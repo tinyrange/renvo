@@ -7707,6 +7707,19 @@ func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 	}
 }
 
+func TestTranslateObjectHonorsPlainCharSignedness(t *testing.T) {
+	source := []byte(`int classify(char value) { return value < 0; }`)
+	signed := TranslateObjectWithConfig("main", source, nil, ObjectConfig{DataModel: DataModelLP64})
+	unsigned := TranslateObjectWithConfig("main", source, nil, ObjectConfig{DataModel: DataModelLP64, UnsignedChar: true})
+	if !signed.Ok || !unsigned.Ok {
+		t.Fatalf("plain-char translation failed: signed=%#v unsigned=%#v", signed, unsigned)
+	}
+	if !bytes.Contains(signed.Source, []byte("func classify(value int8)")) ||
+		!bytes.Contains(unsigned.Source, []byte("func classify(value uint8)")) {
+		t.Fatalf("plain-char signedness was not preserved:\nsigned:\n%s\nunsigned:\n%s", signed.Source, unsigned.Source)
+	}
+}
+
 func TestGeneratedIdentifierReferencesIndexWholeIdentifiers(t *testing.T) {
 	references := newGeneratedIdentifierReferences(4)
 	references.add("alpha")

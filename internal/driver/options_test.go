@@ -107,13 +107,21 @@ func TestNormalizeCCompilerCommand(t *testing.T) {
 }
 
 func TestNormalizeKbuildCCompilerCommand(t *testing.T) {
-	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Os", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-funsigned-char", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Os", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
 	options := ParseOptions(args[1:])
 	if !options.Ok || !options.CCompiler || !options.CNoStdIncludes || !options.CDependencyRequested ||
-		!options.CFunctionSections || !options.CDataSections || !options.CShortWChar || !options.CKernelCodeModel || !options.COptimize || options.DependencyFile != "obj/.leaf.o.d" ||
+		!options.CFunctionSections || !options.CDataSections || !options.CShortWChar || !options.CUnsignedChar || !options.CKernelCodeModel || !options.COptimize || options.DependencyFile != "obj/.leaf.o.d" ||
 		len(options.CForcedInclude) != 1 || options.CForcedInclude[0] != "include/config.h" ||
 		len(options.CDefines) != 1 || options.CDefines[0] != "__KERNEL__" {
 		t.Fatalf("normalized Kbuild options = %#v (args %#v)", options, args)
+	}
+}
+
+func TestNormalizeKbuildCharSignednessOverride(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-funsigned-char", "-fsigned-char", "-c", "leaf.c", "-o", "leaf.o"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.CUnsignedChar {
+		t.Fatalf("normalized signed-char override = %#v (args %#v)", options, args)
 	}
 }
 

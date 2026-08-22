@@ -84,7 +84,7 @@ func CheckCCommand(args []string, workDir string, fs SourceFS) CSyntaxCommandRes
 	preprocessMark := arena.Mark()
 	processed := c11.Preprocess(c11.PreprocessConfig{
 		Path: path, Source: source, Reader: reader,
-		Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
+		Predefined: cCommandMacros(options), Undefined: cCommandUndefined(options),
 		ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
 		SuppressForcedIncludes: true,
 	})

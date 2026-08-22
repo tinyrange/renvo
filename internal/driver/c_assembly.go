@@ -73,7 +73,7 @@ func CompileCAssemblyCommand(args []string, workDir string, fs SourceFS) CAssemb
 	}
 	processed := c11.Preprocess(c11.PreprocessConfig{
 		Path: path, Source: source, Reader: reader,
-		Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
+		Predefined: cCommandMacros(options), Undefined: cCommandUndefined(options),
 		ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
 		SuppressForcedIncludes: !options.CNoStdIncludes,
 	})
@@ -88,7 +88,7 @@ func CompileCAssemblyCommand(args []string, workDir string, fs SourceFS) CAssemb
 		dataModel = c11.DataModelILP32
 	}
 	translated := c11.TranslateAssemblyMetadata(processed.Source, header.Prelude, c11.ObjectConfig{
-		DataModel: dataModel, ShortWChar: options.CShortWChar, KernelCodeModel: options.CKernelCodeModel,
+		DataModel: dataModel, ShortWChar: options.CShortWChar, UnsignedChar: options.CUnsignedChar, KernelCodeModel: options.CKernelCodeModel,
 	})
 	if !translated.Ok {
 		result.Ok = false

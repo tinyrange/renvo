@@ -171,6 +171,7 @@ type translator struct {
 	qualifiedChanges        []cTypeCacheChange
 	functionSections        bool
 	dataSections            bool
+	unsignedChar            bool
 	kernelCodeModel         bool
 	pruneUnusedStatics      bool
 	baseAttributes          cAttributes
@@ -351,6 +352,7 @@ type ObjectConfig struct {
 	FunctionSections   bool
 	DataSections       bool
 	ShortWChar         bool
+	UnsignedChar       bool
 	KernelCodeModel    bool
 	PruneUnusedStatics bool
 }
@@ -392,6 +394,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		assemblyOutput:     assemblyOutput,
 		functionSections:   config.FunctionSections,
 		dataSections:       config.DataSections,
+		unsignedChar:       config.UnsignedChar,
 		kernelCodeModel:    config.KernelCodeModel,
 		pruneUnusedStatics: config.PruneUnusedStatics,
 		ok:                 true,
@@ -9475,7 +9478,7 @@ done:
 	case "bool":
 		typeID = cTypeBoolID
 	case "char":
-		if unsigned {
+		if unsigned || t.unsignedChar {
 			typeID = cTypeUint8ID
 		} else {
 			typeID = cTypeInt8ID

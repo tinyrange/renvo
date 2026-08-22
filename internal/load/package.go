@@ -32,6 +32,7 @@ type SourceFile struct {
 	CFunctionSections bool
 	CDataSections     bool
 	CShortWChar       bool
+	CUnsignedChar     bool
 	CKernelCodeModel  bool
 	COptimize         bool
 	ArenaStart        int
@@ -167,6 +168,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					DataModel: source.CDataModel, FunctionSections: source.CFunctionSections,
 					DataSections:       source.CDataSections,
 					ShortWChar:         source.CShortWChar,
+					UnsignedChar:       source.CUnsignedChar,
 					KernelCodeModel:    source.CKernelCodeModel,
 					PruneUnusedStatics: source.COptimize,
 				})
@@ -325,6 +327,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
 			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
 			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
+			CUnsignedChar:    files[i].CUnsignedChar,
 			CKernelCodeModel: files[i].CKernelCodeModel, COptimize: files[i].COptimize,
 			ArenaStart: files[i].ArenaStart, ArenaEnd: files[i].ArenaEnd})
 	}

@@ -86,7 +86,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		}
 		processed := c11.Preprocess(c11.PreprocessConfig{
 			Path: result.Files[i].Path, Source: source, Reader: reader,
-			Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
+			Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
 			ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
 			SuppressForcedIncludes: !options.CNoStdIncludes,
 		})
@@ -102,6 +102,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		result.Files[i].CFunctionSections = options.CFunctionSections
 		result.Files[i].CDataSections = options.CDataSections
 		result.Files[i].CShortWChar = options.CShortWChar
+		result.Files[i].CUnsignedChar = options.CUnsignedChar
 		result.Files[i].CKernelCodeModel = options.CKernelCodeModel
 		result.Files[i].COptimize = options.COptimize
 		result.Files[i].CPrelude = header.Prelude

@@ -145,9 +145,10 @@ The system C driver is used only for startup objects and the final link. Renvo
 is the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
 headers, retains referenced external declarations from the real header, emits
 NUL-terminated C string data and an undefined `puts` with a standard x86_64
-PLT relocation, and leaves libc resolution to the system link. Full macro
-preprocessing and the broader GNU C declaration grammar remain later Linux
-frontend milestones.
+PLT relocation, and leaves libc resolution to the system link. The C frontend
+also implements the macro and GNU C surface exercised by the pinned Linux
+bring-up; unsupported constructs fail explicitly. Its current boundaries are
+documented in `internal/c11/README.md`.
 
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.

@@ -104,7 +104,7 @@ func PreprocessCCommandWithInput(args []string, workDir string, fs SourceFS, inp
 	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, options.CNoStdIncludes, fs)}
 	processed := c11.Preprocess(c11.PreprocessConfig{
 		Path: path, Source: source, Reader: reader,
-		Predefined: cCommandMacros(options.CDefines), Undefined: options.CUndefines,
+		Predefined: cCommandMacros(options), Undefined: cCommandUndefined(options),
 		ForcedIncludes: options.CForcedInclude, EmitIncludes: true, LineMarkers: lineMarkers, MacroDump: macroDump,
 	})
 	result.Source = processed.Source
@@ -157,19 +157,48 @@ func cPreprocessDiagnostic(preprocessError int, path string, line int, detail st
 	return Diagnostic{Phase: "preprocessor", Code: code, Message: message, Path: path, Line: line, Column: 1}
 }
 
-func cCommandMacros(definitions []string) []c11.Macro {
-	macros := make([]c11.Macro, 0, len(definitions))
-	for i := 0; i < len(definitions); i++ {
-		name := definitions[i]
+func cCommandMacros(options Options) []c11.Macro {
+	macros := make([]c11.Macro, 0, len(options.CDefines)+16)
+	if options.Target == "linux/386" {
+		macros = append(macros,
+			c11.Macro{Name: "__i386__", Value: "1"},
+			c11.Macro{Name: "__i386", Value: "1"},
+			c11.Macro{Name: "i386", Value: "1"},
+			c11.Macro{Name: "__ILP32__", Value: "1"},
+			c11.Macro{Name: "_ILP32", Value: "1"},
+			c11.Macro{Name: "__SIZEOF_LONG__", Value: "4"},
+			c11.Macro{Name: "__SIZEOF_POINTER__", Value: "4"},
+			c11.Macro{Name: "__SIZEOF_SIZE_T__", Value: "4"},
+			c11.Macro{Name: "__SIZEOF_PTRDIFF_T__", Value: "4"},
+			c11.Macro{Name: "__SIZE_TYPE__", Value: "unsigned int"},
+			c11.Macro{Name: "__PTRDIFF_TYPE__", Value: "int"},
+			c11.Macro{Name: "__INTPTR_TYPE__", Value: "int"},
+			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "unsigned int"},
+		)
+	}
+	if options.CUnsignedChar {
+		macros = append(macros, c11.Macro{Name: "__CHAR_UNSIGNED__", Value: "1"})
+	}
+	for i := 0; i < len(options.CDefines); i++ {
+		name := options.CDefines[i]
 		value := "1"
-		for j := 0; j < len(definitions[i]); j++ {
-			if definitions[i][j] == '=' {
-				name = definitions[i][:j]
-				value = definitions[i][j+1:]
+		for j := 0; j < len(options.CDefines[i]); j++ {
+			if options.CDefines[i][j] == '=' {
+				name = options.CDefines[i][:j]
+				value = options.CDefines[i][j+1:]
 				break
 			}
 		}
 		macros = append(macros, c11.Macro{Name: name, Value: value})
 	}
 	return macros
+}
+
+func cCommandUndefined(options Options) []string {
+	if options.Target != "linux/386" {
+		return options.CUndefines
+	}
+	undefined := make([]string, 0, len(options.CUndefines)+5)
+	undefined = append(undefined, options.CUndefines...)
+	return append(undefined, "__x86_64__", "__x86_64", "__amd64__", "__LP64__", "_LP64")
 }

@@ -59,6 +59,28 @@ func TestBuildFreestandingCObjectRetainsForcedAndKernelHeaders(t *testing.T) {
 	}
 }
 
+func TestBuildCObjectCarriesUnsignedCharSemantics(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{{
+		Path: "/repo/case/main.c",
+		Src:  []byte("#ifndef __CHAR_UNSIGNED__\n#error unsigned char macro missing\n#endif\nint classify(char value) { return value < 0; }\n"),
+	}}}
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-nostdinc", "-funsigned-char", "-c", "main.c", "-o", "main.o"})
+	result := BuildFromFS(args[1:], "/repo/case", "/std", fs)
+	if !result.Ok {
+		t.Fatalf("unsigned-char C object failed: %#v", result)
+	}
+	for i := 0; i < len(result.Pipeline.Workspace.Files); i++ {
+		file := result.Pipeline.Workspace.Files[i]
+		if file.Path == "/repo/case/main.c" {
+			if !file.CUnsignedChar || !bytes.Contains(file.Src, []byte("int classify")) {
+				t.Fatalf("unsigned-char source metadata = %#v, source %q", file, file.Src)
+			}
+			return
+		}
+	}
+	t.Fatal("unsigned-char source missing from workspace")
+}
+
 func TestBuildCObjectReportsMissingHeader(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{{Path: "/repo/case/main.c", Src: []byte("#include <missing.h>\nint main(void) { return 0; }\n")}}}
 	result := BuildFromFS([]string{"-c", "-o", "main.o", "main.c"}, "/repo/case", "/std", fs)

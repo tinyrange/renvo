@@ -77,3 +77,15 @@ func TestPreprocessCCommandDumpsMacrosForNullProbe(t *testing.T) {
 		t.Fatalf("null macro-dump result = %#v, source %q", result, result.Source)
 	}
 }
+
+func TestPreprocessCCommandReportsI386DataModel(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-m32", "-funsigned-char", "-dM", "-E", "-x", "c", "/dev/null"})
+	result := PreprocessCCommand(args, "/repo", memorySourceFS{})
+	text := string(result.Source)
+	if !result.Ok || !strings.Contains(text, "#define __i386__ 1\n") ||
+		!strings.Contains(text, "#define __SIZEOF_POINTER__ 4\n") ||
+		!strings.Contains(text, "#define __CHAR_UNSIGNED__ 1\n") ||
+		strings.Contains(text, "#define __x86_64__ 1\n") || strings.Contains(text, "#define __LP64__ 1\n") {
+		t.Fatalf("i386 macro dump = %#v, source %q", result, result.Source)
+	}
+}
