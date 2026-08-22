@@ -61,6 +61,11 @@ check_packages() {
 
 check_preflight() {
 	local started=$SECONDS
+	local budget="${RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS:-60}"
+	if [[ ! "$budget" =~ ^[1-9][0-9]*$ ]]; then
+		printf 'RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS must be a positive integer\n' >&2
+		return 2
+	fi
 	# The tracked patterns include the generated-source authority packages. Keep
 	# them in one Go invocation so cold preflight builds compile each package once.
 	# The tracked suite saturates small CI runners, so let it finish first. The
@@ -80,12 +85,12 @@ check_preflight() {
 		failed=1
 	fi
 	local elapsed=$((SECONDS - started))
-	printf '\nPreflight completed in %ds (budget: 60s)\n' "$elapsed"
+	printf '\nPreflight completed in %ds (budget: %ss)\n' "$elapsed" "$budget"
 	if ((failed != 0)); then
 		return 1
 	fi
-	if ((elapsed > 60)); then
-		printf 'development preflight exceeded its 60-second budget\n' >&2
+	if ((elapsed > budget)); then
+		printf 'preflight exceeded its %s-second budget\n' "$budget" >&2
 		return 1
 	fi
 }
@@ -205,6 +210,8 @@ Modes:
 Set RENVO_CHECK_MEMORY_MAX=4G on systemd-based Linux to put each command in a
 memory-limited user unit. This prevents a runaway compiler test from taking
 down the interactive session while retaining the command's exit status.
+Set RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS only for slower, cache-disabled CI
+runners; the local development budget remains 60 seconds by default.
 EOF
 }
 
