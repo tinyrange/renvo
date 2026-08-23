@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b42dd9021327d1caa32f87378ef349fe44a71852b2452c2cf4db6ae3a3e6e7f3"
+const CompilerSourceDigest = "194df1807845ebb9f0b5f8437f4a341622b9fbcd7d5222954df91c14fb2918d8"
 
 // source: backend/compiler_common_impl.go
 
@@ -34396,7 +34396,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\xa8֟B\n\xbc\xe1\xe7-\x12*\x9ac\xbb\xf4\xfc\xd1oc+\x83sd)\x1b\x16\xafc\"\xb5\xab\xfb", 3, true
+return "linux/amd64", "|/\x9bv\x92w\x1f\xf9\x82vk\xfb\br@\x89\x8b\xcf\xf7V)dYʮP\xa1\xdcw:\xcd1", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -43492,7 +43492,11 @@ vectorCount := 0
 for i := 0; i < wordCount; i++ {
 if vectorMask&(1<<i) != 0 {
 renvoAsmEmit8(out, 0x58)
-renvoAsmEmit4(out, 0xf2, 0x48, 0x0f, 0x2a)
+
+
+
+
+renvoAsmEmit4(out, 0x66, 0x48, 0x0f, 0x6e)
 renvoAsmEmit8(out, 0xc0 | vectorCount<<3)
 vectorCount++
 } else {
@@ -43510,16 +43514,6 @@ renvoAsmEmit2(out, 0x41, 0x58)
 renvoAsmEmit2(out, 0x41, 0x59)
 }
 integerCount++
-}
-}
-if vectorCount != 0 {
-renvoAsmEmit8(out, 0xb8)
-renvoAsmEmit32(out, 4)
-renvoAsmEmit4(out, 0xf2, 0x4c, 0x0f, 0x2a)
-renvoAsmEmit8(out, 0xc0)
-for i := 0; i < vectorCount; i++ {
-renvoAsmEmit4(out, 0xf2, 0x41, 0x0f, 0x5e)
-renvoAsmEmit8(out, 0xc0 | i<<3)
 }
 }
 externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
