@@ -35,14 +35,16 @@ func main() {
 	os.Exit(bootstrap.Run(os.Args, env, backend))
 }
 
-func checkoutBackend(stdRoot string, cacheDir string) driver.Backend {
-	return checkoutBackendMux{builtin: backendjit.NewBuiltin(stdRoot, cacheDir)}
+// checkoutBackendMux keeps direct VM32 output on the fixed seed and delegates
+// other built-in targets to the backend selected by the Go build variant.
+type checkoutBackendMux struct {
+	builtin checkoutBuiltinBackend
 }
 
-// checkoutBackendMux keeps direct VM32 output on the fixed seed and derives
-// every other built-in compiler through the content-addressed seeded path.
-type checkoutBackendMux struct {
-	builtin *backendjit.SeededBackend
+type checkoutBuiltinBackend interface {
+	driver.Backend
+	driver.ArenaBackend
+	driver.OptionsBackend
 }
 
 func (b checkoutBackendMux) CompileUnit(unit []byte, target string, strip bool, windowsGUI bool) driver.BackendResult {

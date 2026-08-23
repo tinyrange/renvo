@@ -52,6 +52,8 @@ check_tracked_packages() {
 check_bundled_packages() {
 	run_check "bundled driver and bootstrap" \
 		go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
+	run_check "same-executable native backend" \
+		go test -count=1 -tags renvo_native_backend ./cmd/renvo
 }
 
 check_packages() {

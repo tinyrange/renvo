@@ -155,11 +155,13 @@ reference and target list.
 
 ## Generated and custom backends
 
-The included backends are generated from the closed definitions in
-`backend/definitions/`, checked in, and compiled into ordinary Go builds. A
-normal `go build ./cmd/renvo` therefore needs neither the definitions nor a
-checkout-local backend at runtime. Native targets share one `native_v1`
-catalog; Wasm and VM32 use the separate `structured32` family. See
+The included backend definitions are generated from the closed definitions in
+`backend/definitions/` and checked in. A normal `go build ./cmd/renvo` embeds a
+fixed native VM32 seed and promotes target-specialized native compilers into a
+content-addressed cache on first use. A warm compile executes the cached native
+compiler directly. It needs neither the definitions nor a checkout-local
+backend at runtime. Native targets share one `native_v1` catalog; Wasm and VM32
+use the separate `structured32` family. See
 [`backend/definitions/README.md`](backend/definitions/README.md) for the schema
 and architecture workflow. After changing an included definition, refresh the
 checked-in layers:
@@ -170,9 +172,22 @@ go generate ./internal/targetinfo
 go generate ./internal/backendcompiled
 ```
 
-A custom definition is prepared with the compiled-in host backend and executed
-by the host command. Passing source prepares it on first use and reuses a
-content-addressed cache entry afterward:
+For distributions that prefer predictable first-run latency over the smallest
+portable bootstrap boundary, the native backend can instead be linked into the
+same Go executable:
+
+```sh
+go build -tags renvo_native_backend -o renvo ./cmd/renvo
+```
+
+That variant compiles built-in targets in-process and does not use the native
+compiler promotion cache. The untagged build remains the VM32-only portable
+frontend; external `-backend` definitions continue to use CompilerJIT so they
+do not require regenerating the executable.
+
+A custom definition is prepared by CompilerJIT and executed by the host
+command. Passing source prepares it on first use and reuses a content-addressed
+cache entry afterward:
 
 ```sh
 renvo -backend machines.rtg -t acme/amd64 -o app ./cmd/app
