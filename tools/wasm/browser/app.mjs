@@ -2,6 +2,7 @@ import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
+import { fetchAsset } from "./asset-fetch.mjs";
 import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 import { decodeProjectZip, decodeSharedProject, encodeProjectZip, encodeSharedProject, normalizeProjectPath } from "./project-archive.mjs";
@@ -225,13 +226,13 @@ async function boot() {
 
 async function loadTargetCatalog() {
   try {
-    const response = await fetch(catalogUrl);
+    const response = await fetchAsset(catalogUrl);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const catalog = await response.json();
     if (!Array.isArray(catalog.targets) || !catalog.targets.length) throw new Error("target catalog is empty");
     if (catalog.stdlib) {
       const stdlibUrl = new URL(catalog.stdlib, catalogUrl).href;
-      standardCatalogPromise = fetch(stdlibUrl).then((response) => {
+      standardCatalogPromise = fetchAsset(stdlibUrl).then((response) => {
         if (!response.ok) throw new Error(`could not load standard library catalog: HTTP ${response.status}`);
         return response.json().then((value) => {
           standardCatalog = { ...value, url: stdlibUrl };
@@ -991,8 +992,8 @@ async function showBrowserPreview(data) {
 async function packageBrowserArtifact(data) {
   if (!targetCatalog?.browserPrefix || !targetCatalog?.browserSuffix) throw new Error("The browser preview host is unavailable.");
   if (!browserHostParts) browserHostParts = Promise.all([
-    fetch(new URL(targetCatalog.browserPrefix, catalogUrl)).then(checkTextResponse),
-    fetch(new URL(targetCatalog.browserSuffix, catalogUrl)).then(checkTextResponse),
+    fetchAsset(new URL(targetCatalog.browserPrefix, catalogUrl)).then(checkTextResponse),
+    fetchAsset(new URL(targetCatalog.browserSuffix, catalogUrl)).then(checkTextResponse),
   ]);
   const [prefix, suffix] = await browserHostParts;
   const bytes = new Uint8Array(data);
@@ -1041,7 +1042,7 @@ async function loadCLibrary(catalog) {
     if (catalog.module && !models.has("go.mod")) stdlibFiles.set("go.mod", encoder.encode(catalog.module));
     const values = await Promise.all(catalog.libc.map(async (file) => {
       const path = file.split("/").map(encodeURIComponent).join("/");
-      const response = await fetch(new URL(`libc/${path}`, catalog.url));
+      const response = await fetchAsset(new URL(`libc/${path}`, catalog.url));
       if (!response.ok) throw new Error(`could not load C library file ${file}: HTTP ${response.status}`);
       return [file, new Uint8Array(await response.arrayBuffer())];
     }));
@@ -1069,7 +1070,7 @@ async function loadStandardPackage(importPath, catalog) {
     const root = platform ? `module/${item.root}` : `src/${name}`;
     const base = new URL(`${root.split("/").map(encodeURIComponent).join("/")}/`, catalog.url);
     const values = await Promise.all(item.files.map(async (file) => {
-      const response = await fetch(new URL(file.split("/").map(encodeURIComponent).join("/"), base));
+      const response = await fetchAsset(new URL(file.split("/").map(encodeURIComponent).join("/"), base));
       if (!response.ok) throw new Error(`could not load library file ${key}/${file}: HTTP ${response.status}`);
       return [file, new Uint8Array(await response.arrayBuffer())];
     }));

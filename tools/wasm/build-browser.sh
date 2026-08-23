@@ -103,6 +103,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
+	tools/wasm/browser/asset-fetch.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
@@ -117,6 +118,7 @@ if [ "$layout" = pages ]; then
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
+	tools/wasm/browser/asset-fetch.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
