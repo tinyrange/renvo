@@ -99,3 +99,42 @@ func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
 			result.Binary[:minInt(4, len(result.Binary))])
 	}
 }
+
+func TestCompiledInBootstrapCompilesESP32C6JTAGImageIntoSRAM(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "backends", "esp32c6_jtag.rtg")
+	result := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "esp32c6-jtag/riscv32",
+		"-s",
+		"-o", "hotreload-jtag.elf",
+		filepath.Join(root, "examples", "m5nanoc6", "hotreload"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{},
+		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+			backendJITTestCacheDir, backendcompiled.Backend{}))
+	if !result.Ok {
+		t.Fatalf("ESP32-C6 JTAG backend compile failed: %#v", result.Diagnostic)
+	}
+	image := result.Binary
+	if len(image) < 116 || !bytes.Equal(image[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("output is not ELF32: % x", image[:minInt(4, len(image))])
+	}
+	if entry := binary.LittleEndian.Uint32(image[24:28]); entry != 0x40824100 {
+		t.Fatalf("ELF entry = %#x, want SRAM entry 0x40824100", entry)
+	}
+	if text := binary.LittleEndian.Uint32(image[52+8 : 52+12]); text != 0x40824000 {
+		t.Fatalf("text address = %#x, want 0x40824000", text)
+	}
+	dataHeader := 52 + 32
+	dataEnd := binary.LittleEndian.Uint32(image[dataHeader+8:dataHeader+12]) +
+		binary.LittleEndian.Uint32(image[dataHeader+20:dataHeader+24])
+	if dataEnd > 0x40824000 {
+		t.Fatalf("data/BSS end %#x overlaps hot-reload text", dataEnd)
+	}
+}

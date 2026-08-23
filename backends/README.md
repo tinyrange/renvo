@@ -10,6 +10,7 @@ The available external backends are:
 - `android_arm64.rtg`
 - `c89.rtg`
 - `esp32c6.rtg`
+- `esp32c6_jtag.rtg`
 - `esp32p4.rtg`
 - `esp32s3.rtg`
 - `ios_arm64.rtg`

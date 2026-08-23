@@ -1,6 +1,6 @@
 //go:build renvo && darwin && arm64
 
-package main
+package espflash
 
 import "unsafe"
 
@@ -59,7 +59,8 @@ func hostError(result int) int {
 	}
 	return int(*pointer)
 }
-func hostWouldBlock() int { return 35 }
+func hostWouldBlock() int           { return 35 }
+func hostPointer(pointer *byte) int { return int(unsafe.Pointer(pointer)) }
 func hostIoctl(fd int, request int, pointer int) int {
 	return darwinIoctl(fd, uint64(request), (*byte)(unsafe.Pointer(uintptr(pointer))))
 }
