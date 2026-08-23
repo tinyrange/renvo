@@ -44,3 +44,56 @@ func main() {
 		t.Fatalf("bound method call argument was not lowered:\n%s", linked.Program.Text)
 	}
 }
+
+func TestFunctionValueClosureCallArgument(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Callback func(int) int
+type Holder struct { callback Callback }
+func NewHolder(callback Callback) *Holder { return &Holder{callback: callback} }
+
+func main() {
+	base := 40
+	holder := NewHolder(func(value int) int { return base + value })
+	if holder.callback(2) == 42 { print("PASS\n") }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("NewHolder(Callback{kind: 1, closure0:")) ||
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&holder.callback, 2)")) {
+		t.Fatalf("closure callback argument was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
+func TestFunctionValueNamedFunctionAssignmentToLocal(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Callback func(int) int
+type Holder struct { callback Callback }
+func increment(value int) int { return value + 1 }
+
+func main() {
+	var callback Callback
+	callback = increment
+	holder := Holder{callback: callback}
+	if holder.callback(41) == 42 { print("PASS\n") }
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("callback = Callback{kind: 1}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&holder.callback, 41)")) {
+		t.Fatalf("named function assignment to a callback local was not lowered:\n%s", linked.Program.Text)
+	}
+}

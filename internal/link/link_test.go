@@ -994,6 +994,7 @@ func appMain() int {
 	print("FAIL\n")
 	return 1
 }
+
 `)},
 	})
 	linked := LinkBuildCore(result)
@@ -1006,6 +1007,31 @@ func appMain() int {
 		!bytes.Contains(decoded.Text, []byte(`__renvo_map_0_ref`)) ||
 		!bytes.Contains(decoded.Text, []byte(`__renvo_map_0_get`)) {
 		t.Fatalf("linked text did not lower map semantics:\\n%s", string(decoded.Text))
+	}
+}
+
+func TestLinkBuildCoreLowersImmediateMapLiteralLookup(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() int {
+	if map[int]string{7: "PASS\n"}[7] == "PASS\n" {
+		print("PASS\n")
+		return 0
+	}
+	print("FAIL\n")
+	return 1
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte(`__renvo_map_0_get((__renvo_map_literal_0(7,`)) ||
+		bytes.Contains(linked.Program.Text, []byte(`)[7]`)) {
+		t.Fatalf("linked text did not lower immediate map literal lookup:\n%s", linked.Program.Text)
 	}
 }
 
