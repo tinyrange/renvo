@@ -125,11 +125,8 @@ func (filesystemImportLoader) LoadImport(
 }
 
 func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.BackendResult {
-	if request.Protocol != ProtocolVersion || artifact.Protocol != ProtocolVersion ||
-		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
-		return driver.BackendResult{Diagnostic: driver.Diagnostic{
-			Phase: "backend", Code: "RENVO-BACKEND-008", Message: "prepared backend protocol is incompatible",
-		}}
+	if !compatibleRequest(artifact, request) {
+		return incompatibleProtocol()
 	}
 	image, err := linkedimage.Decode(artifact.Payload)
 	if err != nil || image.Target != artifact.Host {
@@ -147,30 +144,7 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 	if err = os.WriteFile(inputPath, request.Unit, 0o600); err != nil {
 		return backendIOError("write protocol input")
 	}
-	args := []string{"-t", artifact.Descriptor.Name}
-	options := request.Options
-	if options.Strip {
-		args = append(args, "-s")
-	}
-	if options.WindowsGUI {
-		args = append(args, "-windows-gui")
-	}
-	if options.EmitImage {
-		args = append(args, "-emit-image")
-	}
-	if options.ObjectFile || options.Mode == driver.ModeObject {
-		args = append(args, "-object")
-	}
-	if options.ArenaSize > 0 {
-		args = append(args, "-arena-size", decimal(options.ArenaSize))
-	}
-	if options.Output != "" {
-		args = append(args, "-module-name", options.Output)
-	}
-	if options.ModuleLicense != "" {
-		args = append(args, "-module-license", options.ModuleLicense)
-	}
-	args = append(args, "-o", outputPath, inputPath)
+	args := compilerRequestArgs(artifact.Descriptor.Name, request.Options, outputPath, inputPath)
 	executed := runimage.Run(image, "renvo-prepared-backend", args, os.Environ(), os.Stdin,
 		os.Stdout, os.Stderr)
 	if executed.Err != nil || executed.ExitCode != 0 {

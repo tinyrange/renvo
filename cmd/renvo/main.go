@@ -7,11 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/backendjit"
+	"renvo.dev/internal/backendvm32"
 	"renvo.dev/internal/bootstrap"
 	"renvo.dev/internal/driver"
-	"renvo.dev/internal/rtg"
 )
 
 func main() {
@@ -25,26 +24,46 @@ func main() {
 			env = append(env, driver.StdRootEnv+"="+stdRoot)
 		}
 	}
-	backend := checkoutBackend()
+	stdRoot := driver.StdRootFromEnv(env)
+	backend := checkoutBackend(stdRoot, backendCacheDir())
 	if len(os.Args) > 2 && os.Args[1] == "backend" && os.Args[2] == "build" {
-		os.Exit(buildPreparedBackend(os.Args[3:], env, backend))
+		os.Exit(buildPreparedBackend(os.Args[3:], env))
 	}
 	if path := backendPath(os.Args); path != "" {
-		backend = backendjit.New(path, checkoutBackendRoot(), driver.StdRootFromEnv(env), backendCacheDir(), backend)
+		backend = backendjit.NewSeeded(path, stdRoot, backendCacheDir())
 	}
 	os.Exit(bootstrap.Run(os.Args, env, backend))
 }
 
-func checkoutBackend() driver.Backend {
-	return backendcompiled.Backend{}
+func checkoutBackend(stdRoot string, cacheDir string) driver.Backend {
+	return checkoutBackendMux{builtin: backendjit.NewBuiltin(stdRoot, cacheDir)}
 }
 
-func checkoutBackendRoot() string {
-	path := "."
-	if _, err := os.Stat("compiler_main.go"); err != nil {
-		path = "./backend"
+// checkoutBackendMux keeps direct VM32 output on the fixed seed and derives
+// every other built-in compiler through the content-addressed seeded path.
+type checkoutBackendMux struct {
+	builtin *backendjit.SeededBackend
+}
+
+func (b checkoutBackendMux) CompileUnit(unit []byte, target string, strip bool, windowsGUI bool) driver.BackendResult {
+	if target == backendvm32.Target {
+		return (backendvm32.Backend{}).CompileUnit(unit, target, strip, windowsGUI)
 	}
-	return path
+	return b.builtin.CompileUnit(unit, target, strip, windowsGUI)
+}
+
+func (b checkoutBackendMux) CompileUnitWithArena(unit []byte, target string, strip bool, windowsGUI bool, arenaSize int) driver.BackendResult {
+	if target == backendvm32.Target {
+		return (backendvm32.Backend{}).CompileUnitWithArena(unit, target, strip, windowsGUI, arenaSize)
+	}
+	return b.builtin.CompileUnitWithArena(unit, target, strip, windowsGUI, arenaSize)
+}
+
+func (b checkoutBackendMux) CompileUnitWithOptions(unit []byte, options driver.BackendCompileOptions) driver.BackendResult {
+	if options.Target == backendvm32.Target {
+		return (backendvm32.Backend{}).CompileUnitWithOptions(unit, options)
+	}
+	return b.builtin.CompileUnitWithOptions(unit, options)
 }
 
 func backendPath(args []string) string {
@@ -64,7 +83,7 @@ func backendCacheDir() string {
 	return filepath.Join(root, "renvo", "backends")
 }
 
-func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.Backend) int {
+func buildPreparedBackend(args []string, env []string) int {
 	input := ""
 	target := ""
 	output := ""
@@ -93,19 +112,12 @@ func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.B
 		fmt.Fprintln(os.Stderr, "usage: renvo backend build <definition.rtg> -t <target> -o <backend.rtgb>")
 		return 2
 	}
-	source, err := os.ReadFile(input)
+	_, err := os.ReadFile(input)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "renvo backend build: could not read definition:", err)
 		return 1
 	}
-	workDir, _ := os.Getwd()
-	prepared := backendjit.Prepare(backendjit.PrepareConfig{
-		Definition: source, Filename: input, Target: target,
-		ImportLoader: commandImportLoader{},
-		BackendRoot:  checkoutBackendRoot(), WorkDir: workDir,
-		StdRoot: driver.StdRootFromEnv(env), CacheDir: backendCacheDir(),
-		Bootstrap: bootstrapBackend,
-	})
+	prepared := backendjit.NewSeeded(input, driver.StdRootFromEnv(env), backendCacheDir()).Prepare(target)
 	if !prepared.Ok {
 		fmt.Fprint(os.Stderr, driver.FormatDiagnostic(prepared.Diagnostic))
 		return 1
@@ -115,14 +127,4 @@ func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.B
 		return 1
 	}
 	return 0
-}
-
-type commandImportLoader struct{}
-
-func (commandImportLoader) LoadImport(
-	importingFilename string, importPath string,
-) rtg.ImportSource {
-	path := filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath))
-	imported, err := os.ReadFile(path)
-	return rtg.ImportSource{Source: imported, Filename: path, Ok: err == nil}
 }

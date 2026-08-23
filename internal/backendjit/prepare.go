@@ -5,12 +5,13 @@
 package backendjit
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 
-	"renvo.dev/internal/backendcompiled"
+	"renvo.dev/internal/backendvm32"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
@@ -46,12 +47,13 @@ type ArtifactCache interface {
 }
 
 type Prepared struct {
-	Artifact   rtgb.Artifact
-	Encoded    []byte
-	CachePath  string
-	CacheHit   bool
-	Diagnostic driver.Diagnostic
-	Ok         bool
+	Artifact       rtgb.Artifact
+	Encoded        []byte
+	CachePath      string
+	ExecutablePath string
+	CacheHit       bool
+	Diagnostic     driver.Diagnostic
+	Ok             bool
 }
 
 func Prepare(config PrepareConfig) Prepared {
@@ -159,8 +161,8 @@ func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]loa
 	excluded := excludedFamily(generated.Descriptor)
 	sources := []load.SourceFile{{Path: "/backend/go.mod", Src: []byte("module renvo.dev/prepared-backend\n")}}
 	var names []string
-	for i := 0; i < backendcompiled.CompilerSourceCount; i++ {
-		name, source, ok := backendcompiled.CompilerSource(i)
+	for i := 0; i < backendvm32.CompilerSourceCount; i++ {
+		name, source, ok := backendvm32.CompilerSource(i)
 		if !ok {
 			return nil, nil, fmt.Errorf("decompress backend kernel source %d", i)
 		}
@@ -195,7 +197,7 @@ func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
 		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion) +
 		"-a" + decimal(preparedBackendArenaSize) +
-		"-c" + backendcompiled.CompilerSourceDigest
+		"-c" + backendvm32.CompilerSourceDigest
 }
 
 func encodedName(value string) string {
@@ -227,6 +229,10 @@ func decimal(value int) string {
 }
 
 func publish(path string, source []byte) error {
+	return publishMode(path, source, 0o600)
+}
+
+func publishMode(path string, source []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create backend cache: %w", err)
 	}
@@ -240,6 +246,10 @@ func publish(path string, source []byte) error {
 		_ = temp.Close()
 		return fmt.Errorf("write backend cache entry: %w", err)
 	}
+	if err = temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("permission backend cache entry: %w", err)
+	}
 	if err = temp.Sync(); err != nil {
 		_ = temp.Close()
 		return fmt.Errorf("sync backend cache entry: %w", err)
@@ -248,10 +258,21 @@ func publish(path string, source []byte) error {
 		return fmt.Errorf("close backend cache entry: %w", err)
 	}
 	if err = os.Rename(tempPath, path); err != nil {
-		if _, statErr := os.Stat(path); statErr == nil {
+		if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, source) {
 			return nil
 		}
-		return fmt.Errorf("publish backend cache entry: %w", err)
+		// Windows does not replace an existing destination with Rename. Remove
+		// an incompatible or corrupt entry, then retry; a concurrent writer that
+		// wins the retry is accepted only when it published the same bytes.
+		if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("replace backend cache entry: %w", removeErr)
+		}
+		if err = os.Rename(tempPath, path); err != nil {
+			if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, source) {
+				return nil
+			}
+			return fmt.Errorf("publish backend cache entry: %w", err)
+		}
 	}
 	return nil
 }

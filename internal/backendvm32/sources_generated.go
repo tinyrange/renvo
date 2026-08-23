@@ -1,7 +1,7 @@
 // Code generated from checked-in RTG backend outputs; DO NOT EDIT.
 //go:build !renvo
 
-package backendcompiled
+package backendvm32
 
 const CompilerSourceCount = 39
 

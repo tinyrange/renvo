@@ -185,6 +185,30 @@ func renvoUnitBindingMatchesTarget(src []byte, target int) bool {
 		int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
 }
 
+func renvoUnitHasTargetBinding(src []byte) bool {
+	if len(src) < 14 || src[0] != renvoUnitMagic[0] || src[1] != renvoUnitMagic[1] ||
+		src[2] != renvoUnitMagic[2] || src[3] != renvoUnitMagic[3] ||
+		renvoUnitRead32(src, 10) != len(src)-14 {
+		return false
+	}
+	for at := 14; at < len(src); {
+		if at+6 > len(src) {
+			return false
+		}
+		tag := int(src[at]) | int(src[at+1])<<8
+		size := renvoUnitRead32(src, at+2)
+		next := at + 6 + size
+		if size < 0 || next < at || next > len(src) {
+			return false
+		}
+		if tag == 4 || tag == 5 || tag == 6 {
+			return true
+		}
+		at = next
+	}
+	return false
+}
+
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	renvoNonNil(prog)
 	if len(src) < 14 {

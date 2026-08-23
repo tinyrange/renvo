@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/scanner"
 	"go/token"
@@ -20,6 +21,10 @@ func main() {
 	backend := flag.String("backend", "", "backend source directory")
 	output := flag.String("o", "", "generated output")
 	sourcesOutput := flag.String("sources", "", "generated embedded source bundle")
+	packageName := flag.String("package", "backendcompiled", "generated Go package name")
+	fixedTarget := flag.String("fixed-target", "", "fixed target identifier for the generated compiler")
+	stubSources := flag.String("stub-sources", "", "comma-separated backend sources whose functions are replaced by unreachable stubs")
+	stubFunctions := flag.String("stub-functions", "", "comma-separated functions replaced by unreachable stubs")
 	prepareSource := flag.String("prepare-source", "", "specialize one compiler source for a prepared backend")
 	flag.Parse()
 	if *prepareSource != "" {
@@ -40,9 +45,23 @@ func main() {
 		}
 		return
 	}
-	if *backend == "" || *output == "" || *sourcesOutput == "" {
-		fmt.Fprintln(os.Stderr, "usage: gen -backend directory -o output.go -sources sources.go")
+	if *backend == "" || *output == "" || *packageName == "" {
+		fmt.Fprintln(os.Stderr, "usage: gen -backend directory -o output.go [-sources sources.go] [-package name] [-fixed-target identifier] [-stub-sources names] [-stub-functions names]")
 		os.Exit(2)
+	}
+	stubbed := make(map[string]bool)
+	for _, name := range strings.Split(*stubSources, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			stubbed[name] = true
+		}
+	}
+	stubbedFunctions := make(map[string]bool)
+	for _, name := range strings.Split(*stubFunctions, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			stubbedFunctions[name] = true
+		}
 	}
 	manifest, err := os.ReadFile(filepath.Join(*backend, "compiler_sources.txt"))
 	if err != nil {
@@ -60,10 +79,14 @@ func main() {
 	var digestSource bytes.Buffer
 	out.WriteString("// Code generated from checked-in RTG backend outputs; DO NOT EDIT.\n")
 	out.WriteString("//go:build !renvo\n\n")
-	out.WriteString("package backendcompiled\n\n")
+	out.WriteString("package ")
+	out.WriteString(*packageName)
+	out.WriteString("\n\n")
 	sourceBundle.WriteString("// Code generated from checked-in RTG backend outputs; DO NOT EDIT.\n")
 	sourceBundle.WriteString("//go:build !renvo\n\n")
-	sourceBundle.WriteString("package backendcompiled\n\n")
+	sourceBundle.WriteString("package ")
+	sourceBundle.WriteString(*packageName)
+	sourceBundle.WriteString("\n\n")
 	sourceBundle.WriteString("const CompilerSourceCount = ")
 	sourceBundle.WriteString(strconv.Itoa(len(names)))
 	sourceBundle.WriteString("\n\n")
@@ -72,6 +95,8 @@ func main() {
 	var sourceChunkCounts bytes.Buffer
 	var sourceChunks bytes.Buffer
 	var sourceConstants bytes.Buffer
+	foundStub := make(map[string]bool)
+	foundStubFunction := make(map[string]bool)
 	for sourceIndex, name := range names {
 		source, err := os.ReadFile(filepath.Join(*backend, name))
 		if err != nil {
@@ -92,7 +117,18 @@ func main() {
 			out.WriteString("// source: backend/")
 			out.WriteString(name)
 			out.WriteByte('\n')
-			out.Write(compactCompiledSource(source[packageAt+len("package main\n"):]))
+			compiledSource := source[packageAt+len("package main\n"):]
+			if *fixedTarget != "" || stubbed[name] || len(stubbedFunctions) != 0 {
+				compiledSource, err = specializeCompiledSource(
+					name, source, *fixedTarget, stubbed[name], stubbedFunctions, foundStubFunction)
+				if err != nil {
+					fail(err)
+				}
+			}
+			if stubbed[name] {
+				foundStub[name] = true
+			}
+			out.Write(compactCompiledSource(compiledSource))
 			out.WriteByte('\n')
 		}
 		indexText := strconv.Itoa(sourceIndex)
@@ -130,6 +166,16 @@ func main() {
 		}
 		sourceChunks.WriteString("\t}\n")
 	}
+	for name := range stubbed {
+		if !foundStub[name] {
+			fail(fmt.Errorf("stub source %s is not an ordinary compiler source", name))
+		}
+	}
+	for name := range stubbedFunctions {
+		if !foundStubFunction[name] {
+			fail(fmt.Errorf("stub function %s is not in an ordinary compiler source", name))
+		}
+	}
 	sourceBundle.WriteString("func compilerSourceName(index int) string {\n")
 	sourceBundle.Write(sourceNames.Bytes())
 	sourceBundle.WriteString(`	return ""
@@ -153,8 +199,9 @@ func compilerSourceChunk(index int, chunk int) string {
 	sourceBundle.Write(sourceConstants.Bytes())
 	digest := fmt.Sprintf("%x", sha256.Sum256(digestSource.Bytes()))
 	compilerSource := out.Bytes()
-	packageEnd := bytes.Index(compilerSource, []byte("package backendcompiled\n"))
-	packageEnd += len("package backendcompiled\n")
+	packageDeclaration := []byte("package " + *packageName + "\n")
+	packageEnd := bytes.Index(compilerSource, packageDeclaration)
+	packageEnd += len(packageDeclaration)
 	var withDigest bytes.Buffer
 	withDigest.Write(compilerSource[:packageEnd])
 	withDigest.WriteString("\nconst CompilerSourceDigest = ")
@@ -166,9 +213,74 @@ func compilerSourceChunk(index int, chunk int) string {
 	if err := os.WriteFile(*output, compiled, 0o644); err != nil {
 		fail(err)
 	}
-	if err := os.WriteFile(*sourcesOutput, sourceBundle.Bytes(), 0o644); err != nil {
-		fail(err)
+	if *sourcesOutput != "" {
+		if err := os.WriteFile(*sourcesOutput, sourceBundle.Bytes(), 0o644); err != nil {
+			fail(err)
+		}
 	}
+}
+
+func specializeCompiledSource(
+	name string, source []byte, fixedTarget string, stubAllFunctions bool,
+	stubFunctions map[string]bool, foundStubFunction map[string]bool,
+) ([]byte, error) {
+	files := token.NewFileSet()
+	file, err := parser.ParseFile(files, name, source, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s for fixed-backend generation: %w", name, err)
+	}
+	fixedTargetFound := false
+	for _, declaration := range file.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		stubFunction := isFunction && (stubAllFunctions || stubFunctions[function.Name.Name])
+		if stubFunction {
+			if stubFunctions[function.Name.Name] {
+				foundStubFunction[function.Name.Name] = true
+			}
+			if function.Name.Name == "init" {
+				function.Body = &ast.BlockStmt{}
+			} else {
+				function.Body = &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
+					Fun:  ast.NewIdent("panic"),
+					Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("non-VM backend is unavailable")}},
+				}}}}
+			}
+			continue
+		}
+		generic, ok := declaration.(*ast.GenDecl)
+		if !ok || fixedTarget == "" || name != "compiler_main.go" {
+			continue
+		}
+		for _, item := range generic.Specs {
+			specification, ok := item.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, declared := range specification.Names {
+				if declared.Name != "renvoFixedTarget" {
+					continue
+				}
+				if len(specification.Names) != 1 || len(specification.Values) != 1 || i != 0 {
+					return nil, fmt.Errorf("%s must declare renvoFixedTarget as one variable with one value", name)
+				}
+				specification.Values[0] = ast.NewIdent(fixedTarget)
+				fixedTargetFound = true
+			}
+		}
+	}
+	if fixedTarget != "" && name == "compiler_main.go" && !fixedTargetFound {
+		return nil, fmt.Errorf("%s does not declare renvoFixedTarget", name)
+	}
+	var output bytes.Buffer
+	if err := format.Node(&output, files, file); err != nil {
+		return nil, fmt.Errorf("format specialized %s: %w", name, err)
+	}
+	formatted := output.Bytes()
+	packageAt := bytes.Index(formatted, []byte("package main\n"))
+	if packageAt < 0 {
+		return nil, fmt.Errorf("specialized %s has no package main declaration", name)
+	}
+	return formatted[packageAt+len("package main\n"):], nil
 }
 
 func specializePreparationSource(name string, source []byte) ([]byte, error) {

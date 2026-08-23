@@ -427,6 +427,11 @@ func backendSource(descriptors []sourceDescriptor) []byte {
 	}
 	out.WriteString(strconv.Quote(strings.Join(supported, ", ")))
 	out.WriteString("\n\nfunc renvoParseTargetArg(target string) int {\n")
+	out.WriteString("\tif renvoPreparedBackendActive != 0 {\n")
+	out.WriteString("\t\tif prepared := renvoRTGParseTargetArg(target); prepared != 0 {\n")
+	out.WriteString("\t\t\treturn prepared\n")
+	out.WriteString("\t\t}\n")
+	out.WriteString("\t}\n")
 	for _, descriptor := range backend {
 		fmt.Fprintf(&out, "if target == %q { return %s }\n", descriptor.Name, descriptor.Constant)
 		for _, alias := range descriptor.Aliases {

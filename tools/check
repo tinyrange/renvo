@@ -23,7 +23,7 @@ run_check() {
 
 check_generated() {
 	run_check "checked-in generated source" \
-		go test -count=1 ./internal/rtg ./internal/backendcompiled
+		go test -count=1 ./internal/rtg ./internal/backendcompiled ./internal/backendbuiltin ./internal/backendvm32
 }
 
 check_tracked_packages() {

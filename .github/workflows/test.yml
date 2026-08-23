@@ -35,6 +35,26 @@ jobs:
           RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS: "75"
         run: ./tools/check preflight
 
+  seeded-integration:
+    name: VM32 seeded compiler promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run cold seed promotion and warm-cache integration
+        env:
+          RENVO_SEEDED_INTEGRATION: "1"
+        run: go test -count=1 -timeout 15m -run '^TestVM32SeedPromotesExternalCompilerAndCachesExecutable$' ./internal/backendjit
+
   backend-amd64:
     name: Backend compiler tests (linux-amd64)
     needs: preflight
@@ -234,6 +254,7 @@ jobs:
     name: Frontend corpus tests
     needs:
       - preflight
+      - seeded-integration
       - backend-amd64
       - package-tests
     if: ${{ github.event_name != 'pull_request' }}
@@ -258,6 +279,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - preflight
+      - seeded-integration
       - backend-amd64
       - backend-arm64
       - backend-darwin-arm64
@@ -272,10 +294,14 @@ jobs:
       - name: Require every test job to pass
         run: |
           if [[ '${{ github.event_name }}' == pull_request ]]; then
-            results=('${{ needs.preflight.result }}')
+            results=(
+              '${{ needs.preflight.result }}'
+              '${{ needs.seeded-integration.result }}'
+            )
           else
             results=(
               '${{ needs.preflight.result }}'
+              '${{ needs.seeded-integration.result }}'
               '${{ needs.backend-amd64.result }}'
               '${{ needs.backend-arm64.result }}'
               '${{ needs.backend-darwin-arm64.result }}'

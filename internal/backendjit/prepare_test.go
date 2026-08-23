@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
 
+	"renvo.dev/internal/backendbuiltin"
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/rtg"
@@ -133,6 +135,31 @@ func TestCacheKeyPreservesExactTargetAndHostIdentity(t *testing.T) {
 	}
 }
 
+func TestSeededCacheKeyCoversHostTargetAndCompatibilityIdentity(t *testing.T) {
+	descriptor := rtg.TargetDescriptor{Name: "target/example", Version: rtg.DescriptorVersion}
+	descriptor.Definition[0] = 1
+	var hostDefinition [32]byte
+	hostDefinition[0] = 2
+	base := seededCacheKey("compiler", seededKernelVersion, descriptor, "host/example", hostDefinition)
+
+	targetChanged := descriptor
+	targetChanged.Definition[0]++
+	if base == seededCacheKey("compiler", seededKernelVersion, targetChanged, "host/example", hostDefinition) {
+		t.Fatal("target semantic digest did not change the compiler cache key")
+	}
+	hostChanged := hostDefinition
+	hostChanged[0]++
+	if base == seededCacheKey("compiler", seededKernelVersion, descriptor, "host/example", hostChanged) {
+		t.Fatal("host semantic digest did not change the compiler cache key")
+	}
+	if base == seededCacheKey("compiler", seededKernelVersion+1, descriptor, "host/example", hostDefinition) {
+		t.Fatal("kernel compatibility version did not change the compiler cache key")
+	}
+	if base == seededCacheKey("compiler", seededKernelVersion, descriptor, "host_example", hostDefinition) {
+		t.Fatal("host canonical name did not change the compiler cache key")
+	}
+}
+
 type memoryRunner struct {
 	request Request
 }
@@ -183,7 +210,25 @@ func TestInMemoryRunnerUsesVersionedProtocol(t *testing.T) {
 	}
 }
 
-func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
+func TestCompilerRequestArgsPreserveOptions(t *testing.T) {
+	got := compilerRequestArgs("example/amd64", driver.BackendCompileOptions{
+		Strip: true, WindowsGUI: true, EmitImage: true, ObjectFile: true,
+		ArenaSize: 4096, Output: "module-name", ModuleLicense: "Dual MIT/GPL",
+	}, "-", "-")
+	want := []string{
+		"-t", "example/amd64", "-s", "-windows-gui", "-emit-image", "-object",
+		"-arena-size", "4096", "-module-name", "module-name",
+		"-module-license", "Dual MIT/GPL", "-o", "-", "-",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("compiler process arguments = %#v, want %#v", got, want)
+	}
+}
+
+func TestVM32SeedPromotesExternalCompilerAndCachesExecutable(t *testing.T) {
+	if os.Getenv("RENVO_SEEDED_INTEGRATION") != "1" {
+		t.Skip("set RENVO_SEEDED_INTEGRATION=1 to run the cold VM32 seed promotion integration")
+	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skipf("in-process prepared backend requires linux/amd64, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
@@ -210,13 +255,42 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 		source,
 	}
 
-	first := New(definition, filepath.Join(root, "backend"), stdRoot, cache, backendcompiled.Backend{})
+	first := NewSeeded(definition, stdRoot, cache)
 	firstResult := driver.CompileFromFS(args, root, stdRoot, driver.OSFS{}, first)
 	if !firstResult.Ok {
 		t.Fatalf("cold custom backend compile failed: %#v", firstResult.Diagnostic)
 	}
 	if first.prepared.CacheHit {
 		t.Fatal("cold custom backend unexpectedly hit cache")
+	}
+	if first.prepared.ExecutablePath == "" || !trustedCachedExecutable(first.prepared.ExecutablePath) {
+		t.Fatalf("cold custom backend did not publish a trusted executable: host=%q path=%q diagnostic=%#v", first.prepared.Artifact.Host, first.prepared.ExecutablePath, first.prepared.Diagnostic)
+	}
+	binding, ok := unit.ReadTargetBinding(firstResult.Build.Unit)
+	if !ok {
+		t.Fatal("cold custom backend unit has no target binding")
+	}
+	wrongDefinition := []byte(binding.Definition)
+	wrongDefinition[0] ^= 0xff
+	for _, mismatch := range []struct {
+		name    string
+		binding unit.TargetBinding
+	}{
+		{"target", unit.TargetBinding{Target: binding.Target + "-wrong", Definition: binding.Definition, DescriptorVersion: binding.DescriptorVersion}},
+		{"definition", unit.TargetBinding{Target: binding.Target, Definition: string(wrongDefinition), DescriptorVersion: binding.DescriptorVersion}},
+		{"descriptor version", unit.TargetBinding{Target: binding.Target, Definition: binding.Definition, DescriptorVersion: binding.DescriptorVersion + 1}},
+	} {
+		mismatchedUnit, bound := unit.BindTarget(firstResult.Build.Unit, mismatch.binding)
+		if !bound {
+			t.Fatalf("could not construct %s-mismatched unit", mismatch.name)
+		}
+		mismatched := runNativeCompiler(first.prepared.ExecutablePath, first.prepared.Artifact, Request{
+			Protocol: ProtocolVersion, Unit: mismatchedUnit,
+			Options: driver.BackendCompileOptions{Target: "example/example64", Strip: true},
+		})
+		if mismatched.Ok || len(mismatched.Binary) != 0 || mismatched.Diagnostic.Code != "RENVO-BACKEND-009" {
+			t.Fatalf("%s-mismatched compiler request: ok=%v bytes=%d diagnostic=%#v", mismatch.name, mismatched.Ok, len(mismatched.Binary), mismatched.Diagnostic)
+		}
 	}
 	if !bytes.HasPrefix(firstResult.Binary, []byte{0x7f, 'E', 'L', 'F'}) {
 		t.Fatalf("cold custom backend output prefix = % x", firstResult.Binary[:minInt(4, len(firstResult.Binary))])
@@ -288,27 +362,40 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	if string(immediateExecution) != "PASS\n" {
 		t.Fatalf("custom backend immediate argument output = %q, want PASS", immediateExecution)
 	}
-	for _, mutate := range []func(*rtgb.Artifact){
-		func(artifact *rtgb.Artifact) { artifact.Protocol++ },
-		func(artifact *rtgb.Artifact) { artifact.Unit++ },
-		func(artifact *rtgb.Artifact) { artifact.Descriptor.Version++ },
-		func(artifact *rtgb.Artifact) { artifact.Optimization++ },
-		func(artifact *rtgb.Artifact) { artifact.Generator++ },
-		func(artifact *rtgb.Artifact) { artifact.Kernel++ },
-		func(artifact *rtgb.Artifact) { artifact.Host += "-wrong" },
+	if loaded := loadSeeded(first.prepared.Encoded, "example/example64"); !loaded.Ok {
+		t.Fatalf("could not reload exported derived backend: %#v", loaded.Diagnostic)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*rtgb.Artifact)
+	}{
+		{"protocol", func(artifact *rtgb.Artifact) { artifact.Protocol++ }},
+		{"unit", func(artifact *rtgb.Artifact) { artifact.Unit++ }},
+		{"descriptor", func(artifact *rtgb.Artifact) { artifact.Descriptor.Version++ }},
+		{"optimization", func(artifact *rtgb.Artifact) { artifact.Optimization++ }},
+		{"generator", func(artifact *rtgb.Artifact) { artifact.Generator++ }},
+		{"kernel", func(artifact *rtgb.Artifact) { artifact.Kernel++ }},
+		{"host", func(artifact *rtgb.Artifact) { artifact.Host += "-wrong" }},
 	} {
 		artifact := first.prepared.Artifact
-		mutate(&artifact)
+		test.mutate(&artifact)
 		encoded, ok := rtgb.Encode(artifact)
 		if !ok {
 			t.Fatal("could not encode incompatible artifact")
 		}
-		if loaded := Load(encoded); loaded.Ok {
-			t.Fatalf("accepted incompatible artifact %#v", artifact)
+		if loaded := loadSeeded(encoded, "example/example64"); loaded.Ok {
+			t.Fatalf("accepted artifact with incompatible %s identity", test.name)
 		}
 	}
 
-	second := New(definition, filepath.Join(root, "backend"), stdRoot, cache, backendcompiled.Backend{})
+	hostEmitters, err := filepath.Glob(filepath.Join(cache, "host-emitter-*.rtgb"))
+	if err != nil || len(hostEmitters) != 1 {
+		t.Fatalf("cold bootstrap host emitter cache = %q, error %v", hostEmitters, err)
+	}
+	if err = os.Rename(hostEmitters[0], hostEmitters[0]+".unavailable"); err != nil {
+		t.Fatal(err)
+	}
+	second := NewSeeded(definition, stdRoot, cache)
 	secondResult := driver.CompileFromFS(args, root, stdRoot, driver.OSFS{}, second)
 	if !secondResult.Ok {
 		t.Fatalf("warm custom backend compile failed: %#v", secondResult.Diagnostic)
@@ -318,6 +405,46 @@ func TestCompiledInBootstrapPreparesAndCachesBackend(t *testing.T) {
 	}
 	if !bytes.Equal(firstResult.Binary, secondResult.Binary) {
 		t.Fatal("cold and warm custom backend outputs differ")
+	}
+	if second.prepared.ExecutablePath != first.prepared.ExecutablePath {
+		t.Fatalf("warm compiler path = %q, want %q", second.prepared.ExecutablePath, first.prepared.ExecutablePath)
+	}
+	hostEmitters, err = filepath.Glob(filepath.Join(cache, "host-emitter-*.rtgb"))
+	if err != nil || len(hostEmitters) != 0 {
+		t.Fatalf("warm compiler cache unexpectedly rebuilt the VM host emitter: %q, error %v", hostEmitters, err)
+	}
+}
+
+func TestNativeCompilerCacheRejectsAndReplacesCorruptExecutable(t *testing.T) {
+	resolved := backendbuiltin.Resolve("linux/amd64")
+	generated := rtg.GeneratePreparedBackend(resolved, "linux/amd64")
+	if !generated.Ok {
+		t.Fatalf("generate cache fixture descriptor: %#v", generated.Diagnostics)
+	}
+	artifact := seededArtifact(generated.Descriptor, "linux/amd64", []byte("\x7fELFcompiler-one"))
+	directory := t.TempDir()
+	key := "compiler-cache-recovery"
+	stored, err := storeNativeCompilerCache(directory, key, artifact)
+	if err != nil || !trustedCachedExecutable(stored.ExecutablePath) {
+		t.Fatalf("store native compiler: %v, %#v", err, stored)
+	}
+	loaded, found := loadNativeCompilerCache(directory, key, generated.Descriptor, "linux/amd64")
+	if !found || !loaded.CacheHit || !bytes.Equal(loaded.Artifact.Payload, artifact.Payload) {
+		t.Fatalf("load native compiler = %#v, found %v", loaded, found)
+	}
+	if err = os.WriteFile(stored.ExecutablePath, []byte("corrupt compiler"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, found = loadNativeCompilerCache(directory, key, generated.Descriptor, "linux/amd64"); found {
+		t.Fatal("cache accepted an executable that no longer matched its committed digest")
+	}
+	artifact.Payload = []byte("\x7fELFcompiler-two")
+	if _, err = storeNativeCompilerCache(directory, key, artifact); err != nil {
+		t.Fatalf("replace corrupt native compiler: %v", err)
+	}
+	loaded, found = loadNativeCompilerCache(directory, key, generated.Descriptor, "linux/amd64")
+	if !found || !bytes.Equal(loaded.Artifact.Payload, artifact.Payload) {
+		t.Fatal("replacement native compiler was not published atomically")
 	}
 }
 

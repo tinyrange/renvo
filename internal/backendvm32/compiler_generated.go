@@ -1,7 +1,7 @@
 // Code generated from checked-in RTG backend outputs; DO NOT EDIT.
 //go:build !renvo
 
-package backendcompiled
+package backendvm32
 
 const CompilerSourceDigest = "7d52a5a15493e3a248b0d4f6a857230d8375f103a2175f6e4a801ab4150eb23d"
 
@@ -9,10 +9,6 @@ const CompilerSourceDigest = "7d52a5a15493e3a248b0d4f6a857230d8375f103a2175f6e4a
 
 const renvoAbsBssReloc = 1
 const renvoImportReloc = 2
-
-
-
-
 
 const renvoObjectExternalBase = 536870912
 const renvoObjectExternalStride = 1048576
@@ -65,8 +61,6 @@ a.kernelImportOffsets = append(a.kernelImportOffsets, len(a.kernelImportNames))
 return len(a.kernelImportOffsets)/2 - 1
 }
 
-
-
 func renvo_runtime_ArenaMark() int { return 0 }
 
 func renvo_runtime_ArenaReset(mark int) {}
@@ -78,9 +72,6 @@ func renvo_runtime_ArenaDiscardBytes(value []byte) {}
 func renvo_runtime_ArenaDiscardDecls(value []renvoDecl) {}
 
 func renvo_runtime_ArenaDiscardFuncs(value []renvoFuncDecl) {}
-
-
-
 
 func renvo_runtime_UnsafeByteAt(data []byte, index int) byte { return data[index] }
 
@@ -136,10 +127,6 @@ type renvoObjectFunctionRange struct {
 label, end, nameStart, nameEnd, sectionStart, sectionEnd, alignment int
 }
 
-
-
-
-
 type renvoReplSymbol struct {
 id         int
 offset     int
@@ -189,19 +176,12 @@ patchFailed         bool
 syscallNumber       int
 syscallNumberKnown  bool
 
-
-
 objectData       []renvoObjectDataSymbol
 objectDataValues []byte
 objectFunctions  []renvoObjectFunctionRange
 objectDataRelocs []renvoObjectDataRelocation
 objectExternals  []renvoObjectExternal
 }
-
-
-
-
-
 
 type renvoObjectCacheEntry struct {
 used   bool
@@ -212,9 +192,6 @@ keyA   int
 keyB   int
 data   []byte
 }
-
-
-
 
 type renvoObjectGenState struct {
 contextA      int
@@ -227,7 +204,6 @@ funcNext      []int
 }
 
 type renvoObjectStrings struct {
-
 refs []int
 }
 
@@ -330,8 +306,6 @@ if closureIndex < 0 || g.meta.closures[closureIndex].ready {
 return false
 }
 
-
-
 g.funcReachable[fnIndex] = false
 return true
 }
@@ -407,14 +381,10 @@ symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
 codeCapacity := 2097152
 code = make([]byte, 0, codeCapacity)
 
-
-
 labelCapacity := 24576
 relocCapacity := 81920
 labelPos = make([]int32, 0, labelCapacity)
 relocs = make([]int32, 0, relocCapacity)
-
-
 
 absRelocCapacity := 12288
 absRelocs = make([]int32, 0, absRelocCapacity)
@@ -580,10 +550,6 @@ return renvo_runtime_ArenaPersistString(value)
 }
 return value
 }
-
-
-
-
 
 func (a *renvoAsm) ObjectImage() []byte {
 if renvoFixedTarget != 0 {
@@ -1187,7 +1153,6 @@ const renvoTypeStruct = 12
 const renvoTypeNamed = 13
 const renvoTypeArray = 14
 
-
 const renvoTypeUint16 = 16
 const renvoTypeUint32 = 17
 const renvoTypeUint64 = 18
@@ -1286,8 +1251,6 @@ ready        bool
 
 type renvoDeferSite struct {
 funcType int
-
-
 
 directTarget int
 }
@@ -2206,9 +2169,6 @@ p.parsedIntHigh = n >> 32
 return n
 }
 
-
-
-
 func renvoParseFloatTokenScaledCompatibility(p *renvoProgram, tokIndex int) int {
 renvoNonNil(p)
 tok := renvoTokAt(p, tokIndex)
@@ -2324,19 +2284,10 @@ power++
 return mantissa
 }
 
-
-
-
-
-
-
 type renvoFloatBig struct {
 word   [80]uint32
 length int
 }
-
-
-
 
 type renvoFloatDecimal struct {
 digit [800]byte
@@ -2728,8 +2679,6 @@ return length
 
 func renvoFloatUint32Less(left uint32, right uint32) bool {
 
-
-
 return int32(left^uint32(0x80000000)) < int32(right^uint32(0x80000000))
 }
 
@@ -2833,9 +2782,6 @@ return difference
 }
 
 func renvoFloatBigDivideRounded(numerator *renvoFloatBig, denominator *renvoFloatBig, sticky bool, quotientLow *uint32, quotientHigh *uint32) {
-
-
-
 
 renvoFloatBigQuotientRounded(numerator, denominator, sticky, quotientLow, quotientHigh)
 }
@@ -3101,10 +3047,6 @@ return
 renvoSetConstResult(out, 0, false)
 }
 
-
-
-
-
 func renvoEmitFloatConstByName(g *renvoLinearGen, nameStart int, nameEnd int) int {
 renvoNonNil(g)
 symIndex := renvoFindMetaGlobalIndex(g.meta, nameStart, nameEnd, renvoTokConst)
@@ -3194,8 +3136,6 @@ return
 }
 if e.kind == renvoExprFloat {
 
-
-
 renvoSetConstResult(out, 0, false)
 return
 }
@@ -3234,9 +3174,6 @@ if renvoIsHostedObjectAmd64(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
 fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 if fnIndex >= 0 {
 fn := &g.meta.funcs[fnIndex]
-
-
-
 
 start, end, found := renvoFunctionLeadingReturnExpr(g, fn)
 if fn.linkStatic == 0 && found {
@@ -3278,8 +3215,6 @@ result := renvoEvalConstExpr(g, ep, argIndex)
 if result.ok {
 source := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
 renvoNonNil(source)
-
-
 
 if renvoTypeKindIsFloat(resolved.kind) || renvoTypeKindIsFloat(source.kind) {
 renvoSetConstResult(out, 0, false)
@@ -3397,7 +3332,6 @@ return
 usesFloat := renvoBinaryUsesFloat(g, ep, e)
 if usesFloat {
 
-
 renvoSetConstResult(out, 0, false)
 return
 }
@@ -3416,10 +3350,6 @@ return
 }
 renvoSetConstResult(out, 0, false)
 }
-
-
-
-
 
 func renvoFunctionLeadingReturnExpr(g *renvoLinearGen, fn *renvoFuncInfo) (int, int, bool) {
 renvoNonNil(g, fn)
@@ -3662,9 +3592,6 @@ var zero renvoExprParse
 ep.prog = p
 ep.pos = start
 ep.end = end
-
-
-
 
 capacity := end - start
 if capacity < 2 {
@@ -4749,8 +4676,6 @@ m.scratchStart = renvo_runtime_ArenaMark()
 p := pp
 m.prog = p
 
-
-
 typeCap := len(p.decls) + 512
 fieldCap := len(p.decls)*2 + 256
 globalCap := len(p.decls) + 128
@@ -4839,9 +4764,6 @@ renvoParseFuncInfo(m, i)
 }
 renvoParseFuncLiterals(m, p)
 
-
-
-
 m.panicEnabled = p.toks.panicEnabled
 if renvoProgramUsesC11Semantics(p) {
 m.panicEnabled = m.panicEnabled && renvoC11UsesDefer(p)
@@ -4913,7 +4835,6 @@ if size <= 0 {
 return 0
 }
 
-
 return (size&127)<<24 | int(renvo_runtime_UnsafeByteAt(src, start))<<16 | int(renvo_runtime_UnsafeByteAt(src, end-1))<<8 | int(renvo_runtime_UnsafeByteAt(src, start+size/2))
 }
 
@@ -4984,8 +4905,6 @@ for changed {
 changed = false
 for i := 0; i < len(m.globals); i++ {
 global := &m.globals[i]
-
-
 
 if global.kind != renvoTokVar || global.typ != 0 || global.initStart >= global.initEnd {
 continue
@@ -5176,7 +5095,6 @@ renvoSetConstResult(out, value, true)
 return
 }
 if e.kind == renvoExprFloat {
-
 
 renvoSetConstResult(out, 0, false)
 return
@@ -5853,8 +5771,6 @@ end = start
 return 0
 }
 
-
-
 func renvoObjectDirectiveFields(src []byte, start int, end int) []int {
 fields := make([]int, 0, 22)
 for start < end {
@@ -6364,7 +6280,6 @@ if addressSpace < renvoPointerSpaceData || addressSpace > renvoPointerSpaceGener
 addressSpace = renvoPointerSpaceData
 }
 
-
 for i := len(m.types) - 1; i >= 1; i-- {
 typ := &m.types[i]
 if typ.kind == renvoTypePointer && typ.elem == elem && typ.first == addressSpace {
@@ -6519,8 +6434,6 @@ size = renvoAlignValue(offset, align)
 size = renvoNativeTypeLayout(m, t.elem) * t.count
 align = m.types[t.elem].nativeAlign
 } else if t.kind == renvoTypePointer {
-
-
 
 size = m.c.renvoNativeIntSize
 align = renvoNativeAlignment(m.c, size)
@@ -6825,7 +6738,6 @@ return false
 return renvoBytesEqualText(src, end-len(suffix), end, suffix)
 }
 
-
 func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 renvoNonNil(g)
 meta := g.meta
@@ -6881,7 +6793,6 @@ continue
 }
 if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, paramType.kind) {
 
-
 renvoStoreIncomingCallWord(g, callWord, offset)
 callWord++
 continue
@@ -6898,8 +6809,6 @@ continue
 renvoStoreIncomingCallWord(g, callWord, offset)
 callWord++
 }
-
-
 
 if renvoPreparedBackendActive != 0 {
 for at := 0; at < fn.paramCount; at++ {
@@ -7027,7 +6936,6 @@ renvoEnsurePanicState(g)
 renvoAsmPrimaryBssAddr(&g.asm, g.mainThreadStateOff)
 if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
 
-
 renvoAsmEmitText(&g.asm, "\x49\x89\xc7")
 }
 renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -7035,8 +6943,6 @@ renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
 
 func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-
-
 
 renvoEnsurePanicState(g)
 renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
@@ -7214,9 +7120,6 @@ renvoNonNil(g)
 if g.deferReturnLabel <= 0 {
 return false
 }
-
-
-
 
 if g.stackUsed < g.stackPeak {
 g.stackUsed = g.stackPeak
@@ -7748,7 +7651,6 @@ renvoAsmStorePrimaryStack(a, offset)
 return
 }
 
-
 renvoAsmPushPrimary(a)
 renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmCopyPrimaryToSecondary(a)
@@ -7831,8 +7733,6 @@ renvoAsmStorePrimaryStack(a, offset)
 return
 }
 if a.c.renvoTargetArch == renvoArchAmd64 {
-
-
 
 renvoAsmStackMem(a, offset, 0xff48, 0x45, 0x85)
 return
@@ -8412,7 +8312,6 @@ stackInitLabel            int
 stackSwitchLabel          int
 runtimeFaultLabel         int
 
-
 runtimeNonNilLabel       int
 runtimeSecondaryLabel    int
 runtimeBoundsLabel       int
@@ -8494,7 +8393,6 @@ kernelCallbackLabels     []int
 replRestoreOffsets       []int
 c                        *renvoCompileContext
 
-
 object                  *renvoObjectGenState
 funcSingleCallState     []int
 paramConstValues        []int
@@ -8511,8 +8409,6 @@ const renvoStringInternSearchBytes = 512
 
 func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 renvoNonNil(g)
-
-
 
 searchStart := len(g.asm.data) - renvoStringInternSearchBytes
 if searchStart < 0 {
@@ -8546,8 +8442,6 @@ return -1
 if alignment == 1 {
 return renvoAddStringData(g, msg)
 }
-
-
 
 searchStart := len(g.asm.data) - renvoStringInternSearchBytes
 if searchStart < 0 {
@@ -8761,7 +8655,6 @@ g.flowControlDepth--
 g.localCount = oldLocalCount
 g.scopeBase = oldScopeBase
 if g.deferReturnLabel > 0 && g.stackPeak > oldStackUsed {
-
 
 g.stackUsed = g.stackPeak
 } else {
@@ -9069,9 +8962,6 @@ callee := &ep.exprs[call.left]
 if callee.kind == renvoExprIdent {
 fnIndex := renvoFuncInfoFromCall(g, ep, call.left)
 if fnIndex >= 0 {
-
-
-
 
 directTarget = fnIndex + 1
 }
@@ -10759,7 +10649,6 @@ if renvoFixedTarget == 0 {
 renvoLinearPrepareReplGlobals(g)
 }
 
-
 for i := 0; i < len(meta.globals); i++ {
 s := &meta.globals[i]
 if s.kind != renvoTokVar {
@@ -10909,8 +10798,6 @@ renvoAsmPopSecondary(a)
 renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, kind))
 return true
 }
-
-
 
 func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok int) int {
 p := g.prog
@@ -11184,8 +11071,6 @@ if assignTok <= stmt.startTok || !renvoTokCharIs(p, assignTok, '=') {
 return true
 }
 
-
-
 discardStmt := *stmt
 discardStmt.exprStart = assignTok + 1
 discardStmt.exprEnd = stmt.endTok
@@ -11321,9 +11206,6 @@ sliceArena := 0
 if trackSliceArena && renvoReturnedSliceCanReuseDescriptor(g, ep, rootIndex) {
 sliceArena = 1
 }
-
-
-
 
 dominates := declaresLocal
 if renvoFixedTarget == 0 && !dominates {
@@ -11607,10 +11489,6 @@ p.toks.data[to+i] = renvo_runtime_UnsafeInt32At(p.toks.data, from+i)
 }
 }
 
-
-
-
-
 func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok int) int {
 renvoNonNil(g, stmt)
 p := g.prog
@@ -11652,8 +11530,6 @@ if !ok || len(rhs)/2 != nameCount {
 return -1
 }
 temps = renvoFixedIntScratch(nameCount)
-
-
 
 for i := 0; i < nameCount; i++ {
 ep := renvoNewExprParse()
@@ -12039,11 +11915,6 @@ renvoNonNil(resolved)
 return renvoTypeKindIsScalarInt(resolved.kind) && !renvoLocalNameAddressTaken(g, nameStart, nameEnd)
 }
 
-
-
-
-
-
 func renvoTopLevelAssignmentDominates(g *renvoLinearGen, assignmentTok int) bool {
 renvoNonNil(g)
 if !renvoIsHostedObjectAmd64(g.c) || g.flowControlDepth != 0 ||
@@ -12135,8 +12006,6 @@ if addressTok < 0 {
 continue
 }
 
-
-
 if addressTok >= 2 && renvoTokCharIs(p, addressTok-1, '=') && renvoTokIdentIs(p, addressTok-2, "_") {
 continue
 }
@@ -12144,9 +12013,6 @@ return true
 }
 return false
 }
-
-
-
 
 func renvoLocalNameWrittenAfter(g *renvoLinearGen, nameStart int, nameEnd int, afterTok int) bool {
 renvoNonNil(g)
@@ -12755,7 +12621,6 @@ return renvoFindTypeByRange(g, callee.nameStart, callee.nameEnd)
 func renvoLocalTypeAtOffset(g *renvoLinearGen, offset int) int {
 renvoNonNil(g)
 
-
 for i := g.localCount - 1; i >= 0; i-- {
 local := &g.locals[i]
 if local.offset == offset {
@@ -12865,8 +12730,6 @@ if e.kind == renvoExprComposite {
 valueOffset := offset
 copyValue := false
 
-
-
 if renvoCompositeNeedsTemporary(g, ep, e, offset) {
 valueOffset = renvoAddUnnamedLocal(g, destType)
 copyValue = true
@@ -12956,7 +12819,6 @@ if e.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 return localIndex >= 0 && g.locals[localIndex].offset == offset
 }
-
 
 if e.kind == renvoExprCall || e.kind == renvoExprIndex || e.kind == renvoExprAssert || e.kind == renvoExprFunc {
 return true
@@ -13091,8 +12953,6 @@ leftNil := renvoExprIsNil(g.prog, &ep.exprs[e.left])
 rightNil := renvoExprIsNil(g.prog, &ep.exprs[e.right])
 if leftNil || rightNil {
 
-
-
 valueIndex := e.left
 if leftNil {
 valueIndex = e.right
@@ -13180,7 +13040,6 @@ leftValue := renvoAddUnnamedLocal(g, typ)
 rightValue := renvoAddUnnamedLocal(g, typ)
 size := renvoTypeSize(g.meta, typ)
 if renvoResolveType(g.meta, typ).kind == renvoTypeComplex64 && g.c.renvoNativeIntSize == 8 {
-
 
 renvoAsmLoadSecondaryStack(a, left)
 renvoUnpackComplex64MemSecondaryRegs(g)
@@ -13361,8 +13220,6 @@ elemSize := renvoTypeSize(g.meta, t.elem)
 if elemSize < 1 {
 elemSize = 8
 }
-
-
 
 slackSize := 80
 if elemSize > slackSize {
@@ -13884,7 +13741,6 @@ afterLabel := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
 if g.c.renvoTargetArch == renvoArchAmd64 {
 
-
 renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 renvoAsmMarkLabel(a, afterLabel)
 return g.makeZeroLabel
@@ -13919,8 +13775,6 @@ renvoAsmRet(a)
 func renvoEmitMakeZero(g *renvoLinearGen) {
 renvoNonNil(g)
 if g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-
-
 
 renvoAsmEmitText(&g.asm, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58")
 return
@@ -14430,8 +14284,6 @@ return true
 }
 if renvoProgramUsesC11Semantics(g.prog) && e.argCount == 1 &&
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_bool_int") {
-
-
 
 return renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 }
@@ -15039,7 +14891,6 @@ offset := renvoAlignValue(g.asm.bssSize, 4)
 g.asm.bssSize = offset + 12
 valueStart := len(g.asm.objectDataValues)
 
-
 g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 11, 8, 0, 0)
 g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
 sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
@@ -15176,15 +15027,12 @@ renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x54\x24\x08\x8b\x04\x24\x66\x0f\x
 return 1
 }
 
-
 renvoAsmEmitText(&g.asm, "\x53\x8b\x44\x24\x18\x8b\x5c\x24\x10\x8b\x4c\x24\x08\x0f\x01\xfb\x5b\x48\x83\xc4\x18")
 return 1
 }
 if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadCPUNODE") &&
 (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
 renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
 
 renvoAsmEmitText(&g.asm, "\x0f\x03\xc0")
 return 1
@@ -15546,7 +15394,6 @@ renvoAsmEmitText(&g.asm, "\x0f\xb6\xc0")
 renvoAsmEmitText(&g.asm, "\x0f\xb7\xc0")
 }
 
-
 renvoAsmSecondaryImm(&g.asm, 0)
 return 1
 }
@@ -15742,7 +15589,6 @@ if argCount < 1 || argCount > 5 || e.argCount != argCount || renvoEmitCallArgsRe
 return 0
 }
 
-
 renvoAsmEmit8(&g.asm, 0x53)
 registerModRM := "\x44\x5c\x4c\x54\x74"
 for i := 0; i < argCount; i++ {
@@ -15762,10 +15608,6 @@ if e.argCount == 0 &&
 (renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableUserAccess") ||
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess")) &&
 g.c.renvoTargetArch == renvoArchAmd64 {
-
-
-
-
 
 renvoAsmEmitText(&g.asm, "\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
 if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess") {
@@ -15828,7 +15670,6 @@ return 1
 if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIRETToSelf") &&
 g.c.renvoTargetArch == renvoArchAmd64 {
 
-
 renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xd0\x50\x54\x48\x83\x04\x24\x08\x9c")
 renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xc8\x50\x48\x8d\x05\x03\x00\x00\x00\x50\x48\xcf")
 return 1
@@ -15855,8 +15696,6 @@ if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, 
 g.c.renvoTargetArch == renvoArchAmd64 &&
 renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 
-
-
 renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x08\x48\x83\xf9\x06\x73\x13")
 renvoAsmEmitText(&g.asm, "\x48\x8b\x10\x48\x8b\x14\xca\x48\xff\xc1\x48\x89\x48\x08\x48\x89\xd0\xeb\x12")
 renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x10\x48\x8b\x11\x48\x83\xc1\x08\x48\x89\x48\x10\x48\x89\xd0")
@@ -15865,7 +15704,6 @@ return 1
 if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVAArg32") &&
 g.c.renvoTargetArch == renvoArch386 &&
 renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
 
 renvoAsmEmitText(&g.asm, "\x8b\x08\x8b\x11\x83\xc1\x04\x89\x08\x89\xd0")
 return 1
@@ -15894,8 +15732,6 @@ return 1
 if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadAccessRights") &&
 g.c.renvoTargetArch == renvoArchAmd64 &&
 renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
 
 renvoAsmEmitText(&g.asm, "\x89\xc1\x31\xc0\x0f\x02\xc1")
 return 1
@@ -16479,15 +16315,12 @@ return 0
 if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadInstructionPointer") &&
 g.c.renvoTargetArch == renvoArchAmd64 {
 
-
 renvoAsmEmitText(&g.asm, "\x48\x8d\x05\x00\x00\x00\x00")
 return 1
 }
 if e.argCount == 0 &&
 (renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryBarrier") ||
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CConditionClobber")) {
-
-
 
 return 1
 }
@@ -16501,8 +16334,6 @@ if !number.ok || !vector.ok || vector.value < 0 || vector.value > 255 ||
 !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2)) {
 return 0
 }
-
-
 
 renvoAsmEmitText(&g.asm, "\x89\xda\x89\xe3\x89\xc1\x89\xcc\xb8")
 renvoAsmEmit32(&g.asm, number.value)
@@ -16567,10 +16398,6 @@ renvoAsmPushStackWord(&g.asm, offsets[i])
 return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
 }
 
-
-
-
-
 func renvoCallArgumentsDiscardable(g *renvoLinearGen, ep *renvoExprParse, call *renvoExpr) bool {
 renvoNonNil(g, ep, call)
 for i := 0; i < call.argCount; i++ {
@@ -16610,8 +16437,6 @@ return false
 func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
 
-
-
 if !renvoIsHostedObjectAmd64(g.c) || wordCount != fn.paramCount || wordCount <= 6 || wordCount > 22 {
 return false
 }
@@ -16625,7 +16450,6 @@ if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && pa
 return false
 }
 }
-
 
 renvoAsmEmitText(&g.asm, "\x5f\x5e\x5a\x59\x41\x58\x41\x59")
 stackWords := wordCount - 6
@@ -16688,7 +16512,6 @@ if !renvoEmitStringValueRegs(g, ep, arg) {
 return -1
 }
 
-
 renvoAsmPushPrimary(&g.asm)
 wordCount++
 continue
@@ -16702,7 +16525,6 @@ return -1
 } else if !renvoEmitStringValueRegs(g, ep, arg) {
 return -1
 }
-
 
 renvoAsmPushPrimary(&g.asm)
 wordCount++
@@ -16867,11 +16689,6 @@ return renvoFunctionValueDirect
 }
 return 0
 }
-
-
-
-
-
 
 func renvoFunctionValueTag(g *renvoLinearGen, fnIndex int) int {
 if renvoFixedTarget == 0 {
@@ -17042,8 +16859,6 @@ return false
 wordOffsets = append(wordOffsets, argOffsets[i])
 }
 
-
-
 if len(wordOffsets) > 20 || hasAggregate && len(wordOffsets) > 6 {
 return false
 }
@@ -17123,7 +16938,6 @@ renvoTypeSize(g.meta, functionType.elem) > 4) {
 return false
 }
 
-
 for i := len(argOffsets) - 1; i >= 0; i-- {
 renvoAsmLoadPrimaryStack(&g.asm, argOffsets[i])
 renvoAsmPushPrimary(&g.asm)
@@ -17151,8 +16965,6 @@ renvoNonNil(g)
 if !renvoIsHostedObjectAmd64(g.c) || len(argOffsets) <= 6 || len(argOffsets) > 20 {
 return false
 }
-
-
 
 renvoAsmLoadPrimaryStack(&g.asm, handleOffset)
 renvoAsmEmitText(&g.asm, "\x49\x89\xc3\x49\x89\xe2\x48\x83\xe4\xf0")
@@ -17391,8 +17203,6 @@ renvoEmitPostCallPanicCheck(g)
 renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 }
 
-
-
 renvoEmitRuntimeFault(g)
 renvoAsmPrimaryImm(&g.asm, 0)
 renvoAsmMarkLabel(&g.asm, doneLabel)
@@ -17407,9 +17217,6 @@ return true
 }
 info := &g.meta.closures[closureIndex]
 if !info.ready {
-
-
-
 
 return true
 }
@@ -17549,11 +17356,6 @@ base := len(a.code)
 a.labelPos[init] = int32(base + 39)
 a.labelPos[switchStack] = int32(base + 107)
 
-
-
-
-
-
 renvoAsmEmitText(a, "\xe9\x91\x00\x00\x00\x4c\x89\xef\x4c\x89\xe6\xe8\x00\x00\x00\x00\xc3\x41\x5a\x41\xc6\x02\x01\x41\x5b\x49\x8b\x23\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\x4c\x89\xc0\x48\x83\xe0\xf0\x48\x83\xe8\x58\x4c\x89\x38\x45\x31\xc9\x4c\x89\x48\x08\x48\x89\x50\x10\x48\x89\x48\x18\x4c\x89\x48\x20\x4c\x89\x48\x28\x4c\x8d\x0d\xb2\xff\xff\xff\x4c\x89\x48\x30\x4c\x8d\x0d\xb3\xff\xff\xff\x4c\x89\x48\x38\x48\x89\x70\x40\x48\x89\x78\x48\xc3\x49\x89\xf2\x49\x89\xfb\x4c\x8d\x0d\x1d\x00\x00\x00\x41\x51\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57\x49\x89\x22\x4c\x89\xdc\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\xc3")
 renvoAsmAddReloc(a, base+12, g.funcLabels[fn])
 }
@@ -17590,9 +17392,6 @@ renvoAsmCallLabel(&g.asm, g.stackSwitchLabel-1)
 }
 return true
 }
-
-
-
 
 const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16"
 
@@ -17645,10 +17444,6 @@ return renvoEmitPanicState(g, valueOffset)
 
 func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 renvoNonNil(g)
-
-
-
-
 
 if !g.meta.panicEnabled || g.deferReturnLabel <= 0 {
 renvoEmitUncaughtFaultTransfer(g, false)
@@ -17750,8 +17545,6 @@ return label
 }
 after := renvoAsmNewLabel(a)
 if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-
-
 
 renvoAsmMarkLabel(a, label)
 renvoAsmEmit16(a, 0x0b0f)
@@ -18075,8 +17868,6 @@ if !renvoEmitStringValueRegs(g, ep, idx) {
 return -1
 }
 
-
-
 renvoAsmPushPrimary(&g.asm)
 return 1
 }
@@ -18174,9 +17965,6 @@ if actualExprResolved.kind == renvoTypePointer {
 if !renvoEmitIntExpr(g, ep, idx) {
 return -1
 }
-
-
-
 
 receiverDereferences := renvoPointerDereferenceDistance(meta, actualExprType, receiverType)
 for i := 0; i < receiverDereferences; i++ {
@@ -19016,8 +18804,6 @@ if renvoTypeSize(g.meta, source.elem) != elemSize {
 return false
 }
 
-
-
 if elemSize == 1 && g.c.renvoTargetArch == renvoArchAmd64 {
 srcPtr := renvoAddUnnamedLocal(g, renvoTypeInt)
 srcLen := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -19075,11 +18861,6 @@ renvoAsmLoadPrimaryTertiaryStack(a, destLen, srcLen)
 renvoAsmAddPrimaryTertiary(a)
 renvoAsmStorePrimaryStack(a, finalLen)
 
-
-
-
-
-
 renvoAsmStoreStackImm(a, reserveIndex, 0)
 reserveLoop := renvoAsmNewLabel(a)
 reserveDone := renvoAsmNewLabel(a)
@@ -19092,7 +18873,6 @@ return false
 renvoAsmIncStack(a, reserveIndex)
 renvoAsmJmpMarkLabel(a, reserveLoop, reserveDone)
 
-
 if loc.mem {
 renvoAsmLoadSecondaryStack(a, headerOffset)
 renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
@@ -19102,8 +18882,6 @@ renvoAsmCopyBssToStackSlot(a, loc.offset, destPtr)
 } else {
 renvoAsmCopyStackSlot(a, loc.offset, destPtr)
 }
-
-
 
 renvoAsmLoadPrimaryTertiaryStack(a, destPtr, destLen)
 renvoAsmAddScaledTertiary(a, elemSize)
@@ -19565,9 +19343,6 @@ renvoNonNil(g, ep)
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
 if renvoPreparedBackendActive != 0 {
-
-
-
 
 leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
 rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
@@ -20176,9 +19951,6 @@ return
 done := renvoAsmNewLabel(a)
 if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
 
-
-
-
 renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8")
 renvoAmd64AsmJccLabel(a, 0x82, done)
 } else {
@@ -20344,7 +20116,6 @@ return -1
 
 func renvoLoadStructFieldPath(g *renvoLinearGen, typ int, nameStart int, nameEnd int) bool {
 renvoNonNil(g)
-
 
 if g.fieldCacheStart == nameStart {
 return g.fieldIndex >= 0
@@ -20614,7 +20385,6 @@ nameHash := 0
 if nameEnd > nameStart {
 nameHash = renvoHashRange(g.prog.src, nameStart, nameEnd)
 
-
 g.localCacheStart = -1
 }
 g.locals[g.localCount] = renvoLocalInfo{nameStart: nameStart, nameEnd: nameEnd, nameHash: nameHash, offset: offset, captureOff: captureOff, typ: typ, size: size}
@@ -20627,8 +20397,6 @@ return offset
 
 func renvoRecordStackPeak(g *renvoLinearGen) {
 renvoNonNil(g)
-
-
 
 if g.stackUsed > g.stackPeak {
 g.stackPeak = g.stackUsed
@@ -20717,8 +20485,6 @@ renvoInitEmptySliceStack(g, offset)
 return
 }
 if g.c.renvoTargetArch == renvoArchAmd64 && size >= 64 {
-
-
 
 renvoAsmAddressCallWord0Stack(a, offset)
 renvoAsmPrimaryImm(a, 0)
@@ -20940,10 +20706,6 @@ renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 }
 if !matched {
 
-
-
-
-
 renvoAsmMarkLabel(&g.asm, doneLabel)
 renvoEmitStaticWrite(g, "interface method unavailable\n", 2)
 renvoAsmPrimaryImm(&g.asm, 2)
@@ -21065,8 +20827,6 @@ if a.objectStrings != nil {
 objectStringCapacity = cap(a.objectStrings.refs)
 }
 
-
-
 capacity := cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
 if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
 renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
@@ -21156,8 +20916,6 @@ if a.c.renvoNativeIntSize == 8 {
 renvoAsmPrimaryImm64(a, low, high)
 return
 }
-
-
 
 renvoAsmPrimaryImm(a, low)
 }
@@ -21467,7 +21225,6 @@ renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
 renvoFixedTarget == renvoTargetNetBSDAmd64 ||
 renvoFixedTarget == 0 && targetIsBSD(a.c.renvoTargetOS) {
 
-
 renvoAsmEmitText(a, "\x73\x03\x48\xf7\xd8")
 }
 if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
@@ -21639,8 +21396,6 @@ renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
 func renvoAsmLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
 renvoNonNil(a)
 if renvoPreparedBackendActive != 0 {
-
-
 
 renvoRTGAsmLoadSize(a, renvoRTGPrimary,
 renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
@@ -22099,16 +21854,12 @@ renvo386AsmShrRaxImm(a, imm)
 return
 }
 
-
 renvoAsmEmit4(a, 0x48, 0xc1, 0xe8, imm)
 }
 func renvoAsmDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
 renvoNonNil(a)
 if renvoPreparedBackendActive != 0 {
 if mod {
-
-
-
 
 renvoRTGDirectMove(a, renvoRTGScratch, renvoRTGPrimary)
 renvoRTGDirectSignedDivide(a, false)
@@ -22839,9 +22590,6 @@ renvoNonNil(baseResolved)
 if base.kind == renvoExprUnary && renvoTokCharIs(g.prog, base.tok, '*') {
 pointerExpr := base.left
 
-
-
-
 if baseResolved.kind == renvoTypePointer {
 pointerExpr = e.left
 }
@@ -23059,8 +22807,6 @@ if renvoExprIsIdentText(p, ep, e.left, "renvoTruncBytes") || renvoExprIsIdentTex
 return renvoEmitRuntimeTruncateSlice(g, ep, e, -1)
 }
 callee := renvoExprIdentCode(p, ep, e.left)
-
-
 
 if callee == renvoIdentSyscall && e.argCount == 4 ||
 renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
@@ -23814,8 +23560,6 @@ a := &g.asm
 if renvoFixedTarget == 0 {
 if persistent && renvoIsHostedObjectAmd64(g.c) {
 
-
-
 renvoAsmPushPrimary(a)
 renvoEmitPersistentArenaReady(g)
 renvoAsmPopPrimary(a)
@@ -24246,8 +23990,6 @@ return
 g.funcReachable[fnIndex] = true
 g.funcQueue = append(g.funcQueue, fnIndex)
 
-
-
 if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
 return
 }
@@ -24287,7 +24029,6 @@ for i := 0; i < fn.paramCount; i++ {
 paramType := meta.params[fn.firstParam+i].typ
 param := renvoResolveType(meta, paramType)
 renvoNonNil(param)
-
 
 paramWords := 1
 if param.kind == renvoTypeStruct {
@@ -24384,9 +24125,6 @@ if g == nil {
 return nil
 }
 
-
-
-
 for i := 0; i < len(meta.globals); i++ {
 s := &meta.globals[i]
 if s.kind != renvoTokVar {
@@ -24430,9 +24168,6 @@ size := storageSize
 if decl != nil && decl.size >= 0 {
 size = decl.size
 }
-
-
-
 
 objectStorageSize := storageSize
 if size > objectStorageSize {
@@ -24486,8 +24221,6 @@ relocation.targetStart, relocation.targetEnd = start, end
 }
 }
 
-
-
 if meta.panicEnabled {
 renvoEnsurePanicState(g)
 }
@@ -24511,8 +24244,6 @@ return g
 
 func renvoEnsureObjectAddressTakenFunctionWrappers(g *renvoLinearGen) bool {
 renvoNonNil(g)
-
-
 
 queue := make([]int, len(g.funcQueue))
 copy(queue, g.funcQueue)
@@ -24627,9 +24358,6 @@ renvoNonNil(g, ep)
 if idx < 0 || idx >= len(ep.exprs) || offset < 0 {
 return false
 }
-
-
-
 
 if len(data) == 0 {
 return offset == 0
@@ -24769,7 +24497,6 @@ return false
 fieldType = resolved.elem
 elementSize := renvoTypeSize(g.meta, fieldType)
 if g.c.objectFile && renvoResolveType(g.meta, fieldType).kind == renvoTypeFunc {
-
 
 elementSize = g.c.renvoNativeIntSize
 }
@@ -25197,8 +24924,6 @@ offsets[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
 renvoAsmStorePrimaryStack(&g.asm, offsets[i])
 }
 
-
-
 renvoAsmEmitText(&g.asm, "\x41\x54\x41\x55")
 renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
 renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
@@ -25213,8 +24938,6 @@ if !renvoEmitObjectRawFunctionCall(g, enter) {
 return false
 }
 if argCount == 2 {
-
-
 
 renvoAsmEmitText(&g.asm, "\x4c\x89\xe6\x4c\x89\xef")
 } else {
@@ -25259,9 +24982,6 @@ if !renvoEmitExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
 return false
 }
 }
-
-
-
 
 renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
 renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
@@ -25360,8 +25080,6 @@ if wordCount > registerWords || memoryAggregate {
 renvoAmd64BeginObjectStackArgs(&g.asm)
 }
 if sret {
-
-
 
 if renvoPreparedBackendActive != 0 {
 if !renvoRTGBeginObjectAggregateResult(&g.asm, true) {
@@ -25503,12 +25221,8 @@ if fn.linkStatic != 0 {
 nameStart, nameEnd = fn.linkMethodStart, fn.linkMethodEnd
 } else if fn.exportNameEnd > fn.exportNameStart {
 
-
 nameStart, nameEnd = fn.exportNameStart, fn.exportNameEnd
 } else {
-
-
-
 
 if len(g.objectCABIWrapperLabels) == 0 || fnIndex >= len(g.objectCABIWrapperLabels) ||
 g.objectCABIWrapperLabels[fnIndex] == 0 {
@@ -25523,8 +25237,6 @@ offset := renvoObjectExternalOffset(&g.asm, importID)
 if offset < 0 {
 return false
 }
-
-
 
 renvoAsmPrimaryBssAddr(&g.asm, offset)
 if fn.linkStatic == 0 {
@@ -25543,8 +25255,6 @@ if !ok || renvoAsmAddExternalImportRange(&g.asm, g.prog.src, nameStart, nameEnd)
 return false
 }
 targetStart, targetEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, nameStart, nameEnd)
-
-
 
 renvoAsmEmit16(&g.asm, 0xb848)
 sourceLabel := renvoAsmNewLabel(&g.asm)
@@ -25609,7 +25319,6 @@ if wordCount < 0 || fnIndex < 0 || fnIndex >= len(g.meta.funcs) {
 return false
 }
 
-
 renvoAsmEmitText(&g.asm, "\x55\x89\xe5\x53\x56\x57")
 fixedWords := wordCount
 if variadic {
@@ -25618,13 +25327,10 @@ return false
 }
 fixedWords--
 
-
 renvoAsmEmitText(&g.asm, "\x83\xec\x0c\x8d\x45")
 renvoAsmEmit8(&g.asm, 8+fixedWords*4)
 renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x24\x08\x00\x00\x00\x00")
 }
-
-
 
 entry := renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
 for at := 0; at < fixedWords; at++ {
@@ -25758,7 +25464,6 @@ if variadic {
 fixedCount := wordCount - 1
 renvoAmd64ReserveObjectVAList(g, fixedCount)
 
-
 renvoAsmEmitText(&g.asm, "\x49\x89\xc2")
 if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount-1) {
 return false
@@ -25825,8 +25530,6 @@ func renvoAmd64ReserveObjectVAList(g *renvoLinearGen, fixedCount int) {
 renvoNonNil(g)
 a := &g.asm
 
-
-
 renvoAsmEmitText(a, "\x48\x83\xec\x48")
 renvoAsmEmitText(a, "\x48\x89\x3c\x24\x48\x89\x74\x24\x08\x48\x89\x54\x24\x10\x48\x89\x4c\x24\x18")
 renvoAsmEmitText(a, "\x4c\x89\x44\x24\x20\x4c\x89\x4c\x24\x28")
@@ -25838,14 +25541,10 @@ renvoAsmEmitText(a, "\x48\x8d\x44\x24\x78\x48\x89\x44\x24\x40\x48\x8d\x44\x24\x3
 
 func renvoAmd64BeginObjectStackArgs(a *renvoAsm) {
 
-
-
 renvoAsmEmitText(a, "\x4c\x8d\x5c\x24\x30")
 }
 
 func renvoAmd64PushObjectPrivateResult(a *renvoAsm, argumentWords int) {
-
-
 
 displacement := argumentWords * 8
 if displacement == 0 {
@@ -25859,10 +25558,6 @@ renvoAsmEmit32(a, displacement)
 }
 renvoAsmEmit8(a, 0x50)
 }
-
-
-
-
 
 func renvoRTGBeginObjectAggregateResult(a *renvoAsm, preserveSRet bool) bool {
 if renvoRTGStackWordBytes != 8 || !renvoRTGStack.Valid ||
@@ -25979,9 +25674,6 @@ for word := 0; word < words; word++ {
 register := integerRegister + word
 if param.kind == renvoTypeStruct {
 
-
-
-
 register = integerRegister + words - 1 - word
 }
 kind := 0
@@ -26071,7 +25763,6 @@ targetStart, targetEnd := renvoAsmCopyObjectText(a, src, decl.relocationTargetSt
 relocationOffset, addend := offset, decl.relocationAddend
 if decl.kind == renvoObjectDeclStaticCall {
 
-
 relocationOffset++
 addend -= 4
 }
@@ -26122,8 +25813,6 @@ if g.asm.symbols[symbol].label != g.objectCABIWrapperLabels[i] {
 continue
 }
 if i < len(addressEscapes) && addressEscapes[i] {
-
-
 
 g.asm.symbols[symbol].sectionStart = 0
 g.asm.symbols[symbol].sectionEnd = 0
@@ -26181,8 +25870,6 @@ continue
 if !renvoObjectDataRelocationHasPersistentLifetime(g, entry) {
 continue
 }
-
-
 
 canInfer[target] = false
 owners[target] = -1
@@ -26266,8 +25953,6 @@ return !renvoBytesPrefixText(g.asm.symbolName, item.sectionStart, item.sectionEn
 !renvoBytesPrefixText(g.asm.symbolName, item.sectionStart, item.sectionEnd, ".meminit") &&
 !renvoBytesPrefixText(g.asm.symbolName, item.sectionStart, item.sectionEnd, ".discard") &&
 
-
-
 !renvoBytesEqualText(g.asm.symbolName, item.sectionStart, item.sectionEnd, "__earlycon_table")
 }
 return true
@@ -26342,7 +26027,6 @@ g.paramConstValues = make([]int, len(g.meta.params))
 g.paramConstValid = make([]bool, len(g.meta.params))
 renvoRecordFunctionDirectUseCounts(g)
 }
-
 
 g.breakLabels = make([]int, 0, 32)
 g.continueLabels = make([]int, 0, 32)
@@ -26790,8 +26474,6 @@ return renvoEmitWideExprToLocal(g, ep, arg, offset, renvoTypeUint64)
 }
 conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 if conversionType != 0 {
-
-
 
 if ep.exprs[arg].kind == renvoExprInt || ep.exprs[arg].kind == renvoExprChar {
 return renvoEmit386Float64ExprToLocal(g, ep, arg, offset)
@@ -27355,8 +27037,6 @@ if g.c.renvoTargetArch == renvoArch386 {
 renvoEmitNativeCompareStack(g, left, right, 0x92)
 return
 }
-
-
 
 zero := renvoAddUnnamedLocal(g, renvoTypeInt)
 leftNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -28339,8 +28019,6 @@ renvoAsmPrimaryImm(&g.asm, 0)
 return true
 }
 
-
-
 if g.c.objectFile && destKind == renvoTypeFunc && e.kind == renvoExprCall && e.argCount == 1 {
 conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
 if conversionType != 0 && renvoResolveType(g.meta, conversionType).kind == renvoTypeFunc {
@@ -28423,8 +28101,6 @@ done := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x85\xc0")
 renvoAmd64AsmJccLabel(a, 0x89, positive)
 
-
-
 renvoAsmEmitText(a, "\x48\x89\xc1\x83\xe1\x01\x48\xd1\xe8\x48\x09\xc8")
 if destKind == renvoTypeFloat32 {
 renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\xf3\x0f\x58\xc0\x66\x0f\x7e\xc0")
@@ -28443,7 +28119,6 @@ renvoAsmMarkLabel(a, done)
 below := renvoAsmNewLabel(a)
 done := renvoAsmNewLabel(a)
 if sourceKind == renvoTypeFloat32 {
-
 
 renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xb9\x00\x00\x00\x5f\x66\x0f\x6e\xc9\x0f\x2e\xc1")
 renvoAmd64AsmJccLabel(a, 0x82, below)
@@ -28592,7 +28267,6 @@ return c0, c1, renvoIsComparisonChars(c0, c1)
 }
 
 func renvoEmitAmd64IEEECompareResult(a *renvoAsm, c0 byte, c1 byte, kind int) {
-
 
 if kind == renvoTypeFloat32 {
 renvoAsmEmitText(a, "\x66\x0f\x6e\xc1\x66\x0f\x6e\xc8\x31\xc0\x31\xd2\x0f\x2e\xc1")
@@ -29200,8 +28874,6 @@ return renvoEmitRuntimeTruncateSlice(g, ep, e, -1)
 }
 callee := renvoExprIdentCode(p, ep, e.left)
 
-
-
 if callee == renvoIdentSyscall && e.argCount == 4 ||
 renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
 return renvoEmitArbitrarySyscall(g, ep, idx)
@@ -29761,7 +29433,6 @@ if !renvoIsComparisonChars(c0, c1) {
 return false
 }
 
-
 usesFloat := renvoBinaryUsesFloat(g, ep, e)
 floatKind := 0
 if usesFloat {
@@ -29779,8 +29450,6 @@ if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 if !renvoEmitIntExpr(g, ep, leftIndex) {
 return false
 }
-
-
 
 renvoNormalizeNativeExprPrimary(g, ep, leftIndex)
 renvoAsmCmpPrimaryImm8Discard(&g.asm, rightConst.value)
@@ -29831,8 +29500,6 @@ return false
 }
 renvoAsmPopTertiary(&g.asm)
 if usesFloat && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64) {
-
-
 
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmCopyTertiaryToPrimary(&g.asm)
@@ -31016,9 +30683,6 @@ if len(renvoObjectCacheEntries) == 0 || g.c.renvoTargetArch == renvoArchWasm32 |
 return renvoEmitScalarFunctionScratch(g, fnIndex)
 }
 
-
-
-
 if len(g.meta.funcs) > len(renvoObjectCacheEntries) {
 return renvoEmitScalarFunctionScratch(g, fnIndex)
 }
@@ -31077,10 +30741,6 @@ return true
 // source: backend/compiler_linked_image_impl.go
 
 const renvoImageHeaderSize = 20
-
-
-
-
 
 func renvoCompileOutputData(data []byte, target int) []byte {
 if renvoFixedTarget != 0 {
@@ -31161,10 +30821,6 @@ id: id, offset: offset, size: size, restoreOff: restoreOff,
 })
 }
 
-
-
-
-
 func renvoAppendReplLinkTable(out []byte, a *renvoAsm) []byte {
 renvoNonNil(a)
 if len(a.replSymbols) == 0 {
@@ -31212,271 +30868,54 @@ thunkSize    int
 iatRVAs      []int
 }
 
-func renvoWinImportName(id int) string {
-if id == renvoWinImportCreateFileA {
-return "CreateFileA"
-}
-if id == renvoWinImportCloseHandle {
-return "CloseHandle"
-}
-if id == renvoWinImportReadFile {
-return "ReadFile"
-}
-if id == renvoWinImportWriteFile {
-return "WriteFile"
-}
-if id == renvoWinImportSetFilePointer {
-return "SetFilePointer"
-}
-if id == renvoWinImportGetStdHandle {
-return "GetStdHandle"
-}
-if id == renvoWinImportGetCommandLineA {
-return "GetCommandLineA"
-}
-if id == renvoWinImportGetEnvironmentStringsA {
-return "GetEnvironmentStringsA"
-}
-return "ExitProcess"
-}
+func renvoWinImportName(id int) string { panic("non-VM backend is unavailable") }
 
 func renvoAsmAddWinImportReloc(a *renvoAsm, at int, importID int) {
-renvoNonNil(a)
-renvoAsmAddAbsReloc(a, at, importID, renvoAbsWinImportReloc)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmAddWinStaticImport(a *renvoAsm, dllStart int, dllEnd int, nameStart int, nameEnd int, src []byte) int {
-renvoNonNil(a)
-dll := renvoStringFromBytes(src, dllStart, dllEnd)
-name := renvoStringFromBytes(src, nameStart, nameEnd)
-for i := 0; i < len(a.staticImports); i++ {
-imp := a.staticImports[i]
-if imp.dll == dll && imp.name == name {
-return renvoWinImportFixedCount + 1 + i
-}
-}
-a.staticImports = append(a.staticImports, renvoStaticImport{dll: dll, name: name})
-return renvoWinImportFixedCount + len(a.staticImports)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmHasWinImportRelocs(a *renvoAsm) bool {
-renvoNonNil(a)
-for i := 2; i < len(a.absRelocs); i += 3 {
-if int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) == renvoAbsWinImportReloc {
-return true
-}
-}
-return false
-}
+func renvoAsmHasWinImportRelocs(a *renvoAsm) bool { panic("non-VM backend is unavailable") }
 
 func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
-renvoNonNil(a, layout)
-thunkSize := 4
-if a.c.renvoTargetArch != renvoArch386 {
-thunkSize = 8
-}
-layout.thunkSize = thunkSize
-dataRVA := a.dataOffset
-if dataRVA == 0 {
-dataRVA = a.codeOffset + len(a.code)
-}
-layout.iatRVAs = make([]int, renvoWinImportFixedCount+len(a.staticImports)+1)
-groupCount := len(a.staticImports) + 1
-importOff := renvoAlignValue(len(a.data), thunkSize)
-a.data = renvoAppendUntil(a.data, importOff)
-descOff := importOff
-kernelILTOff := descOff + (groupCount+1)*20
-kernelIATOff := kernelILTOff + (renvoWinImportFixedCount+1)*thunkSize
-customTablesOff := kernelIATOff + (renvoWinImportFixedCount+1)*thunkSize
-tableOff := customTablesOff + len(a.staticImports)*4*thunkSize
-a.data = renvoAppendUntil(a.data, tableOff)
-
-for id := 1; id <= renvoWinImportFixedCount; id++ {
-slot := (id - 1) * thunkSize
-renvoAppendWinImportEntry(a, layout, kernelILTOff+slot, kernelIATOff+slot, id, renvoWinImportName(id))
-}
-for i := 0; i < len(a.staticImports); i++ {
-imp := a.staticImports[i]
-iltOff := customTablesOff + i*4*thunkSize
-renvoAppendWinImportEntry(a, layout, iltOff, iltOff+2*thunkSize, renvoWinImportFixedCount+1+i, imp.name)
-}
-for i := 0; i < groupCount; i++ {
-iltOff := kernelILTOff
-iatOff := kernelIATOff
-dllNameOff := len(a.data)
-dll := "kernel32.dll"
-if i > 0 {
-dll = a.staticImports[i-1].dll
-iltOff = customTablesOff + (i-1)*4*thunkSize
-iatOff = iltOff + 2*thunkSize
-}
-a.data = renvoAppendStringZ(a.data, dll)
-at := descOff + i*20
-renvoPut32At(a.data, at, dataRVA+iltOff)
-renvoPut32At(a.data, at+12, dataRVA+dllNameOff)
-renvoPut32At(a.data, at+16, dataRVA+iatOff)
-}
-
-layout.importRVA = dataRVA + importOff
-layout.importSize = len(a.data) - importOff
-layout.kernelIATRVA = layout.iatRVAs[renvoWinImportGetStdHandle]
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltAt int, iatAt int, id int, name string) {
-renvoNonNil(a, layout)
-nameAt := len(a.data)
-a.data = renvoAppend16(a.data, 0)
-a.data = renvoAppendStringZ(a.data, name)
-if len(a.data)&1 != 0 {
-a.data = append(a.data, 0)
-}
-nameRVA := a.dataOffset + nameAt
-renvoPut32At(a.data, iltAt, nameRVA)
-renvoPut32At(a.data, iatAt, nameRVA)
-layout.iatRVAs[id] = a.dataOffset + iatAt
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
-renvoNonNil(a)
-for i := 0; i+1 < len(a.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
-label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-if label < 0 {
-continue
-}
-target := renvoAsmLabelPosition(a, label)
-if target < 0 {
-continue
-}
-disp := target - (at + 4)
-renvoPut32At(a.code, at, disp)
-}
-if a.dataOffset == 0 {
-a.dataOffset = a.codeOffset + len(a.code)
-}
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-if kind == renvoAbsWinImportReloc {
-target := layout.iatRVAs[off]
-if a.c.renvoTargetArch != renvoArch386 {
-next := a.codeOffset + at + 4
-renvoPut32At(a.code, at, target-next)
-} else {
-renvoPut32At(a.code, at, renvoWinImageBase+target)
-}
-continue
-}
-target := a.dataOffset + off
-if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-if a.c.renvoTargetArch != renvoArch386 {
-next := a.codeOffset + at + 4
-renvoPut32At(a.code, at, target-next)
-} else {
-renvoPut32At(a.code, at, renvoWinImageBase+target)
-}
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-return renvoAppendPEHeader64WithContext(renvoLegacyCompileContext(), out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-machine := 0x8664
-imageBase := renvoWinImageBase
-stackReserve := 0x800000
-stackCommit := 0x1000
-if context.renvoTargetArch == renvoArchAarch64 {
-machine = 0xaa64
-imageBase = 0x140000000
-}
-sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)
-out = renvoAppend32(out, 0x5a4d)
-out = renvoAppendUntil(out, 0x3c)
-out = renvoAppend32(out, 0x80)
-out = renvoAppendUntil(out, 0x80)
-pe := len(out)
-
-
-
-out = renvoAppendStringZ(out, "\x50\x45\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0\x00\x22\x00\x0b\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x02\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00")
-renvoTruncBytes(&out, len(out)-1)
-out = renvoAppendUntil(out, pe+24+240)
-renvoPut32At(out, pe+4, 0x00020000|machine)
-opt := pe + 24
-renvoPut32At(out, opt+4, textRawSize)
-renvoPut32At(out, opt+8, dataRawSize)
-renvoPut32At(out, opt+16, renvoWinSectionRVA)
-renvoPut32At(out, opt+24, imageBase)
-renvoPut32At(out, opt+28, imageBase>>32)
-renvoPut32At(out, opt+56, sizeOfImage)
-renvoPut32At(out, opt+68, 0x01000000|context.windowsSubsystem)
-renvoPut32At(out, opt+72, stackReserve)
-renvoPut32At(out, opt+80, stackCommit)
-renvoPut32At(out, opt+120, importRVA)
-renvoPut32At(out, opt+124, importSize)
-renvoPut32At(out, opt+208, iatRVA)
-renvoPut32At(out, opt+212, iatSize)
-out = renvoAppendPESection(out, ".text", textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
-out = renvoAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
-out = renvoAppendUntil(out, renvoWinHeadersSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-return renvoAppendPEHeader32WithContext(renvoLegacyCompileContext(), out, entryRVA, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, importRVA, importSize, iatRVA, iatSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendPEHeader32WithContext(context *renvoCompileContext, out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)
-out = renvoAppend32(out, 0x5a4d)
-out = renvoAppendUntil(out, 0x3c)
-out = renvoAppend32(out, 0x80)
-out = renvoAppendUntil(out, 0x80)
-pe := len(out)
-
-
-out = renvoAppendStringZ(out, "\x50\x45\x00\x00\x4c\x01\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe0\x00\x02\x01\x0b\x01\x01\x00\x00\x02\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x20\x00\x00\x00\x00\x40\x00\x00\x10\x00\x00\x00\x02\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x30\x00\x04\x00\x02\x00\x00\x00\x00\x00\x00\x03\x00\x00\x01\x00\x00\x10\x00\x00\x00\x10\x00\x00\x00\x10\x00\x00\x10\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00")
-out = renvoAppendUntil(out, pe+248)
-opt := pe + 24
-renvoPut32At(out, opt+4, textRawSize)
-renvoPut32At(out, opt+8, dataRawSize)
-renvoPut32At(out, opt+16, entryRVA)
-renvoPut32At(out, opt+24, dataRVA)
-renvoPut32At(out, opt+56, sizeOfImage)
-renvoPut32At(out, opt+68, 0x01000000|context.windowsSubsystem)
-renvoPut32At(out, opt+104, importRVA)
-renvoPut32At(out, opt+108, importSize)
-renvoPut32At(out, opt+192, iatRVA)
-renvoPut32At(out, opt+196, iatSize)
-out = renvoAppendPESection(out, ".text", textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
-out = renvoAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
-out = renvoAppendUntil(out, renvoWinHeadersSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendPESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawPtr int, characteristics int) []byte {
-start := len(out)
-out = renvoAppendUntil(out, start+40)
-for i := 0; i < len(name); i++ {
-out[start+i] = name[i]
-}
-renvoPut32At(out, start+8, virtualSize)
-renvoPut32At(out, start+12, rva)
-renvoPut32At(out, start+16, rawSize)
-renvoPut32At(out, start+20, rawPtr)
-renvoPut32At(out, start+36, characteristics)
-return out
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_main.go
 
 var renvoDefaultTarget int = renvoTargetLinuxAmd64
-var renvoFixedTarget int = 0
+var renvoFixedTarget int = renvoTargetVM32
 var renvoCompilerStripSymbols bool
 var renvoKernelRelease string
 var renvoKernelModuleName string
@@ -31783,7 +31222,6 @@ if n <= 0 {
 return out
 }
 
-
 for i := 0; i < n; i++ {
 out = append(out, buf[i])
 }
@@ -31824,8 +31262,6 @@ callee := &ep.exprs[root.left]
 if !fmtPrintln && (fnIndex >= 0 || renvoFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0) {
 return false
 }
-
-
 
 if fmtPrintln && root.argCount > 1 {
 return false
@@ -31892,7 +31328,6 @@ fnIndex := renvoPrintMirrorFunction(g)
 if fnIndex < 0 || fnIndex == g.currentFunc {
 return
 }
-
 
 renvoAsmPushSecondary(&g.asm)
 renvoAsmPushPrimary(&g.asm)
@@ -32163,7 +31598,6 @@ return false
 renvoAsmCopyPrimaryToCallWord0(a)
 renvoAsmPopCallWord1(a)
 renvoAsmSecondaryImm(a, 493)
-
 
 renvoAarch64AsmPushReg(a, renvoAarch64RegRdx)
 renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportOpen, 2)
@@ -32442,11 +31876,6 @@ renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
 return true
 }
 
-
-
-
-
-
 func renvoEmitCObjectMemoryAggregateCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 if !renvoIsHostedObjectAmd64(g.c) || wordCount < 1 {
 return -1
@@ -32507,8 +31936,6 @@ return 0
 }
 
 a := &g.asm
-
-
 
 renvoAsmEmitText(a, "\x49\x89\xe3\x48\x83\xe4\xf0")
 reserve := renvoAlignValue(stackBytes+16, 16)
@@ -32676,9 +32103,6 @@ return -1
 }
 return mask
 }
-
-
-
 
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 renvoNonNil(g, fn)
@@ -33023,8 +32447,6 @@ return false
 }
 number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 
-
-
 if !number.ok || number.value != 217 {
 return false
 }
@@ -33047,10 +32469,6 @@ renvoAsmPushPrimary(&g.asm)
 }
 return renvoEmitSyscallFromStack(g, e.argCount, syscallNumber)
 }
-
-
-
-
 
 func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
@@ -33237,8 +32655,6 @@ if wordCount > 5 {
 renvoAsmEmit8(a, 0x5f)
 }
 if wordCount > 6 {
-
-
 
 renvoAsmEmitText(a, "\x87\x2c\x24")
 renvoAsmSyscall(a)
@@ -33501,383 +32917,58 @@ renvoAmd64AsmMoveOffsetArg(a)
 
 // source: backend/compiler_windows_impl.go
 
-func renvoWin386CallImport(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit16(a, 0x15ff)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
+func renvoWin386CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0xa1)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
+func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) {
-renvoNonNil(a)
-renvoAsmEmit16(a, 0x358b)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddWinImportReloc(a, at, importID)
-}
+func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit16(a, 0x0d89)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0xbb)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0xb9)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0xbf)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0x68)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit16(a, 0x358b)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) {
-renvoNonNil(a)
-renvoAsmEmit8(a, 0xa1)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
 func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-a := &g.asm
-if isWrite {
-if g.winWriteEmitted {
-return g.winWriteLabel
-}
-g.winWriteEmitted = true
-g.winWriteLabel = renvoAsmNewLabel(a)
-} else {
-if g.winReadEmitted {
-return g.winReadLabel
-}
-g.winReadEmitted = true
-g.winReadLabel = renvoAsmNewLabel(a)
-}
-countOff := a.bssSize
-a.bssSize = countOff + 16
-
-
-label := g.winReadLabel
-base := len(a.code)
-relocs := ""
-if isWrite {
-label = g.winWriteLabel
-renvoAsmEmitText(a, "\xe9\xc4\x00\x00\x00\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-relocs = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
-} else {
-renvoAsmEmitText(a, "\xe9\xac\x00\x00\x00\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-relocs = "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
-}
-for i := 0; i < len(relocs); i += 2 {
-at := base + int(relocs[i])
-kind := int(relocs[i+1])
-if kind < 2 {
-renvoAsmAddAbsReloc(a, at, countOff+(kind<<3), renvoAbsBssReloc)
-} else {
-renvoAsmAddWinImportReloc(a, at, kind-2)
-}
-}
-a.labelPos[label] = int32(base + 5)
-return label
+panic("non-VM backend is unavailable")
 }
 
-func renvoWin386SetStdHandle(a *renvoAsm, stdHandle int) {
-renvoNonNil(a)
-renvoAsmPushImm(a, stdHandle)
-renvoWin386CallImport(a, renvoWinImportGetStdHandle)
-renvoAsmCopyPrimaryToCallWord0(a)
-}
+func renvoWin386SetStdHandle(a *renvoAsm, stdHandle int) { panic("non-VM backend is unavailable") }
 
 func renvoWin386EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
-renvoNonNil(a)
-renvoAsmPushImm(a, 0)
-renvoWin386PushBssAddr(a, countOff)
-renvoAsmPushSecondary(a)
-renvoAsmEmit8(a, 0x56)
-renvoAsmEmit8(a, 0x53)
-renvoWin386CallImport(a, importID)
+panic("non-VM backend is unavailable")
 }
 
-func renvoWin386TranslateCreateFileFlags(a *renvoAsm) {
-renvoNonNil(a)
-notRDWRLabel := renvoAsmNewLabel(a)
-accessDoneLabel := renvoAsmNewLabel(a)
-noCreateLabel := renvoAsmNewLabel(a)
-createDoneLabel := renvoAsmNewLabel(a)
-
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, -2147483648)
-renvoAsmEmit2(a, 0xa8, 2)
-renvoAsmJzLabel(a, notRDWRLabel)
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, -1073741824)
-renvoAsmJmpMarkLabel(a, accessDoneLabel, notRDWRLabel)
-renvoAsmEmit2(a, 0xa8, 1)
-renvoAsmJzLabel(a, accessDoneLabel)
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, 0x40000000)
-renvoAsmMarkLabel(a, accessDoneLabel)
-
-renvoAsmEmit8(a, 0xb9)
-renvoAsmEmit32(a, 3)
-renvoAsmEmit2(a, 0xa8, 64)
-renvoAsmJzLabel(a, noCreateLabel)
-renvoAsmEmit8(a, 0xb9)
-renvoAsmEmit32(a, 4)
-renvoAsmEmit8(a, 0xa9)
-renvoAsmEmit32(a, 512)
-renvoAsmJzLabel(a, createDoneLabel)
-renvoAsmEmit8(a, 0xb9)
-renvoAsmEmit32(a, 2)
-renvoAsmJmpMarkLabel(a, createDoneLabel, noCreateLabel)
-renvoAsmEmit8(a, 0xa9)
-renvoAsmEmit32(a, 512)
-renvoAsmJzLabel(a, createDoneLabel)
-renvoAsmEmit8(a, 0xb9)
-renvoAsmEmit32(a, 5)
-renvoAsmMarkLabel(a, createDoneLabel)
-}
+func renvoWin386TranslateCreateFileFlags(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, isWrite bool) bool {
-renvoNonNil(g, ep)
-a := &g.asm
-p := g.prog
-firstArg := ep.exprs[idx].firstArg
-argCount := ep.exprs[idx].argCount
-if argCount != 3 {
-return false
-}
-fdStart := ep.exprs[idx].tok + 1
-fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
-fdEp := renvoNewExprParse()
-renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
-if !fdEp.ok || len(fdEp.exprs) == 0 {
-return false
-}
-if !renvoEmitIntExpr(g, fdEp, len(fdEp.exprs)-1) {
-return false
-}
-renvoAsmPushPrimary(a)
-offIndex := ep.args[firstArg+2]
-offConst := renvoEvalConstExpr(g, ep, offIndex)
-if offConst.ok && offConst.value < 0 {
-renvoAsmPrimaryImm(a, -1)
-} else if offConst.ok {
-renvoAsmPrimaryImm(a, offConst.value)
-} else {
-if !renvoEmitIntExpr(g, ep, offIndex) {
-return false
-}
-}
-renvoAsmPushPrimary(a)
-if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
-return false
-}
-if g.c.renvoTargetArch == renvoArch386 {
-label := renvoWin386EmitReadWriteHelper(g, isWrite)
-renvoAsmEmit16(a, 0xc689)
-renvoAsmEmit16(a, 0xca89)
-renvoAsmPopTertiary(a)
-renvoAsmPopCallWord0(a)
-renvoAsmCallLabel(a, label)
-return true
-}
-if g.c.renvoTargetArch == renvoArchAarch64 {
-label := renvoWinArm64EmitReadWriteHelper(g, isWrite)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRcx)
-renvoAsmPopTertiary(a)
-renvoAsmPopCallWord0(a)
-renvoAsmCallLabel(a, label)
-return true
-}
-label := renvoWinAmd64EmitReadWriteHelper(g, isWrite)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmEmit24(a, 0xca8948)
-renvoAsmPopTertiary(a)
-renvoAsmPopCallWord0(a)
-renvoAsmCallLabel(a, label)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-renvoNonNil(g, ep)
-a := &g.asm
-e := ep.exprs[idx]
-if e.argCount != 2 {
-return false
-}
-if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
-return false
-}
-renvoAsmPushPrimary(a)
-if !renvoEmitStringPtrExpr(g, ep, ep.args[e.firstArg]) {
-return false
-}
-if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmEmit16(a, 0xc689)
-renvoAsmPopPrimary(a)
-renvoWin386TranslateCreateFileFlags(a)
-renvoAsmPushImm(a, 0)
-renvoAsmPushImm(a, 0x80)
-renvoAsmPushTertiary(a)
-renvoAsmPushImm(a, 0)
-renvoAsmPushImm(a, 3)
-renvoAsmPushSecondary(a)
-renvoAsmEmit8(a, 0x56)
-renvoWin386CallImport(a, renvoWinImportCreateFileA)
-return true
-}
-if g.c.renvoTargetArch == renvoArchAarch64 {
-renvoAarch64AsmMovRegReg(a, 9, 0)
-renvoAsmPopPrimary(a)
-renvoWinArm64TranslateCreateFileFlags(a)
-renvoAarch64AsmMovRegReg(a, 0, 9)
-renvoWinArm64CallImport(a, renvoWinImportCreateFileA)
-return true
-}
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPopCallWord1(a)
-renvoWinAmd64EmitRuntimeOpen(a)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-renvoNonNil(g, ep)
-a := &g.asm
-e := ep.exprs[idx]
-if e.argCount != 1 {
-return false
-}
-if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-return false
-}
-failLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmPushPrimary(a)
-renvoWin386CallImport(a, renvoWinImportCloseHandle)
-renvoAsmEmit3(a, 0x83, 0xf8, 0)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
-return true
-}
-if g.c.renvoTargetArch == renvoArchAarch64 {
-renvoWinArm64CallImport(a, renvoWinImportCloseHandle)
-renvoAsmCmpPrimaryImm8(a, 0)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
-return true
-}
-renvoAsmCopyPrimaryToTertiary(a)
-renvoWinAmd64EmitRuntimeClose(a)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-renvoNonNil(g, ep)
-a := &g.asm
-e := ep.exprs[idx]
-if e.argCount != 2 {
-return false
-}
-if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-return false
-}
-renvoAsmPushPrimary(a)
-if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg+1]) {
-return false
-}
-failLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmPopPrimary(a)
-renvoAsmPushImm(a, 1)
-renvoAsmPushImm(a, 0)
-renvoAsmPushImm(a, 0)
-renvoAsmPushPrimary(a)
-renvoWin386CallImport(a, renvoWinImportSetFilePointer)
-renvoAsmEmit3(a, 0x83, 0xf8, -1)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
-return true
-}
-if g.c.renvoTargetArch == renvoArchAarch64 {
-renvoAsmPopPrimary(a)
-renvoAarch64AsmMovRegImm(a, 1, 0)
-renvoAarch64AsmMovRegImm(a, 2, 0)
-renvoAarch64AsmMovRegImm(a, 3, 1)
-renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
-renvoAarch64AsmCmpRegImm(a, 0, -1)
-renvoAsmJzLabel(a, failLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmJmpMarkLabel(a, doneLabel, failLabel)
-renvoAsmPrimaryImm(a, -1)
-renvoAsmMarkLabel(a, doneLabel)
-return true
-}
-renvoAsmPopTertiary(a)
-renvoWinAmd64EmitRuntimeChmod(a)
-return true
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_target_policy_impl.go
 
 const renvoPreparedBackendActive = 0
 const renvoRTGStructuredFunctions = 0
-
 
 const renvoTargetLinuxAmd64 = 1
 const renvoTargetLinux386 = 2
@@ -33898,8 +32989,6 @@ const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
 
-
-
 const renvoArchAmd64 = 1
 const renvoArch386 = 2
 const renvoArchAarch64 = 3
@@ -33916,8 +33005,6 @@ const renvoOSRTG = 6
 const renvoOSFreeBSD = 7
 const renvoOSOpenBSD = 8
 const renvoOSNetBSD = 9
-
-
 
 const renvoTargetRTG = 15
 
@@ -33964,10 +33051,6 @@ const renvoInterruptVector = 1
 const renvoFloatScaledInteger = 1
 const renvoFloatIEEEHardware = 2
 const renvoFloatIEEESoft = 3
-
-
-
-
 
 const renvoBackendValueSlotSize = 8
 const renvoBackendStringWordCount = 2
@@ -34101,12 +33184,6 @@ var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
 var renvoCompilerObjectFile bool
 
-
-
-
-
-
-
 type renvoKernelCompileContext struct {
 kernelModuleName string
 kernelModuleSize int
@@ -34234,7 +33311,6 @@ renvoTargetArch = int(targetArchTable[target])
 renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
 return
 }
-
 
 renvoTargetOS = renvoOSLinux
 renvoTargetArch = renvoArchAmd64
@@ -34615,8 +33691,6 @@ notEqualLabel := renvoAsmNewLabel(a)
 equalLabel := renvoAsmNewLabel(a)
 loopLabel := renvoAsmNewLabel(a)
 
-
-
 renvoRTGDirectCompare(a, renvoRTGCallWord1, renvoRTGCallWord3)
 renvoAsmJnzLabel(a, notEqualLabel)
 renvoRTGDirectMoveImmediate(a, renvoRTGCallWord4, 0)
@@ -34643,16 +33717,10 @@ renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
 renvoAsmRet(a)
 }
 
-
-
-
-
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 return renvoCompileUnitInput(input, output, target, arenaSize)
 }
-
-
 
 if renvoFixedTarget != 0 {
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -34763,9 +33831,6 @@ ModuleNamePath string
 ObjectFile     bool
 }
 
-
-
-
 func RenvoInitializeObjectCache(targetName string) {
 target := renvoParseTargetArg(targetName)
 if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVM32 && target != renvoTargetLinuxKernelAmd64 {
@@ -34777,9 +33842,6 @@ func RenvoTargetSupported(targetName string) bool {
 return renvoParseTargetArg(targetName) != 0
 }
 
-
-
-
 func RenvoTargetBinding(targetName string) (string, string, int, bool) {
 target := renvoParseTargetArg(targetName)
 if target == 0 {
@@ -34787,8 +33849,6 @@ return "", "", 0, false
 }
 return renvoRTGTargetBinding(target)
 }
-
-
 
 func RenvoTargetHasBuildTag(targetName string, tag string) bool {
 target := renvoParseTargetArg(targetName)
@@ -34905,9 +33965,6 @@ result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 return renvoWriteCompileResult(context, result, outputPath)
 }
 
-
-
-
 func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options RenvoCompileOptions) ([]byte, bool) {
 target := renvoParseTargetArg(targetName)
 if target == 0 || !renvoCompileOptionsValid(target, options) ||
@@ -34955,9 +34012,6 @@ close(output)
 }
 return true
 }
-
-
-
 
 type RenvoCompileSession struct {
 unit       []byte
@@ -35207,9 +34261,8 @@ renvoKernelLicense = license
 
 // source: backend/compiler_rtg_generated_impl.go
 
-
 type RTGRegister struct {
-Code int
+Code  int
 Valid bool
 }
 
@@ -35228,7 +34281,7 @@ label     int
 type RTGShiftDirection int
 
 const (
-RTGShiftLeft RTGShiftDirection = 1
+RTGShiftLeft  RTGShiftDirection = 1
 RTGShiftRight RTGShiftDirection = 2
 )
 
@@ -35318,7 +34371,7 @@ renvoAsmEmit32(out, int(value))
 
 func (out *renvoAsm) Uint64(value uint64) {
 renvoAsmEmit32(out, int(value))
-renvoAsmEmit32(out, int(value >> 32))
+renvoAsmEmit32(out, int(value>>32))
 }
 
 func (out *renvoAsm) PatchUint32(at int, value int) {
@@ -35452,8 +34505,7 @@ at := index * 2
 if at < 0 || at+1 >= len(out.kernelImportOffsets) {
 return ""
 }
-return string(out.kernelImportNames[
-out.kernelImportOffsets[at]:out.kernelImportOffsets[at+1]])
+return string(out.kernelImportNames[out.kernelImportOffsets[at]:out.kernelImportOffsets[at+1]])
 }
 
 func (out *renvoAsm) KernelModuleName() string {
@@ -35685,7 +34737,7 @@ renvoAsmEmit32(out, value)
 
 func renvoRTGUint64(out *renvoAsm, value uint64) {
 renvoAsmEmit32(out, int(value))
-renvoAsmEmit32(out, int(value >> 32))
+renvoAsmEmit32(out, int(value>>32))
 }
 
 func renvoRTGPatchUint32(out *renvoAsm, at int, value int) {
@@ -35717,155 +34769,231 @@ renvoRTGUnsupportedOperation = 2003
 var renvoRTGUnsupportedOperation int
 
 func renvoRTGDirectMove(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 1
+}
 }
 
 func renvoRTGDirectAddress(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 2 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 2
+}
 }
 
 func renvoRTGDirectLoadNative(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 3 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 3
+}
 }
 
 func renvoRTGDirectLoadI32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 4 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 4
+}
 }
 
 func renvoRTGDirectLoadU32(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 5 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 5
+}
 }
 
 func renvoRTGDirectLoadI16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 6 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 6
+}
 }
 
 func renvoRTGDirectLoadU16(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 7 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 7
+}
 }
 
 func renvoRTGDirectLoadI8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 8 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 8
+}
 }
 
 func renvoRTGDirectLoadU8(out *renvoAsm, destination RTGRegister, address renvoRTGAddress) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 9 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 9
+}
 }
 
 func renvoRTGDirectStoreNative(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 10 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 10
+}
 }
 
 func renvoRTGDirectStoreU32(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 11 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 11
+}
 }
 
 func renvoRTGDirectStoreU16(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 12 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 12
+}
 }
 
 func renvoRTGDirectStoreU8(out *renvoAsm, address renvoRTGAddress, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 13 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 13
+}
 }
 
 func renvoRTGDirectAdd(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 14 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 14
+}
 }
 
 func renvoRTGDirectSubtract(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 15 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 15
+}
 }
 
 func renvoRTGDirectMultiply(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 16 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 16
+}
 }
 
 func renvoRTGDirectBitAnd(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 17 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 17
+}
 }
 
 func renvoRTGDirectBitOr(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 18 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 18
+}
 }
 
 func renvoRTGDirectBitXor(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 19 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 19
+}
 }
 
 func renvoRTGDirectCompare(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 20 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 20
+}
 }
 
 func renvoRTGDirectTest(out *renvoAsm, destination RTGRegister, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 21 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 21
+}
 }
 
 func renvoRTGDirectIncrement(out *renvoAsm, operand RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 22 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 22
+}
 }
 
 func renvoRTGDirectDecrement(out *renvoAsm, operand RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 23 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 23
+}
 }
 
 func renvoRTGDirectShiftLeftImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 24 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 24
+}
 }
 
 func renvoRTGDirectShiftRightUnsignedImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 25 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 25
+}
 }
 
 func renvoRTGDirectShiftRightSignedImmediate(out *renvoAsm, destination RTGRegister, value byte) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 26 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 26
+}
 }
 
 func renvoRTGDirectCall(out *renvoAsm, label int) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 27 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 27
+}
 }
 
 func renvoRTGDirectCallIndirect(out *renvoAsm, operand RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 28 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 28
+}
 }
 
 func renvoRTGDirectJump(out *renvoAsm, label int) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 29 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 29
+}
 }
 
 func renvoRTGDirectJumpCondition(out *renvoAsm, condition RTGCondition, label int) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 30 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 30
+}
 }
 
 func renvoRTGDirectSetCondition(out *renvoAsm, condition RTGCondition, source RTGRegister) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 31 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 31
+}
 }
 
 func renvoRTGDirectReturn(out *renvoAsm) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 32 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 32
+}
 }
 
 func renvoRTGDirectLeave(out *renvoAsm) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 33 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 33
+}
 }
 
 func renvoRTGDirectHostSyscall(out *renvoAsm) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 34 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 34
+}
 }
 
 func renvoRTGDirectMoveImmediate(out *renvoAsm, destination RTGRegister, value int64) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 35 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 35
+}
 }
 
 func renvoRTGDirectVariableShift(out *renvoAsm, direction RTGShiftDirection, signed bool) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 36 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 36
+}
 }
 
 func renvoRTGDirectSignedDivide(out *renvoAsm, remainder bool) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 37 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 37
+}
 }
 
 func renvoRTGDirectCopyBytes(out *renvoAsm) {
-if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 38 }
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 38
+}
 }
 
 var renvoRTGPrimary = RTGNoRegister
@@ -35891,36 +35019,46 @@ var renvoRTGSyscallWord3 = RTGNoRegister
 var renvoRTGSyscallWord4 = RTGNoRegister
 var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
+
 const renvoRTGStackWordBytes = 0
-func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
-func renvoRTGPatchRelocations(out *renvoAsm) {}
-func renvoRTGFrameStart(out *renvoAsm) int { return -1 }
-func renvoRTGFrameFinish(out *renvoAsm, framePatch int, stackUsed int) {}
-func renvoRTGABIPushRegister(out *renvoAsm, source RTGRegister) bool { return false }
-func renvoRTGABIPushImmediate(out *renvoAsm, value int) bool { return false }
-func renvoRTGABIPopRegister(out *renvoAsm, destination RTGRegister) bool { return false }
-func renvoRTGABILoadFrame(out *renvoAsm, destination RTGRegister, offset int) bool { return false }
-func renvoRTGABIStoreFrame(out *renvoAsm, offset int, source RTGRegister) bool { return false }
+
+func renvoRTGConditionFromSetcc(setcc int) RTGCondition                               { return RTGCondition{} }
+func renvoRTGPatchRelocations(out *renvoAsm)                                          {}
+func renvoRTGFrameStart(out *renvoAsm) int                                            { return -1 }
+func renvoRTGFrameFinish(out *renvoAsm, framePatch int, stackUsed int)                {}
+func renvoRTGABIPushRegister(out *renvoAsm, source RTGRegister) bool                  { return false }
+func renvoRTGABIPushImmediate(out *renvoAsm, value int) bool                          { return false }
+func renvoRTGABIPopRegister(out *renvoAsm, destination RTGRegister) bool              { return false }
+func renvoRTGABILoadFrame(out *renvoAsm, destination RTGRegister, offset int) bool    { return false }
+func renvoRTGABIStoreFrame(out *renvoAsm, offset int, source RTGRegister) bool        { return false }
 func renvoRTGABIAddressFrame(out *renvoAsm, destination RTGRegister, offset int) bool { return false }
-func renvoRTGABIStoreParamWord(out *renvoAsm, word int, offset int) bool { return false }
-func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { return false }
-func renvoRTGMarkLabel(out *renvoAsm, label int) {}
-func renvoRTGFunctionStart(out *renvoAsm, label int) {}
-func renvoRTGFunctionFinish(out *renvoAsm) {}
-func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
+func renvoRTGABIStoreParamWord(out *renvoAsm, word int, offset int) bool              { return false }
+func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool           { return false }
+func renvoRTGMarkLabel(out *renvoAsm, label int)                                      {}
+func renvoRTGFunctionStart(out *renvoAsm, label int)                                  {}
+func renvoRTGFunctionFinish(out *renvoAsm)                                            {}
+func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool {
+return false
+}
 func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
+
 const renvoRTGCodeOffset = 0
-func renvoRTGImage(out *renvoAsm) []byte { return nil }
+
+func renvoRTGImage(out *renvoAsm) []byte                                     { return nil }
 func renvoRTGKernelImage(out *renvoAsm, initLabel int, exitLabel int) []byte { return nil }
+
 const renvoRTGEntryStateBytes = 0
+
 func renvoRTGEmitEntryStart(out *renvoAsm, stateOffset int) bool { return true }
-func renvoRTGEmitEntry(out *renvoAsm, parameterCount int, stateOffset int) bool { return parameterCount == 0 }
-func renvoRTGKernelEntryPrologue(out *renvoAsm) {}
-func renvoRTGKernelEntryEpilogue(out *renvoAsm) {}
-func renvoRTGKernelCallbackAddress(out *renvoAsm, label int) {}
-func renvoRTGEmitExit(out *renvoAsm, status RTGRegister) bool { return false }
+func renvoRTGEmitEntry(out *renvoAsm, parameterCount int, stateOffset int) bool {
+return parameterCount == 0
+}
+func renvoRTGKernelEntryPrologue(out *renvoAsm)                              {}
+func renvoRTGKernelEntryEpilogue(out *renvoAsm)                              {}
+func renvoRTGKernelCallbackAddress(out *renvoAsm, label int)                 {}
+func renvoRTGEmitExit(out *renvoAsm, status RTGRegister) bool                { return false }
 func renvoRTGEmitStaticCall(out *renvoAsm, importID int, wordCount int) bool { return false }
-func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool { return false }
+func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool         { return false }
 
 const renvoRTGPreparedOS = 0
 const renvoRTGPreparedIntBits = 0
@@ -35960,11 +35098,6 @@ return renvoBuiltInTargetBinding(target)
 }
 
 // source: backend/compiler_rtg_adapter_impl.go
-
-
-
-
-
 
 func renvoRTGAsmAddress(base RTGRegister, index RTGRegister, displacement int, scale int) renvoRTGAddress {
 var address renvoRTGAddress
@@ -36006,8 +35139,6 @@ func renvoRTGAsmPushImmediate(a *renvoAsm, value int) {
 if renvoRTGABIPushImmediate(a, value) {
 return
 }
-
-
 
 renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
@@ -36299,8 +35430,6 @@ return
 }
 overflowBase := 2 * renvoRTGStackWordBytes
 
-
-
 if renvoRTGCallWord0.Code == renvoRTGPrimary.Code {
 overflowBase = 0
 }
@@ -36425,8 +35554,6 @@ if !renvoTypeIsStringSlice(meta, param.typ) {
 return renvoCompileResult{}
 }
 }
-
-
 
 if !renvoRTGEmitEntry(&g.asm, app.paramCount, entryStateOffset) {
 renvoPrintErr("renvo: prepared backend rejected process arguments\n")
@@ -36659,3128 +35786,646 @@ const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengt
 const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
-!renvoPrepareKernelMetadata() {
-renvoPrintErr("renvo: kernel metadata unavailable\n")
-return 1
-}
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64 {
-renvoCaptureKernelCompileContext(&prog.c)
-}
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramAmd64Scratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-return renvoTryCompileScalarProgramAmd64Scratch(p, meta)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgramAmd64(p, meta)
-if g == nil {
-renvoPrintErr("renvo: failed to begin amd64 program\n")
-return renvoCompileResult{}
-}
-if !renvoEmitAllQueuedFunctionsScratch(g) {
-return renvoCompileResult{}
-}
-return renvoFinishScalarProgramAmd64(g)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgramAmd64(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-return renvoCompileResult{}
-}
-return renvoFinishScalarProgramAmd64(g)
+panic("non-VM backend is unavailable")
 }
 
 func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-renvoNonNil(p, meta)
-if renvoFixedTarget == 0 {
-if renvoIsHostedObjectAmd64(meta.c) {
-return renvoBeginObjectProgram(p, meta)
+panic("non-VM backend is unavailable")
 }
-}
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
-if appIndex < 0 {
-return nil
-}
-g := renvoBeginLinearProgram(p, meta)
-if g == nil {
-return nil
-}
-a := &g.asm
-if renvoFixedTarget == 0 {
-
-
-
-g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
-}
-a.codeOffset = renvoAmd64ELFCodeOffset
-if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSOpenBSD {
-a.codeOffset = renvoOpenBSDAmd64ELFCodeOffset
-}
-if renvoFixedTarget == renvoTargetNetBSDAmd64 ||
-renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSNetBSD {
-a.codeOffset = renvoNetBSDAmd64ELFCodeOffset
-}
-if targetIsWindows(meta.c.renvoTargetOS) {
-a.codeOffset = renvoWinSectionRVA
-}
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
-if !renvoBeginKernelModuleAmd64(g, appIndex) {
-return nil
-}
-return g
-}
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
-renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSFreeBSD {
-
-
-
-renvoAsmEmitText(a, "\x48\x89\xfc")
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-
-
-renvoAsmEmitText(a, "\x57\x56\x52\x51")
-}
-if !meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
-return nil
-}
-} else {
-if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
-return nil
-}
-
-
-if !meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoWinAmd64EmitExit(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
-renvoAsmSyscall(a)
-}
-return g
-}
-
-
-
-
-
-
-
 
 func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 1 {
-
-renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
-renvoNonNil(g)
-a := &g.asm
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-
-
-renvoRecordObjectFunctionRanges(g)
-}
-renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
-var data []byte
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-data = renvoAsmImageObjectAmd64(a)
-} else if targetIsWindows(g.c.renvoTargetOS) {
-data = renvoAsmImageWindowsAmd64(a)
-} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-data = renvoAsmImageKernelModuleAmd64(a, g.kernelInitLabel, g.kernelExitLabel)
-} else {
-data = renvoAsmImageAmd64(a)
-}
-var result renvoCompileResult
-if a.patchFailed || len(data) == 0 {
-return result
-}
-result.data = data
-result.ok = true
-return result
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-argsOff := g.asm.bssSize
-if targetIsWindows(g.c.renvoTargetOS) {
-argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
-argsTextOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
-g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
-argsLenOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
-g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
-envDataOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
-envLenOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
-renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-} else {
-argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
-envDataOff := renvoAlignValue(
-g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
-envLenOff := renvoAlignValue(
-g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
-renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
 
 func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-localCapacity := 16
-
-if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-localCapacity = 32
-}
-g.locals = make([]renvoLocalInfo, localCapacity)
-g.localCount = 0
-g.gotoLabels = nil
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-framePatch := len(a.code)
-if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
-
-
-
-renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
-} else {
-renvoAsmEmit32(a, 0x000000c8)
-}
-if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-renvoAsmStackMem(a, g.returnStruct, 0x8948, 0x7d, 0xbd)
-}
-renvoBindFunctionParams(g, fnInfoIndex)
-if !renvoBindClosureCaptures(g, fnInfoIndex) {
-return false
-}
-if !renvoBindNamedResults(g, fnInfoIndex) {
-return false
-}
-if !renvoPrepareFunctionControl(g) {
-return false
-}
-if !renvoEmitLinearRange(g, metaFn.bodyStart, metaFn.bodyEnd) {
-return false
-}
-if g.deferReturnLabel > 0 {
-if !g.lastRangeReturns {
-renvoAsmJmpLabel(a, g.deferReturnLabel)
-}
-if !renvoEmitFunctionControlEpilogue(g) {
-return false
-}
-} else if !g.lastRangeReturns {
-renvoMoveCapturedLocals(g, true)
-if metaFn.resultType != 0 {
-renvoAsmPrimaryImm(a, 0)
-}
-renvoAsmLeave(a)
-renvoAsmRet(a)
-}
-frame := renvoAlignValue(g.stackPeak, 16)
-if frame > 65520 {
-frame = 65520
-}
-if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
-a.code[framePatch+7] = byte(frame)
-a.code[framePatch+8] = byte(frame >> 8)
-} else {
-a.code[framePatch+1] = byte(frame)
-a.code[framePatch+2] = byte(frame >> 8)
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-renvoNonNil(g)
-a := &g.asm
-if reg < 6 {
-at := reg * 4
-renvoAsmStackMem(a, offset, int(renvoAmd64ParamStoreRecipes[at])|int(renvoAmd64ParamStoreRecipes[at+1])<<8, int(renvoAmd64ParamStoreRecipes[at+2]), int(renvoAmd64ParamStoreRecipes[at+3]))
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit24(a, 0x858b48)
-renvoAsmEmit32(a, 0x10+(reg-6)*8)
-renvoAsmStorePrimaryStack(a, offset)
-}
+
 func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-a := &g.asm
-renvoAsmLoadPrimaryStack(a, srcPtr)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmLoadPrimaryStack(a, destPtr)
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmLoadTertiaryStack(a, byteCount)
-
-
-
-
-renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
-}
-func renvoAmd64RelaxBranches(a *renvoAsm) {
-renvoNonNil(a)
-oldLen := len(a.code)
-
-
-
-if oldLen >= 1048576 {
-return
+panic("non-VM backend is unavailable")
 }
 
-
-
-
-branches := make([]int32, 0, len(a.relocs)/2)
-savings := make([]int32, 0, len(a.relocs)/2)
-totalSaving := 0
-for i := 0; i+1 < len(a.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-target := renvoAsmLabelPosition(a, label)
-if target < 0 {
-continue
-}
-disp := target - (at + 4)
-if disp < -128 || disp > 127 {
-continue
-}
-start := -1
-kind := 0
-saving := 0
-if at >= 1 && a.code[at-1] == 0xe9 {
-start = at - 1
-saving = 3
-} else if at >= 2 && a.code[at-2] == 0x0f && a.code[at-1] >= 0x80 && a.code[at-1] <= 0x8f {
-start = at - 2
-kind = 1
-saving = 4
-}
-if start >= 0 {
-if len(branches) > 0 && int(branches[len(branches)-1])/2 >= start {
-continue
-}
-
-
-
-
-a.relocs[i+1] = int32(label | -2147483648)
-if kind != 0 {
-a.relocs[i] = int32(at | -2147483648)
-}
-totalSaving += saving
-branches = append(branches, int32(start*2+kind))
-savings = append(savings, int32(totalSaving))
-}
-}
-read := 0
-write := 0
-branch := 0
-for read < oldLen {
-if branch < len(branches) && int(branches[branch])/2 == read {
-kind := int(branches[branch]) & 1
-op := 0xeb
-size := 5
-if kind != 0 {
-op = int(a.code[read+1]) - 0x10
-size = 6
-}
-a.code[write] = byte(op)
-a.code[write+1] = 0
-write += 2
-read += size
-branch++
-continue
-}
-a.code[write] = a.code[read]
-write++
-read++
-}
-renvoTruncBytes(&a.code, write)
-for i := 0; i < len(a.labelPos); i++ {
-position := renvoAsmLabelPosition(a, i)
-if position >= 0 {
-a.labelPos[i] = int32(renvoAmd64RelaxedPosition(branches, savings, position))
-}
-}
-relocCount := 0
-relocBranch := 0
-for i := 0; i+1 < len(a.relocs); i += 2 {
-rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
-rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-at := rawAt & 2147483647
-label := rawLabel & 2147483647
-target := renvoAsmLabelPosition(a, label)
-if rawLabel < 0 && target >= 0 {
-start := at - 1
-if rawAt < 0 {
-start = at - 2
-}
-newAt := renvoAmd64RelaxedPosition(branches, savings, start) + 1
-disp := target - (newAt + 1)
-if disp >= -128 && disp <= 127 {
-a.code[newAt] = byte(disp)
-continue
-}
-}
-for relocBranch < len(branches) && int(branches[relocBranch])/2 < at {
-relocBranch++
-}
-newAt := at
-if relocBranch > 0 {
-newAt -= int(renvo_runtime_UnsafeInt32At(savings, relocBranch-1))
-}
-a.relocs[relocCount] = int32(newAt)
-a.relocs[relocCount+1] = int32(label)
-relocCount += 2
-}
-a.relocs = a.relocs[:relocCount]
-absBranch := 0
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
-for absBranch < len(branches) && int(branches[absBranch])/2 < at {
-absBranch++
-}
-if absBranch > 0 {
-at -= int(renvo_runtime_UnsafeInt32At(savings, absBranch-1))
-}
-a.absRelocs[i] = int32(at)
-}
-}
+func renvoAmd64RelaxBranches(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAmd64RelaxedPosition(branches []int32, savings []int32, position int) int {
-lo := 0
-hi := len(branches)
-for lo < hi {
-mid := lo + (hi-lo)/2
-if int(renvo_runtime_UnsafeInt32At(branches, mid))/2 < position {
-lo = mid + 1
-} else {
-hi = mid
-}
-}
-if lo == 0 {
-return position
-}
-return position - int(renvo_runtime_UnsafeInt32At(savings, lo-1))
-}
-func renvoAmd64EmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
-return renvoEmitNativeSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
-}
-func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
-renvoNonNil(g)
-a := &g.asm
-p := g.prog
-if tok < 0 || tok >= renvoTokCount(p) {
-return false
-}
-start := renvoTokStart(p, tok)
-end := renvoTokEnd(p, tok)
-if start >= end {
-return false
-}
-c0 := renvo_runtime_UnsafeByteAt(p.src, start)
-c1 := byte(0)
-if start+1 < end {
-c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
-}
-if c0 == '+' {
-renvoAsmAddPrimaryTertiary(a)
-return true
-}
-if c0 == '-' {
-renvoAsmEmit32(a, 0x48c12948)
-renvoAsmEmit16(a, 0xc889)
-return true
-}
-if c0 == '*' {
-renvoAsmEmit32(a, 0xc1af0f48)
-return true
-}
-if c0 == '/' {
-renvoAsmDivLeftTertiaryRightPrimary(a, false)
-return true
-}
-if c0 == '%' {
-renvoAsmDivLeftTertiaryRightPrimary(a, true)
-return true
-}
-op := 0
-if c0 == '&' {
-if c1 == '^' {
-renvoAsmEmit32(a, 0x48d0f748)
-renvoAsmEmit16(a, 0xc821)
-return true
-}
-op = 0xc82148
-}
-if c0 == '|' {
-op = 0xc80948
-}
-if c0 == '^' {
-op = 0xc83148
-}
-if op != 0 {
-renvoAsmEmit24(a, op)
-return true
-}
-shift := 0
-setcc := 0
-if c0 == '<' {
-if c1 == '<' {
-shift = 0xe0d348d0
-} else if c1 == '=' {
-setcc = 0x9e
-} else {
-setcc = 0x9c
-}
-}
-if c0 == '>' {
-if c1 == '>' {
-shift = 0xf8d348d0
-} else if c1 == '=' {
-setcc = 0x9d
-} else {
-setcc = 0x9f
-}
-}
-if c0 == '=' && c1 == '=' {
-setcc = 0x94
-}
-if c0 == '!' && c1 == '=' {
-setcc = 0x95
-}
-if shift != 0 {
-renvoAsmEmit32(a, 0x48ca8948)
-renvoAsmEmit32(a, 0x8948c189)
-renvoAsmEmit32(a, shift)
-return true
-}
-if setcc != 0 {
-renvoAsmCmpTertiaryPrimarySet(a, setcc)
-return true
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
+func renvoAmd64EmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
+panic("non-VM backend is unavailable")
+}
+
+func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool { panic("non-VM backend is unavailable") }
+
 func renvoAmd64EmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-return renvoGenericEmitStringValueRegs(g, ep, idx)
+panic("non-VM backend is unavailable")
 }
+
 func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-renvoNonNil(g)
-a := &g.asm
-if wordCount > 0 {
-renvoAsmPopCallWord0(a)
-}
-if wordCount > 1 {
-renvoAsmEmit8(a, 0x5e)
-}
-if wordCount > 2 {
-renvoAsmPopSecondary(a)
-}
-if wordCount > 3 {
-renvoAsmPopTertiary(a)
-}
-if wordCount > 4 {
-renvoAsmEmit16(a, 0x5841)
-}
-if wordCount > 5 {
-renvoAsmEmit16(a, 0x5941)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-if wordCount > 6 {
-imm := (wordCount - 6) * 8
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit4(a, 0x48, 0x83, 0xc4, imm)
-} else {
-renvoAsmEmit24(a, 0xc48148)
-renvoAsmEmit32(a, imm)
-}
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-return renvoEmitNativeFloatBinaryExpr(g, ep, idx)
-}
-func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) {
-renvoNonNil(a)
-renvoAsmEmit2(a, 0x0f, op)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddReloc(a, at, label)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) {
-renvoNonNil(g)
-a := &g.asm
-renvoAmd64InitRuntimeCheckReg(a, 0x258d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeBoundsLabel, 2, "\x48\x89\xc2\x48\x39\xc8\x73\x01\xc3\xe9\x00\x00\x00\x00"))
-renvoAmd64InitRuntimeCheckReg(a, 0x2d8d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeSecondaryLabel, 1, "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"))
-renvoAmd64InitRuntimeCheckReg(a, 0x358d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeByteIndexLabel, 3, "\x48\x39\xd1\x73\x04\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
-renvoAmd64InitRuntimeCheckReg(a, 0x3d8d4c, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWordIndexLabel, 4, "\x48\x39\xd1\x73\x08\x48\xc1\xe1\x03\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
-renvoAmd64InitRuntimeCheckReg(a, 0x1d8d48, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeWideIndexLabel, 5, "\x48\x39\xd1\x73\x08\x48\x6b\xc9\x48\x48\x01\xc8\xc3\xe9\x00\x00\x00\x00"))
-}
+func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) { panic("non-VM backend is unavailable") }
 
 func renvoAmd64ObjectExportFrame(g *renvoLinearGen, reserve bool) {
-if reserve {
-
-
-
-renvoAsmEmitText(&g.asm, "\x53\x41\x54\x41\x55\x41\x56\x41\x57")
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-return
-}
-renvoAsmEmitText(&g.asm, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b")
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64InitRuntimeCheckReg(a *renvoAsm, op int, label int) {
-renvoNonNil(a)
-renvoAsmEmit24(a, op)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddReloc(a, at, label)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64CallIndexAddressHelper(a *renvoAsm, elemSize int) {
-renvoNonNil(a)
-if elemSize == 1 {
-renvoAsmEmit24(a, 0xd6ff41)
-} else if elemSize == 8 {
-renvoAsmEmit24(a, 0xd7ff41)
-} else {
-renvoAsmEmit16(a, 0xd3ff)
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64EnsureRuntimeCheck(g *renvoLinearGen, slot *int, kind int, code string) int {
-renvoNonNil(g, slot)
-a := &g.asm
-if *slot > 0 {
-return *slot - 1
-}
-label := renvoAsmNewLabel(a)
-*slot = label + 1
-after := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-if kind == 2 && g.meta.panicEnabled {
-renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8\x0f\x92\xc0\x48\x0f\xb6\xc0\xc3")
-} else if kind == 6 && g.meta.panicEnabled {
-renvoAsmEmitText(a, "\x48\x39\xc2\x72\x0e\x48\x39\xd1\x72\x09\x48\x39\xcf\x72\x04\x6a\x01\x58\xc3\x31\xc0\xc3")
-} else {
-renvoAsmEmitText(a, code)
-relocation := len(a.code) - 4
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmAddReloc(a, relocation, renvoEnsureUncaughtRuntimeFaultHelper(g))
-}
-if renvoAsmLabelPosition(a, helperEnd) < 0 {
-renvoAsmMarkLabel(a, helperEnd)
-}
-renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-name := "__renvo_check_non_nil"
-if kind == 1 {
-name = "__renvo_check_secondary"
-} else if kind == 2 {
-name = "__renvo_check_bounds"
-} else if kind == 3 {
-name = "__renvo_check_byte_index"
-} else if kind == 4 {
-name = "__renvo_check_word_index"
-} else if kind == 5 {
-name = "__renvo_check_wide_index"
-} else if kind == 6 {
-name = "__renvo_check_slice_bounds"
-}
-renvoAsmAddLocalObjectFuncSymbolText(a, name, label, helperEnd)
-}
-return label
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmAddLocalObjectFuncSymbolText(a *renvoAsm, name string, label int, endLabel int) {
-renvoNonNil(a)
-start := len(a.symbolName)
-for i := 0; i < len(name); i++ {
-a.symbolName = append(a.symbolName, name[i])
-}
-a.symbols = append(a.symbols, renvoAsmSymbol{nameStart: start, nameEnd: len(a.symbolName), label: label, endLabel: endLabel})
+panic("non-VM backend is unavailable")
 }
 
-func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-a := &g.asm
-if g.appendAddrEmitted {
-return g.appendAddrLabel
-}
-arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-g.appendAddrEmitted = true
-g.appendAddrLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
-noGrowLabel := renvoAsmNewLabel(a)
-haveCapLabel := renvoAsmNewLabel(a)
-renvoAsmEmitText(a, "\x48\x8b\x0e\x4d\x8b\x01\x4c\x39\xc1")
-renvoAmd64AsmJccLabel(a, 0x8c, noGrowLabel)
-renvoAsmEmitText(a, "\x57\x56\x41\x51\x52\x51\x4d\x85\xc0")
-renvoAmd64AsmJccLabel(a, 0x85, haveCapLabel)
-renvoAsmEmitText(a, "\x49\xc7\xc0\x10\x00\x00\x00")
-renvoAsmMarkLabel(a, haveCapLabel)
-renvoAsmEmitText(a, "\x4d\x01\xc0\x41\x50\x4c\x89\xc1\x0f\xaf\xca\x51\x58")
-renvoAsmCallLabel(a, arenaAllocLabel)
-if g.meta.panicEnabled {
-allocOKLabel := renvoAsmNewLabel(a)
-renvoAsmEmitText(a, "\x48\x85\xc0")
-renvoAmd64AsmJccLabel(a, 0x85, allocOKLabel)
-renvoAsmEmitText(a, "\x48\x83\xc4\x30\xc3")
-renvoAsmMarkLabel(a, allocOKLabel)
-}
-renvoAsmEmitText(a, "\x50\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x8b\x7c\x24\x30\x48\x8b\x37\x48\x8b\x3c\x24\xfc\xf3\xa4\x48\x8b\x7c\x24\x30\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x20\x4c\x8b\x44\x24\x08\x4d\x89\x01\x48\x8b\x04\x24\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x74\x24\x28\x48\x8b\x4c\x24\x10\x48\xff\xc1\x48\x89\x0e\x48\x83\xc4\x38\xc3")
-renvoAsmMarkLabel(a, noGrowLabel)
-renvoAsmEmitText(a, "\x48\x8b\x0e\x48\x8b\x07\x48\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x0e\x48\xff\xc1\x48\x89\x0e\xc3")
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_addr", g.appendAddrLabel, helperEnd)
-}
-return g.appendAddrLabel
-}
+func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvoAmd64EnsureAppend8Helper(g *renvoLinearGen) int {
-renvoNonNil(g)
-a := &g.asm
-if g.append8Emitted {
-return g.append8Label
-}
-g.append8Emitted = true
-g.append8Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x41\x88\x14\x08\x48\xff\xc1\x48\x89\x0e\xc3")
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_byte", g.append8Label, helperEnd)
-}
-return g.append8Label
-}
-func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int {
-renvoNonNil(g)
-a := &g.asm
-if g.append64Emitted {
-return g.append64Label
-}
-g.append64Emitted = true
-g.append64Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x49\x89\x14\xc8\x48\xff\xc1\x48\x89\x0e\xc3")
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_word", g.append64Label, helperEnd)
-}
-return g.append64Label
-}
+func renvoAmd64EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.appendBytesEmitted {
-return g.appendBytesLabel
-}
-arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-g.appendBytesEmitted = true
-g.appendBytesLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.appendBytesLabel)
+func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
+func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
+func renvoAmd64EnsureCopyWordsHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-
-
-renvoAsmEmitText(a, "\x48\x85\xc9\x0f\x84\xc8\x00\x00\x00\x4c\x8b\x06\x4d\x89\xc2\x49\x01\xca\x0f\x82\xbd\x00\x00\x00\x4d\x39\x11\x0f\x83\x83\x00\x00\x00\x4d\x8b\x19\x4d\x85\xdb\x75\x06\x41\xbb\x10\x00\x00\x00\x4d\x01\xdb\x0f\x82\x9d\x00\x00\x00\x4d\x39\xd3\x72\xf2\x57\x56\x41\x51\x52\x51\x41\x50\x41\x52\x41\x53\x4c\x89\xd8\xe8\x00\x00\x00\x00\x48\x85\xc0\x75\x05\x48\x83\xc4\x40\xc3\x50\x48\x8b\x4c\x24\x18\x48\x89\xc7\x48\x8b\x74\x24\x40\x48\x8b\x36\xf3\xa4\x48\x8b\x7c\x24\x40\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x30\x4c\x8b\x5c\x24\x08\x4d\x89\x19\x48\x8b\x4c\x24\x20\x48\x8b\x54\x24\x28\x4c\x8b\x44\x24\x18\x4c\x8b\x54\x24\x10\x48\x8b\x74\x24\x38\x48\x83\xc4\x48\x4c\x89\x16\x48\x8b\x07\x4a\x8d\x3c\x00\x48\x89\xd6\x48\x39\xf7\x76\x19\x48\x8d\x04\x0e\x48\x39\xc7\x73\x10\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x02\xf3\xa4\x6a\x01\x58\xc3\x31\xc0\xc3")
-renvoAsmAddReloc(a, len(a.code)-139, arenaAllocLabel)
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_bytes", g.appendBytesLabel, helperEnd)
-}
-return g.appendBytesLabel
-}
-
-
-
-func renvoAmd64EnsureCopyWordsHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-return 0
-}
-func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-a := &g.asm
-if g.streqEmitted {
-return g.streqLabel
-}
-g.streqEmitted = true
-g.streqLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-helperEnd := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
-notEqualLabel := renvoAsmNewLabel(a)
-equalLabel := renvoAsmNewLabel(a)
-loopLabel := renvoAsmNewLabel(a)
-renvoAsmEmitText(a, "\x31\xc0\x48\x39\xce")
-renvoAsmJnzLabel(a, notEqualLabel)
-renvoAsmEmitText(a, "\x48\x85\xf6")
-renvoAsmJzLabel(a, equalLabel)
-renvoAsmMarkLabel(a, loopLabel)
-renvoAsmEmitText(a, "\x44\x8a\x07\x44\x38\x02")
-renvoAsmJnzLabel(a, notEqualLabel)
-renvoAsmEmitText(a, "\x48\xff\xc7\x48\xff\xc2\x48\xff\xce")
-renvoAsmJnzLabel(a, loopLabel)
-renvoAsmMarkLabel(a, equalLabel)
-renvoAsmEmitText(a, "\x6a\x01\x58")
-renvoAsmMarkLabel(a, notEqualLabel)
-renvoAsmEmitText(a, "\xc3")
-renvoAsmMarkLabel(a, helperEnd)
-renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_equal", g.streqLabel, helperEnd)
-}
-return g.streqLabel
-}
+func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_amd64_target_impl.go
 
+func renvoElfAmd64Append32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
-func renvoElfAmd64Append32(out []byte, value int) []byte {
-out = append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
-return out
-}
-func renvoElfAmd64Append64(out []byte, value int) []byte {
-out = renvoElfAmd64Append32(out, value)
-out = renvoElfAmd64Append32(out, value>>32)
-return out
-}
-func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit8(a, 0x02)
-} else if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a, 0x42, disp)
-} else {
-renvoAsmEmit8(a, 0x82)
-renvoAsmEmit32(a, disp)
-}
-}
-func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
-if imm == 0 {
-renvoAsmEmit16(a, 0xc031)
-return
-}
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit2(a, 0x6a, imm)
-renvoAsmPopPrimary(a)
-return
-}
-if imm>>32 == 0 {
-renvoAsmEmit8(a, 0xb8)
-renvoAsmEmit32(a, imm)
-return
-}
-if imm >= -2147483647 && imm <= 2147483647 {
-renvoAsmEmit8(a, 0x68)
-renvoAsmEmit32(a, imm)
-renvoAsmPopPrimary(a)
-return
-}
-renvoAsmEmit16(a, 0xb848)
-renvoAsmEmit64(a, imm)
-}
-func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
-if renvoAmd64RewritePrimaryLoad(a, 7, false) {
-return
-}
-if renvoFixedTarget == 0 && a.c.optimizeRuntime {
-renvoAsmEmit3(a, 0x48, 0x89, 0xc7)
-return
-}
-renvoAsmEmit16(a, 0x5f50)
-}
-func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
-if renvoAmd64RewritePrimaryLoad(a, 6, false) {
-return
-}
-if renvoFixedTarget == 0 && a.c.optimizeRuntime {
-renvoAsmEmit3(a, 0x48, 0x89, 0xc6)
-return
-}
-renvoAsmEmit16(a, 0x5e50)
-}
+func renvoElfAmd64Append64(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
 func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
-load := a.lastPrimaryLoad
-if pushed {
-load = -load
+panic("non-VM backend is unavailable")
 }
-end := load >> 3
-at := end - (load & 7)
-if pushed {
-end++
-}
-if load <= 0 || end != len(a.code) {
-return false
-}
-a.code[at] += byte(reg*8)
-if pushed {
-renvoTruncBytes(&a.code, len(a.code) - 1)
-}
-a.lastPrimaryLoad = 0
-return true
-}
+
 func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
-load := a.lastPrimaryLoad
-end := load >> 3
-if load <= 0 || end != len(a.code) {
-return false
-}
-at := end - (load & 7)
-
-
-if a.code[at]&0xc7 == 0x05 {
-return false
+panic("non-VM backend is unavailable")
 }
 
-
-
-a.code[at-1] = 0x83
-a.code[at] += 0x38
-a.code = append(a.code, byte(imm))
-a.lastPrimaryLoad = 0
-return true
-}
 func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-renvoAsmEmit16(a, op)
-if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a, disp8, disp)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit8(a, disp32)
-renvoAsmEmit32(a, disp)
-}
+
 func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-renvoAsmEmit16(a, 0x8b48)
-if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit3(a, 0x44, 0x8, disp)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit16(a, 0x0884)
-renvoAsmEmit32(a, disp)
-}
-func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit24(a, 0x028b48)
-a.lastPrimaryLoad = len(a.code)*8 + 1
-return
-}
-renvoAmd64AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
-distance := 2
-if !renvoAsmImmFits8Signed(disp) {
-distance = 5
-}
-a.lastPrimaryLoad = len(a.code)*8 + distance
-}
+
+func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+
 func renvoAmd64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-if size == 1 {
-renvoAsmEmit24(a, 0xb60f48)
-renvoAmd64AsmSecondaryDisp(a, disp)
-return
+panic("non-VM backend is unavailable")
 }
-if size == 2 {
-renvoAsmEmit24(a, 0xbf0f48)
-renvoAmd64AsmSecondaryDisp(a, disp)
-return
-}
-if size == 4 {
-renvoAmd64AsmMemDisp(a, disp, 0x6348, 0x42, 0x82)
-return
-}
-renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
-}
-func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-if size == 1 {
-renvoAmd64AsmLoadByteRaxIndexRcx(a)
-return
-}
-if size == 2 {
-renvoAsmEmit32(a, 0x04bf0f48)
-renvoAsmEmit8(a, 0x48)
-return
-}
-if size == 4 {
-renvoAsmEmit32(a, 0x88046348)
-return
-}
-renvoAmd64AsmLoadQwordRaxIndexRcx8(a)
-}
-func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit24(a, 0x028948)
-return
-}
-renvoAmd64AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
-}
+
+func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+
 func renvoAmd64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-if size == 1 {
-renvoAsmEmit8(a, 0x88)
-renvoAmd64AsmSecondaryDisp(a, disp)
-return
-}
-if size == 2 {
-renvoAsmEmit16(a, 0x8966)
-renvoAmd64AsmSecondaryDisp(a, disp)
-return
-}
-if size == 4 {
-renvoAsmEmit8(a, 0x89)
-renvoAmd64AsmSecondaryDisp(a, disp)
-return
-}
-renvoAmd64AsmStoreRaxMemRdxDisp(a, disp)
-}
-func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool {
-start := len(a.code) - len(suffix)
-if start < 0 {
-return false
-}
-for i := 0; i < len(suffix); i++ {
-if a.code[start+i] != suffix[i] {
-return false
-}
-}
-return true
-}
-func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-if kind == 3 {
-if renvoAmd64CodeEnds(a, "\x0f\xb6\xc0") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x02") || renvoAmd64CodeEnds(a, "\x48\x0f\xb6\x04\x08") {
-return
-}
-renvoAsmEmit24(a, 0xc0b60f)
-return
-}
-if kind == 7 {
-renvoAsmEmit32(a, 0xc0be0f48)
-return
-}
-if kind == 8 {
-renvoAsmEmit32(a, 0xc0bf0f48)
-return
-}
-if kind == 16 {
-renvoAsmEmit32(a, 0xc0b70f48)
-return
-}
-if kind == 9 {
-if renvoAmd64CodeEnds(a, "\x48\x63\xc0") || renvoAmd64CodeEnds(a, "\x48\x63\x04\x88") {
-return
-}
-renvoAsmEmit24(a, 0xc06348)
-return
-}
-if kind == 17 {
-renvoAsmEmit16(a, 0xc089)
-}
-}
-func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
-if imm == 0 {
-
-
-
-
-renvoAsmEmit24(a, 0xc08548)
-return
-}
-renvoAsmEmit4(a, 0x48, 0x83, 0xf8, imm)
-}
-func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
-if renvoAmd64RewritePrimaryLoadCompare(a, imm) {
-return
-}
-renvoAmd64AsmCmpRaxImm8(a, imm)
-}
-func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-if mod {
-renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x10\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x04\x31\xc0\xeb\x10\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x48\x89\xd0\x5b")
-return
-}
-renvoAsmEmitText(a, "\x48\x83\xf8\xff\x75\x11\x6a\x01\x5a\x48\xc1\xe2\x3f\x48\x39\xd1\x75\x05\x48\x89\xc8\xeb\x0d\x53\x48\x89\xc3\x48\x89\xc8\x48\x99\x48\xf7\xfb\x5b")
+panic("non-VM backend is unavailable")
 }
 
-func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoAsmEmit32(a, 0x0fc13948)
-renvoAsmEmit3(a, setcc,0xc0,0xf)
-renvoAsmEmit16(a, 0xc0b6)
-}
+func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
-renvoAsmEmit24(a, 0x0aff48)
-}
+func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmIncMemRdx(a *renvoAsm) {
-renvoAsmEmit24(a, 0x02ff48)
-}
+func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoAsmEmit32(a, 0x04b60f48)
-renvoAsmEmit8(a, 0x8)
-}
+func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoAsmEmit32(a, 0xc8048b48)
-}
+func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
-renvoAsmEmit24(a, 0xc08949)
-}
+func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
-renvoAsmEmit24(a, 0xc18949)
-}
+func renvoAmd64AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoAsmEmit32(a, 0xca048948)
-}
+func renvoAmd64AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a, 0x058b48)
-at:=len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at,bssOff,1)
-a.lastPrimaryLoad = len(a.code)*8+5
-}
+func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a, 0x158d4c)
-at:=len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at,bssOff,1)
-}
+func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-renvoAsmEmit24(a, 0x058948)
-at:=len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at,bssOff,1)
-}
+func renvoAmd64AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoElfAmd64Append16(out []byte, value int) []byte {
-return append(out,byte(value),byte(value>>8))
-}
+func renvoAmd64AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+
+func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+
+func renvoElfAmd64Append16(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
 func renvoElfAmd64AppendHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
-out=append(out,0x7f,'E','L','F',2,1,1,0)
-out=append(out,0,0,0,0,0,0,0,0)
-out=renvoElfAmd64Append16(out,1)
-out=renvoElfAmd64Append16(out,62)
-out=renvoElfAmd64Append32(out,1)
-out=renvoElfAmd64Append64(out,0)
-out=renvoElfAmd64Append64(out,0)
-out=renvoElfAmd64Append64(out,sectionOffset)
-out=renvoElfAmd64Append32(out,0)
-out=renvoElfAmd64Append16(out,64)
-out=renvoElfAmd64Append16(out,0)
-out=renvoElfAmd64Append16(out,0)
-out=renvoElfAmd64Append16(out,64)
-out=renvoElfAmd64Append16(out,sectionCount)
-out=renvoElfAmd64Append16(out,namesIndex)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoElfAmd64AppendRelocation(out []byte, offset int, symbol int, kind int, addend int) []byte {
-out=renvoElfAmd64Append64(out,offset)
-out=renvoElfAmd64Append64(out,symbol<<32|kind)
-out=renvoElfAmd64Append64(out,addend)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoElfAmd64AppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
-out=renvoElfAmd64Append32(out,name)
-out=renvoElfAmd64Append32(out,kind)
-out=renvoElfAmd64Append64(out,flags)
-out=renvoElfAmd64Append64(out,0)
-out=renvoElfAmd64Append64(out,offset)
-out=renvoElfAmd64Append64(out,size)
-out=renvoElfAmd64Append32(out,link)
-out=renvoElfAmd64Append32(out,info)
-out=renvoElfAmd64Append64(out,alignment)
-out=renvoElfAmd64Append64(out,entrySize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoElfAmd64AppendSymbol(out []byte, name int, info int, section int, value int, size int) []byte {
-out=renvoElfAmd64Append32(out,name)
-out=append(out,byte(info),0)
-out=renvoElfAmd64Append16(out,section)
-out=renvoElfAmd64Append64(out,value)
-out=renvoElfAmd64Append64(out,size)
-return out
+panic("non-VM backend is unavailable")
 }
 
-
-func rtgX8664PatchRelocations(out *renvoAsm) {
-for i := 0; i+1 < len(out.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
-target := renvoAsmLabelPosition(out, label)
-if at < 0 || at+4 > len(out.code) {
-out.patchFailed = true
-continue
-}
-if target < 0 { continue }
-addend := renvoGet32At(out.code, at)
-renvoPut32At(out.code, at, target+addend-(at+4))
-}
-}
+func rtgX8664PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_386_impl.go
 
 const renvo386ELFCodeOffset = 0x74
 
-func renvoAsmImageObject386(emitter *renvoAsm) []byte {
-return renvoAsmImageRelocatableObject386(emitter)
-}
+func renvoAsmImageObject386(emitter *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-return renvoTryCompileScalarProgram386Scratch(p, meta)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgram386Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgram386(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-return renvoCompileResult{}
-}
-return renvoFinishScalarProgram386(g)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgram386Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgram386(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-return renvoCompileResult{}
+panic("non-VM backend is unavailable")
 }
-return renvoFinishScalarProgram386(g)
-}
+
 func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-if renvoFixedTarget == 0 {
-if renvoIsHostedObject386(meta.c) {
-return renvoBeginObjectProgram(p, meta)
-}
-}
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
-if appIndex < 0 {
-return nil
-}
-g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-a := &g.asm
-renvoAsmInitWithContext(a, g.c)
-a.codeOffset = renvo386ELFCodeOffset
-if targetIsWindows(meta.c.renvoTargetOS) {
-a.codeOffset = renvoWinSectionRVA
-}
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgs386(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoAsmPushPrimary(a)
-renvoWin386CallImport(a, renvoWinImportExitProcess)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 1)
-renvoAsmSyscall(a)
-}
-return g
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
-if app.paramCount == 1 {
-return true
-}
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
-renvoNonNil(g)
-a := &g.asm
-if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
-renvoRecordObjectFunctionRanges(g)
-}
-renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
-var data []byte
-if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
-data = renvoAsmImageObject386(a)
-} else if targetIsWindows(g.c.renvoTargetOS) {
-data = renvoAsmImageWindows386(a)
-} else {
-data = renvoAsmImage386(a)
-}
-var result renvoCompileResult
-if a.patchFailed || len(data) == 0 {
-return result
-}
-result.data = data
-result.ok = true
-return result
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-argsOff := g.asm.bssSize
-g.asm.bssSize += 32768
-if targetIsWindows(g.c.renvoTargetOS) {
-argsTextOff := g.asm.bssSize
-g.asm.bssSize += 32768
-argsLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-} else {
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
-}
-func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-renvo386AsmMovRegPCRel(a, 0, dataOff, 0)
-return
-}
-renvoAsmEmit8(a, 0xb8)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, dataOff, 0)
+panic("non-VM backend is unavailable")
 }
 
-func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
-return
-}
-renvoAsmEmit8(a, 0xb8)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
-return
-}
-renvoAsmEmit8(a, 0xbb)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
-renvoAsmEmit16(a, 0x008b)
-return
-}
-renvoAsmEmit8(a, 0xa1)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-renvoAsmEmit8(a, 0x53)
-renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
-renvoAsmEmit16(a, 0x0389)
-renvoAsmEmit8(a, 0x5b)
-return
-}
-renvoAsmEmit8(a, 0xa3)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
-}
+func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+
+func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
 func renvo386AsmX87BinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
-loadOpcode := 0xdd
-storeOpcode := 0xdd
-if size == 4 {
-loadOpcode = 0xd9
-storeOpcode = 0xd9
-}
-renvoAsmStackMem(a, left, loadOpcode, 0x45, 0x85)
-opcode := 0xdc
-shortModRM := 0x45
-longModRM := 0x85
-if size == 4 {
-opcode = 0xd8
-}
-if op == '*' {
-shortModRM, longModRM = 0x4d, 0x8d
-} else if op == '-' {
-shortModRM, longModRM = 0x65, 0xa5
-} else if op == '/' {
-shortModRM, longModRM = 0x75, 0xb5
-} else if op != '+' {
-return false
-}
-renvoAsmStackMem(a, right, opcode, shortModRM, longModRM)
-renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvo386AsmX87CompareStack(a *renvoAsm, left int, right int, size int) {
-opcode := 0xdd
-if size == 4 {
-opcode = 0xd9
-}
-renvoAsmStackMem(a, right, opcode, 0x45, 0x85)
-renvoAsmStackMem(a, left, opcode, 0x45, 0x85)
-renvoAsmEmit16(a, 0xe9df)
-renvoAsmEmit16(a, 0xd8dd)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386AsmX87IntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
-if !signed && intSize < 8 {
-renvoAsmStoreStackImm(a, offset-4, 0)
-intSize = 8
-}
-if intSize == 8 {
-renvoAsmStackMem(a, offset, 0xdf, 0x6d, 0xad)
-} else {
-renvoAsmStackMem(a, offset, 0xdb, 0x45, 0x85)
-}
-if !signed && intSize == 8 {
-converted := renvoAsmNewLabel(a)
-renvoAsmJcmpStackImm(a, offset-4, 0, converted, 0x9d)
-
-
-
-renvoAsmStoreStackImm(a, offset, 0)
-renvoAsmStoreStackImm(a, offset-4, 0x43f00000)
-renvoAsmStackMem(a, offset, 0xdc, 0x45, 0x85)
-renvoAsmMarkLabel(a, converted)
-}
-if floatSize == 4 {
-renvoAsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
-} else {
-renvoAsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvo386AsmX87ConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
-loadOpcode := 0xdd
-if sourceSize == 4 {
-loadOpcode = 0xd9
-}
-storeOpcode := 0xdd
-if destSize == 4 {
-storeOpcode = 0xd9
-}
-renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85)
-renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386AsmX87FloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
-loadOpcode := 0xdd
-if floatSize == 4 {
-loadOpcode = 0xd9
-}
-renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85)
-storeOpcode := 0xdb
-if intSize == 8 || !signed {
-storeOpcode = 0xdd
-}
-renvoAsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386AsmX87NegateStack(a *renvoAsm, offset int, size int) {
-highOffset := offset
-if size == 8 {
-highOffset -= 4
-}
-renvoAsmLoadPrimaryStack(a, highOffset)
-renvoAsmEmit8(a, 0x35)
-renvoAsmEmit32(a, -2147483648)
-renvoAsmStorePrimaryStack(a, highOffset)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-a := &g.asm
-if loc.mem {
-if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-return false
-}
-renvoAsmEmit16(a, 0x5f52)
-renvoAsmEmit16(a, 0x728d)
-renvoAsmEmit8(a, 8)
-return true
-}
-if loc.global {
-if g.c.renvoTargetOS == renvoOSLinux {
-renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
-renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
-return true
-}
-renvoAsmEmit16(a, 0x3d8d)
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, loc.offset, renvoAbsBssReloc)
-renvoAsmEmit16(a, 0x358d)
-at = len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, loc.offset+8, renvoAbsBssReloc)
-return true
-}
-renvoAsmAddressCallWord0Stack(a, loc.offset)
-renvoAsmAddressCallWord1Stack(a, loc.offset-8)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-a := &g.asm
-renvoAsmLoadPrimaryStack(a, srcPtr)
-renvoAsmEmit16(a, 0xc689)
-renvoAsmLoadPrimaryStack(a, destPtr)
-renvoAsmEmit16(a, 0xc789)
-renvoAsmLoadTertiaryStack(a, byteCount)
-renvoAsmEmitText(a, "\x39\xf7\x76\x0e\x8d\x74\x0e\xff\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+panic("non-VM backend is unavailable")
 }
 
-func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-if g.wideBinaryLabel > 0 {
-return g.wideBinaryLabel - 1
-}
-label := renvoAsmNewLabel(&g.asm)
-g.wideBinaryLabel = label + 1
-after := renvoAsmNewLabel(&g.asm)
-renvoAsmJmpMarkLabel(&g.asm, after, label)
-renvoAsmEmitText(&g.asm, "\x83\xf8\x0d\x75\x18\x8b\x0e\x8b\x56\x04\x8b\x03\xf7\xd0\x21\xc1\x8b\x43\x04\xf7\xd0\x21\xc2\x89\x0f\x89\x57\x04\xc3\x83\xf8\x0e\x72\x05\xe9\xb3\x01\x00\x00\x83\xf8\x00\x74\x1e\x83\xf8\x01\x74\x29\x83\xf8\x02\x74\x34\x83\xf8\x0a\x73\x4b\x83\xf8\x06\x0f\x86\xf2\x00\x00\x00\x83\xf8\x09\x76\x65\xc3\x8b\x06\x03\x03\x89\x07\x8b\x46\x04\x13\x43\x04\x89\x47\x04\xc3\x8b\x06\x2b\x03\x89\x07\x8b\x46\x04\x1b\x43\x04\x89\x47\x04\xc3\x8b\x06\xf7\x23\x89\x07\x89\xd1\x8b\x46\x04\x0f\xaf\x03\x01\xc1\x8b\x06\x0f\xaf\x43\x04\x01\xc8\x89\x47\x04\xc3\x8b\x0e\x8b\x56\x04\x83\xf8\x0a\x74\x0c\x83\xf8\x0b\x74\x0e\x33\x0b\x33\x53\x04\xeb\x0c\x23\x0b\x23\x53\x04\xeb\x05\x0b\x0b\x0b\x53\x04\x89\x0f\x89\x57\x04\xc3\x8b\x0e\x8b\x56\x04\x8b\x73\x04\x85\xf6\x75\x64\x8b\x1b\x83\xfb\x40\x73\x5d\x83\xfb\x20\x73\x2b\x51\x89\xd9\x83\xf8\x07\x74\x17\x5b\x89\xde\x0f\xad\xd6\x83\xf8\x08\x74\x04\xd3\xfa\xeb\x02\xd3\xea\x89\x37\x89\x57\x04\xc3\x5e\x0f\xa5\xf2\xd3\xe6\x89\x37\x89\x57\x04\xc3\x83\xeb\x20\x51\x89\xd9\x83\xf8\x07\x74\x15\x5e\x89\xd6\x83\xf8\x08\x74\x07\xd3\xfe\xc1\xfa\x1f\xeb\xd4\xd3\xee\x31\xd2\xeb\xce\x5e\x89\xf2\xd3\xe2\x31\xf6\x89\x37\x89\x57\x04\xc3\x83\xf8\x09\x74\x0a\x31\xc9\x31\xd2\x89\x0f\x89\x57\x04\xc3\xc1\xfa\x1f\x89\x17\x89\x57\x04\xc3\x55\x57\x50\x8b\x06\x8b\x56\x04\x8b\x0b\x8b\x5b\x04\x31\xf6\x31\xff\x80\x3c\x24\x05\x72\x1a\x89\xd6\xc1\xfe\x1f\x89\xdf\xc1\xff\x1f\x31\xf0\x31\xf2\x29\xf0\x19\xf2\x31\xf9\x31\xfb\x29\xf9\x19\xfb\x56\x57\x53\x51\x31\xc9\x31\xdb\x31\xf6\x31\xff\xbd\x40\x00\x00\x00\xd1\xe0\xd1\xd2\xd1\xd6\xd1\xd7\xd1\xe1\xd1\xd3\x3b\x7c\x24\x04\x72\x11\x77\x05\x3b\x34\x24\x72\x0a\x2b\x34\x24\x1b\x7c\x24\x04\x83\xc9\x01\x4d\x75\xda\xf6\x44\x24\x10\x01\x74\x1b\x8b\x44\x24\x0c\x33\x44\x24\x08\x31\xc1\x31\xc3\x29\xc1\x19\xc3\x8b\x54\x24\x14\x89\x0a\x89\x5a\x04\xeb\x15\x8b\x44\x24\x0c\x31\xc6\x31\xc7\x29\xc6\x19\xc7\x8b\x54\x24\x14\x89\x32\x89\x7a\x04\x83\xc4\x18\x5d\xc3\x83\xe8\x0e\x8b\x56\x04\x3b\x53\x04\x75\x26\x8b\x16\x3b\x13\x75\x38\x83\xf8\x00\x74\x69\x83\xf8\x01\x74\x61\x83\xf8\x03\x74\x5f\x83\xf8\x05\x74\x5a\x83\xf8\x07\x74\x55\x83\xf8\x09\x74\x50\xeb\x4b\x83\xf8\x01\x74\x49\x83\xf8\x06\x73\x07\x3b\x53\x04\x7c\x28\xeb\x10\x3b\x53\x04\x72\x21\xeb\x09\x83\xf8\x01\x74\x31\x3b\x13\x72\x16\x83\xf8\x04\x74\x28\x83\xf8\x05\x74\x23\x83\xf8\x08\x74\x1e\x83\xf8\x09\x74\x19\xeb\x14\x83\xf8\x02\x74\x12\x83\xf8\x03\x74\x0d\x83\xf8\x06\x74\x08\x83\xf8\x07\x74\x03\x31\xc0\xc3\xb8\x01\x00\x00\x00\xc3")
-renvoAsmMarkLabel(&g.asm, after)
-return label
-}
+func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvo386EnsureWideCompareHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-if g.wideCompareLabel > 0 {
-return g.wideCompareLabel - 1
-}
-label := renvoAsmNewLabel(&g.asm)
-g.wideCompareLabel = label + 1
-after := renvoAsmNewLabel(&g.asm)
-renvoAsmJmpMarkLabel(&g.asm, after, label)
-renvoAsmEmitText(&g.asm, "\x8b\x56\x04\x3b\x53\x04\x75\x26\x8b\x16\x3b\x13\x75\x38\x83\xf8\x00\x74\x69\x83\xf8\x01\x74\x61\x83\xf8\x03\x74\x5f\x83\xf8\x05\x74\x5a\x83\xf8\x07\x74\x55\x83\xf8\x09\x74\x50\xeb\x4b\x83\xf8\x01\x74\x49\x83\xf8\x06\x73\x07\x3b\x53\x04\x7c\x28\xeb\x10\x3b\x53\x04\x72\x21\xeb\x09\x83\xf8\x01\x74\x31\x3b\x13\x72\x16\x83\xf8\x04\x74\x28\x83\xf8\x05\x74\x23\x83\xf8\x08\x74\x1e\x83\xf8\x09\x74\x19\xeb\x14\x83\xf8\x02\x74\x12\x83\xf8\x03\x74\x0d\x83\xf8\x06\x74\x08\x83\xf8\x07\x74\x03\x31\xc0\xc3\xb8\x01\x00\x00\x00\xc3")
-renvoAsmMarkLabel(&g.asm, after)
-return label
-}
+func renvo386EnsureWideCompareHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 func renvo386EmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
-a := &g.asm
-renvoAsmStackMem(a, dest, 0x8d, 0x7d, 0xbd)
-renvoAsmStackMem(a, left, 0x8d, 0x75, 0xb5)
-renvoAsmStackMem(a, right, 0x8d, 0x5d, 0x9d)
-renvoAsmPrimaryImm(a, mode)
-renvoAsmCallLabel(a, label)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
-renvoNonNil(g)
-if mode >= 3 && mode <= 6 {
-nonzero := renvoAsmNewLabel(&g.asm)
-renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
-renvoAsmJnzPrimary(&g.asm, nonzero)
-renvoAsmLoadPrimaryStack(&g.asm, right)
-renvoEmitRuntimeNonNilPrimary(g)
-renvoAsmMarkLabel(&g.asm, nonzero)
-}
-renvo386EmitWideHelperCall(g, dest, left, right, mode, renvo386EnsureWideBinaryHelper(g))
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitWideCompareStack(g *renvoLinearGen, left int, right int, mode int) {
-renvoNonNil(g)
-renvo386EmitWideHelperCall(g, 0, left, right, mode, renvo386EnsureWideCompareHelper(g))
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-framePatch := len(a.code)
-renvoAsmEmit32(a, 0x000000c8)
-if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-renvoAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
-}
-renvoBindFunctionParams(g, fnInfoIndex)
-if !renvoBindClosureCaptures(g, fnInfoIndex) {
-return false
-}
-if !renvoBindNamedResults(g, fnInfoIndex) {
-return false
-}
-if !renvoPrepareFunctionControl(g) {
-return false
-}
-if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-return false
-}
-if g.deferReturnLabel > 0 {
-if !g.lastRangeReturns {
-renvoAsmJmpLabel(a, g.deferReturnLabel)
-}
-if !renvoEmitFunctionControlEpilogue(g) {
-return false
-}
-} else if !g.lastRangeReturns {
-renvoMoveCapturedLocals(g, true)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmLeave(a)
-renvoAsmRet(a)
-}
-frame := renvoAlignTo8(g.stackPeak)
-if frame > 65528 {
-frame = 65528
-}
-a.code[framePatch+1] = byte(frame & 255)
-a.code[framePatch+2] = byte((frame / 256) & 255)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-a := &g.asm
-if reg == 0 {
-renvoAsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
-return
-}
-if reg == 1 {
-renvoAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
-return
-}
-if reg == 2 {
-renvoAsmStoreSecondaryStack(a, offset)
-return
-}
-if reg == 3 {
-renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
-return
-}
-if reg == 4 {
-renvoAsmStorePrimaryStack(a, offset)
-return
-}
-if reg == 5 {
-renvoAsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
-return
-}
-renvoAsmEmit16(a, 0x858b)
-renvoAsmEmit32(a, 8+(reg-6)*4)
-renvoAsmStorePrimaryStack(a, offset)
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
-a := &g.asm
-p := g.prog
-if tok < 0 || tok >= renvoTokCount(p) {
-return false
-}
-start := renvoTokStart(p, tok)
-end := renvoTokEnd(p, tok)
-if start >= end {
-return false
-}
-c0 := p.src[start]
-c1 := byte(0)
-if start+1 < end {
-c1 = p.src[start+1]
-}
-if c0 == '+' {
-renvoAsmAddPrimaryTertiary(a)
-return true
-}
-if c0 == '-' {
-renvoAsmEmit16(a, 0xc129)
-renvoAsmEmit16(a, 0xc889)
-return true
-}
-if c0 == '*' {
-renvoAsmEmit24(a, 0xc1af0f)
-return true
-}
-if c0 == '/' {
-renvoAsmDivLeftTertiaryRightPrimary(a, false)
-return true
-}
-if c0 == '%' {
-renvoAsmDivLeftTertiaryRightPrimary(a, true)
-return true
-}
-if c0 == '&' {
-if c1 == '^' {
-renvoAsmEmit16(a, 0xd0f7)
-renvoAsmEmit16(a, 0xc821)
-} else {
-renvoAsmEmit16(a, 0xc821)
-}
-return true
-}
-if c0 == '|' {
-renvoAsmEmit16(a, 0xc809)
-return true
-}
-if c0 == '^' {
-renvoAsmEmit16(a, 0xc831)
-return true
-}
-if c0 == '<' {
-if c1 == '<' {
-renvoAsmEmit16(a, 0xca89)
-renvoAsmEmit16(a, 0xc189)
-renvoAsmEmit16(a, 0xd089)
-renvoAsmEmit16(a, 0xe0d3)
-} else if c1 == '=' {
-renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
-} else {
-renvoAsmCmpTertiaryPrimarySet(a, 0x9c)
-}
-return true
-}
-if c0 == '>' {
-if c1 == '>' {
-renvoAsmEmit16(a, 0xca89)
-renvoAsmEmit16(a, 0xc189)
-renvoAsmEmit16(a, 0xd089)
-opcode := 0xf8d3
-if unsigned {
-opcode = 0xe8d3
-}
-renvoAsmEmit16(a, opcode)
-} else if c1 == '=' {
-renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
-} else {
-renvoAsmCmpTertiaryPrimarySet(a, 0x9f)
-}
-return true
-}
-if c0 == '=' && c1 == '=' {
-renvoAsmCmpTertiaryPrimarySet(a, 0x94)
-return true
-}
-if c0 == '!' && c1 == '=' {
-renvoAsmCmpTertiaryPrimarySet(a, 0x95)
-return true
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
 func renvo386EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-a := &g.asm
-if wordCount > 0 {
-renvoAsmPopCallWord0(a)
+panic("non-VM backend is unavailable")
 }
-if wordCount > 1 {
-renvoAsmEmit8(a, 0x5e)
-}
-if wordCount > 2 {
-renvoAsmPopSecondary(a)
-}
-if wordCount > 3 {
-renvoAsmPopTertiary(a)
-}
-if wordCount > 4 {
-renvoAsmPopPrimary(a)
-}
-if wordCount > 5 {
-renvoAsmEmit8(a, 0x5f)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-if wordCount > 6 {
-imm := (wordCount - 6) * 4
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit3(a, 0x83, 0xc4, imm)
-} else {
-renvoAsmEmit16(a, 0xc481)
-renvoAsmEmit32(a, imm)
-}
-}
-}
+
 func renvo386EmitEnsureMemSlice(g *renvoLinearGen, elemSize int) {
-a := &g.asm
-if elemSize < 1 {
-elemSize = 8
-}
-okLabel := renvoAsmNewLabel(a)
-renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-renvoAsmCmpPrimaryImm8(a, 0)
-renvoAsmJnzLabel(a, okLabel)
-backingSize := 2097152
-backingOff := g.asm.bssSize
-g.asm.bssSize += backingSize
-renvoAsmPrimaryBssAddr(a, backingOff)
-renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
-renvoAsmPrimaryImm(a, backingSize/elemSize)
-renvoAsmStorePrimaryMemSecondaryDisp(a, 16)
-renvoAsmMarkLabel(a, okLabel)
+panic("non-VM backend is unavailable")
 }
 
-func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.appendAddrEmitted {
-return g.appendAddrLabel
-}
-arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-g.appendAddrEmitted = true
-g.appendAddrLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
-noGrowLabel := renvoAsmNewLabel(a)
-capNonZeroLabel := renvoAsmNewLabel(a)
-capReadyLabel := renvoAsmNewLabel(a)
-renvoAsmEmit16(a, 0x0e8b)
-renvoAsmEmit3(a, 0x8b, 0x46, 8)
-renvoAsmEmit16(a, 0xc139)
-renvo386AsmJccLabel(a, 0x8c, noGrowLabel)
-renvoAsmEmit8(a, 0x57)
-renvoAsmEmit8(a, 0x56)
-renvoAsmPushSecondary(a)
-renvoAsmPushTertiary(a)
-renvoAsmEmit3(a, 0x8b, 0x46, 8)
-renvoAsmEmit16(a, 0xc085)
-renvo386AsmJccLabel(a, 0x85, capNonZeroLabel)
-renvoAsmPrimaryImm(a, 16)
-renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmMarkLabel(a, capReadyLabel)
-renvoAsmPushPrimary(a)
-renvoAsmCopyPrimaryToTertiary(a)
-renvoAsmEmit3(a, 0x0f, 0xaf, 0x4c)
-renvoAsmEmit2(a, 0x24, 8)
-renvoAsmPushTertiary(a)
-renvoAsmPopPrimary(a)
-renvoAsmCallLabel(a, arenaAllocLabel)
-if g.meta.panicEnabled {
-allocOKLabel := renvoAsmNewLabel(a)
-renvoAsmEmit16(a, 0xc085)
-renvo386AsmJccLabel(a, 0x85, allocOKLabel)
-renvoAsmEmit3(a, 0x83, 0xc4, 20)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, allocOKLabel)
-}
-renvoAsmPushPrimary(a)
-renvoAsmEmit3(a, 0x8b, 0x3c, 0x24)
-renvoAsmEmit4(a, 0x8b, 0x74, 0x24, 20)
-renvoAsmEmit16(a, 0x368b)
-renvoAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
-renvoAsmEmit4(a, 0x8b, 0x44, 0x24, 12)
-renvoAsmEmit3(a, 0x0f, 0xaf, 0xc8)
-renvoAsmEmit16(a, 0xa4f3)
-renvoAsmEmit4(a, 0x8b, 0x7c, 0x24, 20)
-renvoAsmEmit3(a, 0x8b, 0x04, 0x24)
-renvoAsmEmit16(a, 0x0789)
-renvoAsmEmit4(a, 0x8b, 0x74, 0x24, 16)
-renvoAsmEmit4(a, 0x8b, 0x44, 0x24, 4)
-renvoAsmEmit3(a, 0x89, 0x46, 8)
-renvoAsmEmit3(a, 0x8b, 0x04, 0x24)
-renvoAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
-renvoAsmEmit4(a, 0x8b, 0x54, 0x24, 12)
-renvoAsmEmit3(a, 0x0f, 0xaf, 0xca)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmEmit4(a, 0x8b, 0x74, 0x24, 16)
-renvoAsmEmit4(a, 0x8b, 0x4c, 0x24, 8)
-renvoAsmIncTertiary(a)
-renvoAsmEmit16(a, 0x0e89)
-renvoAsmEmit3(a, 0x83, 0xc4, 24)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, noGrowLabel)
-renvoAsmEmit16(a, 0x0e8b)
-renvoAsmEmit16(a, 0x078b)
-renvoAsmEmit24(a, 0xcaaf0f)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmEmit16(a, 0x0e8b)
-renvoAsmIncTertiary(a)
-renvoAsmEmit16(a, 0x0e89)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.appendAddrLabel
-}
+func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvo386EnsureAppend8Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append8Emitted {
-return g.append8Label
-}
-g.append8Emitted = true
-g.append8Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x88\x14\x08\x41\x89\x0e\xc3")
-renvoAsmMarkLabel(a, afterLabel)
-return g.append8Label
-}
+func renvo386EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvo386EnsureAppend64Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append64Emitted {
-return g.append64Label
-}
-g.append64Emitted = true
-g.append64Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x89\x14\xc8\x41\x89\x0e\xc3")
-renvoAsmMarkLabel(a, afterLabel)
-return g.append64Label
-}
+func renvo386EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.streqEmitted {
-return g.streqLabel
-}
-g.streqEmitted = true
-g.streqLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
-notEqualLabel := renvoAsmNewLabel(a)
-equalLabel := renvoAsmNewLabel(a)
-loopLabel := renvoAsmNewLabel(a)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmEmit16(a, 0xce39)
-renvoAsmJnzLabel(a, notEqualLabel)
-renvoAsmEmit16(a, 0xf685)
-renvoAsmJzLabel(a, equalLabel)
-renvoAsmMarkLabel(a, loopLabel)
-renvoAsmEmit16(a, 0x0b8a)
-renvoAsmEmit16(a, 0x0a38)
-renvoAsmJnzLabel(a, notEqualLabel)
-renvoAsmEmit8(a, 0x43)
-renvoAsmEmit8(a, 0x42)
-renvoAsmEmit8(a, 0x4e)
-renvoAsmJnzLabel(a, loopLabel)
-renvoAsmMarkLabel(a, equalLabel)
-renvoAsmPrimaryImm(a, 1)
-renvoAsmMarkLabel(a, notEqualLabel)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.streqLabel
-}
+func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_386_target_impl.go
 
+func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit8(a, 0x02)
-return
-}
-if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a, 0x42, disp)
-return
-}
-renvoAsmEmit8(a, 0x82)
-renvoAsmEmit32(a, disp)
-}
-func renvo386AsmMovRaxImm(a *renvoAsm, imm int) {
-if imm == 0 {
-renvoAsmEmit16(a, 0xc031)
-return
-}
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit2(a, 0x6a, imm)
-renvoAsmEmit8(a, 0x58)
-return
-}
-if imm >= -2147483647 && imm <= 2147483647 {
-renvoAsmEmit8(a, 0xb8)
-renvoAsmEmit32(a, imm)
-return
-}
-renvoAsmEmit8(a, 0xb8)
-renvoAsmEmit32(a, imm)
-}
-func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
-if imm == 0 {
-renvoAsmEmit16(a, 0xd231)
-return
-}
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit2(a, 0x6a, imm)
-renvoAsmEmit8(a, 0x5a)
-return
-}
-if imm >= 0 {
-if imm <= 2147483647 {
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, imm)
-return
-}
-} else {
-if imm >= -2147483647 {
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, imm)
-return
-}
-}
-renvoAsmEmit8(a, 0xba)
-renvoAsmEmit32(a, imm)
-}
+func renvo386AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+
+func renvo386AsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+
 func renvo386AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-if base > 0xff {
-renvoAsmEmit8(a, base >> 8)
-} else {
-renvoAsmEmit8(a, base)
+panic("non-VM backend is unavailable")
 }
-if offset >= 0 && offset <= 128 {
-renvoAsmEmit8(a, disp8)
-renvoAsmEmit8(a, -offset)
-return
-}
-renvoAsmEmit8(a, disp32)
-renvoAsmEmit32(a, -offset)
-}
-func renvo386AsmAddRdxImm(a *renvoAsm, imm int) {
-if renvoAsmImmFits8Signed(imm) {
-renvoAsmEmit3(a, 0x83, 0xc2, imm)
-return
-}
-renvoAsmEmit16(a, 0xc281)
-renvoAsmEmit32(a, imm)
-}
+
+func renvo386AsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+
 func renvo386AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-if op > 0xff {
-renvoAsmEmit8(a, op >> 8)
-} else {
-renvoAsmEmit8(a, op)
+panic("non-VM backend is unavailable")
 }
-if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit2(a, disp8, disp)
-return
-}
-renvoAsmEmit8(a, disp32)
-renvoAsmEmit32(a, disp)
-}
+
 func renvo386AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-renvoAsmEmit8(a, 0x8b)
-if renvoAsmImmFits8Signed(disp) {
-renvoAsmEmit3(a, 0x44, 0x8, disp)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit16(a, 0x0884)
-renvoAsmEmit32(a, disp)
-}
-func renvo386AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit16(a, 0x028b)
-return
-}
-renvo386AsmMemDisp(a, disp, 0x8b48, 0x42, 0x82)
-}
+
+func renvo386AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+
 func renvo386AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-if size == 1 {
-renvoAsmEmit16(a, 0xb60f)
-renvo386AsmSecondaryDisp(a, disp)
-return
+panic("non-VM backend is unavailable")
 }
-if size == 2 {
-renvoAsmEmit16(a, 0xbf0f)
-renvo386AsmSecondaryDisp(a, disp)
-return
-}
-renvo386AsmLoadRaxMemRdxDisp(a, disp)
-}
-func renvo386AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-if size == 1 {
-renvo386AsmLoadByteRaxIndexRcx(a)
-return
-}
-if size == 2 {
-renvoAsmEmit32(a, 0x4804bf0f)
-return
-}
-if size == 4 {
-renvoAsmEmit24(a, 0x88048b)
-return
-}
-renvo386AsmLoadQwordRaxIndexRcx8(a)
-}
-func renvo386AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-if disp == 0 {
-renvoAsmEmit16(a, 0x0289)
-return
-}
-renvo386AsmMemDisp(a, disp, 0x8948, 0x42, 0x82)
-}
+
+func renvo386AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+
+func renvo386AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+
 func renvo386AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-if size == 1 {
-renvoAsmEmit8(a, 0x88)
-renvo386AsmSecondaryDisp(a, disp)
-return
-}
-if size == 2 {
-renvoAsmEmit16(a, 0x8966)
-renvo386AsmSecondaryDisp(a, disp)
-return
-}
-renvo386AsmStoreRaxMemRdxDisp(a, disp)
-}
-func renvo386AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-if kind == 3 {
-renvoAsmEmit24(a, 0xc0b60f)
-return
-}
-if kind == 7 {
-renvoAsmEmit24(a, 0xc0be0f)
-return
-}
-if kind == 8 {
-renvoAsmEmit8(a, 0x98)
-return
-}
-if kind == 16 {
-renvoAsmEmit24(a, 0xc0b70f)
-}
-}
-func renvo386AsmCmpRaxImm8(a *renvoAsm, imm int) {
-if imm == 0 {
-renvoAsmEmit16(a, 0xc085)
-return
-}
-renvoAsmEmit3(a, 0x83, 0xf8, imm)
-}
-func renvo386AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-renvoAsmEmit16(a, 0xc389)
-renvoAsmEmit16(a, 0xc889)
-renvoAsmEmit8(a, 0x99)
-renvoAsmEmit16(a, 0xfbf7)
-if mod {
-renvoAsmEmit16(a, 0xd089)
-}
+panic("non-VM backend is unavailable")
 }
 
-func renvo386AsmAddRaxRcx(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc801)
-}
+func renvo386AsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmAddRdxRcx(a *renvoAsm) {
-renvoAsmEmit16(a, 0xca01)
-}
+func renvo386AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmBoolNotRax(a *renvoAsm) {
-renvoAsmEmit3(a, 0x83,0xf0,1)
-}
+func renvo386AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoAsmEmit24(a, 0x0fc139)
-renvoAsmEmit3(a, setcc,0xc0,0xf)
-renvoAsmEmit16(a, 0xc0b6)
-}
+func renvo386AsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmDecMemRdx(a *renvoAsm) {
-renvoAsmEmit16(a, 0x0aff)
-}
+func renvo386AsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmIncMemRdx(a *renvoAsm) {
-renvoAsmEmit16(a, 0x02ff)
-}
+func renvo386AsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoAsmEmit32(a, 0x0804b60f)
-}
+func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoAsmEmit24(a, 0xc8048b)
-}
+func renvo386AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovR8Rax(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc389)
-}
+func renvo386AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovR9Rax(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc389)
-}
+func renvo386AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) {
-renvo386AsmMovRaxImm(a,imm)
-}
+func renvo386AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovRaxRdx(a *renvoAsm) {
-renvoAsmEmit16(a, 0xd089)
-}
+func renvo386AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovRdiRax(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc389)
-}
+func renvo386AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMovRsiRax(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc189)
-}
+func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmPopRdi(a *renvoAsm) {
-renvoAsmEmit8(a, 0x5b)
-}
+func renvo386AsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmSarRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a, 0xc1,0xf8,imm)
-}
+func renvo386AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmShlRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a, 0xc1,0xe0,imm)
-}
+func renvo386AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmShlRcxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a, 0xc1,0xe1,imm)
-}
+func renvo386AsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmShrRaxImm(a *renvoAsm, imm int) {
-renvoAsmEmit3(a, 0xc1,0xe8,imm)
-}
+func renvo386AsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoAsmEmit24(a, 0xca0489)
-}
+func renvo386AsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmSubRaxRcx(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc829)
-}
+func renvo386AsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmSyscall(a *renvoAsm) {
-renvoAsmEmit16(a, 0x80cd)
-}
+func renvo386AsmShrRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAsmMovArg1Rax(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc689)
-}
+func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmJccLabel(a *renvoAsm, op int, label int) {
-renvoAsmEmit2(a, 0x0f,op)
-at:=len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddReloc(a, at,label)
-}
+func renvo386AsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvo386AsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvoAsmMovArg1Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvo386AsmJccLabel(a *renvoAsm, op int, label int) { panic("non-VM backend is unavailable") }
 
 func renvo386AsmMovRegPCRel(a *renvoAsm, reg int, off int, kind int) {
-renvoAsmEmit8(a, 0xe8)
-renvoAsmEmit32(a, 0)
-renvoAsmEmit8(a, 0x58|reg)
-renvoAsmEmit2(a, 0x81,0xc0|reg)
-at:=len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at,off,kind)
+panic("non-VM backend is unavailable")
 }
 
-
-func rtgX8632PatchRelocations(out *renvoAsm) {
-for i := 0; i+1 < len(out.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
-target := renvoAsmLabelPosition(out, label)
-if at < 0 || at+4 > len(out.code) {
-out.patchFailed = true
-continue
-}
-if target < 0 { continue }
-addend := renvoGet32At(out.code, at)
-renvoPut32At(out.code, at, target+addend-(at+4))
-}
-}
+func rtgX8632PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_aarch64_impl.go
 
+func renvoAarch64AsmAlign(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmAlign(a *renvoAsm) {
-for len(a.code)%4 != 0 {
-renvoAsmEmit8(a, 0)
-}
-}
-func renvoAarch64AsmMovRegReg(a *renvoAsm, dst int, src int) {
-if dst == src {
-return
-}
-renvoAarch64AsmEmit(a, 0xaa0003e0|(src<<16)|dst)
-}
-func renvoAarch64AsmMovRegImm(a *renvoAsm, reg int, imm int) {
-if imm < 0 {
-inv := -imm - 1
-part := inv & 65535
-renvoAarch64AsmEmit(a, 0x92800000|(part<<5)|reg)
-for i := 1; i < 4; i++ {
-targetPart := (imm >> (i * 16)) & 65535
-if targetPart != 65535 {
-renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(targetPart<<5)|reg)
-}
-}
-return
-}
-part := imm & 65535
-renvoAarch64AsmEmit(a, 0xd2800000|(part<<5)|reg)
-for i := 1; i < 4; i++ {
-part = (imm >> (i * 16)) & 65535
-if part != 0 {
-renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
-}
-}
-}
+func renvoAarch64AsmMovRegReg(a *renvoAsm, dst int, src int) { panic("non-VM backend is unavailable") }
+
+func renvoAarch64AsmMovRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+
 func renvoAarch64AsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
-part := imm & 65535
-renvoPut32At(a.code, at, 0xd2800000|(part<<5)|reg)
-for i := 1; i < 4; i++ {
-part = (imm >> (i * 16)) & 65535
-renvoPut32At(a.code, at+i*4, 0xf2800000|(i<<21)|(part<<5)|reg)
+panic("non-VM backend is unavailable")
 }
-}
+
 func renvoAarch64AsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
-if imm == 0 {
-renvoAarch64AsmMovRegReg(a, dst, src)
-return
+panic("non-VM backend is unavailable")
 }
-op := 0x91000000
-if imm < 0 {
-op = 0xd1000000
-imm = -imm
-}
-cur := src
-for imm > 0 {
-shift := 0
-chunk := imm
-if chunk > 4095 {
-chunk = imm / 4096
-if chunk > 4095 {
-chunk = 4095
-}
-shift = 1
-imm = imm - chunk*4096
-} else {
-imm = 0
-}
-renvoAarch64AsmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
-cur = dst
-}
-}
-func renvoAarch64AsmAddr(a *renvoAsm, base int, disp int) int {
-if disp == 0 {
-return base
-}
-renvoAarch64AsmAddRegImm(a, 12, base, disp)
-return 12
-}
+
+func renvoAarch64AsmAddr(a *renvoAsm, base int, disp int) int { panic("non-VM backend is unavailable") }
+
 func renvoAarch64AsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
-if disp != 0 && disp >= -256 && disp <= 255 {
-imm := (disp & 511) << 12
-if size == 1 {
-renvoAarch64AsmEmit(a, 0x38400000|imm|(base<<5)|dst)
-return
+panic("non-VM backend is unavailable")
 }
-if size == 2 {
-renvoAarch64AsmEmit(a, 0x78400000|imm|(base<<5)|dst)
-return
-}
-if size == 4 {
-renvoAarch64AsmEmit(a, 0xb8400000|imm|(base<<5)|dst)
-return
-}
-renvoAarch64AsmEmit(a, 0xf8400000|imm|(base<<5)|dst)
-return
-}
-addr := renvoAarch64AsmAddr(a, base, disp)
-if size == 1 {
-renvoAarch64AsmEmit(a, 0x39400000|(addr<<5)|dst)
-return
-}
-if size == 2 {
-renvoAarch64AsmEmit(a, 0x79800000|(addr<<5)|dst)
-return
-}
-if size == 4 {
-renvoAarch64AsmEmit(a, 0xb9800000|(addr<<5)|dst)
-return
-}
-renvoAarch64AsmEmit(a, 0xf9400000|(addr<<5)|dst)
-}
+
 func renvoAarch64AsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
-if disp != 0 && disp >= -256 && disp <= 255 {
-imm := (disp & 511) << 12
-if size == 1 {
-renvoAarch64AsmEmit(a, 0x38000000|imm|(base<<5)|src)
-return
+panic("non-VM backend is unavailable")
 }
-if size == 2 {
-renvoAarch64AsmEmit(a, 0x78000000|imm|(base<<5)|src)
-return
-}
-if size == 4 {
-renvoAarch64AsmEmit(a, 0xb8000000|imm|(base<<5)|src)
-return
-}
-renvoAarch64AsmEmit(a, 0xf8000000|imm|(base<<5)|src)
-return
-}
-addr := renvoAarch64AsmAddr(a, base, disp)
-if size == 1 {
-renvoAarch64AsmEmit(a, 0x39000000|(addr<<5)|src)
-return
-}
-if size == 2 {
-renvoAarch64AsmEmit(a, 0x79000000|(addr<<5)|src)
-return
-}
-if size == 4 {
-renvoAarch64AsmEmit(a, 0xb9000000|(addr<<5)|src)
-return
-}
-renvoAarch64AsmEmit(a, 0xf9000000|(addr<<5)|src)
-}
+
 func renvoAarch64AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-if base == 0x8948 && disp8 == 0x45 {
-renvoAarch64AsmStoreRegStack(a, 0, offset)
-return
+panic("non-VM backend is unavailable")
 }
-if base == 0x8948 && disp8 == 0x55 {
-renvoAarch64AsmStoreRegStack(a, 1, offset)
-return
-}
-if base == 0x8948 && disp8 == 0x4d {
-renvoAarch64AsmStoreRegStack(a, 2, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x45 {
-renvoAarch64AsmLoadRegStack(a, 0, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x55 {
-renvoAarch64AsmLoadRegStack(a, 1, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x4d {
-renvoAarch64AsmLoadRegStack(a, 2, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x45 {
-renvoAarch64AsmLeaRegStack(a, 0, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x55 {
-renvoAarch64AsmLeaRegStack(a, 1, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x7d {
-renvoAarch64AsmLeaRegStack(a, 3, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x75 {
-renvoAarch64AsmLeaRegStack(a, 4, offset)
-return
-}
-}
+
 func renvoAarch64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-if op == 0x8b48 && disp8 == 0x4a {
-renvoAarch64AsmLoadRegMem(a, 2, 1, disp, 8)
-return
+panic("non-VM backend is unavailable")
 }
-if op == 0x8b48 && disp8 == 0x52 {
-renvoAarch64AsmLoadRegMem(a, 1, 1, disp, 8)
-return
-}
-}
+
 func renvoAarch64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-shift := 3
-if size == 1 {
-shift = 0
+panic("non-VM backend is unavailable")
 }
-if size == 2 {
-shift = 1
-}
-if size == 4 {
-shift = 2
-}
-renvoAarch64AsmAddRegRegShift(a, 12, 0, 2, shift)
-renvoAarch64AsmLoadRegMem(a, 0, 12, 0, size)
-}
+
 func renvoAarch64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-if kind == 3 {
-renvoAarch64AsmEmit(a, 0x92401c00)
-return
+panic("non-VM backend is unavailable")
 }
-if kind == 7 {
-renvoAarch64AsmEmit(a, 0x93401c00)
-return
-}
-if kind == 8 {
-renvoAarch64AsmEmit(a, 0x93403c00)
-return
-}
-if kind == 16 {
-renvoAarch64AsmEmit(a, 0x92403c00)
-return
-}
-if kind == 9 {
-renvoAarch64AsmEmit(a, 0x93407c00)
-return
-}
-if kind == 17 {
-renvoAarch64AsmEmit(a, 0x92407c00)
-}
-}
-func renvoAarch64AsmCmpRegImm(a *renvoAsm, reg int, imm int) {
-if imm >= 0 && imm <= 4095 {
-renvoAarch64AsmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
-return
-}
-renvoAarch64AsmMovRegImm(a, 9, imm)
-renvoAarch64AsmCmpRegReg(a, reg, 9)
-}
-func renvoAarch64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-renvoAarch64AsmMovRegReg(a, 9, 0)
-renvoAarch64AsmEmit(a, 0x9ac00c40)
-if mod {
-renvoAarch64AsmEmit(a, 0x9b098800)
-}
-}
-func renvoAarch64CondFromSetcc(setcc int) int {
-if setcc == 0x94 {
-return 0
-}
-if setcc == 0x95 {
-return 1
-}
-if setcc == 0x92 {
-return 3
-}
-if setcc == 0x93 {
-return 2
-}
-if setcc == 0x96 {
-return 9
-}
-if setcc == 0x97 {
-return 8
-}
-if setcc == 0x9c {
-return 11
-}
-if setcc == 0x9e {
-return 13
-}
-if setcc == 0x9f {
-return 12
-}
-return 10
-}
+
+func renvoAarch64AsmCmpRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+
+func renvoAarch64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+
+func renvoAarch64CondFromSetcc(setcc int) int { panic("non-VM backend is unavailable") }
+
 func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
-shift := 3
-if size == 1 {
-shift = 0
-}
-if size == 2 {
-shift = 1
-}
-if size == 4 {
-shift = 2
-}
-renvoAarch64AsmAddRegRegShift(a, 12, 1, 2, shift)
-renvoAarch64AsmStoreRegMem(a, 0, 12, 0, size)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmAddRaxRcx(a *renvoAsm) {
-renvoAarch64AsmAddRegReg(a,0,0,2)
-}
+func renvoAarch64AsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmAddRdxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmAddRegImm(a,1,1,imm)
-}
+func renvoAarch64AsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmAddRdxRcx(a *renvoAsm) {
-renvoAarch64AsmAddRegReg(a,1,1,2)
-}
+func renvoAarch64AsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(left<<5)|dst)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64AsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
-renvoAarch64AsmEmit(a,0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmBoolNotRax(a *renvoAsm) {
-renvoAarch64AsmCmpRaxImm8(a,0)
-renvoAarch64AsmCsetRax(a,0)
-}
+func renvoAarch64AsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmCmpRaxImm8(a *renvoAsm, imm int) {
-renvoAarch64AsmCmpRegImm(a,0,imm)
-}
+func renvoAarch64AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmCmpRegReg(a *renvoAsm, left int, right int) {
-renvoAarch64AsmEmit(a,0xeb00001f|(right<<16)|(left<<5))
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmCsetRax(a *renvoAsm, cond int) {
-renvoAarch64AsmEmit(a,0x9a9f07e0|((cond^1)<<12))
-}
+func renvoAarch64AsmCsetRax(a *renvoAsm, cond int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmDecMemRdx(a *renvoAsm) {
-renvoAarch64AsmLoadRegMem(a,9,1,0,8)
-renvoAarch64AsmAddRegImm(a,9,9,-1)
-renvoAarch64AsmStoreRegMem(a,9,1,0,8)
-}
+func renvoAarch64AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmEmit(a *renvoAsm, insn int) {
-renvoAsmEmit32(a,insn)
-}
+func renvoAarch64AsmEmit(a *renvoAsm, insn int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmImulRcxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmMovRegImm(a,9,imm)
-renvoAarch64AsmEmit(a,0x9b007c00|(9<<16)|(2<<5)|2)
-}
+func renvoAarch64AsmImulRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmIncMemRdx(a *renvoAsm) {
-renvoAarch64AsmLoadRegMem(a,9,1,0,8)
-renvoAarch64AsmAddRegImm(a,9,9,1)
-renvoAarch64AsmStoreRegMem(a,9,1,0,8)
-}
+func renvoAarch64AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmIncRax(a *renvoAsm) {
-renvoAarch64AsmAddRegImm(a,0,0,1)
-}
+func renvoAarch64AsmIncRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmIncRcx(a *renvoAsm) {
-renvoAarch64AsmAddRegImm(a,2,2,1)
-}
+func renvoAarch64AsmIncRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmJnzLabel(a *renvoAsm, label int) {
-renvoAarch64AsmBCondLabel(a,label,1)
-}
+func renvoAarch64AsmJnzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmJzLabel(a *renvoAsm, label int) {
-renvoAarch64AsmBCondLabel(a,label,0)
-}
+func renvoAarch64AsmJzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmLeaRegStack(a *renvoAsm, dst int, offset int) {
-renvoAarch64AsmAddRegImm(a,dst,29,-offset)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmLeave(a *renvoAsm) {
-renvoAarch64AsmEmit(a,0x910003bf)
-renvoAarch64AsmEmit(a,0xa8c17bfd)
-}
+func renvoAarch64AsmLeave(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoAarch64AsmAddRegRegShift(a,12,0,2,0)
-renvoAarch64AsmLoadRegMem(a,0,12,0,1)
-}
+func renvoAarch64AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoAarch64AsmAddRegRegShift(a,12,0,2,3)
-renvoAarch64AsmLoadRegMem(a,0,12,0,8)
-}
+func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-renvoAarch64AsmAddRegReg(a,12,0,2)
-renvoAarch64AsmLoadRegMem(a,0,12,disp,8)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
-renvoAarch64AsmMovRegAbs(a,12,bssOff,1)
-renvoAarch64AsmLoadRegMem(a,0,12,0,8)
-}
+func renvoAarch64AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-renvoAarch64AsmLoadRegMem(a,0,1,disp,8)
-}
+func renvoAarch64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-renvoAarch64AsmLoadRegMem(a,0,1,disp,size)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64AsmLoadRegStack(a *renvoAsm, dst int, offset int) {
-renvoAarch64AsmLoadRegMem(a,dst,29,-offset,8)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-renvoAarch64AsmMovRegAbs(a,7,bssOff,1)
-}
+func renvoAarch64AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovR8Rax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,5,0)
-}
+func renvoAarch64AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovR9Rax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,6,0)
-}
+func renvoAarch64AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-renvoAarch64AsmMovRegAbs(a,0,bssOff,1)
-}
+func renvoAarch64AsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-renvoAarch64AsmMovRegAbs(a,0,dataOff,0)
-}
+func renvoAarch64AsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRaxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmMovRegImm(a,0,imm)
-}
+func renvoAarch64AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRaxImm64(a *renvoAsm, imm int) {
-renvoAarch64AsmMovRaxImm(a,imm)
-}
+func renvoAarch64AsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRaxRdx(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,0,1)
-}
+func renvoAarch64AsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRcxRax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,2,0)
-}
+func renvoAarch64AsmMovRcxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRcxRdx(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,2,1)
-}
+func renvoAarch64AsmMovRcxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRdiRax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,3,0)
-}
+func renvoAarch64AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRdxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmMovRegImm(a,1,imm)
-}
+func renvoAarch64AsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRdxRax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,1,0)
-}
+func renvoAarch64AsmMovRdxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMovRsiRax(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,4,0)
-}
+func renvoAarch64AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoAarch64AsmEmit(a,0x9b007c00|(right<<16)|(left<<5)|dst)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmNegRax(a *renvoAsm) {
-renvoAarch64AsmSubRegReg(a,0,31,0)
-}
+func renvoAarch64AsmNegRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopRax(a *renvoAsm) {
-renvoAarch64AsmPopReg(a,0)
-}
+func renvoAarch64AsmPopRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopRcx(a *renvoAsm) {
-renvoAarch64AsmPopReg(a,2)
-}
+func renvoAarch64AsmPopRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopRdi(a *renvoAsm) {
-renvoAarch64AsmPopReg(a,3)
-}
+func renvoAarch64AsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopRdx(a *renvoAsm) {
-renvoAarch64AsmPopReg(a,1)
-}
+func renvoAarch64AsmPopRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopReg(a *renvoAsm, reg int) {
-renvoAarch64AsmEmit(a,0xf84107e0|reg)
-}
+func renvoAarch64AsmPopReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPopRsi(a *renvoAsm) {
-renvoAarch64AsmPopReg(a,4)
-}
+func renvoAarch64AsmPopRsi(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPushImm(a *renvoAsm, imm int) {
-renvoAarch64AsmMovRegImm(a,9,imm)
-renvoAarch64AsmPushReg(a,9)
-}
+func renvoAarch64AsmPushImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPushRax(a *renvoAsm) {
-renvoAarch64AsmPushReg(a,0)
-}
+func renvoAarch64AsmPushRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPushRcx(a *renvoAsm) {
-renvoAarch64AsmPushReg(a,2)
-}
+func renvoAarch64AsmPushRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPushRdx(a *renvoAsm) {
-renvoAarch64AsmPushReg(a,1)
-}
+func renvoAarch64AsmPushRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmPushReg(a *renvoAsm, reg int) {
-renvoAarch64AsmEmit(a,0xf81f0fe0|reg)
-}
+func renvoAarch64AsmPushReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmRet(a *renvoAsm) {
-renvoAarch64AsmEmit(a,0xd65f03c0)
-}
+func renvoAarch64AsmRet(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmSarRaxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmEmit(a,0x9340fc00|(imm<<16))
-}
+func renvoAarch64AsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmShlRaxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10))
-}
+func renvoAarch64AsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmShlRcxImm(a *renvoAsm, imm int) {
-renvoAarch64AsmEmit(a,0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(2<<5)|2)
-}
+func renvoAarch64AsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmStoreAlMemRdxRcx1(a *renvoAsm) {
-renvoAarch64AsmAddRegRegShift(a,12,1,2,0)
-renvoAarch64AsmStoreRegMem(a,0,12,0,1)
-}
+func renvoAarch64AsmStoreAlMemRdxRcx1(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
-renvoAarch64AsmMovRegAbs(a,12,bssOff,1)
-renvoAarch64AsmStoreRegMem(a,0,12,0,8)
-}
+func renvoAarch64AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-renvoAarch64AsmStoreRegMem(a,0,1,disp,8)
-}
+func renvoAarch64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-renvoAarch64AsmStoreRegMem(a,0,1,disp,size)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoAarch64AsmAddRegRegShift(a,12,1,2,3)
-renvoAarch64AsmStoreRegMem(a,0,12,0,8)
-}
+func renvoAarch64AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmStoreRegStack(a *renvoAsm, src int, offset int) {
-renvoAarch64AsmStoreRegMem(a,src,29,-offset,8)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmStoreSliceStack(a *renvoAsm, offset int) {
-renvoAarch64AsmStoreRegStack(a,0,offset)
-renvoAarch64AsmStoreRegStack(a,1,offset-8)
-renvoAarch64AsmStoreRegStack(a,2,offset-16)
-}
+func renvoAarch64AsmStoreSliceStack(a *renvoAsm, offset int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmSubRaxRcx(a *renvoAsm) {
-renvoAarch64AsmSubRegReg(a,0,0,2)
-}
+func renvoAarch64AsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoAarch64AsmEmit(a,0xcb000000|(right<<16)|(left<<5)|dst)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmSyscall(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a,8,0)
-renvoAarch64AsmMovRegReg(a,9,1)
-renvoAarch64AsmMovRegReg(a,0,3)
-renvoAarch64AsmMovRegReg(a,1,4)
-renvoAarch64AsmMovRegReg(a,2,9)
-renvoAarch64AsmMovRegReg(a,3,7)
-renvoAarch64AsmEmit(a,0xd4000001)
-}
+func renvoAarch64AsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmBCondLabel(a *renvoAsm, label int, cond int) {
-at:=len(a.code)
-renvoAarch64AsmEmit(a,0x54000000|cond)
-renvoAsmAddReloc(a, at,label)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64AsmCallLabel(a *renvoAsm, label int) {
-at:=len(a.code)
-renvoAarch64AsmEmit(a,0x94000000)
-renvoAsmAddReloc(a, at,label)
-}
+func renvoAarch64AsmCallLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoAarch64AsmCmpRegReg(a,2,0)
-cond:=renvoAarch64CondFromSetcc(setcc)
-renvoAarch64AsmCsetRax(a,cond)
-}
+func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) {
-at:=len(a.code)
-renvoAarch64AsmEmit(a,0x14000000)
-renvoAsmAddReloc(a, at,label)
-}
+func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
-at:=len(a.code)
-renvoAarch64AsmMovRegImm(a,reg,0)
-renvoAarch64AsmEmit(a,0xf2800000|(1<<21)|reg)
-renvoAarch64AsmEmit(a,0xf2800000|(2<<21)|reg)
-renvoAarch64AsmEmit(a,0xf2800000|(3<<21)|reg)
-renvoAsmAddAbsReloc(a, at,off,kind)
+panic("non-VM backend is unavailable")
 }
 
-
-func rtgAarch64PatchRelocations(out *renvoAsm) {
-for i := 0; i+1 < len(out.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
-target := renvoAsmLabelPosition(out, label)
-if at < 0 || at+4 > len(out.code) {
-out.patchFailed = true
-continue
-}
-if target < 0 { continue }
-insn := renvoGet32At(out.code, at)
-
-displacement := target - at
-if (insn & 0x7c000000) == 0x14000000 {
-renvoPut32At(out.code, at, (insn&0xfc000000)|((displacement/4)&0x03ffffff))
-} else if (insn & 0xff000010) == 0x54000000 {
-renvoPut32At(out.code, at, (insn&0xff00001f)|(((displacement/4)&0x7ffff)<<5))
-}
-}
-}
+func rtgAarch64PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_aarch64_target_impl.go
 
@@ -39801,435 +36446,49 @@ const renvoAarch64RegLr = 30
 const renvoAarch64RegZr = 31
 
 func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAarch64AsmAlign(a)
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-renvoAarch64AsmEmit(a, 0xa9bf7bfd)
-renvoAarch64AsmEmit(a, 0x910003fd)
-framePatch := renvoAarch64AsmFrameStart(a)
-if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, g.returnStruct)
-}
-renvoBindFunctionParams(g, fnInfoIndex)
-if !renvoBindClosureCaptures(g, fnInfoIndex) {
-return false
-}
-if !renvoBindNamedResults(g, fnInfoIndex) {
-return false
-}
-if !renvoPrepareFunctionControl(g) {
-return false
-}
-if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-return false
-}
-if g.deferReturnLabel > 0 {
-if !g.lastRangeReturns {
-renvoAsmJmpLabel(a, g.deferReturnLabel)
-}
-if !renvoEmitFunctionControlEpilogue(g) {
-return false
-}
-} else if !g.lastRangeReturns {
-renvoMoveCapturedLocals(g, true)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmLeave(a)
-renvoAsmRet(a)
-}
-renvoAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-a := &g.asm
-if reg == 0 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, offset)
-return
-}
-if reg == 1 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRsi, offset)
-return
-}
-if reg == 2 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdx, offset)
-return
-}
-if reg == 3 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRcx, offset)
-return
-}
-if reg == 4 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR8, offset)
-return
-}
-if reg == 5 {
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegR9, offset)
-return
-}
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegFp, 16+(reg-6)*16, 8)
-renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-a := &g.asm
-if wordCount > 0 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
-}
-if wordCount > 1 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
-}
-if wordCount > 2 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
-}
-if wordCount > 3 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
-}
-if wordCount > 4 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegR8)
-}
-if wordCount > 5 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegR9)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-if wordCount > 6 {
-renvoAarch64AsmAddRegImm(a, 31, 31, (wordCount-6)*16)
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
-a := &g.asm
-p := g.prog
-if tok < 0 || tok >= renvoTokCount(p) {
-return false
-}
-start := renvoTokStart(p, tok)
-end := renvoTokEnd(p, tok)
-if start >= end {
-return false
-}
-c0 := p.src[start]
-c1 := byte(0)
-if start+1 < end {
-c1 = p.src[start+1]
-}
-if c0 == '+' {
-renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
-return true
-}
-if c0 == '-' {
-renvoAarch64AsmSubRegReg(a, renvoAarch64RegRax, renvoAarch64RegRcx, renvoAarch64RegRax)
-return true
-}
-if c0 == '*' {
-renvoAarch64AsmEmit(a, 0x9b007c40)
-return true
-}
-if c0 == '/' {
-renvoAarch64AsmDivLeftRcxRightRax(a, false)
-return true
-}
-if c0 == '%' {
-renvoAarch64AsmDivLeftRcxRightRax(a, true)
-return true
-}
-if c0 == '&' {
-if c1 == '^' {
-renvoAarch64AsmEmit(a, 0x8a200040)
-} else {
-renvoAarch64AsmEmit(a, 0x8a000040)
-}
-return true
-}
-if c0 == '|' {
-renvoAarch64AsmEmit(a, 0xaa000040)
-return true
-}
-if c0 == '^' {
-renvoAarch64AsmEmit(a, 0xca000040)
-return true
-}
-if c0 == '<' {
-if c1 == '<' {
-renvoAarch64AsmEmit(a, 0x9ac02040)
-} else if c1 == '=' {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x9e)
-} else {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x9c)
-}
-return true
-}
-if c0 == '>' {
-if c1 == '>' {
-renvoAarch64AsmEmit(a, 0x9ac02840)
-} else if c1 == '=' {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x9d)
-} else {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x9f)
-}
-return true
-}
-if c0 == '=' && c1 == '=' {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x94)
-return true
-}
-if c0 == '!' && c1 == '=' {
-renvoAarch64AsmCmpRcxRaxSet(a, 0x95)
-return true
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
 func renvoAarch64EnsureAppendAddrHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.appendAddrEmitted {
-return g.appendAddrLabel
-}
-arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-g.appendAddrEmitted = true
-g.appendAddrLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.appendAddrLabel)
-noGrowLabel := renvoAsmNewLabel(a)
-capNonZeroLabel := renvoAsmNewLabel(a)
-capReadyLabel := renvoAsmNewLabel(a)
-copyLoopLabel := renvoAsmNewLabel(a)
-copyDoneLabel := renvoAsmNewLabel(a)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
-renvoAarch64AsmCmpRegReg(a, renvoAarch64RegR8, renvoAarch64RegRcx)
-renvoAarch64AsmBCondLabel(a, noGrowLabel, 11)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, renvoAarch64RegRdx)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR10, renvoAarch64RegRdi)
-renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRcx, 0)
-renvoAarch64AsmBCondLabel(a, capNonZeroLabel, 1)
-renvoAarch64AsmMovRegImm(a, renvoAarch64RegRcx, 16)
-renvoAsmJmpMarkLabel(a, capReadyLabel, capNonZeroLabel)
-renvoAarch64AsmAddRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRcx, renvoAarch64RegR8)
-renvoAsmMarkLabel(a, capReadyLabel)
-renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRcx, renvoAarch64RegR9)
-renvoAsmPushTertiary(a)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRax, renvoAarch64RegTmp)
-renvoAarch64AsmPushReg(a, renvoAarch64RegLr)
-renvoAsmCallLabel(a, arenaAllocLabel)
-renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
-renvoAsmPopTertiary(a)
-if g.meta.panicEnabled {
-allocOKLabel := renvoAsmNewLabel(a)
-renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRax, 0)
-renvoAarch64AsmBCondLabel(a, allocOKLabel, 1)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, allocOKLabel)
-}
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRax)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdi, renvoAarch64RegRdx)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegR10, 0, 8)
-renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
-renvoAsmMarkLabel(a, copyLoopLabel)
-renvoAarch64AsmCmpRegImm(a, renvoAarch64RegTmp, 0)
-renvoAarch64AsmBCondLabel(a, copyDoneLabel, 0)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegTmp2, 0, 1)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp2, renvoAarch64RegTmp2, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegTmp, renvoAarch64RegTmp, -1)
-renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegR10, 0, 8)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 8, 8)
-renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegR9)
-renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRdx, renvoAarch64RegTmp)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, noGrowLabel)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRax, renvoAarch64RegRdi, 0, 8)
-renvoAarch64AsmMulRegReg(a, renvoAarch64RegTmp, renvoAarch64RegR8, renvoAarch64RegRdx)
-renvoAarch64AsmAddRegReg(a, renvoAarch64RegRax, renvoAarch64RegRax, renvoAarch64RegTmp)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegR8, renvoAarch64RegR8, 1)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegR8, renvoAarch64RegRsi, 0, 8)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.appendAddrLabel
+panic("non-VM backend is unavailable")
 }
 
-func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append8Emitted {
-return g.append8Label
-}
-g.append8Emitted = true
-g.append8Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
-renvoAarch64AsmAddRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.append8Label
-}
+func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append64Emitted {
-return g.append64Label
-}
-g.append64Emitted = true
-g.append64Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 8)
-renvoAarch64AsmAddRegRegShift(a, renvoAarch64RegTmp, renvoAarch64RegTmp, renvoAarch64RegRcx, 3)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRdx, renvoAarch64RegTmp, 0, 8)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRcx, renvoAarch64RegRcx, 1)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRcx, renvoAarch64RegRsi, 0, 8)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.append64Label
-}
+func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 func renvoAarch64EnsureStringEqualHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.streqEmitted {
-return g.streqLabel
-}
-g.streqEmitted = true
-g.streqLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-notEqualLabel := renvoAsmNewLabel(a)
-equalLabel := renvoAsmNewLabel(a)
-loopLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAarch64AsmCmpRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRcx)
-renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
-renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
-renvoAarch64AsmBCondLabel(a, equalLabel, 0)
-renvoAsmMarkLabel(a, loopLabel)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp, renvoAarch64RegRdi, 0, 1)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegTmp2, renvoAarch64RegRdx, 0, 1)
-renvoAarch64AsmCmpRegReg(a, renvoAarch64RegTmp, renvoAarch64RegTmp2)
-renvoAarch64AsmBCondLabel(a, notEqualLabel, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdi, renvoAarch64RegRdi, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRdx, renvoAarch64RegRdx, 1)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRsi, -1)
-renvoAarch64AsmCmpRegImm(a, renvoAarch64RegRsi, 0)
-renvoAarch64AsmBCondLabel(a, loopLabel, 1)
-renvoAsmMarkLabel(a, equalLabel)
-renvoAsmPrimaryImm(a, 1)
-renvoAsmMarkLabel(a, notEqualLabel)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.streqLabel
+panic("non-VM backend is unavailable")
 }
 
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-sourceCapacity := 786432
-src := make([]byte, 0, sourceCapacity)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-return renvoTryCompileScalarProgramAarch64Scratch(p, meta)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-session := renvoBeginScalarProgramAarch64(p, meta)
-if session == nil {
-return renvoCompileResult{}
-}
-for !session.stepScratch(64) {
-}
-return session.result
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-session := renvoBeginScalarProgramAarch64(p, meta)
-if session == nil {
-return renvoCompileResult{}
-}
-for !session.stepCached(64) {
-}
-return session.result
+panic("non-VM backend is unavailable")
 }
 
 type renvoAarch64ProgramSession struct {
@@ -40241,874 +36500,268 @@ result     renvoCompileResult
 }
 
 func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
-if appIndex < 0 {
-return nil
-}
-session := &renvoAarch64ProgramSession{prog: p}
-g := &session.gen
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-a := &g.asm
-renvoAsmInitWithContext(a, g.c)
-a.codeOffset = renvoAarch64ELFCodeOffset
-if targetIsWindows(meta.c.renvoTargetOS) {
-a.codeOffset = renvoWinSectionRVA
-}
-if targetIsDarwin(meta.c.renvoTargetOS) {
-a.codeOffset = renvoDarwinArm64CodeOffset
-if !(renvoFixedTarget == 0 && meta.c.emitImage) {
-g.darwinEntryOff = a.bssSize
-a.bssSize += 24
-renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
-renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
-}
-}
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == 0 && meta.c.emitImage {
-
-
-renvoAarch64AsmEmit(a, 0xa9bf7bfd)
-renvoAarch64AsmEmit(a, 0x910003fd)
-renvoAarch64AsmAddRegImm(a, 31, 31, -32)
-renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
-renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
-renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
-} else if targetIsDarwin(meta.c.renvoTargetOS) {
-entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmLeave(a)
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-renvoWinArm64CallImport(a, renvoWinImportExitProcess)
-renvoAsmRet(a)
-} else if targetIsDarwin(meta.c.renvoTargetOS) {
-renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 93)
-renvoAsmSyscall(a)
-}
-return session
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-
-if app.paramCount == 2 {
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
-}
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
-return s.stepCached(functionLimit)
+panic("non-VM backend is unavailable")
 }
 
 func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
-if s == nil || s.done {
-return true
-}
-if functionLimit < 1 {
-functionLimit = 1
-}
-emitted := 0
-for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
-i := s.gen.funcQueue[s.queueIndex]
-s.queueIndex++
-emitted++
-if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
-continue
-}
-if !renvoEmitScalarFunctionScratch(&s.gen, i) {
-return s.failFunction(i)
-}
-}
-return s.finishStep()
+panic("non-VM backend is unavailable")
 }
 
 func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
-if s == nil || s.done {
-return true
-}
-if functionLimit < 1 {
-functionLimit = 1
-}
-emitted := 0
-for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
-i := s.gen.funcQueue[s.queueIndex]
-s.queueIndex++
-emitted++
-if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
-continue
-}
-if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
-return s.failFunction(i)
-}
-}
-return s.finishStep()
+panic("non-VM backend is unavailable")
 }
 
-func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
-if targetIsDarwin(s.gen.c.renvoTargetOS) {
-renvoPrintErr("renvo: failed to emit function ")
-write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
-renvoPrintErr("\n")
-}
-s.done = true
-return true
-}
+func (s *renvoAarch64ProgramSession) failFunction(i int) bool { panic("non-VM backend is unavailable") }
 
-func (s *renvoAarch64ProgramSession) finishStep() bool {
-if s.queueIndex < len(s.gen.funcQueue) {
-return false
-}
-a := &s.gen.asm
-data := renvoAsmImageAarch64(a)
-if targetIsWindows(s.gen.c.renvoTargetOS) {
-data = renvoAsmImageWindowsArm64(a)
-} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
-data = renvoAsmImageDarwinArm64(a)
-}
-if a.patchFailed || len(data) == 0 {
-s.done = true
-return true
-}
-s.result.data = data
-s.result.ok = true
-s.done = true
-return true
-}
-func renvoAarch64AsmFrameStart(a *renvoAsm) int {
-at := len(a.code)
-count := 2
-if a.c.renvoTargetOS == renvoOSWindows {
+func (s *renvoAarch64ProgramSession) finishStep() bool { panic("non-VM backend is unavailable") }
 
-
-
-count = 8
-}
-for i := 0; i < count; i++ {
-renvoAarch64AsmEmit(a, 0xd503201f)
-}
-return at
-}
+func renvoAarch64AsmFrameStart(a *renvoAsm) int { panic("non-VM backend is unavailable") }
 
 func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
-frame := renvoAlignValue(stackUsed, 16)
-if a.c.renvoTargetOS == renvoOSWindows {
-pages := frame / 4096
-tail := frame % 4096
-if frame == 0 {
-return
-}
-
-renvoPut32At(a.code, at, 0xd2800009|(pages<<5))
-
-renvoPut32At(a.code, at+4, 0xb40000a9)
-
-renvoPut32At(a.code, at+8, 0xd14007ff)
-renvoPut32At(a.code, at+12, 0xf90003ff)
-
-renvoPut32At(a.code, at+16, 0xf1000529)
-renvoPut32At(a.code, at+20, 0x54ffffa1)
-if tail > 0 {
-renvoPut32At(a.code, at+24, 0xd10003ff|(tail<<10))
-renvoPut32At(a.code, at+28, 0xf90003ff)
-}
-return
-}
-high := frame / 4096
-low := frame % 4096
-if high > 0 {
-renvoPut32At(a.code, at, 0xd14003ff|(high<<10))
-}
-if low > 0 {
-renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
-}
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_arm_impl.go
 
+func renvoArmAsmAlign(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmAlign(a *renvoAsm) {
-for len(a.code)%4 != 0 {
-renvoAsmEmit8(a, 0)
-}
-}
-func renvoArmAsmMovRegReg(a *renvoAsm, dst int, src int) {
-if dst == src {
-return
-}
-renvoArmAsmEmit(a, 0xe1a00000|(dst<<12)|src)
-}
-func renvoArmAsmMovRegImm(a *renvoAsm, reg int, imm int) {
-part := imm & 65535
-renvoArmAsmEmit(a, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-part = (imm >> 16) & 65535
-if part != 0 {
-renvoArmAsmEmit(a, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-}
-}
+func renvoArmAsmMovRegReg(a *renvoAsm, dst int, src int) { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmMovRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+
 func renvoArmAsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
-if imm == 0 {
-renvoArmAsmMovRegReg(a, dst, src)
-return
+panic("non-VM backend is unavailable")
 }
-tmp := 9
-if dst == tmp || src == tmp {
-tmp = 10
-}
-if imm < 0 {
-renvoArmAsmMovRegImm(a, tmp, -imm)
-renvoArmAsmSubRegReg(a, dst, src, tmp)
-return
-}
-renvoArmAsmMovRegImm(a, tmp, imm)
-renvoArmAsmAddRegReg(a, dst, src, tmp)
-}
-func renvoArmAsmFrameStart(a *renvoAsm) int {
-at := len(a.code)
-renvoArmAsmEmit(a, 0xe3009000)
-renvoArmAsmEmit(a, 0xe04dd009)
-return at
-}
+
+func renvoArmAsmFrameStart(a *renvoAsm) int { panic("non-VM backend is unavailable") }
+
 func renvoArmAsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
-frame := (stackUsed + 7) & -8
-if frame > 65528 {
-frame = 65528
+panic("non-VM backend is unavailable")
 }
-renvoPut32At(a.code, at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
-}
+
 func renvoArmAsmAddRegSmallImm(a *renvoAsm, dst int, src int, imm int) {
-if imm < 0 {
-renvoArmAsmEmit(a, 0xe2400000|(src<<16)|(dst<<12)|(-imm))
-return
+panic("non-VM backend is unavailable")
 }
-renvoArmAsmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
-}
-func renvoArmAsmAddr(a *renvoAsm, base int, disp int) int {
-if disp == 0 {
-return base
-}
-renvoArmAsmAddRegImm(a, 12, base, disp)
-return 12
-}
+
+func renvoArmAsmAddr(a *renvoAsm, base int, disp int) int { panic("non-VM backend is unavailable") }
+
 func renvoArmAsmLoadStoreAddr(a *renvoAsm, base int, disp int, size int) int {
-if size == 2 && (disp < 0 || disp > 255) {
-return renvoArmAsmAddr(a, base, disp)
+panic("non-VM backend is unavailable")
 }
-if size != 2 && (disp < -4095 || disp > 4095) {
-return renvoArmAsmAddr(a, base, disp)
-}
-return base
-}
+
 func renvoArmAsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
-addr := renvoArmAsmLoadStoreAddr(a, base, disp, size)
-if addr != base {
-disp = 0
+panic("non-VM backend is unavailable")
 }
-up := 0x00800000
-if disp < 0 {
-up = 0
-disp = -disp
-}
-if size == 1 {
-renvoArmAsmEmit(a, 0xe5500000|up|(addr<<16)|(dst<<12)|disp)
-return
-}
-if size == 2 {
-renvoArmAsmEmit(a, 0xe15000f0|up|(addr<<16)|(dst<<12)|((disp&0xf0)<<4)|(disp&0x0f))
-return
-}
-renvoArmAsmEmit(a, 0xe5100000|up|(addr<<16)|(dst<<12)|disp)
-}
+
 func renvoArmAsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
-addr := renvoArmAsmLoadStoreAddr(a, base, disp, size)
-if addr != base {
-disp = 0
+panic("non-VM backend is unavailable")
 }
-up := 0x00800000
-if disp < 0 {
-up = 0
-disp = -disp
-}
-if size == 1 {
-renvoArmAsmEmit(a, 0xe5400000|up|(addr<<16)|(src<<12)|disp)
-return
-}
-if size == 2 {
-renvoArmAsmEmit(a, 0xe14000b0|up|(addr<<16)|(src<<12)|((disp&0xf0)<<4)|(disp&0x0f))
-return
-}
-renvoArmAsmEmit(a, 0xe5000000|up|(addr<<16)|(src<<12)|disp)
-}
+
 func renvoArmAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-if base == 0x8948 && disp8 == 0x45 {
-renvoArmAsmStoreRegStack(a, 0, offset)
-return
+panic("non-VM backend is unavailable")
 }
-if base == 0x8948 && disp8 == 0x55 {
-renvoArmAsmStoreRegStack(a, 1, offset)
-return
-}
-if base == 0x8948 && disp8 == 0x4d {
-renvoArmAsmStoreRegStack(a, 2, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x45 {
-renvoArmAsmLoadRegStack(a, 0, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x55 {
-renvoArmAsmLoadRegStack(a, 1, offset)
-return
-}
-if base == 0x8b48 && disp8 == 0x4d {
-renvoArmAsmLoadRegStack(a, 2, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x45 {
-renvoArmAsmLeaRegStack(a, 0, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x55 {
-renvoArmAsmLeaRegStack(a, 1, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x7d {
-renvoArmAsmLeaRegStack(a, 3, offset)
-return
-}
-if base == 0x8d48 && disp8 == 0x75 {
-renvoArmAsmLeaRegStack(a, 4, offset)
-return
-}
-}
+
 func renvoArmAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-if op == 0x8b48 && disp8 == 0x4a {
-renvoArmAsmLoadRegMem(a, 2, 1, disp, 4)
-return
-}
-if op == 0x8b48 && disp8 == 0x52 {
-renvoArmAsmLoadRegMem(a, 1, 1, disp, 4)
-return
-}
-if op == 0x8948 && disp8 == 0x41 {
-renvoArmAsmStoreRegMem(a, 0, 2, disp, 4)
-return
-}
-}
-func renvoArmAsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-shift := 3
-if size == 1 {
-shift = 0
-}
-if size == 2 {
-shift = 1
-}
-if size == 4 {
-shift = 2
-}
-renvoArmAsmAddRegRegShift(a, 12, 0, 2, shift)
-renvoArmAsmLoadRegMem(a, 0, 12, 0, size)
-}
-func renvoArmAsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-if kind == 3 {
-renvoArmAsmEmit(a, 0xe6ef0070)
-return
-}
-if kind == 7 {
-renvoArmAsmEmit(a, 0xe6af0070)
-return
-}
-if kind == 8 {
-renvoArmAsmEmit(a, 0xe6bf0070)
-return
-}
-if kind == 16 {
-renvoArmAsmEmit(a, 0xe6ff0070)
-}
-}
-func renvoArmAsmCmpRegImm(a *renvoAsm, reg int, imm int) {
-if imm >= 0 && imm <= 255 {
-renvoArmAsmEmit(a, 0xe3500000|(reg<<16)|imm)
-return
-}
-tmp := 9
-if reg == tmp {
-tmp = 10
-}
-renvoArmAsmMovRegImm(a, tmp, imm)
-renvoArmAsmCmpRegReg(a, reg, tmp)
-}
-func renvoArmCondFromSetcc(setcc int) int {
-if setcc == 0x94 {
-return 0
-}
-if setcc == 0x95 {
-return 1
-}
-if setcc == 0x9c {
-return 11
-}
-if setcc == 0x9e {
-return 13
-}
-if setcc == 0x9f {
-return 12
-}
-return 10
-}
-func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
-renvoArmAsmMovRegReg(a, 9, 0)
-renvoArmAsmEmit(a, 0xe710f010|(0<<16)|(0<<8)|2)
-if mod {
-renvoArmAsmEmit(a, 0xe0600090|(2<<12)|(9<<8)|0)
-}
-}
-func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
-shift := 3
-if size == 1 {
-shift = 0
-}
-if size == 2 {
-shift = 1
-}
-if size == 4 {
-shift = 2
-}
-renvoArmAsmAddRegRegShift(a, 12, 1, 2, shift)
-renvoArmAsmStoreRegMem(a, 0, 12, 0, size)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmAddRaxRcx(a *renvoAsm) {
-renvoArmAsmAddRegReg(a,0,0,2)
-}
+func renvoArmAsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmAddRdxImm(a *renvoAsm, imm int) {
-renvoArmAsmAddRegImm(a,1,1,imm)
-}
+func renvoArmAsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmAddRdxRcx(a *renvoAsm) {
-renvoArmAsmAddRegReg(a,1,1,2)
-}
+func renvoArmAsmCmpRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+
+func renvoArmCondFromSetcc(setcc int) int { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+
+func renvoArmAsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|right)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
-renvoArmAsmEmit(a,0xe0800000|(left<<16)|(dst<<12)|(shift<<7)|right)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmBoolNotRax(a *renvoAsm) {
-renvoArmAsmCmpRaxImm8(a,0)
-renvoArmAsmCsetRax(a,0)
-}
+func renvoArmAsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmCmpRaxImm8(a *renvoAsm, imm int) {
-renvoArmAsmCmpRegImm(a,0,imm)
-}
+func renvoArmAsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmCmpRegReg(a *renvoAsm, left int, right int) {
-renvoArmAsmEmit(a,0xe1500000|(left<<16)|right)
-}
+func renvoArmAsmCmpRegReg(a *renvoAsm, left int, right int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmCsetRax(a *renvoAsm, cond int) {
-renvoArmAsmEmit(a,0xe3a00000)
-renvoArmAsmEmit(a,(cond<<28)|0x03a00001)
-}
+func renvoArmAsmCsetRax(a *renvoAsm, cond int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmDecMemRdx(a *renvoAsm) {
-renvoArmAsmLoadRegMem(a,9,1,0,4)
-renvoArmAsmAddRegImm(a,9,9,-1)
-renvoArmAsmStoreRegMem(a,9,1,0,4)
-}
+func renvoArmAsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmEmit(a *renvoAsm, insn int) {
-renvoAsmEmit32(a,insn)
-}
+func renvoArmAsmEmit(a *renvoAsm, insn int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmImulRcxImm(a *renvoAsm, imm int) {
-renvoArmAsmMovRegImm(a,9,imm)
-renvoArmAsmMulRegReg(a,2,2,9)
-}
+func renvoArmAsmImulRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmIncMemRdx(a *renvoAsm) {
-renvoArmAsmLoadRegMem(a,9,1,0,4)
-renvoArmAsmAddRegImm(a,9,9,1)
-renvoArmAsmStoreRegMem(a,9,1,0,4)
-}
+func renvoArmAsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmIncRax(a *renvoAsm) {
-renvoArmAsmAddRegImm(a,0,0,1)
-}
+func renvoArmAsmIncRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmIncRcx(a *renvoAsm) {
-renvoArmAsmAddRegImm(a,2,2,1)
-}
+func renvoArmAsmIncRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmJnzLabel(a *renvoAsm, label int) {
-renvoArmAsmBCondLabel(a,label,1)
-}
+func renvoArmAsmJnzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmJzLabel(a *renvoAsm, label int) {
-renvoArmAsmBCondLabel(a,label,0)
-}
+func renvoArmAsmJzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmLeaRegStack(a *renvoAsm, dst int, offset int) {
-renvoArmAsmAddRegImm(a,dst,11,-offset)
-}
+func renvoArmAsmLeaRegStack(a *renvoAsm, dst int, offset int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmLeave(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,13,11)
-renvoArmAsmEmit(a,0xe8bd4800)
-}
+func renvoArmAsmLeave(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmLoadByteRaxIndexRcx(a *renvoAsm) {
-renvoArmAsmAddRegReg(a,12,0,2)
-renvoArmAsmLoadRegMem(a,0,12,0,1)
-}
+func renvoArmAsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
-renvoArmAsmAddRegRegShift(a,12,0,2,3)
-renvoArmAsmLoadRegMem(a,0,12,0,4)
-}
+func renvoArmAsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-renvoArmAsmAddRegReg(a,12,0,2)
-renvoArmAsmLoadRegMem(a,0,12,disp,4)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) {
-renvoArmAsmAccessRaxBss(a,bssOff,0xe79f0000|12)
-}
+func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
-renvoArmAsmLoadRegMem(a,0,1,disp,4)
-}
+func renvoArmAsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-renvoArmAsmLoadRegMem(a,0,1,disp,size)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmLoadRegStack(a *renvoAsm, dst int, offset int) {
-renvoArmAsmLoadRegMem(a,dst,11,-offset,4)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) {
-renvoArmAsmMovRegAbs(a,8,bssOff,1)
-}
+func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovR8Rax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,5,0)
-}
+func renvoArmAsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovR9Rax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,6,0)
-}
+func renvoArmAsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-renvoArmAsmMovRegAbs(a,0,bssOff,1)
-}
+func renvoArmAsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
-renvoArmAsmMovRegAbs(a,0,dataOff,0)
-}
+func renvoArmAsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRaxImm(a *renvoAsm, imm int) {
-renvoArmAsmMovRegImm(a,0,imm)
-}
+func renvoArmAsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRaxImm64(a *renvoAsm, imm int) {
-renvoArmAsmMovRaxImm(a,imm)
-}
+func renvoArmAsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRaxRdx(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,0,1)
-}
+func renvoArmAsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRcxRax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,2,0)
-}
+func renvoArmAsmMovRcxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRcxRdx(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,2,1)
-}
+func renvoArmAsmMovRcxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRdiRax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,3,0)
-}
+func renvoArmAsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRdxImm(a *renvoAsm, imm int) {
-renvoArmAsmMovRegImm(a,1,imm)
-}
+func renvoArmAsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRdxRax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,1,0)
-}
+func renvoArmAsmMovRdxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMovRsiRax(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,4,0)
-}
+func renvoArmAsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoArmAsmEmit(a,0xe0000090|(dst<<16)|(right<<8)|left)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmNegRax(a *renvoAsm) {
-renvoArmAsmEmit(a,0xe2600000)
-}
+func renvoArmAsmNegRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopRax(a *renvoAsm) {
-renvoArmAsmPopReg(a,0)
-}
+func renvoArmAsmPopRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopRcx(a *renvoAsm) {
-renvoArmAsmPopReg(a,2)
-}
+func renvoArmAsmPopRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopRdi(a *renvoAsm) {
-renvoArmAsmPopReg(a,3)
-}
+func renvoArmAsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopRdx(a *renvoAsm) {
-renvoArmAsmPopReg(a,1)
-}
+func renvoArmAsmPopRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopReg(a *renvoAsm, reg int) {
-renvoArmAsmEmit(a,0xe49d0004|(reg<<12))
-}
+func renvoArmAsmPopReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPopRsi(a *renvoAsm) {
-renvoArmAsmPopReg(a,4)
-}
+func renvoArmAsmPopRsi(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPushImm(a *renvoAsm, imm int) {
-renvoArmAsmMovRegImm(a,9,imm)
-renvoArmAsmPushReg(a,9)
-}
+func renvoArmAsmPushImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPushRax(a *renvoAsm) {
-renvoArmAsmPushReg(a,0)
-}
+func renvoArmAsmPushRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPushRcx(a *renvoAsm) {
-renvoArmAsmPushReg(a,2)
-}
+func renvoArmAsmPushRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPushRdx(a *renvoAsm) {
-renvoArmAsmPushReg(a,1)
-}
+func renvoArmAsmPushRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmPushReg(a *renvoAsm, reg int) {
-renvoArmAsmEmit(a,0xe52d0004|(reg<<12))
-}
+func renvoArmAsmPushReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmRet(a *renvoAsm) {
-renvoArmAsmEmit(a,0xe12fff1e)
-}
+func renvoArmAsmRet(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmSarRaxImm(a *renvoAsm, imm int) {
-renvoArmAsmEmit(a,0xe1a00040|(0<<12)|(imm<<7)|0)
-}
+func renvoArmAsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmShlRaxImm(a *renvoAsm, imm int) {
-renvoArmAsmEmit(a,0xe1a00000|(0<<12)|(imm<<7)|0)
-}
+func renvoArmAsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmShlRcxImm(a *renvoAsm, imm int) {
-renvoArmAsmEmit(a,0xe1a00000|(2<<12)|(imm<<7)|2)
-}
+func renvoArmAsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmShrRaxImm(a *renvoAsm, imm int) {
-renvoArmAsmEmit(a,0xe1a00020|(0<<12)|(imm<<7)|0)
-}
+func renvoArmAsmShrRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmStoreAlMemRdxRcx1(a *renvoAsm) {
-renvoArmAsmAddRegReg(a,12,1,2)
-renvoArmAsmStoreRegMem(a,0,12,0,1)
-}
+func renvoArmAsmStoreAlMemRdxRcx1(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) {
-renvoArmAsmAccessRaxBss(a,bssOff,0xe78f0000|12)
-}
+func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
-renvoArmAsmStoreRegMem(a,0,1,disp,4)
-}
+func renvoArmAsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-renvoArmAsmStoreRegMem(a,0,1,disp,size)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmStoreRaxMemRdxRcx8(a *renvoAsm) {
-renvoArmAsmAddRegRegShift(a,12,1,2,3)
-renvoArmAsmStoreRegMem(a,0,12,0,4)
-}
+func renvoArmAsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmStoreRegStack(a *renvoAsm, src int, offset int) {
-renvoArmAsmStoreRegMem(a,src,11,-offset,4)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmStoreSliceStack(a *renvoAsm, offset int) {
-renvoArmAsmStoreRegStack(a,0,offset)
-renvoArmAsmStoreRegStack(a,1,offset-8)
-renvoArmAsmStoreRegStack(a,2,offset-16)
-}
+func renvoArmAsmStoreSliceStack(a *renvoAsm, offset int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmSubRaxRcx(a *renvoAsm) {
-renvoArmAsmSubRegReg(a,0,0,2)
-}
+func renvoArmAsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
-renvoArmAsmEmit(a,0xe0400000|(left<<16)|(dst<<12)|right)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmSyscall(a *renvoAsm) {
-renvoArmAsmMovRegReg(a,7,0)
-renvoArmAsmMovRegReg(a,9,1)
-renvoArmAsmMovRegReg(a,0,3)
-renvoArmAsmMovRegReg(a,1,4)
-renvoArmAsmMovRegReg(a,2,9)
-renvoArmAsmMovRegReg(a,3,8)
-renvoArmAsmMovRegReg(a,4,8)
-renvoArmAsmMovRegImm(a,5,0)
-renvoArmAsmEmit(a,0xef000000)
-}
+func renvoArmAsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmAccessRaxBss(a *renvoAsm, bssOff int, insn int) {
-at:=len(a.code)
-renvoAsmEmit32(a,0xe3000000|(12<<12))
-renvoAsmEmit32(a,0xe3400000|(12<<12))
-renvoAsmEmit32(a,insn)
-renvoAsmAddAbsReloc(a, at,bssOff,1)
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) {
-at:=len(a.code)
-renvoArmAsmEmit(a,(cond<<28)|0x0a000000)
-renvoAsmAddReloc(a, at,label)
-}
+func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmCallLabel(a *renvoAsm, label int) {
-at:=len(a.code)
-renvoArmAsmEmit(a,0xeb000000)
-renvoAsmAddReloc(a, at,label)
-}
+func renvoArmAsmCallLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
-renvoArmAsmCmpRegReg(a,2,0)
-cond:=renvoArmCondFromSetcc(setcc)
-renvoArmAsmCsetRax(a,cond)
-}
+func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmJmpLabel(a *renvoAsm, label int) {
-at:=len(a.code)
-renvoArmAsmEmit(a,0xea000000)
-renvoAsmAddReloc(a, at,label)
-}
+func renvoArmAsmJmpLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
 func renvoArmAsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
-at:=len(a.code)
-renvoAsmEmit32(a,0xe3000000|(reg<<12))
-renvoAsmEmit32(a,0xe3400000|(reg<<12))
-renvoAsmEmit32(a,0xe08f0000|(reg<<12)|reg)
-renvoAsmAddAbsReloc(a, at,off,kind)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
-part:=imm&65535
-renvoPut32At(a.code, at,0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
-part=(imm>>16)&65535
-renvoPut32At(a.code, at+4,0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+panic("non-VM backend is unavailable")
 }
 
-
-func rtgArmPatchRelocations(out *renvoAsm) {
-for i := 0; i+1 < len(out.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(out.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(out.relocs, i+1)) & 2147483647
-target := renvoAsmLabelPosition(out, label)
-if at < 0 || at+4 > len(out.code) {
-out.patchFailed = true
-continue
-}
-if target < 0 { continue }
-insn := renvoGet32At(out.code, at)
-
-if (insn & 0x0e000000) == 0x0a000000 {
-displacement := target - (at + 8)
-renvoPut32At(out.code, at, (insn&0xff000000)|((displacement/4)&0x00ffffff))
-}
-}
-}
+func rtgArmPatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_wasm32_impl.go
-
 
 type renvoWasmBuffer struct {
 data           []byte
@@ -41119,6 +36772,7 @@ lastLocalStart int
 lastLocalEnd   int
 frameSize      int
 }
+
 const renvoWasm32RegRax = 0
 const renvoWasm32RegRdx = 1
 const renvoWasm32RegRcx = 2
@@ -41240,6 +36894,7 @@ const renvoVMDataBase = 256
 const renvoVMRoutineSize = 12
 const renvoVMRoutineFramed = 1
 const rtgWasm32Wasm32PackageRenvoWasm32LocalFrameBase = 16
+
 func renvoWasmPut(out *renvoWasmBuffer, value byte) {
 out.lastLocalOp = 0
 if out.length >= len(out.data) {
@@ -41755,8 +37410,6 @@ renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32R
 func renvoWasm32AsmShrRaxImm(a *renvoAsm, imm int) {
 renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 
-
-
 renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 }
 func renvoWasm32AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
@@ -41847,7 +37500,6 @@ op := int(renvo_runtime_UnsafeByteAt(code, pc))
 return pc + int(renvoWasm32InstructionSizes[op])
 }
 func renvoWasm32InstructionPcs(code []byte) []int {
-
 
 out := renvoMakeIntScratch(81920)
 pc := 0
@@ -42154,17 +37806,17 @@ return
 }
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 for i := 0; i+1 < len(a.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(a.relocs,i))
-label := int(renvo_runtime_UnsafeInt32At(a.relocs,i+1))
-target := renvoAsmLabelPosition(a,label)
+at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
+target := renvoAsmLabelPosition(a, label)
 if target >= 0 {
 renvoPut32At(a.code, at, target)
 }
 }
 for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+2))
+at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
+off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
+kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
 target := dataBase + off
 if kind == 1 {
 target = bssBase + off
@@ -42357,7 +38009,6 @@ wasmOp := int(renvo_runtime_UnsafeByteAt(code, pc+13))
 recipe := "\xff\x06\x00\xff\x0b\x01\xff\x0b\x02\xff\x0e\x03\xff\x0d\x00"
 if wasmOp >= 0x92 && wasmOp <= 0x98 {
 
-
 recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0b\x02\xa7\xbe\xff\x0e\x03\xbc\xad\xff\x0d\x00"
 } else if wasmOp >= 0xa0 && wasmOp <= 0xa6 {
 
@@ -42394,14 +38045,12 @@ recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0e\x03\xff\x0d\x00"
 recipe = "\xff\x06\x00\xff\x0b\x01\xbf\xff\x0e\x03\xff\x0d\x00"
 } else if wasmOp >= 0x86 {
 
-
 if wasmOp == 0x87 {
 recipe = "\xff\x06\x00\xff\x0b\x02\x42\xc0\x00\x5a\x04\x7e\xff\x0b\x01\x42\x3f\x87\x05\xff\x0b\x01\xff\x0b\x02\xff\x0e\x03\x0b\xff\x0d\x00"
 } else {
 recipe = "\xff\x06\x00\xff\x0b\x02\x42\xc0\x00\x5a\x04\x7e\x42\x00\x05\xff\x0b\x01\xff\x0b\x02\xff\x0e\x03\x0b\xff\x0d\x00"
 }
 } else if wasmOp == 0x7f || wasmOp == 0x81 {
-
 
 if wasmOp == 0x7f {
 recipe = "\xff\x06\x00\xff\x0b\x02\x42\x7f\x51\x04\x7e\x42\x00\xff\x0b\x01\x7d\x05\xff\x0b\x01\xff\x0b\x02\xff\x0e\x03\x0b\xff\x0d\x00"
@@ -42673,7 +38322,7 @@ func renvoWasm32SymbolPcs(a *renvoAsm) []int {
 pcs := make([]int, 0, 2048)
 for i := 0; i < len(a.symbols); i++ {
 symbol := &a.symbols[i]
-pc := renvoAsmLabelPosition(a,symbol.label)
+pc := renvoAsmLabelPosition(a, symbol.label)
 if pc >= 0 {
 if !renvoWasm32PcInList(pcs, pc) {
 pcs = append(pcs, pc)
@@ -42690,7 +38339,7 @@ pcs = append(pcs, 0)
 marks[0] = 1
 for i := 0; i < len(a.symbols); i++ {
 symbol := &a.symbols[i]
-pc := renvoAsmLabelPosition(a,symbol.label)
+pc := renvoAsmLabelPosition(a, symbol.label)
 if pc >= 0 {
 if pc >= 0 && pc < len(marks) && marks[pc] == 0 {
 pcs = append(pcs, pc)
@@ -43163,7 +38812,7 @@ break
 if !matched {
 continue
 }
-pc := renvoAsmLabelPosition(a,symbol.label)
+pc := renvoAsmLabelPosition(a, symbol.label)
 if pc >= 0 {
 return renvoWasm32FindRoutineIndex(routinePcs, pc)
 }
@@ -43257,41 +38906,8 @@ out = append(out, a.data...)
 renvoPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
 return out
 }
-func renvoWasm32Image(a *renvoAsm) []byte {
-dataBase := renvoWasm32ProgramBase
-bssBase := renvoAlignTo8(dataBase + len(a.data))
-renvoWasm32Patch(a, dataBase, bssBase)
-instrPcs := renvoWasm32InstructionPcs(a.code)
-symbolPcs := renvoWasm32SymbolPcs(a)
-routinePcs := renvoWasm32RoutinePcs(a, a.code, instrPcs)
-routineEnds := renvoWasm32RoutineEnds(routinePcs, symbolPcs, a.code, instrPcs)
-browserStepRoutine := renvoWasm32NamedRoutine(a, routinePcs, "renvoBrowserStep")
-exprStackBase := bssBase + a.bssSize + renvoWasm32StackGuardSize
-callStackBase := exprStackBase + renvoWasm32ExprStackSize
-frameTop := callStackBase + renvoWasm32CallStackSize + renvoWasm32FrameStackSize
-memSize := bssBase + a.bssSize + renvoWasm32StackGuardSize + renvoWasm32ExprStackSize + renvoWasm32CallStackSize + renvoWasm32FrameStackSize + renvoWasm32StackGuardSize
-var out renvoWasmBuffer
-imageCapacity := len(a.code) + len(a.code)/2 + len(a.data) + 65536
-if imageCapacity < 262144 {
-imageCapacity = 262144
-}
-out.data = renvoMakeByteBuffer(imageCapacity)
-renvoWasmAppendEncoded(&out, "\x00\x61\x73\x6d\x01\x00\x00\x00")
-renvoWasmAppendSection(&out, 1, renvoWasm32TypeSectionFull())
-renvoWasmAppendSection(&out, 2, renvoWasm32ImportSectionFull())
-renvoWasmAppendSection(&out, 3, renvoWasm32FunctionSectionDirect(len(routinePcs), browserStepRoutine >= 0))
-renvoWasmAppendSection(&out, 5, renvoWasm32MemorySectionFull(memSize))
-browserStepIndex := -1
-if browserStepRoutine >= 0 {
-browserStepIndex = renvoWasm32VmFuncBase + len(routinePcs)
-}
-renvoWasmAppendSection(&out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
-renvoWasm32AppendCodeSectionDirect(&out, a, instrPcs, routinePcs, routineEnds, symbolPcs, callStackBase, frameTop, exprStackBase, browserStepRoutine)
-if len(a.data) > 0 {
-renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
-}
-return out.data[:out.length]
-}
+func renvoWasm32Image(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+
 func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
 renvoWasmAppendI32Const(out, 0)
 renvoWasmAppendI32Const(out, ptr)
@@ -43625,67 +39241,18 @@ return headers, tails, true
 
 // source: backend/compiler_linux_amd64_impl.go
 
-
 func rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(
 out *renvoAsm, importID int, wordCount int,
 ) {
-vectorMask := wordCount >> 8
-wordCount &= 255
-integerCount := 0
-vectorCount := 0
-for i := 0; i < wordCount; i++ {
-if vectorMask&(1<<i) != 0 {
-renvoAsmEmit8(out, 0x58)
-
-
-
-
-renvoAsmEmit4(out, 0x66, 0x48, 0x0f, 0x6e)
-renvoAsmEmit8(out, 0xc0 | vectorCount<<3)
-vectorCount++
-} else {
-if integerCount == 0 {
-renvoAsmEmit8(out, 0x5f)
-} else if integerCount == 1 {
-renvoAsmEmit8(out, 0x5e)
-} else if integerCount == 2 {
-renvoAsmEmit8(out, 0x5a)
-} else if integerCount == 3 {
-renvoAsmEmit8(out, 0x59)
-} else if integerCount == 4 {
-renvoAsmEmit2(out, 0x41, 0x58)
-} else {
-renvoAsmEmit2(out, 0x41, 0x59)
-}
-integerCount++
-}
-}
-externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
-
-
-
-renvoAsmEmit3(out, 0x49, 0x89, 0xe3)
-renvoAsmEmit4(out, 0x48, 0x83, 0xe4, 0xf0)
-renvoAsmEmit4(out, 0x48, 0x83, 0xec, 0x10)
-renvoAsmEmit4(out, 0x4c, 0x89, 0x5c, 0x24)
-renvoAsmEmit8(out, 0x08)
-
-renvoAsmEmit8(out, 0xb0)
-renvoAsmEmit8(out, vectorCount)
-renvoAsmEmit8(out, 0xe8)
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, externalID, 2)
-renvoAsmEmit4(out, 0x48, 0x8b, 0x64, 0x24)
-renvoAsmEmit8(out, 0x08)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
-renvoAsmEmit16(out, 0x5a51)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
-renvoAsmEmit24(out, 0xc28949)
+panic("non-VM backend is unavailable")
 }
 
 const renvoLinuxAmd64SysReadSeq = 0
@@ -43696,24 +39263,14 @@ const renvoLinuxAmd64SysReadAt = 17
 const renvoLinuxAmd64SysWriteAt = 18
 const renvoLinuxAmd64SysFchmod = 91
 
-func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
-renvoNonNil(a)
-renvoAsmCopyPrimaryToCallWord1(a)
-rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(a)
-}
+func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
-renvoNonNil(a)
-rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(a)
-}
+func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func compileLinuxAmd64(input []int, output int) int {
-return compileLinuxAmd64Arena(input, output, 0)
-}
+func compileLinuxAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileLinuxAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetLinuxAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 const renvoLinuxAmd64ArgsBSSSize = 32768
@@ -43724,161 +39281,28 @@ const renvoLinuxAmd64EnvironmentLengthBSSSize = 8
 const renvoLinuxAmd64EnvironmentLengthBSSAlignment = 8
 
 func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff int, environmentLengthOff int) {
-renvoNonNil(a)
-base := len(a.code)
-renvoAsmEmitText(a, "\x48\x8b\x04\x24\x49\x89\xc0\x4c\x8d\x4c\x24\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x89\xd4\x4d\x31\xdb\x4d\x39\xc3\x7d\x22\x4b\x8b\x3c\xd9\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd9\x4c\x8d\x4c\x24\x08\x49\x83\x39\x00\x74\x06\x49\x83\xc1\x08\xeb\xf4\x49\x83\xc1\x08\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x4b\x8b\x3c\xd9\x48\x83\xff\x00\x74\x1e\x49\x89\x3a\x48\x31\xc0\x80\x3c\x07\x00\x74\x05\x48\xff\xc0\xeb\xf5\x49\x89\x42\x08\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x4c\x89\xe7\x4c\x89\xc6\x4c\x89\xc2\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-renvoAsmAddAbsReloc(a, base+15, argsOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+88, environmentOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+141, environmentLengthOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+157, environmentOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+166, environmentLengthOff, renvoAbsBssReloc)
+panic("non-VM backend is unavailable")
 }
 
-
-func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
-return renvoAsmImageRelocatableObjectAmd64(emitter)
-}
+func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 func renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {
-rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(out, importID, wordCount)
+panic("non-VM backend is unavailable")
 }
 
 const renvoLinuxAmd64ELFMachine = 62
 
-func renvoAsmImageAmd64(a *renvoAsm) []byte {
-renvoNonNil(a)
-renvoAsmPatch(a)
-loadFileSize := a.dataOffset + len(a.data)
-bssOffset := renvoAsmBssOffset(a)
-syscallTableSize := len(a.openbsdSyscalls) / 2 * 8
-if a.c.stripSymbols {
-oldCodeLen := len(a.code)
-var out []byte
-out = a.code
-if renvoFixedTarget == 0 && loadFileSize > cap(out) {
-out = renvoAppendUntil(out, loadFileSize)
-} else {
-renvoTruncBytes(&out, loadFileSize)
-}
-if renvoFixedTarget == 0 {
-copy(out[a.codeOffset:a.codeOffset+oldCodeLen], out[:oldCodeLen])
-} else {
-for i := oldCodeLen; i > 0; i-- {
-out[a.codeOffset+i-1] = out[i-1]
-}
-}
-var header []byte
-header = renvoAppendElfHeaderAmd64(header, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0, loadFileSize, syscallTableSize)
-if renvoFixedTarget == 0 {
-copy(out, header)
-} else {
-for i := 0; i < len(header); i++ {
-out[i] = header[i]
-}
-}
-pos := a.dataOffset
-if a.c.renvoTargetOS == renvoOSOpenBSD {
-out = renvoAppendOpenBSDSyscallTable(out, a)
-}
-if renvoFixedTarget == 0 {
-copy(out[pos:], a.data)
-} else {
-for i := 0; i < len(a.data); i++ {
-out[pos+i] = a.data[i]
-}
-}
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
-var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
-finalSize := sec.shoff + 448
-syscallTableOff := finalSize
-finalSize += syscallTableSize
-out := make([]byte, finalSize)
-renvoTruncBytes(&out, 0)
-out = renvoAppendElfHeaderAmd64(out, a, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff, syscallTableOff, syscallTableSize)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-out = renvoAppendUntil(out, a.dataOffset)
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, sec.symtabOff)
-for i := 0; i < len(sec.symtab); i++ {
-out = append(out, sec.symtab[i])
-}
-out = renvoAppendUntil(out, sec.strtabOff)
-for i := 0; i < len(sec.strtab); i++ {
-out = append(out, sec.strtab[i])
-}
-out = renvoAppendUntil(out, sec.shstrOff)
-for i := 0; i < len(sec.shstrtab); i++ {
-out = append(out, sec.shstrtab[i])
-}
-out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
-if a.c.renvoTargetOS == renvoOSOpenBSD {
-out = renvoAppendOpenBSDSyscallTable(out, a)
-}
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 func renvoAppendElfHeaderAmd64(out []byte, a *renvoAsm, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
-if a.c.renvoTargetOS == renvoOSOpenBSD {
-return renvoAppendOpenBSDElfHeaderAmd64(out, entryOff, a.dataOffset, fileSize, bssOffset, bssSize, shoff, syscallTableOff, syscallTableSize)
-}
-if a.c.renvoTargetOS == renvoOSNetBSD {
-return renvoAppendNetBSDElfHeaderAmd64(out, entryOff, fileSize, bssOffset, bssSize, shoff)
-}
-start := len(out)
-base := 0
-header := "\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x38\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00\x00\x00\x00"
-for i := 0; i < len(header); i++ {
-out = append(out, header[i])
-}
-out[start+18] = byte(renvoLinuxAmd64ELFMachine)
-out[start+19] = byte(renvoLinuxAmd64ELFMachine >> 8)
-if a.c.renvoTargetOS == renvoOSFreeBSD {
-out[start+7] = 9
-}
-
-
-out[start+16] = 3
-renvoPut32At(out, start+24, base+entryOff)
-renvoPut32At(out, start+40, shoff)
-renvoPut32At(out, start+80, base)
-renvoPut32At(out, start+88, base)
-if shoff != 0 {
-out[start+58] = 64
-out[start+60] = 7
-out[start+62] = 6
-}
-renvoPut32At(out, start+96, fileSize)
-renvoPut32At(out, start+104, fileSize)
-out = renvoAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoAppendElf64Program(out []byte, kind int, flags int, offset int, address int, fileSize int, memorySize int, alignment int) []byte {
-out = renvoAppend32(out, kind)
-out = renvoAppend32(out, flags)
-out = renvoAppend64(out, offset)
-out = renvoAppend64(out, address)
-out = renvoAppend64(out, address)
-out = renvoAppend64(out, fileSize)
-out = renvoAppend64(out, memorySize)
-return renvoAppend64(out, alignment)
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_freebsd_amd64_impl.go
-
 
 const renvoBSDAmd64SysReadSeq = 3
 const renvoBSDAmd64SysWriteSeq = 4
@@ -43891,108 +39315,35 @@ const renvoBSDAmd64SysExit = 1
 
 // source: backend/compiler_openbsd_amd64_impl.go
 
-
 const renvoOpenBSDAmd64SysReadAt = 169
 const renvoOpenBSDAmd64SysWriteAt = 170
-
 
 const renvoOpenBSDAmd64ELFCodeOffset = 432
 const renvoOpenBSDPTSyscalls = 0x65a3dbe9
 
 func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
-start := len(out)
-header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x3e\x00\x01\x00\x00\x00"
-for i := 0; i < len(header); i++ {
-out = append(out, header[i])
-}
-out = renvoAppendUntil(out, start+64)
-renvoPut32At(out, start+24, entryOff)
-renvoPut32At(out, start+32, 64)
-renvoPut32At(out, start+40, shoff)
-out[start+52] = 64
-out[start+54] = 56
-out[start+56] = 6
-if shoff != 0 {
-out[start+58] = 64
-out[start+60] = 7
-out[start+62] = 6
-}
-out = renvoAppendElf64Program(out, 6, 4, 64, 64, 336, 336, 8)
-dataFileSize := fileSize - dataOffset
-out = renvoAppendElf64LoadProgram(out, 5, 0, 0, dataOffset, dataOffset)
-out = renvoAppendElf64LoadProgram(out, 4, dataOffset, dataOffset, dataFileSize, dataFileSize)
-out = renvoAppendElf64LoadProgram(out, 6, bssOffset, bssOffset, 0, bssSize)
-out = renvoAppendElf64Program(out, 4, 4, 400, 400, 24, 24, 4)
-out = renvoAppendElf64Program(out, renvoOpenBSDPTSyscalls, 4, syscallTableOff, 0, syscallTableSize, syscallTableSize, 4)
-out = renvoAppendOpenBSDIdentNote(out)
-return renvoAppendUntil(out, start+renvoOpenBSDAmd64ELFCodeOffset)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAppendOpenBSDIdentNote(out []byte) []byte {
-out = renvoAppend32(out, 8)
-out = renvoAppend32(out, 4)
-out = renvoAppend32(out, 1)
-out = append(out, 'O', 'p', 'e', 'n', 'B', 'S', 'D', 0)
-return renvoAppend32(out, 0)
-}
+func renvoAppendOpenBSDIdentNote(out []byte) []byte { panic("non-VM backend is unavailable") }
 
 func renvoAppendOpenBSDSyscallTable(out []byte, a *renvoAsm) []byte {
-for i := 0; i+1 < len(a.openbsdSyscalls); i += 2 {
-label := a.openbsdSyscalls[i]
-if label < 0 || label >= len(a.labelPos) || a.labelPos[label] < 0 {
-a.patchFailed = true
-return out
-}
-out = renvoAppend32(out, a.codeOffset+int(a.labelPos[label]))
-out = renvoAppend32(out, a.openbsdSyscalls[i+1])
-}
-return out
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_netbsd_amd64_impl.go
 
-
 const renvoNetBSDAmd64SysReadAt = 173
 const renvoNetBSDAmd64SysWriteAt = 174
-
 
 const renvoNetBSDAmd64ELFCodeOffset = 256
 const renvoNetBSDAmd64ImageBase = 0x400000
 
 func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-start := len(out)
-header := "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00\x01\x00\x00\x00"
-for i := 0; i < len(header); i++ {
-out = append(out, header[i])
-}
-out = renvoAppendUntil(out, start+64)
-renvoPut32At(out, start+24, renvoNetBSDAmd64ImageBase+entryOff)
-renvoPut32At(out, start+32, 64)
-renvoPut32At(out, start+40, shoff)
-out[start+52] = 64
-out[start+54] = 56
-out[start+56] = 3
-if shoff != 0 {
-out[start+58] = 64
-out[start+60] = 7
-out[start+62] = 6
-}
-out = renvoAppendElf64Program(out, 1, 5, 0, renvoNetBSDAmd64ImageBase, fileSize, fileSize, 0x1000)
-out = renvoAppendElf64Program(out, 1, 6, bssOffset, renvoNetBSDAmd64ImageBase+bssOffset, 0, bssSize, 0x1000)
-out = renvoAppendElf64Program(out, 4, 4, 232, renvoNetBSDAmd64ImageBase+232, 24, 24, 4)
-out = renvoAppend32(out, 7)
-out = renvoAppend32(out, 4)
-out = renvoAppend32(out, 1)
-out = append(out, 'N', 'e', 't', 'B', 'S', 'D', 0, 0)
-return renvoAppend32(out, 1100000000)
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_linux_amd64_object_impl.go
-
-
-
-
-
 
 type renvoObjectELFSection struct {
 name                          string
@@ -44024,820 +39375,96 @@ type renvoObjectDataRange struct {
 start, end, section, local int
 }
 
-
-
-
-
 func renvoAmd64EmitObjectStaticCallReverse(out *renvoAsm, importID int, wordCount int) {
-for register := wordCount - 1; register >= 0; register-- {
-if register == 0 {
-renvoAsmEmit8(out, 0x5f)
-} else if register == 1 {
-renvoAsmEmit8(out, 0x5e)
-} else if register == 2 {
-renvoAsmEmit8(out, 0x5a)
-} else if register == 3 {
-renvoAsmEmit8(out, 0x59)
-} else if register == 4 {
-renvoAsmEmit2(out, 0x41, 0x58)
-} else if register == 5 {
-renvoAsmEmit2(out, 0x41, 0x59)
-}
-}
-externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
-
-
-renvoAsmEmitText(out, "\x49\x89\xe3\x48\x83\xe4\xf0\x48\x83\xec\x10\x4c\x89\x5c\x24\x08")
-renvoAsmEmitText(out, "\x31\xc0\xe8")
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, externalID, 2)
-renvoAsmEmitText(out, "\x48\x8b\x64\x24\x08")
+panic("non-VM backend is unavailable")
 }
 
-func renvoObjectImageFail(reason string) []byte {
-renvoPrintErr("renvo: object image failed: ")
-renvoPrintErr(reason)
-renvoPrintErr("\n")
-return nil
-}
+func renvoObjectImageFail(reason string) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmImageRelocatableObjectAmd64(a *renvoAsm) []byte {
-return renvoAsmImageRelocatableObjectX86(a, false)
-}
+func renvoAsmImageRelocatableObjectAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmImageRelocatableObject386(a *renvoAsm) []byte {
-return renvoAsmImageRelocatableObjectX86(a, true)
-}
+func renvoAsmImageRelocatableObject386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
-renvoNonNil(a)
-sections := []renvoObjectELFSection{{}}
-ranges := renvoObjectCodeRanges(a)
-boundaries := make([]int, 0, len(ranges)*2+2)
-boundaries = append(boundaries, 0, len(a.code))
-for i := 0; i < len(ranges); i++ {
-r := &ranges[i]
-if r.start < 0 || r.end > len(a.code) || r.end <= r.start {
-return renvoObjectImageFail("invalid code range")
-}
-boundaries = append(boundaries, r.start, r.end)
-}
-for i := 1; i < len(boundaries); i++ {
-value := boundaries[i]
-j := i
-for j > 0 && boundaries[j-1] > value {
-boundaries[j] = boundaries[j-1]
-j--
-}
-boundaries[j] = value
-}
-unique := boundaries[:0]
-for i := 0; i < len(boundaries); i++ {
-if len(unique) == 0 || unique[len(unique)-1] != boundaries[i] {
-unique = append(unique, boundaries[i])
-}
-}
-codeMap := make([]renvoObjectCodeRange, 0, len(unique))
-for i := 0; i+1 < len(unique); i++ {
-start, end := unique[i], unique[i+1]
-if end <= start {
-continue
-}
-chosen := -1
-for j := 0; j < len(ranges); j++ {
-r := &ranges[j]
-if r.start <= start && r.end >= end &&
-(chosen < 0 || r.priority > ranges[chosen].priority ||
-r.priority == ranges[chosen].priority && r.end-r.start < ranges[chosen].end-ranges[chosen].start) {
-chosen = j
-}
-}
-name := ".text"
-alignment := 1
-priority := 0
-if chosen >= 0 {
-r := &ranges[chosen]
-name = r.name
-priority = r.priority
-if start == r.start {
-alignment = r.alignment
-if alignment < 1 {
-alignment = 16
-}
-}
-}
-if name == "" {
-name = ".text"
-}
-section := renvoObjectELFSectionIndex(&sections, name, 1, 6, alignment)
-local := renvoAlignValue(len(sections[section].data), alignment)
-sections[section].data = renvoObjectCodeUntil(sections[section].data, local)
-sections[section].data = append(sections[section].data, a.code[start:end]...)
-sections[section].size = len(sections[section].data)
-codeMap = append(codeMap, renvoObjectCodeRange{start: start, end: end, section: section, local: local, priority: priority})
-}
-
-dataMap := make([]renvoObjectDataRange, 0, len(a.objectData)+1)
-if len(a.data) != 0 {
-section := renvoObjectELFSectionIndex(&sections, ".rodata", 1, 2, 8)
-sections[section].data = append(sections[section].data, a.data...)
-sections[section].size = len(sections[section].data)
-}
-for i := 0; i < len(a.objectData); i++ {
-item := &a.objectData[i]
-if item.size <= 0 {
-target := renvoObjectStoredText(a, item.targetStart, item.targetEnd)
-if target != "" && target != "-" {
-continue
-}
-}
-name := renvoObjectStoredText(a, item.sectionStart, item.sectionEnd)
-if name == "" {
-if item.initialized != 0 {
-name = ".data"
-} else {
-name = ".bss"
-}
-}
-nobits := item.initialized == 0 && (name == ".bss" || renvoObjectStringPrefix(name, ".bss."))
-typ, flags := 1, 3
-if nobits {
-typ = 8
-}
-if renvoObjectStringPrefix(name, ".rodata") {
-flags = 2
-}
-if renvoObjectStringPrefix(name, ".initcall") {
-
-
-flags = 2
-}
-if item.kind == renvoObjectDeclStaticCall {
-flags = 6
-}
-if name == "__ex_table" || renvoObjectStringPrefix(name, "runtime_ptr_") || renvoObjectStringPrefix(name, "runtime_shift_") {
-flags = 2
-}
-alignment := item.alignment
-if alignment < 1 {
-alignment = renvoObjectNaturalAlignment(item.size)
-}
-section := renvoObjectELFSectionIndex(&sections, name, typ, flags, alignment)
-local := renvoAlignValue(sections[section].size, alignment)
-
-
-
-
-
-emittedSize := item.size
-sections[section].size = local + emittedSize
-if !nobits {
-sections[section].data = renvoObjectUntil(sections[section].data, local+emittedSize)
-valueSize := item.valueEnd - item.valueStart
-if valueSize > 0 {
-if item.valueStart < 0 || item.valueEnd > len(a.objectDataValues) || valueSize > emittedSize {
-return renvoObjectImageFail("invalid data value range")
-}
-copy(sections[section].data[local:local+valueSize], a.objectDataValues[item.valueStart:item.valueEnd])
-} else {
-for at := 0; at < item.size; at++ {
-sections[section].data[local+at] = byte(item.value >> (at * 8))
-}
-}
-}
-dataMap = append(dataMap, renvoObjectDataRange{start: item.offset, end: item.offset + emittedSize, section: section, local: local})
-}
-declaredRanges := len(dataMap)
-mappedEnd := 0
-for i := 0; i < declaredRanges; i++ {
-r := dataMap[i]
-if r.start < mappedEnd {
-return renvoObjectImageFail("overlapping or unordered data ranges")
-}
-if r.start > mappedEnd {
-section := renvoObjectELFSectionIndex(&sections, ".bss", 8, 3, 8)
-local := renvoAlignValue(sections[section].size, 8)
-sections[section].size = local + r.start - mappedEnd
-dataMap = append(dataMap, renvoObjectDataRange{start: mappedEnd, end: r.start, section: section, local: local})
-}
-mappedEnd = r.end
-}
-if a.bssSize > mappedEnd {
-section := renvoObjectELFSectionIndex(&sections, ".bss", 8, 3, 8)
-local := renvoAlignValue(sections[section].size, 8)
-sections[section].size = local + a.bssSize - mappedEnd
-dataMap = append(dataMap, renvoObjectDataRange{start: mappedEnd, end: a.bssSize, section: section, local: local})
-}
-sectionSymbols := make([]int, len(sections))
-symbols := []renvoObjectELFSymbol{{}}
-for i := 1; i < len(sections); i++ {
-sectionSymbols[i] = len(symbols)
-symbols = append(symbols, renvoObjectELFSymbol{info: 3, section: i})
-}
-
-
-
-
-for i := 0; i < len(a.objectFunctions); i++ {
-f := &a.objectFunctions[i]
-section, value, ok := renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, f.label))
-endSection, endValue, endOK := renvoObjectMapCodeEnd(codeMap, f.end)
-if !ok || !endOK || endSection != section || endValue <= value {
-return renvoObjectImageFail("invalid object function range")
-}
-name := renvoObjectStoredText(a, f.nameStart, f.nameEnd)
-symbols = append(symbols, renvoObjectELFSymbol{name: name,
-info: 2, section: section, value: value, size: endValue - value})
-}
-
-for bindingPass := 0; bindingPass < 2; bindingPass++ {
-for i := 0; i < len(a.symbols); i++ {
-s := &a.symbols[i]
-binding := s.binding
-if binding == 0 && bindingPass != 0 || binding != 0 && bindingPass == 0 {
-continue
-}
-position := renvoAsmLabelPosition(a, s.label)
-section, value, ok := renvoObjectMapCode(codeMap, position)
-if !ok {
-return renvoObjectImageFail("invalid code symbol range")
-}
-size := 0
-if s.endLabel > 0 {
-endSection, endValue, endOK := renvoObjectMapCodeEnd(codeMap, renvoAsmLabelPosition(a, s.endLabel))
-if endOK && endSection == section {
-size = endValue - value
-}
-}
-symbols = append(symbols, renvoObjectELFSymbol{name: renvoObjectStoredText(a, s.nameStart, s.nameEnd),
-info: binding<<4 | 2, visibility: s.visibility, section: section, value: value, size: size})
-}
-for i := 0; i < len(a.objectData); i++ {
-d := &a.objectData[i]
-target := renvoObjectStoredText(a, d.targetStart, d.targetEnd)
-alias := d.size <= 0 && target != "" && target != "-"
-if alias || d.binding == 0 && bindingPass != 0 || d.binding != 0 && bindingPass == 0 {
-continue
-}
-name := renvoObjectStoredText(a, d.nameStart, d.nameEnd)
-if name == "" {
-continue
-}
-section, value, ok := renvoObjectMapData(dataMap, d.offset)
-if !ok {
-return renvoObjectImageFail("invalid data symbol range")
-}
-symbolType := 1
-if d.kind == renvoObjectDeclStaticCall {
-symbolType = 2
-}
-symbols = append(symbols, renvoObjectELFSymbol{name: name,
-info: d.binding<<4 | symbolType, visibility: d.visibility, section: section, value: value, size: d.size})
-}
-}
-firstGlobal := len(symbols)
-for i := 1; i < len(symbols); i++ {
-if symbols[i].info>>4 != 0 {
-firstGlobal = i
-break
-}
-}
-for i := 0; i < len(a.objectData); i++ {
-d := &a.objectData[i]
-if d.size != 0 || d.targetEnd <= d.targetStart {
-continue
-}
-target := renvoObjectStoredText(a, d.targetStart, d.targetEnd)
-if target == "-" {
-continue
-}
-targetIndex := renvoObjectFindSymbol(symbols, target)
-if targetIndex < 0 {
-return renvoObjectImageFail("alias target missing")
-}
-base := symbols[targetIndex]
-base.name = renvoObjectStoredText(a, d.nameStart, d.nameEnd)
-base.info = d.binding<<4 | base.info&15
-base.visibility = d.visibility
-symbols = append(symbols, base)
-}
-importSymbols := make([]int, renvoKernelAmd64ExternalImportCount(a))
-for i := 0; i < len(importSymbols); i++ {
-importSymbols[i] = -1
-if !renvoObjectImportReferenced(a, i) {
-continue
-}
-name := renvoKernelAmd64ExternalImportName(a, i)
-
-
-
-importSymbols[i] = renvoObjectFindSymbol(symbols, name)
-if importSymbols[i] >= 0 {
-continue
-}
-importSymbols[i] = len(symbols)
-symbols = append(symbols, renvoObjectELFSymbol{name: name, info: 16})
-}
-
-
-
-for i := 0; i+1 < len(a.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
-label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
-targetPosition := renvoAsmLabelPosition(a, label)
-sourceSection, sourceOffset, sourceOK := renvoObjectMapCode(codeMap, at)
-targetSection, targetOffset, targetOK := renvoObjectMapCode(codeMap, targetPosition)
-if !sourceOK || !targetOK || sourceOffset+4 > len(sections[sourceSection].data) {
-return renvoObjectImageFail("label relocation range missing")
-}
-addend := renvoGet32At(sections[sourceSection].data, sourceOffset)
-if sourceSection == targetSection {
-renvoPut32At(sections[sourceSection].data, sourceOffset, targetOffset+addend-(sourceOffset+4))
-} else {
-renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
-sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-renvoObjectELFRelocation{offset: sourceOffset, symbol: sectionSymbols[targetSection], typ: 2, addend: targetOffset + addend - 4})
-}
-}
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
-addend := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
-sourceSection, sourceOffset, ok := renvoObjectMapCode(codeMap, at)
-if !ok || sourceOffset+4 > len(sections[sourceSection].data) {
-return renvoObjectImageFail("absolute relocation source missing")
-}
-targetSymbol, targetOffset, relocationType := 0, 0, 2
-if kind == renvoImportReloc {
-if addend < 0 || addend >= len(importSymbols) {
-return renvoObjectImageFail("absolute import index invalid")
-}
-targetSymbol = importSymbols[addend]
-relocationType = 4
-if elf386 {
-relocationType = 2
-}
-} else if kind == renvoKernelAmd64RelocationAbsoluteData {
-section := renvoObjectFindSection(sections, ".rodata")
-if section < 0 {
-return renvoObjectImageFail("absolute rodata section missing")
-}
-targetSymbol, targetOffset = sectionSymbols[section], addend
-} else if kind == renvoKernelAmd64RelocationAbsoluteBSS {
-externalID, externalAddend := renvoObjectMapExternal(a, addend)
-if externalID >= 0 {
-if externalID >= len(importSymbols) {
-return renvoObjectImageFail("absolute external index invalid")
-}
-targetSymbol, targetOffset = importSymbols[externalID], externalAddend
-} else {
-section, value, found := renvoObjectMapData(dataMap, addend)
-if !found {
-renvoPrintErr("renvo: absolute data target offset ")
-renvoPrintIntErr(addend)
-renvoPrintErr(" bss size ")
-renvoPrintIntErr(a.bssSize)
-renvoPrintErr("\n")
-return renvoObjectImageFail("absolute data target missing")
-}
-targetSymbol, targetOffset = sectionSymbols[section], value
-}
-} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
-section := renvoObjectFindSection(sections, ".bss")
-if section < 0 {
-return renvoObjectImageFail("absolute bss-end section missing")
-}
-targetSymbol, targetOffset = sectionSymbols[section], sections[section].size
-} else {
-return renvoObjectImageFail("unknown absolute relocation kind")
-}
-renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
-relocationAddend := targetOffset - 4
-if elf386 && kind != renvoImportReloc {
-relocationType = 1
-relocationAddend = targetOffset
-}
-sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: relocationType, addend: relocationAddend})
-}
-for i := 0; i < len(a.objectDataRelocs); i++ {
-r := &a.objectDataRelocs[i]
-sourceSection, sourceOffset, found := -1, 0, false
-if r.offset < 0 {
-sourceSection, sourceOffset, found = renvoObjectMapCode(codeMap, renvoAsmLabelPosition(a, -r.offset-1))
-} else {
-sourceSection, sourceOffset, found = renvoObjectMapData(dataMap, r.offset)
-}
-if !found {
-renvoPrintErr("renvo: object relocation source missing ")
-renvoPrintIntErr(i)
-renvoPrintErr("\n")
-return renvoObjectImageFail("relocation source missing")
-}
-targetSymbol := -1
-addend := r.addend
-if r.codeTarget > 0 || r.codeLabel > 0 {
-targetPosition := r.codeTarget - 1
-if r.codeLabel > 0 {
-targetPosition = renvoAsmLabelPosition(a, r.codeLabel-1)
-}
-targetSection, targetOffset, ok := renvoObjectMapCode(codeMap, targetPosition)
-if !ok {
-renvoPrintErr("renvo: object data relocation code target missing\n")
-return renvoObjectImageFail("data relocation code target missing")
-}
-targetSymbol = sectionSymbols[targetSection]
-addend += targetOffset
-} else if target := renvoObjectStoredText(a, r.targetStart, r.targetEnd); target == "" {
-section := renvoObjectFindSection(sections, ".rodata")
-if section < 0 {
-renvoPrintErr("renvo: object data relocation rodata missing\n")
-return renvoObjectImageFail("data relocation rodata missing")
-}
-targetSymbol = sectionSymbols[section]
-} else {
-targetSymbol = renvoObjectFindSymbol(symbols, target)
-if targetSymbol < 0 {
-renvoPrintErr("renvo: object data relocation symbol missing: ")
-renvoPrintErr(target)
-renvoPrintErr("\n")
-return renvoObjectImageFail("data relocation symbol missing")
-}
-}
-sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-renvoObjectELFRelocation{offset: sourceOffset, symbol: targetSymbol, typ: r.typ, addend: addend})
-}
-for i := 1; i < len(sections); i++ {
-if !renvoObjectStringPrefix(sections[i].name, ".gnu.linkonce.") {
-continue
-}
-signature := -1
-for j := 1; j < len(symbols); j++ {
-if symbols[j].section == i && symbols[j].name != "" {
-signature = j
-break
-}
-}
-if signature < 0 {
-return renvoObjectImageFail("linkonce signature missing")
-}
-sections[i].flags |= 512
-groupData := renvoElfAmd64Append32(nil, 1)
-groupData = renvoElfAmd64Append32(groupData, i)
-sections = append(sections, renvoObjectELFSection{name: ".group", typ: 17, alignment: 4,
-info: signature, entrySize: 4, data: groupData, size: len(groupData)})
-}
-
-contentCount := len(sections)
-for i := 1; i < contentCount; i++ {
-if len(sections[i].relocations) == 0 {
-continue
-}
-name := ".rela" + sections[i].name
-relocationSection := renvoObjectELFSection{name: name, typ: 4, flags: 64, alignment: 8, info: i, entrySize: 24}
-if elf386 {
-name = ".rel" + sections[i].name
-relocationSection = renvoObjectELFSection{name: name, typ: 9, flags: 64, alignment: 4, info: i, entrySize: 8}
-}
-for j := 0; j < len(sections[i].relocations); j++ {
-r := sections[i].relocations[j]
-if elf386 {
-if r.offset < 0 || r.offset+4 > len(sections[i].data) {
-return renvoObjectImageFail("i386 relocation source missing")
-}
-renvoPut32At(sections[i].data, r.offset, renvoGet32At(sections[i].data, r.offset)+r.addend)
-relocationSection.data = renvoElf386AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ)
-} else {
-relocationSection.data = renvoElfAmd64AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ, r.addend)
-}
-}
-relocationSection.size = len(relocationSection.data)
-sections = append(sections, relocationSection)
-}
-
-strtab := []byte{0}
-symbolSize := 24
-if elf386 {
-symbolSize = 16
-}
-symtab := make([]byte, 0, len(symbols)*symbolSize)
-for i := 0; i < len(symbols); i++ {
-nameOffset := 0
-if symbols[i].name != "" {
-nameOffset = len(strtab)
-strtab = renvoObjectAppendString(strtab, symbols[i].name)
-}
-if elf386 {
-symtab = renvoElf386AppendSymbol(symtab, nameOffset, symbols[i].info, symbols[i].visibility,
-symbols[i].section, symbols[i].value, symbols[i].size)
-} else {
-start := len(symtab)
-symtab = renvoElfAmd64AppendSymbol(symtab, nameOffset, symbols[i].info, symbols[i].section, symbols[i].value, symbols[i].size)
-symtab[start+5] = byte(symbols[i].visibility)
-}
-}
-symtabIndex := len(sections)
-symbolAlignment := 8
-if elf386 {
-symbolAlignment = 4
-}
-sections = append(sections, renvoObjectELFSection{name: ".symtab", typ: 2, alignment: symbolAlignment, info: firstGlobal, entrySize: symbolSize, data: symtab, size: len(symtab)})
-strtabIndex := len(sections)
-sections = append(sections, renvoObjectELFSection{name: ".strtab", typ: 3, alignment: 1, data: strtab, size: len(strtab)})
-sections[symtabIndex].link = strtabIndex
-for i := 1; i < symtabIndex; i++ {
-if sections[i].typ == 4 || sections[i].typ == 9 || sections[i].typ == 17 {
-sections[i].link = symtabIndex
-}
-}
-sections = append(sections, renvoObjectELFSection{name: ".note.GNU-stack", typ: 1, alignment: 1})
-shstrtabIndex := len(sections)
-sections = append(sections, renvoObjectELFSection{name: ".shstrtab", typ: 3, alignment: 1})
-sectionNameOffsets := make([]int, len(sections))
-shstrtab := []byte{0}
-for i := 1; i < len(sections); i++ {
-sectionNameOffsets[i] = len(shstrtab)
-shstrtab = renvoObjectAppendString(shstrtab, sections[i].name)
-}
-sections[shstrtabIndex].data = shstrtab
-sections[shstrtabIndex].size = len(shstrtab)
-
-headerSize := 64
-if elf386 {
-headerSize = 52
-}
-image := make([]byte, headerSize)
-for i := 1; i < len(sections); i++ {
-alignment := sections[i].alignment
-if alignment < 1 {
-alignment = 1
-}
-offset := renvoAlignValue(len(image), alignment)
-image = renvoObjectUntil(image, offset)
-sections[i].offset = offset
-if sections[i].typ != 8 {
-image = append(image, sections[i].data...)
-}
-}
-sectionAlignment := 8
-if elf386 {
-sectionAlignment = 4
-}
-sectionOffset := renvoAlignValue(len(image), sectionAlignment)
-image = renvoObjectUntil(image, sectionOffset)
-for i := 0; i < len(sections); i++ {
-s := sections[i]
-if elf386 {
-image = renvoElf386AppendSection(image, sectionNameOffsets[i], s.typ, s.flags, s.offset, s.size,
-s.link, s.info, s.alignment, s.entrySize)
-} else {
-image = renvoElfAmd64AppendSection(image, sectionNameOffsets[i], s.typ, s.flags, s.offset, s.size,
-s.link, s.info, s.alignment, s.entrySize)
-}
-}
-header := renvoElfAmd64AppendHeader(nil, sectionOffset, len(sections), shstrtabIndex)
-if elf386 {
-header = renvoElf386AppendHeader(nil, sectionOffset, len(sections), shstrtabIndex)
-}
-for i := 0; i < len(header); i++ {
-image[i] = header[i]
-}
-return image
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectImportReferenced(a *renvoAsm, importID int) bool {
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-addend := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2)) & 2147483647
-if kind == renvoImportReloc && addend == importID {
-return true
-}
-if kind == renvoKernelAmd64RelocationAbsoluteBSS {
-externalID, _ := renvoObjectMapExternal(a, addend)
-if externalID == importID {
-return true
-}
-}
-}
-name := renvoKernelAmd64ExternalImportName(a, importID)
-for i := 0; i < len(a.objectDataRelocs); i++ {
-r := &a.objectDataRelocs[i]
-if r.codeTarget <= 0 && r.codeLabel <= 0 &&
-renvoObjectStoredText(a, r.targetStart, r.targetEnd) == name {
-return true
-}
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
-func renvoElf386Append16(out []byte, value int) []byte {
-return append(out, byte(value), byte(value>>8))
-}
+func renvoElf386Append16(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
-func renvoElf386Append32(out []byte, value int) []byte {
-return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
-}
+func renvoElf386Append32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
 func renvoElf386AppendHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
-out = append(out, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0)
-for len(out) < 16 {
-out = append(out, 0)
-}
-out = renvoElf386Append16(out, 1)
-out = renvoElf386Append16(out, 3)
-out = renvoElf386Append32(out, 1)
-out = renvoElf386Append32(out, 0)
-out = renvoElf386Append32(out, 0)
-out = renvoElf386Append32(out, sectionOffset)
-out = renvoElf386Append32(out, 0)
-out = renvoElf386Append16(out, 52)
-out = renvoElf386Append16(out, 0)
-out = renvoElf386Append16(out, 0)
-out = renvoElf386Append16(out, 40)
-out = renvoElf386Append16(out, sectionCount)
-out = renvoElf386Append16(out, namesIndex)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoElf386AppendRelocation(out []byte, offset int, symbol int, kind int) []byte {
-out = renvoElf386Append32(out, offset)
-return renvoElf386Append32(out, symbol<<8|kind&255)
+panic("non-VM backend is unavailable")
 }
 
 func renvoElf386AppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
-out = renvoElf386Append32(out, name)
-out = renvoElf386Append32(out, kind)
-out = renvoElf386Append32(out, flags)
-out = renvoElf386Append32(out, 0)
-out = renvoElf386Append32(out, offset)
-out = renvoElf386Append32(out, size)
-out = renvoElf386Append32(out, link)
-out = renvoElf386Append32(out, info)
-out = renvoElf386Append32(out, alignment)
-return renvoElf386Append32(out, entrySize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoElf386AppendSymbol(out []byte, name int, info int, visibility int, section int, value int, size int) []byte {
-out = renvoElf386Append32(out, name)
-out = renvoElf386Append32(out, value)
-out = renvoElf386Append32(out, size)
-out = append(out, byte(info), byte(visibility))
-return renvoElf386Append16(out, section)
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectMapExternal(a *renvoAsm, offset int) (int, int) {
-for i := 0; i < len(a.objectExternals); i++ {
-external := &a.objectExternals[i]
-if offset >= external.offset && offset < external.offset+renvoObjectExternalStride {
-return external.importID, offset - external.offset
-}
-}
-return -1, 0
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {
-var ranges []renvoObjectCodeRange
-for i := 0; i < len(a.symbols); i++ {
-s := &a.symbols[i]
-if s.endLabel <= 0 {
-continue
-}
-ranges = append(ranges, renvoObjectCodeRange{start: renvoAsmLabelPosition(a, s.label),
-end: renvoAsmLabelPosition(a, s.endLabel), name: renvoObjectStoredText(a, s.sectionStart, s.sectionEnd), alignment: s.alignment, priority: 2})
-}
-for i := 0; i < len(a.objectFunctions); i++ {
-f := &a.objectFunctions[i]
-ranges = append(ranges, renvoObjectCodeRange{start: renvoAsmLabelPosition(a, f.label), end: f.end,
-name: renvoObjectStoredText(a, f.sectionStart, f.sectionEnd), alignment: f.alignment, priority: 1})
-}
-for i := 1; i < len(ranges); i++ {
-value := ranges[i]
-j := i
-for j > 0 && ranges[j-1].start > value.start {
-ranges[j] = ranges[j-1]
-j--
-}
-ranges[j] = value
-}
-return ranges
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectELFSectionIndex(sections *[]renvoObjectELFSection, name string, typ int, flags int, alignment int) int {
-for i := 1; i < len(*sections); i++ {
-if (*sections)[i].name == name {
-if alignment > (*sections)[i].alignment {
-(*sections)[i].alignment = alignment
-}
-return i
-}
-}
-*sections = append(*sections, renvoObjectELFSection{name: name, typ: typ, flags: flags, alignment: alignment})
-return len(*sections) - 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectMapCode(ranges []renvoObjectCodeRange, position int) (int, int, bool) {
-for i := 0; i < len(ranges); i++ {
-if position >= ranges[i].start && position < ranges[i].end {
-return ranges[i].section, ranges[i].local + position - ranges[i].start, true
-}
-}
-return 0, 0, false
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectMapCodeEnd(ranges []renvoObjectCodeRange, position int) (int, int, bool) {
-for i := 0; i < len(ranges); i++ {
-if position >= ranges[i].start && position <= ranges[i].end {
-return ranges[i].section, ranges[i].local + position - ranges[i].start, true
-}
-}
-return 0, 0, false
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectMapData(ranges []renvoObjectDataRange, position int) (int, int, bool) {
-for i := 0; i < len(ranges); i++ {
-if position >= ranges[i].start && position < ranges[i].end {
-return ranges[i].section, ranges[i].local + position - ranges[i].start, true
-}
-}
-return 0, 0, false
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectStoredText(a *renvoAsm, start int, end int) string {
-if start < 0 || end <= start || end > len(a.symbolName) {
-return ""
-}
-return string(a.symbolName[start:end])
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectFindSection(sections []renvoObjectELFSection, name string) int {
-for i := 1; i < len(sections); i++ {
-if sections[i].name == name {
-return i
-}
-}
-return -1
+panic("non-VM backend is unavailable")
 }
 
 func renvoObjectFindSymbol(symbols []renvoObjectELFSymbol, name string) int {
-for i := 1; i < len(symbols); i++ {
-if symbols[i].name == name {
-return i
-}
-}
-return -1
+panic("non-VM backend is unavailable")
 }
 
-func renvoObjectUntil(out []byte, size int) []byte {
-for len(out) < size {
-out = append(out, 0)
-}
-return out
-}
+func renvoObjectUntil(out []byte, size int) []byte { panic("non-VM backend is unavailable") }
 
-func renvoObjectCodeUntil(out []byte, size int) []byte {
+func renvoObjectCodeUntil(out []byte, size int) []byte { panic("non-VM backend is unavailable") }
 
+func renvoObjectAppendString(out []byte, value string) []byte { panic("non-VM backend is unavailable") }
 
-
-for len(out) < size {
-out = append(out, 0x90)
-}
-return out
-}
-
-func renvoObjectAppendString(out []byte, value string) []byte {
-for i := 0; i < len(value); i++ {
-out = append(out, value[i])
-}
-return append(out, 0)
-}
-
-func renvoObjectNaturalAlignment(size int) int {
-alignment := 1
-for alignment < size && alignment < 8 {
-alignment *= 2
-}
-return alignment
-}
+func renvoObjectNaturalAlignment(size int) int { panic("non-VM backend is unavailable") }
 
 func renvoObjectStringPrefix(value string, prefix string) bool {
-if len(value) < len(prefix) {
-return false
-}
-for i := 0; i < len(prefix); i++ {
-if value[i] != prefix[i] {
-return false
-}
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_windows_amd64_impl.go
 
-
-
 type renvoWindowsAmd64Register struct {
-Code int
+Code  int
 Valid bool
 }
 
@@ -44846,285 +39473,72 @@ var renvoWindowsAmd64RaxRegister = renvoWindowsAmd64Register{Code: 0, Valid: tru
 const renvoWindowsAmd64RelocationAbsoluteBSS = 1
 const renvoWindowsAmd64RelocationImport = 2
 
-func renvoWindowsAmd64Rel32(out *renvoAsm, label int) {
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-if label >= 0 {
-renvoAsmAddReloc(out, at, label)
-}
-}
+func renvoWindowsAmd64Rel32(out *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
 func rtgBuiltinWindowsAmd64PackageWindowsExit(out *renvoAsm, status renvoWindowsAmd64Register) {
-if status.Code != 1 {
-if status.Code >= 8 {
-renvoAsmEmit8(out, 0x49)
-} else {
-renvoAsmEmit8(out, 0x48)
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit8(out, 0x89)
-out.code = append(out.code, byte(0xc1 | (status.Code&7)<<3))
-}
-renvoAsmEmit4(out, 0x48, 0x83, 0xec, 0x28)
-renvoAsmEmit2(out, 0xff, 0x15)
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, 8, 2)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10(out *renvoAsm, offset int) {
-if offset <= 127 {
-renvoAsmEmit4(out, 0x49, 0x8b, 0x42, offset)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit3(out, 0x49, 0x8b, 0x82)
-renvoAsmEmit32(out, offset)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP(out *renvoAsm, offset int) {
-if offset <= 127 {
-renvoAsmEmit4(out, 0x48, 0x8b, 0x44, 0x24)
-renvoAsmEmit8(out, offset)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit4(out, 0x48, 0x8b, 0x84, 0x24)
-renvoAsmEmit32(out, offset)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP(out *renvoAsm, offset int) {
-if offset <= 127 {
-renvoAsmEmit4(out, 0x48, 0x89, 0x44, 0x24)
-renvoAsmEmit8(out, offset)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit4(out, 0x48, 0x89, 0x84, 0x24)
-renvoAsmEmit32(out, offset)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP(out *renvoAsm, offset int) {
-if offset <= 127 {
-renvoAsmEmit4(out, 0x4c, 0x89, 0x54, 0x24)
-renvoAsmEmit8(out, offset)
-return
+panic("non-VM backend is unavailable")
 }
-renvoAsmEmit4(out, 0x4c, 0x89, 0x94, 0x24)
-renvoAsmEmit32(out, offset)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsStaticCall(out *renvoAsm, importID int, wordCount int) {
-if wordCount > 0 {
-renvoAsmEmit8(out, 0x59)
+panic("non-VM backend is unavailable")
 }
-if wordCount > 1 {
-renvoAsmEmit8(out, 0x5a)
-}
-if wordCount > 2 {
-renvoAsmEmit2(out, 0x41, 0x58)
-}
-if wordCount > 3 {
-renvoAsmEmit2(out, 0x41, 0x59)
-}
-stackWords := 0
-if wordCount > 4 {
-stackWords = wordCount - 4
-}
-renvoAsmEmit3(out, 0x49, 0x89, 0xe2)
-renvoAsmEmit4(out, 0x48, 0x83, 0xe4, 0xf0)
-savedRSPOff := 32 + stackWords*8
-allocation := renvoAlignValue(savedRSPOff+8, 16)
-if renvoAsmImmFits8Signed(allocation) {
-renvoAsmEmit4(out, 0x48, 0x83, 0xec, allocation)
-} else {
-renvoAsmEmit3(out, 0x48, 0x81, 0xec)
-renvoAsmEmit32(out, allocation)
-}
-for i := 0; i < stackWords; i++ {
-rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10(out, i*8)
-rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP(out, 32+i*8)
-}
-rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP(out, savedRSPOff)
-renvoAsmEmit2(out, 0xff, 0x15)
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, importID, 2)
-renvoAsmEmit3(out, 0x49, 0x89, 0xc2)
-rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP(out, savedRSPOff)
-renvoAsmEmit3(out, 0x48, 0x89, 0xc4)
-if stackWords > 0 {
-adjust := stackWords * 8
-if renvoAsmImmFits8Signed(adjust) {
-renvoAsmEmit4(out, 0x48, 0x83, 0xc4, adjust)
-} else {
-renvoAsmEmit3(out, 0x48, 0x81, 0xc4)
-renvoAsmEmit32(out, adjust)
-}
-}
-renvoAsmEmit3(out, 0x4c, 0x89, 0xd0)
-}
+
 func rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out *renvoAsm, opcode byte, label int) {
-renvoAsmEmit2(out, 0x0f, int(opcode))
-renvoWindowsAmd64Rel32(out, label)
+panic("non-VM backend is unavailable")
 }
+
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose(out *renvoAsm) {
-failed := renvoAsmNewLabel(out)
-done := renvoAsmNewLabel(out)
-rtgBuiltinWindowsAmd64PackageWindowsCallImport(out, 2)
-renvoAsmEmit2(out, 0x85, 0xc0)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, failed)
-renvoAsmEmit2(out, 0x31, 0xc0)
-renvoAsmEmit8(out, 0xe9)
-renvoWindowsAmd64Rel32(out, done)
-renvoAsmMarkLabel(out, failed)
-renvoAsmEmit2(out, 0x6a, -1)
-renvoAsmEmit8(out, 0x58)
-renvoAsmMarkLabel(out, done)
+panic("non-VM backend is unavailable")
 }
+
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod(out *renvoAsm) {
-failed := renvoAsmNewLabel(out)
-done := renvoAsmNewLabel(out)
-renvoAsmEmit2(out, 0x31, 0xd2)
-renvoAsmEmit3(out, 0x45, 0x31, 0xc0)
-renvoAsmEmit2(out, 0x41, 0xb9)
-renvoAsmEmit32(out, 1)
-rtgBuiltinWindowsAmd64PackageWindowsCallImport(out, 5)
-renvoAsmEmit3(out, 0x83, 0xf8, -1)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, failed)
-renvoAsmEmit2(out, 0x31, 0xc0)
-renvoAsmEmit8(out, 0xe9)
-renvoWindowsAmd64Rel32(out, done)
-renvoAsmMarkLabel(out, failed)
-renvoAsmEmit2(out, 0x6a, -1)
-renvoAsmEmit8(out, 0x58)
-renvoAsmMarkLabel(out, done)
+panic("non-VM backend is unavailable")
 }
+
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags(out *renvoAsm) {
-notReadWrite := renvoAsmNewLabel(out)
-accessDone := renvoAsmNewLabel(out)
-noCreate := renvoAsmNewLabel(out)
-createDone := renvoAsmNewLabel(out)
-renvoAsmEmit8(out, 0x68)
-renvoAsmEmit32(out, -2147483648)
-renvoAsmEmit8(out, 0x5a)
-renvoAsmEmit2(out, 0xa8, 2)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, notReadWrite)
-renvoAsmEmit8(out, 0x68)
-renvoAsmEmit32(out, -1073741824)
-renvoAsmEmit8(out, 0x5a)
-renvoAsmEmit8(out, 0xe9)
-renvoWindowsAmd64Rel32(out, accessDone)
-renvoAsmMarkLabel(out, notReadWrite)
-renvoAsmEmit2(out, 0xa8, 1)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, accessDone)
-renvoAsmEmit8(out, 0xba)
-renvoAsmEmit32(out, 0x40000000)
-renvoAsmMarkLabel(out, accessDone)
-renvoAsmEmit2(out, 0x41, 0xba)
-renvoAsmEmit32(out, 3)
-renvoAsmEmit2(out, 0xa8, 64)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, noCreate)
-renvoAsmEmit2(out, 0x41, 0xba)
-renvoAsmEmit32(out, 4)
-renvoAsmEmit8(out, 0xa9)
-renvoAsmEmit32(out, 512)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, createDone)
-renvoAsmEmit2(out, 0x41, 0xba)
-renvoAsmEmit32(out, 2)
-renvoAsmEmit8(out, 0xe9)
-renvoWindowsAmd64Rel32(out, createDone)
-renvoAsmMarkLabel(out, noCreate)
-renvoAsmEmit8(out, 0xa9)
-renvoAsmEmit32(out, 512)
-rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out, 0x84, createDone)
-renvoAsmEmit2(out, 0x41, 0xba)
-renvoAsmEmit32(out, 5)
-renvoAsmMarkLabel(out, createDone)
-renvoAsmEmit2(out, 0x41, 0xb8)
-renvoAsmEmit32(out, 3)
-renvoAsmEmit3(out, 0x45, 0x31, 0xc9)
+panic("non-VM backend is unavailable")
 }
+
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen(out *renvoAsm) {
-renvoAsmEmit3(out, 0x49, 0x89, 0xfb)
-renvoAsmEmit3(out, 0x48, 0x89, 0xf0)
-rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags(out)
-renvoAsmEmit3(out, 0x4c, 0x89, 0xd9)
-base := len(out.code)
-renvoAsmEmitText(out, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-renvoAsmAddAbsReloc(out, base+37, 1, 2)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsCallImport(out *renvoAsm, importID int) {
-base:=len(out.code)
-renvoAsmEmitText(out, "\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-renvoAsmAddAbsReloc(out, base+15,importID,2)
+panic("non-VM backend is unavailable")
 }
 
-func renvoWinAmd64EmitExit(a *renvoAsm) {
-rtgBuiltinWindowsAmd64PackageWindowsExit(a, renvoWindowsAmd64RaxRegister)
-}
+func renvoWinAmd64EmitExit(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoWinAmd64CallImport(a *renvoAsm, importID int) {
-rtgBuiltinWindowsAmd64PackageWindowsCallImport(a, importID)
-}
+func renvoWinAmd64CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
 
 func renvoWinAmd64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
-rtgBuiltinWindowsAmd64PackageWindowsStaticCall(a, importID, wordCount)
+panic("non-VM backend is unavailable")
 }
 
-func renvoWinAmd64EmitRuntimeOpen(a *renvoAsm) {
-rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen(a)
-}
+func renvoWinAmd64EmitRuntimeOpen(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoWinAmd64EmitRuntimeClose(a *renvoAsm) {
-rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose(a)
-}
+func renvoWinAmd64EmitRuntimeClose(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoWinAmd64EmitRuntimeChmod(a *renvoAsm) {
-rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod(a)
-}
+func renvoWinAmd64EmitRuntimeChmod(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-renvoNonNil(g)
-a := &g.asm
-if isWrite {
-if g.winWriteEmitted { return g.winWriteLabel }
-} else if g.winReadEmitted { return g.winReadLabel }
-label := renvoAsmNewLabel(a)
-if isWrite { g.winWriteEmitted = true; g.winWriteLabel = label } else { g.winReadEmitted = true; g.winReadLabel = label }
-countOff := renvoAlignValue(a.bssSize, 8)
-a.bssSize = countOff + 8
-positionOff := renvoAlignValue(a.bssSize, 8)
-a.bssSize = positionOff + 8
-code := "WVRQH\x83|$\x18\x00t\x02\xeb\x18\xb9\xf6"
-codeSize := 306
-if isWrite { code = "WVRQH\x83|$\x18\x01t\x0aH\x83|$\x18\x02t\x1c\xeb2\xb9\xf5\xff\xff\xffH\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89D$\x18\xeb\x18\xb9\xf4"; codeSize = 340 }
-base := len(a.code)
-renvoAsmEmit8(a, 0xe9)
-renvoAsmEmit32(a, codeSize)
-a.labelPos[label] = int32(base + 5)
-renvoAsmEmitText(a, code)
-commonBase := len(a.code)
-renvoAsmEmitText(a, "\xff\xff\xffH\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89D$\x18H\x83<$\x00\x0f\x8c\x80\x00\x00\x00H\x8bL$\x181\xd2E1\xc0A\xb9\x01\x00\x00\x00H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x89\x05\x00\x00\x00\x00H\x8bL$\x18H\x8b\x14$E1\xc0E1\xc9H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x8bL$\x18H\x8bT$\x10L\x8bD$\x08H\x8d\x05\x00\x00\x00\x00I\x89\xc1H\x83\xec(H\xc7D$ \x00\x00\x00\x00\xff\x15\x00\x00\x00\x00H\x83\xc4(\x83\xf8\x00tRH\x8b\x05\x00\x00\x00\x00\xebLH\x8bL$\x18H\x8bT$\x10L\x8bD$\x08H\x8d\x05\x00\x00\x00\x00I\x89\xc1H\x83\xec(H\xc7D$ \x00\x00\x00\x00\xff\x15\x00\x00\x00\x00H\x83\xc4(\x83\xf8\x00t\x0cH\x8b\x05\x00\x00\x00\x00H\x83\xc4 \xc3j\xffXH\x83\xc4 \xc3j\xffXH\x89\x05\x00\x00\x00\x00H\x8bL$\x18H\x8b\x05\x00\x00\x00\x00PZE1\xc0E1\xc9H\x83\xec(\xff\x15\x00\x00\x00\x00H\x83\xc4(H\x8b\x05\x00\x00\x00\x00H\x83\xc4 \xc3")
-if isWrite {
-renvoAsmAddAbsReloc(a, base + 5 + 33, 6, renvoWindowsAmd64RelocationImport)
-} else {
-}
-renvoAsmAddAbsReloc(a, commonBase + 9, 6, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, commonBase + 55, 5, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, commonBase + 66, positionOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, commonBase + 91, 5, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, commonBase + 117, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-if isWrite {
-renvoAsmAddAbsReloc(a, commonBase + 139, 4, renvoWindowsAmd64RelocationImport)
-} else {
-renvoAsmAddAbsReloc(a, commonBase + 139, 3, renvoWindowsAmd64RelocationImport)
-}
-renvoAsmAddAbsReloc(a, commonBase + 155, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, commonBase + 179, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-if isWrite {
-renvoAsmAddAbsReloc(a, commonBase + 201, 4, renvoWindowsAmd64RelocationImport)
-} else {
-renvoAsmAddAbsReloc(a, commonBase + 201, 3, renvoWindowsAmd64RelocationImport)
-}
-renvoAsmAddAbsReloc(a, commonBase + 217, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, commonBase + 240, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, commonBase + 252, positionOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, commonBase + 270, 5, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, commonBase + 281, countOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-return label
+panic("non-VM backend is unavailable")
 }
 
 const renvoWindowsAmd64ArgsBSSSize = 32768
@@ -45139,1123 +39553,197 @@ const renvoWindowsAmd64EnvironmentLengthBSSSize = 8
 const renvoWindowsAmd64EnvironmentLengthBSSAlignment = 8
 
 func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, argsTextOff int, argsLengthOff int, environmentOff int, environmentLengthOff int) {
-renvoNonNil(a)
-base := len(a.code)
-renvoAsmEmitText(a, "\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5a\x4d\x31\xdb\x80\x3e\x00\x0f\x84\x62\x00\x00\x00\x80\x3e\x20\x74\x05\x80\x3e\x09\x75\x05\x48\xff\xc6\xeb\xe8\x49\x89\x12\x31\xc9\x45\x31\xc0\x8a\x06\x3c\x00\x74\x28\x3c\x22\x75\x09\x41\x83\xf0\x01\x48\xff\xc6\xeb\xed\x41\x83\xf8\x00\x75\x08\x3c\x20\x74\x11\x3c\x09\x74\x0d\x88\x02\x48\xff\xc6\x48\xff\xc2\x48\xff\xc1\xeb\xd2\xc6\x02\x00\x48\xff\xc2\x49\x89\x4a\x08\x49\x83\xc2\x10\x49\xff\xc3\x3c\x00\x74\x08\x48\xff\xc6\xe9\x95\xff\xff\xff\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x83\xec\x28\xff\x15\x00\x00\x00\x00\x48\x83\xc4\x28\x48\x89\xc6\x4c\x8d\x15\x00\x00\x00\x00\x4d\x31\xdb\x80\x3e\x00\x74\x23\x49\x89\x32\x31\xc9\x80\x3c\x0e\x00\x74\x05\x48\xff\xc1\xeb\xf5\x49\x89\x4a\x08\x48\x01\xce\x48\xff\xc6\x49\x83\xc2\x10\x49\xff\xc3\xeb\xd8\x4c\x89\xd8\x48\x89\x05\x00\x00\x00\x00\x48\x8d\x05\x00\x00\x00\x00\x50\x5f\x48\x8b\x05\x00\x00\x00\x00\x50\x5e\x50\x5a\x48\x8d\x05\x00\x00\x00\x00\x50\x59\x48\x8b\x05\x00\x00\x00\x00\x49\x89\xc0\x49\x89\xc1")
-renvoAsmAddAbsReloc(a, base+6, 7, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, base+20, argsOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+27, argsTextOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+149, argsLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+159, 9, renvoWindowsAmd64RelocationImport)
-renvoAsmAddAbsReloc(a, base+173, environmentOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+226, environmentLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+233, argsOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+242, argsLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+253, environmentOff, renvoWindowsAmd64RelocationAbsoluteBSS)
-renvoAsmAddAbsReloc(a, base+262, environmentLengthOff, renvoWindowsAmd64RelocationAbsoluteBSS)
+panic("non-VM backend is unavailable")
 }
 
-
-func compileWindowsAmd64(input []int, output int) int {
-return compileWindowsAmd64Arena(input, output, 0)
-}
+func compileWindowsAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileWindowsAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetWindowsAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmPatchWindowsAmd64(a *renvoAsm, layout renvoWinImportLayout) {
-for i := 0; i+1 < len(a.relocs); i += 2 {
-at := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
-label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
-target := renvoAsmLabelPosition(a, label)
-renvoPut32At(a.code, at, target-(at+4))
-}
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsWinImportReloc {
-target = layout.iatRVAs[off]
-} else if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-renvoPut32At(a.code, at, target-(a.codeOffset+at+4))
-}
+panic("non-VM backend is unavailable")
 }
 
-
-
-
-func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
-renvoNonNil(a)
-for (a.codeOffset+len(a.code))%8 != 0 {
-a.code = append(a.code, 0)
-}
-textVirtualSize := len(a.code)
-textRawSize := renvoAlignValue(textVirtualSize, renvoWinFileAlign)
-dataRVA := renvoAlignValue(a.codeOffset+textVirtualSize, renvoWinSectionAlign)
-a.dataOffset = dataRVA
-var imports renvoWinImportLayout
-renvoAppendWinImports(a, &imports)
-renvoAsmPatchWindowsAmd64(a, imports)
-dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)
-dataVirtualSize := len(a.data) + a.bssSize
-var out []byte
-out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, (renvoWinImportFixedCount+1)*imports.thunkSize)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
-if renvoFixedTarget == 0 && a.c.emitImage {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_linux_kernel_amd64_target_impl.go
-
-
 
 const renvoKernelAmd64RelocationAbsoluteData = 0
 const renvoKernelAmd64RelocationAbsoluteBSS = 1
 const renvoKernelAmd64RelocationImport = 2
 const renvoKernelAmd64RelocationAbsoluteBSSEnd = 3
 
-func renvoKernelAmd64Rel32(out *renvoAsm, label int) {
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-if label >= 0 {
-renvoAsmAddReloc(out, at, label)
-}
-}
+func renvoKernelAmd64Rel32(out *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoKernelAmd64ExternalImportCount(out *renvoAsm) int {
-return len(out.kernelImportOffsets) / 2
-}
+func renvoKernelAmd64ExternalImportCount(out *renvoAsm) int { panic("non-VM backend is unavailable") }
 
 func renvoKernelAmd64ExternalImportName(out *renvoAsm, index int) string {
-at := index * 2
-if at < 0 || at+1 >= len(out.kernelImportOffsets) {
-return ""
-}
-start := out.kernelImportOffsets[at]
-end := out.kernelImportOffsets[at+1]
-return string(out.kernelImportNames[start:end])
+panic("non-VM backend is unavailable")
 }
 
 func renvoKernelAmd64AbsoluteRelocationOffset(out *renvoAsm, index int) int {
-return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3))
+panic("non-VM backend is unavailable")
 }
 
 func renvoKernelAmd64AbsoluteRelocationAddend(out *renvoAsm, index int) int {
-return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3+1))
+panic("non-VM backend is unavailable")
 }
 
 func renvoKernelAmd64AbsoluteRelocationKind(out *renvoAsm, index int) int {
-return int(renvo_runtime_UnsafeInt32At(out.absRelocs, index*3+2))
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(out *renvoAsm, importID int, wordCount int) {
-if wordCount > 0 {
-renvoAsmEmit8(out, 0x5f)
+panic("non-VM backend is unavailable")
 }
-if wordCount > 1 {
-renvoAsmEmit8(out, 0x5e)
-}
-if wordCount > 2 {
-renvoAsmEmit8(out, 0x5a)
-}
-if wordCount > 3 {
-renvoAsmEmit8(out, 0x59)
-}
-if wordCount > 4 {
-renvoAsmEmit2(out, 0x41, 0x58)
-}
-if wordCount > 5 {
-renvoAsmEmit2(out, 0x41, 0x59)
-}
-renvoAsmEmit8(out, 0xe8)
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, importID, 2)
-}
+
 func rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation(out *renvoAsm, operation int) bool {
-if operation != 2 {
-return false
-}
-
-
-renvoAsmEmit8(out, 0x50)
-renvoAsmEmit3(out, 0x48, 0x89, 0xd6)
-renvoAsmEmit8(out, 0x5a)
-data := out.data
-formatOffset := len(data)
-data = append(data, '%', '.', '*', 's', 0)
-out.data = data
-renvoAsmEmit3(out, 0x48, 0x8d, 0x3d)
-at := len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, formatOffset, 0)
-renvoAsmEmit2(out, 0x31, 0xc0)
-importID := renvoAsmAddExternalImportName(out, "_printk")
-renvoAsmEmit8(out, 0xe8)
-at = len(out.code)
-renvoAsmEmit32(out, 0)
-renvoAsmAddAbsReloc(out, at, importID, 2)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress(out *renvoAsm, label int) {
-renvoAsmEmit3(out, 0x48,0x8d,0x05)
-renvoKernelAmd64Rel32(out, label)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue(out *renvoAsm) {
-renvoAsmEmitText(out, "\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5b\xc9\xc3")
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue(out *renvoAsm) {
-renvoAsmEmitText(out, "\xf3\x0f\x1e\xfa\x55\x48\x89\xe5\x53\x41\x54\x41\x55\x41\x56\x41\x57\x48\x83\xec\x08")
+panic("non-VM backend is unavailable")
 }
 
-
-func rtgBuiltinElf64ObjectX8664Get32(data []byte, at int) int {
-if at < 0 || at+4 > len(data) {
-return 0
-}
-value := int(data[at])
-value |= int(data[at+1]) << 8
-value |= int(data[at+2]) << 16
-value |= int(data[at+3]) << 24
-return value
-}
+func rtgBuiltinElf64ObjectX8664Get32(data []byte, at int) int { panic("non-VM backend is unavailable") }
 
 func rtgBuiltinElf64ObjectX8664BTFString(data []byte, base int, offset int, value string) bool {
-position := base + offset
-if offset < 0 || position < 0 || position+len(value) >= len(data) {
-return false
-}
-for i := 0; i < len(value); i++ {
-if data[position+i] != value[i] {
-return false
-}
-}
-return data[position+len(value)] == 0
+panic("non-VM backend is unavailable")
 }
 
 type rtgBuiltinElf64ObjectX8664ModuleLayout struct {
-size		int
-nameOffset	int
-initOffset	int
-exitOffset	int
-ok		bool
+size       int
+nameOffset int
+initOffset int
+exitOffset int
+ok         bool
 }
 
 func rtgBuiltinElf64ObjectX8664BTFModuleLayout(data []byte) rtgBuiltinElf64ObjectX8664ModuleLayout {
-var result rtgBuiltinElf64ObjectX8664ModuleLayout
-if len(data) < 24 || data[0] != 0x9f || data[1] != 0xeb {
-return result
-}
-headerLength := rtgBuiltinElf64ObjectX8664Get32(data, 4)
-typeStart := headerLength + rtgBuiltinElf64ObjectX8664Get32(data, 8)
-typeEnd := typeStart + rtgBuiltinElf64ObjectX8664Get32(data, 12)
-stringStart := headerLength + rtgBuiltinElf64ObjectX8664Get32(data, 16)
-if headerLength < 24 || typeStart < headerLength ||
-typeEnd > len(data) || stringStart < headerLength ||
-stringStart >= len(data) {
-return result
-}
-position := typeStart
-for position+12 <= typeEnd {
-name := rtgBuiltinElf64ObjectX8664Get32(data, position)
-info := rtgBuiltinElf64ObjectX8664Get32(data, position+4)
-size := rtgBuiltinElf64ObjectX8664Get32(data, position+8)
-kind := (info >> 24) & 31
-count := info & 65535
-extra := 0
-if kind == 1 {
-extra = 4
-} else if kind == 3 {
-extra = 12
-} else if kind == 4 || kind == 5 {
-extra = count * 12
-} else if kind == 6 || kind == 13 {
-extra = count * 8
-} else if kind == 14 || kind == 17 {
-extra = 4
-} else if kind == 15 || kind == 19 {
-extra = count * 12
-}
-next := position + 12 + extra
-if next > typeEnd || next <= position {
-return result
-}
-if kind == 4 &&
-rtgBuiltinElf64ObjectX8664BTFString(data, stringStart, name, "module") {
-nameOffset := -1
-initOffset := -1
-exitOffset := -1
-member := position + 12
-for i := 0; i < count; i++ {
-memberName := rtgBuiltinElf64ObjectX8664Get32(data, member)
-bitOffset := rtgBuiltinElf64ObjectX8664Get32(data, member+8) & 0x00ffffff
-if bitOffset%8 == 0 {
-if rtgBuiltinElf64ObjectX8664BTFString(
-data, stringStart, memberName, "name",
-) {
-nameOffset = bitOffset / 8
-} else if rtgBuiltinElf64ObjectX8664BTFString(
-data, stringStart, memberName, "init",
-) {
-initOffset = bitOffset / 8
-} else if rtgBuiltinElf64ObjectX8664BTFString(
-data, stringStart, memberName, "exit",
-) {
-exitOffset = bitOffset / 8
-}
-}
-member += 12
-}
-result.size = size
-result.nameOffset = nameOffset
-result.initOffset = initOffset
-result.exitOffset = exitOffset
-result.ok = nameOffset >= 0 && initOffset >= 0
-return result
-}
-position = next
-}
-return result
+panic("non-VM backend is unavailable")
 }
 
-func rtgBuiltinElf64ObjectX8664HexDigit(ch byte) int {
-if ch >= '0' && ch <= '9' {
-return int(ch - '0')
-}
-if ch >= 'a' && ch <= 'f' {
-return int(ch-'a') + 10
-}
-if ch >= 'A' && ch <= 'F' {
-return int(ch-'A') + 10
-}
-return -1
-}
+func rtgBuiltinElf64ObjectX8664HexDigit(ch byte) int { panic("non-VM backend is unavailable") }
 
 func rtgBuiltinElf64ObjectX8664SymbolCRC(data []byte, symbol string) (int, bool) {
-line := 0
-for line < len(data) {
-end := line
-for end < len(data) && data[end] != '\n' {
-end++
-}
-firstTab := line
-for firstTab < end && data[firstTab] != '\t' {
-firstTab++
-}
-secondTab := firstTab + 1
-for secondTab < end && data[secondTab] != '\t' {
-secondTab++
-}
-if secondTab-firstTab-1 == len(symbol) {
-match := true
-for i := 0; i < len(symbol); i++ {
-if data[firstTab+1+i] != symbol[i] {
-match = false
-}
-}
-if match {
-value := 0
-start := line
-if start+2 <= firstTab &&
-data[start] == '0' && data[start+1] == 'x' {
-start += 2
-}
-for i := start; i < firstTab; i++ {
-digit := rtgBuiltinElf64ObjectX8664HexDigit(data[i])
-if digit < 0 {
-return 0, false
-}
-value = value<<4 | digit
-}
-return value, true
-}
-}
-line = end + 1
-}
-return 0, false
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664SymbolGPLOnly(data []byte, symbol string) bool {
-line := 0
-for line < len(data) {
-end := line
-for end < len(data) && data[end] != '\n' {
-end++
-}
-firstTab := line
-for firstTab < end && data[firstTab] != '\t' {
-firstTab++
-}
-secondTab := firstTab + 1
-for secondTab < end && data[secondTab] != '\t' {
-secondTab++
-}
-if secondTab-firstTab-1 == len(symbol) {
-match := true
-for i := 0; i < len(symbol); i++ {
-if data[firstTab+1+i] != symbol[i] {
-match = false
-}
-}
-if match {
-thirdTab := secondTab + 1
-for thirdTab < end && data[thirdTab] != '\t' {
-thirdTab++
-}
-exportStart := thirdTab + 1
-exportEnd := exportStart
-for exportEnd < end && data[exportEnd] != '\t' {
-exportEnd++
-}
-if exportEnd-exportStart < 4 {
-return false
-}
-if data[exportEnd-4] != '_' || data[exportEnd-3] != 'G' {
-return false
-}
-return data[exportEnd-2] == 'P' && data[exportEnd-1] == 'L'
-}
-}
-line = end + 1
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664LicenseGPLCompatible(license string) bool {
-if license == "GPL" || license == "GPL v2" {
-return true
-}
-if license == "GPL and additional rights" ||
-license == "Dual BSD/GPL" {
-return true
-}
-return license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664Contains(text string, needle string) bool {
-if len(needle) == 0 || len(needle) > len(text) {
-return false
-}
-for i := 0; i+len(needle) <= len(text); i++ {
-match := true
-for j := 0; j < len(needle); j++ {
-if text[i+j] != needle[j] {
-match = false
-}
-}
-if match {
-return true
-}
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664Vermagic(
 release string, version string, exitOffset int, symvers []byte,
 ) string {
-out := release
-if rtgBuiltinElf64ObjectX8664Contains(version, " SMP ") ||
-rtgBuiltinElf64ObjectX8664Contains(version, " SMP") {
-out += " SMP"
-}
-if rtgBuiltinElf64ObjectX8664Contains(version, "PREEMPT") {
-out += " preempt"
-}
-if exitOffset >= 0 {
-out += " mod_unload"
-}
-crc, ok := rtgBuiltinElf64ObjectX8664SymbolCRC(symvers, "module_layout")
-if ok && crc != 0 {
-out += " modversions"
-}
-return out + " "
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664AppendString(out []byte, value string) []byte {
-for i := 0; i < len(value); i++ {
-out = append(out, value[i])
-}
-return append(out, 0)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664Until(out []byte, size int) []byte {
-for len(out) < size {
-out = append(out, 0)
-}
-return out
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664AppendVersion(out []byte, symbol string, crc int) []byte {
-start := len(out)
-out = renvoElfAmd64Append64(out, crc)
-for i := 0; i < len(symbol) && i < 55; i++ {
-out = append(out, symbol[i])
-}
-out = append(out, 0)
-return rtgBuiltinElf64ObjectX8664Until(out, start+64)
+panic("non-VM backend is unavailable")
 }
 
 func rtgBuiltinElf64ObjectX8664KernelImage(
 emitter *renvoAsm, initLabel int, exitLabel int,
 ) []byte {
-initPosition := renvoAsmLabelPosition(emitter, initLabel)
-exitPosition := renvoAsmLabelPosition(emitter, exitLabel)
-layout := rtgBuiltinElf64ObjectX8664BTFModuleLayout(emitter.c.kernel.kernelBTF)
-if initPosition < 0 || !layout.ok || layout.size <= 0 {
-return nil
+panic("non-VM backend is unavailable")
 }
-moduleName := emitter.c.kernel.kernelModuleName
-license := emitter.c.kernel.kernelLicense
-symvers := emitter.c.kernel.kernelSymvers
-if moduleName == "" || license == "" || len(symvers) == 0 {
-return nil
-}
-
-strings := []byte("\x00init_module\x00cleanup_module\x00__this_module\x00")
-
-var symbols []byte
-symbols = renvoElfAmd64AppendSymbol(symbols, 0, 0, 0, 0, 0)
-symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 1, 0, 0)
-symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 3, 0, 0)
-symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 4, 0, 0)
-symbols = renvoElfAmd64AppendSymbol(symbols, 0, 3, 7, 0, 0)
-initSymbol := 5
-symbols = renvoElfAmd64AppendSymbol(
-symbols, 1, 18, 1, initPosition, 0,
-)
-exitSymbol := 0
-if exitPosition >= 0 {
-exitSymbol = len(symbols) / 24
-symbols = renvoElfAmd64AppendSymbol(
-symbols, 13, 18, 1, exitPosition, 0,
-)
-}
-symbols = renvoElfAmd64AppendSymbol(
-symbols, 28, 17, 7, 0, layout.size,
-)
-firstImportSymbol := len(symbols)/24
-nameOffset := len(strings)
-for i := 0; i < renvoKernelAmd64ExternalImportCount(emitter); i++ {
-symbols = renvoElfAmd64AppendSymbol(
-symbols, nameOffset, 16, 0, 0, 0,
-)
-strings = rtgBuiltinElf64ObjectX8664AppendString(strings, renvoKernelAmd64ExternalImportName(emitter, i))
-nameOffset = len(strings)
-}
-
-var textRelocations []byte
-for i := 0; i < len(emitter.absRelocs)/3; i++ {
-at := renvoKernelAmd64AbsoluteRelocationOffset(emitter, i)
-addend := renvoKernelAmd64AbsoluteRelocationAddend(emitter, i)
-kind := renvoKernelAmd64AbsoluteRelocationKind(emitter, i)
-if kind == renvoKernelAmd64RelocationAbsoluteBSS {
-textRelocations = renvoElfAmd64AppendRelocation(
-textRelocations, at, 3, 2, addend-4,
-)
-} else if kind == renvoKernelAmd64RelocationAbsoluteBSSEnd {
-alignment := addend
-if alignment <= 0 {
-alignment = 1
-}
-textRelocations = renvoElfAmd64AppendRelocation(
-textRelocations, at, 3, 2,
-renvoAlignValue(emitter.bssSize, alignment)-4,
-)
-} else if kind == renvoKernelAmd64RelocationImport {
-if addend < 0 || addend >= renvoKernelAmd64ExternalImportCount(emitter) {
-return nil
-}
-textRelocations = renvoElfAmd64AppendRelocation(
-textRelocations, at, firstImportSymbol+addend, 4, -4,
-)
-} else {
-textRelocations = renvoElfAmd64AppendRelocation(
-textRelocations, at, 2, 2, addend-4,
-)
-}
-}
-
-thisModule := make([]byte, layout.size)
-if layout.nameOffset+len(moduleName) >= len(thisModule) {
-return nil
-}
-for i := 0; i < len(moduleName); i++ {
-thisModule[layout.nameOffset+i] = moduleName[i]
-}
-var moduleRelocations []byte
-moduleRelocations = renvoElfAmd64AppendRelocation(
-moduleRelocations, layout.initOffset, initSymbol, 1, 0,
-)
-if exitSymbol != 0 && layout.exitOffset >= 0 {
-moduleRelocations = renvoElfAmd64AppendRelocation(
-moduleRelocations, layout.exitOffset, exitSymbol, 1, 0,
-)
-}
-
-var versions []byte
-moduleCRC, moduleOK := rtgBuiltinElf64ObjectX8664SymbolCRC(
-symvers, "module_layout",
-)
-if moduleOK && moduleCRC != 0 {
-versions = rtgBuiltinElf64ObjectX8664AppendVersion(
-versions, "module_layout", moduleCRC,
-)
-}
-for i := 0; i < renvoKernelAmd64ExternalImportCount(emitter); i++ {
-name := renvoKernelAmd64ExternalImportName(emitter, i)
-if rtgBuiltinElf64ObjectX8664SymbolGPLOnly(symvers, name) &&
-!rtgBuiltinElf64ObjectX8664LicenseGPLCompatible(license) {
-return nil
-}
-crc, ok := rtgBuiltinElf64ObjectX8664SymbolCRC(symvers, name)
-if !ok {
-return nil
-}
-if crc != 0 {
-versions = rtgBuiltinElf64ObjectX8664AppendVersion(versions, name, crc)
-}
-}
-
-var moduleInfo []byte
-moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
-moduleInfo, "license="+license,
-)
-moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(moduleInfo, "depends=")
-moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
-moduleInfo, "name="+moduleName,
-)
-moduleInfo = rtgBuiltinElf64ObjectX8664AppendString(
-moduleInfo,
-"vermagic="+rtgBuiltinElf64ObjectX8664Vermagic(
-emitter.c.kernel.kernelRelease, emitter.c.kernel.kernelVersion,
-layout.exitOffset, symvers,
-),
-)
-
-sectionNames := []byte("\x00.text\x00.rela.text\x00.rodata\x00.bss\x00.modinfo\x00__versions\x00.gnu.linkonce.this_module\x00.rela.gnu.linkonce.this_module\x00.symtab\x00.strtab\x00.shstrtab\x00")
-
-code := emitter.code
-data := emitter.data
-var image []byte
-image = rtgBuiltinElf64ObjectX8664Until(image, 64)
-textOffset := renvoAlignValue(len(image), 16)
-image = rtgBuiltinElf64ObjectX8664Until(image, textOffset)
-image = append(image, code...)
-textRelocationOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, textRelocationOffset)
-image = append(image, textRelocations...)
-dataOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, dataOffset)
-image = append(image, data...)
-bssOffset := len(image)
-infoOffset := len(image)
-image = append(image, moduleInfo...)
-versionOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, versionOffset)
-image = append(image, versions...)
-moduleOffset := renvoAlignValue(len(image), 64)
-image = rtgBuiltinElf64ObjectX8664Until(image, moduleOffset)
-image = append(image, thisModule...)
-moduleRelocationOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, moduleRelocationOffset)
-image = append(image, moduleRelocations...)
-symbolOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, symbolOffset)
-image = append(image, symbols...)
-stringOffset := len(image)
-image = append(image, strings...)
-sectionStringOffset := len(image)
-image = append(image, sectionNames...)
-sectionOffset := renvoAlignValue(len(image), 8)
-image = rtgBuiltinElf64ObjectX8664Until(image, sectionOffset)
-image = renvoElfAmd64AppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-image = renvoElfAmd64AppendSection(
-image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 7, 4, 64, textRelocationOffset,
-len(textRelocations), 9, 1, 8, 24,
-)
-image = renvoElfAmd64AppendSection(
-image, 18, 1, 2, dataOffset, len(data), 0, 0, 8, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 26, 8, 3, bssOffset, emitter.bssSize,
-0, 0, 8, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 31, 1, 2, infoOffset, len(moduleInfo),
-0, 0, 1, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 40, 1, 2, versionOffset, len(versions),
-0, 0, 8, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 51, 1, 3, moduleOffset,
-len(thisModule), 0, 0, 64, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 77, 4, 64, moduleRelocationOffset,
-len(moduleRelocations), 9, 7, 8, 24,
-)
-image = renvoElfAmd64AppendSection(
-image, 108, 2, 0, symbolOffset, len(symbols),
-10, 5, 8, 24,
-)
-image = renvoElfAmd64AppendSection(
-image, 116, 3, 0, stringOffset, len(strings),
-0, 0, 1, 0,
-)
-image = renvoElfAmd64AppendSection(
-image, 124, 3, 0, sectionStringOffset,
-len(sectionNames), 0, 0, 1, 0,
-)
-var header []byte
-header = renvoElfAmd64AppendHeader(header, sectionOffset, 12, 11)
-for i := 0; i < len(header); i++ {
-image[i] = header[i]
-}
-return image
-}
-
 
 func renvoAmd64KernelBTFModuleLayout(data []byte) (int, int, int, int, bool) {
-layout := rtgBuiltinElf64ObjectX8664BTFModuleLayout(data)
-return layout.size, layout.nameOffset, layout.initOffset, layout.exitOffset, layout.ok
+panic("non-VM backend is unavailable")
 }
 
-func renvoAmd64KernelEntryPrologue(a *renvoAsm) {
-rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue(a)
-}
+func renvoAmd64KernelEntryPrologue(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64KernelEntryEpilogue(a *renvoAsm) {
-rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue(a)
-}
+func renvoAmd64KernelEntryEpilogue(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64KernelCallbackAddress(a *renvoAsm, label int) {
-rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress(a, label)
-}
+func renvoAmd64KernelCallbackAddress(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
 
-func renvoAmd64EmitKernelPrintValue(a *renvoAsm) {
-rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation(a, 2)
-}
+func renvoAmd64EmitKernelPrintValue(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAmd64EmitKernelStaticCall(a *renvoAsm, importID int, wordCount int) {
-rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(a, importID, wordCount)
+panic("non-VM backend is unavailable")
 }
 
-
-func compileLinuxKernelAmd64(input []int, output int) int {
-return compileLinuxKernelAmd64Arena(input, output, 0)
-}
+func compileLinuxKernelAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileLinuxKernelAmd64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetLinuxKernelAmd64)
-return renvoCompileAmd64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) []byte {
-renvoNonNil(a)
-renvoAsmPatch(a)
-return rtgBuiltinElf64ObjectX8664KernelImage(a, initLabel, exitLabel)
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_linux_kernel_amd64_impl.go
 
 func renvoBeginKernelModuleAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-for i := 0; i < len(g.kernelCallbackLabels); i++ {
-g.kernelCallbackLabels[i] = -1
-}
-exitIndex := -1
-for i := 0; i < len(g.meta.funcs); i++ {
-if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
-exitIndex = i
-}
-}
-g.kernelInitLabel = renvoAsmNewLabel(a)
-g.kernelExitLabel = -1
-renvoAsmMarkLabel(a, g.kernelInitLabel)
-
-renvoAmd64KernelEntryPrologue(a)
-renvoLinearMarkFunc(g, appIndex)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return false
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return false
-}
-renvoAsmPrimaryImm(a, 0)
-renvoAmd64KernelEntryEpilogue(a)
-if exitIndex >= 0 {
-g.kernelExitLabel = renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, g.kernelExitLabel)
-renvoAmd64KernelEntryPrologue(a)
-renvoLinearMarkFunc(g, exitIndex)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-renvoAmd64KernelEntryEpilogue(a)
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64EmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
-renvoNonNil(g, ep)
-if idx < 0 || idx >= len(ep.exprs) {
-return -1
-}
-e := &ep.exprs[idx]
-if e.kind != renvoExprIdent {
-return -1
-}
-fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-return -1
-}
-renvoLinearMarkFunc(g, fnIndex)
-a := &g.asm
-label := g.kernelCallbackLabels[fnIndex]
-first := label < 0
-if first {
-label = renvoAsmNewLabel(a)
-g.kernelCallbackLabels[fnIndex] = label
-}
-
-
-renvoAmd64KernelCallbackAddress(a, label)
-renvoAsmPushPrimary(a)
-if first {
-after := renvoAsmNewLabel(a)
-renvoAsmJmpLabel(a, after)
-renvoAsmMarkLabel(a, label)
-renvoAmd64KernelEntryPrologue(a)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-renvoAmd64KernelEntryEpilogue(a)
-renvoAsmMarkLabel(a, after)
-}
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int) int {
-renvoNonNil(a)
-if nameStart < 0 || nameEnd <= nameStart || nameEnd > len(src) {
-return -1
-}
-var name []byte
-for i := nameStart; i < nameEnd; i++ {
-name = append(name, src[i])
-}
-return renvoAsmAddExternalImportName(a, string(name))
+panic("non-VM backend is unavailable")
 }
 
 func renvoAmd64EmitKernelLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-renvoNonNil(g, fn)
-if wordCount < 0 || wordCount > 6 {
-return false
-}
-a := &g.asm
-importID := renvoAsmAddKernelImport(a, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-if importID < 0 {
-return false
-}
-renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
-return true
+panic("non-VM backend is unavailable")
 }
 
-func renvoKernelNameFromOutput(path string) string {
-start := 0
-for i := 0; i < len(path); i++ {
-if path[i] == '/' || path[i] == '\\' {
-start = i + 1
-}
-}
-end := len(path)
-if end-start > 3 && path[end-3] == '.' && path[end-2] == 'k' && path[end-1] == 'o' {
-end -= 3
-}
-var out []byte
-for i := start; i < end && len(out) < 55; i++ {
-ch := path[i]
-if ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '_' {
-out = append(out, ch)
-} else {
-out = append(out, '_')
-}
-}
-if len(out) == 0 {
-return "renvo"
-}
-return string(out)
-}
+func renvoKernelNameFromOutput(path string) string { panic("non-VM backend is unavailable") }
 
-func renvoKernelReadFile(path string) []byte {
-fd := open(path, O_RDONLY)
-if fd < 0 {
-return nil
-}
-var out []byte
-out = renvoReadAll(fd, out)
-close(fd)
-return out
-}
+func renvoKernelReadFile(path string) []byte { panic("non-VM backend is unavailable") }
 
-func renvoKernelTrimLine(data []byte) string {
-end := len(data)
-for end > 0 && (data[end-1] == '\n' || data[end-1] == '\r' || data[end-1] == 0) {
-end--
-}
-return string(data[:end])
-}
+func renvoKernelTrimLine(data []byte) string { panic("non-VM backend is unavailable") }
 
-func renvoPrepareKernelMetadata() bool {
-if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 || renvoKernelRelease == "" {
-release := renvoKernelReadFile("/proc/sys/kernel/osrelease")
-if len(release) == 0 {
-return false
-}
-renvoKernelRelease = renvoKernelTrimLine(release)
-renvoKernelVersion = renvoKernelTrimLine(renvoKernelReadFile("/proc/version"))
-renvoKernelBTF = renvoKernelReadFile("/sys/kernel/btf/vmlinux")
-symversPath := "/lib/modules/" + renvoKernelRelease + "/build/Module.symvers"
-renvoKernelSymvers = renvoKernelReadFile(symversPath)
-}
-if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 {
-return false
-}
-if renvoKernelModuleSize <= 0 {
-size, nameOff, initOff, exitOff, ok := renvoAmd64KernelBTFModuleLayout(renvoKernelBTF)
-if !ok || size <= 0 || nameOff < 0 || initOff < 0 {
-return false
-}
-renvoKernelModuleSize = size
-renvoKernelModuleNameOff = nameOff
-renvoKernelModuleInitOff = initOff
-renvoKernelModuleExitOff = exitOff
-}
+func renvoPrepareKernelMetadata() bool { panic("non-VM backend is unavailable") }
 
-
-
-
-return true
-}
-
-func renvoKernelGet32(data []byte, at int) int {
-if at < 0 || at+4 > len(data) {
-return 0
-}
-return int(data[at]) | int(data[at+1])<<8 | int(data[at+2])<<16 | int(data[at+3])<<24
-}
+func renvoKernelGet32(data []byte, at int) int { panic("non-VM backend is unavailable") }
 
 func renvoKernelBTFString(data []byte, base int, off int, value string) bool {
-pos := base + off
-if off < 0 || pos < 0 || pos+len(value) >= len(data) {
-return false
-}
-for i := 0; i < len(value); i++ {
-if data[pos+i] != value[i] {
-return false
-}
-}
-return data[pos+len(value)] == 0
+panic("non-VM backend is unavailable")
 }
 
 func renvoKernelBTFModuleLayout(data []byte) (int, int, int, int, bool) {
-if len(data) < 24 || data[0] != 0x9f || data[1] != 0xeb {
-return 0, 0, 0, 0, false
-}
-headerLen := renvoKernelGet32(data, 4)
-typeStart := headerLen + renvoKernelGet32(data, 8)
-typeEnd := typeStart + renvoKernelGet32(data, 12)
-stringStart := headerLen + renvoKernelGet32(data, 16)
-if headerLen < 24 || typeStart < headerLen || typeEnd > len(data) || stringStart < headerLen || stringStart >= len(data) {
-return 0, 0, 0, 0, false
-}
-pos := typeStart
-for pos+12 <= typeEnd {
-name := renvoKernelGet32(data, pos)
-info := renvoKernelGet32(data, pos+4)
-sizeType := renvoKernelGet32(data, pos+8)
-kind := (info >> 24) & 31
-vlen := info & 65535
-extra := 0
-if kind == 1 {
-extra = 4
-} else if kind == 3 {
-extra = 12
-} else if kind == 4 || kind == 5 {
-extra = vlen * 12
-} else if kind == 6 {
-extra = vlen * 8
-} else if kind == 13 {
-extra = vlen * 8
-} else if kind == 14 || kind == 17 {
-extra = 4
-} else if kind == 15 || kind == 19 {
-extra = vlen * 12
-}
-next := pos + 12 + extra
-if next > typeEnd || next <= pos {
-return 0, 0, 0, 0, false
-}
-if kind == 4 && renvoKernelBTFString(data, stringStart, name, "module") {
-nameOff := -1
-initOff := -1
-exitOff := -1
-member := pos + 12
-for i := 0; i < vlen; i++ {
-memberName := renvoKernelGet32(data, member)
-bitOff := renvoKernelGet32(data, member+8) & 0x00ffffff
-if bitOff%8 == 0 {
-if renvoKernelBTFString(data, stringStart, memberName, "name") {
-nameOff = bitOff / 8
-} else if renvoKernelBTFString(data, stringStart, memberName, "init") {
-initOff = bitOff / 8
-} else if renvoKernelBTFString(data, stringStart, memberName, "exit") {
-exitOff = bitOff / 8
-}
-}
-member += 12
-}
-return sizeType, nameOff, initOff, exitOff, nameOff >= 0 && initOff >= 0
-}
-pos = next
-}
-return 0, 0, 0, 0, false
+panic("non-VM backend is unavailable")
 }
 
-func renvoKernelHexDigit(ch byte) int {
-if ch >= '0' && ch <= '9' {
-return int(ch - '0')
-}
-if ch >= 'a' && ch <= 'f' {
-return int(ch-'a') + 10
-}
-if ch >= 'A' && ch <= 'F' {
-return int(ch-'A') + 10
-}
-return -1
-}
+func renvoKernelHexDigit(ch byte) int { panic("non-VM backend is unavailable") }
 
-func renvoKernelSymbolCRC(symbol string) (int, bool) {
-data := renvoKernelSymvers
-line := 0
-for line < len(data) {
-end := line
-for end < len(data) && data[end] != '\n' {
-end++
-}
-firstTab := line
-for firstTab < end && data[firstTab] != '\t' {
-firstTab++
-}
-secondTab := firstTab + 1
-for secondTab < end && data[secondTab] != '\t' {
-secondTab++
-}
-if secondTab-firstTab-1 == len(symbol) {
-match := true
-for i := 0; i < len(symbol); i++ {
-if data[firstTab+1+i] != symbol[i] {
-match = false
-}
-}
-if match {
-value := 0
-start := line
-if start+2 <= firstTab && data[start] == '0' && data[start+1] == 'x' {
-start += 2
-}
-for i := start; i < firstTab; i++ {
-digit := renvoKernelHexDigit(data[i])
-if digit < 0 {
-return 0, false
-}
-value = (value << 4) | digit
-}
-return value, true
-}
-}
-line = end + 1
-}
-return 0, false
-}
+func renvoKernelSymbolCRC(symbol string) (int, bool) { panic("non-VM backend is unavailable") }
 
-func renvoKernelSymbolGPLOnly(symbol string) bool {
-data := renvoKernelSymvers
-line := 0
-for line < len(data) {
-end := line
-for end < len(data) && data[end] != '\n' {
-end++
-}
-firstTab := line
-for firstTab < end && data[firstTab] != '\t' {
-firstTab++
-}
-secondTab := firstTab + 1
-for secondTab < end && data[secondTab] != '\t' {
-secondTab++
-}
-if secondTab-firstTab-1 == len(symbol) {
-match := true
-for i := 0; i < len(symbol); i++ {
-if data[firstTab+1+i] != symbol[i] {
-match = false
-}
-}
-if match {
-thirdTab := secondTab + 1
-for thirdTab < end && data[thirdTab] != '\t' {
-thirdTab++
-}
-exportStart := thirdTab + 1
-exportEnd := exportStart
-for exportEnd < end && data[exportEnd] != '\t' {
-exportEnd++
-}
-return exportEnd-exportStart >= 4 && data[exportEnd-4] == '_' && data[exportEnd-3] == 'G' && data[exportEnd-2] == 'P' && data[exportEnd-1] == 'L'
-}
-}
-line = end + 1
-}
-return false
-}
+func renvoKernelSymbolGPLOnly(symbol string) bool { panic("non-VM backend is unavailable") }
 
-func renvoKernelLicenseGPLCompatible() bool {
-license := renvoKernelLicense
-return license == "GPL" || license == "GPL v2" || license == "GPL and additional rights" || license == "Dual BSD/GPL" || license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
-}
+func renvoKernelLicenseGPLCompatible() bool { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_linux_386_impl.go
 
@@ -46267,310 +39755,41 @@ const renvoLinux386SysFchmod = 94
 const renvoLinux386SysReadAt = 180
 const renvoLinux386SysWriteAt = 181
 
-func renvo386AsmPrepareReadWriteBuf(a *renvoAsm) {
-renvoAsmPushTertiary(a)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmPopSecondary(a)
-}
+func renvo386AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvo386AsmMoveOffsetArg(a *renvoAsm) {
-renvoAsmEmit16(a, 0xc689)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmEmit16(a, 0xc789)
-}
+func renvo386AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func compileLinux386(input []int, output int) int {
-return compileLinux386Arena(input, output, 0)
-}
+func compileLinux386(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileLinux386Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetLinux386)
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgram386Scratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-loopLabel := renvoAsmNewLabel(a)
-strlenLabel := renvoAsmNewLabel(a)
-afterLenLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-envLoopLabel := renvoAsmNewLabel(a)
-envStrlenLabel := renvoAsmNewLabel(a)
-envAfterLenLabel := renvoAsmNewLabel(a)
-envDoneLabel := renvoAsmNewLabel(a)
-
-
-
-renvoAsmEmitText(a, "\x8b\x04\x24\x89\xe6\x83\xc6\x04")
-renvo386AsmMovRegPCRel(a, 7, bssOff, renvoAbsBssReloc)
-renvoAsmEmitText(a, "\x31\xc9")
-renvoAsmMarkLabel(a, loopLabel)
-renvoAsmEmitText(a, "\x39\xc1\x0f\x8d")
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddReloc(a, at, doneLabel)
-renvoAsmEmitText(a, "\x8b\x14\x8e\x89\x17\x31\xdb")
-renvoAsmMarkLabel(a, strlenLabel)
-renvoAsmEmitText(a, "\x80\x3c\x1a\x00")
-renvoAsmJzLabel(a, afterLenLabel)
-renvoAsmEmitText(a, "\x43")
-renvoAsmJmpMarkLabel(a, strlenLabel, afterLenLabel)
-renvoAsmEmitText(a, "\x89\x5f\x08\x83\xc7\x10\x41")
-renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
-
-renvoAsmEmitText(a, "\x8d\x74\x86\x08")
-renvo386AsmMovRegPCRel(a, 7, envOff, renvoAbsBssReloc)
-renvoAsmEmitText(a, "\x31\xc9")
-renvoAsmMarkLabel(a, envLoopLabel)
-renvoAsmEmitText(a, "\x8b\x14\x8e\x85\xd2")
-renvoAsmJzLabel(a, envDoneLabel)
-renvoAsmEmitText(a, "\x89\x17\x31\xdb")
-renvoAsmMarkLabel(a, envStrlenLabel)
-renvoAsmEmitText(a, "\x80\x3c\x1a\x00")
-renvoAsmJzLabel(a, envAfterLenLabel)
-renvoAsmEmitText(a, "\x43")
-renvoAsmJmpMarkLabel(a, envStrlenLabel, envAfterLenLabel)
-renvoAsmEmitText(a, "\x89\x5f\x08\x83\xc7\x10\x41")
-renvoAsmJmpMarkLabel(a, envLoopLabel, envDoneLabel)
-renvo386AsmMovRegPCRel(a, 6, envLenOff, renvoAbsBssReloc)
-renvoAsmEmit16(a, 0x0e89)
-
-renvo386AsmMovRegPCRel(a, 3, bssOff, renvoAbsBssReloc)
-renvoAsmEmitText(a, "\x89\xc6\x89\xc2")
-renvo386AsmMovRegPCRel(a, 1, envOff, renvoAbsBssReloc)
-renvo386AsmMovRegPCRel(a, 0, envLenOff, renvoAbsBssReloc)
-renvoAsmEmit16(a, 0x008b)
-renvoAsmEmitText(a, "\x89\xc7")
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmImage386(a *renvoAsm) []byte {
-renvoAsmPatch386(a)
-loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-bssOffset := renvoAsmBssOffset(a)
-if a.c.stripSymbols {
-out := make([]byte, 0, loadFileSize)
-out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
-var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
-out := make([]byte, 0, sec.shoff+280)
-out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, sec.symtabOff)
-for i := 0; i < len(sec.symtab); i++ {
-out = append(out, sec.symtab[i])
-}
-out = renvoAppendUntil(out, sec.strtabOff)
-for i := 0; i < len(sec.strtab); i++ {
-out = append(out, sec.strtab[i])
-}
-out = renvoAppendUntil(out, sec.shstrOff)
-for i := 0; i < len(sec.shstrtab); i++ {
-out = append(out, sec.shstrtab[i])
-}
-out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImage386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmPatch386(a *renvoAsm) {
-renvoAsmPatch(a)
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-renvoPut32At(a.code, at, target-(a.codeOffset+at-3))
-}
-}
+func renvoAsmPatch386(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAppendElfHeader386(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-base := 0
-
-out = append(out, 0x7f)
-out = append(out, 'E')
-out = append(out, 'L')
-out = append(out, 'F')
-out = append(out, 1)
-out = append(out, 1)
-out = append(out, 1)
-out = append(out, 0)
-for i := 0; i < 8; i++ {
-out = append(out, 0)
-}
-out = renvoAppend16(out, 3)
-out = renvoAppend16(out, 3)
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, base+entryOff)
-out = renvoAppend32(out, 52)
-out = renvoAppend32(out, shoff)
-out = renvoAppend32(out, 0)
-out = renvoAppend16(out, 52)
-out = renvoAppend16(out, 32)
-out = renvoAppend16(out, 2)
-if shoff == 0 {
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 0)
-} else {
-out = renvoAppend16(out, 40)
-out = renvoAppend16(out, 7)
-out = renvoAppend16(out, 6)
-}
-
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, base)
-out = renvoAppend32(out, base)
-out = renvoAppend32(out, fileSize)
-out = renvoAppend32(out, fileSize)
-out = renvoAppend32(out, 5)
-out = renvoAppend32(out, 0x1000)
-out = renvoAppendElf32LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_windows_386_impl.go
 
-func compileWindows386(input []int, output int) int {
-return compileWindows386Arena(input, output, 0)
-}
+func compileWindows386(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileWindows386Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetWindows386)
-var src []byte
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgram386Scratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildWindowsArgvEnvSlices386(a *renvoAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-base := len(a.code)
-renvoAsmEmitText(a, "\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\xb8\x00\x00\x00\x00\x89\xc2\x31\xdb\x80\x3e\x00\x0f\x84\x75\x00\x00\x00\x80\x3e\x20\x0f\x84\x09\x00\x00\x00\x80\x3e\x09\x0f\x85\x06\x00\x00\x00\x46\xe9\xdf\xff\xff\xff\x89\x17\x31\xc9\x31\xed\x8a\x06\x3c\x00\x0f\x84\x34\x00\x00\x00\x3c\x22\x0f\x85\x09\x00\x00\x00\x83\xf5\x01\x46\xe9\xe5\xff\xff\xff\x83\xfd\x00\x0f\x85\x10\x00\x00\x00\x3c\x20\x0f\x84\x12\x00\x00\x00\x3c\x09\x0f\x84\x0a\x00\x00\x00\x88\x02\x46\x42\x41\xe9\xc2\xff\xff\xff\xc6\x02\x00\x42\x89\x4f\x08\x83\xc7\x10\x43\x3c\x00\x0f\x84\x06\x00\x00\x00\x46\xe9\x82\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x89\xc6\xbf\x00\x00\x00\x00\x31\xdb\x80\x3e\x00\x0f\x84\x23\x00\x00\x00\x89\x37\x31\xc9\x80\x3c\x0e\x00\x0f\x84\x06\x00\x00\x00\x41\xe9\xf0\xff\xff\xff\x89\x4f\x08\x01\xce\x46\x83\xc7\x10\x43\xe9\xd4\xff\xff\xff\x89\xd8\xa3\x00\x00\x00\x00\xbb\x00\x00\x00\x00\x8b\x35\x00\x00\x00\x00\x89\xf2\xb9\x00\x00\x00\x00\xa1\x00\x00\x00\x00\x89\xc7")
-renvoAsmAddWinImportReloc(a, base+2, renvoWinImportGetCommandLineA)
-renvoAsmAddAbsReloc(a, base+9, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+14, argsTextOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+151, argsLenOff, renvoAbsBssReloc)
-renvoAsmAddWinImportReloc(a, base+157, renvoWinImportGetEnvironmentStringsA)
-renvoAsmAddAbsReloc(a, base+164, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+217, envLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+222, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+228, argsLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+235, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+240, envLenOff, renvoAbsBssReloc)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmImageWindows386(a *renvoAsm) []byte {
-for (a.codeOffset+len(a.code))%4 != 0 {
-a.code = append(a.code, 0)
-}
-textVirtualSize := len(a.code)
-textRawSize := renvoAlignValue(textVirtualSize, renvoWinFileAlign)
-dataRVA := renvoAlignValue(a.codeOffset+textVirtualSize, renvoWinSectionAlign)
-a.dataOffset = dataRVA
-var imports renvoWinImportLayout
-if renvoAsmHasWinImportRelocs(a) {
-renvoAppendWinImports(a, &imports)
-}
-renvoAsmPatchWindows(a, imports)
-dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)
-dataVirtualSize := len(a.data) + a.bssSize
-iatSize := 0
-if imports.kernelIATRVA != 0 {
-iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
-}
-var out []byte
-out = renvoAppendPEHeader32WithContext(a.c, out, a.codeOffset, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
-if renvoFixedTarget == 0 && a.c.emitImage {
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
-out = renvoAppend32(out, a.codeOffset+at)
-}
-out = renvoAppend32(out, len(a.absRelocs)/3)
-out = append(out, 'R', 'B', 'R', '1')
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageWindows386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_linux_aarch64_impl.go
 
@@ -46582,239 +39801,30 @@ const renvoLinuxAarch64SysFchmod = 52
 const renvoLinuxAarch64SysReadAt = 67
 const renvoLinuxAarch64SysWriteAt = 68
 
-func renvoAarch64AsmPrepareReadWriteBuf(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRcx)
-}
+func renvoAarch64AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoAarch64AsmMoveOffsetArg(a *renvoAsm) {
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR10, renvoAarch64RegRax)
-}
+func renvoAarch64AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func compileLinuxAarch64(input []int, output int) int {
-return compileLinuxAarch64Arena(input, output, 0)
-}
+func compileLinuxAarch64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileLinuxAarch64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetLinuxAarch64)
-return renvoCompileAarch64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-argsOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-renvoAsmBuildArgvEnvSlicesAarch64(&g.asm, argsOff, envDataOff, envLenOff)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildArgvEnvSlicesAarch64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-loopLabel := renvoAsmNewLabel(a)
-strlenLabel := renvoAsmNewLabel(a)
-afterLenLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-envLoopLabel := renvoAsmNewLabel(a)
-envStrlenLabel := renvoAsmNewLabel(a)
-envAfterLenLabel := renvoAsmNewLabel(a)
-envDoneLabel := renvoAsmNewLabel(a)
-
-renvoAarch64AsmLoadRegMem(a, 13, 31, 0, 8)
-renvoAarch64AsmAddRegImm(a, 10, 31, 8)
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegR10, bssOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 11, 0)
-renvoAsmMarkLabel(a, loopLabel)
-renvoAarch64AsmCmpRegReg(a, 11, 13)
-renvoAarch64AsmBCondLabel(a, doneLabel, 0)
-renvoAarch64AsmAddRegRegShift(a, 12, 10, 11, 3)
-renvoAarch64AsmLoadRegMem(a, 12, 12, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 12, renvoAarch64RegR10, 0, 8)
-renvoAarch64AsmMovRegImm(a, renvoAarch64RegRax, 0)
-renvoAsmMarkLabel(a, strlenLabel)
-renvoAarch64AsmAddRegReg(a, 9, 12, renvoAarch64RegRax)
-renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, afterLenLabel, 0)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRax, renvoAarch64RegRax, 1)
-renvoAarch64AsmJmpLabel(a, strlenLabel)
-renvoAsmMarkLabel(a, afterLenLabel)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegR10, 8, 8)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegR10, renvoAarch64RegR10, 16)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmJmpLabel(a, loopLabel)
-renvoAsmMarkLabel(a, doneLabel)
-
-renvoAarch64AsmAddRegRegShift(a, 10, 10, 13, 3)
-renvoAarch64AsmAddRegImm(a, 10, 10, 8)
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegR10, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 11, 0)
-renvoAsmMarkLabel(a, envLoopLabel)
-renvoAarch64AsmLoadRegMem(a, 12, 10, 0, 8)
-renvoAarch64AsmCmpRegImm(a, 12, 0)
-renvoAarch64AsmBCondLabel(a, envDoneLabel, 0)
-renvoAarch64AsmStoreRegMem(a, 12, renvoAarch64RegR10, 0, 8)
-renvoAarch64AsmMovRegImm(a, renvoAarch64RegRax, 0)
-renvoAsmMarkLabel(a, envStrlenLabel)
-renvoAarch64AsmAddRegReg(a, 9, 12, renvoAarch64RegRax)
-renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, envAfterLenLabel, 0)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegRax, renvoAarch64RegRax, 1)
-renvoAarch64AsmJmpLabel(a, envStrlenLabel)
-renvoAsmMarkLabel(a, envAfterLenLabel)
-renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegR10, 8, 8)
-renvoAarch64AsmAddRegImm(a, renvoAarch64RegR10, renvoAarch64RegR10, 16)
-renvoAarch64AsmAddRegImm(a, 10, 10, 8)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmJmpLabel(a, envLoopLabel)
-renvoAsmMarkLabel(a, envDoneLabel)
-renvoAarch64AsmMovRegAbs(a, 12, envLenOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 11, 12, 0, 8)
-
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, bssOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, 13)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, 13)
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmImageAarch64(a *renvoAsm) []byte {
-renvoAsmPatch(a)
-renvoAsmPatchAarch64Abs(a)
-loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-bssOffset := renvoAsmBssOffset(a)
-if a.c.stripSymbols {
-out := make([]byte, 0, loadFileSize)
-out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-out = append(out, a.code...)
-out = append(out, a.data...)
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
-var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
-outputCapacity := 1048576
-out := make([]byte, 0, outputCapacity)
-out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, sec.symtabOff)
-for i := 0; i < len(sec.symtab); i++ {
-out = append(out, sec.symtab[i])
-}
-out = renvoAppendUntil(out, sec.strtabOff)
-for i := 0; i < len(sec.strtab); i++ {
-out = append(out, sec.strtab[i])
-}
-out = renvoAppendUntil(out, sec.shstrOff)
-for i := 0; i < len(sec.shstrtab); i++ {
-out = append(out, sec.shstrtab[i])
-}
-out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageAarch64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmPatchAarch64Abs(a *renvoAsm) {
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-insn := renvoGet32At(a.code, at)
-reg := insn & 31
-pcPage := (a.codeOffset + at) & -4096
-targetPage := target & -4096
-pageDelta := (targetPage - pcPage) >> 12
-immlo := pageDelta & 3
-immhi := pageDelta >> 2 & 524287
-renvoPut32At(a.code, at, 0x90000000|(immlo<<29)|(immhi<<5)|reg)
-renvoPut32At(a.code, at+4, 0x91000000|((target&4095)<<10)|(reg<<5)|reg)
-renvoPut32At(a.code, at+8, 0xd503201f)
-renvoPut32At(a.code, at+12, 0xd503201f)
-}
-}
+func renvoAsmPatchAarch64Abs(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-base := 0
-
-out = append(out, 0x7f)
-out = append(out, 'E')
-out = append(out, 'L')
-out = append(out, 'F')
-out = append(out, 2)
-out = append(out, 1)
-out = append(out, 1)
-out = append(out, 0)
-for i := 0; i < 8; i++ {
-out = append(out, 0)
-}
-out = renvoAppend16(out, 3)
-out = renvoAppend16(out, 183)
-out = renvoAppend32(out, 1)
-out = renvoAppend64U32(out, base+entryOff)
-out = renvoAppend64U32(out, 64)
-out = renvoAppend64U32(out, shoff)
-out = renvoAppend32(out, 0)
-out = renvoAppend16(out, 64)
-out = renvoAppend16(out, 56)
-out = renvoAppend16(out, 2)
-if shoff == 0 {
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 0)
-out = renvoAppend16(out, 0)
-} else {
-out = renvoAppend16(out, 64)
-out = renvoAppend16(out, 7)
-out = renvoAppend16(out, 6)
-}
-
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, 5)
-out = renvoAppend64U32(out, 0)
-out = renvoAppend64U32(out, base)
-out = renvoAppend64U32(out, base)
-out = renvoAppend64U32(out, fileSize)
-out = renvoAppend64U32(out, fileSize)
-out = renvoAppend64U32(out, 0x1000)
-out = renvoAppendElf64LoadProgram(out, 6, bssOffset, base+bssOffset, 0, bssSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_windows_arm64_impl.go
@@ -46822,703 +39832,88 @@ return out
 const renvoWinArm64Machine = 0xaa64
 const renvoWinArm64ImageBase = 0x140000000
 
-func compileWindowsArm64(input []int, output int) int {
-return compileWindowsArm64Arena(input, output, 0)
-}
+func compileWindowsArm64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetWindowsArm64)
-return renvoCompileAarch64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-argsOff := g.asm.bssSize
-g.asm.bssSize += 32768
-argsTextOff := g.asm.bssSize
-g.asm.bssSize += 32768
-argsLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-envOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-renvoAsmBuildWindowsArgvEnvSlicesArm64(&g.asm, argsOff, argsTextOff, argsLenOff, envOff, envLenOff)
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-return renvoTypeIsStringSlice(g.meta, second.typ)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildWindowsArgvEnvSlicesArm64(a *renvoAsm, argsOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-skipLabel := renvoAsmNewLabel(a)
-startLabel := renvoAsmNewLabel(a)
-copyLabel := renvoAsmNewLabel(a)
-quoteLabel := renvoAsmNewLabel(a)
-setQuoteLabel := renvoAsmNewLabel(a)
-copyCharLabel := renvoAsmNewLabel(a)
-argDoneLabel := renvoAsmNewLabel(a)
-argsDoneLabel := renvoAsmNewLabel(a)
-
-renvoWinArm64CallImport(a, renvoWinImportGetCommandLineA)
-renvoAarch64AsmMovRegReg(a, 9, 0)
-renvoAarch64AsmMovRegAbs(a, 10, argsOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegAbs(a, 11, argsTextOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 12, 0)
-renvoAsmMarkLabel(a, skipLabel)
-renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 13, 0)
-renvoAarch64AsmBCondLabel(a, argsDoneLabel, 0)
-renvoAarch64AsmCmpRegImm(a, 13, ' ')
-renvoAarch64AsmBCondLabel(a, startLabel, 1)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmJmpLabel(a, skipLabel)
-renvoAsmMarkLabel(a, startLabel)
-renvoAarch64AsmCmpRegImm(a, 13, 9)
-renvoAarch64AsmBCondLabel(a, copyLabel, 1)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmJmpLabel(a, skipLabel)
-
-renvoAsmMarkLabel(a, copyLabel)
-renvoAarch64AsmMovRegReg(a, 14, 11)
-renvoAarch64AsmMovRegImm(a, 15, 0)
-renvoAarch64AsmMovRegImm(a, 17, 0)
-copyLoopLabel := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, copyLoopLabel)
-renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 13, 0)
-renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
-renvoAarch64AsmCmpRegImm(a, 13, '"')
-renvoAarch64AsmBCondLabel(a, quoteLabel, 0)
-renvoAarch64AsmCmpRegImm(a, 17, 0)
-renvoAarch64AsmBCondLabel(a, copyCharLabel, 1)
-renvoAarch64AsmCmpRegImm(a, 13, ' ')
-renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
-renvoAarch64AsmCmpRegImm(a, 13, 9)
-renvoAarch64AsmBCondLabel(a, argDoneLabel, 0)
-renvoAsmMarkLabel(a, copyCharLabel)
-renvoAarch64AsmStoreRegMem(a, 13, 11, 0, 1)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmAddRegImm(a, 15, 15, 1)
-renvoAarch64AsmJmpLabel(a, copyLoopLabel)
-renvoAsmMarkLabel(a, quoteLabel)
-renvoAarch64AsmCmpRegImm(a, 17, 0)
-renvoAarch64AsmBCondLabel(a, setQuoteLabel, 0)
-renvoAarch64AsmMovRegImm(a, 17, 0)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmJmpLabel(a, copyLoopLabel)
-renvoAsmMarkLabel(a, setQuoteLabel)
-renvoAarch64AsmMovRegImm(a, 17, 1)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmJmpLabel(a, copyLoopLabel)
-
-renvoAsmMarkLabel(a, argDoneLabel)
-renvoAarch64AsmStoreRegMem(a, 31, 11, 0, 1)
-renvoAarch64AsmStoreRegMem(a, 14, 10, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 15, 10, 8, 8)
-renvoAarch64AsmAddRegImm(a, 10, 10, 16)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmAddRegImm(a, 12, 12, 1)
-renvoAarch64AsmCmpRegImm(a, 13, 0)
-renvoAarch64AsmBCondLabel(a, argsDoneLabel, 0)
-renvoAarch64AsmAddRegImm(a, 9, 9, 1)
-renvoAarch64AsmJmpLabel(a, skipLabel)
-
-renvoAsmMarkLabel(a, argsDoneLabel)
-renvoAarch64AsmMovRegAbs(a, 9, argsLenOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 12, 9, 0, 8)
-
-envLoopLabel := renvoAsmNewLabel(a)
-envLengthLabel := renvoAsmNewLabel(a)
-envStringDoneLabel := renvoAsmNewLabel(a)
-envDoneLabel := renvoAsmNewLabel(a)
-renvoWinArm64CallImport(a, renvoWinImportGetEnvironmentStringsA)
-renvoAarch64AsmMovRegReg(a, 9, 0)
-renvoAarch64AsmMovRegAbs(a, 10, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 11, 0)
-renvoAsmMarkLabel(a, envLoopLabel)
-renvoAarch64AsmLoadRegMem(a, 12, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 12, 0)
-renvoAarch64AsmBCondLabel(a, envDoneLabel, 0)
-renvoAarch64AsmStoreRegMem(a, 9, 10, 0, 8)
-renvoAarch64AsmMovRegImm(a, 13, 0)
-renvoAsmMarkLabel(a, envLengthLabel)
-renvoAarch64AsmAddRegReg(a, 14, 9, 13)
-renvoAarch64AsmLoadRegMem(a, 12, 14, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 12, 0)
-renvoAarch64AsmBCondLabel(a, envStringDoneLabel, 0)
-renvoAarch64AsmAddRegImm(a, 13, 13, 1)
-renvoAarch64AsmJmpLabel(a, envLengthLabel)
-renvoAsmMarkLabel(a, envStringDoneLabel)
-renvoAarch64AsmStoreRegMem(a, 13, 10, 8, 8)
-renvoAarch64AsmAddRegImm(a, 10, 10, 16)
-renvoAarch64AsmAddRegImm(a, 13, 13, 1)
-renvoAarch64AsmAddRegReg(a, 9, 9, 13)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmJmpLabel(a, envLoopLabel)
-renvoAsmMarkLabel(a, envDoneLabel)
-renvoAarch64AsmMovRegAbs(a, 9, envLenOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 11, 9, 0, 8)
-
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, argsOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegAbs(a, 9, argsLenOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, renvoAarch64RegRsi, 9, 0, 8)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, renvoAarch64RegRsi)
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+panic("non-VM backend is unavailable")
 }
 
-func renvoWinArm64CallImport(a *renvoAsm, importID int) {
-renvoAarch64AsmMovRegAbs(a, 16, importID, renvoAbsWinImportReloc)
-renvoAarch64AsmLoadRegMem(a, 16, 16, 0, 8)
-renvoAarch64AsmEmit(a, 0xd63f0200)
-}
+func renvoWinArm64CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
 
 func renvoWinArm64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
-registerWords := wordCount
-if registerWords > 8 {
-registerWords = 8
-}
-for i := 0; i < registerWords; i++ {
-renvoAarch64AsmPopReg(a, i)
-}
-stackWords := wordCount - registerWords
-
-
-
-
-renvoAarch64AsmEmit(a, 0x910003e9)
-savedSPOff := stackWords * 8
-allocation := renvoAlignValue(savedSPOff+8, 16)
-renvoAarch64AsmAddRegImm(a, 31, 31, -allocation)
-for i := 0; i < stackWords; i++ {
-renvoAarch64AsmLoadRegMem(a, 10, 9, i*16, 8)
-renvoAarch64AsmStoreRegMem(a, 10, 31, i*8, 8)
-}
-renvoAarch64AsmStoreRegMem(a, 9, 31, savedSPOff, 8)
-renvoWinArm64CallImport(a, importID)
-renvoAarch64AsmMovRegReg(a, 10, 0)
-renvoAarch64AsmLoadRegMem(a, 9, 31, savedSPOff, 8)
-
-renvoAarch64AsmEmit(a, 0x9100013f)
-renvoAarch64AsmAddRegImm(a, 31, 31, stackWords*16)
-renvoAarch64AsmMovRegReg(a, 0, 10)
+panic("non-VM backend is unavailable")
 }
 
-func renvoWinArm64TestRegImm(a *renvoAsm, reg int, imm int) {
-renvoAarch64AsmMovRegImm(a, 15, imm)
-renvoAarch64AsmEmit(a, 0xea00001f|(15<<16)|(reg<<5))
-}
+func renvoWinArm64TestRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
 
-func renvoWinArm64TranslateCreateFileFlags(a *renvoAsm) {
-notReadWriteLabel := renvoAsmNewLabel(a)
-accessDoneLabel := renvoAsmNewLabel(a)
-noCreateLabel := renvoAsmNewLabel(a)
-createDoneLabel := renvoAsmNewLabel(a)
-
-renvoAarch64AsmMovRegImm(a, 1, -2147483648)
-renvoWinArm64TestRegImm(a, 0, 2)
-renvoAarch64AsmBCondLabel(a, notReadWriteLabel, 0)
-renvoAarch64AsmMovRegImm(a, 1, -1073741824)
-renvoAarch64AsmJmpLabel(a, accessDoneLabel)
-renvoAsmMarkLabel(a, notReadWriteLabel)
-renvoWinArm64TestRegImm(a, 0, 1)
-renvoAarch64AsmBCondLabel(a, accessDoneLabel, 0)
-renvoAarch64AsmMovRegImm(a, 1, 0x40000000)
-renvoAsmMarkLabel(a, accessDoneLabel)
-
-renvoAarch64AsmMovRegImm(a, 4, 3)
-renvoWinArm64TestRegImm(a, 0, 64)
-renvoAarch64AsmBCondLabel(a, noCreateLabel, 0)
-renvoAarch64AsmMovRegImm(a, 4, 4)
-renvoWinArm64TestRegImm(a, 0, 512)
-renvoAarch64AsmBCondLabel(a, createDoneLabel, 0)
-renvoAarch64AsmMovRegImm(a, 4, 2)
-renvoAarch64AsmJmpLabel(a, createDoneLabel)
-renvoAsmMarkLabel(a, noCreateLabel)
-renvoWinArm64TestRegImm(a, 0, 512)
-renvoAarch64AsmBCondLabel(a, createDoneLabel, 0)
-renvoAarch64AsmMovRegImm(a, 4, 5)
-renvoAsmMarkLabel(a, createDoneLabel)
-renvoAarch64AsmMovRegImm(a, 2, 3)
-renvoAarch64AsmMovRegImm(a, 3, 0)
-renvoAarch64AsmMovRegImm(a, 5, 0x80)
-renvoAarch64AsmMovRegImm(a, 6, 0)
-}
+func renvoWinArm64TranslateCreateFileFlags(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoWinArm64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-a := &g.asm
-if isWrite {
-if g.winWriteEmitted {
-return g.winWriteLabel
-}
-g.winWriteEmitted = true
-g.winWriteLabel = renvoAsmNewLabel(a)
-} else {
-if g.winReadEmitted {
-return g.winReadLabel
-}
-g.winReadEmitted = true
-g.winReadLabel = renvoAsmNewLabel(a)
-}
-label := g.winReadLabel
-importID := renvoWinImportReadFile
-if isWrite {
-label = g.winWriteLabel
-importID = renvoWinImportWriteFile
-}
-countOff := a.bssSize
-a.bssSize += 8
-posOff := a.bssSize
-a.bssSize += 8
-resultOff := a.bssSize
-a.bssSize += 8
-afterLabel := renvoAsmNewLabel(a)
-standardLabel := renvoAsmNewLabel(a)
-standardErrorLabel := renvoAsmNewLabel(a)
-handleReadyLabel := renvoAsmNewLabel(a)
-sequentialLabel := renvoAsmNewLabel(a)
-positionFailedLabel := renvoAsmNewLabel(a)
-ioFailedLabel := renvoAsmNewLabel(a)
-restoreLabel := renvoAsmNewLabel(a)
-failLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, label)
-
-
-renvoAarch64AsmPushReg(a, renvoAarch64RegLr)
-renvoAarch64AsmPushReg(a, renvoAarch64RegRdi)
-renvoAarch64AsmPushReg(a, renvoAarch64RegRsi)
-renvoAarch64AsmPushReg(a, renvoAarch64RegRdx)
-renvoAarch64AsmPushReg(a, renvoAarch64RegRcx)
-renvoAarch64AsmLoadRegMem(a, 9, 31, 48, 8)
-if isWrite {
-renvoAarch64AsmCmpRegImm(a, 9, 1)
-renvoAarch64AsmBCondLabel(a, standardLabel, 0)
-renvoAarch64AsmCmpRegImm(a, 9, 2)
-renvoAarch64AsmBCondLabel(a, standardErrorLabel, 0)
-} else {
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, standardLabel, 0)
-}
-renvoAarch64AsmStoreRegMem(a, 9, 31, 48, 8)
-renvoAarch64AsmJmpLabel(a, handleReadyLabel)
-renvoAsmMarkLabel(a, standardLabel)
-standardHandle := -10
-if isWrite {
-standardHandle = -11
-}
-renvoAarch64AsmMovRegImm(a, 0, standardHandle)
-renvoWinArm64CallImport(a, renvoWinImportGetStdHandle)
-renvoAarch64AsmStoreRegMem(a, 0, 31, 48, 8)
-renvoAarch64AsmJmpLabel(a, handleReadyLabel)
-renvoAsmMarkLabel(a, standardErrorLabel)
-renvoAarch64AsmMovRegImm(a, 0, -12)
-renvoWinArm64CallImport(a, renvoWinImportGetStdHandle)
-renvoAarch64AsmStoreRegMem(a, 0, 31, 48, 8)
-renvoAsmMarkLabel(a, handleReadyLabel)
-
-
-renvoAarch64AsmLoadRegMem(a, 9, 31, 0, 8)
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, sequentialLabel, 11)
-
-
-renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
-renvoAarch64AsmMovRegImm(a, 1, 0)
-renvoAarch64AsmMovRegImm(a, 2, 0)
-renvoAarch64AsmMovRegImm(a, 3, 1)
-renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
-renvoAarch64AsmMovRegImm(a, 9, 0xffffffff)
-renvoAarch64AsmCmpRegReg(a, 0, 9)
-renvoAarch64AsmBCondLabel(a, positionFailedLabel, 0)
-renvoAarch64AsmMovRegAbs(a, 9, posOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
-
-
-renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
-renvoAarch64AsmLoadRegMem(a, 1, 31, 0, 8)
-renvoAarch64AsmMovRegImm(a, 2, 0)
-renvoAarch64AsmMovRegImm(a, 3, 0)
-renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
-renvoAarch64AsmMovRegImm(a, 9, 0xffffffff)
-renvoAarch64AsmCmpRegReg(a, 0, 9)
-renvoAarch64AsmBCondLabel(a, ioFailedLabel, 0)
-
-renvoWinArm64EmitKernelReadWriteCall(a, importID, countOff)
-renvoAarch64AsmCmpRegImm(a, 0, 0)
-renvoAarch64AsmBCondLabel(a, ioFailedLabel, 0)
-renvoAarch64AsmMovRegAbs(a, 9, countOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 8)
-renvoAarch64AsmJmpLabel(a, restoreLabel)
-renvoAsmMarkLabel(a, ioFailedLabel)
-renvoAarch64AsmMovRegImm(a, 9, -1)
-renvoAsmMarkLabel(a, restoreLabel)
-renvoAarch64AsmMovRegAbs(a, 10, resultOff, renvoAbsBssReloc)
-renvoAarch64AsmStoreRegMem(a, 9, 10, 0, 8)
-renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
-renvoAarch64AsmMovRegAbs(a, 9, posOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, 1, 9, 0, 8)
-renvoAarch64AsmMovRegImm(a, 2, 0)
-renvoAarch64AsmMovRegImm(a, 3, 0)
-renvoWinArm64CallImport(a, renvoWinImportSetFilePointer)
-renvoAarch64AsmMovRegAbs(a, 9, resultOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, 0, 9, 0, 8)
-renvoAarch64AsmJmpLabel(a, doneLabel)
-
-renvoAsmMarkLabel(a, positionFailedLabel)
-renvoAarch64AsmMovRegImm(a, 0, -1)
-renvoAarch64AsmJmpLabel(a, doneLabel)
-
-renvoAsmMarkLabel(a, sequentialLabel)
-renvoWinArm64EmitKernelReadWriteCall(a, importID, countOff)
-renvoAarch64AsmCmpRegImm(a, 0, 0)
-renvoAarch64AsmBCondLabel(a, failLabel, 0)
-renvoAarch64AsmMovRegAbs(a, 9, countOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, 0, 9, 0, 8)
-renvoAarch64AsmJmpLabel(a, doneLabel)
-renvoAsmMarkLabel(a, failLabel)
-renvoAarch64AsmMovRegImm(a, 0, -1)
-renvoAsmMarkLabel(a, doneLabel)
-renvoAarch64AsmAddRegImm(a, 31, 31, 64)
-renvoAarch64AsmPopReg(a, renvoAarch64RegLr)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return label
+panic("non-VM backend is unavailable")
 }
 
 func renvoWinArm64EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
-renvoAarch64AsmLoadRegMem(a, 0, 31, 48, 8)
-renvoAarch64AsmLoadRegMem(a, 1, 31, 32, 8)
-renvoAarch64AsmLoadRegMem(a, 2, 31, 16, 8)
-renvoAarch64AsmMovRegAbs(a, 3, countOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 4, 0)
-renvoWinArm64CallImport(a, importID)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmPatchWindowsArm64(a *renvoAsm, layout renvoWinImportLayout) {
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsWinImportReloc {
-target = layout.iatRVAs[off]
-} else if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-insn := renvoGet32At(a.code, at)
-reg := insn & 31
-pc := a.codeOffset + at
-delta := (target >> 12) - (pc >> 12)
-imm := delta & 0x1fffff
-renvoPut32At(a.code, at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
-renvoPut32At(a.code, at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
-renvoPut32At(a.code, at+8, 0xd503201f)
-renvoPut32At(a.code, at+12, 0xd503201f)
-}
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
-renvoAsmPatch(a)
-for (a.codeOffset+len(a.code))%8 != 0 {
-a.code = append(a.code, 0)
-}
-textVirtualSize := len(a.code)
-textRawSize := renvoAlignValue(textVirtualSize, renvoWinFileAlign)
-dataRVA := renvoAlignValue(a.codeOffset+textVirtualSize, renvoWinSectionAlign)
-a.dataOffset = dataRVA
-var imports renvoWinImportLayout
-if renvoAsmHasWinImportRelocs(a) {
-renvoAppendWinImports(a, &imports)
-}
-renvoAsmPatchWindowsArm64(a, imports)
-dataRawSize := renvoAlignValue(len(a.data), renvoWinFileAlign)
-dataVirtualSize := len(a.data) + a.bssSize
-iatSize := 0
-if imports.kernelIATRVA != 0 {
-iatSize = (renvoWinImportFixedCount + 1) * imports.thunkSize
-}
-var out []byte
-out = renvoAppendPEHeader64WithContext(a.c, out, textRawSize, textVirtualSize, dataRVA, dataRawSize, dataVirtualSize, imports.importRVA, imports.importSize, imports.kernelIATRVA, iatSize)
-
-
-out[0xc0] = 6
-out[0xc2] = 1
-out[0xc4] = 1
-out[0xc8] = 6
-out[0xca] = 1
-out[0x9a] = 3
-out[0x96] = 0x22
-out[0xde] = 0x00
-out[0xdf] = 0x81
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize+dataRawSize)
-if renvoFixedTarget == 0 && a.c.emitImage {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageWindowsArm64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_linux_arm_impl.go
 
 func renvoArmAsmVFPLoadStack(a *renvoAsm, offset int, reg int, size int) {
-renvoArmAsmLeaRegStack(a, renvoArmRegAddr, offset)
-insn := 0xed9c0b00 | reg<<12
-if size == 4 {
-insn = 0xed9c0a00
-if reg == 1 {
-insn = 0xeddc0a00
-}
-}
-renvoArmAsmEmit(a, insn)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPStoreStack(a *renvoAsm, offset int, size int) {
-renvoArmAsmLeaRegStack(a, renvoArmRegAddr, offset)
-insn := 0xed8c0b00
-if size == 4 {
-insn = 0xed8c0a00
-}
-renvoArmAsmEmit(a, insn)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPBinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
-renvoArmAsmVFPLoadStack(a, left, 0, size)
-renvoArmAsmVFPLoadStack(a, right, 1, size)
-insn := 0
-if size == 4 {
-if op == '+' {
-insn = 0xee300a20
-} else if op == '-' {
-insn = 0xee300a60
-} else if op == '*' {
-insn = 0xee200a20
-} else if op == '/' {
-insn = 0xee800a20
-}
-} else {
-if op == '+' {
-insn = 0xee300b01
-} else if op == '-' {
-insn = 0xee300b41
-} else if op == '*' {
-insn = 0xee200b01
-} else if op == '/' {
-insn = 0xee800b01
-}
-}
-if insn == 0 {
-return false
-}
-renvoArmAsmEmit(a, insn)
-renvoArmAsmVFPStoreStack(a, dest, size)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPCompareStack(a *renvoAsm, left int, right int, size int) {
-renvoArmAsmVFPLoadStack(a, left, 0, size)
-renvoArmAsmVFPLoadStack(a, right, 1, size)
-if size == 4 {
-renvoArmAsmEmit(a, 0xeeb40a60)
-} else {
-renvoArmAsmEmit(a, 0xeeb40b41)
-}
-renvoArmAsmEmit(a, 0xeef1fa10)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
-renvoArmAsmVFPLoadStack(a, source, 0, sourceSize)
-if sourceSize == 4 && destSize == 8 {
-renvoArmAsmEmit(a, 0xeeb70ac0)
-} else if sourceSize == 8 && destSize == 4 {
-renvoArmAsmEmit(a, 0xeeb70bc0)
-}
-renvoArmAsmVFPStoreStack(a, dest, destSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPIntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
-if intSize == 8 {
-renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
-renvoArmAsmLoadRegStack(a, renvoArmRegRdx, offset-4)
-renvoArmAsmEmit(a, 0xee000a10)
-renvoArmAsmEmit(a, 0xee011a10)
-renvoArmAsmEmit(a, 0xeeb80b40)
-highConvert := 0xeeb81bc1
-if !signed {
-highConvert = 0xeeb81b41
-}
-renvoArmAsmEmit(a, highConvert)
-renvoArmAsmMovRegImm(a, renvoArmRegRcx, 0)
-renvoArmAsmMovRegImm(a, renvoArmRegRdi, 0x41f00000)
-renvoArmAsmEmit(a, 0xec432b12)
-renvoArmAsmEmit(a, 0xee211b02)
-renvoArmAsmEmit(a, 0xee310b00)
-if floatSize == 4 {
-renvoArmAsmEmit(a, 0xeeb70bc0)
-}
-renvoArmAsmVFPStoreStack(a, offset, floatSize)
-return
-}
-renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
-renvoArmAsmEmit(a, 0xee000a10)
-if floatSize == 4 {
-op := 0xeeb80ac0
-if !signed {
-op = 0xeeb80a40
-}
-renvoArmAsmEmit(a, op)
-} else {
-op := 0xeeb80bc0
-if !signed {
-op = 0xeeb80b40
-}
-renvoArmAsmEmit(a, op)
-}
-renvoArmAsmVFPStoreStack(a, offset, floatSize)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmAsmVFPFloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
-if intSize == 8 {
-signOffset := source
-if floatSize == 8 {
-signOffset = source - 4
-}
-renvoArmAsmLoadRegStack(a, renvoArmRegRdi, signOffset)
-renvoArmAsmEmit(a, 0xe1a03fa3)
-renvoArmAsmVFPLoadStack(a, source, 0, floatSize)
-if floatSize == 4 {
-renvoArmAsmEmit(a, 0xeeb70ac0)
-}
-renvoArmAsmEmit(a, 0xeeb00bc0)
-renvoArmAsmMovRegImm(a, renvoArmRegRcx, 0)
-renvoArmAsmMovRegImm(a, renvoArmRegRsi, 0x41f00000)
-renvoArmAsmEmit(a, 0xec442b12)
-renvoArmAsmEmit(a, 0xee801b02)
-renvoArmAsmEmit(a, 0xeebc1bc1)
-renvoArmAsmEmit(a, 0xee111a10)
-renvoArmAsmEmit(a, 0xeeb81b41)
-renvoArmAsmEmit(a, 0xee211b02)
-renvoArmAsmEmit(a, 0xee300b41)
-renvoArmAsmEmit(a, 0xeebc0bc0)
-renvoArmAsmEmit(a, 0xee100a10)
-if signed {
-nonnegative := renvoAsmNewLabel(a)
-renvoArmAsmCmpRegImm(a, renvoArmRegRdi, 0)
-renvoArmAsmBCondLabel(a, nonnegative, 0)
-renvoArmAsmEmit(a, 0xe2700000)
-renvoArmAsmEmit(a, 0xe2e11000)
-renvoAsmMarkLabel(a, nonnegative)
-}
-renvoArmAsmStoreRegStack(a, renvoArmRegRax, dest)
-renvoArmAsmStoreRegStack(a, renvoArmRegRdx, dest-4)
-return
-}
-renvoArmAsmVFPLoadStack(a, source, 0, floatSize)
-if floatSize == 4 {
-op := 0xeebd0ac0
-if !signed {
-op = 0xeebc0ac0
-}
-renvoArmAsmEmit(a, op)
-} else {
-op := 0xeebd0bc0
-if !signed {
-op = 0xeebc0bc0
-}
-renvoArmAsmEmit(a, op)
-}
-renvoArmAsmEmit(a, 0xee100a10)
-renvoArmAsmStoreRegStack(a, renvoArmRegRax, dest)
-if intSize == 8 {
-if signed {
-renvoArmAsmEmit(a, 0xe1a01fc0)
-} else {
-renvoArmAsmEmit(a, 0xe3a01000)
-}
-renvoArmAsmStoreRegStack(a, renvoArmRegRdx, dest-4)
-}
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmEnsureWideBinaryHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-if g.wideBinaryLabel > 0 {
-return g.wideBinaryLabel - 1
-}
-label := renvoAsmNewLabel(&g.asm)
-g.wideBinaryLabel = label + 1
-after := renvoAsmNewLabel(&g.asm)
-renvoAsmJmpMarkLabel(&g.asm, after, label)
-renvoAsmEmitText(&g.asm, "\x0d\x00\x50\xe3\x08\x00\x00\x1a\x00\x10\x94\xe5\x04\x20\x94\xe5\x00\x60\x95\xe5\x04\x70\x95\xe5\x06\x10\xc1\xe1\x07\x20\xc2\xe1\x00\x10\x83\xe5\x04\x20\x83\xe5\x1e\xff\x2f\xe1\x0e\x00\x50\xe3\x00\x00\x00\xba\x94\x00\x00\xea\x00\x00\x50\xe3\x08\x00\x00\x0a\x01\x00\x50\xe3\x0f\x00\x00\x0a\x02\x00\x50\xe3\x16\x00\x00\x0a\x06\x00\x50\xe3\x52\x00\x00\xda\x09\x00\x50\xe3\x2f\x00\x00\xda\x1b\x00\x00\xea\x00\x10\x94\xe5\x00\x20\x95\xe5\x02\x10\x91\xe0\x00\x10\x83\xe5\x04\x10\x94\xe5\x04\x20\x95\xe5\x02\x10\xa1\xe0\x04\x10\x83\xe5\x1e\xff\x2f\xe1\x00\x10\x94\xe5\x00\x20\x95\xe5\x02\x10\x51\xe0\x00\x10\x83\xe5\x04\x10\x94\xe5\x04\x20\x95\xe5\x02\x10\xc1\xe0\x04\x10\x83\xe5\x1e\xff\x2f\xe1\x00\x60\x94\xe5\x00\x70\x95\xe5\x96\x17\x82\xe0\x04\x80\x94\xe5\x98\x27\x22\xe0\x04\x80\x95\xe5\x96\x28\x22\xe0\x00\x10\x83\xe5\x04\x20\x83\xe5\x1e\xff\x2f\xe1\x00\x10\x94\xe5\x04\x20\x94\xe5\x00\x60\x95\xe5\x04\x70\x95\xe5\x0a\x00\x50\xe3\x04\x00\x00\x0a\x0b\x00\x50\xe3\x05\x00\x00\x0a\x06\x10\x21\xe0\x07\x20\x22\xe0\x04\x00\x00\xea\x06\x10\x01\xe0\x07\x20\x02\xe0\x01\x00\x00\xea\x06\x10\x81\xe1\x07\x20\x82\xe1\x00\x10\x83\xe5\x04\x20\x83\xe5\x1e\xff\x2f\xe1\x00\x10\x94\xe5\x04\x20\x94\xe5\x00\x60\x95\xe5\x04\x70\x95\xe5\x00\x00\x57\xe3\x40\x60\xa0\x13\x40\x00\x56\xe3\x40\x60\xa0\x83\x09\x00\x50\xe3\x0d\x00\x00\x0a\x08\x00\x50\xe3\x05\x00\x00\x0a\x00\x00\x56\xe3\x0f\x00\x00\x0a\x01\x10\x91\xe0\x02\x20\xa2\xe0\x01\x60\x46\xe2\xf9\xff\xff\xea\x00\x00\x56\xe3\x09\x00\x00\x0a\xa2\x20\xb0\xe1\x61\x10\xa0\xe1\x01\x60\x46\xe2\xf9\xff\xff\xea\x00\x00\x56\xe3\x03\x00\x00\x0a\xc2\x20\xb0\xe1\x61\x10\xa0\xe1\x01\x60\x46\xe2\xf9\xff\xff\xea\x00\x10\x83\xe5\x04\x20\x83\xe5\x1e\xff\x2f\xe1\x09\x40\x2d\xe9\x00\x00\x94\xe5\x04\x10\x94\xe5\x00\x60\x95\xe5\x04\x70\x95\xe5\xc1\x4f\xa0\xe1\xc7\x5f\xa0\xe1\x00\xa0\x9d\xe5\x05\x00\x5a\xe3\x62\x00\x00\xba\x04\x00\x20\xe0\x04\x10\x21\xe0\x04\x00\x50\xe0\x04\x10\xc1\xe0\x05\x60\x26\xe0\x05\x70\x27\xe0\x05\x60\x56\xe0\x05\x70\xc7\xe0\x00\x20\xa0\xe3\x00\x30\xa0\xe3\x00\x80\xa0\xe3\x00\x90\xa0\xe3\x40\xa0\xa0\xe3\x00\x00\x90\xe0\x01\x10\xb1\xe0\x08\x80\xb8\xe0\x09\x90\xa9\xe0\x02\x20\x92\xe0\x03\x30\xa3\xe0\x07\x00\x59\xe1\x05\x00\x00\x3a\x01\x00\x00\x8a\x06\x00\x58\xe1\x02\x00\x00\x3a\x06\x80\x58\xe0\x07\x90\xc9\xe0\x01\x20\x82\xe3\x01\xa0\x5a\xe2\xef\xff\xff\x1a\x00\x00\x9d\xe5\x04\x10\x9d\xe5\x01\x00\x10\xe3\x07\x00\x00\x0a\x05\x00\x24\xe0\x00\x20\x22\xe0\x00\x30\x23\xe0\x00\x20\x52\xe0\x00\x30\xc3\xe0\x00\x20\x81\xe5\x04\x30\x81\xe5\x05\x00\x00\xea\x04\x80\x28\xe0\x04\x90\x29\xe0\x04\x80\x58\xe0\x04\x90\xc9\xe0\x00\x80\x81\xe5\x04\x90\x81\xe5\x09\x80\xbd\xe8\x0e\x00\x40\xe2\x04\x10\x94\xe5\x04\x20\x95\xe5\x02\x00\x51\xe1\x0a\x00\x00\x1a\x00\x10\x94\xe5\x00\x20\x95\xe5\x02\x00\x51\xe1\x10\x00\x00\x1a\x00\x00\x50\xe3\x25\x00\x00\x0a\x01\x00\x50\xe3\x21\x00\x00\x0a\x01\x00\x10\xe3\x21\x00\x00\x1a\x1e\x00\x00\xea\x01\x00\x50\xe3\x1e\x00\x00\x0a\x06\x00\x50\xe3\x02\x00\x00\x2a\x02\x00\x51\xe1\x10\x00\x00\xba\x06\x00\x00\xea\x02\x00\x51\xe1\x0d\x00\x00\x3a\x03\x00\x00\xea\x01\x00\x50\xe3\x14\x00\x00\x0a\x02\x00\x51\xe1\x08\x00\x00\x3a\x04\x00\x50\xe3\x10\x00\x00\x0a\x05\x00\x50\xe3\x0e\x00\x00\x0a\x08\x00\x50\xe3\x0c\x00\x00\x0a\x09\x00\x50\xe3\x0a\x00\x00\x0a\x07\x00\x00\xea\x02\x00\x50\xe3\x07\x00\x00\x0a\x03\x00\x50\xe3\x05\x00\x00\x0a\x06\x00\x50\xe3\x03\x00\x00\x0a\x07\x00\x50\xe3\x01\x00\x00\x0a\x00\x00\xa0\xe3\x1e\xff\x2f\xe1\x01\x00\xa0\xe3\x1e\xff\x2f\xe1\x00\x40\xa0\xe3\x00\x50\xa0\xe3\xa1\xff\xff\xea")
-renvoAsmMarkLabel(&g.asm, after)
-return label
-}
+func renvoArmEnsureWideBinaryHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-func renvoArmEnsureWideCompareHelper(g *renvoLinearGen) int {
-renvoNonNil(g)
-if g.wideCompareLabel > 0 {
-return g.wideCompareLabel - 1
-}
-label := renvoAsmNewLabel(&g.asm)
-g.wideCompareLabel = label + 1
-after := renvoAsmNewLabel(&g.asm)
-renvoAsmJmpMarkLabel(&g.asm, after, label)
-renvoAsmEmitText(&g.asm, "\x04\x10\x94\xe5\x04\x20\x95\xe5\x02\x00\x51\xe1\x0a\x00\x00\x1a\x00\x10\x94\xe5\x00\x20\x95\xe5\x02\x00\x51\xe1\x10\x00\x00\x1a\x00\x00\x50\xe3\x25\x00\x00\x0a\x01\x00\x50\xe3\x21\x00\x00\x0a\x01\x00\x10\xe3\x21\x00\x00\x1a\x1e\x00\x00\xea\x01\x00\x50\xe3\x1e\x00\x00\x0a\x06\x00\x50\xe3\x02\x00\x00\x2a\x02\x00\x51\xe1\x10\x00\x00\xba\x06\x00\x00\xea\x02\x00\x51\xe1\x0d\x00\x00\x3a\x03\x00\x00\xea\x01\x00\x50\xe3\x14\x00\x00\x0a\x02\x00\x51\xe1\x08\x00\x00\x3a\x04\x00\x50\xe3\x10\x00\x00\x0a\x05\x00\x50\xe3\x0e\x00\x00\x0a\x08\x00\x50\xe3\x0c\x00\x00\x0a\x09\x00\x50\xe3\x0a\x00\x00\x0a\x07\x00\x00\xea\x02\x00\x50\xe3\x07\x00\x00\x0a\x03\x00\x50\xe3\x05\x00\x00\x0a\x06\x00\x50\xe3\x03\x00\x00\x0a\x07\x00\x50\xe3\x01\x00\x00\x0a\x00\x00\xa0\xe3\x1e\xff\x2f\xe1\x01\x00\xa0\xe3\x1e\xff\x2f\xe1")
-renvoAsmMarkLabel(&g.asm, after)
-return label
-}
+func renvoArmEnsureWideCompareHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 func renvoArmEmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
-a := &g.asm
-renvoArmAsmLeaRegStack(a, renvoArmRegRdi, dest)
-renvoArmAsmLeaRegStack(a, renvoArmRegRsi, left)
-renvoArmAsmLeaRegStack(a, renvoArmRegR8, right)
-renvoAsmPrimaryImm(a, mode)
-renvoAsmCallLabel(a, label)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmEmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
-renvoNonNil(g)
-if mode >= 3 && mode <= 6 {
-nonzero := renvoAsmNewLabel(&g.asm)
-renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
-renvoAsmJnzPrimary(&g.asm, nonzero)
-renvoAsmLoadPrimaryStack(&g.asm, right)
-renvoEmitRuntimeNonNilPrimary(g)
-renvoAsmMarkLabel(&g.asm, nonzero)
-}
-renvoArmEmitWideHelperCall(g, dest, left, right, mode, renvoArmEnsureWideBinaryHelper(g))
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmEmitWideCompareStack(g *renvoLinearGen, left int, right int, mode int) {
-renvoNonNil(g)
-a := &g.asm
-renvoArmAsmLeaRegStack(a, renvoArmRegRsi, left)
-renvoArmAsmLeaRegStack(a, renvoArmRegR8, right)
-renvoAsmPrimaryImm(a, mode)
-renvoAsmCallLabel(a, renvoArmEnsureWideCompareHelper(g))
+panic("non-VM backend is unavailable")
 }
 
 const renvoArmRegRax = 0
@@ -47538,333 +39933,32 @@ const renvoArmRegSp = 13
 const renvoArmRegLr = 14
 
 func renvoArmEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-a := &g.asm
-renvoAsmLoadPrimaryStack(a, srcPtr)
-renvoAsmLoadSecondaryStack(a, destPtr)
-renvoAsmLoadTertiaryStack(a, byteCount)
-renvoAsmEmitText(a, "\x00\x00\x51\xe1\x03\x00\x00\x9a\x02\x00\x80\xe0\x02\x10\x81\xe0\x00\x30\xe0\xe3\x02\x00\x00\xea\x01\x00\x40\xe2\x01\x10\x41\xe2\x01\x30\xa0\xe3\x00\x00\x52\xe3\x05\x00\x00\x0a\x03\x00\x80\xe0\x03\x10\x81\xe0\x00\x90\xd0\xe5\x00\x90\xc1\xe5\x01\x20\x42\xe2\xf7\xff\xff\xea")
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoArmAsmAlign(a)
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-renvoArmAsmEmit(a, 0xe92d4800)
-renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
-framePatch := renvoArmAsmFrameStart(a)
-if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-renvoArmAsmStoreRegStack(a, renvoArmRegRdi, g.returnStruct)
-}
-renvoBindFunctionParams(g, fnInfoIndex)
-if !renvoBindClosureCaptures(g, fnInfoIndex) {
-return false
-}
-if !renvoBindNamedResults(g, fnInfoIndex) {
-return false
-}
-if !renvoPrepareFunctionControl(g) {
-return false
-}
-if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-return false
-}
-if g.deferReturnLabel > 0 {
-if !g.lastRangeReturns {
-renvoAsmJmpLabel(a, g.deferReturnLabel)
-}
-if !renvoEmitFunctionControlEpilogue(g) {
-return false
-}
-} else if !g.lastRangeReturns {
-renvoMoveCapturedLocals(g, true)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmLeave(a)
-renvoAsmRet(a)
-}
-renvoArmAsmPatchFrame(a, framePatch, g.stackPeak)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmStoreParamWord(g *renvoLinearGen, reg int, offset int) {
-a := &g.asm
-if reg == 0 {
-renvoArmAsmStoreRegStack(a, renvoArmRegRdi, offset)
-return
-}
-if reg == 1 {
-renvoArmAsmStoreRegStack(a, renvoArmRegRsi, offset)
-return
-}
-if reg == 2 {
-renvoArmAsmStoreRegStack(a, renvoArmRegRdx, offset)
-return
-}
-if reg == 3 {
-renvoArmAsmStoreRegStack(a, renvoArmRegRcx, offset)
-return
-}
-if reg == 4 {
-renvoArmAsmStoreRegStack(a, renvoArmRegR8, offset)
-return
-}
-if reg == 5 {
-renvoArmAsmStoreRegStack(a, renvoArmRegR9, offset)
-return
-}
-renvoArmAsmLoadRegMem(a, renvoArmRegRax, renvoArmRegFp, 8+(reg-6)*4, 4)
-renvoArmAsmStoreRegStack(a, renvoArmRegRax, offset)
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-a := &g.asm
-if wordCount > 0 {
-renvoArmAsmPopReg(a, renvoArmRegRdi)
-}
-if wordCount > 1 {
-renvoArmAsmPopReg(a, renvoArmRegRsi)
-}
-if wordCount > 2 {
-renvoArmAsmPopReg(a, renvoArmRegRdx)
-}
-if wordCount > 3 {
-renvoArmAsmPopReg(a, renvoArmRegRcx)
-}
-if wordCount > 4 {
-renvoArmAsmPopReg(a, renvoArmRegR8)
-}
-if wordCount > 5 {
-renvoArmAsmPopReg(a, renvoArmRegR9)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-if wordCount > 6 {
-renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, (wordCount-6)*4)
-}
+panic("non-VM backend is unavailable")
 }
 
 func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int, rightShiftOpcode int) bool {
-a := &g.asm
-p := g.prog
-start := renvoTokStart(p, tok)
-c0 := renvo_runtime_UnsafeByteAt(p.src, start)
-
-
-
-c1 := renvo_runtime_UnsafeByteAt(p.src, start+1)
-if c0 == '+' {
-renvoArmAsmAddRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-return true
-}
-if c0 == '-' {
-renvoArmAsmSubRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-return true
-}
-if c0 == '*' {
-renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-return true
-}
-if c0 == '/' {
-renvoArmAsmDivLeftRcxRightRax(a, false)
-return true
-}
-if c0 == '%' {
-renvoArmAsmDivLeftRcxRightRax(a, true)
-return true
-}
-if c0 == '&' {
-if c1 == '^' {
-renvoArmAsmEmit(a, 0xe1e00000|(renvoArmRegRax<<12)|renvoArmRegRax)
-renvoArmAsmEmit(a, 0xe0000000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
-} else {
-renvoArmAsmEmit(a, 0xe0000000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
-}
-return true
-}
-if c0 == '|' {
-renvoArmAsmEmit(a, 0xe1800000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
-return true
-}
-if c0 == '^' {
-renvoArmAsmEmit(a, 0xe0200000|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
-return true
-}
-if c0 == '<' || c0 == '>' {
-if c1 == c0 {
-opcode := 0xe1a00010
-if c0 == '>' {
-opcode = rightShiftOpcode
-}
-renvoArmAsmEmit(a, opcode|(renvoArmRegRax<<8)|(renvoArmRegRax<<12)|renvoArmRegRcx)
-} else {
-setcc := 0x9c
-if c0 == '>' {
-setcc = 0x9f
-}
-if c1 == '=' {
-setcc = setcc ^ 2
-}
-renvoArmAsmCmpRcxRaxSet(a, setcc)
-}
-return true
-}
-if (c0 == '=' || c0 == '!') && c1 == '=' {
-setcc := 0x94
-if c0 == '!' {
-setcc++
-}
-renvoArmAsmCmpRcxRaxSet(a, setcc)
-return true
-}
-return false
+panic("non-VM backend is unavailable")
 }
 
-func renvoArmEnsureAppendAddrHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.appendAddrEmitted {
-return g.appendAddrLabel
-}
-arenaAllocLabel := renvoEnsureArenaAllocHelper(g)
-g.appendAddrEmitted = true
-g.appendAddrLabel = renvoAsmNewLabel(a)
+func renvoArmEnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
+func renvoArmEnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
+func renvoArmEnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
-
-branch := 0xea00002f
-template := "\x00P\x94\xe5\b \x94\xe5\x02\x00U\xe1$\x00\x00\xba\x01`\xa0\xe1\x03\x80\xa0\xe1\x00\x00R\xe3\x01\x00\x00\x1a\x10 \x00\xe3\x00\x00\x00\xea\x05 \x82\xe0\x92\x06\t\xe0\x04 -\xe5\t\x00\xa0\xe1\x04\xe0-\xe5\x00\x00\x00\xeb\x04\xe0\x9d\xe4\x04 \x9d\xe4\x00\x00P\xe3\x00\x00\x00\x1a\x1e\xff/\xe1\x00\x10\xa0\xe1\x010\xa0\xe1\x00\xa0\x98\xe5\x95\x06\t\xe0\x00\x00Y\xe3\x05\x00\x00\n\x00\x00\xda\xe5\x00\x00\xc3\xe5\x01\xa0\x8a\xe2\x010\x83\xe2\x01\x90I\xe2\xf7\xff\xff\xea\x00\x10\x88\xe5\b \x84\xe5\x95\x06\t\xe0\t\x00\x81\xe0\x01\x90\x00\xe3\tP\x85\xe0\x00P\x84\xe5\x1e\xff/\xe1\x00\x00\x93\xe5\x95\x01\t\xe0\t\x00\x80\xe0\x01\x90\x00\xe3\tP\x85\xe0\x00P\x84\xe5\x1e\xff/\xe1"
-if !g.meta.panicEnabled {
-branch = 0xea00002c
-template = "\x00P\x94\xe5\b \x94\xe5\x02\x00U\xe1!\x00\x00\xba\x01`\xa0\xe1\x03\x80\xa0\xe1\x00\x00R\xe3\x01\x00\x00\x1a\x10 \x00\xe3\x00\x00\x00\xea\x05 \x82\xe0\x92\x06\t\xe0\x04 -\xe5\t\x00\xa0\xe1\x04\xe0-\xe5\x00\x00\x00\xeb\x04\xe0\x9d\xe4\x04 \x9d\xe4\x00\x10\xa0\xe1\x010\xa0\xe1\x00\xa0\x98\xe5\x95\x06\t\xe0\x00\x00Y\xe3\x05\x00\x00\n\x00\x00\xda\xe5\x00\x00\xc3\xe5\x01\xa0\x8a\xe2\x010\x83\xe2\x01\x90I\xe2\xf7\xff\xff\xea\x00\x10\x88\xe5\b \x84\xe5\x95\x06\t\xe0\t\x00\x81\xe0\x01\x90\x00\xe3\tP\x85\xe0\x00P\x84\xe5\x1e\xff/\xe1\x00\x00\x93\xe5\x95\x01\t\xe0\t\x00\x80\xe0\x01\x90\x00\xe3\tP\x85\xe0\x00P\x84\xe5\x1e\xff/\xe1"
-}
-start := len(a.code)
-renvoArmAsmEmit(a, branch)
-renvoAsmMarkLabel(a, g.appendAddrLabel)
-renvoAsmEmitText(a, template)
-renvoAsmAddReloc(a, start+64, arenaAllocLabel)
-return g.appendAddrLabel
-}
-
-func renvoArmEnsureAppend8Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append8Emitted {
-return g.append8Label
-}
-g.append8Emitted = true
-g.append8Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-renvoArmAsmLoadRegMem(a, renvoArmRegRcx, renvoArmRegRsi, 0, 4)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 4)
-renvoArmAsmAddRegReg(a, renvoArmRegTmp, renvoArmRegTmp, renvoArmRegRcx)
-renvoArmAsmStoreRegMem(a, renvoArmRegRdx, renvoArmRegTmp, 0, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRcx, renvoArmRegRcx, 1)
-renvoArmAsmStoreRegMem(a, renvoArmRegRcx, renvoArmRegRsi, 0, 4)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.append8Label
-}
-
-func renvoArmEnsureAppend64Helper(g *renvoLinearGen) int {
-a := &g.asm
-if g.append64Emitted {
-return g.append64Label
-}
-g.append64Emitted = true
-g.append64Label = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-renvoArmAsmLoadRegMem(a, renvoArmRegRcx, renvoArmRegRsi, 0, 4)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 4)
-renvoArmAsmAddRegRegShift(a, renvoArmRegTmp, renvoArmRegTmp, renvoArmRegRcx, 3)
-renvoArmAsmStoreRegMem(a, renvoArmRegRdx, renvoArmRegTmp, 0, 4)
-renvoArmAsmAddRegImm(a, renvoArmRegRcx, renvoArmRegRcx, 1)
-renvoArmAsmStoreRegMem(a, renvoArmRegRcx, renvoArmRegRsi, 0, 4)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.append64Label
-}
-
-func renvoArmEnsureStringEqualHelper(g *renvoLinearGen) int {
-a := &g.asm
-if g.streqEmitted {
-return g.streqLabel
-}
-g.streqEmitted = true
-g.streqLabel = renvoAsmNewLabel(a)
-afterLabel := renvoAsmNewLabel(a)
-notEqualLabel := renvoAsmNewLabel(a)
-equalLabel := renvoAsmNewLabel(a)
-loopLabel := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, afterLabel, g.streqLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoArmAsmCmpRegReg(a, renvoArmRegRsi, renvoArmRegRcx)
-renvoArmAsmBCondLabel(a, notEqualLabel, 1)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
-renvoArmAsmBCondLabel(a, equalLabel, 0)
-renvoAsmMarkLabel(a, loopLabel)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 1)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, 0, 1)
-renvoArmAsmCmpRegReg(a, renvoArmRegTmp, renvoArmRegTmp2)
-renvoArmAsmBCondLabel(a, notEqualLabel, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdi, renvoArmRegRdi, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdx, renvoArmRegRdx, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRsi, -1)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
-renvoArmAsmBCondLabel(a, loopLabel, 1)
-renvoAsmMarkLabel(a, equalLabel)
-renvoAsmPrimaryImm(a, 1)
-renvoAsmMarkLabel(a, notEqualLabel)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, afterLabel)
-return g.streqLabel
-}
+func renvoArmEnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
 
 const renvoLinuxArmCodeOffset = 0x74
 
@@ -47876,311 +39970,57 @@ const renvoLinuxArmSysFchmod = 94
 const renvoLinuxArmSysReadAt = 180
 const renvoLinuxArmSysWriteAt = 181
 
-func renvoArmAsmPrepareReadWriteBuf(a *renvoAsm) {
-renvoArmAsmMovRegReg(a, renvoArmRegRsi, renvoArmRegRax)
-renvoArmAsmMovRegReg(a, renvoArmRegRdx, renvoArmRegRcx)
-}
+func renvoArmAsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func renvoArmAsmMoveOffsetArg(a *renvoAsm) {
-renvoArmAsmMovRegReg(a, renvoArmRegR10, renvoArmRegRax)
-}
+func renvoArmAsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-func compileLinuxArm(input []int, output int) int {
-return compileLinuxArmArena(input, output, 0)
-}
+func compileLinuxArm(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileLinuxArmArena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetLinuxArm)
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramArmScratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-return renvoTryCompileScalarProgramArmScratch(p, meta)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramArmScratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgramArm(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-return renvoCompileResult{}
-}
-return renvoFinishScalarProgramArm(g)
+panic("non-VM backend is unavailable")
 }
 
 func renvoTryCompileScalarProgramArmCached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-g := renvoBeginScalarProgramArm(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-return renvoCompileResult{}
+panic("non-VM backend is unavailable")
 }
-return renvoFinishScalarProgramArm(g)
-}
+
 func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
-if appIndex < 0 {
-return nil
-}
-g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-a := &g.asm
-renvoAsmInitWithContext(a, g.c)
-a.codeOffset = renvoLinuxArmCodeOffset
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoArmAsmEmit(a, 0xe92d4800)
-renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
-renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
-renvoArmAsmStoreRegMem(a, 0, renvoArmRegSp, 0, 4)
-renvoArmAsmStoreRegMem(a, 1, renvoArmRegSp, 4, 4)
-renvoArmAsmStoreRegMem(a, 2, renvoArmRegSp, 8, 4)
-renvoArmAsmStoreRegMem(a, 3, renvoArmRegSp, 12, 4)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgsArm(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgsArm(g, appIndex)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmLeave(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, 1)
-renvoAsmSyscall(a)
-}
-return g
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitImageEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
-renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
-renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
-renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-
-if app.paramCount == 2 {
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
-}
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
-renvoNonNil(g)
-a := &g.asm
-data := renvoAsmImageArm(a)
-var result renvoCompileResult
-if a.patchFailed || len(data) == 0 {
-return result
-}
-result.data = data
-result.ok = true
-return result
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-argsOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envDataOff := g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff := g.asm.bssSize
-g.asm.bssSize += 8
-renvoAsmBuildArgvEnvSlicesArm(&g.asm, argsOff, envDataOff, envLenOff)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildArgvEnvSlicesArm(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-base := len(a.code)
-renvoAsmEmitText(a, "\x00\x50\x9d\xe5\x04\x90\x00\xe3\x09\x60\x8d\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\xa0\x00\xe3\x05\x00\x5a\xe1\x10\x00\x00\x0a\x0a\xc1\x86\xe0\x00\xc0\x9c\xe5\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x01\x90\x00\xe3\x09\xa0\x8a\xe0\xec\xff\xff\xea\x05\x61\x86\xe0\x04\x90\x00\xe3\x09\x60\x86\xe0\x00\x80\x00\xe3\x00\x80\x40\xe3\x08\x80\x8f\xe0\x00\x60\x00\xe3\x00\xa0\x9d\xe5\x02\x90\x00\xe3\x09\xa0\x8a\xe0\x0a\xa1\x8d\xe0\x00\x60\x00\xe3\x00\xc0\x9a\xe5\x00\x00\x5c\xe3\x10\x00\x00\x0a\x00\xc0\x88\xe5\x00\x00\x00\xe3\x00\x90\x8c\xe0\x00\x90\xd9\xe5\x00\x00\x59\xe3\x02\x00\x00\x0a\x01\x90\x00\xe3\x09\x00\x80\xe0\xf8\xff\xff\xea\x08\x00\x88\xe5\x10\x90\x00\xe3\x09\x80\x88\xe0\x04\x90\x00\xe3\x09\xa0\x8a\xe0\x01\x90\x00\xe3\x09\x60\x86\xe0\xeb\xff\xff\xea\x00\xc0\x00\xe3\x00\xc0\x40\xe3\x0c\xc0\x8f\xe0\x00\x60\x8c\xe5\x00\x30\x00\xe3\x00\x30\x40\xe3\x03\x30\x8f\xe0\x05\x40\xa0\xe1\x05\x10\xa0\xe1\x00\x20\x00\xe3\x00\x20\x40\xe3\x02\x20\x8f\xe0\x06\x50\xa0\xe1")
-renvoAsmAddAbsReloc(a, base+12, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+116, envOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+232, envLenOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+248, bssOff, renvoAbsBssReloc)
-renvoAsmAddAbsReloc(a, base+268, envOff, renvoAbsBssReloc)
+panic("non-VM backend is unavailable")
 }
 
-func renvoAsmImageArm(a *renvoAsm) []byte {
-renvoAsmPatchArm(a)
-loadFileSize := a.codeOffset + len(a.code) + len(a.data)
-bssOffset := renvoAsmBssOffset(a)
-if a.c.stripSymbols {
-out := make([]byte, 0, loadFileSize)
-out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
-out = append(out, a.code...)
-out = append(out, a.data...)
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
-var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
-out := make([]byte, 0, sec.shoff+280)
-out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
-out = append(out, a.code...)
-out = append(out, a.data...)
-out = renvoAppendUntil(out, sec.symtabOff)
-for i := 0; i < len(sec.symtab); i++ {
-out = append(out, sec.symtab[i])
-}
-out = renvoAppendUntil(out, sec.strtabOff)
-for i := 0; i < len(sec.strtab); i++ {
-out = append(out, sec.strtab[i])
-}
-out = renvoAppendUntil(out, sec.shstrOff)
-for i := 0; i < len(sec.shstrtab); i++ {
-out = append(out, sec.shstrtab[i])
-}
-out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
-if renvoFixedTarget == 0 {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoAsmImageArm(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmPatchArm(a *renvoAsm) {
-renvoAsmPatch(a)
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-insn := renvoGet32At(a.code, at)
-reg := (insn >> 12) & 15
-delta := target - (a.codeOffset + at + 16)
-renvoArmAsmPatchMovRegImmAt(a, at, reg, delta)
-}
-}
+func renvoAsmPatchArm(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
 func renvoAppendElfHeaderArm(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-start := len(out)
-base := 0
-
-
-header := "\x7f\x45\x4c\x46\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\x28\x00\x01\x00\x00\x00\x00\x00\x01\x00\x34\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x34\x00\x20\x00\x02\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x00\x10\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x00\x10\x00\x00"
-for i := 0; i < len(header); i++ {
-out = append(out, header[i])
-}
-renvoPut32At(out, start+24, base+entryOff)
-renvoPut32At(out, start+32, shoff)
-if shoff != 0 {
-out[start+46] = 40
-out[start+48] = 7
-out[start+50] = 6
-}
-renvoPut32At(out, start+60, base)
-renvoPut32At(out, start+64, base)
-renvoPut32At(out, start+68, fileSize)
-renvoPut32At(out, start+72, fileSize)
-renvoPut32At(out, start+88, bssOffset)
-renvoPut32At(out, start+92, base+bssOffset)
-renvoPut32At(out, start+96, base+bssOffset)
-renvoPut32At(out, start+104, bssSize)
-return out
+panic("non-VM backend is unavailable")
 }
 
 // source: backend/compiler_wasi_wasm32_impl.go
-
-
-
-
-
-
-
 
 const renvoSoftFloatSource = `
 const __renvoSoftMant64 uint = 52
@@ -48892,13 +40732,10 @@ return true
 return false
 }
 
-func compileWasiWasm32(input []int, output int) int {
-return compileWasiWasm32Arena(input, output, 0)
-}
+func compileWasiWasm32(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetWasiWasm32)
-return compileWasm32Arena(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
 func compileVM32(input []int, output int) int {
@@ -48966,8 +40803,6 @@ g.arenaSize = meta.arenaSize
 if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 renvoLoadCompilerFixedTarget(&g)
 if g.fixedTargetState != 1 {
-
-
 
 g.fixedTargetState = 1
 g.fixedTargetValue = 0
@@ -49062,68 +40897,7 @@ return true
 }
 
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
-if appIndex < 0 {
-var result renvoCompileResult
-return result
-}
-app := &meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(meta, app.resultType) {
-var result renvoCompileResult
-return result
-}
-if app.paramCount > 1 {
-var result renvoCompileResult
-return result
-}
-if app.paramCount == 1 {
-first := &meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(meta, first.typ) {
-var result renvoCompileResult
-return result
-}
-}
-fn := &p.funcs[app.declIndex]
-var body renvoBodyParse
-body.prog = p
-body.ok = true
-statements := make([]renvoStmt, 0, 64)
-i := fn.bodyStart + 1
-for body.ok && i < fn.bodyEnd {
-if renvoTokCharIs(p, i, ';') {
-i++
-continue
-}
-if renvoTokCharIs(p, i, '}') || renvoTokIsKind(p, i, renvoTokEOF) {
-break
-}
-body.stmtCount = 0
-next := renvoParseOneStatement(&body, i, fn.bodyEnd)
-if !body.ok || next <= i || body.stmtCount != 1 {
-var result renvoCompileResult
-return result
-}
-statements = append(statements, body.stmt)
-i = next
-}
-if !body.ok {
-var result renvoCompileResult
-return result
-}
-data := renvoWasiWasm32EmitBinary(p, meta, statements)
-if len(data) == 0 {
-var result renvoCompileResult
-return result
-}
-var result renvoCompileResult
-result.data = data
-result.ok = true
-return result
+panic("non-VM backend is unavailable")
 }
 
 func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []renvoStmt) []byte {
@@ -49241,7 +41015,6 @@ if op == 0 {
 return false
 }
 if op >= 0x7f && op <= 0x82 {
-
 
 nonzero := renvoAsmNewLabel(&g.asm)
 renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
@@ -50120,9 +41893,6 @@ candidates[j] = 0
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 
-
-
-
 if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
 for j := 0; j < len(candidates); j++ {
 candidates[j] = 0
@@ -50599,10 +42369,11 @@ return g.streqLabel
 
 // source: backend/compiler_darwin_arm64_impl.go
 
+func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int {
+panic("non-VM backend is unavailable")
+}
 
-func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int { return 0 }
-
-func renvo_runtime_ArenaPersistString(value string) string { return value }
+func renvo_runtime_ArenaPersistString(value string) string { panic("non-VM backend is unavailable") }
 
 const renvoDarwinArm64CodeOffset = 0x1000
 const renvoDarwinArm64ImageBase = 0x100000000
@@ -50621,575 +42392,78 @@ const renvoDarwinImportFchmod = 8
 const renvoDarwinImportGetdirentries = 9
 const renvoDarwinImportCount = 9
 
-func compileDarwinArm64(input []int, output int) int {
-return compileDarwinArm64Arena(input, output, 0)
-}
+func compileDarwinArm64(input []int, output int) int { panic("non-VM backend is unavailable") }
 
 func compileDarwinArm64Arena(input []int, output int, arenaSize int) int {
-renvoSetTarget(renvoTargetDarwinArm64)
-return renvoCompileAarch64(input, output, arenaSize)
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinImportName(id int) string {
-if id == renvoDarwinImportExit {
-return "_exit"
-}
-if id == renvoDarwinImportOpen {
-return "_open"
-}
-if id == renvoDarwinImportClose {
-return "_close"
-}
-if id == renvoDarwinImportRead {
-return "_read"
-}
-if id == renvoDarwinImportWrite {
-return "_write"
-}
-if id == renvoDarwinImportPread {
-return "_pread"
-}
-if id == renvoDarwinImportPwrite {
-return "_pwrite"
-}
-if id == renvoDarwinImportFchmod {
-return "_fchmod"
-}
-if id == renvoDarwinImportGetdirentries {
-return "_getdirentries"
-}
-return ""
-}
+func renvoDarwinImportName(id int) string { panic("non-VM backend is unavailable") }
 
-func renvoDarwinArm64ImportLabel(a *renvoAsm, id int) int {
-if len(a.darwinImportLabels) == 0 {
-a.darwinImportLabels = make([]int, renvoDarwinImportCount+1)
-a.darwinImportUsed = make([]bool, renvoDarwinImportCount+1)
-for i := 0; i <= renvoDarwinImportCount; i++ {
-a.darwinImportLabels[i] = -1
-}
-}
-if id <= 0 || id > renvoDarwinImportCount {
-return -1
-}
-if a.darwinImportLabels[id] < 0 {
-a.darwinImportLabels[id] = renvoAsmNewLabel(a)
-}
-a.darwinImportUsed[id] = true
-return a.darwinImportLabels[id]
-}
+func renvoDarwinArm64ImportLabel(a *renvoAsm, id int) int { panic("non-VM backend is unavailable") }
 
-func renvoDarwinArm64CallImport(a *renvoAsm, id int) {
-label := renvoDarwinArm64ImportLabel(a, id)
-renvoAarch64AsmCallLabel(a, label)
-}
+func renvoDarwinArm64CallImport(a *renvoAsm, id int) { panic("non-VM backend is unavailable") }
 
 func renvoDarwinArm64CallVirtualArgs(a *renvoAsm, id int, argCount int) {
-if argCount > 2 {
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegTmp, renvoAarch64RegRdx)
-}
-if argCount > 0 {
-renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRdi)
-}
-if argCount > 1 {
-renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRsi)
-}
-if argCount > 2 {
-renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegTmp)
-}
-if argCount > 3 {
-renvoAarch64AsmMovRegReg(a, 3, renvoAarch64RegR10)
-}
-renvoDarwinArm64CallImport(a, id)
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmAddDarwinStaticImport(a *renvoAsm, dylib string, name string) int {
-if len(name) == 0 || name[0] != '_' {
-name = renvo_runtime_ArenaPersistString("_" + name)
+panic("non-VM backend is unavailable")
 }
-for i := 0; i < len(a.darwinImports); i++ {
-if a.darwinImports[i].dylib == dylib && a.darwinImports[i].name == name {
-a.darwinImports[i].used = true
-return i
-}
-}
-label := renvoAsmNewLabel(a)
-a.darwinImports = append(a.darwinImports, renvoDarwinStaticImport{dylib: dylib, name: name, label: label, used: true})
-return len(a.darwinImports) - 1
-}
-
-
-
-
-
 
 func renvoDarwinArm64EmitIntegerStackCall(a *renvoAsm, importIndex int, paramCount int) {
-registerWords := paramCount
-if registerWords > 8 {
-registerWords = 8
-}
-for i := 0; i < registerWords; i++ {
-renvoAarch64AsmPopReg(a, i)
-}
-stackWords := paramCount - registerWords
-if stackWords == 0 {
-for i := registerWords; i < 8; i++ {
-renvoAarch64AsmMovRegImm(a, i, 0)
-}
-renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
-return
-}
-
-renvoAarch64AsmEmit(a, 0x910003e9)
-savedSPOff := stackWords * 8
-allocation := renvoAlignValue(savedSPOff+8, 16)
-renvoAarch64AsmAddRegImm(a, 31, 31, -allocation)
-for i := 0; i < stackWords; i++ {
-renvoAarch64AsmLoadRegMem(a, 10, 9, i*16, 8)
-renvoAarch64AsmStoreRegMem(a, 10, 31, i*8, 8)
-}
-renvoAarch64AsmStoreRegMem(a, 9, 31, savedSPOff, 8)
-renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
-renvoAarch64AsmMovRegReg(a, 10, 0)
-renvoAarch64AsmLoadRegMem(a, 9, 31, savedSPOff, 8)
-renvoAarch64AsmEmit(a, 0x9100013f)
-renvoAarch64AsmAddRegImm(a, 31, 31, stackWords*16)
-renvoAarch64AsmMovRegReg(a, 0, 10)
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-if g.c.renvoTargetArch != renvoArchAarch64 {
-return false
-}
-dylib := renvoStringFromBytes(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
-name := renvoStringFromBytes(g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-importIndex := renvoAsmAddDarwinStaticImport(&g.asm, dylib, name)
-a := &g.asm
-allIntegerWords := wordCount == fn.paramCount
-for i := 0; i < fn.paramCount && allIntegerWords; i++ {
-typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-if renvoTypeKindIsFloat(typ.kind) || typ.kind == renvoTypeString || typ.kind == renvoTypeSlice || typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
-allIntegerWords = false
-}
-}
-if allIntegerWords && fn.paramCount > 8 {
-renvoDarwinArm64EmitIntegerStackCall(a, importIndex, fn.paramCount)
-return true
-}
-intReg := 0
-floatReg := 0
-consumed := 0
-objcRectCall := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRect")
-objcSizeCall := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgSize")
-glOrthoCall := name == "glOrtho" || name == "_glOrtho"
-glPixelZoomCall := name == "glPixelZoom" || name == "_glPixelZoom"
-for i := 0; i < fn.paramCount; i++ {
-typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-integerDouble := glOrthoCall || (objcRectCall && i >= 2 && i < 6) || (objcSizeCall && i >= 2 && i < 4)
-integerSingle := glPixelZoomCall
-if renvoTypeKindIsFloat(typ.kind) || integerDouble || integerSingle {
-if floatReg >= 8 {
-return false
-}
-renvoAarch64AsmPopReg(a, 16)
-if typ.kind == renvoTypeFloat32 {
-renvoAarch64AsmEmit(a, 0x1e270000|(16<<5)|floatReg)
-} else if typ.kind == renvoTypeFloat64 {
-renvoAarch64AsmEmit(a, 0x9e670000|(16<<5)|floatReg)
-} else if integerSingle {
-renvoAarch64AsmEmit(a, 0x9e220000|(16<<5)|floatReg)
-} else {
-renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|floatReg)
-}
-floatReg++
-consumed++
-continue
-}
-if intReg >= 8 {
-return false
-}
-if typ.kind == renvoTypeString {
-renvoAarch64AsmPopReg(a, intReg)
-renvoAarch64AsmPopReg(a, 16)
-consumed += 2
-intReg++
-continue
-}
-if typ.kind == renvoTypeSlice {
-renvoAarch64AsmPopReg(a, intReg)
-renvoAarch64AsmPopReg(a, 16)
-renvoAarch64AsmPopReg(a, 16)
-consumed += 3
-intReg++
-continue
-}
-if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
-return false
-}
-renvoAarch64AsmPopReg(a, intReg)
-consumed++
-intReg++
-}
-if consumed != wordCount {
-renvoPrintErr("renvo: Darwin foreign-call argument layout mismatch\n")
-return false
-}
-for intReg < 8 {
-renvoAarch64AsmMovRegImm(a, intReg, 0)
-intReg++
-}
-renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
-resultKind := renvoResolveType(g.meta, fn.resultType).kind
-if renvoTypeKindIsFloat(resultKind) {
-resultFloatReg := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgPointY") {
-resultFloatReg = 1
-}
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectY") {
-resultFloatReg = 1
-}
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectWidth") {
-resultFloatReg = 2
-}
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectHeight") {
-resultFloatReg = 3
-}
-if resultKind == renvoTypeFloat32 {
-renvoAarch64AsmEmit(a, 0x1e260000|(resultFloatReg<<5))
-} else {
-renvoAarch64AsmEmit(a, 0x9e660000|(resultFloatReg<<5))
-}
-}
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 2 {
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-}
-argsOff := g.asm.bssSize
-g.asm.bssSize += renvoDarwinArgEnvDescriptorSize
-envOff := g.asm.bssSize
-g.asm.bssSize += renvoDarwinArgEnvDescriptorSize
-renvoAsmBuildDarwinArgvEnvSlicesArm64(&g.asm, g.darwinEntryOff, argsOff, envOff)
-return true
+panic("non-VM backend is unavailable")
 }
 
 func renvoAsmBuildDarwinArgvEnvSlicesArm64(a *renvoAsm, entryOff int, argsOff int, envOff int) {
-argLoop := renvoAsmNewLabel(a)
-argLenLoop := renvoAsmNewLabel(a)
-argLenDone := renvoAsmNewLabel(a)
-argsDone := renvoAsmNewLabel(a)
-envLoop := renvoAsmNewLabel(a)
-envLenLoop := renvoAsmNewLabel(a)
-envLenDone := renvoAsmNewLabel(a)
-envDone := renvoAsmNewLabel(a)
-
-
-
-renvoAarch64AsmMovRegAbs(a, 9, entryOff, renvoAbsBssReloc)
-renvoAarch64AsmLoadRegMem(a, 13, 9, 0, 8)
-renvoAarch64AsmLoadRegMem(a, 14, 9, 8, 8)
-renvoAarch64AsmLoadRegMem(a, 15, 9, 16, 8)
-renvoAarch64AsmMovRegAbs(a, 10, argsOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 11, 0)
-renvoAsmMarkLabel(a, argLoop)
-renvoAarch64AsmCmpRegImm(a, 11, renvoDarwinArgEnvDescriptorCount)
-renvoAarch64AsmBCondLabel(a, argsDone, 10)
-renvoAarch64AsmCmpRegReg(a, 11, 13)
-renvoAarch64AsmBCondLabel(a, argsDone, 0)
-renvoAarch64AsmAddRegRegShift(a, 12, 14, 11, 3)
-renvoAarch64AsmLoadRegMem(a, 12, 12, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 12, 10, 0, 8)
-renvoAarch64AsmMovRegImm(a, 0, 0)
-renvoAsmMarkLabel(a, argLenLoop)
-renvoAarch64AsmAddRegReg(a, 9, 12, 0)
-renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, argLenDone, 0)
-renvoAarch64AsmAddRegImm(a, 0, 0, 1)
-renvoAarch64AsmJmpLabel(a, argLenLoop)
-renvoAsmMarkLabel(a, argLenDone)
-renvoAarch64AsmStoreRegMem(a, 0, 10, 8, 8)
-renvoAarch64AsmAddRegImm(a, 10, 10, 16)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmJmpLabel(a, argLoop)
-renvoAsmMarkLabel(a, argsDone)
-renvoAarch64AsmMovRegReg(a, 13, 11)
-
-renvoAarch64AsmMovRegAbs(a, 10, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegImm(a, 11, 0)
-renvoAsmMarkLabel(a, envLoop)
-renvoAarch64AsmCmpRegImm(a, 11, renvoDarwinArgEnvDescriptorCount)
-renvoAarch64AsmBCondLabel(a, envDone, 10)
-renvoAarch64AsmLoadRegMem(a, 12, 15, 0, 8)
-renvoAarch64AsmCmpRegImm(a, 12, 0)
-renvoAarch64AsmBCondLabel(a, envDone, 0)
-renvoAarch64AsmStoreRegMem(a, 12, 10, 0, 8)
-renvoAarch64AsmMovRegImm(a, 0, 0)
-renvoAsmMarkLabel(a, envLenLoop)
-renvoAarch64AsmAddRegReg(a, 9, 12, 0)
-renvoAarch64AsmLoadRegMem(a, 9, 9, 0, 1)
-renvoAarch64AsmCmpRegImm(a, 9, 0)
-renvoAarch64AsmBCondLabel(a, envLenDone, 0)
-renvoAarch64AsmAddRegImm(a, 0, 0, 1)
-renvoAarch64AsmJmpLabel(a, envLenLoop)
-renvoAsmMarkLabel(a, envLenDone)
-renvoAarch64AsmStoreRegMem(a, 0, 10, 8, 8)
-renvoAarch64AsmAddRegImm(a, 10, 10, 16)
-renvoAarch64AsmAddRegImm(a, 15, 15, 8)
-renvoAarch64AsmAddRegImm(a, 11, 11, 1)
-renvoAarch64AsmJmpLabel(a, envLoop)
-renvoAsmMarkLabel(a, envDone)
-
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, argsOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, 13)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegRdx, 13)
-renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRcx, envOff, renvoAbsBssReloc)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR8, 11)
-renvoAarch64AsmMovRegReg(a, renvoAarch64RegR9, 11)
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinAppendULEB(out []byte, value int) []byte {
-for {
-b := byte(value & 127)
-value = value >> 7
-if value != 0 {
-b = b | 128
-}
-out = append(out, b)
-if value == 0 {
-return out
-}
-}
-}
+func renvoDarwinAppendULEB(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
-func renvoDarwinAppendName16(out []byte, name string) []byte {
-for i := 0; i < 16; i++ {
-if i < len(name) {
-out = append(out, name[i])
-} else {
-out = append(out, 0)
-}
-}
-return out
-}
+func renvoDarwinAppendName16(out []byte, name string) []byte { panic("non-VM backend is unavailable") }
 
 func renvoDarwinAppendSegment64(out []byte, name string, vmaddr int, vmsize int, fileoff int, filesize int, maxprot int, initprot int) []byte {
-out = renvoAppend32(out, 0x19)
-out = renvoAppend32(out, 72)
-out = renvoDarwinAppendName16(out, name)
-out = renvoAppend64(out, vmaddr)
-out = renvoAppend64(out, vmsize)
-out = renvoAppend64(out, fileoff)
-out = renvoAppend64(out, filesize)
-out = renvoAppend32(out, maxprot)
-out = renvoAppend32(out, initprot)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinAppendSection64(out []byte, section string, segment string, addr int, size int, offset int, align int, flags int) []byte {
-out = renvoDarwinAppendName16(out, section)
-out = renvoDarwinAppendName16(out, segment)
-out = renvoAppend64(out, addr)
-out = renvoAppend64(out, size)
-out = renvoAppend32(out, offset)
-out = renvoAppend32(out, align)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, flags)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinAppendTextSegment64(out []byte, codeSize int, fileSize int) []byte {
-out = renvoAppend32(out, 0x19)
-out = renvoAppend32(out, 152)
-out = renvoDarwinAppendName16(out, "__TEXT")
-out = renvoAppend64(out, renvoDarwinArm64ImageBase)
-out = renvoAppend64(out, fileSize)
-out = renvoAppend64(out, 0)
-out = renvoAppend64(out, fileSize)
-out = renvoAppend32(out, 5)
-out = renvoAppend32(out, 5)
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, 0)
-out = renvoDarwinAppendSection64(out, "__text", "__TEXT", renvoDarwinArm64ImageBase+renvoDarwinArm64CodeOffset, codeSize, renvoDarwinArm64CodeOffset, 2, 0x80000400)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinAppendDataSegment64(out []byte, dataFileOff int, dataFileSize int, bssSize int) []byte {
-vmSize := renvoAlignValue(dataFileSize+bssSize, renvoDarwinArm64PageSize)
-out = renvoAppend32(out, 0x19)
-out = renvoAppend32(out, 232)
-out = renvoDarwinAppendName16(out, "__DATA")
-out = renvoAppend64(out, renvoDarwinArm64ImageBase+dataFileOff)
-out = renvoAppend64(out, vmSize)
-out = renvoAppend64(out, dataFileOff)
-out = renvoAppend64(out, dataFileSize)
-out = renvoAppend32(out, 3)
-out = renvoAppend32(out, 3)
-out = renvoAppend32(out, 2)
-out = renvoAppend32(out, 0)
-out = renvoDarwinAppendSection64(out, "__data", "__DATA", renvoDarwinArm64ImageBase+dataFileOff, dataFileSize, dataFileOff, 3, 0)
-out = renvoDarwinAppendSection64(out, "__bss", "__DATA", renvoDarwinArm64ImageBase+dataFileOff+dataFileSize, bssSize, 0, 3, 1)
-return out
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinPatchArm64Adrp(code []byte, at int, pc int, target int) {
-delta := (target >> 12) - (pc >> 12)
-imm := delta & 0x1fffff
-insn := 0x90000010 | ((imm & 3) << 29) | (((imm >> 2) & 0x7ffff) << 5)
-renvoPut32At(code, at, insn)
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinStaticDylibs(a *renvoAsm) []string {
-var out []string
-for i := 0; i < len(a.darwinImports); i++ {
-imp := a.darwinImports[i]
-if !imp.used || imp.dylib == "/usr/lib/libSystem.B.dylib" {
-continue
-}
-found := false
-for j := 0; j < len(out); j++ {
-if out[j] == imp.dylib {
-found = true
-}
-}
-if !found {
-out = append(out, imp.dylib)
-}
-}
-return out
-}
+func renvoDarwinStaticDylibs(a *renvoAsm) []string { panic("non-VM backend is unavailable") }
 
-func renvoDarwinDylibOrdinal(a *renvoAsm, dylib string) int {
-if dylib == "/usr/lib/libSystem.B.dylib" {
-return 1
-}
-dylibs := renvoDarwinStaticDylibs(a)
-for i := 0; i < len(dylibs); i++ {
-if dylibs[i] == dylib {
-return i + 2
-}
-}
-return 0
-}
+func renvoDarwinDylibOrdinal(a *renvoAsm, dylib string) int { panic("non-VM backend is unavailable") }
 
-func renvoDarwinDylibCommandSize(path string) int {
-return renvoAlignValue(24+len(path)+1, 8)
-}
+func renvoDarwinDylibCommandSize(path string) int { panic("non-VM backend is unavailable") }
 
 func renvoDarwinAppendDylibCommand(out []byte, path string) []byte {
-start := len(out)
-size := renvoDarwinDylibCommandSize(path)
-out = renvoAppend32(out, 0x0c)
-out = renvoAppend32(out, size)
-out = renvoAppend32(out, 24)
-out = renvoAppend32(out, 2)
-out = renvoAppend32(out, 0x00010000)
-out = renvoAppend32(out, 0x00010000)
-out = renvoAppendStringZ(out, path)
-return renvoAppendUntil(out, start+size)
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinMachHeader(a *renvoAsm, textFileSize int, dataFileOff int, dataFileSize int, dataVMSize int, linkeditOff int, linkeditSize int, bindOff int, bindSize int, symOff int, symbolCount int, strOff int, strSize int, undefinedCount int, sigOff int, sigSize int) []byte {
-dylibs := renvoDarwinStaticDylibs(a)
-commandSize := 856
-for i := 0; i < len(dylibs); i++ {
-commandSize += renvoDarwinDylibCommandSize(dylibs[i])
-}
-out := make([]byte, 0, a.codeOffset)
-out = renvoAppend32(out, 0xfeedfacf)
-out = renvoAppend32(out, 0x0100000c)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 2)
-out = renvoAppend32(out, 13+len(dylibs))
-out = renvoAppend32(out, commandSize)
-out = renvoAppend32(out, 0x200085)
-out = renvoAppend32(out, 0)
-out = renvoDarwinAppendSegment64(out, "__PAGEZERO", 0, renvoDarwinArm64ImageBase, 0, 0, 0, 0)
-out = renvoDarwinAppendTextSegment64(out, len(a.code), textFileSize)
-out = renvoDarwinAppendDataSegment64(out, dataFileOff, dataFileSize, a.bssSize)
-out = renvoDarwinAppendSegment64(out, "__LINKEDIT", renvoDarwinArm64ImageBase+dataFileOff+dataVMSize, renvoAlignValue(linkeditSize, renvoDarwinArm64PageSize), linkeditOff, linkeditSize, 1, 1)
-out = renvoAppend32(out, 0x80000022)
-out = renvoAppend32(out, 48)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, bindOff)
-out = renvoAppend32(out, bindSize)
-for i := 0; i < 6; i++ {
-out = renvoAppend32(out, 0)
-}
-out = renvoAppend32(out, 0x02)
-out = renvoAppend32(out, 24)
-out = renvoAppend32(out, symOff)
-out = renvoAppend32(out, symbolCount)
-out = renvoAppend32(out, strOff)
-out = renvoAppend32(out, strSize)
-out = renvoAppend32(out, 0x0b)
-out = renvoAppend32(out, 80)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, undefinedCount)
-for i := 0; i < 12; i++ {
-out = renvoAppend32(out, 0)
-}
-cmdStart := len(out)
-out = renvoAppend32(out, 0x0e)
-out = renvoAppend32(out, 32)
-out = renvoAppend32(out, 12)
-out = renvoAppendStringZ(out, "/usr/lib/dyld")
-out = renvoAppendUntil(out, cmdStart+32)
-out = renvoDarwinAppendDylibCommand(out, "/usr/lib/libSystem.B.dylib")
-for i := 0; i < len(dylibs); i++ {
-out = renvoDarwinAppendDylibCommand(out, dylibs[i])
-}
-out = renvoAppend32(out, 0x1b)
-out = renvoAppend32(out, 24)
-out = renvoAppend32(out, 0x52544758)
-out = renvoAppend32(out, 0x44415257)
-out = renvoAppend32(out, 0x494e4152)
-out = renvoAppend32(out, 0x4d363400)
-out = renvoAppend32(out, 0x32)
-out = renvoAppend32(out, 24)
-out = renvoAppend32(out, 1)
-out = renvoAppend32(out, 0x000b0000)
-out = renvoAppend32(out, 0x000b0000)
-out = renvoAppend32(out, 0)
-out = renvoAppend32(out, 0x80000028)
-out = renvoAppend32(out, 24)
-out = renvoAppend64U32(out, a.codeOffset)
-out = renvoAppend64U32(out, 0)
-out = renvoAppend32(out, 0x1d)
-out = renvoAppend32(out, 16)
-out = renvoAppend32(out, sigOff)
-out = renvoAppend32(out, sigSize)
-return renvoAppendUntil(out, a.codeOffset)
+panic("non-VM backend is unavailable")
 }
 
 type renvoDarwinImportLayout struct {
@@ -51198,419 +42472,46 @@ staticGotOffs []int
 }
 
 func renvoDarwinPrepareImports(a *renvoAsm) renvoDarwinImportLayout {
-var layout renvoDarwinImportLayout
-layout.gotOffs = make([]int, renvoDarwinImportCount+1)
-layout.staticGotOffs = make([]int, len(a.darwinImports))
-stubAts := make([]int, renvoDarwinImportCount+1)
-staticStubAts := make([]int, len(a.darwinImports))
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-label := a.darwinImportLabels[id]
-renvoAarch64AsmAlign(a)
-renvoAsmMarkLabel(a, label)
-stubAts[id] = len(a.code)
-renvoAarch64AsmEmit(a, 0x90000010)
-renvoAarch64AsmEmit(a, 0xf9400210)
-renvoAarch64AsmEmit(a, 0xd61f0200)
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if !a.darwinImports[i].used {
-continue
-}
-renvoAarch64AsmAlign(a)
-renvoAsmMarkLabel(a, a.darwinImports[i].label)
-staticStubAts[i] = len(a.code)
-renvoAarch64AsmEmit(a, 0x90000010)
-renvoAarch64AsmEmit(a, 0xf9400210)
-renvoAarch64AsmEmit(a, 0xd61f0200)
-}
-renvoAsmPatch(a)
-dataFileOff := renvoAlignValue(a.codeOffset+len(a.code), renvoDarwinArm64PageSize)
-a.dataOffset = dataFileOff
-a.data = renvoAppendUntil(a.data, renvoAlignValue(len(a.data), 8))
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-layout.gotOffs[id] = len(a.data)
-a.data = renvoAppend64U32(a.data, 0)
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if !a.darwinImports[i].used {
-continue
-}
-layout.staticGotOffs[i] = len(a.data)
-a.data = renvoAppend64U32(a.data, 0)
-}
-a.data = renvoAppendUntil(a.data, renvoAlignValue(len(a.data), renvoDarwinArm64PageSize))
-renvoAsmPatchAarch64AbsDarwin(a)
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-stubAt := stubAts[id]
-target := renvoDarwinArm64ImageBase + dataFileOff + layout.gotOffs[id]
-pc := renvoDarwinArm64ImageBase + a.codeOffset + stubAt
-renvoDarwinPatchArm64Adrp(a.code, stubAt, pc, target)
-pageOff := target & 0xfff
-renvoPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if !a.darwinImports[i].used {
-continue
-}
-stubAt := staticStubAts[i]
-target := renvoDarwinArm64ImageBase + dataFileOff + layout.staticGotOffs[i]
-pc := renvoDarwinArm64ImageBase + a.codeOffset + stubAt
-renvoDarwinPatchArm64Adrp(a.code, stubAt, pc, target)
-pageOff := target & 0xfff
-renvoPut32At(a.code, stubAt+4, 0xf9400210|((pageOff/8)<<10))
-}
-return layout
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinBuildBindData(a *renvoAsm, gotOffs []int, staticGotOffs []int) []byte {
-bind := make([]byte, 0, 256)
-bind = append(bind, 0x11)
-bind = append(bind, 0x51)
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-bind = append(bind, 0x40)
-bind = renvoAppendStringZ(bind, renvoDarwinImportName(id))
-bind = append(bind, 0x72)
-bind = renvoDarwinAppendULEB(bind, gotOffs[id])
-bind = append(bind, 0x90)
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if !a.darwinImports[i].used {
-continue
-}
-ordinal := renvoDarwinDylibOrdinal(a, a.darwinImports[i].dylib)
-if ordinal <= 0 || ordinal >= 16 {
-continue
-}
-bind = append(bind, byte(0x10|ordinal))
-bind = append(bind, 0x40)
-bind = renvoAppendStringZ(bind, a.darwinImports[i].name)
-bind = append(bind, 0x72)
-bind = renvoDarwinAppendULEB(bind, staticGotOffs[i])
-bind = append(bind, 0x90)
-}
-return append(bind, 0)
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinBuildStringTable(a *renvoAsm) []byte {
-strtab := make([]byte, 0, 128)
-strtab = append(strtab, 0)
-strtab = renvoAppendStringZ(strtab, "_main")
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-strtab = renvoAppendStringZ(strtab, renvoDarwinImportName(id))
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if a.darwinImports[i].used {
-strtab = renvoAppendStringZ(strtab, a.darwinImports[i].name)
-}
-}
-return strtab
-}
+func renvoDarwinBuildStringTable(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoDarwinBuildSymbolTable(a *renvoAsm) []byte {
-symtab := make([]byte, 0, 16*(renvoDarwinImportCount+1))
-symtab = renvoAppend32(symtab, 1)
-symtab = append(symtab, 0x0f)
-symtab = append(symtab, 1)
-symtab = renvoAppend16(symtab, 0)
-symtab = renvoAppend64(symtab, renvoDarwinArm64ImageBase+a.codeOffset)
-nameOff := 7
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) <= id || !a.darwinImportUsed[id] {
-continue
-}
-symtab = renvoAppend32(symtab, nameOff)
-symtab = append(symtab, 1)
-symtab = append(symtab, 0)
-symtab = renvoAppend16(symtab, 0x100)
-symtab = renvoAppend64(symtab, 0)
-nameOff += len(renvoDarwinImportName(id)) + 1
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if !a.darwinImports[i].used {
-continue
-}
-symtab = renvoAppend32(symtab, nameOff)
-symtab = append(symtab, 1)
-symtab = append(symtab, 0)
-symtab = renvoAppend16(symtab, 0x100)
-symtab = renvoAppend64(symtab, 0)
-nameOff += len(a.darwinImports[i].name) + 1
-}
-return symtab
-}
+func renvoDarwinBuildSymbolTable(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-func renvoDarwinUsedImportCount(a *renvoAsm) int {
-count := 0
-for id := 1; id <= renvoDarwinImportCount; id++ {
-if len(a.darwinImportUsed) > id && a.darwinImportUsed[id] {
-count++
-}
-}
-for i := 0; i < len(a.darwinImports); i++ {
-if a.darwinImports[i].used {
-count++
-}
-}
-return count
-}
+func renvoDarwinUsedImportCount(a *renvoAsm) int { panic("non-VM backend is unavailable") }
 
-func renvoAsmImageDarwinArm64(a *renvoAsm) []byte {
-imports := renvoDarwinPrepareImports(a)
-dataFileOff := renvoAlignValue(a.codeOffset+len(a.code), renvoDarwinArm64PageSize)
-bind := renvoDarwinBuildBindData(a, imports.gotOffs, imports.staticGotOffs)
-symtab := renvoDarwinBuildSymbolTable(a)
-strtab := renvoDarwinBuildStringTable(a)
-undefinedCount := renvoDarwinUsedImportCount(a)
+func renvoAsmImageDarwinArm64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
 
-textFileSize := dataFileOff
-dataFileSize := len(a.data)
-dataVMSize := renvoAlignValue(len(a.data)+a.bssSize, renvoDarwinArm64PageSize)
-linkeditOff := dataFileOff + dataFileSize
-bindOff := linkeditOff
-symOff := renvoAlignValue(bindOff+len(bind), 8)
-strOff := symOff + len(symtab)
-sigOff := renvoAlignValue(strOff+len(strtab), 16)
-sigSize := renvoDarwinCodeSignatureSize(sigOff, "renvo")
-linkeditSize := sigOff + sigSize - linkeditOff
+func renvoAsmPatchAarch64AbsDarwin(a *renvoAsm) { panic("non-VM backend is unavailable") }
 
-out := renvoDarwinMachHeader(a, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1+undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize)
-for i := 0; i < len(a.code); i++ {
-out = append(out, a.code[i])
-}
-out = renvoAppendUntil(out, dataFileOff)
-for i := 0; i < len(a.data); i++ {
-out = append(out, a.data[i])
-}
-out = renvoAppendUntil(out, bindOff)
-for i := 0; i < len(bind); i++ {
-out = append(out, bind[i])
-}
-out = renvoAppendUntil(out, symOff)
-for i := 0; i < len(symtab); i++ {
-out = append(out, symtab[i])
-}
-for i := 0; i < len(strtab); i++ {
-out = append(out, strtab[i])
-}
-out = renvoAppendUntil(out, sigOff)
-sig := renvoDarwinCodeSignature(out, "renvo", textFileSize)
-for i := 0; i < len(sig); i++ {
-out = append(out, sig[i])
-}
-if renvoFixedTarget == 0 && a.c.emitImage {
-return renvoAppendReplLinkTable(out, a)
-}
-return out
-}
+func renvoDarwinAppendBE32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
-func renvoAsmPatchAarch64AbsDarwin(a *renvoAsm) {
-for i := 0; i+2 < len(a.absRelocs); i += 3 {
-at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
-target := a.dataOffset + off
-if kind == renvoAbsBssReloc {
-target = renvoAsmBssOffset(a) + off
-}
-insn := renvoGet32At(a.code, at)
-reg := insn & 31
-address := renvoDarwinArm64ImageBase + target
-pc := renvoDarwinArm64ImageBase + a.codeOffset + at
-delta := (address >> 12) - (pc >> 12)
-imm := delta & 0x1fffff
-renvoPut32At(a.code, at, 0x90000000|((imm&3)<<29)|(((imm>>2)&0x7ffff)<<5)|reg)
-renvoPut32At(a.code, at+4, 0x91000000|((address&0xfff)<<10)|(reg<<5)|reg)
-renvoPut32At(a.code, at+8, 0xd503201f)
-renvoPut32At(a.code, at+12, 0xd503201f)
-}
-}
-
-func renvoDarwinAppendBE32(out []byte, value int) []byte {
-out = append(out, byte(value>>24))
-out = append(out, byte(value>>16))
-out = append(out, byte(value>>8))
-out = append(out, byte(value))
-return out
-}
-
-func renvoDarwinAppendBE64(out []byte, value int) []byte {
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, value)
-return out
-}
+func renvoDarwinAppendBE64(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
 
 func renvoDarwinCodeSignatureSize(codeLimit int, ident string) int {
-slots := (codeLimit + 16383) / 16384
-cdSize := 88 + len(ident) + 1 + slots*32
-return 20 + cdSize
+panic("non-VM backend is unavailable")
 }
 
 func renvoDarwinCodeSignature(code []byte, ident string, execLimit int) []byte {
-slots := (len(code) + 16383) / 16384
-identOff := 88
-hashOff := identOff + len(ident) + 1
-cdSize := hashOff + slots*32
-totalSize := 20 + cdSize
-out := make([]byte, 0, totalSize)
-out = renvoDarwinAppendBE32(out, 0xfade0cc0)
-out = renvoDarwinAppendBE32(out, totalSize)
-out = renvoDarwinAppendBE32(out, 1)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, 20)
-out = renvoDarwinAppendBE32(out, 0xfade0c02)
-out = renvoDarwinAppendBE32(out, cdSize)
-out = renvoDarwinAppendBE32(out, 0x20400)
-out = renvoDarwinAppendBE32(out, 0x2)
-out = renvoDarwinAppendBE32(out, hashOff)
-out = renvoDarwinAppendBE32(out, identOff)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, slots)
-out = renvoDarwinAppendBE32(out, len(code))
-out = append(out, 32)
-out = append(out, 2)
-out = append(out, 0)
-out = append(out, 14)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE32(out, 0)
-out = renvoDarwinAppendBE64(out, 0)
-out = renvoDarwinAppendBE64(out, 0)
-out = renvoDarwinAppendBE64(out, execLimit)
-out = renvoDarwinAppendBE64(out, 1)
-for i := 0; i < len(ident); i++ {
-out = append(out, ident[i])
-}
-out = append(out, 0)
-for slot := 0; slot < slots; slot++ {
-start := slot * 16384
-end := start + 16384
-if end > len(code) {
-end = len(code)
-}
-hash := renvoDarwinSHA256(code[start:end])
-for i := 0; i < len(hash); i++ {
-out = append(out, hash[i])
-}
-}
-return out
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinSHA256Constants() []int {
-return []int{
-0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-}
-}
+func renvoDarwinSHA256Constants() []int { panic("non-VM backend is unavailable") }
 
 func renvoDarwinSHA256Schedule(msg []byte, chunk int, w []int) {
-for i := 0; i < 16; i++ {
-at := chunk + i*4
-w[i] = (int(msg[at])<<24 | int(msg[at+1])<<16 | int(msg[at+2])<<8 | int(msg[at+3])) & 0xffffffff
-}
-for i := 16; i < 64; i++ {
-x := w[i-15] & 0xffffffff
-y := w[i-2] & 0xffffffff
-s0 := ((x >> 7) | ((x << 25) & 0xffffffff)) ^ ((x >> 18) | ((x << 14) & 0xffffffff)) ^ (x >> 3)
-s1 := ((y >> 17) | ((y << 15) & 0xffffffff)) ^ ((y >> 19) | ((y << 13) & 0xffffffff)) ^ (y >> 10)
-w[i] = (w[i-16] + s0 + w[i-7] + s1) & 0xffffffff
-}
+panic("non-VM backend is unavailable")
 }
 
-func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) {
-a := hvals[0]
-b := hvals[1]
-c := hvals[2]
-d := hvals[3]
-e := hvals[4]
-f := hvals[5]
-g := hvals[6]
-h := hvals[7]
-for i := 0; i < 64; i++ {
-e32 := e & 0xffffffff
-a32 := a & 0xffffffff
-s1 := ((e32 >> 6) | ((e32 << 26) & 0xffffffff)) ^ ((e32 >> 11) | ((e32 << 21) & 0xffffffff)) ^ ((e32 >> 25) | ((e32 << 7) & 0xffffffff))
-choose := (e & f) ^ ((e ^ 0xffffffff) & g)
-t1 := (h + s1 + choose + k[i] + w[i]) & 0xffffffff
-s0 := ((a32 >> 2) | ((a32 << 30) & 0xffffffff)) ^ ((a32 >> 13) | ((a32 << 19) & 0xffffffff)) ^ ((a32 >> 22) | ((a32 << 10) & 0xffffffff))
-majority := (a & b) ^ (a & c) ^ (b & c)
-t2 := (s0 + majority) & 0xffffffff
-h = g
-g = f
-f = e
-e = (d + t1) & 0xffffffff
-d = c
-c = b
-b = a
-a = (t1 + t2) & 0xffffffff
-}
-hvals[0] = (hvals[0] + a) & 0xffffffff
-hvals[1] = (hvals[1] + b) & 0xffffffff
-hvals[2] = (hvals[2] + c) & 0xffffffff
-hvals[3] = (hvals[3] + d) & 0xffffffff
-hvals[4] = (hvals[4] + e) & 0xffffffff
-hvals[5] = (hvals[5] + f) & 0xffffffff
-hvals[6] = (hvals[6] + g) & 0xffffffff
-hvals[7] = (hvals[7] + h) & 0xffffffff
-}
+func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) { panic("non-VM backend is unavailable") }
 
-func renvoDarwinSHA256Compress(msg []byte, hvals []int) {
-k := renvoDarwinSHA256Constants()
-w := make([]int, 64)
-for chunk := 0; chunk < len(msg); chunk += 64 {
-renvoDarwinSHA256Schedule(msg, chunk, w)
-renvoDarwinSHA256Rounds(w, k, hvals)
-}
-}
+func renvoDarwinSHA256Compress(msg []byte, hvals []int) { panic("non-VM backend is unavailable") }
 
-func renvoDarwinSHA256(data []byte) []byte {
-hardware := make([]byte, 32)
-if renvoDarwinCCSHA256(data, len(data), hardware) != 0 {
-return hardware
-}
-msgLen := len(data) + 1 + 8
-msgLen = renvoAlignValue(msgLen, 64)
-msg := make([]byte, msgLen)
-for i := 0; i < len(data); i++ {
-msg[i] = data[i]
-}
-msg[len(data)] = 0x80
-bits := len(data) * 8
-for i := 0; i < 8; i++ {
-msg[msgLen-1-i] = byte(bits >> (i * 8))
-}
-vals := []int{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
-renvoDarwinSHA256Compress(msg, vals)
-out := make([]byte, 0, 32)
-for i := 0; i < len(vals); i++ {
-out = append(out, byte(vals[i]>>24))
-out = append(out, byte(vals[i]>>16))
-out = append(out, byte(vals[i]>>8))
-out = append(out, byte(vals[i]))
-}
-return out
-}
+func renvoDarwinSHA256(data []byte) []byte { panic("non-VM backend is unavailable") }
 
 // source: backend/compiler_unit_impl.go
 
@@ -51765,8 +42666,6 @@ lineBases = append(lineBases, int32(i&0xffffff|lineHigh<<24))
 out[base] = int32(kind | (line&65535)<<8 | highBits)
 out[base+1] = int32(start&0xffffff | (size&255)<<24)
 if r.pos >= nextDiscard {
-
-
 
 renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
 discardStart = r.pos - 4096

@@ -5,6 +5,11 @@ package main
 const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32, freebsd/amd64, openbsd/amd64, netbsd/amd64"
 
 func renvoParseTargetArg(target string) int {
+	if renvoPreparedBackendActive != 0 {
+		if prepared := renvoRTGParseTargetArg(target); prepared != 0 {
+			return prepared
+		}
+	}
 	if target == "linux/amd64" {
 		return renvoTargetLinuxAmd64
 	}
