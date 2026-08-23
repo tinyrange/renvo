@@ -1,3 +1,5 @@
+//go:build !renvo || renvo_wasi_language_service
+
 package c11
 
 // The language-service index deliberately describes the original C source.
