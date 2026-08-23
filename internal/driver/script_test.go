@@ -67,3 +67,18 @@ func TestParseOptionsScriptAndImage(t *testing.T) {
 		}
 	}
 }
+
+func TestStandaloneCSourceContextPreservesSingleGoObject(t *testing.T) {
+	options := Options{
+		Mode:    ModeObject,
+		Package: "/repo/module/object.go",
+		Files:   []string{"/repo/module/object.go"},
+	}
+	workDir, options := standaloneCSourceContext("/tmp/build", options)
+	if workDir != "/repo/module" {
+		t.Fatalf("object work directory = %q, want /repo/module", workDir)
+	}
+	if options.Package != "object.go" || len(options.Files) != 1 || options.Files[0] != "object.go" {
+		t.Fatalf("object source options = %#v", options)
+	}
+}

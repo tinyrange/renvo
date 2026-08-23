@@ -125,6 +125,17 @@ func standaloneCSourceContext(workDir string, options Options) (string, Options)
 	if len(options.Files) == 0 || options.Mode != ModeObject && !(options.CCompiler && options.Mode == ModeExecutable) {
 		return workDir, options
 	}
+	// Object mode has historically accepted a single source outside the current
+	// module, including Go sources. Preserve that behavior while extending the
+	// same standalone context to multi-file C compilations below.
+	if options.Mode == ModeObject && len(options.Files) == 1 {
+		path := load.CleanPath(load.JoinPath(workDir, options.Files[0]))
+		workDir = load.DirPath(path)
+		name := load.BasePath(path)
+		options.Package = name
+		options.Files = []string{name}
+		return workDir, options
+	}
 	dir := ""
 	files := make([]string, len(options.Files))
 	for i := 0; i < len(options.Files); i++ {
