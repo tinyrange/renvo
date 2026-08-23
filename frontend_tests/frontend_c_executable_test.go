@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
 	if err := os.WriteFile(source, program, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := frontendCommand(frontend, "cc", filepath.Base(source), "-o", executable)
+	command := frontendCommand(frontend, "cc", "-t", frontend.target, filepath.Base(source), "-o", executable)
 	command.Dir = dir
 	command.Env = cExecutableFrontendEnv(frontend, root, dir)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -105,7 +105,7 @@ int main(void) {
 		t.Fatal(err)
 	}
 	executable := filepath.Join(dir, "app")
-	command := frontendCommand(frontend, "cc", "main.c", "-o", executable)
+	command := frontendCommand(frontend, "cc", "-t", frontend.target, "main.c", "-o", executable)
 	command.Dir = dir
 	command.Env = cExecutableFrontendEnv(frontend, root, dir)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -130,7 +130,7 @@ func runCCModeDoesNotExposeGoBuiltins(t *testing.T, root string, frontend fronte
 	if err := os.WriteFile(source, []byte("int main(void) { print(\"not C\\n\"); return 0; }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := frontendCommand(frontend, "cc", filepath.Base(source), "-o", filepath.Join(dir, "app"))
+	command := frontendCommand(frontend, "cc", "-t", frontend.target, filepath.Base(source), "-o", filepath.Join(dir, "app"))
 	command.Dir = dir
 	command.Env = cExecutableFrontendEnv(frontend, root, dir)
 	output, err := command.CombinedOutput()
