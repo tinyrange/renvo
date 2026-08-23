@@ -1,4 +1,4 @@
-const CACHE = "renvo-web-ide-v24";
+const CACHE = "renvo-web-ide-v25";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs",
   "./editor-navigation.mjs", "./language-path.mjs", "./serial-plotter.mjs",

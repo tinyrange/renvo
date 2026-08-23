@@ -21,6 +21,7 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(html, /id="build-scope"/);
   assert.match(html, /id="new-file-dialog"/);
   assert.match(html, /id="new-file-kind"/);
+  assert.doesNotMatch(html, /Initializing compiler/);
   assert.doesNotMatch(html, /class="activity-bar"/);
   assert.match(html, /id="snapshot-dialog"/);
   assert.match(html, /id="text-dialog"/);
