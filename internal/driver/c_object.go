@@ -45,20 +45,45 @@ func (r cObjectIncludeReader) ReadIncludeNext(from string, name string, _ bool) 
 	return nil, name, false
 }
 
-func prepareCObjectSources(result SourceResult, options *Options, workDir string, fs SourceFS) SourceResult {
-	if !result.Ok || options.Mode != ModeObject {
+func prepareCSources(result SourceResult, options *Options, workDir string, stdRoot string, moduleCache string, fs SourceFS) SourceResult {
+	return prepareCSourcesPass(result, options, workDir, stdRoot, moduleCache, fs, true)
+}
+
+func prepareCSourcesPass(result SourceResult, options *Options, workDir string, stdRoot string, moduleCache string, fs SourceFS, reloadGoFiles bool) SourceResult {
+	object := options.Mode == ModeObject
+	executable := options.CCompiler && options.Mode == ModeExecutable
+	if !result.Ok || !object && !executable {
 		return result
 	}
-	reader := cObjectIncludeReader{fs: fs, paths: cObjectIncludePaths(workDir, options.IncludePaths, options.CNoStdIncludes, fs)}
+	paths := options.IncludePaths
+	if object {
+		paths = cObjectIncludePaths(workDir, paths, options.CNoStdIncludes, fs)
+	} else if !options.CNoStdIncludes {
+		copied := make([]string, len(paths), len(paths)+1)
+		copy(copied, paths)
+		paths = append(copied, load.JoinPath(load.DirPath(stdRoot), "libc/include"))
+	}
+	reader := cObjectIncludeReader{fs: fs, paths: paths}
+	libcRoot := load.JoinPath(load.DirPath(stdRoot), "libc")
+	selectedLibc := make([]string, 0, 5)
+	pragmaGoFiles := make([]string, 0, 2)
+	needsRuntime := false
+	firstC := -1
 	// Carry the target model explicitly so translation never depends on the host
 	// Go process.
 	dataModel := c11.DataModelLP64
-	if options.Target == "linux/386" {
+	targetOS, _, pointerBits := cCompilerTarget(options.Target)
+	if pointerBits == 32 {
 		dataModel = c11.DataModelILP32
+	} else if targetOS == "windows" {
+		dataModel = c11.DataModelLLP64
 	}
 	for i := 0; i < len(result.Files); i++ {
 		if !optionArgIsCFile(result.Files[i].Path) {
 			continue
+		}
+		if firstC < 0 {
+			firstC = i
 		}
 		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
 		source := result.Files[i].Src
@@ -75,7 +100,7 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 			headerSource = prefix
 		}
 		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
-		if !options.CNoStdIncludes {
+		if object && !options.CNoStdIncludes {
 			header = c11.BuildObjectPrelude(result.Files[i].Path, headerSource, reader)
 			if !header.Ok {
 				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
@@ -87,8 +112,8 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		processed := c11.Preprocess(c11.PreprocessConfig{
 			Path: result.Files[i].Path, Source: source, Reader: reader,
 			Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
-			ForcedIncludes: options.CForcedInclude, EmitIncludes: options.CNoStdIncludes, EmitQuotedIncludes: true,
-			SuppressForcedIncludes: !options.CNoStdIncludes,
+			ForcedIncludes: options.CForcedInclude, EmitIncludes: executable || options.CNoStdIncludes, EmitQuotedIncludes: true,
+			SuppressForcedIncludes: object && !options.CNoStdIncludes,
 		})
 		if !processed.Ok {
 			result = sourceFail(result, SourceErrCPreprocess, processed.ErrorPath)
@@ -97,7 +122,8 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 			result.CPreprocessDetail = processed.Detail
 			return result
 		}
-		result.Files[i].CObject = true
+		result.Files[i].CObject = object
+		result.Files[i].CCompiler = options.CCompiler
 		result.Files[i].CDataModel = dataModel
 		result.Files[i].CFunctionSections = options.CFunctionSections
 		result.Files[i].CDataSections = options.CDataSections
@@ -105,6 +131,20 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		result.Files[i].CUnsignedChar = options.CUnsignedChar
 		result.Files[i].CKernelCodeModel = options.CKernelCodeModel
 		result.Files[i].COptimize = options.COptimize
+		for j := 0; j < len(processed.GoFiles); j++ {
+			path := load.CleanPath(load.JoinPath(load.DirPath(processed.GoFiles[j].From), processed.GoFiles[j].Name))
+			if !isGoSourceName(load.BasePath(path)) {
+				return sourceFail(result, SourceErrReadFile, path)
+			}
+			if load.DirPath(path) != load.CleanPath(workDir) {
+				return sourceFail(result, SourceErrFileDirectory, path)
+			}
+			name := load.BasePath(path)
+			if findString(pragmaGoFiles, name) < 0 {
+				pragmaGoFiles = append(pragmaGoFiles, name)
+				options.CDependencies = appendUniquePath(options.CDependencies, path)
+			}
+		}
 		result.Files[i].CPrelude = header.Prelude
 		result.Files[i].Src = processed.Source
 		for j := 0; j < len(header.Dependencies); j++ {
@@ -112,9 +152,93 @@ func prepareCObjectSources(result SourceResult, options *Options, workDir string
 		}
 		for j := 0; j < len(processed.Dependencies); j++ {
 			options.CDependencies = appendUniquePath(options.CDependencies, processed.Dependencies[j])
+			if executable {
+				implementation := cLibcImplementation(processed.Dependencies[j])
+				if implementation != "" && findString(selectedLibc, implementation) < 0 {
+					libraryPath := load.JoinPath(libcRoot, "src/"+implementation)
+					src, ok := fs.ReadFile(libraryPath)
+					if !ok {
+						return sourceFail(result, SourceErrReadFile, libraryPath)
+					}
+					selectedLibc = append(selectedLibc, implementation)
+					result.Files = append(result.Files, load.SourceFile{Path: load.JoinPath(workDir, "__renvo_libc_"+implementation), Src: src})
+					if implementation == "stdio.c" || implementation == "stdlib.c" || implementation == "assert.c" {
+						needsRuntime = true
+					}
+				}
+			}
 		}
 	}
+	if executable && reloadGoFiles && len(pragmaGoFiles) > 0 {
+		files := make([]string, len(options.Files), len(options.Files)+len(pragmaGoFiles))
+		copy(files, options.Files)
+		for i := 0; i < len(pragmaGoFiles); i++ {
+			if findString(files, pragmaGoFiles[i]) < 0 {
+				files = append(files, pragmaGoFiles[i])
+			}
+		}
+		collected := CollectSourceFilesForTargetTagsWithModuleCache(
+			workDir, stdRoot, files, options.Target, options.Tags, moduleCache, fs)
+		if !collected.Ok {
+			return collected
+		}
+		options.Files = files
+		return prepareCSourcesPass(collected, options, workDir, stdRoot, moduleCache, fs, false)
+	}
+	if executable && firstC >= 0 && len(selectedLibc) > 0 {
+		total := len(result.Files[firstC].Src)
+		for i := 0; i < len(result.Files); i++ {
+			if bundledCLibrarySource(result.Files[i].Path) {
+				total += len(result.Files[i].Src) + 1
+			}
+		}
+		merged := make([]byte, 0, total)
+		merged = append(merged, result.Files[firstC].Src...)
+		for i := 0; i < len(result.Files); i++ {
+			if bundledCLibrarySource(result.Files[i].Path) {
+				merged = append(merged, '\n')
+				merged = append(merged, result.Files[i].Src...)
+			}
+		}
+		result.Files[firstC].Src = merged
+		files := result.Files[:0]
+		for i := 0; i < len(result.Files); i++ {
+			if bundledCLibrarySource(result.Files[i].Path) {
+				continue
+			}
+			files = append(files, result.Files[i])
+		}
+		result.Files = files
+	}
+	if executable && needsRuntime {
+		result.Files = append(result.Files, load.SourceFile{
+			Path: load.JoinPath(workDir, "__renvo_c_runtime.go"),
+			Src:  []byte("package main\nfunc __renvo_c_write_byte(fd int32, ch int32) int32 { data := []byte{byte(ch)}; if write(int(fd), data, -1) != 1 { return -1 }; return ch }\nfunc __renvo_c_read_byte(fd int32) int32 { data := []byte{0}; if read(int(fd), data, -1) != 1 { return -1 }; return int32(data[0]) }\nfunc renvo_runtime_Exit(status int32) {}\nfunc __renvo_c_abort(status int32) { renvo_runtime_Exit(status) }\n"),
+		})
+	}
 	return result
+}
+
+func bundledCLibrarySource(path string) bool {
+	name := load.BasePath(path)
+	const prefix = "__renvo_libc_"
+	return len(name) > len(prefix) && name[:len(prefix)] == prefix
+}
+
+func cLibcImplementation(path string) string {
+	switch load.BasePath(path) {
+	case "string.h":
+		return "string.c"
+	case "stdlib.h":
+		return "stdlib.c"
+	case "stdio.h":
+		return "stdio.c"
+	case "ctype.h":
+		return "ctype.c"
+	case "assert.h":
+		return "assert.c"
+	}
+	return ""
 }
 
 // CDependencyOutput emits the make-compatible dependency rule requested by a

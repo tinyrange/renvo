@@ -1,4 +1,4 @@
-const sourceRoots = ["std", "device", "examples", "forms"];
+const sourceRoots = ["std", "libc", "device", "examples", "forms"];
 
 // cleanLanguagePath maps language-service filesystem paths back to the model
 // names used by Monaco. The service may return absolute paths while catalog
@@ -36,4 +36,11 @@ export function sourceImportPath(name, catalog) {
     }
   }
   return importPath;
+}
+
+// isCLibrarySourcePath identifies bundled libc headers and implementations.
+// They live beside catalog packages rather than under an import path.
+export function isCLibrarySourcePath(name, catalog) {
+  const value = cleanLanguagePath(name);
+  return value.startsWith("libc/") && (catalog.libc || []).includes(value.slice("libc/".length));
 }

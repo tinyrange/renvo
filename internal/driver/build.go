@@ -154,6 +154,41 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 	return result
 }
 
+// BuildCExecutableUnitCompact builds explicitly named, module-free C sources
+// for the compact browser frontend. C dependency sources are synthesized while
+// loading, so the persistent linker keeps their storage alive through unit
+// serialization; the browser process exits after this one build.
+func BuildCExecutableUnitCompact(files []string, target string, tags []string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
+	if len(files) == 0 {
+		return PackageUnitResult{Phase: BuildErrSource, Error: SourceErrFileListEmpty}
+	}
+	options := Options{
+		Target: target, Mode: ModeExecutable, ModuleLicense: DefaultModuleLicense,
+		Files: files, Package: files[0], CCompiler: true, Ok: true, ErrorAt: -1, SystemAt: -1,
+		Tags: tags,
+	}
+	built := buildFromFSOptions(options, workDir, stdRoot, "", fs, false)
+	result := PackageUnitResult{
+		Unit: built.Unit, Path: built.ErrorPath, Ok: built.Ok, Phase: built.Error,
+		ErrorPackage: built.ErrorPackage, ErrorFile: built.ErrorFile, ErrorToken: built.ErrorToken,
+	}
+	if built.Ok {
+		result.Phase = BuildOK
+		result.Error = SourceOK
+		return result
+	}
+	result.Phase = built.Error
+	if built.Error == BuildErrSource {
+		result.Error = built.Sources.Error
+	} else if built.Error == BuildErrPipeline {
+		result.Error = built.Pipeline.Error
+		if built.Pipeline.Error == pipeline.PipelineErrLoad {
+			result.Error = built.Pipeline.Workspace.Error
+		}
+	}
+	return result
+}
+
 func buildFromFSCompact(args []string, workDir string, stdRoot string, fs SourceFS) BuildResult {
 	return buildFromFS(args, workDir, stdRoot, "", fs, true)
 }
@@ -178,7 +213,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
 	options = resolveCCompilerPaths(workDir, options)
-	workDir, options = objectSourceContext(workDir, options)
+	workDir, options = standaloneCSourceContext(workDir, options)
 	result.Options = options
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
@@ -188,7 +223,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	} else {
 		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
 	}
-	sources = prepareCObjectSources(sources, &options, workDir, fs)
+	sources = prepareCSources(sources, &options, workDir, stdRoot, moduleCache, fs)
 	options = finalizeCDependencyOptions(options)
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
@@ -250,7 +285,7 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		return buildFail(result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
 	}
 	options = resolveCCompilerPaths(workDir, options)
-	workDir, options = objectSourceContext(workDir, options)
+	workDir, options = standaloneCSourceContext(workDir, options)
 	result.Options = options
 	fs = sourceFSForOptions(fs, workDir, options)
 	sourcesStart := arena.Mark()
@@ -260,7 +295,7 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	} else {
 		sources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, options.Target, options.Tags, moduleCache, fs)
 	}
-	sources = prepareCObjectSources(sources, &options, workDir, fs)
+	sources = prepareCSources(sources, &options, workDir, stdRoot, moduleCache, fs)
 	options = finalizeCDependencyOptions(options)
 	sourcesEnd := arena.Mark()
 	result.Sources = sources
@@ -296,6 +331,12 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if options.Mode == ModeObject {
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if compact && options.CCompiler {
+		// Demand-selected libc sources are synthesized during collection rather
+		// than retained by the editor cache. Use the one-shot transient linker so
+		// their storage remains valid through serialization without being pinned
+		// for the next incremental build.
+		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else if compact {
 		built = pipeline.BuildUnitWithTransientFilesCached(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
 	} else {

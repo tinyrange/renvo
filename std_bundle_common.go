@@ -105,7 +105,7 @@ func bundledSourceName(path string) (string, bool) {
 	if bundledHasPrefix(path, module+"/") {
 		return "@module/" + path[len(module)+1:], true
 	}
-	if path != "std" && !bundledHasPrefix(path, "std/") {
+	if path != "std" && !bundledHasPrefix(path, "std/") && path != "libc" && !bundledHasPrefix(path, "libc/") {
 		return "", false
 	}
 	return path, true

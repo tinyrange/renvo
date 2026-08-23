@@ -141,6 +141,9 @@ func cPreprocessDiagnostic(preprocessError int, path string, line int, detail st
 		}
 	} else if preprocessError == c11.PreprocessErrDirective {
 		message = "invalid or unsupported preprocessing directive"
+		if detail != "" {
+			message += ": " + detail
+		}
 	} else if preprocessError == c11.PreprocessErrExpression {
 		message = "invalid preprocessor constant expression"
 	} else if preprocessError == c11.PreprocessErrMacro {
@@ -158,12 +161,10 @@ func cPreprocessDiagnostic(preprocessError int, path string, line int, detail st
 }
 
 func cCommandMacros(options Options) []c11.Macro {
-	macros := make([]c11.Macro, 0, len(options.CDefines)+16)
-	if options.Target == "linux/386" {
+	macros := make([]c11.Macro, 0, len(options.CDefines)+32)
+	targetOS, targetISA, pointerBits := cCompilerTarget(options.Target)
+	if pointerBits == 32 {
 		macros = append(macros,
-			c11.Macro{Name: "__i386__", Value: "1"},
-			c11.Macro{Name: "__i386", Value: "1"},
-			c11.Macro{Name: "i386", Value: "1"},
 			c11.Macro{Name: "__ILP32__", Value: "1"},
 			c11.Macro{Name: "_ILP32", Value: "1"},
 			c11.Macro{Name: "__SIZEOF_LONG__", Value: "4"},
@@ -175,6 +176,32 @@ func cCommandMacros(options Options) []c11.Macro {
 			c11.Macro{Name: "__INTPTR_TYPE__", Value: "int"},
 			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "unsigned int"},
 		)
+	}
+	if targetOS == "windows" && pointerBits == 64 {
+		macros = append(macros,
+			c11.Macro{Name: "_WIN64", Value: "1"},
+			c11.Macro{Name: "__SIZEOF_LONG__", Value: "4"},
+			c11.Macro{Name: "__SIZEOF_POINTER__", Value: "8"},
+			c11.Macro{Name: "__SIZEOF_SIZE_T__", Value: "8"},
+			c11.Macro{Name: "__SIZEOF_PTRDIFF_T__", Value: "8"},
+			c11.Macro{Name: "__SIZE_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__PTRDIFF_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__INTPTR_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "long long unsigned int"},
+		)
+	}
+	targetMacros := cTargetPredefinedMacros(targetOS, targetISA)
+	for i := 0; i < len(targetMacros); i++ {
+		macros = append(macros, targetMacros[i])
+	}
+	if options.CCompiler && options.Mode == ModeExecutable {
+		macros = append(macros, c11.Macro{Name: "__STDC_HOSTED__", Value: "1"})
+	}
+	if targetOS == "vm" && targetISA == "vm32" {
+		// VM32 does not currently implement the binary floating-point
+		// conversions required by printf's decimal formatter. This standard
+		// feature-test macro lets libc retain the rest of stdio on that target.
+		macros = append(macros, c11.Macro{Name: "__STDC_NO_IEC_60559_BFP__", Value: "1"})
 	}
 	if options.CUnsignedChar {
 		macros = append(macros, c11.Macro{Name: "__CHAR_UNSIGNED__", Value: "1"})
@@ -195,10 +222,70 @@ func cCommandMacros(options Options) []c11.Macro {
 }
 
 func cCommandUndefined(options Options) []string {
-	if options.Target != "linux/386" {
-		return options.CUndefines
+	undefined := make([]string, len(options.CUndefines))
+	copy(undefined, options.CUndefines)
+	targetOS, targetISA, pointerBits := cCompilerTarget(options.Target)
+	if targetISA != "amd64" {
+		undefined = append(undefined, "__x86_64__", "__x86_64", "__amd64__")
 	}
-	undefined := make([]string, 0, len(options.CUndefines)+5)
-	undefined = append(undefined, options.CUndefines...)
-	return append(undefined, "__x86_64__", "__x86_64", "__amd64__", "__LP64__", "_LP64")
+	if pointerBits != 64 || targetOS == "windows" {
+		undefined = append(undefined, "__LP64__", "_LP64")
+	}
+	if targetOS != "linux" {
+		undefined = append(undefined, "__linux__", "__linux", "linux")
+	}
+	if targetOS != "linux" && targetOS != "freebsd" && targetOS != "openbsd" && targetOS != "netbsd" {
+		undefined = append(undefined, "__ELF__")
+	}
+	return undefined
+}
+
+func cTargetPredefinedMacros(targetOS string, targetISA string) []c11.Macro {
+	var macros []c11.Macro
+	switch targetISA {
+	case "386":
+		macros = append(macros, c11.Macro{Name: "__i386__", Value: "1"}, c11.Macro{Name: "__i386", Value: "1"}, c11.Macro{Name: "i386", Value: "1"})
+	case "aarch64":
+		macros = append(macros, c11.Macro{Name: "__aarch64__", Value: "1"})
+	case "arm":
+		macros = append(macros, c11.Macro{Name: "__arm__", Value: "1"})
+	case "wasm32":
+		macros = append(macros, c11.Macro{Name: "__wasm__", Value: "1"}, c11.Macro{Name: "__wasm32__", Value: "1"})
+	case "riscv32":
+		macros = append(macros, c11.Macro{Name: "__riscv", Value: "1"}, c11.Macro{Name: "__riscv_xlen", Value: "32"})
+	case "xtensa_lx7":
+		macros = append(macros, c11.Macro{Name: "__XTENSA__", Value: "1"}, c11.Macro{Name: "__xtensa__", Value: "1"})
+	}
+	switch targetOS {
+	case "windows":
+		macros = append(macros, c11.Macro{Name: "_WIN32", Value: "1"})
+	case "darwin":
+		macros = append(macros, c11.Macro{Name: "__APPLE__", Value: "1"}, c11.Macro{Name: "__MACH__", Value: "1"})
+	case "freebsd":
+		macros = append(macros, c11.Macro{Name: "__FreeBSD__", Value: "1"})
+	case "openbsd":
+		macros = append(macros, c11.Macro{Name: "__OpenBSD__", Value: "1"})
+	case "netbsd":
+		macros = append(macros, c11.Macro{Name: "__NetBSD__", Value: "1"})
+	case "wasi", "browser":
+		macros = append(macros, c11.Macro{Name: "__wasi__", Value: "1"})
+	}
+	return macros
+}
+
+func cCompilerTarget(target string) (string, string, int) {
+	os := target
+	isa := ""
+	for i := 0; i < len(target); i++ {
+		if target[i] == '/' {
+			os = target[:i]
+			isa = target[i+1:]
+			break
+		}
+	}
+	pointerBits := 64
+	if isa == "386" || isa == "arm" || isa == "wasm32" || isa == "vm32" || isa == "riscv32" || isa == "xtensa_lx7" {
+		pointerBits = 32
+	}
+	return os, isa, pointerBits
 }

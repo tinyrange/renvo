@@ -24,6 +24,7 @@ type targetAsset struct {
 	Name              string   `json:"name"`
 	BackendTarget     string   `json:"backendTarget"`
 	Backend           string   `json:"backend"`
+	CBackend          string   `json:"cBackend,omitempty"`
 	Output            string   `json:"output"`
 	Runnable          bool     `json:"runnable,omitempty"`
 	Device            string   `json:"device,omitempty"`
@@ -45,17 +46,20 @@ type targetCatalog struct {
 }
 
 type standardPackage struct {
-	Files   []string `json:"files"`
-	Imports []string `json:"imports,omitempty"`
-	Root    string   `json:"root,omitempty"`
-	Main    bool     `json:"main,omitempty"`
-	Target  string   `json:"target,omitempty"`
-	Board   string   `json:"board,omitempty"`
+	Files    []string `json:"files"`
+	Imports  []string `json:"imports,omitempty"`
+	Root     string   `json:"root,omitempty"`
+	Main     bool     `json:"main,omitempty"`
+	Target   string   `json:"target,omitempty"`
+	Board    string   `json:"board,omitempty"`
+	Language string   `json:"language,omitempty"`
 }
 
 type standardCatalog struct {
 	Packages  map[string]standardPackage `json:"packages"`
 	Platforms map[string]standardPackage `json:"platforms,omitempty"`
+	Libc      []string                   `json:"libc,omitempty"`
+	Module    string                     `json:"module,omitempty"`
 }
 
 type customTarget struct {
@@ -98,7 +102,7 @@ func main() {
 		}
 		catalog.Targets = append(catalog.Targets, targetAsset{
 			Name: descriptor.Name, BackendTarget: descriptor.Backend,
-			Backend: backend, Output: outputName(descriptor.Name, descriptor.Image),
+			Backend: backend, CBackend: "backends/native-c.wasm", Output: outputName(descriptor.Name, descriptor.Image),
 			Runnable: descriptor.Backend == "wasi/wasm32", Tags: descriptor.Tags,
 		})
 	}
@@ -226,13 +230,47 @@ func buildStandardLibrary(root string, output string) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(filepath.Join(output, "stdlib", "catalog.json"), standardCatalog{Packages: packages, Platforms: platforms})
+	libc, err := buildCLibrary(root, output)
+	if err != nil {
+		return err
+	}
+	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return err
+	}
+	return writeJSON(filepath.Join(output, "stdlib", "catalog.json"), standardCatalog{Packages: packages, Platforms: platforms, Libc: libc, Module: string(module)})
+}
+
+func buildCLibrary(root string, output string) ([]string, error) {
+	libcRoot := filepath.Join(root, "libc")
+	var files []string
+	err := filepath.WalkDir(libcRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			return nil
+		}
+		relative, err := filepath.Rel(libcRoot, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(relative)
+		files = append(files, name)
+		return copyFile(path, filepath.Join(output, "stdlib", "libc", relative))
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 type platformPackageSpec struct {
-	Path   string
-	Target string
-	Board  string
+	Path     string
+	Target   string
+	Board    string
+	Language string
 }
 
 func platformPackageSpecs() []platformPackageSpec {
@@ -256,7 +294,9 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/blink_mixed", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/blink_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
 		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/button_rgb_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
 		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "device/esp32s3", Target: "esp32s3/xtensa_lx7"},
 		{Path: "device/board/m5atoms3lite", Target: "esp32s3/xtensa_lx7"},
@@ -287,7 +327,7 @@ func buildPlatformPackages(root string, output string) (map[string]standardPacka
 		if err != nil {
 			return nil, err
 		}
-		item := standardPackage{Root: spec.Path, Target: spec.Target, Board: spec.Board}
+		item := standardPackage{Root: spec.Path, Target: spec.Target, Board: spec.Board, Language: spec.Language}
 		imports := make(map[string]bool)
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), ".") {

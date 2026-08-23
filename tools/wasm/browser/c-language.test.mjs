@@ -36,3 +36,29 @@ test("catalog source models use extension-based language selection", async () =>
   assert.match(app, /createModel\(decoder\.decode\(source\), languageForFile\(name\)/);
   assert.match(app, /if \(name\.endsWith\("\.c"\) \|\| name\.endsWith\("\.h"\)\) return C_LANGUAGE_ID/);
 });
+
+test("C models use the complete semantic language-service pipeline", async () => {
+  const app = await readFile(new URL("./app.mjs", import.meta.url), "utf8");
+  const worker = await readFile(new URL("./worker.mjs", import.meta.url), "utf8");
+  assert.match(app, /const semanticLanguages = \["go", C_LANGUAGE_ID\]/);
+  assert.match(app, /registerCompletionItemProvider\(semanticLanguages/);
+  assert.match(app, /registerSignatureHelpProvider\(semanticLanguages/);
+  assert.match(app, /registerDefinitionProvider\(semanticLanguages/);
+  assert.match(app, /registerHoverProvider\(semanticLanguages/);
+  assert.match(app, /registerReferenceProvider\(semanticLanguages/);
+  assert.match(app, /registerRenameProvider\(semanticLanguages/);
+  assert.match(app, /function cIncludeContextAt\(model, position\)/);
+  assert.match(app, /name\.startsWith\("libc\/include\/"\)/);
+  assert.doesNotMatch(app, /if \(activeBuildLanguage\(\) === "c"\) return \[\]/);
+  assert.doesNotMatch(app, /C project · build for diagnostics/);
+  assert.match(app, /language: activeBuildLanguage\(\)/);
+  assert.match(worker, /args\.push\("-language", request\.language\)/);
+});
+
+test("bundled C library sources are visible in the library explorer", async () => {
+  const app = await readFile(new URL("./app.mjs", import.meta.url), "utf8");
+  assert.match(app, /heading\.textContent = "C standard library"/);
+  assert.match(app, /cLibraryDirectory\(catalog, "include", "Headers"\)/);
+  assert.match(app, /cLibraryDirectory\(catalog, "src", "Implementation"\)/);
+  assert.match(app, /librarySourceFile\(`libc\/\$\{file\}`/);
+});

@@ -4,6 +4,7 @@ const (
 	DataModelInvalid = iota
 	DataModelLP64
 	DataModelILP32
+	DataModelLLP64
 )
 
 type cTargetDescriptor struct {
@@ -29,6 +30,11 @@ var cX8664SysV = cTargetDescriptor{
 var cI386SysV = cTargetDescriptor{
 	dataModel: DataModelILP32, boolSize: 1, charSize: 1, shortSize: 2,
 	intSize: 4, longSize: 4, floatSize: 4, doubleSize: 8, pointerSize: 4,
+}
+
+var cWindows64 = cTargetDescriptor{
+	dataModel: DataModelLLP64, boolSize: 1, charSize: 1, shortSize: 2,
+	intSize: 4, longSize: 4, floatSize: 4, doubleSize: 8, pointerSize: 8,
 }
 
 const (
@@ -185,6 +191,8 @@ func (t *translator) initTypes(dataModel int) {
 	target := cX8664SysV
 	if dataModel == DataModelILP32 {
 		target = cI386SysV
+	} else if dataModel == DataModelLLP64 {
+		target = cWindows64
 	} else if dataModel != target.dataModel {
 		t.ok = false
 		t.err = TranslateErrUnsupported

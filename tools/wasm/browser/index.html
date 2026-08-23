@@ -80,6 +80,8 @@
       </div>
       <div class="section-title project-heading"><span>FILES</span><span id="project-file-count" class="section-count">2</span></div>
       <div class="project-action-menu" id="project-action-menu" role="menu" aria-label="Project actions" hidden>
+        <button type="button" role="menuitem" data-project-action="new"><span>＋</span><span>New project…</span></button>
+        <div class="menu-separator" role="separator"></div>
         <button type="button" role="menuitem" data-project-action="rename"><span>✎</span><span>Rename project…</span></button>
         <button type="button" role="menuitem" data-project-action="export"><span>⇩</span><span>Export project ZIP</span></button>
         <button type="button" role="menuitem" data-project-action="directory"><span>▣</span><span>Import folder…</span></button>
@@ -242,6 +244,18 @@
           <p class="dialog-error" id="new-file-error" role="alert"></p>
         </div>
         <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-primary">Create file</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="ide-dialog new-project-dialog" id="new-project-dialog">
+      <form method="dialog" id="new-project-form">
+        <header><div><h2>New project</h2><p>Choose the language for a fresh playground project.</p></div><button value="cancel" aria-label="Close">×</button></header>
+        <fieldset class="project-kind-options">
+          <label><input type="radio" name="project-kind" value="go" checked><span><strong>Go project</strong><small>Start with a Go module and main package.</small></span></label>
+          <label><input type="radio" name="project-kind" value="c"><span><strong>C project</strong><small>Start in pure C mode with the embedded C standard library.</small></span></label>
+        </fieldset>
+        <p class="new-project-warning">Creating the project replaces the files currently open in this playground.</p>
+        <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-primary">Create project</button></footer>
       </form>
     </dialog>
 

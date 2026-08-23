@@ -110,7 +110,8 @@ self.addEventListener("message", async (event) => {
       return;
     }
     const context = newContext(new Map(languageFiles));
-    const args = ["renvo-language", request.type, "-target", request.target, "-file", request.file, "-offset", String(request.offset)];
+	const args = ["renvo-language", request.type, "-target", request.target, "-file", request.file, "-offset", String(request.offset)];
+	if (request.language) args.push("-language", request.language);
     for (const tag of request.tags || []) args.push("-tags", tag);
     args.push(request.packageAt || ".");
     await runModule(languageServiceModule, context, args);

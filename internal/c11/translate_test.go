@@ -6782,6 +6782,7 @@ unsigned long call_inspect(char *pointer) { return inspect(1, 42, pointer); }
 		[]byte("// renvo:object function inspect - 0 1 0 - 8 0 - 1"),
 		[]byte("func inspect(fixed int32,__c_va *[3]uintptr)"),
 		[]byte("args=*__c_va"),
+		[]byte("value:=*(*uint64)(__c_unsafe.Pointer(*state+index*8))"),
 		[]byte("renvo_runtime_CVAArg(args)"),
 		[]byte("__c_va_copy(&(destination)[0],source)"),
 		[]byte("consume(&(args)[0])"),
@@ -6819,6 +6820,7 @@ unsigned long long inspect(int fixed, ...) {
 	}
 	for _, want := range [][]byte{
 		[]byte("func renvo_runtime_CVAArg32(state *uintptr) uintptr"),
+		[]byte("value:=*(*uintptr)(__c_unsafe.Pointer(pointer))"),
 		[]byte("func renvo_runtime_CVAArg64(state *uintptr) uint64"),
 		[]byte("word=uint32(renvo_runtime_CVAArg32(&(args)[0]))"),
 		[]byte("wide=uint64(renvo_runtime_CVAArg64(&(args)[0]))"),
@@ -7698,11 +7700,67 @@ unsigned long preserve_value(void) {
 func TestTranslateRejectsSemanticsNotYetPreserved(t *testing.T) {
 	for _, source := range []string{
 		"#if 0\nint hidden(void) { return 1; }\n#endif\n",
-		"int main(int argc, char **argv) { return argc; }\n",
 	} {
 		result := Translate("main", []byte(source))
 		if result.Ok || result.Error != TranslateErrUnsupported {
 			t.Fatalf("Translate(%q) = %#v, want explicit unsupported error", source, result)
+		}
+	}
+}
+
+func TestTranslateExecutableMainArguments(t *testing.T) {
+	result := Translate("main", []byte("int main(int argc, char **argv) { return argc + (argv != 0); }\n"))
+	if !result.Ok {
+		t.Fatalf("argument-bearing main translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("func __c_user_main("), []byte("func appMain(__c_args []string,__c_env []string) int32"), []byte("return __c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])))")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("argument-bearing main source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("argument-bearing main source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateExecutableDataModels(t *testing.T) {
+	source := []byte("int inspect(void) { return sizeof(long) * 100 + sizeof(void *); }\n")
+	models := []struct {
+		model int
+		want  []byte
+	}{
+		{model: DataModelLP64, want: []byte("return 808")},
+		{model: DataModelILP32, want: []byte("return 404")},
+		{model: DataModelLLP64, want: []byte("return 408")},
+	}
+	for _, test := range models {
+		result := TranslateForDataModel("main", source, test.model)
+		if !result.Ok || !bytes.Contains(result.Source, test.want) {
+			t.Fatalf("data model %d translation = %#v\n%s", test.model, result, result.Source)
+		}
+	}
+}
+
+func TestTranslateExecutableVariadicFloatPack(t *testing.T) {
+	result := Translate("main", []byte("int show(const char *, ...); int main(void) { return show(\"%.2f\", 2.5); }\n"))
+	if !result.Ok {
+		t.Fatalf("floating variadic translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("__c_variadic_"), []byte("__c_va_bits_0"), []byte("*(*float64)(__c_unsafe.Pointer")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("floating variadic source is missing %q:\n%s", want, result.Source)
+		}
+	}
+}
+
+func TestTranslateExecutableDoesNotExposeGoBuiltins(t *testing.T) {
+	result := TranslateWithConfig("main", []byte("int main(void) { int len = 1; print(len); return 0; }\n"), ObjectConfig{DataModel: DataModelLP64, IsolateGoBuiltins: true})
+	if !result.Ok {
+		t.Fatalf("C identifier isolation translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{[]byte("var __c_name_len int32"), []byte("__c_name_print(__c_name_len)")} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("C identifier isolation source is missing %q:\n%s", want, result.Source)
 		}
 	}
 }

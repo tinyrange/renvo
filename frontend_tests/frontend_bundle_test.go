@@ -105,6 +105,23 @@ func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
 	if err != nil || !strings.Contains(string(runHelp), "Usage: renvo run") || !strings.Contains(string(runHelp), "Top-level statements") {
 		t.Fatalf("standalone run help failed: err=%v output=%q", err, runHelp)
 	}
+	cSource := filepath.Join(helpDir, "standalone.c")
+	cExecutable := filepath.Join(helpDir, "standalone-c")
+	if err := os.WriteFile(cSource, []byte("#include <stdio.h>\nint main(void) { printf(\"C PASS %.1f\\n\", 2.5); return 0; }\n"), 0o644); err != nil {
+		t.Fatalf("write standalone C source failed: %v", err)
+	}
+	cmd = exec.Command(standalone, "cc", filepath.Base(cSource), "-o", cExecutable)
+	cmd.Dir = helpDir
+	cmd.Env = []string{"PWD=" + helpDir}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("standalone bundled C compile failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command(cExecutable)
+	cmd.Dir = helpDir
+	cmd.Env = []string{"PWD=" + helpDir}
+	if out, err := cmd.CombinedOutput(); err != nil || string(out) != "C PASS 2.5\n" {
+		t.Fatalf("standalone bundled C output failed: err=%v output=%q", err, out)
+	}
 
 	project := writeBundleProject(t)
 	systemProfile := filepath.Join(project, "small-linux.rtg")

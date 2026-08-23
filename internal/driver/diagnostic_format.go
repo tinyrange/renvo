@@ -1,5 +1,13 @@
 package driver
 
+func cDiagnosticIdentifier(path string, name []byte) string {
+	const prefix = "__c_name_"
+	if optionArgIsCFile(path) && len(name) > len(prefix) && string(name[:len(prefix)]) == prefix {
+		name = name[len(prefix):]
+	}
+	return string(name)
+}
+
 // FormatDiagnostic produces the common CLI representation without relying on
 // fmt, so the host and self-hosted frontend use exactly the same text.
 func FormatDiagnostic(d Diagnostic) string {

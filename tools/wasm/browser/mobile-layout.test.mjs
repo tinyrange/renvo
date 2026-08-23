@@ -20,6 +20,10 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(html, /id="project-action-menu"/);
   assert.match(html, /id="build-scope"/);
   assert.match(html, /id="new-file-dialog"/);
+  assert.match(html, /data-project-action="new"/);
+  assert.match(html, /id="new-project-dialog"/);
+  assert.match(html, /name="project-kind" value="go"/);
+  assert.match(html, /name="project-kind" value="c"/);
   assert.match(html, /id="new-file-kind"/);
   assert.doesNotMatch(html, /class="activity-bar"/);
   assert.match(html, /id="snapshot-dialog"/);
@@ -58,6 +62,13 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(app, /function saveAndDeploy\(\)[\s\S]*selectedTarget\?\.device === "esp32"[\s\S]*runArtifact\(\)/);
   assert.match(app, /openSnapshotDialog/);
   assert.match(app, /function createNewWorkspaceFile[\s\S]*setBuildPackage\("\."\)/);
+  assert.match(app, /function createNewProject[\s\S]*initialCFiles/);
+  assert.match(app, /activeBuildLanguage\(\) === "c"[\s\S]*result\.unshift\("cc"\)/);
+  assert.match(app, /async function loadCLibrary[\s\S]*stdlibFiles\.set\(`libc\/\$\{file\}`/);
+  assert.match(app, /catalog\.module[\s\S]*stdlibFiles\.set\("go\.mod"/);
+  assert.match(app, /setBuildPackage\(item\.root, item\.target, button, item\.language\)/);
+  assert.match(app, /item\.language === "c"[\s\S]*file === "main\.c"/);
+  assert.match(app, /language: projectLanguage/);
   assert.match(app, /function syncBuildScope/);
   assert.match(app, /target: selectedTarget\?\.name \|\| restoredTargetName/);
   assert.match(app, /\\\.\(\?:go\|c\|h\|rtg\)\$/);

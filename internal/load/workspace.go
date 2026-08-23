@@ -60,7 +60,7 @@ func normalizeSourceFiles(files []SourceFile) ([]SourceFile, int) {
 	out := make([]SourceFile, 0, len(files))
 	for i := 0; i < len(files); i++ {
 		out = append(out, SourceFile{Path: CleanPath(files[i].Path), Src: files[i].Src, CPrelude: files[i].CPrelude,
-			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
+			CObject: files[i].CObject, CCompiler: files[i].CCompiler, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
 			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
 			CUnsignedChar:    files[i].CUnsignedChar,
 			CKernelCodeModel: files[i].CKernelCodeModel, COptimize: files[i].COptimize,

@@ -136,6 +136,7 @@ type translator struct {
 	tokens                  []token
 	pos                     int
 	packageName             string
+	isolateGoBuiltins       bool
 	out                     []byte
 	object                  bool
 	checkOnly               bool
@@ -333,6 +334,18 @@ func Translate(packageName string, src []byte) Result {
 	return translate(packageName, src, nil, false, DataModelLP64, false)
 }
 
+// TranslateForDataModel lowers a freestanding C translation unit using the
+// scalar widths of the selected executable target.
+func TranslateForDataModel(packageName string, src []byte, dataModel int) Result {
+	return translate(packageName, src, nil, false, dataModel, false)
+}
+
+// TranslateWithConfig lowers an executable C translation unit with the
+// target's command-line scalar and optimization policy.
+func TranslateWithConfig(packageName string, src []byte, config ObjectConfig) Result {
+	return translateObjectConfig(packageName, src, nil, false, config, false)
+}
+
 // TranslateObject lowers a hosted C translation unit. Prelude contains
 // declarations recovered from the translation unit's included headers; it is
 // kept separate so diagnostics in src retain their original byte offsets.
@@ -355,6 +368,7 @@ type ObjectConfig struct {
 	UnsignedChar       bool
 	KernelCodeModel    bool
 	PruneUnusedStatics bool
+	IsolateGoBuiltins  bool
 }
 
 func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
@@ -388,6 +402,7 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 func translateObjectConfigMode(packageName string, src []byte, prelude []byte, object bool, config ObjectConfig, checkOnly bool, assemblyOutput bool) Result {
 	t := translator{
 		packageName:        packageName,
+		isolateGoBuiltins:  config.IsolateGoBuiltins,
 		out:                make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
 		object:             object,
 		checkOnly:          checkOnly,
@@ -816,19 +831,19 @@ func (t *translator) externalDeclaration() {
 			if t.object && decl.attributes.alias != "" {
 				t.emitObjectAlias(decl, storage, true)
 			}
-			if (t.checkOnly || t.object) && !t.rememberFunction(&decl, false) {
+			if !t.rememberFunction(&decl, false) {
 				t.fail(TranslateErrDeclaration)
 			}
 			return // Otherwise a C or Go definition in the package satisfies it.
 		}
 		if t.take(",") {
-			if (t.checkOnly || t.object) && !t.rememberFunction(&decl, false) {
+			if !t.rememberFunction(&decl, false) {
 				t.fail(TranslateErrDeclaration)
 				return
 			}
 			for {
 				next, valid := t.parseDeclarator(base, true)
-				if !valid || !next.function || (t.checkOnly || t.object) && !t.rememberFunction(&next, false) {
+				if !valid || !next.function || !t.rememberFunction(&next, false) {
 					t.fail(TranslateErrDeclaration)
 					return
 				}
@@ -2240,7 +2255,7 @@ func (t *translator) rememberObject(name []byte, typeID int) {
 			return
 		}
 	}
-	t.objects = append(t.objects, cObjectName{name: string(name), goName: cGoIdentifier(string(name)), typeID: typeID, auto: t.localStart >= 0})
+	t.objects = append(t.objects, cObjectName{name: string(name), goName: t.cSourceGoIdentifier(string(name)), typeID: typeID, auto: t.localStart >= 0})
 	t.rememberName(string(name), len(t.objects)-1, cNameObject)
 }
 
@@ -2263,7 +2278,7 @@ func (t *translator) rememberExternalObject(decl declarator) {
 		}
 		return
 	}
-	t.externals = append(t.externals, cObjectName{name: name, goName: cGoIdentifier(name), typeID: decl.typeID,
+	t.externals = append(t.externals, cObjectName{name: name, goName: t.cSourceGoIdentifier(name), typeID: decl.typeID,
 		attributes: decl.attributes, storage: storageExtern})
 }
 
@@ -2859,7 +2874,7 @@ func (t *translator) emitPendingDeclarations() {
 		t.out = append(t.out, ';', '\n')
 	}
 	for i := 0; i < len(t.functions); i++ {
-		if !t.functions[i].variadic && references.contains(t.functions[i].name) &&
+		if t.object && !t.functions[i].variadic && references.contains(t.functions[i].name) &&
 			(!t.functions[i].defined || t.object && t.functions[i].attributes.weak) {
 			t.emitForeignFunctionName(t.functions[i])
 		}
@@ -2879,7 +2894,7 @@ func (t *translator) emitPendingDeclarations() {
 		}
 		t.emitObjectMetadata("variable", t.tentatives[i].name, t.tentatives[i].attributes, t.tentatives[i].storage, nil, typeID, false)
 		t.appendText("var ")
-		t.out = append(t.out, cGoIdentifier(t.tentatives[i].name)...)
+		t.out = append(t.out, t.cSourceGoIdentifier(t.tentatives[i].name)...)
 		t.out = append(t.out, ' ')
 		t.emitType(typeID)
 		t.out = append(t.out, ';', '\n')
@@ -3346,6 +3361,24 @@ func cGoIdentifier(name string) string {
 	return name
 }
 
+func (t *translator) cSourceGoIdentifier(name string) string {
+	if t.isolateGoBuiltins && !t.object && t.cIdentifierIsGoPredeclared(name) {
+		return "__c_name_" + name
+	}
+	return cGoIdentifier(name)
+}
+
+func (t *translator) cIdentifierIsGoPredeclared(name string) bool {
+	return cTokenSetContains("append,cap,close,complex,complex64,complex128,copy,delete,error,false,float32,float64,imag,int,int8,int16,int32,int64,len,make,new,nil,panic,print,println,real,recover,rune,string,true,uint,uint8,uint16,uint32,uint64,uintptr", []byte(name))
+}
+
+func (t *translator) cFunctionGoName(name string) string {
+	if t.object {
+		return name
+	}
+	return t.cSourceGoIdentifier(name)
+}
+
 func (t *translator) emitForeignFunctionName(fn cFunctionName) {
 	t.emitForeignFunction(fn.name, fn.name, fn.resultType, fn.paramStart, fn.paramCount)
 }
@@ -3386,15 +3419,15 @@ func (t *translator) emitForeignFunction(symbol string, goName string, resultTyp
 
 func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 	fn := t.functions[call.function]
-	if fn.defined {
+	if fn.defined || !t.object {
 		extraCount := call.paramCount - fn.paramCount
 		if extraCount < 0 || extraCount > 64 {
 			t.fail(TranslateErrUnsupported)
 			return
 		}
-		for i := fn.paramCount; fn.consumesVariadic && i < call.paramCount; i++ {
+		for i := fn.paramCount; (fn.consumesVariadic || !t.object) && i < call.paramCount; i++ {
 			info := t.typeInfo(t.functionParams[call.paramStart+i])
-			if info.kind != cTypePointer && info.kind != cTypeInt && info.kind != cTypeUint && info.kind != cTypeBool ||
+			if info.kind != cTypePointer && info.kind != cTypeInt && info.kind != cTypeUint && info.kind != cTypeBool && info.kind != cTypeFloat ||
 				info.kind != cTypePointer && (info.size < 1 || info.size > 8) {
 				t.fail(TranslateErrUnsupported)
 				return
@@ -3417,12 +3450,12 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 			t.out = append(t.out, ' ')
 			t.emitType(fn.resultType)
 		}
-		if !fn.consumesVariadic {
+		if !fn.consumesVariadic && t.object {
 			t.appendText("{")
 			if fn.resultType != cTypeVoidID {
 				t.appendText("return ")
 			}
-			t.out = append(t.out, fn.name...)
+			t.out = append(t.out, t.cFunctionGoName(fn.name)...)
 			t.out = append(t.out, '(')
 			for i := 0; i < fn.paramCount; i++ {
 				if i > 0 {
@@ -3437,29 +3470,71 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 			t.appendText("nil)}\n")
 			return
 		}
-		wordCount := extraCount
+		wordCount := 0
+		for i := 0; i < extraCount; i++ {
+			size := t.typeInfo(t.functionParams[call.paramStart+fn.paramCount+i]).size
+			if size < t.pointerSize {
+				size = t.pointerSize
+			}
+			wordCount += (size + t.pointerSize - 1) / t.pointerSize
+		}
 		if wordCount < 6 {
 			wordCount = 6
 		}
 		t.appendText("{var __c_va_words [")
 		t.appendDecimal(wordCount)
 		t.appendText("]uintptr;var __c_va [3]uintptr;")
+		wordOffset := 0
 		for i := 0; i < extraCount; i++ {
-			t.appendText("__c_va_words[")
-			t.appendDecimal(i)
-			t.appendText("]=uintptr(")
 			typeID := t.functionParams[call.paramStart+fn.paramCount+i]
-			if t.typeInfo(typeID).kind == cTypePointer {
-				t.usesUnsafe = true
-				t.appendText("__c_unsafe.Pointer(")
-				t.out = append(t.out, 'p')
-				t.appendDecimal(fn.paramCount + i)
-				t.appendText(")")
-			} else {
-				t.out = append(t.out, 'p')
-				t.appendDecimal(fn.paramCount + i)
+			info := t.typeInfo(typeID)
+			words := (info.size + t.pointerSize - 1) / t.pointerSize
+			if words < 1 {
+				words = 1
 			}
-			t.appendText(");")
+			if info.kind == cTypeFloat {
+				t.usesUnsafe = true
+				t.appendText("__c_va_bits_")
+				t.appendDecimal(i)
+				t.appendText(":=uint64(0);*(*float64)(__c_unsafe.Pointer(&__c_va_bits_")
+				t.appendDecimal(i)
+				t.appendText("))=")
+				t.out = append(t.out, 'p')
+				t.appendDecimal(fn.paramCount + i)
+				t.appendText(";")
+				for word := 0; word < words; word++ {
+					t.appendText("__c_va_words[")
+					t.appendDecimal(wordOffset + word)
+					t.appendText("]=uintptr(__c_va_bits_")
+					t.appendDecimal(i)
+					if word != 0 {
+						t.appendText(">>32")
+					}
+					t.appendText(");")
+				}
+			} else {
+				t.appendText("__c_va_words[")
+				t.appendDecimal(wordOffset)
+				t.appendText("]=uintptr(")
+				if info.kind == cTypePointer {
+					t.usesUnsafe = true
+					t.appendText("__c_unsafe.Pointer(")
+				}
+				t.out = append(t.out, 'p')
+				t.appendDecimal(fn.paramCount + i)
+				if info.kind == cTypePointer {
+					t.appendText(")")
+				}
+				t.appendText(");")
+				if words == 2 {
+					t.appendText("__c_va_words[")
+					t.appendDecimal(wordOffset + 1)
+					t.appendText("]=uintptr(uint64(p")
+					t.appendDecimal(fn.paramCount + i)
+					t.appendText(")>>32);")
+				}
+			}
+			wordOffset += words
 		}
 		t.appendText("__c_va[0]=uintptr(__c_unsafe.Pointer(&__c_va_words[0]));")
 		if extraCount > 6 {
@@ -3469,7 +3544,7 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 		if fn.resultType != cTypeVoidID {
 			t.appendText("return ")
 		}
-		t.out = append(t.out, fn.name...)
+		t.out = append(t.out, t.cFunctionGoName(fn.name)...)
 		t.out = append(t.out, '(')
 		for i := 0; i < fn.paramCount; i++ {
 			if i > 0 {
@@ -9870,8 +9945,8 @@ func (t *translator) takeInitializer() []token {
 }
 
 func (t *translator) emitFunction(decl declarator, storage int) {
-	if !t.checkOnly && !t.object && tokenIs(t.src, decl.name, "main") && t.packageName == "main" &&
-		(len(decl.params) != 0 || decl.typeID != cTypeInt32ID) {
+	cMain := !t.object && tokenIs(t.src, decl.name, "main") && t.packageName == "main"
+	if !t.checkOnly && cMain && !t.validExecutableMain(decl) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
@@ -9894,20 +9969,25 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	t.appendText("func ")
 	name := tokenText(t.src, decl.name)
 	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" {
-		name = []byte("appMain")
+		if t.object || len(decl.params) == 0 {
+			name = []byte("appMain")
+		} else {
+			name = []byte("__c_user_main")
+			t.emitExecutableMainWrapper(len(decl.params) == 3)
+		}
 	} else if t.object && linkageStorage != storageStatic && decl.attributes.weak {
 		// A weak definition remains interposable from its own translation unit.
 		// Keep the implementation behind the exported C symbol so calls resolve
 		// through the linker instead of binding directly to Renvo's local body.
 		name = append([]byte("__c_weak_impl_"), name...)
 	}
-	t.out = append(t.out, name...)
+	t.out = append(t.out, t.cFunctionGoName(string(name))...)
 	t.out = append(t.out, '(')
 	for i := 0; i < len(decl.params); i++ {
 		if i > 0 {
 			t.out = append(t.out, ',')
 		}
-		t.out = append(t.out, cGoIdentifier(string(tokenText(t.src, decl.params[i].name)))...)
+		t.out = append(t.out, t.cSourceGoIdentifier(string(tokenText(t.src, decl.params[i].name)))...)
 		t.out = append(t.out, ' ')
 		t.emitType(decl.params[i].typeID)
 	}
@@ -9978,6 +10058,39 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	t.out = append(t.out, '\n')
 }
 
+func (t *translator) validExecutableMain(decl declarator) bool {
+	if decl.typeID != cTypeInt32ID {
+		return false
+	}
+	if len(decl.params) == 0 {
+		return true
+	}
+	if len(decl.params) != 2 && len(decl.params) != 3 || decl.params[0].typeID != cTypeInt32ID {
+		return false
+	}
+	for i := 1; i < len(decl.params); i++ {
+		outer := t.typeInfo(decl.params[i].typeID)
+		if outer.kind != cTypePointer {
+			return false
+		}
+		inner := t.typeInfo(outer.base)
+		if inner.kind != cTypePointer || t.typeInfo(inner.base).size != 1 || t.typeInfo(inner.base).kind != cTypeInt {
+			return false
+		}
+	}
+	return true
+}
+
+func (t *translator) emitExecutableMainWrapper(environment bool) {
+	t.usesUnsafe = true
+	t.staticOut = append(t.staticOut, "func appMain(__c_args []string,__c_env []string) int32{__c_total:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_total+=len(__c_args[__c_i])+1};__c_text:=make([]int8,__c_total);__c_argv:=make([]uintptr,len(__c_args)+1);__c_at:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_argv[__c_i]=uintptr(__c_unsafe.Pointer(&__c_text[__c_at]));for __c_j:=0;__c_j<len(__c_args[__c_i]);__c_j++{__c_text[__c_at+__c_j]=int8(__c_args[__c_i][__c_j])};__c_at+=len(__c_args[__c_i])+1};"...)
+	if environment {
+		t.staticOut = append(t.staticOut, "__c_env_total:=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_env_total+=len(__c_env[__c_i])+1};__c_env_text:=make([]int8,__c_env_total);__c_envp:=make([]uintptr,len(__c_env)+1);__c_at=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_envp[__c_i]=uintptr(__c_unsafe.Pointer(&__c_env_text[__c_at]));for __c_j:=0;__c_j<len(__c_env[__c_i]);__c_j++{__c_env_text[__c_at+__c_j]=int8(__c_env[__c_i][__c_j])};__c_at+=len(__c_env[__c_i])+1};return __c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])),(**int8)(__c_unsafe.Pointer(&__c_envp[0])))}\n"...)
+	} else {
+		t.staticOut = append(t.staticOut, "return __c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])))}\n"...)
+	}
+}
+
 func (t *translator) emitVariable(decl declarator) {
 	t.rememberObject(tokenText(t.src, decl.name), decl.typeID)
 	name := string(tokenText(t.src, decl.name))
@@ -9990,11 +10103,11 @@ func (t *translator) emitVariable(decl declarator) {
 		decl.initializer = nil
 		t.emitVariableName(name, decl)
 		t.appendText("_=&")
-		t.out = append(t.out, cGoIdentifier(name)...)
+		t.out = append(t.out, t.cSourceGoIdentifier(name)...)
 		t.appendText(";")
 		oldInitializing := t.initializing
 		t.initializing = -1
-		t.out = append(t.out, cGoIdentifier(name)...)
+		t.out = append(t.out, t.cSourceGoIdentifier(name)...)
 		decl.initializer = initializer
 		t.emitVariableInitializerSuffix(decl)
 		t.appendText(";\n")
@@ -10007,7 +10120,7 @@ func (t *translator) emitVariable(decl declarator) {
 	t.initializing = oldInitializing
 	if t.localStart >= 0 {
 		t.appendText("_=&")
-		t.out = append(t.out, cGoIdentifier(name)...)
+		t.out = append(t.out, t.cSourceGoIdentifier(name)...)
 		t.appendText(";")
 	}
 }
@@ -10021,7 +10134,7 @@ func (t *translator) emitVariableName(name string, decl declarator) {
 		t.emitObjectMetadata("variable", name, decl.attributes, decl.storage, decl.initializer, outputType, false)
 	}
 	t.appendText("var ")
-	t.out = append(t.out, cGoIdentifier(name)...)
+	t.out = append(t.out, t.cSourceGoIdentifier(name)...)
 	t.out = append(t.out, ' ')
 	t.emitType(outputType)
 	t.emitVariableInitializerSuffix(decl)
@@ -12777,6 +12890,10 @@ func (t *translator) emitExpression(tokens []token) {
 			}
 			if object, ok := t.lookupObject(text); ok && object.goName != "" {
 				text = []byte(object.goName)
+			} else {
+				if t.isolateGoBuiltins && t.cIdentifierIsGoPredeclared(string(text)) {
+					text = []byte("__c_name_" + string(text))
+				}
 			}
 		} else if tokenIs(t.src, tok, "NULL") {
 			text = []byte("nil")
@@ -14782,19 +14899,33 @@ func (t *translator) ensureBuiltinBitHelper(operation int, width int) string {
 func (t *translator) emitBuiltinVAArg(state []token, typeTokens []token) {
 	typeID, ok := t.typeFromTokens(typeTokens)
 	info := t.typeInfo(typeID)
-	if !ok || info.kind != cTypePointer && info.kind != cTypeInt && info.kind != cTypeUint && info.kind != cTypeBool ||
+	if !ok || info.kind != cTypePointer && info.kind != cTypeInt && info.kind != cTypeUint && info.kind != cTypeBool && info.kind != cTypeFloat ||
 		info.kind != cTypePointer && (info.size < 1 || info.size > 8) {
 		t.fail(TranslateErrUnsupported)
 		return
 	}
 	if !t.vaListHelper {
 		t.vaListHelper = true
+		t.usesUnsafe = true
 		if t.pointerSize == 4 {
-			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg32(state *uintptr) uintptr{return 0}\n"...)
+			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg32(state *uintptr) uintptr{pointer:=*state;value:=*(*uintptr)(__c_unsafe.Pointer(pointer));*state=pointer+4;return value}\n"...)
 			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg64(state *uintptr) uint64{low:=uint64(renvo_runtime_CVAArg32(state));high:=uint64(renvo_runtime_CVAArg32(state));return low|high<<32}\n"...)
+			t.staticOut = append(t.staticOut, "func __c_va_float32(state *uintptr) float32{bits:=uint32(renvo_runtime_CVAArg32(state));return *(*float32)(__c_unsafe.Pointer(&bits))}\nfunc __c_va_float64(state *uintptr) float64{bits:=renvo_runtime_CVAArg64(state);return *(*float64)(__c_unsafe.Pointer(&bits))}\n"...)
 		} else {
-			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg(state *uintptr) uint64{return 0}\n"...)
+			t.staticOut = append(t.staticOut, "func renvo_runtime_CVAArg(state *uintptr) uint64{next:=(*uintptr)(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(state))+8));index:=*next;value:=*(*uint64)(__c_unsafe.Pointer(*state+index*8));*next=index+1;return value}\n"...)
+			t.staticOut = append(t.staticOut, "func __c_va_float32(state *uintptr) float32{bits:=uint32(renvo_runtime_CVAArg(state));return *(*float32)(__c_unsafe.Pointer(&bits))}\nfunc __c_va_float64(state *uintptr) float64{bits:=renvo_runtime_CVAArg(state);return *(*float64)(__c_unsafe.Pointer(&bits))}\n"...)
 		}
+	}
+	if info.kind == cTypeFloat {
+		t.usesUnsafe = true
+		if info.size == 4 {
+			t.appendText("__c_va_float32(")
+		} else {
+			t.appendText("__c_va_float64(")
+		}
+		t.emitVAListPointer(state)
+		t.appendText(")")
+		return
 	}
 	if info.kind == cTypePointer {
 		t.usesUnsafe = true
@@ -15034,7 +15165,7 @@ func (t *translator) emitFixedCall(function int, tokens []token) bool {
 			return true
 		}
 	}
-	t.out = append(t.out, fn.name...)
+	t.out = append(t.out, t.cFunctionGoName(fn.name)...)
 	t.out = append(t.out, '(')
 	for i := 0; i < len(args); i++ {
 		if i > 0 {

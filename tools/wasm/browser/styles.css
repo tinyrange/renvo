@@ -214,6 +214,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .new-file-body input { width: 100%; }
 .new-file-help { min-height: 32px; margin: 0 0 0 104px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .new-file-body .dialog-error { margin: 0 0 0 104px; }
+.project-kind-options { display: grid; gap: 8px; margin: 0; padding: 16px; border: 0; }
+.project-kind-options label { display: grid; min-height: 62px; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 4px; background: #202020; cursor: pointer; }
+.project-kind-options label:hover, .project-kind-options label:has(input:checked) { border-color: #397ca9; background: #183247; }
+.project-kind-options input { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+.project-kind-options strong, .project-kind-options small { display: block; }
+.project-kind-options strong { color: var(--bright); font-size: 12px; font-weight: 550; }
+.project-kind-options small { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.new-project-warning { margin: 0; padding: 0 16px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
 .workbench { grid-column: 2; grid-row: 2; display: grid; min-width: 0; min-height: 0; grid-template-rows: 38px minmax(0, 1fr) var(--panel-height); background: var(--editor); }
 .workbench.panel-hidden { grid-template-rows: 38px minmax(0, 1fr) 0; }
@@ -385,6 +393,7 @@ button.status-item:hover { background: var(--hover); }
   .new-file-body label { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .new-file-body select { min-height: 42px; font-size: 13px; }
   .new-file-help, .new-file-body .dialog-error { margin-left: 0; }
+  .project-kind-options label { min-height: 72px; }
   .snapshot-item { min-height: 64px; }
   .snapshot-item button { min-height: 40px; }
   .file-tree { padding: 4px 0 8px; }

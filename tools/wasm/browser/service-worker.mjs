@@ -1,4 +1,4 @@
-const CACHE = "renvo-web-ide-v26";
+const CACHE = "renvo-web-ide-v31";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs",
   "./editor-navigation.mjs", "./language-path.mjs", "./serial-plotter.mjs",
@@ -19,8 +19,13 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== location.origin && !url.hostname.endsWith("jsdelivr.net")) return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+  const remember = (response) => {
     if (response.ok || response.type === "opaque") caches.open(CACHE).then((cache) => cache.put(event.request, response.clone()));
     return response;
-  })));
+  };
+  if (url.origin === location.origin) {
+    event.respondWith(fetch(event.request).then(remember).catch(() => caches.match(event.request).then((cached) => cached || Response.error())));
+    return;
+  }
+  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then(remember)));
 });

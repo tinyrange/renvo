@@ -254,7 +254,7 @@ func renvoBuildDiagnosticLocation(result BuildResult, d Diagnostic) Diagnostic {
 	d.Start = syntax.TokenStart(source.File.Tokens[tok])
 	d.End = syntax.TokenEnd(source.File.Tokens[tok])
 	if renvoDiagnosticNamesToken(d.Code) && d.Start >= 0 && d.End > d.Start && d.End <= len(source.Src) {
-		d.Message += ": " + string(source.Src[d.Start:d.End])
+		d.Message += ": " + cDiagnosticIdentifier(source.Path, source.Src[d.Start:d.End])
 	}
 	d.Line = syntax.TokenLine(source.File.Tokens[tok])
 	d.Column = 1
