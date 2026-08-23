@@ -1,7 +1,7 @@
-const CACHE = "renvo-web-ide-v31";
+const CACHE = "renvo-web-ide-v32";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs",
-  "./editor-navigation.mjs", "./language-path.mjs", "./serial-plotter.mjs",
+  "./editor-navigation.mjs", "./language-path.mjs", "./asset-fetch.mjs", "./serial-plotter.mjs",
   "./esp-webserial.mjs", "./esp-webusb.mjs", "./esp-webusb-jtag.mjs", "./project-archive.mjs",
   "./device-profile.mjs", "./test-project.mjs", "./workspace-store.mjs",
   "./c-language.mjs", "./rtg-language.mjs",
