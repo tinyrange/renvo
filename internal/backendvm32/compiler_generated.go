@@ -3,7 +3,7 @@
 
 package backendvm32
 
-const CompilerSourceDigest = "7d52a5a15493e3a248b0d4f6a857230d8375f103a2175f6e4a801ab4150eb23d"
+const CompilerSourceDigest = "ec1f5944f34fa038cec60781fbea0acd016f35201c9681ea4932553a9e1fefc6"
 
 // source: backend/compiler_common_impl.go
 
@@ -4552,9 +4552,11 @@ i := start
 paren := 0
 brack := 0
 for i < end {
-tok := renvoTokAt(p, i)
-if tok.end == tok.start+1 {
-c := renvo_runtime_UnsafeByteAt(p.src, tok.start)
+first := int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride))
+c := 0
+if first&255 == renvoTokOp {
+c = first >> 24 & 255
+}
 if c == '(' {
 paren++
 } else if c == ')' {
@@ -4571,9 +4573,15 @@ brack--
 if paren == 0 && brack == 0 {
 closeTok := renvoSkipBalanced(p, i, '{', '}')
 if closeTok > i && closeTok < end {
-next := renvoTokSingleChar(p, closeTok)
-sameLine := renvoTokLine(p, closeTok-1) == renvoTokLine(p, closeTok)
-if sameLine && (renvoTokenPrecedence(p, closeTok) > 0 || next == '{' || next == '.' || next == '[' || next == '(') {
+previousLine := renvoTokLine(p, closeTok-1)
+nextLine := renvoTokLine(p, closeTok)
+nextFirst := int(renvo_runtime_UnsafeInt32At(p.toks.data, closeTok*renvoTokenStride))
+nextChar := 0
+if nextFirst&255 == renvoTokOp {
+nextChar = nextFirst >> 24 & 255
+}
+precedence := renvoTokenPrecedence(p, closeTok)
+if previousLine == nextLine && (precedence > 0 || nextChar == '{' || nextChar == '.' || nextChar == '[' || nextChar == '(') {
 i = closeTok
 continue
 }
@@ -4586,7 +4594,6 @@ i = closeTok
 continue
 }
 }
-}
 i++
 }
 return start
@@ -4594,16 +4601,15 @@ return start
 
 func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 renvoNonNil(p)
-if renvoTokSingleChar(p, openTok) != '{' {
+if !renvoTokCharIs(p, openTok, '{') {
 return openTok
 }
 depth := 1
 i := openTok + 1
 for i < end {
-c := renvoTokSingleChar(p, i)
-if c == '{' {
+if renvoTokCharIs(p, i, '{') {
 depth++
-} else if c == '}' {
+} else if renvoTokCharIs(p, i, '}') {
 depth--
 if depth == 0 {
 return i
@@ -11293,6 +11299,7 @@ renvoClearLocalConstAtOffset(g, offset)
 }
 return true
 }
+if renvoPreparedBackendActive == 0 {
 memoryOp := 0
 if renvoTok2Is(p, assignTok, '+', '=') {
 memoryOp = 0x0148
@@ -11305,7 +11312,7 @@ memoryOp = 0x0948
 } else if renvoTok2Is(p, assignTok, '^', '=') {
 memoryOp = 0x3148
 }
-if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
+if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
 if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
 return false
 }
@@ -11321,6 +11328,7 @@ renvoClearLocalFlowConstAtOffset(g, offset)
 }
 }
 return true
+}
 }
 if globalOffset >= 0 {
 if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -17597,15 +17605,19 @@ renvoAsmMarkLabel(a, ok)
 func renvoEnsureNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 renvoNonNil(g)
 labelSlot := &g.runtimeNonNilLabel
+if secondary {
+labelSlot = &g.runtimeSecondaryLabel
+}
+if renvoPreparedBackendActive == 0 {
 register := 0
 code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
 if secondary {
-labelSlot = &g.runtimeSecondaryLabel
 register = 1
 code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
 }
-if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchAmd64 {
 return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
+}
 }
 if *labelSlot > 0 {
 return *labelSlot - 1
@@ -30868,48 +30880,52 @@ thunkSize    int
 iatRVAs      []int
 }
 
-func renvoWinImportName(id int) string { panic("non-VM backend is unavailable") }
+func renvoWinImportName(id int) string {
+panic("unavailable specialized backend function: renvoWinImportName")
+}
 
 func renvoAsmAddWinImportReloc(a *renvoAsm, at int, importID int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmAddWinImportReloc")
 }
 
 func renvoAsmAddWinStaticImport(a *renvoAsm, dllStart int, dllEnd int, nameStart int, nameEnd int, src []byte) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmAddWinStaticImport")
 }
 
-func renvoAsmHasWinImportRelocs(a *renvoAsm) bool { panic("non-VM backend is unavailable") }
+func renvoAsmHasWinImportRelocs(a *renvoAsm) bool {
+panic("unavailable specialized backend function: renvoAsmHasWinImportRelocs")
+}
 
 func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendWinImports")
 }
 
 func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltAt int, iatAt int, id int, name string) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendWinImportEntry")
 }
 
 func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmPatchWindows")
 }
 
 func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendPEHeader64")
 }
 
 func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendPEHeader64WithContext")
 }
 
 func renvoAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendPEHeader32")
 }
 
 func renvoAppendPEHeader32WithContext(context *renvoCompileContext, out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendPEHeader32WithContext")
 }
 
 func renvoAppendPESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawPtr int, characteristics int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendPESection")
 }
 
 // source: backend/compiler_main.go
@@ -32917,52 +32933,76 @@ renvoAmd64AsmMoveOffsetArg(a)
 
 // source: backend/compiler_windows_impl.go
 
-func renvoWin386CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
+func renvoWin386CallImport(a *renvoAsm, importID int) {
+panic("unavailable specialized backend function: renvoWin386CallImport")
+}
 
-func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
+func renvoWin386LoadImportPtrRax(a *renvoAsm, importID int) {
+panic("unavailable specialized backend function: renvoWin386LoadImportPtrRax")
+}
 
-func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
+func renvoWin386LoadImportPtrRsi(a *renvoAsm, importID int) {
+panic("unavailable specialized backend function: renvoWin386LoadImportPtrRsi")
+}
 
-func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386StoreEcxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386StoreEcxBss")
+}
 
-func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386MovEbxBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386MovEbxBssAddr")
+}
 
-func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386MovEcxBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386MovEcxBssAddr")
+}
 
-func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386MovEdiBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386MovEdiBssAddr")
+}
 
-func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386PushBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386PushBssAddr")
+}
 
-func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386LoadEsiBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386LoadEsiBss")
+}
 
-func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoWin386LoadEaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoWin386LoadEaxBss")
+}
 
 func renvoWin386EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWin386EmitReadWriteHelper")
 }
 
-func renvoWin386SetStdHandle(a *renvoAsm, stdHandle int) { panic("non-VM backend is unavailable") }
+func renvoWin386SetStdHandle(a *renvoAsm, stdHandle int) {
+panic("unavailable specialized backend function: renvoWin386SetStdHandle")
+}
 
 func renvoWin386EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWin386EmitKernelReadWriteCall")
 }
 
-func renvoWin386TranslateCreateFileFlags(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWin386TranslateCreateFileFlags(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWin386TranslateCreateFileFlags")
+}
 
 func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, isWrite bool) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitWindowsReadWrite")
 }
 
 func renvoEmitWindowsOpen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitWindowsOpen")
 }
 
 func renvoEmitWindowsClose(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitWindowsClose")
 }
 
 func renvoEmitWindowsChmod(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitWindowsChmod")
 }
 
 // source: backend/compiler_target_policy_impl.go
@@ -33616,7 +33656,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "|/\x9bv\x92w\x1f\xf9\x82vk\xfb\br@\x89\x8b\xcf\xf7V)dYʮP\xa1\xdcw:\xcd1", 3, true
+return "linux/amd64", "dgo\x90\xe0\x8es\xbcj\xc7yJ \x8b\x95\x83\xcc#\x0f2\xbc\xb1z\xc3~\xed\xd2C\xbeacj", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -33628,7 +33668,7 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\xc6Α(\x066\xf1E\x15\xf2]V\xb5r|gFc\xf9\xadv\xbe\xa8}\x99t\xce\x1f\xd1+ef", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xe10\x04\x02\xce\xd9k5\xff\x1cJ\x85\x8a\x11\xac\xe7q\xf9ɠ\x90\xe2O\x04\xbeX\x8e\xb8\x8aͺ\x01", 3, true
+return "windows/amd64", "F\x9c\xb18\xf8j;~\xb8\xa4\x91\x9aHw\x12\x16\x82\x92\x8037\xee\x8a\xda0<\xeb;\xa2\x9a\x97v", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", ",\xd4\a\xe0\xe9(\n\xdb\x02\xf57\x89\x97YZ\xf9\x97\x0f\xb9\xfbh\x9a\xf2\x92\x1d\xf0\x10\xda\xc3\x12W\x7f", 3, true
@@ -33640,7 +33680,7 @@ if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xe8!)f\x95\xf13Ǝ\xf4\x81\xc1`k\xb6\xd3{C\xba\xd9\xf1u\xcca\x1c{4\xeb\x00\x80\xd6;", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\xe9R\x9fP]\xf2\x8fKK\xb7,\xa5;!\xe6&\xe8\xf8\xb7\xd5\x1ft\xbcj7B\xa7C\x19P\x11\xe0", 3, true
+return "linux-kernel/amd64", "rl~;\xb6\xa7\xb8\xb7,\x11} \xbb#\xb2QSϓk\xe2\xdfJ-o\x1e؈\xf2\xcc\xff\x96", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
@@ -33649,13 +33689,13 @@ if target == renvoTargetVM32 {
 return "vm/vm32", "ײ\x1d>cߓ\xfc\xa7b}b\xf0\x15\x9f\xe9\fd[\xa4\x8a\x93\x95G\xdcB\xe1Mr~i>", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "۠\fȿ\xb8\xce\x11\x81e\x17\xc6\x16V\xa7\xaf?\x10\x99\xb2\x14\x05*U\x94\x949\xd7'*Ǻ", 3, true
+return "freebsd/amd64", " \x02\xc0\xd5(\x91\x84l\x1d̙\xae^\x1a\xca\x0e\xeeMo\xca\x1f@\xdby\xfb\x1f7Epb\xf5H", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\x01\xe4\xed\xce*\xe5u\xe6VW\xb9\x91l\xc0\x8f\xe7\x81\x01\x7f>\xd2,\xca<`q\xd6@\xd7\x12\xa0\xa7", 3, true
+return "openbsd/amd64", "\xd6r\xb6eUxDz\xab\xfd\x11\xea\xee\xa5\xd2\xcf;\x9a\xfcyv\x04\xf9r*\xaeP`Q\x94~\xba", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "6\xd8\xd1\xda\aL\xa0\f \xec\x9fU\xed r\aI6\xe6cz\xeePC\x06\xf1\v\xf1\x19\x82\xf0\xc0", 3, true
+return "netbsd/amd64", "-\xfd\x10\xf5s\x19\x1fj7\xaa7\x87\xa4\a\xe5\xdcoܦq\xd6\x0fS\xfc\xe4H\xcc\xc0\xd8\xdb'\xb9", 3, true
 }
 return "", "", 0, false
 }
@@ -35786,646 +35826,948 @@ const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengt
 const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoCompileAmd64")
 }
 
 func renvoTryCompileScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAmd64")
 }
 
 func renvoTryCompileScalarProgramAmd64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAmd64Scratch")
 }
 
 func renvoTryCompileScalarProgramAmd64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAmd64Cached")
 }
 
 func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoBeginScalarProgramAmd64")
 }
 
 func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitImageEntryArgsAmd64")
 }
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoFinishScalarProgramAmd64")
 }
 
 func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgsAmd64")
 }
 
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
 
 func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitScalarFunction")
 }
 
 func renvoAmd64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64StoreParamWord")
 }
 
 func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitCopyBytes")
 }
 
-func renvoAmd64RelaxBranches(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64RelaxBranches(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64RelaxBranches")
+}
 
 func renvoAmd64RelaxedPosition(branches []int32, savings []int32, position int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64RelaxedPosition")
 }
 
 func renvoAmd64EmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitSwitchStringCaseTest")
 }
 
-func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool { panic("non-VM backend is unavailable") }
+func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
+panic("unavailable specialized backend function: renvoAmd64EmitRaxRcxOp")
+}
 
 func renvoAmd64EmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitStringValueRegs")
 }
 
 func renvoAmd64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitCallWithWordCount")
 }
 
 func renvoAmd64EmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitFloatBinaryExpr")
 }
 
-func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmJccLabel(a *renvoAsm, op int, label int) {
+panic("unavailable specialized backend function: renvoAmd64AsmJccLabel")
+}
 
-func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) { panic("non-VM backend is unavailable") }
+func renvoAmd64InitRuntimeCheckRegs(g *renvoLinearGen) {
+panic("unavailable specialized backend function: renvoAmd64InitRuntimeCheckRegs")
+}
 
 func renvoAmd64ObjectExportFrame(g *renvoLinearGen, reserve bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64ObjectExportFrame")
 }
 
 func renvoAmd64InitRuntimeCheckReg(a *renvoAsm, op int, label int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64InitRuntimeCheckReg")
 }
 
 func renvoAmd64CallIndexAddressHelper(a *renvoAsm, elemSize int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64CallIndexAddressHelper")
 }
 
 func renvoAmd64EnsureRuntimeCheck(g *renvoLinearGen, slot *int, kind int, code string) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EnsureRuntimeCheck")
 }
 
 func renvoAsmAddLocalObjectFuncSymbolText(a *renvoAsm, name string, label int, endLabel int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmAddLocalObjectFuncSymbolText")
 }
 
-func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureAppendAddrHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureAppendAddrHelper")
+}
 
-func renvoAmd64EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureAppend8Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureAppend8Helper")
+}
 
-func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureAppend64Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureAppend64Helper")
+}
 
-func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureAppendBytesHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureAppendBytesHelper")
+}
 
-func renvoAmd64EnsureCopyWordsHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureCopyWordsHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureCopyWordsHelper")
+}
 
-func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAmd64EnsureStringEqualHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAmd64EnsureStringEqualHelper")
+}
 
 // source: backend/compiler_amd64_target_impl.go
 
-func renvoElfAmd64Append32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoElfAmd64Append32(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoElfAmd64Append32")
+}
 
-func renvoElfAmd64Append64(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoElfAmd64Append64(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoElfAmd64Append64")
+}
 
-func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmSecondaryDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoAmd64AsmSecondaryDisp")
+}
 
-func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovRaxImm")
+}
 
-func renvoAmd64AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovRdiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovRdiRax")
+}
 
-func renvoAmd64AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovRsiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovRsiRax")
+}
 
 func renvoAmd64RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64RewritePrimaryLoad")
 }
 
 func renvoAmd64RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64RewritePrimaryLoadCompare")
 }
 
 func renvoAmd64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64AsmMemDisp")
 }
 
 func renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64AsmLoadQwordRaxIndexRcxDisp")
 }
 
-func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoAmd64AsmLoadRaxMemRdxDisp")
+}
 
 func renvoAmd64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64AsmLoadRaxMemRdxDispSize")
 }
 
-func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
+panic("unavailable specialized backend function: renvoAmd64AsmLoadRaxIndexRcxSize")
+}
 
-func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoAmd64AsmStoreRaxMemRdxDisp")
+}
 
 func renvoAmd64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64AsmStoreRaxMemRdxDispSize")
 }
 
-func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool { panic("non-VM backend is unavailable") }
+func renvoAmd64CodeEnds(a *renvoAsm, suffix string) bool {
+panic("unavailable specialized backend function: renvoAmd64CodeEnds")
+}
 
-func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
+panic("unavailable specialized backend function: renvoAmd64AsmNormalizeRaxForKind")
+}
 
-func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmCmpRaxImm8(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAmd64AsmCmpRaxImm8")
+}
 
-func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmCmpRaxImm8Discard(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAmd64AsmCmpRaxImm8Discard")
+}
 
-func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+panic("unavailable specialized backend function: renvoAmd64AsmDivLeftRcxRightRax")
+}
 
-func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+panic("unavailable specialized backend function: renvoAmd64AsmCmpRcxRaxSet")
+}
 
-func renvoAmd64AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmDecMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmDecMemRdx")
+}
 
-func renvoAmd64AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmIncMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmIncMemRdx")
+}
 
-func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmLoadByteRaxIndexRcx")
+}
 
-func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmLoadQwordRaxIndexRcx8")
+}
 
-func renvoAmd64AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovR8Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovR8Rax")
+}
 
-func renvoAmd64AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovR9Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovR9Rax")
+}
 
-func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmStoreRaxMemRdxRcx8")
+}
 
-func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAmd64AsmLoadRaxBss")
+}
 
-func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAmd64AsmMovR10BssAddr")
+}
 
-func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAmd64AsmStoreRaxBss")
+}
 
-func renvoElfAmd64Append16(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoElfAmd64Append16(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoElfAmd64Append16")
+}
 
 func renvoElfAmd64AppendHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElfAmd64AppendHeader")
 }
 
 func renvoElfAmd64AppendRelocation(out []byte, offset int, symbol int, kind int, addend int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElfAmd64AppendRelocation")
 }
 
 func renvoElfAmd64AppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElfAmd64AppendSection")
 }
 
 func renvoElfAmd64AppendSymbol(out []byte, name int, info int, section int, value int, size int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElfAmd64AppendSymbol")
 }
 
-func rtgX8664PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
+func rtgX8664PatchRelocations(out *renvoAsm) {
+panic("unavailable specialized backend function: rtgX8664PatchRelocations")
+}
 
 // source: backend/compiler_386_impl.go
 
 const renvo386ELFCodeOffset = 0x74
 
-func renvoAsmImageObject386(emitter *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageObject386(emitter *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageObject386")
+}
 
 func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgram386")
 }
 
 func renvoTryCompileScalarProgram386Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgram386Scratch")
 }
 
 func renvoTryCompileScalarProgram386Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgram386Cached")
 }
 
 func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoBeginScalarProgram386")
 }
 
 func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitImageEntryArgs386")
 }
 
 func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoFinishScalarProgram386")
 }
 
 func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgs386")
 }
 
-func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+panic("unavailable specialized backend function: renvo386AsmMovRaxDataAddr")
+}
 
-func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvo386AsmMovRaxBssAddr")
+}
 
-func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvo386AsmMovR10BssAddr")
+}
 
-func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvo386AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvo386AsmLoadRaxBss")
+}
 
-func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvo386AsmStoreRaxBss")
+}
 
 func renvo386AsmX87BinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87BinaryStack")
 }
 
 func renvo386AsmX87CompareStack(a *renvoAsm, left int, right int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87CompareStack")
 }
 
 func renvo386AsmX87IntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87IntToFloatStack")
 }
 
 func renvo386AsmX87ConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87ConvertFloatStack")
 }
 
 func renvo386AsmX87FloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87FloatToIntStack")
 }
 
 func renvo386AsmX87NegateStack(a *renvoAsm, offset int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmX87NegateStack")
 }
 
 func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitSliceSlotAddrs")
 }
 
 func renvo386EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitCopyBytes")
 }
 
-func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureWideBinaryHelper")
+}
 
-func renvo386EnsureWideCompareHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureWideCompareHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureWideCompareHelper")
+}
 
 func renvo386EmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitWideHelperCall")
 }
 
 func renvo386EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitWideBinaryStack")
 }
 
 func renvo386EmitWideCompareStack(g *renvoLinearGen, left int, right int, mode int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitWideCompareStack")
 }
 
 func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitScalarFunction")
 }
 
 func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386StoreParamWord")
 }
 
 func renvo386EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitRaxRcxOp")
 }
 
 func renvo386EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitCallWithWordCount")
 }
 
 func renvo386EmitEnsureMemSlice(g *renvoLinearGen, elemSize int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386EmitEnsureMemSlice")
 }
 
-func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureAppendAddrHelper")
+}
 
-func renvo386EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureAppend8Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureAppend8Helper")
+}
 
-func renvo386EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureAppend64Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureAppend64Helper")
+}
 
-func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvo386EnsureStringEqualHelper")
+}
 
 // source: backend/compiler_386_target_impl.go
 
-func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
-
-func renvo386AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
-
-func renvo386AsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
-
-func renvo386AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+func renvo386AsmSecondaryDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvo386AsmSecondaryDisp")
 }
 
-func renvo386AsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmMovRaxImm")
+}
+
+func renvo386AsmMovRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmMovRdxImm")
+}
+
+func renvo386AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
+panic("unavailable specialized backend function: renvo386AsmStackMem")
+}
+
+func renvo386AsmAddRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmAddRdxImm")
+}
 
 func renvo386AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmMemDisp")
 }
 
 func renvo386AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmLoadQwordRaxIndexRcxDisp")
 }
 
-func renvo386AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvo386AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvo386AsmLoadRaxMemRdxDisp")
+}
 
 func renvo386AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmLoadRaxMemRdxDispSize")
 }
 
-func renvo386AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+func renvo386AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
+panic("unavailable specialized backend function: renvo386AsmLoadRaxIndexRcxSize")
+}
 
-func renvo386AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvo386AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvo386AsmStoreRaxMemRdxDisp")
+}
 
 func renvo386AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmStoreRaxMemRdxDispSize")
 }
 
-func renvo386AsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
+func renvo386AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
+panic("unavailable specialized backend function: renvo386AsmNormalizeRaxForKind")
+}
 
-func renvo386AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmCmpRaxImm8(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmCmpRaxImm8")
+}
 
-func renvo386AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+func renvo386AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+panic("unavailable specialized backend function: renvo386AsmDivLeftRcxRightRax")
+}
 
-func renvo386AsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmAddRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmAddRaxRcx")
+}
 
-func renvo386AsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmAddRdxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmAddRdxRcx")
+}
 
-func renvo386AsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmBoolNotRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmBoolNotRax")
+}
 
-func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
+func renvo386AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+panic("unavailable specialized backend function: renvo386AsmCmpRcxRaxSet")
+}
 
-func renvo386AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmDecMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmDecMemRdx")
+}
 
-func renvo386AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmIncMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmIncMemRdx")
+}
 
-func renvo386AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmLoadByteRaxIndexRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmLoadByteRaxIndexRcx")
+}
 
-func renvo386AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmLoadQwordRaxIndexRcx8")
+}
 
-func renvo386AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovR8Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMovR8Rax")
+}
 
-func renvo386AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovR9Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMovR9Rax")
+}
 
-func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRaxImm64(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmMovRaxImm64")
+}
 
-func renvo386AsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRaxRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMovRaxRdx")
+}
 
-func renvo386AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRdiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMovRdiRax")
+}
 
-func renvo386AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMovRsiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMovRsiRax")
+}
 
-func renvo386AsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmPopRdi(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmPopRdi")
+}
 
-func renvo386AsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmSarRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmSarRaxImm")
+}
 
-func renvo386AsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmShlRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmShlRaxImm")
+}
 
-func renvo386AsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmShlRcxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmShlRcxImm")
+}
 
-func renvo386AsmShrRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvo386AsmShrRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvo386AsmShrRaxImm")
+}
 
-func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmStoreRaxMemRdxRcx8")
+}
 
-func renvo386AsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmSubRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmSubRaxRcx")
+}
 
-func renvo386AsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmSyscall(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmSyscall")
+}
 
-func renvoAsmMovArg1Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAsmMovArg1Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAsmMovArg1Rax")
+}
 
-func renvo386AsmJccLabel(a *renvoAsm, op int, label int) { panic("non-VM backend is unavailable") }
+func renvo386AsmJccLabel(a *renvoAsm, op int, label int) {
+panic("unavailable specialized backend function: renvo386AsmJccLabel")
+}
 
 func renvo386AsmMovRegPCRel(a *renvoAsm, reg int, off int, kind int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvo386AsmMovRegPCRel")
 }
 
-func rtgX8632PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
+func rtgX8632PatchRelocations(out *renvoAsm) {
+panic("unavailable specialized backend function: rtgX8632PatchRelocations")
+}
 
 // source: backend/compiler_aarch64_impl.go
 
-func renvoAarch64AsmAlign(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmAlign(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmAlign")
+}
 
-func renvoAarch64AsmMovRegReg(a *renvoAsm, dst int, src int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRegReg(a *renvoAsm, dst int, src int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRegReg")
+}
 
-func renvoAarch64AsmMovRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRegImm(a *renvoAsm, reg int, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRegImm")
+}
 
 func renvoAarch64AsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmPatchMovRegImmAt")
 }
 
 func renvoAarch64AsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmAddRegImm")
 }
 
-func renvoAarch64AsmAddr(a *renvoAsm, base int, disp int) int { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmAddr(a *renvoAsm, base int, disp int) int {
+panic("unavailable specialized backend function: renvoAarch64AsmAddr")
+}
 
 func renvoAarch64AsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRegMem")
 }
 
 func renvoAarch64AsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRegMem")
 }
 
 func renvoAarch64AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmStackMem")
 }
 
 func renvoAarch64AsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmMemDisp")
 }
 
 func renvoAarch64AsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRaxIndexRcxSize")
 }
 
 func renvoAarch64AsmNormalizeRaxForKind(a *renvoAsm, kind int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmNormalizeRaxForKind")
 }
 
-func renvoAarch64AsmCmpRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmCmpRegImm(a *renvoAsm, reg int, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmCmpRegImm")
+}
 
-func renvoAarch64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+panic("unavailable specialized backend function: renvoAarch64AsmDivLeftRcxRightRax")
+}
 
-func renvoAarch64CondFromSetcc(setcc int) int { panic("non-VM backend is unavailable") }
+func renvoAarch64CondFromSetcc(setcc int) int {
+panic("unavailable specialized backend function: renvoAarch64CondFromSetcc")
+}
 
 func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRaxMemRdxRcxSize")
 }
 
-func renvoAarch64AsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmAddRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmAddRaxRcx")
+}
 
-func renvoAarch64AsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmAddRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmAddRdxImm")
+}
 
-func renvoAarch64AsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmAddRdxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmAddRdxRcx")
+}
 
 func renvoAarch64AsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmAddRegReg")
 }
 
 func renvoAarch64AsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmAddRegRegShift")
 }
 
-func renvoAarch64AsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmBoolNotRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmBoolNotRax")
+}
 
-func renvoAarch64AsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmCmpRaxImm8(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmCmpRaxImm8")
+}
 
 func renvoAarch64AsmCmpRegReg(a *renvoAsm, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmCmpRegReg")
 }
 
-func renvoAarch64AsmCsetRax(a *renvoAsm, cond int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmCsetRax(a *renvoAsm, cond int) {
+panic("unavailable specialized backend function: renvoAarch64AsmCsetRax")
+}
 
-func renvoAarch64AsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmDecMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmDecMemRdx")
+}
 
-func renvoAarch64AsmEmit(a *renvoAsm, insn int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmEmit(a *renvoAsm, insn int) {
+panic("unavailable specialized backend function: renvoAarch64AsmEmit")
+}
 
-func renvoAarch64AsmImulRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmImulRcxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmImulRcxImm")
+}
 
-func renvoAarch64AsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmIncMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmIncMemRdx")
+}
 
-func renvoAarch64AsmIncRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmIncRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmIncRax")
+}
 
-func renvoAarch64AsmIncRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmIncRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmIncRcx")
+}
 
-func renvoAarch64AsmJnzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmJnzLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoAarch64AsmJnzLabel")
+}
 
-func renvoAarch64AsmJzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmJzLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoAarch64AsmJzLabel")
+}
 
 func renvoAarch64AsmLeaRegStack(a *renvoAsm, dst int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLeaRegStack")
 }
 
-func renvoAarch64AsmLeave(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmLeave(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmLeave")
+}
 
-func renvoAarch64AsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmLoadByteRaxIndexRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmLoadByteRaxIndexRcx")
+}
 
-func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmLoadQwordRaxIndexRcx8")
+}
 
 func renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLoadQwordRaxIndexRcxDisp")
 }
 
-func renvoAarch64AsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmLoadRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRaxBss")
+}
 
-func renvoAarch64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRaxMemRdxDisp")
+}
 
 func renvoAarch64AsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRaxMemRdxDispSize")
 }
 
 func renvoAarch64AsmLoadRegStack(a *renvoAsm, dst int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmLoadRegStack")
 }
 
-func renvoAarch64AsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovR10BssAddr")
+}
 
-func renvoAarch64AsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovR8Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovR8Rax")
+}
 
-func renvoAarch64AsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovR9Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovR9Rax")
+}
 
-func renvoAarch64AsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRaxBssAddr")
+}
 
-func renvoAarch64AsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRaxDataAddr")
+}
 
-func renvoAarch64AsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRaxImm")
+}
 
-func renvoAarch64AsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRaxImm64(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRaxImm64")
+}
 
-func renvoAarch64AsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRaxRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRaxRdx")
+}
 
-func renvoAarch64AsmMovRcxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRcxRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRcxRax")
+}
 
-func renvoAarch64AsmMovRcxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRcxRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRcxRdx")
+}
 
-func renvoAarch64AsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRdiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRdiRax")
+}
 
-func renvoAarch64AsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRdxImm")
+}
 
-func renvoAarch64AsmMovRdxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRdxRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRdxRax")
+}
 
-func renvoAarch64AsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMovRsiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMovRsiRax")
+}
 
 func renvoAarch64AsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmMulRegReg")
 }
 
-func renvoAarch64AsmNegRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmNegRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmNegRax")
+}
 
-func renvoAarch64AsmPopRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopRax")
+}
 
-func renvoAarch64AsmPopRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopRcx")
+}
 
-func renvoAarch64AsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopRdi(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopRdi")
+}
 
-func renvoAarch64AsmPopRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopRdx")
+}
 
-func renvoAarch64AsmPopReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopReg(a *renvoAsm, reg int) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopReg")
+}
 
-func renvoAarch64AsmPopRsi(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPopRsi(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPopRsi")
+}
 
-func renvoAarch64AsmPushImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPushImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmPushImm")
+}
 
-func renvoAarch64AsmPushRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPushRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPushRax")
+}
 
-func renvoAarch64AsmPushRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPushRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPushRcx")
+}
 
-func renvoAarch64AsmPushRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPushRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPushRdx")
+}
 
-func renvoAarch64AsmPushReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPushReg(a *renvoAsm, reg int) {
+panic("unavailable specialized backend function: renvoAarch64AsmPushReg")
+}
 
-func renvoAarch64AsmRet(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmRet(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmRet")
+}
 
-func renvoAarch64AsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmSarRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmSarRaxImm")
+}
 
-func renvoAarch64AsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmShlRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmShlRaxImm")
+}
 
-func renvoAarch64AsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmShlRcxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoAarch64AsmShlRcxImm")
+}
 
-func renvoAarch64AsmStoreAlMemRdxRcx1(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmStoreAlMemRdxRcx1(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmStoreAlMemRdxRcx1")
+}
 
-func renvoAarch64AsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmStoreRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRaxBss")
+}
 
-func renvoAarch64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRaxMemRdxDisp")
+}
 
 func renvoAarch64AsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRaxMemRdxDispSize")
 }
 
-func renvoAarch64AsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRaxMemRdxRcx8")
+}
 
 func renvoAarch64AsmStoreRegStack(a *renvoAsm, src int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmStoreRegStack")
 }
 
-func renvoAarch64AsmStoreSliceStack(a *renvoAsm, offset int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmStoreSliceStack(a *renvoAsm, offset int) {
+panic("unavailable specialized backend function: renvoAarch64AsmStoreSliceStack")
+}
 
-func renvoAarch64AsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmSubRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmSubRaxRcx")
+}
 
 func renvoAarch64AsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmSubRegReg")
 }
 
-func renvoAarch64AsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmSyscall(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmSyscall")
+}
 
 func renvoAarch64AsmBCondLabel(a *renvoAsm, label int, cond int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmBCondLabel")
 }
 
-func renvoAarch64AsmCallLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmCallLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoAarch64AsmCallLabel")
+}
 
-func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+panic("unavailable specialized backend function: renvoAarch64AsmCmpRcxRaxSet")
+}
 
-func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmJmpLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoAarch64AsmJmpLabel")
+}
 
 func renvoAarch64AsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmMovRegAbs")
 }
 
-func rtgAarch64PatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
+func rtgAarch64PatchRelocations(out *renvoAsm) {
+panic("unavailable specialized backend function: rtgAarch64PatchRelocations")
+}
 
 // source: backend/compiler_aarch64_target_impl.go
 
@@ -36446,49 +36788,53 @@ const renvoAarch64RegLr = 30
 const renvoAarch64RegZr = 31
 
 func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64EmitScalarFunction")
 }
 
 func renvoAarch64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64StoreParamWord")
 }
 
 func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64EmitCallWithWordCount")
 }
 
 func renvoAarch64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64EmitRaxRcxOp")
 }
 
 func renvoAarch64EnsureAppendAddrHelper(g *renvoLinearGen) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64EnsureAppendAddrHelper")
 }
 
-func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAarch64EnsureAppend8Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAarch64EnsureAppend8Helper")
+}
 
-func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoAarch64EnsureAppend64Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoAarch64EnsureAppend64Helper")
+}
 
 func renvoAarch64EnsureStringEqualHelper(g *renvoLinearGen) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64EnsureStringEqualHelper")
 }
 
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoCompileAarch64")
 }
 
 func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAarch64")
 }
 
 func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAarch64Scratch")
 }
 
 func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramAarch64Cached")
 }
 
 type renvoAarch64ProgramSession struct {
@@ -36500,266 +36846,420 @@ result     renvoCompileResult
 }
 
 func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoBeginScalarProgramAarch64")
 }
 
 func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitImageEntryArgsAarch64")
 }
 
 func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: step")
 }
 
 func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: stepScratch")
 }
 
 func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: stepCached")
 }
 
-func (s *renvoAarch64ProgramSession) failFunction(i int) bool { panic("non-VM backend is unavailable") }
+func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
+panic("unavailable specialized backend function: failFunction")
+}
 
-func (s *renvoAarch64ProgramSession) finishStep() bool { panic("non-VM backend is unavailable") }
+func (s *renvoAarch64ProgramSession) finishStep() bool {
+panic("unavailable specialized backend function: finishStep")
+}
 
-func renvoAarch64AsmFrameStart(a *renvoAsm) int { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmFrameStart(a *renvoAsm) int {
+panic("unavailable specialized backend function: renvoAarch64AsmFrameStart")
+}
 
 func renvoAarch64AsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAarch64AsmPatchFrame")
 }
 
 // source: backend/compiler_arm_impl.go
 
-func renvoArmAsmAlign(a *renvoAsm) { panic("non-VM backend is unavailable") }
-
-func renvoArmAsmMovRegReg(a *renvoAsm, dst int, src int) { panic("non-VM backend is unavailable") }
-
-func renvoArmAsmMovRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
-
-func renvoArmAsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
-panic("non-VM backend is unavailable")
+func renvoArmAsmAlign(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmAlign")
 }
 
-func renvoArmAsmFrameStart(a *renvoAsm) int { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRegReg(a *renvoAsm, dst int, src int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRegReg")
+}
+
+func renvoArmAsmMovRegImm(a *renvoAsm, reg int, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRegImm")
+}
+
+func renvoArmAsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmAddRegImm")
+}
+
+func renvoArmAsmFrameStart(a *renvoAsm) int {
+panic("unavailable specialized backend function: renvoArmAsmFrameStart")
+}
 
 func renvoArmAsmPatchFrame(a *renvoAsm, at int, stackUsed int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmPatchFrame")
 }
 
 func renvoArmAsmAddRegSmallImm(a *renvoAsm, dst int, src int, imm int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmAddRegSmallImm")
 }
 
-func renvoArmAsmAddr(a *renvoAsm, base int, disp int) int { panic("non-VM backend is unavailable") }
+func renvoArmAsmAddr(a *renvoAsm, base int, disp int) int {
+panic("unavailable specialized backend function: renvoArmAsmAddr")
+}
 
 func renvoArmAsmLoadStoreAddr(a *renvoAsm, base int, disp int, size int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmLoadStoreAddr")
 }
 
 func renvoArmAsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmLoadRegMem")
 }
 
 func renvoArmAsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmStoreRegMem")
 }
 
 func renvoArmAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmStackMem")
 }
 
 func renvoArmAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmMemDisp")
 }
 
-func renvoArmAsmLoadRaxIndexRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLoadRaxIndexRcxSize(a *renvoAsm, size int) {
+panic("unavailable specialized backend function: renvoArmAsmLoadRaxIndexRcxSize")
+}
 
-func renvoArmAsmNormalizeRaxForKind(a *renvoAsm, kind int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmNormalizeRaxForKind(a *renvoAsm, kind int) {
+panic("unavailable specialized backend function: renvoArmAsmNormalizeRaxForKind")
+}
 
-func renvoArmAsmCmpRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCmpRegImm(a *renvoAsm, reg int, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmCmpRegImm")
+}
 
-func renvoArmCondFromSetcc(setcc int) int { panic("non-VM backend is unavailable") }
+func renvoArmCondFromSetcc(setcc int) int {
+panic("unavailable specialized backend function: renvoArmCondFromSetcc")
+}
 
-func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) { panic("non-VM backend is unavailable") }
+func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
+panic("unavailable specialized backend function: renvoArmAsmDivLeftRcxRightRax")
+}
 
-func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
+panic("unavailable specialized backend function: renvoArmAsmStoreRaxMemRdxRcxSize")
+}
 
-func renvoArmAsmAddRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmAddRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmAddRaxRcx")
+}
 
-func renvoArmAsmAddRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmAddRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmAddRdxImm")
+}
 
-func renvoArmAsmAddRdxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmAddRdxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmAddRdxRcx")
+}
 
 func renvoArmAsmAddRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmAddRegReg")
 }
 
 func renvoArmAsmAddRegRegShift(a *renvoAsm, dst int, left int, right int, shift int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmAddRegRegShift")
 }
 
-func renvoArmAsmBoolNotRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmBoolNotRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmBoolNotRax")
+}
 
-func renvoArmAsmCmpRaxImm8(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCmpRaxImm8(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmCmpRaxImm8")
+}
 
-func renvoArmAsmCmpRegReg(a *renvoAsm, left int, right int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCmpRegReg(a *renvoAsm, left int, right int) {
+panic("unavailable specialized backend function: renvoArmAsmCmpRegReg")
+}
 
-func renvoArmAsmCsetRax(a *renvoAsm, cond int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCsetRax(a *renvoAsm, cond int) {
+panic("unavailable specialized backend function: renvoArmAsmCsetRax")
+}
 
-func renvoArmAsmDecMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmDecMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmDecMemRdx")
+}
 
-func renvoArmAsmEmit(a *renvoAsm, insn int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmEmit(a *renvoAsm, insn int) {
+panic("unavailable specialized backend function: renvoArmAsmEmit")
+}
 
-func renvoArmAsmImulRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmImulRcxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmImulRcxImm")
+}
 
-func renvoArmAsmIncMemRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmIncMemRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmIncMemRdx")
+}
 
-func renvoArmAsmIncRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmIncRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmIncRax")
+}
 
-func renvoArmAsmIncRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmIncRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmIncRcx")
+}
 
-func renvoArmAsmJnzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmJnzLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoArmAsmJnzLabel")
+}
 
-func renvoArmAsmJzLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmJzLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoArmAsmJzLabel")
+}
 
-func renvoArmAsmLeaRegStack(a *renvoAsm, dst int, offset int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLeaRegStack(a *renvoAsm, dst int, offset int) {
+panic("unavailable specialized backend function: renvoArmAsmLeaRegStack")
+}
 
-func renvoArmAsmLeave(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLeave(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmLeave")
+}
 
-func renvoArmAsmLoadByteRaxIndexRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLoadByteRaxIndexRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmLoadByteRaxIndexRcx")
+}
 
-func renvoArmAsmLoadQwordRaxIndexRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLoadQwordRaxIndexRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmLoadQwordRaxIndexRcx8")
+}
 
 func renvoArmAsmLoadQwordRaxIndexRcxDisp(a *renvoAsm, disp int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmLoadQwordRaxIndexRcxDisp")
 }
 
-func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLoadRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoArmAsmLoadRaxBss")
+}
 
-func renvoArmAsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmLoadRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoArmAsmLoadRaxMemRdxDisp")
+}
 
 func renvoArmAsmLoadRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmLoadRaxMemRdxDispSize")
 }
 
 func renvoArmAsmLoadRegStack(a *renvoAsm, dst int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmLoadRegStack")
 }
 
-func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovR10BssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoArmAsmMovR10BssAddr")
+}
 
-func renvoArmAsmMovR8Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovR8Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovR8Rax")
+}
 
-func renvoArmAsmMovR9Rax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovR9Rax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovR9Rax")
+}
 
-func renvoArmAsmMovRaxBssAddr(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRaxBssAddr")
+}
 
-func renvoArmAsmMovRaxDataAddr(a *renvoAsm, dataOff int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRaxDataAddr")
+}
 
-func renvoArmAsmMovRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRaxImm")
+}
 
-func renvoArmAsmMovRaxImm64(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRaxImm64(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRaxImm64")
+}
 
-func renvoArmAsmMovRaxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRaxRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRaxRdx")
+}
 
-func renvoArmAsmMovRcxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRcxRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRcxRax")
+}
 
-func renvoArmAsmMovRcxRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRcxRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRcxRdx")
+}
 
-func renvoArmAsmMovRdiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRdiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRdiRax")
+}
 
-func renvoArmAsmMovRdxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRdxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmMovRdxImm")
+}
 
-func renvoArmAsmMovRdxRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRdxRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRdxRax")
+}
 
-func renvoArmAsmMovRsiRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMovRsiRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMovRsiRax")
+}
 
 func renvoArmAsmMulRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmMulRegReg")
 }
 
-func renvoArmAsmNegRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmNegRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmNegRax")
+}
 
-func renvoArmAsmPopRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPopRax")
+}
 
-func renvoArmAsmPopRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPopRcx")
+}
 
-func renvoArmAsmPopRdi(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopRdi(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPopRdi")
+}
 
-func renvoArmAsmPopRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPopRdx")
+}
 
-func renvoArmAsmPopReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopReg(a *renvoAsm, reg int) {
+panic("unavailable specialized backend function: renvoArmAsmPopReg")
+}
 
-func renvoArmAsmPopRsi(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPopRsi(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPopRsi")
+}
 
-func renvoArmAsmPushImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPushImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmPushImm")
+}
 
-func renvoArmAsmPushRax(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPushRax(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPushRax")
+}
 
-func renvoArmAsmPushRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPushRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPushRcx")
+}
 
-func renvoArmAsmPushRdx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPushRdx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPushRdx")
+}
 
-func renvoArmAsmPushReg(a *renvoAsm, reg int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPushReg(a *renvoAsm, reg int) {
+panic("unavailable specialized backend function: renvoArmAsmPushReg")
+}
 
-func renvoArmAsmRet(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmRet(a *renvoAsm) { panic("unavailable specialized backend function: renvoArmAsmRet") }
 
-func renvoArmAsmSarRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmSarRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmSarRaxImm")
+}
 
-func renvoArmAsmShlRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmShlRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmShlRaxImm")
+}
 
-func renvoArmAsmShlRcxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmShlRcxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmShlRcxImm")
+}
 
-func renvoArmAsmShrRaxImm(a *renvoAsm, imm int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmShrRaxImm(a *renvoAsm, imm int) {
+panic("unavailable specialized backend function: renvoArmAsmShrRaxImm")
+}
 
-func renvoArmAsmStoreAlMemRdxRcx1(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreAlMemRdxRcx1(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmStoreAlMemRdxRcx1")
+}
 
-func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreRaxBss(a *renvoAsm, bssOff int) {
+panic("unavailable specialized backend function: renvoArmAsmStoreRaxBss")
+}
 
-func renvoArmAsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreRaxMemRdxDisp(a *renvoAsm, disp int) {
+panic("unavailable specialized backend function: renvoArmAsmStoreRaxMemRdxDisp")
+}
 
 func renvoArmAsmStoreRaxMemRdxDispSize(a *renvoAsm, disp int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmStoreRaxMemRdxDispSize")
 }
 
-func renvoArmAsmStoreRaxMemRdxRcx8(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreRaxMemRdxRcx8(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmStoreRaxMemRdxRcx8")
+}
 
 func renvoArmAsmStoreRegStack(a *renvoAsm, src int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmStoreRegStack")
 }
 
-func renvoArmAsmStoreSliceStack(a *renvoAsm, offset int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmStoreSliceStack(a *renvoAsm, offset int) {
+panic("unavailable specialized backend function: renvoArmAsmStoreSliceStack")
+}
 
-func renvoArmAsmSubRaxRcx(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmSubRaxRcx(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmSubRaxRcx")
+}
 
 func renvoArmAsmSubRegReg(a *renvoAsm, dst int, left int, right int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmSubRegReg")
 }
 
-func renvoArmAsmSyscall(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmSyscall(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmSyscall")
+}
 
 func renvoArmAsmAccessRaxBss(a *renvoAsm, bssOff int, insn int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmAccessRaxBss")
 }
 
-func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmBCondLabel(a *renvoAsm, label int, cond int) {
+panic("unavailable specialized backend function: renvoArmAsmBCondLabel")
+}
 
-func renvoArmAsmCallLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCallLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoArmAsmCallLabel")
+}
 
-func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+panic("unavailable specialized backend function: renvoArmAsmCmpRcxRaxSet")
+}
 
-func renvoArmAsmJmpLabel(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoArmAsmJmpLabel(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoArmAsmJmpLabel")
+}
 
 func renvoArmAsmMovRegAbs(a *renvoAsm, reg int, off int, kind int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmMovRegAbs")
 }
 
 func renvoArmAsmPatchMovRegImmAt(a *renvoAsm, at int, reg int, imm int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmPatchMovRegImmAt")
 }
 
-func rtgArmPatchRelocations(out *renvoAsm) { panic("non-VM backend is unavailable") }
+func rtgArmPatchRelocations(out *renvoAsm) {
+panic("unavailable specialized backend function: rtgArmPatchRelocations")
+}
 
 // source: backend/compiler_wasm32_impl.go
 
@@ -38906,7 +39406,9 @@ out = append(out, a.data...)
 renvoPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
 return out
 }
-func renvoWasm32Image(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoWasm32Image(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoWasm32Image")
+}
 
 func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
 renvoWasmAppendI32Const(out, 0)
@@ -39244,15 +39746,15 @@ return headers, tails, true
 func rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(
 out *renvoAsm, importID int, wordCount int,
 ) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall")
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer")
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxAmd64PackageLinuxMoveOffsetArgument")
 }
 
 const renvoLinuxAmd64SysReadSeq = 0
@@ -39263,14 +39765,20 @@ const renvoLinuxAmd64SysReadAt = 17
 const renvoLinuxAmd64SysWriteAt = 18
 const renvoLinuxAmd64SysFchmod = 91
 
-func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmPrepareReadWriteBuf(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmPrepareReadWriteBuf")
+}
 
-func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64AsmMoveOffsetArg(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64AsmMoveOffsetArg")
+}
 
-func compileLinuxAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileLinuxAmd64(input []int, output int) int {
+panic("unavailable specialized backend function: compileLinuxAmd64")
+}
 
 func compileLinuxAmd64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileLinuxAmd64Arena")
 }
 
 const renvoLinuxAmd64ArgsBSSSize = 32768
@@ -39281,25 +39789,29 @@ const renvoLinuxAmd64EnvironmentLengthBSSSize = 8
 const renvoLinuxAmd64EnvironmentLengthBSSAlignment = 8
 
 func renvoAsmBuildArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, environmentOff int, environmentLengthOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildArgvEnvSlicesAmd64")
 }
 
-func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageObjectAmd64(emitter *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageObjectAmd64")
+}
 
 func renvoAmd64EmitObjectStaticCall(out *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitObjectStaticCall")
 }
 
 const renvoLinuxAmd64ELFMachine = 62
 
-func renvoAsmImageAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageAmd64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageAmd64")
+}
 
 func renvoAppendElfHeaderAmd64(out []byte, a *renvoAsm, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendElfHeaderAmd64")
 }
 
 func renvoAppendElf64Program(out []byte, kind int, flags int, offset int, address int, fileSize int, memorySize int, alignment int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendElf64Program")
 }
 
 // source: backend/compiler_freebsd_amd64_impl.go
@@ -39322,13 +39834,15 @@ const renvoOpenBSDAmd64ELFCodeOffset = 432
 const renvoOpenBSDPTSyscalls = 0x65a3dbe9
 
 func renvoAppendOpenBSDElfHeaderAmd64(out []byte, entryOff int, dataOffset int, fileSize int, bssOffset int, bssSize int, shoff int, syscallTableOff int, syscallTableSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendOpenBSDElfHeaderAmd64")
 }
 
-func renvoAppendOpenBSDIdentNote(out []byte) []byte { panic("non-VM backend is unavailable") }
+func renvoAppendOpenBSDIdentNote(out []byte) []byte {
+panic("unavailable specialized backend function: renvoAppendOpenBSDIdentNote")
+}
 
 func renvoAppendOpenBSDSyscallTable(out []byte, a *renvoAsm) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendOpenBSDSyscallTable")
 }
 
 // source: backend/compiler_netbsd_amd64_impl.go
@@ -39340,7 +39854,7 @@ const renvoNetBSDAmd64ELFCodeOffset = 256
 const renvoNetBSDAmd64ImageBase = 0x400000
 
 func renvoAppendNetBSDElfHeaderAmd64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendNetBSDElfHeaderAmd64")
 }
 
 // source: backend/compiler_linux_amd64_object_impl.go
@@ -39376,89 +39890,107 @@ start, end, section, local int
 }
 
 func renvoAmd64EmitObjectStaticCallReverse(out *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitObjectStaticCallReverse")
 }
 
-func renvoObjectImageFail(reason string) []byte { panic("non-VM backend is unavailable") }
+func renvoObjectImageFail(reason string) []byte {
+panic("unavailable specialized backend function: renvoObjectImageFail")
+}
 
-func renvoAsmImageRelocatableObjectAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageRelocatableObjectAmd64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageRelocatableObjectAmd64")
+}
 
-func renvoAsmImageRelocatableObject386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageRelocatableObject386(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageRelocatableObject386")
+}
 
 func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmImageRelocatableObjectX86")
 }
 
 func renvoObjectImportReferenced(a *renvoAsm, importID int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectImportReferenced")
 }
 
-func renvoElf386Append16(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoElf386Append16(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoElf386Append16")
+}
 
-func renvoElf386Append32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoElf386Append32(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoElf386Append32")
+}
 
 func renvoElf386AppendHeader(out []byte, sectionOffset int, sectionCount int, namesIndex int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElf386AppendHeader")
 }
 
 func renvoElf386AppendRelocation(out []byte, offset int, symbol int, kind int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElf386AppendRelocation")
 }
 
 func renvoElf386AppendSection(out []byte, name int, kind int, flags int, offset int, size int, link int, info int, alignment int, entrySize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElf386AppendSection")
 }
 
 func renvoElf386AppendSymbol(out []byte, name int, info int, visibility int, section int, value int, size int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoElf386AppendSymbol")
 }
 
 func renvoObjectMapExternal(a *renvoAsm, offset int) (int, int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectMapExternal")
 }
 
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectCodeRanges")
 }
 
 func renvoObjectELFSectionIndex(sections *[]renvoObjectELFSection, name string, typ int, flags int, alignment int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectELFSectionIndex")
 }
 
 func renvoObjectMapCode(ranges []renvoObjectCodeRange, position int) (int, int, bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectMapCode")
 }
 
 func renvoObjectMapCodeEnd(ranges []renvoObjectCodeRange, position int) (int, int, bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectMapCodeEnd")
 }
 
 func renvoObjectMapData(ranges []renvoObjectDataRange, position int) (int, int, bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectMapData")
 }
 
 func renvoObjectStoredText(a *renvoAsm, start int, end int) string {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectStoredText")
 }
 
 func renvoObjectFindSection(sections []renvoObjectELFSection, name string) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectFindSection")
 }
 
 func renvoObjectFindSymbol(symbols []renvoObjectELFSymbol, name string) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectFindSymbol")
 }
 
-func renvoObjectUntil(out []byte, size int) []byte { panic("non-VM backend is unavailable") }
+func renvoObjectUntil(out []byte, size int) []byte {
+panic("unavailable specialized backend function: renvoObjectUntil")
+}
 
-func renvoObjectCodeUntil(out []byte, size int) []byte { panic("non-VM backend is unavailable") }
+func renvoObjectCodeUntil(out []byte, size int) []byte {
+panic("unavailable specialized backend function: renvoObjectCodeUntil")
+}
 
-func renvoObjectAppendString(out []byte, value string) []byte { panic("non-VM backend is unavailable") }
+func renvoObjectAppendString(out []byte, value string) []byte {
+panic("unavailable specialized backend function: renvoObjectAppendString")
+}
 
-func renvoObjectNaturalAlignment(size int) int { panic("non-VM backend is unavailable") }
+func renvoObjectNaturalAlignment(size int) int {
+panic("unavailable specialized backend function: renvoObjectNaturalAlignment")
+}
 
 func renvoObjectStringPrefix(value string, prefix string) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoObjectStringPrefix")
 }
 
 // source: backend/compiler_windows_amd64_impl.go
@@ -39473,72 +40005,84 @@ var renvoWindowsAmd64RaxRegister = renvoWindowsAmd64Register{Code: 0, Valid: tru
 const renvoWindowsAmd64RelocationAbsoluteBSS = 1
 const renvoWindowsAmd64RelocationImport = 2
 
-func renvoWindowsAmd64Rel32(out *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoWindowsAmd64Rel32(out *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoWindowsAmd64Rel32")
+}
 
 func rtgBuiltinWindowsAmd64PackageWindowsExit(out *renvoAsm, status renvoWindowsAmd64Register) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsExit")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10(out *renvoAsm, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromR10")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP(out *renvoAsm, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsLoadRAXFromRSP")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP(out *renvoAsm, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsStoreRAXToRSP")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP(out *renvoAsm, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsStoreR10ToRSP")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsStaticCall(out *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsStaticCall")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsConditionalJump(out *renvoAsm, opcode byte, label int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsConditionalJump")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeClose")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeChmod")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsBuiltinTranslateCreateFileFlags")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsBuiltinRuntimeOpen")
 }
 
 func rtgBuiltinWindowsAmd64PackageWindowsCallImport(out *renvoAsm, importID int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinWindowsAmd64PackageWindowsCallImport")
 }
 
-func renvoWinAmd64EmitExit(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWinAmd64EmitExit(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWinAmd64EmitExit")
+}
 
-func renvoWinAmd64CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
+func renvoWinAmd64CallImport(a *renvoAsm, importID int) {
+panic("unavailable specialized backend function: renvoWinAmd64CallImport")
+}
 
 func renvoWinAmd64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWinAmd64CallStaticImport")
 }
 
-func renvoWinAmd64EmitRuntimeOpen(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWinAmd64EmitRuntimeOpen(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWinAmd64EmitRuntimeOpen")
+}
 
-func renvoWinAmd64EmitRuntimeClose(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWinAmd64EmitRuntimeClose(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWinAmd64EmitRuntimeClose")
+}
 
-func renvoWinAmd64EmitRuntimeChmod(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWinAmd64EmitRuntimeChmod(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWinAmd64EmitRuntimeChmod")
+}
 
 func renvoWinAmd64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWinAmd64EmitReadWriteHelper")
 }
 
 const renvoWindowsAmd64ArgsBSSSize = 32768
@@ -39553,20 +40097,24 @@ const renvoWindowsAmd64EnvironmentLengthBSSSize = 8
 const renvoWindowsAmd64EnvironmentLengthBSSAlignment = 8
 
 func renvoAsmBuildWindowsArgvEnvSlicesAmd64(a *renvoAsm, argsOff int, argsTextOff int, argsLengthOff int, environmentOff int, environmentLengthOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildWindowsArgvEnvSlicesAmd64")
 }
 
-func compileWindowsAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileWindowsAmd64(input []int, output int) int {
+panic("unavailable specialized backend function: compileWindowsAmd64")
+}
 
 func compileWindowsAmd64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileWindowsAmd64Arena")
 }
 
 func renvoAsmPatchWindowsAmd64(a *renvoAsm, layout renvoWinImportLayout) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmPatchWindowsAmd64")
 }
 
-func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageWindowsAmd64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageWindowsAmd64")
+}
 
 // source: backend/compiler_linux_kernel_amd64_target_impl.go
 
@@ -39575,50 +40123,56 @@ const renvoKernelAmd64RelocationAbsoluteBSS = 1
 const renvoKernelAmd64RelocationImport = 2
 const renvoKernelAmd64RelocationAbsoluteBSSEnd = 3
 
-func renvoKernelAmd64Rel32(out *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoKernelAmd64Rel32(out *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoKernelAmd64Rel32")
+}
 
-func renvoKernelAmd64ExternalImportCount(out *renvoAsm) int { panic("non-VM backend is unavailable") }
+func renvoKernelAmd64ExternalImportCount(out *renvoAsm) int {
+panic("unavailable specialized backend function: renvoKernelAmd64ExternalImportCount")
+}
 
 func renvoKernelAmd64ExternalImportName(out *renvoAsm, index int) string {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoKernelAmd64ExternalImportName")
 }
 
 func renvoKernelAmd64AbsoluteRelocationOffset(out *renvoAsm, index int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoKernelAmd64AbsoluteRelocationOffset")
 }
 
 func renvoKernelAmd64AbsoluteRelocationAddend(out *renvoAsm, index int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoKernelAmd64AbsoluteRelocationAddend")
 }
 
 func renvoKernelAmd64AbsoluteRelocationKind(out *renvoAsm, index int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoKernelAmd64AbsoluteRelocationKind")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall(out *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxKernelAmd64PackageKernelStaticCall")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation(out *renvoAsm, operation int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxKernelAmd64PackageKernelRuntimeOperation")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress(out *renvoAsm, label int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxKernelAmd64PackageKernelCallbackAddress")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxKernelAmd64PackageKernelEntryEpilogue")
 }
 
 func rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue(out *renvoAsm) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinLinuxKernelAmd64PackageKernelEntryPrologue")
 }
 
-func rtgBuiltinElf64ObjectX8664Get32(data []byte, at int) int { panic("non-VM backend is unavailable") }
+func rtgBuiltinElf64ObjectX8664Get32(data []byte, at int) int {
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664Get32")
+}
 
 func rtgBuiltinElf64ObjectX8664BTFString(data []byte, base int, offset int, value string) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664BTFString")
 }
 
 type rtgBuiltinElf64ObjectX8664ModuleLayout struct {
@@ -39630,120 +40184,463 @@ ok         bool
 }
 
 func rtgBuiltinElf64ObjectX8664BTFModuleLayout(data []byte) rtgBuiltinElf64ObjectX8664ModuleLayout {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664BTFModuleLayout")
 }
 
-func rtgBuiltinElf64ObjectX8664HexDigit(ch byte) int { panic("non-VM backend is unavailable") }
+func rtgBuiltinElf64ObjectX8664HexDigit(ch byte) int {
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664HexDigit")
+}
 
 func rtgBuiltinElf64ObjectX8664SymbolCRC(data []byte, symbol string) (int, bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664SymbolCRC")
 }
 
 func rtgBuiltinElf64ObjectX8664SymbolGPLOnly(data []byte, symbol string) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664SymbolGPLOnly")
 }
 
 func rtgBuiltinElf64ObjectX8664LicenseGPLCompatible(license string) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664LicenseGPLCompatible")
 }
 
 func rtgBuiltinElf64ObjectX8664Contains(text string, needle string) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664Contains")
 }
 
 func rtgBuiltinElf64ObjectX8664Vermagic(
 release string, version string, exitOffset int, symvers []byte,
 ) string {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664Vermagic")
 }
 
 func rtgBuiltinElf64ObjectX8664AppendString(out []byte, value string) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664AppendString")
 }
 
 func rtgBuiltinElf64ObjectX8664Until(out []byte, size int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664Until")
 }
 
 func rtgBuiltinElf64ObjectX8664AppendVersion(out []byte, symbol string, crc int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664AppendVersion")
 }
 
 func rtgBuiltinElf64ObjectX8664KernelImage(
 emitter *renvoAsm, initLabel int, exitLabel int,
 ) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: rtgBuiltinElf64ObjectX8664KernelImage")
 }
 
 func renvoAmd64KernelBTFModuleLayout(data []byte) (int, int, int, int, bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64KernelBTFModuleLayout")
 }
 
-func renvoAmd64KernelEntryPrologue(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64KernelEntryPrologue(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64KernelEntryPrologue")
+}
 
-func renvoAmd64KernelEntryEpilogue(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64KernelEntryEpilogue(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64KernelEntryEpilogue")
+}
 
-func renvoAmd64KernelCallbackAddress(a *renvoAsm, label int) { panic("non-VM backend is unavailable") }
+func renvoAmd64KernelCallbackAddress(a *renvoAsm, label int) {
+panic("unavailable specialized backend function: renvoAmd64KernelCallbackAddress")
+}
 
-func renvoAmd64EmitKernelPrintValue(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAmd64EmitKernelPrintValue(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAmd64EmitKernelPrintValue")
+}
 
 func renvoAmd64EmitKernelStaticCall(a *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAmd64EmitKernelStaticCall")
 }
 
-func compileLinuxKernelAmd64(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileLinuxKernelAmd64(input []int, output int) int {
+panic("unavailable specialized backend function: compileLinuxKernelAmd64")
+}
 
 func compileLinuxKernelAmd64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileLinuxKernelAmd64Arena")
 }
 
 func renvoAsmImageKernelModuleAmd64(a *renvoAsm, initLabel int, exitLabel int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmImageKernelModuleAmd64")
 }
 
 // source: backend/compiler_linux_kernel_amd64_impl.go
 
 func renvoBeginKernelModuleAmd64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+renvoNonNil(g)
+a := &g.asm
+g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
+for i := 0; i < len(g.kernelCallbackLabels); i++ {
+g.kernelCallbackLabels[i] = -1
+}
+exitIndex := -1
+for i := 0; i < len(g.meta.funcs); i++ {
+if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
+exitIndex = i
+}
+}
+g.kernelInitLabel = renvoAsmNewLabel(a)
+g.kernelExitLabel = -1
+renvoAsmMarkLabel(a, g.kernelInitLabel)
+
+renvoAmd64KernelEntryPrologue(a)
+renvoLinearMarkFunc(g, appIndex)
+if !g.meta.panicEnabled {
+renvoAmd64InitRuntimeCheckRegs(g)
+}
+renvoEmitInitializeThreadState(g)
+renvoEmitPersistentArenaReady(g)
+if !renvoLinearInitGlobals(g) {
+return false
+}
+renvoAsmCallLabel(a, g.funcLabels[appIndex])
+if !renvoEmitProgramPanicCheck(g) {
+return false
+}
+renvoAsmPrimaryImm(a, 0)
+renvoAmd64KernelEntryEpilogue(a)
+if exitIndex >= 0 {
+g.kernelExitLabel = renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, g.kernelExitLabel)
+renvoAmd64KernelEntryPrologue(a)
+renvoLinearMarkFunc(g, exitIndex)
+if !g.meta.panicEnabled {
+renvoAmd64InitRuntimeCheckRegs(g)
+}
+renvoAsmCallLabel(a, g.funcLabels[exitIndex])
+renvoAmd64KernelEntryEpilogue(a)
+}
+return true
 }
 
 func renvoAmd64EmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
-panic("non-VM backend is unavailable")
+renvoNonNil(g, ep)
+if idx < 0 || idx >= len(ep.exprs) {
+return -1
+}
+e := &ep.exprs[idx]
+if e.kind != renvoExprIdent {
+return -1
+}
+fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
+if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
+return -1
+}
+renvoLinearMarkFunc(g, fnIndex)
+a := &g.asm
+label := g.kernelCallbackLabels[fnIndex]
+first := label < 0
+if first {
+label = renvoAsmNewLabel(a)
+g.kernelCallbackLabels[fnIndex] = label
+}
+
+renvoAmd64KernelCallbackAddress(a, label)
+renvoAsmPushPrimary(a)
+if first {
+after := renvoAsmNewLabel(a)
+renvoAsmJmpLabel(a, after)
+renvoAsmMarkLabel(a, label)
+renvoAmd64KernelEntryPrologue(a)
+if !g.meta.panicEnabled {
+renvoAmd64InitRuntimeCheckRegs(g)
+}
+renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+renvoAmd64KernelEntryEpilogue(a)
+renvoAsmMarkLabel(a, after)
+}
+return 1
 }
 
 func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int) int {
-panic("non-VM backend is unavailable")
+renvoNonNil(a)
+if nameStart < 0 || nameEnd <= nameStart || nameEnd > len(src) {
+return -1
+}
+var name []byte
+for i := nameStart; i < nameEnd; i++ {
+name = append(name, src[i])
+}
+return renvoAsmAddExternalImportName(a, string(name))
 }
 
 func renvoAmd64EmitKernelLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-panic("non-VM backend is unavailable")
+renvoNonNil(g, fn)
+if wordCount < 0 || wordCount > 6 {
+return false
+}
+a := &g.asm
+importID := renvoAsmAddKernelImport(a, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+if importID < 0 {
+return false
+}
+renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
+return true
 }
 
-func renvoKernelNameFromOutput(path string) string { panic("non-VM backend is unavailable") }
+func renvoKernelNameFromOutput(path string) string {
+start := 0
+for i := 0; i < len(path); i++ {
+if path[i] == '/' || path[i] == '\\' {
+start = i + 1
+}
+}
+end := len(path)
+if end-start > 3 && path[end-3] == '.' && path[end-2] == 'k' && path[end-1] == 'o' {
+end -= 3
+}
+var out []byte
+for i := start; i < end && len(out) < 55; i++ {
+ch := path[i]
+if ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '_' {
+out = append(out, ch)
+} else {
+out = append(out, '_')
+}
+}
+if len(out) == 0 {
+return "renvo"
+}
+return string(out)
+}
 
-func renvoKernelReadFile(path string) []byte { panic("non-VM backend is unavailable") }
+func renvoKernelReadFile(path string) []byte {
+fd := open(path, O_RDONLY)
+if fd < 0 {
+return nil
+}
+var out []byte
+out = renvoReadAll(fd, out)
+close(fd)
+return out
+}
 
-func renvoKernelTrimLine(data []byte) string { panic("non-VM backend is unavailable") }
+func renvoKernelTrimLine(data []byte) string {
+end := len(data)
+for end > 0 && (data[end-1] == '\n' || data[end-1] == '\r' || data[end-1] == 0) {
+end--
+}
+return string(data[:end])
+}
 
-func renvoPrepareKernelMetadata() bool { panic("non-VM backend is unavailable") }
+func renvoPrepareKernelMetadata() bool {
+if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 || renvoKernelRelease == "" {
+release := renvoKernelReadFile("/proc/sys/kernel/osrelease")
+if len(release) == 0 {
+return false
+}
+renvoKernelRelease = renvoKernelTrimLine(release)
+renvoKernelVersion = renvoKernelTrimLine(renvoKernelReadFile("/proc/version"))
+renvoKernelBTF = renvoKernelReadFile("/sys/kernel/btf/vmlinux")
+symversPath := "/lib/modules/" + renvoKernelRelease + "/build/Module.symvers"
+renvoKernelSymvers = renvoKernelReadFile(symversPath)
+}
+if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 {
+return false
+}
+if renvoKernelModuleSize <= 0 {
+size, nameOff, initOff, exitOff, ok := renvoAmd64KernelBTFModuleLayout(renvoKernelBTF)
+if !ok || size <= 0 || nameOff < 0 || initOff < 0 {
+return false
+}
+renvoKernelModuleSize = size
+renvoKernelModuleNameOff = nameOff
+renvoKernelModuleInitOff = initOff
+renvoKernelModuleExitOff = exitOff
+}
 
-func renvoKernelGet32(data []byte, at int) int { panic("non-VM backend is unavailable") }
+return true
+}
+
+func renvoKernelGet32(data []byte, at int) int {
+if at < 0 || at+4 > len(data) {
+return 0
+}
+return int(data[at]) | int(data[at+1])<<8 | int(data[at+2])<<16 | int(data[at+3])<<24
+}
 
 func renvoKernelBTFString(data []byte, base int, off int, value string) bool {
-panic("non-VM backend is unavailable")
+pos := base + off
+if off < 0 || pos < 0 || pos+len(value) >= len(data) {
+return false
+}
+for i := 0; i < len(value); i++ {
+if data[pos+i] != value[i] {
+return false
+}
+}
+return data[pos+len(value)] == 0
 }
 
 func renvoKernelBTFModuleLayout(data []byte) (int, int, int, int, bool) {
-panic("non-VM backend is unavailable")
+if len(data) < 24 || data[0] != 0x9f || data[1] != 0xeb {
+return 0, 0, 0, 0, false
+}
+headerLen := renvoKernelGet32(data, 4)
+typeStart := headerLen + renvoKernelGet32(data, 8)
+typeEnd := typeStart + renvoKernelGet32(data, 12)
+stringStart := headerLen + renvoKernelGet32(data, 16)
+if headerLen < 24 || typeStart < headerLen || typeEnd > len(data) || stringStart < headerLen || stringStart >= len(data) {
+return 0, 0, 0, 0, false
+}
+pos := typeStart
+for pos+12 <= typeEnd {
+name := renvoKernelGet32(data, pos)
+info := renvoKernelGet32(data, pos+4)
+sizeType := renvoKernelGet32(data, pos+8)
+kind := (info >> 24) & 31
+vlen := info & 65535
+extra := 0
+if kind == 1 {
+extra = 4
+} else if kind == 3 {
+extra = 12
+} else if kind == 4 || kind == 5 {
+extra = vlen * 12
+} else if kind == 6 {
+extra = vlen * 8
+} else if kind == 13 {
+extra = vlen * 8
+} else if kind == 14 || kind == 17 {
+extra = 4
+} else if kind == 15 || kind == 19 {
+extra = vlen * 12
+}
+next := pos + 12 + extra
+if next > typeEnd || next <= pos {
+return 0, 0, 0, 0, false
+}
+if kind == 4 && renvoKernelBTFString(data, stringStart, name, "module") {
+nameOff := -1
+initOff := -1
+exitOff := -1
+member := pos + 12
+for i := 0; i < vlen; i++ {
+memberName := renvoKernelGet32(data, member)
+bitOff := renvoKernelGet32(data, member+8) & 0x00ffffff
+if bitOff%8 == 0 {
+if renvoKernelBTFString(data, stringStart, memberName, "name") {
+nameOff = bitOff / 8
+} else if renvoKernelBTFString(data, stringStart, memberName, "init") {
+initOff = bitOff / 8
+} else if renvoKernelBTFString(data, stringStart, memberName, "exit") {
+exitOff = bitOff / 8
+}
+}
+member += 12
+}
+return sizeType, nameOff, initOff, exitOff, nameOff >= 0 && initOff >= 0
+}
+pos = next
+}
+return 0, 0, 0, 0, false
 }
 
-func renvoKernelHexDigit(ch byte) int { panic("non-VM backend is unavailable") }
+func renvoKernelHexDigit(ch byte) int {
+if ch >= '0' && ch <= '9' {
+return int(ch - '0')
+}
+if ch >= 'a' && ch <= 'f' {
+return int(ch-'a') + 10
+}
+if ch >= 'A' && ch <= 'F' {
+return int(ch-'A') + 10
+}
+return -1
+}
 
-func renvoKernelSymbolCRC(symbol string) (int, bool) { panic("non-VM backend is unavailable") }
+func renvoKernelSymbolCRC(symbol string) (int, bool) {
+data := renvoKernelSymvers
+line := 0
+for line < len(data) {
+end := line
+for end < len(data) && data[end] != '\n' {
+end++
+}
+firstTab := line
+for firstTab < end && data[firstTab] != '\t' {
+firstTab++
+}
+secondTab := firstTab + 1
+for secondTab < end && data[secondTab] != '\t' {
+secondTab++
+}
+if secondTab-firstTab-1 == len(symbol) {
+match := true
+for i := 0; i < len(symbol); i++ {
+if data[firstTab+1+i] != symbol[i] {
+match = false
+}
+}
+if match {
+value := 0
+start := line
+if start+2 <= firstTab && data[start] == '0' && data[start+1] == 'x' {
+start += 2
+}
+for i := start; i < firstTab; i++ {
+digit := renvoKernelHexDigit(data[i])
+if digit < 0 {
+return 0, false
+}
+value = (value << 4) | digit
+}
+return value, true
+}
+}
+line = end + 1
+}
+return 0, false
+}
 
-func renvoKernelSymbolGPLOnly(symbol string) bool { panic("non-VM backend is unavailable") }
+func renvoKernelSymbolGPLOnly(symbol string) bool {
+data := renvoKernelSymvers
+line := 0
+for line < len(data) {
+end := line
+for end < len(data) && data[end] != '\n' {
+end++
+}
+firstTab := line
+for firstTab < end && data[firstTab] != '\t' {
+firstTab++
+}
+secondTab := firstTab + 1
+for secondTab < end && data[secondTab] != '\t' {
+secondTab++
+}
+if secondTab-firstTab-1 == len(symbol) {
+match := true
+for i := 0; i < len(symbol); i++ {
+if data[firstTab+1+i] != symbol[i] {
+match = false
+}
+}
+if match {
+thirdTab := secondTab + 1
+for thirdTab < end && data[thirdTab] != '\t' {
+thirdTab++
+}
+exportStart := thirdTab + 1
+exportEnd := exportStart
+for exportEnd < end && data[exportEnd] != '\t' {
+exportEnd++
+}
+return exportEnd-exportStart >= 4 && data[exportEnd-4] == '_' && data[exportEnd-3] == 'G' && data[exportEnd-2] == 'P' && data[exportEnd-1] == 'L'
+}
+}
+line = end + 1
+}
+return false
+}
 
-func renvoKernelLicenseGPLCompatible() bool { panic("non-VM backend is unavailable") }
+func renvoKernelLicenseGPLCompatible() bool {
+license := renvoKernelLicense
+return license == "GPL" || license == "GPL v2" || license == "GPL and additional rights" || license == "Dual BSD/GPL" || license == "Dual MIT/GPL" || license == "Dual MPL/GPL"
+}
 
 // source: backend/compiler_linux_386_impl.go
 
@@ -39755,41 +40652,55 @@ const renvoLinux386SysFchmod = 94
 const renvoLinux386SysReadAt = 180
 const renvoLinux386SysWriteAt = 181
 
-func renvo386AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmPrepareReadWriteBuf(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmPrepareReadWriteBuf")
+}
 
-func renvo386AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvo386AsmMoveOffsetArg(a *renvoAsm) {
+panic("unavailable specialized backend function: renvo386AsmMoveOffsetArg")
+}
 
-func compileLinux386(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileLinux386(input []int, output int) int {
+panic("unavailable specialized backend function: compileLinux386")
+}
 
 func compileLinux386Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileLinux386Arena")
 }
 
 func renvoAsmBuildArgvEnvSlices386(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildArgvEnvSlices386")
 }
 
-func renvoAsmImage386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImage386(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImage386")
+}
 
-func renvoAsmPatch386(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAsmPatch386(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAsmPatch386")
+}
 
 func renvoAppendElfHeader386(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendElfHeader386")
 }
 
 // source: backend/compiler_windows_386_impl.go
 
-func compileWindows386(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileWindows386(input []int, output int) int {
+panic("unavailable specialized backend function: compileWindows386")
+}
 
 func compileWindows386Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileWindows386Arena")
 }
 
 func renvoAsmBuildWindowsArgvEnvSlices386(a *renvoAsm, bssOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildWindowsArgvEnvSlices386")
 }
 
-func renvoAsmImageWindows386(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageWindows386(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageWindows386")
+}
 
 // source: backend/compiler_linux_aarch64_impl.go
 
@@ -39801,30 +40712,40 @@ const renvoLinuxAarch64SysFchmod = 52
 const renvoLinuxAarch64SysReadAt = 67
 const renvoLinuxAarch64SysWriteAt = 68
 
-func renvoAarch64AsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmPrepareReadWriteBuf(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmPrepareReadWriteBuf")
+}
 
-func renvoAarch64AsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAarch64AsmMoveOffsetArg(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAarch64AsmMoveOffsetArg")
+}
 
-func compileLinuxAarch64(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileLinuxAarch64(input []int, output int) int {
+panic("unavailable specialized backend function: compileLinuxAarch64")
+}
 
 func compileLinuxAarch64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileLinuxAarch64Arena")
 }
 
 func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgsAarch64")
 }
 
 func renvoAsmBuildArgvEnvSlicesAarch64(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildArgvEnvSlicesAarch64")
 }
 
-func renvoAsmImageAarch64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageAarch64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageAarch64")
+}
 
-func renvoAsmPatchAarch64Abs(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAsmPatchAarch64Abs(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAsmPatchAarch64Abs")
+}
 
 func renvoAppendElfHeaderAarch64(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendElfHeaderAarch64")
 }
 
 // source: backend/compiler_windows_arm64_impl.go
@@ -39832,88 +40753,102 @@ panic("non-VM backend is unavailable")
 const renvoWinArm64Machine = 0xaa64
 const renvoWinArm64ImageBase = 0x140000000
 
-func compileWindowsArm64(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileWindowsArm64(input []int, output int) int {
+panic("unavailable specialized backend function: compileWindowsArm64")
+}
 
 func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileWindowsArm64Arena")
 }
 
 func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgsWindowsArm64")
 }
 
 func renvoAsmBuildWindowsArgvEnvSlicesArm64(a *renvoAsm, argsOff int, argsTextOff int, argsLenOff int, envOff int, envLenOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildWindowsArgvEnvSlicesArm64")
 }
 
-func renvoWinArm64CallImport(a *renvoAsm, importID int) { panic("non-VM backend is unavailable") }
+func renvoWinArm64CallImport(a *renvoAsm, importID int) {
+panic("unavailable specialized backend function: renvoWinArm64CallImport")
+}
 
 func renvoWinArm64CallStaticImport(a *renvoAsm, importID int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWinArm64CallStaticImport")
 }
 
-func renvoWinArm64TestRegImm(a *renvoAsm, reg int, imm int) { panic("non-VM backend is unavailable") }
+func renvoWinArm64TestRegImm(a *renvoAsm, reg int, imm int) {
+panic("unavailable specialized backend function: renvoWinArm64TestRegImm")
+}
 
-func renvoWinArm64TranslateCreateFileFlags(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoWinArm64TranslateCreateFileFlags(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoWinArm64TranslateCreateFileFlags")
+}
 
 func renvoWinArm64EmitReadWriteHelper(g *renvoLinearGen, isWrite bool) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWinArm64EmitReadWriteHelper")
 }
 
 func renvoWinArm64EmitKernelReadWriteCall(a *renvoAsm, importID int, countOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoWinArm64EmitKernelReadWriteCall")
 }
 
 func renvoAsmPatchWindowsArm64(a *renvoAsm, layout renvoWinImportLayout) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmPatchWindowsArm64")
 }
 
-func renvoAsmImageWindowsArm64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageWindowsArm64")
+}
 
 // source: backend/compiler_linux_arm_impl.go
 
 func renvoArmAsmVFPLoadStack(a *renvoAsm, offset int, reg int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPLoadStack")
 }
 
 func renvoArmAsmVFPStoreStack(a *renvoAsm, offset int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPStoreStack")
 }
 
 func renvoArmAsmVFPBinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPBinaryStack")
 }
 
 func renvoArmAsmVFPCompareStack(a *renvoAsm, left int, right int, size int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPCompareStack")
 }
 
 func renvoArmAsmVFPConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPConvertFloatStack")
 }
 
 func renvoArmAsmVFPIntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPIntToFloatStack")
 }
 
 func renvoArmAsmVFPFloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmAsmVFPFloatToIntStack")
 }
 
-func renvoArmEnsureWideBinaryHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureWideBinaryHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureWideBinaryHelper")
+}
 
-func renvoArmEnsureWideCompareHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureWideCompareHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureWideCompareHelper")
+}
 
 func renvoArmEmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitWideHelperCall")
 }
 
 func renvoArmEmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitWideBinaryStack")
 }
 
 func renvoArmEmitWideCompareStack(g *renvoLinearGen, left int, right int, mode int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitWideCompareStack")
 }
 
 const renvoArmRegRax = 0
@@ -39933,32 +40868,40 @@ const renvoArmRegSp = 13
 const renvoArmRegLr = 14
 
 func renvoArmEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitCopyBytes")
 }
 
 func renvoArmEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitScalarFunction")
 }
 
 func renvoArmStoreParamWord(g *renvoLinearGen, reg int, offset int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmStoreParamWord")
 }
 
 func renvoArmEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitCallWithWordCount")
 }
 
 func renvoArmEmitRaxRcxOp(g *renvoLinearGen, tok int, rightShiftOpcode int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoArmEmitRaxRcxOp")
 }
 
-func renvoArmEnsureAppendAddrHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureAppendAddrHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureAppendAddrHelper")
+}
 
-func renvoArmEnsureAppend8Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureAppend8Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureAppend8Helper")
+}
 
-func renvoArmEnsureAppend64Helper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureAppend64Helper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureAppend64Helper")
+}
 
-func renvoArmEnsureStringEqualHelper(g *renvoLinearGen) int { panic("non-VM backend is unavailable") }
+func renvoArmEnsureStringEqualHelper(g *renvoLinearGen) int {
+panic("unavailable specialized backend function: renvoArmEnsureStringEqualHelper")
+}
 
 const renvoLinuxArmCodeOffset = 0x74
 
@@ -39970,54 +40913,64 @@ const renvoLinuxArmSysFchmod = 94
 const renvoLinuxArmSysReadAt = 180
 const renvoLinuxArmSysWriteAt = 181
 
-func renvoArmAsmPrepareReadWriteBuf(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmPrepareReadWriteBuf(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmPrepareReadWriteBuf")
+}
 
-func renvoArmAsmMoveOffsetArg(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoArmAsmMoveOffsetArg(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoArmAsmMoveOffsetArg")
+}
 
-func compileLinuxArm(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileLinuxArm(input []int, output int) int {
+panic("unavailable specialized backend function: compileLinuxArm")
+}
 
 func compileLinuxArmArena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileLinuxArmArena")
 }
 
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramArm")
 }
 
 func renvoTryCompileScalarProgramArmScratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramArmScratch")
 }
 
 func renvoTryCompileScalarProgramArmCached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileScalarProgramArmCached")
 }
 
 func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoBeginScalarProgramArm")
 }
 
 func renvoEmitImageEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitImageEntryArgsArm")
 }
 
 func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoFinishScalarProgramArm")
 }
 
 func renvoEmitProgramEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgsArm")
 }
 
 func renvoAsmBuildArgvEnvSlicesArm(a *renvoAsm, bssOff int, envOff int, envLenOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildArgvEnvSlicesArm")
 }
 
-func renvoAsmImageArm(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageArm(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageArm")
+}
 
-func renvoAsmPatchArm(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAsmPatchArm(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAsmPatchArm")
+}
 
 func renvoAppendElfHeaderArm(out []byte, entryOff int, fileSize int, bssOffset int, bssSize int, shoff int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAppendElfHeaderArm")
 }
 
 // source: backend/compiler_wasi_wasm32_impl.go
@@ -40732,10 +41685,12 @@ return true
 return false
 }
 
-func compileWasiWasm32(input []int, output int) int { panic("non-VM backend is unavailable") }
+func compileWasiWasm32(input []int, output int) int {
+panic("unavailable specialized backend function: compileWasiWasm32")
+}
 
 func compileWasiWasm32Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: compileWasiWasm32Arena")
 }
 
 func compileVM32(input []int, output int) int {
@@ -40897,7 +41852,7 @@ return true
 }
 
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoTryCompileWasiWasm32")
 }
 
 func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []renvoStmt) []byte {
@@ -42370,10 +43325,12 @@ return g.streqLabel
 // source: backend/compiler_darwin_arm64_impl.go
 
 func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinCCSHA256")
 }
 
-func renvo_runtime_ArenaPersistString(value string) string { panic("non-VM backend is unavailable") }
+func renvo_runtime_ArenaPersistString(value string) string {
+panic("unavailable specialized backend function: renvo_runtime_ArenaPersistString")
+}
 
 const renvoDarwinArm64CodeOffset = 0x1000
 const renvoDarwinArm64ImageBase = 0x100000000
@@ -42392,78 +43349,96 @@ const renvoDarwinImportFchmod = 8
 const renvoDarwinImportGetdirentries = 9
 const renvoDarwinImportCount = 9
 
-func compileDarwinArm64(input []int, output int) int { panic("non-VM backend is unavailable") }
-
-func compileDarwinArm64Arena(input []int, output int, arenaSize int) int {
-panic("non-VM backend is unavailable")
+func compileDarwinArm64(input []int, output int) int {
+panic("unavailable specialized backend function: compileDarwinArm64")
 }
 
-func renvoDarwinImportName(id int) string { panic("non-VM backend is unavailable") }
+func compileDarwinArm64Arena(input []int, output int, arenaSize int) int {
+panic("unavailable specialized backend function: compileDarwinArm64Arena")
+}
 
-func renvoDarwinArm64ImportLabel(a *renvoAsm, id int) int { panic("non-VM backend is unavailable") }
+func renvoDarwinImportName(id int) string {
+panic("unavailable specialized backend function: renvoDarwinImportName")
+}
 
-func renvoDarwinArm64CallImport(a *renvoAsm, id int) { panic("non-VM backend is unavailable") }
+func renvoDarwinArm64ImportLabel(a *renvoAsm, id int) int {
+panic("unavailable specialized backend function: renvoDarwinArm64ImportLabel")
+}
+
+func renvoDarwinArm64CallImport(a *renvoAsm, id int) {
+panic("unavailable specialized backend function: renvoDarwinArm64CallImport")
+}
 
 func renvoDarwinArm64CallVirtualArgs(a *renvoAsm, id int, argCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinArm64CallVirtualArgs")
 }
 
 func renvoAsmAddDarwinStaticImport(a *renvoAsm, dylib string, name string) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmAddDarwinStaticImport")
 }
 
 func renvoDarwinArm64EmitIntegerStackCall(a *renvoAsm, importIndex int, paramCount int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinArm64EmitIntegerStackCall")
 }
 
 func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinArm64EmitLinkStaticCall")
 }
 
 func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoEmitProgramEntryArgsDarwinArm64")
 }
 
 func renvoAsmBuildDarwinArgvEnvSlicesArm64(a *renvoAsm, entryOff int, argsOff int, envOff int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoAsmBuildDarwinArgvEnvSlicesArm64")
 }
 
-func renvoDarwinAppendULEB(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinAppendULEB(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoDarwinAppendULEB")
+}
 
-func renvoDarwinAppendName16(out []byte, name string) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinAppendName16(out []byte, name string) []byte {
+panic("unavailable specialized backend function: renvoDarwinAppendName16")
+}
 
 func renvoDarwinAppendSegment64(out []byte, name string, vmaddr int, vmsize int, fileoff int, filesize int, maxprot int, initprot int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinAppendSegment64")
 }
 
 func renvoDarwinAppendSection64(out []byte, section string, segment string, addr int, size int, offset int, align int, flags int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinAppendSection64")
 }
 
 func renvoDarwinAppendTextSegment64(out []byte, codeSize int, fileSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinAppendTextSegment64")
 }
 
 func renvoDarwinAppendDataSegment64(out []byte, dataFileOff int, dataFileSize int, bssSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinAppendDataSegment64")
 }
 
 func renvoDarwinPatchArm64Adrp(code []byte, at int, pc int, target int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinPatchArm64Adrp")
 }
 
-func renvoDarwinStaticDylibs(a *renvoAsm) []string { panic("non-VM backend is unavailable") }
+func renvoDarwinStaticDylibs(a *renvoAsm) []string {
+panic("unavailable specialized backend function: renvoDarwinStaticDylibs")
+}
 
-func renvoDarwinDylibOrdinal(a *renvoAsm, dylib string) int { panic("non-VM backend is unavailable") }
+func renvoDarwinDylibOrdinal(a *renvoAsm, dylib string) int {
+panic("unavailable specialized backend function: renvoDarwinDylibOrdinal")
+}
 
-func renvoDarwinDylibCommandSize(path string) int { panic("non-VM backend is unavailable") }
+func renvoDarwinDylibCommandSize(path string) int {
+panic("unavailable specialized backend function: renvoDarwinDylibCommandSize")
+}
 
 func renvoDarwinAppendDylibCommand(out []byte, path string) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinAppendDylibCommand")
 }
 
 func renvoDarwinMachHeader(a *renvoAsm, textFileSize int, dataFileOff int, dataFileSize int, dataVMSize int, linkeditOff int, linkeditSize int, bindOff int, bindSize int, symOff int, symbolCount int, strOff int, strSize int, undefinedCount int, sigOff int, sigSize int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinMachHeader")
 }
 
 type renvoDarwinImportLayout struct {
@@ -42472,46 +43447,68 @@ staticGotOffs []int
 }
 
 func renvoDarwinPrepareImports(a *renvoAsm) renvoDarwinImportLayout {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinPrepareImports")
 }
 
 func renvoDarwinBuildBindData(a *renvoAsm, gotOffs []int, staticGotOffs []int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinBuildBindData")
 }
 
-func renvoDarwinBuildStringTable(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinBuildStringTable(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoDarwinBuildStringTable")
+}
 
-func renvoDarwinBuildSymbolTable(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinBuildSymbolTable(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoDarwinBuildSymbolTable")
+}
 
-func renvoDarwinUsedImportCount(a *renvoAsm) int { panic("non-VM backend is unavailable") }
+func renvoDarwinUsedImportCount(a *renvoAsm) int {
+panic("unavailable specialized backend function: renvoDarwinUsedImportCount")
+}
 
-func renvoAsmImageDarwinArm64(a *renvoAsm) []byte { panic("non-VM backend is unavailable") }
+func renvoAsmImageDarwinArm64(a *renvoAsm) []byte {
+panic("unavailable specialized backend function: renvoAsmImageDarwinArm64")
+}
 
-func renvoAsmPatchAarch64AbsDarwin(a *renvoAsm) { panic("non-VM backend is unavailable") }
+func renvoAsmPatchAarch64AbsDarwin(a *renvoAsm) {
+panic("unavailable specialized backend function: renvoAsmPatchAarch64AbsDarwin")
+}
 
-func renvoDarwinAppendBE32(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinAppendBE32(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoDarwinAppendBE32")
+}
 
-func renvoDarwinAppendBE64(out []byte, value int) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinAppendBE64(out []byte, value int) []byte {
+panic("unavailable specialized backend function: renvoDarwinAppendBE64")
+}
 
 func renvoDarwinCodeSignatureSize(codeLimit int, ident string) int {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinCodeSignatureSize")
 }
 
 func renvoDarwinCodeSignature(code []byte, ident string, execLimit int) []byte {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinCodeSignature")
 }
 
-func renvoDarwinSHA256Constants() []int { panic("non-VM backend is unavailable") }
+func renvoDarwinSHA256Constants() []int {
+panic("unavailable specialized backend function: renvoDarwinSHA256Constants")
+}
 
 func renvoDarwinSHA256Schedule(msg []byte, chunk int, w []int) {
-panic("non-VM backend is unavailable")
+panic("unavailable specialized backend function: renvoDarwinSHA256Schedule")
 }
 
-func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) { panic("non-VM backend is unavailable") }
+func renvoDarwinSHA256Rounds(w []int, k []int, hvals []int) {
+panic("unavailable specialized backend function: renvoDarwinSHA256Rounds")
+}
 
-func renvoDarwinSHA256Compress(msg []byte, hvals []int) { panic("non-VM backend is unavailable") }
+func renvoDarwinSHA256Compress(msg []byte, hvals []int) {
+panic("unavailable specialized backend function: renvoDarwinSHA256Compress")
+}
 
-func renvoDarwinSHA256(data []byte) []byte { panic("non-VM backend is unavailable") }
+func renvoDarwinSHA256(data []byte) []byte {
+panic("unavailable specialized backend function: renvoDarwinSHA256")
+}
 
 // source: backend/compiler_unit_impl.go
 

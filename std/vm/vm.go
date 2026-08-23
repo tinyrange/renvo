@@ -124,18 +124,33 @@ const (
 )
 
 type image struct {
-	code     []byte
-	data     []byte
-	dataBase int
-	bssBase  int
-	bssSize  int
-	routines []routine
+	code         []byte
+	instructions []instruction
+	bytePCs      []int32
+	data         []byte
+	dataBase     int
+	bssBase      int
+	bssSize      int
+	routines     []routine
 }
 
 type routine struct {
 	pc        int
 	frameSize int
 	framed    bool
+}
+
+// instruction is the validated, host-friendly form of one VM32 instruction.
+// Keeping decoding out of the execution loop matters for bootstrap workloads,
+// which execute billions of instructions from a comparatively small image.
+type instruction struct {
+	x  int32
+	y  int32
+	z  int32
+	op byte
+	a  byte
+	b  byte
+	c  byte
 }
 
 type callFrame struct {
@@ -159,7 +174,7 @@ type machine struct {
 	memory    []byte
 	regs      [regCount]int32
 	pc        int
-	currentPC int
+	current   int
 	sp        int
 	stackBase int
 	fp        int
@@ -231,7 +246,7 @@ func RunConfig(program []byte, config Config) Result {
 		Stderr:     m.stderr,
 		Files:      m.resultFiles(),
 		Trap:       m.trap,
-		TrapPC:     m.currentPC,
+		TrapPC:     m.currentBytePC(),
 		TrapOpcode: m.currentOpcode(),
 	}
 }
@@ -282,7 +297,71 @@ func decodeImage(program []byte) (image, bool) {
 	if !validateCode(img.code, img.routines) {
 		return image{}, false
 	}
+	img.instructions, img.bytePCs = decodeInstructions(img.code, img.routines)
+	if len(img.instructions) == 0 {
+		return image{}, false
+	}
 	return img, true
+}
+
+func decodeInstructions(code []byte, routines []routine) ([]instruction, []int32) {
+	byteToInstruction := make([]int, len(code))
+	instructions := make([]instruction, 0, len(code)/3)
+	bytePCs := make([]int32, 0, len(code)/3)
+	for pc := 0; pc < len(code); pc = nextInstruction(code, pc) {
+		byteToInstruction[pc] = len(instructions)
+		op := int(code[pc])
+		item := instruction{op: byte(op)}
+		switch op {
+		case opMovRegImm, opLoadStack, opStoreStack, opLeaStack,
+			opAddRegImm, opMulRegImm, opCmpRegImm:
+			item.a = code[pc+1]
+			item.x = int32(read32(code, pc+2))
+		case opMovRegReg, opAddRegReg, opSubRegReg, opMulRegReg, opDivRegReg,
+			opModRegReg, opAndRegReg, opOrRegReg, opXorRegReg, opAndNotRegReg,
+			opShlRegReg, opShrRegReg, opCmpRegReg, opShrUnsignedRegReg:
+			item.a = code[pc+1]
+			item.b = code[pc+2]
+		case opPushReg, opPopReg, opIncReg, opIncMem, opDecMem, opBoolNot, opNegReg,
+			opSetCond:
+			item.a = code[pc+1]
+		case opPushImm:
+			item.x = int32(read32(code, pc+1))
+		case opLoadMem, opStoreMem:
+			item.a = code[pc+1]
+			item.b = code[pc+2]
+			item.x = int32(read32(code, pc+3))
+			item.c = code[pc+7]
+		case opLoadIndex, opStoreIndex:
+			item.a = code[pc+1]
+			item.b = code[pc+2]
+			item.c = code[pc+3]
+			item.y = int32(code[pc+4]) | int32(code[pc+9])<<8
+			item.x = int32(read32(code, pc+5))
+		case opJmp, opJz, opJnz, opCall:
+			item.x = int32(read32(code, pc+1))
+			if op == opCall {
+				item.y = int32(read32(code, pc+5))
+				item.z = int32(findRoutine(routines, int(item.x)))
+			}
+		case opJCond:
+			item.a = code[pc+1]
+			item.x = int32(read32(code, pc+2))
+		}
+		instructions = append(instructions, item)
+		bytePCs = append(bytePCs, int32(pc))
+	}
+	for i := range instructions {
+		op := int(instructions[i].op)
+		if op == opJmp || op == opJz || op == opJnz || op == opJCond || op == opCall {
+			instructions[i].x = int32(byteToInstruction[int(instructions[i].x)])
+		}
+	}
+	// A fallthrough beyond the validated byte stream becomes a deterministic
+	// invalid-instruction trap without adding a bounds branch to the hot loop.
+	instructions = append(instructions, instruction{})
+	bytePCs = append(bytePCs, int32(len(code)))
+	return instructions, bytePCs
 }
 
 func validateCode(code []byte, routines []routine) bool {
@@ -373,263 +452,327 @@ func nextInstruction(code []byte, pc int) int {
 		return -1
 	}
 	op := int(code[pc])
-	size := 1
-	if op == opMovRegImm || op == opLoadStack || op == opStoreStack || op == opLeaStack ||
-		op == opAddRegImm || op == opMulRegImm || op == opCmpRegImm || op == opJCond {
-		size = 6
-	} else if op == opMovRegReg || op >= opAddRegReg && op <= opShrRegReg ||
-		op == opCmpRegReg || op == opShrUnsignedRegReg {
-		size = 3
-	} else if op == opPushReg || op == opPopReg || op == opIncReg || op == opIncMem ||
-		op == opDecMem || op == opBoolNot || op == opNegReg || op == opSetCond {
-		size = 2
-	} else if op == opPushImm || op == opJmp || op == opJz || op == opJnz {
-		size = 5
-	} else if op == opLoadMem || op == opStoreMem {
-		size = 8
-	} else if op == opLoadIndex || op == opStoreIndex {
-		size = 10
-	} else if op == opCall {
-		size = 9
-	} else if op == opBuildArgsEnv {
-		size = 13
+	if op <= 0 || op >= len(vmInstructionSizes) {
+		return -1
 	}
-	return pc + size
+	return pc + int(vmInstructionSizes[op])
+}
+
+var vmInstructionSizes = [...]byte{
+	0, 1, 13, 6, 3, 2, 5, 2, 6, 6, 6, 8, 8, 10, 10,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 6, 6, 2, 2, 2, 2, 2,
+	6, 3, 2, 5, 5, 5, 6, 9, 1, 1, 1, 3,
 }
 
 func (m *machine) step() bool {
-	if m.pc < 0 || m.pc >= len(m.image.code) {
-		m.trap = TrapInvalidInstruction
-		return false
-	}
-	m.currentPC = m.pc
-	if !m.charge(1) {
-		return false
-	}
-	code := m.image.code
+	steps := m.steps
 	pc := m.pc
-	op := int(code[pc])
-	next := nextInstruction(code, pc)
-	m.pc = next
-	if op == opExit {
+	current := m.current
+	defer func() {
+		m.steps = steps
+		m.pc = pc
+		m.current = current
+	}()
+	batchEnd := steps + 4096
+	if batchEnd < steps || batchEnd > m.limits.Steps {
+		batchEnd = m.limits.Steps
+	}
+	if steps >= batchEnd {
+		current = pc
+		m.trap = TrapStepLimit
 		return false
 	}
-	if op == opBuildArgsEnv {
-		args, ok := m.buildStrings(m.args)
-		if !ok {
+	instructions := m.image.instructions
+	for steps < batchEnd {
+		current = pc
+		item := &instructions[pc]
+		steps++
+		pc++
+		op := int(item.op)
+		switch op {
+		case opExit:
 			return false
-		}
-		env, ok := m.buildStrings(m.env)
-		if !ok {
-			return false
-		}
-		m.regs[regRdi] = int32(args)
-		m.regs[regRsi] = int32(len(m.args))
-		m.regs[regRdx] = int32(len(m.args))
-		m.regs[regRcx] = int32(env)
-		m.regs[regR8] = int32(len(m.env))
-		m.regs[regR9] = int32(len(m.env))
-		m.stackBase = m.sp
-		return true
-	}
-	if op == opMovRegImm {
-		m.regs[int(code[pc+1])] = int32(read32(code, pc+2))
-		return true
-	}
-	if op == opMovRegReg {
-		m.regs[int(code[pc+1])] = m.regs[int(code[pc+2])]
-		return true
-	}
-	if op == opPushReg {
-		return m.push(m.regs[int(code[pc+1])])
-	}
-	if op == opPushImm {
-		return m.push(int32(read32(code, pc+1)))
-	}
-	if op == opPopReg {
-		value, ok := m.pop()
-		if ok {
-			m.regs[int(code[pc+1])] = value
-		}
-		return ok
-	}
-	if op == opLoadStack || op == opStoreStack || op == opLeaStack {
-		reg := int(code[pc+1])
-		addr := m.fp - int(int32(read32(code, pc+2)))
-		if op == opLeaStack {
+		case opBuildArgsEnv:
+			args, ok := m.buildStrings(m.args)
+			if !ok {
+				return false
+			}
+			env, ok := m.buildStrings(m.env)
+			if !ok {
+				return false
+			}
+			m.regs[regRdi] = int32(args)
+			m.regs[regRsi] = int32(len(m.args))
+			m.regs[regRdx] = int32(len(m.args))
+			m.regs[regRcx] = int32(env)
+			m.regs[regR8] = int32(len(m.env))
+			m.regs[regR9] = int32(len(m.env))
+			m.stackBase = m.sp
+			continue
+		case opMovRegImm:
+			m.regs[int(item.a)] = item.x
+			continue
+		case opMovRegReg:
+			m.regs[int(item.a)] = m.regs[int(item.b)]
+			continue
+		case opPushReg:
+			if !m.push(m.regs[int(item.a)]) {
+				return false
+			}
+			continue
+		case opPushImm:
+			if !m.push(item.x) {
+				return false
+			}
+			continue
+		case opPopReg:
+			value, ok := m.pop()
+			if !ok {
+				return false
+			}
+			m.regs[int(item.a)] = value
+			continue
+		case opLeaStack:
+			reg := int(item.a)
+			addr := m.fp - int(item.x)
 			if !m.address(addr, 0) {
 				return false
 			}
 			m.regs[reg] = int32(addr)
-			return true
-		}
-		if op == opLoadStack {
+			continue
+		case opLoadStack:
+			addr := m.fp - int(item.x)
 			value, ok := m.load(addr, 4)
-			if ok {
-				m.regs[reg] = int32(value)
+			if !ok {
+				return false
 			}
-			return ok
-		}
-		return m.store(addr, 4, uint32(m.regs[reg]))
-	}
-	if op == opLoadMem || op == opStoreMem {
-		reg := int(code[pc+1])
-		base := int(code[pc+2])
-		addr := int(m.regs[base]) + int(int32(read32(code, pc+3)))
-		size := int(code[pc+7])
-		if op == opLoadMem {
-			value, ok := m.loadSized(addr, size)
-			if ok {
-				m.regs[reg] = int32(value)
+			m.regs[int(item.a)] = int32(value)
+			if steps < batchEnd {
+				next := &instructions[pc]
+				if next.op == opPushReg {
+					current = pc
+					steps++
+					pc++
+					if !m.push(m.regs[int(next.a)]) {
+						return false
+					}
+				} else if next.op == opStoreStack {
+					current = pc
+					steps++
+					pc++
+					nextAddr := m.fp - int(next.x)
+					if !m.store(nextAddr, 4, uint32(m.regs[int(next.a)])) {
+						return false
+					}
+				}
 			}
-			return ok
-		}
-		return m.store(addr, size, uint32(m.regs[reg]))
-	}
-	if op == opLoadIndex || op == opStoreIndex {
-		reg := int(code[pc+1])
-		base := int(code[pc+2])
-		index := int(code[pc+3])
-		scale := int(code[pc+4])
-		addr := int(m.regs[base]) + int(m.regs[index])*scale + int(int32(read32(code, pc+5)))
-		size := int(code[pc+9])
-		if op == opLoadIndex {
-			value, ok := m.loadSized(addr, size)
-			if ok {
-				m.regs[reg] = int32(value)
+			continue
+		case opStoreStack:
+			addr := m.fp - int(item.x)
+			if !m.store(addr, 4, uint32(m.regs[int(item.a)])) {
+				return false
 			}
-			return ok
-		}
-		return m.store(addr, size, uint32(m.regs[reg]))
-	}
-	if op >= opAddRegReg && op <= opShrRegReg || op == opShrUnsignedRegReg {
-		return m.binary(op, int(code[pc+1]), int(code[pc+2]))
-	}
-	if op == opAddRegImm || op == opMulRegImm {
-		reg := int(code[pc+1])
-		imm := int32(read32(code, pc+2))
-		if op == opAddRegImm {
-			m.regs[reg] += imm
-		} else {
-			m.regs[reg] *= imm
-		}
-		return true
-	}
-	if op == opIncReg {
-		m.regs[int(code[pc+1])]++
-		return true
-	}
-	if op == opIncMem || op == opDecMem {
-		addr := int(m.regs[int(code[pc+1])])
-		value, ok := m.load(addr, 4)
-		if !ok {
-			return false
-		}
-		if op == opIncMem {
-			value++
-		} else {
-			value--
-		}
-		return m.store(addr, 4, value)
-	}
-	if op == opBoolNot {
-		reg := int(code[pc+1])
-		if m.regs[reg] == 0 {
-			m.regs[reg] = 1
-		} else {
-			m.regs[reg] = 0
-		}
-		return true
-	}
-	if op == opNegReg {
-		reg := int(code[pc+1])
-		m.regs[reg] = -m.regs[reg]
-		return true
-	}
-	if op == opCmpRegImm {
-		m.flag = m.regs[int(code[pc+1])] - int32(read32(code, pc+2))
-		return true
-	}
-	if op == opCmpRegReg {
-		m.flag = m.regs[int(code[pc+1])] - m.regs[int(code[pc+2])]
-		return true
-	}
-	if op == opSetCond {
-		if condition(m.flag, int(code[pc+1])) {
-			m.regs[regRax] = 1
-		} else {
-			m.regs[regRax] = 0
-		}
-		return true
-	}
-	if op == opJmp {
-		m.pc = read32(code, pc+1)
-		return true
-	}
-	if op == opJz || op == opJnz {
-		zero := m.flag == 0
-		if op == opJz && zero || op == opJnz && !zero {
-			m.pc = read32(code, pc+1)
-		}
-		return true
-	}
-	if op == opJCond {
-		if condition(m.flag, int(code[pc+1])) {
-			m.pc = read32(code, pc+2)
-		}
-		return true
-	}
-	if op == opCall {
-		target := read32(code, pc+1)
-		targetRoutine := findRoutine(m.image.routines, target)
-		if targetRoutine < 0 {
+			if steps < batchEnd {
+				next := &instructions[pc]
+				if next.op == opLoadStack {
+					current = pc
+					steps++
+					pc++
+					nextAddr := m.fp - int(next.x)
+					nextValue, nextOK := m.load(nextAddr, 4)
+					if !nextOK {
+						return false
+					}
+					m.regs[int(next.a)] = int32(nextValue)
+				}
+			}
+			continue
+		case opLoadMem, opStoreMem:
+			reg := int(item.a)
+			base := int(item.b)
+			addr := int(m.regs[base]) + int(item.x)
+			size := int(item.c)
+			if op == opLoadMem {
+				value, ok := m.loadSized(addr, size)
+				if !ok {
+					return false
+				}
+				m.regs[reg] = int32(value)
+				continue
+			}
+			if !m.store(addr, size, uint32(m.regs[reg])) {
+				return false
+			}
+			continue
+		case opLoadIndex, opStoreIndex:
+			reg := int(item.a)
+			base := int(item.b)
+			index := int(item.c)
+			scale := int(item.y & 255)
+			addr := int(m.regs[base]) + int(m.regs[index])*scale + int(item.x)
+			size := int(item.y >> 8 & 255)
+			if op == opLoadIndex {
+				value, ok := m.loadSized(addr, size)
+				if !ok {
+					return false
+				}
+				m.regs[reg] = int32(value)
+				continue
+			}
+			if !m.store(addr, size, uint32(m.regs[reg])) {
+				return false
+			}
+			continue
+		case opAddRegReg, opSubRegReg, opMulRegReg, opDivRegReg, opModRegReg,
+			opAndRegReg, opOrRegReg, opXorRegReg, opAndNotRegReg, opShlRegReg,
+			opShrRegReg, opShrUnsignedRegReg:
+			if !m.binary(op, int(item.a), int(item.b)) {
+				return false
+			}
+			continue
+		case opAddRegImm, opMulRegImm:
+			reg := int(item.a)
+			if op == opAddRegImm {
+				m.regs[reg] += item.x
+			} else {
+				m.regs[reg] *= item.x
+			}
+			continue
+		case opIncReg:
+			m.regs[int(item.a)]++
+			continue
+		case opIncMem, opDecMem:
+			addr := int(m.regs[int(item.a)])
+			value, ok := m.load(addr, 4)
+			if !ok {
+				return false
+			}
+			if op == opIncMem {
+				value++
+			} else {
+				value--
+			}
+			if !m.store(addr, 4, value) {
+				return false
+			}
+			continue
+		case opBoolNot:
+			reg := int(item.a)
+			if m.regs[reg] == 0 {
+				m.regs[reg] = 1
+			} else {
+				m.regs[reg] = 0
+			}
+			continue
+		case opNegReg:
+			reg := int(item.a)
+			m.regs[reg] = -m.regs[reg]
+			continue
+		case opCmpRegImm:
+			m.flag = m.regs[int(item.a)] - item.x
+			continue
+		case opCmpRegReg:
+			m.flag = m.regs[int(item.a)] - m.regs[int(item.b)]
+			if steps < batchEnd {
+				next := &instructions[pc]
+				if next.op == opSetCond {
+					current = pc
+					steps++
+					pc++
+					if condition(m.flag, int(next.a)) {
+						m.regs[regRax] = 1
+					} else {
+						m.regs[regRax] = 0
+					}
+				}
+			}
+			continue
+		case opSetCond:
+			if condition(m.flag, int(item.a)) {
+				m.regs[regRax] = 1
+			} else {
+				m.regs[regRax] = 0
+			}
+			continue
+		case opJmp:
+			pc = int(item.x)
+			continue
+		case opJz, opJnz:
+			zero := m.flag == 0
+			if op == opJz && zero || op == opJnz && !zero {
+				pc = int(item.x)
+			}
+			continue
+		case opJCond:
+			if condition(m.flag, int(item.a)) {
+				pc = int(item.x)
+			}
+			continue
+		case opCall:
+			target := int(item.x)
+			targetRoutine := int(item.z)
+			if targetRoutine < 0 {
+				m.trap = TrapInvalidInstruction
+				return false
+			}
+			frameSize := 0
+			if m.image.routines[targetRoutine].framed {
+				frameSize = m.image.routines[m.routine].frameSize
+			}
+			newFP := m.fp - frameSize
+			if newFP < m.sp || newFP < 0 {
+				m.trap = TrapMemoryLimit
+				return false
+			}
+			wordCount := int(item.y)
+			drop := 0
+			if wordCount > 6 {
+				drop = (wordCount - 6) * 4
+			}
+			m.calls = append(m.calls, callFrame{pc: pc, fp: m.fp, sp: m.sp, routine: m.routine, drop: drop})
+			m.fp = newFP
+			m.routine = targetRoutine
+			pc = target
+			if !m.updatePeak() {
+				return false
+			}
+			continue
+		case opRet:
+			if len(m.calls) == 0 {
+				return false
+			}
+			frame := m.calls[len(m.calls)-1]
+			m.calls = m.calls[:len(m.calls)-1]
+			if frame.drop > frame.sp-m.stackBase {
+				m.trap = TrapInvalidInstruction
+				return false
+			}
+			m.sp = frame.sp - frame.drop
+			pc = frame.pc
+			m.fp = frame.fp
+			m.routine = frame.routine
+			continue
+		case opSyscall:
+			// Syscall I/O charges deterministic work through the machine field;
+			// synchronize the batched counter around that cold path.
+			m.steps = steps
+			if !m.syscall() {
+				steps = m.steps
+				return false
+			}
+			steps = m.steps
+			return true
+		case opNop:
+			continue
+		default:
+			if item.op == 0 {
+				steps--
+			}
 			m.trap = TrapInvalidInstruction
 			return false
 		}
-		frameSize := 0
-		if m.image.routines[targetRoutine].framed {
-			frameSize = m.image.routines[m.routine].frameSize
-		}
-		newFP := m.fp - frameSize
-		if newFP < m.sp || newFP < 0 {
-			m.trap = TrapMemoryLimit
-			return false
-		}
-		wordCount := read32(code, pc+5)
-		drop := 0
-		if wordCount > 6 {
-			drop = (wordCount - 6) * 4
-		}
-		m.calls = append(m.calls, callFrame{pc: next, fp: m.fp, sp: m.sp, routine: m.routine, drop: drop})
-		m.fp = newFP
-		m.routine = targetRoutine
-		m.pc = target
-		return m.updatePeak()
 	}
-	if op == opRet {
-		if len(m.calls) == 0 {
-			return false
-		}
-		frame := m.calls[len(m.calls)-1]
-		m.calls = m.calls[:len(m.calls)-1]
-		if frame.drop > frame.sp-m.stackBase {
-			m.trap = TrapInvalidInstruction
-			return false
-		}
-		m.sp = frame.sp - frame.drop
-		m.pc = frame.pc
-		m.fp = frame.fp
-		m.routine = frame.routine
-		return true
-	}
-	if op == opSyscall {
-		return m.syscall()
-	}
-	if op == opNop {
-		return true
-	}
-	m.trap = TrapInvalidInstruction
-	return false
+	return true
 }
 
 func (m *machine) loadSized(addr int, size int) (uint32, bool) {
@@ -648,10 +791,17 @@ func (m *machine) loadSized(addr int, size int) (uint32, bool) {
 }
 
 func (m *machine) currentOpcode() int {
-	if m.currentPC < 0 || m.currentPC >= len(m.image.code) {
+	if m.current < 0 || m.current >= len(m.image.instructions) {
 		return 0
 	}
-	return int(m.image.code[m.currentPC])
+	return int(m.image.instructions[m.current].op)
+}
+
+func (m *machine) currentBytePC() int {
+	if m.current < 0 || m.current >= len(m.image.bytePCs) {
+		return 0
+	}
+	return int(m.image.bytePCs[m.current])
 }
 
 func (m *machine) binary(op int, dst int, src int) bool {

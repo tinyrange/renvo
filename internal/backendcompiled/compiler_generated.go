@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7d52a5a15493e3a248b0d4f6a857230d8375f103a2175f6e4a801ab4150eb23d"
+const CompilerSourceDigest = "ec1f5944f34fa038cec60781fbea0acd016f35201c9681ea4932553a9e1fefc6"
 
 // source: backend/compiler_common_impl.go
 
@@ -4625,9 +4625,11 @@ i := start
 paren := 0
 brack := 0
 for i < end {
-tok := renvoTokAt(p, i)
-if tok.end == tok.start+1 {
-c := renvo_runtime_UnsafeByteAt(p.src, tok.start)
+first := int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride))
+c := 0
+if first&255 == renvoTokOp {
+c = first >> 24 & 255
+}
 if c == '(' {
 paren++
 } else if c == ')' {
@@ -4644,9 +4646,15 @@ brack--
 if paren == 0 && brack == 0 {
 closeTok := renvoSkipBalanced(p, i, '{', '}')
 if closeTok > i && closeTok < end {
-next := renvoTokSingleChar(p, closeTok)
-sameLine := renvoTokLine(p, closeTok-1) == renvoTokLine(p, closeTok)
-if sameLine && (renvoTokenPrecedence(p, closeTok) > 0 || next == '{' || next == '.' || next == '[' || next == '(') {
+previousLine := renvoTokLine(p, closeTok-1)
+nextLine := renvoTokLine(p, closeTok)
+nextFirst := int(renvo_runtime_UnsafeInt32At(p.toks.data, closeTok*renvoTokenStride))
+nextChar := 0
+if nextFirst&255 == renvoTokOp {
+nextChar = nextFirst >> 24 & 255
+}
+precedence := renvoTokenPrecedence(p, closeTok)
+if previousLine == nextLine && (precedence > 0 || nextChar == '{' || nextChar == '.' || nextChar == '[' || nextChar == '(') {
 i = closeTok
 continue
 }
@@ -4659,7 +4667,6 @@ i = closeTok
 continue
 }
 }
-}
 i++
 }
 return start
@@ -4667,16 +4674,15 @@ return start
 
 func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 renvoNonNil(p)
-if renvoTokSingleChar(p, openTok) != '{' {
+if !renvoTokCharIs(p, openTok, '{') {
 return openTok
 }
 depth := 1
 i := openTok + 1
 for i < end {
-c := renvoTokSingleChar(p, i)
-if c == '{' {
+if renvoTokCharIs(p, i, '{') {
 depth++
-} else if c == '}' {
+} else if renvoTokCharIs(p, i, '}') {
 depth--
 if depth == 0 {
 return i
@@ -11411,6 +11417,7 @@ renvoClearLocalConstAtOffset(g, offset)
 }
 return true
 }
+if renvoPreparedBackendActive == 0 {
 memoryOp := 0
 if renvoTok2Is(p, assignTok, '+', '=') {
 memoryOp = 0x0148
@@ -11423,7 +11430,7 @@ memoryOp = 0x0948
 } else if renvoTok2Is(p, assignTok, '^', '=') {
 memoryOp = 0x3148
 }
-if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
+if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
 if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
 return false
 }
@@ -11439,6 +11446,7 @@ renvoClearLocalFlowConstAtOffset(g, offset)
 }
 }
 return true
+}
 }
 if globalOffset >= 0 {
 if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -17804,15 +17812,19 @@ renvoAsmMarkLabel(a, ok)
 func renvoEnsureNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 renvoNonNil(g)
 labelSlot := &g.runtimeNonNilLabel
+if secondary {
+labelSlot = &g.runtimeSecondaryLabel
+}
+if renvoPreparedBackendActive == 0 {
 register := 0
 code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
 if secondary {
-labelSlot = &g.runtimeSecondaryLabel
 register = 1
 code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
 }
-if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchAmd64 {
 return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
+}
 }
 if *labelSlot > 0 {
 return *labelSlot - 1
@@ -34540,7 +34552,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "|/\x9bv\x92w\x1f\xf9\x82vk\xfb\br@\x89\x8b\xcf\xf7V)dYʮP\xa1\xdcw:\xcd1", 3, true
+return "linux/amd64", "dgo\x90\xe0\x8es\xbcj\xc7yJ \x8b\x95\x83\xcc#\x0f2\xbc\xb1z\xc3~\xed\xd2C\xbeacj", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -34552,7 +34564,7 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\xc6Α(\x066\xf1E\x15\xf2]V\xb5r|gFc\xf9\xadv\xbe\xa8}\x99t\xce\x1f\xd1+ef", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xe10\x04\x02\xce\xd9k5\xff\x1cJ\x85\x8a\x11\xac\xe7q\xf9ɠ\x90\xe2O\x04\xbeX\x8e\xb8\x8aͺ\x01", 3, true
+return "windows/amd64", "F\x9c\xb18\xf8j;~\xb8\xa4\x91\x9aHw\x12\x16\x82\x92\x8037\xee\x8a\xda0<\xeb;\xa2\x9a\x97v", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", ",\xd4\a\xe0\xe9(\n\xdb\x02\xf57\x89\x97YZ\xf9\x97\x0f\xb9\xfbh\x9a\xf2\x92\x1d\xf0\x10\xda\xc3\x12W\x7f", 3, true
@@ -34564,7 +34576,7 @@ if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xe8!)f\x95\xf13Ǝ\xf4\x81\xc1`k\xb6\xd3{C\xba\xd9\xf1u\xcca\x1c{4\xeb\x00\x80\xd6;", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\xe9R\x9fP]\xf2\x8fKK\xb7,\xa5;!\xe6&\xe8\xf8\xb7\xd5\x1ft\xbcj7B\xa7C\x19P\x11\xe0", 3, true
+return "linux-kernel/amd64", "rl~;\xb6\xa7\xb8\xb7,\x11} \xbb#\xb2QSϓk\xe2\xdfJ-o\x1e؈\xf2\xcc\xff\x96", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
@@ -34573,13 +34585,13 @@ if target == renvoTargetVM32 {
 return "vm/vm32", "ײ\x1d>cߓ\xfc\xa7b}b\xf0\x15\x9f\xe9\fd[\xa4\x8a\x93\x95G\xdcB\xe1Mr~i>", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "۠\fȿ\xb8\xce\x11\x81e\x17\xc6\x16V\xa7\xaf?\x10\x99\xb2\x14\x05*U\x94\x949\xd7'*Ǻ", 3, true
+return "freebsd/amd64", " \x02\xc0\xd5(\x91\x84l\x1d̙\xae^\x1a\xca\x0e\xeeMo\xca\x1f@\xdby\xfb\x1f7Epb\xf5H", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\x01\xe4\xed\xce*\xe5u\xe6VW\xb9\x91l\xc0\x8f\xe7\x81\x01\x7f>\xd2,\xca<`q\xd6@\xd7\x12\xa0\xa7", 3, true
+return "openbsd/amd64", "\xd6r\xb6eUxDz\xab\xfd\x11\xea\xee\xa5\xd2\xcf;\x9a\xfcyv\x04\xf9r*\xaeP`Q\x94~\xba", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "6\xd8\xd1\xda\aL\xa0\f \xec\x9fU\xed r\aI6\xe6cz\xeePC\x06\xf1\v\xf1\x19\x82\xf0\xc0", 3, true
+return "netbsd/amd64", "-\xfd\x10\xf5s\x19\x1fj7\xaa7\x87\xa4\a\xe5\xdcoܦq\xd6\x0fS\xfc\xe4H\xcc\xc0\xd8\xdb'\xb9", 3, true
 }
 return "", "", 0, false
 }

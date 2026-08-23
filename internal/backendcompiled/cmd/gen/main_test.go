@@ -46,14 +46,22 @@ func TestSpecializePreparationSourceRejectsInvalidSetting(t *testing.T) {
 	}
 }
 
-func TestSpecializePreparationSourceIgnoresOtherFiles(t *testing.T) {
-	source := []byte("not Go source")
+func TestSpecializePreparationSourceFoldsPreparedBranches(t *testing.T) {
+	source := []byte(`package main
+const renvoPreparedBackendActive = 0
+func selected(value bool) int {
+	if renvoPreparedBackendActive != 0 { return 1 }
+	if value && renvoPreparedBackendActive == 0 { return 2 }
+	return 3
+}
+`)
 	prepared, err := specializePreparationSource("compiler_main.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(prepared, source) {
-		t.Fatalf("other source changed from %q to %q", source, prepared)
+	if !bytes.Contains(prepared, []byte("return 1")) || bytes.Contains(prepared, []byte("return 2")) ||
+		bytes.Contains(prepared, []byte("return 3")) {
+		t.Fatalf("prepared branches were not folded: %s", prepared)
 	}
 }
 

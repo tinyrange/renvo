@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	seededKernelVersion       = 2
-	seededHostEmitterKernel   = 3
+	seededKernelVersion       = 3
+	seededHostEmitterKernel   = 4
 	seededCompilerArenaSize   = 1 << 30
-	seededVMCompilerArenaSize = 128 << 20
-	seededVMMemoryLimit       = 256 << 20
+	seededVMCompilerArenaSize = 32 << 20
+	seededVMMemoryLimit       = 64 << 20
 	seededVMStepLimit         = 20 * 1000 * 1000 * 1000
 )
 

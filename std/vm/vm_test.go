@@ -38,6 +38,13 @@ func TestRunRejectsCorruptArtifact(t *testing.T) {
 	}
 }
 
+func TestRunTrapsInstructionFallthrough(t *testing.T) {
+	result := Run(testProgram([]byte{opNop}, nil, 0), Limits{Steps: 10, Memory: 1024})
+	if result.Trap != TrapInvalidInstruction || result.TrapPC != 1 || result.TrapOpcode != 0 || result.Steps != 1 {
+		t.Fatalf("fallthrough result = %+v", result)
+	}
+}
+
 func TestLoadSizedExtensionMarkers(t *testing.T) {
 	m := machine{memory: make([]byte, minAddress+3)}
 	copy(m.memory[minAddress:], []byte{0x80, 0x00, 0x80})

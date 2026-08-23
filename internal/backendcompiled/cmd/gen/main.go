@@ -242,7 +242,7 @@ func specializeCompiledSource(
 			} else {
 				function.Body = &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
 					Fun:  ast.NewIdent("panic"),
-					Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("non-VM backend is unavailable")}},
+					Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("unavailable specialized backend function: " + function.Name.Name)}},
 				}}}}
 			}
 			continue
@@ -284,61 +284,291 @@ func specializeCompiledSource(
 }
 
 func specializePreparationSource(name string, source []byte) ([]byte, error) {
-	if name != "compiler_target_policy_impl.go" {
-		return source, nil
-	}
-	const ordinaryTag = "//go:build !renvo_prepared\n"
-	if !bytes.HasPrefix(source, []byte(ordinaryTag)) {
-		return nil, fmt.Errorf("%s does not declare the ordinary preparation build tag", name)
-	}
-	const identifier = "renvoPreparedBackendActive"
-	files := token.NewFileSet()
-	file, err := parser.ParseFile(files, name, source, 0)
-	if err != nil {
-		return nil, fmt.Errorf("parse preparation setting in %s: %w", name, err)
-	}
-	start := -1
-	end := -1
-	for _, declaration := range file.Decls {
-		generic, ok := declaration.(*ast.GenDecl)
-		if !ok || generic.Tok != token.CONST {
-			continue
+	prepared := source
+	if name == "compiler_target_policy_impl.go" {
+		const ordinaryTag = "//go:build !renvo_prepared\n"
+		if !bytes.HasPrefix(source, []byte(ordinaryTag)) {
+			return nil, fmt.Errorf("%s does not declare the ordinary preparation build tag", name)
 		}
-		for _, item := range generic.Specs {
-			specification, ok := item.(*ast.ValueSpec)
-			if !ok {
+		const identifier = "renvoPreparedBackendActive"
+		files := token.NewFileSet()
+		file, err := parser.ParseFile(files, name, source, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse preparation setting in %s: %w", name, err)
+		}
+		start := -1
+		end := -1
+		for _, declaration := range file.Decls {
+			generic, ok := declaration.(*ast.GenDecl)
+			if !ok || generic.Tok != token.CONST {
 				continue
 			}
-			for i, declared := range specification.Names {
-				if declared.Name != identifier {
+			for _, item := range generic.Specs {
+				specification, ok := item.(*ast.ValueSpec)
+				if !ok {
 					continue
 				}
-				if start >= 0 {
-					return nil, fmt.Errorf("%s declares %s more than once", name, identifier)
+				for i, declared := range specification.Names {
+					if declared.Name != identifier {
+						continue
+					}
+					if start >= 0 {
+						return nil, fmt.Errorf("%s declares %s more than once", name, identifier)
+					}
+					if len(specification.Names) != 1 || len(specification.Values) != 1 || i != 0 {
+						return nil, fmt.Errorf("%s must declare %s as one const with one value", name, identifier)
+					}
+					start = files.Position(specification.Values[0].Pos()).Offset
+					end = files.Position(specification.Values[0].End()).Offset
 				}
-				if len(specification.Names) != 1 || len(specification.Values) != 1 || i != 0 {
-					return nil, fmt.Errorf("%s must declare %s as one const with one value", name, identifier)
+			}
+		}
+		if start < 0 || end <= start {
+			return nil, fmt.Errorf("%s does not declare the preparation const %s", name, identifier)
+		}
+		preparedTag := "//go:build renvo_prepared\n\n// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.\n"
+		prepared = make([]byte, 0, len(source)+len(preparedTag)-len(ordinaryTag)-end+start+1)
+		prepared = append(prepared, preparedTag...)
+		prepared = append(prepared, source[len(ordinaryTag):start]...)
+		prepared = append(prepared, '1')
+		prepared = append(prepared, source[end:]...)
+		const ordinaryStructuredMode = "const renvoRTGStructuredFunctions = 0\n"
+		if bytes.Count(prepared, []byte(ordinaryStructuredMode)) != 1 {
+			return nil, fmt.Errorf("%s does not declare one ordinary structured-function const", name)
+		}
+		prepared = bytes.Replace(prepared, []byte(ordinaryStructuredMode), nil, 1)
+	}
+	return foldPreparationBranches(name, prepared)
+}
+
+func foldPreparationBranches(name string, source []byte) ([]byte, error) {
+	files := token.NewFileSet()
+	file, err := parser.ParseFile(files, name, source, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("parse prepared branches in %s: %w", name, err)
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		function.Body.List = foldPreparationStatements(function.Body.List)
+		markUnusedPreparationLocals(function.Body)
+	}
+	var output bytes.Buffer
+	if err = format.Node(&output, files, file); err != nil {
+		return nil, fmt.Errorf("format prepared branches in %s: %w", name, err)
+	}
+	return output.Bytes(), nil
+}
+
+func markUnusedPreparationLocals(body *ast.BlockStmt) {
+	uses := make(map[*ast.Object]int)
+	ast.Inspect(body, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if ok && identifier.Obj != nil && identifier.Obj.Kind == ast.Var && identifier.Obj.Pos() != identifier.Pos() {
+			uses[identifier.Obj]++
+		}
+		return true
+	})
+	body.List = markUnusedPreparationStatements(body.List, uses)
+}
+
+func markUnusedPreparationStatements(statements []ast.Stmt, uses map[*ast.Object]int) []ast.Stmt {
+	var output []ast.Stmt
+	for _, statement := range statements {
+		switch item := statement.(type) {
+		case *ast.BlockStmt:
+			item.List = markUnusedPreparationStatements(item.List, uses)
+		case *ast.IfStmt:
+			item.Body.List = markUnusedPreparationStatements(item.Body.List, uses)
+			if block, ok := item.Else.(*ast.BlockStmt); ok {
+				block.List = markUnusedPreparationStatements(block.List, uses)
+			}
+		case *ast.ForStmt:
+			item.Body.List = markUnusedPreparationStatements(item.Body.List, uses)
+		case *ast.RangeStmt:
+			item.Body.List = markUnusedPreparationStatements(item.Body.List, uses)
+		case *ast.SwitchStmt:
+			for _, child := range item.Body.List {
+				clause := child.(*ast.CaseClause)
+				clause.Body = markUnusedPreparationStatements(clause.Body, uses)
+			}
+		case *ast.TypeSwitchStmt:
+			for _, child := range item.Body.List {
+				clause := child.(*ast.CaseClause)
+				clause.Body = markUnusedPreparationStatements(clause.Body, uses)
+			}
+		case *ast.SelectStmt:
+			for _, child := range item.Body.List {
+				clause := child.(*ast.CommClause)
+				clause.Body = markUnusedPreparationStatements(clause.Body, uses)
+			}
+		}
+		output = append(output, statement)
+		for _, identifier := range preparationStatementDeclarations(statement) {
+			if identifier.Name == "_" || identifier.Obj == nil || uses[identifier.Obj] != 0 {
+				continue
+			}
+			output = append(output, &ast.AssignStmt{
+				Lhs: []ast.Expr{ast.NewIdent("_")}, Tok: token.ASSIGN,
+				Rhs: []ast.Expr{ast.NewIdent(identifier.Name)},
+			})
+		}
+	}
+	return output
+}
+
+func preparationStatementDeclarations(statement ast.Stmt) []*ast.Ident {
+	switch item := statement.(type) {
+	case *ast.AssignStmt:
+		if item.Tok != token.DEFINE {
+			return nil
+		}
+		var output []*ast.Ident
+		for _, expression := range item.Lhs {
+			if identifier, ok := expression.(*ast.Ident); ok {
+				output = append(output, identifier)
+			}
+		}
+		return output
+	case *ast.DeclStmt:
+		declaration, ok := item.Decl.(*ast.GenDecl)
+		if !ok || declaration.Tok != token.VAR {
+			return nil
+		}
+		var output []*ast.Ident
+		for _, specification := range declaration.Specs {
+			output = append(output, specification.(*ast.ValueSpec).Names...)
+		}
+		return output
+	}
+	return nil
+}
+
+func foldPreparationStatements(statements []ast.Stmt) []ast.Stmt {
+	output := make([]ast.Stmt, 0, len(statements))
+	for _, statement := range statements {
+		folded := foldPreparationStatement(statement)
+		if folded == nil {
+			continue
+		}
+		output = append(output, folded)
+		if preparationStatementTerminates(folded) {
+			break
+		}
+	}
+	return output
+}
+
+func foldPreparationStatement(statement ast.Stmt) ast.Stmt {
+	switch item := statement.(type) {
+	case *ast.BlockStmt:
+		item.List = foldPreparationStatements(item.List)
+	case *ast.IfStmt:
+		item.Body.List = foldPreparationStatements(item.Body.List)
+		if item.Else != nil {
+			item.Else = foldPreparationStatement(item.Else)
+		}
+		if value, known := preparationBool(item.Cond); known {
+			if value {
+				return item.Body
+			}
+			return item.Else
+		}
+	case *ast.ForStmt:
+		item.Body.List = foldPreparationStatements(item.Body.List)
+	case *ast.RangeStmt:
+		item.Body.List = foldPreparationStatements(item.Body.List)
+	case *ast.SwitchStmt:
+		for _, statement := range item.Body.List {
+			clause := statement.(*ast.CaseClause)
+			clause.Body = foldPreparationStatements(clause.Body)
+		}
+	case *ast.TypeSwitchStmt:
+		for _, statement := range item.Body.List {
+			clause := statement.(*ast.CaseClause)
+			clause.Body = foldPreparationStatements(clause.Body)
+		}
+	case *ast.SelectStmt:
+		for _, statement := range item.Body.List {
+			clause := statement.(*ast.CommClause)
+			clause.Body = foldPreparationStatements(clause.Body)
+		}
+	case *ast.LabeledStmt:
+		item.Stmt = foldPreparationStatement(item.Stmt)
+	}
+	return statement
+}
+
+func preparationBool(expression ast.Expr) (bool, bool) {
+	switch item := expression.(type) {
+	case *ast.ParenExpr:
+		return preparationBool(item.X)
+	case *ast.UnaryExpr:
+		if item.Op == token.NOT {
+			value, known := preparationBool(item.X)
+			return !value, known
+		}
+	case *ast.BinaryExpr:
+		if item.Op == token.LAND || item.Op == token.LOR {
+			left, leftKnown := preparationBool(item.X)
+			right, rightKnown := preparationBool(item.Y)
+			if item.Op == token.LAND {
+				if leftKnown && !left || rightKnown && !right {
+					return false, true
 				}
-				start = files.Position(specification.Values[0].Pos()).Offset
-				end = files.Position(specification.Values[0].End()).Offset
+				if leftKnown && rightKnown {
+					return left && right, true
+				}
+			} else {
+				if leftKnown && left || rightKnown && right {
+					return true, true
+				}
+				if leftKnown && rightKnown {
+					return left || right, true
+				}
+			}
+		}
+		if item.Op == token.EQL || item.Op == token.NEQ {
+			left, leftKnown := preparationInteger(item.X)
+			right, rightKnown := preparationInteger(item.Y)
+			if leftKnown && rightKnown {
+				equal := left == right
+				return equal == (item.Op == token.EQL), true
 			}
 		}
 	}
-	if start < 0 || end <= start {
-		return nil, fmt.Errorf("%s does not declare the preparation const %s", name, identifier)
+	return false, false
+}
+
+func preparationInteger(expression ast.Expr) (int64, bool) {
+	switch item := expression.(type) {
+	case *ast.ParenExpr:
+		return preparationInteger(item.X)
+	case *ast.Ident:
+		if item.Name == "renvoPreparedBackendActive" {
+			return 1, true
+		}
+	case *ast.BasicLit:
+		if item.Kind == token.INT {
+			value, err := strconv.ParseInt(item.Value, 0, 64)
+			return value, err == nil
+		}
 	}
-	preparedTag := "//go:build renvo_prepared\n\n// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.\n"
-	prepared := make([]byte, 0, len(source)+len(preparedTag)-len(ordinaryTag)-end+start+1)
-	prepared = append(prepared, preparedTag...)
-	prepared = append(prepared, source[len(ordinaryTag):start]...)
-	prepared = append(prepared, '1')
-	prepared = append(prepared, source[end:]...)
-	const ordinaryStructuredMode = "const renvoRTGStructuredFunctions = 0\n"
-	if bytes.Count(prepared, []byte(ordinaryStructuredMode)) != 1 {
-		return nil, fmt.Errorf("%s does not declare one ordinary structured-function const", name)
+	return 0, false
+}
+
+func preparationStatementTerminates(statement ast.Stmt) bool {
+	switch item := statement.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.BlockStmt:
+		return len(item.List) != 0 && preparationStatementTerminates(item.List[len(item.List)-1])
+	case *ast.IfStmt:
+		return item.Else != nil && preparationStatementTerminates(item.Body) && preparationStatementTerminates(item.Else)
 	}
-	prepared = bytes.Replace(prepared, []byte(ordinaryStructuredMode), nil, 1)
-	return prepared, nil
+	return false
 }
 
 func compactCompiledSource(source []byte) []byte {

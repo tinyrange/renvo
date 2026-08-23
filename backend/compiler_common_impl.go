@@ -4618,39 +4618,46 @@ func renvoFindStatementBodyOpen(p *renvoProgram, start int, end int) int {
 	paren := 0
 	brack := 0
 	for i < end {
-		tok := renvoTokAt(p, i)
-		if tok.end == tok.start+1 {
-			c := renvo_runtime_UnsafeByteAt(p.src, tok.start)
-			if c == '(' {
-				paren++
-			} else if c == ')' {
-				if paren > 0 {
-					paren--
-				}
-			} else if c == '[' {
-				brack++
-			} else if c == ']' {
-				if brack > 0 {
-					brack--
-				}
-			} else if c == '{' {
-				if paren == 0 && brack == 0 {
-					closeTok := renvoSkipBalanced(p, i, '{', '}')
-					if closeTok > i && closeTok < end {
-						next := renvoTokSingleChar(p, closeTok)
-						sameLine := renvoTokLine(p, closeTok-1) == renvoTokLine(p, closeTok)
-						if sameLine && (renvoTokenPrecedence(p, closeTok) > 0 || next == '{' || next == '.' || next == '[' || next == '(') {
-							i = closeTok
-							continue
-						}
-					}
-					return i
-				}
+		first := int(renvo_runtime_UnsafeInt32At(p.toks.data, i*renvoTokenStride))
+		c := 0
+		if first&255 == renvoTokOp {
+			c = first >> 24 & 255
+		}
+		if c == '(' {
+			paren++
+		} else if c == ')' {
+			if paren > 0 {
+				paren--
+			}
+		} else if c == '[' {
+			brack++
+		} else if c == ']' {
+			if brack > 0 {
+				brack--
+			}
+		} else if c == '{' {
+			if paren == 0 && brack == 0 {
 				closeTok := renvoSkipBalanced(p, i, '{', '}')
-				if closeTok > i {
-					i = closeTok
-					continue
+				if closeTok > i && closeTok < end {
+					previousLine := renvoTokLine(p, closeTok-1)
+					nextLine := renvoTokLine(p, closeTok)
+					nextFirst := int(renvo_runtime_UnsafeInt32At(p.toks.data, closeTok*renvoTokenStride))
+					nextChar := 0
+					if nextFirst&255 == renvoTokOp {
+						nextChar = nextFirst >> 24 & 255
+					}
+					precedence := renvoTokenPrecedence(p, closeTok)
+					if previousLine == nextLine && (precedence > 0 || nextChar == '{' || nextChar == '.' || nextChar == '[' || nextChar == '(') {
+						i = closeTok
+						continue
+					}
 				}
+				return i
+			}
+			closeTok := renvoSkipBalanced(p, i, '{', '}')
+			if closeTok > i {
+				i = closeTok
+				continue
 			}
 		}
 		i++
@@ -4660,16 +4667,15 @@ func renvoFindStatementBodyOpen(p *renvoProgram, start int, end int) int {
 
 func renvoFindMatchingBrace(p *renvoProgram, openTok int, end int) int {
 	renvoNonNil(p)
-	if renvoTokSingleChar(p, openTok) != '{' {
+	if !renvoTokCharIs(p, openTok, '{') {
 		return openTok
 	}
 	depth := 1
 	i := openTok + 1
 	for i < end {
-		c := renvoTokSingleChar(p, i)
-		if c == '{' {
+		if renvoTokCharIs(p, i, '{') {
 			depth++
-		} else if c == '}' {
+		} else if renvoTokCharIs(p, i, '}') {
 			depth--
 			if depth == 0 {
 				return i
@@ -11404,34 +11410,36 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			return true
 		}
-		memoryOp := 0
-		if renvoTok2Is(p, assignTok, '+', '=') {
-			memoryOp = 0x0148
-		} else if renvoTok2Is(p, assignTok, '-', '=') {
-			memoryOp = 0x2948
-		} else if renvoTok2Is(p, assignTok, '&', '=') {
-			memoryOp = 0x2148
-		} else if renvoTok2Is(p, assignTok, '|', '=') {
-			memoryOp = 0x0948
-		} else if renvoTok2Is(p, assignTok, '^', '=') {
-			memoryOp = 0x3148
-		}
-		if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
-			if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
-				return false
+		if renvoPreparedBackendActive == 0 {
+			memoryOp := 0
+			if renvoTok2Is(p, assignTok, '+', '=') {
+				memoryOp = 0x0148
+			} else if renvoTok2Is(p, assignTok, '-', '=') {
+				memoryOp = 0x2948
+			} else if renvoTok2Is(p, assignTok, '&', '=') {
+				memoryOp = 0x2148
+			} else if renvoTok2Is(p, assignTok, '|', '=') {
+				memoryOp = 0x0948
+			} else if renvoTok2Is(p, assignTok, '^', '=') {
+				memoryOp = 0x3148
 			}
-			renvoAsmStackMem(a, offset, memoryOp, 0x45, 0x85)
-			if compoundZero.ok {
-				if renvoFixedTarget == 0 {
-					renvoSetLocalFlowConstAtOffset(g, offset, 0, targetResolved.kind)
+			if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 && renvoTypeIsNativeInt(meta, targetType) {
+				if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
+					return false
 				}
-			} else {
-				renvoClearLocalConstAtOffset(g, offset)
-				if renvoFixedTarget == 0 {
-					renvoClearLocalFlowConstAtOffset(g, offset)
+				renvoAsmStackMem(a, offset, memoryOp, 0x45, 0x85)
+				if compoundZero.ok {
+					if renvoFixedTarget == 0 {
+						renvoSetLocalFlowConstAtOffset(g, offset, 0, targetResolved.kind)
+					}
+				} else {
+					renvoClearLocalConstAtOffset(g, offset)
+					if renvoFixedTarget == 0 {
+						renvoClearLocalFlowConstAtOffset(g, offset)
+					}
 				}
+				return true
 			}
-			return true
 		}
 		if globalOffset >= 0 {
 			if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -17797,15 +17805,19 @@ func renvoEmitRuntimeNonNilPrimary(g *renvoLinearGen) {
 func renvoEnsureNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 	renvoNonNil(g)
 	labelSlot := &g.runtimeNonNilLabel
-	register := 0
-	code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
 	if secondary {
 		labelSlot = &g.runtimeSecondaryLabel
-		register = 1
-		code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
 	}
-	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
-		return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
+	if renvoPreparedBackendActive == 0 {
+		register := 0
+		code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
+		if secondary {
+			register = 1
+			code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
+		}
+		if g.c.renvoTargetArch == renvoArchAmd64 {
+			return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
+		}
 	}
 	if *labelSlot > 0 {
 		return *labelSlot - 1

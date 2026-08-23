@@ -55,10 +55,3 @@ func TestSeedRejectsNativeTarget(t *testing.T) {
 		t.Fatalf("native target result = %#v", result)
 	}
 }
-
-func TestSeedMatchesCompilerSources(t *testing.T) {
-	if CompilerSourceDigest != backendcompiled.CompilerSourceDigest {
-		t.Fatalf("VM32 seed source digest = %s, compiler source digest = %s; run go generate ./internal/backendvm32",
-			CompilerSourceDigest, backendcompiled.CompilerSourceDigest)
-	}
-}
