@@ -95,40 +95,53 @@ type scriptSourceFS struct {
 	path string
 }
 
-type objectSourceFS struct {
+type standaloneCSourceFS struct {
 	base       SourceFS
 	modulePath string
+	synthetic  bool
 }
 
-func (fs objectSourceFS) ReadDir(path string) ([]DirEntry, bool) {
+func (fs standaloneCSourceFS) ReadDir(path string) ([]DirEntry, bool) {
 	entries, ok := fs.base.ReadDir(path)
 	return entries, ok
 }
 
-func (fs objectSourceFS) ReadFile(path string) ([]byte, bool) {
-	if load.CleanPath(path) == fs.modulePath {
-		return []byte("module renvo.c.object\n"), true
+func (fs standaloneCSourceFS) ReadFile(path string) ([]byte, bool) {
+	if fs.synthetic && load.CleanPath(path) == fs.modulePath {
+		return []byte("module renvo.c.program\n"), true
 	}
 	src, ok := fs.base.ReadFile(path)
 	return src, ok
 }
 
-func (fs objectSourceFS) PathExists(path string) bool {
-	if load.CleanPath(path) == fs.modulePath {
+func (fs standaloneCSourceFS) PathExists(path string) bool {
+	if fs.synthetic && load.CleanPath(path) == fs.modulePath {
 		return true
 	}
 	return fs.base.PathExists(path)
 }
 
-func objectSourceContext(workDir string, options Options) (string, Options) {
-	if options.Mode != ModeObject || len(options.Files) != 1 {
+func standaloneCSourceContext(workDir string, options Options) (string, Options) {
+	if len(options.Files) == 0 || options.Mode != ModeObject && !(options.CCompiler && options.Mode == ModeExecutable) {
 		return workDir, options
 	}
-	path := load.CleanPath(load.JoinPath(workDir, options.Files[0]))
-	workDir = load.DirPath(path)
-	name := load.BasePath(path)
-	options.Package = name
-	options.Files = []string{name}
+	dir := ""
+	files := make([]string, len(options.Files))
+	for i := 0; i < len(options.Files); i++ {
+		path := load.CleanPath(load.JoinPath(workDir, options.Files[i]))
+		if !optionArgIsCFile(path) && !optionArgIsPreprocessedCFile(path) {
+			return workDir, options
+		}
+		if dir == "" {
+			dir = load.DirPath(path)
+		} else if dir != load.DirPath(path) {
+			return workDir, options
+		}
+		files[i] = load.BasePath(path)
+	}
+	workDir = dir
+	options.Package = files[0]
+	options.Files = files
 	return workDir, options
 }
 
@@ -167,10 +180,12 @@ func (fs scriptSourceFS) PathExists(path string) bool {
 }
 
 func sourceFSForOptions(fs SourceFS, workDir string, options Options) SourceFS {
-	if options.Mode == ModeObject && len(options.Files) == 1 {
-		fs = objectSourceFS{
+	if len(options.Files) > 0 && (options.Mode == ModeObject || options.CCompiler && options.Mode == ModeExecutable) {
+		_, _, _, hasModule := findModuleSource(workDir, fs)
+		fs = standaloneCSourceFS{
 			base:       fs,
 			modulePath: load.CleanPath(load.JoinPath(workDir, "go.mod")),
+			synthetic:  !hasModule,
 		}
 	}
 	if options.Script && len(options.Files) == 1 {

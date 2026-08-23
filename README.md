@@ -150,6 +150,35 @@ also implements the macro and GNU C surface exercised by the pinned Linux
 bring-up; unsupported constructs fail explicitly. Its current boundaries are
 documented in `internal/c11/README.md`.
 
+Without `-c`, `renvo cc` builds a complete executable and needs neither a
+`go.mod` nor a host C toolchain:
+
+```sh
+renvo cc hello.c -o hello
+./hello
+```
+
+Executable mode uses Renvo's embedded C headers and demand-selects the matching
+library implementations from the same bundle as the Go standard library. The
+minimal hosted surface includes the fundamental integer/size/boolean headers,
+`stdarg`, memory and string operations, allocation and conversions, character
+classification, assertions, streams, and formatted output. Both `main(void)`
+and `main(int, char **)` are supported. C identifiers do not fall through to
+Go builtins; for example, `print` is not a C output function—include
+`<stdio.h>` and use `printf`, `puts`, or the stream APIs.
+
+A native C entrypoint can opt into a narrow Go adapter from the same directory:
+
+```c
+#pragma go "board.go"
+extern void board_set_led(int on);
+```
+
+Only named `.go` files are added to an explicit `cc` build. Their ordinary Go
+imports are resolved transitively, letting C application code use small typed
+adapters for Renvo board and device packages without implicitly compiling every
+Go file beside the C source.
+
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 

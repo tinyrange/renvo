@@ -75,6 +75,7 @@ func renvoWasiBackendCompile(unit []byte, output int, arenaSize int) int {
 	}
 	renvoSetTarget(renvoTargetWasiWasm32)
 	context := renvoNewCompileContext(renvoTargetWasiWasm32, renvoCompilerStripSymbols, false, false)
+	renvoConfigureCompileContext(context, "wasi/wasm32", "renvo", "")
 	prog.c = *context
 	var meta renvoMeta
 	renvoBuildMetaInto(&prog, &meta)

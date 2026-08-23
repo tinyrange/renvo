@@ -89,3 +89,56 @@ func TestPreprocessCCommandReportsI386DataModel(t *testing.T) {
 		t.Fatalf("i386 macro dump = %#v, source %q", result, result.Source)
 	}
 }
+
+func TestCCommandMacrosDescribeWindowsLLP64(t *testing.T) {
+	options := Options{Target: "windows/amd64", Mode: ModeExecutable, CCompiler: true}
+	macros := cCommandMacros(options)
+	want := map[string]string{
+		"_WIN32": "1", "_WIN64": "1", "__SIZEOF_LONG__": "4",
+		"__SIZEOF_POINTER__": "8", "__STDC_HOSTED__": "1",
+	}
+	for name, value := range want {
+		found := false
+		for i := 0; i < len(macros); i++ {
+			if macros[i].Name == name && macros[i].Value == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("Windows macro %s=%s missing from %#v", name, value, macros)
+		}
+	}
+	undefined := cCommandUndefined(options)
+	for _, name := range []string{"__linux__", "__ELF__", "__LP64__"} {
+		if findString(undefined, name) < 0 {
+			t.Fatalf("incompatible Windows macro %s was not undefined: %#v", name, undefined)
+		}
+	}
+}
+
+func TestCCompilerTargetUsesILP32ForMicrocontrollerISAs(t *testing.T) {
+	for _, test := range []struct {
+		target string
+		macro  string
+	}{
+		{target: "esp32c6/riscv32", macro: "__riscv"},
+		{target: "esp32s3/xtensa_lx7", macro: "__XTENSA__"},
+		{target: "esp32p4/riscv32", macro: "__riscv"},
+	} {
+		_, _, pointerBits := cCompilerTarget(test.target)
+		if pointerBits != 32 {
+			t.Fatalf("cCompilerTarget(%q) pointer width = %d, want 32", test.target, pointerBits)
+		}
+		found := false
+		for _, macro := range cCommandMacros(Options{Target: test.target, Mode: ModeExecutable, CCompiler: true}) {
+			if macro.Name == test.macro {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("C target macro %q missing for %q", test.macro, test.target)
+		}
+	}
+}

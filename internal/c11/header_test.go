@@ -46,3 +46,13 @@ func TestBuildObjectPreludeAcceptsDefaultExternalLibraryPrototypes(t *testing.T)
 		t.Fatalf("BuildObjectPrelude library prototype = %#v, prelude %q", result, result.Prelude)
 	}
 }
+
+func TestBuildObjectPreludeDoesNotRetainMultilineMacroBody(t *testing.T) {
+	source := []byte("#include <rand.h>\nint main(void) { return RAND_bytes(0, 0); }\n")
+	header := []byte("#define RAND_cleanup() \\\n+    while (0) \\\n+    continue\n#endif\nint RAND_bytes(unsigned char *buf, int num);\n")
+	result := BuildObjectPrelude("/tmp/main.c", source, headerTestReader{name: "rand.h", src: header})
+	want := []byte("int RAND_bytes ( unsigned char * buf , int num );\n")
+	if !result.Ok || !bytes.Equal(result.Prelude, want) {
+		t.Fatalf("BuildObjectPrelude multiline macro = %#v, prelude %q", result, result.Prelude)
+	}
+}

@@ -90,8 +90,11 @@ func appMain(args []string, env []string) int {
 	descriptorVersion := 0
 	tags := make([]string, 0, 4)
 	mode := driver.ModeExecutable
+	cCompiler := len(args) > 1 && args[1] == "cc"
 	for i := 1; i < len(args); i++ {
-		if args[i] == "-o" && i+1 < len(args) {
+		if i == 1 && cCompiler {
+			continue
+		} else if args[i] == "-o" && i+1 < len(args) {
 			output = args[i+1]
 			i++
 		} else if args[i] == "-tags" && i+1 < len(args) {
@@ -144,7 +147,21 @@ func appMain(args []string, env []string) int {
 		print("\n")
 		return 2
 	}
-	built := driver.BuildPackageUnitCompactMode(packageArg, target, tags, mode, workDir, stdRoot, driver.RenvoFS{})
+	var built driver.PackageUnitResult
+	if cCompiler {
+		if mode != driver.ModeExecutable {
+			print("renvo cc: browser C projects require executable mode\n")
+			return 2
+		}
+		files, ok := renvoWasiCFiles(packageArg, workDir, driver.RenvoFS{})
+		if !ok || len(files) == 0 {
+			print("renvo cc: C project contains no .c source files\n")
+			return 1
+		}
+		built = driver.BuildCExecutableUnitCompact(files, target, tags, workDir, stdRoot, driver.RenvoFS{})
+	} else {
+		built = driver.BuildPackageUnitCompactMode(packageArg, target, tags, mode, workDir, stdRoot, driver.RenvoFS{})
+	}
 	if !built.Ok {
 		print("renvo: frontend compilation failed\n")
 		return 1
@@ -164,4 +181,37 @@ func appMain(args []string, env []string) int {
 		return 1
 	}
 	return 0
+}
+
+func renvoWasiCFiles(packageArg string, workDir string, fs driver.SourceFS) ([]string, bool) {
+	if packageArg != "." && packageArg != "./" {
+		if renvoWasiCSourceName(packageArg) {
+			return []string{packageArg}, true
+		}
+	}
+	dir := workDir
+	prefix := ""
+	if packageArg != "." && packageArg != "./" {
+		dir = packageArg
+		prefix = packageArg
+	}
+	entries, ok := fs.ReadDir(dir)
+	if !ok {
+		return nil, false
+	}
+	files := make([]string, 0, len(entries))
+	for i := 0; i < len(entries); i++ {
+		if !entries[i].IsDir && renvoWasiCSourceName(entries[i].Name) {
+			name := entries[i].Name
+			if prefix != "" {
+				name = prefix + "/" + name
+			}
+			files = append(files, name)
+		}
+	}
+	return files, true
+}
+
+func renvoWasiCSourceName(name string) bool {
+	return len(name) > 2 && name[len(name)-2:] == ".c"
 }

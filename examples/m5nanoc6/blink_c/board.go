@@ -1,0 +1,12 @@
+package main
+
+import board "renvo.dev/device/board/m5nanoc6"
+
+// These functions are the intentionally small board API presented to C.
+func board_set_blue_led(on int32) {
+	board.BlueLED.Set(on != 0)
+}
+
+func board_delay_milliseconds(milliseconds uint32) {
+	board.Clock.DelayMilliseconds(milliseconds)
+}

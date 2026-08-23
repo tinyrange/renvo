@@ -2,7 +2,7 @@ import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
-import { cleanLanguagePath, sourceImportPath } from "./language-path.mjs";
+import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 import { decodeProjectZip, decodeSharedProject, encodeProjectZip, encodeSharedProject, normalizeProjectPath } from "./project-archive.mjs";
 import { chooseESPTransportAvailability, detectDeviceProfile } from "./device-profile.mjs";
@@ -96,6 +96,8 @@ const elements = {
   newFilePath: document.querySelector("#new-file-path"),
   newFileHelp: document.querySelector("#new-file-help"),
   newFileError: document.querySelector("#new-file-error"),
+  newProjectDialog: document.querySelector("#new-project-dialog"),
+  newProjectForm: document.querySelector("#new-project-form"),
   confirmDialog: document.querySelector("#confirm-dialog"),
   confirmDialogTitle: document.querySelector("#confirm-dialog-title"),
   confirmDialogMessage: document.querySelector("#confirm-dialog-message"),
@@ -129,6 +131,15 @@ func main() {
 }
 `,
   "go.mod": "module renvo.dev\n\ngo 1.20\n",
+};
+const initialCFiles = {
+  "main.c": `#include <stdio.h>
+
+int main(void) {
+    printf("Hello from Renvo C!\\n");
+    return 0;
+}
+`,
 };
 let fileValues = { ...initialFiles };
 const editableFiles = new Set(Object.keys(fileValues));
@@ -169,9 +180,11 @@ let latestAnalysisRequestID = 0;
 let requestID = 0;
 let focusedTargetIndex = -1;
 let activeBuildRoot = ".";
+let externalBuildLanguage = "go";
 let autoBuildPending = parameters.has("run");
 let plotterAutoShown = false;
 let projectName = "playground";
+let projectLanguage = "go";
 let saveTimer;
 let testBuild = false;
 let testRunning = false;
@@ -180,6 +193,7 @@ let browserHostParts;
 let fileMenuTarget = "";
 let textDialogResolve;
 let confirmDialogResolve;
+let cLibraryPromise;
 const customBackendURLs = new Map();
 const cachedBackendRecords = new Map();
 const projectBackendRoots = new Set();
@@ -233,6 +247,7 @@ async function loadTargetCatalog() {
     elements.output.textContent = `Target catalog unavailable (${error.message}); using the WASI backend from the URL.\n`;
     return { languageService: "", targets: [{
       name: "wasi/wasm32", backendTarget: "wasi/wasm32", backend: fallbackBackendUrl,
+      cBackend: new URL(parameters.get("cbackend") || "backends/native-c.wasm", bundleRoot).href,
       output: "app.wasm", runnable: true, tags: ["wasi", "wasip1", "wasm", "wasm32"],
     }] };
   }
@@ -460,6 +475,7 @@ function setupShell() {
   elements.newFileForm.addEventListener("submit", createNewWorkspaceFile);
   elements.newFileKind.addEventListener("change", updateNewFileSuggestion);
   elements.newFilePath.addEventListener("input", updateNewFileKindFromPath);
+  elements.newProjectForm.addEventListener("submit", createNewProject);
   elements.confirmDialog.addEventListener("close", finishConfirmDialog);
   document.querySelector("#snapshot-dialog-close").addEventListener("click", () => elements.snapshotDialog.close());
   document.querySelector("#snapshot-create-form").addEventListener("submit", saveSnapshotFromDialog);
@@ -636,7 +652,9 @@ async function compileTarget(buildTarget) {
   building = true;
   updateReadyState();
   closeTargetMenu();
-  const backend = new URL(buildTarget.backend, catalogUrl).href;
+  const backendPath = activeBuildLanguage() === "c" && buildTarget.cBackend
+    ? buildTarget.cBackend : buildTarget.backend;
+  const backend = new URL(backendPath, catalogUrl).href;
   const loading = !backendReady.has(backend);
   setCompilerStatus("busy", loading ? `Loading ${buildTarget.name} backend…` : "Building…");
   elements.output.textContent = `$ renvo ${args.join(" ")}\n`;
@@ -683,6 +701,7 @@ function controlledArguments(args, target) {
   if (elements.emitUnit.checked) result.unshift("-emit-unit");
   if (elements.emitImage.checked) result.unshift("-emit-image");
   if (elements.windowsGUI.checked) result.unshift("-windows-gui");
+  if (activeBuildLanguage() === "c") result.unshift("cc");
   return result;
 }
 
@@ -1005,11 +1024,36 @@ function renderRunResult(result) {
 async function ensureWorkspaceDependencies() {
   if (!standardCatalogPromise) return;
   const catalog = await standardCatalogPromise;
+  if (activeBuildLanguage() === "c") {
+    await Promise.all([loadCLibrary(catalog), loadStandardPackage("unsafe", catalog)]);
+  }
   const imports = new Set();
   for (const model of models.values()) {
     if (model.uri.path.endsWith(".go")) for (const name of scanImports(model.getValue())) imports.add(name);
   }
   await Promise.all(Array.from(imports, (name) => loadStandardPackage(name, catalog)));
+}
+
+async function loadCLibrary(catalog) {
+  if (!catalog.libc?.length) throw new Error("The browser bundle does not contain the C standard library.");
+  if (cLibraryPromise) return cLibraryPromise;
+  cLibraryPromise = (async () => {
+    if (catalog.module && !models.has("go.mod")) stdlibFiles.set("go.mod", encoder.encode(catalog.module));
+    const values = await Promise.all(catalog.libc.map(async (file) => {
+      const path = file.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(new URL(`libc/${path}`, catalog.url));
+      if (!response.ok) throw new Error(`could not load C library file ${file}: HTTP ${response.status}`);
+      return [file, new Uint8Array(await response.arrayBuffer())];
+    }));
+    for (const [file, data] of values) stdlibFiles.set(`libc/${file}`, data);
+    languageWorkspaceRevision++;
+  })();
+  try {
+    await cLibraryPromise;
+  } catch (error) {
+    cLibraryPromise = undefined;
+    throw error;
+  }
 }
 
 async function loadStandardPackage(importPath, catalog) {
@@ -1070,9 +1114,22 @@ function languageWorkspacePayload() {
 }
 
 function installLanguageProviders() {
-  monaco.languages.registerCompletionItemProvider("go", {
-    triggerCharacters: [".", '"', "`", "/"],
+	const semanticLanguages = ["go", C_LANGUAGE_ID];
+	monaco.languages.registerCompletionItemProvider(semanticLanguages, {
+    triggerCharacters: [".", '"', "`", "/", "<"],
     provideCompletionItems: async (model, position) => {
+      const includeContext = cIncludeContextAt(model, position);
+      if (includeContext) {
+        await ensureWorkspaceDependencies();
+        const headers = new Set([...editableFiles].filter((name) => name.endsWith(".h")));
+        for (const name of stdlibFiles.keys()) {
+          if (name.startsWith("libc/include/") && name.endsWith(".h")) headers.add(name.slice("libc/include/".length));
+        }
+        return { suggestions: [...headers].filter((name) => name.startsWith(includeContext.prefix)).sort().map((name) => ({
+          label: name, kind: monaco.languages.CompletionItemKind.File,
+          detail: "C header", insertText: name, range: includeContext.range,
+        })) };
+      }
       const importContext = importContextAt(model, position);
       if (importContext) {
         const catalog = standardCatalogPromise ? await standardCatalogPromise : { packages: {} };
@@ -1096,7 +1153,7 @@ function installLanguageProviders() {
       return { suggestions: Array.from(suggestions.values()) };
     },
   });
-  monaco.languages.registerSignatureHelpProvider("go", {
+	monaco.languages.registerSignatureHelpProvider(semanticLanguages, {
     signatureHelpTriggerCharacters: ["(", ","],
     signatureHelpRetriggerCharacters: [","],
     provideSignatureHelp: async (model, position) => {
@@ -1109,21 +1166,22 @@ function installLanguageProviders() {
       }, dispose() {} };
     },
   });
-  monaco.languages.registerDefinitionProvider("go", {
+	monaco.languages.registerDefinitionProvider(semanticLanguages, {
     provideDefinition: async (model, position) => {
       const records = await requestLanguage("definition", model, byteOffset(model, position));
       const record = records.find((item) => item[0] === "L");
       return record ? languageLocation(record) : undefined;
     },
   });
-  monaco.languages.registerHoverProvider("go", {
+	monaco.languages.registerHoverProvider(semanticLanguages, {
     provideHover: async (model, position) => {
       const records = await requestLanguage("hover", model, byteOffset(model, position));
       const record = records.find((item) => item[0] === "H");
       if (!record) return undefined;
       const start = positionAtByteOffset(model, Number(record[3]));
       const end = positionAtByteOffset(model, Number(record[4]));
-      const contents = [{ value: `\`\`\`go\n${record[1]}\n\`\`\`` }];
+		const language = model.getLanguageId() === C_LANGUAGE_ID ? "c" : "go";
+		const contents = [{ value: `\`\`\`${language}\n${record[1]}\n\`\`\`` }];
       if (record[2]) contents.push({ value: record[2] });
       return {
         contents,
@@ -1131,7 +1189,7 @@ function installLanguageProviders() {
       };
     },
   });
-  monaco.languages.registerReferenceProvider("go", {
+	monaco.languages.registerReferenceProvider(semanticLanguages, {
     provideReferences: async (model, position, context) => {
       const records = await requestLanguage("references", model, byteOffset(model, position));
       let locations = (await Promise.all(records.filter((item) => item[0] === "L").map(languageLocation))).filter(Boolean);
@@ -1143,13 +1201,13 @@ function installLanguageProviders() {
       return locations;
     },
   });
-  monaco.languages.registerRenameProvider("go", {
+	monaco.languages.registerRenameProvider(semanticLanguages, {
     resolveRenameLocation(model, position) {
       const word = model.getWordAtPosition(position);
       return word ? { range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn), text: word.word } : { range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column), text: "", rejectReason: "Place the cursor on a symbol." };
     },
     provideRenameEdits: async (model, position, newName) => {
-      if (!/^[A-Za-z_]\w*$/.test(newName)) return { edits: [], rejectReason: "Enter a valid Go identifier." };
+		if (!/^[A-Za-z_]\w*$/.test(newName)) return { edits: [], rejectReason: "Enter a valid identifier." };
       const offset = byteOffset(model, position);
       const [references, definitions] = await Promise.all([requestLanguage("references", model, offset), requestLanguage("definition", model, offset)]);
       const seen = new Set(); const edits = [];
@@ -1162,7 +1220,7 @@ function installLanguageProviders() {
       return edits.length ? { edits } : { edits: [], rejectReason: "No editable references were found." };
     },
   });
-  monaco.languages.registerDocumentSymbolProvider("go", {
+	monaco.languages.registerDocumentSymbolProvider(semanticLanguages, {
     provideDocumentSymbols(model) {
       return outlineItems(model).map((item) => ({
         name: item.name, detail: item.kind,
@@ -1196,14 +1254,15 @@ function sameLanguageLocation(location, record) {
 }
 
 async function requestLanguage(mode, model, offset) {
-  if (!compilerReady || !targetCatalog?.languageService || !selectedTarget) return [];
+	if (!compilerReady || !targetCatalog?.languageService || !selectedTarget) return [];
   await ensureWorkspaceDependencies();
   const id = ++requestID;
   const payload = languageWorkspacePayload();
   const result = new Promise((resolve) => languageRequests.set(id, resolve));
   worker.postMessage({
-    type: mode, id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
-    tags: selectedTarget.tags || [], file: fileName(model), offset,
+		type: mode, id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
+		tags: selectedTarget.tags || [], file: fileName(model), offset,
+		language: activeBuildLanguage(),
     packageAt: languagePackageForModel(model),
   }, payload.transfers);
   return result;
@@ -1228,8 +1287,8 @@ function scheduleAnalysis(delay = 280) {
 }
 
 async function runAnalysis(generation) {
-  if (!compilerReady || !targetCatalog?.languageService || !selectedTarget || generation !== languageGeneration) return;
-  elements.languageStatus.textContent = "Checking…";
+	if (!compilerReady || !targetCatalog?.languageService || !selectedTarget || generation !== languageGeneration) return;
+	elements.languageStatus.textContent = activeBuildLanguage() === "c" ? "Checking C…" : "Checking…";
   try {
     await ensureWorkspaceDependencies();
     if (generation !== languageGeneration) return;
@@ -1237,8 +1296,9 @@ async function runAnalysis(generation) {
     const id = ++requestID;
     latestAnalysisRequestID = id;
     worker.postMessage({
-      type: "analyze", id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
-      tags: selectedTarget.tags || [], file: activeFile, offset: 0,
+		type: "analyze", id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
+		tags: selectedTarget.tags || [], file: activeFile, offset: 0,
+		language: activeBuildLanguage(),
       packageAt: languagePackageForModel(models.get(activeFile)),
     }, payload.transfers);
     languageRequests.set(id, (records) => applyAnalysis(id, records, ""));
@@ -1293,6 +1353,18 @@ function importContextAt(model, position) {
   return {
     prefix: match[2],
     range: new monaco.Range(position.lineNumber, position.column - match[2].length, position.lineNumber, position.column),
+  };
+}
+
+function cIncludeContextAt(model, position) {
+  if (model.getLanguageId() !== C_LANGUAGE_ID) return null;
+  const offset = model.getOffsetAt(position);
+  const line = model.getValue().slice(0, offset).split("\n").pop();
+  const match = /^\s*#\s*include\s*[<"]([^>"]*)$/.exec(line);
+  if (!match) return null;
+  return {
+    prefix: match[1],
+    range: new monaco.Range(position.lineNumber, position.column - match[1].length, position.lineNumber, position.column),
   };
 }
 
@@ -1400,7 +1472,7 @@ function handleModelChange(name, model) {
       if (target.projectBackend) target.backendStale = true;
     }
   }
-  if (name.endsWith(".go") || name === "go.mod") scheduleAnalysis();
+	if (name.endsWith(".go") || name.endsWith(".c") || name.endsWith(".h") || name === "go.mod") scheduleAnalysis();
   if (name === activeFile) renderOutline(model);
 }
 
@@ -1678,7 +1750,8 @@ async function handleProjectAction(event) {
   const action = button.dataset.projectAction;
   closeProjectActionMenu();
   try {
-    if (action === "rename") {
+    if (action === "new") openNewProjectDialog();
+    else if (action === "rename") {
       const name = await requestText({ title: "Rename project", label: "Project name", value: projectName, accept: "Rename", validate: (value) => value.trim() || "playground" });
       if (name) { projectName = name; syncProjectName(); saveFiles(); }
     } else if (action === "export") exportProject();
@@ -1687,6 +1760,31 @@ async function handleProjectAction(event) {
     else if (action === "snapshots") await openSnapshotDialog();
     else if (action === "reset" && await requestConfirmation({ title: "Reset project?", message: "All current project files will be replaced with the starter project. Save a snapshot first if you may need them again.", accept: "Reset project" })) resetProject();
   } catch (error) { showProjectError(error); }
+}
+
+function openNewProjectDialog() {
+  const selected = elements.newProjectForm.querySelector(`input[name="project-kind"][value="${projectLanguage}"]`);
+  if (selected) selected.checked = true;
+  elements.newProjectDialog.showModal();
+  queueMicrotask(() => elements.newProjectForm.querySelector("input[name=\"project-kind\"]:checked")?.focus());
+}
+
+function createNewProject(event) {
+  if (event.submitter?.value !== "accept") return;
+  event.preventDefault();
+  const language = new FormData(elements.newProjectForm).get("project-kind") === "c" ? "c" : "go";
+  const c = language === "c";
+  elements.newProjectDialog.close("accept");
+  replaceProject({
+    name: c ? "c-playground" : "playground",
+    language,
+    files: c ? initialCFiles : initialFiles,
+    activeFile: c ? "main.c" : "main.go",
+    openFiles: [c ? "main.c" : "main.go"],
+    command: "-s -o app.wasm .",
+  });
+  elements.languageStatus.textContent = c ? "C project created" : "Go project created";
+  if (isPhoneWorkspace()) showMobileView("editor");
 }
 
 async function openSnapshotDialog() {
@@ -1751,13 +1849,17 @@ async function shareProject() {
 }
 
 function resetProject() {
-  replaceProject({ name: "playground", files: initialFiles, activeFile: "main.go", openFiles: ["main.go"], command: "-s -o app.wasm ." });
+  const c = projectLanguage === "c";
+  replaceProject({ name: c ? "c-playground" : "playground", language: projectLanguage, files: c ? initialCFiles : initialFiles, activeFile: c ? "main.c" : "main.go", openFiles: [c ? "main.c" : "main.go"], command: "-s -o app.wasm ." });
 }
 
 function replaceProject(project) {
   for (const model of models.values()) model.dispose();
   editableFiles.clear(); editableBaselines.clear(); models.clear(); openFiles.length = 0;
-  const files = project.files && Object.keys(project.files).length ? project.files : initialFiles;
+  projectLanguage = project.language === "c" || !project.language && inferProjectLanguage(project.files) === "c" ? "c" : "go";
+  externalBuildLanguage = "go";
+  const fallbackFiles = projectLanguage === "c" ? initialCFiles : initialFiles;
+  const files = project.files && Object.keys(project.files).length ? project.files : fallbackFiles;
   for (const [name, source] of Object.entries(files)) { createProjectModel(name, source); editableBaselines.set(name, source); }
   activeFile = Object.hasOwn(files, project.activeFile) ? project.activeFile : Object.keys(files)[0];
   for (const name of project.openFiles || []) if (Object.hasOwn(files, name) && !openFiles.includes(name)) openFiles.push(name);
@@ -1778,6 +1880,11 @@ function syncProjectName() {
 }
 
 function safeProjectName(name) { return (name || "renvo-project").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-|-$/g, "") || "renvo-project"; }
+
+function inferProjectLanguage(files) {
+  const names = Object.keys(files || {});
+  return names.some((name) => name.endsWith(".c")) && !names.some((name) => name.endsWith(".go")) ? "c" : "go";
+}
 
 function showProjectError(error) {
   elements.output.textContent = `${error.message || error}\n`; showPanel("output");
@@ -2531,7 +2638,7 @@ function saveAndDeploy() {
 }
 
 function currentProject() {
-  return { name: projectName, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
+  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
 }
 
 async function restoreProject() {
@@ -2547,7 +2654,9 @@ async function restoreProject() {
       if (legacy && typeof legacy === "object" && !Array.isArray(legacy) && Object.keys(legacy).length) project = { name: "playground", files: legacy };
     } catch {}
   }
-  fileValues = project?.files && Object.keys(project.files).length ? { ...project.files } : { ...initialFiles };
+  projectLanguage = project?.language === "c" || !project?.language && inferProjectLanguage(project?.files) === "c" ? "c" : "go";
+  const fallbackFiles = projectLanguage === "c" ? initialCFiles : initialFiles;
+  fileValues = project?.files && Object.keys(project.files).length ? { ...project.files } : { ...fallbackFiles };
   editableFiles.clear(); editableBaselines.clear();
   for (const [name, source] of Object.entries(fileValues)) { editableFiles.add(name); editableBaselines.set(name, source); }
   projectName = project?.name || "playground";
@@ -2559,6 +2668,7 @@ async function restoreProject() {
   for (const name of project?.openFiles || []) if (Object.hasOwn(fileValues, name) && !openFiles.includes(name)) openFiles.push(name);
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   if (project?.command) elements.command.value = project.command;
+  externalBuildLanguage = project?.buildLanguage === "c" ? "c" : "go";
   syncProjectName();
   syncBuildRootFromCommand();
 }
@@ -2610,6 +2720,12 @@ function renderLibraryCatalog(catalog) {
     for (const [name, item] of entries) children.push(libraryPackage(catalog, name, item));
   };
   appendGroup("Standard library", Object.entries(catalog.packages || {}).sort(([left], [right]) => left.localeCompare(right)));
+  if (catalog.libc?.length) {
+    const heading = document.createElement("div");
+    heading.className = "library-group"; heading.textContent = "C standard library"; children.push(heading);
+    children.push(cLibraryDirectory(catalog, "include", "Headers"));
+    children.push(cLibraryDirectory(catalog, "src", "Implementation"));
+  }
   const platforms = Object.entries(catalog.platforms || {});
   const boards = new Map();
   for (const entry of platforms) {
@@ -2648,7 +2764,7 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
   button.addEventListener("click", async () => {
     const opening = files.hidden;
     files.hidden = !opening; button.classList.toggle("open", opening);
-    if (item.main) setBuildPackage(item.root, item.target, button);
+    if (item.main) setBuildPackage(item.root, item.target, button, item.language);
     if (!opening) return;
     if (files.childElementCount) {
       if (item.main) await openPackageEntry(item);
@@ -2664,21 +2780,8 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     try {
       await loadStandardPackage(importPath, catalog);
       const prefix = item.root || `std/${importPath}`;
-      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg)$/.test(file)).map((file) => {
-        const path = `${prefix}/${file}`;
-        const entry = document.createElement("button");
-        entry.type = "button"; entry.className = "stdlib-file"; entry.dataset.file = path;
-        const [iconText, iconClass] = fileIcon(file);
-        const icon = document.createElement("span"); icon.className = iconClass; icon.textContent = iconText;
-        const label = document.createElement("span"); label.textContent = file;
-        entry.append(icon, label);
-        entry.addEventListener("click", async () => {
-          await ensureSourceModel(path);
-          openFile(path);
-          if (isPhoneWorkspace()) showMobileView("editor");
-        });
-        return entry;
-      }));
+      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg)$/.test(file))
+        .map((file) => librarySourceFile(`${prefix}/${file}`, file)));
       if (item.main) await openPackageEntry(item);
       const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
       if (item.main && backendDefinition) {
@@ -2696,8 +2799,52 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
   return wrapper;
 }
 
+function cLibraryDirectory(catalog, directory, label) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "library-board-package";
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "stdlib-package"; button.textContent = label;
+  button.title = `libc/${directory}`;
+  const files = document.createElement("div");
+  files.className = "stdlib-files"; files.hidden = true;
+  button.addEventListener("click", async () => {
+    const opening = files.hidden;
+    files.hidden = !opening; button.classList.toggle("open", opening);
+    if (!opening || files.childElementCount) return;
+    button.disabled = true;
+    try {
+      await loadCLibrary(catalog);
+      const prefix = `${directory}/`;
+      files.replaceChildren(...catalog.libc.filter((file) => file.startsWith(prefix))
+        .map((file) => librarySourceFile(`libc/${file}`, file.slice(prefix.length))));
+    } catch (error) {
+      files.replaceChildren(Object.assign(document.createElement("span"), { className: "tree-loading", textContent: error.message }));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  wrapper.append(button, files);
+  return wrapper;
+}
+
+function librarySourceFile(path, name) {
+  const entry = document.createElement("button");
+  entry.type = "button"; entry.className = "stdlib-file"; entry.dataset.file = path;
+  const [iconText, iconClass] = fileIcon(name);
+  const icon = document.createElement("span"); icon.className = iconClass; icon.textContent = iconText;
+  const label = document.createElement("span"); label.textContent = name;
+  entry.append(icon, label);
+  entry.addEventListener("click", async () => {
+    await ensureSourceModel(path);
+    openFile(path);
+    if (isPhoneWorkspace()) showMobileView("editor");
+  });
+  return entry;
+}
+
 async function openPackageEntry(item) {
-  const entryFile = item.files.find((file) => file === "main.go") ||
+  const entryFile = item.language === "c" && item.files.find((file) => file === "main.c") ||
+    item.files.find((file) => file === "main.go") ||
     item.files.find((file) => file.endsWith(".go"));
   if (!entryFile) return;
   const path = `${item.root}/${entryFile}`;
@@ -2705,8 +2852,9 @@ async function openPackageEntry(item) {
   openFile(path);
 }
 
-function setBuildPackage(root, target, button) {
+function setBuildPackage(root, target, button, language = "go") {
   activeBuildRoot = root === "." ? "." : `./${root}`;
+  externalBuildLanguage = activeBuildRoot === "." ? "go" : language === "c" ? "c" : "go";
   if (target && target !== selectedTarget?.name) selectTarget(target, true);
   let args;
   try { args = splitArguments(elements.command.value); } catch { return; }
@@ -2717,6 +2865,10 @@ function setBuildPackage(root, target, button) {
   syncBuildScope();
   markBuildStale();
   saveFiles();
+}
+
+function activeBuildLanguage() {
+  return activeBuildRoot === "." ? projectLanguage : externalBuildLanguage;
 }
 
 function syncBuildScope() {
@@ -2737,9 +2889,13 @@ async function ensureSourceModel(path) {
   if (models.has(name)) return models.get(name);
   if (!standardCatalogPromise) return undefined;
   const catalog = await standardCatalogPromise;
-  const importPath = sourceImportPath(name, catalog);
-  if (!importPath) return undefined;
-  await loadStandardPackage(importPath, catalog);
+  if (isCLibrarySourcePath(name, catalog)) {
+    await loadCLibrary(catalog);
+  } else {
+    const importPath = sourceImportPath(name, catalog);
+    if (!importPath) return undefined;
+    await loadStandardPackage(importPath, catalog);
+  }
   const source = stdlibFiles.get(name);
   if (!source) return undefined;
   const model = monaco.editor.createModel(decoder.decode(source), languageForFile(name), monaco.Uri.parse(`file:///${name}`));

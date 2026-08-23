@@ -28,6 +28,7 @@ type SourceFile struct {
 	Src               []byte
 	CPrelude          []byte
 	CObject           bool
+	CCompiler         bool
 	CDataModel        int
 	CFunctionSections bool
 	CDataSections     bool
@@ -171,9 +172,17 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					UnsignedChar:       source.CUnsignedChar,
 					KernelCodeModel:    source.CKernelCodeModel,
 					PruneUnusedStatics: source.COptimize,
+					IsolateGoBuiltins:  source.CCompiler,
 				})
 			} else {
-				translated = c11.Translate(pkg.Name, source.Src)
+				dataModel := source.CDataModel
+				if dataModel == c11.DataModelInvalid {
+					dataModel = c11.DataModelLP64
+				}
+				translated = c11.TranslateWithConfig(pkg.Name, source.Src, c11.ObjectConfig{
+					DataModel: dataModel, ShortWChar: source.CShortWChar, UnsignedChar: source.CUnsignedChar,
+					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler,
+				})
 			}
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
@@ -325,7 +334,7 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 			continue
 		}
 		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
-			CObject: files[i].CObject, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
+			CObject: files[i].CObject, CCompiler: files[i].CCompiler, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
 			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
 			CUnsignedChar:    files[i].CUnsignedChar,
 			CKernelCodeModel: files[i].CKernelCodeModel, COptimize: files[i].COptimize,

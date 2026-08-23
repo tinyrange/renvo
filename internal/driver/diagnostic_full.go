@@ -383,7 +383,7 @@ func diagnosticAtToken(diagnostic Diagnostic, source load.SourceFile, tokens []s
 		token := tokens[tokenIndex]
 		start, end, line = syntax.TokenStart(token), syntax.TokenEnd(token), syntax.TokenLine(token)
 		if diagnosticNamesToken(diagnostic.Code) && start >= 0 && end > start && end <= len(source.Src) {
-			diagnostic.Message += ": " + string(source.Src[start:end])
+			diagnostic.Message += ": " + cDiagnosticIdentifier(source.Path, source.Src[start:end])
 		}
 	} else if len(source.Src) > 0 {
 		start, end = len(source.Src), len(source.Src)

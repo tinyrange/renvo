@@ -107,6 +107,14 @@ func (p *preprocessor) directive(tokens []ppToken, includeFrom string, displayPa
 	if directiveName == "pragma" {
 		if len(rest) == 1 && p.tokenIs(rest[0], "once") && findPPText(p.once, includeFrom) < 0 {
 			p.once = append(p.once, includeFrom)
+		} else if len(rest) > 0 && p.tokenIs(rest[0], "go") {
+			name := p.pragmaGoName(rest[1:])
+			if name == "" {
+				p.errorDetail = "#pragma go requires a Go filename"
+				p.fail(PreprocessErrDirective, displayPath, line)
+			} else if !p.hasGoFile(includeFrom, name) {
+				p.goFiles = append(p.goFiles, GoFile{From: includeFrom, Name: name})
+			}
 		}
 		return 0, ""
 	}
@@ -130,6 +138,40 @@ func (p *preprocessor) directive(tokens []ppToken, includeFrom string, displayPa
 	}
 	p.fail(PreprocessErrDirective, displayPath, line)
 	return 0, ""
+}
+
+func (p *preprocessor) pragmaGoName(tokens []ppToken) string {
+	if len(tokens) == 1 && ppTokenKind(tokens[0]) == ppString {
+		text := p.tokenText(tokens[0])
+		if len(text) > 2 {
+			return string(text[1 : len(text)-1])
+		}
+		return ""
+	}
+	start, end := 0, len(tokens)
+	if len(tokens) >= 3 && p.tokenIs(tokens[0], "<") && p.tokenIs(tokens[len(tokens)-1], ">") {
+		start, end = 1, len(tokens)-1
+	}
+	if start == end {
+		return ""
+	}
+	var name []byte
+	for i := start; i < end; i++ {
+		if ppTokenKind(tokens[i]) == ppString || p.tokenIs(tokens[i], "<") || p.tokenIs(tokens[i], ">") {
+			return ""
+		}
+		name = append(name, p.tokenText(tokens[i])...)
+	}
+	return string(name)
+}
+
+func (p *preprocessor) hasGoFile(from string, name string) bool {
+	for i := 0; i < len(p.goFiles); i++ {
+		if p.goFiles[i].From == from && p.goFiles[i].Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *preprocessor) lineDirective(tokens []ppToken, oldPath string) (int, string) {
@@ -272,6 +314,9 @@ func (p *preprocessor) defineTokens(tokens []ppToken) bool {
 func (p *preprocessor) defineText(name string, params []string, function bool, variadic bool, value string) {
 	source := len(p.sources)
 	p.sources = append(p.sources, []byte(value))
+	if p.trackOrigins {
+		p.sourcePaths = append(p.sourcePaths, "")
+	}
 	tokens, ok := p.lex(source, 0, len(value))
 	if !ok {
 		p.fail(PreprocessErrMacro, "<predefined>", 1)

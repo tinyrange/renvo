@@ -31,6 +31,32 @@ allocation-unit layout plus generated read/modify/write accessors. File-scope
 prototypes and tentative definitions coalesce by C linkage rules; incomplete
 tentative arrays complete at the end of the translation unit, and block
 `static` objects are hoisted with scope-safe internal names.
+The `cc` executable path is hermetic and accepts one or more C files without a
+Go module. It preprocesses against the embedded `libc/include` tree, selects
+implementation files from `libc/src` only for headers actually reached by the
+translation unit, and lowers them through the same frontend. Target descriptors
+select ILP32, LP64, or Windows LLP64 widths and define the conventional
+architecture/operating-system macros used by guarded library implementations.
+The C ordinary-identifier namespace is kept separate from Go's predeclared
+identifiers, while compiler-generated library bridges retain access to the
+portable read, write, and exit runtime operations.
+An active `#pragma go "filename.go"` adds that same-directory Go source and its
+transitive imports to an executable C build. Quoted, angle-bracket, and bare
+filenames are accepted; inactive conditional branches do not add sources, and
+adjacent Go files remain excluded unless explicitly named.
+
+The browser language service indexes original C and header byte spans rather
+than the generated Go-shaped source. It provides live preprocessing/scanning
+diagnostics, scoped and aggregate-member completion, inferred-type and
+documentation hover, signature help, definitions, references, and rename.
+External declarations, project headers, macros, tags, enumerators, local
+shadowing, and translation-unit-local `static` names retain distinct bindings.
+Mixed projects also navigate across an `extern` declaration and a matching Go
+function selected with `#pragma go`. Preprocessing can optionally retain a
+token-level origin map so diagnostics produced after macro/include expansion
+are reported against their original C or header spelling; ordinary compiler
+builds do not pay for that map.
+
 Aggregate initialization supports positional and chained designated
 structure/array members, repeated-designator overwrite, inferred array bounds,
 nested braces, bitfields, union active members, and structure/union compound
@@ -60,8 +86,10 @@ atomic/remaining qualifier validation, and variadic definitions whose optional
 pack is not consumed. Direct external variadic calls are arity-specialized after
 C default argument promotion; the shared x86_64 object-call descriptor classifies
 integer and floating arguments, sets the SysV vector count, and aligns every
-foreign call boundary. Consuming a variadic pack needs the later builtin surface,
-and cross-object thread or static string addresses need later relocations.
+foreign call boundary. Executable variadic definitions use a target-width word
+pack supporting promoted pointers, integers, and floating-point values on both
+32- and 64-bit targets. Cross-object thread or static string addresses need
+later relocations.
 Attributes and the other GNU C surface remain M4 work.
 Unsupported constructs must fail in this frontend rather than reaching a
 backend.

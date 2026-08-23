@@ -15,6 +15,10 @@ the typed board LED and clock capabilities. It is available in the web editor
 as the `blink_mixed` NanoC6 example, where both source files can be edited and
 flashed together.
 
+The `blink_c` and `button_rgb_c` examples are native C projects. Their C
+entrypoints use `#pragma go "board.go"` to include only the small typed Go board
+adapter named by the project; the application logic remains ordinary C11.
+
 The `air_quality` example reads an SGP30 from the Grove I2C connector once per
 second. It displays TVOC on the RGB LED as a continuous
 green-to-orange-to-red scale. Magenta means the sensor could not be initialized
@@ -59,6 +63,22 @@ sandbox/renvo \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-blink-mixed.elf \
   ./examples/m5nanoc6/blink_mixed
+```
+
+Build the native C versions through `cc` mode:
+
+```sh
+sandbox/renvo cc \
+  -backend backends/esp32c6.rtg \
+  -t esp32c6/riscv32 \
+  -o sandbox/m5nanoc6-blink-c.elf \
+  ./examples/m5nanoc6/blink_c/main.c
+
+sandbox/renvo cc \
+  -backend backends/esp32c6.rtg \
+  -t esp32c6/riscv32 \
+  -o sandbox/m5nanoc6-button-rgb-c.elf \
+  ./examples/m5nanoc6/button_rgb_c/main.c
 ```
 
 To build the button and RGB example instead, change the output name and final

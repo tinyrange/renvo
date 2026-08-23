@@ -106,8 +106,16 @@ func NormalizeCCompilerCommand(args []string) []string {
 	out := make([]string, 1, len(args))
 	out[0] = args[0]
 	out = append(out, "-cc")
+	hasOutput := false
+	executable := true
 	for i := 2; i < len(args); i++ {
 		arg := args[i]
+		if arg == "-o" {
+			hasOutput = true
+		}
+		if arg == "-c" || arg == "-E" || arg == "-S" || arg == "-fsyntax-only" {
+			executable = false
+		}
 		if arg == "-" {
 			out = append(out, "-cc-stdin")
 			continue
@@ -244,6 +252,9 @@ func NormalizeCCompilerCommand(args []string) []string {
 			continue
 		}
 		out = append(out, arg)
+	}
+	if executable && !hasOutput {
+		out = append(out, "-o", "a.out")
 	}
 	return out
 }

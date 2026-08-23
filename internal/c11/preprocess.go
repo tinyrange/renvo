@@ -37,6 +37,9 @@ type PreprocessConfig struct {
 	SuppressForcedIncludes bool
 	MacroDump              bool
 	LineMarkers            bool
+	// TrackOrigins retains a compact token-level map from rendered output back
+	// to the original source or included header for interactive diagnostics.
+	TrackOrigins bool
 }
 
 // PreprocessResult owns only the final rendered token stream plus dependency
@@ -45,11 +48,49 @@ type PreprocessConfig struct {
 type PreprocessResult struct {
 	Source       []byte
 	Dependencies []string
+	GoFiles      []GoFile
+	Origins      []SourceOrigin
 	Ok           bool
 	Error        int
 	ErrorPath    string
 	Line         int
 	Detail       string
+}
+
+// SourceOrigin maps one rendered preprocessor token to its original spelling.
+type SourceOrigin struct {
+	OutputStart int
+	OutputEnd   int
+	Path        string
+	Start       int
+	End         int
+}
+
+// OriginAt resolves a rendered byte offset to its original source token.
+func (r PreprocessResult) OriginAt(offset int) (SourceOrigin, bool) {
+	previous := -1
+	for i := 0; i < len(r.Origins); i++ {
+		origin := r.Origins[i]
+		if origin.OutputStart <= offset && offset < origin.OutputEnd {
+			return origin, true
+		}
+		if origin.OutputEnd <= offset {
+			previous = i
+		} else {
+			break
+		}
+	}
+	if previous >= 0 {
+		return r.Origins[previous], true
+	}
+	return SourceOrigin{}, false
+}
+
+// GoFile is one active #pragma go source reference. From is the source or
+// included header containing the directive; Name retains its relative path.
+type GoFile struct {
+	From string
+	Name string
 }
 
 const (
@@ -128,13 +169,17 @@ type ppConditional struct {
 type preprocessor struct {
 	config         PreprocessConfig
 	sources        [][]byte
+	sourcePaths    []string
 	macros         []ppMacro
 	buckets        []int
 	hides          []ppHide
 	conditionals   []ppConditional
 	dependencies   []string
+	goFiles        []GoFile
 	once           []string
 	out            []byte
+	origins        []SourceOrigin
+	trackOrigins   bool
 	ok             bool
 	err            int
 	errorPath      string
@@ -148,8 +193,11 @@ type preprocessor struct {
 
 // Preprocess runs translation phases 2-4 for one C translation unit.
 func Preprocess(config PreprocessConfig) PreprocessResult {
-	p := preprocessor{config: config, ok: true}
+	p := preprocessor{config: config, ok: true, trackOrigins: config.TrackOrigins}
 	p.sources = append(p.sources, nil) // source zero is generated spelling.
+	if p.trackOrigins {
+		p.sourcePaths = append(p.sourcePaths, "")
+	}
 	p.hides = append(p.hides, ppHide{})
 	p.installPredefined(config.Predefined)
 	for i := 0; i < len(config.Undefined); i++ {
@@ -185,7 +233,7 @@ func Preprocess(config PreprocessConfig) PreprocessResult {
 	if config.MacroDump {
 		p.renderMacroDump()
 	}
-	return PreprocessResult{Source: p.out, Dependencies: p.dependencies, Ok: true, Error: PreprocessOK}
+	return PreprocessResult{Source: p.out, Dependencies: p.dependencies, GoFiles: p.goFiles, Origins: p.origins, Ok: true, Error: PreprocessOK}
 }
 
 func (p *preprocessor) renderMacroDump() {
@@ -325,6 +373,12 @@ func (p *preprocessor) processFile(path string, src []byte, emit bool, depth int
 	}
 	sourceID := len(p.sources)
 	p.sources = append(p.sources, normalized)
+	if p.trackOrigins {
+		for len(p.sourcePaths) < sourceID {
+			p.sourcePaths = append(p.sourcePaths, "")
+		}
+		p.sourcePaths = append(p.sourcePaths, path)
+	}
 	previousPath, previousDisplay, previousLine := p.currentPath, p.currentDisplay, p.currentLine
 	p.currentPath = path
 	p.currentDisplay = path
@@ -640,7 +694,15 @@ func (p *preprocessor) renderLine(tokens []ppToken) {
 		if i > 0 {
 			p.out = append(p.out, ' ')
 		}
+		outputStart := len(p.out)
 		p.out = append(p.out, p.tokenText(tokens[i])...)
+		if p.trackOrigins {
+			source := ppTokenSource(tokens[i])
+			if source > 0 && source < len(p.sourcePaths) {
+				p.origins = append(p.origins, SourceOrigin{OutputStart: outputStart, OutputEnd: len(p.out),
+					Path: p.sourcePaths[source], Start: tokens[i].start, End: tokens[i].end})
+			}
+		}
 	}
 	p.out = append(p.out, '\n')
 }

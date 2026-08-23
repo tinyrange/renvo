@@ -139,6 +139,13 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		start := i
 		for start > 0 && !tokenIs(src, scanned.tokens[start-1], ";") &&
 			!tokenIs(src, scanned.tokens[start-1], "{") && !tokenIs(src, scanned.tokens[start-1], "}") {
+			// A preprocessor directive terminates any preceding macro body even
+			// when that body contains no C declaration delimiter. Do not pull a
+			// multiline statement macro across its closing #endif into the next
+			// external prototype.
+			if tokenOnDirectiveLine(src, scanned.tokens, start-1) {
+				break
+			}
 			start--
 		}
 		for start < i && tokenOnDirectiveLine(src, scanned.tokens, start) {

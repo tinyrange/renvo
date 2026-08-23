@@ -56,7 +56,7 @@ func (s *FSBuildSession) Step() bool {
 			return true
 		}
 		options = resolveCCompilerPaths(s.workDir, options)
-		s.workDir, options = objectSourceContext(s.workDir, options)
+		s.workDir, options = standaloneCSourceContext(s.workDir, options)
 		s.result.Options = options
 		s.fs = sourceFSForOptions(s.fs, s.workDir, options)
 		s.stage = 1
@@ -71,7 +71,7 @@ func (s *FSBuildSession) Step() bool {
 		} else {
 			sources = CollectSourcesForTargetTagsWithModuleCache(s.workDir, s.stdRoot, options.Package, options.Target, options.Tags, s.moduleCache, s.fs)
 		}
-		sources = prepareCObjectSources(sources, &options, s.workDir, s.fs)
+		sources = prepareCSources(sources, &options, s.workDir, s.stdRoot, s.moduleCache, s.fs)
 		options = finalizeCDependencyOptions(options)
 		s.sourcesEnd = arena.Mark()
 		s.result.Sources = sources

@@ -63,6 +63,11 @@ native_sources=$(stage_backend "$native_source_dir" builtin)
   -system systems/backend-wasi-wasm32.rtg \
   -s -o "$output/backends/native.wasm" $native_sources
 
+# Pure C canonical units currently need the full backend surface. Ordinary Go
+# projects keep using the substantially smaller self-hosted module above.
+env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
+  -o "$output/backends/native-c.wasm" ./backend
+
 build_custom_backend() {
   target_name=$1
   definition=$2

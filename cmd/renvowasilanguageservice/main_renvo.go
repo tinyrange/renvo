@@ -3,10 +3,12 @@
 package main
 
 import (
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/languageservice"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/syntax"
 )
 
 type analysisOptions struct {
@@ -16,6 +18,7 @@ type analysisOptions struct {
 	packageAt string
 	offset    int
 	tags      []string
+	language  string
 }
 
 func analysisInt(text string) (int, bool) {
@@ -39,7 +42,7 @@ func analysisParse(args []string) (analysisOptions, bool) {
 			options.mode = args[i]
 			continue
 		}
-		if (args[i] == "-target" || args[i] == "-file" || args[i] == "-offset" || args[i] == "-tags") && i+1 < len(args) {
+		if (args[i] == "-target" || args[i] == "-file" || args[i] == "-offset" || args[i] == "-tags" || args[i] == "-language") && i+1 < len(args) {
 			name := args[i]
 			i++
 			if name == "-target" {
@@ -48,6 +51,8 @@ func analysisParse(args []string) (analysisOptions, bool) {
 				options.file = args[i]
 			} else if name == "-tags" {
 				options.tags = append(options.tags, args[i])
+			} else if name == "-language" {
+				options.language = args[i]
 			} else {
 				value, ok := analysisInt(args[i])
 				if !ok {
@@ -178,6 +183,358 @@ func analysisLocation(location check.SourceLocation) {
 	analysisLine("L", location.Path, analysisDecimal(location.Start), analysisDecimal(location.End))
 }
 
+func analysisCLocation(location c11.LanguageLocation) {
+	analysisLine("L", location.Path, analysisDecimal(location.Start), analysisDecimal(location.End))
+}
+
+func analysisCCompletion(item c11.LanguageCompletion) {
+	analysisLine("C", item.Name, item.Detail, analysisDecimal(item.Kind), item.Signature, item.Documentation)
+}
+
+func analysisCHover(hover c11.LanguageHover) {
+	if hover.Ok {
+		analysisLine("H", hover.Signature, hover.Documentation, analysisDecimal(hover.Start), analysisDecimal(hover.End))
+	}
+}
+
+func analysisCSignature(help c11.LanguageSignature) {
+	if !help.Ok {
+		return
+	}
+	fields := []string{"S", analysisDecimal(help.ActiveParameter), help.Label}
+	for i := 0; i < len(help.Parameters); i++ {
+		label := help.Parameters[i].Type
+		if help.Parameters[i].Name != "" {
+			if label != "" {
+				label += " "
+			}
+			label += help.Parameters[i].Name
+		}
+		fields = append(fields, label)
+	}
+	analysisLine(fields...)
+}
+
+type analysisCIncludeReader struct {
+	fs    driver.RenvoFS
+	paths []string
+}
+
+func (r analysisCIncludeReader) ReadInclude(from string, name string, angled bool) ([]byte, string, bool) {
+	if !angled {
+		path := load.JoinPath(load.DirPath(from), name)
+		if src, ok := r.fs.ReadFile(path); ok {
+			return src, path, true
+		}
+	}
+	for i := 0; i < len(r.paths); i++ {
+		path := load.JoinPath(r.paths[i], name)
+		if src, ok := r.fs.ReadFile(path); ok {
+			return src, path, true
+		}
+	}
+	return nil, name, false
+}
+
+func (r analysisCIncludeReader) ReadIncludeNext(from string, name string, angled bool) ([]byte, string, bool) {
+	fromDir := load.DirPath(from)
+	start := 0
+	for i := 0; i < len(r.paths); i++ {
+		if load.CleanPath(r.paths[i]) == load.CleanPath(fromDir) {
+			start = i + 1
+			break
+		}
+	}
+	for i := start; i < len(r.paths); i++ {
+		path := load.JoinPath(r.paths[i], name)
+		if src, ok := r.fs.ReadFile(path); ok {
+			return src, path, true
+		}
+	}
+	return nil, name, false
+}
+
+func analysisCFiles(workDir string, stdRoot string, target string, queryPath string, sources []load.SourceFile) ([]c11.LanguageFile, []c11.LanguageDiagnostic) {
+	libcRoot := load.JoinPath(load.DirPath(stdRoot), "libc")
+	libcInclude := load.JoinPath(libcRoot, "include")
+	reader := analysisCIncludeReader{fs: driver.RenvoFS{}, paths: []string{workDir, libcInclude}}
+	var files []c11.LanguageFile
+	var diagnostics []c11.LanguageDiagnostic
+	var implementations []string
+	if entries, ok := reader.fs.ReadDir(workDir); ok {
+		for i := 0; i < len(entries); i++ {
+			if !entries[i].IsDir && analysisEndsWith(entries[i].Name, ".h") {
+				path := load.JoinPath(workDir, entries[i].Name)
+				if src, read := reader.fs.ReadFile(path); read {
+					files = analysisCAppendFile(files, path, src, false)
+				}
+			}
+		}
+	}
+	queryPath = load.CleanPath(queryPath)
+	if analysisEndsWith(queryPath, ".h") {
+		if src, ok := reader.fs.ReadFile(queryPath); ok {
+			files = analysisCAppendFile(files, queryPath, src, false)
+		}
+	}
+	for i := 0; i < len(sources); i++ {
+		if !analysisCPath(sources[i].Path) {
+			continue
+		}
+		files = analysisCAppendFile(files, sources[i].Path, sources[i].Src, false)
+		processed := c11.Preprocess(c11.PreprocessConfig{Path: sources[i].Path, Source: sources[i].Src,
+			Reader: reader, EmitIncludes: true, EmitQuotedIncludes: true, TrackOrigins: true})
+		if !processed.Ok {
+			path := processed.ErrorPath
+			if path == "" {
+				path = sources[i].Path
+			}
+			diagnostics = append(diagnostics, c11.LanguageDiagnostic{Path: path, Line: processed.Line, Column: 1,
+				Code: "RENVO-C-PP-001", Message: analysisCPreprocessMessage(processed)})
+			continue
+		}
+		for j := 0; j < len(processed.Dependencies); j++ {
+			if src, ok := reader.fs.ReadFile(processed.Dependencies[j]); ok {
+				files = analysisCAppendFile(files, processed.Dependencies[j], src, true)
+			}
+			dependency := load.CleanPath(processed.Dependencies[j])
+			if load.DirPath(dependency) == load.CleanPath(libcInclude) && analysisEndsWith(dependency, ".h") {
+				name := load.BasePath(dependency)
+				implementation := load.JoinPath(load.JoinPath(libcRoot, "src"), name[:len(name)-2]+".c")
+				if _, ok := reader.fs.ReadFile(implementation); ok && !analysisContains(implementations, implementation) {
+					implementations = append(implementations, implementation)
+				}
+			}
+		}
+		checked := c11.CheckObjectForDataModel(processed.Source, analysisCDataModel(target))
+		if !checked.Ok {
+			diagnostic := c11.LanguageDiagnostic{Path: sources[i].Path, Start: checked.ErrorAt,
+				End: checked.ErrorAt + 1, Line: 1, Column: 1, Code: "RENVO-C-CHECK-001", Message: analysisCCheckMessage(checked.Error)}
+			if origin, found := processed.OriginAt(checked.ErrorAt); found {
+				diagnostic.Path, diagnostic.Start, diagnostic.End = origin.Path, origin.Start, origin.End
+				if original, read := reader.fs.ReadFile(origin.Path); read {
+					diagnostic.Line, diagnostic.Column = analysisSourceLineColumn(original, origin.Start)
+				}
+			}
+			diagnostics = append(diagnostics, diagnostic)
+		}
+	}
+	// Index the implementation paired with each included standard header. The
+	// compiler already bundles these files; exposing their original source lets
+	// navigation prefer a function body over the public header declaration.
+	for i := 0; i < len(implementations); i++ {
+		if src, ok := reader.fs.ReadFile(implementations[i]); ok {
+			files = analysisCAppendFile(files, implementations[i], src, true)
+		}
+	}
+	return files, diagnostics
+}
+
+func analysisContains(values []string, value string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
+func analysisCDataModel(target string) int {
+	if target == "windows/amd64" || target == "windows/arm64" {
+		return c11.DataModelLLP64
+	}
+	if analysisEndsWith(target, "/386") || analysisEndsWith(target, "/arm") || analysisEndsWith(target, "/wasm32") ||
+		analysisEndsWith(target, "/vm32") || analysisEndsWith(target, "/riscv32") || analysisEndsWith(target, "/xtensa_lx7") {
+		return c11.DataModelILP32
+	}
+	return c11.DataModelLP64
+}
+
+func analysisEndsWith(value string, suffix string) bool {
+	return len(value) >= len(suffix) && value[len(value)-len(suffix):] == suffix
+}
+
+func analysisCCheckMessage(code int) string {
+	if code == c11.TranslateErrScan {
+		return "C tokenization failed"
+	}
+	if code == c11.TranslateErrDeclaration {
+		return "invalid C declaration"
+	}
+	if code == c11.TranslateErrStatement {
+		return "invalid C statement or expression"
+	}
+	if code == c11.TranslateErrUnsupported {
+		return "C construct is not supported"
+	}
+	if code == c11.TranslateErrVLA {
+		return "variable-length arrays are not supported"
+	}
+	return "C type checking failed"
+}
+
+func analysisSourceLineColumn(source []byte, offset int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	line, column := 1, 1
+	for i := 0; i < offset; i++ {
+		if source[i] == '\n' {
+			line, column = line+1, 1
+		} else {
+			column++
+		}
+	}
+	return line, column
+}
+
+func analysisCAppendFile(files []c11.LanguageFile, path string, source []byte, suppressDiagnostics bool) []c11.LanguageFile {
+	path = load.CleanPath(path)
+	for i := 0; i < len(files); i++ {
+		if load.CleanPath(files[i].Path) == path {
+			return files
+		}
+	}
+	return append(files, c11.LanguageFile{Path: path, Source: source, SuppressDiagnostics: suppressDiagnostics})
+}
+
+func analysisCPreprocessMessage(result c11.PreprocessResult) string {
+	message := "C preprocessing failed"
+	if result.Error == c11.PreprocessErrInclude {
+		message = "include could not be resolved"
+	} else if result.Error == c11.PreprocessErrMacro {
+		message = "invalid macro expansion"
+	} else if result.Error == c11.PreprocessErrExpression {
+		message = "invalid preprocessor expression"
+	} else if result.Error == c11.PreprocessErrDirective {
+		message = "invalid preprocessor directive"
+	}
+	if result.Detail != "" {
+		message += ": " + result.Detail
+	}
+	return message
+}
+
+func analysisCPath(path string) bool {
+	return len(path) > 2 && path[len(path)-2:] == ".c" || len(path) > 2 && path[len(path)-2:] == ".h"
+}
+
+func analysisGoPath(path string) bool {
+	return len(path) > 3 && path[len(path)-3:] == ".go"
+}
+
+func analysisIdentifierAt(files []load.SourceFile, path string, offset int) string {
+	name, _, _ := analysisIdentifierSpan(files, path, offset)
+	return name
+}
+
+func analysisIdentifierSpan(files []load.SourceFile, path string, offset int) (string, int, int) {
+	src := analysisFindSource(files, path)
+	if offset < 0 || offset > len(src) {
+		return "", offset, offset
+	}
+	start, end := offset, offset
+	for start > 0 && analysisIdentifierByte(src[start-1]) {
+		start--
+	}
+	for end < len(src) && analysisIdentifierByte(src[end]) {
+		end++
+	}
+	return string(src[start:end]), start, end
+}
+
+func analysisIdentifierByte(value byte) bool {
+	return value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9'
+}
+
+func analysisGoFunctions(files []load.SourceFile, name string) []check.SourceLocation {
+	var locations []check.SourceLocation
+	for i := 0; i < len(files); i++ {
+		if !analysisGoPath(files[i].Path) {
+			continue
+		}
+		parsed := syntax.ParseFile(files[i].Src)
+		if !parsed.Ok {
+			continue
+		}
+		for j := 0; j < len(parsed.Funcs); j++ {
+			tok := parsed.Tokens[parsed.Funcs[j].NameTok]
+			if string(syntax.TokenText(parsed.Src, tok)) == name {
+				locations = append(locations, check.SourceLocation{Path: files[i].Path, Start: syntax.TokenStart(tok), End: syntax.TokenEnd(tok)})
+			}
+		}
+	}
+	return locations
+}
+
+func analysisGoIdentifiers(files []load.SourceFile, name string) []check.SourceLocation {
+	var locations []check.SourceLocation
+	for i := 0; i < len(files); i++ {
+		if !analysisGoPath(files[i].Path) {
+			continue
+		}
+		parsed := syntax.ParseFile(files[i].Src)
+		if !parsed.Ok {
+			continue
+		}
+		for j := 0; j < len(parsed.Tokens); j++ {
+			tok := parsed.Tokens[j]
+			if tok.KindLine&255 == syntax.TokenIdent && string(syntax.TokenText(parsed.Src, tok)) == name {
+				locations = append(locations, check.SourceLocation{Path: files[i].Path, Start: syntax.TokenStart(tok), End: syntax.TokenEnd(tok)})
+			}
+		}
+	}
+	return locations
+}
+
+func analysisGoOnlySources(files []load.SourceFile) []load.SourceFile {
+	result := make([]load.SourceFile, 0, len(files))
+	for i := 0; i < len(files); i++ {
+		if !analysisCPath(files[i].Path) {
+			result = append(result, files[i])
+		}
+	}
+	return result
+}
+
+func analysisCallIdentifier(files []load.SourceFile, path string, offset int) string {
+	src := analysisFindSource(files, path)
+	parsed := syntax.ParseFile(src)
+	paren, bracket, brace := 0, 0, 0
+	for i := len(parsed.Tokens) - 1; i >= 0; i-- {
+		tok := parsed.Tokens[i]
+		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 == syntax.TokenEOF {
+			continue
+		}
+		text := string(syntax.TokenText(src, tok))
+		if text == ")" {
+			paren++
+		} else if text == "]" {
+			bracket++
+		} else if text == "}" {
+			brace++
+		} else if text == "(" {
+			if paren > 0 {
+				paren--
+			} else if bracket == 0 && brace == 0 && i > 0 && parsed.Tokens[i-1].KindLine&255 == syntax.TokenIdent {
+				return string(syntax.TokenText(src, parsed.Tokens[i-1]))
+			}
+		} else if text == "[" && bracket > 0 {
+			bracket--
+		} else if text == "{" && brace > 0 {
+			brace--
+		}
+	}
+	return ""
+}
+
+func analysisCProject(options analysisOptions) bool {
+	return options.language == "c" || analysisCPath(options.file)
+}
+
 func analysisFindSource(files []load.SourceFile, path string) []byte {
 	path = load.CleanPath(path)
 	for i := 0; i < len(files); i++ {
@@ -212,7 +569,76 @@ func appMain(args []string, env []string) int {
 		analysisSourceFailure(sources)
 		return 0
 	}
-	result := languageservice.AnalyzeWorkspace(workDir, stdRoot, options.packageAt, sources.Files)
+	var cAnalysis c11.LanguageAnalysis
+	var cPreprocessDiagnostics []c11.LanguageDiagnostic
+	if analysisCProject(options) {
+		cFiles, diagnostics := analysisCFiles(workDir, stdRoot, options.target, options.file, sources.Files)
+		cPreprocessDiagnostics = diagnostics
+		cAnalysis = c11.AnalyzeLanguage(cFiles)
+		if options.mode == "analyze" {
+			for i := 0; i < len(cPreprocessDiagnostics); i++ {
+				diagnostic := cPreprocessDiagnostics[i]
+				analysisLine("D", diagnostic.Path, analysisDecimal(diagnostic.Start), analysisDecimal(diagnostic.End),
+					analysisDecimal(diagnostic.Line), analysisDecimal(diagnostic.Column), diagnostic.Code, diagnostic.Message)
+			}
+			for i := 0; i < len(cAnalysis.Diagnostics()); i++ {
+				diagnostic := cAnalysis.Diagnostics()[i]
+				analysisLine("D", diagnostic.Path, analysisDecimal(diagnostic.Start), analysisDecimal(diagnostic.End),
+					analysisDecimal(diagnostic.Line), analysisDecimal(diagnostic.Column), diagnostic.Code, diagnostic.Message)
+			}
+			return 0
+		}
+		if analysisCPath(options.file) {
+			path := load.CleanPath(options.file)
+			if options.mode == "complete" {
+				items := cAnalysis.Complete(path, options.offset)
+				for i := 0; i < len(items); i++ {
+					analysisCCompletion(items[i])
+				}
+			} else if options.mode == "signature" {
+				analysisCSignature(cAnalysis.Signature(path, options.offset))
+			} else if options.mode == "hover" {
+				analysisCHover(cAnalysis.Hover(path, options.offset))
+			} else if options.mode == "definition" || options.mode == "references" {
+				if options.mode == "definition" {
+					include := cAnalysis.IncludeAt(path, options.offset)
+					if include.Ok {
+						reader := analysisCIncludeReader{fs: driver.RenvoFS{}, paths: []string{workDir,
+							load.JoinPath(load.DirPath(stdRoot), "libc/include")}}
+						if _, target, ok := reader.ReadInclude(path, include.Name, include.Angled); ok {
+							analysisCLocation(c11.LanguageLocation{Path: target})
+						}
+						return 0
+					}
+				}
+				navigation := cAnalysis.Navigate(path, options.offset)
+				if navigation.Ok {
+					goDefinitions := analysisGoFunctions(sources.Files, navigation.Name)
+					if options.mode == "definition" {
+						if navigation.DefinitionIsDeclaration && len(goDefinitions) > 0 {
+							analysisLocation(goDefinitions[0])
+						} else {
+							analysisCLocation(navigation.Definition)
+						}
+					} else {
+						for i := 0; i < len(navigation.References); i++ {
+							analysisCLocation(navigation.References[i])
+						}
+						goReferences := analysisGoIdentifiers(sources.Files, navigation.Name)
+						for i := 0; i < len(goReferences); i++ {
+							analysisLocation(goReferences[i])
+						}
+					}
+				}
+			}
+			return 0
+		}
+	}
+	goSources := sources.Files
+	if analysisCProject(options) {
+		goSources = analysisGoOnlySources(sources.Files)
+	}
+	result := languageservice.AnalyzeWorkspace(workDir, stdRoot, options.packageAt, goSources)
 	if options.mode == "analyze" {
 		analysisDiagnostic(result.Diagnostic)
 		return 0
@@ -230,27 +656,48 @@ func appMain(args []string, env []string) int {
 	if options.mode == "signature" {
 		help := check.SignatureHelpProgram(result.Workspace.Graph, program,
 			load.CleanPath(options.file), options.offset)
-		analysisSignature(help)
+		if help.Ok {
+			analysisSignature(help)
+		} else if analysisCProject(options) {
+			name := analysisCallIdentifier(sources.Files, options.file, options.offset)
+			analysisCSignature(cAnalysis.SignatureName(name))
+		}
 		return 0
 	}
 	if options.mode == "definition" || options.mode == "references" {
 		navigation := check.NavigateProgram(result.Workspace.Graph, program,
 			load.CleanPath(options.file), options.offset)
-		if !navigation.Ok {
-			return 0
-		}
+		name := analysisIdentifierAt(sources.Files, options.file, options.offset)
+		cNavigation := cAnalysis.NavigateName(name)
 		if options.mode == "definition" {
-			analysisLocation(navigation.Definition)
+			if navigation.Ok {
+				analysisLocation(navigation.Definition)
+			} else if cNavigation.Ok {
+				analysisCLocation(cNavigation.Definition)
+			}
 		} else {
-			for i := 0; i < len(navigation.References); i++ {
-				analysisLocation(navigation.References[i])
+			if navigation.Ok {
+				for i := 0; i < len(navigation.References); i++ {
+					analysisLocation(navigation.References[i])
+				}
+			}
+			if cNavigation.Ok {
+				for i := 0; i < len(cNavigation.References); i++ {
+					analysisCLocation(cNavigation.References[i])
+				}
 			}
 		}
 		return 0
 	}
 	if options.mode == "hover" {
-		analysisHover(check.HoverProgram(result.Workspace.Graph, program,
-			load.CleanPath(options.file), options.offset))
+		hover := check.HoverProgram(result.Workspace.Graph, program,
+			load.CleanPath(options.file), options.offset)
+		if hover.Ok {
+			analysisHover(hover)
+		} else if analysisCProject(options) {
+			name, start, end := analysisIdentifierSpan(sources.Files, options.file, options.offset)
+			analysisCHover(cAnalysis.HoverName(name, start, end))
+		}
 		return 0
 	}
 	source := analysisFindSource(sources.Files, options.file)
@@ -261,6 +708,15 @@ func appMain(args []string, env []string) int {
 		load.CleanPath(options.file), options.offset)
 	for i := 0; i < len(completions); i++ {
 		analysisCompletion(completions[i])
+	}
+	if analysisCProject(options) {
+		prefix, _, _ := analysisIdentifierSpan(sources.Files, options.file, options.offset)
+		items := cAnalysis.CompleteGlobals(prefix)
+		for i := 0; i < len(items); i++ {
+			if items[i].Kind != c11.LanguageKeyword {
+				analysisCCompletion(items[i])
+			}
+		}
 	}
 	return 0
 }

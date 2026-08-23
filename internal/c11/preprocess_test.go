@@ -203,6 +203,42 @@ int wrong;
 	}
 }
 
+func TestPreprocessCollectsActiveGoPragmas(t *testing.T) {
+	source := []byte(`#pragma go "bridge.go"
+#pragma go <support.go>
+#pragma go bare.go
+#pragma go "bridge.go"
+#if 0
+#pragma go "disabled.go"
+#endif
+int main(void) { return 0; }
+`)
+	result := Preprocess(PreprocessConfig{Path: "src/main.c", Source: source, EmitIncludes: true})
+	want := []GoFile{
+		{From: "src/main.c", Name: "bridge.go"},
+		{From: "src/main.c", Name: "support.go"},
+		{From: "src/main.c", Name: "bare.go"},
+	}
+	if !result.Ok || len(result.GoFiles) != len(want) {
+		t.Fatalf("Go pragma result = %#v", result)
+	}
+	for i := 0; i < len(want); i++ {
+		if result.GoFiles[i] != want[i] {
+			t.Fatalf("Go pragma %d = %#v, want %#v", i, result.GoFiles[i], want[i])
+		}
+	}
+	if bytes.Contains(result.Source, []byte("pragma")) || !bytes.Contains(result.Source, []byte("int main")) {
+		t.Fatalf("Go pragma output = %q", result.Source)
+	}
+}
+
+func TestPreprocessRejectsGoPragmaWithoutFilename(t *testing.T) {
+	result := Preprocess(PreprocessConfig{Path: "main.c", Source: []byte("#pragma go\n"), EmitIncludes: true})
+	if result.Ok || result.Error != PreprocessErrDirective || result.Detail != "#pragma go requires a Go filename" {
+		t.Fatalf("invalid Go pragma result = %#v", result)
+	}
+}
+
 func TestPreprocessSplicesLinesAndRemovesCommentsBeforeExpansion(t *testing.T) {
 	source := []byte("#define SUM(a, b) ((a) + \\\n(b))\nSUM(1, /* middle */ 2)\nkept // removed \\\nstill removed\nnext\n")
 	result := Preprocess(PreprocessConfig{Path: "main.c", Source: source, EmitIncludes: true})
@@ -274,5 +310,31 @@ func TestPreprocessLineMarkersTrackIncludesAndLineDirectives(t *testing.T) {
 	want := "# 1 \"main.c\"\n# 1 \"/include/value.h\"\nHEADER \"main.c\" \"/include/value.h\"\n# 2 \"main.c\"\n# 40 \"virtual.c\"\n40 \"virtual.c\"\n"
 	if !result.Ok || string(result.Source) != want {
 		t.Fatalf("line marker result = %#v, source %q, want %q", result, result.Source, want)
+	}
+}
+
+func TestPreprocessTracksRenderedTokenOrigins(t *testing.T) {
+	reader := preprocessTestReader{files: map[string][]byte{
+		"api.h": []byte("int header_value;\n"),
+	}}
+	source := []byte("#include <api.h>\n#define VALUE 42\nint root_value = VALUE;\n")
+	result := Preprocess(PreprocessConfig{Path: "main.c", Source: source, Reader: reader, EmitIncludes: true, TrackOrigins: true})
+	if !result.Ok {
+		t.Fatalf("Preprocess failed: %#v", result)
+	}
+	headerAt := bytes.Index(result.Source, []byte("header_value"))
+	header, ok := result.OriginAt(headerAt)
+	if !ok || header.Path != "/include/api.h" || header.Start != bytes.Index(reader.files["api.h"], []byte("header_value")) {
+		t.Fatalf("header origin = %#v, ok %v", header, ok)
+	}
+	rootAt := bytes.Index(result.Source, []byte("root_value"))
+	root, ok := result.OriginAt(rootAt)
+	if !ok || root.Path != "main.c" || root.Start != bytes.Index(source, []byte("root_value")) {
+		t.Fatalf("root origin = %#v, ok %v", root, ok)
+	}
+	macroAt := bytes.Index(result.Source, []byte("42"))
+	macro, ok := result.OriginAt(macroAt)
+	if !ok || macro.Path != "main.c" || macro.Start != bytes.Index(source, []byte("42")) {
+		t.Fatalf("macro origin = %#v, ok %v", macro, ok)
 	}
 }

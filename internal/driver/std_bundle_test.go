@@ -38,6 +38,13 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if _, ok := fs.ReadFile("/std/sync/sync_renvo.go"); !ok {
 		t.Fatal("sync standard library source was not embedded")
 	}
+	stdio, ok := fs.ReadFile("/libc/include/stdio.h")
+	if !ok || !bytes.Contains(stdio, []byte("int printf")) {
+		t.Fatal("C standard library headers were not embedded")
+	}
+	if implementation, ok := fs.ReadFile("/libc/src/stdio.c"); !ok || !bytes.Contains(implementation, []byte("int vfprintf")) {
+		t.Fatal("C standard library implementation was not embedded")
+	}
 	font, ok := fs.ReadFile("/std/graphics/gofont/Go-Mono.ttf")
 	if !ok || len(font) < 4 || !bytes.Equal(font[:4], []byte{0, 1, 0, 0}) {
 		t.Fatal("standard library embed asset was not embedded")
