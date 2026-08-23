@@ -521,9 +521,25 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		if !ok {
 			return nil, nil, false
 		}
-		edits = append(edits, functionValueTokenRangeEdit(program, typeStart, close+1, call))
-		mapLowerCover(covered, typeStart, close+1)
-		i = close
+		replacementEnd := close + 1
+		if replacementEnd < len(program.Tokens) && functionValueTokenEquals(program, replacementEnd, "[") {
+			indexClose := functionValueFindMatching(program, replacementEnd, "[", "]")
+			if indexClose < 0 {
+				return nil, nil, false
+			}
+			key := mapLowerReadText(program, specs, replacementEnd+1, indexClose)
+			mapping := "(" + call + ")"
+			call = specs[spec].get + "(" + mapping + "," + key + ")"
+			if mapLowerIndexIsAssignmentTarget(program, indexClose) {
+				call = "(*" + specs[spec].ref + "(" + mapping + "," + key + "))"
+			} else if mapLowerIndexIsCommaOK(program, typeStart, indexClose) {
+				call = specs[spec].lookup + "(" + mapping + "," + key + ")"
+			}
+			replacementEnd = indexClose + 1
+		}
+		edits = append(edits, functionValueTokenRangeEdit(program, typeStart, replacementEnd, call))
+		mapLowerCover(covered, typeStart, replacementEnd)
+		i = replacementEnd - 1
 	}
 	return edits, covered, true
 }

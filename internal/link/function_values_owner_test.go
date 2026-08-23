@@ -92,6 +92,46 @@ func main() {
 	}
 }
 
+func TestFunctionValueFieldCallOnTypeSwitchBindingIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Value interface { value() int }
+type Number int
+func (n Number) value() int { return int(n) }
+type Tuple []Value
+type Callback func(*Builtin, Tuple, []Tuple) (Value, error)
+type Builtin struct { fn Callback }
+
+func invoke(value Value, args Tuple, kwargs []Tuple) (Value, error) {
+	switch fn := value.(type) {
+	case *Builtin:
+		return fn.fn(fn, args, kwargs)
+	default:
+		return nil, nil
+	}
+}
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&fn.fn, fn, args, kwargs)")) {
+		t.Fatalf("callback field on a type-switch binding was not lowered:\n%s", linked.Program.Text)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("arg1 Tuple, arg2 []Tuple")) {
+		t.Fatalf("unnamed named-type callback parameters were grouped incorrectly:\n%s", linked.Program.Text)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("var __renvo_zero_0 Value")) ||
+		!bytes.Contains(linked.Program.Text, []byte("var __renvo_zero_1 error")) {
+		t.Fatalf("multi-result callback dispatcher has invalid zero results:\n%s", linked.Program.Text)
+	}
+}
+
 func TestFunctionValueFieldNameDoesNotRewriteNestedMethod(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
