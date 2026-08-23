@@ -18458,6 +18458,19 @@ func renvoEmitStructArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, t
 	wordSize := renvoCallWordSize(g, typ)
 	wordCount := renvoAlignValue(size, wordSize) / wordSize
 	if e.kind == renvoExprIdent {
+		resolved := renvoResolveType(meta, typ)
+		renvoNonNil(resolved)
+		if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(resolved.kind) {
+			constant := renvoEvalConstExpr(g, ep, idx)
+			if constant.ok {
+				offset := renvoAddUnnamedLocal(g, typ)
+				if !renvoEmitWideExprToLocal(g, ep, idx, offset, resolved.kind) {
+					return -1
+				}
+				renvoEmitPushWords(g, offset, size, wordSize, renvoPushStack)
+				return wordCount
+			}
+		}
 		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 		if localIndex >= 0 {
 			if renvoTypeSize(meta, g.locals[localIndex].typ) != size {

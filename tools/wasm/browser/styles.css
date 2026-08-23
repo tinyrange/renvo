@@ -231,6 +231,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .editor-toolbar button:hover { color: var(--bright); background: var(--hover); }
 .editor-toolbar button:disabled { color: #5f5f5f; cursor: default; }
 .editor-toolbar button:disabled:hover { background: transparent; }
+.editor-toolbar .editor-text-action { width: auto; padding: 0 9px; font-size: 11px; }
+.editor-toolbar button[hidden] { display: none; }
 #format-file, #search-project { width: auto; padding: 0 8px; font-size: 11px; }
 #copy-to-playground { width: auto; padding: 0 8px; font-size: 11px; }
 #copy-to-playground[hidden] { display: none; }

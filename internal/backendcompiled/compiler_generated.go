@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "194df1807845ebb9f0b5f8437f4a341622b9fbcd7d5222954df91c14fb2918d8"
+const CompilerSourceDigest = "134428406cc9ab20d6745ab0c2b778e7d2f00afb25694a98d9529c80f0ae520c"
 
 // source: backend/compiler_common_impl.go
 
@@ -18465,6 +18465,19 @@ return 1
 wordSize := renvoCallWordSize(g, typ)
 wordCount := renvoAlignValue(size, wordSize) / wordSize
 if e.kind == renvoExprIdent {
+resolved := renvoResolveType(meta, typ)
+renvoNonNil(resolved)
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideInt(resolved.kind) {
+constant := renvoEvalConstExpr(g, ep, idx)
+if constant.ok {
+offset := renvoAddUnnamedLocal(g, typ)
+if !renvoEmitWideExprToLocal(g, ep, idx, offset, resolved.kind) {
+return -1
+}
+renvoEmitPushWords(g, offset, size, wordSize, renvoPushStack)
+return wordCount
+}
+}
 localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 if localIndex >= 0 {
 if renvoTypeSize(meta, g.locals[localIndex].typ) != size {

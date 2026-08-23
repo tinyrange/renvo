@@ -28,6 +28,12 @@ tools/wasm/build.sh "$output/renvo.wasm" "$output/backends/wasi-wasm32.wasm"
 env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
   -o "$output/renvo-format.wasm" ./cmd/renvowasiformat
 
+env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
+  -o "$output/renvo-backend-jit.wasm" ./cmd/renvowasibackendjit
+
+env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
+  -o "$output/renvo-vm-backend.wasm" ./cmd/renvowasivmbackend
+
 backend_files=$(go list -f '{{range .GoFiles}}backend/{{.}} {{end}}' ./backend)
 
 stage_backend() {
@@ -95,6 +101,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/rtg-language.mjs \
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \
 	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
@@ -108,6 +115,7 @@ if [ "$layout" = pages ]; then
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/rtg-language.mjs \
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \
     tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \

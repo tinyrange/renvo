@@ -133,6 +133,15 @@ func TestCacheKeyPreservesExactTargetAndHostIdentity(t *testing.T) {
 	}
 }
 
+func TestCacheKeyIncludesPreparedCompilerArena(t *testing.T) {
+	var descriptor rtg.TargetDescriptor
+	descriptor.Name = "example/target"
+	if cacheKeyForArena(descriptor, "vm/vm32", 64*1024*1024) ==
+		cacheKeyForArena(descriptor, "vm/vm32", 96*1024*1024) {
+		t.Fatal("prepared compilers with different arenas share a cache key")
+	}
+}
+
 type memoryRunner struct {
 	request Request
 }
