@@ -9925,10 +9925,8 @@ func renvoEmitConstantSwitchClause(g *renvoLinearGen, stmt *renvoStmt, clause in
 
 func renvoCopyInterfaceValueToLocal(g *renvoLinearGen, sourceOffset int, typ int, valueOffset int) {
 	renvoNonNil(g)
-	resolved := renvoResolveType(g.meta, typ)
-	renvoNonNil(resolved)
-	kind := resolved.kind
-	if resolved.kind == renvoTypeInterface {
+	kind := renvoResolveType(g.meta, typ).kind
+	if kind == renvoTypeInterface {
 		renvoEmitCopyStackToStack(g, sourceOffset, valueOffset, 2*renvoBackendValueSlotSize)
 		return
 	}
@@ -9941,10 +9939,11 @@ func renvoCopyInterfaceValueToLocal(g *renvoLinearGen, sourceOffset int, typ int
 	}
 	size := renvoTypeSize(g.meta, typ)
 	if size <= renvoBackendValueSlotSize {
-		if renvoTypeKindIsScalarValue(resolved.kind) || resolved.kind == renvoTypePointer || resolved.kind == renvoTypeFunc {
+		if size <= g.c.renvoNativeIntSize &&
+			(renvoTypeKindIsScalarValue(kind) || kind == renvoTypePointer || kind == renvoTypeFunc) {
 			renvoAsmLoadPrimaryStack(&g.asm, sourceOffset)
-			if renvoTypeKindIsScalarValue(resolved.kind) {
-				renvoAsmNormalizePrimaryForKind(&g.asm, resolved.kind)
+			if renvoTypeKindIsScalarValue(kind) {
+				renvoAsmNormalizePrimaryForKind(&g.asm, kind)
 			}
 			renvoAsmStorePrimaryStack(&g.asm, valueOffset)
 			return
@@ -13045,7 +13044,8 @@ func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx 
 		return false
 	}
 	if size <= renvoBackendValueSlotSize {
-		if renvoTypeKindIsScalarValue(source.kind) || source.kind == renvoTypePointer || source.kind == renvoTypeFunc {
+		if size <= g.c.renvoNativeIntSize &&
+			(renvoTypeKindIsScalarValue(source.kind) || source.kind == renvoTypePointer || source.kind == renvoTypeFunc) {
 			renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
 			if renvoTypeKindIsScalarValue(source.kind) {
 				renvoAsmNormalizePrimaryForKind(&g.asm, source.kind)
