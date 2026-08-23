@@ -143,7 +143,9 @@ func (debug *USBJTAG) initialize() error {
 }
 
 func (debug *USBJTAG) Halt() error {
-	if err := debug.dmiWrite(dmiDMControl, 0x80000001); err != nil {
+	// A freshly enumerated C6 commonly has allhavereset/anyhavereset latched.
+	// Acknowledge it together with haltreq so the hart accepts the request.
+	if err := debug.dmiWrite(dmiDMControl, 0x90000001); err != nil {
 		return fail("halt ESP32-C6: " + err.Error())
 	}
 	lastStatus := uint32(0)

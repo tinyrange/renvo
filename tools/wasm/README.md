@@ -108,15 +108,19 @@ target.
 Each command runs in a fresh WASI instance inside the worker. Build results
 include per-phase timing, peak linear-memory size, diagnostics, and downloadable
 artifacts. WASI command artifacts can run directly in the terminal panel with
-arguments and preloaded standard input. For ESP32-C6 and ESP32-S3, Flash & Run
+arguments and preloaded standard input. For ESP32-C6 and ESP32-S3, WebSerial
 converts Renvo's ELF to the documented Espressif app-image format, writes the
-app partition through WebSerial or WebUSB, reboots the board, and attaches the
-terminal as a serial monitor. Arduino Serial Plotter records in either labelled
+app partition, reboots the board, and attaches the terminal as a serial monitor.
+ESP32-C6 WebUSB instead claims the vendor JTAG interface, automatically builds
+the hidden SRAM-linked target, and loads only changed words on subsequent runs.
+This works when a desktop kernel owns the CDC interfaces; the program remains
+volatile across a reset or power cycle. On macOS, Command-S saves and deploys
+the active ESP project (Ctrl-S on other platforms). Arduino Serial Plotter records in either labelled
 `name:value` form or as whitespace-separated numbers also feed the live Plotter
 panel; each labelled series is independently scaled so values with different
-units remain visible. The transport picker uses WebUSB on Android and
-WebSerial on desktop, where the operating-system CDC driver owns the control
-interface required for reset. It remembers an explicit valid choice and falls
+units remain visible. The transport picker offers C6 JTAG WebUSB on desktop,
+tablet, and mobile Chromium, while WebSerial remains the persistent-flash path.
+It remembers an explicit valid choice and falls
 back to the available browser API. Both transports require an HTTPS or localhost
 origin and a Chromium-based browser. The terminal reports build, flash, and
 combined elapsed time. Native artifacts remain downloads.
@@ -127,21 +131,61 @@ Apache-2.0-licensed [esptool-js at commit c2956c5](https://github.com/espressif/
 and against Espressif's public serial-protocol and firmware-image
 documentation. No esptool-js source is copied or bundled.
 
-The browser shell uses Monaco Editor 0.56.0 and keeps the small editable
-workspace in browser local storage. Press Ctrl/Cmd+Enter to build or F5 to run
-a WASI or ESP target; Run automatically builds first when the artifact is missing or the
-workspace, target, or compiler arguments changed. Press Ctrl/Cmd+S to save the
-current workspace and Ctrl/Cmd+J to toggle the panel. Monaco is loaded from
-jsDelivr for now. Pass
+The browser shell uses Monaco Editor 0.56.0 and keeps a multi-file project in
+IndexedDB. Files and directories can be imported, projects round-trip as ZIP
+archives, and compact projects can be shared in a URL. Project snapshots are
+also stored locally. New-file templates cover Go, C source, C headers, and
+empty files; creating or importing a file makes the editable project the build
+scope so an example selected earlier cannot silently remain the active build.
+The selected target, command, and build scope are shown in the shell and saved
+with the project. An offline service worker caches the application shell and
+compiler assets after their first successful load.
+
+Go editing includes the compiler-backed language service, project-wide search,
+an outline, cross-file rename, and exact `gofmt` behavior through a small host-Go
+WASI formatter. C and header files use Monaco's C syntax highlighting and the
+outline, but do not yet have the Go language service. Press Shift+Alt+F to
+format Go, Ctrl/Cmd+Shift+F to search, Ctrl/Cmd+Enter to build, Ctrl+Shift+Enter
+to run browser tests, or F5 to run a WASI, browser, or ESP target. Run
+automatically builds first when the artifact is missing or the workspace,
+target, or compiler arguments changed. Press Ctrl/Cmd+S to save the current
+workspace and Ctrl/Cmd+J to toggle the panel. Monaco is loaded from jsDelivr
+for now. Pass
 `monaco=/assets/monaco/min/` to use a self-hosted copy in production.
 
+The Advanced Build section exposes executable, object, and Linux kernel-module
+modes, arena size, canonical-unit output, linked-image output, and the Windows
+GUI subsystem. A prepared custom backend can be imported as a JSON manifest
+plus its compiled `.wasm` backend. The manifest format is:
+
+```json
+{
+  "name": "acme/amd64",
+  "backendTarget": "acme/amd64",
+  "definition": "64 hexadecimal digits",
+  "descriptorVersion": 1,
+  "output": "app",
+  "tags": [],
+  "runnable": false
+}
+```
+
+Imported backends are cached in IndexedDB. Importing a raw `.rtg` definition
+still requires the CompilerJIT bootstrap; the UI preserves the definition as a
+project source file until that compiler is available.
+
 On phone-sized screens the desktop chrome becomes full-screen Files, Code, and
-Console workspace views. Selecting a source opens the editor directly; a
+Console workspace views. Tablet-class devices keep a split workspace with a
+narrower explorer, larger controls, touch-friendly targets, and denser panels.
+Detection combines Android/mobile hints, touch and coarse-pointer capability,
+and viewport size, so a large Android tablet is not mistaken for a desktop.
+WebUSB remains offered on desktop and touch/mobile Chromium devices even when a
+reduced user agent hides Android; the C6 JTAG path does not claim the CDC
+control interface. Selecting a source opens the editor directly; a
 persistent Target action opens full-screen target selection when needed. Flash
-opens a full-screen progress and serial-console view. WebUSB/WebSerial becomes
-a touch choice in the target view rather than a compact dropdown. Read-only
-library sources can replace the locally persisted playground `main.go` through
-the editor's Copy into main.go action without changing the bundled original.
+opens a full-screen progress and serial-console view. Read-only library sources
+can be copied into an editable project file with the same basename and language
+without changing the bundled original.
 
 ## Reference result
 

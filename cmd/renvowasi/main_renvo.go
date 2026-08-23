@@ -89,16 +89,17 @@ func appMain(args []string, env []string) int {
 	definition := ""
 	descriptorVersion := 0
 	tags := make([]string, 0, 4)
+	mode := driver.ModeExecutable
 	for i := 1; i < len(args); i++ {
 		if args[i] == "-o" && i+1 < len(args) {
+			output = args[i+1]
 			i++
-			output = args[i]
 		} else if args[i] == "-tags" && i+1 < len(args) {
+			tags = append(tags, args[i+1])
 			i++
-			tags = append(tags, args[i])
 		} else if args[i] == "-t" && i+1 < len(args) {
+			target = args[i+1]
 			i++
-			target = args[i]
 		} else if args[i] == "-target-definition" && i+1 < len(args) {
 			i++
 			var ok bool
@@ -115,11 +116,35 @@ func appMain(args []string, env []string) int {
 				print("renvo: invalid target descriptor version\n")
 				return 2
 			}
-		} else if args[i] != "-s" && args[i] != "-emit-unit" {
+		} else if (args[i] == "-arena-size" || args[i] == "-module-license") && i+1 < len(args) {
+			i++
+		} else if args[i] == "-mode" && i+1 < len(args) {
+			mode = args[i+1]
+			i++
+		} else if args[i] == "-mode=object" {
+			mode = driver.ModeObject
+		} else if args[i] == "-mode=executable" {
+			mode = driver.ModeExecutable
+		} else if args[i] == "-mode=kernel-module" {
+			mode = driver.ModeKernelModule
+		} else if args[i] == "-s" || args[i] == "-emit-unit" || args[i] == "-emit-image" || args[i] == "-windows-gui" {
+			// These options affect the separately invoked backend only.
+		} else if len(args[i]) > 0 && args[i][0] == '-' {
+			print("renvo: unsupported browser frontend option ")
+			print(args[i])
+			print("\n")
+			return 2
+		} else {
 			packageArg = args[i]
 		}
 	}
-	built := driver.BuildPackageUnitCompact(packageArg, target, tags, workDir, stdRoot, driver.RenvoFS{})
+	if mode != driver.ModeExecutable && mode != driver.ModeObject && mode != driver.ModeKernelModule {
+		print("renvo: unsupported build mode ")
+		print(mode)
+		print("\n")
+		return 2
+	}
+	built := driver.BuildPackageUnitCompactMode(packageArg, target, tags, mode, workDir, stdRoot, driver.RenvoFS{})
 	if !built.Ok {
 		print("renvo: frontend compilation failed\n")
 		return 1

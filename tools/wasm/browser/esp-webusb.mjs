@@ -5,8 +5,8 @@
 // https://www.espressif.com/sites/default/files/documentation/esp32-c6_technical_reference_manual_en.pdf
 // https://www.usb.org/document-library/class-definitions-communication-devices-12
 
-const ESPRESSIF_VENDOR_ID = 0x303a;
-const USB_SERIAL_JTAG_PRODUCT_ID = 0x1001;
+export const ESPRESSIF_VENDOR_ID = 0x303a;
+export const USB_SERIAL_JTAG_PRODUCT_ID = 0x1001;
 const CDC_CONTROL_CLASS = 0x02;
 const CDC_DATA_CLASS = 0x0a;
 const SET_LINE_CODING = 0x20;
@@ -24,8 +24,8 @@ export function preferredESPTransport({ saved, android, webSerial, webUSB }) {
   return available[preferred] ? preferred : available[fallback] ? fallback : preferred;
 }
 
-export function supportsESPWebUSBPlatform({ platform = "", userAgent = "" } = {}) {
-  return platform === "Android" || /Android/i.test(userAgent);
+export function supportsESPWebUSBPlatform({ platform = "", userAgent = "", mobile = false, maxTouchPoints = 0, coarsePointer = false } = {}) {
+  return platform === "Android" || /Android/i.test(userAgent) || mobile || coarsePointer && maxTouchPoints > 0;
 }
 
 export function selectAuthorizedESPUSBDevice(devices) {

@@ -44,6 +44,18 @@ func TestCompactPackageUnitCarriesFixedTargetBinding(t *testing.T) {
 	}
 }
 
+func TestCompactKernelModuleCarriesKernelTargetBinding(t *testing.T) {
+	files := driverTestFiles()
+	result := BuildPackageUnitCompactMode("./cmd/app", "linux/amd64", nil, ModeKernelModule, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("compact kernel module build = %#v", result)
+	}
+	binding, ok := wireunit.ReadTargetBinding(result.Unit)
+	if !ok || binding.Target != "linux-kernel/amd64" || len(binding.Definition) != 32 || binding.DescriptorVersion <= 0 {
+		t.Fatalf("compact kernel target binding = %#v, ok=%v", binding, ok)
+	}
+}
+
 func TestOneShotEmitUnitPreservesCanonicalPackageMetadata(t *testing.T) {
 	args := []string{"-emit-unit", "-t", "linux/amd64", "-o", "program.unit", "./cmd/app"}
 	files := driverTestFiles()

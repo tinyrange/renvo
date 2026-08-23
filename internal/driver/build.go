@@ -120,6 +120,12 @@ type PackageUnitResult struct {
 // command or browser host owns human-readable diagnostic text, keeping that UI
 // policy out of a size-constrained frontend module.
 func BuildPackageUnitCompact(packageArg string, target string, tags []string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
+	return BuildPackageUnitCompactMode(packageArg, target, tags, ModeExecutable, workDir, stdRoot, fs)
+}
+
+// BuildPackageUnitCompactMode is the fixed-target frontend boundary with the
+// mode distinctions required by object and kernel-module browser builds.
+func BuildPackageUnitCompactMode(packageArg string, target string, tags []string, mode string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
 	var result PackageUnitResult
 	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, packageArg, target, tags, "", fs)
 	if !sources.Ok {
@@ -128,7 +134,12 @@ func BuildPackageUnitCompact(packageArg string, target string, tags []string, wo
 		result.Path = sources.ErrorPath
 		return result
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	var built pipeline.Result
+	if mode == ModeObject {
+		built = pipeline.BuildObjectUnit(workDir, stdRoot, packageArg, sources.Files)
+	} else {
+		built = pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	}
 	if !built.Ok {
 		result.Phase = BuildErrPipeline
 		result.Error = built.Error
@@ -138,7 +149,7 @@ func BuildPackageUnitCompact(packageArg string, target string, tags []string, wo
 		return result
 	}
 	result.Unit = built.Link.Data
-	bindBuiltInTarget(&result.Unit, Options{Target: target})
+	bindBuiltInTarget(&result.Unit, Options{Target: target, Mode: mode})
 	result.Ok = true
 	return result
 }

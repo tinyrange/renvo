@@ -16662,6 +16662,15 @@ func renvoEmitBuiltinPanic(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 
 func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 	renvoNonNil(g)
+	// A linked mixed C/Go unit retains the C11 marker so translated C helpers
+	// keep their pointer and cleanup semantics.  When that marker suppresses
+	// whole-program panic state, ordinary Go type assertions can still reach
+	// this helper.  Transfer to the target's uncaught-fault path instead of
+	// emitting a jump through the unset per-function return label.
+	if !g.meta.panicEnabled || g.deferReturnLabel <= 0 {
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return true
+	}
 	noPrevious := renvoAsmNewLabel(&g.asm)
 	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 	renvoAsmJzPrimary(&g.asm, noPrevious)

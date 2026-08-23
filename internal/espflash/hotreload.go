@@ -247,8 +247,12 @@ func loadImageByte(image *LoadImage, address uint32) (byte, bool) {
 	}
 	for i := 0; i < len(image.Segments); i++ {
 		segment := image.Segments[i]
-		if address < segment.Address || address >= segment.Address+uint32(len(segment.Data)) {
+		paddedSize := uint32((len(segment.Data) + 3) &^ 3)
+		if address < segment.Address || address >= segment.Address+paddedSize {
 			continue
+		}
+		if address >= segment.Address+uint32(len(segment.Data)) {
+			return 0, true
 		}
 		return segment.Data[address-segment.Address], true
 	}

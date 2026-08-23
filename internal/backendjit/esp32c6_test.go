@@ -3,6 +3,7 @@ package backendjit
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -136,5 +137,56 @@ func TestCompiledInBootstrapCompilesESP32C6JTAGImageIntoSRAM(t *testing.T) {
 		binary.LittleEndian.Uint32(image[dataHeader+20:dataHeader+24])
 	if dataEnd > 0x40824000 {
 		t.Fatalf("data/BSS end %#x overlaps hot-reload text", dataEnd)
+	}
+}
+
+func TestCompiledInBootstrapCompilesESP32C6MixedC11Fmt(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/mixedfmt\n\ngo 1.23\n",
+		"main.go": `package main
+
+import "fmt"
+
+func main() {
+	setValue(&value)
+	fmt.Printf("value: %d\n", value)
+}
+
+var value = 2
+`,
+		"helper.c": `extern void setValue(int *value) {
+	*value = 10;
+}
+`,
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(project, name), []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	definition := filepath.Join(root, "backends", "esp32c6.rtg")
+	result := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "esp32c6/riscv32",
+		"-s",
+		"-o", "mixed-fmt.elf",
+		project,
+	}, project, filepath.Join(root, "std"), driver.OSFS{},
+		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+			backendJITTestCacheDir, backendcompiled.Backend{}))
+	if !result.Ok {
+		t.Fatalf("ESP32-C6 mixed C11/fmt compile failed: %#v", result.Diagnostic)
+	}
+	if len(result.Binary) < 52 || !bytes.Equal(result.Binary[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("mixed C11/fmt output is not ELF32: % x",
+			result.Binary[:minInt(4, len(result.Binary))])
 	}
 }

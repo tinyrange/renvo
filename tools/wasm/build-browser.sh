@@ -25,6 +25,9 @@ tools/wasm/build.sh "$output/renvo.wasm" "$output/backends/wasi-wasm32.wasm"
   -system systems/frontend-wasi-wasm32.rtg \
   -s -o "$output/renvo-language-service.wasm" ./cmd/renvowasilanguageservice
 
+env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
+  -o "$output/renvo-format.wasm" ./cmd/renvowasiformat
+
 backend_files=$(go list -f '{{range .GoFiles}}backend/{{.}} {{end}}' ./backend)
 
 stage_backend() {
@@ -80,6 +83,7 @@ build_custom_backend() {
 }
 
 build_custom_backend esp32c6/riscv32 backends/esp32c6.rtg esp32c6-riscv32 go
+build_custom_backend esp32c6-jtag/riscv32 backends/esp32c6_jtag.rtg esp32c6-jtag-riscv32 go
 build_custom_backend esp32s3/xtensa_lx7 backends/esp32s3.rtg esp32s3-xtensa_lx7 go
 build_custom_backend esp32p4/riscv32 backends/esp32p4.rtg esp32p4-riscv32 go
 
@@ -89,7 +93,12 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
-	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/browser/"
+	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
+	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
+	tools/wasm/browser/service-worker.mjs \
+	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
+	tools/wasm/browser/esp-webusb-jtag.mjs "$output/browser/"
 
 if [ "$layout" = pages ]; then
   cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
@@ -97,5 +106,10 @@ if [ "$layout" = pages ]; then
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/serial-plotter.mjs \
-    tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs "$output/"
+	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
+	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
+	tools/wasm/browser/service-worker.mjs \
+    tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
+    tools/wasm/browser/esp-webusb-jtag.mjs "$output/"
 fi

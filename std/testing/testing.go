@@ -16,31 +16,6 @@ type InternalTest struct {
 type InternalBenchmark struct{}
 type InternalExample struct{}
 
-type failNow struct{}
-
-func RunTest(name string, test func(*T)) bool {
-	t := &T{name: name}
-	func() {
-		defer func() {
-			if recover() != nil {
-				t.Fail()
-			}
-		}()
-		test(t)
-	}()
-	if t.failed {
-		for i := 0; i < len(t.logs); i++ {
-			print("    ")
-			print(t.logs[i])
-			print("\n")
-		}
-		print("--- FAIL: ")
-		print(name)
-		print("\n")
-	}
-	return !t.failed
-}
-
 func Finish(failed bool) {
 	if failed {
 		print("FAIL\n")
@@ -51,11 +26,6 @@ func Finish(failed bool) {
 
 func (t *T) Fail() {
 	t.failed = true
-}
-
-func (t *T) FailNow() {
-	t.Fail()
-	panic(failNow{})
 }
 
 func (t *T) Failed() bool {

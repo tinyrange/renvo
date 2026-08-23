@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"renvo.dev/internal/backenddef"
+	"renvo.dev/internal/driver"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/targetinfo"
 )
@@ -28,10 +30,14 @@ type targetAsset struct {
 	Tags              []string `json:"tags,omitempty"`
 	Definition        string   `json:"definition,omitempty"`
 	DescriptorVersion int      `json:"descriptorVersion,omitempty"`
+	Hidden            bool     `json:"hidden,omitempty"`
 }
 
 type targetCatalog struct {
 	LanguageService string        `json:"languageService"`
+	Formatter       string        `json:"formatter"`
+	BrowserPrefix   string        `json:"browserPrefix"`
+	BrowserSuffix   string        `json:"browserSuffix"`
 	Stdlib          string        `json:"stdlib"`
 	Targets         []targetAsset `json:"targets"`
 }
@@ -54,10 +60,12 @@ type customTarget struct {
 	Name       string
 	Definition string
 	Backend    string
+	Hidden     bool
 }
 
 var customTargets = []customTarget{
 	{Name: "esp32c6/riscv32", Definition: "backends/esp32c6.rtg", Backend: "backends/esp32c6-riscv32.wasm"},
+	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Hidden: true},
 	{Name: "esp32s3/xtensa_lx7", Definition: "backends/esp32s3.rtg", Backend: "backends/esp32s3-xtensa_lx7.wasm"},
 	{Name: "esp32p4/riscv32", Definition: "backends/esp32p4.rtg", Backend: "backends/esp32p4-riscv32.wasm"},
 }
@@ -72,7 +80,11 @@ func main() {
 	if err = os.MkdirAll(*output, 0o755); err != nil {
 		fail(err)
 	}
-	catalog := targetCatalog{LanguageService: "renvo-language-service.wasm", Stdlib: "stdlib/catalog.json"}
+	catalog := targetCatalog{
+		LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
+		BrowserPrefix: "browser-host-prefix.html", BrowserSuffix: "browser-host-suffix.html",
+		Stdlib: "stdlib/catalog.json",
+	}
 	for _, descriptor := range targetinfo.All() {
 		if !descriptor.Advertised {
 			continue
@@ -102,14 +114,35 @@ func main() {
 			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: descriptor.BuildTags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
 			Device: "esp32",
+			Hidden: custom.Hidden,
 		})
 	}
 	if err = writeJSON(filepath.Join(*output, "targets.json"), catalog); err != nil {
 		fail(err)
 	}
+	if err = writeBrowserHost(*output); err != nil {
+		fail(err)
+	}
 	if err = buildStandardLibrary(root, *output); err != nil {
 		fail(err)
 	}
+}
+
+func writeBrowserHost(output string) error {
+	const marker = `const wasm64="`
+	packaged := driver.PackageBrowserHTML(nil)
+	at := bytes.Index(packaged, []byte(marker))
+	if at < 0 {
+		return fmt.Errorf("browser host marker is missing")
+	}
+	prefixEnd := at + len(marker)
+	if prefixEnd >= len(packaged) || packaged[prefixEnd] != '"' {
+		return fmt.Errorf("browser host marker has unexpected contents")
+	}
+	if err := os.WriteFile(filepath.Join(output, "browser-host-prefix.html"), packaged[:prefixEnd], 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(output, "browser-host-suffix.html"), packaged[prefixEnd:], 0o644)
 }
 
 func outputName(target string, image string) string {
@@ -218,6 +251,7 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
 		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
 		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/blink_mixed", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "device/esp32s3", Target: "esp32s3/xtensa_lx7"},

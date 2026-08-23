@@ -1,5 +1,6 @@
 let frontendModule;
 let languageServiceModule;
+let formatterModule;
 let compilerError;
 const backendModules = new Map();
 const encoder = new TextEncoder();
@@ -11,9 +12,10 @@ self.addEventListener("message", async (event) => {
   const request = event.data;
   if (request.type === "init") {
     try {
-      [frontendModule, languageServiceModule] = await Promise.all([
+      [frontendModule, languageServiceModule, formatterModule] = await Promise.all([
         loadModule(request.compiler, "frontend"),
         request.languageService ? loadModule(request.languageService, "language service") : Promise.resolve(null),
+        request.formatter ? loadModule(request.formatter, "formatter") : Promise.resolve(null),
       ]);
       self.postMessage({ type: "ready" });
     } catch (error) {
@@ -34,9 +36,24 @@ self.addEventListener("message", async (event) => {
     }
     self.postMessage({
       type: "run-result", id: request.id, exitCode,
+      purpose: request.purpose || "app",
       stdout: decodeParts(context.stdout), stderr: decodeParts(context.stderr),
       elapsedMilliseconds: performance.now() - started,
       linearMemoryBytes: context.maxLinearMemoryBytes,
+    });
+    return;
+  }
+  if (request.type === "format") {
+    if (!formatterModule) {
+      self.postMessage({ type: "format-result", id: request.id, output: "", error: "Go formatting is unavailable" });
+      return;
+    }
+    const files = new Map([[clean(request.name), new Uint8Array(request.data)]]);
+    const context = newContext(files);
+    const exitCode = await runModule(formatterModule, context, ["renvo-format", clean(request.name)]);
+    self.postMessage({
+      type: "format-result", id: request.id, exitCode,
+      output: decodeParts(context.stdout), error: decodeParts(context.stderr),
     });
     return;
   }
@@ -172,6 +189,10 @@ function pipelineArguments(args, files, backendTarget) {
   let arenaSize = "";
   let strip = false;
   let emitUnit = false;
+  let emitImage = false;
+  let windowsGUI = false;
+  let mode = "";
+  let moduleLicense = "";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "-o" && i + 1 < args.length) {
       output = args[++i];
@@ -182,6 +203,11 @@ function pipelineArguments(args, files, backendTarget) {
     } else {
       if (args[i] === "-s") strip = true;
       if (args[i] === "-emit-unit") emitUnit = true;
+      if (args[i] === "-emit-image") emitImage = true;
+      if (args[i] === "-windows-gui") windowsGUI = true;
+      if (args[i] === "-mode" && i + 1 < args.length) mode = args[i+1];
+      if (args[i].startsWith("-mode=")) mode = args[i].slice("-mode=".length);
+      if (args[i] === "-module-license" && i + 1 < args.length) moduleLicense = args[i+1];
       frontend.push(args[i]);
     }
   }
@@ -189,9 +215,14 @@ function pipelineArguments(args, files, backendTarget) {
   let temporary = ".renvo/frontend.unit";
   for (let suffix = 1; files.has(temporary); suffix++) temporary = `.renvo/frontend-${suffix}.unit`;
   frontend[outputAt] = temporary;
-  const backend = ["-t", backendTarget];
+  const resolvedBackendTarget = mode === "kernel-module" ? "linux-kernel/amd64" : backendTarget;
+  const backend = ["-t", resolvedBackendTarget];
   if (strip) backend.push("-s");
   if (arenaSize) backend.push("-arena-size", arenaSize);
+  if (mode === "object") backend.push("-object");
+  if (emitImage) backend.push("-emit-image");
+  if (windowsGUI) backend.push("-windows-gui");
+  if (moduleLicense) backend.push("-module-license", moduleLicense);
   backend.push("-o", output, temporary);
   return { frontend, backend, temporary };
 }
@@ -206,6 +237,7 @@ function wasiImports(context, args) {
     path_open: (...values) => pathOpen(context, ...values),
     fd_close: (fd) => { context.fds.delete(fd); return 0; },
     fd_fdstat_get: (fd, at) => fdStat(context, fd, at),
+    fd_filestat_get: (fd, at) => fdFileStat(context, fd, at),
     fd_fdstat_set_flags: () => 0,
     fd_readdir: (fd, at, length, cookie, usedAt) => fdReaddir(context, fd, at, length, cookie, usedAt),
     fd_prestat_get: (fd, at) => fdPrestat(context, fd, at),
@@ -308,6 +340,18 @@ function fdStat(context, fd, at) {
   if (!entry && fd !== 3 && fd > 2) return 8;
   new Uint8Array(context.memory.buffer, at, 24).fill(0);
   new Uint8Array(context.memory.buffer)[at] = fd === 3 || entry?.directory ? 3 : 4;
+  return 0;
+}
+
+function fdFileStat(context, fd, at) {
+  const entry = context.fds.get(fd);
+  if (!entry && fd !== 3 && fd > 2) return 8;
+  const source = entry && !entry.directory ? context.files.get(entry.path) : undefined;
+  const data = new Uint8Array(context.memory.buffer, at, 64); data.fill(0);
+  const stat = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  stat.setUint8(16, fd === 3 || entry?.directory ? 3 : 4);
+  stat.setBigUint64(24, 1n, true);
+  stat.setBigUint64(32, BigInt(source?.length || 0), true);
   return 0;
 }
 

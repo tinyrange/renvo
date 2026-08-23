@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7fc51c6d122e153b467695e44eab1c9b1cf47541a4d01fe5f8040c99772ee30b"
+const CompilerSourceDigest = "2e7e8d231754963fc37dd6d4c54d7ddfb99f98879c82ebf74b0caf3415238616"
 
 // source: backend/compiler_common_impl.go
 
@@ -16669,6 +16669,15 @@ return renvoEmitPanicState(g, valueOffset)
 
 func renvoEmitPanicState(g *renvoLinearGen, valueOffset int) bool {
 renvoNonNil(g)
+
+
+
+
+
+if !g.meta.panicEnabled || g.deferReturnLabel <= 0 {
+renvoEmitUncaughtFaultTransfer(g, false)
+return true
+}
 noPrevious := renvoAsmNewLabel(&g.asm)
 renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
 renvoAsmJzPrimary(&g.asm, noPrevious)
