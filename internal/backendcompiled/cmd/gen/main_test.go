@@ -65,6 +65,55 @@ func selected(value bool) int {
 	}
 }
 
+func TestSpecializePreparationSourcePreservesUnknownLeftOperandEvaluation(t *testing.T) {
+	source := []byte(`package main
+const renvoPreparedBackendActive = 0
+func observed() bool { return true }
+func selected() int {
+	if observed() && renvoPreparedBackendActive == 0 { return 1 }
+	if observed() || renvoPreparedBackendActive != 0 { return 2 }
+	return 3
+}
+`)
+	prepared, err := specializePreparationSource("compiler_main.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(prepared, []byte("observed()")) != 3 ||
+		!bytes.Contains(prepared, []byte("return 1")) || !bytes.Contains(prepared, []byte("return 2")) {
+		t.Fatalf("prepared source erased left-operand evaluation: %s", prepared)
+	}
+}
+
+func TestSpecializePreparationSourceDoesNotFoldShadowedSettingOrGotoBody(t *testing.T) {
+	source := []byte(`package main
+const renvoPreparedBackendActive = 0
+func shadowed(renvoPreparedBackendActive int) int {
+	if renvoPreparedBackendActive != 0 { return 1 }
+	return 2
+}
+func labeled(value bool) int {
+	if value { goto chosen }
+	if renvoPreparedBackendActive != 0 { return 3 }
+	return 4
+chosen:
+	return 5
+}
+`)
+	prepared, err := specializePreparationSource("compiler_main.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range [][]byte{
+		[]byte("renvoPreparedBackendActive != 0"), []byte("return 1"),
+		[]byte("goto chosen"), []byte("return 4"), []byte("chosen:"),
+	} {
+		if !bytes.Contains(prepared, text) {
+			t.Fatalf("prepared source removed %q from a shadowed or goto body: %s", text, prepared)
+		}
+	}
+}
+
 func TestCheckedInPreparedPolicy(t *testing.T) {
 	source, err := os.ReadFile("../../../../backend/compiler_target_policy_impl.go")
 	if err != nil {

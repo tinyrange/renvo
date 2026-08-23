@@ -13,12 +13,12 @@ import (
 	"renvo.dev/internal/rtgb"
 )
 
-func nativeCompilerCachePath(directory string, key string) string {
+func nativeCompilerCachePath(directory string, key string, digest [sha256.Size]byte) string {
 	suffix := ""
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
 	}
-	return filepath.Join(directory, key+suffix)
+	return filepath.Join(directory, key+"-"+rtg.HashText(digest)+suffix)
 }
 
 func loadNativeCompilerCache(directory string, key string, descriptor rtg.TargetDescriptor, host string) (Prepared, bool) {
@@ -35,7 +35,9 @@ func loadNativeCompilerCache(directory string, key string, descriptor rtg.Target
 	if !ok || !seededCompatible(manifest, descriptor, host) || len(manifest.Payload) != sha256.Size {
 		return Prepared{}, false
 	}
-	path := nativeCompilerCachePath(directory, key)
+	var expectedDigest [sha256.Size]byte
+	copy(expectedDigest[:], manifest.Payload)
+	path := nativeCompilerCachePath(directory, key, expectedDigest)
 	if !trustedCachedExecutable(path) {
 		return Prepared{}, false
 	}
@@ -44,7 +46,7 @@ func loadNativeCompilerCache(directory string, key string, descriptor rtg.Target
 		return Prepared{}, false
 	}
 	digest := sha256.Sum256(executable)
-	if !bytes.Equal(manifest.Payload, digest[:]) {
+	if digest != expectedDigest {
 		return Prepared{}, false
 	}
 	manifest.Payload = executable
@@ -59,11 +61,11 @@ func loadNativeCompilerCache(directory string, key string, descriptor rtg.Target
 }
 
 func storeNativeCompilerCache(directory string, key string, artifact rtgb.Artifact) (Prepared, error) {
-	path := nativeCompilerCachePath(directory, key)
 	if !validHostExecutable(artifact.Payload, artifact.Host) {
 		return Prepared{}, os.ErrInvalid
 	}
 	digest := sha256.Sum256(artifact.Payload)
+	path := nativeCompilerCachePath(directory, key, digest)
 	manifest := artifact
 	manifest.Payload = digest[:]
 	encoded, ok := rtgb.Encode(manifest)
@@ -102,14 +104,17 @@ func trustedCachedFile(path string, executable bool) bool {
 		return false
 	}
 	if runtime.GOOS == "windows" {
-		return true
+		directoryPath := filepath.Dir(path)
+		directory, directoryErr := os.Stat(directoryPath)
+		return cachedFileOwnedByCurrentUser(path, info) && directoryErr == nil && directory.IsDir() &&
+			cachedFileOwnedByCurrentUser(directoryPath, directory)
 	}
-	if !cachedFileOwnedByCurrentUser(info) || info.Mode().Perm()&0o022 != 0 ||
+	if !cachedFileOwnedByCurrentUser(path, info) || info.Mode().Perm()&0o022 != 0 ||
 		executable && info.Mode().Perm()&0o111 == 0 {
 		return false
 	}
 	directory, err := os.Stat(filepath.Dir(path))
-	return err == nil && directory.IsDir() && cachedFileOwnedByCurrentUser(directory) && directory.Mode().Perm()&0o022 == 0
+	return err == nil && directory.IsDir() && cachedFileOwnedByCurrentUser(filepath.Dir(path), directory) && directory.Mode().Perm()&0o022 == 0
 }
 
 func validHostExecutable(source []byte, host string) bool {

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"renvo.dev/internal/backendbuiltin"
 	"renvo.dev/internal/backendvm32"
@@ -29,6 +30,7 @@ const (
 // Built-in mode resolves the checked-in definition catalog; external mode
 // resolves the definition at path.
 type SeededBackend struct {
+	prepareMu   sync.Mutex
 	path        string
 	stdRoot     string
 	cacheDir    string
@@ -69,7 +71,8 @@ func (backend *SeededBackend) CompileUnitWithOptions(source []byte, options driv
 }
 
 func (backend *SeededBackend) compile(source []byte, options driver.BackendCompileOptions) driver.BackendResult {
-	prepared := backend.prepare(options.Target)
+	compileTarget := backend.compileTarget(options)
+	prepared := backend.prepare(compileTarget)
 	if !prepared.Ok {
 		return driver.BackendResult{Diagnostic: prepared.Diagnostic}
 	}
@@ -95,14 +98,23 @@ func (backend *SeededBackend) compile(source []byte, options driver.BackendCompi
 	if result.Ok || result.Diagnostic.Code != "RENVO-BACKEND-011" {
 		return result
 	}
-	fallback := backend.prepareVMFallback(options.Target)
+	fallback := backend.prepareVMFallback(compileTarget)
 	if !fallback.Ok {
 		return result
 	}
 	return runVMCompiler(fallback.Artifact, request)
 }
 
+func (backend *SeededBackend) compileTarget(options driver.BackendCompileOptions) string {
+	if backend.builtin && options.Mode == driver.ModeKernelModule {
+		return "linux-kernel/amd64"
+	}
+	return options.Target
+}
+
 func (backend *SeededBackend) prepareVMFallback(target string) Prepared {
+	backend.prepareMu.Lock()
+	defer backend.prepareMu.Unlock()
 	if backend.vmPrepared.Ok && backend.vmFor == target {
 		return backend.vmPrepared
 	}
@@ -141,6 +153,8 @@ func (backend *SeededBackend) prepareVMFallback(target string) Prepared {
 }
 
 func (backend *SeededBackend) prepare(target string) Prepared {
+	backend.prepareMu.Lock()
+	defer backend.prepareMu.Unlock()
 	if backend.prepared.Ok && backend.preparedFor == target {
 		return backend.prepared
 	}

@@ -4,6 +4,6 @@ package backendjit
 
 import "os"
 
-func cachedFileOwnedByCurrentUser(info os.FileInfo) bool {
+func cachedFileOwnedByCurrentUser(_ string, info os.FileInfo) bool {
 	return false
 }

@@ -45,6 +45,32 @@ func TestRunTrapsInstructionFallthrough(t *testing.T) {
 	}
 }
 
+func TestRunFastPairDoesNotCrossStepLimit(t *testing.T) {
+	code := []byte{
+		opMovRegImm, regRax, 7, 0, 0, 0,
+		opPushReg, regRax,
+		opExit,
+	}
+	program := testProgram(code, nil, 0)
+	for _, test := range []struct {
+		limit      int
+		trap       int
+		trapPC     int
+		trapOpcode int
+		steps      int
+	}{
+		{limit: 1, trap: TrapStepLimit, trapPC: 6, trapOpcode: opPushReg, steps: 1},
+		{limit: 2, trap: TrapStepLimit, trapPC: 8, trapOpcode: opExit, steps: 2},
+		{limit: 3, trap: TrapNone, trapPC: 8, trapOpcode: opExit, steps: 3},
+	} {
+		result := Run(program, Limits{Steps: test.limit, Memory: 1024})
+		if result.Trap != test.trap || result.TrapPC != test.trapPC ||
+			result.TrapOpcode != test.trapOpcode || result.Steps != test.steps {
+			t.Errorf("limit %d result = %+v", test.limit, result)
+		}
+	}
+}
+
 func TestLoadSizedExtensionMarkers(t *testing.T) {
 	m := machine{memory: make([]byte, minAddress+3)}
 	copy(m.memory[minAddress:], []byte{0x80, 0x00, 0x80})

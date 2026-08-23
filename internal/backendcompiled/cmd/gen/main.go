@@ -352,6 +352,9 @@ func foldPreparationBranches(name string, source []byte) ([]byte, error) {
 		if !ok || function.Body == nil {
 			continue
 		}
+		if preparationBodyHasGoto(function.Body) {
+			continue
+		}
 		function.Body.List = foldPreparationStatements(function.Body.List)
 		markUnusedPreparationLocals(function.Body)
 	}
@@ -360,6 +363,18 @@ func foldPreparationBranches(name string, source []byte) ([]byte, error) {
 		return nil, fmt.Errorf("format prepared branches in %s: %w", name, err)
 	}
 	return output.Bytes(), nil
+}
+
+func preparationBodyHasGoto(body *ast.BlockStmt) bool {
+	found := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		if branch, ok := node.(*ast.BranchStmt); ok && branch.Tok == token.GOTO {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
 }
 
 func markUnusedPreparationLocals(body *ast.BlockStmt) {
@@ -515,14 +530,17 @@ func preparationBool(expression ast.Expr) (bool, bool) {
 			left, leftKnown := preparationBool(item.X)
 			right, rightKnown := preparationBool(item.Y)
 			if item.Op == token.LAND {
-				if leftKnown && !left || rightKnown && !right {
+				// A known right-hand false value does not make the complete
+				// expression removable: Go still evaluates an unknown left side.
+				if leftKnown && !left {
 					return false, true
 				}
 				if leftKnown && rightKnown {
 					return left && right, true
 				}
 			} else {
-				if leftKnown && left || rightKnown && right {
+				// Likewise, x || true must preserve evaluation of x.
+				if leftKnown && left {
 					return true, true
 				}
 				if leftKnown && rightKnown {
@@ -547,7 +565,7 @@ func preparationInteger(expression ast.Expr) (int64, bool) {
 	case *ast.ParenExpr:
 		return preparationInteger(item.X)
 	case *ast.Ident:
-		if item.Name == "renvoPreparedBackendActive" {
+		if item.Name == "renvoPreparedBackendActive" && item.Obj != nil && item.Obj.Kind == ast.Con {
 			return 1, true
 		}
 	case *ast.BasicLit:

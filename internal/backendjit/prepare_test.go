@@ -17,6 +17,7 @@ import (
 
 	"renvo.dev/internal/backendbuiltin"
 	"renvo.dev/internal/backendcompiled"
+	"renvo.dev/internal/backendvm32"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
@@ -118,6 +119,47 @@ func TestConcurrentPublishNeverExposesPartialEntry(t *testing.T) {
 		}
 	}
 	t.Fatalf("published entry has partial size %d", len(got))
+}
+
+func TestSeededBackendConcurrentPrepareSharesCompatibleArtifact(t *testing.T) {
+	resolved := backendbuiltin.Resolve("linux/amd64")
+	generated := rtg.GeneratePreparedBackend(resolved, "linux/amd64")
+	if !generated.Ok {
+		t.Fatalf("generate fixture backend: %#v", generated.Diagnostics)
+	}
+	host := hostTarget()
+	if host == "" {
+		host = backendvm32.Target
+	}
+	artifact := seededArtifact(generated.Descriptor, host, []byte("concurrent prepared fixture"))
+	encoded, ok := rtgb.Encode(artifact)
+	if !ok {
+		t.Fatal("encode fixture backend")
+	}
+	path := filepath.Join(t.TempDir(), "compiler.rtgb")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := NewSeeded(path, "", "")
+	const workers = 16
+	results := make(chan Prepared, workers)
+	var wait sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			results <- backend.Prepare("linux/amd64")
+		}()
+	}
+	wait.Wait()
+	close(results)
+	for prepared := range results {
+		if !prepared.Ok || prepared.Artifact.Descriptor.Name != artifact.Descriptor.Name ||
+			prepared.Artifact.Descriptor.Definition != artifact.Descriptor.Definition ||
+			prepared.Artifact.Descriptor.Version != artifact.Descriptor.Version || prepared.Artifact.Host != host {
+			t.Fatalf("concurrent prepare result = %#v", prepared)
+		}
+	}
 }
 
 func TestCacheKeyPreservesExactTargetAndHostIdentity(t *testing.T) {
@@ -362,6 +404,24 @@ func TestVM32SeedPromotesExternalCompilerAndCachesExecutable(t *testing.T) {
 	if string(immediateExecution) != "PASS\n" {
 		t.Fatalf("custom backend immediate argument output = %q, want PASS", immediateExecution)
 	}
+	kernelBackend := NewBuiltin(stdRoot, cache)
+	kernelResult := driver.CompileFromFS([]string{
+		"-t", "linux/amd64", "-mode=kernel-module", "-o", "edge.ko",
+		filepath.Join(root, "internal", "backendjit", "testdata", "kernel_runtime.go"),
+	}, root, stdRoot, driver.OSFS{}, kernelBackend)
+	if !kernelResult.Ok {
+		t.Fatalf("seeded built-in kernel-module compile failed: %#v", kernelResult.Diagnostic)
+	}
+	if !kernelBackend.prepared.Ok || kernelBackend.prepared.Artifact.Descriptor.Name != "linux-kernel/amd64" {
+		t.Fatalf("kernel-module compiler descriptor = %#v", kernelBackend.prepared.Artifact.Descriptor)
+	}
+	kernelImage, err := elf.NewFile(bytes.NewReader(kernelResult.Binary))
+	if err != nil {
+		t.Fatalf("parse seeded kernel-module output: %v", err)
+	}
+	if kernelImage.Type != elf.ET_REL || kernelImage.Machine != elf.EM_X86_64 {
+		t.Fatalf("seeded kernel-module type/machine = %v/%v", kernelImage.Type, kernelImage.Machine)
+	}
 	if loaded := loadSeeded(first.prepared.Encoded, "example/example64"); !loaded.Ok {
 		t.Fatalf("could not reload exported derived backend: %#v", loaded.Diagnostic)
 	}
@@ -446,6 +506,41 @@ func TestNativeCompilerCacheRejectsAndReplacesCorruptExecutable(t *testing.T) {
 	if !found || !bytes.Equal(loaded.Artifact.Payload, artifact.Payload) {
 		t.Fatal("replacement native compiler was not published atomically")
 	}
+}
+
+func TestConcurrentNativeCompilerPublicationKeepsManifestAndExecutableConsistent(t *testing.T) {
+	resolved := backendbuiltin.Resolve("linux/amd64")
+	generated := rtg.GeneratePreparedBackend(resolved, "linux/amd64")
+	if !generated.Ok {
+		t.Fatalf("generate cache fixture descriptor: %#v", generated.Diagnostics)
+	}
+	directory := t.TempDir()
+	key := "compiler-concurrent-publication"
+	artifacts := []rtgb.Artifact{
+		seededArtifact(generated.Descriptor, "linux/amd64", []byte("\x7fELFcompiler-concurrent-one")),
+		seededArtifact(generated.Descriptor, "linux/amd64", []byte("\x7fELFcompiler-concurrent-two")),
+	}
+	var wait sync.WaitGroup
+	for i := range artifacts {
+		wait.Add(1)
+		go func(artifact rtgb.Artifact) {
+			defer wait.Done()
+			if _, err := storeNativeCompilerCache(directory, key, artifact); err != nil {
+				t.Errorf("store concurrent compiler: %v", err)
+			}
+		}(artifacts[i])
+	}
+	wait.Wait()
+	loaded, found := loadNativeCompilerCache(directory, key, generated.Descriptor, "linux/amd64")
+	if !found {
+		t.Fatal("concurrent publication left no committed compiler")
+	}
+	for _, artifact := range artifacts {
+		if bytes.Equal(loaded.Artifact.Payload, artifact.Payload) {
+			return
+		}
+	}
+	t.Fatalf("loaded compiler is not one complete published artifact: %q", loaded.Artifact.Payload)
 }
 
 func TestLinuxAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {

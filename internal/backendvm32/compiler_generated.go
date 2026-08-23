@@ -3,7 +3,7 @@
 
 package backendvm32
 
-const CompilerSourceDigest = "ec1f5944f34fa038cec60781fbea0acd016f35201c9681ea4932553a9e1fefc6"
+const CompilerSourceDigest = "c91e3f962aee7f230d5f49484dc5162e7ab0cc43fba61c81641b0c9e3133766a"
 
 // source: backend/compiler_common_impl.go
 
