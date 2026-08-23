@@ -30,3 +30,16 @@ func TestQuote(t *testing.T) {
 		t.Fatalf("Unquote accepted invalid input")
 	}
 }
+
+func TestFloats(t *testing.T) {
+	value, err := ParseFloat("0.02", 64)
+	if err != nil || value != 0.02 {
+		t.Fatalf("ParseFloat = %.17g, %v", value, err)
+	}
+	if got := FormatFloat(value, 'g', -1, 64); got != "0.02" {
+		t.Fatalf("FormatFloat = %q", got)
+	}
+	if got := string(AppendFloat([]byte("v="), 0.2, 'g', -1, 64)); got != "v=0.2" {
+		t.Fatalf("AppendFloat = %q", got)
+	}
+}

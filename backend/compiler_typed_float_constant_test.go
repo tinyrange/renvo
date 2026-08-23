@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestTypedFloatConstantUsesFloatRepresentation(t *testing.T) {
+func TestTypedFloatConstantDoesNotUseIntegerRepresentation(t *testing.T) {
 	program := renvoParseProgram([]byte("package main\ntype Scalar = float64\nconst rowHeight Scalar = 34\n"))
 	if !program.ok {
 		t.Fatal("failed to parse source")
@@ -21,8 +21,8 @@ func TestTypedFloatConstantUsesFloatRepresentation(t *testing.T) {
 			gen.prog = &program
 			gen.meta = &meta
 			result := renvoEvalConstByName(&gen, global.nameStart, global.nameEnd)
-			if !result.ok || result.value != 34*4 {
-				t.Fatalf("rowHeight representation = %d (ok %v), want %d", result.value, result.ok, 34*4)
+			if result.ok {
+				t.Fatalf("typed floating-point constant leaked through the integer constant evaluator as %d", result.value)
 			}
 			return
 		}

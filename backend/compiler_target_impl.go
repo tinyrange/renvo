@@ -130,7 +130,7 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if target == renvoTargetWasiWasm32 {
 		return compileWasiWasm32Arena(input, output, arenaSize)
 	}
-	if target == renvoTargetVM32 {
+	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		return compileVM32Arena(input, output, arenaSize)
 	}
 	if target == renvoTargetDarwinArm64 {
@@ -237,6 +237,10 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 	}
 	renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
+	if prog.ok && target == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
+		source = renvoAppendSoftFloatSource(source)
+		prog = renvoParseProgramWithContext(source, context)
+	}
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 	if !result.ok {
 		return nil, false
@@ -257,6 +261,10 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 	context.objectFile = options.ObjectFile
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
+	if prog.ok && target == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
+		source = renvoAppendSoftFloatSource(source)
+		prog = renvoParseProgramWithContext(source, context)
+	}
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 	if !result.ok {
 		return false

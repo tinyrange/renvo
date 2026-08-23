@@ -169,7 +169,7 @@ func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wo
 	allIntegerWords := wordCount == fn.paramCount
 	for i := 0; i < fn.paramCount && allIntegerWords; i++ {
 		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-		if typ.kind == renvoTypeFloat64 || typ.kind == renvoTypeString || typ.kind == renvoTypeSlice || typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
+		if renvoTypeKindIsFloat(typ.kind) || typ.kind == renvoTypeString || typ.kind == renvoTypeSlice || typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
 			allIntegerWords = false
 		}
 	}
@@ -188,22 +188,19 @@ func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wo
 		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
 		integerDouble := glOrthoCall || (objcRectCall && i >= 2 && i < 6) || (objcSizeCall && i >= 2 && i < 4)
 		integerSingle := glPixelZoomCall
-		if typ.kind == renvoTypeFloat64 || integerDouble || integerSingle {
+		if renvoTypeKindIsFloat(typ.kind) || integerDouble || integerSingle {
 			if floatReg >= 8 {
 				return false
 			}
 			renvoAarch64AsmPopReg(a, 16)
-			if integerSingle {
+			if typ.kind == renvoTypeFloat32 {
+				renvoAarch64AsmEmit(a, 0x1e270000|(16<<5)|floatReg) // fmov sN, w16
+			} else if typ.kind == renvoTypeFloat64 {
+				renvoAarch64AsmEmit(a, 0x9e670000|(16<<5)|floatReg) // fmov dN, x16
+			} else if integerSingle {
 				renvoAarch64AsmEmit(a, 0x9e220000|(16<<5)|floatReg)
 			} else {
 				renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|floatReg)
-			}
-			if typ.kind == renvoTypeFloat64 && !integerDouble {
-				// RENVO represents float64 values as integers scaled by four. Convert
-				// them to an ABI double only at the foreign-call boundary.
-				renvoAarch64AsmMovRegImm(a, 16, 4)
-				renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
-				renvoAarch64AsmEmit(a, 0x1e601800|(31<<16)|(floatReg<<5)|floatReg)
 			}
 			floatReg++
 			consumed++
@@ -243,7 +240,8 @@ func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wo
 		intReg++
 	}
 	renvoAsmCallLabel(a, a.darwinImports[importIndex].label)
-	if renvoResolveType(g.meta, fn.resultType).kind == renvoTypeFloat64 {
+	resultKind := renvoResolveType(g.meta, fn.resultType).kind
+	if renvoTypeKindIsFloat(resultKind) {
 		resultFloatReg := 0
 		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgPointY") {
 			resultFloatReg = 1
@@ -257,11 +255,11 @@ func renvoDarwinArm64EmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wo
 		if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "objcMsgRectHeight") {
 			resultFloatReg = 3
 		}
-		// Convert an ABI double result back to RENVO's scaled representation.
-		renvoAarch64AsmMovRegImm(a, 16, 4)
-		renvoAarch64AsmEmit(a, 0x9e620000|(16<<5)|31)
-		renvoAarch64AsmEmit(a, 0x1e600800|(31<<16)|(resultFloatReg<<5)|resultFloatReg)
-		renvoAarch64AsmEmit(a, 0x9e780000|(resultFloatReg<<5))
+		if resultKind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e260000|(resultFloatReg<<5)) // fmov w0, sN
+		} else {
+			renvoAarch64AsmEmit(a, 0x9e660000|(resultFloatReg<<5)) // fmov x0, dN
+		}
 	}
 	return true
 }

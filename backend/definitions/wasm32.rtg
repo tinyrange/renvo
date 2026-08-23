@@ -1424,7 +1424,44 @@ go backend {
 			right := renvoWasm32GetS32(code, pc+9)
 			wasmOp := int(RTGByteAt(code, pc+13))
 			recipe := "\xff\x06\x00\xff\x0b\x01\xff\x0b\x02\xff\x0e\x03\xff\x0d\x00"
-			if wasmOp >= 0x86 {
+			if wasmOp >= 0x92 && wasmOp <= 0x98 {
+				// Float32 values occupy the low word of a wide frame slot. Convert
+				// between that raw representation and WebAssembly's native f32 type.
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0b\x02\xa7\xbe\xff\x0e\x03\xbc\xad\xff\x0d\x00"
+			} else if wasmOp >= 0xa0 && wasmOp <= 0xa6 {
+				// Float64 values already fill a wide slot; only reinterpret their bits.
+				recipe = "\xff\x06\x00\xff\x0b\x01\xbf\xff\x0b\x02\xbf\xff\x0e\x03\xbd\xff\x0d\x00"
+			} else if wasmOp == 0xb2 || wasmOp == 0xb3 {
+				// i32 -> f32
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xff\x0e\x03\xbc\xad\xff\x0d\x00"
+			} else if wasmOp == 0xb4 || wasmOp == 0xb5 {
+				// i64 -> f32
+				recipe = "\xff\x06\x00\xff\x0b\x01\xff\x0e\x03\xbc\xad\xff\x0d\x00"
+			} else if wasmOp == 0xb7 || wasmOp == 0xb8 {
+				// i32 -> f64
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xff\x0e\x03\xbd\xff\x0d\x00"
+			} else if wasmOp == 0xb9 || wasmOp == 0xba {
+				// i64 -> f64
+				recipe = "\xff\x06\x00\xff\x0b\x01\xff\x0e\x03\xbd\xff\x0d\x00"
+			} else if wasmOp == 0xb6 {
+				// f64 -> f32
+				recipe = "\xff\x06\x00\xff\x0b\x01\xbf\xff\x0e\x03\xbc\xad\xff\x0d\x00"
+			} else if wasmOp == 0xbb {
+				// f32 -> f64
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0e\x03\xbd\xff\x0d\x00"
+			} else if wasmOp == 0xa8 || wasmOp == 0xa9 {
+				// f32 -> i32
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0e\x03\xad\xff\x0d\x00"
+			} else if wasmOp == 0xaa || wasmOp == 0xab {
+				// f64 -> i32
+				recipe = "\xff\x06\x00\xff\x0b\x01\xbf\xff\x0e\x03\xad\xff\x0d\x00"
+			} else if wasmOp == 0xae || wasmOp == 0xaf {
+				// f32 -> i64
+				recipe = "\xff\x06\x00\xff\x0b\x01\xa7\xbe\xff\x0e\x03\xff\x0d\x00"
+			} else if wasmOp == 0xb0 || wasmOp == 0xb1 {
+				// f64 -> i64
+				recipe = "\xff\x06\x00\xff\x0b\x01\xbf\xff\x0e\x03\xff\x0d\x00"
+			} else if wasmOp >= 0x86 {
 				// Go shifts do not mask counts: shifts by 64 or more produce zero,
 				// or the sign word for a signed right shift.
 				if wasmOp == 0x87 {
@@ -1445,7 +1482,14 @@ go backend {
 			return
 		}
 		if op == renvoWasm32OpWideCompare {
-			renvoWasmAppendRecipe(out, "\xff\x0b\x00\xff\x0b\x01\xff\x0e\x02\xff\x05\x03", renvoWasm32GetS32(code, pc+1), renvoWasm32GetS32(code, pc+5), int(RTGByteAt(code, pc+9)), renvoWasm32RegRax)
+			wasmOp := int(RTGByteAt(code, pc+9))
+			recipe := "\xff\x0b\x00\xff\x0b\x01\xff\x0e\x02\xff\x05\x03"
+			if wasmOp >= 0x5b && wasmOp <= 0x60 {
+				recipe = "\xff\x0b\x00\xa7\xbe\xff\x0b\x01\xa7\xbe\xff\x0e\x02\xff\x05\x03"
+			} else if wasmOp >= 0x61 && wasmOp <= 0x66 {
+				recipe = "\xff\x0b\x00\xbf\xff\x0b\x01\xbf\xff\x0e\x02\xff\x05\x03"
+			}
+			renvoWasmAppendRecipe(out, recipe, renvoWasm32GetS32(code, pc+1), renvoWasm32GetS32(code, pc+5), wasmOp, renvoWasm32RegRax)
 			return
 		}
 		if op == renvoWasm32OpLoadStack {

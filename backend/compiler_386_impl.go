@@ -242,6 +242,110 @@ func renvo386AsmStoreRaxBss(a *renvoAsm, bssOff int) {
 	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
 }
 
+func renvo386AsmX87BinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
+	loadOpcode := 0xdd
+	storeOpcode := 0xdd
+	if size == 4 {
+		loadOpcode = 0xd9
+		storeOpcode = 0xd9
+	}
+	renvoAsmStackMem(a, left, loadOpcode, 0x45, 0x85) // fld
+	opcode := 0xdc
+	shortModRM := 0x45
+	longModRM := 0x85
+	if size == 4 {
+		opcode = 0xd8
+	}
+	if op == '*' {
+		shortModRM, longModRM = 0x4d, 0x8d
+	} else if op == '-' {
+		shortModRM, longModRM = 0x65, 0xa5
+	} else if op == '/' {
+		shortModRM, longModRM = 0x75, 0xb5
+	} else if op != '+' {
+		return false
+	}
+	renvoAsmStackMem(a, right, opcode, shortModRM, longModRM)
+	renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d) // fstp
+	return true
+}
+
+func renvo386AsmX87CompareStack(a *renvoAsm, left int, right int, size int) {
+	opcode := 0xdd
+	if size == 4 {
+		opcode = 0xd9
+	}
+	renvoAsmStackMem(a, right, opcode, 0x45, 0x85)
+	renvoAsmStackMem(a, left, opcode, 0x45, 0x85)
+	renvoAsmEmit16(a, 0xe9df) // fucomip st(0), st(1)
+	renvoAsmEmit16(a, 0xd8dd) // fstp st(0)
+}
+
+func renvo386AsmX87IntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
+	if !signed && intSize < 8 {
+		renvoAsmStoreStackImm(a, offset-4, 0)
+		intSize = 8
+	}
+	if intSize == 8 {
+		renvoAsmStackMem(a, offset, 0xdf, 0x6d, 0xad) // fild qword
+	} else {
+		renvoAsmStackMem(a, offset, 0xdb, 0x45, 0x85) // fild dword
+	}
+	if !signed && intSize == 8 {
+		converted := renvoAsmNewLabel(a)
+		renvoAsmJcmpStackImm(a, offset-4, 0, converted, 0x9d)
+		// FILD is signed. For the upper uint64 half, adding exactly 2^64
+		// converts its negative two's-complement interpretation to the
+		// corresponding non-negative value before the final rounding step.
+		renvoAsmStoreStackImm(a, offset, 0)
+		renvoAsmStoreStackImm(a, offset-4, 0x43f00000)
+		renvoAsmStackMem(a, offset, 0xdc, 0x45, 0x85) // fadd qword
+		renvoAsmMarkLabel(a, converted)
+	}
+	if floatSize == 4 {
+		renvoAsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
+	} else {
+		renvoAsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
+	}
+}
+
+func renvo386AsmX87ConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
+	loadOpcode := 0xdd
+	if sourceSize == 4 {
+		loadOpcode = 0xd9
+	}
+	storeOpcode := 0xdd
+	if destSize == 4 {
+		storeOpcode = 0xd9
+	}
+	renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+	renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)  // fstp
+}
+
+func renvo386AsmX87FloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
+	loadOpcode := 0xdd
+	if floatSize == 4 {
+		loadOpcode = 0xd9
+	}
+	renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+	storeOpcode := 0xdb                                 // fisttp dword
+	if intSize == 8 || !signed {
+		storeOpcode = 0xdd // fisttp qword
+	}
+	renvoAsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
+}
+
+func renvo386AsmX87NegateStack(a *renvoAsm, offset int, size int) {
+	highOffset := offset
+	if size == 8 {
+		highOffset -= 4
+	}
+	renvoAsmLoadPrimaryStack(a, highOffset)
+	renvoAsmEmit8(a, 0x35) // xor eax, imm32
+	renvoAsmEmit32(a, -2147483648)
+	renvoAsmStorePrimaryStack(a, highOffset)
+}
+
 func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
 	a := &g.asm
 	if loc.mem {

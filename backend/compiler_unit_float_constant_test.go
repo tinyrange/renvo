@@ -12,7 +12,7 @@ import (
 	internalunit "renvo.dev/internal/unit"
 )
 
-func TestLinkedUnitUntypedFloatConstantKeepsScaledValue(t *testing.T) {
+func TestLinkedUnitUntypedFloatConstantKeepsExactValue(t *testing.T) {
 	source := []byte(`package main
 
 const value = (10 + 0.0)
