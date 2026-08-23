@@ -1,5 +1,183 @@
 package main
 
+func renvoArmAsmVFPLoadStack(a *renvoAsm, offset int, reg int, size int) {
+	renvoArmAsmLeaRegStack(a, renvoArmRegAddr, offset)
+	insn := 0xed9c0b00 | reg<<12
+	if size == 4 {
+		insn = 0xed9c0a00
+		if reg == 1 {
+			insn = 0xeddc0a00
+		}
+	}
+	renvoArmAsmEmit(a, insn)
+}
+
+func renvoArmAsmVFPStoreStack(a *renvoAsm, offset int, size int) {
+	renvoArmAsmLeaRegStack(a, renvoArmRegAddr, offset)
+	insn := 0xed8c0b00
+	if size == 4 {
+		insn = 0xed8c0a00
+	}
+	renvoArmAsmEmit(a, insn)
+}
+
+func renvoArmAsmVFPBinaryStack(a *renvoAsm, dest int, left int, right int, op byte, size int) bool {
+	renvoArmAsmVFPLoadStack(a, left, 0, size)
+	renvoArmAsmVFPLoadStack(a, right, 1, size)
+	insn := 0
+	if size == 4 {
+		if op == '+' {
+			insn = 0xee300a20
+		} else if op == '-' {
+			insn = 0xee300a60
+		} else if op == '*' {
+			insn = 0xee200a20
+		} else if op == '/' {
+			insn = 0xee800a20
+		}
+	} else {
+		if op == '+' {
+			insn = 0xee300b01
+		} else if op == '-' {
+			insn = 0xee300b41
+		} else if op == '*' {
+			insn = 0xee200b01
+		} else if op == '/' {
+			insn = 0xee800b01
+		}
+	}
+	if insn == 0 {
+		return false
+	}
+	renvoArmAsmEmit(a, insn)
+	renvoArmAsmVFPStoreStack(a, dest, size)
+	return true
+}
+
+func renvoArmAsmVFPCompareStack(a *renvoAsm, left int, right int, size int) {
+	renvoArmAsmVFPLoadStack(a, left, 0, size)
+	renvoArmAsmVFPLoadStack(a, right, 1, size)
+	if size == 4 {
+		renvoArmAsmEmit(a, 0xeeb40a60)
+	} else {
+		renvoArmAsmEmit(a, 0xeeb40b41)
+	}
+	renvoArmAsmEmit(a, 0xeef1fa10)
+}
+
+func renvoArmAsmVFPConvertFloatStack(a *renvoAsm, dest int, source int, sourceSize int, destSize int) {
+	renvoArmAsmVFPLoadStack(a, source, 0, sourceSize)
+	if sourceSize == 4 && destSize == 8 {
+		renvoArmAsmEmit(a, 0xeeb70ac0)
+	} else if sourceSize == 8 && destSize == 4 {
+		renvoArmAsmEmit(a, 0xeeb70bc0)
+	}
+	renvoArmAsmVFPStoreStack(a, dest, destSize)
+}
+
+func renvoArmAsmVFPIntToFloatStack(a *renvoAsm, offset int, intSize int, floatSize int, signed bool) {
+	if intSize == 8 {
+		renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
+		renvoArmAsmLoadRegStack(a, renvoArmRegRdx, offset-4)
+		renvoArmAsmEmit(a, 0xee000a10) // vmov s0, r0
+		renvoArmAsmEmit(a, 0xee011a10) // vmov s2, r1
+		renvoArmAsmEmit(a, 0xeeb80b40) // vcvt.f64.u32 d0, s0
+		highConvert := 0xeeb81bc1      // vcvt.f64.s32 d1, s2
+		if !signed {
+			highConvert = 0xeeb81b41 // vcvt.f64.u32 d1, s2
+		}
+		renvoArmAsmEmit(a, highConvert)
+		renvoArmAsmMovRegImm(a, renvoArmRegRcx, 0)
+		renvoArmAsmMovRegImm(a, renvoArmRegRdi, 0x41f00000)
+		renvoArmAsmEmit(a, 0xec432b12) // vmov d2, r2, r3 (2^32)
+		renvoArmAsmEmit(a, 0xee211b02) // vmul.f64 d1, d1, d2
+		renvoArmAsmEmit(a, 0xee310b00) // vadd.f64 d0, d1, d0
+		if floatSize == 4 {
+			renvoArmAsmEmit(a, 0xeeb70bc0) // vcvt.f32.f64 s0, d0
+		}
+		renvoArmAsmVFPStoreStack(a, offset, floatSize)
+		return
+	}
+	renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
+	renvoArmAsmEmit(a, 0xee000a10) // vmov s0, r0
+	if floatSize == 4 {
+		op := 0xeeb80ac0 // vcvt.f32.s32 s0, s0
+		if !signed {
+			op = 0xeeb80a40 // vcvt.f32.u32 s0, s0
+		}
+		renvoArmAsmEmit(a, op)
+	} else {
+		op := 0xeeb80bc0 // vcvt.f64.s32 d0, s0
+		if !signed {
+			op = 0xeeb80b40 // vcvt.f64.u32 d0, s0
+		}
+		renvoArmAsmEmit(a, op)
+	}
+	renvoArmAsmVFPStoreStack(a, offset, floatSize)
+}
+
+func renvoArmAsmVFPFloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
+	if intSize == 8 {
+		signOffset := source
+		if floatSize == 8 {
+			signOffset = source - 4
+		}
+		renvoArmAsmLoadRegStack(a, renvoArmRegRdi, signOffset)
+		renvoArmAsmEmit(a, 0xe1a03fa3) // lsr r3, r3, #31
+		renvoArmAsmVFPLoadStack(a, source, 0, floatSize)
+		if floatSize == 4 {
+			renvoArmAsmEmit(a, 0xeeb70ac0) // vcvt.f64.f32 d0, s0
+		}
+		renvoArmAsmEmit(a, 0xeeb00bc0) // vabs.f64 d0, d0
+		renvoArmAsmMovRegImm(a, renvoArmRegRcx, 0)
+		renvoArmAsmMovRegImm(a, renvoArmRegRsi, 0x41f00000)
+		renvoArmAsmEmit(a, 0xec442b12) // vmov d2, r2, r4 (2^32)
+		renvoArmAsmEmit(a, 0xee801b02) // vdiv.f64 d1, d0, d2
+		renvoArmAsmEmit(a, 0xeebc1bc1) // vcvt.u32.f64 s2, d1
+		renvoArmAsmEmit(a, 0xee111a10) // vmov r1, s2
+		renvoArmAsmEmit(a, 0xeeb81b41) // vcvt.f64.u32 d1, s2
+		renvoArmAsmEmit(a, 0xee211b02) // vmul.f64 d1, d1, d2
+		renvoArmAsmEmit(a, 0xee300b41) // vsub.f64 d0, d0, d1
+		renvoArmAsmEmit(a, 0xeebc0bc0) // vcvt.u32.f64 s0, d0
+		renvoArmAsmEmit(a, 0xee100a10) // vmov r0, s0
+		if signed {
+			nonnegative := renvoAsmNewLabel(a)
+			renvoArmAsmCmpRegImm(a, renvoArmRegRdi, 0)
+			renvoArmAsmBCondLabel(a, nonnegative, 0)
+			renvoArmAsmEmit(a, 0xe2700000) // rsbs r0, r0, #0
+			renvoArmAsmEmit(a, 0xe2e11000) // rsc r1, r1, #0
+			renvoAsmMarkLabel(a, nonnegative)
+		}
+		renvoArmAsmStoreRegStack(a, renvoArmRegRax, dest)
+		renvoArmAsmStoreRegStack(a, renvoArmRegRdx, dest-4)
+		return
+	}
+	renvoArmAsmVFPLoadStack(a, source, 0, floatSize)
+	if floatSize == 4 {
+		op := 0xeebd0ac0 // vcvt.s32.f32 s0, s0
+		if !signed {
+			op = 0xeebc0ac0 // vcvt.u32.f32 s0, s0
+		}
+		renvoArmAsmEmit(a, op)
+	} else {
+		op := 0xeebd0bc0 // vcvt.s32.f64 s0, d0
+		if !signed {
+			op = 0xeebc0bc0 // vcvt.u32.f64 s0, d0
+		}
+		renvoArmAsmEmit(a, op)
+	}
+	renvoArmAsmEmit(a, 0xee100a10) // vmov r0, s0
+	renvoArmAsmStoreRegStack(a, renvoArmRegRax, dest)
+	if intSize == 8 {
+		if signed {
+			renvoArmAsmEmit(a, 0xe1a01fc0) // asr r1, r0, #31
+		} else {
+			renvoArmAsmEmit(a, 0xe3a01000) // mov r1, #0
+		}
+		renvoArmAsmStoreRegStack(a, renvoArmRegRdx, dest-4)
+	}
+}
+
 func renvoArmEnsureWideBinaryHelper(g *renvoLinearGen) int {
 	renvoNonNil(g)
 	if g.wideBinaryLabel > 0 {

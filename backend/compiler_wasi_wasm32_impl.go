@@ -1,5 +1,722 @@
 package main
 
+// renvoSoftFloatSource is compiled only when a VM32 program reaches
+// one of these helpers.  Keeping the fallback in ordinary Renvo source makes
+// the IEEE implementation independent of the host compiler and exercises the
+// same integer backend as user code.  The algorithms follow the structure of
+// Go's runtime softfloat implementation (BSD licensed), with the division
+// primitive expressed as a small fixed-width long division so it also works on
+// the deliberately minimal VM32 instruction set.
+const renvoSoftFloatSource = `
+const __renvoSoftMant64 uint = 52
+const __renvoSoftExp64 uint = 11
+const __renvoSoftBias64 = -1023
+const __renvoSoftNaN64 uint64 = 0x7ff8000000000000
+const __renvoSoftInf64 uint64 = 0x7ff0000000000000
+const __renvoSoftNeg64 uint64 = 0x8000000000000000
+
+func __renvoSoftUnpack64(f uint64) (sign uint64, mant uint64, exp int) {
+	sign = f & 0x8000000000000000
+	mant = f & 0x000fffffffffffff
+	exp = int(f >> __renvoSoftMant64) & 0x7ff
+	if exp == 0x7ff {
+		if mant != 0 {
+			exp = 2049
+			return
+		}
+		exp = 2048
+		return
+	}
+	if exp == 0 {
+		if mant != 0 {
+			exp = __renvoSoftBias64 + 1
+			for mant < uint64(1)<<__renvoSoftMant64 {
+				mant <<= 1
+				exp--
+			}
+		}
+		return
+	}
+	mant |= uint64(1) << __renvoSoftMant64
+	exp += __renvoSoftBias64
+	return
+}
+
+func __renvoSoftPack64(sign uint64, mant uint64, exp int, trunc uint64) uint64 {
+	mant0 := mant
+	exp0 := exp
+	trunc0 := trunc
+	if mant == 0 {
+		return sign
+	}
+	for mant < uint64(1)<<__renvoSoftMant64 {
+		mant <<= 1
+		exp--
+	}
+	for mant >= uint64(4)<<__renvoSoftMant64 {
+		trunc |= mant & 1
+		mant >>= 1
+		exp++
+	}
+	if mant >= uint64(2)<<__renvoSoftMant64 {
+		if mant&1 != 0 && (trunc != 0 || mant&2 != 0) {
+			mant++
+			if mant >= uint64(4)<<__renvoSoftMant64 {
+				mant >>= 1
+				exp++
+			}
+		}
+		mant >>= 1
+		exp++
+	}
+	if exp >= 1024 {
+		return sign ^ 0x7ff0000000000000
+	}
+	if exp < __renvoSoftBias64+1 {
+		if exp < __renvoSoftBias64-int(__renvoSoftMant64) {
+			return sign
+		}
+		mant = mant0
+		exp = exp0
+		trunc = trunc0
+		for exp < __renvoSoftBias64 {
+			trunc |= mant & 1
+			mant >>= 1
+			exp++
+		}
+		if mant&1 != 0 && (trunc != 0 || mant&2 != 0) {
+			mant++
+		}
+		mant >>= 1
+		exp++
+		if mant < uint64(1)<<__renvoSoftMant64 {
+			return sign | mant
+		}
+	}
+	return sign | uint64(exp-__renvoSoftBias64)<<__renvoSoftMant64 | mant&0x000fffffffffffff
+}
+
+func __renvoSoftAdd64(f uint64, g uint64) uint64 {
+	fs, fm, fe := __renvoSoftUnpack64(f)
+	gs, gm, ge := __renvoSoftUnpack64(g)
+	fi := fe == 2048
+	fn := fe == 2049
+	gi := ge == 2048
+	gn := ge == 2049
+	if fn || gn {
+		return 0x7ff8000000000000
+	}
+	if fi && gi && fs != gs {
+		return 0x7ff8000000000000
+	}
+	if fi {
+		return f
+	}
+	if gi {
+		return g
+	}
+	if fm == 0 && gm == 0 && fs != 0 && gs != 0 {
+		return f
+	}
+	if fm == 0 {
+		if gm == 0 {
+			g ^= gs
+		}
+		return g
+	}
+	if gm == 0 {
+		return f
+	}
+	if fe < ge || fe == ge && fm < gm {
+		tf, ts, tm, te := f, fs, fm, fe
+		f, fs, fm, fe = g, gs, gm, ge
+		g, gs, gm, ge = tf, ts, tm, te
+	}
+	shift := uint(fe - ge)
+	fm <<= 2
+	gm <<= 2
+	trunc := uint64(0)
+	if shift >= 64 {
+		trunc = gm
+		gm = 0
+	} else if shift != 0 {
+		trunc = gm & (uint64(1)<<shift - 1)
+		gm >>= shift
+	}
+	if fs == gs {
+		fm += gm
+	} else {
+		fm -= gm
+		if trunc != 0 {
+			fm--
+		}
+	}
+	if fm == 0 {
+		fs = 0
+	}
+	return __renvoSoftPack64(fs, fm, fe-2, trunc)
+}
+
+func __renvoSoftSub64(f uint64, g uint64) uint64 {
+	return __renvoSoftAdd64(f, g^0x8000000000000000)
+}
+
+func __renvoSoftMul128(u uint64, v uint64) (lo uint64, hi uint64) {
+	u0 := u & 0xffffffff
+	u1 := u >> 32
+	v0 := v & 0xffffffff
+	v1 := v >> 32
+	w0 := u0 * v0
+	t := u1*v0 + w0>>32
+	w1 := t & 0xffffffff
+	w2 := t >> 32
+	w1 += u0 * v1
+	lo = u * v
+	hi = u1*v1 + w2 + w1>>32
+	return
+}
+
+func __renvoSoftMul64(f uint64, g uint64) uint64 {
+	fs, fm, fe := __renvoSoftUnpack64(f)
+	gs, gm, ge := __renvoSoftUnpack64(g)
+	fi := fe == 2048
+	fn := fe == 2049
+	gi := ge == 2048
+	gn := ge == 2049
+	if fn || gn {
+		return 0x7ff8000000000000
+	}
+	if fi && gi {
+		return f ^ gs
+	}
+	if fi && gm == 0 || fm == 0 && gi {
+		return 0x7ff8000000000000
+	}
+	if fm == 0 {
+		return f ^ gs
+	}
+	if gm == 0 {
+		return g ^ fs
+	}
+	lo, hi := __renvoSoftMul128(fm, gm)
+	shift := __renvoSoftMant64 - 1
+	trunc := lo & (uint64(1)<<shift - 1)
+	mant := hi<<(64-shift) | lo>>shift
+	return __renvoSoftPack64(fs^gs, mant, fe+ge-1, trunc)
+}
+
+func __renvoSoftDiv128(hi uint64, lo uint64, divisor uint64) (quotient uint64, remainder uint64) {
+	quotient = 0
+	remainder = hi
+	for bit := 0; bit < 64; bit++ {
+		overflow := remainder >> 63
+		remainder = remainder<<1 | lo>>63
+		lo <<= 1
+		quotient <<= 1
+		if overflow != 0 || remainder >= divisor {
+			remainder -= divisor
+			quotient |= 1
+		}
+	}
+	return
+}
+
+func __renvoSoftDiv64(f uint64, g uint64) uint64 {
+	if g&0x7fffffffffffffff == 0 {
+		if f&0x7fffffffffffffff == 0 {
+			return 0x7ff8000000000000
+		}
+		return (f^g)&0x8000000000000000 | 0x7ff0000000000000
+	}
+	fs, fm, fe := __renvoSoftUnpack64(f)
+	gs, gm, ge := __renvoSoftUnpack64(g)
+	fi := fe == 2048
+	fn := fe == 2049
+	gi := ge == 2048
+	gn := ge == 2049
+	if fn || gn {
+		return 0x7ff8000000000000
+	}
+	if fi && gi {
+		return 0x7ff8000000000000
+	}
+	if !fi && !gi && fm == 0 && gm == 0 {
+		return 0x7ff8000000000000
+	}
+	if fi {
+		return (fs ^ gs) | 0x7ff0000000000000
+	}
+	if !gi && gm == 0 {
+		return (fs ^ gs) | 0x7ff0000000000000
+	}
+	if gi {
+		return fs ^ gs
+	}
+	if fm == 0 {
+		return fs ^ gs
+	}
+	shift := __renvoSoftMant64 + 2
+	q, r := __renvoSoftDiv128(fm>>(64-shift), fm<<shift, gm)
+	return __renvoSoftPack64(fs^gs, q, fe-ge-2, r)
+}
+
+func __renvoSoftCompareCode64(f uint64, g uint64) int {
+	fa := f & 0x7fffffffffffffff
+	ga := g & 0x7fffffffffffffff
+	if fa > 0x7ff0000000000000 || ga > 0x7ff0000000000000 {
+		return 2
+	}
+	if fa == 0 && ga == 0 {
+		return 0
+	}
+	fs := f & 0x8000000000000000
+	gs := g & 0x8000000000000000
+	if fs > gs {
+		return -1
+	}
+	if fs < gs {
+		return 1
+	}
+	if fs == 0 {
+		if f < g {
+			return -1
+		}
+		if f > g {
+			return 1
+		}
+	} else {
+		if f > g {
+			return -1
+		}
+		if f < g {
+			return 1
+		}
+	}
+	return 0
+}
+
+func __renvoSoftCompare64(f uint64, g uint64) (cmp int, nan bool) {
+	nan = false
+	cmp = __renvoSoftCompareCode64(f, g)
+	if cmp == 2 {
+		cmp = 0
+		nan = true
+	}
+	return
+}
+
+func __renvoSoftEq64(f uint64, g uint64) bool {
+	return __renvoSoftCompareCode64(f, g) == 0
+}
+func __renvoSoftNe64(f uint64, g uint64) bool {
+	return __renvoSoftCompareCode64(f, g) != 0
+}
+func __renvoSoftLt64(f uint64, g uint64) bool {
+	return __renvoSoftCompareCode64(f, g) < 0
+}
+func __renvoSoftLe64(f uint64, g uint64) bool {
+	cmp := __renvoSoftCompareCode64(f, g)
+	return cmp != 2 && cmp <= 0
+}
+func __renvoSoftGt64(f uint64, g uint64) bool {
+	cmp := __renvoSoftCompareCode64(f, g)
+	return cmp != 2 && cmp > 0
+}
+func __renvoSoftGe64(f uint64, g uint64) bool {
+	cmp := __renvoSoftCompareCode64(f, g)
+	return cmp != 2 && cmp >= 0
+}
+
+func __renvoSoftEqWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftEq64(f, g) { return 1 }
+	return 0
+}
+func __renvoSoftNeWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftNe64(f, g) { return 1 }
+	return 0
+}
+func __renvoSoftLtWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftLt64(f, g) { return 1 }
+	return 0
+}
+func __renvoSoftLeWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftLe64(f, g) { return 1 }
+	return 0
+}
+func __renvoSoftGtWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftGt64(f, g) { return 1 }
+	return 0
+}
+func __renvoSoftGeWord64(f uint64, g uint64) uint64 {
+	if __renvoSoftGe64(f, g) { return 1 }
+	return 0
+}
+
+func __renvoSoftJoin64(low uint32, high uint32) uint64 {
+	return uint64(high)<<32 | uint64(low)
+}
+func __renvoSoftEqWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftEq64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+func __renvoSoftNeWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftNe64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+func __renvoSoftLtWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftLt64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+func __renvoSoftLeWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftLe64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+func __renvoSoftGtWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftGt64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+func __renvoSoftGeWords64(fl uint32, fh uint32, gl uint32, gh uint32) bool {
+	return __renvoSoftGe64(__renvoSoftJoin64(fl, fh), __renvoSoftJoin64(gl, gh))
+}
+
+func __renvoSoftInt64To64(value int64) uint64 {
+	sign := uint64(value) & 0x8000000000000000
+	mant := uint64(value)
+	if sign != 0 {
+		mant = -mant
+	}
+	return __renvoSoftPack64(sign, mant, int(__renvoSoftMant64), 0)
+}
+
+func __renvoSoftUint64To64(value uint64) uint64 {
+	if int64(value) >= 0 {
+		return __renvoSoftInt64To64(int64(value))
+	}
+	rounded := value>>1 | value&1
+	result := __renvoSoftInt64To64(int64(rounded))
+	return __renvoSoftAdd64(result, result)
+}
+
+func __renvoSoftUint64To32Wide(value uint64) uint64 {
+	return uint64(__renvoSoft64To32(__renvoSoftUint64To64(value)))
+}
+
+func __renvoSoft64ToInt64(f uint64) uint64 {
+	sign, mant, exp := __renvoSoftUnpack64(f)
+	if exp == 2048 || exp == 2049 {
+		return 0x8000000000000000
+	}
+	if exp < 0 {
+		return 0
+	}
+	if exp > 63 {
+		return 0x8000000000000000
+	}
+	for exp > 52 {
+		mant <<= 1
+		exp--
+	}
+	for exp < 52 {
+		mant >>= 1
+		exp++
+	}
+	if sign != 0 {
+		return -mant
+	}
+	return mant
+}
+
+func __renvoSoft64ToUint64(f uint64) uint64 {
+	sign, mant, exp := __renvoSoftUnpack64(f)
+	if sign != 0 || exp == 2048 || exp == 2049 {
+		return 0
+	}
+	if exp < 0 {
+		return 0
+	}
+	if exp > 63 {
+		return 0xffffffffffffffff
+	}
+	for exp > 52 {
+		mant <<= 1
+		exp--
+	}
+	for exp < 52 {
+		mant >>= 1
+		exp++
+	}
+	return mant
+}
+
+func __renvoSoftUnpack32(f uint32) (sign uint32, mant uint32, exp int) {
+	sign = f & 0x80000000
+	mant = f & 0x007fffff
+	exp = int(f>>23) & 0xff
+	if exp == 0xff {
+		if mant != 0 {
+			exp = 257
+			return
+		}
+		exp = 256
+		return
+	}
+	if exp == 0 {
+		if mant != 0 {
+			exp = -126
+			for mant < uint32(1)<<23 {
+				mant <<= 1
+				exp--
+			}
+		}
+		return
+	}
+	mant |= uint32(1) << 23
+	exp -= 127
+	return
+}
+
+func __renvoSoftPack32(sign uint32, mant uint32, exp int, trunc uint32) uint32 {
+	mant0 := mant
+	exp0 := exp
+	trunc0 := trunc
+	if mant == 0 {
+		return sign
+	}
+	for mant < uint32(1)<<23 {
+		mant <<= 1
+		exp--
+	}
+	for mant >= uint32(4)<<23 {
+		trunc |= mant & 1
+		mant >>= 1
+		exp++
+	}
+	if mant >= uint32(2)<<23 {
+		if mant&1 != 0 && (trunc != 0 || mant&2 != 0) {
+			mant++
+			if mant >= uint32(4)<<23 {
+				mant >>= 1
+				exp++
+			}
+		}
+		mant >>= 1
+		exp++
+	}
+	if exp >= 128 {
+		return sign ^ 0x7f800000
+	}
+	if exp < -126 {
+		if exp < -127-int(23) {
+			return sign
+		}
+		mant = mant0
+		exp = exp0
+		trunc = trunc0
+		for exp < -127 {
+			trunc |= mant & 1
+			mant >>= 1
+			exp++
+		}
+		if mant&1 != 0 && (trunc != 0 || mant&2 != 0) {
+			mant++
+		}
+		mant >>= 1
+		exp++
+		if mant < uint32(1)<<23 {
+			return sign | mant
+		}
+	}
+	return sign | uint32(exp+127)<<23 | mant&0x007fffff
+}
+
+func __renvoSoft64To32(f uint64) uint32 {
+	fs, fm, fe := __renvoSoftUnpack64(f)
+	fi := fe == 2048
+	fn := fe == 2049
+	if fn {
+		return 0x7fc00000
+	}
+	fs32 := uint32(fs >> 32)
+	if fi {
+		return fs32 ^ 0x7f800000
+	}
+	const shift = 28
+	return __renvoSoftPack32(fs32, uint32(fm>>shift), fe-1, uint32(fm&(uint64(1)<<shift-1)))
+}
+
+func __renvoSoft32To64(f uint32) uint64 {
+	fs, fm, fe := __renvoSoftUnpack32(f)
+	fi := fe == 256
+	fn := fe == 257
+	if fn {
+		return 0x7ff8000000000000
+	}
+	fs64 := uint64(fs) << 32
+	if fi {
+		return fs64 ^ 0x7ff0000000000000
+	}
+	return __renvoSoftPack64(fs64, uint64(fm)<<29, fe, 0)
+}
+
+func __renvoSoftAdd32(f uint32, g uint32) uint32 {
+	return __renvoSoft64To32(__renvoSoftAdd64(__renvoSoft32To64(f), __renvoSoft32To64(g)))
+}
+func __renvoSoftSub32(f uint32, g uint32) uint32 {
+	return __renvoSoftAdd32(f, g^0x80000000)
+}
+func __renvoSoftMul32(f uint32, g uint32) uint32 {
+	return __renvoSoft64To32(__renvoSoftMul64(__renvoSoft32To64(f), __renvoSoft32To64(g)))
+}
+func __renvoSoftDiv32(f uint32, g uint32) uint32 {
+	return __renvoSoft64To32(__renvoSoftDiv64(__renvoSoft32To64(f), __renvoSoft32To64(g)))
+}
+func __renvoSoftInt64To32(value int64) uint32 {
+	sign := uint64(value) & 0x8000000000000000
+	mant := uint64(value)
+	if sign != 0 {
+		mant = -mant
+	}
+	exp := 23
+	trunc := uint32(0)
+	for mant >= uint64(1)<<32 {
+		trunc |= uint32(mant) & 1
+		mant >>= 1
+		exp++
+	}
+	return __renvoSoftPack32(uint32(sign>>32), uint32(mant), exp, trunc)
+}
+func __renvoSoftInt64To32Wide(value int64) uint64 { return uint64(__renvoSoftInt64To32(value)) }
+func __renvoSoft64To32Wide(value uint64) uint64 { return uint64(__renvoSoft64To32(value)) }
+func __renvoSoft32To64Wide(value uint64) uint64 { return __renvoSoft32To64(uint32(value)) }
+func __renvoSoft32To64Scalar(value uint32) uint64 { return __renvoSoft32To64(value) }
+func __renvoSoft32WideTo64(value uint64) uint64 {
+	f := value & 0xffffffff
+	sign := f & 0x80000000
+	mant := f & 0x007fffff
+	exp := int(f>>23) & 0xff
+	if exp == 0xff {
+		if mant != 0 { return 0x7ff8000000000000 }
+		return sign<<32 ^ 0x7ff0000000000000
+	}
+	if exp == 0 {
+		if mant == 0 { return sign << 32 }
+		exp = -126
+		for mant < uint64(1)<<23 {
+			mant <<= 1
+			exp--
+		}
+	} else {
+		mant |= uint64(1) << 23
+		exp -= 127
+	}
+	return __renvoSoftPack64(sign<<32, mant<<29, exp, 0)
+}
+func __renvoSoft32WideToInt64(value uint64) uint64 {
+	f := uint32(value)
+	sign := f & 0x80000000
+	mant := f & 0x007fffff
+	exp := int(f>>23) & 0xff
+	if exp == 0xff {
+		return 0x8000000000000000
+	}
+	if exp == 0 {
+		if mant == 0 {
+			return 0
+		}
+		exp = -126
+		for mant < uint32(1)<<23 {
+			mant <<= 1
+			exp--
+		}
+	} else {
+		mant |= uint32(1) << 23
+		exp -= 127
+	}
+	if exp < 0 {
+		return 0
+	}
+	if exp > 63 {
+		return 0x8000000000000000
+	}
+	for exp > 23 {
+		mant <<= 1
+		exp--
+	}
+	for exp < 23 {
+		mant >>= 1
+		exp++
+	}
+	if sign != 0 {
+		return -uint64(mant)
+	}
+	return uint64(mant)
+}
+func __renvoSoft32WideToUint64(value uint64) uint64 {
+	f := uint32(value)
+	sign := f & 0x80000000
+	mant := f & 0x007fffff
+	exp := int(f>>23) & 0xff
+	if sign != 0 || exp == 0xff {
+		return 0
+	}
+	if exp == 0 {
+		if mant == 0 {
+			return 0
+		}
+		exp = -126
+		for mant < uint32(1)<<23 {
+			mant <<= 1
+			exp--
+		}
+	} else {
+		mant |= uint32(1) << 23
+		exp -= 127
+	}
+	if exp < 0 {
+		return 0
+	}
+	if exp > 63 {
+		return 0xffffffffffffffff
+	}
+	wide := uint64(mant)
+	for exp > 23 {
+		wide <<= 1
+		exp--
+	}
+	for exp < 23 {
+		wide >>= 1
+		exp++
+	}
+	return wide
+}
+func __renvoSoftAdd32Wide(f uint64, g uint64) uint64 { return uint64(__renvoSoftAdd32(uint32(f), uint32(g))) }
+func __renvoSoftSub32Wide(f uint64, g uint64) uint64 { return uint64(__renvoSoftSub32(uint32(f), uint32(g))) }
+func __renvoSoftMul32Wide(f uint64, g uint64) uint64 { return uint64(__renvoSoftMul32(uint32(f), uint32(g))) }
+func __renvoSoftDiv32Wide(f uint64, g uint64) uint64 { return uint64(__renvoSoftDiv32(uint32(f), uint32(g))) }
+`
+
+func renvoAppendSoftFloatSource(src []byte) []byte {
+	src = append(src, '\n')
+	for i := 0; i < len(renvoSoftFloatSource); i++ {
+		src = append(src, renvoSoftFloatSource[i])
+	}
+	return src
+}
+
+func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
+	for i := 0; i < renvoTokCount(prog); i++ {
+		if renvoTokIsKind(prog, i, renvoTokFloat) {
+			return true
+		}
+		if !renvoTokIsKind(prog, i, renvoTokIdent) {
+			continue
+		}
+		tok := renvoTokAt(prog, i)
+		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
+			return true
+		}
+	}
+	return false
+}
+
 func compileWasiWasm32(input []int, output int) int {
 	return compileWasiWasm32Arena(input, output, 0)
 }
@@ -28,6 +745,13 @@ func compileWasm32Arena(input []int, output int, arenaSize int) int {
 	prog = renvoParseProgram(src)
 	if !prog.ok {
 		return 1
+	}
+	if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
+		src = renvoAppendSoftFloatSource(src)
+		prog = renvoParseProgram(src)
+		if !prog.ok {
+			return 1
+		}
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(&prog, &meta)
@@ -427,6 +1151,616 @@ func renvoWasm32EmitWideCompareStack(g *renvoLinearGen, left int, right int, tok
 	}
 	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideCompare, 0, left, right, op)
 	return true
+}
+
+func renvoWasm32SoftCallWideUnary(g *renvoLinearGen, dest int, source int, helperName string) bool {
+	fnIndex := renvoFindMetaFunctionText(g.meta, helperName)
+	if fnIndex < 0 {
+		return false
+	}
+	wordCount := renvoEmitTypedLocalArgReverse(g, source, renvoBuiltinTypeUint64)
+	renvoAsmAddressPrimaryStack(&g.asm, dest)
+	renvoAsmPushPrimary(&g.asm)
+	wordCount += renvoBackendHiddenResultWordCount
+	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+
+func renvoWasm32SoftCallScalarToWide(g *renvoLinearGen, dest int, source int, helperName string) bool {
+	fnIndex := renvoFindMetaFunctionText(g.meta, helperName)
+	if fnIndex < 0 {
+		return false
+	}
+	wordCount := renvoEmitTypedLocalArgReverse(g, source, renvoBuiltinTypeUint32)
+	renvoAsmAddressPrimaryStack(&g.asm, dest)
+	renvoAsmPushPrimary(&g.asm)
+	wordCount += renvoBackendHiddenResultWordCount
+	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+
+func renvoWasm32SoftCallWideBinary(g *renvoLinearGen, dest int, left int, right int, helperName string) bool {
+	fnIndex := renvoFindMetaFunctionText(g.meta, helperName)
+	if fnIndex < 0 {
+		return false
+	}
+	wordCount := renvoEmitTypedLocalArgReverse(g, left, renvoBuiltinTypeUint64)
+	wordCount += renvoEmitTypedLocalArgReverse(g, right, renvoBuiltinTypeUint64)
+	renvoAsmAddressPrimaryStack(&g.asm, dest)
+	renvoAsmPushPrimary(&g.asm)
+	wordCount += renvoBackendHiddenResultWordCount
+	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+
+func renvoWasm32SoftCallBoolBinary(g *renvoLinearGen, left int, right int, helperName string) bool {
+	fnIndex := renvoFindMetaFunctionText(g.meta, helperName)
+	if fnIndex < 0 {
+		return false
+	}
+	wordCount := renvoEmitTypedLocalArgReverse(g, right, renvoBuiltinTypeUint64)
+	wordCount += renvoEmitTypedLocalArgReverse(g, left, renvoBuiltinTypeUint64)
+	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+
+func renvoWasm32SoftCallBoolWords(g *renvoLinearGen, left int, right int, helperName string) bool {
+	fnIndex := renvoFindMetaFunctionText(g.meta, helperName)
+	if fnIndex < 0 {
+		return false
+	}
+	wordCount := renvoEmitTypedLocalArgReverse(g, left, renvoBuiltinTypeUint32)
+	wordCount += renvoEmitTypedLocalArgReverse(g, left-4, renvoBuiltinTypeUint32)
+	wordCount += renvoEmitTypedLocalArgReverse(g, right, renvoBuiltinTypeUint32)
+	wordCount += renvoEmitTypedLocalArgReverse(g, right-4, renvoBuiltinTypeUint32)
+	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
+	return true
+}
+
+func renvoWasm32NativeFloatBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+	wasmOp := 0
+	if size == 4 {
+		if op == '+' {
+			wasmOp = 0x92 // f32.add
+		} else if op == '-' {
+			wasmOp = 0x93 // f32.sub
+		} else if op == '*' {
+			wasmOp = 0x94 // f32.mul
+		} else if op == '/' {
+			wasmOp = 0x95 // f32.div
+		}
+	} else if size == 8 {
+		if op == '+' {
+			wasmOp = 0xa0 // f64.add
+		} else if op == '-' {
+			wasmOp = 0xa1 // f64.sub
+		} else if op == '*' {
+			wasmOp = 0xa2 // f64.mul
+		} else if op == '/' {
+			wasmOp = 0xa3 // f64.div
+		}
+	}
+	if wasmOp == 0 {
+		return false
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, left, right, wasmOp)
+	return true
+}
+
+func renvoWasm32NativeFloatCompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+	wasmOp := 0
+	if kind == renvoTypeFloat32 {
+		wasmOp = 0x5b // f32.eq
+	} else if kind == renvoTypeFloat64 {
+		wasmOp = 0x61 // f64.eq
+	} else {
+		return false
+	}
+	if c0 == '!' {
+		wasmOp++
+	} else if c0 == '<' {
+		wasmOp += 2
+		if c1 == '=' {
+			wasmOp += 2
+		}
+	} else if c0 == '>' {
+		wasmOp += 3
+		if c1 == '=' {
+			wasmOp += 2
+		}
+	} else if c0 != '=' {
+		return false
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideCompare, 0, left, right, wasmOp)
+	return true
+}
+
+func renvoWasm32NativeFloatConvertStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+	if sourceSize == destSize {
+		renvoEmitCopyStackToStack(g, source, dest, sourceSize)
+		return
+	}
+	wasmOp := 0xbb // f64.promote_f32
+	if sourceSize == 8 && destSize == 4 {
+		wasmOp = 0xb6 // f32.demote_f64
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, source, source, wasmOp)
+}
+
+func renvoWasm32NativeIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+	wasmOp := 0
+	if floatSize == 4 {
+		wasmOp = 0xb2 // f32.convert_i32_s
+		if intSize == 8 {
+			wasmOp = 0xb4 // f32.convert_i64_s
+		}
+	} else if floatSize == 8 {
+		wasmOp = 0xb7 // f64.convert_i32_s
+		if intSize == 8 {
+			wasmOp = 0xb9 // f64.convert_i64_s
+		}
+	}
+	if !signed {
+		wasmOp++
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, offset, offset, offset, wasmOp)
+}
+
+func renvoWasm32NativeFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+	wasmOp := 0
+	if floatSize == 4 {
+		wasmOp = 0xa8 // i32.trunc_f32_s
+		if intSize == 8 {
+			wasmOp = 0xae // i64.trunc_f32_s
+		}
+	} else if floatSize == 8 {
+		wasmOp = 0xaa // i32.trunc_f64_s
+		if intSize == 8 {
+			wasmOp = 0xb0 // i64.trunc_f64_s
+		}
+	}
+	if !signed {
+		wasmOp++
+	}
+	renvoWasm32EmitWideOp(&g.asm, renvoWasm32OpWideBinary, dest, source, source, wasmOp)
+}
+
+func renvoWasm32SoftFloatBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+	if g.c.renvoTarget == renvoTargetWasiWasm32 {
+		return renvoWasm32NativeFloatBinaryStack(g, dest, left, right, op, size)
+	}
+	if size != 4 && size != 8 {
+		return false
+	}
+	helper := ""
+	if size == 4 {
+		if op == '+' {
+			helper = "__renvoSoftAdd32Wide"
+		} else if op == '-' {
+			helper = "__renvoSoftSub32Wide"
+		} else if op == '*' {
+			helper = "__renvoSoftMul32Wide"
+		} else if op == '/' {
+			helper = "__renvoSoftDiv32Wide"
+		}
+	} else {
+		if op == '+' {
+			helper = "__renvoSoftAdd64"
+		} else if op == '-' {
+			helper = "__renvoSoftSub64"
+		} else if op == '*' {
+			helper = "__renvoSoftMul64"
+		} else if op == '/' {
+			helper = "__renvoSoftDiv64"
+		}
+	}
+	if helper == "" {
+		return false
+	}
+	if size == 4 {
+		wideLeft := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		wideRight := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		wideResult := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmStorePrimaryStack(&g.asm, wideLeft)
+		renvoAsmStoreStackImm(&g.asm, wideLeft-4, 0)
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoAsmStorePrimaryStack(&g.asm, wideRight)
+		renvoAsmStoreStackImm(&g.asm, wideRight-4, 0)
+		if !renvoWasm32SoftCallWideBinary(g, wideResult, wideLeft, wideRight, helper) {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, wideResult)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		return true
+	}
+	return renvoWasm32SoftCallWideBinary(g, dest, left, right, helper)
+}
+
+func renvoWasm32SoftFloatCompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+	if g.c.renvoTarget == renvoTargetWasiWasm32 {
+		return renvoWasm32NativeFloatCompareStack(g, left, right, kind, c0, c1)
+	}
+	if kind == renvoTypeFloat32 {
+		return renvoWasm32SoftFloat32CompareInline(g, left, right, c0, c1)
+	}
+	if kind != renvoTypeFloat64 {
+		return false
+	}
+	return renvoWasm32SoftFloatCompareInline(g, left, right, c0, c1)
+}
+
+func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int, c0 byte, c1 byte) bool {
+	leftAbs := renvoAddUnnamedLocal(g, renvoTypeInt)
+	rightAbs := renvoAddUnnamedLocal(g, renvoTypeInt)
+	for i := 0; i < 2; i++ {
+		source := left
+		dest := leftAbs
+		if i != 0 {
+			source = right
+			dest = rightAbs
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, source)
+		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 0x7fffffff)
+		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+	}
+
+	nan := renvoAsmNewLabel(&g.asm)
+	zeroPair := renvoAsmNewLabel(&g.asm)
+	compare := renvoAsmNewLabel(&g.asm)
+	done := renvoAsmNewLabel(&g.asm)
+	renvoAsmJcmpStackImm(&g.asm, leftAbs, 0x7f800000, nan, 0x9f)
+	renvoAsmJcmpStackImm(&g.asm, rightAbs, 0x7f800000, nan, 0x9f)
+	leftNonzero := renvoAsmNewLabel(&g.asm)
+	renvoAsmLoadPrimaryStack(&g.asm, leftAbs)
+	renvoAsmJnzPrimary(&g.asm, leftNonzero)
+	renvoAsmLoadPrimaryStack(&g.asm, rightAbs)
+	renvoAsmJzPrimary(&g.asm, zeroPair)
+	renvoAsmMarkLabel(&g.asm, leftNonzero)
+	renvoAsmJmpLabel(&g.asm, compare)
+
+	renvoAsmMarkLabel(&g.asm, compare)
+	if c0 == '=' || c0 == '!' {
+		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		if c0 == '!' {
+			renvoAsmBoolNotPrimary(&g.asm)
+		}
+		renvoAsmJmpLabel(&g.asm, done)
+	} else {
+		leftSign := renvoAddUnnamedLocal(g, renvoTypeInt)
+		rightSign := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, leftSign)
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, rightSign)
+		leftNegative := renvoAsmNewLabel(&g.asm)
+		bothPositive := renvoAsmNewLabel(&g.asm)
+		bothNegative := renvoAsmNewLabel(&g.asm)
+		relationalDone := renvoAsmNewLabel(&g.asm)
+		renvoAsmLoadPrimaryStack(&g.asm, leftSign)
+		renvoAsmJnzPrimary(&g.asm, leftNegative)
+		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
+		renvoAsmJzPrimary(&g.asm, bothPositive)
+		result := 0
+		if c0 == '>' {
+			result = 1
+		}
+		renvoAsmPrimaryImm(&g.asm, result)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, bothPositive)
+		setcc := renvoFloat32RelationSetcc(c0, c1)
+		renvoEmitNativeCompareStack(g, left, right, setcc)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, leftNegative)
+		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
+		renvoAsmJnzPrimary(&g.asm, bothNegative)
+		result = 0
+		if c0 == '<' {
+			result = 1
+		}
+		renvoAsmPrimaryImm(&g.asm, result)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, bothNegative)
+		renvoEmitNativeCompareStack(g, right, left, setcc)
+		renvoAsmMarkLabel(&g.asm, relationalDone)
+		renvoAsmJmpLabel(&g.asm, done)
+	}
+
+	renvoAsmMarkLabel(&g.asm, nan)
+	result := 0
+	if c0 == '!' {
+		result = 1
+	}
+	renvoAsmPrimaryImm(&g.asm, result)
+	renvoAsmJmpLabel(&g.asm, done)
+	renvoAsmMarkLabel(&g.asm, zeroPair)
+	result = 0
+	if c0 == '=' || c0 == '<' && c1 == '=' || c0 == '>' && c1 == '=' {
+		result = 1
+	}
+	renvoAsmPrimaryImm(&g.asm, result)
+	renvoAsmMarkLabel(&g.asm, done)
+	return true
+}
+
+func renvoFloat32RelationSetcc(c0 byte, c1 byte) int {
+	if c0 == '<' {
+		if c1 == '=' {
+			return 0x96
+		}
+		return 0x92
+	}
+	if c1 == '=' {
+		return 0x93
+	}
+	return 0x97
+}
+
+func renvoWasm32SoftConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+	if g.c.renvoTarget == renvoTargetWasiWasm32 {
+		renvoWasm32NativeFloatConvertStack(g, dest, source, sourceSize, destSize)
+		return
+	}
+	if sourceSize == destSize {
+		renvoEmitCopyStackToStack(g, source, dest, sourceSize)
+		return
+	}
+	if sourceSize == 4 && destSize == 8 {
+		wideSource := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmLoadPrimaryStack(&g.asm, source)
+		renvoAsmStorePrimaryStack(&g.asm, wideSource)
+		renvoAsmStoreStackImm(&g.asm, wideSource-4, 0)
+		renvoWasm32SoftCallWideUnary(g, dest, wideSource, "__renvoSoft32WideTo64")
+		return
+	}
+	if sourceSize == 8 && destSize == 4 {
+		wideResult := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		if renvoWasm32SoftCallWideUnary(g, wideResult, source, "__renvoSoft64To32Wide") {
+			renvoAsmLoadPrimaryStack(&g.asm, wideResult)
+			renvoAsmStorePrimaryStack(&g.asm, dest)
+		}
+	}
+}
+
+func renvoWasm32SoftIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+	if g.c.renvoTarget == renvoTargetWasiWasm32 {
+		renvoWasm32NativeIntToFloatStack(g, offset, intSize, floatSize, signed)
+		return
+	}
+	if floatSize != 4 && floatSize != 8 {
+		return
+	}
+	if intSize < 8 {
+		if signed {
+			renvoAsmLoadPrimaryStack(&g.asm, offset)
+			renvoAsmSarPrimaryImm(&g.asm, 31)
+			renvoAsmStorePrimaryStack(&g.asm, offset-4)
+		} else {
+			renvoAsmStoreStackImm(&g.asm, offset-4, 0)
+		}
+	}
+	result := renvoAddUnnamedLocal(g, renvoTypeFloat64)
+	helper := "__renvoSoftInt64To64"
+	if !signed {
+		helper = "__renvoSoftUint64To64"
+	}
+	if floatSize == 4 {
+		helper = "__renvoSoftInt64To32Wide"
+		if !signed {
+			helper = "__renvoSoftUint64To32Wide"
+		}
+	}
+	if renvoWasm32SoftCallWideUnary(g, result, offset, helper) {
+		renvoEmitCopyStackToStack(g, result, offset, floatSize)
+	}
+}
+
+func renvoWasm32SoftFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+	if g.c.renvoTarget == renvoTargetWasiWasm32 {
+		renvoWasm32NativeFloatToIntStack(g, dest, source, floatSize, intSize, signed)
+		return
+	}
+	wideSource := source
+	if floatSize == 4 {
+		bits := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmLoadPrimaryStack(&g.asm, source)
+		renvoAsmStorePrimaryStack(&g.asm, bits)
+		renvoAsmStoreStackImm(&g.asm, bits-4, 0)
+		wideSource = bits
+	}
+	result := renvoAddUnnamedLocal(g, renvoTypeInt64)
+	helper := "__renvoSoft64ToInt64"
+	if !signed {
+		helper = "__renvoSoft64ToUint64"
+	}
+	if floatSize == 4 {
+		helper = "__renvoSoft32WideToInt64"
+		if !signed {
+			helper = "__renvoSoft32WideToUint64"
+		}
+	}
+	if renvoWasm32SoftCallWideUnary(g, result, wideSource, helper) {
+		renvoEmitCopyStackToStack(g, result, dest, intSize)
+	}
+}
+
+func renvoWasm32SoftNegateStack(g *renvoLinearGen, offset int, size int) {
+	highOffset := offset
+	if size == 8 {
+		highOffset -= 4
+	}
+	renvoAsmLoadPrimaryStack(&g.asm, highOffset)
+	renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -2147483648)
+	renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmStorePrimaryStack(&g.asm, highOffset)
+}
+
+func renvoWasm32SoftFloatAbsStack(g *renvoLinearGen, dest int, source int) {
+	renvoEmitCopyStackToStack(g, source, dest, 8)
+	renvoAsmLoadPrimaryStack(&g.asm, dest-4)
+	renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 0x7fffffff)
+	renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmStorePrimaryStack(&g.asm, dest-4)
+}
+
+func renvoWasm32SoftFloatOrderKeyStack(g *renvoLinearGen, dest int, source int) {
+	renvoEmitCopyStackToStack(g, source, dest, 8)
+	negative := renvoAsmNewLabel(&g.asm)
+	done := renvoAsmNewLabel(&g.asm)
+	renvoAsmJcmpStackImm(&g.asm, source-4, 0, negative, 0x9c)
+	renvoAsmLoadPrimaryStack(&g.asm, dest-4)
+	renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -2147483648)
+	renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	renvoAsmStorePrimaryStack(&g.asm, dest-4)
+	renvoAsmJmpLabel(&g.asm, done)
+	renvoAsmMarkLabel(&g.asm, negative)
+	renvoAsmLoadPrimaryStack(&g.asm, dest)
+	renvoAsmBitwiseNotPrimary(&g.asm)
+	renvoAsmStorePrimaryStack(&g.asm, dest)
+	renvoAsmLoadPrimaryStack(&g.asm, dest-4)
+	renvoAsmBitwiseNotPrimary(&g.asm)
+	renvoAsmStorePrimaryStack(&g.asm, dest-4)
+	renvoAsmMarkLabel(&g.asm, done)
+}
+
+func renvoWasm32SoftFloatCompareInline(g *renvoLinearGen, left int, right int, c0 byte, c1 byte) bool {
+	leftHigh := renvoAddUnnamedLocal(g, renvoTypeInt)
+	rightHigh := renvoAddUnnamedLocal(g, renvoTypeInt)
+	for i := 0; i < 2; i++ {
+		source := left
+		dest := leftHigh
+		if i != 0 {
+			source = right
+			dest = rightHigh
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, source-4)
+		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 0x7fffffff)
+		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+	}
+
+	nan := renvoAsmNewLabel(&g.asm)
+	zeroPair := renvoAsmNewLabel(&g.asm)
+	compare := renvoAsmNewLabel(&g.asm)
+	done := renvoAsmNewLabel(&g.asm)
+	for i := 0; i < 2; i++ {
+		high := leftHigh
+		low := left
+		if i != 0 {
+			high = rightHigh
+			low = right
+		}
+		notMaxExponent := renvoAsmNewLabel(&g.asm)
+		renvoAsmJcmpStackImm(&g.asm, high, 0x7ff00000, nan, 0x9f)
+		renvoAsmJcmpStackImm(&g.asm, high, 0x7ff00000, notMaxExponent, 0x95)
+		renvoAsmLoadPrimaryStack(&g.asm, low)
+		renvoAsmJnzPrimary(&g.asm, nan)
+		renvoAsmMarkLabel(&g.asm, notMaxExponent)
+	}
+
+	leftNonzero := renvoAsmNewLabel(&g.asm)
+	renvoAsmLoadPrimaryStack(&g.asm, leftHigh)
+	renvoAsmJnzPrimary(&g.asm, leftNonzero)
+	renvoAsmLoadPrimaryStack(&g.asm, left)
+	renvoAsmJnzPrimary(&g.asm, leftNonzero)
+	renvoAsmLoadPrimaryStack(&g.asm, rightHigh)
+	renvoAsmJnzPrimary(&g.asm, compare)
+	renvoAsmLoadPrimaryStack(&g.asm, right)
+	renvoAsmJzPrimary(&g.asm, zeroPair)
+	renvoAsmMarkLabel(&g.asm, leftNonzero)
+	renvoAsmJmpLabel(&g.asm, compare)
+
+	renvoAsmMarkLabel(&g.asm, compare)
+	if c0 == '=' || c0 == '!' {
+		renvoWasm32SoftFloatRawEquality(g, left, right, c0 == '!')
+		renvoAsmJmpLabel(&g.asm, done)
+	} else {
+		leftSign := renvoAddUnnamedLocal(g, renvoTypeInt)
+		rightSign := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, left-4)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, leftSign)
+		renvoAsmLoadPrimaryStack(&g.asm, right-4)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, rightSign)
+		leftNegative := renvoAsmNewLabel(&g.asm)
+		bothPositive := renvoAsmNewLabel(&g.asm)
+		bothNegative := renvoAsmNewLabel(&g.asm)
+		relationalDone := renvoAsmNewLabel(&g.asm)
+		renvoAsmLoadPrimaryStack(&g.asm, leftSign)
+		renvoAsmJnzPrimary(&g.asm, leftNegative)
+		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
+		renvoAsmJzPrimary(&g.asm, bothPositive)
+		result := 0
+		if c0 == '>' {
+			result = 1
+		}
+		renvoAsmPrimaryImm(&g.asm, result)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, bothPositive)
+		renvoWasm32SoftFloatRawRelation(g, left, right, c0, c1)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, leftNegative)
+		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
+		renvoAsmJnzPrimary(&g.asm, bothNegative)
+		result = 0
+		if c0 == '<' {
+			result = 1
+		}
+		renvoAsmPrimaryImm(&g.asm, result)
+		renvoAsmJmpLabel(&g.asm, relationalDone)
+		renvoAsmMarkLabel(&g.asm, bothNegative)
+		renvoWasm32SoftFloatRawRelation(g, right, left, c0, c1)
+		renvoAsmMarkLabel(&g.asm, relationalDone)
+		renvoAsmJmpLabel(&g.asm, done)
+	}
+
+	renvoAsmMarkLabel(&g.asm, nan)
+	result := 0
+	if c0 == '!' {
+		result = 1
+	}
+	renvoAsmPrimaryImm(&g.asm, result)
+	renvoAsmJmpLabel(&g.asm, done)
+	renvoAsmMarkLabel(&g.asm, zeroPair)
+	result = 0
+	if c0 == '=' || c0 == '<' && c1 == '=' || c0 == '>' && c1 == '=' {
+		result = 1
+	}
+	renvoAsmPrimaryImm(&g.asm, result)
+	renvoAsmMarkLabel(&g.asm, done)
+	return true
+}
+
+func renvoWasm32SoftFloatRawEquality(g *renvoLinearGen, left int, right int, notEqualResult bool) {
+	notEqual := renvoAsmNewLabel(&g.asm)
+	done := renvoAsmNewLabel(&g.asm)
+	renvoEmitNativeCompareStack(g, left-4, right-4, 0x94)
+	renvoAsmJzPrimary(&g.asm, notEqual)
+	renvoEmitNativeCompareStack(g, left, right, 0x94)
+	renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
+	renvoAsmPrimaryImm(&g.asm, 0)
+	renvoAsmMarkLabel(&g.asm, done)
+	if notEqualResult {
+		renvoAsmBoolNotPrimary(&g.asm)
+	}
+}
+
+func renvoWasm32SoftFloatRawRelation(g *renvoLinearGen, left int, right int, c0 byte, c1 byte) {
+	if c0 == '<' && c1 == '=' {
+		renvoEmitWideLessStack(g, right, left, false)
+		renvoAsmBoolNotPrimary(&g.asm)
+	} else if c0 == '<' {
+		renvoEmitWideLessStack(g, left, right, false)
+	} else if c0 == '>' && c1 == '=' {
+		renvoEmitWideLessStack(g, left, right, false)
+		renvoAsmBoolNotPrimary(&g.asm)
+	} else {
+		renvoEmitWideLessStack(g, right, left, false)
+	}
 }
 
 func renvoEmitVM32WideShiftBy(g *renvoLinearGen, count int, opcode int) {

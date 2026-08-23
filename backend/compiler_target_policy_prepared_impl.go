@@ -162,7 +162,10 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	p.heapModel = renvoHeapNone
 	p.oomModel = renvoOOMResult
 	p.interruptModel = renvoInterruptNone
-	p.floatModel = renvoFloatScaledInteger
+	p.floatModel = renvoFloatIEEESoft
+	if p.arch == renvoArchAmd64 || p.arch == renvoArchAarch64 || p.arch == renvoArch386 || p.arch == renvoArchArm || target == renvoTargetWasiWasm32 {
+		p.floatModel = renvoFloatIEEEHardware
+	}
 	p.codePointerBits = p.pointerBits
 	p.funcPointerBits = p.pointerBits
 	return p, true

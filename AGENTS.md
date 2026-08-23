@@ -13,8 +13,8 @@ take precedence whenever they disagree with the guide.
 
 ## Restrictions
 
-- Backend compiler edits are limited to `backend/compiler_*_impl.go` and
-  `backend/compiler_main.go`.
+- Backend compiler edits are limited to `backend/compiler_*_impl.go`,
+  `backend/compiler_main.go`, and files under `backend/definitions/`.
 - Frontend acceptance tests live under `frontend_tests/`.
 - New backend regression programs may be added to `backend/tests/`; avoid
   modifying existing programs unless they are broken.

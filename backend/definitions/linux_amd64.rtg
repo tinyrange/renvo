@@ -15,7 +15,11 @@ go backend {
 		for i := 0; i < wordCount; i++ {
 			if vectorMask&(1<<i) != 0 {
 				out.Byte(0x58)
-				out.Bytes4(0xf2, 0x48, 0x0f, 0x2a)
+				// Floating arguments already use their IEEE-754 binary64 bit
+				// representation. Move those bits directly into the next SysV
+				// vector register rather than treating them as the legacy
+				// fixed-point value used by the old floating-point backend.
+				out.Bytes4(0x66, 0x48, 0x0f, 0x6e)
 				out.Byte(0xc0 | vectorCount<<3)
 				vectorCount++
 			} else {
@@ -33,16 +37,6 @@ go backend {
 					out.Bytes2(0x41, 0x59)
 				}
 				integerCount++
-			}
-		}
-		if vectorCount != 0 {
-			out.Byte(0xb8)
-			out.Int32(4)
-			out.Bytes4(0xf2, 0x4c, 0x0f, 0x2a)
-			out.Byte(0xc0)
-			for i := 0; i < vectorCount; i++ {
-				out.Bytes4(0xf2, 0x41, 0x0f, 0x5e)
-				out.Byte(0xc0 | i<<3)
 			}
 		}
 		externalID := out.ExternalImport(out.StaticImportName(importID))

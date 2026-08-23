@@ -45,8 +45,12 @@ func TestTargetProfilesSeparateMachineWidthsFromBackendSlots(t *testing.T) {
 		if p.codePointerBits != p.pointerBits || p.funcPointerBits != p.pointerBits || p.addressModel != renvoAddressModelFlat {
 			t.Fatalf("target %d flat pointer model = %#v", test.target, p)
 		}
-		if p.floatModel != renvoFloatScaledInteger {
-			t.Fatalf("target %d float model = %d, want explicitly documented scaled-integer compatibility mode", test.target, p.floatModel)
+		wantFloatModel := renvoFloatIEEEHardware
+		if test.target == renvoTargetVM32 {
+			wantFloatModel = renvoFloatIEEESoft
+		}
+		if p.floatModel != wantFloatModel {
+			t.Fatalf("target %d float model = %d, want %d", test.target, p.floatModel, wantFloatModel)
 		}
 		if !renvoProfileHasRuntime(p, renvoRuntimePrint|renvoRuntimeRead|renvoRuntimeWrite) {
 			t.Fatalf("target %d missing required runtime capabilities: %#v", test.target, p)
