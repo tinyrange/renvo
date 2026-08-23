@@ -37,6 +37,36 @@ func renvo386RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
 	return true
 }
 
+func renvoCompile386(input []int, output int, arenaSize int) int {
+	src := renvoMakeByteScratch(786432)
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if !prog.ok {
+		return 1
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	result := renvoTryCompileScalarProgram386Scratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	renvoPrintErr("renvo: compilation failed\n")
+	return 1
+}
+
 func renvoAsmImageObject386(emitter *renvoAsm) []byte {
 	return renvoAsmImageRelocatableObject386(emitter)
 }
@@ -111,12 +141,11 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	if renvoFixedTarget == 0 && meta.c.emitImage {
 		renvoAsmRet(a)
 	} else if targetIsWindows(meta.c.renvoTargetOS) {
-		renvoAsmPushPrimary(a)
-		renvoWin386CallImport(a, renvoWinImportExitProcess)
+		renvoWin386EmitExit(a)
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 1)
+		renvoAsmPrimaryImm(a, renvoLinux386SysExit)
 		renvoAsmSyscall(a)
 	}
 	return g
@@ -403,23 +432,25 @@ func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 	if !renvoTypeIsStringSlice(g.meta, first.typ) {
 		return false
 	}
-	argsOff := g.asm.bssSize
-	g.asm.bssSize += 32768
 	if targetIsWindows(g.c.renvoTargetOS) {
-		argsTextOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		argsLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
+		argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
+		g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
+		argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
+		g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
+		envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
+		envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
 		renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
 	} else {
-		envDataOff := g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff := g.asm.bssSize
-		g.asm.bssSize += 8
+		argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
+		g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
+		envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
+		g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
+		envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
+		g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
 		renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
 	}
 	if app.paramCount == 1 {

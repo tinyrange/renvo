@@ -477,11 +477,10 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		a.codeOffset = renvoDarwinArm64CodeOffset
 		if !(renvoFixedTarget == 0 && meta.c.emitImage) {
 			g.darwinEntryOff = a.bssSize
-			a.bssSize += 24
-			renvoAarch64AsmMovRegAbs(a, 9, g.darwinEntryOff, renvoAbsBssReloc)
-			renvoAarch64AsmStoreRegMem(a, 0, 9, 0, 8)
-			renvoAarch64AsmStoreRegMem(a, 1, 9, 8, 8)
-			renvoAarch64AsmStoreRegMem(a, 2, 9, 16, 8)
+			a.bssSize += renvoDarwinArm64EntryStateBytes
+			if !renvoDarwinArm64DefinitionEntryStart(a, g.darwinEntryOff) {
+				return nil
+			}
 		}
 	}
 	if renvoFixedTarget != 0 {
@@ -531,15 +530,14 @@ func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarc
 		renvoAsmRet(a)
 	} else if targetIsWindows(meta.c.renvoTargetOS) {
 		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-		renvoWinArm64CallImport(a, renvoWinImportExitProcess)
+		renvoWinArm64DefinitionExit(a)
 		renvoAsmRet(a)
 	} else if targetIsDarwin(meta.c.renvoTargetOS) {
-		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-		renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
+		renvoDarwinArm64DefinitionExit(a)
 		renvoAsmRet(a)
 	} else {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 93)
+		renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
 		renvoAsmSyscall(a)
 	}
 	return session
@@ -641,7 +639,7 @@ func (s *renvoAarch64ProgramSession) finishStep() bool {
 	if targetIsWindows(s.gen.c.renvoTargetOS) {
 		data = renvoAsmImageWindowsArm64(a)
 	} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
-		data = renvoAsmImageDarwinArm64(a)
+		data = renvoDarwinArm64Image(a)
 	}
 	if a.patchFailed || len(data) == 0 {
 		s.done = true

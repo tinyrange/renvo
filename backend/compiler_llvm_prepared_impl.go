@@ -211,12 +211,28 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallParameterCount() int {
+	return out.staticCallParamCount
+}
+
+func (out *renvoAsm) StaticCallParameterKind(index int) int {
+	return int(out.staticCallParamKinds[index])
+}
+
+func (out *renvoAsm) StaticCallResultFloatRegister() int {
+	return out.staticCallResultFloat
+}
+
 func (out *renvoAsm) DynamicImport(library string, name string) int {
 	for i := 0; i < len(out.darwinImports); i++ {
 		if out.darwinImports[i].dylib == library && out.darwinImports[i].name == name {
 			out.darwinImports[i].used = true
 			return i
 		}
+	}
+	if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetDarwinArm64 {
+		library = renvo_runtime_ArenaPersistString(library)
+		name = renvo_runtime_ArenaPersistString(name)
 	}
 	label := renvoAsmNewLabel(out)
 	out.darwinImports = append(out.darwinImports,
@@ -2084,42 +2100,82 @@ func renvoRTGEmitStaticCall(out *renvoAsm, importID int, wordCount int) bool {
 }
 func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool {
 	if operation == 1 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 0)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 2 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 1)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 3 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPushRegister(out, rtgLlvmRCX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRCX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 17)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 4 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPushRegister(out, rtgLlvmRCX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRCX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 18)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 5 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDX)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 2)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 6 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 3)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)
 		return true
 	}
 	if operation == 7 {
+		renvoRTGAsmPushRegister(out, rtgLlvmRDI)
+		renvoRTGAsmPushRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRSI)
+		renvoRTGAsmPopRegister(out, rtgLlvmRDI)
 		renvoRTGDirectMoveImmediate(out, rtgLlvmRAX, 91)
 		renvoRTGDirectHostSyscall(out)
 		renvoRTGDirectMove(out, renvoRTGPrimary, rtgLlvmRAX)

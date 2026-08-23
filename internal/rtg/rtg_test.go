@@ -129,6 +129,31 @@ func TestEmbeddedGoIsTypeCheckedAgainstBackendAPI(t *testing.T) {
 	}
 }
 
+func TestCompilerGoParsesWithoutEnteringBackendTypeContract(t *testing.T) {
+	document := Parse([]byte(`definition 1
+unit compiler
+implements direct_emitter_v1
+go compiler {
+	func compilerIntegration(value *compilerOnlyType) int {
+		return compilerOnlyHelper(value)
+	}
+}
+`), "compiler.rtg")
+	if !document.Ok {
+		t.Fatalf("go compiler block failed to parse: %#v", document.Diagnostics)
+	}
+	if len(document.Declarations) != 1 || document.Declarations[0].Name != "compiler" {
+		t.Fatalf("go compiler declaration = %#v", document.Declarations)
+	}
+	if names := embeddedGoNames(document); len(names) != 0 {
+		t.Fatalf("compiler-only declarations entered backend hook names: %#v", names)
+	}
+	compilerSource := appendCompilerGoBlocks(nil, document)
+	if !strings.Contains(string(compilerSource), "func compilerIntegration(") {
+		t.Fatalf("checked-in compiler projection omitted compiler-only source: %q", compilerSource)
+	}
+}
+
 func TestTruncatedBlocksFail(t *testing.T) {
 	document := Parse([]byte("definition 1\nunit demo\nimplements direct_emitter_v1\narch a { width = 64"), "truncated.rtg")
 	if document.Ok || len(document.Diagnostics) == 0 || document.Diagnostics[0].Code != "RTG-PARSE-014" {

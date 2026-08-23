@@ -59,15 +59,15 @@ go generate ./internal/backendcompiled
 ```
 
 The first command emits each production architecture projection from its
-matching `*_algorithms.rtg` root and the authoritative Linux/amd64 production
-target projection from `linux_amd64.rtg`. Architecture roots import only their
-shared ISA fragment; target projections use a separate built-in namespace and
-call those shared algorithms directly rather than using the prepared-backend
-adapter. The second command resolves target descriptors and writes the registry
-and the non-enforcing source-volume report. Architecture-only roots are
-validated by generation but intentionally contribute no registry target. The
-third refreshes the ordinary-Go compiled backend and the source bundle used to
-prepare external definitions.
+matching `*_algorithms.rtg` root and the authoritative production target
+projections from their target entrypoints. Architecture roots import only
+their shared ISA fragment; target projections use a separate built-in
+namespace and call those shared algorithms directly rather than using the
+prepared-backend adapter. The second command resolves target descriptors and
+writes the registry and the non-enforcing source-volume report.
+Architecture-only roots are validated by generation but intentionally
+contribute no registry target. The third refreshes the ordinary-Go compiled
+backend and the source bundle used to prepare external definitions.
 
 ## Adding a native architecture
 
@@ -116,6 +116,12 @@ checks hook signatures but does not attempt complexity or termination
 analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
+
+Use `go backend` for these portable hooks. A closed `*_algorithms.rtg` root may
+also use `go compiler` for ordinary Go copied only into its checked-in compiler
+projection. Compiler blocks may refer to private compiler types, are excluded
+from prepared external backends and target semantic identities, and should be
+reserved for integration code that cannot use the typed `RTGEmitter` surface.
 
 `TestNativeDefinitionEmbeddedGoMetrics` deduplicates shared declarations across
 every native entrypoint and reports semantic Go bytes and declaration counts as

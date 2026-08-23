@@ -3,8 +3,10 @@
 package definitions
 
 //go:generate go run ../../internal/rtg/cmd/rtggen -kernel -package main -o ../compiler_rtg_generated_impl.go
-//go:generate go run ../../internal/rtg/cmd/rtggen -inactive-kernel -package main -o ../compiler_rtg_inactive_impl.go
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch aarch64 -package main -o ../compiler_aarch64_impl.go aarch64_algorithms.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/aarch64 -package main -o ../compiler_linux_aarch64_impl.go linux_aarch64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/arm64 -package main -o ../compiler_windows_arm64_target_impl.go windows_aarch64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t darwin/arm64 -package main -o ../compiler_darwin_arm64_target_impl.go darwin_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_64 -package main -o ../compiler_amd64_target_impl.go x86_64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/amd64 -package main -o ../compiler_linux_amd64_impl.go linux_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t freebsd/amd64 -package main -o ../compiler_freebsd_amd64_impl.go freebsd_amd64.rtg
@@ -14,7 +16,10 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux-kernel/amd64 -package main -o ../compiler_linux_kernel_amd64_target_impl.go linux_kernel_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_32 -package main -o ../compiler_386_target_impl.go x86_32_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_code16 -package main -o ../compiler_386_code16_impl.go x86_16.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/386 -package main -o ../compiler_linux_386_impl.go linux_386.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/386 -package main -o ../compiler_windows_386_impl.go windows_386.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch arm -package main -o ../compiler_arm_impl.go arm_algorithms.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/arm -package main -o ../compiler_linux_arm_impl.go linux_arm.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch vm32 -package main -o ../compiler_wasm32_impl.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -contract -arch vm32 -package main -o ../rtg_vm32_contract_generated.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -prepared -build-tag renvo_jvm_prepared -t jvm/vm32 -o ../compiler_jvm_prepared_impl.go ../../backends/jvm.rbe

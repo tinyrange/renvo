@@ -76,9 +76,16 @@ complexity analyzer.
 
 ## Embedded Go boundary
 
-Embedded Go is parsed and checked with Renvo's Go frontend. Imports, package
-clauses, compiler directives, undefined symbols, and incompatible hook
+`go backend` blocks are parsed and checked with Renvo's Go frontend. Imports,
+package clauses, compiler directives, undefined symbols, and incompatible hook
 signatures are rejected.
+
+Closed checked-in architecture roots may also contain `go compiler` blocks.
+These blocks are copied only into the ordinary compiler-facing architecture
+projection and may refer to private compiler implementation types. They are
+not portable backend hooks, are not included in prepared external backends,
+and do not contribute target runtime semantics. Use them only for integration
+code that cannot live behind the typed `RTGEmitter` contract.
 
 Generation starts from one target or architecture and emits only transitively
 reachable declarations. An opaque hook is appropriate when an encoder or
@@ -122,15 +129,15 @@ prunable, while each target can evolve without affecting unrelated
 operating-system code.
 
 Built-ins expose stable compiler-facing names so fixed-target compilers retain
-their direct fast calls. Shared projections replace ISA encoder algorithms.
-Linux/amd64 is the first authoritative production target projection: its
-runtime numbers, syscall ABI shuffles, process-stack entry template, and ELF
-image integration are generated from `linux_amd64.rtg` and its imported format
-definition into `compiler_linux_amd64_impl.go`. Its private symbols use a
-separate built-in namespace so prepared definitions can coexist in the same
-self-hosted compiler source bundle. The remaining built-in OS/runtime paths
-are still handwritten pending their own equivalence migrations. External
-definitions use the target-neutral prepared adapter and take runtime,
+their direct fast calls. Shared projections replace ISA encoder algorithms,
+and production target projections now derive the supported native targets'
+runtime numbers, entry contracts, relocation rules, and executable packaging
+from their `.rtg` entrypoints. Private symbols use a separate built-in
+namespace so prepared definitions can coexist in the same self-hosted compiler
+source bundle. Windows/386 uses compact literal runtime templates to stay
+inside the compiler resource gates; generation pins those templates to a
+canonical identity of the reachable definition semantics and rejects drift.
+External definitions use the target-neutral prepared adapter and take runtime,
 relocation, and format semantics from the selected definition.
 
 `go generate ./internal/targetinfo` resolves every public target and emits:

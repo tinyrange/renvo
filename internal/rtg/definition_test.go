@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -11,11 +12,14 @@ import (
 
 var nativeDefinitionEntrypoints = map[string]string{
 	"darwin/arm64":       "../../backend/definitions/darwin_aarch64.rtg",
+	"freebsd/amd64":      "../../backend/definitions/freebsd_amd64.rtg",
 	"linux/386":          "../../backend/definitions/linux_386.rtg",
 	"linux/aarch64":      "../../backend/definitions/linux_aarch64.rtg",
 	"linux/amd64":        "../../backend/definitions/linux_amd64.rtg",
 	"linux/arm":          "../../backend/definitions/linux_arm.rtg",
 	"linux-kernel/amd64": "../../backend/definitions/linux_kernel_amd64.rtg",
+	"netbsd/amd64":       "../../backend/definitions/netbsd_amd64.rtg",
+	"openbsd/amd64":      "../../backend/definitions/openbsd_amd64.rtg",
 	"windows/386":        "../../backend/definitions/windows_386.rtg",
 	"windows/amd64":      "../../backend/definitions/windows_amd64.rtg",
 	"windows/arm64":      "../../backend/definitions/windows_aarch64.rtg",
@@ -69,6 +73,64 @@ func TestNativeDefinitionEmbeddedGoMetrics(t *testing.T) {
 	} {
 		if strings.Contains(string(source), legacy) {
 			t.Errorf("legacy opaque backend algorithm remains: %s", legacy)
+		}
+	}
+}
+
+func TestNativeBuiltInAndPreparedProjectionsShareResolvedSemantics(t *testing.T) {
+	for _, targetName := range sortedNativeTargetNames() {
+		t.Run(strings.ReplaceAll(targetName, "/", "-"), func(t *testing.T) {
+			resolved := resolveNativeTarget(t, targetName)
+			builtIn := GenerateCheckedInTargetProjection(resolved, targetName, "main")
+			if !builtIn.Ok {
+				t.Fatalf("generate checked-in projection: %#v", builtIn.Diagnostics)
+			}
+			prepared := GeneratePreparedBackend(resolved, targetName)
+			if !prepared.Ok {
+				t.Fatalf("generate prepared projection: %#v", prepared.Diagnostics)
+			}
+			if !reflect.DeepEqual(builtIn.Descriptor, prepared.Descriptor) {
+				t.Fatalf("descriptor mismatch:\nchecked-in: %#v\nprepared:   %#v",
+					builtIn.Descriptor, prepared.Descriptor)
+			}
+			if len(builtIn.Manifest) != 1 || len(prepared.Manifest) != 1 ||
+				builtIn.Manifest[0] != prepared.Manifest[0] {
+				t.Fatalf("resolved-definition manifest mismatch:\nchecked-in: %#v\nprepared:   %#v",
+					builtIn.Manifest, prepared.Manifest)
+			}
+			if bytes.Equal(builtIn.Source, prepared.Source) {
+				t.Fatal("checked-in and prepared projections unexpectedly use the same packaging")
+			}
+			if containsText(string(builtIn.Source), "const renvoRTGPreparedOS") ||
+				!containsText(string(prepared.Source), "const renvoRTGPreparedOS") ||
+				containsText(string(builtIn.Source), "func rtgNativeDirectMove(") ||
+				!containsText(string(prepared.Source), "func rtgNativeDirectMove(") {
+				t.Fatal("machine semantics did not retain the direct/prepared packaging boundary")
+			}
+		})
+	}
+}
+
+func TestCompactRuntimeOperationLists(t *testing.T) {
+	resolved := resolveNativeTarget(t, "linux/386")
+	target, found := lookupResolvedTarget(resolved, "linux/386")
+	if !found {
+		t.Fatal("linux/386 definition lost its target")
+	}
+	want := []string{"fd", "buffer", "count"}
+	if got := runtimeOperationList(target.Runtime, "write", "args"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("compact write args = %#v, want %#v", got, want)
+	}
+	prepared := GeneratePreparedBackend(resolved, "linux/386")
+	if !prepared.Ok {
+		t.Fatalf("generate prepared linux/386: %#v", prepared.Diagnostics)
+	}
+	for _, move := range []string{
+		"renvoRTGAsmPushRegister(out, rtgNativeESI)",
+		"renvoRTGAsmPopRegister(out, rtgNativeECX)",
+	} {
+		if !containsText(string(prepared.Source), move) {
+			t.Errorf("prepared linux/386 runtime omitted %s", move)
 		}
 	}
 }
@@ -524,6 +586,238 @@ func Test386DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 	}
 }
 
+func TestCheckedIn386TargetProjectionOutput(t *testing.T) {
+	tests := []struct {
+		target string
+		file   string
+		want   []string
+	}{
+		{
+			target: "linux/386",
+			file:   "../../backend/compiler_linux_386_impl.go",
+			want: []string{
+				"target: target-projection/linux/386",
+				"const renvoLinux386SysReadSeq = 3",
+				"func rtgBuiltinLinux386PackageLinuxEntry(",
+				"func renvoAsmImage386(",
+			},
+		},
+		{
+			target: "windows/386",
+			file:   "../../backend/compiler_windows_386_impl.go",
+			want: []string{
+				"target: target-projection/windows/386",
+				"func renvoWin386EmitRuntimeOpen(",
+				"func renvoAsmBuildWindowsArgvEnvSlices386(",
+				"func renvoAsmImageWindows386(",
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(strings.ReplaceAll(test.target, "/", "-"), func(t *testing.T) {
+			resolved := resolveNativeTarget(t, test.target)
+			generated := GenerateCheckedInTargetProjection(resolved, test.target, "main")
+			if !generated.Ok {
+				t.Fatalf("generate %s target projection: %#v", test.target, generated.Diagnostics)
+			}
+			checkedIn, err := os.ReadFile(test.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(generated.Source, checkedIn) {
+				t.Fatalf("checked-in %s target projection is stale; run go generate ./backend/definitions", test.target)
+			}
+			for _, binding := range test.want {
+				if !containsText(string(checkedIn), binding) {
+					t.Errorf("generated %s target output is missing %s", test.target, binding)
+				}
+			}
+			for _, forbidden := range []string{"type RTGEmitter struct", "func renvoRTGImage("} {
+				if containsText(string(checkedIn), forbidden) {
+					t.Errorf("generated %s target retained prepared bridge %s", test.target, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckedInNativeTargetProjectionOwnsDefinitionSemantics(t *testing.T) {
+	tests := []struct {
+		filename string
+		target   string
+		old      string
+		new      string
+		want     string
+	}{
+		{
+			filename: "../../backend/definitions/linux_386.rtg",
+			target:   "linux/386",
+			old:      "operation read { number = 3",
+			new:      "operation read { number = 13",
+			want:     "const renvoLinux386SysReadSeq = 13",
+		},
+		{
+			filename: "../../backend/definitions/windows_386.rtg",
+			target:   "windows/386",
+			old:      "bss args 32768 16",
+			new:      "bss args 16384 32",
+			want:     "const renvoWindows386ArgsBSSSize = 16384",
+		},
+		{
+			filename: "../../backend/definitions/linux_aarch64.rtg",
+			target:   "linux/aarch64",
+			old:      "operation read { number = 63",
+			new:      "operation read { number = 163",
+			want:     "const renvoLinuxAarch64SysReadSeq = 163",
+		},
+		{
+			filename: "../../backend/definitions/windows_aarch64.rtg",
+			target:   "windows/arm64",
+			old:      "bss args 32768 16",
+			new:      "bss args 16384 32",
+			want:     "const renvoWindowsArm64ArgsBSSSize = 16384",
+		},
+		{
+			filename: "../../backend/definitions/darwin_aarch64.rtg",
+			target:   "darwin/arm64",
+			old:      "bss args 32768 16",
+			new:      "bss args 16384 32",
+			want:     "const renvoDarwinArm64ArgsBSSSize = 16384",
+		},
+		{
+			filename: "../../backend/definitions/linux_arm.rtg",
+			target:   "linux/arm",
+			old:      "operation read { number = 3",
+			new:      "operation read { number = 13",
+			want:     "const renvoLinuxArmSysReadSeq = 13",
+		},
+		{
+			filename: "../../backend/definitions/linux_arm.rtg",
+			target:   "linux/arm",
+			old:      "operation exit { number = 1",
+			new:      "operation exit { number = 11",
+			want:     "const renvoLinuxArmSysExit = 11",
+		},
+		{
+			filename: "../../backend/definitions/linux_arm.rtg",
+			target:   "linux/arm",
+			old:      "flags = 0x05000000",
+			new:      "flags = 0x04000000",
+			want:     "const renvoLinuxArmELFFlags = 67108864",
+		},
+	}
+	for _, test := range tests {
+		original, err := os.ReadFile(test.filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modified := bytes.Replace(original, []byte(test.old), []byte(test.new), 1)
+		if bytes.Equal(modified, original) {
+			t.Fatalf("fixture %s did not contain %q", test.filename, test.old)
+		}
+		resolved := ResolveDefinitions(ParseImports(
+			modified, test.filename, testFilesystemImportLoader{}))
+		if !resolved.Ok {
+			t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+		}
+		generated := GenerateCheckedInTargetProjection(resolved, test.target, "main")
+		if !generated.Ok {
+			t.Fatalf("modified projection failed: %#v", generated.Diagnostics)
+		}
+		if !containsText(string(generated.Source), test.want) {
+			t.Errorf("modified %s projection is missing %s", test.target, test.want)
+		}
+	}
+}
+
+func TestCheckedInWindows386RejectsStaleCompactRuntime(t *testing.T) {
+	const filename = "../../backend/definitions/windows_386.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte("out.Int32(0x80)"), []byte("out.Int32(0x81)"), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("Windows/386 runtime mutation did not change the fixture")
+	}
+	resolved := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !resolved.Ok {
+		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
+	}
+	generated := GenerateCheckedInTargetProjection(resolved, "windows/386", "main")
+	if generated.Ok || len(generated.Diagnostics) == 0 ||
+		!strings.Contains(generated.Diagnostics[0].Message, "compact runtime templates are stale") {
+		t.Fatalf("modified compact runtime generation = ok %v, diagnostics %#v",
+			generated.Ok, generated.Diagnostics)
+	}
+}
+
+func TestCheckedInRemainingNativeTargetProjectionOutput(t *testing.T) {
+	tests := []struct{ target, file, binding string }{
+		{"linux/aarch64", "../../backend/compiler_linux_aarch64_impl.go", "func rtgBuiltinLinuxAarch64PackageLinuxEntry("},
+		{"windows/arm64", "../../backend/compiler_windows_arm64_target_impl.go", "func rtgBuiltinWindowsAarch64PackageWindowsRuntimeOpen("},
+		{"darwin/arm64", "../../backend/compiler_darwin_arm64_target_impl.go", "func rtgBuiltinDarwinAarch64PackageMachImage("},
+		{"linux/arm", "../../backend/compiler_linux_arm_impl.go", "const renvoLinuxArmSysReadSeq = 3"},
+	}
+	for _, test := range tests {
+		t.Run(strings.ReplaceAll(test.target, "/", "-"), func(t *testing.T) {
+			generated := GenerateCheckedInTargetProjection(resolveNativeTarget(t, test.target), test.target, "main")
+			if !generated.Ok {
+				t.Fatalf("generate target projection: %#v", generated.Diagnostics)
+			}
+			checkedIn, err := os.ReadFile(test.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(generated.Source, checkedIn) {
+				t.Fatalf("checked-in %s projection is stale; run go generate ./backend/definitions", test.target)
+			}
+			if !containsText(string(checkedIn), test.binding) {
+				t.Errorf("projection is missing %s", test.binding)
+			}
+			for _, forbidden := range []string{"type RTGEmitter struct", "func renvoRTGImage("} {
+				if containsText(string(checkedIn), forbidden) {
+					t.Errorf("projection retained %s", forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckedInWindowsProjectionsCacheRuntimeIOHelpers(t *testing.T) {
+	for _, target := range []string{"windows/386", "windows/arm64"} {
+		generated := GenerateCheckedInTargetProjection(
+			resolveNativeTarget(t, target), target, "main")
+		if !generated.Ok {
+			t.Fatalf("generate %s: %#v", target, generated.Diagnostics)
+		}
+		if !containsText(string(generated.Source), "g.winReadEmitted") ||
+			!containsText(string(generated.Source), "g.winWriteEmitted") {
+			t.Errorf("%s projection duplicates runtime I/O helpers at each call site", target)
+		}
+	}
+}
+
+func TestWindowsArm64ParameterlessEntrySkipsArgvRuntime(t *testing.T) {
+	generated := GenerateCheckedInTargetProjection(
+		resolveNativeTarget(t, "windows/arm64"), "windows/arm64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate windows/arm64: %#v", generated.Diagnostics)
+	}
+	source := string(generated.Source)
+	entry := strings.Index(source, "func renvoEmitProgramEntryArgsWindowsArm64(")
+	if entry < 0 {
+		t.Fatal("windows/arm64 projection omitted its entry adapter")
+	}
+	guard := strings.Index(source[entry:], "if app.paramCount == 0")
+	allocation := strings.Index(source[entry:], "renvoWindowsArm64ArgsBSSAlignment")
+	if guard < 0 || allocation < 0 || guard > allocation {
+		t.Fatalf("parameterless entry guard does not precede argv runtime allocation")
+	}
+}
+
 func TestWindows386RuntimeIOUsesBoundedSequences(t *testing.T) {
 	const filename = "../../backend/definitions/windows_386.rtg"
 	source, err := os.ReadFile(filename)
@@ -561,6 +855,15 @@ func sortedNativeEntrypoints() []string {
 	}
 	sort.Strings(filenames)
 	return filenames
+}
+
+func sortedNativeTargetNames() []string {
+	targets := make([]string, 0, len(nativeDefinitionEntrypoints))
+	for target := range nativeDefinitionEntrypoints {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	return targets
 }
 
 func resolveNativeTarget(t *testing.T, target string) ResolveResult {
@@ -701,14 +1004,6 @@ func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	}
 	if !bytes.Equal(generated.Source, checkedIn) {
 		t.Fatal("checked-in RTG architecture kernel is stale; run go generate ./backend/definitions")
-	}
-	inactive := GenerateInactiveArchitectureKernel("main")
-	checkedInactive, err := os.ReadFile("../../backend/compiler_rtg_inactive_impl.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(inactive.Source, checkedInactive) {
-		t.Fatal("checked-in inactive RTG architecture kernel is stale; run go generate ./backend/definitions")
 	}
 }
 

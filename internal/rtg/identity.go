@@ -187,6 +187,10 @@ func baseTargetGoRoots(document Document, target ResolvedTarget) []string {
 		abi = base
 	}
 	roots = appendDeclarationGoRoots(roots, target.Runtime)
+	if entry, found := decodeRuntimeEntryTemplate(target.Runtime); found &&
+		entry.algorithm != "" {
+		roots = append(roots, entry.algorithm)
+	}
 	roots = appendDeclarationGoRoots(roots, target.Executable)
 	roots = appendDeclarationGoRoots(roots, target.Object)
 	roots = appendDeclarationGoRoots(roots, target.Declaration)

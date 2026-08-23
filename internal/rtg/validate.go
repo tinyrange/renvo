@@ -471,6 +471,7 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "image_base_high", "machine", "kind", "cpu", "subsystem", "entry", "strip",
+			"image_variant", "osabi",
 			"type", "headers_size", "text_rva", "sections", "code_offset", "image",
 			"production_image",
 			"kernel_image", "flags", "patch_absolute", "patch_image",

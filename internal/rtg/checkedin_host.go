@@ -28,6 +28,24 @@ func GenerateCheckedInTargetProjection(
 		return generateCheckedInWindowsAmd64Projection(
 			resolved, target, packageName)
 	}
+	if target.Descriptor.Name == "linux/386" && target.Arch.Name == "x86_32" {
+		return generateCheckedInLinux386Projection(resolved, target, packageName)
+	}
+	if target.Descriptor.Name == "windows/386" && target.Arch.Name == "x86_32" {
+		return generateCheckedInWindows386Projection(resolved, target, packageName)
+	}
+	if target.Descriptor.Name == "linux/aarch64" && target.Arch.Name == "aarch64" {
+		return generateCheckedInLinuxAarch64Projection(resolved, target, packageName)
+	}
+	if target.Descriptor.Name == "windows/arm64" && target.Arch.Name == "aarch64" {
+		return generateCheckedInWindowsAarch64Projection(resolved, target, packageName)
+	}
+	if target.Descriptor.Name == "darwin/arm64" && target.Arch.Name == "aarch64" {
+		return generateCheckedInDarwinAarch64Projection(resolved, target, packageName)
+	}
+	if target.Descriptor.Name == "linux/arm" && target.Arch.Name == "arm" {
+		return generateCheckedInLinuxArmProjection(resolved, target, packageName)
+	}
 	if target.Descriptor.Name == "linux-kernel/amd64" && target.Arch.Name == "x86_64" {
 		return generateCheckedInLinuxKernelAmd64Projection(
 			resolved, target, packageName)
@@ -136,6 +154,7 @@ func checkedInLinuxAmd64RuntimeOperations(
 		{name: "read_at", symbol: "renvoLinuxAmd64SysReadAt"},
 		{name: "write_at", symbol: "renvoLinuxAmd64SysWriteAt"},
 		{name: "chmod", symbol: "renvoLinuxAmd64SysFchmod"},
+		{name: "exit", symbol: "renvoLinuxAmd64SysExit"},
 	}
 	for i := 0; i < len(operations); i++ {
 		value, ok := runtimeOperationInteger(runtime, operations[i].name, "number")
@@ -545,7 +564,21 @@ func GenerateCheckedInArchitectureAlgorithms(resolved ResolveResult, archName st
 	if declarativeArchitectureRelocations(arch) != "" {
 		source = appendCheckedInArchitectureHooks(source, projection, arch)
 	}
+	source = appendCompilerGoBlocks(source, resolved.Document)
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
+func appendCompilerGoBlocks(source []byte, document Document) []byte {
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo || declaration.Name != "compiler" {
+			continue
+		}
+		source = append(source, '\n')
+		source = append(source, dedentGoSource(declaration.GoSource)...)
+		source = append(source, '\n')
+	}
+	return source
 }
 
 // GenerateCheckedInArchitectureContract emits the complete typed semantic

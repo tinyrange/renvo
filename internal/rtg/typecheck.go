@@ -100,6 +100,9 @@ func (out *RTGEmitter) WindowsSubsystem() int { return 0 }
 func (out *RTGEmitter) StaticImportCount() int { return 0 }
 func (out *RTGEmitter) StaticImportDLL(index int) string { return "" }
 func (out *RTGEmitter) StaticImportName(index int) string { return "" }
+func (out *RTGEmitter) StaticCallParameterCount() int { return 0 }
+func (out *RTGEmitter) StaticCallParameterKind(index int) int { return 0 }
+func (out *RTGEmitter) StaticCallResultFloatRegister() int { return -1 }
 func (out *RTGEmitter) DynamicImport(library string, name string) int { return 0 }
 func (out *RTGEmitter) DynamicImportCount() int { return 0 }
 func (out *RTGEmitter) DynamicImportLibrary(index int) string { return "" }
@@ -185,7 +188,7 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 	}
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		source = append(source, '\n')

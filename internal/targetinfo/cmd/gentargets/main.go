@@ -15,39 +15,40 @@ import (
 )
 
 type sourceDescriptor struct {
-	Name                string   `json:"name"`
-	Backend             string   `json:"backend"`
-	BackendID           int      `json:"backend_id"`
-	Constant            string   `json:"constant"`
-	Aliases             []string `json:"aliases"`
-	Family              string   `json:"family"`
-	OS                  string   `json:"os"`
-	OSID                int      `json:"os_id"`
-	ISA                 string   `json:"isa"`
-	ISAID               int      `json:"isa_id"`
-	WordBits            int      `json:"word_bits"`
-	PointerBits         int      `json:"pointer_bits"`
-	CodePointerBits     int      `json:"code_pointer_bits"`
-	FunctionPointerBits int      `json:"function_pointer_bits"`
-	MaxAlign            int      `json:"max_align"`
-	Endian              string   `json:"endian"`
-	ABI                 string   `json:"abi"`
-	Image               string   `json:"image"`
-	Runtime             []string `json:"runtime"`
-	Tags                []string `json:"tags"`
-	Advertised          bool     `json:"advertised"`
-	Virtual             bool     `json:"virtual"`
-	DefaultArena        int      `json:"default_arena"`
-	ReleaseArtifact     string   `json:"release_artifact"`
-	IDE                 bool     `json:"ide"`
-	Capabilities        []string `json:"capabilities"`
-	Definition          [32]byte `json:"-"`
-	Descriptor          int      `json:"-"`
-	DeclarativeBytes    int      `json:"-"`
-	ReachableGoBytes    int      `json:"-"`
-	CatalogGoBytes      int      `json:"-"`
-	ReachableGoDecls    int      `json:"-"`
-	CatalogGoDecls      int      `json:"-"`
+	Name                string         `json:"name"`
+	Backend             string         `json:"backend"`
+	BackendID           int            `json:"backend_id"`
+	Constant            string         `json:"constant"`
+	Aliases             []string       `json:"aliases"`
+	Family              string         `json:"family"`
+	OS                  string         `json:"os"`
+	OSID                int            `json:"os_id"`
+	ISA                 string         `json:"isa"`
+	ISAID               int            `json:"isa_id"`
+	WordBits            int            `json:"word_bits"`
+	PointerBits         int            `json:"pointer_bits"`
+	CodePointerBits     int            `json:"code_pointer_bits"`
+	FunctionPointerBits int            `json:"function_pointer_bits"`
+	MaxAlign            int            `json:"max_align"`
+	Endian              string         `json:"endian"`
+	ABI                 string         `json:"abi"`
+	Image               string         `json:"image"`
+	Runtime             []string       `json:"runtime"`
+	Tags                []string       `json:"tags"`
+	Advertised          bool           `json:"advertised"`
+	Virtual             bool           `json:"virtual"`
+	DefaultArena        int            `json:"default_arena"`
+	ReleaseArtifact     string         `json:"release_artifact"`
+	IDE                 bool           `json:"ide"`
+	Capabilities        []string       `json:"capabilities"`
+	Definition          [32]byte       `json:"-"`
+	Descriptor          int            `json:"-"`
+	DeclarativeBytes    int            `json:"-"`
+	ReachableGoBytes    int            `json:"-"`
+	CatalogGoBytes      int            `json:"-"`
+	ReachableGoDecls    int            `json:"-"`
+	CatalogGoDecls      int            `json:"-"`
+	RuntimeNumbers      map[string]int `json:"-"`
 }
 
 func main() {
@@ -111,6 +112,7 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 	type resolvedMachine struct {
 		descriptor rtg.TargetDescriptor
 		metrics    rtg.TargetMetrics
+		runtime    rtg.Declaration
 	}
 	targets := make(map[string]resolvedMachine)
 	for _, path := range paths {
@@ -140,6 +142,7 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 			targets[name] = resolvedMachine{
 				descriptor: target.Descriptor,
 				metrics:    rtg.MeasureTarget(resolved.Document, target),
+				runtime:    target.Runtime,
 			}
 		}
 	}
@@ -165,6 +168,14 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		descriptors[i].Tags = append([]string(nil), machine.BuildTags...)
 		descriptors[i].Capabilities = append([]string(nil), machine.Capabilities...)
 		descriptors[i].Runtime = append([]string(nil), machine.RuntimeOps...)
+		descriptors[i].RuntimeNumbers = make(map[string]int)
+		for _, operation := range []string{
+			"read", "write", "read_at", "write_at", "open", "close", "chmod", "exit",
+		} {
+			if number, ok := rtg.RuntimeOperationInteger(resolved.runtime, operation, "number"); ok {
+				descriptors[i].RuntimeNumbers[operation] = number
+			}
+		}
 		if contains(machine.Capabilities, "hosted") {
 			descriptors[i].Runtime = append(descriptors[i].Runtime, "hosted")
 		}
@@ -505,6 +516,36 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	projection.WriteByte('\n')
 	for _, descriptor := range backend {
 		fmt.Fprintf(&projection, "const %s = %d\n", descriptor.Constant, descriptor.BackendID)
+	}
+	var linuxAmd64 *sourceDescriptor
+	for i := range backend {
+		if backend[i].Name == "linux/amd64" {
+			linuxAmd64 = &backend[i]
+			break
+		}
+	}
+	if linuxAmd64 == nil {
+		return fmt.Errorf("target registry has no linux/amd64 definition")
+	}
+	projection.WriteByte('\n')
+	for _, operation := range []struct {
+		name   string
+		suffix string
+	}{
+		{"read", "ReadSeq"},
+		{"write", "WriteSeq"},
+		{"read_at", "ReadAt"},
+		{"write_at", "WriteAt"},
+		{"open", "Open"},
+		{"close", "Close"},
+		{"chmod", "Fchmod"},
+		{"exit", "Exit"},
+	} {
+		number, ok := linuxAmd64.RuntimeNumbers[operation.name]
+		if !ok {
+			return fmt.Errorf("linux/amd64 definition has no %s runtime number", operation.name)
+		}
+		fmt.Fprintf(&projection, "const renvoResolvedLinuxAmd64Sys%s = %d\n", operation.suffix, number)
 	}
 	projection.WriteString("\nconst targetOSTable = ")
 	projection.WriteString(strconv.Quote(byteTable(backend, func(descriptor sourceDescriptor) int { return descriptor.OSID })))

@@ -23,27 +23,20 @@ func main() {
 	targetProjection := flag.Bool("target-projection", false, "emit a checked-in production target projection")
 	prepared := flag.Bool("prepared", false, "emit a prepared custom backend for compiler package main")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
-	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
 	buildTag := flag.String("build-tag", "", "prepend one Go build tag to generated source")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
-	if *output == "" || flag.NArg() == 0 && !*kernel && !*inactiveKernel {
+	if *output == "" || flag.NArg() == 0 && !*kernel {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
 		os.Exit(2)
 	}
-	if *kernel || *inactiveKernel {
+	if *kernel {
 		if *target != "" || *arch != "" || *statefulEmitter || *targetProjection || flag.NArg() != 0 {
 			fail("kernel generation does not accept definitions, -t, or -arch")
 		}
-		if *kernel && *inactiveKernel {
-			fail("-kernel and -inactive-kernel are mutually exclusive")
-		}
 		generated := rtg.GenerateArchitectureKernel(*packageName)
-		if *inactiveKernel {
-			generated = rtg.GenerateInactiveArchitectureKernel(*packageName)
-		}
 		writeGenerated(*output, *check, generated)
 		return
 	}

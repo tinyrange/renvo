@@ -168,23 +168,21 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	}
 	if targetIsWindows(g.c.renvoTargetOS) {
 		if g.c.renvoTargetArch == renvoArch386 {
-			label := renvoWin386EmitReadWriteHelper(g, true)
 			renvoAsmEmit16(a, 0xc689)
 			renvoAsmPrimaryImm(a, -1)
 			renvoAsmCopyPrimaryToTertiary(a)
 			renvoAsmPrimaryImm(a, fd)
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmCallLabel(a, label)
+			renvoAsmEmit16(a, 0xc389)
+			renvoWin386EmitRuntimeWriteAt(g)
 			return true
 		}
 		if g.c.renvoTargetArch == renvoArchAarch64 {
-			label := renvoWinArm64EmitReadWriteHelper(g, true)
 			renvoAsmCopyPrimaryToCallWord1(a)
-			renvoAsmPrimaryImm(a, fd)
-			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPrimaryImm(a, -1)
 			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmCallLabel(a, label)
+			renvoAsmPrimaryImm(a, fd)
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoWinArm64DefinitionWriteAt(g)
 			return true
 		}
 		label := renvoWinAmd64EmitReadWriteHelper(g, true)
@@ -197,10 +195,9 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 		return true
 	}
 	if targetIsDarwin(g.c.renvoTargetOS) {
-		renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegRdx)
-		renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRax)
-		renvoAarch64AsmMovRegImm(a, 0, fd)
-		renvoDarwinArm64CallImport(a, renvoDarwinImportWrite)
+		renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
+		renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, fd)
+		renvoDarwinArm64DefinitionWrite(a)
 		return true
 	}
 	renvoAsmPushImm(a, fd)
@@ -262,7 +259,11 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	renvoAsmPrepareReadWriteBuf(a)
 	if offsetRead {
 		renvoAsmPopPrimary(a)
-		renvoAsmMoveOffsetArg(a)
+		if targetIsDarwin(g.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToTertiary(a)
+		} else {
+			renvoAsmMoveOffsetArg(a)
+		}
 	}
 	renvoAsmPopCallWord0(a)
 	if offsetRead {
@@ -271,15 +272,17 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 		renvoAsmPrimaryImm(a, seqSyscall)
 	}
 	if targetIsDarwin(g.c.renvoTargetOS) {
-		importID := seqSyscall
 		if offsetRead {
-			importID = offSyscall
+			if seqSyscall == renvoDarwinImportWrite {
+				renvoDarwinArm64DefinitionWriteAt(a)
+			} else {
+				renvoDarwinArm64DefinitionReadAt(a)
+			}
+		} else if seqSyscall == renvoDarwinImportWrite {
+			renvoDarwinArm64DefinitionWrite(a)
+		} else {
+			renvoDarwinArm64DefinitionRead(a)
 		}
-		argCount := 3
-		if offsetRead {
-			argCount = 4
-		}
-		renvoDarwinArm64CallVirtualArgs(a, importID, argCount)
 		return true
 	}
 	renvoAsmSyscall(a)
@@ -411,11 +414,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPopCallWord1(a)
 			renvoAsmSecondaryImm(a, 493)
-			// mode is the first variadic argument to open. Darwin's arm64
-			// ABI passes variadic arguments on the stack.
-			renvoAarch64AsmPushReg(a, renvoAarch64RegRdx)
-			renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportOpen, 2)
-			renvoAarch64AsmAddRegImm(a, 31, 31, 16)
+			renvoDarwinArm64DefinitionOpen(a)
 			return true
 		}
 		if g.c.renvoTargetArch == renvoArchAarch64 {
@@ -475,7 +474,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		}
 		renvoAsmCopyPrimaryToCallWord0(a)
 		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportClose, 1)
+			renvoDarwinArm64DefinitionClose(a)
 			return true
 		}
 		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetOS, g.c.renvoTargetArch))
@@ -495,7 +494,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 	renvoAsmCopyPrimaryToCallWord1(a)
 	renvoAsmPopCallWord0(a)
 	if targetIsDarwin(g.c.renvoTargetOS) {
-		renvoDarwinArm64CallVirtualArgs(a, renvoDarwinImportFchmod, 2)
+		renvoDarwinArm64DefinitionChmod(a)
 		return true
 	}
 	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetOS, g.c.renvoTargetArch))
@@ -566,28 +565,28 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	}
 	if g.c.renvoTargetArch == renvoArchAarch64 {
 		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-			renvoDarwinArm64CallImport(a, renvoDarwinImportExit)
+			renvoDarwinArm64DefinitionExit(a)
+		} else if targetIsWindows(g.c.renvoTargetOS) {
+			renvoWinArm64DefinitionExit(a)
 		} else {
 			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, 93)
+			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
 			renvoAsmSyscall(a)
 		}
 		return true
 	}
 	if g.c.renvoTargetArch == renvoArchArm {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, 1)
+		renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
 		renvoAsmSyscall(a)
 		return true
 	}
 	if g.c.renvoTargetArch == renvoArch386 {
 		if targetIsWindows(g.c.renvoTargetOS) {
-			renvoAsmPushPrimary(a)
-			renvoWin386CallImport(a, renvoWinImportExitProcess)
+			renvoWin386EmitExit(a)
 		} else {
 			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, 1)
+			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
 			renvoAsmSyscall(a)
 		}
 		return true
@@ -676,14 +675,28 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
 	}
+	if renvoPreparedBackendActive != 0 && renvoRTGPreparedOS == renvoOSDarwin ||
+		renvoPreparedBackendActive == 0 && targetIsDarwin(g.c.renvoTargetOS) {
+		if !renvoPrepareDarwinStaticCall(g, fn, wordCount) {
+			return false
+		}
+		importID := renvoAsmAddPreparedStaticImport(&g.asm,
+			fn.linkDLLStart, fn.linkDLLEnd,
+			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
+		if importID < 0 {
+			return false
+		}
+		if renvoPreparedBackendActive != 0 {
+			return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+		}
+		renvoDarwinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
+		return true
+	}
 	if renvoPreparedBackendActive != 0 {
 		importID := renvoAsmAddPreparedStaticImport(&g.asm,
 			fn.linkDLLStart, fn.linkDLLEnd,
 			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		return renvoDarwinArm64EmitLinkStaticCall(g, fn, wordCount)
 	}
 	if g.c.renvoTargetOS != renvoOSWindows {
 		return false
@@ -697,7 +710,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		return true
 	}
 	if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoWinArm64CallStaticImport(&g.asm, importID, wordCount)
+		renvoWinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
 		return true
 	}
 	if g.c.renvoTargetArch != renvoArchAmd64 {
@@ -705,6 +718,123 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 	}
 	renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
 	return true
+}
+
+const (
+	renvoDarwinStaticCallInteger = iota
+	renvoDarwinStaticCallString
+	renvoDarwinStaticCallSlice
+	renvoDarwinStaticCallFloat32
+	renvoDarwinStaticCallFloat64
+	renvoDarwinStaticCallIntegerFloat64
+	renvoDarwinStaticCallIntegerFloat32
+)
+
+func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
+	if g.c.renvoTargetArch != renvoArchAarch64 && renvoPreparedBackendActive == 0 {
+		return false
+	}
+	var kinds [16]byte
+	consumed := 0
+	integerCount := 0
+	floatCount := 0
+	allInteger := true
+	abi := renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float64") |
+		renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float32")<<8
+	for i := 0; i < fn.paramCount; i++ {
+		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
+		kind := renvoDarwinStaticCallInteger
+		if abi&(1<<(i+8)) != 0 {
+			kind = renvoDarwinStaticCallIntegerFloat32
+		} else if abi&(1<<i) != 0 {
+			kind = renvoDarwinStaticCallIntegerFloat64
+		} else if typ.kind == renvoTypeFloat32 {
+			kind = renvoDarwinStaticCallFloat32
+		} else if typ.kind == renvoTypeFloat64 {
+			kind = renvoDarwinStaticCallFloat64
+		} else if typ.kind == renvoTypeString {
+			kind = renvoDarwinStaticCallString
+		} else if typ.kind == renvoTypeSlice {
+			kind = renvoDarwinStaticCallSlice
+		} else if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
+			return false
+		}
+		if kind == renvoDarwinStaticCallFloat32 || kind == renvoDarwinStaticCallFloat64 ||
+			kind == renvoDarwinStaticCallIntegerFloat64 || kind == renvoDarwinStaticCallIntegerFloat32 {
+			floatCount++
+			allInteger = false
+		} else {
+			integerCount++
+			if kind != renvoDarwinStaticCallInteger {
+				allInteger = false
+			}
+		}
+		if i >= len(kinds) && kind != renvoDarwinStaticCallInteger {
+			return false
+		}
+		if i < len(kinds) {
+			kinds[i] = byte(kind)
+		}
+		consumed++
+		if kind == renvoDarwinStaticCallString {
+			consumed++
+		} else if kind == renvoDarwinStaticCallSlice {
+			consumed += 2
+		}
+	}
+	if consumed != wordCount {
+		return false
+	}
+	if !allInteger && (integerCount > 8 || floatCount > 8) {
+		return false
+	}
+	resultFloat := -1
+	resultKind := renvoDarwinStaticCallInteger
+	typ := renvoResolveType(g.meta, fn.resultType)
+	if renvoTypeKindIsFloat(typ.kind) {
+		resultFloat = renvoLinkStaticOption(
+			g.prog.src, fn.linkMethodEnd, fn.nameStart, "result-float64")
+		if resultFloat < 0 || resultFloat >= 8 {
+			return false
+		}
+		if typ.kind == renvoTypeFloat32 {
+			resultKind = renvoDarwinStaticCallFloat32
+		} else {
+			resultKind = renvoDarwinStaticCallFloat64
+		}
+	}
+	g.asm.staticCallParamCount = fn.paramCount
+	g.asm.staticCallParamKinds = kinds
+	if resultKind == renvoDarwinStaticCallFloat32 {
+		resultFloat += 8
+	}
+	g.asm.staticCallResultFloat = resultFloat
+	return true
+}
+
+func renvoLinkStaticOption(src []byte, start int, end int, name string) int {
+	for start < end && renvo_runtime_UnsafeByteAt(src, start) != '\n' {
+		if renvo_runtime_UnsafeByteAt(src, start) != ',' {
+			start++
+			continue
+		}
+		start++
+		for start < end && renvo_runtime_UnsafeByteAt(src, start) == ' ' {
+			start++
+		}
+		if start+len(name) < end && renvoBytesEqualText(src, start, start+len(name), name) &&
+			renvo_runtime_UnsafeByteAt(src, start+len(name)) == '=' {
+			value := 0
+			for start += len(name) + 1; start < end; start++ {
+				ch := renvo_runtime_UnsafeByteAt(src, start)
+				if ch < '0' || ch > '9' {
+					return value
+				}
+				value = value*10 + int(ch-'0')
+			}
+		}
+	}
+	return 0
 }
 
 // renvoEmitCObjectMemoryAggregateCall handles foreign calls whose SysV stack
@@ -1000,11 +1130,6 @@ func renvoAsmAddPreparedStaticImport(
 	a *renvoAsm, libraryStart int, libraryEnd int,
 	nameStart int, nameEnd int, src []byte,
 ) int {
-	if renvoFixedTarget != 0 {
-		if renvoPreparedBackendActive == 0 {
-			return -1
-		}
-	}
 	renvoNonNil(a)
 	library := renvoStringFromBytes(src, libraryStart, libraryEnd)
 	name := renvoStringFromBytes(src, nameStart, nameEnd)
@@ -1525,7 +1650,7 @@ func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber i
 			baseOff := a.bssSize
 			a.bssSize += 8
 			renvoAarch64AsmMovRegAbs(a, 3, baseOff, renvoAbsBssReloc)
-			renvoDarwinArm64CallImport(a, renvoDarwinImportGetdirentries)
+			renvoDarwinArm64EmitGetdirentries(a)
 			return true
 		}
 		renvoAarch64AsmPopReg(a, renvoAarch64RegSys)

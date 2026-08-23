@@ -568,7 +568,7 @@ func declarationBlock(declaration Declaration, name string) (Statement, bool) {
 func findEmbeddedFunction(document Document, name string) (embeddedFunction, bool) {
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		wrapped := make([]byte, 0, len(declaration.GoSource)+16)

@@ -91,7 +91,7 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 
 func GenerateArchitectureKernel(packageName string) GenerateResult {
 	ensureDirectEmitterV1()
-	source := []byte("//go:build !renvo\n\n")
+	source := []byte("//go:build !renvo_prepared && !renvo_jvm_prepared\n\n")
 	source = append(source, generateHeaderPackage(nil, "architecture-kernel", packageName)...)
 	source = appendNativeRegisterAPI(source)
 	source = appendNativeArchitectureAPI(source)
@@ -99,54 +99,6 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
 	return GenerateResult{Source: source, Ok: true}
-}
-
-// GenerateInactiveArchitectureKernel emits only the declarations needed to
-// type-check prepared-backend branches in a self-hosted built-in compiler.
-// renvoPreparedBackend is a compile-time zero there, so no adapter is
-// executable. The host and prepared topologies use the full implementations.
-func GenerateInactiveArchitectureKernel(packageName string) GenerateResult {
-	ensureDirectEmitterV1()
-	source := []byte("//go:build renvo && !renvo_prepared && !renvo_jvm_prepared\n\n")
-	source = append(source, generateHeaderPackage(nil, "inactive-architecture-kernel", packageName)...)
-	source = appendNativeRegisterAPI(source)
-	source = appendNativeArchitectureAPI(source)
-	source = appendNativeEmitterAPI(source)
-	source = appendDirectEmitterKernelAdapters(source)
-	source = append(source, `
-func renvoRTGAsmAddress(base RTGRegister, index RTGRegister, displacement int, scale int) renvoRTGAddress {
-	return renvoRTGAddress{}
-}
-func renvoRTGAsmDataAddress(offset int) renvoRTGAddress { return renvoRTGAddress{} }
-func renvoRTGAsmBSSAddress(offset int) renvoRTGAddress { return renvoRTGAddress{} }
-func renvoRTGAsmPushRegister(a *renvoAsm, source RTGRegister) {}
-func renvoRTGAsmPushImmediate(a *renvoAsm, value int) {}
-func renvoRTGAsmPopRegister(a *renvoAsm, destination RTGRegister) {}
-func renvoRTGAsmLoadFrame(a *renvoAsm, destination RTGRegister, offset int) {}
-func renvoRTGAsmStoreFrame(a *renvoAsm, offset int, source RTGRegister) {}
-func renvoRTGAsmAddressFrame(a *renvoAsm, destination RTGRegister, offset int) {}
-func renvoRTGAsmLoadSize(a *renvoAsm, destination RTGRegister, address renvoRTGAddress, size int, signed bool) {}
-func renvoRTGAsmStoreSize(a *renvoAsm, address renvoRTGAddress, source RTGRegister, size int) {}
-func renvoRTGAsmNormalize(a *renvoAsm, kind int) {}
-func renvoRTGAsmCompareImmediate(a *renvoAsm, value int) {}
-func renvoRTGAsmMemoryIncrement(a *renvoAsm, decrement bool) {}
-func renvoRTGAsmBoolNot(a *renvoAsm) {}
-func renvoRTGEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool { return false }
-func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool { return false }
-func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {}
-func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {}
-func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool { return false }
-func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {}
-func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {}
-func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool { return false }
-func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	return renvoCompileResult{}
-}
-func renvoRTGEmitKernelCallbackArgReverse(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int,
-) int { return -1 }
-`...)
-	return GenerateResult{Source: appendPreparedTargetFacts(source, TargetDescriptor{}, false), Ok: true}
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -727,12 +679,28 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallParameterCount() int {
+	return out.staticCallParamCount
+}
+
+func (out *renvoAsm) StaticCallParameterKind(index int) int {
+	return int(out.staticCallParamKinds[index])
+}
+
+func (out *renvoAsm) StaticCallResultFloatRegister() int {
+	return out.staticCallResultFloat
+}
+
 func (out *renvoAsm) DynamicImport(library string, name string) int {
 	for i := 0; i < len(out.darwinImports); i++ {
 		if out.darwinImports[i].dylib == library && out.darwinImports[i].name == name {
 			out.darwinImports[i].used = true
 			return i
 		}
+	}
+	if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetDarwinArm64 {
+		library = renvo_runtime_ArenaPersistString(library)
+		name = renvo_runtime_ArenaPersistString(name)
 	}
 	label := renvoAsmNewLabel(out)
 	out.darwinImports = append(out.darwinImports,
@@ -1294,12 +1262,28 @@ func (out *RTGEmitter) StaticImportName(index int) string {
 	return out.asm.staticImports[index].name
 }
 
+func (out *RTGEmitter) StaticCallParameterCount() int {
+	return out.asm.staticCallParamCount
+}
+
+func (out *RTGEmitter) StaticCallParameterKind(index int) int {
+	return int(out.asm.staticCallParamKinds[index])
+}
+
+func (out *RTGEmitter) StaticCallResultFloatRegister() int {
+	return out.asm.staticCallResultFloat
+}
+
 func (out *RTGEmitter) DynamicImport(library string, name string) int {
 	for i := 0; i < len(out.asm.darwinImports); i++ {
 		if out.asm.darwinImports[i].dylib == library && out.asm.darwinImports[i].name == name {
 			out.asm.darwinImports[i].used = true
 			return i
 		}
+	}
+	if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetDarwinArm64 {
+		library = renvo_runtime_ArenaPersistString(library)
+		name = renvo_runtime_ArenaPersistString(name)
 	}
 	label := renvoAsmNewLabel(out.asm)
 	out.asm.darwinImports = append(out.asm.darwinImports,
@@ -1737,7 +1721,7 @@ func appendEmbeddedGo(source []byte, document Document) []byte {
 	prefix := "rtg" + exportedName(document.Unit)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		source = append(source, '\n')
@@ -1752,7 +1736,7 @@ func appendMangledEmbeddedGo(source []byte, document Document, nativeEmitter boo
 	prefix := "rtg" + exportedName(document.Unit)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		source = append(source, '\n')
@@ -1921,7 +1905,7 @@ func reachableEmbeddedGoParts(document Document, roots []string, excluded []stri
 	var combined []byte
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		combined = append(combined, '\n')
@@ -2089,7 +2073,7 @@ func collectEmbeddedGoNames(document Document, functionsOnly bool) []string {
 	var names []string
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		wrapped := append([]byte("package backend\n"), declaration.GoSource...)
@@ -2255,6 +2239,8 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		method != "Data" && method != "SetData" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
 		method != "WindowsSubsystem" && method != "StaticImportCount" &&
 		method != "StaticImportDLL" && method != "StaticImportName" &&
+		method != "StaticCallParameterCount" && method != "StaticCallParameterKind" &&
+		method != "StaticCallResultFloatRegister" &&
 		method != "RelocationCount" &&
 		method != "RelocationAt" && method != "RelocationOffset" &&
 		method != "RelocationLabel" && method != "RelocationWordCount" &&
@@ -2377,6 +2363,21 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		replacement = append(replacement, ".staticImports["...)
 		replacement = append(replacement, arguments[0]...)
 		return append(replacement, "].name"...), end, true
+	}
+	if method == "StaticCallParameterCount" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallParamCount"...), end, true
+	}
+	if method == "StaticCallParameterKind" && len(arguments) == 1 {
+		replacement = append(replacement, "int("...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".staticCallParamKinds["...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, "])"...), end, true
+	}
+	if method == "StaticCallResultFloatRegister" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallResultFloat"...), end, true
 	}
 	if method == "RelocationCount" && len(arguments) == 0 {
 		replacement = append(replacement, "len("...)

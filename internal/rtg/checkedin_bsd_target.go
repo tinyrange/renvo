@@ -5,6 +5,10 @@ package rtg
 func generateCheckedInBSDAmd64Projection(
 	resolved ResolveResult, target ResolvedTarget, packageName string,
 ) GenerateResult {
+	if field, want, ok := checkedInBSDAmd64FormatMismatch(resolved.Document, target); ok {
+		return checkedInTargetProjectionFailure(resolved.Document, target.Executable,
+			target.Descriptor.Name+" executable "+field+" must be "+want)
+	}
 	operations, missing := checkedInLinuxAmd64RuntimeOperations(target.Runtime)
 	if missing != "" {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
@@ -43,24 +47,44 @@ func generateCheckedInBSDAmd64Projection(
 		source = append(source, " = "...)
 		source = appendDecimalFrame(source, operations[i].value)
 	}
-	exit, ok := runtimeOperationInteger(target.Runtime, "exit", "number")
-	if !ok || exit <= 0 {
-		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
-			target.Descriptor.Name+" runtime exit requires a syscall number")
-	}
-	if exit != 1 {
-		return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
-			target.Descriptor.Name+" runtime exit violates the shared BSD syscall ABI")
-	}
-	if target.Descriptor.Name == "freebsd/amd64" {
-		source = append(source, "\nconst renvoBSDAmd64SysExit = "...)
-		source = appendDecimalFrame(source, exit)
-	}
 	source = append(source, '\n')
 	source = append(source, body...)
 	return GenerateResult{
 		Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true,
 	}
+}
+
+func checkedInBSDAmd64FormatMismatch(
+	document Document, target ResolvedTarget,
+) (string, string, bool) {
+	wantVariant := target.Descriptor.OS
+	variant, found := fieldValue(document, target.Executable, "image_variant")
+	if !found || valueName(variant) != wantVariant {
+		return "image_variant", wantVariant, true
+	}
+	wantOffset := 176
+	if wantVariant == "netbsd" {
+		wantOffset = 256
+	} else if wantVariant == "openbsd" {
+		wantOffset = 432
+	}
+	offset, found := integerField(document, target.Executable, "code_offset")
+	if !found || offset != wantOffset {
+		return "code_offset", decimalFrame(wantOffset), true
+	}
+	if wantVariant == "freebsd" {
+		osabi, found := integerField(document, target.Executable, "osabi")
+		if !found || osabi != 9 {
+			return "osabi", "9", true
+		}
+	}
+	if wantVariant == "netbsd" {
+		base, found := integerField(document, target.Executable, "image_base")
+		if !found || base != 0x400000 {
+			return "image_base", "4194304", true
+		}
+	}
+	return "", "", false
 }
 
 func checkedInBSDAmd64CommonOperation(name string) (bool, int) {
@@ -78,6 +102,9 @@ func checkedInBSDAmd64CommonOperation(name string) (bool, int) {
 	}
 	if name == "chmod" {
 		return true, 124
+	}
+	if name == "exit" {
+		return true, 1
 	}
 	return false, 0
 }
