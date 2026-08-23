@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "da75d37870e5431812cb15261471b861ffed3218e79288fc16741543bd47a6ac"
+const CompilerSourceDigest = "b42dd9021327d1caa32f87378ef349fe44a71852b2452c2cf4db6ae3a3e6e7f3"
 
 // source: backend/compiler_common_impl.go
 
@@ -8915,7 +8915,7 @@ return false
 resultResolved := renvoResolveType(g.meta, resultType)
 renvoNonNil(resultResolved)
 if renvoTypeKindIsComplex(resultResolved.kind) {
-if !renvoEmitComplexValueRegs(g, ep, rootIndex) {
+if !renvoEmitComplexValueRegsForKind(g, ep, rootIndex, resultResolved.kind) {
 return false
 }
 } else if !renvoEmitScalarExprForKind(g, ep, rootIndex, resultResolved.kind) {
@@ -11477,7 +11477,7 @@ renvoAsmStoreSliceBss(a, globalOffset)
 return true
 }
 if globalOffset >= 0 && targetResolved.kind == renvoTypeComplex64 {
-if !renvoEmitComplexValueRegs(g, ep, rootIndex) {
+if !renvoEmitComplexValueRegsForKind(g, ep, rootIndex, targetResolved.kind) {
 return false
 }
 if g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32) {
@@ -11550,8 +11550,9 @@ return true
 
 func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, addrOffset int) bool {
 renvoNonNil(g, ep)
-if renvoResolveType(g.meta, typ).kind == renvoTypeComplex64 {
-if !renvoEmitComplexValueRegs(g, ep, idx) {
+resolvedKind := renvoResolveType(g.meta, typ).kind
+if resolvedKind == renvoTypeComplex64 {
+if !renvoEmitComplexValueRegsForKind(g, ep, idx, resolvedKind) {
 return false
 }
 if g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32) {
@@ -12772,7 +12773,7 @@ if g.c.renvoNativeIntSize == 4 && destResolved.kind == renvoTypeComplex {
 return renvoEmit386Complex128ToLocal(g, ep, idx, offset)
 }
 if renvoTypeKindIsComplex(destResolved.kind) {
-if !renvoEmitComplexValueRegs(g, ep, idx) {
+if !renvoEmitComplexValueRegsForKind(g, ep, idx, destResolved.kind) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(&g.asm, offset, renvoComplexSecondaryStackOffset(g, destType, offset))
@@ -14088,7 +14089,7 @@ renvoAsmStorePrimarySecondaryStack(a, destOffset, destOffset-8)
 return true
 }
 if fieldResolved.kind == renvoTypeComplex64 {
-if !renvoEmitComplexValueRegs(g, ep, idx) {
+if !renvoEmitComplexValueRegsForKind(g, ep, idx, fieldResolved.kind) {
 return false
 }
 if g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32) {
@@ -18086,6 +18087,14 @@ return -1
 }
 renvoAsmPushStackWord(&g.asm, tempOffset-renvoBackendValueSlotSize)
 renvoAsmPushStackWord(&g.asm, tempOffset)
+return 2
+}
+if renvoTypeKindIsComplex(resolved.kind) && !(g.c.renvoNativeIntSize == 4 && resolved.kind == renvoTypeComplex) {
+if !renvoEmitComplexValueRegsForKind(g, ep, idx, resolved.kind) {
+return -1
+}
+renvoAsmPushSecondary(&g.asm)
+renvoAsmPushPrimary(&g.asm)
 return 2
 }
 if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(resolved.kind) || resolved.kind == renvoTypeComplex) {
@@ -27730,8 +27739,19 @@ renvoNonNil(g, ep)
 if idx < 0 || idx >= len(ep.exprs) {
 return false
 }
-e := &ep.exprs[idx]
 complexKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+return renvoEmitComplexValueRegsForKind(g, ep, idx, complexKind)
+}
+
+func renvoEmitComplexValueRegsForKind(g *renvoLinearGen, ep *renvoExprParse, idx int, complexKind int) bool {
+renvoNonNil(g, ep)
+if idx < 0 || idx >= len(ep.exprs) {
+return false
+}
+if !renvoTypeKindIsComplex(complexKind) {
+complexKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+}
+e := &ep.exprs[idx]
 componentKind := renvoTypeFloat64
 if complexKind == renvoTypeComplex64 {
 componentKind = renvoTypeFloat32
@@ -27778,6 +27798,9 @@ return renvoEmitComplexMemSecondaryRegs(g, renvoInferParsedExprType(g, ep, idx))
 if (e.kind == renvoExprInt || e.kind == renvoExprFloat) && renvoExprTokenIsImaginary(g.prog, e.tok) {
 renvoAsmPrimaryImm(&g.asm, 0)
 bits := renvoParseFloatTokenBits(g.prog, e.tok, 52, 11, 1023)
+if componentKind == renvoTypeFloat32 {
+bits = renvoParseFloatTokenBits(g.prog, e.tok, 23, 8, 127)
+}
 renvoAsmPushPrimary(&g.asm)
 renvoEmitFloat64BitsPrimary(&g.asm, bits)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
@@ -27809,11 +27832,11 @@ leftReal := renvoAddUnnamedLocal(g, componentKind)
 leftImag := renvoAddUnnamedLocal(g, componentKind)
 rightReal := renvoAddUnnamedLocal(g, componentKind)
 rightImag := renvoAddUnnamedLocal(g, componentKind)
-if !renvoEmitComplexValueRegs(g, ep, e.left) {
+if !renvoEmitComplexValueRegsForKind(g, ep, e.left, complexKind) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(&g.asm, leftReal, leftImag)
-if !renvoEmitComplexValueRegs(g, ep, e.right) {
+if !renvoEmitComplexValueRegsForKind(g, ep, e.right, complexKind) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(&g.asm, rightReal, rightImag)
@@ -27829,7 +27852,7 @@ renvoAsmPopSecondary(&g.asm)
 return true
 }
 if renvoTypeKindIsScalarValue(renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind) {
-if !renvoEmitScalarExprForKind(g, ep, idx, renvoTypeFloat64) {
+if !renvoEmitScalarExprForKind(g, ep, idx, componentKind) {
 return false
 }
 renvoAsmSecondaryImm(&g.asm, 0)
