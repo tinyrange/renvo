@@ -1,8 +1,13 @@
 let frontendModule;
 let languageServiceModule;
 let formatterModule;
+let backendJITURL;
+let vmBackendURL;
+let backendJITModule;
+let vmBackendModule;
 let compilerError;
 const backendModules = new Map();
+const backendPrograms = new Map();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 let languageFiles = new Map();
@@ -12,6 +17,8 @@ self.addEventListener("message", async (event) => {
   const request = event.data;
   if (request.type === "init") {
     try {
+      backendJITURL = request.backendJIT || "";
+      vmBackendURL = request.vmBackend || "";
       [frontendModule, languageServiceModule, formatterModule] = await Promise.all([
         loadModule(request.compiler, "frontend"),
         request.languageService ? loadModule(request.languageService, "language service") : Promise.resolve(null),
@@ -21,6 +28,37 @@ self.addEventListener("message", async (event) => {
     } catch (error) {
       compilerError = error;
       throw error;
+    }
+    return;
+  }
+  if (request.type === "backend-inspect" || request.type === "backend-prepare") {
+    const started = performance.now();
+    try {
+      if (!backendJITURL) throw new Error("custom backend compilation is unavailable");
+      if (!backendJITModule) backendJITModule = loadModule(backendJITURL, "backend JIT");
+      const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+      const context = newContext(files);
+      const output = ".renvo/prepared-backend.rnvb";
+      const args = ["renvo-backend-jit"];
+      if (request.type === "backend-inspect") args.push("-inspect");
+      args.push("-definition", clean(request.definition));
+      if (request.type === "backend-prepare") args.push("-target", request.target, "-o", output);
+      const exitCode = await runModule(await backendJITModule, context, args);
+      const compiler = files.get(output);
+      const copy = compiler?.buffer.slice(compiler.byteOffset, compiler.byteOffset + compiler.byteLength);
+      const result = {
+        type: "backend-result", id: request.id, mode: request.type,
+        exitCode, stdout: decodeParts(context.stdout), stderr: decodeParts(context.stderr),
+        compiler: copy, elapsedMilliseconds: performance.now() - started,
+        linearMemoryBytes: context.maxLinearMemoryBytes,
+      };
+      self.postMessage(result, copy ? [copy] : []);
+    } catch (error) {
+      self.postMessage({
+        type: "backend-result", id: request.id, mode: request.type, exitCode: 1,
+        stdout: "", stderr: String(error), elapsedMilliseconds: performance.now() - started,
+        linearMemoryBytes: 0,
+      });
     }
     return;
   }
@@ -101,7 +139,7 @@ self.addEventListener("message", async (event) => {
 
 function newContext(files, stdin = "") {
   return {
-    memory: null, maxLinearMemoryBytes: 0, files, fds: new Map(), nextFd: 4,
+    memory: null, maxLinearMemoryBytes: 0, files, directories: new Set(["."]), fds: new Map(), nextFd: 4,
     stdout: [], stderr: [], stdin: encoder.encode(stdin), stdinOffset: 0,
   };
 }
@@ -109,6 +147,17 @@ function newContext(files, stdin = "") {
 async function backendModule(url) {
   if (!backendModules.has(url)) backendModules.set(url, loadModule(url, "backend"));
   return backendModules.get(url);
+}
+
+async function backendProgram(url) {
+  if (!backendPrograms.has(url)) backendPrograms.set(url, loadBytes(url, "VM backend"));
+  return backendPrograms.get(url);
+}
+
+async function loadBytes(url, name) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`could not load ${name}: HTTP ${response.status}`);
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function loadModule(url, name) {
@@ -134,8 +183,18 @@ async function runPipeline(request) {
   let backendMilliseconds = 0;
   if (exitCode === 0 && plan.backend) {
     const backendStarted = performance.now();
-    const backend = await backendModule(request.backend);
-    exitCode = await runModule(backend, context, ["renvo-backend", ...plan.backend]);
+    if (request.backendFormat === "vm32") {
+      if (!vmBackendURL) throw new Error("VM32 backend execution is unavailable");
+      if (!vmBackendModule) vmBackendModule = loadModule(vmBackendURL, "VM backend runner");
+      const compilerName = ".renvo/backend.rnvb";
+      context.files.set(compilerName, (await backendProgram(request.backend)).slice());
+      exitCode = await runModule(await vmBackendModule, context,
+        ["renvo-vm-backend", compilerName, "--", ...plan.backend]);
+      context.files.delete(compilerName);
+    } else {
+      const backend = await backendModule(request.backend);
+      exitCode = await runModule(backend, context, ["renvo-backend", ...plan.backend]);
+    }
     backendMilliseconds = performance.now() - backendStarted;
   }
   if (plan.backend) files.delete(plan.temporary);
@@ -239,10 +298,16 @@ function wasiImports(context, args) {
     fd_fdstat_get: (fd, at) => fdStat(context, fd, at),
     fd_filestat_get: (fd, at) => fdFileStat(context, fd, at),
     fd_fdstat_set_flags: () => 0,
+    fd_sync: () => 0,
     fd_readdir: (fd, at, length, cookie, usedAt) => fdReaddir(context, fd, at, length, cookie, usedAt),
     fd_prestat_get: (fd, at) => fdPrestat(context, fd, at),
     fd_prestat_dir_name: (fd, at, length) => fdPrestatName(context, fd, at, length),
     path_filestat_get: (fd, flags, pathAt, pathLength, at) => pathFileStat(context, fd, flags, pathAt, pathLength, at),
+    path_create_directory: (fd, pathAt, pathLength) => pathCreateDirectory(context, fd, pathAt, pathLength),
+    path_remove_directory: (fd, pathAt, pathLength) => pathRemoveDirectory(context, fd, pathAt, pathLength),
+    path_unlink_file: (fd, pathAt, pathLength) => pathUnlinkFile(context, fd, pathAt, pathLength),
+    path_rename: (oldFD, oldAt, oldLength, newFD, newAt, newLength) =>
+      pathRename(context, oldFD, oldAt, oldLength, newFD, newAt, newLength),
     args_sizes_get: (countAt, sizeAt) => writeStringSizes(context, args, countAt, sizeAt),
     args_get: (pointersAt, dataAt) => writeStrings(context, args, pointersAt, dataAt),
     environ_sizes_get: (countAt, sizeAt) => writeStringSizes(context, env, countAt, sizeAt),
@@ -381,6 +446,40 @@ function pathFileStat(context, _fd, _flags, pathAt, pathLength, at) {
   return 0;
 }
 
+function pathName(context, at, length) {
+  return clean(decoder.decode(new Uint8Array(context.memory.buffer, at, length)));
+}
+
+function pathUnlinkFile(context, _fd, pathAt, pathLength) {
+  const name = pathName(context, pathAt, pathLength);
+  return context.files.delete(name) ? 0 : 44;
+}
+
+function pathCreateDirectory(context, _fd, pathAt, pathLength) {
+  context.directories.add(pathName(context, pathAt, pathLength));
+  return 0;
+}
+
+function pathRemoveDirectory(context, _fd, pathAt, pathLength) {
+  const name = pathName(context, pathAt, pathLength);
+  const prefix = name === "." ? "" : `${name}/`;
+  for (const path of context.files.keys()) if (path.startsWith(prefix)) return 55;
+  for (const path of context.directories) if (path !== name && path.startsWith(prefix)) return 55;
+  context.directories.delete(name);
+  return 0;
+}
+
+function pathRename(context, _oldFD, oldAt, oldLength, _newFD, newAt, newLength) {
+  const oldName = pathName(context, oldAt, oldLength);
+  const newName = pathName(context, newAt, newLength);
+  const source = context.files.get(oldName);
+  if (!source) return 44;
+  context.files.set(newName, source);
+  context.files.delete(oldName);
+  for (const entry of context.fds.values()) if (entry.path === oldName) entry.path = newName;
+  return 0;
+}
+
 function clockTime(context, at) {
   view(context).setBigUint64(at, BigInt(Date.now()) * 1000000n, true);
   return 0;
@@ -459,7 +558,7 @@ function clean(name) {
 }
 
 function isDirectory(context, name) {
-  if (name === ".") return true;
+  if (context.directories.has(name)) return true;
   const prefix = name + "/";
   for (const path of context.files.keys()) if (path.startsWith(prefix)) return true;
   return false;
@@ -474,6 +573,13 @@ function directoryEntries(context, directory) {
     const slash = rest.indexOf("/");
     const name = slash < 0 ? rest : rest.slice(0, slash);
     if (name) names.set(name, slash >= 0);
+  }
+  for (const path of context.directories) {
+    if (path === directory || !path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length);
+    const slash = rest.indexOf("/");
+    const name = slash < 0 ? rest : rest.slice(0, slash);
+    if (name) names.set(name, true);
   }
   return Array.from(names, ([name, directory]) => ({ name, directory })).sort((left, right) => left.name.localeCompare(right.name));
 }

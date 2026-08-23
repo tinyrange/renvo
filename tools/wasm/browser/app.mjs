@@ -7,6 +7,7 @@ import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
 import { decodeProjectZip, decodeSharedProject, encodeProjectZip, encodeSharedProject, normalizeProjectPath } from "./project-archive.mjs";
 import { chooseESPTransportAvailability, detectDeviceProfile } from "./device-profile.mjs";
 import { C_LANGUAGE_ID, registerCLanguage } from "./c-language.mjs";
+import { RTG_LANGUAGE_ID, registerRTGLanguage } from "./rtg-language.mjs";
 import { generateBrowserTestProject } from "./test-project.mjs";
 import { deleteProjectSnapshot, loadCurrentProject, loadPreparedBackends, loadProjectSnapshots, saveCurrentProject, savePreparedBackend, saveProjectSnapshot } from "./workspace-store.mjs";
 
@@ -116,6 +117,7 @@ const elements = {
   mobileFlashOutput: document.querySelector("#mobile-flash-output"),
   copyToPlayground: document.querySelector("#copy-to-playground"),
   formatFile: document.querySelector("#format-file"),
+  useBackend: document.querySelector("#use-backend"),
 };
 const phoneWorkspace = matchMedia("(max-width: 680px)");
 
@@ -138,6 +140,7 @@ const loadedStandardPackages = new Set();
 const loadingStandardPackages = new Map();
 const languageRequests = new Map();
 const formatRequests = new Map();
+const backendRequests = new Map();
 let languageWorkspaceRevision = 1;
 let sentLanguageWorkspaceRevision = 0;
 const backendReady = new Set();
@@ -178,6 +181,8 @@ let fileMenuTarget = "";
 let textDialogResolve;
 let confirmDialogResolve;
 const customBackendURLs = new Map();
+const cachedBackendRecords = new Map();
+const projectBackendRoots = new Set();
 const plotterView = new SerialPlotterView(elements.plotterCanvas, elements.plotterLegend);
 const serialPlotter = new SerialPlotter({ onChange: (data) => plotterView.update(data) });
 plotterView.update(serialPlotter.snapshot());
@@ -197,7 +202,10 @@ async function boot() {
   installLanguageProviders();
   const languageService = catalog.languageService ? new URL(catalog.languageService, catalogUrl).href : "";
   const formatter = catalog.formatter ? new URL(catalog.formatter, catalogUrl).href : "";
-  await initializeCompiler(languageService, formatter);
+  const backendJIT = catalog.backendJIT ? new URL(catalog.backendJIT, catalogUrl).href : "";
+  const vmBackend = catalog.vmBackend ? new URL(catalog.vmBackend, catalogUrl).href : "";
+  await initializeCompiler(languageService, formatter, backendJIT, vmBackend);
+  await restoreProjectBackends();
   scheduleAnalysis(20);
 }
 
@@ -237,7 +245,7 @@ function configureTargets(targets) {
   let group = "";
   for (let index = 0; index < visibleTargets.length; index++) {
     const target = visibleTargets[index];
-    const nextGroup = targetGroup(target.name);
+    const nextGroup = targetGroup(target);
     if (nextGroup !== group) {
       group = nextGroup;
       const heading = document.createElement("div");
@@ -274,13 +282,16 @@ function configureTargets(targets) {
   }
   elements.targetMenu.replaceChildren(...entries);
   elements.mobileTargetList.replaceChildren(...mobileEntries);
-  const requested = parameters.get("target") || restoredTargetName;
+  const restoredAvailable = restoredTargetName && visibleTargets.some((target) => target.name === restoredTargetName);
+  const requested = restoredAvailable ? restoredTargetName : selectedTarget?.name || parameters.get("target");
   const initial = visibleTargets.some((target) => target.name === requested) ? requested :
     visibleTargets.some((target) => target.name === "wasi/wasm32") ? "wasi/wasm32" : visibleTargets[0].name;
   selectTarget(initial, false);
 }
 
-function targetGroup(name) {
+function targetGroup(target) {
+  if (target.projectBackend) return "Project backends";
+  const name = target.name;
   if (name.startsWith("linux/")) return "Linux";
   if (name.startsWith("windows/")) return "Windows";
   if (name.startsWith("darwin/")) return "macOS";
@@ -302,6 +313,7 @@ async function loadMonaco() {
   await new Promise((resolve, reject) => window.require(["vs/editor/editor.main"], resolve, reject));
   monaco = window.monaco;
   registerCLanguage(monaco);
+  registerRTGLanguage(monaco);
   defineTheme();
   for (const [name, value] of Object.entries(fileValues)) {
     createProjectModel(name, value);
@@ -344,7 +356,7 @@ async function loadMonaco() {
   if (!isPhoneWorkspace()) editor.focus();
 }
 
-function initializeCompiler(languageService, formatter) {
+function initializeCompiler(languageService, formatter, backendJIT, vmBackend) {
   return new Promise((resolve, reject) => {
     const onReady = (event) => {
       if (event.data.type !== "ready") return;
@@ -357,7 +369,7 @@ function initializeCompiler(languageService, formatter) {
     };
     worker.addEventListener("message", onReady);
     worker.addEventListener("error", reject, { once: true });
-    worker.postMessage({ type: "init", compiler: compilerUrl, languageService, formatter });
+    worker.postMessage({ type: "init", compiler: compilerUrl, languageService, formatter, backendJIT, vmBackend });
   });
 }
 
@@ -366,6 +378,7 @@ worker.addEventListener("message", (event) => {
   else if (event.data.type === "run-result") renderRunResult(event.data);
   else if (event.data.type === "language-result") receiveLanguageResult(event.data);
   else if (event.data.type === "format-result") receiveFormatResult(event.data);
+  else if (event.data.type === "backend-result") receiveBackendResult(event.data);
 });
 worker.addEventListener("error", (event) => showFatalError(new Error(event.message)));
 
@@ -383,6 +396,7 @@ function setupShell() {
   elements.fileActionMenu.addEventListener("click", handleFileAction);
   document.querySelector("#import-backend").addEventListener("click", () => elements.backendFileInput.click());
   elements.formatFile.addEventListener("click", formatActiveFile);
+  elements.useBackend.addEventListener("click", () => useProjectBackend(activeFile));
   document.querySelector("#search-project").addEventListener("click", searchProject);
   document.querySelector("#search-form").addEventListener("submit", submitProjectSearch);
   document.querySelector("#advanced-heading").addEventListener("click", toggleAdvancedBuild);
@@ -486,6 +500,7 @@ function selectTarget(name, updateCommand) {
   const changed = selectedTarget?.name !== name;
   selectedTarget = targetCatalog?.targets.find((target) => target.name === name);
   if (!selectedTarget) return;
+  if (updateCommand) restoredTargetName = selectedTarget.name;
   if (changed && previousTarget?.device === "esp32" && espPort) {
     if (espSession) espSession.close().catch(() => {});
     else espPort.close().catch(() => {});
@@ -583,6 +598,25 @@ async function compile() {
 async function compileTarget(buildTarget) {
   if (!compilerReady || building || !monaco || !selectedTarget) return;
   if (!buildTarget) return;
+  if (buildTarget.projectBackend && (buildTarget.backendStale || !buildTarget.backend)) {
+    building = true;
+    updateReadyState();
+    closeTargetMenu();
+    setCompilerStatus("busy", `Preparing ${buildTarget.name} backend…`);
+    try {
+      buildTarget = await prepareProjectBackend(buildTarget);
+      selectedTarget = buildTarget;
+      setCompilerStatus("ready", "Compiler ready");
+    } catch (error) {
+      renderProblems(parseDiagnostics(error.message || String(error)));
+      showPanel("problems");
+      setCompilerStatus("error", "Backend preparation failed");
+      return;
+    } finally {
+      building = false;
+      updateReadyState();
+    }
+  }
   const revision = buildRevision;
   let args;
   try {
@@ -614,7 +648,7 @@ async function compileTarget(buildTarget) {
     pendingBuild = { id, revision, target: buildTarget, backend, action: "build" };
     worker.postMessage({
       type: "compile", id, args, files: payload.files,
-      backend, backendTarget: buildTarget.backendTarget,
+      backend, backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
     }, payload.transfers);
   } catch (error) {
     building = false;
@@ -1313,6 +1347,7 @@ function openFile(name) {
   elements.formatFile.disabled = !editable || !name.endsWith(".go");
   elements.formatFile.title = elements.formatFile.disabled ? "Formatting is currently available for editable Go files" : "Format document with gofmt (Shift+Alt+F)";
   elements.languageMode.textContent = name.endsWith(".go") ? "Go" : /\.[ch]$/.test(name) ? "C" : name.endsWith(".rtg") ? "RTG" : "Plain Text";
+  elements.useBackend.hidden = !editable || !name.endsWith(".rtg");
   document.querySelectorAll(".file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   document.querySelectorAll(".stdlib-file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   renderOutline(model);
@@ -1360,6 +1395,11 @@ function handleModelChange(name, model) {
   saveFiles();
   markBuildStale();
   languageWorkspaceRevision++;
+  if (name.endsWith(".rtg")) {
+    for (const target of targetCatalog?.targets || []) {
+      if (target.projectBackend) target.backendStale = true;
+    }
+  }
   if (name.endsWith(".go") || name === "go.mod") scheduleAnalysis();
   if (name === activeFile) renderOutline(model);
 }
@@ -1379,6 +1419,7 @@ function createProjectModel(name, value = "") {
 function languageForFile(name) {
   if (name.endsWith(".go")) return "go";
   if (name.endsWith(".c") || name.endsWith(".h")) return C_LANGUAGE_ID;
+  if (name.endsWith(".rtg")) return RTG_LANGUAGE_ID;
   if (name.endsWith(".json")) return "json";
   return "plaintext";
 }
@@ -1477,7 +1518,7 @@ function createNewWorkspaceFile(event) {
 }
 
 function updateNewFileSuggestion() {
-  const extension = ({ go: ".go", c: ".c", h: ".h" })[elements.newFileKind.value];
+  const extension = ({ go: ".go", c: ".c", h: ".h", rtg: ".rtg" })[elements.newFileKind.value];
   if (extension) elements.newFilePath.value = elements.newFilePath.value.replace(/(?:\.[^./]+)?$/, extension);
   updateNewFileHelp();
 }
@@ -1487,6 +1528,7 @@ function updateNewFileKindFromPath() {
   if (name.endsWith(".go")) elements.newFileKind.value = "go";
   else if (name.endsWith(".c")) elements.newFileKind.value = "c";
   else if (name.endsWith(".h")) elements.newFileKind.value = "h";
+  else if (name.endsWith(".rtg")) elements.newFileKind.value = "rtg";
   else elements.newFileKind.value = "empty";
   updateNewFileHelp();
 }
@@ -1496,6 +1538,7 @@ function updateNewFileHelp() {
     go: "Starts with a package declaration and builds with this project.",
     c: "Creates a C source file with a short Go interop note and builds it with this project.",
     h: "Creates a guarded C header for declarations shared by C files.",
+    rtg: "Creates a target definition that can be selected as a project backend.",
     empty: "Creates an empty file and builds supported source extensions with this project.",
   })[elements.newFileKind.value];
 }
@@ -1504,6 +1547,7 @@ function starterSourceForFile(name, kind) {
   if (name.endsWith(".go") || kind === "go") return "package main\n";
   if (name.endsWith(".c") || kind === "c") return "/* Package-level Go functions can be declared here with extern. */\n";
   if (name.endsWith(".h") || kind === "h") return "#pragma once\n";
+  if (name.endsWith(".rtg") || kind === "rtg") return "definition 1\nunit custom\nimplements direct_emitter_v1\n\n# Define or import an architecture, ABI, runtime, format, and target.\n";
   return "";
 }
 
@@ -1520,6 +1564,8 @@ function openFileActionMenu(name, left, top) {
   elements.fileActionMenu.style.left = `${Math.max(4, Math.min(left, innerWidth - 200))}px`;
   elements.fileActionMenu.style.top = `${Math.max(4, Math.min(top, innerHeight - 90))}px`;
   elements.fileActionMenu.hidden = false;
+  const backend = elements.fileActionMenu.querySelector('[data-file-action="backend"]');
+  if (backend) backend.hidden = !name.endsWith(".rtg");
   elements.fileActionMenu.querySelector("button")?.focus();
 }
 
@@ -1528,7 +1574,8 @@ async function handleFileAction(event) {
   if (!button || !fileMenuTarget) return;
   const name = fileMenuTarget;
   closeFileActionMenu();
-  if (button.dataset.fileAction === "rename") await renameWorkspaceFile(name);
+  if (button.dataset.fileAction === "backend") await useProjectBackend(name);
+  else if (button.dataset.fileAction === "rename") await renameWorkspaceFile(name);
   else if (button.dataset.fileAction === "delete") await deleteWorkspaceFile(name);
 }
 
@@ -1555,6 +1602,10 @@ async function renameWorkspaceFile(oldName) {
   createProjectModel(name, value); editableBaselines.set(name, value);
   const tabAt = openFiles.indexOf(oldName); if (tabAt >= 0) openFiles[tabAt] = name;
   if (wasActive) activeFile = name;
+  if (projectBackendRoots.delete(oldName)) projectBackendRoots.add(name);
+  for (const target of targetCatalog?.targets || []) {
+    if (target.projectDefinition === oldName) target.projectDefinition = name;
+  }
   renderWorkspaceFiles(); renderEditorTabs(); if (wasActive) openFile(name);
   saveFiles(); markBuildStale(); scheduleAnalysis(20);
 }
@@ -1562,6 +1613,15 @@ async function renameWorkspaceFile(oldName) {
 async function deleteWorkspaceFile(name) {
   if (!await requestConfirmation({ title: "Delete file?", message: `${name} will be removed from this browser project.`, accept: "Delete" })) return;
   const model = models.get(name);
+  projectBackendRoots.delete(name);
+  if (targetCatalog) {
+    targetCatalog.targets = targetCatalog.targets.filter((target) => target.projectDefinition !== name);
+    if (selectedTarget?.projectDefinition === name) {
+      selectedTarget = undefined;
+      restoredTargetName = "";
+    }
+    configureTargets(targetCatalog.targets);
+  }
   editableFiles.delete(name); models.delete(name); editableBaselines.delete(name); model?.dispose();
   const at = openFiles.indexOf(name); if (at >= 0) openFiles.splice(at, 1);
   if (!editableFiles.size) createProjectModel("main.go", initialFiles["main.go"]);
@@ -1893,7 +1953,128 @@ function renderProjectSearch(query) {
 async function installCachedBackends() {
   let cached = [];
   try { cached = await loadPreparedBackends(); } catch {}
-  for (const record of cached) installCustomTarget(record.manifest, record.wasm, false);
+  for (const record of cached) {
+    const compiler = record.compiler || record.wasm;
+    if (!compiler || !record.manifest) continue;
+    cachedBackendRecords.set(backendCacheID(record.manifest), { ...record, compiler });
+    if (!record.manifest.projectDefinition) installCustomTarget(record.manifest, compiler, false);
+  }
+}
+
+async function restoreProjectBackends() {
+  if (!projectBackendRoots.size) return;
+  let changed = false;
+  for (const definition of [...projectBackendRoots]) {
+    await ensureBundledBackendModel(definition);
+    if (!models.has(definition)) continue;
+    try {
+      await inspectProjectBackend(definition, false);
+      changed = true;
+    } catch (error) {
+      renderProblems(parseDiagnostics(error.message || String(error)));
+    }
+  }
+  if (changed) configureTargets(targetCatalog.targets);
+}
+
+async function ensureBundledBackendModel(definition) {
+  if (models.has(definition) || !standardCatalogPromise) return;
+  const catalog = await standardCatalogPromise;
+  for (const [importPath, item] of Object.entries(catalog.platforms || {})) {
+    if (!(item.files || []).some((file) => `${item.root}/${file}` === definition)) continue;
+    await loadStandardPackage(importPath, catalog);
+    await ensureSourceModel(definition);
+    return;
+  }
+}
+
+async function useProjectBackend(definition) {
+  if (!definition?.endsWith(".rtg") || !models.has(definition)) return;
+  projectBackendRoots.add(definition);
+  saveFiles();
+  setCompilerStatus("busy", `Reading ${definition}…`);
+  try {
+    const targets = await inspectProjectBackend(definition, false);
+    if (!targets.length) throw new Error(`${definition} does not export a target.`);
+    configureTargets(targetCatalog.targets);
+    selectTarget(targets[0].name, true);
+    setCompilerStatus("ready", "Compiler ready");
+    elements.languageStatus.textContent = targets.length === 1
+      ? `Project backend ${targets[0].name} selected`
+      : `${targets.length} project backend targets added`;
+  } catch (error) {
+    renderProblems(parseDiagnostics(error.message || String(error)));
+    showPanel("problems");
+    setCompilerStatus("error", "Backend definition failed");
+  }
+}
+
+async function inspectProjectBackend(definition, configure = true) {
+  const result = await requestProjectBackend("backend-inspect", definition);
+  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || "backend definition inspection failed");
+  let manifests;
+  try { manifests = JSON.parse(result.stdout); } catch { throw new Error("backend JIT returned an invalid target manifest"); }
+  if (!Array.isArray(manifests)) throw new Error("backend JIT did not return a target list");
+  const prior = new Map(targetCatalog.targets.map((target) => [target.name, target]));
+  targetCatalog.targets = targetCatalog.targets.filter((target) => target.projectDefinition !== definition);
+  const installed = [];
+  for (const manifest of manifests) {
+    validateBackendManifest(manifest);
+    const previous = prior.get(manifest.name);
+    const record = cachedBackendRecords.get(backendCacheID(manifest));
+    const cached = previous?.definition === manifest.definition.toLowerCase() && previous.backend;
+    const backendFormat = manifest.backendFormat || record?.manifest?.backendFormat || "vm32";
+    const backend = cached ? previous.backend : record?.compiler
+      ? customBackendURL(manifest.name, backendFormat, record.compiler) : "";
+    const target = {
+      name: manifest.name, backendTarget: manifest.backendTarget || manifest.name,
+      backend, backendFormat: cached ? previous.backendFormat || backendFormat : backendFormat,
+      output: manifest.output || "app", runnable: Boolean(manifest.runnable), tags: manifest.tags || [],
+      definition: manifest.definition.toLowerCase(), descriptorVersion: manifest.descriptorVersion,
+      device: manifest.name.startsWith("esp32") ? "esp32" : "",
+      projectBackend: true, projectDefinition: definition, backendStale: false,
+    };
+    targetCatalog.targets = targetCatalog.targets.filter((item) => item.name !== target.name);
+    targetCatalog.targets.push(target);
+    installed.push(target);
+  }
+  if (configure) configureTargets(targetCatalog.targets);
+  return installed;
+}
+
+async function prepareProjectBackend(target) {
+  const targets = await inspectProjectBackend(target.projectDefinition, false);
+  const current = targets.find((item) => item.name === target.name);
+  if (!current) throw new Error(`${target.projectDefinition} no longer exports ${target.name}.`);
+  if (current.backend && !current.backendStale) {
+    configureTargets(targetCatalog.targets);
+    selectTarget(current.name, false);
+    return targetCatalog.targets.find((item) => item.name === current.name);
+  }
+  const result = await requestProjectBackend("backend-prepare", target.projectDefinition, target.name);
+  if (result.exitCode !== 0 || !result.compiler) throw new Error(result.stderr.trim() || "backend compiler preparation failed");
+  let manifest;
+  try { manifest = JSON.parse(result.stdout); } catch { throw new Error("backend JIT returned an invalid prepared manifest"); }
+  manifest = { ...manifest, backendFormat: "vm32", projectDefinition: target.projectDefinition };
+  installCustomTarget(manifest, result.compiler, true);
+  configureTargets(targetCatalog.targets);
+  selectTarget(manifest.name, false);
+  return targetCatalog.targets.find((item) => item.name === manifest.name);
+}
+
+function requestProjectBackend(type, definition, target = "") {
+  const payload = workspacePayload();
+  const id = ++requestID;
+  const pending = new Promise((resolve) => backendRequests.set(id, resolve));
+  worker.postMessage({ type, id, definition, target, files: payload.files }, payload.transfers);
+  return pending;
+}
+
+function receiveBackendResult(result) {
+  const pending = backendRequests.get(result.id);
+  if (!pending) return;
+  backendRequests.delete(result.id);
+  pending(result);
 }
 
 async function importPreparedBackend(list) {
@@ -1905,14 +2086,18 @@ async function importPreparedBackend(list) {
     if (rtgFile && !models.has(rtgFile.name)) {
       createProjectModel(rtgFile.name, await rtgFile.text()); editableBaselines.set(rtgFile.name, models.get(rtgFile.name).getValue()); renderWorkspaceFiles();
     }
-    if (!manifestFile || !wasmFile) throw new Error("Choose a prepared backend manifest (.json) and its WebAssembly compiler (.wasm). Raw .rtg compilation will become available with the CompilerJIT bootstrap.");
-    const manifest = JSON.parse(await manifestFile.text());
-    const wasm = await wasmFile.arrayBuffer();
-    validateBackendManifest(manifest);
-    installCustomTarget(manifest, wasm, true);
-    configureTargets(targetCatalog.targets);
-    selectTarget(manifest.name, true);
-    elements.languageStatus.textContent = `Imported backend ${manifest.name}`;
+    if (rtgFile && !manifestFile && !wasmFile) {
+      await useProjectBackend(rtgFile.name);
+    } else {
+      if (!manifestFile || !wasmFile) throw new Error("Choose a prepared backend manifest (.json) and its WebAssembly compiler (.wasm), or import an RTG definition.");
+      const manifest = JSON.parse(await manifestFile.text());
+      const wasm = await wasmFile.arrayBuffer();
+      validateBackendManifest(manifest);
+      installCustomTarget(manifest, wasm, true);
+      configureTargets(targetCatalog.targets);
+      selectTarget(manifest.name, true);
+      elements.languageStatus.textContent = `Imported backend ${manifest.name}`;
+    }
   } catch (error) { showProjectError(error); }
   elements.backendFileInput.value = "";
 }
@@ -1921,20 +2106,39 @@ function validateBackendManifest(manifest) {
   if (!manifest || typeof manifest.name !== "string" || !manifest.name.includes("/")) throw new Error("The backend manifest needs a target name such as acme/amd64.");
   if (!/^[0-9a-fA-F]{64}$/.test(manifest.definition || "")) throw new Error("The backend manifest needs the 64-digit target definition signature.");
   if (!Number.isInteger(manifest.descriptorVersion) || manifest.descriptorVersion <= 0) throw new Error("The backend manifest needs a positive descriptorVersion.");
+  if (manifest.backendFormat && manifest.backendFormat !== "wasm" && manifest.backendFormat !== "vm32") throw new Error("The backend manifest has an unsupported compiler format.");
 }
 
-function installCustomTarget(manifest, wasm, persist) {
+function installCustomTarget(manifest, compiler, persist) {
   validateBackendManifest(manifest);
   const existing = targetCatalog.targets.findIndex((target) => target.name === manifest.name);
   if (existing >= 0) targetCatalog.targets.splice(existing, 1);
-  const old = customBackendURLs.get(manifest.name); if (old) URL.revokeObjectURL(old);
-  const url = URL.createObjectURL(new Blob([wasm], { type: "application/wasm" })); customBackendURLs.set(manifest.name, url);
+  const backendFormat = manifest.backendFormat || "wasm";
+  const url = customBackendURL(manifest.name, backendFormat, compiler);
   targetCatalog.targets.push({
     name: manifest.name, backendTarget: manifest.backendTarget || manifest.name, backend: url,
     output: manifest.output || "app", runnable: Boolean(manifest.runnable), tags: manifest.tags || [],
     definition: manifest.definition.toLowerCase(), descriptorVersion: manifest.descriptorVersion, custom: true,
+    backendFormat, projectBackend: Boolean(manifest.projectDefinition), projectDefinition: manifest.projectDefinition || "",
+    device: manifest.name.startsWith("esp32") ? "esp32" : "", backendStale: false,
   });
-  if (persist) savePreparedBackend({ id: manifest.name, manifest, wasm }).catch((error) => showProjectError(error));
+  if (persist) {
+    const record = { id: backendCacheID(manifest), manifest, compiler };
+    cachedBackendRecords.set(record.id, record);
+    savePreparedBackend(record).catch((error) => showProjectError(error));
+  }
+}
+
+function customBackendURL(name, backendFormat, compiler) {
+  const old = customBackendURLs.get(name); if (old) URL.revokeObjectURL(old);
+  const type = backendFormat === "wasm" ? "application/wasm" : "application/octet-stream";
+  const url = URL.createObjectURL(new Blob([compiler], { type }));
+  customBackendURLs.set(name, url);
+  return url;
+}
+
+function backendCacheID(manifest) {
+  return `${manifest.name}:${String(manifest.definition || "").toLowerCase()}:v${manifest.descriptorVersion}:${manifest.backendFormat || "wasm"}`;
 }
 
 function markBuildStale() {
@@ -2327,7 +2531,7 @@ function saveAndDeploy() {
 }
 
 function currentProject() {
-  return { name: projectName, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName };
+  return { name: projectName, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
 }
 
 async function restoreProject() {
@@ -2348,6 +2552,8 @@ async function restoreProject() {
   for (const [name, source] of Object.entries(fileValues)) { editableFiles.add(name); editableBaselines.set(name, source); }
   projectName = project?.name || "playground";
   restoredTargetName = project?.target || "";
+  projectBackendRoots.clear();
+  for (const name of project?.backendRoots || []) if (typeof name === "string") projectBackendRoots.add(name);
   activeFile = project?.activeFile && Object.hasOwn(fileValues, project.activeFile) ? project.activeFile : Object.keys(fileValues)[0];
   openFiles.length = 0;
   for (const name of project?.openFiles || []) if (Object.hasOwn(fileValues, name) && !openFiles.includes(name)) openFiles.push(name);
@@ -2423,8 +2629,10 @@ function renderLibraryCatalog(catalog) {
       }
     }
   }
-  const forms = platforms.filter(([name]) => !name.includes("/examples/m5"));
-  if (forms.length) appendGroup("Frameworks", forms);
+  const examples = platforms.filter(([, item]) => item.main && !item.board);
+  if (examples.length) appendGroup("Examples", examples);
+  const frameworks = platforms.filter(([name, item]) => !name.includes("/examples/m5") && !item.main);
+  if (frameworks.length) appendGroup("Frameworks", frameworks);
   elements.stdlibTree.replaceChildren(...children);
 }
 
@@ -2444,6 +2652,12 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     if (!opening) return;
     if (files.childElementCount) {
       if (item.main) await openPackageEntry(item);
+      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      if (item.main && backendDefinition) {
+        const definition = `${item.root}/${backendDefinition}`;
+        await ensureSourceModel(definition);
+        await useProjectBackend(definition);
+      }
       return;
     }
     button.disabled = true;
@@ -2466,6 +2680,12 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
         return entry;
       }));
       if (item.main) await openPackageEntry(item);
+      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      if (item.main && backendDefinition) {
+        const definition = `${item.root}/${backendDefinition}`;
+        await ensureSourceModel(definition);
+        await useProjectBackend(definition);
+      }
     } catch (error) {
       files.replaceChildren(Object.assign(document.createElement("span"), { className: "tree-loading", textContent: error.message }));
     } finally {

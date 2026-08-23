@@ -36,6 +36,12 @@ type PrepareConfig struct {
 	CacheDir     string
 	Cache        ArtifactCache
 	Bootstrap    driver.Backend
+	// HostTarget overrides the executable format used for the prepared compiler.
+	// Empty selects the current native host. Sandboxed embedders use vm/vm32.
+	HostTarget string
+	// ArenaSize controls the prepared compiler's own arena. Zero uses the native
+	// process default; VM embedders should choose a bounded value they can host.
+	ArenaSize int
 }
 
 // ArtifactCache lets embedders keep prepared artifacts outside the host
@@ -64,11 +70,18 @@ func Prepare(config PrepareConfig) Prepared {
 	if !generated.Ok {
 		return prepareFailure("RENVO-RTG-002", generated.Diagnostics[0].Message)
 	}
-	host := hostTarget()
+	host := config.HostTarget
+	if host == "" {
+		host = hostTarget()
+	}
 	if host == "" {
 		return prepareFailure("RENVO-RTG-003", "this host cannot prepare native backends")
 	}
-	key := cacheKey(generated.Descriptor, host)
+	arenaSize := config.ArenaSize
+	if arenaSize == 0 {
+		arenaSize = preparedBackendArenaSize
+	}
+	key := cacheKeyForArena(generated.Descriptor, host, arenaSize)
 	cachePath := ""
 	cache := config.Cache
 	if cache == nil && config.CacheDir != "" {
@@ -87,7 +100,7 @@ func Prepare(config PrepareConfig) Prepared {
 		return prepareFailure("RENVO-RTG-004", err.Error())
 	}
 	args := make([]string, 0, len(names)+9)
-	args = append(args, "-s", "-emit-image", "-t", host, "-arena-size", decimal(preparedBackendArenaSize), "-o", "-")
+	args = append(args, "-s", "-emit-image", "-t", host, "-arena-size", decimal(arenaSize), "-o", "-")
 	args = append(args, names...)
 	compiled := driver.CompileUnit(args, "/backend", config.StdRoot, sources, config.Bootstrap)
 	if !compiled.Ok {
@@ -190,11 +203,15 @@ func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host st
 }
 
 func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
+	return cacheKeyForArena(descriptor, host, preparedBackendArenaSize)
+}
+
+func cacheKeyForArena(descriptor rtg.TargetDescriptor, host string, arenaSize int) string {
 	return rtg.HashText(descriptor.Definition) + "-" + encodedName(descriptor.Name) +
 		"-" + encodedName(host) + "-g" + decimal(rtg.GeneratorVersion) +
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
 		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion) +
-		"-a" + decimal(preparedBackendArenaSize) +
+		"-a" + decimal(arenaSize) +
 		"-c" + backendcompiled.CompilerSourceDigest
 }
 
@@ -284,6 +301,8 @@ func hostTarget() string {
 		return "openbsd/amd64"
 	case "netbsd/amd64":
 		return "netbsd/amd64"
+	case "wasip1/wasm":
+		return "wasi/wasm32"
 	}
 	return ""
 }

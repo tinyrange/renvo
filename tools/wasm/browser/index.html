@@ -89,6 +89,7 @@
         <button type="button" class="danger" role="menuitem" data-project-action="reset"><span>↺</span><span>Reset project…</span></button>
       </div>
       <div class="file-action-menu" id="file-action-menu" role="menu" aria-label="File actions" hidden>
+        <button type="button" role="menuitem" data-file-action="backend">Use as project backend…</button>
         <button type="button" role="menuitem" data-file-action="rename">Rename…</button>
         <button type="button" class="danger" role="menuitem" data-file-action="delete">Delete…</button>
       </div>
@@ -131,6 +132,7 @@
         <div class="open-editor-tabs" id="open-editor-tabs"></div>
         <div class="editor-toolbar">
           <button id="copy-to-playground" type="button" title="Copy this library source into the editable project" hidden>Copy to project</button>
+          <button id="use-backend" class="editor-text-action" type="button" title="Add targets from this RTG definition" hidden>Use backend</button>
           <button id="format-file" type="button" title="Format document (Shift+Alt+F)">Format</button>
           <button id="search-project" type="button" title="Search project (Ctrl+Shift+F)">Search</button>
           <button id="toggle-panel" title="Toggle panel (Ctrl+J)" aria-label="Toggle bottom panel" aria-pressed="true">
@@ -232,6 +234,7 @@
             <option value="go">Go source</option>
             <option value="c">C source</option>
             <option value="h">C header</option>
+            <option value="rtg">RTG backend</option>
             <option value="empty">Empty file</option>
           </select></label>
           <label><span>Path</span><input id="new-file-path" value="new.go" autocomplete="off" spellcheck="false"></label>

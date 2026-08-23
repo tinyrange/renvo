@@ -96,6 +96,15 @@ its size-optimized backend; ESP32-C6 and ESP32-S3 each use a prepared custom
 backend generated from their checked-in RTG definitions. A target change does
 not replace or reload the frontend.
 
+Editable `.rtg` files can also be used directly as project backends. The worker
+loads a Go-built WASI CompilerJIT only when a definition is inspected, compiles
+the selected target into a regular VM32 backend executable, and stores that
+compiler in IndexedDB under its target-definition identity. Builds then run the
+cached compiler through the small VM32 WASI host. Editing the definition marks
+the project target stale and prepares a new content-addressed compiler on the
+next build. The bundled PDP-11 Unix V7 example exercises this complete path and
+produces a downloadable historical `0407` `a.out` executable.
+
 Library metadata is small and loaded once. Standard-library, Forms, and ESP32
 platform source is fetched only when it is browsed or imported, including its
 dependencies. The same files are then passed to continuous diagnostics,
@@ -144,7 +153,8 @@ compiler assets after their first successful load.
 Go editing includes the compiler-backed language service, project-wide search,
 an outline, cross-file rename, and exact `gofmt` behavior through a small host-Go
 WASI formatter. C and header files use Monaco's C syntax highlighting and the
-outline, but do not yet have the Go language service. Press Shift+Alt+F to
+outline, while RTG files have a dedicated tokenizer for declarations and their
+embedded Go hooks. C and RTG do not yet have the Go language service. Press Shift+Alt+F to
 format Go, Ctrl/Cmd+Shift+F to search, Ctrl/Cmd+Enter to build, Ctrl+Shift+Enter
 to run browser tests, or F5 to run a WASI, browser, or ESP target. Run
 automatically builds first when the artifact is missing or the workspace,
@@ -155,8 +165,10 @@ for now. Pass
 
 The Advanced Build section exposes executable, object, and Linux kernel-module
 modes, arena size, canonical-unit output, linked-image output, and the Windows
-GUI subsystem. A prepared custom backend can be imported as a JSON manifest
-plus its compiled `.wasm` backend. The manifest format is:
+GUI subsystem. An RTG file can be created or imported like any other project
+source and selected with **Use backend** in its editor or file menu. Legacy
+prepared custom backends can still be imported as a JSON manifest plus their
+compiled `.wasm` backend. The manifest format is:
 
 ```json
 {
@@ -170,9 +182,7 @@ plus its compiled `.wasm` backend. The manifest format is:
 }
 ```
 
-Imported backends are cached in IndexedDB. Importing a raw `.rtg` definition
-still requires the CompilerJIT bootstrap; the UI preserves the definition as a
-project source file until that compiler is available.
+Imported and JIT-compiled backends are cached in IndexedDB.
 
 On phone-sized screens the desktop chrome becomes full-screen Files, Code, and
 Console workspace views. Tablet-class devices keep a split workspace with a

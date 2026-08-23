@@ -1,10 +1,10 @@
-const CACHE = "renvo-web-ide-v24";
+const CACHE = "renvo-web-ide-v26";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs",
   "./editor-navigation.mjs", "./language-path.mjs", "./serial-plotter.mjs",
   "./esp-webserial.mjs", "./esp-webusb.mjs", "./esp-webusb-jtag.mjs", "./project-archive.mjs",
   "./device-profile.mjs", "./test-project.mjs", "./workspace-store.mjs",
-  "./c-language.mjs",
+  "./c-language.mjs", "./rtg-language.mjs",
 ];
 
 self.addEventListener("install", (event) => {

@@ -36,6 +36,8 @@ type targetAsset struct {
 type targetCatalog struct {
 	LanguageService string        `json:"languageService"`
 	Formatter       string        `json:"formatter"`
+	BackendJIT      string        `json:"backendJIT"`
+	VMBackend       string        `json:"vmBackend"`
 	BrowserPrefix   string        `json:"browserPrefix"`
 	BrowserSuffix   string        `json:"browserSuffix"`
 	Stdlib          string        `json:"stdlib"`
@@ -82,6 +84,7 @@ func main() {
 	}
 	catalog := targetCatalog{
 		LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
+		BackendJIT: "renvo-backend-jit.wasm", VMBackend: "renvo-vm-backend.wasm",
 		BrowserPrefix: "browser-host-prefix.html", BrowserSuffix: "browser-host-suffix.html",
 		Stdlib: "stdlib/catalog.json",
 	}
@@ -235,6 +238,7 @@ type platformPackageSpec struct {
 func platformPackageSpecs() []platformPackageSpec {
 	return []platformPackageSpec{
 		{Path: "forms"},
+		{Path: "examples/pdp11v7", Target: "unixv7/pdp11"},
 		{Path: "device/mmio"},
 		{Path: "device/gpio"},
 		{Path: "device/clock"},
