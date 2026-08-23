@@ -9,6 +9,12 @@ The `button_rgb` example also drives the board's GPIO20 WS2812 through the
 ESP32-C6 RMT peripheral. Pressing the active-low GPIO9 button chooses a new
 color from the ESP32-C6 hardware RNG, mixed with the timing of the press.
 
+The `blink_mixed` example demonstrates a bidirectional Go/C package. Its Go
+entrypoint calls a C11 blink loop, and that C loop calls small Go adapters for
+the typed board LED and clock capabilities. It is available in the web editor
+as the `blink_mixed` NanoC6 example, where both source files can be edited and
+flashed together.
+
 The `air_quality` example reads an SGP30 from the Grove I2C connector once per
 second. It displays TVOC on the RGB LED as a continuous
 green-to-orange-to-red scale. Magenta means the sensor could not be initialized
@@ -43,6 +49,16 @@ sandbox/renvo \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-blink.elf \
   ./examples/m5nanoc6/blink
+```
+
+Build the mixed C/Go version by changing the output and package paths:
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32c6.rtg \
+  -t esp32c6/riscv32 \
+  -o sandbox/m5nanoc6-blink-mixed.elf \
+  ./examples/m5nanoc6/blink_mixed
 ```
 
 To build the button and RGB example instead, change the output name and final

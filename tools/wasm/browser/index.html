@@ -10,10 +10,14 @@
 <body>
   <div class="ide" id="ide">
     <header class="command-bar">
-      <div class="brand" aria-label="Renvo">
+      <button class="brand" id="toggle-sidebar" type="button" aria-label="Toggle project sidebar" aria-expanded="true" title="Toggle project sidebar">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg>
-      </div>
-      <div class="project-title"><span>playground</span><span class="muted">— Renvo</span></div>
+      </button>
+      <div class="project-title"><span class="project-kicker">Renvo project</span><strong id="project-name">playground</strong></div>
+      <button id="build-scope" class="build-scope" type="button" title="Build the current project">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h4l1.4 1.5h5.6v7.5h-11v-9Z"/></svg>
+        <span><small>Build scope</small><strong id="build-scope-label">Project</strong></span>
+      </button>
       <label class="command-input" title="Compiler arguments">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5M10 13h3"/></svg>
         <input id="command" value="-s -o app.wasm ." spellcheck="false" aria-label="Compiler arguments">
@@ -27,6 +31,9 @@
           <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
         </div>
         <div class="run-actions">
+          <button class="secondary-action" id="test" disabled title="Run tests (Ctrl+Shift+Enter)">
+            <span>Test</span>
+          </button>
           <button class="secondary-action" id="run" disabled title="Run console app (F5)">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
             <span>Run</span>
@@ -57,30 +64,51 @@
       </div>
     </header>
 
-    <nav class="activity-bar" aria-label="Workspace views">
-      <button class="activity active" data-view="explorer" title="Explorer">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h6l2 2h8v16H4V3Zm0 6h16"/></svg>
-      </button>
-      <button class="activity" data-view="output" title="Build output">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6-5 6 5 6m8-12 5 6-5 6m-3-15-3 18"/></svg>
-      </button>
-      <div class="activity-spacer"></div>
-    </nav>
-
     <aside class="sidebar" aria-label="Explorer">
-      <div class="sidebar-title">EXPLORER</div>
-      <div class="section-title"><span class="chevron">⌄</span><span>PLAYGROUND</span></div>
-      <div class="file-tree" role="tree">
-        <button class="file active" data-file="main.go" role="treeitem">
-          <span class="go-icon">Go</span><span>main.go</span><span class="dirty" aria-label="Modified"></span>
-        </button>
-        <button class="file" data-file="go.mod" role="treeitem">
-          <span class="mod-icon">M</span><span>go.mod</span><span class="dirty" aria-label="Modified"></span>
-        </button>
+      <div class="sidebar-header">
+        <span>Workspace</span>
+        <strong id="sidebar-project-name">playground</strong>
       </div>
-      <div class="section-title"><span class="chevron">⌄</span><span>LIBRARIES</span></div>
+      <div class="project-toolbar" aria-label="Project actions">
+        <button id="new-file" class="project-primary" type="button"><span>＋</span> New file</button>
+        <button id="import-project" type="button" title="Import files or ZIP"><span>⇧</span> Import</button>
+        <button id="project-menu" type="button" title="More project actions" aria-label="More project actions" aria-haspopup="menu" aria-expanded="false">•••</button>
+      </div>
+      <div class="project-build-context">
+        <span>Building</span>
+        <button id="build-project-scope" type="button" title="Build files in this project"><strong id="sidebar-build-scope-label">Project</strong><small>.</small></button>
+      </div>
+      <div class="section-title project-heading"><span>FILES</span><span id="project-file-count" class="section-count">2</span></div>
+      <div class="project-action-menu" id="project-action-menu" role="menu" aria-label="Project actions" hidden>
+        <button type="button" role="menuitem" data-project-action="rename"><span>✎</span><span>Rename project…</span></button>
+        <button type="button" role="menuitem" data-project-action="export"><span>⇩</span><span>Export project ZIP</span></button>
+        <button type="button" role="menuitem" data-project-action="directory"><span>▣</span><span>Import folder…</span></button>
+        <button type="button" role="menuitem" data-project-action="share"><span>↗</span><span>Copy share link</span></button>
+        <button type="button" role="menuitem" data-project-action="snapshots"><span>◷</span><span>Project snapshots…</span></button>
+        <div class="menu-separator" role="separator"></div>
+        <button type="button" class="danger" role="menuitem" data-project-action="reset"><span>↺</span><span>Reset project…</span></button>
+      </div>
+      <div class="file-action-menu" id="file-action-menu" role="menu" aria-label="File actions" hidden>
+        <button type="button" role="menuitem" data-file-action="rename">Rename…</button>
+        <button type="button" class="danger" role="menuitem" data-file-action="delete">Delete…</button>
+      </div>
+      <input id="project-file-input" type="file" accept=".zip,.go,.c,.h,.rtg,.mod,.txt,.json" multiple hidden>
+      <input id="project-directory-input" type="file" webkitdirectory multiple hidden>
+      <input id="backend-file-input" type="file" accept=".json,.wasm,.rtg" multiple hidden>
+      <div class="file-tree" id="file-tree" role="tree"></div>
+      <div class="section-title collapsed" id="advanced-heading"><span class="chevron">›</span><span>ADVANCED BUILD</span></div>
+      <div class="advanced-build" id="advanced-build" hidden>
+        <label>Mode <select id="build-mode"><option value="executable">Executable</option><option value="object">Object</option><option value="kernel-module">Kernel module</option></select></label>
+        <label>Arena <input id="arena-size" placeholder="target default"></label>
+        <label><input id="emit-unit" type="checkbox"> Emit canonical unit</label>
+        <label><input id="emit-image" type="checkbox"> Emit linked image</label>
+        <label><input id="windows-gui" type="checkbox"> Windows GUI subsystem</label>
+        <button id="import-backend" type="button">Import prepared backend…</button>
+      </div>
+      <div class="section-title library-heading"><span class="chevron">⌄</span><span>EXAMPLES &amp; LIBRARIES</span></div>
       <div class="stdlib-tree" id="stdlib-tree" role="tree"><span class="tree-loading">Loading packages…</span></div>
-      <div class="section-title collapsed"><span class="chevron">›</span><span>OUTLINE</span></div>
+      <div class="section-title" id="outline-heading"><span class="chevron">⌄</span><span>OUTLINE</span></div>
+      <div class="outline-tree" id="outline-tree" role="tree"></div>
     </aside>
 
     <section class="mobile-target-view" id="mobile-target-view" aria-label="Select build target">
@@ -100,12 +128,12 @@
 
     <main class="workbench">
       <div class="editor-tabs" role="tablist" aria-label="Open editors">
-        <button class="editor-tab active" data-file="main.go" role="tab">
-          <span class="go-icon">Go</span><span>main.go</span>
-        </button>
+        <div class="open-editor-tabs" id="open-editor-tabs"></div>
         <div class="editor-toolbar">
-          <button id="copy-to-playground" type="button" title="Replace playground/main.go with this library source" hidden>Copy into main.go</button>
-          <button id="toggle-panel" title="Toggle panel (Ctrl+J)">
+          <button id="copy-to-playground" type="button" title="Copy this library source into the editable project" hidden>Copy to project</button>
+          <button id="format-file" type="button" title="Format document (Shift+Alt+F)">Format</button>
+          <button id="search-project" type="button" title="Search project (Ctrl+Shift+F)">Search</button>
+          <button id="toggle-panel" title="Toggle panel (Ctrl+J)" aria-label="Toggle bottom panel" aria-pressed="true">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h12v12H2V2Zm0 8h12"/></svg>
           </button>
         </div>
@@ -116,11 +144,14 @@
 
       <section class="panel" id="panel" aria-label="Build panel">
         <div class="panel-tabs" role="tablist">
-          <button class="panel-tab active" data-panel="output" role="tab">OUTPUT</button>
-          <button class="panel-tab" data-panel="problems" role="tab">PROBLEMS <span id="problem-count">0</span></button>
-          <button class="panel-tab" data-panel="terminal" role="tab">TERMINAL</button>
-          <button class="panel-tab" data-panel="plotter" role="tab">PLOTTER</button>
-          <button class="panel-tab" data-panel="artifacts" role="tab">ARTIFACTS <span id="artifact-count">0</span></button>
+          <button class="panel-tab active" data-panel="output" role="tab" aria-selected="true">Output</button>
+          <button class="panel-tab" data-panel="problems" role="tab" aria-selected="false">Problems <span id="problem-count">0</span></button>
+          <button class="panel-tab" data-panel="terminal" role="tab" aria-selected="false">Terminal</button>
+          <button class="panel-tab" data-panel="plotter" role="tab" aria-selected="false">Plotter</button>
+          <button class="panel-tab" data-panel="tests" role="tab" aria-selected="false">Tests</button>
+          <button class="panel-tab" data-panel="search" role="tab" aria-selected="false">Search</button>
+          <button class="panel-tab" data-panel="preview" role="tab" aria-selected="false">Preview</button>
+          <button class="panel-tab" data-panel="artifacts" role="tab" aria-selected="false">Artifacts <span id="artifact-count">0</span></button>
           <div class="panel-actions">
             <button id="toggle-plotter-size" title="Expand plotter over editor" aria-pressed="false" hidden>Expand</button>
             <button id="clear-output" title="Clear output">Clear</button>
@@ -141,6 +172,12 @@
             <div id="plotter-legend" aria-live="polite"></div>
             <canvas id="serial-plotter-canvas" aria-label="Live serial data plot"></canvas>
           </div>
+          <pre class="panel-view" id="tests-output" data-panel-view="tests" aria-live="polite">Add a _test.go file, then press Test.</pre>
+          <div class="panel-view search-results" id="search-results" data-panel-view="search">
+            <form class="search-form" id="search-form"><input id="search-query" aria-label="Search project files" placeholder="Search project files"><button type="submit">Search</button></form>
+            <div id="search-matches"><div class="empty-state">Search the project with Ctrl+Shift+F.</div></div>
+          </div>
+          <div class="panel-view preview" id="preview" data-panel-view="preview"><div class="empty-state">Build and run browser/wasm32 to preview the application.</div></div>
           <div class="panel-view artifacts" data-panel-view="artifacts" id="artifacts"><div class="empty-state">Build outputs will appear here.</div></div>
         </div>
       </section>
@@ -156,14 +193,14 @@
       <span class="status-item" id="cursor-status">Ln 1, Col 1</span>
       <span class="status-item">Tab Size: 4</span>
       <span class="status-item">UTF-8</span>
-      <span class="status-item">Go</span>
+      <span class="status-item" id="language-mode">Go</span>
       <span class="status-item" id="memory-status">— MiB</span>
     </footer>
 
     <nav class="mobile-nav" aria-label="Workspace steps">
-      <button type="button" data-mobile-view="files" class="active"><span>1</span>Files</button>
-      <button type="button" data-mobile-view="editor"><span>2</span>Code</button>
-      <button type="button" data-mobile-view="console"><span>3</span>Console</button>
+      <button type="button" data-mobile-view="files" class="active"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h5l1.5 2H14v8H2V3Z"/></svg>Files</button>
+      <button type="button" data-mobile-view="editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3-3 5 3 5m6-10 3 5-3 5M9 2 7 14"/></svg>Code</button>
+      <button type="button" data-mobile-view="console"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 4 4 4-4 4m5 0h5"/></svg>Output</button>
     </nav>
 
     <section class="mobile-flash-view" id="mobile-flash-view" aria-label="Flash progress and serial console" hidden>
@@ -177,6 +214,52 @@
       <progress id="mobile-flash-progress" max="1" aria-label="Flash progress"></progress>
       <pre id="mobile-flash-output" aria-live="polite"></pre>
     </section>
+
+    <dialog class="ide-dialog text-dialog" id="text-dialog">
+      <form method="dialog">
+        <header><h2 id="text-dialog-title">Enter a value</h2><button value="cancel" aria-label="Close">×</button></header>
+        <label><span id="text-dialog-label">Value</span><input id="text-dialog-input" autocomplete="off" spellcheck="false"></label>
+        <p class="dialog-error" id="text-dialog-error" role="alert"></p>
+        <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-primary" id="text-dialog-accept">Save</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="ide-dialog new-file-dialog" id="new-file-dialog">
+      <form method="dialog" id="new-file-form">
+        <header><div><h2>New project file</h2><p>Create a source file in the current project.</p></div><button value="cancel" aria-label="Close">×</button></header>
+        <div class="new-file-body">
+          <label><span>File type</span><select id="new-file-kind">
+            <option value="go">Go source</option>
+            <option value="c">C source</option>
+            <option value="h">C header</option>
+            <option value="empty">Empty file</option>
+          </select></label>
+          <label><span>Path</span><input id="new-file-path" value="new.go" autocomplete="off" spellcheck="false"></label>
+          <p class="new-file-help" id="new-file-help">Starts with a package declaration and builds with this project.</p>
+          <p class="dialog-error" id="new-file-error" role="alert"></p>
+        </div>
+        <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-primary">Create file</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="ide-dialog confirm-dialog" id="confirm-dialog">
+      <form method="dialog">
+        <header><h2 id="confirm-dialog-title">Confirm action</h2><button value="cancel" aria-label="Close">×</button></header>
+        <p id="confirm-dialog-message"></p>
+        <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-danger" id="confirm-dialog-accept">Continue</button></footer>
+      </form>
+    </dialog>
+
+    <dialog class="ide-dialog snapshot-dialog" id="snapshot-dialog">
+      <div class="dialog-body">
+        <header><div><h2>Project snapshots</h2><p>Save or restore browser-local project states.</p></div><button type="button" id="snapshot-dialog-close" aria-label="Close">×</button></header>
+        <form class="snapshot-create" id="snapshot-create-form">
+          <input id="snapshot-name" value="Snapshot" aria-label="Snapshot name" autocomplete="off">
+          <button type="submit" class="dialog-primary">Save current</button>
+        </form>
+        <div class="snapshot-list" id="snapshot-list"></div>
+      </div>
+    </dialog>
   </div>
   <script type="module" src="app.mjs"></script>
 </body>

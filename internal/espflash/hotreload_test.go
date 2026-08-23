@@ -38,6 +38,18 @@ func TestParseLoadImageAndPlanPatches(t *testing.T) {
 	}
 }
 
+func TestPlanPatchesDoesNotRewriteUnchangedPaddedWord(t *testing.T) {
+	image, err := ParseLoadImage(testELF(0x40824100, []testELFSegment{{
+		address: 0x40824000, data: []byte{1, 2, 3, 4, 5}, memorySize: 8, flags: 5,
+	}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patches := PlanPatches(&image, image); len(patches) != 0 {
+		t.Fatalf("unchanged padded image patches = %#v, want none", patches)
+	}
+}
+
 func TestParseLoadImageRejectsFlashLinkedELF(t *testing.T) {
 	_, err := ParseLoadImage(testELF(0x42000100, []testELFSegment{{
 		address: 0x42000000, data: []byte{1, 2, 3, 4}, memorySize: 4, flags: 5,

@@ -77,6 +77,7 @@ test("flash transport preference follows platform, availability, and saved choic
   assert.equal(preferredESPTransport({ android: false, webSerial: false, webUSB: true }), "webusb");
   assert.equal(preferredESPTransport({ saved: "webusb", android: false, webSerial: true, webUSB: true }), "webusb");
   assert.equal(supportsESPWebUSBPlatform({ platform: "Android" }), true);
+  assert.equal(supportsESPWebUSBPlatform({ platform: "Linux", maxTouchPoints: 10, coarsePointer: true }), true);
   assert.equal(supportsESPWebUSBPlatform({ platform: "MacIntel", userAgent: "Mozilla/5.0 (Macintosh)" }), false);
 });
 
