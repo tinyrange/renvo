@@ -1,5 +1,12 @@
 //go:build !renvo
 
-// Package main contains the Renvo-native renvoflash command. Its executable
-// implementation is intentionally available only to the Renvo frontend.
+// Command renvoflash flashes and hot-reloads supported ESP microcontrollers.
 package main
+
+import (
+	"os"
+
+	"renvo.dev/internal/espflash"
+)
+
+func main() { os.Exit(espflash.Run(os.Args, os.Environ())) }

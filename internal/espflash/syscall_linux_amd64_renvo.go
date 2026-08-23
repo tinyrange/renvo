@@ -1,6 +1,6 @@
 //go:build renvo && linux && amd64
 
-package main
+package espflash
 
 import "unsafe"
 
@@ -13,7 +13,9 @@ const (
 	sysNanosleep = 35
 )
 
-func syscall(number int, first int, second int, third int, fourth int, fifth int, sixth int) int {
+// renvo_runtime_Syscall is the frontend's explicit generic Linux syscall
+// intrinsic. Its body is replaced by the selected native backend.
+func renvo_runtime_Syscall(number int, first int, second int, third int, fourth int, fifth int, sixth int) int {
 	return 0
 }
 
@@ -27,25 +29,26 @@ func hostModemGet() int            { return 0x5415 }
 func hostModemWrite() int          { return 0x5418 }
 func hostModemSet() int            { return 0x5416 }
 func hostModemClear() int          { return 0x5417 }
-func hostClose(fd int) int         { return syscall(sysClose, fd, 0, 0, 0, 0, 0) }
+func hostClose(fd int) int         { return renvo_runtime_Syscall(sysClose, fd, 0, 0, 0, 0, 0) }
 func hostError(result int) int {
 	// Renvo's Linux syscall intrinsic returns the kernel result directly, so
 	// failures are -errno rather than libc's -1 plus a thread-local errno.
 	return -result
 }
-func hostWouldBlock() int { return 11 }
+func hostWouldBlock() int           { return 11 }
+func hostPointer(pointer *byte) int { return int(unsafe.Pointer(pointer)) }
 func hostIoctl(fd int, request int, pointer int) int {
-	return syscall(sysIoctl, fd, request, pointer, 0, 0, 0)
+	return renvo_runtime_Syscall(sysIoctl, fd, request, pointer, 0, 0, 0)
 }
 func hostRead(fd int, pointer int, size int) int {
-	return syscall(sysRead, fd, pointer, size, 0, 0, 0)
+	return renvo_runtime_Syscall(sysRead, fd, pointer, size, 0, 0, 0)
 }
 func hostWrite(fd int, pointer int, size int) int {
-	return syscall(sysWrite, fd, pointer, size, 0, 0, 0)
+	return renvo_runtime_Syscall(sysWrite, fd, pointer, size, 0, 0, 0)
 }
 func hostOpen(path string, flags int, mode int) int {
 	name := append([]byte(path), 0)
-	return syscall(sysOpen, int(unsafe.Pointer(&name[0])), flags, mode, 0, 0, 0)
+	return renvo_runtime_Syscall(sysOpen, int(unsafe.Pointer(&name[0])), flags, mode, 0, 0, 0)
 }
 
 func configureSerial(port *serial) int {
@@ -66,5 +69,5 @@ func sleep(milliseconds int) {
 	timespec := make([]byte, 16)
 	put64(timespec, 0, int64(milliseconds/1000))
 	put64(timespec, 8, int64(milliseconds%1000)*1000000)
-	syscall(sysNanosleep, int(unsafe.Pointer(&timespec[0])), 0, 0, 0, 0, 0)
+	renvo_runtime_Syscall(sysNanosleep, int(unsafe.Pointer(&timespec[0])), 0, 0, 0, 0, 0)
 }

@@ -3,24 +3,26 @@ package driver
 import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/pipeline"
+	"renvo.dev/internal/unit"
 )
 
 // FSBuildSession advances source discovery and the package pipeline in bounded
 // steps. It is used by embedded GUI callers that must return to an event loop.
 type FSBuildSession struct {
-	args         []string
-	workDir      string
-	stdRoot      string
-	moduleCache  string
-	fs           SourceFS
-	compact      bool
-	cached       bool
-	stage        int
-	sourcesStart int
-	sourcesEnd   int
-	rootArg      string
-	pipeline     *pipeline.Session
-	result       BuildResult
+	args          []string
+	workDir       string
+	stdRoot       string
+	moduleCache   string
+	fs            SourceFS
+	compact       bool
+	cached        bool
+	stage         int
+	sourcesStart  int
+	sourcesEnd    int
+	rootArg       string
+	pipeline      *pipeline.Session
+	targetBinding unit.TargetBinding
+	result        BuildResult
 }
 
 func BeginFSBuildSession(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) *FSBuildSession {
@@ -45,7 +47,8 @@ func (s *FSBuildSession) Step() bool {
 		return true
 	}
 	if s.stage == 0 {
-		options := parseFSOptions(s.args, s.workDir, s.fs)
+		options, binding := resolveFSBuildSessionOptions(s.args, s.workDir, s.fs)
+		s.targetBinding = binding
 		s.result.Options = options
 		if !options.Ok {
 			s.result = buildFail(s.result, BuildErrOptions, options.ErrorArg, "", options.ErrorAt, -1, -1, -1)
@@ -125,6 +128,11 @@ func (s *FSBuildSession) Step() bool {
 		}
 		s.result.Unit = built.Link.Data
 		bindBuiltInTarget(&s.result.Unit, s.result.Options)
+		if s.targetBinding.Target != "" {
+			if bound, ok := unit.BindTarget(s.result.Unit, s.targetBinding); ok {
+				s.result.Unit = bound
+			}
+		}
 		s.stage = 3
 		return false
 	}

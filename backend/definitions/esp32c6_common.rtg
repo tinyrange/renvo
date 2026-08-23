@@ -1,0 +1,331 @@
+definition 1
+unit esp32c6
+implements direct_emitter_v1
+
+@import "riscv32.rtg"
+
+go backend {
+	const textAddress = 0x42000000
+	// Hot-reload code occupies SRAM above OpenOCD's conventional 0x24000-byte
+	// work area. Data, BSS, and the 64 KiB arena remain below it; the stack grows
+	// down from the top of HP SRAM.
+	const jtagTextAddress = 0x40824000
+	const dataAddress = 0x40800000
+	const codeOffset = 0x100
+	const pageSize = 0x1000
+	const stackTop = 0x40880000
+	const appDescriptorAddress = 0x42010020
+	const usbSerialEndpoint = 0x6000f000
+	const usbSerialEndpointConfig = usbSerialEndpoint + 4
+	const usbSerialInterruptRaw = usbSerialEndpoint + 8
+	const usbSerialStartOfFrame = 1 << 1
+	const usbSerialProbeIterations = 65536
+
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func appendProgramHeader(
+		out []byte, offset int, address int, fileSize int,
+		memorySize int, flags int,
+	) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, pageSize)
+	}
+
+	func appendSectionHeader(
+		out []byte, name int, kind int, flags int, address int,
+		offset int, size int, alignment int,
+	) []byte {
+		out = append32(out, name)
+		out = append32(out, kind)
+		out = append32(out, flags)
+		out = append32(out, address)
+		out = append32(out, offset)
+		out = append32(out, size)
+		out = append32(out, 0)
+		out = append32(out, 0)
+		out = append32(out, alignment)
+		return append32(out, 0)
+	}
+
+	func appDescriptor() []byte {
+		// esp_app_desc_t is an ESP-IDF bootloader contract. Keeping it as a
+		// dedicated section lets standard esptool place it at image offset 0x20.
+		descriptor := make([]byte, 256)
+		descriptor[0] = 0x32
+		descriptor[1] = 0x54
+		descriptor[2] = 0xcd
+		descriptor[3] = 0xab
+		copy(descriptor[16:], []byte("renvo"))
+		copy(descriptor[48:], []byte("renvo-esp32c6"))
+		copy(descriptor[112:], []byte("renvo"))
+		return descriptor
+	}
+
+	func patchAbsolute(out *RTGEmitter, bssAddress int) {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			addend := out.AbsoluteRelocationAddend(index)
+			kind := out.AbsoluteRelocationKind(index)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataAddress, bssAddress)
+			if !resolved {
+				continue
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 7) & 31
+			hi := (target + 0x800) >> 12
+			lo := target - (hi << 12)
+			out.PatchUint32(at, 0x37|(register<<7)|(hi<<12))
+			out.PatchUint32(at+4,
+				0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+		}
+	}
+
+	func writeRegister(out *RTGEmitter, register int, value int64) {
+		riscv32.moveImmediate(out, riscv32.primary, value)
+		riscv32.storeU32(out, RTGAddress{Displacement: register}, riscv32.primary)
+	}
+
+	func disableWatchdogs(out *RTGEmitter) {
+		// The ESP-IDF bootloader leaves watchdogs armed so a broken application
+		// resets. A freestanding runtime owns them from entry onward.
+		writeRegister(out, 0x60008064, 0x50d83aa1)
+		writeRegister(out, 0x60008048, 0)
+		writeRegister(out, 0x6000807c, 2)
+		writeRegister(out, 0x60009064, 0x50d83aa1)
+		writeRegister(out, 0x60009048, 0)
+		writeRegister(out, 0x6000907c, 2)
+		writeRegister(out, 0x600b1c18, 0x50d83aa1)
+		writeRegister(out, 0x600b1c00, 0)
+		writeRegister(out, 0x600b1c20, 0x50d83aa1)
+		writeRegister(out, 0x600b1c1c, 0x40000000)
+		writeRegister(out, 0x600b1c30, 0xc0000000)
+	}
+
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.emitAddress(out, riscv32.secondary, RTGBSSAddress(0))
+		riscv32.emitAddress(out, riscv32.copyCount, RTGBSSEndAddress(4))
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.secondary, riscv32.copyCount)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.secondary}, riscv32.primary)
+		riscv32.emitAddress(out, riscv32.secondary,
+			RTGAddress{Base: riscv32.secondary, Displacement: 4})
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func imageAt(out *RTGEmitter, imageTextAddress int) []byte {
+		code := out.Code()
+		data := out.Data()
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		patchAbsolute(out, bssAddress)
+		code = out.Code()
+
+		dataOffset := RTGAlignValue(codeOffset+len(code), pageSize)
+		dataGap := bssAddress - (dataAddress + len(data))
+		dataMemorySize := len(data) + dataGap + RTGAlignValue(out.BSSSize(), 4)
+		descriptor := appDescriptor()
+		descriptorOffset := RTGAlignValue(dataOffset+len(data), 4)
+		sectionNames := []byte{0,
+			'.', 'f', 'l', 'a', 's', 'h', '.', 'a', 'p', 'p', 'd', 'e', 's', 'c', 0,
+			'.', 't', 'e', 'x', 't', 0,
+			'.', 'd', 'a', 't', 'a', 0,
+			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0}
+		sectionNamesOffset := descriptorOffset+len(descriptor)
+		sectionHeadersOffset := RTGAlignValue(
+			sectionNamesOffset+len(sectionNames), 4)
+
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0,
+		)
+		result = append16(result, 2)
+		result = append16(result, 243)
+		result = append32(result, 1)
+		result = append32(result, imageTextAddress+codeOffset)
+		result = append32(result, 52)
+		result = append32(result, sectionHeadersOffset)
+		result = append32(result, 0)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 2)
+		result = append16(result, 40)
+		result = append16(result, 5)
+		result = append16(result, 4)
+		result = appendProgramHeader(
+			result, 0, imageTextAddress, codeOffset+len(code),
+			codeOffset+len(code), 5,
+		)
+		result = appendProgramHeader(
+			result, dataOffset, dataAddress, len(data),
+			dataMemorySize, 6,
+		)
+		result = appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		result = append(result, data...)
+		result = appendUntil(result, descriptorOffset)
+		result = append(result, descriptor...)
+		result = appendUntil(result, sectionNamesOffset)
+		result = append(result, sectionNames...)
+		result = appendUntil(result, sectionHeadersOffset)
+		result = appendSectionHeader(result, 0, 0, 0, 0, 0, 0, 0)
+		result = appendSectionHeader(result, 1, 1, 2,
+			appDescriptorAddress, descriptorOffset, len(descriptor), 4)
+		result = appendSectionHeader(result, 16, 1, 6,
+			imageTextAddress+codeOffset, codeOffset, len(code), 4)
+		result = appendSectionHeader(result, 22, 1, 3,
+			dataAddress, dataOffset, len(data), 4)
+		result = appendSectionHeader(result, 28, 3, 0,
+			0, sectionNamesOffset, len(sectionNames), 1)
+		return result
+	}
+
+	func image(out *RTGEmitter) []byte {
+		return imageAt(out, textAddress)
+	}
+
+	func jtagImage(out *RTGEmitter) []byte {
+		return imageAt(out, jtagTextAddress)
+	}
+
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		clearBSS(out)
+		// Opening the native USB CDC endpoint toggles its control lines. Keep
+		// those transitions from resetting the chip while retaining the
+		// Serial/JTAG data endpoints used by write and print.
+		writeRegister(out, 0x6000f04c, 4)
+		disableWatchdogs(out)
+		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
+		riscv32.move(out, riscv32.frame, riscv32.stack)
+		usbSerialInitialize(out)
+		return true
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		riscv32.jump(out, loop)
+	}
+
+	func usbSerialInitialize(out *RTGEmitter) {
+		done := out.NewLabel()
+		// The second-stage bootloader runs long enough for an attached host to
+		// set the controller's SOF latch. Preserve it as the connection state;
+		// unlike FIFO-ready, it remains clear when the board boots on battery.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			riscv32.scratch)
+		out.Mark(done)
+	}
+
+	func usbSerialWrite(out *RTGEmitter) {
+
+		loop := out.NewLabel()
+		wait := out.NewLabel()
+		ready := out.NewLabel()
+		done := out.NewLabel()
+		disabled := out.NewLabel()
+		riscv32.move(out, riscv32.copyCount, riscv32.tertiary)
+		// A host sends USB SOF packets every millisecond. Initialization clears
+		// this latch, so an unset bit means the board is running without a USB
+		// host and serial output must not hold up the application.
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialInterruptRaw})
+		riscv32.moveImmediate(out, riscv32.primary, usbSerialStartOfFrame)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, disabled)
+		out.Mark(loop)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.tertiary, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.moveImmediate(out, riscv32.copyDestination,
+			usbSerialProbeIterations)
+		out.Mark(wait)
+		riscv32.loadU32(out, riscv32.scratch,
+			RTGAddress{Displacement: usbSerialEndpointConfig})
+		riscv32.moveImmediate(out, riscv32.primary, 2)
+		riscv32.bitAnd(out, riscv32.scratch, riscv32.primary)
+		riscv32.moveImmediate(out, riscv32.primary, 0)
+		riscv32.compare(out, riscv32.scratch, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, ready)
+		riscv32.decrement(out, riscv32.copyDestination)
+		riscv32.compare(out, riscv32.copyDestination, riscv32.primary)
+		riscv32.jumpCondition(out, riscv32.ne, wait)
+		riscv32.jump(out, done)
+		out.Mark(ready)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Base: riscv32.secondary})
+		riscv32.storeU32(out, RTGAddress{Displacement: usbSerialEndpoint},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.secondary)
+		riscv32.decrement(out, riscv32.tertiary)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		riscv32.moveImmediate(out, riscv32.scratch, 1)
+		riscv32.storeU32(out,
+			RTGAddress{Displacement: usbSerialEndpointConfig},
+			riscv32.scratch)
+		out.Mark(disabled)
+		riscv32.move(out, riscv32.primary, riscv32.copyCount)
+	}
+}
+
+runtime esp32c6_freestanding {
+	emit_entry_start = go entryStart
+	emit_exit = go exit
+	operation write { emit = go usbSerialWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format esp32c6_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go image
+}
+
+format esp32c6_jtag_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go jtagImage
+}

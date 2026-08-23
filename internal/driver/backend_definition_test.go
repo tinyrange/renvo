@@ -75,6 +75,31 @@ func TestBackendDefinitionResolvesBeforeSourceSelection(t *testing.T) {
 	}
 }
 
+func TestBuildSessionAcceptsBackendDefinition(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/acme.rtg", Src: []byte(testBackendDefinition)},
+		{Path: "/repo/case/cmd/app/main_linux_arm64.go", Src: []byte("package main\nfunc appMain() int { return 42 }\n")},
+	}
+	session := BeginFSBuildSession([]string{
+		"-backend", "acme.rtg",
+		"-t", "acme/arm64",
+		"-emit-unit",
+		"-o", "app.unit",
+		"./cmd/app",
+	}, "/repo/case", "/std", "", memorySourceFS{files: files}, true)
+	for !session.Step() {
+	}
+	result := session.Result()
+	if !result.Ok {
+		t.Fatalf("build session failed: %#v", result.Diagnostic)
+	}
+	binding, ok := internalunit.ReadTargetBinding(result.Unit)
+	if !ok || binding.Target != "acme/aarch64" {
+		t.Fatalf("binding = %#v, ok %v", binding, ok)
+	}
+}
+
 func TestBackendDefinitionResolvesRelativeImportsFromSourceFS(t *testing.T) {
 	declarationAt := strings.Index(testBackendDefinition, "arch a64")
 	if declarationAt < 0 {
