@@ -29,6 +29,11 @@ connector. It prints calibrated grams and raw HX711 samples in Arduino Serial
 Plotter-compatible form. The NanoC6 button tares the scale; green means the
 unit is responding, blue acknowledges a tare, and red reports an I2C failure.
 
+The `synth` example sends standard 31,250-baud MIDI over the Grove data wire to
+an M5Stack Unit Synth. It uses twelve MIDI channels for a procedurally varied
+ensemble of melody, bass, drums, arpeggio, electric piano, warm pads, music box,
+and guitar. Constrained progressions keep each newly generated cycle musical.
+
 The target is intentionally loaded with `-backend`: it exercises the same JIT
 preparation path available to custom boards and does not advertise itself as a
 compiled-in host target.
@@ -115,6 +120,16 @@ sandbox/renvo \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-miniscale.elf \
   ./examples/m5nanoc6/miniscale
+```
+
+For the Unit Synth song demo, use:
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32c6.rtg \
+  -t esp32c6/riscv32 \
+  -o sandbox/m5nanoc6-synth.elf \
+  ./examples/m5nanoc6/synth
 ```
 
 Convert the ELF, write only the factory application partition, and start it:
