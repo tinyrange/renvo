@@ -291,12 +291,14 @@ func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		// Call discovery follows expression traversal. Always choose the lowest
-		// source function index from the current frontier so equivalent reachable
-		// graphs have one deterministic layout independent of call order.
-		for i := queueIndex + 1; i < len(g.funcQueue); i++ {
-			if g.funcQueue[i] < g.funcQueue[queueIndex] {
-				g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
+		// Prepared backends are cached compiler products, so keep their complete
+		// reachable layout stable even when expression traversal discovers the
+		// same call graph in a different order.
+		if renvoPreparedBackendActive != 0 {
+			for i := queueIndex + 1; i < len(g.funcQueue); i++ {
+				if g.funcQueue[i] < g.funcQueue[queueIndex] {
+					g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
+				}
 			}
 		}
 		fnIndex := g.funcQueue[queueIndex]
@@ -24221,10 +24223,7 @@ func renvoEmitStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 }
 func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	renvoNonNil(g)
-	if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
-		return
-	}
-	if g.funcReachable[fnIndex] {
+	if fnIndex < 0 || fnIndex >= len(g.funcReachable) || g.funcReachable[fnIndex] {
 		return
 	}
 	g.funcReachable[fnIndex] = true
@@ -26315,10 +26314,7 @@ func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 
 func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 	renvoNonNil(g)
-	g.funcReachable = make([]bool, count, count)
-	for i := 0; i < count; i++ {
-		g.funcReachable[i] = false
-	}
+	g.funcReachable = make([]bool, count)
 	g.funcQueue = make([]int, 0, count)
 	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
 		g.funcSingleCallState = make([]int, count)

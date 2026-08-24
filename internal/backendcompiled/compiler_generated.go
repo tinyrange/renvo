@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "48dcb1493fae70cf14ea5a7462427c45ff7181b940b4a19890dcebf238a07aa2"
+const CompilerSourceDigest = "e00f76fa12df9bbfb7fa58fc58f86bc280af6ff5156ac648ae2d38e34b592322"
 
 // source: backend/compiler_common_impl.go
 
@@ -301,9 +301,11 @@ for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 
 
 
+if renvoPreparedBackendActive != 0 {
 for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 if g.funcQueue[i] < g.funcQueue[queueIndex] {
 g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
+}
 }
 }
 fnIndex := g.funcQueue[queueIndex]
@@ -24228,10 +24230,7 @@ return renvoEmitNativeStructReturnExpr(g, ep, idx)
 }
 func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 renvoNonNil(g)
-if fnIndex < 0 || fnIndex >= len(g.funcReachable) {
-return
-}
-if g.funcReachable[fnIndex] {
+if fnIndex < 0 || fnIndex >= len(g.funcReachable) || g.funcReachable[fnIndex] {
 return
 }
 g.funcReachable[fnIndex] = true
@@ -26322,10 +26321,7 @@ renvoAmd64ObjectExportFrame(g, reserve)
 
 func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 renvoNonNil(g)
-g.funcReachable = make([]bool, count, count)
-for i := 0; i < count; i++ {
-g.funcReachable[i] = false
-}
+g.funcReachable = make([]bool, count)
 g.funcQueue = make([]int, 0, count)
 if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
 g.funcSingleCallState = make([]int, count)
