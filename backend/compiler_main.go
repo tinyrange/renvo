@@ -110,6 +110,8 @@ func appMain(args []string, env []string) int {
 	renvoCompilerStripSymbols = false
 	renvoCompilerEmitImage = false
 	renvoCompilerObjectFile = false
+	renvoCompilerCode16 = false
+	renvoCompilerRegParm = 0
 	renvoCompilerWindowsSubsystem = 3
 	if len(args) == 0 {
 		renvoPrintErr("renvo: missing output path (-o)\n")
@@ -131,6 +133,16 @@ func appMain(args []string, env []string) int {
 		}
 		if arg == "-object" {
 			renvoCompilerObjectFile = true
+			i++
+			continue
+		}
+		if arg == "-code16" {
+			renvoCompilerCode16 = true
+			i++
+			continue
+		}
+		if arg == "-regparm3" {
+			renvoCompilerRegParm = 3
 			i++
 			continue
 		}

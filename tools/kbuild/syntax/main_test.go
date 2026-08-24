@@ -32,9 +32,9 @@ func TestPreprocessingCommandRejectsUnexpectedSuffix(t *testing.T) {
 }
 
 func TestObjectArgumentsPreserveSemanticCodeGenerationFlags(t *testing.T) {
-	arguments := objectArguments("cc -m64 -fshort-wchar -mcmodel=kernel -c -o main.o main.c", "out.o", "unit.c")
+	arguments := objectArguments("cc -m16 -fshort-wchar -mcmodel=kernel -c -o main.o main.c", "out.o", "unit.c")
 	joined := strings.Join(arguments, " ")
-	for _, want := range []string{"-fshort-wchar", "-mcmodel=kernel"} {
+	for _, want := range []string{"-fshort-wchar", "-mcmodel=kernel", "-m16"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("object arguments %q are missing %q", joined, want)
 		}

@@ -3483,7 +3483,11 @@ func (t *translator) emitVariadicForeignFunction(call cVariadicCall) {
 		}
 		t.appendText("{var __c_va_words [")
 		t.appendDecimal(wordCount)
-		t.appendText("]uintptr;var __c_va [3]uintptr;")
+		// C automatic objects are intentionally not zeroed by the object backend.
+		// The synthetic va_list is compiler state rather than a source automatic:
+		// initialize all three words so unwritten register/overflow cursors cannot
+		// inherit stale stack contents.
+		t.appendText("]uintptr;var __c_va [3]uintptr=[3]uintptr{};")
 		wordOffset := 0
 		for i := 0; i < extraCount; i++ {
 			typeID := t.functionParams[call.paramStart+fn.paramCount+i]
@@ -12891,7 +12895,7 @@ func (t *translator) emitExpression(tokens []token) {
 			if object, ok := t.lookupObject(text); ok && object.goName != "" {
 				text = []byte(object.goName)
 			} else {
-				if t.isolateGoBuiltins && t.cIdentifierIsGoPredeclared(string(text)) {
+				if t.isolateGoBuiltins && !t.object && t.cIdentifierIsGoPredeclared(string(text)) {
 					text = []byte("__c_name_" + string(text))
 				}
 			}
@@ -16948,6 +16952,9 @@ func (t *translator) emitMutationInitializer(typeID int, tokens []token) bool {
 	t.emitType(typeID)
 	t.appendText("{var p ")
 	t.emitType(typeID)
+	t.out = append(t.out, '=')
+	t.emitType(typeID)
+	t.appendText("{}")
 	t.out = append(t.out, ';')
 	for i := 0; i < len(paths); i++ {
 		path := paths[i]
@@ -17481,6 +17488,9 @@ func (t *translator) emitUnionInitializer(typeID int, tokens []token) {
 	t.emitType(typeID)
 	t.appendText("{var p ")
 	t.emitType(typeID)
+	t.out = append(t.out, '=')
+	t.emitType(typeID)
+	t.appendText("{}")
 	t.out = append(t.out, ';')
 	if field.bitWidth > 0 {
 		t.appendText("p.__c_set_")

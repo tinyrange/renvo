@@ -2197,7 +2197,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 
 func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string,
 	names []string, prefix string, document *Document, exports []embeddedExport) ([]byte, int, bool) {
-	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "ByteAt" &&
+	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
 		method != "Data" && method != "SetData" && method != "BSSSize" && method != "WasmLocalSlots" &&
@@ -2262,6 +2262,13 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		replacement = append(replacement, "renvoFixedTarget == 0 && "...)
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".c.optimizeRuntime"...), end, true
+	}
+	if method == "VMBytecode" && len(arguments) == 0 {
+		replacement = append(replacement, '(')
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".c == nil || "...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".c.renvoTarget == renvoTargetVM32)"...), end, true
 	}
 	if method == "Code" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

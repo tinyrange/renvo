@@ -142,3 +142,14 @@ func TestCCompilerTargetUsesILP32ForMicrocontrollerISAs(t *testing.T) {
 		}
 	}
 }
+
+func TestPreprocessM16CommandReportsGCCCodeModel(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-m16", "-dM", "-E", "-x", "c", "/dev/null"})
+	result := PreprocessCCommand(args, "/repo", memorySourceFS{})
+	text := string(result.Source)
+	if !result.Ok || !strings.Contains(text, "#define __i386__ 1\n") ||
+		!strings.Contains(text, "#define __code_model_32__ 1\n") ||
+		!strings.Contains(text, "#define __SIZEOF_POINTER__ 4\n") {
+		t.Fatalf("-m16 macro dump = %#v, source %q", result, result.Source)
+	}
+}

@@ -659,6 +659,7 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 		"func renvoWasm32Image(",
 		"func renvoVMImage(",
 		"func renvoWasiWasm32ImportSection(",
+		"(a.c == nil || a.c.renvoTarget == renvoTargetVM32)",
 	} {
 		if !containsText(string(checkedIn), binding) {
 			t.Errorf("generated VM32 output is missing algorithm binding %s", binding)

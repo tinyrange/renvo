@@ -25,6 +25,180 @@ func TestVM32ExecutesCompiledProgram(t *testing.T) {
 	}
 }
 
+func TestVM32FoldsAdjacentRegisterPushPop(t *testing.T) {
+	var emitter renvoAsm
+	emitter.lastPrimaryStoreEnd = -1
+	renvoWasm32EmitReg(&emitter, renvoWasm32OpPushReg, renvoWasm32RegRax)
+	renvoWasm32EmitReg(&emitter, renvoWasm32OpPopReg, renvoWasm32RegRax)
+	if len(emitter.code) != 0 {
+		t.Fatalf("same-register push/pop = %x, want empty", emitter.code)
+	}
+	renvoWasm32EmitReg(&emitter, renvoWasm32OpPushReg, renvoWasm32RegRax)
+	renvoWasm32EmitReg(&emitter, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+	want := []byte{renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax}
+	if string(emitter.code) != string(want) {
+		t.Fatalf("cross-register push/pop = %x, want %x", emitter.code, want)
+	}
+}
+
+func TestVM32FoldsAdjacentImmediateBinary(t *testing.T) {
+	var emitter renvoAsm
+	renvoWasm32EmitRegImm(&emitter, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 0x12345678)
+	renvoWasm32EmitRegReg(&emitter, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+	want := []byte{renvoWasm32OpBinaryRegImm, renvoWasm32RegRax, 0x78, 0x56, 0x34, 0x12, renvoWasm32OpXorRegReg}
+	if string(emitter.code) != string(want) {
+		t.Fatalf("immediate binary = %x, want %x", emitter.code, want)
+	}
+}
+
+func TestVM32FoldsCommonStackPairs(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*renvoAsm)
+		want []byte
+	}{
+		{
+			name: "push-load-stack",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+			},
+			want: []byte{renvoWasm32OpPushRegLoadStack, renvoWasm32RegRax, renvoWasm32RegRdx, 12, 0, 0, 0},
+		},
+		{
+			name: "load-stack-push",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
+			},
+			want: []byte{renvoWasm32OpLoadStackPushReg, renvoWasm32RegRdx, 12, 0, 0, 0, renvoWasm32RegRdx},
+		},
+		{
+			name: "push-immediate",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9)
+			},
+			want: []byte{renvoWasm32OpPushRegMovImm, renvoWasm32RegRax, renvoWasm32RegRdx, 9, 0, 0, 0},
+		},
+		{
+			name: "load-memory-push",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, 4, 2)
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+			},
+			want: []byte{renvoWasm32OpLoadMemPushReg, renvoWasm32RegRax, renvoWasm32RegRdx, 4, 0, 0, 0, 2, renvoWasm32RegRax},
+		},
+		{
+			name: "load-stack-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpLoadStackPop, renvoWasm32RegRdx, 12, 0, 0, 0, renvoWasm32RegRcx},
+		},
+		{
+			name: "immediate-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpMovRegImmPop, renvoWasm32RegRdx, 9, 0, 0, 0, renvoWasm32RegRcx},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var emitter renvoAsm
+			test.emit(&emitter)
+			if string(emitter.code) != string(test.want) {
+				t.Fatalf("encoding = %x, want %x", emitter.code, test.want)
+			}
+		})
+	}
+}
+
+func TestWasm32DirectEmissionKeepsVMFusionsDisabled(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*renvoAsm)
+		want []byte
+	}{
+		{
+			name: "immediate-binary",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9)
+				renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+			},
+			want: []byte{renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9, 0, 0, 0,
+				renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRdx},
+		},
+		{
+			name: "push-load-stack",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+			},
+			want: []byte{renvoWasm32OpPushReg, renvoWasm32RegRax,
+				renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12, 0, 0, 0},
+		},
+		{
+			name: "load-stack-push",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
+			},
+			want: []byte{renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12, 0, 0, 0,
+				renvoWasm32OpPushReg, renvoWasm32RegRdx},
+		},
+		{
+			name: "push-immediate",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9)
+			},
+			want: []byte{renvoWasm32OpPushReg, renvoWasm32RegRax,
+				renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9, 0, 0, 0},
+		},
+		{
+			name: "load-memory-push",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, 4, 2)
+				renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+			},
+			want: []byte{renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, 4, 0, 0, 0, 2,
+				renvoWasm32OpPushReg, renvoWasm32RegRax},
+		},
+		{
+			name: "load-stack-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpLoadStack, renvoWasm32RegRdx, 12, 0, 0, 0,
+				renvoWasm32OpPopReg, renvoWasm32RegRcx},
+		},
+		{
+			name: "immediate-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9, 0, 0, 0,
+				renvoWasm32OpPopReg, renvoWasm32RegRcx},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			context := renvoNewCompileContext(renvoTargetWasiWasm32, false, false, false)
+			emitter := renvoAsm{c: context}
+			test.emit(&emitter)
+			if string(emitter.code) != string(test.want) {
+				t.Fatalf("encoding = %x, want unfused %x", emitter.code, test.want)
+			}
+		})
+	}
+}
+
 func TestVM32SupportsArgumentsAndFileIO(t *testing.T) {
 	tests := []struct {
 		path string

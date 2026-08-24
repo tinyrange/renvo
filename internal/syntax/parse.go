@@ -60,6 +60,7 @@ func ParseFile(src []byte) File {
 	tokenArenaStart := arena.Mark()
 	tokens, scanOK := parseScanTokens(src)
 	tokenArenaEnd := arena.Mark()
+	tokenCapacity := cap(tokens)
 	file := File{
 		Src:         src,
 		Tokens:      tokens,
@@ -72,10 +73,20 @@ func ParseFile(src []byte) File {
 	// tokenArenaEnd even when append replaced one or more smaller arrays. Drop
 	// those superseded arrays now so they do not contribute to peak RSS.
 	tokenArenaElementSize := int(unsafe.Sizeof(Token{}))
-	finalTokenStart := tokenArenaEnd - cap(tokens)*tokenArenaElementSize
+	finalTokenStart := tokenArenaEnd - tokenCapacity*tokenArenaElementSize
 	if tokenArenaEnd > tokenArenaStart {
 		arena.Discard(tokenArenaStart, finalTokenStart)
+		unusedTokenStart := finalTokenStart + len(tokens)*tokenArenaElementSize
+		arena.Discard(unusedTokenStart, tokenArenaEnd)
+		// Scanning is the only allocation between the marks. Move the arena
+		// cursor back over the unused tail so subsequent persistent allocations
+		// reuse even its partial final page.
+		arena.Rewind(unusedTokenStart)
 	}
+	// The discarded tail is no longer part of the live token allocation.
+	// Restrict capacity so a caller cannot append into pages that were released.
+	tokens = tokens[:len(tokens):len(tokens)]
+	file.Tokens = tokens
 	if !scanOK {
 		return parseFail(file, ParseErrScan, len(tokens)-1)
 	}

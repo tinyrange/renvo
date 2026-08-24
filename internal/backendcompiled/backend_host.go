@@ -42,6 +42,8 @@ func compile(unit []byte, options driver.BackendCompileOptions) driver.BackendRe
 		WindowsGUI: options.WindowsGUI, EmitImage: options.EmitImage,
 		ModuleLicense: options.ModuleLicense, ModuleNamePath: options.Output,
 		ObjectFile: options.ObjectFile || options.Mode == driver.ModeObject,
+		Code16:     options.Code16,
+		RegParm:    options.RegParm,
 	})
 	if !ok {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{

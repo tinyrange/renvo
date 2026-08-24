@@ -24,14 +24,14 @@ func (b CommandBackend) CompileUnitWithArena(unit []byte, target string, strip b
 }
 
 func (b CommandBackend) CompileUnitWithOptions(unit []byte, options BackendCompileOptions) BackendResult {
-	return b.compileUnitImage(unit, backendTargetForOptions(options.Target, options.Mode), options.Output, options.Strip, options.WindowsGUI, options.EmitImage, options.ArenaSize, options.ModuleLicense, options.ObjectFile || options.Mode == ModeObject)
+	return b.compileUnitImage(unit, backendTargetForOptions(options.Target, options.Mode), options.Output, options.Strip, options.WindowsGUI, options.EmitImage, options.ArenaSize, options.ModuleLicense, options.ObjectFile || options.Mode == ModeObject, options.Code16, options.RegParm)
 }
 
 func (b CommandBackend) compileUnit(unit []byte, target string, output string, strip bool, windowsGUI bool, arenaSize int, moduleLicense string) BackendResult {
-	return b.compileUnitImage(unit, target, output, strip, windowsGUI, false, arenaSize, moduleLicense, false)
+	return b.compileUnitImage(unit, target, output, strip, windowsGUI, false, arenaSize, moduleLicense, false, false, 0)
 }
 
-func (b CommandBackend) compileUnitImage(unit []byte, target string, output string, strip bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string, objectFile bool) BackendResult {
+func (b CommandBackend) compileUnitImage(unit []byte, target string, output string, strip bool, windowsGUI bool, emitImage bool, arenaSize int, moduleLicense string, objectFile bool, code16 bool, regParm int) BackendResult {
 	if b.Path == "" || target == "" || len(unit) == 0 {
 		return BackendResult{Diagnostic: Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-002", Message: "backend command is not configured"}}
 	}
@@ -49,6 +49,12 @@ func (b CommandBackend) compileUnitImage(unit []byte, target string, output stri
 	}
 	if objectFile {
 		args = append(args, "-object")
+	}
+	if code16 {
+		args = append(args, "-code16")
+	}
+	if regParm == 3 {
+		args = append(args, "-regparm3")
 	}
 	if arenaSize > 0 {
 		args = append(args, "-arena-size", arenaSizeDecimal(arenaSize))

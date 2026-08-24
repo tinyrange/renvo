@@ -21,6 +21,73 @@ func TestLinuxAmd64ReverseObjectCallUsesSysVArgumentOrder(t *testing.T) {
 	}
 }
 
+func TestLinuxAmd64ExtendedRegisterPushPopRewritesToMove(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	for register, want := range [][]byte{{0x4c, 0x89, 0xc0}, {0x4c, 0x89, 0xc8}} {
+		emitter := renvoAsm{c: context}
+		renvoAmd64PushObjectIntegerRegister(&emitter, register+4)
+		renvoAsmPopPrimary(&emitter)
+		if !bytes.Equal(emitter.code, want) {
+			t.Fatalf("push/pop r%d to rax = %x, want %x", register+8, emitter.code, want)
+		}
+	}
+}
+
+func TestLinuxAmd64CFieldAccessorOffsetDoesNotTreatImmediateAsPush(t *testing.T) {
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	context.objectFile = true
+	source := []byte(`package main
+import __c_unsafe "unsafe"
+// renvo:c11
+type zone struct{}
+type node struct{}
+func (zone *zone) __c_ptr_80_zone_pgdat() **node {
+	return (**node)(__c_unsafe.Pointer(uintptr(__c_unsafe.Pointer(zone)) + uintptr(80)))
+}
+// renvo:object function node_data - 0 0 0 - 8 0 - 0
+func node_data(nid int32) *node { return nil }
+// renvo:object function assign .text 0 0 0 - 8 0 - 0
+//export assign
+func assign(zone *zone, nid int32) {
+	*zone.__c_ptr_80_zone_pgdat() = node_data(nid)
+}
+`)
+	program := renvoParseProgramWithContext(source, context)
+	if !program.ok {
+		t.Fatal("C field-accessor source did not parse")
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&program, &meta)
+	if !meta.ok {
+		t.Fatal("C field-accessor metadata failed")
+	}
+	meta.arenaSize = renvoDefaultArenaSize(renvoTargetLinuxAmd64)
+	result := renvoTryCompileScalarProgramAmd64(&program, &meta)
+	if !result.ok {
+		t.Fatal("C field-accessor object compilation failed")
+	}
+	file, err := elf.NewFile(bytes.NewReader(result.data))
+	if err != nil {
+		t.Fatalf("parse C field-accessor object: %v", err)
+	}
+	for _, section := range file.Sections {
+		if section.Flags&elf.SHF_EXECINSTR == 0 {
+			continue
+		}
+		data, err := section.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte("\x6a\x48\x89\xc1\x48\x01\xc8")) {
+			t.Fatalf("field offset 80 immediate was mistaken for PUSH rax: code=%x", data)
+		}
+		if bytes.Contains(data, []byte("\x6a\x50\x59\x48\x01\xc8")) {
+			return
+		}
+	}
+	t.Fatal("field offset 80 addition was not emitted")
+}
+
 func TestLinuxAmd64ObjectUserAccessInstructionsRequireSMAPEnabled(t *testing.T) {
 	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
 	context.objectFile = true
@@ -2298,7 +2365,7 @@ func narrow(a uintptr,b uintptr,c int32,d uint32,e uintptr,f uintptr,g int32) in
 		for _, want := range [][]byte{
 			[]byte("\x48\x89\xd0\x48\x63\xc0\x50"),
 			[]byte("\x48\x89\xc8\x89\xc0\x50"),
-			[]byte("\x49\x8b\x43\x00\x48\x63\xc0\x50"),
+			[]byte("\x49\x8b\x43\x00\x48\x63\xc0"),
 		} {
 			if !bytes.Contains(code, want) {
 				t.Fatalf("narrow wrapper is missing normalization %x: code=%x", want, code)

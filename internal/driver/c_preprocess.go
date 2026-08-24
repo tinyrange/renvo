@@ -176,6 +176,9 @@ func cCommandMacros(options Options) []c11.Macro {
 			c11.Macro{Name: "__INTPTR_TYPE__", Value: "int"},
 			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "unsigned int"},
 		)
+		if options.CCode16 {
+			macros = append(macros, c11.Macro{Name: "__code_model_32__", Value: "1"})
+		}
 	}
 	if targetOS == "windows" && pointerBits == 64 {
 		macros = append(macros,

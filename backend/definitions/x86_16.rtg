@@ -1,0 +1,369 @@
+# GCC's -m16 mode is an i386 ILP32 environment whose instructions execute
+# under a 16-bit default operand/address size. It is not a 16-bit C ABI: ints,
+# pointers, calls, and near branches remain 32-bit and receive 0x66/0x67
+# overrides as required. Keep this adaptation beside the i386 machine facts so
+# the C driver can select it without inventing a second frontend target.
+
+definition 1
+unit x86_code16
+implements direct_emitter_v1
+
+go backend {
+	type code16ModRMResult struct {
+		at int
+		reg int
+		ok bool
+	}
+
+	type code16RewriteResult struct {
+		code []byte
+		positions []int
+		failure int
+		ok bool
+	}
+
+	func code16ModRMEnd(code []byte, at int, address32 bool) code16ModRMResult {
+		if at >= len(code) {
+			return code16ModRMResult{at: at}
+		}
+		modrm := int(code[at])
+		at++
+		mod := modrm >> 6
+		rm := modrm & 7
+		if mod == 3 {
+			return code16ModRMResult{at: at, reg: (modrm >> 3) & 7, ok: true}
+		}
+		if address32 {
+			if rm == 4 {
+				if at >= len(code) {
+					return code16ModRMResult{at: at}
+				}
+				sib := int(code[at])
+				at++
+				if mod == 0 && sib&7 == 5 {
+					at += 4
+				}
+			} else if mod == 0 && rm == 5 {
+				at += 4
+			}
+			if mod == 1 {
+				at++
+			} else if mod == 2 {
+				at += 4
+			}
+		} else {
+			if mod == 0 && rm == 6 {
+				at += 2
+			} else if mod == 1 {
+				at++
+			} else if mod == 2 {
+				at += 2
+			}
+		}
+		return code16ModRMResult{at: at, reg: (modrm >> 3) & 7, ok: at <= len(code)}
+	}
+
+	func code16Rewrite(code []byte) code16RewriteResult {
+		mapping := make([]int, len(code)+1)
+		for i := 0; i < len(mapping); i++ {
+			mapping[i] = -1
+		}
+		result := make([]byte, 0, len(code)+len(code)/2)
+		for input := 0; input < len(code); {
+			start := input
+			operand32 := true
+			address32 := true
+			for input < len(code) {
+				prefix := code[input]
+				if prefix == 0x66 {
+					operand32 = !operand32
+					input++
+					continue
+				}
+				if prefix == 0x67 {
+					address32 = !address32
+					input++
+					continue
+				}
+				if prefix == 0x26 || prefix == 0x2e || prefix == 0x36 || prefix == 0x3e ||
+					prefix == 0x64 || prefix == 0x65 || prefix == 0xf0 || prefix == 0xf2 || prefix == 0xf3 {
+					input++
+					continue
+				}
+				break
+			}
+			if input >= len(code) {
+				return code16RewriteResult{failure: start}
+			}
+			opcodeAt := input
+			opcode := int(code[input])
+			input++
+			hasModRM := false
+			operandDefault := false
+			addressDefault := false
+			immediate := 0
+			optionalGroupImmediate := false
+
+			if opcode == 0x0f {
+				if input >= len(code) {
+					return code16RewriteResult{failure: start}
+				}
+				second := int(code[input])
+				input++
+				if second >= 0x80 && second <= 0x8f {
+					operandDefault = true
+					if operand32 { immediate = 4 } else { immediate = 2 }
+				} else if second >= 0x90 && second <= 0x9f {
+					hasModRM = true
+				} else if second >= 0x40 && second <= 0x4f ||
+					second == 0xa3 || second == 0xab || second == 0xaf ||
+					second == 0xb1 || second == 0xb7 || second == 0xbc || second == 0xbd || second == 0xbf ||
+					second == 0xc1 || second >= 0xc8 && second <= 0xcf {
+					hasModRM = second < 0xc8
+					operandDefault = true
+				} else if second == 0xa4 || second == 0xac || second == 0xba {
+					hasModRM = true
+					operandDefault = true
+					immediate = 1
+				} else if second == 0xa5 || second == 0xad || second == 0xb3 || second == 0xbb {
+					hasModRM = true
+					operandDefault = true
+				} else if second == 0xb0 || second == 0xb6 || second == 0xbe || second == 0xc0 {
+					hasModRM = true
+					operandDefault = second == 0xb6 || second == 0xbe
+				} else if second == 0x20 || second == 0x21 || second == 0x22 || second == 0x23 {
+					hasModRM = true
+				} else if second == 0x01 {
+					hasModRM = true
+					operandDefault = true
+				} else if second == 0x30 || second == 0x31 || second == 0x32 || second == 0xa2 {
+					// wrmsr, rdtsc, rdmsr, and cpuid have no encoded operands.
+				} else {
+					return code16RewriteResult{failure: start}
+				}
+			} else if opcode <= 0x3f {
+				low := opcode & 7
+				if low <= 3 {
+					hasModRM = true
+					operandDefault = low == 1 || low == 3
+				} else if low == 4 {
+					immediate = 1
+				} else if low == 5 {
+					operandDefault = true
+					if operand32 { immediate = 4 } else { immediate = 2 }
+				} else if opcode == 0x06 || opcode == 0x07 || opcode == 0x0e ||
+					opcode == 0x16 || opcode == 0x17 || opcode == 0x1e || opcode == 0x1f {
+					operandDefault = true
+				}
+			} else if opcode >= 0x40 && opcode <= 0x61 {
+				operandDefault = true
+			} else if opcode == 0x68 {
+				operandDefault = true
+				if operand32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode == 0x69 {
+				hasModRM = true
+				operandDefault = true
+				if operand32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode == 0x6a {
+				operandDefault = true
+				immediate = 1
+			} else if opcode == 0x6b {
+				hasModRM = true
+				operandDefault = true
+				immediate = 1
+			} else if opcode >= 0x6c && opcode <= 0x6f {
+				addressDefault = true
+				operandDefault = opcode == 0x6d || opcode == 0x6f
+			} else if opcode >= 0x70 && opcode <= 0x7f {
+				immediate = 1
+			} else if opcode >= 0x80 && opcode <= 0x8f {
+				hasModRM = true
+				if opcode == 0x80 || opcode == 0x82 {
+					immediate = 1
+				} else if opcode == 0x81 {
+					operandDefault = true
+					if operand32 { immediate = 4 } else { immediate = 2 }
+				} else if opcode == 0x83 {
+					operandDefault = true
+					immediate = 1
+				} else if opcode == 0x85 || opcode == 0x87 || opcode == 0x89 || opcode == 0x8b || opcode == 0x8d || opcode == 0x8f {
+					operandDefault = true
+				}
+			} else if opcode == 0x90 {
+				// Canonical one-byte nop.
+			} else if opcode >= 0x91 && opcode <= 0x99 || opcode == 0x9c || opcode == 0x9d {
+				operandDefault = true
+			} else if opcode >= 0xa0 && opcode <= 0xa3 {
+				addressDefault = true
+				operandDefault = opcode == 0xa1 || opcode == 0xa3
+				if address32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode >= 0xa4 && opcode <= 0xaf {
+				if opcode != 0xa8 && opcode != 0xa9 {
+					addressDefault = true
+				}
+				if opcode == 0xa5 || opcode == 0xa7 || opcode == 0xa9 || opcode == 0xab || opcode == 0xad || opcode == 0xaf {
+					operandDefault = true
+				}
+				if opcode == 0xa8 {
+					immediate = 1
+				} else if opcode == 0xa9 {
+					if operand32 { immediate = 4 } else { immediate = 2 }
+				}
+			} else if opcode >= 0xb0 && opcode <= 0xb7 {
+				immediate = 1
+			} else if opcode >= 0xb8 && opcode <= 0xbf {
+				operandDefault = true
+				if operand32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode == 0xc0 || opcode == 0xc1 {
+				hasModRM = true
+				operandDefault = opcode == 0xc1
+				immediate = 1
+			} else if opcode == 0xc2 {
+				operandDefault = true
+				immediate = 2
+			} else if opcode == 0xc3 || opcode == 0xc8 || opcode == 0xc9 {
+				operandDefault = true
+				if opcode == 0xc8 { immediate = 3 }
+			} else if opcode == 0xc6 || opcode == 0xc7 {
+				hasModRM = true
+				operandDefault = opcode == 0xc7
+				if opcode == 0xc6 { immediate = 1 } else if operand32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode == 0xcc || opcode == 0xce || opcode == 0xcf || opcode == 0xf4 || opcode == 0xf5 || opcode >= 0xf8 && opcode <= 0xfd {
+				// Fixed-size control instructions.
+			} else if opcode == 0xcd {
+				immediate = 1
+			} else if opcode >= 0xd0 && opcode <= 0xd3 {
+				hasModRM = true
+				operandDefault = opcode == 0xd1 || opcode == 0xd3
+			} else if opcode >= 0xd8 && opcode <= 0xdf {
+				hasModRM = true
+			} else if opcode >= 0xe0 && opcode <= 0xe3 {
+				addressDefault = true
+				immediate = 1
+			} else if opcode == 0xe8 || opcode == 0xe9 {
+				operandDefault = true
+				if operand32 { immediate = 4 } else { immediate = 2 }
+			} else if opcode == 0xea {
+				operandDefault = true
+				if operand32 { immediate = 6 } else { immediate = 4 }
+			} else if opcode == 0xeb || opcode == 0xe4 || opcode == 0xe5 || opcode == 0xe6 || opcode == 0xe7 {
+				immediate = 1
+				operandDefault = opcode == 0xe5 || opcode == 0xe7
+			} else if opcode == 0xec || opcode == 0xee {
+				// Byte port I/O.
+			} else if opcode == 0xed || opcode == 0xef {
+				operandDefault = true
+			} else if opcode == 0xf6 || opcode == 0xf7 {
+				hasModRM = true
+				operandDefault = opcode == 0xf7
+				optionalGroupImmediate = true
+			} else if opcode == 0xfe || opcode == 0xff {
+				hasModRM = true
+				operandDefault = opcode == 0xff
+			} else {
+				return code16RewriteResult{failure: start}
+			}
+
+			modrmReg := -1
+			if hasModRM {
+				modrmAt := input
+				decoded := code16ModRMEnd(code, input, address32)
+				input = decoded.at
+				modrmReg = decoded.reg
+				if !decoded.ok {
+					return code16RewriteResult{failure: start}
+				}
+				if int(code[modrmAt])>>6 != 3 {
+					addressDefault = true
+				}
+			}
+			if optionalGroupImmediate && (modrmReg == 0 || modrmReg == 1) {
+				if opcode == 0xf6 {
+					immediate = 1
+				} else if operand32 {
+					immediate = 4
+				} else {
+					immediate = 2
+				}
+			}
+			input += immediate
+			if input > len(code) {
+				return code16RewriteResult{failure: start}
+			}
+			if opcode == 0x90 && opcodeAt+1 == input {
+				// The ordinary i386 emitter aligns every function with semantic
+				// one-byte nops. Code16 setup images have a hard 32 KiB ceiling,
+				// and x86 permits byte-aligned instruction targets, so retain all
+				// positions while omitting the padding instruction itself.
+				for i := start; i <= input; i++ {
+					mapping[i] = len(result)
+				}
+				continue
+			}
+
+			outputStart := len(result)
+			mapping[start] = outputStart
+			for i := start; i < opcodeAt; i++ {
+				if code[i] == 0x66 || code[i] == 0x67 {
+					if mapping[i] < 0 { mapping[i] = outputStart }
+					continue
+				}
+				if mapping[i] < 0 { mapping[i] = len(result) }
+				result = append(result, code[i])
+			}
+			if addressDefault && address32 {
+				result = append(result, 0x67)
+			}
+			if operandDefault && operand32 {
+				result = append(result, 0x66)
+			}
+			for i := opcodeAt; i < input; i++ {
+				if mapping[i] < 0 { mapping[i] = len(result) }
+				result = append(result, code[i])
+			}
+			mapping[input] = len(result)
+		}
+		return code16RewriteResult{code: result, positions: mapping, failure: -1, ok: true}
+	}
+
+	func code16RewriteBytes(code []byte) []byte {
+		result := code16Rewrite(code)
+		if !result.ok { return nil }
+		return result.code
+	}
+
+	func code16RewritePositions(code []byte) []int {
+		result := code16Rewrite(code)
+		if !result.ok { return nil }
+		return result.positions
+	}
+
+	func code16RewriteFailure(code []byte) int {
+		return code16Rewrite(code).failure
+	}
+}
+
+arch x86_code16 {
+	alias = "386-code16"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 1
+	stack_word_bytes = 4
+	stack_alignment = 4
+	exports {
+		renvo386RewriteCode16 = go code16RewriteBytes
+		renvo386Code16Positions = go code16RewritePositions
+		renvo386Code16FailureOffset = go code16RewriteFailure
+	}
+	reject = [
+		move, address,
+		load.native, load.i32, load.u32, load.i16, load.u16, load.i8, load.u8,
+		store.native, store.u32, store.u16, store.u8,
+		add, subtract, multiply, bit_and, bit_or, bit_xor, compare, test,
+		increment, decrement,
+		shift_left_immediate, shift_right_unsigned_immediate, shift_right_signed_immediate,
+		call, call_indirect, jump, jump_condition, set_condition, return, leave,
+		host_syscall, move_immediate, variable_shift, signed_divide, copy_bytes
+	]
+}

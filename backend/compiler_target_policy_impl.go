@@ -227,6 +227,8 @@ var renvoTarget int = renvoTargetLinuxAmd64
 var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
 var renvoCompilerObjectFile bool
+var renvoCompilerCode16 bool
+var renvoCompilerRegParm int
 
 // renvoCompileContext is owned by one compilation. The target identity and
 // output policy are fixed when the context is created, so independent host
@@ -256,6 +258,8 @@ type renvoCompileContext struct {
 	windowsSubsystem   int
 	emitImage          bool
 	objectFile         bool
+	code16             bool
+	regParm            int
 	optimizeRuntime    bool
 	kernel             *renvoKernelCompileContext
 }
@@ -270,6 +274,8 @@ func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emit
 	context.windowsSubsystem = 3
 	context.emitImage = emitImage
 	context.objectFile = renvoCompilerObjectFile
+	context.code16 = renvoCompilerCode16
+	context.regParm = renvoCompilerRegParm
 	if windowsGUI {
 		context.windowsSubsystem = 2
 	}
@@ -298,6 +304,8 @@ func renvoLegacyCompileContext() *renvoCompileContext {
 	context.windowsSubsystem = renvoCompilerWindowsSubsystem
 	context.emitImage = renvoCompilerEmitImage
 	context.objectFile = renvoCompilerObjectFile
+	context.code16 = renvoCompilerCode16
+	context.regParm = renvoCompilerRegParm
 	context.renvoTarget = renvoTarget
 	context.renvoTargetOS = renvoTargetOS
 	context.renvoTargetArch = renvoTargetArch

@@ -179,7 +179,7 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	if built.Options.BinaryLimit > 0 {
 		ok, compileDiagnostic = compileSystemOutput(unit, target, virtualTarget, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, moduleLicense, systemName, built.Options.BinaryLimit)
 	} else {
-		ok = backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, moduleLicense, built.Options.Mode == ModeObject, args, env)
+		ok = backendbridge.CompileUnitToOutputStripEnv(unit, target, output, built.Options.Strip, built.Options.WindowsGUI, built.Options.EmitImage, arenaSize, moduleLicense, built.Options.Mode == ModeObject, built.Options.CCode16, built.Options.CRegParm, args, env)
 	}
 	if ok && built.Options.BinaryLimit == 0 && virtualTarget == "browser/wasm32" && !built.Options.EmitImage {
 		wasm, readErr := os.ReadFile(output)

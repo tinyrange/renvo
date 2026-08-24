@@ -359,6 +359,7 @@ struct record {
 union word { unsigned whole; unsigned char bytes[4]; };
 struct packed { unsigned low : 3; unsigned high : 5; int value; };
 struct text { char label[3]; unsigned char wrapped; };
+struct __attribute__((packed)) sparse_state { void *first; void *second; unsigned long flags; };
 typedef int (*binary_fn)(int, int);
 static int expression_side;
 static int expression_add(int left, int right) { return left + right; }
@@ -386,6 +387,8 @@ int renvo_aggregate(void) {
 	struct packed sequence = { 6, 3, 2 };
 	struct text text = { "ok", 300 };
 	struct text named = { .wrapped = 301, .label = "hi" };
+	struct sparse_state occupied = { .first = &selected, .second = &positional, .flags = 99 };
+	struct sparse_state omitted = { .second = &sparse };
 	const int qualified = 2;
 	volatile int observed = qualified;
 	unsigned char promotion_left = 250, promotion_right = 10;
@@ -410,6 +413,8 @@ int renvo_aggregate(void) {
 		string_exact[1] != 'k' || string_padded[0] != 'x' || string_padded[1] != 0 || string_padded[3] != 0 || sizeof "xy" != 3) return -8;
 	if (text.label[0] != 'o' || text.label[2] != 0 || text.wrapped != 44) return -9;
 	if (named.label[1] != 'i' || named.label[2] != 0 || named.wrapped != 45 || ((int[2]){4, 5})[1] != 5) return -10;
+	if (!occupied.first || !occupied.second || occupied.flags != 99 ||
+		omitted.first || omitted.second != &sparse || omitted.flags) return -11;
 	return selected.tail + selected.nested.x + selected.values[2] +
 		positional.nested.y + sparse[4] + inferred[3] + ((struct inner){ .x = 4, .y = 6 }).y +
 		word.bytes[0] + bytes.bytes[1] + packed.high + packed.low + packed.value +
