@@ -291,14 +291,12 @@ func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		// Call discovery follows expression traversal. Choose the lowest source
-		// function index from the current hot-reload frontier so reordered calls
-		// do not reorder their complete transitive function trees.
-		if renvoRTGPreparedHotReload != 0 {
-			for i := queueIndex + 1; i < len(g.funcQueue); i++ {
-				if g.funcQueue[i] < g.funcQueue[queueIndex] {
-					g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
-				}
+		// Call discovery follows expression traversal. Always choose the lowest
+		// source function index from the current frontier so equivalent reachable
+		// graphs have one deterministic layout independent of call order.
+		for i := queueIndex + 1; i < len(g.funcQueue); i++ {
+			if g.funcQueue[i] < g.funcQueue[queueIndex] {
+				g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
 			}
 		}
 		fnIndex := g.funcQueue[queueIndex]

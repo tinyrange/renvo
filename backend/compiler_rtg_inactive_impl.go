@@ -757,7 +757,6 @@ const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
-const renvoRTGPreparedHotReload = 0
 
 func renvoRTGParseTargetArg(name string) int {
 return 0

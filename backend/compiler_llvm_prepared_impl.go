@@ -521,7 +521,6 @@ const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
-const renvoRTGPreparedHotReload = 0
 
 func renvoRTGParseTargetArg(name string) int {
 if name == "llvm/linux-amd64" { return renvoTargetRTG }

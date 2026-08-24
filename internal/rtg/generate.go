@@ -235,13 +235,6 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = append(source, '0')
 	}
 	source = append(source, '\n')
-	source = append(source, "const renvoRTGPreparedHotReload = "...)
-	if active && stringIndex(descriptor.Capabilities, "hot_reload") >= 0 {
-		source = append(source, '1')
-	} else {
-		source = append(source, '0')
-	}
-	source = append(source, '\n')
 	source = append(source, "\nfunc renvoRTGParseTargetArg(name string) int {\n"...)
 	if active {
 		source = append(source, "if name == "...)

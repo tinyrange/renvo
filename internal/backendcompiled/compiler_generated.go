@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f43d3cfd91bb5d699acfc1fd522ae6fdaf04e746b39777b965db2743186fdb1c"
+const CompilerSourceDigest = "48dcb1493fae70cf14ea5a7462427c45ff7181b940b4a19890dcebf238a07aa2"
 
 // source: backend/compiler_common_impl.go
 
@@ -301,11 +301,9 @@ for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 
 
 
-if renvoRTGPreparedHotReload != 0 {
 for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 if g.funcQueue[i] < g.funcQueue[queueIndex] {
 g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
-}
 }
 }
 fnIndex := g.funcQueue[queueIndex]
@@ -35858,7 +35856,6 @@ const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
-const renvoRTGPreparedHotReload = 0
 
 func renvoRTGParseTargetArg(name string) int {
 return 0
