@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "69acf3c903ce1e5e5a859e0c78fba1329b3e53c60be846a51b200686c8abfc63"
+const CompilerSourceDigest = "f43d3cfd91bb5d699acfc1fd522ae6fdaf04e746b39777b965db2743186fdb1c"
 
 // source: backend/compiler_common_impl.go
 
@@ -297,16 +297,11 @@ return false
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 renvoNonNil(g)
-hotReload := false
-if renvoPreparedBackendActive != 0 {
-name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
-hotReload = found && name == "esp32c6-jtag/riscv32"
-}
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 
 
 
-if hotReload {
+if renvoRTGPreparedHotReload != 0 {
 for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 if g.funcQueue[i] < g.funcQueue[queueIndex] {
 g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
@@ -35863,6 +35858,7 @@ const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
+const renvoRTGPreparedHotReload = 0
 
 func renvoRTGParseTargetArg(name string) int {
 return 0

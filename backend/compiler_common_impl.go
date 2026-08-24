@@ -290,16 +290,11 @@ func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) 
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
-	hotReload := false
-	if renvoPreparedBackendActive != 0 {
-		name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
-		hotReload = found && name == "esp32c6-jtag/riscv32"
-	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		// Call discovery follows expression traversal. Choose the lowest source
 		// function index from the current hot-reload frontier so reordered calls
 		// do not reorder their complete transitive function trees.
-		if hotReload {
+		if renvoRTGPreparedHotReload != 0 {
 			for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 				if g.funcQueue[i] < g.funcQueue[queueIndex] {
 					g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]

@@ -25,6 +25,6 @@ target esp32c6-jtag/riscv32 {
 	runtime = esp32c6_freestanding
 	executable = esp32c6_jtag_elf
 	build_tags = [esp32c6, riscv32, m5nanoc6, renvo_hotreload]
-	capabilities = [freestanding, executable, volatile_memory]
+	capabilities = [freestanding, executable, volatile_memory, hot_reload]
 	arena_default = 65536
 }
