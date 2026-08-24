@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ba5fd064e235f8d0a86af23eae8c162417a3096166fa4799d3ffe357b02cdb89"
+const CompilerSourceDigest = "69acf3c903ce1e5e5a859e0c78fba1329b3e53c60be846a51b200686c8abfc63"
 
 // source: backend/compiler_common_impl.go
 
@@ -297,8 +297,22 @@ return false
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 renvoNonNil(g)
+hotReload := false
+if renvoPreparedBackendActive != 0 {
+name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
+hotReload = found && name == "esp32c6-jtag/riscv32"
+}
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-renvoSortHotReloadFunctionQueue(g, queueIndex)
+
+
+
+if hotReload {
+for i := queueIndex + 1; i < len(g.funcQueue); i++ {
+if g.funcQueue[i] < g.funcQueue[queueIndex] {
+g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
+}
+}
+}
 fnIndex := g.funcQueue[queueIndex]
 if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
 continue
@@ -323,26 +337,6 @@ return false
 }
 return true
 }
-
-
-
-
-
-func renvoSortHotReloadFunctionQueue(g *renvoLinearGen, start int) {
-if !renvoUseHotReloadFunctionSlots(g) || start < 0 || start >= len(g.funcQueue) {
-return
-}
-for i := start + 1; i < len(g.funcQueue); i++ {
-value := g.funcQueue[i]
-j := i
-for j > start && value < g.funcQueue[j-1] {
-g.funcQueue[j] = g.funcQueue[j-1]
-j--
-}
-g.funcQueue[j] = value
-}
-}
-
 func renvoDeferUnreadyQueuedClosure(g *renvoLinearGen, fnIndex int) bool {
 renvoNonNil(g)
 closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
@@ -21111,9 +21105,6 @@ ok = renvo386EmitScalarFunction(g, fnInfoIndex)
 } else {
 ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 }
-if ok {
-renvoPadHotReloadFunction(g)
-}
 if len(g.meta.captures) == captureCount {
 renvoTruncTypes(&g.meta.types, typeCount)
 renvoTruncFields(&g.meta.fields, fieldCount)
@@ -21122,35 +21113,6 @@ if persistentCapacity == renvoLinearPersistentCapacity(g) {
 renvo_runtime_ArenaReset(mark)
 }
 return ok
-}
-
-
-
-
-
-
-
-func renvoPadHotReloadFunction(g *renvoLinearGen) {
-if !renvoUseHotReloadFunctionSlots(g) {
-return
-}
-const alignment = 256
-if len(g.asm.code)&3 != 0 {
-return
-}
-for len(g.asm.code)&(alignment-1) != 0 {
-
-g.asm.code = append(g.asm.code, 0x13, 0, 0, 0)
-}
-}
-
-func renvoUseHotReloadFunctionSlots(g *renvoLinearGen) bool {
-if renvoPreparedBackendActive == 0 || g == nil || g.c == nil ||
-g.c.renvoTarget != renvoTargetRTG {
-return false
-}
-name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
-return found && name == "esp32c6-jtag/riscv32"
 }
 
 func renvoLinearPersistentCapacity(g *renvoLinearGen) int {

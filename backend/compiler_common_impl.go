@@ -290,8 +290,22 @@ func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) 
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
+	hotReload := false
+	if renvoPreparedBackendActive != 0 {
+		name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
+		hotReload = found && name == "esp32c6-jtag/riscv32"
+	}
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		renvoSortHotReloadFunctionQueue(g, queueIndex)
+		// Call discovery follows expression traversal. Choose the lowest source
+		// function index from the current hot-reload frontier so reordered calls
+		// do not reorder their complete transitive function trees.
+		if hotReload {
+			for i := queueIndex + 1; i < len(g.funcQueue); i++ {
+				if g.funcQueue[i] < g.funcQueue[queueIndex] {
+					g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
+				}
+			}
+		}
 		fnIndex := g.funcQueue[queueIndex]
 		if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
 			continue
@@ -316,26 +330,6 @@ func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	}
 	return true
 }
-
-// Call discovery follows expression traversal, which means merely reordering
-// two calls can otherwise reorder their complete transitive function trees.
-// Sort the not-yet-emitted frontier for the hot-reload target so an equivalent
-// reachable set receives the same layout independent of call order.
-func renvoSortHotReloadFunctionQueue(g *renvoLinearGen, start int) {
-	if !renvoUseHotReloadFunctionSlots(g) || start < 0 || start >= len(g.funcQueue) {
-		return
-	}
-	for i := start + 1; i < len(g.funcQueue); i++ {
-		value := g.funcQueue[i]
-		j := i
-		for j > start && value < g.funcQueue[j-1] {
-			g.funcQueue[j] = g.funcQueue[j-1]
-			j--
-		}
-		g.funcQueue[j] = value
-	}
-}
-
 func renvoDeferUnreadyQueuedClosure(g *renvoLinearGen, fnIndex int) bool {
 	renvoNonNil(g)
 	closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
@@ -21104,9 +21098,6 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	} else {
 		ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 	}
-	if ok {
-		renvoPadHotReloadFunction(g)
-	}
 	if len(g.meta.captures) == captureCount {
 		renvoTruncTypes(&g.meta.types, typeCount)
 		renvoTruncFields(&g.meta.fields, fieldCount)
@@ -21115,35 +21106,6 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 		renvo_runtime_ArenaReset(mark)
 	}
 	return ok
-}
-
-// The ESP32-C6 hot-reload image is patched in place over JTAG. Keep each
-// function in its own modestly aligned slot so a small control-flow edit does
-// not move every function which follows it and rewrite their relative calls.
-// Padding is deliberately confined to the SRAM-only target: ordinary images
-// retain their compact layout, while the hot-reload target trades a little of
-// its ample SRAM window for much smaller edit deltas.
-func renvoPadHotReloadFunction(g *renvoLinearGen) {
-	if !renvoUseHotReloadFunctionSlots(g) {
-		return
-	}
-	const alignment = 256
-	if len(g.asm.code)&3 != 0 {
-		return
-	}
-	for len(g.asm.code)&(alignment-1) != 0 {
-		// ADDI x0, x0, 0 is the canonical four-byte RISC-V NOP.
-		g.asm.code = append(g.asm.code, 0x13, 0, 0, 0)
-	}
-}
-
-func renvoUseHotReloadFunctionSlots(g *renvoLinearGen) bool {
-	if renvoPreparedBackendActive == 0 || g == nil || g.c == nil ||
-		g.c.renvoTarget != renvoTargetRTG {
-		return false
-	}
-	name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
-	return found && name == "esp32c6-jtag/riscv32"
 }
 
 func renvoLinearPersistentCapacity(g *renvoLinearGen) int {
