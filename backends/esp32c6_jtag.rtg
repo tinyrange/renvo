@@ -1,11 +1,27 @@
 @import "../backend/definitions/esp32c6_common.rtg"
 
+go backend {
+	func hotReloadFunctionFinish(out *RTGEmitter) {
+		// Keep each function in its own modestly aligned slot so a small edit
+		// does not move every function which follows it. This target trades a
+		// little of its ample SRAM window for much smaller JTAG patches.
+		for out.Len()&255 != 0 {
+			riscv32.emit(out, 0x00000013) // addi x0, x0, 0
+		}
+	}
+}
+
+abi esp32c6_jtag_internal {
+	internal = riscv32_internal
+	function_finish = go hotReloadFunctionFinish
+}
+
 target esp32c6-jtag/riscv32 {
 	family = native_v1
 	os = esp32c6
 	arch = riscv32
 	frontend_arch = riscv32
-	abi = riscv32_internal
+	abi = esp32c6_jtag_internal
 	runtime = esp32c6_freestanding
 	executable = esp32c6_jtag_elf
 	build_tags = [esp32c6, riscv32, m5nanoc6, renvo_hotreload]

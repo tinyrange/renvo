@@ -44,6 +44,7 @@ func TestESP32C6ExternalDefinition(t *testing.T) {
 		"UsbSerialEndpoint = 0x6000f000",
 		"UsbSerialInterruptRaw = ",
 		"AppDescriptorAddress = 0x42010020",
+		"InterruptRefillMailbox = 0x4087ff00",
 		"WordBits:32,PointerBits:32",
 		"func rtgEsp32c6Riscv32PackageMoveImmediate(",
 		"if setcc == 150 { return rtgEsp32c6ULE }",

@@ -2,6 +2,8 @@
 // and strips, including three-channel SK6812 devices.
 package ws2812
 
+import "renvo.dev/device/gpio"
+
 // RGB is one red, green and blue addressable-LED value.
 type RGB struct {
 	Red   uint8
@@ -15,14 +17,30 @@ type Transmitter interface {
 	Transmit([]byte) bool
 }
 
+// Output is a board-exposed data output capable of constructing its fastest
+// WS2812 transmitter. Implementations can select a dedicated peripheral such
+// as RMT, PIO, DMA-backed SPI, or a software transmitter without exposing that
+// choice to portable applications.
+type Output interface {
+	gpio.Pin
+	WS2812Transmitter(power gpio.Pin) Transmitter
+}
+
 // Strip is a WS2812-compatible pixel chain backed by a hardware transmitter.
 type Strip struct {
 	transmitter Transmitter
 	bytes       []byte
 }
 
-// New returns a strip backed by transmitter.
-func New(transmitter Transmitter) Strip {
+// New constructs a strip using output's preferred transmitter. power may be
+// nil when the attached pixels do not have a board-controlled power pin.
+func New(output Output, power gpio.Pin) Strip {
+	return NewTransmitter(output.WS2812Transmitter(power))
+}
+
+// NewTransmitter returns a strip backed by an already selected transmitter.
+// Most applications should use New with a board-provided Output instead.
+func NewTransmitter(transmitter Transmitter) Strip {
 	return Strip{transmitter: transmitter}
 }
 

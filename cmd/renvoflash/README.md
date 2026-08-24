@@ -131,6 +131,13 @@ Every component's `Setup` runs once in slice order, followed by repeated `Loop`
 calls in the same order. A hot reload restarts the linked program and therefore
 runs `Setup` again; it does not preserve BSS or heap state.
 
+The SRAM-linked target deliberately trades a small amount of space for stable
+edit deltas. It sorts newly reachable functions independently of source call
+order and ends each function at a 256-byte boundary. A small function growth
+can then overwrite its existing padding without moving later functions or
+changing their call relocations. This layout policy is not used by persistent
+flash images.
+
 The sub-50 ms objective applies to a warm frontend cache plus a small JTAG
 delta. Cold compilation, initial SRAM loading, USB enumeration, and full flash
 erase/write are intentionally outside that latency budget.

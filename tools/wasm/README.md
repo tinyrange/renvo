@@ -122,6 +122,11 @@ converts Renvo's ELF to the documented Espressif app-image format, writes the
 app partition, reboots the board, and attaches the terminal as a serial monitor.
 ESP32-C6 WebUSB instead claims the vendor JTAG interface, automatically builds
 the hidden SRAM-linked target, and loads only changed words on subsequent runs.
+That target emits reachable functions in a deterministic order and gives each
+function a 256-byte-aligned SRAM slot. Small control-flow changes therefore
+consume nearby padding instead of moving the remaining program and rewriting
+every affected relative call. The one-time image is slightly larger, while
+normal flash-linked ESP images retain their compact layout.
 This works when a desktop kernel owns the CDC interfaces; the program remains
 volatile across a reset or power cycle. On macOS, Command-S saves and deploys
 the active ESP project (Ctrl-S on other platforms). Arduino Serial Plotter records in either labelled

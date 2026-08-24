@@ -13,7 +13,10 @@ go backend {
 	const dataAddress = 0x40800000
 	const codeOffset = 0x100
 	const pageSize = 0x1000
-	const stackTop = 0x40880000
+	// The final 256 bytes are reserved for the interrupt refill mailbox. Keeping
+	// the stack below it gives both flash and JTAG images one stable address.
+	const interruptRefillMailbox = 0x4087ff00
+	const stackTop = interruptRefillMailbox
 	const appDescriptorAddress = 0x42010020
 	const usbSerialEndpoint = 0x6000f000
 	const usbSerialEndpointConfig = usbSerialEndpoint + 4
@@ -137,6 +140,91 @@ go backend {
 		out.Mark(done)
 	}
 
+	func emitInterruptVectors(out *RTGEmitter) {
+		entry := out.NewLabel()
+		refill := out.NewLabel()
+		unexpected := out.NewLabel()
+
+		// MTVEC mode one uses one four-byte slot per PLIC interrupt. ELF entry
+		// executes slot zero, which jumps over the table and handler to startup.
+		riscv32.jump(out, entry)
+		riscv32.jump(out, refill)
+		for interrupt := 2; interrupt < 32; interrupt++ {
+			riscv32.jump(out, unexpected)
+		}
+
+		out.Mark(refill)
+		// The handler is deliberately leaf-only. Save every register it uses,
+		// copy one mailbox-selected half-buffer, acknowledge the RMT threshold,
+		// and return without involving the Go ABI or allocator.
+		riscv32.emit(out, 0xfd010113) // addi sp, sp, -48
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:0}, riscv32.scratch)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:4}, riscv32.primary)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:8}, riscv32.secondary)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:12}, riscv32.tertiary)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:16}, riscv32.copyDestination)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:20}, riscv32.copySource)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:24}, riscv32.copyCount)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:28}, riscv32.compareLeft)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:32}, riscv32.compareRight)
+
+		riscv32.moveImmediate(out, riscv32.scratch, int64(interruptRefillMailbox))
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.scratch})
+		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base:riscv32.scratch, Displacement:4})
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.scratch, Displacement:8})
+		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base:riscv32.scratch, Displacement:12})
+		riscv32.move(out, riscv32.copyCount, riscv32.copySource)
+		riscv32.shiftRightUnsignedImmediate(out, riscv32.copyCount, 2)
+
+		copyLoop := out.NewLabel()
+		copyDone := out.NewLabel()
+		out.Mark(copyLoop)
+		riscv32.compare(out, riscv32.copyCount, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, copyDone)
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.secondary})
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.copyDestination}, riscv32.primary)
+		riscv32.emitAddress(out, riscv32.secondary, RTGAddress{Base:riscv32.secondary, Displacement:4})
+		riscv32.emitAddress(out, riscv32.copyDestination, RTGAddress{Base:riscv32.copyDestination, Displacement:4})
+		riscv32.decrement(out, riscv32.copyCount)
+		riscv32.jump(out, copyLoop)
+
+		out.Mark(copyDone)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.scratch}, riscv32.secondary)
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.scratch, Displacement:8})
+		riscv32.bitXor(out, riscv32.copyDestination, riscv32.copySource)
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.scratch, Displacement:8}, riscv32.copyDestination)
+
+		acknowledge := out.NewLabel()
+		riscv32.compare(out, riscv32.secondary, riscv32.tertiary)
+		riscv32.jumpCondition(out, riscv32.ne, acknowledge)
+		// The final copied half contains reset and EOF. Disable further threshold
+		// interrupts before acknowledging this one, as ESP-IDF does after EOF.
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.scratch, Displacement:20})
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.primary}, riscv32.zero)
+
+		out.Mark(acknowledge)
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.scratch, Displacement:16})
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.scratch, Displacement:24})
+		riscv32.storeU32(out, RTGAddress{Base:riscv32.primary}, riscv32.secondary)
+		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
+
+		riscv32.loadU32(out, riscv32.scratch, RTGAddress{Base:riscv32.stack, Displacement:0})
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.stack, Displacement:4})
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.stack, Displacement:8})
+		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base:riscv32.stack, Displacement:12})
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.stack, Displacement:16})
+		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base:riscv32.stack, Displacement:20})
+		riscv32.loadU32(out, riscv32.copyCount, RTGAddress{Base:riscv32.stack, Displacement:24})
+		riscv32.loadU32(out, riscv32.compareLeft, RTGAddress{Base:riscv32.stack, Displacement:28})
+		riscv32.loadU32(out, riscv32.compareRight, RTGAddress{Base:riscv32.stack, Displacement:32})
+		riscv32.emit(out, 0x03010113) // addi sp, sp, 48
+		riscv32.emit(out, 0x30200073) // mret
+
+		out.Mark(unexpected)
+		riscv32.jump(out, unexpected)
+		out.Mark(entry)
+	}
+
 	func imageAt(out *RTGEmitter, imageTextAddress int) []byte {
 		code := out.Code()
 		data := out.Data()
@@ -214,6 +302,11 @@ go backend {
 	}
 
 	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		vectorStart := out.Len()
+		emitInterruptVectors(out)
+		// Keep interrupts globally masked until MTVEC, stack, and PLIC state are
+		// all owned by this image.
+		riscv32.emit(out, 0x30047073) // csrci mstatus, 8
 		clearBSS(out)
 		// Opening the native USB CDC endpoint toggles its control lines. Keep
 		// those transitions from resetting the chip while retaining the
@@ -222,6 +315,24 @@ go backend {
 		disableWatchdogs(out)
 		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
 		riscv32.move(out, riscv32.frame, riscv32.stack)
+		// Derive the vector base from the current PC so the same generated code
+		// works from flash and from the JTAG SRAM address.
+		vectorDelta := out.Len() - vectorStart
+		riscv32.emit(out, 0x00000297) // auipc t0, 0
+		riscv32.emitAddress(out, riscv32.scratch,
+			RTGAddress{Base:riscv32.scratch, Displacement:-vectorDelta})
+		riscv32.moveImmediate(out, riscv32.primary, 1)
+		riscv32.bitOr(out, riscv32.scratch, riscv32.primary)
+		riscv32.emit(out, 0x30529073) // csrw mtvec, t0
+		writeRegister(out, 0x20001000, 0)
+		writeRegister(out, 0x20001090, 1)
+		writeRegister(out, interruptRefillMailbox, 0)
+		// ESP32-C6's PLIC has both a peripheral enable register and the standard
+		// per-vector MIE CSR gate. Vector one is the sole owned interrupt.
+		riscv32.emit(out, 0x30401073) // csrwi mie, 0
+		riscv32.emit(out, 0x30416073) // csrsi mie, 2
+		riscv32.emit(out, 0x30317073) // csrci mideleg, 2
+		riscv32.emit(out, 0x30046073) // csrsi mstatus, 8
 		usbSerialInitialize(out)
 		return true
 	}

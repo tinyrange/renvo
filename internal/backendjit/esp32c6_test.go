@@ -47,6 +47,23 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 	if len(image) < codeOffset+16 {
 		t.Fatalf("ELF code is too short: %d bytes", len(image))
 	}
+	if instruction := binary.LittleEndian.Uint32(image[codeOffset : codeOffset+4]); instruction&0x7f != 0x6f {
+		t.Fatalf("vector-table entry instruction = %#x, want JAL", instruction)
+	}
+	if instruction := binary.LittleEndian.Uint32(image[codeOffset+4 : codeOffset+8]); instruction&0x7f != 0x6f {
+		t.Fatalf("RMT vector instruction = %#x, want JAL", instruction)
+	}
+	for name, instruction := range map[string]uint32{
+		"enable MIE vector one": 0x30416073,
+		"retain machine mode":   0x30317073,
+		"interrupt return":      0x30200073,
+	} {
+		encoded := make([]byte, 4)
+		binary.LittleEndian.PutUint32(encoded, instruction)
+		if !bytes.Contains(image, encoded) {
+			t.Fatalf("ESP32-C6 image omitted %s instruction %#x", name, instruction)
+		}
+	}
 	dataHeader := 52 + 32
 	bssAddress := binary.LittleEndian.Uint32(image[dataHeader+8:dataHeader+12]) +
 		binary.LittleEndian.Uint32(image[dataHeader+16:dataHeader+20])
@@ -56,15 +73,25 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 	if bssEnd <= bssAddress || bssEnd&3 != 0 {
 		t.Fatalf("final BSS range = [%#x, %#x), want non-empty 4-byte-aligned range", bssAddress, bssEnd)
 	}
-	if got := riscvAddressPair(image, codeOffset); got != bssAddress {
-		t.Fatalf("clear-BSS start address = %#x, want %#x", got, bssAddress)
-	}
-	if got := riscvAddressPair(image, codeOffset+8); got != bssEnd {
-		t.Fatalf("clear-BSS final address = %#x, want %#x", got, bssEnd)
+	if !containsRiscvAddressPair(image, codeOffset, len(image), bssAddress, bssEnd) {
+		t.Fatalf("startup omitted clear-BSS range [%#x, %#x)", bssAddress, bssEnd)
 	}
 	if !bytes.Contains(image, []byte(".flash.appdesc\x00")) {
 		t.Fatal("ELF omitted the ESP application descriptor section")
 	}
+}
+
+func containsRiscvAddressPair(image []byte, start, end int, first, second uint32) bool {
+	if end > len(image)-16 {
+		end = len(image) - 16
+	}
+	for offset := start; offset <= end; offset += 4 {
+		if riscvAddressPair(image, offset) == first &&
+			riscvAddressPair(image, offset+8) == second {
+			return true
+		}
+	}
+	return false
 }
 
 func riscvAddressPair(image []byte, offset int) uint32 {
