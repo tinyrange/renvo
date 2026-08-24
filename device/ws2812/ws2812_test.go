@@ -1,6 +1,10 @@
 package ws2812
 
-import "testing"
+import (
+	"testing"
+
+	"renvo.dev/device/gpio"
+)
 
 type recordingTransmitter struct {
 	bytes []byte
@@ -11,9 +15,46 @@ func (t *recordingTransmitter) Transmit(data []byte) bool {
 	return true
 }
 
-func TestSetPixelsUsesGRBWireOrder(t *testing.T) {
+type recordingOutput struct {
+	transmitter *recordingTransmitter
+	power       gpio.Pin
+}
+
+func (o *recordingOutput) Configure(gpio.Config) error { return nil }
+func (o *recordingOutput) Set(bool)                    {}
+func (o *recordingOutput) Get() bool                   { return false }
+func (o *recordingOutput) WS2812Transmitter(power gpio.Pin) Transmitter {
+	o.power = power
+	return o.transmitter
+}
+
+type fakePin struct{}
+
+func (*fakePin) Configure(gpio.Config) error { return nil }
+func (*fakePin) Set(bool)                    {}
+func (*fakePin) Get() bool                   { return false }
+
+func newRecordingStrip() (Strip, *recordingTransmitter) {
 	transmitter := &recordingTransmitter{}
-	strip := New(transmitter)
+	return NewTransmitter(transmitter), transmitter
+}
+
+func TestNewUsesBoardOutputCapability(t *testing.T) {
+	transmitter := &recordingTransmitter{}
+	output := &recordingOutput{transmitter: transmitter}
+	power := &fakePin{}
+	strip := New(output, power)
+	strip.Set(0x12, 0x34, 0x56)
+	if output.power != power {
+		t.Fatal("output did not receive the board power pin")
+	}
+	if len(transmitter.bytes) != 3 {
+		t.Fatalf("transmitted %d bytes, want 3", len(transmitter.bytes))
+	}
+}
+
+func TestSetPixelsUsesGRBWireOrder(t *testing.T) {
+	strip, transmitter := newRecordingStrip()
 	if !strip.SetPixels([]RGB{
 		{Red: 0x81, Green: 0x42, Blue: 0x24},
 		{Red: 0x18, Green: 0x57, Blue: 0x39},
@@ -40,8 +81,7 @@ func TestEncodingReusesCapacity(t *testing.T) {
 }
 
 func TestSetUsesSinglePixel(t *testing.T) {
-	transmitter := &recordingTransmitter{}
-	strip := New(transmitter)
+	strip, transmitter := newRecordingStrip()
 	strip.Set(0x12, 0x34, 0x56)
 	want := [3]byte{0x34, 0x12, 0x56}
 	for i := 0; i < len(want); i++ {

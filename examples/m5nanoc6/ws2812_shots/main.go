@@ -1,7 +1,7 @@
 package main
 
 import (
-	board "renvo.dev/device/board/m5atoms3lite"
+	board "renvo.dev/device/board/m5nanoc6"
 	"renvo.dev/device/ws2812"
 )
 

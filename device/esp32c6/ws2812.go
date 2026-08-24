@@ -1,6 +1,7 @@
 package esp32c6
 
 import (
+	"renvo.dev/device/gpio"
 	"renvo.dev/device/internal/esprmt"
 	"renvo.dev/device/mmio"
 	"renvo.dev/device/ws2812"
@@ -39,13 +40,18 @@ type WS2812 = ws2812.Strip
 
 type ws2812RMT struct {
 	data        *Pin
-	power       *Pin
+	power       gpio.Pin
 	initialized bool
 	sender      esprmt.Sender
 }
 
-// NewWS2812 describes a pixel or strip routed through RMT channel zero.
-func NewWS2812(data, power *Pin) WS2812 {
+// WS2812Transmitter selects the ESP32-C6 RMT peripheral for pixels attached to
+// this pin. Portable code reaches it through ws2812.Output.
+func (p *Pin) WS2812Transmitter(power gpio.Pin) ws2812.Transmitter {
+	return newWS2812Transmitter(p, power)
+}
+
+func newWS2812Transmitter(data *Pin, power gpio.Pin) ws2812.Transmitter {
 	transport := &ws2812RMT{data: data, power: power}
 	transport.sender = esprmt.New(esprmt.Config{
 		ConfigAddress:          rmtConfig,
@@ -57,7 +63,13 @@ func NewWS2812(data, power *Pin) WS2812 {
 		BaseConfig:             rmtIdleLow | rmtDivider10MHz | rmtMemoryBlocks | rmtWrap,
 		MemoryWords:            rmtMemoryWords,
 	})
-	return ws2812.New(transport)
+	return transport
+}
+
+// NewWS2812 describes a pixel or strip routed through RMT channel zero.
+// Deprecated: use ws2812.New with a board-provided output capability.
+func NewWS2812(data, power *Pin) WS2812 {
+	return ws2812.New(data, power)
 }
 
 func (p *ws2812RMT) initialize() {
@@ -66,7 +78,7 @@ func (p *ws2812RMT) initialize() {
 	}
 	if p.power != nil {
 		p.power.Set(true)
-		_ = p.power.ConfigureOutputSignal(gpioOutputSignal)
+		_ = p.power.Configure(gpio.Config{Direction: gpio.Output})
 	}
 	p.data.Set(false)
 	_ = p.data.ConfigureOutputSignal(rmtOutputSignal)
