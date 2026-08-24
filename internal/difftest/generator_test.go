@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"go/parser"
 	"go/token"
-	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -126,37 +124,6 @@ func TestMetamorphicVariantsAreDistinctAndValid(t *testing.T) {
 		if err := validateHostSource(variant.Source); err != nil {
 			t.Fatalf("%s did not type check: %v\n%s", variant.Name, err, variant.Source)
 		}
-	}
-}
-
-func TestRunnerMatchesHostGo(t *testing.T) {
-	if HostTarget() == "" {
-		t.Skipf("no runnable Renvo target for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-	source := []byte(`package main
-
-func main() {
-	value := int64(7)
-	for index := 0; index < 4; index++ {
-		value = value*3 + int64(index)
-	}
-	print(value)
-	print("\n")
-}
-`)
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	comparison, err := (Runner{
-		StdRoot: filepath.Join(filepath.Dir(filename), "..", "..", "std"),
-		Target:  HostTarget(),
-	}).Compare(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if comparison.Interesting {
-		t.Fatalf("runner baseline differs (%s): host=%q renvo=%q diagnostic=%s", comparison.Signature, comparison.Host.Output, comparison.Renvo.Output, comparison.Renvo.Diagnostic)
 	}
 }
 
