@@ -12,7 +12,10 @@ func TestRMTRegisterAddresses(t *testing.T) {
 	if rmtTransmitLimit != 0x60006058 {
 		t.Fatalf("RMT channel zero transmit limit = %#x", rmtTransmitLimit)
 	}
-	if rmtMemoryWords != 192 {
-		t.Fatalf("RMT memory = %d words, want 192", rmtMemoryWords)
+	if rmtMemoryBlocks != 2<<16 {
+		t.Fatalf("RMT channel zero memory blocks = %#x, want %#x", rmtMemoryBlocks, uint32(2<<16))
+	}
+	if rmtMemoryWords != 96 {
+		t.Fatalf("RMT memory = %d words, want 96", rmtMemoryWords)
 	}
 }

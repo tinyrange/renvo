@@ -26,10 +26,12 @@ const (
 	rmtDirectMemory = uint32(1)
 	rmtIdleLow      = uint32(1 << 6)
 	rmtDivider10MHz = uint32(8 << 8)
-	rmtMemoryBlocks = uint32(4 << 16)
+	// ESP32-C6 has two 48-word TX memory blocks. Channel zero owns both so
+	// longer strips can use the RMT ping-pong refill path.
+	rmtMemoryBlocks = uint32(2 << 16)
 	rmtWrap         = uint32(1 << 4)
 
-	rmtMemoryWords = 4 * 48
+	rmtMemoryWords = 2 * 48
 )
 
 // RGB is one red, green and blue addressable-LED value.

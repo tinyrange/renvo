@@ -296,6 +296,8 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "examples/m5nanoc6/blink_mixed", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/blink_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
 		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/ws2812_chase", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
+		{Path: "examples/m5nanoc6/ws2812_strip", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/ws2812_shots", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
 		{Path: "examples/m5nanoc6/button_rgb_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
 		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
