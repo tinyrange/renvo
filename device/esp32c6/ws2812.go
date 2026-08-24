@@ -8,15 +8,22 @@ import (
 )
 
 const (
-	rmtConfig          = uintptr(0x60006010)
-	rmtInterruptRaw    = uintptr(0x60006038)
-	rmtInterruptEnable = uintptr(0x60006040)
-	rmtInterruptClear  = uintptr(0x60006044)
-	rmtTransmitLimit   = uintptr(0x60006058)
-	rmtSystemConfig    = uintptr(0x60006068)
-	rmtMemory          = uintptr(0x60006400)
-	pcrRMTConfig       = uintptr(0x6009602c)
-	pcrRMTClockConfig  = uintptr(0x60096030)
+	rmtConfig                = uintptr(0x60006010)
+	rmtInterruptRaw          = uintptr(0x60006038)
+	rmtInterruptEnable       = uintptr(0x60006040)
+	rmtInterruptClear        = uintptr(0x60006044)
+	rmtTransmitLimit         = uintptr(0x60006058)
+	rmtSystemConfig          = uintptr(0x60006068)
+	rmtClockReset            = uintptr(0x60006070)
+	rmtMemory                = uintptr(0x60006400)
+	pcrRMTConfig             = uintptr(0x6009602c)
+	pcrRMTClockConfig        = uintptr(0x60096030)
+	rmtInterruptMap          = uintptr(0x600100c4)
+	plicInterruptEnable      = uintptr(0x20001000)
+	plicInterruptType        = uintptr(0x20001004)
+	plicInterruptOnePriority = uintptr(0x20001014)
+	plicInterruptThreshold   = uintptr(0x20001090)
+	interruptRefillMailbox   = uintptr(0x4087ff00)
 
 	rmtOutputSignal = uint32(71)
 	rmtClockEnable  = uint32(1)
@@ -26,12 +33,18 @@ const (
 	rmtDirectMemory = uint32(1)
 	rmtIdleLow      = uint32(1 << 6)
 	rmtDivider10MHz = uint32(8 << 8)
-	// ESP32-C6 has two 48-word TX memory blocks. Channel zero owns both so
-	// longer strips can use the RMT ping-pong refill path.
-	rmtMemoryBlocks = uint32(2 << 16)
-	rmtWrap         = uint32(1 << 4)
+	// The C6 reference driver uses one 48-word channel block and refills its two
+	// 24-word halves in alternation.
+	rmtMemoryBlocks      = uint32(1 << 16)
+	rmtWrap              = uint32(1 << 4)
+	rmtCarrierEffective  = uint32(1 << 20)
+	rmtCarrierOutputHigh = uint32(1 << 22)
+	rmtLoopAutoStop      = uint32(1 << 21)
+	rmtClockDenominator  = uint32(1 << 6)
+	rmtCPUInterrupt      = uint32(1)
+	rmtCPUInterruptMask  = uint32(1 << rmtCPUInterrupt)
 
-	rmtMemoryWords = 2 * 48
+	rmtMemoryWords = 48
 )
 
 // RGB is one red, green and blue addressable-LED value.
@@ -62,8 +75,11 @@ func newWS2812Transmitter(data *Pin, power gpio.Pin) ws2812.Transmitter {
 		InterruptClearAddress:  rmtInterruptClear,
 		TransmitLimitAddress:   rmtTransmitLimit,
 		MemoryAddress:          rmtMemory,
-		BaseConfig:             rmtIdleLow | rmtDivider10MHz | rmtMemoryBlocks | rmtWrap,
-		MemoryWords:            rmtMemoryWords,
+		InterruptRefillAddress: interruptRefillMailbox,
+		BaseConfig: rmtIdleLow | rmtDivider10MHz | rmtMemoryBlocks | rmtWrap |
+			rmtCarrierEffective | rmtCarrierOutputHigh,
+		TransmitLimitConfig: rmtLoopAutoStop,
+		MemoryWords:         rmtMemoryWords,
 	})
 	return transport
 }
@@ -88,8 +104,25 @@ func (p *ws2812RMT) initialize() {
 	clock := mmio.Load32(pcrRMTConfig) | rmtClockEnable
 	mmio.Store32(pcrRMTConfig, clock|rmtReset)
 	mmio.Store32(pcrRMTConfig, clock&^rmtReset)
-	mmio.Store32(pcrRMTClockConfig, rmtClock80MHz|rmtSourceEnable)
-	mmio.Store32(rmtSystemConfig, rmtDirectMemory)
+	mmio.Store32(
+		pcrRMTClockConfig,
+		rmtClock80MHz|rmtSourceEnable|rmtClockDenominator,
+	)
+	// Preserve the reset defaults for the RMT source-clock divider and active
+	// gate. Only the direct-memory access bit is changed here, matching the
+	// field-level operation in Espressif's low-level driver.
+	mmio.Store32(rmtSystemConfig, mmio.Load32(rmtSystemConfig)|rmtDirectMemory)
+	// Apply the newly selected channel divider before transmitting. Unlike the
+	// S3, the C6 keeps this divider's counter in a separate reset register.
+	mmio.Store32(rmtClockReset, mmio.Load32(rmtClockReset)|1)
+	// Route the level-triggered RMT source to PLIC vector one. The target
+	// startup owns that vector and reserves the refill mailbox below its stack.
+	mmio.Store32(plicInterruptEnable, mmio.Load32(plicInterruptEnable)&^rmtCPUInterruptMask)
+	mmio.Store32(rmtInterruptMap, rmtCPUInterrupt)
+	mmio.Store32(plicInterruptType, mmio.Load32(plicInterruptType)&^rmtCPUInterruptMask)
+	mmio.Store32(plicInterruptOnePriority, 2)
+	mmio.Store32(plicInterruptThreshold, 1)
+	mmio.Store32(plicInterruptEnable, mmio.Load32(plicInterruptEnable)|rmtCPUInterruptMask)
 	p.sender.Initialize()
 	p.initialized = true
 }
