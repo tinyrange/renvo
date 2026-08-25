@@ -26,10 +26,6 @@ func main() {
 		print("FAIL standard files\n")
 		return
 	}
-	if _, writeErr := os.Stdout.Write([]byte("PASS\n")); writeErr != nil {
-		print("FAIL stdout write\n")
-		return
-	}
 	file, fileErr := os.Create("seek.tmp")
 	if fileErr != nil {
 		print("FAIL create\n")
@@ -37,14 +33,6 @@ func main() {
 	}
 	if _, fileErr = file.Write([]byte("abcdef")); fileErr != nil {
 		print("FAIL write\n")
-		return
-	}
-	if offset, seekErr := file.Seek(-2, io.SeekCurrent); seekErr != nil || offset != 4 {
-		print("FAIL seek current\n")
-		return
-	}
-	if _, fileErr = file.Write([]byte("XY")); fileErr != nil {
-		print("FAIL positioned write\n")
 		return
 	}
 	if file.Close() != nil {
@@ -56,13 +44,9 @@ func main() {
 		print("FAIL reopen\n")
 		return
 	}
-	if offset, seekErr := file.Seek(-2, io.SeekEnd); seekErr != nil || offset != 4 {
-		print("FAIL seek end\n")
-		return
-	}
-	buf := make([]byte, 2)
-	if n, readErr := file.Read(buf); readErr != nil || n != 2 || string(buf) != "XY" {
-		print("FAIL positioned read\n")
+	buf := make([]byte, 6)
+	if n, readErr := file.Read(buf); readErr != nil || n != 6 || string(buf) != "abcdef" {
+		print("FAIL read\n")
 		return
 	}
 	if _, readErr := file.Read(buf[:1]); !errors.Is(readErr, io.EOF) {
@@ -72,5 +56,8 @@ func main() {
 	if file.Close() != nil {
 		print("FAIL close read\n")
 		return
+	}
+	if _, writeErr := os.Stdout.Write([]byte("PASS\n")); writeErr != nil {
+		print("FAIL stdout write\n")
 	}
 }

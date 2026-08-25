@@ -2,12 +2,17 @@
 
 package os
 
+import "io"
+
 const O_RDONLY = 0
 const O_RDWR = 2
 
 type FileMode int
 
 var Args []string
+var Stdin = &File{fd: 0}
+var Stdout = &File{fd: 1}
+var Stderr = &File{fd: 2}
 
 var processEnv []string
 
@@ -25,7 +30,6 @@ type osError struct {
 }
 
 var ioErrorValue = osError{text: "I/O error"}
-var eofErrorValue = osError{text: "EOF"}
 
 func (e *osError) Error() string {
 	if e == nil {
@@ -38,8 +42,8 @@ func errIO() *osError {
 	return &ioErrorValue
 }
 
-func errEOF() *osError {
-	return &eofErrorValue
+func errEOF() error {
+	return io.EOF
 }
 
 func Environ() []string {
