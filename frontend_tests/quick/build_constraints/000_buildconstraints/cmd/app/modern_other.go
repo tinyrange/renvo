@@ -1,4 +1,4 @@
-//go:build windows || wasip1
+//go:build windows || wasip1 || msdos
 
 package main
 

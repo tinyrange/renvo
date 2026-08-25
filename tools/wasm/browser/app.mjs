@@ -1918,6 +1918,10 @@ function openNewProjectDialog() {
   queueMicrotask(() => elements.newProjectForm.querySelector("input[name=\"project-kind\"]:checked")?.focus());
 }
 
+function starterCommand() {
+  return `-s -o ${selectedTarget?.output || "app.wasm"} .`;
+}
+
 function createNewProject(event) {
   if (event.submitter?.value !== "accept") return;
   event.preventDefault();
@@ -1930,7 +1934,7 @@ function createNewProject(event) {
     files: c ? initialCFiles : initialFiles,
     activeFile: c ? "main.c" : "main.go",
     openFiles: [c ? "main.c" : "main.go"],
-    command: "-s -o app.wasm .",
+    command: starterCommand(),
   });
   elements.languageStatus.textContent = c ? "C project created" : "Go project created";
   if (isPhoneWorkspace()) showMobileView("editor");
@@ -1999,12 +2003,14 @@ async function shareProject() {
 
 function resetProject() {
   const c = projectLanguage === "c";
-  replaceProject({ name: c ? "c-playground" : "playground", language: projectLanguage, files: c ? initialCFiles : initialFiles, activeFile: c ? "main.c" : "main.go", openFiles: [c ? "main.c" : "main.go"], command: "-s -o app.wasm ." });
+  replaceProject({ name: c ? "c-playground" : "playground", language: projectLanguage, files: c ? initialCFiles : initialFiles, activeFile: c ? "main.c" : "main.go", openFiles: [c ? "main.c" : "main.go"], command: starterCommand() });
 }
 
 function replaceProject(project) {
   for (const model of models.values()) model.dispose();
   editableFiles.clear(); editableBaselines.clear(); models.clear(); openFiles.length = 0;
+  projectBackendRoots.clear();
+  for (const name of project.backendRoots || []) if (typeof name === "string") projectBackendRoots.add(name);
   projectLanguage = project.language === "c" || !project.language && inferProjectLanguage(project.files) === "c" ? "c" : "go";
   externalBuildLanguage = "go";
   const fallbackFiles = projectLanguage === "c" ? initialCFiles : initialFiles;
@@ -3055,6 +3061,7 @@ function exampleEntries(catalog = standardCatalog) {
 
 function exampleTitle(slug) {
   if (slug === "pdp11v7") return "PDP-11 V7";
+  if (slug === "msdos") return "MS-DOS 8086";
   return slug.split(/[_-]+/).map((word) => {
     if (/^(c|i2c|http|rgb|usb|ws2812|adxl345|sgp30)$/i.test(word)) return word.toUpperCase();
     return word.charAt(0).toUpperCase() + word.slice(1);
@@ -3103,6 +3110,12 @@ const boardArtworkPaths = {
     <rect x="27" y="27" width="50" height="30" rx="2" class="board-face"/>
     <path d="M34 35h35M34 42h27M34 49h31" class="board-graph"/>
     <g class="board-keys"><path d="M88 30h43M88 39h43M88 48h43M88 57h43M27 67h104"/><path d="M98 25v38M109 25v38M120 25v38"/></g>`,
+  ibmpc: `
+    <rect x="21" y="14" width="80" height="58" rx="5" class="board-shell"/>
+    <rect x="30" y="23" width="61" height="36" rx="2" class="board-screen"/>
+    <path d="M38 49h28M38 42h39" class="board-graph"/><circle cx="91" cy="65" r="2" class="board-led"/>
+    <rect x="16" y="72" width="90" height="8" rx="3" class="board-face"/>
+    <path d="M115 26h25v47h-25zM120 35h15M120 43h15M120 64h15" class="board-keys"/>`,
 };
 
 function createBoardArtwork(kind) {
@@ -3334,6 +3347,7 @@ async function handleExampleAction(event) {
     const targetDefinition = targetCatalog?.targets.find((candidate) => candidate.name === target);
     const active = entry.item.language === "c" && Object.hasOwn(files, "main.c") ? "main.c" :
       Object.hasOwn(files, "main.go") ? "main.go" : Object.keys(files).find((name) => /\.(?:go|c)$/.test(name)) || Object.keys(files)[0];
+    const backendDefinition = Object.keys(files).find((name) => name.endsWith(".rtg"));
     replaceProject({
       name: entry.slug,
       language: entry.item.language || "go",
@@ -3341,9 +3355,11 @@ async function handleExampleAction(event) {
       activeFile: active,
       openFiles: [active],
       target,
+      backendRoots: backendDefinition ? [backendDefinition] : [],
       command: `-s -o ${targetDefinition?.output || "app.wasm"} .`,
     });
-    elements.languageStatus.textContent = `${entry.title} is open`;
+    if (backendDefinition) await useProjectBackend(backendDefinition);
+    else elements.languageStatus.textContent = `${entry.title} is open`;
     if (isPhoneWorkspace()) showMobileView("editor");
   } catch (error) {
     showProjectError(error);

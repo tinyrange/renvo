@@ -22,7 +22,9 @@ take precedence whenever they disagree with the guide.
   `backend/*performance*_test.go` file except for explicitly authorized
   harness refactoring. Never loosen performance or resource constraints without
   explicit user instruction.
-- The only syscalls are `open`, `close`, `read`, `write`, `chmod`, and `print`.
+- Backend compiler implementation may invoke only `open`, `close`, `read`,
+  `write`, `chmod`, and `print`. This restriction does not limit target runtime
+  operations or APIs implemented by the Renvo standard library.
 - Performance requirements are strictly defined in `backend/main_test.go` and
   cannot be violated.
 - Do not hardcode test cases, emit prebuilt or self-copying binaries, copy the

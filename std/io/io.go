@@ -1,11 +1,26 @@
 package io
 
+const (
+	SeekStart   = 0
+	SeekCurrent = 1
+	SeekEnd     = 2
+)
+
 type Reader interface {
 	Read(p []byte) (n int, err error)
 }
 
 type Writer interface {
 	Write(p []byte) (n int, err error)
+}
+
+type Closer interface {
+	Close() error
+}
+
+type ReadCloser interface {
+	Reader
+	Closer
 }
 
 type StringWriter interface {

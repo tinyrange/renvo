@@ -1,4 +1,4 @@
-//go:build renvo
+//go:build renvo && !i8086
 
 // Package fmt provides compact, allocation-conscious formatting for Renvo's
 // supported scalar, string, byte-slice, Boolean, and error values.
@@ -225,6 +225,33 @@ func writeString(w Writer, s string) (int, error) {
 	return count, err
 }
 
+func hexBytes(b []byte) string {
+	var out []byte
+	for i := 0; i < len(b); i++ {
+		out = append(out, "0123456789abcdef"[b[i]>>4])
+		out = append(out, "0123456789abcdef"[b[i]&15])
+	}
+	return string(out)
+}
+
+func quote(s string) string {
+	var out []byte
+	out = append(out, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' || c == '"' {
+			out = append(out, '\\')
+			out = append(out, c)
+		} else if c == '\n' {
+			out = appendString(out, "\\n")
+		} else {
+			out = append(out, c)
+		}
+	}
+	out = append(out, '"')
+	return string(out)
+}
+
 func formatInt(v int64, base int) string {
 	if v < 0 {
 		return "-" + formatUint(uint64(-v), base)
@@ -251,33 +278,6 @@ func formatUint(v uint64, base int) string {
 	for i := len(reversed) - 1; i >= 0; i-- {
 		out = append(out, reversed[i])
 	}
-	return string(out)
-}
-
-func hexBytes(b []byte) string {
-	var out []byte
-	for i := 0; i < len(b); i++ {
-		out = append(out, "0123456789abcdef"[b[i]>>4])
-		out = append(out, "0123456789abcdef"[b[i]&15])
-	}
-	return string(out)
-}
-
-func quote(s string) string {
-	var out []byte
-	out = append(out, '"')
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\\' || c == '"' {
-			out = append(out, '\\')
-			out = append(out, c)
-		} else if c == '\n' {
-			out = appendString(out, "\\n")
-		} else {
-			out = append(out, c)
-		}
-	}
-	out = append(out, '"')
 	return string(out)
 }
 

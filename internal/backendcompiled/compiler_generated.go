@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3fabf3eaf8703920a75174b04649070ecb711387243dd0565f631011f332ff2e"
+const CompilerSourceDigest = "e52fcad5efa7d18cbdc69ea6f81b53dc9eb210f4839dd63667dafd56dbb409b7"
 
 // source: backend/compiler_common_impl.go
 
@@ -13830,6 +13830,7 @@ if !renvoEmitInterfaceAssignToLocal(g, ep, e.left, left) || !renvoEmitInterfaceA
 return false
 }
 a := &g.asm
+indirectTypeBase := renvoInterfaceIndirectTypeBaseFor(g.meta)
 different := renvoAsmNewLabel(a)
 nonNil := renvoAsmNewLabel(a)
 indirect := renvoAsmNewLabel(a)
@@ -13842,11 +13843,18 @@ renvoAsmPrimaryImm(a, 1)
 renvoAsmJmpLabel(a, done)
 renvoAsmMarkLabel(a, nonNil)
 renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, 0, nonComparable, 0x9c)
-renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, renvoInterfaceIndirectTypeBase, indirect, 0x9d)
+renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, indirectTypeBase, indirect, 0x9d)
 for typ := 1; typ < len(g.meta.types); typ++ {
 tag := renvoRuntimeTypeTag(g.meta, typ)
 kind := renvoResolveType(g.meta, typ).kind
-if tag <= 0 || tag >= renvoInterfaceIndirectTypeBase ||
+
+
+
+
+if g.c.renvoNativeIntSize == 2 && (renvoTypeKindIsFloat(kind) || kind == renvoTypeComplex64) {
+continue
+}
+if tag <= 0 || tag >= indirectTypeBase ||
 !renvoTypeKindIsFloat(kind) && kind != renvoTypeComplex64 {
 continue
 }
@@ -13883,7 +13891,11 @@ renvoAsmJmpLabel(a, done)
 renvoAsmMarkLabel(a, indirect)
 for typ := 1; typ < len(g.meta.types); typ++ {
 tag := renvoRuntimeTypeTag(g.meta, typ)
-if tag != renvoInterfaceIndirectTypeBase+typ || renvoResolveType(g.meta, typ).kind == renvoTypeInterface {
+kind := renvoResolveType(g.meta, typ).kind
+if g.c.renvoNativeIntSize == 2 && (renvoTypeKindIsFloat(kind) || renvoTypeKindIsComplex(kind)) {
+continue
+}
+if tag != indirectTypeBase+typ || kind == renvoTypeInterface {
 continue
 }
 next := renvoAsmNewLabel(a)
@@ -13948,6 +13960,15 @@ const renvoInterfaceIndirectTypeBase = 1048576
 const renvoPanicTypeAssertionTag = 1048575
 const renvoPanicOutOfMemoryTag = 1048574
 
+func renvoInterfaceIndirectTypeBaseFor(meta *renvoMeta) int {
+if meta != nil && meta.c.renvoNativeIntSize == 2 {
+
+
+return 16384
+}
+return renvoInterfaceIndirectTypeBase
+}
+
 func renvoRuntimeTypeTag(meta *renvoMeta, typ int) int {
 renvoNonNil(meta)
 if typ <= 0 || typ >= len(meta.types) {
@@ -13961,7 +13982,7 @@ if !renvoTypeComparable(meta, typ) {
 return -typ
 }
 if renvoTypeSize(meta, typ) > renvoBackendValueSlotSize {
-return renvoInterfaceIndirectTypeBase + typ
+return renvoInterfaceIndirectTypeBaseFor(meta) + typ
 }
 return typ
 }
@@ -18028,7 +18049,9 @@ return renvoAlignValue(size, wordSize) / wordSize
 
 func renvoCallWordSize(g *renvoLinearGen, typ int) int {
 t := renvoResolveType(g.meta, typ)
-if t.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeStruct && renvoTypeNeedsDenseCallWords(g.meta, typ)) {
+if t.kind == renvoTypeArray ||
+g.c.renvoNativeIntSize == 2 && t.kind == renvoTypeStruct ||
+g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeStruct && renvoTypeNeedsDenseCallWords(g.meta, typ)) {
 return g.c.renvoNativeIntSize
 }
 return renvoBackendValueSlotSize
@@ -20445,6 +20468,12 @@ renvoEmitCompositeCompareAt(g, t.elem, left-i*size, right-i*size, fail)
 return
 }
 if t.kind == renvoTypeString {
+if renvoPreparedBackendActive != 0 {
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, left)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, left-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, right)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, right-renvoBackendValueSlotSize)
+} else {
 renvoAsmLoadPrimarySecondaryStack(a, left, left-8)
 renvoAsmPushStringRegs(a)
 renvoAsmLoadPrimarySecondaryStack(a, right, right-8)
@@ -20452,6 +20481,7 @@ renvoAsmCopySecondaryToTertiary(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPopCallWord0(a)
 renvoAsmPopCallWord1(a)
+}
 renvoAsmCallLabel(a, renvoEnsureStringEqualHelper(g))
 } else if t.kind == renvoTypeComplex64 {
 renvoEmit32IEEECompareStack(g, left, right, renvoTypeFloat32, '=', '=')
@@ -23271,6 +23301,21 @@ return done
 func renvoEmitWideSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
+if renvoPreparedBackendActive != 0 {
+caseOff := renvoAddUnnamedLocal(g, renvoTypeString)
+if !renvoEmitStringValueRegs(g, ep, idx) {
+return false
+}
+renvoAsmStorePrimarySecondaryStack(a, caseOff, caseOff-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, valueOffset)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, lenOffset)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, caseOff)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, caseOff-renvoBackendValueSlotSize)
+renvoAsmCallLabel(a, label)
+renvoAsmCmpPrimaryImm8(a, 0)
+renvoAsmJnzLabel(a, matchLabel)
+return true
+}
 if !renvoEmitStringValueRegs(g, ep, idx) {
 return false
 }
@@ -25361,6 +25406,14 @@ return label
 
 func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 a := &g.asm
+belowOrEqual := 0x9e
+aboveOrEqual := 0x9d
+if g.c.renvoNativeIntSize == 2 {
+
+
+belowOrEqual = 0x96
+aboveOrEqual = 0x93
+}
 if renvoFixedTarget == 0 {
 if persistent && renvoIsHostedObjectAmd64(g.c) {
 
@@ -25380,12 +25433,12 @@ renvoAsmSubPrimaryTertiary(a)
 renvoAsmPushPrimary(a)
 renvoAsmPopTertiary(a)
 renvoAsmPopPrimary(a)
-renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
+renvoAsmCmpTertiaryPrimarySet(a, belowOrEqual)
 renvoAsmJzPrimary(a, oomLabel)
 renvoAsmPushTertiary(a)
 renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
 renvoAsmPopTertiary(a)
-renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+renvoAsmCmpTertiaryPrimarySet(a, aboveOrEqual)
 renvoAsmJzPrimary(a, oomLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
@@ -25397,12 +25450,12 @@ renvoAsmAddPrimaryTertiary(a)
 renvoAsmPushPrimary(a)
 renvoAsmPopTertiary(a)
 renvoAsmPopPrimary(a)
-renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+renvoAsmCmpTertiaryPrimarySet(a, aboveOrEqual)
 renvoAsmJzPrimary(a, oomLabel)
 renvoAsmPushTertiary(a)
 renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 renvoAsmPopTertiary(a)
-renvoAsmCmpTertiaryPrimarySet(a, 0x9e)
+renvoAsmCmpTertiaryPrimarySet(a, belowOrEqual)
 renvoAsmJzPrimary(a, oomLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmStorePrimaryBss(a, g.stringHeapOff)
@@ -31343,6 +31396,21 @@ func renvoEmitNativeSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, len
 renvoNonNil(g, ep)
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
+if renvoPreparedBackendActive != 0 {
+caseOff := renvoAddUnnamedLocal(g, renvoTypeString)
+if !renvoEmitStringValueRegs(g, ep, idx) {
+return false
+}
+renvoAsmStorePrimarySecondaryStack(a, caseOff, caseOff-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, valueOffset)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, lenOffset)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, caseOff)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, caseOff-renvoBackendValueSlotSize)
+renvoAsmCallLabel(a, label)
+renvoAsmCmpPrimaryImm8(a, 0)
+renvoAsmJnzLabel(a, matchLabel)
+return true
+}
 if !renvoEmitStringValueRegs(g, ep, idx) {
 return false
 }
@@ -31996,6 +32064,12 @@ write(output, renvoCompileOutputDataWithContext(context, result.data, target), -
 return 0
 }
 renvoPrintErr("renvo: compilation failed\n")
+if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation == 5001 {
+
+
+
+return 125
+}
 return 1
 }
 
@@ -36295,7 +36369,18 @@ renvoAsmRet(a)
 
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-return renvoCompileUnitInput(input, output, target, arenaSize)
+
+
+
+
+if len(input) != 1 {
+renvoPrintErr("renvo: prepared backends require one input file\n")
+return 1
+}
+var src []byte
+src = renvoReadAll(input[0], src)
+prog := renvoParseProgram(src)
+return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 }
 
 
@@ -38045,6 +38130,7 @@ return renvoCompileResult{}
 if !renvoEmitAllQueuedFunctionsScratch(g) {
 return renvoCompileResult{}
 }
+renvoRTGResolveSpeculativeClosureLabels(g)
 if renvoRTGUnsupportedOperation != 0 {
 renvoRTGReportFailure(g)
 return renvoCompileResult{}
@@ -38109,6 +38195,7 @@ if !renvoEmitAllQueuedFunctionsScratch(g) {
 renvoPrintErr("renvo: prepared backend failed queued functions\n")
 return renvoCompileResult{}
 }
+renvoRTGResolveSpeculativeClosureLabels(g)
 if renvoRTGUnsupportedOperation != 0 {
 renvoRTGReportFailure(g)
 return renvoCompileResult{}
@@ -38122,6 +38209,7 @@ return renvoCompileResult{}
 }
 if len(data) == 0 {
 renvoPrintErr("renvo: prepared backend produced empty output\n")
+renvoRTGUnsupportedOperation = 5001
 return renvoCompileResult{}
 }
 return renvoCompileResult{data: data, ok: true}
@@ -38153,8 +38241,11 @@ func renvoTryCompileObjectProgramRTG(
 p *renvoProgram, meta *renvoMeta,
 ) renvoCompileResult {
 g := renvoBeginObjectProgram(p, meta)
-if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) ||
-renvoRTGUnsupportedOperation != 0 {
+if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+return renvoCompileResult{}
+}
+renvoRTGResolveSpeculativeClosureLabels(g)
+if renvoRTGUnsupportedOperation != 0 {
 return renvoCompileResult{}
 }
 renvoRecordObjectFunctionRanges(g)
@@ -38164,6 +38255,26 @@ if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {
 return renvoCompileResult{}
 }
 return renvoCompileResult{data: data, ok: true}
+}
+
+
+
+
+
+
+func renvoRTGResolveSpeculativeClosureLabels(g *renvoLinearGen) {
+for closureIndex := 0; closureIndex < len(g.meta.closures); closureIndex++ {
+closure := &g.meta.closures[closureIndex]
+fnIndex := closure.fnIndex
+if closure.ready || fnIndex < 0 || fnIndex >= len(g.funcLabels) ||
+renvoAsmLabelPosition(&g.asm, g.funcLabels[fnIndex]) >= 0 {
+continue
+}
+renvoRTGFunctionStart(&g.asm, g.funcLabels[fnIndex])
+renvoAsmMarkLabel(&g.asm, g.funcLabels[fnIndex])
+renvoAsmRet(&g.asm)
+renvoRTGFunctionFinish(&g.asm)
+}
 }
 
 func renvoRTGReportFailure(g *renvoLinearGen) {

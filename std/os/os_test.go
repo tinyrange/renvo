@@ -30,6 +30,31 @@ func TestFileOperations(t *testing.T) {
 	}
 }
 
+func TestFileSeek(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seek.txt")
+	file, err := OpenFile(path, O_CREATE|O_TRUNC|O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err = file.Write([]byte("abcdef")); err != nil {
+		t.Fatal(err)
+	}
+	if offset, seekErr := file.Seek(-2, 1); seekErr != nil || offset != 4 {
+		t.Fatalf("Seek current = %d, %v", offset, seekErr)
+	}
+	if _, err = file.Write([]byte("XY")); err != nil {
+		t.Fatal(err)
+	}
+	if offset, seekErr := file.Seek(-2, 2); seekErr != nil || offset != 4 {
+		t.Fatalf("Seek end = %d, %v", offset, seekErr)
+	}
+	buf := make([]byte, 2)
+	if n, readErr := file.Read(buf); readErr != nil || n != 2 || string(buf) != "XY" {
+		t.Fatalf("Read after Seek = %d, %v, %q", n, readErr, buf)
+	}
+}
+
 func TestReadDirAndEnv(t *testing.T) {
 	dir := t.TempDir()
 	if err := hostos.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644); err != nil {
