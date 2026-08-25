@@ -1,4 +1,4 @@
-const CACHE = "renvo-web-ide-v32";
+const CACHE = "renvo-web-ide-v33";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs",
   "./editor-navigation.mjs", "./language-path.mjs", "./asset-fetch.mjs", "./serial-plotter.mjs",
@@ -24,6 +24,10 @@ self.addEventListener("fetch", (event) => {
     return response;
   };
   if (url.origin === location.origin) {
+    if (url.searchParams.has("v")) {
+      event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then(remember)));
+      return;
+    }
     event.respondWith(fetch(event.request).then(remember).catch(() => caches.match(event.request).then((cached) => cached || Response.error())));
     return;
   }

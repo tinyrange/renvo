@@ -27,12 +27,12 @@ Build Renvo and compile the oracle with the shared ESP32-S3 target:
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5cardputeradv \
   -o sandbox/m5cardputeradv-oracle.elf \
   ./examples/m5cardputeradv/oracle
 ```
 
-Replace the final package with `./examples/m5cardputeradv/terminal` and choose
+Replace the final package with `./examples/device/keyboard_terminal` and choose
 an output such as `sandbox/m5cardputeradv-terminal.elf` to build the terminal.
 
 Convert the ELF and replace only the factory application at flash offset

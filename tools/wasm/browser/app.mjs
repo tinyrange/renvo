@@ -21,7 +21,7 @@ const bundleRoot = browserAssetRoot.pathname.endsWith("/browser/")
   ? new URL("../", browserAssetRoot)
   : browserAssetRoot;
 const MONACO_ROOT = new URL(parameters.get("monaco") || `https://cdn.jsdelivr.net/npm/monaco-editor@${MONACO_VERSION}/min/`, location.href).href.replace(/\/$/, "");
-const compilerUrl = new URL(parameters.get("compiler") || "renvo.wasm", bundleRoot).href;
+const compilerURLOverride = parameters.has("compiler") ? new URL(parameters.get("compiler"), bundleRoot).href : "";
 const fallbackBackendUrl = new URL(parameters.get("backend") || "backends/wasi-wasm32.wasm", bundleRoot).href;
 const catalogUrl = new URL(parameters.get("catalog") || "targets.json", bundleRoot).href;
 const worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "module" });
@@ -70,10 +70,7 @@ const elements = {
   sidebarProjectName: document.querySelector("#sidebar-project-name"),
   projectFileCount: document.querySelector("#project-file-count"),
   toggleSidebar: document.querySelector("#toggle-sidebar"),
-  buildScope: document.querySelector("#build-scope"),
-  buildScopeLabel: document.querySelector("#build-scope-label"),
-  buildProjectScope: document.querySelector("#build-project-scope"),
-  sidebarBuildScopeLabel: document.querySelector("#sidebar-build-scope-label"),
+  outlineCount: document.querySelector("#outline-count"),
   projectMenuButton: document.querySelector("#project-menu"),
   projectActionMenu: document.querySelector("#project-action-menu"),
   fileActionMenu: document.querySelector("#file-action-menu"),
@@ -106,17 +103,40 @@ const elements = {
   snapshotDialog: document.querySelector("#snapshot-dialog"),
   snapshotName: document.querySelector("#snapshot-name"),
   snapshotList: document.querySelector("#snapshot-list"),
+  exampleDialog: document.querySelector("#example-dialog"),
+  exampleSearch: document.querySelector("#example-search"),
+  exampleBoardFilter: document.querySelector("#example-board-filter"),
+  exampleBoardList: document.querySelector("#example-board-list"),
+  exampleTargetFilter: document.querySelector("#example-target-filter"),
+  exampleResultCount: document.querySelector("#example-result-count"),
+  exampleResults: document.querySelector("#example-results"),
+  mobileSetup: document.querySelector("#mobile-setup"),
+  mobileSetupTitle: document.querySelector("#mobile-setup-title"),
+  mobileSetupDetail: document.querySelector("#mobile-setup-detail"),
+  mobileSetupProgress: document.querySelector("#mobile-setup-progress"),
+  devicePermissionDialog: document.querySelector("#device-permission-dialog"),
+  devicePermissionIntro: document.querySelector("#device-permission-intro"),
+  devicePermissionNote: document.querySelector("#device-permission-note"),
+  devicePermissionAccept: document.querySelector("#device-permission-accept"),
+  deviceWebUSBStatus: document.querySelector("#device-webusb-status"),
+  deviceWebSerialStatus: document.querySelector("#device-webserial-status"),
   ide: document.querySelector("#ide"),
   mobileStep: document.querySelector("#mobile-step"),
   mobileContext: document.querySelector("#mobile-context"),
   mobileEditorActions: document.querySelector(".mobile-editor-actions"),
   mobileTargetButton: document.querySelector("#mobile-target-button"),
-  mobileBuild: document.querySelector("#mobile-build"),
   mobileRun: document.querySelector("#mobile-run"),
+  mobileDeviceBuild: document.querySelector("#mobile-device-build"),
+  mobileDeviceRun: document.querySelector("#mobile-device-run"),
+  mobileDeviceTarget: document.querySelector("#mobile-device-target"),
+  mobileDeviceHint: document.querySelector("#mobile-device-hint"),
+  mobileTransportStatus: document.querySelector("#mobile-transport-status"),
+  mobileDeviceOutput: document.querySelector("#mobile-device-output"),
   mobileTargetList: document.querySelector("#mobile-target-list"),
   mobileFlashView: document.querySelector("#mobile-flash-view"),
   mobileFlashState: document.querySelector("#mobile-flash-state"),
   mobileFlashProgress: document.querySelector("#mobile-flash-progress"),
+  mobileFlashDetail: document.querySelector("#mobile-flash-detail"),
   mobileFlashOutput: document.querySelector("#mobile-flash-output"),
   copyToPlayground: document.querySelector("#copy-to-playground"),
   formatFile: document.querySelector("#format-file"),
@@ -156,6 +176,7 @@ const backendRequests = new Map();
 let languageWorkspaceRevision = 1;
 let sentLanguageWorkspaceRevision = 0;
 const backendReady = new Set();
+const prefetchingBackends = new Set();
 let monaco;
 let editor;
 let activeFile = "main.go";
@@ -175,6 +196,8 @@ let restoredTargetName = "";
 let targetCatalog;
 let standardCatalog;
 let standardCatalogPromise;
+let exampleCatalogPromise;
+let exampleBoardSelectionTouched = false;
 let analysisTimer;
 let languageGeneration = 0;
 let latestAnalysisRequestID = 0;
@@ -194,6 +217,10 @@ let browserHostParts;
 let fileMenuTarget = "";
 let textDialogResolve;
 let confirmDialogResolve;
+let devicePermissionResolve;
+let mobileDeploymentActive = false;
+let mobileDeploymentLabel = "";
+let mobileDeploymentStep = "";
 let cLibraryPromise;
 const customBackendURLs = new Map();
 const cachedBackendRecords = new Map();
@@ -209,17 +236,45 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 boot().catch(showFatalError);
 
 async function boot() {
+  setSetupStep("workspace", "active", "Opening your saved workspace…");
+  setSetupStep("catalog", "active", "Loading boards and examples…");
+  const catalogPromise = loadTargetCatalog();
+  exampleCatalogPromise = catalogPromise.then(async () => {
+    if (!standardCatalogPromise) throw new Error("The example catalog is unavailable.");
+    return standardCatalogPromise;
+  });
+  exampleCatalogPromise.then(
+    () => setSetupStep("catalog", "done", "Boards and examples are ready."),
+    () => setSetupStep("catalog", "error", "Boards and examples could not be loaded."),
+  );
+  maybeOpenMobileExamples();
   await restoreProject();
-  const [catalog] = await Promise.all([loadTargetCatalog(), loadMonaco()]);
+  setSetupStep("workspace", "done", "Workspace open.");
+  setSetupStep("editor", "active", "Downloading the code editor…");
+  const monacoPromise = loadMonaco().then(() => {
+    setSetupStep("editor", "done", "Editor ready.");
+  });
+  const catalog = await catalogPromise;
   targetCatalog = catalog;
   await installCachedBackends();
   configureTargets(catalog.targets);
+  if (elements.exampleDialog.open && standardCatalog) {
+    selectInitialExampleBoard();
+    renderExampleBrowser();
+  }
+  await monacoPromise;
+  if (elements.exampleDialog.open && standardCatalog) renderExampleBrowser();
   installLanguageProviders();
   const languageService = catalog.languageService ? new URL(catalog.languageService, catalogUrl).href : "";
   const formatter = catalog.formatter ? new URL(catalog.formatter, catalogUrl).href : "";
   const backendJIT = catalog.backendJIT ? new URL(catalog.backendJIT, catalogUrl).href : "";
   const vmBackend = catalog.vmBackend ? new URL(catalog.vmBackend, catalogUrl).href : "";
-  await initializeCompiler(languageService, formatter, backendJIT, vmBackend);
+  const compiler = compilerURLOverride || new URL(catalog.compiler || "renvo.wasm", catalogUrl).href;
+  setSetupStep("compiler", "active", "Downloading the compiler…");
+  await initializeCompiler(compiler, languageService, formatter, backendJIT, vmBackend);
+  setSetupStep("compiler", "done", "Compiler ready. Choose an example to continue.");
+  prefetchTargetBackend(selectedTarget);
+  prefetchExampleBoard();
   await restoreProjectBackends();
   scheduleAnalysis(20);
 }
@@ -255,7 +310,11 @@ async function loadTargetCatalog() {
 }
 
 function configureTargets(targets) {
-  const visibleTargets = targets.filter((target) => !target.hidden);
+  const visibleTargets = targets.filter((target) => !target.hidden).sort((left, right) => {
+    const leftBoard = left.device === "esp32" ? 0 : 1;
+    const rightBoard = right.device === "esp32" ? 0 : 1;
+    return leftBoard - rightBoard;
+  });
   const entries = [];
   const mobileEntries = [];
   let group = "";
@@ -281,7 +340,8 @@ function configureTargets(targets) {
     option.dataset.index = String(index);
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", "false");
-    option.textContent = target.name;
+    option.textContent = target.label || target.name;
+    option.title = target.label ? target.name : "";
     entries.push(option);
     const mobileOption = document.createElement("button");
     mobileOption.type = "button";
@@ -289,10 +349,11 @@ function configureTargets(targets) {
     mobileOption.dataset.target = target.name;
     mobileOption.setAttribute("role", "option");
     mobileOption.setAttribute("aria-selected", "false");
-    mobileOption.textContent = target.name;
+    mobileOption.textContent = target.label || target.name;
+    mobileOption.title = target.label ? target.name : "";
     mobileOption.addEventListener("click", () => {
       selectTarget(target.name, true);
-      showMobileView("editor");
+      updateMobileHeader();
     });
     mobileEntries.push(mobileOption);
   }
@@ -307,6 +368,7 @@ function configureTargets(targets) {
 
 function targetGroup(target) {
   if (target.projectBackend) return "Project backends";
+  if (target.device === "esp32") return "Boards";
   const name = target.name;
   if (name.startsWith("linux/")) return "Linux";
   if (name.startsWith("windows/")) return "Windows";
@@ -372,7 +434,7 @@ async function loadMonaco() {
   if (!isPhoneWorkspace()) editor.focus();
 }
 
-function initializeCompiler(languageService, formatter, backendJIT, vmBackend) {
+function initializeCompiler(compiler, languageService, formatter, backendJIT, vmBackend) {
   return new Promise((resolve, reject) => {
     const onReady = (event) => {
       if (event.data.type !== "ready") return;
@@ -385,8 +447,36 @@ function initializeCompiler(languageService, formatter, backendJIT, vmBackend) {
     };
     worker.addEventListener("message", onReady);
     worker.addEventListener("error", reject, { once: true });
-    worker.postMessage({ type: "init", compiler: compilerUrl, languageService, formatter, backendJIT, vmBackend });
+    worker.postMessage({ type: "init", compiler, languageService, formatter, backendJIT, vmBackend });
   });
+}
+
+function prefetchTargetBackend(target) {
+  if (!compilerReady || !targetCatalog || target?.device !== "esp32") return;
+  let buildTarget = target;
+  if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget(target))) {
+    buildTarget = targetCatalog.targets.find((candidate) => candidate.name === "esp32c6-jtag/riscv32") || target;
+  }
+  if (!buildTarget.backend) return;
+  const backend = new URL(buildTarget.backend, catalogUrl).href;
+  if (backendReady.has(backend) || prefetchingBackends.has(backend)) return;
+  prefetchingBackends.add(backend);
+  worker.postMessage({
+    type: "prefetch-backend", backend,
+    backendFormat: buildTarget.backendFormat || "wasm",
+  });
+}
+
+function receiveBackendPrefetch(message) {
+  prefetchingBackends.delete(message.backend);
+  if (message.ok) backendReady.add(message.backend);
+}
+
+function prefetchExampleBoard() {
+  const name = elements.exampleBoardFilter.value;
+  if (!name || !standardCatalog) return;
+  const board = catalogBoards().find((choice) => choice.name === name);
+  if (board) prefetchTargetBackend(targetCatalog?.targets.find((target) => target.name === board.target));
 }
 
 worker.addEventListener("message", (event) => {
@@ -395,6 +485,10 @@ worker.addEventListener("message", (event) => {
   else if (event.data.type === "language-result") receiveLanguageResult(event.data);
   else if (event.data.type === "format-result") receiveFormatResult(event.data);
   else if (event.data.type === "backend-result") receiveBackendResult(event.data);
+  else if (event.data.type === "init-progress") setSetupStep("compiler", "active", event.data.message);
+  else if (event.data.type === "compile-progress") receiveCompileProgress(event.data);
+  else if (event.data.type === "backend-prefetch") receiveBackendPrefetch(event.data);
+  else if (event.data.type === "format-progress") elements.languageStatus.textContent = event.data.message;
 });
 worker.addEventListener("error", (event) => showFatalError(new Error(event.message)));
 
@@ -403,10 +497,8 @@ function setupShell() {
   elements.run.addEventListener("click", runArtifact);
   elements.test.addEventListener("click", runTests);
   document.querySelector("#new-file").addEventListener("click", createWorkspaceFile);
-  document.querySelector("#import-project").addEventListener("click", () => elements.projectFileInput.click());
+  document.querySelector("#browse-examples").addEventListener("click", openExampleBrowser);
   elements.toggleSidebar.addEventListener("click", toggleSidebar);
-  elements.buildScope.addEventListener("click", () => setBuildPackage("."));
-  elements.buildProjectScope.addEventListener("click", () => setBuildPackage("."));
   elements.projectMenuButton.addEventListener("click", toggleProjectActionMenu);
   elements.projectActionMenu.addEventListener("click", handleProjectAction);
   elements.fileActionMenu.addEventListener("click", handleFileAction);
@@ -417,6 +509,7 @@ function setupShell() {
   document.querySelector("#search-form").addEventListener("submit", submitProjectSearch);
   document.querySelector("#advanced-heading").addEventListener("click", toggleAdvancedBuild);
   document.querySelector("#outline-heading").addEventListener("click", toggleOutline);
+  document.querySelector("#library-heading").addEventListener("click", toggleLibrary);
   elements.projectFileInput.addEventListener("change", () => importProjectFiles(elements.projectFileInput.files));
   elements.projectDirectoryInput.addEventListener("change", () => importProjectFiles(elements.projectDirectoryInput.files, true));
   elements.backendFileInput.addEventListener("change", () => importPreparedBackend(elements.backendFileInput.files));
@@ -426,10 +519,14 @@ function setupShell() {
   }
   configureFlashTransports();
   elements.flashTransport.addEventListener("change", changeFlashTransport);
-  elements.mobileBuild.addEventListener("click", compile);
-  elements.mobileRun.addEventListener("click", runArtifact);
+  elements.mobileRun.addEventListener("click", () => {
+    if (mobileDeploymentActive) openMobileFlashView(elements.mobileFlashState.textContent);
+    else runArtifact();
+  });
+  elements.mobileDeviceBuild.addEventListener("click", compile);
+  elements.mobileDeviceRun.addEventListener("click", runArtifact);
   elements.mobileTargetButton.addEventListener("click", () => {
-    showMobileView(elements.ide.dataset.mobileView === "target" ? "editor" : "target");
+    showMobileView(elements.ide.dataset.mobileView === "device" ? "editor" : "device");
   });
   elements.copyToPlayground.addEventListener("click", copyActiveFileToPlayground);
   document.querySelectorAll("[data-mobile-transport]").forEach((button) => button.addEventListener("click", () => {
@@ -481,6 +578,16 @@ function setupShell() {
   document.querySelector("#snapshot-dialog-close").addEventListener("click", () => elements.snapshotDialog.close());
   document.querySelector("#snapshot-create-form").addEventListener("submit", saveSnapshotFromDialog);
   elements.snapshotList.addEventListener("click", handleSnapshotAction);
+  document.querySelector("#example-dialog-close").addEventListener("click", () => elements.exampleDialog.close());
+  for (const control of [elements.exampleSearch, elements.exampleBoardFilter, elements.exampleTargetFilter]) {
+    control.addEventListener(control === elements.exampleSearch ? "input" : "change", renderExampleBrowser);
+  }
+  elements.exampleBoardList.addEventListener("click", selectExampleBoard);
+  elements.exampleResults.addEventListener("click", handleExampleAction);
+  document.querySelector("#device-permission-close").addEventListener("click", () => elements.devicePermissionDialog.close("cancel"));
+  document.querySelector("#device-permission-cancel").addEventListener("click", () => elements.devicePermissionDialog.close("cancel"));
+  elements.devicePermissionAccept.addEventListener("click", acceptDevicePermission);
+  elements.devicePermissionDialog.addEventListener("close", finishDevicePermission);
   document.querySelectorAll(".panel-tab").forEach((button) => button.addEventListener("click", () => showPanel(button.dataset.panel)));
   elements.togglePanel.addEventListener("click", togglePanel);
   elements.togglePlotterSize.addEventListener("click", togglePlotterSize);
@@ -525,7 +632,7 @@ function selectTarget(name, updateCommand) {
     espPort = undefined;
     espPortTransport = undefined;
   }
-  elements.targetLabel.textContent = selectedTarget.name;
+  elements.targetLabel.textContent = selectedTarget.label || selectedTarget.name;
   elements.targetButton.title = `Build target: ${selectedTarget.name}`;
   const board = selectedTarget.device === "esp32";
   elements.flashTransport.hidden = !board;
@@ -544,6 +651,7 @@ function selectTarget(name, updateCommand) {
   if (changed) markBuildStale();
   updateReadyState();
   scheduleAnalysis(20);
+  if (changed) prefetchTargetBackend(selectedTarget);
   if (changed && monaco) saveFiles();
 }
 
@@ -661,6 +769,9 @@ async function compileTarget(buildTarget) {
   elements.output.textContent = `$ renvo ${args.join(" ")}\n`;
   showPanel("output");
   try {
+    if (mobileDeploymentActive && runAfterBuild) {
+      setMobileDeployStep("check", "active", "Loading the libraries used by this example…");
+    }
     await ensureWorkspaceDependencies();
     const payload = workspacePayload();
     const id = ++requestID;
@@ -676,6 +787,17 @@ async function compileTarget(buildTarget) {
     updateReadyState();
     setCompilerStatus("error", "Build failed");
     elements.output.textContent += `${error.message}\n`;
+    if (mobileDeploymentActive) failMobileDeployment(mobileDeploymentStep || "check", error.message || String(error));
+  }
+}
+
+function receiveCompileProgress(message) {
+  if (pendingBuild?.id !== message.id || !runAfterBuild || !mobileDeploymentActive) return;
+  if (message.phase === "check") {
+    setMobileDeployStep("check", "active", message.message);
+  } else if (message.phase === "firmware") {
+    setMobileDeployStep("check", "done", "Project code is ready.");
+    setMobileDeployStep("firmware", "active", message.message);
   }
 }
 
@@ -694,7 +816,7 @@ function controlledArguments(args, target) {
     result.push(args[i]);
   }
   validateBrowserArguments(result);
-  result.unshift("-t", target.name);
+  result.unshift("-t", target.frontendTarget || target.name);
   for (const tag of target.tags || []) result.unshift("-tags", tag);
   if (target.definition) result.unshift("-target-version", String(target.descriptorVersion), "-target-definition", target.definition);
   if (elements.arenaSize.value.trim()) result.unshift("-arena-size", elements.arenaSize.value.trim());
@@ -704,6 +826,10 @@ function controlledArguments(args, target) {
   if (elements.windowsGUI.checked) result.unshift("-windows-gui");
   if (activeBuildLanguage() === "c") result.unshift("cc");
   return result;
+}
+
+function deviceMachineTarget(target = selectedTarget) {
+  return target?.frontendTarget || target?.backendTarget || target?.name || "";
 }
 
 function validateBrowserArguments(args) {
@@ -791,9 +917,15 @@ function renderResult(result) {
   else if (result.files.length) showPanel("artifacts");
   if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
     elements.terminalOutput.textContent = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
-    setMobileFlashProgress("Build failed", 0);
+    failMobileDeployment(mobileDeploymentStep || "firmware", "The firmware build failed. Open the activity log for the compiler message.");
   }
-  if (result.exitCode === 0 && shouldRun) queueMicrotask(resumeArtifactAfterBuild);
+  if (result.exitCode === 0 && shouldRun) {
+    if (mobileDeploymentActive) {
+      setMobileDeployStep("check", "done", "Project code is ready.");
+      setMobileDeployStep("firmware", "done", "Firmware built for the selected board.");
+    }
+    queueMicrotask(resumeArtifactAfterBuild);
+  }
 }
 
 function renderTestBuildResult(result, build, summary, text) {
@@ -823,7 +955,7 @@ function resumeArtifactAfterBuild() {
 }
 
 function deploymentBuildTarget() {
-  if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(selectedTarget?.name)) {
+  if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget())) {
     const target = targetCatalog?.targets.find((candidate) => candidate.name === "esp32c6-jtag/riscv32");
     if (!target) throw new Error("The ESP32-C6 JTAG backend is unavailable in this browser bundle.");
     return target;
@@ -834,21 +966,28 @@ function deploymentBuildTarget() {
 async function runArtifactWithMode(resumeAfterBuild) {
   if ((!selectedTarget?.runnable && selectedTarget?.device !== "esp32") || running) return;
   const board = selectedTarget.device === "esp32";
-  if (board && !resumeAfterBuild) openMobileFlashView("Select a device");
   const activeESPPort = espPort && (espPort.readable || espPort.writable);
   const reusableESPPort = espPortTransport === "webusb" && espPort?.canReopen?.();
   if (board && !resumeAfterBuild && !activeESPPort && !reusableESPPort) {
+    if (!await requestDevicePermission()) {
+      if (isPhoneWorkspace()) showMobileView("device");
+      return;
+    }
+    const plannedJTAG = elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
+    startMobileDeployment(plannedJTAG);
+    setMobileDeployStep("usb", "active", "Choose your board in the browser's USB picker.");
     try {
       const previousSession = espSession;
       const previousPort = espPort;
       // Start the permission prompt while the click/key activation is still
       // live; cleanup can safely happen after the user selects the device.
       const transport = elements.flashTransport.value;
-      const jtag = transport === "webusb" && supportsESPWebUSBJTAG(selectedTarget.name);
-      const nextPort = jtag
-        ? await requestESPUSBJTAG(selectedTarget.name)
-        : transport === "webusb" ? await requestESPUSBPort(selectedTarget.name)
-        : await requestESPPort(selectedTarget.name);
+      const machineTarget = deviceMachineTarget();
+      const jtag = transport === "webusb" && supportsESPWebUSBJTAG(machineTarget);
+	  const nextPort = jtag
+		? await requestESPUSBJTAG(machineTarget)
+		: transport === "webusb" ? await requestESPUSBPort(machineTarget)
+		: await requestESPPort(machineTarget);
       espSession = undefined;
       espPort = undefined;
       if (previousSession) await previousSession.close();
@@ -857,16 +996,21 @@ async function runArtifactWithMode(resumeAfterBuild) {
       }
       espPort = nextPort;
       espPortTransport = transport;
+      setMobileDeployStep("usb", "done", "USB device selected.");
     } catch (error) {
       elements.terminalOutput.textContent = `${error.message || error}\n`;
-      setMobileFlashProgress("Device selection failed", 0);
+      failMobileDeployment("usb", "USB device selection failed.");
       showPanel("terminal");
       return;
     }
+  } else if (board && !resumeAfterBuild && !mobileDeploymentActive) {
+    const plannedJTAG = elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
+    startMobileDeployment(plannedJTAG);
+    setMobileDeployStep("usb", "done", "Using the connected USB device.");
   }
   if (board && !espPort) {
     elements.terminalOutput.textContent = "The selected ESP device disconnected before flashing. Click Flash & Run again.\n";
-    setMobileFlashProgress("Device disconnected", 0);
+    failMobileDeployment("usb", "The USB device disconnected before the load started.");
     showPanel("terminal");
     return;
   }
@@ -883,7 +1027,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     deploymentTarget = deploymentBuildTarget();
   } catch (error) {
     elements.terminalOutput.textContent = `${error.message || error}\n`;
-    setMobileFlashProgress("JTAG backend unavailable", 0);
+    failMobileDeployment("firmware", error.message || String(error));
     showPanel("terminal");
     return;
   }
@@ -891,7 +1035,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     lastRunnableArtifact.target !== deploymentTarget?.name;
   if (building || stale) {
     runAfterBuild = true;
-    if (board) setMobileFlashProgress("Building…");
+    if (board) setMobileDeployStep("check", "active", "Loading project libraries…");
     updateReadyState();
     if (!building) compileTarget(deploymentTarget);
     return;
@@ -911,8 +1055,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
   updateReadyState();
   showPanel("terminal");
   if (board) {
-    openMobileFlashView("Connecting…");
-    setMobileFlashProgress("Connecting…");
+    setMobileDeployStep("load", "active", "Connecting to the board over JTAG…");
     const portInfo = espPort.getInfo?.() || {};
     const identity = portInfo.usbVendorId === undefined ? "" :
       ` (USB ${portInfo.usbVendorId.toString(16).padStart(4, "0")}:${(portInfo.usbProductId || 0).toString(16).padStart(4, "0")})`;
@@ -927,7 +1070,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
       const progress = (value) => {
         const verb = jtag ? "Loading" : "Flashing";
         elements.run.querySelector("span").textContent = `${verb} ${Math.round(value * 100)}%`;
-        setMobileFlashProgress(`${verb} ${Math.round(value * 100)}%`, value);
+        setMobileDeployStep("load", "active", `${verb} firmware, ${Math.round(value * 100)}%.`, value);
       };
       let report;
       if (jtag) {
@@ -939,23 +1082,27 @@ async function runArtifactWithMode(resumeAfterBuild) {
           serial: appendSerialText,
           progress,
         });
-        await espSession.flash(lastRunnableArtifact.data, selectedTarget.name);
+		await espSession.flash(lastRunnableArtifact.data, deviceMachineTarget());
       }
       const flashMilliseconds = performance.now() - flashStarted;
       if (jtag) {
         const change = report.unchanged ? "no changed words" : `${report.bytesWritten} bytes in ${report.patchCount} patches`;
         elements.terminalOutput.textContent += `JTAG load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
-        elements.terminalOutput.textContent += "Running from SRAM — press Flash again after editing for a delta hot reload.\n";
-        setMobileFlashProgress("Running from SRAM — JTAG hot reload ready", 1);
+        elements.terminalOutput.textContent += "Running from SRAM. Press Flash after an edit to load the changes.\n";
+        setMobileDeployStep("load", "done", "Firmware loaded over JTAG.");
+        setMobileDeployStep("run", "done", "Running from SRAM. Hot reload is ready.");
+        finishMobileDeployment("JTAG load complete");
       } else {
         elements.terminalOutput.textContent += `Flash: ${formatElapsed(flashMilliseconds)} · Build + flash: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
-        setMobileFlashProgress("Running — serial console attached", 1);
+        setMobileDeployStep("load", "done", "Firmware flashed.");
+        setMobileDeployStep("run", "done", "Running. Serial is connected.");
+        finishMobileDeployment("Flash complete");
       }
     } catch (error) {
       const flashMilliseconds = performance.now() - flashStarted;
       const failedAction = jtag ? "JTAG load" : "Flash";
       elements.terminalOutput.textContent += `${failedAction} failed after ${formatElapsed(flashMilliseconds)}: ${error.message || error}\n`;
-      setMobileFlashProgress(`${failedAction} failed`, 0);
+      failMobileDeployment("load", `${failedAction} failed: ${error.message || error}`);
       const failedSession = espSession;
       espSession = undefined;
       try {
@@ -1261,7 +1408,7 @@ async function requestLanguage(mode, model, offset) {
   const payload = languageWorkspacePayload();
   const result = new Promise((resolve) => languageRequests.set(id, resolve));
   worker.postMessage({
-		type: mode, id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
+		type: mode, id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.frontendTarget || selectedTarget.name,
 		tags: selectedTarget.tags || [], file: fileName(model), offset,
 		language: activeBuildLanguage(),
     packageAt: languagePackageForModel(model),
@@ -1297,7 +1444,7 @@ async function runAnalysis(generation) {
     const id = ++requestID;
     latestAnalysisRequestID = id;
     worker.postMessage({
-		type: "analyze", id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.name,
+		type: "analyze", id, files: payload.files, workspaceRevision: payload.revision, target: selectedTarget.frontendTarget || selectedTarget.name,
 		tags: selectedTarget.tags || [], file: activeFile, offset: 0,
 		language: activeBuildLanguage(),
       packageAt: languagePackageForModel(models.get(activeFile)),
@@ -1752,6 +1899,7 @@ async function handleProjectAction(event) {
   closeProjectActionMenu();
   try {
     if (action === "new") openNewProjectDialog();
+    else if (action === "import") elements.projectFileInput.click();
     else if (action === "rename") {
       const name = await requestText({ title: "Rename project", label: "Project name", value: projectName, accept: "Rename", validate: (value) => value.trim() || "playground" });
       if (name) { projectName = name; syncProjectName(); saveFiles(); }
@@ -1831,11 +1979,11 @@ async function handleSnapshotAction(event) {
   const snapshot = snapshots.find((item) => item.id === row.dataset.snapshot);
   if (!snapshot) return;
   if (button.dataset.snapshotAction === "restore") {
-    const accepted = await requestConfirmation({ title: "Restore snapshot?", message: `Replace the current project with “${snapshot.label || "Snapshot"}”?`, accept: "Restore" });
+    const accepted = await requestConfirmation({ title: "Restore snapshot?", message: `Replace the current project with "${snapshot.label || "Snapshot"}"?`, accept: "Restore" });
     if (!accepted) return;
     elements.snapshotDialog.close(); replaceProject(snapshot); elements.languageStatus.textContent = "Project snapshot restored";
   } else if (button.dataset.snapshotAction === "delete") {
-    const accepted = await requestConfirmation({ title: "Delete snapshot?", message: `“${snapshot.label || "Snapshot"}” will be permanently removed from this browser.`, accept: "Delete" });
+    const accepted = await requestConfirmation({ title: "Delete snapshot?", message: `Delete "${snapshot.label || "Snapshot"}" from this browser?`, accept: "Delete" });
     if (!accepted) return;
     await deleteProjectSnapshot(snapshot.id); await renderSnapshots();
   }
@@ -1876,7 +2024,7 @@ function replaceProject(project) {
 function syncProjectName() {
   elements.projectName.textContent = projectName;
   elements.sidebarProjectName.textContent = projectName;
-  document.title = `${projectName} — Renvo`;
+  document.title = `${projectName} | Renvo`;
   updateMobileHeader();
 }
 
@@ -1924,11 +2072,12 @@ function finishTextDialog() {
   pending?.resolve(elements.textDialog.returnValue === "accept" ? pending.value : undefined);
 }
 
-function requestConfirmation({ title, message, accept = "Continue" }) {
+function requestConfirmation({ title, message, accept = "Continue", danger = true }) {
   if (confirmDialogResolve) throw new Error("Another confirmation is already open.");
   elements.confirmDialogTitle.textContent = title;
   elements.confirmDialogMessage.textContent = message;
   elements.confirmDialogAccept.textContent = accept;
+  elements.confirmDialogAccept.className = danger ? "dialog-danger" : "dialog-primary";
   elements.confirmDialog.returnValue = "cancel";
   const result = new Promise((resolve) => { confirmDialogResolve = resolve; });
   elements.confirmDialog.showModal();
@@ -1942,6 +2091,71 @@ function finishConfirmDialog() {
   resolve?.(elements.confirmDialog.returnValue === "accept");
 }
 
+function deviceAccessSupport() {
+  const profile = currentDeviceProfile();
+  const secure = globalThis.isSecureContext !== false;
+  const choices = chooseESPTransportAvailability({
+    profile,
+    webSerial: secure && Boolean(navigator.serial),
+    webUSB: secure && Boolean(navigator.usb),
+  });
+  return { profile, choices, secure };
+}
+
+function renderDevicePermission() {
+  const { profile, choices, secure } = deviceAccessSupport();
+  const statuses = [
+    [elements.deviceWebUSBStatus, "webusb", "WebUSB"],
+    [elements.deviceWebSerialStatus, "webserial", "WebSerial"],
+  ];
+  for (const [element, key] of statuses) {
+    const available = choices[key];
+    element.classList.toggle("available", available);
+    element.classList.toggle("unavailable", !available);
+    element.querySelector("small").textContent = available ? "Supported" : "Not supported";
+  }
+  const available = choices.webusb || choices.webserial;
+  if (profile.ios && !available) {
+    elements.devicePermissionIntro.textContent = "Browsers on iPhone and iPad cannot flash USB boards.";
+    elements.devicePermissionNote.textContent = "You can edit and build here. To flash, open the project in Chrome or Edge on a computer, or use a supported Android browser.";
+  } else if (!secure) {
+    elements.devicePermissionIntro.textContent = "This page cannot ask for USB access.";
+    elements.devicePermissionNote.textContent = "Open Renvo over HTTPS or localhost, then try again.";
+  } else if (!available) {
+    elements.devicePermissionIntro.textContent = "This browser cannot flash USB boards.";
+    elements.devicePermissionNote.textContent = "Use Chrome or Edge on a computer, or a supported Android browser. You can still edit and build here.";
+  } else {
+    elements.devicePermissionIntro.textContent = "Your browser will ask which device Renvo may use.";
+    elements.devicePermissionNote.textContent = "Disconnect the board at any time to end access.";
+  }
+  elements.devicePermissionAccept.disabled = !available;
+  elements.devicePermissionAccept.textContent = available ? "Select device" : "USB not supported";
+  return available;
+}
+
+function requestDevicePermission() {
+  const available = renderDevicePermission();
+  if (available && localStorage.getItem("renvo.devicePermissionExplained.v1") === "yes") return Promise.resolve(true);
+  if (devicePermissionResolve) return Promise.resolve(false);
+  elements.devicePermissionDialog.returnValue = "cancel";
+  const result = new Promise((resolve) => { devicePermissionResolve = resolve; });
+  elements.devicePermissionDialog.showModal();
+  queueMicrotask(() => (available ? elements.devicePermissionAccept : document.querySelector("#device-permission-cancel")).focus());
+  return result;
+}
+
+function acceptDevicePermission() {
+  if (elements.devicePermissionAccept.disabled) return;
+  localStorage.setItem("renvo.devicePermissionExplained.v1", "yes");
+  elements.devicePermissionDialog.close("accept");
+}
+
+function finishDevicePermission() {
+  const resolve = devicePermissionResolve;
+  devicePermissionResolve = undefined;
+  resolve?.(elements.devicePermissionDialog.returnValue === "accept");
+}
+
 function toggleAdvancedBuild() {
   const panel = document.querySelector("#advanced-build");
   panel.hidden = !panel.hidden;
@@ -1953,6 +2167,12 @@ function toggleOutline() {
   elements.outlineTree.hidden = !elements.outlineTree.hidden;
   document.querySelector("#outline-heading").classList.toggle("collapsed", elements.outlineTree.hidden);
   document.querySelector("#outline-heading .chevron").textContent = elements.outlineTree.hidden ? "›" : "⌄";
+}
+
+function toggleLibrary() {
+  elements.stdlibTree.hidden = !elements.stdlibTree.hidden;
+  document.querySelector("#library-heading").classList.toggle("collapsed", elements.stdlibTree.hidden);
+  document.querySelector("#library-heading .chevron").textContent = elements.stdlibTree.hidden ? "›" : "⌄";
 }
 
 function outlineItems(model) {
@@ -1976,6 +2196,7 @@ function outlineItems(model) {
 
 function renderOutline(model) {
   const items = outlineItems(model);
+  elements.outlineCount.textContent = items.length ? String(items.length) : "";
   if (!items.length) {
     elements.outlineTree.innerHTML = '<div class="tree-loading">No symbols</div>';
     return;
@@ -1983,7 +2204,9 @@ function renderOutline(model) {
   elements.outlineTree.replaceChildren(...items.map((item) => {
     const button = document.createElement("button");
     button.type = "button"; button.className = "outline-item"; button.setAttribute("role", "treeitem");
-    button.textContent = `${item.kind}  ${item.name}`;
+    const kind = document.createElement("span"); kind.className = "outline-kind"; kind.textContent = item.kind;
+    const name = document.createElement("span"); name.className = "outline-name"; name.textContent = item.name;
+    button.append(kind, name);
     button.addEventListener("click", () => {
       const position = { lineNumber: item.line, column: item.column }; editor.setPosition(position); editor.revealPositionInCenter(position); editor.focus();
     });
@@ -1995,8 +2218,12 @@ async function formatActiveFile() {
   const model = models.get(activeFile);
   if (!model || !isEditableFile(activeFile) || !activeFile.endsWith(".go")) return;
   try {
+    elements.languageStatus.textContent = "Formatting…";
     const formatted = await requestFormat(activeFile, model.getValue());
-    if (formatted === model.getValue()) return;
+    if (formatted === model.getValue()) {
+      elements.languageStatus.textContent = "Already formatted";
+      return;
+    }
     editor.executeEdits("gofmt", [{ range: model.getFullModelRange(), text: formatted, forceMoveMarkers: true }]);
     elements.languageStatus.textContent = "Formatted with gofmt";
   } catch (error) {
@@ -2410,27 +2637,63 @@ function setCompilerStatus(state, text) {
   elements.compilerStatus.querySelector("span:last-child").textContent = text;
 }
 
+function setSetupStep(step, state, detail) {
+  const order = ["workspace", "catalog", "editor", "compiler"];
+  const item = elements.mobileSetup?.querySelector(`[data-setup-step="${step}"]`);
+  if (!item) return;
+  item.dataset.state = state;
+  item.dataset.detail = detail || "";
+  const items = order.map((name) => elements.mobileSetup.querySelector(`[data-setup-step="${name}"]`));
+  const done = items.filter((entry) => entry.dataset.state === "done").length;
+  elements.mobileSetupProgress.value = done;
+  elements.mobileSetupProgress.textContent = `${done} of ${order.length}`;
+  const error = items.find((entry) => entry.dataset.state === "error");
+  const active = [...items].reverse().find((entry) => entry.dataset.state === "active");
+  if (error) {
+    elements.mobileSetup.dataset.state = "error";
+    elements.mobileSetupTitle.textContent = "Renvo could not start";
+    elements.mobileSetupDetail.textContent = error.dataset.detail;
+  } else if (done === order.length) {
+    elements.mobileSetup.dataset.state = "done";
+    elements.mobileSetupTitle.textContent = "Renvo is ready";
+    elements.mobileSetupDetail.textContent = "Choose an example, then use JTAG load in the editor.";
+  } else {
+    elements.mobileSetup.dataset.state = "loading";
+    elements.mobileSetupTitle.textContent = "Getting Renvo ready";
+    elements.mobileSetupDetail.textContent = active?.dataset.detail || detail || "Starting…";
+  }
+  if (isPhoneWorkspace()) updateMobileHeader();
+}
+
 function updateReadyState() {
   elements.compile.disabled = !compilerReady || !monaco || building;
   elements.compile.querySelector("span").textContent = building ? "Building…" : "Build";
-  elements.mobileBuild.disabled = elements.compile.disabled;
-  elements.mobileBuild.textContent = building ? "Building…" : "Build";
+  elements.mobileDeviceBuild.disabled = elements.compile.disabled;
+  elements.mobileDeviceBuild.textContent = building ? "Building…" : "Build";
   elements.test.disabled = !compilerReady || !monaco || building || running;
   elements.test.textContent = testBuild ? "Testing…" : "Test";
   elements.targetButton.disabled = building || running;
   const board = selectedTarget?.device === "esp32";
-  const jtag = board && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(selectedTarget?.name);
+  const jtag = board && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
   const deviceAction = jtag ? "JTAG load" : "Flash";
   const executable = selectedTarget?.runnable || board;
-  const transportAvailable = !board || !elements.flashTransport.selectedOptions[0]?.disabled;
-  elements.run.disabled = !compilerReady || !monaco || !executable || !transportAvailable || running || runAfterBuild;
+  elements.run.disabled = !compilerReady || !monaco || !executable || running || runAfterBuild;
   elements.flashTransport.disabled = building || running || runAfterBuild;
   elements.run.title = board ? `Build, ${jtag ? "load over JTAG" : "flash"}, and run on the selected device (F5)` : "Run console app (F5)";
   elements.run.querySelector("span").textContent = running ? (board ? `${deviceAction}…` : "Running…") :
     runAfterBuild ? (board ? "Pending…" : "Run pending…") : (board ? deviceAction : "Run");
   elements.mobileRun.disabled = elements.run.disabled;
-  elements.mobileRun.textContent = running ? (board ? `${deviceAction}…` : "Running…") :
+  elements.mobileRun.textContent = !compilerReady || !monaco ? "Loading…" : running ? (board ? `${deviceAction}…` : "Running…") :
     runAfterBuild ? (board ? "Pending…" : "Pending…") : (board ? deviceAction : "Run");
+  elements.mobileRun.classList.toggle("deploying", mobileDeploymentActive);
+  if (mobileDeploymentActive) {
+    elements.mobileRun.disabled = false;
+    elements.mobileRun.textContent = mobileDeploymentLabel || "Working…";
+    elements.mobileRun.title = "Tap to see JTAG load details";
+  }
+  elements.mobileDeviceRun.disabled = elements.run.disabled;
+  elements.mobileDeviceRun.textContent = running ? (board ? `${deviceAction}…` : "Running…") :
+    runAfterBuild ? "Waiting…" : (board ? deviceAction : "Run");
   if (autoBuildPending && compilerReady && monaco && selectedTarget && !building) {
     autoBuildPending = false;
     queueMicrotask(compile);
@@ -2479,7 +2742,6 @@ function showMobileView(view) {
   document.querySelectorAll(".mobile-nav button").forEach((button) => {
     button.classList.toggle("active", button.dataset.mobileView === view);
   });
-  if (view === "console") showPanel("terminal");
   updateMobileHeader();
   if (view === "editor") requestAnimationFrame(() => editor?.layout());
 }
@@ -2487,21 +2749,27 @@ function showMobileView(view) {
 function updateMobileHeader() {
   const view = elements.ide.dataset.mobileView || "files";
   const file = activeFile.split("/").pop();
-  elements.mobileTargetButton.textContent = view === "target" ? "Done" : "Target";
-  elements.mobileTargetButton.title = selectedTarget ? `Select target (currently ${selectedTarget.name})` : "Select target";
+  elements.mobileTargetButton.textContent = view === "device" ? "Code" : "Device";
+  elements.mobileTargetButton.title = selectedTarget ? `Change target. Using ${selectedTarget.label || selectedTarget.name}.` : "Choose a target";
   if (view === "files") {
-    elements.mobileStep.textContent = "Choose a file";
-    elements.mobileContext.textContent = `${projectName} and libraries`;
-  } else if (view === "target") {
-    elements.mobileStep.textContent = "Choose a target";
-    elements.mobileContext.textContent = file;
+    elements.mobileStep.textContent = "Project";
+    elements.mobileContext.textContent = projectName;
+  } else if (view === "device") {
+    elements.mobileStep.textContent = "Device";
+    elements.mobileContext.textContent = selectedTarget?.label || selectedTarget?.name || "No target selected";
   } else if (view === "editor") {
     elements.mobileStep.textContent = file;
-    elements.mobileContext.textContent = selectedTarget?.name || "Choose a target";
+    const target = selectedTarget?.label || selectedTarget?.name || "No target selected";
+    elements.mobileContext.textContent = compilerReady ? target : `Loading compiler · ${target}`;
   } else {
-    elements.mobileStep.textContent = "Console";
-    elements.mobileContext.textContent = selectedTarget?.name || "Build and run output";
+    elements.mobileStep.textContent = "Project";
+    elements.mobileContext.textContent = projectName;
   }
+  if (elements.mobileDeviceTarget) elements.mobileDeviceTarget.textContent = selectedTarget?.label || selectedTarget?.name || "Choose a target";
+  if (elements.mobileDeviceHint) elements.mobileDeviceHint.textContent = selectedTarget?.device === "esp32"
+    ? "Build the project, then flash this board over USB."
+    : "Build and run this target in the browser.";
+  document.querySelector(".mobile-transport-picker").hidden = selectedTarget?.device !== "esp32";
 }
 
 function openMobileFlashView(state = "Preparing…") {
@@ -2509,9 +2777,68 @@ function openMobileFlashView(state = "Preparing…") {
   elements.mobileFlashView.hidden = false;
   elements.mobileFlashState.textContent = state;
   document.querySelectorAll(".mobile-nav button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mobileView === "console");
+    button.classList.toggle("active", button.dataset.mobileView === "device");
   });
   syncMobileFlashOutput();
+}
+
+function startMobileDeployment(jtag) {
+  mobileDeploymentActive = true;
+  mobileDeploymentLabel = "Starting…";
+  mobileDeploymentStep = "";
+  elements.mobileFlashView.hidden = true;
+  elements.mobileFlashProgress.value = 0;
+  elements.mobileFlashState.textContent = jtag ? "JTAG load" : "Flash board";
+  elements.mobileFlashDetail.textContent = "Preparing the board…";
+  for (const item of document.querySelectorAll("[data-deploy-step]")) {
+    item.dataset.state = "pending";
+    item.querySelector("small").textContent = "Waiting";
+  }
+  const loadName = document.querySelector('[data-deploy-step="load"] strong');
+  if (loadName) loadName.textContent = jtag ? "JTAG load" : "Flash board";
+  elements.terminalOutput.textContent = `$ ${jtag ? "jtag-load" : "flash"} ${selectedTarget?.label || selectedTarget?.name || "board"}\n`;
+  document.querySelector(".mobile-flash-log").open = false;
+  updateReadyState();
+}
+
+function setMobileDeployStep(step, state, detail, partial = 0) {
+  const order = ["usb", "check", "firmware", "load", "run"];
+  const item = document.querySelector(`[data-deploy-step="${step}"]`);
+  if (!item) return;
+  mobileDeploymentStep = step;
+  item.dataset.state = state;
+  item.querySelector("small").textContent = detail;
+  const labels = {
+    usb: "USB…", check: "Checking…", firmware: "Building…",
+    load: partial > 0 ? `Loading ${Math.round(partial * 100)}%` : "Connecting…", run: "Starting…",
+  };
+  if (state === "active") mobileDeploymentLabel = labels[step];
+  const items = order.map((name) => document.querySelector(`[data-deploy-step="${name}"]`));
+  const done = items.filter((entry) => entry.dataset.state === "done").length;
+  const position = state === "active" ? order.indexOf(step) + Math.max(0, Math.min(1, partial)) : done;
+  elements.mobileFlashProgress.value = Math.max(done, position) / order.length;
+  elements.mobileFlashState.textContent = state === "error" ? "Load failed" : item.querySelector("strong").textContent;
+  elements.mobileFlashDetail.textContent = detail;
+  updateReadyState();
+}
+
+function finishMobileDeployment(state) {
+  mobileDeploymentActive = false;
+  mobileDeploymentLabel = "";
+  mobileDeploymentStep = "run";
+  elements.mobileFlashProgress.value = 1;
+  elements.mobileFlashState.textContent = state;
+  updateReadyState();
+}
+
+function failMobileDeployment(step, detail) {
+  if (!mobileDeploymentActive) startMobileDeployment(elements.flashTransport.value === "webusb");
+  setMobileDeployStep(step, "error", detail);
+  mobileDeploymentActive = false;
+  mobileDeploymentLabel = "";
+  document.querySelector(".mobile-flash-log").open = true;
+  openMobileFlashView("Load failed");
+  updateReadyState();
 }
 
 function closeMobileFlashView() {
@@ -2519,22 +2846,14 @@ function closeMobileFlashView() {
   showMobileView("editor");
 }
 
-function setMobileFlashProgress(state, value) {
-  elements.mobileFlashState.textContent = state;
-  if (value === undefined) elements.mobileFlashProgress.removeAttribute("value");
-  else elements.mobileFlashProgress.value = Math.max(0, Math.min(1, value));
-}
-
 function syncMobileFlashOutput() {
   elements.mobileFlashOutput.textContent = elements.terminalOutput.textContent;
   elements.mobileFlashOutput.scrollTop = elements.mobileFlashOutput.scrollHeight;
+  elements.mobileDeviceOutput.textContent = elements.terminalOutput.textContent || "Nothing to show yet.";
 }
 
 function configureFlashTransports() {
-  const profile = currentDeviceProfile();
-  const choices = chooseESPTransportAvailability({
-    profile, webSerial: Boolean(navigator.serial), webUSB: Boolean(navigator.usb),
-  });
+  const { profile, choices } = deviceAccessSupport();
   for (const option of elements.flashTransport.options) {
     option.disabled = !choices[option.value];
     const name = option.value === "webusb" ? "WebUSB (JTAG on ESP32-C6)" : "WebSerial";
@@ -2544,6 +2863,11 @@ function configureFlashTransports() {
   elements.flashTransport.value = preferredESPTransport({
     saved, android: profile.mobileCapable, webSerial: choices.webserial, webUSB: choices.webusb,
   });
+  if (elements.mobileTransportStatus) {
+    const available = [choices.webusb && "WebUSB", choices.webserial && "WebSerial"].filter(Boolean);
+    elements.mobileTransportStatus.textContent = available.length ? `Use ${available.join(" or ")}` :
+      profile.ios ? "iPhone and iPad browsers cannot use USB" : "This browser cannot use USB";
+  }
   syncMobileTransportPicker();
 }
 
@@ -2569,6 +2893,7 @@ async function changeFlashTransport() {
   localStorage.setItem("renvo.espFlashTransport", elements.flashTransport.value);
   syncMobileTransportPicker();
   updateReadyState();
+  prefetchTargetBackend(selectedTarget);
   if (!espPort || espPortTransport === elements.flashTransport.value) return;
   const session = espSession;
   const port = espPort;
@@ -2591,6 +2916,7 @@ function syncMobileTransportPicker() {
 
 function showFatalError(error) {
   building = false; running = false; runAfterBuild = false; compilerReady = false;
+  setSetupStep("compiler", "error", error.message || String(error));
   updateReadyState(); setCompilerStatus("error", "Unavailable");
   elements.output.textContent = `${error.message || error}\n`; showPanel("output");
 }
@@ -2713,6 +3039,318 @@ function cleanPath(name) {
   return cleanLanguagePath(name, models, initialFiles);
 }
 
+function exampleEntries(catalog = standardCatalog) {
+  return Object.entries(catalog?.platforms || {})
+    .filter(([, item]) => item.main)
+    .map(([importPath, item]) => {
+      const boards = item.boards || (item.board ? [{ name: item.board, target: item.target }] : []);
+      const computers = (item.computers || []).map((computer) => ({ ...computer, device: "computer" }));
+      const machines = [...boards, ...computers];
+      const targets = [...new Set([...machines.map((choice) => choice.target), item.target].filter(Boolean))];
+      const slug = item.root.split("/").pop();
+      return { importPath, item, boards, computers, machines, targets, slug, title: exampleTitle(slug) };
+    })
+    .sort((left, right) => left.title.localeCompare(right.title));
+}
+
+function exampleTitle(slug) {
+  if (slug === "pdp11v7") return "PDP-11 V7";
+  return slug.split(/[_-]+/).map((word) => {
+    if (/^(c|i2c|http|rgb|usb|ws2812|adxl345|sgp30)$/i.test(word)) return word.toUpperCase();
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }).join(" ");
+}
+
+function examplePresentation(entry) {
+  const slug = entry.slug;
+  if (entry.computers.length) return { icon: "R", category: entry.computers[0].family || "Computer", tone: "system" };
+  if (/adxl|quality|env|sgp|sensor/.test(slug)) return { icon: "⌁", category: "Sensors", tone: "sensor" };
+  if (/forms|touch|keyboard/.test(slug)) return { icon: "▦", category: "Input", tone: "interface" };
+  if (/terminal/.test(slug)) return { icon: ">_", category: "Terminal", tone: "console" };
+  if (/blink|rgb|ws2812/.test(slug)) return { icon: "✦", category: "LEDs", tone: "light" };
+  return { icon: "R", category: "General", tone: "system" };
+}
+
+const boardArtworkPaths = {
+  nanoc6: `
+    <rect x="18" y="31" width="124" height="38" rx="9" class="board-shell"/>
+    <rect x="142" y="39" width="15" height="22" rx="3" class="board-metal"/>
+    <path d="M28 38h30v24H28zM33 43h20v14H33z" class="board-chip"/>
+    <circle cx="77" cy="50" r="6" class="board-led"/><circle cx="120" cy="50" r="5" class="board-button"/>
+    <path d="M22 26v-8m12 8v-8m12 8v-8M22 82v-8m12 8v-8m12 8v-8" class="board-pin"/>`,
+  atoms3lite: `
+    <rect x="43" y="15" width="74" height="70" rx="16" class="board-shell"/>
+    <rect x="54" y="26" width="52" height="48" rx="10" class="board-face"/>
+    <circle cx="80" cy="50" r="10" class="board-led"/><rect x="117" y="39" width="17" height="22" rx="3" class="board-metal"/>
+    <circle cx="55" cy="76" r="3" class="board-port"/><circle cx="65" cy="76" r="3" class="board-port"/>`,
+  sticks3: `
+    <rect x="54" y="7" width="52" height="86" rx="16" class="board-shell"/>
+    <rect x="61" y="17" width="38" height="55" rx="7" class="board-screen"/>
+    <path d="M68 57l9-13 8 8 8-14" class="board-graph"/><circle cx="80" cy="82" r="5" class="board-button"/>
+    <rect x="106" y="69" width="12" height="15" rx="3" class="board-metal"/>`,
+  cardputeradv: `
+    <rect x="14" y="18" width="132" height="66" rx="10" class="board-shell"/>
+    <rect x="22" y="25" width="46" height="23" rx="3" class="board-screen"/>
+    <g class="board-keys"><path d="M77 26h58M77 34h58M22 57h112M22 65h112M22 73h112"/><path d="M84 23v55M94 23v55M104 23v55M114 23v55M124 23v55M32 53v25M42 53v25M52 53v25M62 53v25M72 53v25"/></g>
+    <rect x="146" y="38" width="11" height="21" rx="3" class="board-metal"/>`,
+  tab5: `
+    <rect x="17" y="10" width="126" height="80" rx="10" class="board-shell"/>
+    <rect x="25" y="18" width="110" height="64" rx="4" class="board-screen"/>
+    <path d="M34 68l22-22 15 12 18-24 36 34" class="board-graph"/>
+    <circle cx="80" cy="14" r="2" class="board-camera"/><rect x="143" y="40" width="13" height="20" rx="3" class="board-metal"/>`,
+  pdp11: `
+    <rect x="18" y="18" width="124" height="64" rx="5" class="board-shell"/>
+    <rect x="27" y="27" width="50" height="30" rx="2" class="board-face"/>
+    <path d="M34 35h35M34 42h27M34 49h31" class="board-graph"/>
+    <g class="board-keys"><path d="M88 30h43M88 39h43M88 48h43M88 57h43M27 67h104"/><path d="M98 25v38M109 25v38M120 25v38"/></g>`,
+};
+
+function createBoardArtwork(kind) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("board-artwork");
+  svg.setAttribute("viewBox", "0 0 160 100");
+  svg.setAttribute("aria-hidden", "true");
+  svg.innerHTML = boardArtworkPaths[kind] || '<rect x="28" y="22" width="104" height="56" rx="12" class="board-shell"/><path d="M45 40h70M45 50h70M45 60h45" class="board-keys"/>';
+  return svg;
+}
+
+function catalogBoards(entries = exampleEntries()) {
+  const boards = new Map();
+  for (const entry of entries) for (const board of entry.boards) {
+    const current = boards.get(board.name) || { ...board, count: 0 };
+    current.count++;
+    boards.set(board.name, current);
+  }
+  return [...boards.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function catalogComputers(entries = exampleEntries()) {
+  const computers = new Map();
+  for (const entry of entries) for (const computer of entry.computers) {
+    const current = computers.get(computer.name) || { ...computer, count: 0 };
+    current.count++;
+    computers.set(computer.name, current);
+  }
+  return [...computers.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function catalogMachines(entries = exampleEntries()) {
+  return [...catalogBoards(entries), ...catalogComputers(entries)];
+}
+
+function renderExampleBoards(entries = exampleEntries()) {
+  const boards = catalogBoards(entries);
+  const computers = catalogComputers(entries);
+  const selected = elements.exampleBoardFilter.value;
+  const choices = [];
+  const all = document.createElement("button");
+  all.type = "button"; all.className = "example-board-choice example-board-all"; all.dataset.exampleBoard = "";
+  all.classList.toggle("selected", !selected); all.setAttribute("aria-pressed", String(!selected));
+  const allIcon = document.createElement("span"); allIcon.className = "example-board-all-icon"; allIcon.textContent = "All";
+  const allText = document.createElement("span"); allText.innerHTML = `<strong>All hardware</strong><small>${entries.length} examples</small>`;
+  all.append(allIcon, allText);
+  if (!isPhoneWorkspace()) choices.push(all);
+  if (boards.length) {
+    const heading = document.createElement("div"); heading.className = "example-machine-group"; heading.textContent = "Boards";
+    choices.push(heading);
+  }
+  for (const board of boards) {
+    const row = document.createElement("div"); row.className = "example-board-row";
+    const button = document.createElement("button"); button.type = "button"; button.className = "example-board-choice";
+    button.dataset.exampleBoard = board.name; button.classList.toggle("selected", selected === board.name);
+    button.setAttribute("aria-pressed", String(selected === board.name));
+    button.append(createBoardArtwork(board.artwork));
+    const text = document.createElement("span");
+    const name = document.createElement("strong"); name.textContent = board.name;
+    const count = document.createElement("small"); count.textContent = `${board.count} example${board.count === 1 ? "" : "s"}`;
+    text.append(name, count); button.append(text); row.append(button);
+    if (board.docs) {
+      const docs = document.createElement("a"); docs.href = board.docs; docs.target = "_blank"; docs.rel = "noreferrer";
+      docs.className = "example-board-docs"; docs.textContent = "Hardware guide"; docs.setAttribute("aria-label", `${board.name} hardware guide`);
+      row.append(docs);
+    }
+    choices.push(row);
+  }
+  if (computers.length) {
+    const heading = document.createElement("div"); heading.className = "example-machine-group"; heading.textContent = "Computers";
+    choices.push(heading);
+  }
+  for (const computer of computers) {
+    const button = document.createElement("button"); button.type = "button"; button.className = "example-board-choice";
+    button.dataset.exampleBoard = computer.name; button.classList.toggle("selected", selected === computer.name);
+    button.setAttribute("aria-pressed", String(selected === computer.name));
+    button.append(createBoardArtwork(computer.artwork));
+    const text = document.createElement("span");
+    const name = document.createElement("strong"); name.textContent = computer.name;
+    const detail = document.createElement("small");
+    const count = `${computer.count} example${computer.count === 1 ? "" : "s"}`;
+    detail.textContent = computer.family ? `${computer.family} · ${count}` : count;
+    text.append(name, detail); button.append(text); choices.push(button);
+  }
+  if (isPhoneWorkspace()) choices.push(all);
+  elements.exampleBoardList.replaceChildren(...choices);
+  if (isPhoneWorkspace() && selected) queueMicrotask(() => {
+    elements.exampleBoardList.querySelector(".example-board-choice.selected")?.scrollIntoView({ block: "nearest", inline: "start" });
+  });
+}
+
+function selectExampleBoard(event) {
+  const button = event.target.closest("[data-example-board]");
+  if (!button) return;
+  exampleBoardSelectionTouched = true;
+  elements.exampleBoardFilter.value = button.dataset.exampleBoard;
+  const machine = catalogMachines().find((choice) => choice.name === button.dataset.exampleBoard);
+  if (machine && elements.exampleTargetFilter.value && elements.exampleTargetFilter.value !== machine.target) {
+    elements.exampleTargetFilter.value = "";
+  }
+  if (machine && machine.device !== "computer") prefetchExampleBoard();
+  renderExampleBrowser();
+}
+
+function selectInitialExampleBoard(entries = exampleEntries()) {
+  if (!isPhoneWorkspace() || exampleBoardSelectionTouched || elements.exampleBoardFilter.value) return;
+  const boards = catalogBoards(entries);
+  const current = boards.find((board) => board.target === selectedTarget?.name);
+  const choice = current || boards[0];
+  if (choice) elements.exampleBoardFilter.value = choice.name;
+}
+
+function maybeOpenMobileExamples() {
+  if (!isPhoneWorkspace() || elements.exampleDialog.open || document.querySelector("dialog[open]")) return;
+  openExampleBrowser();
+}
+
+async function openExampleBrowser() {
+  if (!elements.exampleDialog.open) elements.exampleDialog.showModal();
+  elements.exampleResults.innerHTML = '<div class="example-empty">Loading examples…</div>';
+  try {
+    const catalog = standardCatalog || await (exampleCatalogPromise || standardCatalogPromise);
+    if (!catalog) throw new Error("The example catalog is unavailable.");
+    const entries = exampleEntries(catalog);
+    fillExampleFilter(elements.exampleBoardFilter, [...new Set(entries.flatMap((entry) => entry.machines.map((machine) => machine.name)))].sort());
+    fillExampleFilter(elements.exampleTargetFilter, [...new Set(entries.flatMap((entry) => entry.targets))].sort());
+    if (selectedTarget) selectInitialExampleBoard(entries);
+    renderExampleBrowser();
+    queueMicrotask(() => elements.exampleSearch.focus());
+  } catch (error) {
+    elements.exampleResultCount.textContent = "Examples unavailable";
+    const message = document.createElement("div"); message.className = "example-empty"; message.textContent = error.message || String(error);
+    elements.exampleResults.replaceChildren(message);
+  }
+}
+
+function fillExampleFilter(select, values) {
+  const current = select.value;
+  const first = select.options[0];
+  select.replaceChildren(first, ...values.map((value) => Object.assign(document.createElement("option"), { value, textContent: value })));
+  if (values.includes(current)) select.value = current;
+}
+
+function renderExampleBrowser() {
+  if (!standardCatalog) return;
+  const query = elements.exampleSearch.value.trim().toLowerCase();
+  const board = elements.exampleBoardFilter.value;
+  const target = elements.exampleTargetFilter.value;
+  const entries = exampleEntries().filter((entry) => {
+    const searchable = [entry.title, entry.slug, entry.importPath, entry.item.language || "go",
+      ...entry.machines.flatMap((choice) => [choice.name, choice.family, choice.description]), ...entry.targets].join(" ").toLowerCase();
+    return (!query || searchable.includes(query)) &&
+      (!board || entry.machines.some((choice) => choice.name === board)) &&
+      (!target || entry.targets.includes(target));
+  });
+  elements.exampleResults.scrollTop = 0;
+  renderExampleBoards();
+  elements.exampleResultCount.textContent = `${entries.length} example${entries.length === 1 ? "" : "s"}`;
+  if (!entries.length) {
+    elements.exampleResults.innerHTML = '<div class="example-empty"><strong>No examples found</strong><span>Clear a filter or try another search.</span></div>';
+    return;
+  }
+  elements.exampleResults.replaceChildren(...entries.map((entry) => {
+    const card = document.createElement("article"); card.className = "example-card";
+    const presentation = examplePresentation(entry);
+    const heading = document.createElement("div"); heading.className = "example-card-heading";
+    const title = document.createElement("div"); title.className = "example-card-title";
+    const category = document.createElement("span"); category.className = `example-category ${presentation.tone}`; category.textContent = presentation.category;
+    const name = document.createElement("strong"); name.textContent = entry.title;
+    title.append(category, name);
+    const load = document.createElement("button"); load.type = "button"; load.className = "dialog-primary"; load.dataset.example = entry.importPath;
+    load.disabled = !monaco; load.textContent = monaco ? "Open" : "Editor loading";
+    heading.append(title, load);
+    const metadata = document.createElement("div"); metadata.className = "example-metadata";
+    const language = document.createElement("span"); language.className = "example-language"; language.textContent = entry.item.language === "c" ? "C" : "Go";
+    const files = document.createElement("span"); files.textContent = `${entry.item.files.length} file${entry.item.files.length === 1 ? "" : "s"}`;
+    metadata.append(language, files);
+    const compatible = document.createElement("span"); compatible.className = "example-compatible";
+    compatible.textContent = entry.machines.length ? entry.machines.map((choice) => choice.name).join(", ") : entry.targets.join(", ");
+    metadata.append(compatible);
+    const hardware = document.createElement("div"); hardware.className = "example-hardware";
+    const hardwareLabel = document.createElement("span"); hardwareLabel.textContent = entry.computers.length ? "Runs on" : "Hardware"; hardware.append(hardwareLabel);
+    const relevantBoards = board ? entry.boards.filter((choice) => choice.name === board) : entry.boards;
+    const requirements = new Map();
+    for (const choice of relevantBoards) for (const item of choice.hardware || []) {
+      requirements.set(`${item.name}|${item.docs}|${item.optional}`, item);
+    }
+    if (entry.computers.length) {
+      const system = document.createElement("strong");
+      system.textContent = entry.computers.map((computer) => computer.description || computer.name).join(", ");
+      hardware.append(system);
+    } else if (!requirements.size) {
+      const included = document.createElement("strong"); included.textContent = "Board only"; hardware.append(included);
+    } else for (const item of requirements.values()) {
+      const link = document.createElement("a"); link.href = item.docs; link.target = "_blank"; link.rel = "noreferrer";
+      link.textContent = `${item.optional ? "Optional: " : ""}${item.name}`; hardware.append(link);
+    }
+    card.append(heading, hardware, metadata);
+    return card;
+  }));
+}
+
+async function handleExampleAction(event) {
+  const button = event.target.closest("[data-example]");
+  if (!button || !standardCatalog) return;
+  const entry = exampleEntries().find((candidate) => candidate.importPath === button.dataset.example);
+  if (!entry) return;
+  elements.exampleDialog.close();
+  const accepted = await requestConfirmation({
+    title: `Open ${entry.title}?`,
+    message: "This replaces the current files. Saved snapshots and exported ZIP files will stay where they are.",
+    accept: "Open example",
+    danger: false,
+  });
+  if (!accepted) { elements.exampleDialog.showModal(); return; }
+  try {
+    elements.languageStatus.textContent = `Loading ${entry.title}…`;
+    const files = {};
+    await Promise.all(entry.item.files.map(async (name) => {
+      const asset = new URL(`module/${entry.item.root}/${name.split("/").map(encodeURIComponent).join("/")}`, standardCatalog.url);
+      const response = await fetchAsset(asset);
+      if (!response.ok) throw new Error(`Could not load ${name}: HTTP ${response.status}`);
+      files[name] = await response.text();
+    }));
+    if (Object.keys(files).some((name) => name.endsWith(".go")) && !Object.hasOwn(files, "go.mod")) files["go.mod"] = initialFiles["go.mod"];
+    const filteredTarget = elements.exampleTargetFilter.value;
+    const target = filteredTarget && entry.targets.includes(filteredTarget) ? filteredTarget :
+      entry.targets.includes(selectedTarget?.name) ? selectedTarget.name : entry.targets[0] || selectedTarget?.name;
+    const targetDefinition = targetCatalog?.targets.find((candidate) => candidate.name === target);
+    const active = entry.item.language === "c" && Object.hasOwn(files, "main.c") ? "main.c" :
+      Object.hasOwn(files, "main.go") ? "main.go" : Object.keys(files).find((name) => /\.(?:go|c)$/.test(name)) || Object.keys(files)[0];
+    replaceProject({
+      name: entry.slug,
+      language: entry.item.language || "go",
+      files,
+      activeFile: active,
+      openFiles: [active],
+      target,
+      command: `-s -o ${targetDefinition?.output || "app.wasm"} .`,
+    });
+    elements.languageStatus.textContent = `${entry.title} is open`;
+    if (isPhoneWorkspace()) showMobileView("editor");
+  } catch (error) {
+    showProjectError(error);
+    elements.languageStatus.textContent = `Could not load ${entry.title}`;
+  }
+}
+
 function renderLibraryCatalog(catalog) {
   const children = [];
   const appendGroup = (title, entries) => {
@@ -2728,26 +3366,6 @@ function renderLibraryCatalog(catalog) {
     children.push(cLibraryDirectory(catalog, "src", "Implementation"));
   }
   const platforms = Object.entries(catalog.platforms || {});
-  const boards = new Map();
-  for (const entry of platforms) {
-    const board = entry[1].board;
-    if (!board || !entry[1].main) continue;
-    if (!boards.has(board)) boards.set(board, []);
-    boards.get(board).push(entry);
-  }
-  if (boards.size) {
-    const heading = document.createElement("div");
-    heading.className = "library-group"; heading.textContent = "ESP32 platforms"; children.push(heading);
-    for (const [board, entries] of [...boards].sort(([left], [right]) => left.localeCompare(right))) {
-      const boardHeading = document.createElement("div");
-      boardHeading.className = "library-subgroup"; boardHeading.textContent = board; children.push(boardHeading);
-      for (const [name, item] of entries.sort(([left], [right]) => left.localeCompare(right))) {
-        children.push(libraryPackage(catalog, name, item, item.root.split("/").pop()));
-      }
-    }
-  }
-  const examples = platforms.filter(([, item]) => item.main && !item.board);
-  if (examples.length) appendGroup("Examples", examples);
   const frameworks = platforms.filter(([name, item]) => !name.includes("/examples/m5") && !item.main);
   if (frameworks.length) appendGroup("Frameworks", frameworks);
   elements.stdlibTree.replaceChildren(...children);
@@ -2759,7 +3377,7 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
   const button = document.createElement("button");
   button.type = "button"; button.className = "stdlib-package";
   button.textContent = label;
-  button.title = item.main ? `${importPath} — click to use as the active app` : importPath;
+  button.title = item.main ? `${importPath}. Click to use it as the app.` : importPath;
   const files = document.createElement("div");
   files.className = "stdlib-files"; files.hidden = true;
   button.addEventListener("click", async () => {
@@ -2873,16 +3491,9 @@ function activeBuildLanguage() {
 }
 
 function syncBuildScope() {
-  const project = activeBuildRoot === ".";
-  const path = project ? "." : activeBuildRoot.replace(/^\.\//, "");
-  const label = project ? "Project" : path.split("/").pop();
-  elements.buildScopeLabel.textContent = label;
-  elements.buildScope.title = project ? "Building the current project" : `Building ${path}; click to switch back to the project`;
-  elements.buildScope.classList.toggle("external", !project);
-  elements.buildProjectScope.classList.toggle("active", project);
-  elements.sidebarBuildScopeLabel.textContent = label;
-  elements.buildProjectScope.title = project ? "Building files in this project" : `Building ${path}; click to switch back to the project`;
-  elements.buildProjectScope.querySelector("small").textContent = project ? "." : "Switch back";
+  document.querySelectorAll(".stdlib-package").forEach((item) => {
+    item.classList.toggle("build-root", item.dataset.root && activeBuildRoot === `./${item.dataset.root}`);
+  });
 }
 
 async function ensureSourceModel(path) {

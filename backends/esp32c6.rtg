@@ -1,7 +1,6 @@
 @import "../backend/definitions/esp32c6_common.rtg"
 
 target esp32c6/riscv32 {
-	aliases = [m5nanoc6/riscv32]
 	family = native_v1
 	os = esp32c6
 	arch = riscv32
@@ -9,7 +8,7 @@ target esp32c6/riscv32 {
 	abi = riscv32_internal
 	runtime = esp32c6_freestanding
 	executable = esp32c6_elf
-	build_tags = [esp32c6, riscv32, m5nanoc6]
+	build_tags = [esp32c6, riscv32]
 	capabilities = [freestanding, executable, volatile_memory]
 	arena_default = 65536
 }

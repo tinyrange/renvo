@@ -93,8 +93,8 @@ build_custom_backend() {
   fi
 }
 
-build_custom_backend esp32c6/riscv32 backends/esp32c6.rtg esp32c6-riscv32 go
 build_custom_backend esp32c6-jtag/riscv32 backends/esp32c6_jtag.rtg esp32c6-jtag-riscv32 go
+build_custom_backend esp32c6/riscv32 backends/esp32c6.rtg esp32c6-riscv32 go
 build_custom_backend esp32s3/xtensa_lx7 backends/esp32s3.rtg esp32s3-xtensa_lx7 go
 build_custom_backend esp32p4/riscv32 backends/esp32p4.rtg esp32p4-riscv32 go
 
@@ -128,3 +128,13 @@ if [ "$layout" = pages ]; then
     tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
     tools/wasm/browser/esp-webusb-jtag.mjs "$output/"
 fi
+
+find "$output" -type f \( -name '*.wasm' -o -name '*.mjs' -o -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) \
+  -exec sh -c '
+    for file do
+      gzip -9 -c "$file" > "$file.gz"
+      if command -v brotli >/dev/null 2>&1; then
+        brotli -f -q 6 -o "$file.br" "$file"
+      fi
+    done
+  ' sh {} +

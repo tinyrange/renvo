@@ -31,7 +31,7 @@ fi
 
 "$renvo" \
 	-backend "$repository_root/backends/esp32s3.rtg" \
-	-t esp32s3/xtensa_lx7 \
+	-t esp32s3/xtensa_lx7 -tags m5sticks3 \
 	-o "$temporary/suite.elf" \
 	"$repository_root/frontend_tests/single_file_microcontroller"
 

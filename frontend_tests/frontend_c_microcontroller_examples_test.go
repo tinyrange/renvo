@@ -15,8 +15,8 @@ func TestFrontendCPragmaGoMicrocontrollerExamples(t *testing.T) {
 			output := filepath.Join(t.TempDir(), example+".elf")
 			command := frontendCommand(frontend,
 				"cc", "-backend", filepath.Join(root, "backends", "esp32c6.rtg"),
-				"-t", "esp32c6/riscv32", "-s", "-o", output,
-				filepath.Join(root, "examples", "m5nanoc6", example, "main.c"))
+				"-t", "esp32c6/riscv32", "-tags", "m5nanoc6", "-s", "-o", output,
+				filepath.Join(root, "examples", "device", example, "main.c"))
 			command.Dir = root
 			command.Env = frontendCommandEnv(frontend.env, root)
 			if combined, err := command.CombinedOutput(); err != nil {

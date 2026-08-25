@@ -1,0 +1,85 @@
+[
+  {
+    "name": "M5Stack NanoC6",
+    "target": "m5nanoc6/riscv32",
+    "tag": "m5nanoc6",
+    "docs": "https://docs.m5stack.com/en/core/M5NanoC6",
+    "artwork": "nanoc6",
+    "machine": "esp32c6/riscv32",
+    "definition": "backends/esp32c6.rtg",
+    "backend": "backends/esp32c6-riscv32.wasm",
+    "packages": ["device/esp32c6"],
+    "examples": [
+      {"path": "examples/device/blink"},
+      {"path": "examples/device/blink_mixed"},
+      {"path": "examples/device/blink_c", "language": "c"},
+      {"path": "examples/device/button_rgb"},
+      {"path": "examples/device/ws2812_chase", "hardware": [{"name": "Unit RGB LED, 15 pixels", "docs": "https://docs.m5stack.com/en/unit/neopixel"}]},
+      {"path": "examples/device/ws2812_strip", "hardware": [{"name": "Unit RGB LED, 15 pixels", "docs": "https://docs.m5stack.com/en/unit/neopixel"}]},
+      {"path": "examples/device/ws2812_shots", "hardware": [{"name": "Unit RGB LED, 15 pixels", "docs": "https://docs.m5stack.com/en/unit/neopixel"}]},
+      {"path": "examples/device/button_rgb_c", "language": "c"},
+      {"path": "examples/device/air_quality", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
+      {"path": "examples/device/miniscale", "hardware": [{"name": "Unit Mini Scales", "docs": "https://docs.m5stack.com/en/unit/Unit%20Mini%20Scales"}]},
+      {"path": "examples/device/synth", "hardware": [{"name": "Unit Synth", "docs": "https://docs.m5stack.com/en/unit/synth"}]}
+    ]
+  },
+  {
+    "name": "M5Stack AtomS3 Lite",
+    "target": "m5atoms3lite/xtensa_lx7",
+    "tag": "m5atoms3lite",
+    "docs": "https://docs.m5stack.com/en/core/AtomS3%20Lite",
+    "artwork": "atoms3lite",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3"],
+    "examples": [
+      {"path": "examples/device/adxl345", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel"}]},
+      {"path": "examples/device/button_rgb"},
+      {"path": "examples/device/env_pro", "hardware": [{"name": "Unit ENV-Pro", "docs": "https://docs.m5stack.com/en/unit/ENV%20Pro%20Unit"}]},
+      {"path": "examples/device/ws2812_shots", "hardware": [{"name": "Unit RGB LED, 15 pixels", "docs": "https://docs.m5stack.com/en/unit/neopixel"}]}
+    ]
+  },
+  {
+    "name": "M5Stack StickS3",
+    "target": "m5sticks3/xtensa_lx7",
+    "tag": "m5sticks3",
+    "docs": "https://docs.m5stack.com/en/core/StickS3",
+    "artwork": "sticks3",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3"],
+    "examples": [{"path": "examples/device/forms_menu"}]
+  },
+  {
+    "name": "M5Stack Cardputer Adv",
+    "target": "m5cardputeradv/xtensa_lx7",
+    "tag": "m5cardputeradv",
+    "docs": "https://docs.m5stack.com/en/core/Cardputer-Adv",
+    "artwork": "cardputeradv",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3"],
+    "examples": [{"path": "examples/device/keyboard_terminal"}]
+  },
+  {
+    "name": "M5Stack Tab5",
+    "target": "m5tab5/riscv32",
+    "tag": "m5tab5",
+    "docs": "https://docs.m5stack.com/en/core/Tab5",
+    "artwork": "tab5",
+    "machine": "esp32p4/riscv32",
+    "definition": "backends/esp32p4.rtg",
+    "backend": "backends/esp32p4-riscv32.wasm",
+    "packages": ["device/esp32p4", "examples/device/fontcache"],
+    "examples": [
+      {"path": "examples/device/forms_demo"},
+      {"path": "examples/device/sgp30_demo", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
+      {"path": "examples/device/sensor_terminal", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel"}]},
+      {"path": "examples/device/terminal_stress", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel", "optional": true}]},
+      {"path": "examples/device/touch_trails"}
+    ]
+  }
+]

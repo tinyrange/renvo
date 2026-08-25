@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -22,12 +23,16 @@ import (
 
 type targetAsset struct {
 	Name              string   `json:"name"`
+	Label             string   `json:"label,omitempty"`
+	FrontendTarget    string   `json:"frontendTarget,omitempty"`
 	BackendTarget     string   `json:"backendTarget"`
 	Backend           string   `json:"backend"`
 	CBackend          string   `json:"cBackend,omitempty"`
 	Output            string   `json:"output"`
 	Runnable          bool     `json:"runnable,omitempty"`
 	Device            string   `json:"device,omitempty"`
+	Docs              string   `json:"docs,omitempty"`
+	Artwork           string   `json:"artwork,omitempty"`
 	Tags              []string `json:"tags,omitempty"`
 	Definition        string   `json:"definition,omitempty"`
 	DescriptorVersion int      `json:"descriptorVersion,omitempty"`
@@ -35,6 +40,7 @@ type targetAsset struct {
 }
 
 type targetCatalog struct {
+	Compiler        string        `json:"compiler"`
 	LanguageService string        `json:"languageService"`
 	Formatter       string        `json:"formatter"`
 	BackendJIT      string        `json:"backendJIT"`
@@ -46,13 +52,37 @@ type targetCatalog struct {
 }
 
 type standardPackage struct {
-	Files    []string `json:"files"`
-	Imports  []string `json:"imports,omitempty"`
-	Root     string   `json:"root,omitempty"`
-	Main     bool     `json:"main,omitempty"`
-	Target   string   `json:"target,omitempty"`
-	Board    string   `json:"board,omitempty"`
-	Language string   `json:"language,omitempty"`
+	Files     []string         `json:"files"`
+	Imports   []string         `json:"imports,omitempty"`
+	Root      string           `json:"root,omitempty"`
+	Main      bool             `json:"main,omitempty"`
+	Target    string           `json:"target,omitempty"`
+	Board     string           `json:"board,omitempty"`
+	Boards    []boardTarget    `json:"boards,omitempty"`
+	Computers []computerTarget `json:"computers,omitempty"`
+	Language  string           `json:"language,omitempty"`
+}
+
+type boardTarget struct {
+	Name     string                `json:"name"`
+	Target   string                `json:"target"`
+	Docs     string                `json:"docs,omitempty"`
+	Artwork  string                `json:"artwork,omitempty"`
+	Hardware []hardwareRequirement `json:"hardware,omitempty"`
+}
+
+type computerTarget struct {
+	Name        string `json:"name"`
+	Target      string `json:"target"`
+	Family      string `json:"family,omitempty"`
+	Artwork     string `json:"artwork,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type hardwareRequirement struct {
+	Name     string `json:"name"`
+	Docs     string `json:"docs,omitempty"`
+	Optional bool   `json:"optional,omitempty"`
 }
 
 type standardCatalog struct {
@@ -66,14 +96,31 @@ type customTarget struct {
 	Name       string
 	Definition string
 	Backend    string
+	Tags       []string
 	Hidden     bool
 }
 
+type boardExample struct {
+	Path     string                `json:"path"`
+	Language string                `json:"language,omitempty"`
+	Hardware []hardwareRequirement `json:"hardware,omitempty"`
+}
+
+type boardDefinition struct {
+	Name       string         `json:"name"`
+	Target     string         `json:"target"`
+	Tag        string         `json:"tag"`
+	Docs       string         `json:"docs,omitempty"`
+	Artwork    string         `json:"artwork,omitempty"`
+	Machine    string         `json:"machine"`
+	Definition string         `json:"definition"`
+	Backend    string         `json:"backend"`
+	Packages   []string       `json:"packages"`
+	Examples   []boardExample `json:"examples"`
+}
+
 var customTargets = []customTarget{
-	{Name: "esp32c6/riscv32", Definition: "backends/esp32c6.rtg", Backend: "backends/esp32c6-riscv32.wasm"},
-	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Hidden: true},
-	{Name: "esp32s3/xtensa_lx7", Definition: "backends/esp32s3.rtg", Backend: "backends/esp32s3-xtensa_lx7.wasm"},
-	{Name: "esp32p4/riscv32", Definition: "backends/esp32p4.rtg", Backend: "backends/esp32p4-riscv32.wasm"},
+	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Hidden: true},
 }
 
 func main() {
@@ -86,8 +133,12 @@ func main() {
 	if err = os.MkdirAll(*output, 0o755); err != nil {
 		fail(err)
 	}
+	boards, err := readBoardDefinitions(root)
+	if err != nil {
+		fail(err)
+	}
 	catalog := targetCatalog{
-		LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
+		Compiler: "renvo.wasm", LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
 		BackendJIT: "renvo-backend-jit.wasm", VMBackend: "renvo-vm-backend.wasm",
 		BrowserPrefix: "browser-host-prefix.html", BrowserSuffix: "browser-host-suffix.html",
 		Stdlib: "stdlib/catalog.json",
@@ -116,13 +167,49 @@ func main() {
 			fail(fmt.Errorf("resolve %s: %s", custom.Definition, resolved.Message))
 		}
 		descriptor := resolved.Descriptor
+		tags := append([]string(nil), descriptor.BuildTags...)
+		tags = append(tags, custom.Tags...)
 		catalog.Targets = append(catalog.Targets, targetAsset{
 			Name: descriptor.Name, BackendTarget: descriptor.Name, Backend: custom.Backend,
-			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: descriptor.BuildTags,
+			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: tags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
 			Device: "esp32",
 			Hidden: custom.Hidden,
 		})
+	}
+	for _, board := range boards {
+		source, readErr := os.ReadFile(board.Definition)
+		if readErr != nil {
+			fail(readErr)
+		}
+		resolved := backenddef.ResolveImports(source, board.Definition, board.Machine, filesystemImports{})
+		if !resolved.Ok {
+			fail(fmt.Errorf("resolve %s: %s", board.Definition, resolved.Message))
+		}
+		descriptor := resolved.Descriptor
+		tags := append([]string(nil), descriptor.BuildTags...)
+		tags = append(tags, board.Tag)
+		catalog.Targets = append(catalog.Targets, targetAsset{
+			Name: board.Target, Label: board.Name, FrontendTarget: board.Machine, BackendTarget: board.Machine,
+			Backend: board.Backend, Output: outputName(board.Machine, descriptor.OutputKind),
+			Tags: tags, Definition: hex.EncodeToString(descriptor.Definition[:]),
+			DescriptorVersion: descriptor.Version, Device: "esp32", Docs: board.Docs, Artwork: board.Artwork,
+		})
+	}
+	for _, asset := range []*string{&catalog.Compiler, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend} {
+		if *asset, err = versionAsset(*output, *asset); err != nil {
+			fail(err)
+		}
+	}
+	for i := range catalog.Targets {
+		if catalog.Targets[i].Backend, err = versionAsset(*output, catalog.Targets[i].Backend); err != nil {
+			fail(err)
+		}
+		if catalog.Targets[i].CBackend != "" {
+			if catalog.Targets[i].CBackend, err = versionAsset(*output, catalog.Targets[i].CBackend); err != nil {
+				fail(err)
+			}
+		}
 	}
 	if err = writeJSON(filepath.Join(*output, "targets.json"), catalog); err != nil {
 		fail(err)
@@ -130,9 +217,57 @@ func main() {
 	if err = writeBrowserHost(*output); err != nil {
 		fail(err)
 	}
-	if err = buildStandardLibrary(root, *output); err != nil {
+	if err = buildStandardLibrary(root, *output, boards); err != nil {
 		fail(err)
 	}
+}
+
+func versionAsset(output, name string) (string, error) {
+	if name == "" || strings.Contains(name, "://") {
+		return name, nil
+	}
+	path := strings.SplitN(name, "?", 2)[0]
+	data, err := os.ReadFile(filepath.Join(output, filepath.FromSlash(path)))
+	if err != nil {
+		return "", fmt.Errorf("version %s: %w", name, err)
+	}
+	sum := sha256.Sum256(data)
+	return path + "?v=" + hex.EncodeToString(sum[:6]), nil
+}
+
+func readBoardDefinitions(root string) ([]boardDefinition, error) {
+	source, err := os.ReadFile(filepath.Join(root, "device", "board", "catalog.json"))
+	if err != nil {
+		return nil, err
+	}
+	var boards []boardDefinition
+	if err := json.Unmarshal(source, &boards); err != nil {
+		return nil, err
+	}
+	seenTargets := make(map[string]bool)
+	seenTags := make(map[string]bool)
+	for _, board := range boards {
+		if board.Name == "" || board.Target == "" || board.Tag == "" || board.Machine == "" ||
+			board.Definition == "" || board.Backend == "" || board.Docs == "" || board.Artwork == "" {
+			return nil, fmt.Errorf("incomplete board definition for %q", board.Target)
+		}
+		for _, example := range board.Examples {
+			if example.Path == "" {
+				return nil, fmt.Errorf("board %q has an example without a path", board.Target)
+			}
+			for _, hardware := range example.Hardware {
+				if hardware.Name == "" || hardware.Docs == "" {
+					return nil, fmt.Errorf("example %q has incomplete hardware metadata", example.Path)
+				}
+			}
+		}
+		if seenTargets[board.Target] || seenTags[board.Tag] {
+			return nil, fmt.Errorf("duplicate board target or tag for %q", board.Target)
+		}
+		seenTargets[board.Target] = true
+		seenTags[board.Tag] = true
+	}
+	return boards, nil
 }
 
 func writeBrowserHost(output string) error {
@@ -168,7 +303,7 @@ func outputName(target string, image string) string {
 	return "app"
 }
 
-func buildStandardLibrary(root string, output string) error {
+func buildStandardLibrary(root string, output string, boards []boardDefinition) error {
 	stdRoot := filepath.Join(root, "std")
 	packages := make(map[string]standardPackage)
 	err := filepath.WalkDir(stdRoot, func(path string, entry os.DirEntry, walkErr error) error {
@@ -226,7 +361,7 @@ func buildStandardLibrary(root string, output string) error {
 	if err != nil {
 		return err
 	}
-	platforms, err := buildPlatformPackages(root, output)
+	platforms, err := buildPlatformPackages(root, output, boards)
 	if err != nil {
 		return err
 	}
@@ -267,16 +402,24 @@ func buildCLibrary(root string, output string) ([]string, error) {
 }
 
 type platformPackageSpec struct {
-	Path     string
-	Target   string
-	Board    string
-	Language string
+	Path      string
+	Target    string
+	Board     string
+	Boards    []boardTarget
+	Computers []computerTarget
+	Language  string
 }
 
-func platformPackageSpecs() []platformPackageSpec {
-	return []platformPackageSpec{
+func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
+	specs := []platformPackageSpec{
 		{Path: "forms"},
-		{Path: "examples/pdp11v7", Target: "unixv7/pdp11"},
+		{
+			Path: "examples/pdp11v7", Target: "unixv7/pdp11",
+			Computers: []computerTarget{{
+				Name: "PDP-11", Target: "unixv7/pdp11", Family: "Retro computer", Artwork: "pdp11",
+				Description: "PDP-11 running Unix V7, or a compatible emulator",
+			}},
+		},
 		{Path: "device/mmio"},
 		{Path: "device/gpio"},
 		{Path: "device/clock"},
@@ -293,49 +436,47 @@ func platformPackageSpecs() []platformPackageSpec {
 		{Path: "device/audio/sam2695"},
 		{Path: "device/ws2812"},
 		{Path: "device/internal/esprmt"},
-		{Path: "device/esp32c6", Target: "esp32c6/riscv32"},
-		{Path: "device/board/m5nanoc6", Target: "esp32c6/riscv32"},
-		{Path: "examples/m5nanoc6/blink", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/blink_mixed", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/blink_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
-		{Path: "examples/m5nanoc6/button_rgb", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/ws2812_chase", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/ws2812_strip", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/ws2812_shots", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/button_rgb_c", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6", Language: "c"},
-		{Path: "examples/m5nanoc6/air_quality", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/miniscale", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "examples/m5nanoc6/synth", Target: "esp32c6/riscv32", Board: "M5Stack NanoC6"},
-		{Path: "device/esp32s3", Target: "esp32s3/xtensa_lx7"},
-		{Path: "device/board/m5atoms3lite", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5atoms3lite/adxl345", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
-		{Path: "examples/m5atoms3lite/button_rgb", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
-		{Path: "examples/m5atoms3lite/env_pro", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
-		{Path: "examples/m5atoms3lite/sk6812_strip", Target: "esp32s3/xtensa_lx7", Board: "M5Stack AtomS3 Lite"},
-		{Path: "device/board/m5sticks3", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5sticks3/forms_menu", Target: "esp32s3/xtensa_lx7", Board: "M5Stack StickS3"},
-		{Path: "device/board/m5cardputeradv", Target: "esp32s3/xtensa_lx7"},
-		{Path: "examples/m5cardputeradv/terminal", Target: "esp32s3/xtensa_lx7", Board: "M5Stack Cardputer Adv"},
-		{Path: "device/esp32p4", Target: "esp32p4/riscv32"},
-		{Path: "device/board/m5tab5", Target: "esp32p4/riscv32"},
-		{Path: "examples/m5tab5/fontcache", Target: "esp32p4/riscv32"},
-		{Path: "examples/m5tab5/forms_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
-		{Path: "examples/m5tab5/sgp30_demo", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
-		{Path: "examples/m5tab5/terminal", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
-		{Path: "examples/m5tab5/terminal_stress", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
-		{Path: "examples/m5tab5/touch_trails", Target: "esp32p4/riscv32", Board: "M5Stack Tab5"},
 	}
+	// The public board package contains all build-tagged adapters and is loaded
+	// for every board target. Wiring packages and examples come from the board
+	// catalog so adding a board does not require another editor-side list.
+	specs = append(specs, platformPackageSpec{Path: "device/board"})
+	for _, board := range boards {
+		for _, path := range board.Packages {
+			specs = append(specs, platformPackageSpec{Path: path})
+		}
+		for _, example := range board.Examples {
+			found := -1
+			for i := range specs {
+				if specs[i].Path == example.Path {
+					found = i
+					break
+				}
+			}
+			if found < 0 {
+				specs = append(specs, platformPackageSpec{Path: example.Path, Language: example.Language})
+				found = len(specs) - 1
+			}
+			specs[found].Boards = append(specs[found].Boards, boardTarget{
+				Name: board.Name, Target: board.Target, Docs: board.Docs, Artwork: board.Artwork, Hardware: example.Hardware,
+			})
+		}
+	}
+	return specs
 }
 
-func buildPlatformPackages(root string, output string) (map[string]standardPackage, error) {
+func buildPlatformPackages(root string, output string, boards []boardDefinition) (map[string]standardPackage, error) {
 	packages := make(map[string]standardPackage)
-	for _, spec := range platformPackageSpecs() {
+	for _, spec := range platformPackageSpecs(boards) {
 		path := filepath.Join(root, filepath.FromSlash(spec.Path))
 		entries, err := os.ReadDir(path)
 		if err != nil {
 			return nil, err
 		}
-		item := standardPackage{Root: spec.Path, Target: spec.Target, Board: spec.Board, Language: spec.Language}
+		item := standardPackage{
+			Root: spec.Path, Target: spec.Target, Board: spec.Board, Boards: spec.Boards,
+			Computers: spec.Computers, Language: spec.Language,
+		}
 		imports := make(map[string]bool)
 		for _, entry := range entries {
 			if strings.HasPrefix(entry.Name(), ".") {

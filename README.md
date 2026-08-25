@@ -179,6 +179,24 @@ imports are resolved transitively, letting C application code use small typed
 adapters for Renvo board and device packages without implicitly compiling every
 Go file beside the C source.
 
+Microcontroller applications use one target-selected board package:
+
+```go
+import "renvo.dev/device/board"
+
+func main() {
+	board.RGB.Set(16, 0, 0)
+}
+```
+
+The Web IDE offers board choices such as `m5nanoc6/riscv32`,
+`m5atoms3lite/xtensa_lx7`, and `m5tab5/riscv32`. Each choice maps to a shared
+chip backend plus one board build tag. From the CLI, express the same selection
+as `-t esp32c6/riscv32 -tags m5nanoc6`. Only capabilities present on that board
+are declared, so using an unavailable device is a compile-time error.
+Supported-board metadata and demo membership live in
+`device/board/catalog.json`, not in the RTG machine definitions.
+
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
 

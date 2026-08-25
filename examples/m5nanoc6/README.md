@@ -60,9 +60,9 @@ Build Renvo and the blinking application:
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-blink.elf \
-  ./examples/m5nanoc6/blink
+  ./examples/device/blink
 ```
 
 Build the mixed C/Go version by changing the output and package paths:
@@ -70,9 +70,9 @@ Build the mixed C/Go version by changing the output and package paths:
 ```sh
 sandbox/renvo \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-blink-mixed.elf \
-  ./examples/m5nanoc6/blink_mixed
+  ./examples/device/blink_mixed
 ```
 
 Build the native C versions through `cc` mode:
@@ -80,15 +80,15 @@ Build the native C versions through `cc` mode:
 ```sh
 sandbox/renvo cc \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-blink-c.elf \
-  ./examples/m5nanoc6/blink_c/main.c
+  ./examples/device/blink_c/main.c
 
 sandbox/renvo cc \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-button-rgb-c.elf \
-  ./examples/m5nanoc6/button_rgb_c/main.c
+  ./examples/device/button_rgb_c/main.c
 ```
 
 To build the button and RGB example instead, change the output name and final
@@ -97,9 +97,9 @@ package argument:
 ```sh
 sandbox/renvo \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-button-rgb.elf \
-  ./examples/m5nanoc6/button_rgb
+  ./examples/device/button_rgb
 ```
 
 The SGP30 air-quality example is built in the same way:
@@ -107,9 +107,9 @@ The SGP30 air-quality example is built in the same way:
 ```sh
 sandbox/renvo \
   -backend backends/esp32c6.rtg \
-  -t esp32c6/riscv32 \
+  -t esp32c6/riscv32 -tags m5nanoc6 \
   -o sandbox/m5nanoc6-air-quality.elf \
-  ./examples/m5nanoc6/air_quality
+  ./examples/device/air_quality
 ```
 
 For the Unit Mini Scales demo, use:
@@ -119,7 +119,7 @@ sandbox/renvo \
   -backend backends/esp32c6.rtg \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-miniscale.elf \
-  ./examples/m5nanoc6/miniscale
+  ./examples/device/miniscale
 ```
 
 For the Unit Synth song demo, use:
@@ -129,7 +129,7 @@ sandbox/renvo \
   -backend backends/esp32c6.rtg \
   -t esp32c6/riscv32 \
   -o sandbox/m5nanoc6-synth.elf \
-  ./examples/m5nanoc6/synth
+  ./examples/device/synth
 ```
 
 Convert the ELF, write only the factory application partition, and start it:

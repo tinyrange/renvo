@@ -18,12 +18,12 @@ test("catalog source paths resolve outside the playground module", () => {
     packages: { fmt: { files: ["fmt.go"] } },
     platforms: {
       "renvo.dev/device/clock": { root: "device/clock", files: ["clock.go"] },
-      "renvo.dev/device/board/m5atoms3lite": { root: "device/board/m5atoms3lite", files: ["board.go"] },
+      "renvo.dev/device/board": { root: "device/board", files: ["m5atoms3lite_impl.go"] },
     },
   };
   assert.equal(sourceImportPath("/workspace/std/fmt/fmt.go", catalog), "fmt");
   assert.equal(sourceImportPath("/workspace/device/clock/clock.go", catalog), "renvo.dev/device/clock");
-  assert.equal(sourceImportPath("/workspace/device/board/m5atoms3lite/board.go", catalog), "renvo.dev/device/board/m5atoms3lite");
+  assert.equal(sourceImportPath("/workspace/device/board/m5atoms3lite_impl.go", catalog), "renvo.dev/device/board");
 });
 
 test("bundled C library headers and implementations are navigable sources", () => {

@@ -2,7 +2,7 @@ package main
 
 import (
 	"renvo.dev/device/app"
-	board "renvo.dev/device/board/m5nanoc6"
+	"renvo.dev/device/board"
 )
 
 type blinker struct {

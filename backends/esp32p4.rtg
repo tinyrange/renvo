@@ -83,7 +83,7 @@ go backend {
 		descriptor[2] = 0xcd
 		descriptor[3] = 0xab
 		copy(descriptor[16:], []byte("renvo"))
-		copy(descriptor[48:], []byte("renvo-m5tab5"))
+		copy(descriptor[48:], []byte("renvo-esp32p4"))
 		copy(descriptor[112:], []byte("renvo"))
 		// ESP32-P4's second-stage bootloader uses this log2 page size when
 		// installing the flash/PSRAM XIP mappings for application segments.
@@ -644,7 +644,6 @@ format esp32p4_elf {
 }
 
 target esp32p4/riscv32 {
-	aliases = [m5tab5/riscv32]
 	family = native_v1
 	os = esp32p4
 	arch = riscv32
@@ -655,7 +654,7 @@ target esp32p4/riscv32 {
 	// Tab5 applications run with a small internal startup arena before PSRAM
 	// becomes application storage. Exclude optional desktop designer artwork so
 	// embedded byte assets are not copied into that arena before main.
-	build_tags = [esp32p4, riscv32, m5tab5, tiny]
+	build_tags = [esp32p4, riscv32, tiny]
 	capabilities = [freestanding, executable, volatile_memory]
 	arena_default = 65536
 }

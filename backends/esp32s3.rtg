@@ -87,7 +87,7 @@ go backend {
 		descriptor[2] = 0xcd
 		descriptor[3] = 0xab
 		copy(descriptor[16:], []byte("renvo"))
-		copy(descriptor[48:], []byte("renvo-m5sticks3"))
+		copy(descriptor[48:], []byte("renvo-esp32s3"))
 		copy(descriptor[112:], []byte("renvo"))
 		// Leave mmu_page_size at its legacy zero value. The ESP32-S3
 		// bootloader interprets zero as its configured 64 KiB MMU page size;
@@ -391,7 +391,6 @@ format esp32s3_elf {
 }
 
 target esp32s3/xtensa_lx7 {
-	aliases = [m5sticks3/xtensa_lx7]
 	family = native_v1
 	os = esp32s3
 	arch = xtensa_lx7
@@ -399,7 +398,7 @@ target esp32s3/xtensa_lx7 {
 	abi = xtensa_call0
 	runtime = esp32s3_freestanding
 	executable = esp32s3_elf
-	build_tags = [esp32s3, xtensa_lx7, m5sticks3, tiny]
+	build_tags = [esp32s3, xtensa_lx7, tiny]
 	capabilities = [freestanding, executable, volatile_memory]
 	arena_default = 131072
 }

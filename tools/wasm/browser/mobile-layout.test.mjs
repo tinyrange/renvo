@@ -4,21 +4,33 @@ import test from "node:test";
 
 const root = new URL("./", import.meta.url);
 
-test("phone workspace exposes the file, target, editor, and console flow", async () => {
-  const [html, css, app] = await Promise.all([
+test("phone workspace exposes the project, editor, and device flow", async () => {
+  const [html, css, app, worker] = await Promise.all([
     readFile(new URL("index.html", root), "utf8"),
     readFile(new URL("styles.css", root), "utf8"),
     readFile(new URL("app.mjs", root), "utf8"),
+    readFile(new URL("worker.mjs", root), "utf8"),
   ]);
 
-  for (const view of ["files", "editor", "console"]) {
+  for (const view of ["files", "editor", "device"]) {
     assert.match(html, new RegExp(`data-mobile-view="${view}"`));
   }
   assert.match(html, /id="mobile-target-button"/);
   assert.match(html, /id="copy-to-playground"/);
   assert.match(html, /id="project-file-input"/);
   assert.match(html, /id="project-action-menu"/);
-  assert.match(html, /id="build-scope"/);
+  assert.doesNotMatch(html, /id="build-scope"/);
+  assert.match(html, /id="browse-examples"/);
+  assert.match(html, /id="example-dialog"/);
+  assert.match(html, /id="example-board-filter"/);
+  assert.match(html, /Start with your hardware/);
+  assert.match(html, /Choose a board or computer/);
+  assert.match(html, /id="example-target-filter"/);
+  assert.match(html, /id="mobile-setup-progress"/);
+  assert.doesNotMatch(html, /Initializing compiler/);
+  for (const step of ["workspace", "catalog", "editor", "compiler"]) {
+    assert.match(html, new RegExp(`data-setup-step="${step}"`));
+  }
   assert.match(html, /id="new-file-dialog"/);
   assert.match(html, /data-project-action="new"/);
   assert.match(html, /id="new-project-dialog"/);
@@ -34,9 +46,18 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(html, /data-panel="tests"/);
   assert.match(html, /data-panel="preview"/);
   assert.match(html, /id="mobile-target-view"/);
+  assert.match(html, /id="mobile-device-build"/);
+  assert.match(html, /id="mobile-device-output"/);
   assert.match(html, /data-mobile-transport="webusb"/);
   assert.match(html, /data-mobile-transport="webserial"/);
   assert.match(html, /id="mobile-flash-view"/);
+  assert.match(html, /id="mobile-flash-detail"/);
+  for (const step of ["usb", "check", "firmware", "load", "run"]) {
+    assert.match(html, new RegExp(`data-deploy-step="${step}"`));
+  }
+  assert.match(html, /id="device-permission-dialog"/);
+  assert.match(html, /id="device-webusb-status"/);
+  assert.match(html, /id="device-webserial-status"/);
   assert.match(html, /data-panel="plotter"/);
   assert.match(html, /id="serial-plotter-canvas"/);
   assert.match(html, /id="toggle-plotter-size"/);
@@ -44,19 +65,34 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(css, /@media \(max-width: 680px\)/);
   assert.match(css, /data-device-class="tablet"/);
   assert.match(css, /\.ide\[data-mobile-view="files"\] \.sidebar/);
-  assert.match(css, /\.ide\[data-mobile-view="target"\] \.mobile-target-view/);
+  assert.match(css, /\.ide\[data-mobile-view="device"\] \.mobile-target-view/);
   assert.match(css, /\.ide\[data-mobile-view="editor"\] \.workbench/);
-  assert.match(css, /\.ide\[data-mobile-view="console"\] \.workbench/);
   assert.match(css, /\.mobile-flash-view \{[\s\S]*position: fixed/);
   assert.match(css, /\.workbench\.plotter-expanded \{[\s\S]*grid-template-rows: 38px 0 minmax\(0, 1fr\)/);
   assert.match(app, /showMobileView\("editor"\)/);
   assert.match(app, /copyActiveFileToPlayground/);
   assert.match(app, /const destination = activeFile\.split\("\/"\)\.pop\(\)/);
   assert.doesNotMatch(app, /PLAYGROUND_COPY_PREFIX/);
-  assert.match(app, /openMobileFlashView\("Select a device"\)/);
+  assert.match(app, /if \(mobileDeploymentActive\) openMobileFlashView/);
+  assert.match(app, /function startMobileDeployment/);
+  assert.match(app, /function receiveCompileProgress/);
+  assert.match(app, /Tap to see JTAG load details/);
+  assert.match(worker, /type: "compile-progress"/);
+  assert.match(worker, /Downloading the board compiler/);
   assert.match(app, /appendSerialText/);
   assert.match(app, /setPlotterExpanded/);
   assert.match(app, /chooseESPTransportAvailability/);
+  assert.match(app, /function requestDevicePermission/);
+  assert.match(app, /renvo\.devicePermissionExplained\.v1/);
+  assert.match(app, /maybeOpenMobileExamples/);
+  assert.match(app, /exampleCatalogPromise = catalogPromise/);
+  assert.match(app, /function selectInitialExampleBoard/);
+  assert.match(app, /function catalogComputers/);
+  assert.match(app, /example-machine-group/);
+  assert.match(app, /exampleBoardSelectionTouched/);
+  assert.match(app, /elements\.exampleResults\.scrollTop = 0/);
+  assert.match(app, /setSetupStep\("compiler", "active"/);
+  assert.doesNotMatch(html, /id="mobile-build"/);
   assert.match(app, /runTests/);
   assert.match(app, /event\.metaKey[\s\S]*event\.key\.toLowerCase\(\) === "s"[\s\S]*saveAndDeploy\(\)/);
   assert.match(app, /function saveAndDeploy\(\)[\s\S]*selectedTarget\?\.device === "esp32"[\s\S]*runArtifact\(\)/);
@@ -70,6 +106,7 @@ test("phone workspace exposes the file, target, editor, and console flow", async
   assert.match(app, /item\.language === "c"[\s\S]*file === "main\.c"/);
   assert.match(app, /language: projectLanguage/);
   assert.match(app, /function syncBuildScope/);
+  assert.match(app, /async function handleExampleAction/);
   assert.match(app, /target: selectedTarget\?\.name \|\| restoredTargetName/);
   assert.match(app, /\\\.\(\?:go\|c\|h\|rtg\)\$/);
   assert.doesNotMatch(app, /\b(?:prompt|confirm)\s*\(/);
