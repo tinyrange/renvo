@@ -99,6 +99,9 @@ func outputName(target string, kind string) string {
 	if kind == "rnvm" {
 		return "app.rnvb"
 	}
+	if kind == "dos-com" {
+		return "app.com"
+	}
 	if strings.HasPrefix(target, "windows/") {
 		return "app.exe"
 	}

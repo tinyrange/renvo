@@ -5,6 +5,7 @@ package backendjit
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/linkedimage"
@@ -40,6 +41,7 @@ func NewWithRunner(path string, backendRoot string, stdRoot string, cacheDir str
 type Request struct {
 	Protocol int
 	Unit     []byte
+	Source   []byte
 	Options  driver.BackendCompileOptions
 }
 
@@ -61,6 +63,28 @@ func (b *Backend) CompileUnitWithArena(source []byte, target string, strip bool,
 
 func (b *Backend) CompileUnitWithOptions(source []byte, options driver.BackendCompileOptions) driver.BackendResult {
 	return b.compile(source, options)
+}
+
+// CompileSourceWithArena runs a standalone backend-corpus program directly
+// through the prepared compiler. Unlike CompileUnit, it intentionally bypasses
+// frontend checking, linking, and pruning.
+func (b *Backend) CompileSourceWithArena(source []byte, target string, strip bool, arenaSize int) driver.BackendResult {
+	prepared := b.prepare(target)
+	if !prepared.Ok {
+		return driver.BackendResult{Diagnostic: prepared.Diagnostic}
+	}
+	if b.runner == nil {
+		return driver.BackendResult{Diagnostic: driver.Diagnostic{
+			Phase: "backend", Code: "RENVO-BACKEND-009", Message: "prepared backend runner is unavailable",
+		}}
+	}
+	return b.runner.Run(prepared.Artifact, Request{
+		Protocol: ProtocolVersion,
+		Source:   source,
+		Options: driver.BackendCompileOptions{
+			Target: target, Strip: strip, ArenaSize: arenaSize,
+		},
+	})
 }
 
 func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) driver.BackendResult {
@@ -142,9 +166,15 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 		return backendIOError("create protocol directory")
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
-	inputPath := filepath.Join(tempDir, "input.rtgu")
+	inputName := "input.rtgu"
+	input := request.Unit
+	if len(request.Source) != 0 {
+		inputName = "input.go"
+		input = request.Source
+	}
+	inputPath := filepath.Join(tempDir, inputName)
 	outputPath := filepath.Join(tempDir, "output.bin")
-	if err = os.WriteFile(inputPath, request.Unit, 0o600); err != nil {
+	if err = os.WriteFile(inputPath, input, 0o600); err != nil {
 		return backendIOError("write protocol input")
 	}
 	args := []string{"-t", artifact.Descriptor.Name}
@@ -174,7 +204,7 @@ func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.Backend
 	executed := runimage.Run(image, "renvo-prepared-backend", args, os.Environ(), os.Stdin,
 		os.Stdout, os.Stderr)
 	if executed.Err != nil || executed.ExitCode != 0 {
-		message := "prepared backend execution failed"
+		message := "prepared backend execution failed with exit code " + strconv.Itoa(executed.ExitCode)
 		if executed.Err != nil {
 			message += ": " + executed.Err.Error()
 		}

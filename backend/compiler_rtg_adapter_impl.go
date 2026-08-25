@@ -422,6 +422,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		if !renvoEmitAllQueuedFunctionsScratch(g) {
 			return renvoCompileResult{}
 		}
+		renvoRTGResolveSpeculativeClosureLabels(g)
 		if renvoRTGUnsupportedOperation != 0 {
 			renvoRTGReportFailure(g)
 			return renvoCompileResult{}
@@ -486,6 +487,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		renvoPrintErr("renvo: prepared backend failed queued functions\n")
 		return renvoCompileResult{}
 	}
+	renvoRTGResolveSpeculativeClosureLabels(g)
 	if renvoRTGUnsupportedOperation != 0 {
 		renvoRTGReportFailure(g)
 		return renvoCompileResult{}
@@ -499,6 +501,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	}
 	if len(data) == 0 {
 		renvoPrintErr("renvo: prepared backend produced empty output\n")
+		renvoRTGUnsupportedOperation = 5001
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}
@@ -530,8 +533,11 @@ func renvoTryCompileObjectProgramRTG(
 	p *renvoProgram, meta *renvoMeta,
 ) renvoCompileResult {
 	g := renvoBeginObjectProgram(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) ||
-		renvoRTGUnsupportedOperation != 0 {
+	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
+		return renvoCompileResult{}
+	}
+	renvoRTGResolveSpeculativeClosureLabels(g)
+	if renvoRTGUnsupportedOperation != 0 {
 		return renvoCompileResult{}
 	}
 	renvoRecordObjectFunctionRanges(g)
@@ -541,6 +547,26 @@ func renvoTryCompileObjectProgramRTG(
 		return renvoCompileResult{}
 	}
 	return renvoCompileResult{data: data, ok: true}
+}
+
+// Whole-program function-value dispatch may speculatively reference a closure
+// before its parent is emitted. A reachable literal requeues and emits the real
+// body; a literal folded away by constant control flow does neither. Keep this
+// prepared-only repair in the RTG adapter so fixed-target compiler binaries do
+// not retain it or the target-specific emission graph it references.
+func renvoRTGResolveSpeculativeClosureLabels(g *renvoLinearGen) {
+	for closureIndex := 0; closureIndex < len(g.meta.closures); closureIndex++ {
+		closure := &g.meta.closures[closureIndex]
+		fnIndex := closure.fnIndex
+		if closure.ready || fnIndex < 0 || fnIndex >= len(g.funcLabels) ||
+			renvoAsmLabelPosition(&g.asm, g.funcLabels[fnIndex]) >= 0 {
+			continue
+		}
+		renvoRTGFunctionStart(&g.asm, g.funcLabels[fnIndex])
+		renvoAsmMarkLabel(&g.asm, g.funcLabels[fnIndex])
+		renvoAsmRet(&g.asm)
+		renvoRTGFunctionFinish(&g.asm)
+	}
 }
 
 func renvoRTGReportFailure(g *renvoLinearGen) {

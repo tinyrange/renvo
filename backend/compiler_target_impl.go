@@ -63,7 +63,18 @@ func renvoRTGEmitStringEqualHelperBody(g *renvoLinearGen) {
 // their composition files until those layers are split further.
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		return renvoCompileUnitInput(input, output, target, arenaSize)
+		// renvoCompileUnitInput uses a positional header read for regular files,
+		// so a non-unit input is still positioned at its first byte here. Prepared
+		// backends do not carry the architecture-specific compile*Arena wrappers;
+		// parse their single raw source input through the shared RTG path instead.
+		if len(input) != 1 {
+			renvoPrintErr("renvo: prepared backends require one input file\n")
+			return 1
+		}
+		var src []byte
+		src = renvoReadAll(input[0], src)
+		prog := renvoParseProgram(src)
+		return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 	}
 	// A stage compiler is specialized while its parent is lowering this source.
 	// Keep that dispatch expressed in terms of the specialization global so the

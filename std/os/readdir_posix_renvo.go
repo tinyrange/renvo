@@ -1,4 +1,4 @@
-//go:build renvo && !windows && !wasi && !wasip1
+//go:build renvo && !windows && !wasi && !wasip1 && !msdos
 
 package os
 

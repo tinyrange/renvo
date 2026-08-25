@@ -35,6 +35,10 @@ test("project RTG targets use the browser JIT and VM backend pipeline", async ()
   assert.match(app, /if \(name\.endsWith\("\.rtg"\)\) return RTG_LANGUAGE_ID/);
   assert.match(app, /type, id, definition, target, files: payload\.files/);
   assert.match(app, /backendFormat: buildTarget\.backendFormat \|\| "wasm"/);
+  assert.match(app, /function starterCommand\(\)[\s\S]*selectedTarget\?\.output/);
+  assert.match(app, /command: starterCommand\(\)/);
+  assert.match(app, /backendRoots: backendDefinition \? \[backendDefinition\] : \[\]/);
+  assert.match(app, /if \(backendDefinition\) await useProjectBackend\(backendDefinition\)/);
   assert.match(worker, /request\.type === "backend-inspect" \|\| request\.type === "backend-prepare"/);
   assert.match(worker, /request\.backendFormat === "vm32"/);
   assert.match(worker, /fd_sync: \(\) => 0/);

@@ -133,12 +133,13 @@ func main() {
 		"cmd/app/platform_windows_amd64.go": "package main\nfunc platformValue() int { return 42 }\n",
 		"cmd/app/platform_windows_386.go":   "package main\nfunc platformValue() int { return 42 }\n",
 		"cmd/app/platform_wasip1_wasm.go":   "package main\nfunc platformValue() int { return 42 }\n",
+		"cmd/app/platform_msdos_8086.go":    "package main\nfunc platformValue() int { return 42 }\n",
 		"cmd/app/legacy_unix.go": `// +build linux darwin
 
 package main
 func legacyValue() int { return 1 }
 `,
-		"cmd/app/legacy_other.go": `// +build windows wasip1
+		"cmd/app/legacy_other.go": `// +build windows wasip1 msdos
 
 package main
 func legacyValue() int { return 1 }
@@ -148,7 +149,7 @@ func legacyValue() int { return 1 }
 package main
 func modernValue() int { return 1 }
 `,
-		"cmd/app/modern_other.go": `//go:build windows || wasip1
+		"cmd/app/modern_other.go": `//go:build windows || wasip1 || msdos
 
 package main
 func modernValue() int { return 1 }

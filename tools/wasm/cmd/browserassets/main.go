@@ -297,6 +297,9 @@ func outputName(target string, image string) string {
 	if target == "vm/vm32" {
 		return "app.rnvb"
 	}
+	if image == "dos-com" {
+		return "app.com"
+	}
 	if strings.HasPrefix(target, "esp32") || strings.Contains(image, "elf") {
 		return "app.elf"
 	}
@@ -418,6 +421,13 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 			Computers: []computerTarget{{
 				Name: "PDP-11", Target: "unixv7/pdp11", Family: "Retro computer", Artwork: "pdp11",
 				Description: "PDP-11 running Unix V7, or a compatible emulator",
+			}},
+		},
+		{
+			Path: "examples/msdos", Target: "msdos/8086",
+			Computers: []computerTarget{{
+				Name: "IBM PC compatible", Target: "msdos/8086", Family: "Retro computer", Artwork: "ibmpc",
+				Description: "IBM PC-compatible running MS-DOS, or a compatible emulator",
 			}},
 		},
 		{Path: "device/mmio"},

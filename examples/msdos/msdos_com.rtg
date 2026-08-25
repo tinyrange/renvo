@@ -1,0 +1,816 @@
+definition 1
+unit msdos_com
+implements direct_emitter_v1
+
+# A compact, real-mode 8086 backend for headerless MS-DOS COM executables.
+# DOS loads the image at CS:0100 with CS=DS=ES=SS. All pointers and label
+# addresses are therefore near offsets in that one segment.
+go backend {
+	func emitWord(out *RTGEmitter, value int) {
+		out.Uint16(value)
+	}
+
+	func putWord(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+	}
+
+	func emitModRM(out *RTGEmitter, opcode int, mod int, reg int, rm int) {
+		out.Byte(byte(opcode))
+		out.Byte(byte((mod<<6)|(reg<<3)|rm))
+	}
+
+	func emitRegister(out *RTGEmitter, opcode int, destination RTGRegister, source RTGRegister) {
+		emitModRM(out, opcode, 3, source.Code, destination.Code)
+	}
+
+	func emitMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			emitRegister(out, 0x89, destination, source)
+		}
+	}
+
+	func emitImmediate(out *RTGEmitter, destination RTGRegister, value int) {
+		out.Byte(byte(0xb8 + destination.Code))
+		emitWord(out, value)
+	}
+
+	func emitGroupImmediate(out *RTGEmitter, group int, destination RTGRegister, value int) {
+		emitModRM(out, 0x81, 3, group, destination.Code)
+		emitWord(out, value)
+	}
+
+	func emitAddImmediate(out *RTGEmitter, destination RTGRegister, value int) {
+		if value != 0 {
+			emitGroupImmediate(out, 0, destination, value)
+		}
+	}
+
+	func emitAddress(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		if RTGAddressValid(memory) {
+			emitImmediate(out, destination, memory.Addend)
+			RTGAddressRelocAt(out, memory, out.Len()-2)
+			return
+		}
+		if memory.Base.Valid {
+			emitMove(out, destination, memory.Base)
+		} else {
+			emitImmediate(out, destination, 0)
+		}
+		if memory.Index.Valid {
+			scale := memory.Scale
+			if scale <= 0 {
+				scale = 1
+			}
+			for i := 0; i < scale; i++ {
+				emitRegister(out, 0x01, destination, memory.Index)
+			}
+		}
+		emitAddImmediate(out, destination, memory.Displacement)
+	}
+
+	// SI is the compiler-owned address register. The 8086 ModRM encoding for
+	// [SI] is mod=00, r/m=100.
+	func emitMemory(out *RTGEmitter, opcode int, register RTGRegister) {
+		emitModRM(out, opcode, 0, register.Code, 4)
+	}
+
+	func emitLoadWidth(out *RTGEmitter, destination RTGRegister, memory RTGAddress, size int, signed bool) {
+		emitAddress(out, address, memory)
+		if size == 1 {
+			// Load a word and normalize it so every register can be a byte-load
+			// destination; the 8086 only exposes byte halves of AX/CX/DX/BX.
+			emitMemory(out, 0x8b, destination)
+			emitGroupImmediate(out, 4, destination, 0xff)
+			if signed {
+				for i := 0; i < 8; i++ {
+					emitModRM(out, 0xd1, 3, 4, destination.Code)
+				}
+				for i := 0; i < 8; i++ {
+					emitModRM(out, 0xd1, 3, 7, destination.Code)
+				}
+			}
+			return
+		}
+		emitMemory(out, 0x8b, destination)
+	}
+
+	func emitLoadNative(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 2, true)
+	}
+	func emitLoadI32(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 2, true)
+	}
+	func emitLoadU32(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 2, false)
+	}
+	func emitLoadI16(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 2, true)
+	}
+	func emitLoadU16(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 2, false)
+	}
+	func emitLoadI8(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 1, true)
+	}
+	func emitLoadU8(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		emitLoadWidth(out, destination, memory, 1, false)
+	}
+
+	func emitStoreWidth(out *RTGEmitter, memory RTGAddress, source RTGRegister, size int) {
+		// SI is both an ordinary call-word register and the reserved effective
+		// address register. Preserve an SI source before address materialization
+		// replaces it. Stack/frame addresses are BP-relative, so this temporary
+		// push does not change the effective address being requested.
+		if source.Code == address.Code {
+			out.Byte(byte(0x50 + source.Code))
+			emitAddress(out, address, memory)
+			out.Byte(byte(0x58 + scratch.Code))
+			source = scratch
+		} else {
+			emitAddress(out, address, memory)
+		}
+		if size == 1 {
+			// BL is available on every 8086, while SI/DI/BP/SP have no byte half.
+			emitMove(out, scratch, source)
+			emitMemory(out, 0x88, scratch)
+			return
+		}
+		emitMemory(out, 0x89, source)
+	}
+	func emitStoreNative(out *RTGEmitter, memory RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, memory, source, 2)
+	}
+	func emitStoreU32(out *RTGEmitter, memory RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, memory, source, 2)
+	}
+	func emitStoreU16(out *RTGEmitter, memory RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, memory, source, 2)
+	}
+	func emitStoreU8(out *RTGEmitter, memory RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, memory, source, 1)
+	}
+
+	func emitBinary(out *RTGEmitter, opcode int, destination RTGRegister, source RTGRegister) {
+		emitRegister(out, opcode, destination, source)
+	}
+	func emitAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x01, destination, source)
+	}
+	func emitSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x29, destination, source)
+	}
+	func emitMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		// 8086 only has one-operand IMUL, which writes DX:AX. Exchange AX with
+		// the destination around the instruction so a live AX survives without
+		// disturbing the compiler's expression stack. DX is the declared
+		// multiplication scratch/high-word register.
+		operand := source
+		if destination.Code != ax.Code {
+			emitRegister(out, 0x87, ax, destination)
+			if source.Code == ax.Code {
+				operand = destination
+			} else if source.Code == destination.Code {
+				operand = ax
+			}
+		}
+		emitModRM(out, 0xf7, 3, 5, operand.Code)
+		if destination.Code != ax.Code {
+			emitRegister(out, 0x87, ax, destination)
+		}
+	}
+	func emitBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x21, destination, source)
+	}
+	func emitBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x09, destination, source)
+	}
+	func emitBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x31, destination, source)
+	}
+	func emitCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		emitRegister(out, 0x39, left, right)
+	}
+	func emitTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		emitRegister(out, 0x85, left, right)
+	}
+	func emitIncrement(out *RTGEmitter, operand RTGRegister) {
+		out.Byte(byte(0x40 + operand.Code))
+	}
+	func emitDecrement(out *RTGEmitter, operand RTGRegister) {
+		out.Byte(byte(0x48 + operand.Code))
+	}
+	func emitShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			emitModRM(out, 0xd1, 3, 4, operand.Code)
+		}
+	}
+	func emitShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			emitModRM(out, 0xd1, 3, 5, operand.Code)
+		}
+	}
+	func emitShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			emitModRM(out, 0xd1, 3, 7, operand.Code)
+		}
+	}
+
+	func emitAbsoluteControl(out *RTGEmitter, group int, label RTGLabel) {
+		emitImmediate(out, address, 0)
+		out.RelocAt(out.Len()-2, RTGLabelIndex(label))
+		emitModRM(out, 0xff, 3, group, address.Code)
+	}
+	func emitCall(out *RTGEmitter, label RTGLabel) {
+		// A near relative call does not consume an address register. This matters
+		// because all six general-purpose non-stack/frame registers carry call
+		// words, including SI.
+		out.Byte(0xe8)
+		emitWord(out, 0)
+		out.RelocAt(out.Len()-2, RTGLabelIndex(label))
+	}
+	func emitCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		emitModRM(out, 0xff, 3, 2, operand.Code)
+	}
+	func emitJump(out *RTGEmitter, label RTGLabel) {
+		out.Byte(0xe9)
+		emitWord(out, 0)
+		out.RelocAt(out.Len()-2, RTGLabelIndex(label))
+	}
+
+	func inverseBranch(condition RTGCondition) int {
+		if condition.Code == 0 { return 0x75 }
+		if condition.Code == 1 { return 0x74 }
+		if condition.Code == 2 { return 0x7f }
+		if condition.Code == 3 { return 0x7e }
+		if condition.Code == 4 { return 0x7d }
+		if condition.Code == 5 { return 0x7c }
+		if condition.Code == 6 { return 0x73 }
+		if condition.Code == 7 { return 0x72 }
+		if condition.Code == 8 { return 0x77 }
+		return 0x76
+	}
+	func emitJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		out.Byte(byte(inverseBranch(condition)))
+		out.Byte(3)
+		emitJump(out, label)
+	}
+	func emitSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		emitImmediate(out, destination, 0)
+		out.Byte(byte(inverseBranch(condition)))
+		out.Byte(3)
+		emitImmediate(out, destination, 1)
+	}
+	func emitReturn(out *RTGEmitter) {
+		out.Byte(0xc3)
+	}
+	func emitLeave(out *RTGEmitter) {
+		emitMove(out, sp, frame)
+		out.Byte(byte(0x58 + frame.Code))
+	}
+	func emitHostSyscall(out *RTGEmitter) {
+		out.Byte(0xcc)
+	}
+	func emitMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		emitImmediate(out, destination, int(value))
+	}
+	func emitVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		// The shared lowering presents the shift count in primary and the value
+		// in tertiary. 8086 variable shifts require the count in CL.
+		emitRegister(out, 0x87, primary, tertiary)
+		if direction == RTGShiftLeft {
+			emitModRM(out, 0xd3, 3, 4, primary.Code)
+			return
+		}
+		if signed {
+			emitModRM(out, 0xd3, 3, 7, primary.Code)
+		} else {
+			emitModRM(out, 0xd3, 3, 5, primary.Code)
+		}
+	}
+	func emitSignedDivide(out *RTGEmitter, remainder bool) {
+		// The shared lowering presents divisor in primary and dividend in
+		// tertiary; IDIV consumes DX:AX / r/m16.
+		emitMove(out, scratch, primary)
+		emitMove(out, primary, tertiary)
+		out.Byte(0x99)
+		emitModRM(out, 0xf7, 3, 7, scratch.Code)
+		if remainder {
+			emitMove(out, primary, dx)
+		}
+	}
+	func emitUnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		// DIV consumes DX:AX / r/m16. The common lowering has already checked a
+		// zero divisor and supplies its native-width operands in AX and CX.
+		emitMove(out, scratch, primary)
+		emitMove(out, primary, tertiary)
+		emitRegister(out, 0x31, dx, dx)
+		emitModRM(out, 0xf7, 3, 6, scratch.Code)
+		if remainder {
+			emitMove(out, primary, dx)
+		}
+		return true
+	}
+	func emitCopyBytes(out *RTGEmitter) {
+		// copy has memmove semantics. A forward REP MOVSB is destructive when the
+		// destination begins inside the source range, so copy backwards whenever
+		// destination is above source. Copying backwards is also safe when the two
+		// ranges do not overlap. Leave DF clear for all generated code.
+		emitCompare(out, di, si)
+		out.Byte(0x76) // JBE forward
+		out.Byte(12)
+		emitAdd(out, si, cx)
+		emitDecrement(out, si)
+		emitAdd(out, di, cx)
+		emitDecrement(out, di)
+		out.Byte(0xfd) // STD
+		out.Byte(0xf3)
+		out.Byte(0xa4)
+		out.Byte(0xfc) // CLD
+		out.Byte(0xeb) // JMP done
+		out.Byte(2)
+		out.Byte(0xf3)
+		out.Byte(0xa4)
+	}
+
+	func patchRelocations(out *RTGEmitter) {
+		codeBase := 0x100
+		dataBase := codeBase + len(out.Code())
+		bssBase := dataBase + len(out.Data())
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			target := out.LabelPosition(out.RelocationLabel(i))
+			if target >= 0 {
+				if at > 0 && (out.Code()[at-1] == 0xe8 || out.Code()[at-1] == 0xe9) {
+					putWord(out.Code(), at, target-at-2)
+				} else {
+					putWord(out.Code(), at, codeBase+target)
+				}
+			}
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataBase, bssBase)
+			if ok {
+				putWord(out.Code(), at, target)
+			}
+		}
+	}
+
+	func frameStart(out *RTGEmitter) int {
+		out.Byte(byte(0x50 + frame.Code))
+		emitMove(out, frame, sp)
+		emitModRM(out, 0x81, 3, 5, sp.Code)
+		at := out.Len()
+		emitWord(out, 0)
+		return at
+	}
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		putWord(out.Code(), at, RTGAlignValue(stackUsed, 2))
+	}
+	func pushRegister(out *RTGEmitter, source RTGRegister) {
+		out.Byte(byte(0x50 + source.Code))
+	}
+	func pushImmediate(out *RTGEmitter, value int) {
+		// PUSH imm16 is an 80186 instruction. Preserve 8086 compatibility by
+		// materializing through the scratch register.
+		emitImmediate(out, scratch, value)
+		pushRegister(out, scratch)
+	}
+	func popRegister(out *RTGEmitter, destination RTGRegister) {
+		out.Byte(byte(0x58 + destination.Code))
+	}
+	func loadFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitModRM(out, 0x8b, 2, destination.Code, 6)
+		emitWord(out, -offset)
+	}
+	func storeFrame(out *RTGEmitter, offset int, source RTGRegister) {
+		emitModRM(out, 0x89, 2, source.Code, 6)
+		emitWord(out, -offset)
+	}
+	func addressFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitMove(out, destination, frame)
+		emitAddImmediate(out, destination, -offset)
+	}
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{ax, dx, cx, bx, di, si}
+		register := primary
+		if word >= 0 && word < len(registers) {
+			register = registers[word]
+		} else {
+			// CALL pushes the return address and frameStart pushes the caller's BP.
+			// Overflow word six was left at the top of the caller's stack after the
+			// register words were popped, so it is at BP+4 in the callee.
+			emitModRM(out, 0x8b, 2, register.Code, 6)
+			emitWord(out, 4+(word-len(registers))*2)
+		}
+		storeFrame(out, offset, register)
+	}
+	func callWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		registers := []RTGRegister{ax, dx, cx, bx, di, si}
+		limit := wordCount
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		for i := 0; i < limit; i++ {
+			popRegister(out, registers[i])
+		}
+		emitCall(out, label)
+		if wordCount > len(registers) {
+			emitAddImmediate(out, sp, (wordCount-len(registers))*2)
+		}
+	}
+	func emitStoreAbsoluteWord(out *RTGEmitter, memory RTGAddress, source RTGRegister) {
+		emitModRM(out, 0x89, 0, source.Code, 6)
+		emitWord(out, 0)
+		RTGAddressRelocAt(out, memory, out.Len()-2)
+	}
+	func dosEntryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		// COM normally starts with all four segments at the PSP. Establish data
+		// segments, clear DF, and zero the complete final BSS before any runtime
+		// state or authored global initializer runs.
+		out.Byte(0x0e)
+		out.Byte(0x1f)
+		out.Byte(0x0e)
+		out.Byte(0x07)
+		out.Byte(0xfc)
+		emitAddress(out, di, RTGBSSAddress(0))
+		emitAddress(out, cx, RTGBSSEndAddress(1))
+		emitSubtract(out, cx, di)
+		emitRegister(out, 0x31, ax, ax)
+		out.Byte(0xf3)
+		out.Byte(0xaa) // REP STOSB
+		return true
+	}
+	func emitJumpZero(out *RTGEmitter, label RTGLabel) {
+		out.Byte(0x75)
+		out.Byte(3)
+		emitJump(out, label)
+	}
+	func emitJumpNotZero(out *RTGEmitter, label RTGLabel) {
+		out.Byte(0x74)
+		out.Byte(3)
+		emitJump(out, label)
+	}
+
+	func dosEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount == 0 {
+			return true
+		}
+
+		// The compact-unit string and slice layouts retain eight-byte value slots
+		// even on a 16-bit target. Build up to eight argv string descriptors from
+		// argv[0] plus the PSP command tail, pointing tail strings directly into
+		// the PSP. DOS limits that tail to 126 bytes.
+		argsOffset := out.ReserveBSS(8*16, 2)
+		environmentOffset := out.ReserveBSS(16, 2)
+		data := out.Data()
+		arg0Offset := len(data)
+		data = append(data, []byte("program.com")...)
+		environmentTextOffset := len(data)
+		data = append(data, []byte("PATH=.")...)
+		out.SetData(data)
+
+		emitAddress(out, ax, RTGDataAddress(arg0Offset))
+		emitStoreAbsoluteWord(out, RTGBSSAddress(argsOffset), ax)
+		emitImmediate(out, ax, 11)
+		emitStoreAbsoluteWord(out, RTGBSSAddress(argsOffset+8), ax)
+		emitAddress(out, di, RTGBSSAddress(argsOffset+16))
+		emitImmediate(out, si, 0x81)
+		emitImmediate(out, bx, 1)
+		emitRegister(out, 0x31, cx, cx)
+		// MOV CL,[0080h]
+		emitModRM(out, 0x8a, 0, 1, 6)
+		emitWord(out, 0x80)
+
+		skip := out.NewLabel()
+		token := out.NewLabel()
+		scan := out.NewLabel()
+		finish := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(skip)
+		emitTest(out, cx, cx)
+		emitJumpZero(out, done)
+		emitRegister(out, 0x31, ax, ax)
+		// MOV AL,[SI]
+		emitModRM(out, 0x8a, 0, 0, 4)
+		out.Byte(0x3c)
+		out.Byte(0x20)
+		emitJumpNotZero(out, token)
+		emitIncrement(out, si)
+		emitDecrement(out, cx)
+		emitJump(out, skip)
+
+		out.Mark(token)
+		emitMove(out, dx, si)
+		out.Mark(scan)
+		emitTest(out, cx, cx)
+		emitJumpZero(out, finish)
+		emitRegister(out, 0x31, ax, ax)
+		emitModRM(out, 0x8a, 0, 0, 4)
+		out.Byte(0x3c)
+		out.Byte(0x20)
+		emitJumpZero(out, finish)
+		emitIncrement(out, si)
+		emitDecrement(out, cx)
+		emitJump(out, scan)
+
+		out.Mark(finish)
+		// MOV [DI],DX and MOV [DI+8],AX.
+		emitModRM(out, 0x89, 0, dx.Code, 5)
+		emitMove(out, ax, si)
+		emitSubtract(out, ax, dx)
+		emitModRM(out, 0x89, 1, ax.Code, 5)
+		out.Byte(8)
+		emitAddImmediate(out, di, 16)
+		emitIncrement(out, bx)
+		emitGroupImmediate(out, 7, bx, 8)
+		emitJumpZero(out, done)
+		emitJump(out, skip)
+
+		out.Mark(done)
+		emitAddress(out, ax, RTGBSSAddress(argsOffset))
+		emitMove(out, dx, bx)
+		emitMove(out, cx, bx)
+		if parameterCount == 2 {
+			emitAddress(out, bx, RTGBSSAddress(environmentOffset))
+			emitAddress(out, di, RTGDataAddress(environmentTextOffset))
+			emitStoreAbsoluteWord(out, RTGBSSAddress(environmentOffset), di)
+			emitImmediate(out, di, 6)
+			emitStoreAbsoluteWord(out, RTGBSSAddress(environmentOffset+8), di)
+			emitImmediate(out, di, 1)
+			emitImmediate(out, si, 1)
+		}
+		return true
+	}
+	func dosNegateError(out *RTGEmitter) {
+		out.Byte(0x73) // JNC success
+		out.Byte(2)
+		emitModRM(out, 0xf7, 3, 3, ax.Code) // NEG AX
+	}
+	func dosRead(out *RTGEmitter) {
+		// Renvo arguments arrive as AX=fd, DX=buffer, CX=count.
+		emitMove(out, bx, ax)
+		emitImmediate(out, ax, 0x3f00)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		dosNegateError(out)
+	}
+	func dosWrite(out *RTGEmitter) {
+		emitMove(out, bx, ax)
+		emitImmediate(out, ax, 0x4000)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		dosNegateError(out)
+	}
+	func dosReadWriteAt(out *RTGEmitter, write bool) {
+		// Save the buffer and count while DOS seek consumes CX:DX. The target's
+		// offset is a signed 16-bit int, so sign-extend it into CX:DX.
+		emitMove(out, di, dx)
+		emitMove(out, si, cx)
+		emitMove(out, dx, bx)
+		emitMove(out, cx, dx)
+		for i := 0; i < 15; i++ {
+			emitModRM(out, 0xd1, 3, 7, cx.Code)
+		}
+		emitMove(out, bx, ax)
+		emitImmediate(out, ax, 0x4200)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		out.Byte(0x73) // JNC performIO
+		out.Byte(4)
+		emitModRM(out, 0xf7, 3, 3, ax.Code)
+		out.Byte(0xeb) // JMP done
+		out.Byte(13)
+		emitMove(out, dx, di)
+		emitMove(out, cx, si)
+		if write {
+			emitImmediate(out, ax, 0x4000)
+		} else {
+			emitImmediate(out, ax, 0x3f00)
+		}
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		dosNegateError(out)
+	}
+	func dosReadAt(out *RTGEmitter) { dosReadWriteAt(out, false) }
+	func dosWriteAt(out *RTGEmitter) { dosReadWriteAt(out, true) }
+	func dosOpen(out *RTGEmitter) {
+		// AX=ASCIIZ path, DX=Renvo flags. DOS separates open and create, so try
+		// 3Dh first for O_CREATE without O_TRUNC and fall back to 3Ch on failure.
+		emitMove(out, di, ax)
+		emitMove(out, si, dx)
+		emitMove(out, bx, si)
+		emitGroupImmediate(out, 4, bx, 0x0200)
+		out.Byte(0x75) // JNZ create
+		out.Byte(24)
+		emitMove(out, dx, di)
+		emitMove(out, ax, si)
+		emitGroupImmediate(out, 4, ax, 3)
+		emitGroupImmediate(out, 1, ax, 0x3d00)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		out.Byte(0x73) // JNC done
+		out.Byte(21)
+		emitMove(out, bx, si)
+		emitGroupImmediate(out, 4, bx, 0x0040)
+		out.Byte(0x74) // JZ normalizeError
+		out.Byte(9)
+		// create:
+		emitMove(out, dx, di)
+		emitRegister(out, 0x31, cx, cx)
+		emitImmediate(out, ax, 0x3c00)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		// normalizeError:
+		dosNegateError(out)
+	}
+	func dosClose(out *RTGEmitter) {
+		emitMove(out, bx, ax)
+		emitImmediate(out, ax, 0x3e00)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		out.Byte(0x72) // JC error
+		out.Byte(5)
+		emitImmediate(out, ax, 0)
+		out.Byte(0xeb)
+		out.Byte(2)
+		emitModRM(out, 0xf7, 3, 3, ax.Code)
+	}
+	func dosChmod(out *RTGEmitter) {
+		// DOS has pathname attributes rather than fchmod. Validate that this is a
+		// live disk handle with a zero-distance seek and treat Unix mode bits as a
+		// successful compatibility no-op.
+		emitMove(out, bx, ax)
+		emitImmediate(out, cx, 0)
+		emitImmediate(out, dx, 0)
+		emitImmediate(out, ax, 0x4201)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+		out.Byte(0x72) // JC error
+		out.Byte(5)
+		emitImmediate(out, ax, 0)
+		out.Byte(0xeb)
+		out.Byte(2)
+		emitModRM(out, 0xf7, 3, 3, ax.Code)
+	}
+	func dosExit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != ax.Code {
+			emitMove(out, ax, status)
+		}
+		emitGroupImmediate(out, 4, ax, 0xff)
+		emitGroupImmediate(out, 1, ax, 0x4c00)
+		out.Byte(0xcd)
+		out.Byte(0x21)
+	}
+
+	func comImage(out *RTGEmitter) []byte {
+		result := make([]byte, 0, len(out.Code())+len(out.Data()))
+		result = append(result, out.Code()...)
+		result = append(result, out.Data()...)
+		// Keep 4 KiB above BSS for the machine stack. COM has no header in which
+		// to express this reservation, so reject images that cannot fit the
+		// single-segment memory model.
+		if len(result) > 0xff00 || 0x100+len(result)+out.BSSSize() > 0xf000 {
+			return nil
+		}
+		return result
+	}
+}
+
+arch i8086 {
+	alias = "8086"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	unaligned_memory = true
+	patch_relocations = go patchRelocations
+	registers integer = [ax, cx, dx, bx, sp, bp, si, di]
+	locations {
+		primary = ax
+		secondary = dx
+		tertiary = cx
+		scratch = bx
+		address = si
+		copy_destination = di
+		copy_source = si
+		copy_count = cx
+		stack = sp
+		frame = bp
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go emitMove
+		address = go emitAddress
+		load.native = go emitLoadNative
+		load.i32 = go emitLoadI32
+		load.u32 = go emitLoadU32
+		load.i16 = go emitLoadI16
+		load.u16 = go emitLoadU16
+		load.i8 = go emitLoadI8
+		load.u8 = go emitLoadU8
+		store.native = go emitStoreNative
+		store.u32 = go emitStoreU32
+		store.u16 = go emitStoreU16
+		store.u8 = go emitStoreU8
+		add = go emitAdd
+		subtract = go emitSubtract
+		multiply = go emitMultiply
+		bit_and = go emitBitAnd
+		bit_or = go emitBitOr
+		bit_xor = go emitBitXor
+		compare = go emitCompare
+		test = go emitTest
+		increment = go emitIncrement
+		decrement = go emitDecrement
+		shift_left_immediate = go emitShiftLeftImmediate
+		shift_right_unsigned_immediate = go emitShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go emitShiftRightSignedImmediate
+		call = go emitCall
+		call_indirect = go emitCallIndirect
+		jump = go emitJump
+		jump_condition = go emitJumpCondition
+		set_condition = go emitSetCondition
+		return = go emitReturn
+		leave = go emitLeave
+		host_syscall = go emitHostSyscall
+		move_immediate = go emitMoveImmediate
+		variable_shift = go emitVariableShift
+		signed_divide = go emitSignedDivide
+		copy_bytes = go emitCopyBytes
+	}
+}
+
+abi renvo_8086 {
+	arch = i8086
+	frame_start = go frameStart
+	frame_finish = go frameFinish
+	push_register = go pushRegister
+	push_immediate = go pushImmediate
+	pop_register = go popRegister
+	frame_load = go loadFrame
+	frame_store = go storeFrame
+	frame_address = go addressFrame
+	store_param_word = go storeParamWord
+	call_word_count = go callWordCount
+	unsigned_divide = go emitUnsignedDivide
+	call_words = [ax, dx, cx, bx, di, si]
+	overflow_stride = 2
+	scalar_result = ax
+	stack_alignment = 2
+}
+
+runtime msdos {
+	emit_entry_start = go dosEntryStart
+	emit_entry = go dosEntry
+	emit_exit = go dosExit
+	operation read { emit = go dosRead }
+	operation write { emit = go dosWrite }
+	operation read_at { emit = go dosReadAt }
+	operation write_at { emit = go dosWriteAt }
+	operation open { emit = go dosOpen }
+	operation close { emit = go dosClose }
+	operation chmod { emit = go dosChmod }
+	operation print { use = write args = [stdout, buffer, count] }
+}
+
+format dos_com {
+	kind = "dos-com"
+	byte_order = little
+	address_bits = 16
+	code_offset = 0x100
+	image = go comImage
+}
+
+target msdos/8086 {
+	family = native_v1
+	os = msdos
+	arch = i8086
+	abi = renvo_8086
+	runtime = msdos
+	executable = dos_com
+	arena_default = 24000
+	build_tags = [dos, msdos, i8086]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
