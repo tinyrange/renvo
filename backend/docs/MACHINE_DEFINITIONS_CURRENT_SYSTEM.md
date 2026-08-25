@@ -1,8 +1,8 @@
 # Renvo machine definitions: implemented system
 
-This document supersedes the pre-refactor meeting brief. The design and
-migration rationale are in [`PLAN.html`](PLAN.html); the backend-author
-workflow is in [`../definitions/README.md`](../definitions/README.md).
+This document describes the implemented machine-definition system. The
+backend-author workflow is in
+[`../definitions/README.md`](../definitions/README.md).
 
 ## Current source authority
 
