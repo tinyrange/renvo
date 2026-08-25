@@ -211,9 +211,7 @@ jobs:
         run: ./tools/check packages
 
   performance:
-    name: Compiler CI resource gates
-    needs: preflight
-    if: ${{ github.event_name != 'pull_request' }}
+    name: Compiler CI performance and resource gates
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -232,10 +230,7 @@ jobs:
 
   frontend-corpus:
     name: Frontend corpus tests
-    needs:
-      - preflight
-      - backend-amd64
-      - package-tests
+    needs: preflight
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -272,7 +267,10 @@ jobs:
       - name: Require every test job to pass
         run: |
           if [[ '${{ github.event_name }}' == pull_request ]]; then
-            results=('${{ needs.preflight.result }}')
+            results=(
+              '${{ needs.preflight.result }}'
+              '${{ needs.performance.result }}'
+            )
           else
             results=(
               '${{ needs.preflight.result }}'
