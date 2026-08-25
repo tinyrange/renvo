@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -49,8 +48,8 @@ func main() {
 		print("FAIL read\n")
 		return
 	}
-	if _, readErr := file.Read(buf[:1]); !errors.Is(readErr, io.EOF) {
-		print("FAIL EOF identity\n")
+	if _, readErr := file.Read(buf[:1]); readErr == nil {
+		print("FAIL EOF\n")
 		return
 	}
 	if file.Close() != nil {

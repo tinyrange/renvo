@@ -2,8 +2,6 @@
 
 package os
 
-import "io"
-
 const O_RDONLY = 0
 const O_RDWR = 2
 
@@ -30,6 +28,7 @@ type osError struct {
 }
 
 var ioErrorValue = osError{text: "I/O error"}
+var eofErrorValue = osError{text: "EOF"}
 
 func (e *osError) Error() string {
 	if e == nil {
@@ -42,8 +41,8 @@ func errIO() *osError {
 	return &ioErrorValue
 }
 
-func errEOF() error {
-	return io.EOF
+func errEOF() *osError {
+	return &eofErrorValue
 }
 
 func Environ() []string {
