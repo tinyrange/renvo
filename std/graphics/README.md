@@ -118,17 +118,6 @@ forms.NewApp(window, &form.Form).Run()
 Build the application with `renvo -t browser/wasm32 -o hello.html .` and open
 `hello.html` directly in a WebGL2-capable browser.
 
-The IDE uses the browser's persistent virtual filesystem and launches compiled
-`browser/wasm32` HTML outputs back into the compositor. A bundled compiler also
-provides the Forms sources through its read-only module cache, so the generated
-Hello World project builds without network access. The compiler itself needs a
-larger application arena than ordinary GUI programs:
-
-```sh
-renvo -tags renvo_bundle -t browser/wasm32 -s -arena-size 536870912 \
-  -o renvoide.html ./cmd/renvoide
-```
-
 ## Deliberate baseline exclusions
 
 Shaders, perspective transforms, multisampling, HDR, floating-point targets,

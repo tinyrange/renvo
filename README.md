@@ -322,10 +322,9 @@ module `vendor` directory, or populate `RENVO_MODCACHE` beforehand.
 cmd/renvo/          command-line compiler
 cmd/renvoapk/       Renvo-built Android NativeActivity packager
 cmd/renvorepl/      experimental pure-Renvo interactive compiler
-cmd/renvoide/       beta graphical development environment
 internal/           parser, checker, loader, lowering, linker, and driver
 std/                Renvo's target standard library
-forms/ and ide/     reusable IDE and UI packages
+forms/              reusable UI packages
 frontend_tests/     package, diagnostic, self-host, and standalone acceptance tests
 backend/            code generators, runtime shell, target descriptions, and backend tests
 tools/check         canonical development and PR validation driver
@@ -362,13 +361,6 @@ go test ./internal/... ./std/... ./cmd/...
 go test ./backend/unit ./backend/target ./backend/bringup ./backend/omnibus/...
 go test ./frontend_tests
 go test -run '^(TestCompileTests|TestUnitFrontendCompileTests)$' ./backend
-```
-
-GUI frontend compile time and Go heap allocations have dedicated cold,
-unchanged, and edited-project benchmarks:
-
-```sh
-go test ./cmd/renvoide -run '^$' -bench '^BenchmarkGUIFrontend' -benchmem
 ```
 
 The GitHub Actions workflow runs the complete backend matrix, compiler resource
