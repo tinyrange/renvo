@@ -417,10 +417,10 @@ Useful commands are:
 
 The line editor is implemented in Renvo and supports cursor movement, history,
 UTF-8-aware redraw, and tab completion. Completion and signature help reuse the
-same parser/checker/language-service infrastructure as the IDE. Do not build a
-second identifier parser inside the REPL. Import completion should query the
-bundled standard-library packages, and argument help should use checked
-function signatures.
+shared parser/checker/language-service infrastructure. Do not build a second
+identifier parser inside the REPL. Import completion should query the bundled
+standard-library packages, and argument help should use checked function
+signatures.
 
 When testing the REPL, pipe a sequence of submissions rather than checking only
 one expression. A useful session covers:
@@ -436,35 +436,7 @@ one expression. A useful session covers:
 That sequence catches accidental source replay, broken stable cells, stale code
 pointers, and import-generation mistakes.
 
-## The IDE and Forms
-
-`cmd/renvoide` is a beta IDE written to run as a Renvo application. It is also
-an integration test for the compiler, graphics stack, forms library,
-filesystem, incremental builds, language service, and accessibility layer.
-
-Build it with a standalone compiler:
-
-```sh
-renvo-standalone \
-  -tags renvo_bundle \
-  -t linux/amd64 \
-  -s \
-  -o renvoide \
-  ./cmd/renvoide
-```
-
-The IDE uses the same checked package graph as command-line compilation.
-Editor completion overlays the unsaved current buffer on the filesystem and
-then asks `internal/languageservice` and `internal/check` for:
-
-- lexical and semantic names;
-- members after a selector;
-- standard-library import paths;
-- callable signatures;
-- the active argument.
-
-If a completion bug also appears in the REPL, fix the shared analysis rather
-than adding two UI-specific exceptions.
+## Forms
 
 The Forms designer treats Go source as the model. A typical project separates:
 
@@ -475,12 +447,8 @@ Do not edit the generated file by hand or make the designer rewrite the user
 file. Generated assets such as fonts and control icons should be embedded with
 `//go:embed`, not copied into giant source literals.
 
-The IDE and Forms code has three kinds of tests:
-
-- ordinary widget/model unit tests under `ide/` and `forms/`;
-- project and form-generation tests under `cmd/renvoide/`;
-- UI automation and accessibility tests that exercise real focus, control
-  identity, actions, and screen state.
+Forms has ordinary widget/model unit tests and UI automation and accessibility
+tests that exercise real focus, control identity, actions, and screen state.
 
 Keep visual automation deterministic. Prefer control identity and accessibility
 state over pixel coordinates. Incremental compilation must invalidate by
@@ -1033,7 +1001,7 @@ unexplained payload regression.
 - Keep package initialization order canonical, including blank imports.
 - Preserve declared symbol identity across packages, aliases, methods, and
   interface contracts.
-- Use the same checked model for IDE and REPL tooling.
+- Use the same checked model for interactive tooling.
 - Keep build tags out of parser/checker/linker algorithms.
 - Compare stage0 and self-hosted units whenever a change touches canonical
   ordering or arena reclamation.

@@ -18,7 +18,6 @@ func TestPackageBrowserHTMLIsSelfContained(t *testing.T) {
 		[]byte("launchFile"),
 		[]byte(".renvo-window.floating"),
 		[]byte("ResizeObserver"),
-		[]byte("/workspace"),
 		[]byte("setWindowTimer"),
 		[]byte("RNVA"),
 		[]byte("semanticRoles"),
