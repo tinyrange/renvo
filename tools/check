@@ -203,9 +203,10 @@ Modes:
                bounded QEMU boots. This is intentionally outside preflight.
   xv6          Build pinned xv6/i386 C sources with Renvo, boot QEMU, and run
                the complete xv6 usertests suite. This is outside preflight.
-  full         Run PR-level performance, preflight, backend, and frontend checks.
-               This can take the full 30-minute timeout and is intended for the
-               merge queue, not the normal interactive development loop.
+  full         Run complete performance, preflight, backend, and frontend checks.
+               This can take the full 30-minute timeout and is intended for
+               merge-queue-equivalent validation, not the normal interactive
+               development loop.
 
 Set RENVO_CHECK_MEMORY_MAX=4G on systemd-based Linux to put each command in a
 memory-limited user unit. This prevents a runaway compiler test from taking
