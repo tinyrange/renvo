@@ -21,3 +21,12 @@ test("desktop WebUSB remains available for the kernel-independent JTAG interface
     webserial: true, webusb: true,
   });
 });
+
+test("iOS is detected and reports no transports when the browser exposes neither API", () => {
+  const profile = detectDeviceProfile({ platform: "iPhone", userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", maxTouchPoints: 5, coarsePointer: true, width: 390, shortSide: 390 });
+  assert.equal(profile.ios, true);
+  assert.equal(profile.phone, true);
+  assert.deepEqual(chooseESPTransportAvailability({ profile, webSerial: false, webUSB: false }), {
+    webserial: false, webusb: false,
+  });
+});

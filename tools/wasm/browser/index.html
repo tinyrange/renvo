@@ -14,10 +14,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg>
       </button>
       <div class="project-title"><span class="project-kicker">Renvo project</span><strong id="project-name">playground</strong></div>
-      <button id="build-scope" class="build-scope" type="button" title="Build the current project">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h4l1.4 1.5h5.6v7.5h-11v-9Z"/></svg>
-        <span><small>Build scope</small><strong id="build-scope-label">Project</strong></span>
-      </button>
       <label class="command-input" title="Compiler arguments">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5M10 13h3"/></svg>
         <input id="command" value="-s -o app.wasm ." spellcheck="false" aria-label="Compiler arguments">
@@ -52,13 +48,12 @@
 
     <header class="mobile-header">
       <div class="mobile-heading">
-        <span id="mobile-step">Choose a file</span>
+        <span id="mobile-step">Project</span>
         <span id="mobile-context">playground</span>
       </div>
       <div class="mobile-header-actions">
-        <button id="mobile-target-button" type="button">Target</button>
+        <button id="mobile-target-button" type="button">Device</button>
         <div class="mobile-editor-actions" hidden>
-          <button id="mobile-build" type="button" disabled>Build</button>
           <button id="mobile-run" type="button" disabled>Run</button>
         </div>
       </div>
@@ -66,25 +61,23 @@
 
     <aside class="sidebar" aria-label="Explorer">
       <div class="sidebar-header">
-        <span>Workspace</span>
+        <span>Project</span>
         <strong id="sidebar-project-name">playground</strong>
       </div>
       <div class="project-toolbar" aria-label="Project actions">
         <button id="new-file" class="project-primary" type="button"><span>＋</span> New file</button>
-        <button id="import-project" type="button" title="Import files or ZIP"><span>⇧</span> Import</button>
+        <button id="browse-examples" type="button" title="Browse example projects"><span>◇</span> Examples</button>
         <button id="project-menu" type="button" title="More project actions" aria-label="More project actions" aria-haspopup="menu" aria-expanded="false">•••</button>
-      </div>
-      <div class="project-build-context">
-        <span>Building</span>
-        <button id="build-project-scope" type="button" title="Build files in this project"><strong id="sidebar-build-scope-label">Project</strong><small>.</small></button>
       </div>
       <div class="section-title project-heading"><span>FILES</span><span id="project-file-count" class="section-count">2</span></div>
       <div class="project-action-menu" id="project-action-menu" role="menu" aria-label="Project actions" hidden>
         <button type="button" role="menuitem" data-project-action="new"><span>＋</span><span>New project…</span></button>
         <div class="menu-separator" role="separator"></div>
+        <button type="button" role="menuitem" data-project-action="import"><span>⇧</span><span>Import files or ZIP…</span></button>
+        <button type="button" role="menuitem" data-project-action="directory"><span>▣</span><span>Import folder…</span></button>
+        <div class="menu-separator" role="separator"></div>
         <button type="button" role="menuitem" data-project-action="rename"><span>✎</span><span>Rename project…</span></button>
         <button type="button" role="menuitem" data-project-action="export"><span>⇩</span><span>Export project ZIP</span></button>
-        <button type="button" role="menuitem" data-project-action="directory"><span>▣</span><span>Import folder…</span></button>
         <button type="button" role="menuitem" data-project-action="share"><span>↗</span><span>Copy share link</span></button>
         <button type="button" role="menuitem" data-project-action="snapshots"><span>◷</span><span>Project snapshots…</span></button>
         <div class="menu-separator" role="separator"></div>
@@ -99,33 +92,44 @@
       <input id="project-directory-input" type="file" webkitdirectory multiple hidden>
       <input id="backend-file-input" type="file" accept=".json,.wasm,.rtg" multiple hidden>
       <div class="file-tree" id="file-tree" role="tree"></div>
-      <div class="section-title collapsed" id="advanced-heading"><span class="chevron">›</span><span>ADVANCED BUILD</span></div>
+      <div class="section-title utility-heading collapsed" id="outline-heading"><span class="chevron">›</span><span>OUTLINE</span><span id="outline-count" class="utility-meta"></span></div>
+      <div class="outline-tree" id="outline-tree" role="tree" hidden></div>
+      <div class="section-title utility-heading collapsed" id="library-heading"><span class="chevron">›</span><span>API &amp; LIBRARIES</span></div>
+      <div class="stdlib-tree" id="stdlib-tree" role="tree" hidden><span class="tree-loading">Loading packages…</span></div>
+      <div class="section-title utility-heading collapsed" id="advanced-heading"><span class="chevron">›</span><span>BUILD OPTIONS</span></div>
       <div class="advanced-build" id="advanced-build" hidden>
-        <label>Mode <select id="build-mode"><option value="executable">Executable</option><option value="object">Object</option><option value="kernel-module">Kernel module</option></select></label>
-        <label>Arena <input id="arena-size" placeholder="target default"></label>
+        <p>These settings apply to the next build. Leave them unchanged to use the target defaults.</p>
+        <label><span>Output mode</span><select id="build-mode"><option value="executable">Executable</option><option value="object">Object</option><option value="kernel-module">Kernel module</option></select></label>
+        <label><span>Arena bytes</span><input id="arena-size" inputmode="numeric" placeholder="Target default"></label>
         <label><input id="emit-unit" type="checkbox"> Emit canonical unit</label>
         <label><input id="emit-image" type="checkbox"> Emit linked image</label>
         <label><input id="windows-gui" type="checkbox"> Windows GUI subsystem</label>
         <button id="import-backend" type="button">Import prepared backend…</button>
       </div>
-      <div class="section-title library-heading"><span class="chevron">⌄</span><span>EXAMPLES &amp; LIBRARIES</span></div>
-      <div class="stdlib-tree" id="stdlib-tree" role="tree"><span class="tree-loading">Loading packages…</span></div>
-      <div class="section-title" id="outline-heading"><span class="chevron">⌄</span><span>OUTLINE</span></div>
-      <div class="outline-tree" id="outline-tree" role="tree"></div>
     </aside>
 
-    <section class="mobile-target-view" id="mobile-target-view" aria-label="Select build target">
+    <section class="mobile-target-view" id="mobile-target-view" aria-label="Build and device">
       <div class="mobile-view-intro">
-        <strong>Select a target</strong>
-        <span>Choose where this program will run.</span>
+        <span class="mobile-view-kicker">TARGET</span>
+        <strong id="mobile-device-target">Choose a target</strong>
+        <span id="mobile-device-hint">Choose where the project will run.</span>
+      </div>
+      <div class="mobile-device-actions">
+        <button id="mobile-device-build" type="button" disabled>Build</button>
+        <button id="mobile-device-run" type="button" disabled>Run</button>
       </div>
       <div class="mobile-transport-picker" aria-label="ESP flash transport">
-        <span>ESP connection</span>
+        <div><strong>USB connection</strong><span id="mobile-transport-status">Checking this browser…</span></div>
         <div role="radiogroup" aria-label="ESP flash transport">
           <button type="button" data-mobile-transport="webusb" role="radio" aria-checked="false">WebUSB</button>
           <button type="button" data-mobile-transport="webserial" role="radio" aria-checked="false">WebSerial</button>
         </div>
       </div>
+      <div class="mobile-device-console">
+        <div><strong>Output</strong><span>Build, flash, and serial log</span></div>
+        <pre id="mobile-device-output">Nothing to show yet.</pre>
+      </div>
+      <div class="mobile-target-label">CHOOSE A TARGET</div>
       <div class="mobile-target-list" id="mobile-target-list" role="listbox" aria-label="Build target"></div>
     </section>
 
@@ -163,7 +167,7 @@
           </div>
         </div>
         <div class="panel-content">
-          <pre class="panel-view active" id="output" data-panel-view="output" aria-live="polite">Initializing compiler…</pre>
+          <pre class="panel-view active" id="output" data-panel-view="output" aria-live="polite"></pre>
           <div class="panel-view problems" data-panel-view="problems" id="problems"><div class="empty-state">No problems detected.</div></div>
           <div class="panel-view terminal" data-panel-view="terminal" id="terminal">
             <div class="terminal-options">
@@ -198,25 +202,38 @@
       <span class="status-item">Tab Size: 4</span>
       <span class="status-item">UTF-8</span>
       <span class="status-item" id="language-mode">Go</span>
-      <span class="status-item" id="memory-status">— MiB</span>
+      <span class="status-item" id="memory-status">0 MiB</span>
     </footer>
 
-    <nav class="mobile-nav" aria-label="Workspace steps">
-      <button type="button" data-mobile-view="files" class="active"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h5l1.5 2H14v8H2V3Z"/></svg>Files</button>
+    <nav class="mobile-nav" aria-label="Project views">
+      <button type="button" data-mobile-view="files" class="active"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h5l1.5 2H14v8H2V3Z"/></svg>Project</button>
       <button type="button" data-mobile-view="editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3-3 5 3 5m6-10 3 5-3 5M9 2 7 14"/></svg>Code</button>
-      <button type="button" data-mobile-view="console"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 4 4 4-4 4m5 0h5"/></svg>Output</button>
+      <button type="button" data-mobile-view="device"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 2v3m6-3v3M4 5h8v5a4 4 0 0 1-8 0V5Zm4 9v-2"/></svg>Device</button>
     </nav>
 
     <section class="mobile-flash-view" id="mobile-flash-view" aria-label="Flash progress and serial console" hidden>
       <header>
         <div>
-          <span class="mobile-flash-kicker">FLASH &amp; RUN</span>
+          <span class="mobile-flash-kicker">DEVICE</span>
           <strong id="mobile-flash-state">Ready</strong>
         </div>
         <button id="mobile-flash-close" type="button">Code</button>
       </header>
       <progress id="mobile-flash-progress" max="1" aria-label="Flash progress"></progress>
-      <pre id="mobile-flash-output" aria-live="polite"></pre>
+      <div class="mobile-flash-body">
+        <p id="mobile-flash-detail" aria-live="polite">Preparing the board…</p>
+        <ol class="mobile-flash-steps" aria-label="JTAG load steps">
+          <li data-deploy-step="usb"><span></span><div><strong>USB device</strong><small>Waiting</small></div></li>
+          <li data-deploy-step="check"><span></span><div><strong>Check code</strong><small>Waiting</small></div></li>
+          <li data-deploy-step="firmware"><span></span><div><strong>Build firmware</strong><small>Waiting</small></div></li>
+          <li data-deploy-step="load"><span></span><div><strong>JTAG load</strong><small>Waiting</small></div></li>
+          <li data-deploy-step="run"><span></span><div><strong>Run</strong><small>Waiting</small></div></li>
+        </ol>
+        <details class="mobile-flash-log">
+          <summary>Activity log</summary>
+          <pre id="mobile-flash-output" aria-live="polite"></pre>
+        </details>
+      </div>
     </section>
 
     <dialog class="ide-dialog text-dialog" id="text-dialog">
@@ -249,12 +266,12 @@
 
     <dialog class="ide-dialog new-project-dialog" id="new-project-dialog">
       <form method="dialog" id="new-project-form">
-        <header><div><h2>New project</h2><p>Choose the language for a fresh playground project.</p></div><button value="cancel" aria-label="Close">×</button></header>
+        <header><div><h2>New project</h2><p>Choose a language to start with.</p></div><button value="cancel" aria-label="Close">×</button></header>
         <fieldset class="project-kind-options">
-          <label><input type="radio" name="project-kind" value="go" checked><span><strong>Go project</strong><small>Start with a Go module and main package.</small></span></label>
-          <label><input type="radio" name="project-kind" value="c"><span><strong>C project</strong><small>Start in pure C mode with the embedded C standard library.</small></span></label>
+          <label><input type="radio" name="project-kind" value="go" checked><span><strong>Go</strong><small>A Go module with a main package.</small></span></label>
+          <label><input type="radio" name="project-kind" value="c"><span><strong>C</strong><small>A C program with Renvo's embedded standard library.</small></span></label>
         </fieldset>
-        <p class="new-project-warning">Creating the project replaces the files currently open in this playground.</p>
+        <p class="new-project-warning">This replaces the files in the current project.</p>
         <footer><button value="cancel" class="dialog-secondary">Cancel</button><button value="accept" class="dialog-primary">Create project</button></footer>
       </form>
     </dialog>
@@ -269,12 +286,66 @@
 
     <dialog class="ide-dialog snapshot-dialog" id="snapshot-dialog">
       <div class="dialog-body">
-        <header><div><h2>Project snapshots</h2><p>Save or restore browser-local project states.</p></div><button type="button" id="snapshot-dialog-close" aria-label="Close">×</button></header>
+        <header><div><h2>Snapshots</h2><p>Save a local copy of the project or restore an earlier one.</p></div><button type="button" id="snapshot-dialog-close" aria-label="Close">×</button></header>
         <form class="snapshot-create" id="snapshot-create-form">
           <input id="snapshot-name" value="Snapshot" aria-label="Snapshot name" autocomplete="off">
-          <button type="submit" class="dialog-primary">Save current</button>
+          <button type="submit" class="dialog-primary">Save snapshot</button>
         </form>
         <div class="snapshot-list" id="snapshot-list"></div>
+      </div>
+    </dialog>
+
+    <dialog class="ide-dialog example-dialog" id="example-dialog">
+      <div class="dialog-body">
+        <header><div><span class="dialog-kicker">EXAMPLES</span><h2>Start with your hardware</h2><p>Choose a board or computer to see what runs on it.</p></div><button type="button" id="example-dialog-close" aria-label="Close">×</button></header>
+        <section class="mobile-setup" id="mobile-setup" aria-live="polite">
+          <div class="mobile-setup-copy">
+            <strong id="mobile-setup-title">Getting Renvo ready</strong>
+            <span id="mobile-setup-detail">Opening your workspace…</span>
+            <small>The first visit downloads the editor and compiler. Later visits use the browser cache.</small>
+          </div>
+          <progress id="mobile-setup-progress" max="4" value="0">0 of 4</progress>
+          <ol>
+            <li data-setup-step="workspace"><span></span>Workspace</li>
+            <li data-setup-step="catalog"><span></span>Examples</li>
+            <li data-setup-step="editor"><span></span>Editor</li>
+            <li data-setup-step="compiler"><span></span>Compiler</li>
+          </ol>
+        </section>
+        <div class="example-browser-layout">
+          <aside class="example-board-pane" aria-label="Hardware">
+            <div class="example-pane-heading"><span>HARDWARE</span><strong>What are you using?</strong></div>
+            <div class="example-board-list" id="example-board-list"></div>
+          </aside>
+          <section class="example-project-pane" aria-label="Examples">
+            <div class="example-filters">
+              <label class="example-search"><span>Search examples</span><input id="example-search" type="search" placeholder="Blink, sensor, terminal" autocomplete="off"></label>
+              <label><span>Target</span><select id="example-target-filter"><option value="">All targets</option></select></label>
+              <select id="example-board-filter" aria-label="Hardware" hidden><option value="">All hardware</option></select>
+            </div>
+            <div class="example-summary"><span id="example-result-count">Loading examples…</span><span>Opening an example replaces the current files.</span></div>
+            <div class="example-results" id="example-results" aria-live="polite"></div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="ide-dialog device-permission-dialog" id="device-permission-dialog">
+      <div class="dialog-body">
+        <header><div><span class="dialog-kicker">USB ACCESS</span><h2>Allow USB access?</h2><p id="device-permission-intro">Your browser will ask which device Renvo may use.</p></div><button type="button" id="device-permission-close" aria-label="Close">×</button></header>
+        <div class="device-permission-body">
+          <div class="device-permission-steps">
+            <div><span>1</span><p><strong>Select a device</strong>Only the device you choose is shared with Renvo.</p></div>
+            <div><span>2</span><p><strong>Flash the build</strong>Renvo writes firmware when you press Flash.</p></div>
+            <div><span>3</span><p><strong>Read its output</strong>The connection stays open for serial messages.</p></div>
+          </div>
+          <div class="device-capabilities" aria-label="Browser device support">
+            <div id="device-webusb-status"><span class="capability-dot"></span><p><strong>WebUSB</strong><small>Checking support…</small></p></div>
+            <div id="device-webserial-status"><span class="capability-dot"></span><p><strong>WebSerial</strong><small>Checking support…</small></p></div>
+          </div>
+          <p class="device-permission-note" id="device-permission-note">Disconnect the board at any time to end access.</p>
+        </div>
+        <footer><button type="button" class="dialog-secondary" id="device-permission-cancel">Cancel</button><button type="button" class="dialog-primary" id="device-permission-accept">Select device</button></footer>
       </div>
     </dialog>
   </div>

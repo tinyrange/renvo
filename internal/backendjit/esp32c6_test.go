@@ -24,7 +24,7 @@ func TestCompiledInBootstrapPreparesESP32C6Definition(t *testing.T) {
 	definition := filepath.Join(root, "backends", "esp32c6.rtg")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
-		"-t", "esp32c6/riscv32",
+		"-t", "esp32c6/riscv32", "-tags", "m5nanoc6",
 		"-o", "oracle.elf",
 		filepath.Join(root, "examples", "m5nanoc6", "oracle"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},
@@ -140,6 +140,7 @@ func TestCompiledInBootstrapCompilesESP32C6JTAGImageIntoSRAM(t *testing.T) {
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "esp32c6-jtag/riscv32",
+		"-tags", "m5nanoc6",
 		"-s",
 		"-o", "hotreload-jtag.elf",
 		filepath.Join(root, "examples", "m5nanoc6", "hotreload"),

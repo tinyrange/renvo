@@ -11,9 +11,9 @@ go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo -t darwin/arm64 -o sandbox/renvoflash ./cmd/renvoflash
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5atoms3lite \
   -o sandbox/m5atoms3lite-button-rgb.elf \
-  ./examples/m5atoms3lite/button_rgb
+  ./examples/device/button_rgb
 ```
 
 Flash the factory application region while preserving the bootloader,
@@ -35,9 +35,9 @@ the button still triggers only once.
 ```sh
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5atoms3lite \
   -o sandbox/m5atoms3lite-sk6812-strip.elf \
-  ./examples/m5atoms3lite/sk6812_strip
+  ./examples/device/ws2812_shots
 ./sandbox/renvoflash sandbox/m5atoms3lite-sk6812-strip.elf
 ```
 
@@ -52,9 +52,9 @@ SDO/ALT ADDRESS pin is grounded.
 ```sh
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5atoms3lite \
   -o sandbox/m5atoms3lite-adxl345.elf \
-  ./examples/m5atoms3lite/adxl345
+  ./examples/device/adxl345
 ./sandbox/renvoflash sandbox/m5atoms3lite-adxl345.elf
 ```
 
@@ -75,8 +75,8 @@ Renvo's browser IDE graphs automatically after Flash & Run.
 ```sh
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5atoms3lite \
   -o sandbox/m5atoms3lite-env-pro.elf \
-  ./examples/m5atoms3lite/env_pro
+  ./examples/device/env_pro
 ./sandbox/renvoflash sandbox/m5atoms3lite-env-pro.elf
 ```

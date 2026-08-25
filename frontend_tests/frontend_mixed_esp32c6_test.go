@@ -17,8 +17,8 @@ func TestFrontendBuildsMixedESP32C6Blink(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "blink-mixed.unit")
 	command := frontendCommand(frontend,
 		"-backend", filepath.Join(root, "backends", "esp32c6.rtg"),
-		"-emit-unit", "-t", "esp32c6/riscv32", "-o", output,
-		"./examples/m5nanoc6/blink_mixed")
+		"-emit-unit", "-t", "esp32c6/riscv32", "-tags", "m5nanoc6", "-o", output,
+		"./examples/device/blink_mixed")
 	command.Dir = root
 	command.Env = frontendCommandEnv(frontend.env, root)
 	if combined, err := command.CombinedOutput(); err != nil {

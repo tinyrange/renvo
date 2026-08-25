@@ -1,6 +1,6 @@
 package main
 
-import board "renvo.dev/device/board/m5sticks3"
+import "renvo.dev/device/board"
 
 func main() {
 	if !board.Display.DrawLineDiagnostic() {

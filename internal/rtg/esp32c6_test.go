@@ -23,11 +23,6 @@ func TestESP32C6ExternalDefinition(t *testing.T) {
 		target.Descriptor.OutputKind != "elf" {
 		t.Fatalf("unexpected target descriptor: %#v", target.Descriptor)
 	}
-	if len(target.Descriptor.Aliases) != 1 ||
-		target.Descriptor.Aliases[0] != "m5nanoc6/riscv32" {
-		t.Fatalf("aliases = %#v, want m5nanoc6/riscv32",
-			target.Descriptor.Aliases)
-	}
 	generated := GeneratePreparedBackend(resolved, target.Descriptor.Name)
 	if !generated.Ok {
 		t.Fatalf("generate prepared backend: %#v", generated.Diagnostics)

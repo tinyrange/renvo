@@ -1,6 +1,7 @@
 let frontendModule;
 let languageServiceModule;
 let formatterModule;
+let formatterURL;
 let backendJITURL;
 let vmBackendURL;
 let backendJITModule;
@@ -8,6 +9,8 @@ let vmBackendModule;
 let compilerError;
 const backendModules = new Map();
 const backendPrograms = new Map();
+const readyBackendModules = new Set();
+const readyBackendPrograms = new Set();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 let languageFiles = new Map();
@@ -19,10 +22,11 @@ self.addEventListener("message", async (event) => {
     try {
       backendJITURL = request.backendJIT || "";
       vmBackendURL = request.vmBackend || "";
-      [frontendModule, languageServiceModule, formatterModule] = await Promise.all([
-        loadModule(request.compiler, "frontend"),
-        request.languageService ? loadModule(request.languageService, "language service") : Promise.resolve(null),
-        request.formatter ? loadModule(request.formatter, "formatter") : Promise.resolve(null),
+      formatterURL = request.formatter || "";
+      self.postMessage({ type: "init-progress", message: "Downloading the compiler and code checks…" });
+      [frontendModule, languageServiceModule] = await Promise.all([
+        loadInitModule(request.compiler, "compiler"),
+        request.languageService ? loadInitModule(request.languageService, "code checks") : Promise.resolve(null),
       ]);
       self.postMessage({ type: "ready" });
     } catch (error) {
@@ -82,17 +86,35 @@ self.addEventListener("message", async (event) => {
     return;
   }
   if (request.type === "format") {
-    if (!formatterModule) {
+    if (!formatterURL) {
       self.postMessage({ type: "format-result", id: request.id, output: "", error: "Go formatting is unavailable" });
       return;
     }
-    const files = new Map([[clean(request.name), new Uint8Array(request.data)]]);
-    const context = newContext(files);
-    const exitCode = await runModule(formatterModule, context, ["renvo-format", clean(request.name)]);
-    self.postMessage({
-      type: "format-result", id: request.id, exitCode,
-      output: decodeParts(context.stdout), error: decodeParts(context.stderr),
-    });
+    try {
+      if (!formatterModule) {
+        self.postMessage({ type: "format-progress", message: "Downloading the formatter…" });
+        formatterModule = await loadModule(formatterURL, "formatter");
+      }
+      const files = new Map([[clean(request.name), new Uint8Array(request.data)]]);
+      const context = newContext(files);
+      const exitCode = await runModule(formatterModule, context, ["renvo-format", clean(request.name)]);
+      self.postMessage({
+        type: "format-result", id: request.id, exitCode,
+        output: decodeParts(context.stdout), error: decodeParts(context.stderr),
+      });
+    } catch (error) {
+      self.postMessage({ type: "format-result", id: request.id, exitCode: 1, output: "", error: String(error) });
+    }
+    return;
+  }
+  if (request.type === "prefetch-backend") {
+    try {
+      if (request.backendFormat === "vm32") await backendProgram(request.backend);
+      else await backendModule(request.backend);
+      self.postMessage({ type: "backend-prefetch", backend: request.backend, ok: true });
+    } catch (error) {
+      self.postMessage({ type: "backend-prefetch", backend: request.backend, ok: false, error: String(error) });
+    }
     return;
   }
   if (request.type === "analyze" || request.type === "complete" || request.type === "signature" ||
@@ -138,6 +160,12 @@ self.addEventListener("message", async (event) => {
   }
 });
 
+async function loadInitModule(url, name) {
+  const module = await loadModule(url, name);
+  self.postMessage({ type: "init-progress", message: `${name[0].toUpperCase()}${name.slice(1)} ready. Finishing setup…` });
+  return module;
+}
+
 function newContext(files, stdin = "") {
   return {
     memory: null, maxLinearMemoryBytes: 0, files, directories: new Set(["."]), fds: new Map(), nextFd: 4,
@@ -146,12 +174,22 @@ function newContext(files, stdin = "") {
 }
 
 async function backendModule(url) {
-  if (!backendModules.has(url)) backendModules.set(url, loadModule(url, "backend"));
+  if (!backendModules.has(url)) {
+    backendModules.set(url, loadModule(url, "backend").then((module) => {
+      readyBackendModules.add(url);
+      return module;
+    }));
+  }
   return backendModules.get(url);
 }
 
 async function backendProgram(url) {
-  if (!backendPrograms.has(url)) backendPrograms.set(url, loadBytes(url, "VM backend"));
+  if (!backendPrograms.has(url)) {
+    backendPrograms.set(url, loadBytes(url, "VM backend").then((program) => {
+      readyBackendPrograms.add(url);
+      return program;
+    }));
+  }
   return backendPrograms.get(url);
 }
 
@@ -179,11 +217,20 @@ async function runPipeline(request) {
   const plan = pipelineArguments(request.args, files, request.backendTarget);
   const started = performance.now();
   const frontendStarted = performance.now();
+  self.postMessage({ type: "compile-progress", id: request.id, phase: "check", message: "Checking and compiling project code…" });
   let exitCode = await runModule(frontendModule, context, ["renvo", ...plan.frontend]);
   const frontendMilliseconds = performance.now() - frontendStarted;
   let backendMilliseconds = 0;
   if (exitCode === 0 && plan.backend) {
     const backendStarted = performance.now();
+    const backendReady = request.backendFormat === "vm32" ? readyBackendPrograms.has(request.backend) : readyBackendModules.has(request.backend);
+    const backendLoading = request.backendFormat === "vm32" ? backendPrograms.has(request.backend) : backendModules.has(request.backend);
+    self.postMessage({
+      type: "compile-progress", id: request.id, phase: "firmware",
+      message: backendReady ? "Building firmware for the board…" : backendLoading
+        ? "Finishing the board compiler download…"
+        : "Downloading the board compiler. This only happens on the first build…",
+    });
     if (request.backendFormat === "vm32") {
       if (!vmBackendURL) throw new Error("VM32 backend execution is unavailable");
       if (!vmBackendModule) vmBackendModule = loadModule(vmBackendURL, "VM backend runner");

@@ -6,7 +6,7 @@ pre-v3 internal-SRAM map, watchdog handoff, and native USB Serial/JTAG output.
 
 The connected development unit uses the ST7121 integrated display and touch
 controller. Tab5 wiring and framebuffer support live in
-`device/board/m5tab5`; the reusable controller protocol packages live under
+`device/board` behind the `m5tab5` target tag; the reusable controller protocol packages live under
 `device/display/st7121` and `device/input/st7121`.
 
 ## Build and run the startup probe
@@ -15,7 +15,7 @@ controller. Tab5 wiring and framebuffer support live in
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
   -backend backends/esp32p4.rtg \
-  -t esp32p4/riscv32 \
+  -t esp32p4/riscv32 -tags m5tab5 \
   -o sandbox/m5tab5-hello.elf \
   ./examples/m5tab5/hello
 sandbox/renvo -t darwin/arm64 -o sandbox/renvoflash ./cmd/renvoflash
@@ -45,4 +45,4 @@ The useful Tab5 demos are also published in the web editor:
   validating a display after flashing.
 
 Build any demo by replacing the final package in the startup command, for
-example `./examples/m5tab5/forms_demo`.
+example `./examples/device/forms_demo`.

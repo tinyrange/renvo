@@ -22,7 +22,7 @@ func TestCompiledInBootstrapPreparesESP32P4Definition(t *testing.T) {
 	definition := filepath.Join(root, "backends", "esp32p4.rtg")
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
-		"-t", "esp32p4/riscv32",
+		"-t", "esp32p4/riscv32", "-tags", "m5tab5",
 		"-o", "hello.elf",
 		filepath.Join(root, "examples", "m5tab5", "hello"),
 	}, root, filepath.Join(root, "std"), driver.OSFS{},

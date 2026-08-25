@@ -43,7 +43,7 @@ Build Renvo, then compile the same suite for the board:
 go build -o sandbox/renvo ./cmd/renvo
 sandbox/renvo \
   -backend backends/esp32s3.rtg \
-  -t esp32s3/xtensa_lx7 \
+  -t esp32s3/xtensa_lx7 -tags m5sticks3 \
   -o sandbox/m5sticks3-suite.elf \
   ./frontend_tests/single_file_microcontroller
 ```
@@ -65,4 +65,4 @@ watchdog reset to leave the USB flasher and start the application reliably.
 
 To build and flash the interactive Forms example, use the same commands with
 `sandbox/m5sticks3-forms.elf` as the output and
-`./examples/m5sticks3/forms_menu` as the input package.
+`./examples/device/forms_menu` as the input package.

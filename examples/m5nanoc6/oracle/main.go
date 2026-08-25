@@ -1,7 +1,7 @@
 package main
 
 import (
-	board "renvo.dev/device/board/m5nanoc6"
+	"renvo.dev/device/board"
 )
 
 // The oracle uses a shorter delay than the human-visible example. Reaching a

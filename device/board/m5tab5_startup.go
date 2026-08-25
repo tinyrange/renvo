@@ -1,0 +1,12 @@
+//go:build m5tab5
+
+// Package board describes the hardware attached to an M5Stack Tab5.
+package board
+
+import "renvo.dev/internal/arena"
+
+func init() {
+	// Keep application objects between the two PSRAM framebuffers.
+	arena.Reset(0x48800000)
+	arena.PersistReset(0x49f00000)
+}
