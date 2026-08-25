@@ -311,8 +311,15 @@ go backend {
 	const renvoWasm32OpShrUnsignedRegReg = 44
 	const renvoWasm32OpWideBinary = 45
 	const renvoWasm32OpWideCompare = 46
+	const renvoWasm32OpBinaryRegImm = 47
+	const renvoWasm32OpPushRegLoadStack = 48
+	const renvoWasm32OpLoadStackPushReg = 49
+	const renvoWasm32OpPushRegMovImm = 50
+	const renvoWasm32OpLoadMemPushReg = 51
+	const renvoWasm32OpLoadStackPop = 52
+	const renvoWasm32OpMovRegImmPop = 53
 
-	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a"
+	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07"
 	const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 	const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
@@ -331,26 +338,177 @@ go backend {
 	const renvoWasm32CondUgt = 9
 
 	func renvoWasm32EmitRegImm(a *RTGEmitter, op int, reg int, imm int) {
+		if !a.VMBytecode() {
+			a.SetCode(append(a.Code(), byte(op)))
+			a.SetCode(append(a.Code(), byte(reg)))
+			a.SetCode(RTGAppend32(a.Code(), imm))
+			return
+		}
+		end := len(a.Code())
+		marker := -a.PrimaryLoad() - 2
+		if op == renvoWasm32OpMovRegImm && a.PrimaryLoad() < 0 && marker/32 == end {
+			pushed := marker % 32
+			if pushed >= 0 && pushed < 8 && end >= 2 &&
+				int(a.Code()[end-2]) == renvoWasm32OpPushReg && int(a.Code()[end-1]) == pushed {
+				a.SetCode(a.Code()[:end-2])
+				a.SetCode(append(a.Code(), byte(renvoWasm32OpPushRegMovImm), byte(pushed), byte(reg)))
+				a.SetCode(RTGAppend32(a.Code(), imm))
+				a.SetPrimaryLoad(0)
+				return
+			}
+		}
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), imm))
+		a.SetPrimaryLoad(0)
+		if op == renvoWasm32OpMovRegImm {
+			a.SetPrimaryLoad(-(len(a.Code())*32 + reg + 2))
+		}
+	}
+
+	func renvoWasm32FusibleBinary(op int) bool {
+		return op >= renvoWasm32OpAddRegReg && op <= renvoWasm32OpMulRegReg ||
+			op >= renvoWasm32OpAndRegReg && op <= renvoWasm32OpShrRegReg ||
+			op == renvoWasm32OpShrUnsignedRegReg
 	}
 
 	func renvoWasm32EmitRegReg(a *RTGEmitter, op int, dst int, src int) {
+		if !a.VMBytecode() {
+			a.SetCode(append(a.Code(), byte(op)))
+			a.SetCode(append(a.Code(), byte(dst)))
+			a.SetCode(append(a.Code(), byte(src)))
+			return
+		}
+		end := len(a.Code())
+		if renvoWasm32FusibleBinary(op) &&
+			a.PrimaryLoad() == -(end*32+src+2) && end >= 6 &&
+			int(a.Code()[end-6]) == renvoWasm32OpMovRegImm && int(a.Code()[end-5]) == src {
+			imm := RTGGet32At(a.Code(), end-4)
+			a.SetCode(a.Code()[:end-6])
+			a.SetCode(append(a.Code(), byte(renvoWasm32OpBinaryRegImm), byte(dst)))
+			a.SetCode(RTGAppend32(a.Code(), imm))
+			a.SetCode(append(a.Code(), byte(op)))
+			a.SetPrimaryLoad(0)
+			return
+		}
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(dst)))
 		a.SetCode(append(a.Code(), byte(src)))
+		a.SetPrimaryLoad(0)
+		if op == renvoWasm32OpMovRegReg {
+			a.SetPrimaryLoad(len(a.Code())*32 + dst + 2)
+		}
 	}
 
 	func renvoWasm32EmitReg(a *RTGEmitter, op int, reg int) {
+		if !a.VMBytecode() {
+			a.SetCode(append(a.Code(), byte(op)))
+			a.SetCode(append(a.Code(), byte(reg)))
+			return
+		}
+		if op == renvoWasm32OpPopReg {
+			end := len(a.Code())
+			marker := -a.PrimaryLoad() - 2
+			if a.PrimaryLoad() < 0 && marker/32 == end {
+				pushed := marker % 32
+				if pushed >= 0 && pushed < 8 && end >= 2 &&
+					int(a.Code()[end-2]) == renvoWasm32OpPushReg && int(a.Code()[end-1]) == pushed {
+					a.SetCode(a.Code()[:end-2])
+					a.SetPrimaryLoad(0)
+					if pushed != reg {
+						a.SetCode(append(a.Code(), byte(renvoWasm32OpMovRegReg), byte(reg), byte(pushed)))
+					}
+					return
+				}
+			}
+			if a.PrimaryLoad() < 0 && end >= 6 && marker/32 == end &&
+				int(a.Code()[end-6]) == renvoWasm32OpMovRegImm {
+				dst := int(a.Code()[end-5])
+				imm := RTGGet32At(a.Code(), end-4)
+				a.SetCode(a.Code()[:end-6])
+				a.SetCode(append(a.Code(), byte(renvoWasm32OpMovRegImmPop), byte(dst)))
+				a.SetCode(RTGAppend32(a.Code(), imm))
+				a.SetCode(append(a.Code(), byte(reg)))
+				a.SetPrimaryLoad(0)
+				return
+			}
+			positive := a.PrimaryLoad() - 2
+			if a.PrimaryLoad() > 0 && positive/32 == end {
+				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack {
+					dst := int(a.Code()[end-5])
+					offset := RTGGet32At(a.Code(), end-4)
+					a.SetCode(a.Code()[:end-6])
+					a.SetCode(append(a.Code(), byte(renvoWasm32OpLoadStackPop), byte(dst)))
+					a.SetCode(RTGAppend32(a.Code(), offset))
+					a.SetCode(append(a.Code(), byte(reg)))
+					a.SetPrimaryLoad(0)
+					return
+				}
+			}
+		}
+		if op == renvoWasm32OpPushReg {
+			end := len(a.Code())
+			marker := a.PrimaryLoad() - 2
+			if a.PrimaryLoad() > 0 && marker/32 == end {
+				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack {
+					dst := int(a.Code()[end-5])
+					offset := RTGGet32At(a.Code(), end-4)
+					a.SetCode(a.Code()[:end-6])
+					a.SetCode(append(a.Code(), byte(renvoWasm32OpLoadStackPushReg), byte(dst)))
+					a.SetCode(RTGAppend32(a.Code(), offset))
+					a.SetCode(append(a.Code(), byte(reg)))
+					a.SetPrimaryLoad(0)
+					return
+				}
+				if end >= 8 && int(a.Code()[end-8]) == renvoWasm32OpLoadMem {
+					loadReg := int(a.Code()[end-7])
+					base := int(a.Code()[end-6])
+					disp := RTGGet32At(a.Code(), end-5)
+					size := int(a.Code()[end-1])
+					a.SetCode(a.Code()[:end-8])
+					a.SetCode(append(a.Code(), byte(renvoWasm32OpLoadMemPushReg), byte(loadReg), byte(base)))
+					a.SetCode(RTGAppend32(a.Code(), disp))
+					a.SetCode(append(a.Code(), byte(size), byte(reg)))
+					a.SetPrimaryLoad(0)
+					return
+				}
+			}
+		}
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
+		a.SetPrimaryLoad(0)
+		if op == renvoWasm32OpPushReg {
+			a.SetPrimaryLoad(-(len(a.Code())*32 + reg + 2))
+		}
 	}
 
 	func renvoWasm32EmitStack(a *RTGEmitter, op int, reg int, offset int) {
+		if !a.VMBytecode() {
+			a.SetCode(append(a.Code(), byte(op)))
+			a.SetCode(append(a.Code(), byte(reg)))
+			a.SetCode(RTGAppend32(a.Code(), offset))
+			return
+		}
+		end := len(a.Code())
+		marker := -a.PrimaryLoad() - 2
+		if op == renvoWasm32OpLoadStack && a.PrimaryLoad() < 0 && marker/32 == end {
+			pushed := marker % 32
+			if pushed >= 0 && pushed < 8 && end >= 2 &&
+				int(a.Code()[end-2]) == renvoWasm32OpPushReg && int(a.Code()[end-1]) == pushed {
+				a.SetCode(a.Code()[:end-2])
+				a.SetCode(append(a.Code(), byte(renvoWasm32OpPushRegLoadStack), byte(pushed), byte(reg)))
+				a.SetCode(RTGAppend32(a.Code(), offset))
+				a.SetPrimaryLoad(0)
+				return
+			}
+		}
 		a.SetCode(append(a.Code(), byte(op)))
 		a.SetCode(append(a.Code(), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), offset))
+		a.SetPrimaryLoad(0)
+		if op == renvoWasm32OpLoadStack {
+			a.SetPrimaryLoad(len(a.Code())*32 + reg + 2)
+		}
 	}
 
 	func renvoWasm32EmitWideOp(a *RTGEmitter, op int, dest int, left int, right int, wasmOp int) {
@@ -369,6 +527,13 @@ go backend {
 		a.SetCode(append(a.Code(), byte(base)))
 		a.SetCode(RTGAppend32(a.Code(), disp))
 		a.SetCode(append(a.Code(), byte(size)))
+		if !a.VMBytecode() {
+			return
+		}
+		a.SetPrimaryLoad(0)
+		if op == renvoWasm32OpLoadMem {
+			a.SetPrimaryLoad(len(a.Code())*32 + reg + 2)
+		}
 	}
 
 	func renvoWasm32EmitIndex(a *RTGEmitter, op int, reg int, base int, index int, scale int, disp int, size int) {
@@ -1124,7 +1289,7 @@ go backend {
 		return
 	}
 
-		func renvoWasm32StackAddr(out *renvoWasmBuffer, offset int) {
+	func renvoWasm32StackAddr(out *renvoWasmBuffer, offset int) {
 		renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
 		delta := out.frameSize - offset
 		if delta > 0 {
@@ -1132,6 +1297,31 @@ go backend {
 			renvoWasmPut(out, 0x6a)
 		}
 		return
+	}
+
+	func renvoWasm32AppendPushReg(out *renvoWasmBuffer, reg int) {
+		renvoWasmLocalGet(out, renvoWasm32LocalSp)
+		renvoWasm32RegGet(out, reg)
+		renvoWasmI32Store(out, 2, 0)
+		renvoWasmLocalGet(out, renvoWasm32LocalSp)
+		renvoWasmAppendI32Const(out, 4)
+		renvoWasmPut(out, 0x6a)
+		renvoWasmLocalSet(out, renvoWasm32LocalSp)
+	}
+
+	func renvoWasm32AppendPopReg(out *renvoWasmBuffer, reg int) {
+		renvoWasmLocalGet(out, renvoWasm32LocalSp)
+		renvoWasmAppendI32Const(out, 4)
+		renvoWasmPut(out, 0x6b)
+		renvoWasmLocalTee(out, renvoWasm32LocalSp)
+		renvoWasmI32Load(out, 2, 0)
+		renvoWasm32RegSet(out, reg)
+	}
+
+	func renvoWasm32AppendLoadStackReg(out *renvoWasmBuffer, reg int, offset int) {
+		renvoWasmLocalGet(out, renvoWasm32LocalFrameBase)
+		renvoWasmI32Load(out, 2, out.frameSize-offset)
+		renvoWasm32RegSet(out, reg)
 	}
 
 		func renvoWasm32StackI64(out *renvoWasmBuffer, offset int) {
@@ -1490,6 +1680,55 @@ go backend {
 				recipe = "\xff\x0b\x00\xbf\xff\x0b\x01\xbf\xff\x0e\x02\xff\x05\x03"
 			}
 			renvoWasmAppendRecipe(out, recipe, renvoWasm32GetS32(code, pc+1), renvoWasm32GetS32(code, pc+5), wasmOp, renvoWasm32RegRax)
+			return
+		}
+		if op == renvoWasm32OpBinaryRegImm {
+			dst := int(RTGByteAt(code, pc+1))
+			imm := renvoWasm32GetS32(code, pc+2)
+			binaryOp := int(RTGByteAt(code, pc+6))
+			renvoWasm32RegGet(out, dst)
+			if binaryOp == renvoWasm32OpAndNotRegReg {
+				renvoWasmAppendI32Const(out, ^imm)
+				renvoWasmPut(out, 0x71)
+			} else {
+				renvoWasmAppendI32Const(out, imm)
+				renvoWasm32AppendBinaryOp(out, binaryOp)
+			}
+			renvoWasm32RegSet(out, dst)
+			if loopDepth >= 0 {
+				renvoWasm32SetPc(out, nextIndex)
+				renvoWasmBr(out, loopDepth)
+			}
+			return
+		}
+		if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+			if op == renvoWasm32OpPushRegLoadStack {
+				renvoWasm32AppendPushReg(out, int(RTGByteAt(code, pc+1)))
+				renvoWasm32AppendLoadStackReg(out, int(RTGByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
+			} else if op == renvoWasm32OpLoadStackPushReg {
+				renvoWasm32AppendLoadStackReg(out, int(RTGByteAt(code, pc+1)), renvoWasm32GetS32(code, pc+2))
+				renvoWasm32AppendPushReg(out, int(RTGByteAt(code, pc+6)))
+			} else if op == renvoWasm32OpPushRegMovImm {
+				renvoWasm32AppendPushReg(out, int(RTGByteAt(code, pc+1)))
+				renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+3))
+				renvoWasm32RegSet(out, int(RTGByteAt(code, pc+2)))
+			} else if op == renvoWasm32OpLoadMemPushReg {
+				renvoWasm32MemAddr(out, int(RTGByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
+				renvoWasm32LoadSized(out, int(RTGByteAt(code, pc+7)), 0)
+				renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+				renvoWasm32AppendPushReg(out, int(RTGByteAt(code, pc+8)))
+			} else if op == renvoWasm32OpLoadStackPop {
+				renvoWasm32AppendLoadStackReg(out, int(RTGByteAt(code, pc+1)), renvoWasm32GetS32(code, pc+2))
+				renvoWasm32AppendPopReg(out, int(RTGByteAt(code, pc+6)))
+			} else {
+				renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+2))
+				renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+				renvoWasm32AppendPopReg(out, int(RTGByteAt(code, pc+6)))
+			}
+			if loopDepth >= 0 {
+				renvoWasm32SetPc(out, nextIndex)
+				renvoWasmBr(out, loopDepth)
+			}
 			return
 		}
 		if op == renvoWasm32OpLoadStack {
@@ -1852,6 +2091,16 @@ go backend {
 			pc := pcs[i]
 			op := int(RTGByteAt(code, pc))
 			if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpLeaStack {
+				offset := renvoWasm32GetS32(code, pc+2)
+				if offset > frameSize {
+					frameSize = offset
+				}
+			} else if op == renvoWasm32OpPushRegLoadStack {
+				offset := renvoWasm32GetS32(code, pc+3)
+				if offset > frameSize {
+					frameSize = offset
+				}
+			} else if op == renvoWasm32OpLoadStackPushReg || op == renvoWasm32OpLoadStackPop {
 				offset := renvoWasm32GetS32(code, pc+2)
 				if offset > frameSize {
 					frameSize = offset
@@ -3102,6 +3351,12 @@ go backend {
 			stack = stack[:0]
 			for i := starts[block]; i < end; i++ {
 				op := int(RTGByteAt(code, pcs[i]))
+				if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+					// Fused instructions retain their physical VM stack effects. Do
+					// not match local-stack substitutions across one of them.
+					stack = stack[:0]
+					continue
+				}
 				if op == renvoWasm32OpCall {
 					extra := RTGGet32At(code, pcs[i]+5) - 6
 					if extra < 0 {
@@ -3547,6 +3802,13 @@ arch vm32 {
 		renvoWasm32OpSyscall = go renvoWasm32OpSyscall
 		renvoWasm32OpWideBinary = go renvoWasm32OpWideBinary
 		renvoWasm32OpWideCompare = go renvoWasm32OpWideCompare
+		renvoWasm32OpBinaryRegImm = go renvoWasm32OpBinaryRegImm
+		renvoWasm32OpPushRegLoadStack = go renvoWasm32OpPushRegLoadStack
+		renvoWasm32OpLoadStackPushReg = go renvoWasm32OpLoadStackPushReg
+		renvoWasm32OpPushRegMovImm = go renvoWasm32OpPushRegMovImm
+		renvoWasm32OpLoadMemPushReg = go renvoWasm32OpLoadMemPushReg
+		renvoWasm32OpLoadStackPop = go renvoWasm32OpLoadStackPop
+		renvoWasm32OpMovRegImmPop = go renvoWasm32OpMovRegImmPop
 		renvoWasm32OpXorRegReg = go renvoWasm32OpXorRegReg
 		renvoWasm32Patch = go renvoWasm32Patch
 		renvoWasm32PcInList = go renvoWasm32PcInList

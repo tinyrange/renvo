@@ -23,6 +23,9 @@ func (p point) Len() int { return p.x + p.y }
 	if !file.Ok {
 		t.Fatalf("ParseFile failed: err=%d tok=%d", file.Error, file.ErrorTok)
 	}
+	if cap(file.Tokens) != len(file.Tokens) {
+		t.Fatalf("parsed token capacity = %d, want live length %d", cap(file.Tokens), len(file.Tokens))
+	}
 	if tokenString(file, file.PackageName) != "main" {
 		t.Fatalf("package = %q, want main", tokenString(file, file.PackageName))
 	}

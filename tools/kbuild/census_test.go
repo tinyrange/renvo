@@ -51,7 +51,7 @@ func TestRenvoCCUsesHostOnlyForAssemblyAndM16(t *testing.T) {
 		want string
 	}{
 		{name: "ordinary C", args: []string{"-c", "main.c"}, want: "frontend:cc"},
-		{name: "m16 C", args: []string{"-m16", "-c", "main.c"}, want: "external"},
+		{name: "m16 C", args: []string{"-m16", "-c", "main.c"}, want: "frontend:cc"},
 		{name: "assembly suffix", args: []string{"-c", "entry.S"}, want: "external"},
 		{name: "assembly language", args: []string{"-x", "assembler-with-cpp", "-c", "entry"}, want: "external"},
 		{name: "m16 macro text", args: []string{"-DVALUE=-m16", "-c", "main.c"}, want: "frontend:cc"},

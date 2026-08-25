@@ -354,21 +354,50 @@ func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
 	// section-symbol relocations. This is what makes function sections truthful:
 	// moving a wrapper or implementation never leaves a prepatched PC behind.
 	for i := 0; i+1 < len(a.relocs); i += 2 {
-		at := int(renvo_runtime_UnsafeInt32At(a.relocs, i)) & 2147483647
+		rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
+		at := rawAt & 2147483647
 		label := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1)) & 2147483647
 		targetPosition := renvoAsmLabelPosition(a, label)
 		sourceSection, sourceOffset, sourceOK := renvoObjectMapCode(codeMap, at)
 		targetSection, targetOffset, targetOK := renvoObjectMapCode(codeMap, targetPosition)
-		if !sourceOK || !targetOK || sourceOffset+4 > len(sections[sourceSection].data) {
+		pc16 := elf386 && a.c.code16 && rawAt < 0
+		fieldSize := 4
+		if pc16 {
+			fieldSize = 2
+		}
+		if !sourceOK || !targetOK || sourceOffset+fieldSize > len(sections[sourceSection].data) {
 			return renvoObjectImageFail("label relocation range missing")
 		}
-		addend := renvoGet32At(sections[sourceSection].data, sourceOffset)
-		if sourceSection == targetSection {
-			renvoPut32At(sections[sourceSection].data, sourceOffset, targetOffset+addend-(sourceOffset+4))
+		addend := 0
+		if pc16 {
+			addend = int(int16(uint16(sections[sourceSection].data[sourceOffset]) |
+				uint16(sections[sourceSection].data[sourceOffset+1])<<8))
 		} else {
-			renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
+			addend = renvoGet32At(sections[sourceSection].data, sourceOffset)
+		}
+		if sourceSection == targetSection {
+			displacement := targetOffset + addend - (sourceOffset + fieldSize)
+			if pc16 {
+				if displacement < -32768 || displacement > 32767 {
+					return renvoObjectImageFail("i386 PC16 label relocation overflow")
+				}
+				sections[sourceSection].data[sourceOffset] = byte(displacement)
+				sections[sourceSection].data[sourceOffset+1] = byte(displacement >> 8)
+			} else {
+				renvoPut32At(sections[sourceSection].data, sourceOffset, displacement)
+			}
+		} else {
+			relocationType := 2
+			if pc16 {
+				relocationType = 21 // R_386_PC16
+				sections[sourceSection].data[sourceOffset] = 0
+				sections[sourceSection].data[sourceOffset+1] = 0
+			} else {
+				renvoPut32At(sections[sourceSection].data, sourceOffset, 0)
+			}
 			sections[sourceSection].relocations = append(sections[sourceSection].relocations,
-				renvoObjectELFRelocation{offset: sourceOffset, symbol: sectionSymbols[targetSection], typ: 2, addend: targetOffset + addend - 4})
+				renvoObjectELFRelocation{offset: sourceOffset, symbol: sectionSymbols[targetSection], typ: relocationType,
+					addend: targetOffset + addend - fieldSize})
 		}
 	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
@@ -514,10 +543,20 @@ func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
 		for j := 0; j < len(sections[i].relocations); j++ {
 			r := sections[i].relocations[j]
 			if elf386 {
-				if r.offset < 0 || r.offset+4 > len(sections[i].data) {
+				fieldSize := 4
+				if r.typ == 21 { // R_386_PC16
+					fieldSize = 2
+				}
+				if r.offset < 0 || r.offset+fieldSize > len(sections[i].data) {
 					return renvoObjectImageFail("i386 relocation source missing")
 				}
-				renvoPut32At(sections[i].data, r.offset, renvoGet32At(sections[i].data, r.offset)+r.addend)
+				if fieldSize == 2 {
+					value := int(uint16(sections[i].data[r.offset])|uint16(sections[i].data[r.offset+1])<<8) + r.addend
+					sections[i].data[r.offset] = byte(value)
+					sections[i].data[r.offset+1] = byte(value >> 8)
+				} else {
+					renvoPut32At(sections[i].data, r.offset, renvoGet32At(sections[i].data, r.offset)+r.addend)
+				}
 				relocationSection.data = renvoElf386AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ)
 			} else {
 				relocationSection.data = renvoElfAmd64AppendRelocation(relocationSection.data, r.offset, r.symbol, r.typ, r.addend)

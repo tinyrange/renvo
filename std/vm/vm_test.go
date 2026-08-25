@@ -16,6 +16,40 @@ func TestRunExitAndDeterministicMetrics(t *testing.T) {
 	}
 }
 
+func TestRunBinaryRegisterImmediate(t *testing.T) {
+	code := []byte{
+		opMovRegImm, regRax, 6, 0, 0, 0,
+		opBinaryRegImm, regRax, 3, 0, 0, 0, opMulRegReg,
+		opExit,
+	}
+	result := Run(testProgram(code, nil, 0), Limits{Steps: 10, Memory: 1024})
+	if result.Trap != TrapNone || result.ExitCode != 18 || result.Steps != 3 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestRunFusedStackInstructions(t *testing.T) {
+	code := []byte{
+		opMovRegImm, regRax, 7, 0, 0, 0,
+		opStoreStack, regRax, 4, 0, 0, 0,
+		opPushRegLoadStack, regRax, regRdx, 4, 0, 0, 0,
+		opLoadStackPushReg, regRax, 4, 0, 0, 0, regRdx,
+		opPushRegMovImm, regRax, regRdx, 9, 0, 0, 0,
+		opMovRegReg, regRax, regRdx,
+		opPopReg, regRcx,
+		opLoadStackPop, regRdx, 4, 0, 0, 0, regRcx,
+		opMovRegImmPop, regRdx, 11, 0, 0, 0, regRcx,
+		opLeaStack, regR10, 4, 0, 0, 0,
+		opLoadMemPushReg, regRdx, regR10, 0, 0, 0, 0, 4, regRdx,
+		opPopReg, regR10,
+		opExit,
+	}
+	result := Run(testProgram(code, nil, 0), Limits{Steps: 20, Memory: 1024})
+	if result.Trap != TrapNone || result.ExitCode != 9 || result.Steps != 13 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestRunEnforcesStepAndMemoryLimits(t *testing.T) {
 	loop := testProgram([]byte{opJmp, 0, 0, 0, 0}, nil, 0)
 	result := Run(loop, Limits{Steps: 10, Memory: 1024})

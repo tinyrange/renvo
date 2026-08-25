@@ -85,12 +85,12 @@ M9's clean boot gate is deliberately outside the one-minute preflight loop:
 
 It verifies and extracts the pinned archive, builds Renvo, and applies the
 checked tinyconfig boot fragment with Kbuild's target `CC` set to the checked
-`renvo-cc` driver. Every recorded 64-bit target `.c` command is compiled directly
-by Renvo from the original source and generated headers. Until Renvo gains a
-16-bit code generator, the narrowly identified `-m16` setup C commands join
-standalone assembly, host utilities, and the normal assembler/linker stages on
-the external toolchain. The audit reports the Renvo and `-m16` command counts
-separately and checks every resulting ELF object before a fixed 128 MiB,
+`renvo-cc` driver. Every recorded target `.c` command is compiled directly by
+Renvo from the original source and generated headers. The i386 RTG backend
+implements GCC's `-m16` ILP32 code mode for the boot/setup C objects;
+standalone assembly, host utilities, and the normal assembler/linker stages
+remain on the external toolchain. The audit reports the total Renvo and code16
+command counts and checks every resulting ELF object before a fixed 128 MiB,
 single-CPU QEMU guest boots the image twice with instruction-counted TCG and a
 reproducible musl initramfs. Each boot must reach the checked
 `RENVO-LINUX-M9: PASS` marker within 30 seconds. Set
@@ -98,11 +98,15 @@ reproducible musl initramfs. Each boot must reach the checked
 host parallelism; neither changes the checked guest profile. CPU, RSS, compiler,
 `vmlinux`, and `bzImage` sizes remain recorded telemetry rather than gates.
 
-On the 16-logical-CPU development host, the optimized direct M9 build compiles
-and packages all 507 target C commands from `make clean` in 53.10 seconds at
-`-j16` (584.97s user / 61.03s system, 355,436 KiB maximum child RSS). The audit
-attributes 487 commands to Renvo and the 20 narrowly permitted `-m16` commands
-to the external compiler. This is a reproducible profiling baseline, not a
-portable wall-clock acceptance limit; regressions should be investigated with
-the object-corpus runner and a representative raw-source unit before changing
-worker count.
+The pinned Linux patch raises the legacy setup-image packaging and linker
+ceilings and repairs the setup heap handed off by QEMU's direct Linux loader.
+QEMU still enters this real-mode stub for an x86-64 `-kernel` image; the 64-bit
+payload itself retains the normal 2 MiB physical load address.
+
+The historical 16-logical-CPU baseline, before native code16 support, compiled
+and packaged all 507 target C commands from `make clean` in 53.10 seconds at
+`-j16` (584.97s user / 61.03s system, 355,436 KiB maximum child RSS), with 487
+Renvo commands and 20 externally compiled `-m16` commands. Current runs route
+all 507 C commands through Renvo. This is profiling telemetry, not a portable
+wall-clock acceptance limit; investigate regressions with the object-corpus
+runner and a representative raw-source unit before changing worker count.

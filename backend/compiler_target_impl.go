@@ -175,6 +175,8 @@ type RenvoCompileOptions struct {
 	ModuleLicense  string
 	ModuleNamePath string
 	ObjectFile     bool
+	Code16         bool
+	RegParm        int
 }
 
 // RenvoInitializeObjectCache reserves the bounded in-process object store when
@@ -221,6 +223,12 @@ func renvoCompileOptionsValid(target int, options RenvoCompileOptions) bool {
 	if options.WindowsGUI && target != renvoTargetWindowsAmd64 && target != renvoTargetWindows386 && target != renvoTargetWindowsArm64 {
 		return false
 	}
+	if options.Code16 && (target != renvoTargetLinux386 || !options.ObjectFile) {
+		return false
+	}
+	if options.RegParm != 0 && (options.RegParm != 3 || target != renvoTargetLinux386 || !options.ObjectFile) {
+		return false
+	}
 	return options.ArenaSize == 0 || options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
 }
 
@@ -231,6 +239,8 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
 	context.objectFile = options.ObjectFile
+	context.code16 = options.Code16
+	context.regParm = options.RegParm
 	moduleNamePath := options.ModuleNamePath
 	if moduleNamePath == "" {
 		moduleNamePath = "renvo"
@@ -259,6 +269,8 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
 	context.objectFile = options.ObjectFile
+	context.code16 = options.Code16
+	context.regParm = options.RegParm
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
 	if prog.ok && target == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
@@ -308,6 +320,8 @@ func RenvoCompileUnitToOutputWithOptions(unit []byte, targetName string, outputP
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
 	context.objectFile = options.ObjectFile
+	context.code16 = options.Code16
+	context.regParm = options.RegParm
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit || !ok {
@@ -330,6 +344,8 @@ func RenvoCompileUnitToBytesWithOptions(unit []byte, targetName string, options 
 	}
 	context := renvoNewCompileContext(target, options.StripSymbols, options.WindowsGUI, options.EmitImage)
 	context.objectFile = options.ObjectFile
+	context.code16 = options.Code16
+	context.regParm = options.RegParm
 	moduleNamePath := options.ModuleNamePath
 	if moduleNamePath == "" {
 		moduleNamePath = "renvo"
@@ -406,6 +422,8 @@ func (s *RenvoCompileSession) Step() bool {
 		}
 		s.context = renvoNewCompileContext(s.target, s.options.StripSymbols, s.options.WindowsGUI, s.options.EmitImage)
 		s.context.objectFile = s.options.ObjectFile
+		s.context.code16 = s.options.Code16
+		s.context.regParm = s.options.RegParm
 		renvoConfigureCompileContext(s.context, s.targetName, s.outputPath, s.options.ModuleLicense)
 		prog, isUnit, decoded := renvoDecodeUnitProgram(s.unit)
 		if !isUnit || !decoded {

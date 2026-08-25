@@ -134,7 +134,7 @@ func renvoAppendWinImports(a *renvoAsm, layout *renvoWinImportLayout) {
 
 	layout.importRVA = dataRVA + importOff
 	layout.importSize = len(a.data) - importOff
-	layout.kernelIATRVA = layout.iatRVAs[renvoWinImportGetStdHandle]
+	layout.kernelIATRVA = renvo_runtime_UnsafeIntAt(layout.iatRVAs, renvoWinImportGetStdHandle)
 }
 
 func renvoAppendWinImportEntry(a *renvoAsm, layout *renvoWinImportLayout, iltAt int, iatAt int, id int, name string) {
@@ -174,7 +174,7 @@ func renvoAsmPatchWindows(a *renvoAsm, layout renvoWinImportLayout) {
 		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1))
 		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+2))
 		if kind == renvoAbsWinImportReloc {
-			target := layout.iatRVAs[off]
+			target := renvo_runtime_UnsafeIntAt(layout.iatRVAs, off)
 			if a.c.renvoTargetArch != renvoArch386 {
 				next := a.codeOffset + at + 4
 				renvoPut32At(a.code, at, target-next)
@@ -236,8 +236,8 @@ func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, 
 	renvoPut32At(out, opt+124, importSize)
 	renvoPut32At(out, opt+208, iatRVA)
 	renvoPut32At(out, opt+212, iatSize)
-	out = renvoAppendPESection(out, ".text", textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
-	out = renvoAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
+	out = renvoAppendPESection(out, textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
+	out = renvoAppendPESection(out, dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
 	out = renvoAppendUntil(out, renvoWinHeadersSize)
 	return out
 }
@@ -268,18 +268,23 @@ func renvoAppendPEHeader32WithContext(context *renvoCompileContext, out []byte, 
 	renvoPut32At(out, opt+108, importSize)
 	renvoPut32At(out, opt+192, iatRVA)
 	renvoPut32At(out, opt+196, iatSize)
-	out = renvoAppendPESection(out, ".text", textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
-	out = renvoAppendPESection(out, ".data", dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
+	out = renvoAppendPESection(out, textVirtualSize, renvoWinSectionRVA, textRawSize, renvoWinHeadersSize, 0x60000020)
+	out = renvoAppendPESection(out, dataVirtualSize, dataRVA, dataRawSize, renvoWinHeadersSize+textRawSize, 0xc0000040)
 	out = renvoAppendUntil(out, renvoWinHeadersSize)
 	return out
 }
 
-func renvoAppendPESection(out []byte, name string, virtualSize int, rva int, rawSize int, rawPtr int, characteristics int) []byte {
+func renvoAppendPESection(out []byte, virtualSize int, rva int, rawSize int, rawPtr int, characteristics int) []byte {
 	start := len(out)
 	out = renvoAppendUntil(out, start+40)
-	for i := 0; i < len(name); i++ {
-		out[start+i] = name[i]
+	name := 0x7461642e
+	tail := byte('a')
+	if characteristics == 0x60000020 {
+		name = 0x7865742e
+		tail = 't'
 	}
+	renvoPut32At(out, start, name)
+	renvoPut32At(out, start+4, int(tail))
 	renvoPut32At(out, start+8, virtualSize)
 	renvoPut32At(out, start+12, rva)
 	renvoPut32At(out, start+16, rawSize)

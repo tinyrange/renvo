@@ -115,6 +115,16 @@ const (
 )
 
 const (
+	opBinaryRegImm     = 47
+	opPushRegLoadStack = 48
+	opLoadStackPushReg = 49
+	opPushRegMovImm    = 50
+	opLoadMemPushReg   = 51
+	opLoadStackPop     = 52
+	opMovRegImmPop     = 53
+)
+
+const (
 	condEq = iota
 	condNe
 	condLt
@@ -325,8 +335,24 @@ func validateCode(code []byte, routines []routine) bool {
 
 func validOperands(code []byte, pc int) bool {
 	op := int(code[pc])
-	if op < opExit || op > opShrUnsignedRegReg {
+	if op < opExit || op > opShrUnsignedRegReg && (op < opBinaryRegImm || op > opMovRegImmPop) {
 		return false
+	}
+	if op == opBinaryRegImm {
+		return int(code[pc+1]) < regCount && validImmediateBinaryOpcode(int(code[pc+6]))
+	}
+	if op == opPushRegLoadStack {
+		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount
+	}
+	if op == opLoadStackPushReg || op == opLoadStackPop || op == opMovRegImmPop {
+		return int(code[pc+1]) < regCount && int(code[pc+6]) < regCount
+	}
+	if op == opPushRegMovImm {
+		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount
+	}
+	if op == opLoadMemPushReg {
+		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount &&
+			int(code[pc+8]) < regCount && validLoadSize(int(code[pc+7]))
 	}
 	if op == opMovRegImm || op == opLoadStack || op == opStoreStack || op == opLeaStack ||
 		op == opAddRegImm || op == opMulRegImm || op == opCmpRegImm {
@@ -368,13 +394,25 @@ func validLoadSize(size int) bool {
 	return validSize(size) || size == 66 || size == 129
 }
 
+func validImmediateBinaryOpcode(op int) bool {
+	return op >= opAddRegReg && op <= opMulRegReg ||
+		op >= opAndRegReg && op <= opShrRegReg || op == opShrUnsignedRegReg
+}
+
 func nextInstruction(code []byte, pc int) int {
 	if pc < 0 || pc >= len(code) {
 		return -1
 	}
 	op := int(code[pc])
 	size := 1
-	if op == opMovRegImm || op == opLoadStack || op == opStoreStack || op == opLeaStack ||
+	if op == opBinaryRegImm {
+		size = 7
+	} else if op == opPushRegLoadStack || op == opLoadStackPushReg || op == opPushRegMovImm ||
+		op == opLoadStackPop || op == opMovRegImmPop {
+		size = 7
+	} else if op == opLoadMemPushReg {
+		size = 9
+	} else if op == opMovRegImm || op == opLoadStack || op == opStoreStack || op == opLeaStack ||
 		op == opAddRegImm || op == opMulRegImm || op == opCmpRegImm || op == opJCond {
 		size = 6
 	} else if op == opMovRegReg || op >= opAddRegReg && op <= opShrRegReg ||
@@ -447,11 +485,42 @@ func (m *machine) step() bool {
 		return m.push(int32(read32(code, pc+1)))
 	}
 	if op == opPopReg {
-		value, ok := m.pop()
-		if ok {
-			m.regs[int(code[pc+1])] = value
+		return m.popReg(int(code[pc+1]))
+	}
+	if op == opPushRegLoadStack {
+		if !m.push(m.regs[int(code[pc+1])]) {
+			return false
 		}
-		return ok
+		return m.loadStack(int(code[pc+2]), int32(read32(code, pc+3)))
+	}
+	if op == opLoadStackPushReg {
+		if !m.loadStack(int(code[pc+1]), int32(read32(code, pc+2))) {
+			return false
+		}
+		return m.push(m.regs[int(code[pc+6])])
+	}
+	if op == opPushRegMovImm {
+		if !m.push(m.regs[int(code[pc+1])]) {
+			return false
+		}
+		m.regs[int(code[pc+2])] = int32(read32(code, pc+3))
+		return true
+	}
+	if op == opLoadMemPushReg {
+		if !m.loadMem(int(code[pc+1]), int(code[pc+2]), int32(read32(code, pc+3)), int(code[pc+7])) {
+			return false
+		}
+		return m.push(m.regs[int(code[pc+8])])
+	}
+	if op == opLoadStackPop {
+		if !m.loadStack(int(code[pc+1]), int32(read32(code, pc+2))) {
+			return false
+		}
+		return m.popReg(int(code[pc+6]))
+	}
+	if op == opMovRegImmPop {
+		m.regs[int(code[pc+1])] = int32(read32(code, pc+2))
+		return m.popReg(int(code[pc+6]))
 	}
 	if op == opLoadStack || op == opStoreStack || op == opLeaStack {
 		reg := int(code[pc+1])
@@ -464,11 +533,7 @@ func (m *machine) step() bool {
 			return true
 		}
 		if op == opLoadStack {
-			value, ok := m.load(addr, 4)
-			if ok {
-				m.regs[reg] = int32(value)
-			}
-			return ok
+			return m.loadStack(reg, int32(read32(code, pc+2)))
 		}
 		return m.store(addr, 4, uint32(m.regs[reg]))
 	}
@@ -478,11 +543,7 @@ func (m *machine) step() bool {
 		addr := int(m.regs[base]) + int(int32(read32(code, pc+3)))
 		size := int(code[pc+7])
 		if op == opLoadMem {
-			value, ok := m.loadSized(addr, size)
-			if ok {
-				m.regs[reg] = int32(value)
-			}
-			return ok
+			return m.loadMem(reg, base, int32(read32(code, pc+3)), size)
 		}
 		return m.store(addr, size, uint32(m.regs[reg]))
 	}
@@ -504,6 +565,9 @@ func (m *machine) step() bool {
 	}
 	if op >= opAddRegReg && op <= opShrRegReg || op == opShrUnsignedRegReg {
 		return m.binary(op, int(code[pc+1]), int(code[pc+2]))
+	}
+	if op == opBinaryRegImm {
+		return m.binaryValue(int(code[pc+6]), int(code[pc+1]), int32(read32(code, pc+2)))
 	}
 	if op == opAddRegImm || op == opMulRegImm {
 		reg := int(code[pc+1])
@@ -647,6 +711,30 @@ func (m *machine) loadSized(addr int, size int) (uint32, bool) {
 	return m.load(addr, size)
 }
 
+func (m *machine) loadStack(reg int, offset int32) bool {
+	value, ok := m.load(m.fp-int(offset), 4)
+	if ok {
+		m.regs[reg] = int32(value)
+	}
+	return ok
+}
+
+func (m *machine) loadMem(reg int, base int, disp int32, size int) bool {
+	value, ok := m.loadSized(int(m.regs[base])+int(disp), size)
+	if ok {
+		m.regs[reg] = int32(value)
+	}
+	return ok
+}
+
+func (m *machine) popReg(reg int) bool {
+	value, ok := m.pop()
+	if ok {
+		m.regs[reg] = value
+	}
+	return ok
+}
+
 func (m *machine) currentOpcode() int {
 	if m.currentPC < 0 || m.currentPC >= len(m.image.code) {
 		return 0
@@ -655,8 +743,11 @@ func (m *machine) currentOpcode() int {
 }
 
 func (m *machine) binary(op int, dst int, src int) bool {
+	return m.binaryValue(op, dst, m.regs[src])
+}
+
+func (m *machine) binaryValue(op int, dst int, right int32) bool {
 	left := m.regs[dst]
-	right := m.regs[src]
 	switch op {
 	case opAddRegReg:
 		m.regs[dst] = left + right

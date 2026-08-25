@@ -1,0 +1,44 @@
+diff --git a/arch/x86/boot/header.S b/arch/x86/boot/header.S
+index 9f0e1815e..59bf486c4 100644
+--- a/arch/x86/boot/header.S
++++ b/arch/x86/boot/header.S
+@@ -556,6 +556,13 @@ start_of_setup:
+ 	testb	$CAN_USE_HEAP, loadflags
+ 	jz	1f
+ 	movw	heap_end_ptr, %dx
++	cmpw	$_end, %dx
++	jae	1f
++	# QEMU's direct Linux loader retains the legacy sub-0x8000 heap end.
++	# A larger Renvo-built setup image extends beyond it, so reserve a heap
++	# above setup BSS and put the setup stack beyond that heap.
++	movw	$_end+0x1e00, %dx
++	movw	%dx, heap_end_ptr
+ 1:	addw	$STACK_SIZE, %dx
+ 	jnc	2f
+ 	xorw	%dx, %dx	# Prevent wraparound
+diff --git a/arch/x86/boot/setup.ld b/arch/x86/boot/setup.ld
+index 83bb8064c..a6dbf7886 100644
+--- a/arch/x86/boot/setup.ld
++++ b/arch/x86/boot/setup.ld
+@@ -64,7 +64,7 @@ SECTIONS
+ 	/*
+ 	 * The ASSERT() sink to . is intentional, for binutils 2.14 compatibility:
+ 	 */
+-	. = ASSERT(_end <= 0x8000, "Setup too big!");
++	. = ASSERT(_end <= 0xf000, "Setup too big!");
+ 	. = ASSERT(hdr == 0x1f1, "The setup header has the wrong offset!");
+ 	/* Necessary for the very-old-loader check to work... */
+ 	. = ASSERT(__end_init <= 5*512, "init sections too big!");
+diff --git a/arch/x86/boot/tools/build.c b/arch/x86/boot/tools/build.c
+index 035d3f19a..04c8f3579 100644
+--- a/arch/x86/boot/tools/build.c
++++ b/arch/x86/boot/tools/build.c
+@@ -42,7 +42,7 @@ typedef unsigned int   u32;
+ 
+ /* Minimal number of setup sectors */
+ #define SETUP_SECT_MIN 5
+-#define SETUP_SECT_MAX 64
++#define SETUP_SECT_MAX 128
+ 
+ /* This must be large enough to hold the entire setup */
+ u8 buf[SETUP_SECT_MAX*512];

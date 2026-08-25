@@ -80,7 +80,7 @@ func main() {
 			fatalf("direct compiler audit: %v", err)
 		}
 		boot16 := m16TargetCommandCount(commands)
-		fmt.Printf("gate=PASS\nmode=direct-audit\ncommands=%d\nrenvo_commands=%d\nhost_m16_commands=%d\n", len(commands), len(commands)-boot16, boot16)
+		fmt.Printf("gate=PASS\nmode=direct-audit\ncommands=%d\nrenvo_commands=%d\nrenvo_m16_commands=%d\n", len(commands), len(commands), boot16)
 		return
 	}
 
@@ -279,6 +279,9 @@ func objectArguments(command, object, unit string) []string {
 	}
 	if strings.Contains(command, " -mcmodel=kernel ") {
 		arguments = append(arguments, "-mcmodel=kernel")
+	}
+	if strings.Contains(command, " -m16 ") {
+		arguments = append(arguments, "-m16")
 	}
 	return arguments
 }

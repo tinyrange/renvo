@@ -613,12 +613,29 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
+		registerWords := 0
+		variadic := fn.paramCount > 0 && g.meta.params[fn.firstParam+fn.paramCount-1].initStart != 0
+		if g.c.regParm == 3 && !variadic {
+			registerWords = wordCount
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(&g.asm, 0x58) // eax
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(&g.asm, 0x5a) // edx
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(&g.asm, 0x59) // ecx
+			}
+		}
 		renvoAsmEmit8(&g.asm, 0xe8)
 		at := len(g.asm.code)
 		renvoAsmEmit32(&g.asm, 0)
 		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoImportReloc)
-		if wordCount > 0 {
-			bytes := wordCount * 4
+		if wordCount > registerWords {
+			bytes := (wordCount - registerWords) * 4
 			if renvoAsmImmFits8Signed(bytes) {
 				renvoAsmEmit3(&g.asm, 0x83, 0xc4, bytes)
 			} else {

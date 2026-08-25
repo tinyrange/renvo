@@ -177,7 +177,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		var ok bool
 		packageActions := actions[actionOffset : actionOffset+len(programs[i].Tokens)]
 		actionOffset += len(packageActions)
-		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs))
+		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient)
 		if !ok {
 			appendOK = false
 			break
@@ -576,12 +576,16 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 	return mainTok, eof
 }
 
-func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool) (bool, int) {
+func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
 	text := src.Text
 	tokens := src.Tokens
+	sourceEndsNewline := text[len(text)-1] == '\n'
+	if transient && !prepareTransientCoreMappings(dst, &src, actions, finalEOF) {
+		return false, line
+	}
 	lineBase := line
 	sourceEndLine := tokens[len(tokens)-1].KindLine >> 8
 	if sourceEndLine < 1 {
@@ -589,11 +593,15 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 	}
 	prevEnd := 0
 	pendingStart := 0
+	sourceDiscardStart := 0
+	nextSourceDiscard := 16384
 	for i := 0; i < len(tokens); i++ {
 		action := actions[i]
 		tok := tokens[i]
 		if tok.KindLine&255 == unit.TokenEOF {
-			tokens[i].KindLine = tokens[i].KindLine&255 | len(dst.Tokens)<<8
+			if !transient {
+				tokens[i].KindLine = tokens[i].KindLine&255 | len(dst.Tokens)<<8
+			}
 			continue
 		}
 		tokStart := tok.Start
@@ -610,8 +618,16 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			if tokEnd > prevEnd {
 				prevEnd = tokEnd
 			}
-			if tokenActionRedirect(action) < 0 {
+			if !transient && tokenActionRedirect(action) < 0 {
 				tokens[i].KindLine = tokens[i].KindLine&255 | finalEOF<<8
+			}
+			if transient && tokEnd >= nextSourceDiscard {
+				arena.DiscardBytes(text[sourceDiscardStart:tokEnd])
+				sourceDiscardStart = tokEnd - 1024
+				nextSourceDiscard = tokEnd + 16384
+			}
+			if transient && (i+1)%2048 == 0 {
+				discardTransientCoreTokenChunk(tokens, i)
 			}
 			continue
 		}
@@ -644,9 +660,19 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 				dot.Size = 1
 				dst.Tokens = append(dst.Tokens, dot)
 			}
-			tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
+			if !transient {
+				tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
+			}
 			pendingStart = tokEnd
 			prevEnd = tokEnd
+			if transient && tokEnd >= nextSourceDiscard {
+				arena.DiscardBytes(text[sourceDiscardStart:tokEnd])
+				sourceDiscardStart = tokEnd - 1024
+				nextSourceDiscard = tokEnd + 16384
+			}
+			if transient && (i+1)%2048 == 0 {
+				discardTransientCoreTokenChunk(tokens, i)
+			}
 			continue
 		} else if tok.KindLine&255 == unit.TokenString && tokStart < len(text) && text[tokStart] == '"' {
 			if tokStart > pendingStart {
@@ -664,62 +690,231 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			tok.Start = len(dst.Text) + tokStart - pendingStart
 		}
 		dst.Tokens = append(dst.Tokens, tok)
-		tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
+		if !transient {
+			tokens[i].KindLine = tokens[i].KindLine&255 | mappedToken<<8
+		}
 		prevEnd = tokEnd
+		if transient && tokEnd >= nextSourceDiscard {
+			if pendingStart < tokEnd {
+				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokEnd])
+				pendingStart = tokEnd
+			}
+			arena.DiscardBytes(text[sourceDiscardStart:tokEnd])
+			sourceDiscardStart = tokEnd - 1024
+			nextSourceDiscard = tokEnd + 16384
+		}
+		if transient && (i+1)%2048 == 0 {
+			discardTransientCoreTokenChunk(tokens, i)
+		}
 	}
 	if pendingStart < len(text) {
 		dst.Text = appendCoreBytes(dst.Text, text[pendingStart:])
 	}
-	for i := 0; i < len(tokens); i++ {
-		target := tokenActionRedirect(actions[i])
-		if target >= 0 {
-			tokens[i].KindLine = tokens[i].KindLine&255 | mapLinkedToken(tokens, target, finalEOF)<<8
+	if transient {
+		arena.DiscardBytes(text[sourceDiscardStart:])
+		remaining := len(tokens) % 2048
+		if remaining != 0 {
+			start := len(tokens) - remaining
+			if start >= 256 {
+				start -= 256
+			}
+			renvo_runtime_ArenaDiscardLinkTokens(tokens[start:])
+		}
+	}
+	if !transient {
+		for i := 0; i < len(tokens); i++ {
+			target := tokenActionRedirect(actions[i])
+			if target >= 0 {
+				tokens[i].KindLine = tokens[i].KindLine&255 | mapLinkedToken(tokens, target, finalEOF)<<8
+			}
 		}
 	}
 	for i := 0; i < len(src.Decls); i++ {
 		decl := src.Decls[i]
-		decl.StartTok = mapLinkedToken(tokens, decl.StartTok, finalEOF)
-		decl.EndTok = mapLinkedToken(tokens, decl.EndTok, finalEOF)
-		nameStart, nameEnd, ok := mapCoreTextSpanByToken(src, dst, finalEOF, decl.NameStart, decl.NameEnd)
-		if !ok {
-			return false, line
+		if transient {
+			nameStart, nameEnd, ok := mappedCoreTokenTextSpan(dst, decl.NameStart)
+			if !ok {
+				return false, line
+			}
+			decl.NameStart = nameStart
+			decl.NameEnd = nameEnd
+		} else {
+			decl.StartTok = mapLinkedToken(tokens, decl.StartTok, finalEOF)
+			decl.EndTok = mapLinkedToken(tokens, decl.EndTok, finalEOF)
+			nameStart, nameEnd, ok := mapCoreTextSpanByToken(src, dst, finalEOF, decl.NameStart, decl.NameEnd)
+			if !ok {
+				return false, line
+			}
+			decl.NameStart = nameStart
+			decl.NameEnd = nameEnd
 		}
-		decl.NameStart = nameStart
-		decl.NameEnd = nameEnd
 		dst.Decls = append(dst.Decls, decl)
 	}
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
-		fn.StartTok = mapLinkedToken(tokens, fn.StartTok, finalEOF)
-		fn.NameTok = mapLinkedToken(tokens, fn.NameTok, finalEOF)
+		if !transient {
+			fn.StartTok = mapLinkedToken(tokens, fn.StartTok, finalEOF)
+			fn.NameTok = mapLinkedToken(tokens, fn.NameTok, finalEOF)
+		}
 		nameStart, nameEnd, ok := mappedCoreTokenTextSpan(dst, fn.NameTok)
 		if !ok {
 			return false, line
 		}
 		fn.NameStart = nameStart
 		fn.NameEnd = nameEnd
-		fn.ReceiverStart = mapLinkedToken(tokens, fn.ReceiverStart, finalEOF)
-		fn.ReceiverEnd = mapLinkedToken(tokens, fn.ReceiverEnd, finalEOF)
-		normalizeCoreLinkedReceiver(&fn, finalEOF)
-		fn.BodyStart = mapLinkedToken(tokens, fn.BodyStart, finalEOF)
-		fn.BodyEnd = mapLinkedToken(tokens, fn.BodyEnd, finalEOF)
-		fn.EndTok = mapLinkedFuncEndToken(tokens, fn.EndTok, fn.BodyEnd, finalEOF)
+		if !transient {
+			fn.ReceiverStart = mapLinkedToken(tokens, fn.ReceiverStart, finalEOF)
+			fn.ReceiverEnd = mapLinkedToken(tokens, fn.ReceiverEnd, finalEOF)
+			normalizeCoreLinkedReceiver(&fn, finalEOF)
+			fn.BodyStart = mapLinkedToken(tokens, fn.BodyStart, finalEOF)
+			fn.BodyEnd = mapLinkedToken(tokens, fn.BodyEnd, finalEOF)
+			fn.EndTok = mapLinkedFuncEndToken(tokens, fn.EndTok, fn.BodyEnd, finalEOF)
+		}
 		dst.Funcs = append(dst.Funcs, fn)
 	}
 	for i := 0; i < len(src.ConcurrencySites); i++ {
 		site := src.ConcurrencySites[i]
-		site.Token = mapLinkedToken(tokens, site.Token, finalEOF)
+		if !transient {
+			site.Token = mapLinkedToken(tokens, site.Token, finalEOF)
+		}
 		if site.Token < 0 || site.Token >= finalEOF {
 			return false, line
 		}
 		dst.ConcurrencySites = append(dst.ConcurrencySites, site)
 	}
 	line = lineBase + sourceEndLine - 1
-	if hasNext && (len(text) == 0 || text[len(text)-1] != '\n') {
+	if hasNext && !sourceEndsNewline {
 		dst.Text = append(dst.Text, '\n')
 		line++
 	}
 	return true, line
+}
+
+func discardTransientCoreTokenChunk(tokens []unit.Token, index int) {
+	start := index + 1 - 2048
+	if start >= 256 {
+		start -= 256
+	}
+	renvo_runtime_ArenaDiscardLinkTokens(tokens[start : index+1])
+}
+
+const transientCoreMappingStride = 32
+
+// Transient linking can retire each source-token chunk as soon as it has been
+// copied. Resolve every later metadata and redirect lookup first, borrowing the
+// unused tail of the already-reserved destination token array for sparse prefix
+// checkpoints instead of allocating another full-token mapping.
+func prepareTransientCoreMappings(dst *unit.Program, src *unit.Program, actions []tokenAction, eof int) bool {
+	base := len(dst.Tokens)
+	checkpointCount := (len(actions) + transientCoreMappingStride - 1) / transientCoreMappingStride
+	borrowed := base+checkpointCount <= cap(dst.Tokens)
+	var checkpoints []unit.Token
+	if borrowed {
+		dst.Tokens = dst.Tokens[:base+checkpointCount]
+		checkpoints = dst.Tokens[base:]
+	} else {
+		checkpoints = make([]unit.Token, checkpointCount)
+	}
+	mapped := base
+	for i := 0; i < len(actions); i++ {
+		if i%transientCoreMappingStride == 0 {
+			checkpoints[i/transientCoreMappingStride].Start = mapped
+		}
+		mapped += transientCoreTokenOutputCount(src, actions[i], i)
+	}
+	for i := 0; i < len(actions); i++ {
+		target := tokenActionRedirect(actions[i])
+		if target >= 0 {
+			target = transientCoreMappedPosition(src, actions, checkpoints, target)
+			if target < 0 {
+				return false
+			}
+			actions[i] = tokenAction(-target - 2)
+		}
+	}
+	for i := 0; i < len(src.Decls); i++ {
+		decl := &src.Decls[i]
+		nameTok := coreTokenIndexByTextSpan(src.Tokens, decl.NameStart, decl.NameEnd)
+		nameTok = transientCoreMappedToken(src, actions, checkpoints, nameTok, eof)
+		decl.StartTok = transientCoreMappedToken(src, actions, checkpoints, decl.StartTok, eof)
+		decl.EndTok = transientCoreMappedToken(src, actions, checkpoints, decl.EndTok, eof)
+		if nameTok < 0 || decl.StartTok < 0 || decl.EndTok < 0 {
+			return false
+		}
+		decl.NameStart = nameTok
+		decl.NameEnd = nameTok
+	}
+	for i := 0; i < len(src.Funcs); i++ {
+		fn := &src.Funcs[i]
+		fn.StartTok = transientCoreMappedToken(src, actions, checkpoints, fn.StartTok, eof)
+		fn.NameTok = transientCoreMappedToken(src, actions, checkpoints, fn.NameTok, eof)
+		fn.ReceiverStart = transientCoreMappedToken(src, actions, checkpoints, fn.ReceiverStart, eof)
+		fn.ReceiverEnd = transientCoreMappedToken(src, actions, checkpoints, fn.ReceiverEnd, eof)
+		normalizeCoreLinkedReceiver(fn, eof)
+		fn.BodyStart = transientCoreMappedToken(src, actions, checkpoints, fn.BodyStart, eof)
+		fn.BodyEnd = transientCoreMappedToken(src, actions, checkpoints, fn.BodyEnd, eof)
+		mappedEnd := transientCoreMappedToken(src, actions, checkpoints, fn.EndTok, eof)
+		if mappedEnd == eof && fn.BodyEnd >= 0 && fn.BodyEnd+1 <= eof {
+			mappedEnd = fn.BodyEnd + 1
+		}
+		fn.EndTok = mappedEnd
+		if fn.StartTok < 0 || fn.NameTok < 0 || fn.BodyStart < 0 || fn.BodyEnd < 0 || fn.EndTok < 0 {
+			return false
+		}
+	}
+	for i := 0; i < len(src.ConcurrencySites); i++ {
+		site := &src.ConcurrencySites[i]
+		site.Token = transientCoreMappedToken(src, actions, checkpoints, site.Token, eof)
+		if site.Token < 0 || site.Token >= eof {
+			return false
+		}
+	}
+	if borrowed {
+		dst.Tokens = dst.Tokens[:base]
+	}
+	return true
+}
+
+func transientCoreTokenOutputCount(src *unit.Program, action tokenAction, index int) int {
+	if action < 0 || index < 0 || index >= len(src.Tokens) || src.Tokens[index].KindLine&255 == unit.TokenEOF {
+		return 0
+	}
+	tok := src.Tokens[index]
+	if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start >= 0 && tok.Start+2 < len(src.Text) &&
+		src.Text[tok.Start] == '.' && src.Text[tok.Start+1] == '.' && src.Text[tok.Start+2] == '.' {
+		return 3
+	}
+	return 1
+}
+
+func transientCoreMappedToken(src *unit.Program, actions []tokenAction, checkpoints []unit.Token, tok int, eof int) int {
+	if tok < 0 {
+		return eof
+	}
+	if tok >= len(actions) {
+		return -1
+	}
+	if actions[tok] < 0 {
+		target := tokenActionRedirect(actions[tok])
+		if target >= 0 {
+			return target
+		}
+		return eof
+	}
+	return transientCoreMappedPosition(src, actions, checkpoints, tok)
+}
+
+func transientCoreMappedPosition(src *unit.Program, actions []tokenAction, checkpoints []unit.Token, tok int) int {
+	if tok < 0 || tok >= len(actions) {
+		return -1
+	}
+	block := tok / transientCoreMappingStride
+	mapped := checkpoints[block].Start
+	start := block * transientCoreMappingStride
+	for i := start; i < tok; i++ {
+		mapped += transientCoreTokenOutputCount(src, actions[i], i)
+	}
+	return mapped
 }
 
 func appendCoreQuotedString(out []byte, value string) []byte {
@@ -1343,6 +1538,26 @@ func mapCoreTextSpanByToken(src unit.Program, dst *unit.Program, eof int, start 
 		}
 	}
 	return 0, 0, false
+}
+
+func coreTokenIndexByTextSpan(tokens []unit.Token, start int, end int) int {
+	low := 0
+	high := len(tokens)
+	for low < high {
+		mid := low + (high-low)/2
+		if tokens[mid].Start < start {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	if low < len(tokens) {
+		tok := tokens[low]
+		if tok.Start == start && tok.Start+tok.Size == end {
+			return low
+		}
+	}
+	return -1
 }
 
 func mappedCoreTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {

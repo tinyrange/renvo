@@ -13,6 +13,7 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/amd64 -package main -o ../compiler_windows_amd64_impl.go windows_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux-kernel/amd64 -package main -o ../compiler_linux_kernel_amd64_target_impl.go linux_kernel_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_32 -package main -o ../compiler_386_target_impl.go x86_32_algorithms.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_code16 -package main -o ../compiler_386_code16_impl.go x86_16.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch arm -package main -o ../compiler_arm_impl.go arm_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch vm32 -package main -o ../compiler_wasm32_impl.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -contract -arch vm32 -package main -o ../rtg_vm32_contract_generated.go wasm32.rtg

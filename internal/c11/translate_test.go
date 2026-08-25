@@ -98,6 +98,24 @@ int check(int value) {
 	}
 }
 
+func TestTranslateObjectFunctionDesignatorMayShadowGoPredeclaredName(t *testing.T) {
+	result := TranslateObjectWithConfig("main", []byte(`
+static void error(char *message) {}
+void apply(void (*callback)(char *)) { callback("message"); }
+void run(void) { apply(error); }
+`), nil, ObjectConfig{DataModel: DataModelLP64, IsolateGoBuiltins: true})
+	if !result.Ok {
+		t.Fatalf("predeclared function designator failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("apply(error);")) ||
+		bytes.Contains(result.Source, []byte("__c_name_error")) {
+		t.Fatalf("object function designator did not retain its declared name:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("translated source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
 func TestTranslateObjectAcceptsCMainSignature(t *testing.T) {
 	result := TranslateObject("main", []byte(`void main(void) {}`), nil)
 	if !result.Ok {
@@ -316,6 +334,25 @@ static struct descriptor value = { .size = 4095, .address = (unsigned long)table
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
 		t.Fatalf("packed aggregate source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateObjectZeroInitializesAggregateHelperStorage(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct __attribute__((packed)) state { void *first; void *second; unsigned long flags; };
+void *first_or_null(void *second) {
+	struct state value = { .second = second, .flags = 7 };
+	return value.first;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("aggregate initializer failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var p __c_struct_state=__c_struct_state{};")) {
+		t.Fatalf("aggregate helper storage was not explicitly zero initialized:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("aggregate helper source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
 	}
 }
 
@@ -6786,6 +6823,7 @@ unsigned long call_inspect(char *pointer) { return inspect(1, 42, pointer); }
 		[]byte("renvo_runtime_CVAArg(args)"),
 		[]byte("__c_va_copy(&(destination)[0],source)"),
 		[]byte("consume(&(args)[0])"),
+		[]byte("var __c_va [3]uintptr=[3]uintptr{}"),
 		[]byte("__c_va_words[0]=uintptr(p1)"),
 		[]byte("__c_va_words[1]=uintptr(__c_unsafe.Pointer(p2))"),
 		[]byte("return inspect(p0,&__c_va)"),

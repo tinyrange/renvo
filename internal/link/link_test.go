@@ -2,6 +2,7 @@ package link
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	wireunit "renvo.dev/backend/unit"
@@ -92,6 +93,51 @@ func main() {}
 	}
 	if len(retained.Program.Packages) != len(result.Units) {
 		t.Fatalf("persistent package metadata count = %d, want %d", len(retained.Program.Packages), len(result.Units))
+	}
+}
+
+func TestLinkBuildTransientMatchesPersistentCore(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/pkg/lib/lib.go", Src: []byte(`package lib
+
+const Answer = 40
+
+func Add(values ...int) int {
+	total := Answer
+	for _, value := range values { total += value }
+	return total
+}
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+import "example.com/case/pkg/lib"
+
+func main() {
+	values := []int{1, 1}
+	if lib.Add(values...) == 42 { print("PASS\n") }
+}
+`)},
+	}
+	persistent := LinkBuildCore(buildFromFiles(t, files))
+	if !persistent.Ok {
+		t.Fatalf("persistent LinkBuild failed: err=%d pkg=%d", persistent.Error, persistent.ErrorPackage)
+	}
+	transient := LinkBuildCoreTransient(buildFromFiles(t, files))
+	if !transient.Ok {
+		t.Fatalf("transient LinkBuild failed: err=%d pkg=%d", transient.Error, transient.ErrorPackage)
+	}
+	persistentProgram, err := wireunit.Unmarshal(persistent.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transientProgram, err := wireunit.Unmarshal(transient.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistentProgram.Packages = nil
+	if !reflect.DeepEqual(transientProgram, persistentProgram) {
+		t.Fatal("transient linked core differs from persistent linked core")
 	}
 }
 

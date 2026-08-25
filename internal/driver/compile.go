@@ -29,6 +29,8 @@ type BackendCompileOptions struct {
 	ArenaSize     int
 	ModuleLicense string
 	ObjectFile    bool
+	Code16        bool
+	RegParm       int
 }
 
 type OptionsBackend interface {
@@ -102,7 +104,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
 	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize, built.Options.Mode)
 	if acceptsOptions && (built.Options.Mode != ModeExecutable || built.Options.EmitImage) {
-		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense, ObjectFile: built.Options.Mode == ModeObject})
+		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense, ObjectFile: built.Options.Mode == ModeObject, Code16: built.Options.CCode16, RegParm: built.Options.CRegParm})
 	} else if built.Options.Mode != ModeExecutable {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-006", Message: "backend does not accept output modes"}
 	} else if acceptsArena {

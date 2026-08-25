@@ -171,7 +171,7 @@ func (s *RenvoCommandSession) Step() bool {
 			s.done = true
 			return true
 		}
-		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, moduleLicense, s.built.Options.Mode == ModeObject)
+		s.backend = backendbridge.BeginCompileSession(unit, target, output, s.built.Options.Strip, s.built.Options.WindowsGUI, arenaSize, moduleLicense, s.built.Options.Mode == ModeObject, s.built.Options.CCode16, s.built.Options.CRegParm)
 		return false
 	}
 	if !s.backend.Step() {

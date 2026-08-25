@@ -82,6 +82,7 @@ func (out *RTGEmitter) RelocAt(at int, label int) {}
 func (out *RTGEmitter) PrimaryLoad() int { return 0 }
 func (out *RTGEmitter) SetPrimaryLoad(value int) {}
 func (out *RTGEmitter) OptimizeRuntime() bool { return false }
+func (out *RTGEmitter) VMBytecode() bool { return false }
 func (out *RTGEmitter) ByteAt(at int) byte { return 0 }
 func (out *RTGEmitter) SetByteAt(at int, value byte) {}
 func (out *RTGEmitter) AddByteAt(at int, value byte) {}

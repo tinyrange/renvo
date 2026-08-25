@@ -2,6 +2,41 @@ package main
 
 const renvo386ELFCodeOffset = 0x74
 
+func renvo386RewritePrimaryLoad(a *renvoAsm, reg int, pushed bool) bool {
+	load := a.lastPrimaryLoad
+	if pushed {
+		load = -load
+	}
+	end := load >> 3
+	at := end - (load & 7)
+	if pushed {
+		end++
+	}
+	if load <= 0 || end != len(a.code) {
+		return false
+	}
+	a.code[at] += byte(reg * 8)
+	if pushed {
+		renvoTruncBytes(&a.code, len(a.code)-1)
+	}
+	a.lastPrimaryLoad = 0
+	return true
+}
+
+func renvo386RewritePrimaryLoadCompare(a *renvoAsm, imm int) bool {
+	load := a.lastPrimaryLoad
+	end := load >> 3
+	if load <= 0 || end != len(a.code) {
+		return false
+	}
+	at := end - (load & 7)
+	a.code[at-1] = 0x83
+	a.code[at] += 0x38
+	a.code = append(a.code, byte(imm))
+	a.lastPrimaryLoad = 0
+	return true
+}
+
 func renvoAsmImageObject386(emitter *renvoAsm) []byte {
 	return renvoAsmImageRelocatableObject386(emitter)
 }
@@ -121,6 +156,9 @@ func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
 	a := &g.asm
 	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
 		renvoRecordObjectFunctionRanges(g)
+		if g.c.code16 && !renvo386ApplyCode16(&g.asm) {
+			return renvoCompileResult{}
+		}
 	}
 	renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 	var data []byte
@@ -138,6 +176,221 @@ func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
 	result.data = data
 	result.ok = true
 	return result
+}
+
+func renvo386ApplyCode16(a *renvoAsm) bool {
+	code := renvo386RewriteCode16(a.code)
+	positions := renvo386Code16Positions(a.code)
+	if code == nil || len(positions) != len(a.code)+1 {
+		failure := renvo386Code16FailureOffset(a.code)
+		renvoPrintErr("renvo: code16 rewrite failed at byte ")
+		renvoPrintIntErr(failure)
+		renvoPrintErr(" near")
+		for i := failure - 6; i < failure+6; i++ {
+			if i >= 0 && i < len(a.code) {
+				renvoPrintErr(" ")
+				renvoPrintIntErr(int(a.code[i]))
+			}
+		}
+		renvoPrintErr("\n")
+		a.patchFailed = true
+		return false
+	}
+	for i := 0; i < len(a.labelPos); i++ {
+		old := int(a.labelPos[i])
+		if old < 0 {
+			continue
+		}
+		if old >= len(positions) || positions[old] < 0 {
+			a.patchFailed = true
+			return false
+		}
+		a.labelPos[i] = int32(positions[old])
+	}
+	for i := 0; i < len(a.relocs); i += 2 {
+		old := int(a.relocs[i])
+		if old < 0 || old >= len(positions) || positions[old] < 0 {
+			a.patchFailed = true
+			return false
+		}
+		a.relocs[i] = int32(positions[old])
+	}
+	for i := 0; i < len(a.absRelocs); i += 3 {
+		old := int(a.absRelocs[i])
+		if old < 0 || old >= len(positions) || positions[old] < 0 {
+			a.patchFailed = true
+			return false
+		}
+		a.absRelocs[i] = int32(positions[old])
+	}
+	for i := 0; i < len(a.objectFunctions); i++ {
+		old := a.objectFunctions[i].end
+		if old < 0 || old >= len(positions) || positions[old] < 0 {
+			a.patchFailed = true
+			return false
+		}
+		a.objectFunctions[i].end = positions[old]
+		// Code16 has byte-aligned instruction targets and Linux's setup image
+		// has a strict 32 KiB ceiling. Do not inherit the ordinary hosted
+		// object's discretionary 16-byte function alignment.
+		a.objectFunctions[i].alignment = 1
+	}
+	a.code = code
+	return renvo386RelaxCode16NearRelocs(a)
+}
+
+func renvo386RelaxCode16NearRelocs(a *renvoAsm) bool {
+	// The generic 386 emitter represents every local near transfer with a
+	// rel32 field. In code16 that requires an operand-size override, although
+	// setup objects are themselves comfortably inside the signed rel16 range.
+	// Resolve those local labels now and retain rel32 only for transfers whose
+	// distance is genuinely too large. External ELF relocations live in
+	// absRelocs and are deliberately untouched.
+	type nearReloc struct {
+		start int
+		at    int
+		end   int
+		label int
+		cond  bool
+	}
+	candidates := make([]nearReloc, 0, len(a.relocs)/2)
+	byStart := make([]int, len(a.code)+1)
+	for i := 0; i < len(byStart); i++ {
+		byStart[i] = -1
+	}
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		at := int(a.relocs[i])
+		label := int(a.relocs[i+1])
+		if label < 0 || label >= len(a.labelPos) || a.labelPos[label] < 0 {
+			continue
+		}
+		start := -1
+		end := -1
+		cond := false
+		if at >= 2 && at+4 <= len(a.code) && a.code[at-2] == 0x66 && a.code[at-1] == 0xe9 {
+			start = at - 2
+			end = at + 4
+		} else if at >= 3 && at+4 <= len(a.code) && a.code[at-3] == 0x66 &&
+			a.code[at-2] == 0x0f && a.code[at-1]&0xf0 == 0x80 {
+			start = at - 3
+			end = at + 4
+			cond = true
+		}
+		if start < 0 {
+			continue
+		}
+		// A field that also carries an ELF relocation is not a purely local
+		// transfer and must retain its original width and relocation kind.
+		external := false
+		for absolute := 0; absolute+2 < len(a.absRelocs); absolute += 3 {
+			if int(a.absRelocs[absolute]) == at {
+				external = true
+				break
+			}
+		}
+		if external {
+			continue
+		}
+		distance := int(a.labelPos[label]) - end
+		if distance < -32768 || distance > 32767 {
+			continue
+		}
+		candidate := nearReloc{start: start, at: at, end: end, label: label, cond: cond}
+		byStart[start] = len(candidates)
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) == 0 {
+		return true
+	}
+	oldCode := a.code
+	positions := make([]int, len(oldCode)+1)
+	for i := 0; i < len(positions); i++ {
+		positions[i] = -1
+	}
+	newCode := make([]byte, 0, len(oldCode)-len(candidates)*3)
+	newFields := make([]int, len(candidates))
+	for old := 0; old < len(oldCode); {
+		positions[old] = len(newCode)
+		candidateIndex := byStart[old]
+		if candidateIndex < 0 {
+			newCode = append(newCode, oldCode[old])
+			old++
+			continue
+		}
+		candidate := candidates[candidateIndex]
+		if candidate.cond {
+			newCode = append(newCode, 0x0f, oldCode[candidate.at-1])
+		} else {
+			newCode = append(newCode, oldCode[candidate.at-1])
+		}
+		newFields[candidateIndex] = len(newCode)
+		newCode = append(newCode, 0, 0)
+		for interior := old + 1; interior < candidate.end; interior++ {
+			positions[interior] = len(newCode)
+		}
+		old = candidate.end
+	}
+	positions[len(oldCode)] = len(newCode)
+	for i := 0; i < len(a.labelPos); i++ {
+		old := int(a.labelPos[i])
+		if old < 0 {
+			continue
+		}
+		if old >= len(positions) || positions[old] < 0 {
+			return false
+		}
+		a.labelPos[i] = int32(positions[old])
+	}
+	keptRelocs := a.relocs[:0]
+	for i := 0; i+1 < len(a.relocs); i += 2 {
+		oldAt := int(a.relocs[i])
+		converted := -1
+		for candidateIndex := 0; candidateIndex < len(candidates); candidateIndex++ {
+			if candidates[candidateIndex].at == oldAt {
+				converted = candidateIndex
+				break
+			}
+		}
+		if converted >= 0 {
+			// The relocatable-object writer may realign or regroup function
+			// ranges after this pass. Keep a marked label relocation so it can
+			// calculate the final rel16 displacement from mapped section offsets.
+			keptRelocs = append(keptRelocs, int32(newFields[converted]|-2147483648), a.relocs[i+1])
+			continue
+		}
+		if oldAt < 0 || oldAt >= len(positions) || positions[oldAt] < 0 {
+			return false
+		}
+		keptRelocs = append(keptRelocs, int32(positions[oldAt]), a.relocs[i+1])
+	}
+	a.relocs = keptRelocs
+	for i := 0; i < len(a.absRelocs); i += 3 {
+		old := int(a.absRelocs[i])
+		if old < 0 || old >= len(positions) || positions[old] < 0 {
+			return false
+		}
+		a.absRelocs[i] = int32(positions[old])
+	}
+	for i := 0; i < len(a.objectFunctions); i++ {
+		old := a.objectFunctions[i].end
+		if old < 0 || old >= len(positions) || positions[old] < 0 {
+			return false
+		}
+		a.objectFunctions[i].end = positions[old]
+	}
+	a.code = newCode
+	for i := 0; i < len(candidates); i++ {
+		field := newFields[i]
+		distance := int(a.labelPos[candidates[i].label]) - (field + 2)
+		if distance < -32768 || distance > 32767 {
+			return false
+		}
+		// The object writer calculates the displacement after applying section
+		// grouping and function alignment. Leave a zero REL addend here.
+		a.code[field] = 0
+		a.code[field+1] = 0
+	}
+	return true
 }
 
 func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
@@ -183,26 +436,15 @@ func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
 	}
 	return true
 }
-func renvo386AsmMovRaxDataAddr(a *renvoAsm, dataOff int) {
+func renvo386AsmMovRaxAddr(a *renvoAsm, offset int, relocKind int) {
 	if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-		renvo386AsmMovRegPCRel(a, 0, dataOff, 0)
+		renvo386AsmMovRegPCRel(a, 0, offset, relocKind)
 		return
 	}
 	renvoAsmEmit8(a, 0xb8)
 	at := len(a.code)
 	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, dataOff, 0)
-}
-
-func renvo386AsmMovRaxBssAddr(a *renvoAsm, bssOff int) {
-	if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
-		renvo386AsmMovRegPCRel(a, 0, bssOff, renvoAbsBssReloc)
-		return
-	}
-	renvoAsmEmit8(a, 0xb8)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
+	renvoAsmAddAbsReloc(a, at, offset, relocKind)
 }
 
 func renvo386AsmMovR10BssAddr(a *renvoAsm, bssOff int) {
@@ -427,6 +669,30 @@ func renvo386EmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int
 
 func renvo386EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
 	renvoNonNil(g)
+	// Keep the common integer operations at their call site.  Pulling in the
+	// general dispatcher for a single add, multiply, bitwise operation, or
+	// comparison costs several hundred bytes in small 386 objects and also
+	// hides the operation from the ordinary branch and load peepholes.
+	if renvoFixedTarget == 0 && g.c.code16 && mode == 0 {
+		renvoEmitWideAddStack(g, dest, left, right)
+		return
+	}
+	if renvoFixedTarget == 0 && g.c.code16 && mode == 1 {
+		renvoEmitWideSubStack(g, dest, left, right)
+		return
+	}
+	if renvoFixedTarget == 0 && g.c.code16 && mode == 2 {
+		renvoEmitWideMulStack(g, dest, left, right)
+		return
+	}
+	if renvoFixedTarget == 0 && g.c.code16 && mode >= 10 && mode <= 13 {
+		renvo386EmitWideBitwiseStack(g, dest, left, right, mode)
+		return
+	}
+	if renvoFixedTarget == 0 && g.c.code16 && mode >= 14 && mode <= 23 {
+		renvo386EmitWideCompareInlineStack(g, left, right, mode)
+		return
+	}
 	if mode >= 3 && mode <= 6 {
 		nonzero := renvoAsmNewLabel(&g.asm)
 		renvoAsmLoadPrimaryStack(&g.asm, right-g.c.renvoNativeIntSize)
@@ -436,6 +702,56 @@ func renvo386EmitWideBinaryStack(g *renvoLinearGen, dest int, left int, right in
 		renvoAsmMarkLabel(&g.asm, nonzero)
 	}
 	renvo386EmitWideHelperCall(g, dest, left, right, mode, renvo386EnsureWideBinaryHelper(g))
+}
+
+func renvo386EmitWideBitwiseStack(g *renvoLinearGen, dest int, left int, right int, mode int) {
+	for word := 0; word < 2; word++ {
+		leftWord := left - word*g.c.renvoNativeIntSize
+		rightWord := right - word*g.c.renvoNativeIntSize
+		destWord := dest - word*g.c.renvoNativeIntSize
+		renvoAsmLoadPrimaryStack(&g.asm, leftWord)
+		renvoAsmLoadTertiaryStack(&g.asm, rightWord)
+		if mode == 10 {
+			renvoAsmEmit16(&g.asm, 0xc821)
+		} else if mode == 11 {
+			renvoAsmEmit16(&g.asm, 0xc809)
+		} else if mode == 12 {
+			renvoAsmEmit16(&g.asm, 0xc831)
+		} else {
+			renvoAsmEmit16(&g.asm, 0xd1f7)
+			renvoAsmEmit16(&g.asm, 0xc821)
+		}
+		renvoAsmStorePrimaryStack(&g.asm, destWord)
+	}
+}
+
+func renvo386EmitWideCompareInlineStack(g *renvoLinearGen, left int, right int, mode int) {
+	if mode == 14 || mode == 15 {
+		different := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x95)
+		renvoAsmJnzPrimary(&g.asm, different)
+		renvoEmitNativeCompareStack(g, left, right, 0x95)
+		renvoAsmJmpLabel(&g.asm, done)
+		renvoAsmMarkLabel(&g.asm, different)
+		renvoAsmPrimaryImm(&g.asm, 1)
+		renvoAsmMarkLabel(&g.asm, done)
+		if mode == 14 {
+			renvoAsmBoolNotPrimary(&g.asm)
+		}
+		return
+	}
+	signed := mode >= 16 && mode <= 19
+	inclusive := mode == 17 || mode == 19 || mode == 21 || mode == 23
+	leftFirst := mode == 16 || mode == 19 || mode == 20 || mode == 23
+	if leftFirst {
+		renvoEmitWideLessStack(g, left, right, signed)
+	} else {
+		renvoEmitWideLessStack(g, right, left, signed)
+	}
+	if inclusive {
+		renvoAsmBoolNotPrimary(&g.asm)
+	}
 }
 
 func renvo386EmitWideCompareStack(g *renvoLinearGen, left int, right int, mode int) {
@@ -512,8 +828,7 @@ func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	if frame > 65528 {
 		frame = 65528
 	}
-	a.code[framePatch+1] = byte(frame & 255)
-	a.code[framePatch+2] = byte((frame / 256) & 255)
+	renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
 	g.locals = oldLocals
 	g.localCount = oldLocalCount
 	g.breakDepth = oldBreak
@@ -531,6 +846,61 @@ func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.stackPeak = oldStackPeak
 	g.gotoLabels = oldGotoLabels
 	g.lastRangeReturns = oldLastRangeReturns
+	return true
+}
+
+func renvo386EmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
+	if !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
+		return false
+	}
+	fn := &g.meta.funcs[fnInfoIndex]
+	postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
+	postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
+	if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
+		return false
+	}
+	result := renvoResolveType(g.meta, fn.resultType)
+	size := renvoTypeSize(g.meta, fn.resultType)
+	if size < 1 || size > 4 ||
+		(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
+		return false
+	}
+	a := &g.asm
+	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+	// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
+	// value. Advance *p, store the value through the old pointer, and leave the
+	// expression result in EAX without constructing a frame.
+	renvoAsmEmit16(a, 0x168b) // mov edx,[esi]
+	delta := size
+	if postDec {
+		delta = -delta
+	}
+	if renvoAsmImmFits8Signed(delta) {
+		renvoAsmEmit3(a, 0x8d, 0x4a, delta) // lea ecx,[edx+delta]
+	} else {
+		renvoAsmEmit16(a, 0x8a8d)
+		renvoAsmEmit32(a, delta)
+	}
+	renvoAsmEmit16(a, 0x0e89) // mov [esi],ecx
+	if size == 1 {
+		renvoAsmEmit16(a, 0x1a88) // mov [edx],bl
+		if result.kind == renvoTypeInt8 {
+			renvoAsmEmitText(a, "\x0f\xbe\xc3")
+		} else {
+			renvoAsmEmitText(a, "\x0f\xb6\xc3")
+		}
+	} else if size == 2 {
+		renvoAsmEmitText(a, "\x66\x89\x1a") // mov [edx],bx
+		if result.kind == renvoTypeInt16 {
+			renvoAsmEmitText(a, "\x0f\xbf\xc3")
+		} else {
+			renvoAsmEmitText(a, "\x0f\xb7\xc3")
+		}
+	} else {
+		renvoAsmEmit16(a, 0x1a89) // mov [edx],ebx
+		renvoAsmEmit16(a, 0xd889) // mov eax,ebx
+	}
+	renvoAsmRet(a)
 	return true
 }
 
@@ -691,6 +1061,71 @@ func renvo386EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 		}
 	}
 }
+
+// C lowering frequently stages call arguments in frame slots, then emits a
+// load/push pair for every word immediately before the internal call adapter
+// pops those same words into registers. Replace that lossless stack round trip
+// with direct frame-to-register loads. The conservative metadata checks keep
+// branch targets and relocation fields out of the rewritten range.
+func renvo386TryLoadCallWordsFromFrame(a *renvoAsm, wordCount int) bool {
+	if wordCount < 1 || wordCount > 6 {
+		return false
+	}
+	starts := make([]int, wordCount)
+	displacements := make([]int, wordCount)
+	wide := make([]bool, wordCount)
+	cursor := len(a.code)
+	for i := wordCount - 1; i >= 0; i-- {
+		if cursor < 4 || a.code[cursor-1] != 0x50 {
+			return false
+		}
+		if cursor >= 4 && a.code[cursor-4] == 0x8b && a.code[cursor-3] == 0x45 {
+			starts[i] = cursor - 4
+			displacements[i] = int(int8(a.code[cursor-2]))
+			cursor -= 4
+			continue
+		}
+		if cursor >= 7 && a.code[cursor-7] == 0x8b && a.code[cursor-6] == 0x85 {
+			starts[i] = cursor - 7
+			displacements[i] = int(int32(uint32(a.code[cursor-5]) | uint32(a.code[cursor-4])<<8 |
+				uint32(a.code[cursor-3])<<16 | uint32(a.code[cursor-2])<<24))
+			wide[i] = true
+			cursor -= 7
+			continue
+		}
+		return false
+	}
+	start := starts[0]
+	for i := 0; i < len(a.labelPos); i++ {
+		if int(a.labelPos[i]) >= start {
+			return false
+		}
+	}
+	for i := 0; i < len(a.relocs); i += 2 {
+		if int(a.relocs[i]) >= start {
+			return false
+		}
+	}
+	for i := 0; i < len(a.absRelocs); i += 3 {
+		if int(a.absRelocs[i]) >= start {
+			return false
+		}
+	}
+	a.code = a.code[:start]
+	registers := []int{3, 6, 2, 1, 0, 7}
+	for i := 0; i < wordCount; i++ {
+		register := registers[wordCount-1-i]
+		renvoAsmEmit8(a, 0x8b)
+		if wide[i] {
+			renvoAsmEmit8(a, 0x85|register<<3)
+			renvoAsmEmit32(a, displacements[i])
+		} else {
+			renvoAsmEmit8(a, 0x45|register<<3)
+			renvoAsmEmit8(a, displacements[i])
+		}
+	}
+	return true
+}
 func renvo386EmitEnsureMemSlice(g *renvoLinearGen, elemSize int) {
 	a := &g.asm
 	if elemSize < 1 {
@@ -791,32 +1226,36 @@ func renvo386EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	return g.appendAddrLabel
 }
 
-func renvo386EnsureAppend8Helper(g *renvoLinearGen) int {
+func renvo386EnsureAppendScalarHelper(g *renvoLinearGen, small bool) int {
 	a := &g.asm
-	if g.append8Emitted {
-		return g.append8Label
+	label := g.append64Label
+	if small {
+		label = g.append8Label
+		if g.append8Emitted {
+			return label
+		}
+		g.append8Emitted = true
+	} else {
+		if g.append64Emitted {
+			return label
+		}
+		g.append64Emitted = true
 	}
-	g.append8Emitted = true
-	g.append8Label = renvoAsmNewLabel(a)
-	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.append8Label)
-	renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x88\x14\x08\x41\x89\x0e\xc3")
-	renvoAsmMarkLabel(a, afterLabel)
-	return g.append8Label
-}
-
-func renvo386EnsureAppend64Helper(g *renvoLinearGen) int {
-	a := &g.asm
-	if g.append64Emitted {
-		return g.append64Label
+	label = renvoAsmNewLabel(a)
+	if small {
+		g.append8Label = label
+	} else {
+		g.append64Label = label
 	}
-	g.append64Emitted = true
-	g.append64Label = renvoAsmNewLabel(a)
 	afterLabel := renvoAsmNewLabel(a)
-	renvoAsmJmpMarkLabel(a, afterLabel, g.append64Label)
-	renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x89\x14\xc8\x41\x89\x0e\xc3")
+	renvoAsmJmpMarkLabel(a, afterLabel, label)
+	if small {
+		renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x88\x14\x08\x41\x89\x0e\xc3")
+	} else {
+		renvoAsmEmitText(a, "\x8b\x0e\x8b\x07\x89\x14\xc8\x41\x89\x0e\xc3")
+	}
 	renvoAsmMarkLabel(a, afterLabel)
-	return g.append64Label
+	return label
 }
 
 func renvo386EnsureStringEqualHelper(g *renvoLinearGen) int {

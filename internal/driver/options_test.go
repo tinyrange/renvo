@@ -114,6 +114,14 @@ func TestNormalizeCCompilerExecutableDefaultsToAOut(t *testing.T) {
 	}
 }
 
+func TestNormalizeM16CCompilerCommand(t *testing.T) {
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-m16", "-mregparm=3", "-g", "-march=i386", "-Wstrict-prototypes", "-Wno-address-of-packed-member", "-c", "boot.c", "-o", "boot.o"})
+	options := ParseOptions(args[1:])
+	if !options.Ok || options.Target != "linux/386" || options.Mode != ModeObject || !options.CCode16 || options.CRegParm != 3 {
+		t.Fatalf("normalized -m16 options = %#v (args %#v)", options, args)
+	}
+}
+
 func TestNormalizeKbuildCCompilerCommand(t *testing.T) {
 	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-MMD", "-Wp,-MMD,obj/.leaf.o.d", "-ffunction-sections", "-fdata-sections", "-fshort-wchar", "-funsigned-char", "-nostdinc", "-Iinclude", "-include", "include/config.h", "-D__KERNEL__", "-std=gnu11", "-m64", "-mcmodel=kernel", "-Os", "-Wall", "-c", "leaf.c", "-o", "obj/leaf.o"})
 	options := ParseOptions(args[1:])

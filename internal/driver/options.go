@@ -79,6 +79,8 @@ type Options struct {
 	CShortWChar          bool
 	CUnsignedChar        bool
 	CKernelCodeModel     bool
+	CCode16              bool
+	CRegParm             int
 	COptimize            bool
 	DependencyFile       string
 	DependencyTarget     string
@@ -180,6 +182,14 @@ func NormalizeCCompilerCommand(args []string) []string {
 			out = append(out, "-t", "linux/386")
 			continue
 		}
+		if arg == "-m16" {
+			out = append(out, "-t", "linux/386", "-cc-code16")
+			continue
+		}
+		if arg == "-mregparm=3" {
+			out = append(out, "-cc-regparm=3")
+			continue
+		}
 		if cCompilerInertOption(arg) {
 			continue
 		}
@@ -259,7 +269,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 	return out
 }
 
-const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-ffreestanding|-static|-ggdb|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-omit-frame-pointer|-foptimize-sibling-calls|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Wno-error|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-unused-macros|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
+const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-g|-ggdb|-march=i386|-ffreestanding|-static|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-omit-frame-pointer|-foptimize-sibling-calls|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Wno-error|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wstrict-prototypes|-Wno-address-of-packed-member|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-unused-macros|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
 
 func cCompilerInertOption(arg string) bool {
 	option, _ := cCompilerOptionIndex(cCompilerInertOptions, arg, false)
@@ -401,6 +411,16 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		}
 		if arg == "-cc-kernel-code-model" {
 			options.CKernelCodeModel = true
+			i++
+			continue
+		}
+		if arg == "-cc-code16" {
+			options.CCode16 = true
+			i++
+			continue
+		}
+		if arg == "-cc-regparm=3" {
+			options.CRegParm = 3
 			i++
 			continue
 		}

@@ -92,6 +92,19 @@ func TestCompileCObjectPassesStructuredBackendOptions(t *testing.T) {
 	}
 }
 
+func TestCompileM16CObjectPassesCode16BackendOption(t *testing.T) {
+	backend := &recordingOptionsBackend{binary: []byte("object")}
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/boot.c", Src: []byte("int main(void) { return 0; }\n")},
+	}
+	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-m16", "-mregparm=3", "-c", "boot.c", "-o", "boot.o"})
+	result := CompileUnit(args[1:], "/repo/case", "/std", files, backend)
+	if !result.Ok || backend.options.Target != "linux/386" || !backend.options.ObjectFile || !backend.options.Code16 || backend.options.RegParm != 3 {
+		t.Fatalf("-m16 object compile = %#v, backend options = %#v", result, backend.options)
+	}
+}
+
 func TestCompileReportsBuildFailure(t *testing.T) {
 	backend := &recordingBackend{binary: []byte("binary")}
 	result := CompileUnit([]string{"-t", "invalid", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles(), backend)
