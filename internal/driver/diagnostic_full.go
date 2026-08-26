@@ -8,6 +8,7 @@ import (
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/link"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/lower"
 	"renvo.dev/internal/pipeline"
 	"renvo.dev/internal/syntax"
 )
@@ -352,6 +353,14 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-LOWER-001", "checked program could not be lowered"
+		if built.Build.ErrorDetail == lower.EmitErrAssembly {
+			phase, code, message = "rtgasm", "RENVO-RTGASM-001", "invalid RTGASM source or function binding"
+			diagnostic := Diagnostic{Phase: phase, Code: code, Message: message}
+			if source, ok := findSource(result.Sources.Files, built.ErrorPath); ok {
+				return diagnosticAtOffset(diagnostic, source, built.ErrorOffset)
+			}
+			return diagnostic
+		}
 	} else if built.Build.Error == build.BuildErrUnit {
 		phase, code, message = "unit", "RENVO-UNIT-001", "lowered package unit is invalid"
 	} else if built.Build.Error == build.BuildErrRoot {

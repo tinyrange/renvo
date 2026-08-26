@@ -21,7 +21,11 @@ func MarshalCoreTransient(program CoreProgram) ([]byte, bool) {
 }
 
 func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
-	capacity := 82 + unboundTargetBindingReserve + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12 + len(program.Packages)*48
+	assemblyCapacity := len(program.RTGAssemblyFuncs) * 4
+	for i := 0; i < len(program.RTGAssembly); i++ {
+		assemblyCapacity += len(program.RTGAssembly[i].Path) + len(program.RTGAssembly[i].Source) + 4
+	}
+	capacity := 82 + unboundTargetBindingReserve + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12 + len(program.Packages)*48 + assemblyCapacity
 	out := make([]byte, 0, capacity)
 	for i := 0; i < len(Magic); i++ {
 		out = append(out, Magic[i])
@@ -60,8 +64,31 @@ func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
 		out = appendEncodedPackagesCore(out, program.Packages)
 		patchUint32Core(out, packageHeader+2, len(out)-packageStart)
 	}
+	if len(program.RTGAssembly) > 0 || len(program.RTGAssemblyFuncs) > 0 {
+		out = appendNode(out, TagRTGAssembly, encodeRTGAssemblyCore(program.RTGAssembly, program.RTGAssemblyFuncs))
+	}
 	patchUint32Core(out, rootLength, len(out)-14)
 	return out, true
+}
+
+func encodeRTGAssemblyCore(sources []RTGAssemblySource, bindings []RTGAssemblyBinding) []byte {
+	out := make([]byte, 0)
+	out = appendVarint(out, len(sources))
+	for i := 0; i < len(sources); i++ {
+		out = appendVarint(out, len(sources[i].Path))
+		out = appendCoreStringBytes(out, sources[i].Path)
+		out = appendVarint(out, len(sources[i].Source))
+		out = append(out, sources[i].Source...)
+	}
+	out = appendVarint(out, len(bindings))
+	for i := 0; i < len(bindings); i++ {
+		out = appendVarint(out, bindings[i].Func)
+		out = appendVarint(out, bindings[i].Source)
+		out = appendVarint(out, bindings[i].Entry)
+		out = appendVarint(out, len(bindings[i].Code))
+		out = append(out, bindings[i].Code...)
+	}
+	return out
 }
 
 func appendEncodedPackagesCore(out []byte, packages []PackageInfo) []byte {

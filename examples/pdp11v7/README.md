@@ -11,6 +11,11 @@ encoding, the internal calling convention, V7 `write` and `exit` traps, packed
 data handling, relocations, and the 16-byte executable header. Its intentionally
 small scope is the Hello World demo and similarly simple 16-bit programs.
 
+The example also contains `answer_unixv7_pdp11.rtgasm`. It implements a
+bodyless Go function with the definition's normal PDP-11 emitter helpers and a
+local patched jump. This keeps the assembly source in the project and exercises
+the same CompilerJIT/VM32 path used for larger custom backends.
+
 From the repository root, the equivalent command-line build is:
 
 ```sh

@@ -232,7 +232,7 @@ func driverHelpSource(descriptors []sourceDescriptor) []byte {
 		"  -script      compile one file whose top-level statements form func main\n" +
 		"  -windows-gui select the Windows GUI subsystem instead of the console subsystem\n" +
 		"Source files:\n" +
-		"  Explicit .go and .c files must share one directory and package. Exactly the named files are used;\n" +
+		"  Explicit .go, .c, and .rtgasm files must share one directory and package. Exactly the named files are used;\n" +
 		"  build constraints and OS/architecture suffixes are ignored, while test files are skipped.\n" +
 		"Targets:\n  "
 	const suffix = "Unsupported language/toolchain features:\n  generics, cgo\nConcurrency:\n  goroutines, channels, and select are frontend-lowered through renvo.dev/x/runtime; v1 handlers serialize execution.\n"

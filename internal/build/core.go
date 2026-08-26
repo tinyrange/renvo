@@ -38,6 +38,8 @@ type Result struct {
 	ErrorFile    int
 	ErrorToken   int
 	ErrorDetail  int
+	ErrorPath    string
+	ErrorOffset  int
 }
 
 func BuildUnits(graph load.Graph) Result {
@@ -125,6 +127,8 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 				arena.PersistReset(persistMark)
 			}
 			result.ErrorDetail = emit.Error
+			result.ErrorPath = emit.ErrorPath
+			result.ErrorOffset = emit.ErrorOffset
 			return buildFail(result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		}
 		if pkg.Ref.ImportPath == graph.Root {
@@ -141,6 +145,9 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 		if transient {
 			for j := 0; j < len(pkg.Files); j++ {
 				arena.Discard(pkg.Files[j].ArenaStart, pkg.Files[j].ArenaEnd)
+			}
+			for j := 0; j < len(pkg.Assemblies); j++ {
+				arena.Discard(pkg.Assemblies[j].ArenaStart, pkg.Assemblies[j].ArenaEnd)
 			}
 			arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 			arena.PersistReset(persistMark)

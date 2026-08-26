@@ -67,7 +67,7 @@ func TestCommandHelpRequested(t *testing.T) {
 	if CommandHelpRequested([]string{"renvo", "-o", "app", "."}) {
 		t.Fatal("compile command requested help")
 	}
-	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-I", "-isystem", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go and .c files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
+	for _, want := range []string{"Usage: renvo", "renvo cc -c", "-o <file>", "-I", "-isystem", "-system <file.rtg>", "-mode=<mode>", "kernel-module", "object", "source files...", "Explicit .go, .c, and .rtgasm files", "Exactly the named files", "windows/amd64", "windows/arm64", "darwin/arm64", "wasi/wasm32", "vm/vm32"} {
 		if !strings.Contains(HelpText, want) {
 			t.Fatalf("HelpText missing %q", want)
 		}

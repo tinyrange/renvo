@@ -57,6 +57,12 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
 	}
+	if !builder.addRTGAssembly(pkg) {
+		result = emitFail(result, EmitErrAssembly, builder.errFile, builder.errToken)
+		result.ErrorPath = builder.assemblyErrorPath
+		result.ErrorOffset = builder.assemblyErrorOffset
+		return result
+	}
 	if !builder.finishUnit() {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -65,14 +71,17 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 }
 
 type coreUnitBuilder struct {
-	program    unit.Program
-	lineOffset int
-	finalEOF   int
-	err        int
-	errFile    int
-	errToken   int
-	declRows   []int
-	funcRows   []int
+	program             unit.Program
+	lineOffset          int
+	finalEOF            int
+	err                 int
+	errFile             int
+	errToken            int
+	assemblyErrorPath   string
+	assemblyErrorOffset int
+	declRows            []int
+	funcRows            []int
+	bodylessFuncs       []int
 }
 
 type coreFileTokens struct {
@@ -408,8 +417,17 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		return false
 	}
 	nameTok := mapCoreToken(mapping, fn.NameTok, b.finalEOF)
+	bodyStart := fn.BodyStart
 	bodyEnd := fn.BodyEnd - 1
-	if bodyEnd < fn.BodyStart {
+	endTok := fn.EndTok
+	if fn.BodyStart < 0 {
+		// A bodyless declaration has no brace tokens. Point its empty body at
+		// the declaration boundary; the RTGASM binding makes that sentinel
+		// executable in the backend.
+		bodyStart = fn.EndTok
+		bodyEnd = fn.EndTok
+		b.bodylessFuncs = append(b.bodylessFuncs, len(b.program.Funcs))
+	} else if bodyEnd < fn.BodyStart {
 		b.setErr(EmitErrToken, fileIndex, fn.BodyEnd)
 		return false
 	}
@@ -425,9 +443,9 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		NameTok:       nameTok,
 		ReceiverStart: mapCoreToken(mapping, fn.ReceiverStart, b.finalEOF),
 		ReceiverEnd:   mapCoreToken(mapping, fn.ReceiverEnd, b.finalEOF),
-		BodyStart:     mapCoreToken(mapping, fn.BodyStart, b.finalEOF),
+		BodyStart:     mapCoreToken(mapping, bodyStart, b.finalEOF),
 		BodyEnd:       mapCoreToken(mapping, bodyEnd, b.finalEOF),
-		EndTok:        mapCoreToken(mapping, fn.EndTok, b.finalEOF),
+		EndTok:        mapCoreToken(mapping, endTok, b.finalEOF),
 	})
 	return true
 }

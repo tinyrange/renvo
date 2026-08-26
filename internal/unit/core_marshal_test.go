@@ -71,6 +71,26 @@ func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
 	}
 }
 
+func TestCoreUnitPreservesRTGAssemblySource(t *testing.T) {
+	program := coreGoldenProgram()
+	program.RTGAssembly = []RTGAssemblySource{{
+		Path:   "bits_amd64.rtgasm",
+		Source: []byte("rtgasm 1 assembly { Swap(out:emitter) { out.Byte(0xc3) } }"),
+	}}
+	program.RTGAssemblyFuncs = []RTGAssemblyBinding{{Func: 0, Source: 0, Entry: 0}}
+	data, ok := MarshalCore(CoreProgramFrom(program))
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	if !HasRTGAssembly(data) || !bytes.Contains(data, program.RTGAssembly[0].Source) {
+		t.Fatal("core unit did not preserve RTGASM source")
+	}
+	// The public version-1 reader must continue skipping the new optional table.
+	if _, err := wireunit.Unmarshal(data); err != nil {
+		t.Fatalf("public reader rejected optional RTGASM table: %v", err)
+	}
+}
+
 func TestCoreUnitPublicReaderPreservesLargeTokenLines(t *testing.T) {
 	program := coreGoldenProgram()
 	for i := 0; i < len(program.Tokens); i++ {

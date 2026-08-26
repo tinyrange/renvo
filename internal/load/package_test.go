@@ -2,6 +2,21 @@ package load
 
 import "testing"
 
+func TestLoadPackagePreservesRTGAssemblyFiles(t *testing.T) {
+	module := ParseModule("/repo", []byte("module example.com/case\n"))
+	ref := ResolvePackageArg(module, "/repo", "./bits")
+	pkg := LoadPackage(module, "/std", ref, []SourceFile{
+		{Path: "/repo/bits/bits.go", Src: []byte("package bits\nfunc Swap(value uint64) uint64 { return value }\n")},
+		{Path: "/repo/bits/bits_amd64.rtgasm", Src: []byte("rtgasm 1\nassembly { Swap(out:emitter) { out.Byte(0xc3) } }\n")},
+	})
+	if !pkg.Ok || len(pkg.Files) != 1 || len(pkg.Assemblies) != 1 {
+		t.Fatalf("loaded package = %#v", pkg)
+	}
+	if pkg.Assemblies[0].Path != "/repo/bits/bits_amd64.rtgasm" {
+		t.Fatalf("assembly file = %#v", pkg.Assemblies[0])
+	}
+}
+
 func TestLoadPackageSortsFilesAndIgnoresTests(t *testing.T) {
 	mod := Module{Root: "/repo/case", Path: "example.com/case", Ok: true}
 	ref := ResolvePackageArg(mod, "/repo/case", "./cmd/app")
@@ -116,7 +131,7 @@ func TestLoadPackageErrors(t *testing.T) {
 	}
 
 	badSyntax := LoadPackage(mod, "/std", ref, []SourceFile{
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc f()\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc ()\n")},
 	})
 	if badSyntax.Ok || badSyntax.Error != PackageErrParse {
 		t.Fatalf("bad syntax package = %#v", badSyntax)

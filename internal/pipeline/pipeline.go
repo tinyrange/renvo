@@ -23,6 +23,8 @@ type Result struct {
 	ErrorPackage int
 	ErrorFile    int
 	ErrorToken   int
+	ErrorPath    string
+	ErrorOffset  int
 }
 
 func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
@@ -73,6 +75,8 @@ func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.So
 	}
 	result.Build = built
 	if !built.Ok {
+		result.ErrorPath = built.ErrorPath
+		result.ErrorOffset = built.ErrorOffset
 		return pipelineFail(result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	var linked link.Result

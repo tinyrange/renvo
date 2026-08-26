@@ -212,6 +212,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	var declData []byte
 	var funcData []byte
 	var packageData []byte
+	var assemblyData []byte
 	seenLow := 0
 	seenHigh := 0
 	pos := rootStart
@@ -269,6 +270,9 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		}
 		if tag == renvoUnitTagPackages {
 			packageData = src[pos:next]
+		}
+		if tag == renvoUnitTagRTGAssembly {
+			assemblyData = src[pos:next]
 		}
 		pos = next
 	}
@@ -362,6 +366,10 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		prog.funcs = append(prog.funcs, fn)
 	}
 	if funcReader.pos != funcReader.end {
+		return false
+	}
+	if renvoPreparedBackendActive != 0 &&
+		!renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 		return false
 	}
 	if len(packageData) > 0 {

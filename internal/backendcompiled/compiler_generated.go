@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e52fcad5efa7d18cbdc69ea6f81b53dc9eb210f4839dd63667dafd56dbb409b7"
+const CompilerSourceDigest = "a064de7f1a374b81259624ddac877923347f090868a57012f964c8682b2ab7c6"
 
 // source: backend/compiler_common_impl.go
 
@@ -37710,6 +37710,84 @@ return renvoBuiltInTargetBinding(target)
 
 // source: backend/compiler_rtg_adapter_impl.go
 
+type renvoRTGAssemblySource struct {
+path   []byte
+source []byte
+}
+
+type renvoRTGAssemblyBinding struct {
+function int
+source   int
+entry    int
+code     []byte
+}
+
+type renvoRTGAssemblyTable struct {
+sources  []renvoRTGAssemblySource
+bindings []renvoRTGAssemblyBinding
+}
+
+var renvoRTGAssembly renvoRTGAssemblyTable
+
+func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
+renvoNonNil(prog)
+renvoRTGAssembly = renvoRTGAssemblyTable{}
+if len(data) == 0 {
+return true
+}
+r := renvoUnitReader{src: data, end: len(data), ok: true}
+sourceCount := renvoUnitReadVar(&r)
+if !r.ok || sourceCount < 0 || sourceCount > len(data) {
+return false
+}
+table := renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
+for i := 0; i < sourceCount; i++ {
+pathLength := renvoUnitReadVar(&r)
+if !r.ok || pathLength <= 0 || r.pos+pathLength < r.pos || r.pos+pathLength > r.end {
+return false
+}
+path := make([]byte, pathLength)
+copy(path, r.src[r.pos:r.pos+pathLength])
+r.pos += pathLength
+sourceLength := renvoUnitReadVar(&r)
+if !r.ok || sourceLength < 0 || r.pos+sourceLength < r.pos || r.pos+sourceLength > r.end {
+return false
+}
+source := make([]byte, sourceLength)
+copy(source, r.src[r.pos:r.pos+sourceLength])
+r.pos += sourceLength
+table.sources = append(table.sources, renvoRTGAssemblySource{path: path, source: source})
+}
+bindingCount := renvoUnitReadVar(&r)
+if !r.ok || bindingCount < 0 || bindingCount > len(data) {
+return false
+}
+table.bindings = make([]renvoRTGAssemblyBinding, 0, bindingCount)
+seen := make([]bool, len(prog.funcs))
+for i := 0; i < bindingCount; i++ {
+binding := renvoRTGAssemblyBinding{function: renvoUnitReadVar(&r), source: renvoUnitReadVar(&r), entry: renvoUnitReadVar(&r)}
+codeLength := renvoUnitReadVar(&r)
+if !r.ok || codeLength < 0 || r.pos+codeLength < r.pos || r.pos+codeLength > r.end {
+return false
+}
+if codeLength > 0 {
+binding.code = make([]byte, codeLength)
+copy(binding.code, r.src[r.pos:r.pos+codeLength])
+}
+r.pos += codeLength
+if !r.ok || binding.function < 0 || binding.function >= len(prog.funcs) || binding.source < 0 || binding.source >= len(table.sources) || binding.entry < 0 || seen[binding.function] {
+return false
+}
+seen[binding.function] = true
+table.bindings = append(table.bindings, binding)
+}
+if r.pos != r.end {
+return false
+}
+renvoRTGAssembly = table
+return true
+}
+
 
 
 
@@ -37983,6 +38061,23 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 renvoNonNil(g)
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
+for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+binding := &renvoRTGAssembly.bindings[i]
+if binding.function != metaFn.declIndex {
+continue
+}
+if len(binding.code) == 0 {
+renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
+return false
+}
+renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
+renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+for at := 0; at < len(binding.code); at++ {
+a.code = append(a.code, binding.code[at])
+}
+renvoRTGFunctionFinish(a)
+return true
+}
 localCapacity := 16
 if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
 localCapacity = 32
@@ -54625,44 +54720,45 @@ return out
 // source: backend/compiler_unit_impl.go
 
 const (
-renvoUnitMagic         = "RNVO"
-renvoUnitVersion       = 1
-renvoUnitTagUnit       = 1
-renvoUnitTagPackage    = 2
-renvoUnitTagImportPath = 3
-renvoUnitTagText       = 7
-renvoUnitTagTokens     = 8
-renvoUnitTagDecls      = 9
-renvoUnitTagFuncs      = 10
-renvoUnitTagIndexes    = 11
-renvoUnitTagComps      = 12
-renvoUnitTagAssigns    = 13
-renvoUnitTagReturns    = 14
-renvoUnitTagCalls      = 15
-renvoUnitTagRefs       = 16
-renvoUnitTagSels       = 17
-renvoUnitTagTypes      = 18
-renvoUnitTagTypeRefs   = 19
-renvoUnitTagLocals     = 20
-renvoUnitTagSigs       = 21
-renvoUnitTagDeclMeta   = 22
-renvoUnitTagImports    = 23
-renvoUnitTagSymbols    = 24
-renvoUnitTagInitOrder  = 25
-renvoUnitTagConsts     = 26
-renvoUnitTagTypeFields = 27
-renvoUnitTagTypeIfaces = 28
-renvoUnitTagMethods    = 29
-renvoUnitTagTypeFuncs  = 30
-renvoUnitTagStmts      = 31
-renvoUnitTagPackages   = 32
+renvoUnitMagic          = "RNVO"
+renvoUnitVersion        = 1
+renvoUnitTagUnit        = 1
+renvoUnitTagPackage     = 2
+renvoUnitTagImportPath  = 3
+renvoUnitTagText        = 7
+renvoUnitTagTokens      = 8
+renvoUnitTagDecls       = 9
+renvoUnitTagFuncs       = 10
+renvoUnitTagIndexes     = 11
+renvoUnitTagComps       = 12
+renvoUnitTagAssigns     = 13
+renvoUnitTagReturns     = 14
+renvoUnitTagCalls       = 15
+renvoUnitTagRefs        = 16
+renvoUnitTagSels        = 17
+renvoUnitTagTypes       = 18
+renvoUnitTagTypeRefs    = 19
+renvoUnitTagLocals      = 20
+renvoUnitTagSigs        = 21
+renvoUnitTagDeclMeta    = 22
+renvoUnitTagImports     = 23
+renvoUnitTagSymbols     = 24
+renvoUnitTagInitOrder   = 25
+renvoUnitTagConsts      = 26
+renvoUnitTagTypeFields  = 27
+renvoUnitTagTypeIfaces  = 28
+renvoUnitTagMethods     = 29
+renvoUnitTagTypeFuncs   = 30
+renvoUnitTagStmts       = 31
+renvoUnitTagPackages    = 32
+renvoUnitTagRTGAssembly = 33
 )
 
 func renvoUnitChildTagIndex(tag int) int {
 if tag >= renvoUnitTagPackage && tag <= renvoUnitTagImportPath {
 return tag - 2
 }
-if tag >= renvoUnitTagText && tag <= renvoUnitTagPackages {
+if tag >= renvoUnitTagText && tag <= renvoUnitTagRTGAssembly {
 return tag - 5
 }
 return -1
@@ -54885,6 +54981,7 @@ var tokenData []byte
 var declData []byte
 var funcData []byte
 var packageData []byte
+var assemblyData []byte
 seenLow := 0
 seenHigh := 0
 pos := rootStart
@@ -54942,6 +55039,9 @@ funcData = src[pos:next]
 }
 if tag == renvoUnitTagPackages {
 packageData = src[pos:next]
+}
+if tag == renvoUnitTagRTGAssembly {
+assemblyData = src[pos:next]
 }
 pos = next
 }
@@ -55035,6 +55135,10 @@ return false
 prog.funcs = append(prog.funcs, fn)
 }
 if funcReader.pos != funcReader.end {
+return false
+}
+if renvoPreparedBackendActive != 0 &&
+!renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 return false
 }
 if len(packageData) > 0 {

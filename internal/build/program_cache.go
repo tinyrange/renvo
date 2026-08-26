@@ -41,7 +41,7 @@ func InitializePackageProgramCache() {
 
 func loadCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int, sourceA int, sourceB int) (unit.Program, bool) {
 	var empty unit.Program
-	if packageIndex < 0 || packageIndex >= len(graph.Packages) {
+	if packageIndex < 0 || packageIndex >= len(graph.Packages) || len(graph.Packages[packageIndex].Assemblies) != 0 {
 		return empty, false
 	}
 	pathA, pathB := packageCacheHashString(graph.Packages[packageIndex].Ref.ImportPath)
@@ -81,7 +81,7 @@ func loadCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, 
 }
 
 func storeCachedPackageProgram(graph load.Graph, packageIndex int, contextA int, contextB int, sourceA int, sourceB int, program unit.Program) {
-	if packageIndex < 0 || packageIndex >= len(graph.Packages) {
+	if packageIndex < 0 || packageIndex >= len(graph.Packages) || len(graph.Packages[packageIndex].Assemblies) != 0 {
 		return
 	}
 	data, ok := unit.MarshalFrontendCache(program)
@@ -200,6 +200,19 @@ func packageSourceHash(pkg load.Package) (int, int) {
 		}
 		a = packageCacheHashInt(a, len(pkg.Files[i].Src))
 		b = packageCacheHashIntB(b, len(pkg.Files[i].Src))
+	}
+	for i := 0; i < len(pkg.Assemblies); i++ {
+		path := pkg.Assemblies[i].Path
+		if len(path) > len(pkg.Ref.Dir) && path[len(pkg.Ref.Dir)] == '/' && path[:len(pkg.Ref.Dir)] == pkg.Ref.Dir {
+			path = path[len(pkg.Ref.Dir)+1:]
+		}
+		a, b = packageCacheHashMix(a, b, path)
+		for j := 0; j < len(pkg.Assemblies[i].Src); j++ {
+			a = packageCacheHashInt(a, int(pkg.Assemblies[i].Src[j]))
+			b = packageCacheHashIntB(b, int(pkg.Assemblies[i].Src[j]))
+		}
+		a = packageCacheHashInt(a, len(pkg.Assemblies[i].Src))
+		b = packageCacheHashIntB(b, len(pkg.Assemblies[i].Src))
 	}
 	return a, b
 }

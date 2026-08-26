@@ -2,6 +2,84 @@
 
 package main
 
+type renvoRTGAssemblySource struct {
+	path   []byte
+	source []byte
+}
+
+type renvoRTGAssemblyBinding struct {
+	function int
+	source   int
+	entry    int
+	code     []byte
+}
+
+type renvoRTGAssemblyTable struct {
+	sources  []renvoRTGAssemblySource
+	bindings []renvoRTGAssemblyBinding
+}
+
+var renvoRTGAssembly renvoRTGAssemblyTable
+
+func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
+	renvoNonNil(prog)
+	renvoRTGAssembly = renvoRTGAssemblyTable{}
+	if len(data) == 0 {
+		return true
+	}
+	r := renvoUnitReader{src: data, end: len(data), ok: true}
+	sourceCount := renvoUnitReadVar(&r)
+	if !r.ok || sourceCount < 0 || sourceCount > len(data) {
+		return false
+	}
+	table := renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
+	for i := 0; i < sourceCount; i++ {
+		pathLength := renvoUnitReadVar(&r)
+		if !r.ok || pathLength <= 0 || r.pos+pathLength < r.pos || r.pos+pathLength > r.end {
+			return false
+		}
+		path := make([]byte, pathLength)
+		copy(path, r.src[r.pos:r.pos+pathLength])
+		r.pos += pathLength
+		sourceLength := renvoUnitReadVar(&r)
+		if !r.ok || sourceLength < 0 || r.pos+sourceLength < r.pos || r.pos+sourceLength > r.end {
+			return false
+		}
+		source := make([]byte, sourceLength)
+		copy(source, r.src[r.pos:r.pos+sourceLength])
+		r.pos += sourceLength
+		table.sources = append(table.sources, renvoRTGAssemblySource{path: path, source: source})
+	}
+	bindingCount := renvoUnitReadVar(&r)
+	if !r.ok || bindingCount < 0 || bindingCount > len(data) {
+		return false
+	}
+	table.bindings = make([]renvoRTGAssemblyBinding, 0, bindingCount)
+	seen := make([]bool, len(prog.funcs))
+	for i := 0; i < bindingCount; i++ {
+		binding := renvoRTGAssemblyBinding{function: renvoUnitReadVar(&r), source: renvoUnitReadVar(&r), entry: renvoUnitReadVar(&r)}
+		codeLength := renvoUnitReadVar(&r)
+		if !r.ok || codeLength < 0 || r.pos+codeLength < r.pos || r.pos+codeLength > r.end {
+			return false
+		}
+		if codeLength > 0 {
+			binding.code = make([]byte, codeLength)
+			copy(binding.code, r.src[r.pos:r.pos+codeLength])
+		}
+		r.pos += codeLength
+		if !r.ok || binding.function < 0 || binding.function >= len(prog.funcs) || binding.source < 0 || binding.source >= len(table.sources) || binding.entry < 0 || seen[binding.function] {
+			return false
+		}
+		seen[binding.function] = true
+		table.bindings = append(table.bindings, binding)
+	}
+	if r.pos != r.end {
+		return false
+	}
+	renvoRTGAssembly = table
+	return true
+}
+
 // These helpers compose the small generated direct-emitter contract into the
 // value and stack operations used by the shared backend kernel. They are only
 // reached by prepared backends (renvoArchRTG); built-in targets retain their
@@ -275,6 +353,23 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
+	for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+		binding := &renvoRTGAssembly.bindings[i]
+		if binding.function != metaFn.declIndex {
+			continue
+		}
+		if len(binding.code) == 0 {
+			renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
+			return false
+		}
+		renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
+		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+		for at := 0; at < len(binding.code); at++ {
+			a.code = append(a.code, binding.code[at])
+		}
+		renvoRTGFunctionFinish(a)
+		return true
+	}
 	localCapacity := 16
 	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
 		localCapacity = 32

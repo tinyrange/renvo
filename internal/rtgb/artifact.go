@@ -7,10 +7,10 @@ package rtgb
 import "renvo.dev/internal/rtg"
 
 const (
-	Version    = 3
+	Version    = 4
 	HeaderSize = 80
 	MaxPayload = 64 << 20
-	MaxMeta    = 1 << 20
+	MaxMeta    = 20 << 20
 )
 
 const Magic = "RTGB"
@@ -23,7 +23,11 @@ type Artifact struct {
 	Protocol     int
 	Unit         int
 	Optimization int
-	Payload      []byte
+	// DefinitionFiles preserve the root and imported RTG sources used to
+	// prepare this artifact. They let a distributed .rtgb compile project
+	// RTGASM without consulting the original source tree.
+	DefinitionFiles []rtg.ImportSource
+	Payload         []byte
 }
 
 func Encode(artifact Artifact) ([]byte, bool) {
@@ -46,6 +50,11 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	metadata = appendStrings(metadata, artifact.Descriptor.BuildTags)
 	metadata = appendStrings(metadata, artifact.Descriptor.Capabilities)
 	metadata = appendStrings(metadata, artifact.Descriptor.RuntimeOps)
+	metadata = appendVarint(metadata, len(artifact.DefinitionFiles))
+	for i := 0; i < len(artifact.DefinitionFiles); i++ {
+		metadata = appendString(metadata, artifact.DefinitionFiles[i].Filename)
+		metadata = appendBytes(metadata, artifact.DefinitionFiles[i].Source)
+	}
 	if len(metadata) > MaxMeta {
 		return nil, false
 	}
@@ -122,6 +131,15 @@ func Decode(source []byte) (Artifact, bool) {
 	artifact.Descriptor.BuildTags = reader.strings()
 	artifact.Descriptor.Capabilities = reader.strings()
 	artifact.Descriptor.RuntimeOps = reader.strings()
+	definitionCount := reader.integer()
+	if definitionCount < 0 || definitionCount > 4096 {
+		reader.ok = false
+	}
+	for i := 0; i < definitionCount && reader.ok; i++ {
+		artifact.DefinitionFiles = append(artifact.DefinitionFiles, rtg.ImportSource{
+			Filename: reader.string(), Source: append([]byte(nil), reader.bytes()...), Ok: true,
+		})
+	}
 	if !reader.ok || reader.at != len(reader.source) || !validArtifactMetadata(artifact) {
 		return Artifact{}, false
 	}
@@ -162,6 +180,11 @@ func validArtifactMetadata(artifact Artifact) bool {
 }
 
 func appendString(out []byte, value string) []byte {
+	out = appendVarint(out, len(value))
+	return append(out, value...)
+}
+
+func appendBytes(out []byte, value []byte) []byte {
 	out = appendVarint(out, len(value))
 	return append(out, value...)
 }
@@ -208,12 +231,16 @@ func (r *metadataReader) integer() int {
 }
 
 func (r *metadataReader) string() string {
+	return string(r.bytes())
+}
+
+func (r *metadataReader) bytes() []byte {
 	size := r.integer()
 	if !r.ok || size < 0 || r.at+size < r.at || r.at+size > len(r.source) {
 		r.ok = false
-		return ""
+		return nil
 	}
-	value := string(r.source[r.at : r.at+size])
+	value := r.source[r.at : r.at+size]
 	r.at += size
 	return value
 }

@@ -89,6 +89,8 @@ func (s *Session) Step() bool {
 		built := s.builder.Result()
 		s.result.Build = built
 		if !built.Ok {
+			s.result.ErrorPath = built.ErrorPath
+			s.result.ErrorOffset = built.ErrorOffset
 			s.result = pipelineFail(s.result, PipelineErrBuild, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 			s.stage = 4
 			return true

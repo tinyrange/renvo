@@ -187,6 +187,7 @@ let buildRevision = 1;
 let pendingBuild;
 let runAfterBuild = false;
 let artifactUrls = [];
+const inlineDownloadLimit = 16 * 1024 * 1024;
 let lastRunnableArtifact;
 let espPort;
 let espSession;
@@ -779,6 +780,7 @@ async function compileTarget(buildTarget) {
     worker.postMessage({
       type: "compile", id, args, files: payload.files,
       backend, backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
+      rtgDefinition: buildTarget.rtgDefinition || "",
     }, payload.transfers);
   } catch (error) {
     building = false;
@@ -1875,9 +1877,9 @@ function projectFiles() {
 
 function exportProject() {
   const data = encodeProjectZip(projectFiles());
-  const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
+  const url = createDownloadURL(data, "application/zip");
   const link = document.createElement("a"); link.href = url; link.download = `${safeProjectName(projectName)}.zip`; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setTimeout(() => releaseDownloadURL(url), 0);
 }
 
 function toggleProjectActionMenu() {
@@ -2021,6 +2023,7 @@ function replaceProject(project) {
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   projectName = project.name || "playground"; syncProjectName();
   if (project.command) elements.command.value = project.command;
+  elements.arenaSize.value = project.arenaSize ? String(project.arenaSize) : "";
   restoredTargetName = project.target || selectedTarget?.name || "";
   if (targetCatalog?.targets.some((target) => target.name === restoredTargetName)) selectTarget(restoredTargetName, false);
   syncBuildRootFromCommand();
@@ -2544,10 +2547,23 @@ function renderArtifacts(files) {
     row.className = "artifact-row";
     const name = document.createElement("span"); name.textContent = file.name;
     const size = document.createElement("span"); size.className = "artifact-size"; size.textContent = formatBytes(file.data.byteLength);
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(new Blob([file.data], { type: file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" }));
-    artifactUrls.push(url); link.href = url; link.download = file.name.split("/").pop(); link.textContent = "Download";
-    row.append(name, size, link);
+    const filename = file.name.split("/").pop();
+    const actions = document.createElement("span"); actions.className = "artifact-actions";
+    const rawLink = document.createElement("a");
+    const rawURL = createDownloadURL(file.data, file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream");
+    artifactUrls.push(rawURL); rawLink.href = rawURL; rawLink.download = filename;
+    if (/\.(?:com|exe)$/i.test(filename)) {
+      const zipLink = document.createElement("a");
+      const zipURL = createDownloadURL(encodeProjectZip({ [filename]: file.data }), "application/zip");
+      artifactUrls.push(zipURL); zipLink.href = zipURL; zipLink.download = `${filename}.zip`;
+      zipLink.textContent = "Download ZIP";
+      rawLink.textContent = "Raw";
+      actions.append(zipLink, rawLink);
+    } else {
+      rawLink.textContent = "Download";
+      actions.append(rawLink);
+    }
+    row.append(name, size, actions);
     return row;
   }));
 }
@@ -2971,7 +2987,7 @@ function saveAndDeploy() {
 }
 
 function currentProject() {
-  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
+  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", arenaSize: elements.arenaSize?.value || "", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
 }
 
 async function restoreProject() {
@@ -3001,12 +3017,27 @@ async function restoreProject() {
   for (const name of project?.openFiles || []) if (Object.hasOwn(fileValues, name) && !openFiles.includes(name)) openFiles.push(name);
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   if (project?.command) elements.command.value = project.command;
+  elements.arenaSize.value = project?.arenaSize ? String(project.arenaSize) : "";
   externalBuildLanguage = project?.buildLanguage === "c" ? "c" : "go";
   syncProjectName();
   syncBuildRootFromCommand();
 }
 
-function clearArtifactUrls() { for (const url of artifactUrls) URL.revokeObjectURL(url); artifactUrls = []; }
+function createDownloadURL(data, type) {
+  if (data.byteLength <= inlineDownloadLimit) {
+    const bytes = new Uint8Array(data);
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    return `data:${type};base64,${btoa(chunks.join(""))}`;
+  }
+  return URL.createObjectURL(new Blob([data], { type }));
+}
+
+function releaseDownloadURL(url) { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }
+
+function clearArtifactUrls() { for (const url of artifactUrls) releaseDownloadURL(url); artifactUrls = []; }
 
 function splitArguments(text) {
   const args = []; let value = ""; let quote = ""; let escaped = false; let active = false;
@@ -3355,6 +3386,7 @@ async function handleExampleAction(event) {
       activeFile: active,
       openFiles: [active],
       target,
+      arenaSize: entry.item.arenaSize || "",
       backendRoots: backendDefinition ? [backendDefinition] : [],
       command: `-s -o ${targetDefinition?.output || "app.wasm"} .`,
     });

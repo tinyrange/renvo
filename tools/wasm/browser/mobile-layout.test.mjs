@@ -76,6 +76,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /if \(mobileDeploymentActive\) openMobileFlashView/);
   assert.match(app, /function startMobileDeployment/);
   assert.match(app, /function receiveCompileProgress/);
+  assert.match(app, /arenaSize: entry\.item\.arenaSize \|\| ""/);
   assert.match(app, /Tap to see JTAG load details/);
   assert.match(worker, /type: "compile-progress"/);
   assert.match(worker, /Downloading the board compiler/);

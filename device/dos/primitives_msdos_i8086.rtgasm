@@ -1,0 +1,21 @@
+rtgasm 1
+
+assembly {
+	interrupt10(out:emitter) { emitDOSInterruptBridge(out, 0x10) }
+	interrupt13(out:emitter) { emitDOSInterruptBridge(out, 0x13) }
+	interrupt14(out:emitter) { emitDOSInterruptBridge(out, 0x14) }
+	interrupt15(out:emitter) { emitDOSInterruptBridge(out, 0x15) }
+	interrupt16(out:emitter) { emitDOSInterruptBridge(out, 0x16) }
+	interrupt17(out:emitter) { emitDOSInterruptBridge(out, 0x17) }
+	interrupt1A(out:emitter) { emitDOSInterruptBridge(out, 0x1a) }
+	interrupt21(out:emitter) { emitDOSInterruptBridge(out, 0x21) }
+	interrupt21ES(out:emitter) { emitDOSInterrupt21ES(out) }
+	interrupt33(out:emitter) { emitDOSInterruptBridge(out, 0x33) }
+	portIn8(out:emitter) { emitDOSPortIn8(out) }
+	portOut8(out:emitter) { emitDOSPortOut8(out) }
+	portOut16(out:emitter) { emitDOSPortOut16(out) }
+	segmentLoad8(out:emitter) { emitDOSSegmentLoad8(out) }
+	segmentStore8(out:emitter) { emitDOSSegmentStore8(out) }
+	segmentFill8(out:emitter) { emitDOSSegmentFill8(out) }
+	segmentWrite(out:emitter) { emitDOSSegmentWrite(out) }
+}

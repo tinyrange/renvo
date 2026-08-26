@@ -24,6 +24,7 @@ func TestOutputNameFollowsTargetImage(t *testing.T) {
 		{"example/wasm32", "wasm", "app.wasm"},
 		{"example/vm32", "rnvm", "app.rnvb"},
 		{"msdos/8086", "dos-com", "app.com"},
+		{"msdos/8086-mz", "dos-mz", "app.exe"},
 		{"windows/custom", "pe", "app.exe"},
 		{"example/riscv32", "elf", "app.elf"},
 		{"unixv7/pdp11", "v7-a.out", "app"},

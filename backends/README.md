@@ -14,3 +14,4 @@ The available external backends are:
 - `esp32p4.rtg`
 - `esp32s3.rtg`
 - `ios_arm64.rtg`
+- `msdos.rtg` (`msdos/8086` COM and `msdos/8086-mz` MZ EXE)

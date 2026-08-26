@@ -32,13 +32,14 @@ type manifest struct {
 
 func main() {
 	inspect := flag.Bool("inspect", false, "list targets exported by the definition")
+	evaluateUnit := flag.String("evaluate-unit", "", "evaluate preserved RTGASM in a compact unit")
 	definition := flag.String("definition", "", "project-relative RTG definition")
 	target := flag.String("target", "", "target to prepare")
 	output := flag.String("o", "", "prepared VM32 backend output")
 	flag.Parse()
-	if *definition == "" || *inspect && (*target != "" || *output != "") ||
+	if *definition == "" || *inspect && (*target != "" || *output != "" || *evaluateUnit != "") ||
 		!*inspect && (*target == "" || *output == "") {
-		fail("usage: renvo-backend-jit -inspect -definition file.rtg | -definition file.rtg -target os/arch -o backend.rnvb")
+		fail("usage: renvo-backend-jit -inspect -definition file.rtg | -definition file.rtg -target os/arch [-evaluate-unit input.unit] -o output")
 	}
 	source, err := os.ReadFile(*definition)
 	if err != nil {
@@ -54,6 +55,24 @@ func main() {
 			manifests = append(manifests, targetManifest(item.Descriptor))
 		}
 		writeJSON(manifests)
+		return
+	}
+	if *evaluateUnit != "" {
+		descriptor, found := targetDescriptor(resolved, *target)
+		if !found {
+			fail("target is not exported by definition: " + *target)
+		}
+		unitSource, readErr := os.ReadFile(*evaluateUnit)
+		if readErr != nil {
+			fail("read unit: " + readErr.Error())
+		}
+		evaluated, result := backendjit.EvaluateRTGAssembly(unitSource, resolved, descriptor, "/std", backendcompiled.Backend{})
+		if !result.Ok {
+			fail(result.Diagnostic.Code + ": " + result.Diagnostic.Message)
+		}
+		if err = os.WriteFile(*output, evaluated, 0o644); err != nil {
+			fail("write evaluated unit: " + err.Error())
+		}
 		return
 	}
 	prepared := backendjit.Prepare(backendjit.PrepareConfig{
@@ -72,6 +91,15 @@ func main() {
 		fail("write backend: " + err.Error())
 	}
 	writeJSON(targetManifest(prepared.Artifact.Descriptor))
+}
+
+func targetDescriptor(resolved rtg.ResolveResult, name string) (rtg.TargetDescriptor, bool) {
+	for _, target := range resolved.Targets {
+		if target.Descriptor.Name == name {
+			return target.Descriptor, true
+		}
+	}
+	return rtg.TargetDescriptor{}, false
 }
 
 type filesystemImports struct{}
@@ -101,6 +129,9 @@ func outputName(target string, kind string) string {
 	}
 	if kind == "dos-com" {
 		return "app.com"
+	}
+	if kind == "dos-mz" {
+		return "app.exe"
 	}
 	if strings.HasPrefix(target, "windows/") {
 		return "app.exe"

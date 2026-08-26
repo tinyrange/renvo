@@ -27,6 +27,8 @@ type targetAsset struct {
 	FrontendTarget    string   `json:"frontendTarget,omitempty"`
 	BackendTarget     string   `json:"backendTarget"`
 	Backend           string   `json:"backend"`
+	BackendFormat     string   `json:"backendFormat,omitempty"`
+	RTGDefinition     string   `json:"rtgDefinition,omitempty"`
 	CBackend          string   `json:"cBackend,omitempty"`
 	Output            string   `json:"output"`
 	Runnable          bool     `json:"runnable,omitempty"`
@@ -57,6 +59,7 @@ type standardPackage struct {
 	Root      string           `json:"root,omitempty"`
 	Main      bool             `json:"main,omitempty"`
 	Target    string           `json:"target,omitempty"`
+	ArenaSize int              `json:"arenaSize,omitempty"`
 	Board     string           `json:"board,omitempty"`
 	Boards    []boardTarget    `json:"boards,omitempty"`
 	Computers []computerTarget `json:"computers,omitempty"`
@@ -94,9 +97,13 @@ type standardCatalog struct {
 
 type customTarget struct {
 	Name       string
+	Label      string
 	Definition string
 	Backend    string
+	Format     string
+	RTGSource  string
 	Tags       []string
+	Device     string
 	Hidden     bool
 }
 
@@ -120,7 +127,9 @@ type boardDefinition struct {
 }
 
 var customTargets = []customTarget{
-	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Hidden: true},
+	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Device: "esp32", Hidden: true},
+	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
+	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
 }
 
 func main() {
@@ -170,10 +179,10 @@ func main() {
 		tags := append([]string(nil), descriptor.BuildTags...)
 		tags = append(tags, custom.Tags...)
 		catalog.Targets = append(catalog.Targets, targetAsset{
-			Name: descriptor.Name, BackendTarget: descriptor.Name, Backend: custom.Backend,
+			Name: descriptor.Name, Label: custom.Label, BackendTarget: descriptor.Name, Backend: custom.Backend, BackendFormat: custom.Format, RTGDefinition: custom.RTGSource,
 			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: tags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
-			Device: "esp32",
+			Device: custom.Device,
 			Hidden: custom.Hidden,
 		})
 	}
@@ -207,6 +216,11 @@ func main() {
 		}
 		if catalog.Targets[i].CBackend != "" {
 			if catalog.Targets[i].CBackend, err = versionAsset(*output, catalog.Targets[i].CBackend); err != nil {
+				fail(err)
+			}
+		}
+		if catalog.Targets[i].RTGDefinition != "" {
+			if catalog.Targets[i].RTGDefinition, err = versionAsset(*output, catalog.Targets[i].RTGDefinition); err != nil {
 				fail(err)
 			}
 		}
@@ -299,6 +313,9 @@ func outputName(target string, image string) string {
 	}
 	if image == "dos-com" {
 		return "app.com"
+	}
+	if image == "dos-mz" {
+		return "app.exe"
 	}
 	if strings.HasPrefix(target, "esp32") || strings.Contains(image, "elf") {
 		return "app.elf"
@@ -407,6 +424,7 @@ func buildCLibrary(root string, output string) ([]string, error) {
 type platformPackageSpec struct {
 	Path      string
 	Target    string
+	ArenaSize int
 	Board     string
 	Boards    []boardTarget
 	Computers []computerTarget
@@ -414,6 +432,10 @@ type platformPackageSpec struct {
 }
 
 func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
+	dosComputer := []computerTarget{{
+		Name: "IBM PC compatible", Target: "msdos/8086-mz", Family: "Retro computer", Artwork: "ibmpc",
+		Description: "IBM PC-compatible running MS-DOS, FreeDOS, or a compatible emulator",
+	}}
 	specs := []platformPackageSpec{
 		{Path: "forms"},
 		{
@@ -427,9 +449,14 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 			Path: "examples/msdos", Target: "msdos/8086",
 			Computers: []computerTarget{{
 				Name: "IBM PC compatible", Target: "msdos/8086", Family: "Retro computer", Artwork: "ibmpc",
-				Description: "IBM PC-compatible running MS-DOS, or a compatible emulator",
+				Description: "IBM PC-compatible running MS-DOS, FreeDOS, or a compatible emulator",
 			}},
 		},
+		{Path: "examples/msdos-vga", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
+		{Path: "examples/msdos-filesystem", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
+		{Path: "examples/msdos-system", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
+		{Path: "examples/msdos-input", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
+		{Path: "device/dos"},
 		{Path: "device/mmio"},
 		{Path: "device/gpio"},
 		{Path: "device/clock"},
@@ -484,7 +511,7 @@ func buildPlatformPackages(root string, output string, boards []boardDefinition)
 			return nil, err
 		}
 		item := standardPackage{
-			Root: spec.Path, Target: spec.Target, Board: spec.Board, Boards: spec.Boards,
+			Root: spec.Path, Target: spec.Target, ArenaSize: spec.ArenaSize, Board: spec.Board, Boards: spec.Boards,
 			Computers: spec.Computers, Language: spec.Language,
 		}
 		imports := make(map[string]bool)

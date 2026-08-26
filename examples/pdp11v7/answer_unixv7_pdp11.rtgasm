@@ -1,0 +1,12 @@
+rtgasm 1
+
+assembly {
+	rtgasmAnswer(out:emitter) {
+		let done = out.NewLabel()
+		emitJump(out, done)
+		out.Uint16(0xffff)
+		out.Mark(done)
+		emitImmediate(out, r0, 42)
+		emitReturn(out)
+	}
+}

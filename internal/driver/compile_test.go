@@ -139,6 +139,19 @@ func TestCompileReportsBackendFailure(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsRTGAssemblyWithoutCompilerJIT(t *testing.T) {
+	backend := &recordingBackend{binary: []byte("unexpected")}
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\nfunc answer() int\nfunc appMain() int { return answer() }\n")},
+		{Path: "/repo/case/answer.rtgasm", Src: []byte("rtgasm 1\nassembly { answer(out:emitter) { out.Byte(0xc3) } }\n")},
+	}
+	result := CompileUnit([]string{"-o", "app", "."}, "/repo/case", "/std", files, backend)
+	if result.Ok || result.Diagnostic.Code != "RENVO-RTGASM-010" || backend.called {
+		t.Fatalf("built-in RTGASM compile = %#v, backend called=%v", result, backend.called)
+	}
+}
+
 type recordingBackend struct {
 	binary     []byte
 	called     bool

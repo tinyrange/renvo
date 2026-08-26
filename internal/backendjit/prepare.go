@@ -20,7 +20,7 @@ import (
 
 const (
 	KernelVersion            = 1
-	ProtocolVersion          = 1
+	ProtocolVersion          = 2
 	OptimizationVersion      = 1
 	preparedBackendArenaSize = 1073741824
 )
@@ -53,6 +53,7 @@ type ArtifactCache interface {
 
 type Prepared struct {
 	Artifact   rtgb.Artifact
+	Resolved   rtg.ResolveResult
 	Encoded    []byte
 	CachePath  string
 	CacheHit   bool
@@ -91,7 +92,7 @@ func Prepare(config PrepareConfig) Prepared {
 	if cache != nil {
 		if source, found := cache.Load(key); found {
 			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, generated.Descriptor, host) {
-				return Prepared{Artifact: artifact, Encoded: source, CachePath: cachePath, CacheHit: true, Ok: true}
+				return Prepared{Artifact: artifact, Resolved: resolved, Encoded: source, CachePath: cachePath, CacheHit: true, Ok: true}
 			}
 		}
 	}
@@ -111,14 +112,15 @@ func Prepare(config PrepareConfig) Prepared {
 		return Prepared{Diagnostic: diagnostic}
 	}
 	artifact := rtgb.Artifact{
-		Descriptor:   generated.Descriptor,
-		Host:         host,
-		Generator:    rtg.GeneratorVersion,
-		Kernel:       KernelVersion,
-		Protocol:     ProtocolVersion,
-		Unit:         unit.Version,
-		Optimization: OptimizationVersion,
-		Payload:      compiled.Binary,
+		Descriptor:      generated.Descriptor,
+		Host:            host,
+		Generator:       rtg.GeneratorVersion,
+		Kernel:          KernelVersion,
+		Protocol:        ProtocolVersion,
+		Unit:            unit.Version,
+		Optimization:    OptimizationVersion,
+		DefinitionFiles: rtg.SourceBundle(resolved.Document),
+		Payload:         compiled.Binary,
 	}
 	encoded, ok := rtgb.Encode(artifact)
 	if !ok {
@@ -129,7 +131,7 @@ func Prepare(config PrepareConfig) Prepared {
 			return prepareFailure("RENVO-RTG-007", err.Error())
 		}
 	}
-	return Prepared{Artifact: artifact, Encoded: encoded, CachePath: cachePath, Ok: true}
+	return Prepared{Artifact: artifact, Resolved: resolved, Encoded: encoded, CachePath: cachePath, Ok: true}
 }
 
 // FileCache is the process-host adapter for content-addressed artifacts.
@@ -164,7 +166,32 @@ func Load(source []byte) Prepared {
 		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
 		return prepareFailure("RENVO-RTG-009", "prepared backend is incompatible with this compiler or host")
 	}
-	return Prepared{Artifact: artifact, Encoded: source, Ok: true}
+	var resolved rtg.ResolveResult
+	if len(artifact.DefinitionFiles) != 0 {
+		root := artifact.DefinitionFiles[0]
+		resolved = rtg.ResolveDefinitions(rtg.ParseImports(root.Source, root.Filename,
+			artifactDefinitionLoader{files: artifact.DefinitionFiles}))
+		if !resolved.Ok {
+			message := "prepared backend carries an invalid closed definition"
+			if len(resolved.Diagnostics) != 0 {
+				message += ": " + resolved.Diagnostics[0].Message
+			}
+			return prepareFailure("RENVO-RTG-009", message)
+		}
+	}
+	return Prepared{Artifact: artifact, Resolved: resolved, Encoded: source, Ok: true}
+}
+
+type artifactDefinitionLoader struct{ files []rtg.ImportSource }
+
+func (loader artifactDefinitionLoader) LoadImport(importingFilename string, importPath string) rtg.ImportSource {
+	wanted := load.JoinPath(load.DirPath(importingFilename), importPath)
+	for i := 0; i < len(loader.files); i++ {
+		if loader.files[i].Filename == wanted {
+			return loader.files[i]
+		}
+	}
+	return rtg.ImportSource{}
 }
 
 func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]load.SourceFile, []string, error) {

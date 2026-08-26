@@ -88,3 +88,44 @@ func TestPDP11ExampleIsClassifiedAsAComputer(t *testing.T) {
 		t.Fatalf("PDP-11 boards = %#v", found.Boards)
 	}
 }
+
+func TestDOSDeviceAndExamplesAreInBrowserCatalog(t *testing.T) {
+	root, err := filepath.Abs("../../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages, err := buildPlatformPackages(root, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, ok := packages["renvo.dev/device/dos"]
+	if !ok || device.Main || len(device.Files) == 0 {
+		t.Fatalf("DOS device package = %#v, present=%v", device, ok)
+	}
+	for _, name := range []string{"msdos", "msdos-vga", "msdos-filesystem", "msdos-system", "msdos-input"} {
+		example, present := packages["renvo.dev/examples/"+name]
+		if !present || !example.Main || len(example.Computers) != 1 {
+			t.Errorf("DOS example %q = %#v, present=%v", name, example, present)
+		}
+		if name != "msdos" && example.ArenaSize != 4096 {
+			t.Errorf("DOS MZ example %q arena = %d", name, example.ArenaSize)
+		}
+	}
+}
+
+func TestDOSOutputsUseNativeExtensions(t *testing.T) {
+	if got := outputName("msdos/8086", "dos-com"); got != "app.com" {
+		t.Fatalf("COM output = %q", got)
+	}
+	if got := outputName("msdos/8086-mz", "dos-mz"); got != "app.exe" {
+		t.Fatalf("MZ output = %q", got)
+	}
+}
+
+func TestDOSBrowserTargetsUseVM32Backends(t *testing.T) {
+	for _, target := range customTargets {
+		if strings.HasPrefix(target.Name, "msdos/") && (target.Format != "vm32" || !strings.HasSuffix(target.Backend, ".rnvb")) {
+			t.Errorf("DOS browser target = %#v", target)
+		}
+	}
+}

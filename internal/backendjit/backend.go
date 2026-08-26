@@ -3,26 +3,32 @@
 package backendjit
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/linkedimage"
+	"renvo.dev/internal/load"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
 	"renvo.dev/internal/runimage"
 	"renvo.dev/internal/unit"
+	"renvo.dev/std/vm"
 )
 
 type Backend struct {
-	path        string
-	backendRoot string
-	stdRoot     string
-	cacheDir    string
-	bootstrap   driver.Backend
-	runner      Runner
-	prepared    Prepared
+	path          string
+	backendRoot   string
+	stdRoot       string
+	cacheDir      string
+	bootstrap     driver.Backend
+	runner        Runner
+	prepared      Prepared
+	assemblyCache map[[32]byte][]byte
 }
 
 func New(path string, backendRoot string, stdRoot string, cacheDir string, bootstrap driver.Backend) *Backend {
@@ -50,6 +56,13 @@ type Runner interface {
 }
 
 type ProcessRunner struct{}
+
+// Native prepared compiler images execute in this process and therefore share
+// its low-level runtime state. Keep their complete request lifetimes isolated;
+// concurrent test and IDE requests otherwise race while opening protocol files.
+var processRunnerMu sync.Mutex
+
+func (b *Backend) SupportsRTGAssembly() bool { return true }
 
 func (b *Backend) CompileUnit(source []byte, target string, strip bool, windowsGUI bool) driver.BackendResult {
 	return b.CompileUnitWithArena(source, target, strip, windowsGUI, 0)
@@ -101,6 +114,13 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 			Message: "unit target binding does not match the prepared backend",
 		}}
 	}
+	if _, assemblyBindings, hasAssembly := readRTGAssembly(source); hasAssembly && len(assemblyBindings) != 0 {
+		var evaluated driver.BackendResult
+		source, evaluated = b.evaluateRTGAssembly(source, prepared)
+		if !evaluated.Ok {
+			return evaluated
+		}
+	}
 	if b.runner == nil {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{
 			Phase: "backend", Code: "RENVO-BACKEND-009", Message: "prepared backend runner is unavailable",
@@ -111,6 +131,114 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 		Unit:     source,
 		Options:  options,
 	})
+}
+
+func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte, driver.BackendResult) {
+	sources, bindings, ok := readRTGAssembly(source)
+	if !ok || !prepared.Resolved.Ok {
+		return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
+			Phase: "rtgasm", Code: "RENVO-RTGASM-002", Message: "prepared backend cannot evaluate RTGASM source",
+		}}
+	}
+	code := make([][]byte, len(bindings))
+	documents := make([]rtg.AssemblyDocument, len(sources))
+	for i := 0; i < len(sources); i++ {
+		documents[i] = rtg.ParseAssembly(sources[i].Source, sources[i].Path)
+		if !documents[i].Ok {
+			return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
+				Phase: "rtgasm", Code: "RENVO-RTGASM-003", Message: documents[i].Diagnostics[0].Message,
+				Path: sources[i].Path, Start: documents[i].Diagnostics[0].Span.Start.Offset,
+			}}
+		}
+	}
+	for i := 0; i < len(bindings); i++ {
+		if len(bindings[i].Code) != 0 {
+			code[i] = bindings[i].Code
+			continue
+		}
+		binding := bindings[i]
+		if binding.Source < 0 || binding.Source >= len(documents) || binding.Entry < 0 || binding.Entry >= len(documents[binding.Source].Entries) {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-004", "RTGASM binding is invalid")
+		}
+		cacheInput := make([]byte, 0, len(prepared.Artifact.Descriptor.Definition)+len(sources[binding.Source].Source)+8)
+		cacheInput = append(cacheInput, prepared.Artifact.Descriptor.Definition[:]...)
+		cacheInput = append(cacheInput, sources[binding.Source].Source...)
+		cacheInput = append(cacheInput, byte(binding.Entry), byte(binding.Entry>>8), byte(binding.Entry>>16), byte(binding.Entry>>24))
+		cacheKey := sha256.Sum256(cacheInput)
+		if cached := b.assemblyCache[cacheKey]; len(cached) != 0 {
+			code[i] = append([]byte(nil), cached...)
+			continue
+		}
+		generated := rtg.GenerateAssemblyEvaluator(prepared.Resolved, prepared.Artifact.Descriptor.Name, documents[binding.Source], binding.Entry)
+		if !generated.Ok {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-005", generated.Diagnostics[0].Message)
+		}
+		files, names, err := assemblyEvaluationSources(generated)
+		if err != nil {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-006", err.Error())
+		}
+		args := []string{"-s", "-emit-image", "-t", "vm/vm32", "-arena-size", "67108864", "-o", "-"}
+		args = append(args, names...)
+		compiled := driver.CompileUnit(args, "/backend", b.stdRoot, files, b.bootstrap)
+		if !compiled.Ok {
+			entry := documents[binding.Source].Entries[binding.Entry]
+			return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
+				Phase: "rtgasm", Code: "RENVO-RTGASM-011",
+				Message: "RTGASM fragment does not compile against the selected target: " + compiled.Diagnostic.Message,
+				Path:    sources[binding.Source].Path, Start: entry.Span.Start.Offset,
+			}}
+		}
+		image, err := linkedimage.Decode(compiled.Binary)
+		if err != nil || image.Target != "vm/vm32" {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-007", "RTGASM evaluator image is invalid")
+		}
+		run := vm.RunConfig(image.Native, vm.Config{Limits: vm.Limits{Steps: 500000000, Memory: 96 * 1024 * 1024}})
+		if run.Trap != vm.TrapNone || run.ExitCode != 0 || len(run.Output) == 0 {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator failed")
+		}
+		code[i] = run.Output
+		if b.assemblyCache == nil {
+			b.assemblyCache = make(map[[32]byte][]byte)
+		}
+		b.assemblyCache[cacheKey] = append([]byte(nil), run.Output...)
+	}
+	evaluated, ok := attachRTGAssemblyCode(source, code)
+	if !ok {
+		return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-009", "could not attach evaluated RTGASM code")
+	}
+	return evaluated, driver.BackendResult{Ok: true}
+}
+
+// EvaluateRTGAssembly evaluates preserved project assembly against an already
+// resolved target. Sandboxed frontends use this before invoking a separately
+// prepared compiler image.
+func EvaluateRTGAssembly(source []byte, resolved rtg.ResolveResult, descriptor rtg.TargetDescriptor, stdRoot string, bootstrap driver.Backend) ([]byte, driver.BackendResult) {
+	_, bindings, hasAssembly := readRTGAssembly(source)
+	if !hasAssembly || len(bindings) == 0 {
+		return source, driver.BackendResult{Ok: true}
+	}
+	b := Backend{stdRoot: stdRoot, bootstrap: bootstrap}
+	prepared := Prepared{Resolved: resolved, Artifact: rtgb.Artifact{Descriptor: descriptor}}
+	return b.evaluateRTGAssembly(source, prepared)
+}
+
+func assemblyEvaluationSources(generated rtg.GenerateResult) ([]load.SourceFile, []string, error) {
+	sources, names, err := preparationSources("", generated)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := 0; i < len(sources); i++ {
+		if filepath.Base(sources[i].Path) != "compiler_main.go" {
+			continue
+		}
+		sources[i].Src = bytes.Replace(sources[i].Src, []byte("func appMain("), []byte("func renvoCompilerMain("), 1)
+		break
+	}
+	return sources, names, nil
+}
+
+func rtgAssemblyBackendFailure(code string, message string) driver.BackendResult {
+	return driver.BackendResult{Diagnostic: driver.Diagnostic{Phase: "rtgasm", Code: code, Message: message}}
 }
 
 func (b *Backend) prepare(target string) Prepared {
@@ -149,6 +277,8 @@ func (filesystemImportLoader) LoadImport(
 }
 
 func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.BackendResult {
+	processRunnerMu.Lock()
+	defer processRunnerMu.Unlock()
 	if request.Protocol != ProtocolVersion || artifact.Protocol != ProtocolVersion ||
 		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{

@@ -239,6 +239,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		path := paths[i]
 		name := load.BasePath(path)
 		goSource := isGoSourceName(name)
+		assemblySource := !goSource && isRTGAsmSourceName(name)
 		if !explicit && !frontendFilenameEnabledWithTags(name, c.target, c.tags) {
 			continue
 		}
@@ -277,6 +278,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		arenaEnd = arena.Mark()
 		found = true
 		c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arenaEnd})
+		if assemblySource {
+			continue
+		}
 		if !goSource {
 			// C translation can introduce the unsafe.Pointer import used for exact
 			// union overlap after source discovery has completed. Make that small
@@ -841,8 +845,12 @@ func isCSourceName(name string) bool {
 	return stringHasSuffix(name, ".c") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.c")
 }
 
+func isRTGAsmSourceName(name string) bool {
+	return stringHasSuffix(name, ".rtgasm") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.rtgasm")
+}
+
 func isFrontendSourceName(name string) bool {
-	return isGoSourceName(name) || isCSourceName(name)
+	return isGoSourceName(name) || isCSourceName(name) || isRTGAsmSourceName(name)
 }
 
 func frontendFilenameEnabledWithTags(name string, target string, tags []string) bool {
@@ -851,6 +859,9 @@ func frontendFilenameEnabledWithTags(name string, target string, tags []string) 
 	}
 	if isCSourceName(name) {
 		return sourceFilenameEnabledWithExtension(name, ".c", target, tags)
+	}
+	if isRTGAsmSourceName(name) {
+		return sourceFilenameEnabledWithExtension(name, ".rtgasm", target, tags)
 	}
 	return false
 }
@@ -944,12 +955,18 @@ func sourceFilenameEnabledWithExtension(name string, extension string, target st
 		return true
 	}
 	lastTag := stem[last+1:]
+	before := stem[:last]
+	previous := stringLastIndexByte(before, '_')
+	if previous >= 1 {
+		compound := before[previous+1:] + "_" + lastTag
+		if filenameKnownArch(compound) {
+			return hasBuildTag(target, compound, tags)
+		}
+	}
 	if filenameKnownArch(lastTag) {
 		if !hasBuildTag(target, lastTag, tags) {
 			return false
 		}
-		before := stem[:last]
-		previous := stringLastIndexByte(before, '_')
 		if previous >= 1 && filenameKnownOS(before[previous+1:]) {
 			return hasBuildTag(target, before[previous+1:], tags)
 		}
@@ -962,11 +979,11 @@ func sourceFilenameEnabledWithExtension(name string, extension string, target st
 }
 
 func filenameKnownOS(tag string) bool {
-	return stringInBuildList(tag, "aix android browser darwin dragonfly freebsd hurd illumos ios js linux nacl netbsd openbsd plan9 solaris vm wasi wasip1 windows zos")
+	return stringInBuildList(tag, "aix android browser c89 darwin dragonfly esp32c6 esp32p4 esp32s3 freebsd hurd illumos ios js linux msdos nacl netbsd openbsd plan9 solaris unixv7 vm wasi wasip1 windows zos")
 }
 
 func filenameKnownArch(tag string) bool {
-	return stringInBuildList(tag, "386 amd64 amd64p32 arm armbe arm64 aarch64 arm64be loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le ppc ppc64 ppc64le riscv riscv64 s390 s390x sparc sparc64 vm32 wasm wasm32")
+	return stringInBuildList(tag, "386 8086 aarch64 amd64 amd64p32 arm armbe arm64 arm64be i8086 loong64 mips mipsle mips64 mips64le mips64p32 mips64p32le pdp11 ppc ppc64 ppc64le riscv riscv32 riscv64 s390 s390x sparc sparc64 vm32 wasm wasm32 xtensa xtensa_lx7")
 }
 
 func stringInBuildList(item string, list string) bool {

@@ -9,14 +9,17 @@ const (
 	EmitErrToken
 	EmitErrUnit
 	EmitErrCheck
+	EmitErrAssembly
 )
 
 type Result struct {
-	Program    unit.Program
-	Ok         bool
-	Error      int
-	ErrorFile  int
-	ErrorToken int
+	Program     unit.Program
+	Ok          bool
+	Error       int
+	ErrorFile   int
+	ErrorToken  int
+	ErrorPath   string
+	ErrorOffset int
 }
 
 func emitFail(result Result, err int, file int, tok int) Result {

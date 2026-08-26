@@ -48,10 +48,18 @@ type ParsedFile struct {
 	ArenaEnd   int
 }
 
+type AssemblyFile struct {
+	Path       string
+	Src        []byte
+	ArenaStart int
+	ArenaEnd   int
+}
+
 type Package struct {
 	Ref            PackageRef
 	Name           string
 	Files          []ParsedFile
+	Assemblies     []AssemblyFile
 	Imports        []PackageRef
 	Ok             bool
 	Error          int
@@ -121,6 +129,21 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		return packageFail(pkg, PackageErrRef, -1, -1)
 	}
 	selected := selectPackageFiles(ref.Dir, files)
+	if len(selected) == 0 {
+		return packageFail(pkg, PackageErrNoFiles, -1, -1)
+	}
+	code := selected[:0]
+	for i := 0; i < len(selected); i++ {
+		if !stringHasSuffix(selected[i].Path, ".rtgasm") {
+			code = append(code, selected[i])
+			continue
+		}
+		pkg.Assemblies = append(pkg.Assemblies, AssemblyFile{
+			Path: selected[i].Path, Src: selected[i].Src,
+			ArenaStart: selected[i].ArenaStart, ArenaEnd: selected[i].ArenaEnd,
+		})
+	}
+	selected = code
 	if len(selected) == 0 {
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
@@ -451,8 +474,13 @@ func isCSourceFile(path string) bool {
 	return stringHasSuffix(base, ".c") && !stringHasSuffix(base, "_test.c")
 }
 
+func isRTGAsmSourceFile(path string) bool {
+	base := BasePath(path)
+	return stringHasSuffix(base, ".rtgasm") && !stringHasSuffix(base, "_test.rtgasm")
+}
+
 func isFrontendSourceFile(path string) bool {
-	return isGoSourceFile(path) || isCSourceFile(path)
+	return isGoSourceFile(path) || isCSourceFile(path) || isRTGAsmSourceFile(path)
 }
 
 func cPackageName(ref PackageRef, root bool) string {

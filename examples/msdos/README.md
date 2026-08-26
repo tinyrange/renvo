@@ -1,10 +1,9 @@
-# MS-DOS COM custom-backend demo
+# MS-DOS COM backend demo
 
-This example is a small, complete custom backend for 8086-compatible MS-DOS
-`.COM` programs. Like [`examples/pdp11v7`](../pdp11v7), the compiler prepares
-the target definition on demand and emits an original executable from the Go
-source. The result is a headerless COM image loaded by DOS at offset `0x100`;
-it is not an emulator container or a prebuilt byte sequence.
+This example exercises the supported `msdos/8086` backend with a project-local
+RTGASM function. The compiler emits an original headerless COM image loaded by
+DOS at offset `0x100`; it is not an emulator container or a prebuilt byte
+sequence. The checked-in backend also supports relocatable MZ executables.
 
 The target deliberately uses a 16-bit `int` and pointer model. Its scope is
 small programs whose code, initialized data, zeroed data, heap, and stack all
@@ -16,19 +15,26 @@ environment, and exit. It selects a 24 KiB arena by default, zeroes BSS at
 startup, leaves zero-filled BSS out of the file image, and reserves 4 KiB for
 the machine stack.
 
+The program also demonstrates project-local assembly. `main.go` declares the
+bodyless `rtgasmAnswer` function and `answer_msdos_i8086.rtgasm` implements it
+with the target's existing emitter helpers, including a local label and patched
+jump. CompilerJIT evaluates that small source fragment in VM32 and inserts the
+result at the ordinary function label; no opcode knowledge is added to the
+frontend or shared compiler.
+
 From the repository root:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/msdos/msdos_com.rtg \
+  -backend backends/msdos.rtg \
   -t msdos/8086 -s -o sandbox/hello.com \
   examples/msdos
 ```
 
-The browser bundle lists `examples/msdos` beside the PDP-11 example. Opening it
-loads this RTG definition, prepares the `msdos/8086` compiler as a cached VM32
-backend, and downloads the result as `app.com`. The same prepared target accepts
-both Go projects and C projects created in the browser.
+The browser bundle includes prebuilt backends for both MS-DOS formats. Opening
+this example selects `msdos/8086` and downloads the result as `app.com`; the
+larger device API demos select `msdos/8086-mz` and download `app.exe`. Both
+targets accept Go and C projects created in the browser.
 
 Run `sandbox/hello.com` under DOSBox, real MS-DOS, or an 8086 emulator with a
 COM loader and the required `INT 21h` file/process functions. It has also been exercised
@@ -38,6 +44,27 @@ through its `RunCOMFile` entrypoint. The expected output is:
 ```text
 Hello from Renvo on MS-DOS!
 ```
+
+## MZ executable and device library
+
+The same definition also exposes `msdos/8086-mz`. It emits a DOS `MZ`
+executable with loader-relative CS and SS values, an explicit minimum allocation
+for BSS and a 4 KiB stack, and PSP command-tail copying into the program's data
+segment. It retains the compiler's 16-bit near-pointer model; external hardware
+segments are accessed explicitly by `renvo.dev/device/dos`.
+
+The browser example catalog includes focused demonstrations:
+
+- [`examples/msdos-vga`](../msdos-vga) for VGA, palette, retrace, and keyboard;
+- [`examples/msdos-filesystem`](../msdos-filesystem) for portable file I/O and
+  DOS-specific enumeration, attributes, rename, and removal;
+- [`examples/msdos-system`](../msdos-system) for version, date/time, drives,
+  directories, conventional memory, serial, and printer status;
+- [`examples/msdos-input`](../msdos-input) for keyboard, mouse, BIOS teletype,
+  timing, PIT, and PC-speaker access.
+
+The BIOS, DOS interrupt, port-I/O, and segmented-memory primitives remain small
+target-selected `.rtgasm` fragments in `device/dos`.
 
 ## Corpus qualification
 

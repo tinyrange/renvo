@@ -135,6 +135,23 @@ type PackageInfo struct {
 	FuncEnd    int
 }
 
+// RTGAssemblySource preserves one selected project assembly file verbatim.
+// Path is package-relative and stable across relocating a checkout.
+type RTGAssemblySource struct {
+	Path   string
+	Source []byte
+}
+
+// RTGAssemblyBinding attaches one entry ordinal in a source file to a function
+// index. Package units use package-local indexes; the linker remaps them to the
+// final linked function table before serialization.
+type RTGAssemblyBinding struct {
+	Func   int
+	Source int
+	Entry  int
+	Code   []byte
+}
+
 // Program is the shared lowering and linking model. Checker-only semantic
 // tables stay outside this boundary.
 type Program struct {
@@ -152,29 +169,35 @@ type Program struct {
 	Selectors        []Selector
 	ConcurrencySites []ConcurrencySite
 	Packages         []PackageInfo
+	RTGAssembly      []RTGAssemblySource
+	RTGAssemblyFuncs []RTGAssemblyBinding
 }
 
 // CoreProgram is the complete serialized contract consumed by compiler
 // backends. Link-only resolution tables are deliberately absent.
 type CoreProgram struct {
-	Package    string
-	ImportPath string
-	Text       []byte
-	Tokens     []Token
-	Decls      []Decl
-	Funcs      []Func
-	Packages   []PackageInfo
+	Package          string
+	ImportPath       string
+	Text             []byte
+	Tokens           []Token
+	Decls            []Decl
+	Funcs            []Func
+	Packages         []PackageInfo
+	RTGAssembly      []RTGAssemblySource
+	RTGAssemblyFuncs []RTGAssemblyBinding
 }
 
 func CoreProgramFrom(program Program) CoreProgram {
 	return CoreProgram{
-		Package:    program.Package,
-		ImportPath: program.ImportPath,
-		Text:       program.Text,
-		Tokens:     program.Tokens,
-		Decls:      program.Decls,
-		Funcs:      program.Funcs,
-		Packages:   program.Packages,
+		Package:          program.Package,
+		ImportPath:       program.ImportPath,
+		Text:             program.Text,
+		Tokens:           program.Tokens,
+		Decls:            program.Decls,
+		Funcs:            program.Funcs,
+		Packages:         program.Packages,
+		RTGAssembly:      program.RTGAssembly,
+		RTGAssemblyFuncs: program.RTGAssemblyFuncs,
 	}
 }
 

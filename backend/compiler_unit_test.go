@@ -57,6 +57,23 @@ func TestBackendRenvoUnitKeepsLinesBeyondSixteenBits(t *testing.T) {
 	}
 }
 
+func TestBackendRenvoUnitDecodesRTGAssemblyTable(t *testing.T) {
+	path := []byte("bits_amd64.rtgasm")
+	source := []byte("rtgasm 1 assembly { appMain(out:emitter) { out.Byte(0xc3) } }")
+	payload := []byte{1, byte(len(path))}
+	payload = append(payload, path...)
+	payload = append(payload, byte(len(source)))
+	payload = append(payload, source...)
+	payload = append(payload, 1, 0, 0, 0, 0)
+	decoded := renvoProgram{funcs: make([]renvoFuncDecl, 1)}
+	if !renvoDecodeRTGAssemblyTable(&decoded, payload) || len(renvoRTGAssembly.sources) != 1 || len(renvoRTGAssembly.bindings) != 1 {
+		t.Fatalf("RTGASM decode: table=%#v", renvoRTGAssembly)
+	}
+	if string(renvoRTGAssembly.sources[0].path) != string(path) || string(renvoRTGAssembly.sources[0].source) != string(source) || renvoRTGAssembly.bindings[0].function != 0 {
+		t.Fatalf("RTGASM table = %#v", renvoRTGAssembly)
+	}
+}
+
 func TestBackendRenvoUnitRejectsMissingDuplicateAndMalformedData(t *testing.T) {
 	core := readBackendGolden(t, "unit/testdata/v1-core.hex")
 	for _, item := range unit.WireSchemaTags {
@@ -74,7 +91,13 @@ func TestBackendRenvoUnitRejectsMissingDuplicateAndMalformedData(t *testing.T) {
 		if item.Role != "child" {
 			continue
 		}
-		payload := backendUnitChildPayload(t, full, item.Number)
+		payload, found := findBackendUnitChildPayload(full, item.Number)
+		if !found && !item.Required {
+			continue
+		}
+		if !found {
+			t.Fatalf("golden vector does not contain required tag %d", item.Number)
+		}
 		duplicate := appendBackendUnitChild(full, item.Number, payload)
 		if _, isUnit, ok := renvoDecodeUnitProgram(duplicate); !isUnit || ok {
 			t.Errorf("backend accepted duplicate tag %s", item.Name)
@@ -153,6 +176,15 @@ func removeBackendUnitChild(t *testing.T, data []byte, want uint16) []byte {
 
 func backendUnitChildPayload(t *testing.T, data []byte, want uint16) []byte {
 	t.Helper()
+	payload, found := findBackendUnitChildPayload(data, want)
+	if found {
+		return payload
+	}
+	t.Fatalf("golden vector does not contain tag %d", want)
+	return nil
+}
+
+func findBackendUnitChildPayload(data []byte, want uint16) ([]byte, bool) {
 	pos := 14
 	for pos < len(data) {
 		tag := binary.LittleEndian.Uint16(data[pos : pos+2])
@@ -160,12 +192,11 @@ func backendUnitChildPayload(t *testing.T, data []byte, want uint16) []byte {
 		start := pos + 6
 		next := start + length
 		if tag == want {
-			return append([]byte(nil), data[start:next]...)
+			return append([]byte(nil), data[start:next]...), true
 		}
 		pos = next
 	}
-	t.Fatalf("golden vector does not contain tag %d", want)
-	return nil
+	return nil, false
 }
 
 func replaceBackendUnitChild(t *testing.T, data []byte, want uint16, payload []byte) []byte {
