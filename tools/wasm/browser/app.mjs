@@ -779,6 +779,7 @@ async function compileTarget(buildTarget) {
     worker.postMessage({
       type: "compile", id, args, files: payload.files,
       backend, backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
+      rtgDefinition: buildTarget.rtgDefinition || "",
     }, payload.transfers);
   } catch (error) {
     building = false;
@@ -2021,6 +2022,7 @@ function replaceProject(project) {
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   projectName = project.name || "playground"; syncProjectName();
   if (project.command) elements.command.value = project.command;
+  elements.arenaSize.value = project.arenaSize ? String(project.arenaSize) : "";
   restoredTargetName = project.target || selectedTarget?.name || "";
   if (targetCatalog?.targets.some((target) => target.name === restoredTargetName)) selectTarget(restoredTargetName, false);
   syncBuildRootFromCommand();
@@ -2971,7 +2973,7 @@ function saveAndDeploy() {
 }
 
 function currentProject() {
-  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
+  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", arenaSize: elements.arenaSize?.value || "", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
 }
 
 async function restoreProject() {
@@ -3001,6 +3003,7 @@ async function restoreProject() {
   for (const name of project?.openFiles || []) if (Object.hasOwn(fileValues, name) && !openFiles.includes(name)) openFiles.push(name);
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   if (project?.command) elements.command.value = project.command;
+  elements.arenaSize.value = project?.arenaSize ? String(project.arenaSize) : "";
   externalBuildLanguage = project?.buildLanguage === "c" ? "c" : "go";
   syncProjectName();
   syncBuildRootFromCommand();
@@ -3355,8 +3358,9 @@ async function handleExampleAction(event) {
       activeFile: active,
       openFiles: [active],
       target,
+      arenaSize: entry.item.arenaSize || "",
       backendRoots: backendDefinition ? [backendDefinition] : [],
-      command: `${entry.item.arenaSize ? `-arena-size ${entry.item.arenaSize} ` : ""}-s -o ${targetDefinition?.output || "app.wasm"} .`,
+      command: `-s -o ${targetDefinition?.output || "app.wasm"} .`,
     });
     if (backendDefinition) await useProjectBackend(backendDefinition);
     else elements.languageStatus.textContent = `${entry.title} is open`;

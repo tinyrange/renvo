@@ -27,6 +27,8 @@ type targetAsset struct {
 	FrontendTarget    string   `json:"frontendTarget,omitempty"`
 	BackendTarget     string   `json:"backendTarget"`
 	Backend           string   `json:"backend"`
+	BackendFormat     string   `json:"backendFormat,omitempty"`
+	RTGDefinition     string   `json:"rtgDefinition,omitempty"`
 	CBackend          string   `json:"cBackend,omitempty"`
 	Output            string   `json:"output"`
 	Runnable          bool     `json:"runnable,omitempty"`
@@ -98,6 +100,8 @@ type customTarget struct {
 	Label      string
 	Definition string
 	Backend    string
+	Format     string
+	RTGSource  string
 	Tags       []string
 	Device     string
 	Hidden     bool
@@ -124,8 +128,8 @@ type boardDefinition struct {
 
 var customTargets = []customTarget{
 	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Device: "esp32", Hidden: true},
-	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.wasm", Device: "computer"},
-	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.wasm", Device: "computer"},
+	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
+	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
 }
 
 func main() {
@@ -175,7 +179,7 @@ func main() {
 		tags := append([]string(nil), descriptor.BuildTags...)
 		tags = append(tags, custom.Tags...)
 		catalog.Targets = append(catalog.Targets, targetAsset{
-			Name: descriptor.Name, Label: custom.Label, BackendTarget: descriptor.Name, Backend: custom.Backend,
+			Name: descriptor.Name, Label: custom.Label, BackendTarget: descriptor.Name, Backend: custom.Backend, BackendFormat: custom.Format, RTGDefinition: custom.RTGSource,
 			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: tags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
 			Device: custom.Device,
@@ -212,6 +216,11 @@ func main() {
 		}
 		if catalog.Targets[i].CBackend != "" {
 			if catalog.Targets[i].CBackend, err = versionAsset(*output, catalog.Targets[i].CBackend); err != nil {
+				fail(err)
+			}
+		}
+		if catalog.Targets[i].RTGDefinition != "" {
+			if catalog.Targets[i].RTGDefinition, err = versionAsset(*output, catalog.Targets[i].RTGDefinition); err != nil {
 				fail(err)
 			}
 		}

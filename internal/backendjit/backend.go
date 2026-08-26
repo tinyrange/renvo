@@ -209,6 +209,19 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 	return evaluated, driver.BackendResult{Ok: true}
 }
 
+// EvaluateRTGAssembly evaluates preserved project assembly against an already
+// resolved target. Sandboxed frontends use this before invoking a separately
+// prepared compiler image.
+func EvaluateRTGAssembly(source []byte, resolved rtg.ResolveResult, descriptor rtg.TargetDescriptor, stdRoot string, bootstrap driver.Backend) ([]byte, driver.BackendResult) {
+	_, bindings, hasAssembly := unit.ReadRTGAssembly(source)
+	if !hasAssembly || len(bindings) == 0 {
+		return source, driver.BackendResult{Ok: true}
+	}
+	b := Backend{stdRoot: stdRoot, bootstrap: bootstrap}
+	prepared := Prepared{Resolved: resolved, Artifact: rtgb.Artifact{Descriptor: descriptor}}
+	return b.evaluateRTGAssembly(source, prepared)
+}
+
 func assemblyEvaluationSources(generated rtg.GenerateResult) ([]load.SourceFile, []string, error) {
 	sources, names, err := preparationSources("", generated)
 	if err != nil {

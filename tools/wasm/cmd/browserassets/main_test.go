@@ -121,3 +121,11 @@ func TestDOSOutputsUseNativeExtensions(t *testing.T) {
 		t.Fatalf("MZ output = %q", got)
 	}
 }
+
+func TestDOSBrowserTargetsUseVM32Backends(t *testing.T) {
+	for _, target := range customTargets {
+		if strings.HasPrefix(target.Name, "msdos/") && (target.Format != "vm32" || !strings.HasSuffix(target.Backend, ".rnvb")) {
+			t.Errorf("DOS browser target = %#v", target)
+		}
+	}
+}

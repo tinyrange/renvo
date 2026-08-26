@@ -97,8 +97,19 @@ build_custom_backend esp32c6-jtag/riscv32 backends/esp32c6_jtag.rtg esp32c6-jtag
 build_custom_backend esp32c6/riscv32 backends/esp32c6.rtg esp32c6-riscv32 go
 build_custom_backend esp32s3/xtensa_lx7 backends/esp32s3.rtg esp32s3-xtensa_lx7 go
 build_custom_backend esp32p4/riscv32 backends/esp32p4.rtg esp32p4-riscv32 go
-build_custom_backend msdos/8086 backends/msdos.rtg msdos-8086
-build_custom_backend msdos/8086-mz backends/msdos.rtg msdos-8086-mz
+
+build_vm_backend() {
+  target_name=$1
+  definition=$2
+  output_name=$3
+  go run ./cmd/renvowasibackendjit \
+    -definition "$definition" -target "$target_name" \
+    -o "$output/backends/$output_name.rnvb" >/dev/null
+}
+
+build_vm_backend msdos/8086 backends/msdos.rtg msdos-8086
+build_vm_backend msdos/8086-mz backends/msdos.rtg msdos-8086-mz
+cp backends/msdos.rtg "$output/backends/msdos.rtg"
 
 go run ./tools/wasm/cmd/browserassets -o "$output"
 cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \

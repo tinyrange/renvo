@@ -223,6 +223,24 @@ async function runPipeline(request) {
   let backendMilliseconds = 0;
   if (exitCode === 0 && plan.backend) {
     const backendStarted = performance.now();
+    if (request.rtgDefinition) {
+      if (!backendJITURL) throw new Error("RTGASM evaluation is unavailable");
+      if (!backendJITModule) backendJITModule = loadModule(backendJITURL, "backend JIT");
+      const definitionName = ".renvo/target.rtg";
+      const evaluatedName = ".renvo/evaluated.unit";
+      context.files.set(definitionName, (await loadBytes(request.rtgDefinition, "target definition")).slice());
+      const evaluateExit = await runModule(await backendJITModule, context, [
+        "renvo-backend-jit", "-definition", definitionName, "-target", request.backendTarget,
+        "-evaluate-unit", plan.temporary, "-o", evaluatedName,
+      ]);
+      const evaluated = context.files.get(evaluatedName);
+      context.files.delete(definitionName); context.files.delete(evaluatedName);
+      if (evaluateExit !== 0 || !evaluated) {
+        return pipelineResult(request, files, inputNames, context, plan, started,
+          frontendMilliseconds, performance.now() - backendStarted, evaluateExit || 1);
+      }
+      context.files.set(plan.temporary, evaluated);
+    }
     const backendReady = request.backendFormat === "vm32" ? readyBackendPrograms.has(request.backend) : readyBackendModules.has(request.backend);
     const backendLoading = request.backendFormat === "vm32" ? backendPrograms.has(request.backend) : backendModules.has(request.backend);
     self.postMessage({
@@ -245,6 +263,10 @@ async function runPipeline(request) {
     }
     backendMilliseconds = performance.now() - backendStarted;
   }
+  return pipelineResult(request, files, inputNames, context, plan, started, frontendMilliseconds, backendMilliseconds, exitCode);
+}
+
+function pipelineResult(request, files, inputNames, context, plan, started, frontendMilliseconds, backendMilliseconds, exitCode) {
   if (plan.backend) files.delete(plan.temporary);
   const outputs = [];
   for (const [name, data] of files) {

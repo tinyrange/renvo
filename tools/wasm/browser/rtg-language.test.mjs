@@ -41,6 +41,8 @@ test("project RTG targets use the browser JIT and VM backend pipeline", async ()
   assert.match(app, /if \(backendDefinition\) await useProjectBackend\(backendDefinition\)/);
   assert.match(worker, /request\.type === "backend-inspect" \|\| request\.type === "backend-prepare"/);
   assert.match(worker, /request\.backendFormat === "vm32"/);
+  assert.match(worker, /"-evaluate-unit", plan\.temporary/);
+  assert.match(app, /rtgDefinition: buildTarget\.rtgDefinition \|\| ""/);
   assert.match(worker, /fd_sync: \(\) => 0/);
   assert.match(worker, /path_create_directory: .*pathCreateDirectory/);
   assert.match(worker, /path_rename:/);
