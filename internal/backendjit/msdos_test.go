@@ -79,3 +79,56 @@ int main(void) {
 		t.Fatal("C COM image does not contain program data")
 	}
 }
+
+func TestMSDOSMZTargetAndDeviceLibrary(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "examples", "msdos", "msdos_com.rtg")
+	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+		t.TempDir(), backendcompiled.Backend{})
+	project := t.TempDir()
+	module := "module example.com/dosapp\nrequire renvo.dev v0.0.0\nreplace renvo.dev => " + root + "\n"
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package main
+import "renvo.dev/device/dos"
+func main() {
+	dos.SetVideoMode(dos.ModeText80x25)
+	_ = dos.Now()
+	dos.SpeakerOff()
+}
+`
+	if err := os.WriteFile(filepath.Join(project, "main.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := driver.CompileFromFS([]string{
+		"-backend", definition, "-t", "msdos/8086-mz", "-arena-size", "4096", "-s", "-o", "app.exe", ".",
+	}, project, filepath.Join(root, "std"), driver.OSFS{}, backend)
+	if !result.Ok {
+		t.Fatalf("MS-DOS MZ compile failed: %#v", result.Diagnostic)
+	}
+	image := result.Binary
+	if len(image) < 32 || string(image[:2]) != "MZ" {
+		t.Fatalf("MZ image header = %x", image[:min(len(image), 32)])
+	}
+	word := func(at int) int { return int(image[at]) | int(image[at+1])<<8 }
+	if word(8) != 2 || word(20) != 0x100 || word(22) != 0 || word(24) != 0x1c {
+		t.Fatalf("MZ execution fields: header=%d IP=%#x CS=%#x reloc=%#x", word(8), word(20), word(22), word(24))
+	}
+	if word(2) != len(image)&511 || word(4) != (len(image)+511)/512 || word(6) != 0 {
+		t.Fatalf("MZ file accounting: size=%d last=%d pages=%d relocs=%d", len(image), word(2), word(4), word(6))
+	}
+	moduleSize := len(image) - 32
+	if word(16) <= moduleSize || word(16) > moduleSize+word(10)*16 {
+		t.Fatalf("MZ stack/minalloc: module=%d SP=%#x minalloc=%#x", moduleSize, word(16), word(10))
+	}
+	if !bytes.Contains(image, []byte{0xcd, 0x10}) || !bytes.Contains(image, []byte{0xcd, 0x21}) || !bytes.Contains(image, []byte{0xee}) {
+		t.Fatal("MZ image omits device/dos RTGASM interrupt or port-I/O fragments")
+	}
+}

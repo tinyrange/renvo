@@ -6,8 +6,110 @@ implements direct_emitter_v1
 # DOS loads the image at CS:0100 with CS=DS=ES=SS. All pointers and label
 # addresses are therefore near offsets in that one segment.
 go backend {
+	var dosPSPSegmentOffset int
+
 	func emitWord(out *RTGEmitter, value int) {
 		out.Uint16(value)
+	}
+
+	// Project RTGASM uses these bridges for DOS/BIOS interrupts, port I/O, and
+	// explicit real-mode segment access. The public Go library keeps policy and
+	// data structures out of assembly while these fragments remain ordinary
+	// target-owned 8086 emission.
+	func emitDOSInterruptBridgeMode(out *RTGEmitter, vector int, loadES bool) {
+		out.Byte(0x55) // PUSH BP
+		out.Byte(0x06) // PUSH ES
+		out.Bytes2(0x89, 0xc5) // MOV BP,AX (Registers pointer; SS=DS)
+		out.Bytes3(0x8b, 0x46, 0x00)
+		out.Bytes3(0x8b, 0x5e, 0x02)
+		out.Bytes3(0x8b, 0x4e, 0x04)
+		out.Bytes3(0x8b, 0x56, 0x06)
+		out.Bytes3(0x8b, 0x76, 0x08)
+		out.Bytes3(0x8b, 0x7e, 0x0a)
+		if loadES {
+			out.Bytes3(0x8e, 0x46, 0x0e) // MOV ES,[BP+ES]
+		}
+		out.Byte(0xcd)
+		out.Byte(byte(vector))
+		out.Byte(0x9c) // PUSHF
+		out.Bytes3(0x8f, 0x46, 0x0c) // POP [BP+Flags]
+		out.Bytes3(0x89, 0x46, 0x00)
+		out.Bytes3(0x89, 0x5e, 0x02)
+		out.Bytes3(0x89, 0x4e, 0x04)
+		out.Bytes3(0x89, 0x56, 0x06)
+		out.Bytes3(0x89, 0x76, 0x08)
+		out.Bytes3(0x89, 0x7e, 0x0a)
+		out.Bytes3(0x8c, 0x46, 0x0e) // MOV [BP+ES],ES
+		out.Byte(0x07)
+		out.Byte(0x5d)
+		emitReturn(out)
+	}
+	func emitDOSInterruptBridge(out *RTGEmitter, vector int) {
+		emitDOSInterruptBridgeMode(out, vector, false)
+	}
+	func emitDOSInterrupt21ES(out *RTGEmitter) {
+		emitDOSInterruptBridgeMode(out, 0x21, true)
+	}
+
+	func emitDOSPortIn8(out *RTGEmitter) {
+		out.Bytes2(0x89, 0xc2) // MOV DX,AX
+		out.Bytes2(0x31, 0xc0) // XOR AX,AX
+		out.Byte(0xec) // IN AL,DX
+		emitReturn(out)
+	}
+	func emitDOSPortOut8(out *RTGEmitter) {
+		out.Bytes2(0x89, 0xd3) // MOV BX,DX
+		out.Bytes2(0x89, 0xc2) // MOV DX,AX
+		out.Bytes2(0x89, 0xd8) // MOV AX,BX
+		out.Byte(0xee) // OUT DX,AL
+		emitReturn(out)
+	}
+	func emitDOSPortOut16(out *RTGEmitter) {
+		out.Bytes2(0x89, 0xd3)
+		out.Bytes2(0x89, 0xc2)
+		out.Bytes2(0x89, 0xd8)
+		out.Byte(0xef) // OUT DX,AX
+		emitReturn(out)
+	}
+	func emitDOSSegmentLoad8(out *RTGEmitter) {
+		out.Byte(0x1e) // PUSH DS
+		out.Bytes2(0x8e, 0xd8) // MOV DS,AX
+		out.Bytes2(0x89, 0xd3) // MOV BX,DX
+		out.Bytes2(0x31, 0xc0)
+		out.Bytes2(0x8a, 0x07) // MOV AL,[BX]
+		out.Byte(0x1f)
+		emitReturn(out)
+	}
+	func emitDOSSegmentStore8(out *RTGEmitter) {
+		out.Byte(0x06) // PUSH ES
+		out.Bytes2(0x8e, 0xc0) // MOV ES,AX
+		out.Bytes2(0x89, 0xd3) // MOV BX,DX
+		out.Bytes2(0x89, 0xc8) // MOV AX,CX
+		out.Bytes3(0x26, 0x88, 0x07) // MOV ES:[BX],AL
+		out.Byte(0x07)
+		emitReturn(out)
+	}
+	func emitDOSSegmentFill8(out *RTGEmitter) {
+		out.Byte(0x06)
+		out.Bytes2(0x8e, 0xc0) // ES=segment
+		out.Bytes2(0x89, 0xd7) // DI=offset
+		out.Bytes2(0x89, 0xc8) // AX=value
+		out.Bytes2(0x89, 0xd9) // CX=count
+		out.Byte(0xfc)
+		out.Bytes2(0xf3, 0xaa) // REP STOSB
+		out.Byte(0x07)
+		emitReturn(out)
+	}
+	func emitDOSSegmentWrite(out *RTGEmitter) {
+		out.Byte(0x06)
+		out.Bytes2(0x8e, 0xc0) // ES=segment
+		out.Bytes2(0x89, 0xd7) // DI=offset
+		out.Bytes2(0x89, 0xce) // SI=data
+		out.Bytes2(0x89, 0xd9) // CX=len
+		out.Byte(0xfc)
+		out.Bytes2(0xf3, 0xa4) // REP MOVSB
+		out.Byte(0x07)
+		emitReturn(out)
 	}
 
 	func putWord(data []byte, at int, value int) {
@@ -429,13 +531,16 @@ go backend {
 	}
 	func dosEntryStart(out *RTGEmitter, stateOffset int) bool {
 		_ = stateOffset
-		// COM normally starts with all four segments at the PSP. Establish data
-		// segments, clear DF, and zero the complete final BSS before any runtime
-		// state or authored global initializer runs.
+		// DOS enters both COM and MZ programs with DS at the PSP. Preserve that
+		// segment before establishing the load module's data segments; MZ has a
+		// distinct PSP while COM happens to share its segment with the image.
+		dosPSPSegmentOffset = out.ReserveBSS(2, 2)
+		out.Byte(0x1e) // PUSH DS
 		out.Byte(0x0e)
-		out.Byte(0x1f)
+		out.Byte(0x1f) // DS=CS
 		out.Byte(0x0e)
-		out.Byte(0x07)
+		out.Byte(0x07) // ES=CS
+		out.Byte(0x5b) // POP BX (PSP segment)
 		out.Byte(0xfc)
 		emitAddress(out, di, RTGBSSAddress(0))
 		emitAddress(out, cx, RTGBSSEndAddress(1))
@@ -443,6 +548,7 @@ go backend {
 		emitRegister(out, 0x31, ax, ax)
 		out.Byte(0xf3)
 		out.Byte(0xaa) // REP STOSB
+		emitStoreAbsoluteWord(out, RTGBSSAddress(dosPSPSegmentOffset), bx)
 		return true
 	}
 	func emitJumpZero(out *RTGEmitter, label RTGLabel) {
@@ -470,6 +576,7 @@ go backend {
 		// argv[0] plus the PSP command tail, pointing tail strings directly into
 		// the PSP. DOS limits that tail to 126 bytes.
 		argsOffset := out.ReserveBSS(8*16, 2)
+		tailOffset := out.ReserveBSS(127, 1)
 		environmentOffset := out.ReserveBSS(16, 2)
 		data := out.Data()
 		arg0Offset := len(data)
@@ -482,13 +589,30 @@ go backend {
 		emitStoreAbsoluteWord(out, RTGBSSAddress(argsOffset), ax)
 		emitImmediate(out, ax, 11)
 		emitStoreAbsoluteWord(out, RTGBSSAddress(argsOffset+8), ax)
-		emitAddress(out, di, RTGBSSAddress(argsOffset+16))
-		emitImmediate(out, si, 0x81)
-		emitImmediate(out, bx, 1)
+		// Copy the PSP command tail into the load segment so every Go string
+		// remains a valid near pointer in both COM and MZ executables.
+		emitAddress(out, di, RTGBSSAddress(tailOffset))
+		emitLoadWidth(out, ax, RTGBSSAddress(dosPSPSegmentOffset), 2, false)
+		out.Byte(0x1e) // PUSH DS
+		out.Byte(0x06) // PUSH ES
+		out.Bytes2(0x8e, 0xd8) // DS=PSP
+		out.Byte(0x0e)
+		out.Byte(0x07) // ES=CS
 		emitRegister(out, 0x31, cx, cx)
-		// MOV CL,[0080h]
-		emitModRM(out, 0x8a, 0, 1, 6)
+		out.Byte(0x8a) // MOV CL,[0080h]
+		out.Byte(0x0e)
 		emitWord(out, 0x80)
+		emitMove(out, dx, cx)
+		emitImmediate(out, si, 0x81)
+		out.Byte(0xf3)
+		out.Byte(0xa4) // REP MOVSB
+		out.Byte(0x07) // POP ES
+		out.Byte(0x1f) // POP DS
+
+		emitAddress(out, di, RTGBSSAddress(argsOffset+16))
+		emitAddress(out, si, RTGBSSAddress(tailOffset))
+		emitImmediate(out, bx, 1)
+		emitMove(out, cx, dx)
 
 		skip := out.NewLabel()
 		token := out.NewLabel()
@@ -683,6 +807,45 @@ go backend {
 		}
 		return result
 	}
+
+	func mzAppendWord(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func mzImage(out *RTGEmitter) []byte {
+		// Retain the small near-pointer model by placing the load module's entry
+		// at 0100h, then let DOS relocate the complete module segment through the
+		// MZ header. BSS and a 4 KiB stack are requested with e_minalloc.
+		module := make([]byte, 0x100, 0x100+len(out.Code())+len(out.Data()))
+		module = append(module, out.Code()...)
+		module = append(module, out.Data()...)
+		stackTop := RTGAlignValue(len(module)+out.BSSSize()+4096, 2)
+		if stackTop > 0xfffe {
+			return nil
+		}
+		fileSize := 32 + len(module)
+		lastPage := fileSize & 511
+		pages := (fileSize + 511) / 512
+		header := make([]byte, 0, 32+len(module))
+		header = append(header, 'M', 'Z')
+		header = mzAppendWord(header, lastPage)
+		header = mzAppendWord(header, pages)
+		header = mzAppendWord(header, 0) // relocation count
+		header = mzAppendWord(header, 2) // 32-byte header
+		header = mzAppendWord(header, (out.BSSSize()+4096+15)/16)
+		header = mzAppendWord(header, 0xffff)
+		header = mzAppendWord(header, 0) // SS, relative to load module
+		header = mzAppendWord(header, stackTop)
+		header = mzAppendWord(header, 0) // checksum
+		header = mzAppendWord(header, 0x100) // IP
+		header = mzAppendWord(header, 0) // CS
+		header = mzAppendWord(header, 0x1c) // relocation table
+		header = mzAppendWord(header, 0) // overlay
+		header = mzAppendWord(header, 0)
+		header = mzAppendWord(header, 0) // reserved header words
+		header = append(header, module...)
+		return header
+	}
 }
 
 arch i8086 {
@@ -803,6 +966,14 @@ format dos_com {
 	image = go comImage
 }
 
+format dos_mz {
+	kind = "dos-mz"
+	byte_order = little
+	address_bits = 16
+	code_offset = 0x100
+	image = go mzImage
+}
+
 target msdos/8086 {
 	family = native_v1
 	os = msdos
@@ -812,5 +983,17 @@ target msdos/8086 {
 	executable = dos_com
 	arena_default = 24000
 	build_tags = [dos, msdos, i8086]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+target msdos/8086-mz {
+	family = native_v1
+	os = msdos
+	arch = i8086
+	abi = renvo_8086
+	runtime = msdos
+	executable = dos_mz
+	arena_default = 24000
+	build_tags = [dos, msdos, i8086, mz]
 	capabilities = [hosted, executable, filesystem, heap, argv, environment]
 }

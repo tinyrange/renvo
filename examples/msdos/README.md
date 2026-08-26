@@ -46,6 +46,20 @@ through its `RunCOMFile` entrypoint. The expected output is:
 Hello from Renvo on MS-DOS!
 ```
 
+## MZ executable and device library
+
+The same definition also exposes `msdos/8086-mz`. It emits a DOS `MZ`
+executable with loader-relative CS and SS values, an explicit minimum allocation
+for BSS and a 4 KiB stack, and PSP command-tail copying into the program's data
+segment. It retains the compiler's 16-bit near-pointer model; external hardware
+segments are accessed explicitly by `renvo.dev/device/dos`.
+
+See [`examples/msdos-vga`](../msdos-vga) for VGA, palette, retrace, and keyboard
+usage. `device/dos` also includes filesystem enumeration, drives and paths,
+attributes, date/time, mouse, serial, printer, conventional memory, and speaker
+control. Its BIOS, DOS interrupt, port-I/O, and segmented-memory primitives are
+small target-selected `.rtgasm` fragments.
+
 ## Corpus qualification
 
 `renvodosqualify` compiles every positive backend program and every quick,
