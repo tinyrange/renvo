@@ -114,7 +114,7 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 			Message: "unit target binding does not match the prepared backend",
 		}}
 	}
-	if _, assemblyBindings, hasAssembly := unit.ReadRTGAssembly(source); hasAssembly && len(assemblyBindings) != 0 {
+	if _, assemblyBindings, hasAssembly := readRTGAssembly(source); hasAssembly && len(assemblyBindings) != 0 {
 		var evaluated driver.BackendResult
 		source, evaluated = b.evaluateRTGAssembly(source, prepared)
 		if !evaluated.Ok {
@@ -134,7 +134,7 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 }
 
 func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte, driver.BackendResult) {
-	sources, bindings, ok := unit.ReadRTGAssembly(source)
+	sources, bindings, ok := readRTGAssembly(source)
 	if !ok || !prepared.Resolved.Ok {
 		return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
 			Phase: "rtgasm", Code: "RENVO-RTGASM-002", Message: "prepared backend cannot evaluate RTGASM source",
@@ -202,7 +202,7 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 		}
 		b.assemblyCache[cacheKey] = append([]byte(nil), run.Output...)
 	}
-	evaluated, ok := unit.AttachRTGAssemblyCode(source, code)
+	evaluated, ok := attachRTGAssemblyCode(source, code)
 	if !ok {
 		return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-009", "could not attach evaluated RTGASM code")
 	}
@@ -213,7 +213,7 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 // resolved target. Sandboxed frontends use this before invoking a separately
 // prepared compiler image.
 func EvaluateRTGAssembly(source []byte, resolved rtg.ResolveResult, descriptor rtg.TargetDescriptor, stdRoot string, bootstrap driver.Backend) ([]byte, driver.BackendResult) {
-	_, bindings, hasAssembly := unit.ReadRTGAssembly(source)
+	_, bindings, hasAssembly := readRTGAssembly(source)
 	if !hasAssembly || len(bindings) == 0 {
 		return source, driver.BackendResult{Ok: true}
 	}

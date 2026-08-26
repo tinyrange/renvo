@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package lower
 
 import "testing"

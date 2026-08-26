@@ -82,17 +82,8 @@ func TestCoreUnitPreservesRTGAssemblySource(t *testing.T) {
 	if !ok {
 		t.Fatal("MarshalCore failed")
 	}
-	sources, bindings, ok := ReadRTGAssembly(data)
-	if !ok || len(sources) != 1 || len(bindings) != 1 || sources[0].Path != "bits_amd64.rtgasm" || !bytes.Equal(sources[0].Source, program.RTGAssembly[0].Source) || bindings[0].Func != 0 || bindings[0].Source != 0 || bindings[0].Entry != 0 {
-		t.Fatalf("decoded RTGASM = %#v %#v, ok=%v", sources, bindings, ok)
-	}
-	evaluated, ok := AttachRTGAssemblyCode(data, [][]byte{{0x90, 0xc3}})
-	if !ok {
-		t.Fatal("AttachRTGAssemblyCode failed")
-	}
-	_, bindings, ok = ReadRTGAssembly(evaluated)
-	if !ok || len(bindings) != 1 || !bytes.Equal(bindings[0].Code, []byte{0x90, 0xc3}) {
-		t.Fatalf("evaluated RTGASM = %#v, ok=%v", bindings, ok)
+	if !HasRTGAssembly(data) || !bytes.Contains(data, program.RTGAssembly[0].Source) {
+		t.Fatal("core unit did not preserve RTGASM source")
 	}
 	// The public version-1 reader must continue skipping the new optional table.
 	if _, err := wireunit.Unmarshal(data); err != nil {

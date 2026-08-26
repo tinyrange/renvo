@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package lower
 
 import (
@@ -23,7 +21,8 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 			path = path[len(pkg.Ref.Dir)+1:]
 		}
 		sourceIndex := len(b.program.RTGAssembly)
-		source := append([]byte(nil), file.Src...)
+		source := make([]byte, len(file.Src))
+		copy(source, file.Src)
 		b.program.RTGAssembly = append(b.program.RTGAssembly, unit.RTGAssemblySource{Path: cloneCoreString(path), Source: source})
 		for entryIndex := 0; entryIndex < len(document.entries); entryIndex++ {
 			entry := document.entries[entryIndex]

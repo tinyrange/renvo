@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package lower
 
 type rtgAssemblyEntry struct {
@@ -13,114 +11,68 @@ type rtgAssemblyDocument struct {
 	ok          bool
 }
 
-// parseRTGAssemblyBindings reads the wrapper and preserves entry bodies for
-// CompilerJIT, which interprets them against the selected backend definition.
+// parseRTGAssemblyBindings only discovers top-level entry signatures. The
+// CompilerJIT parser remains authoritative for the preserved source and body.
 func parseRTGAssemblyBindings(source []byte) rtgAssemblyDocument {
-	p := rtgAssemblyBindingParser{source: source}
-	var entries []rtgAssemblyEntry
-	if p.word() != "rtgasm" || p.word() != "1" || p.word() != "assembly" || !p.take('{') {
-		return rtgAssemblyDocument{errorOffset: p.at}
-	}
-	for {
-		p.space()
-		if p.take('}') {
-			break
-		}
-		start := p.at
-		name := p.word()
-		duplicate := false
-		for i := 0; i < len(entries); i++ {
-			duplicate = duplicate || entries[i].name == name
-		}
-		if name == "" || duplicate || !p.take('(') || p.word() != "out" ||
-			!p.take(':') || p.word() != "emitter" || !p.take(')') || !p.take('{') {
-			return rtgAssemblyDocument{entries: entries, errorOffset: p.at}
-		}
-		entries = append(entries, rtgAssemblyEntry{name: name, offset: start})
-		if !p.body() {
-			return rtgAssemblyDocument{entries: entries, errorOffset: p.at}
-		}
-	}
-	p.space()
-	return rtgAssemblyDocument{entries: entries, errorOffset: p.at, ok: p.at == len(source) && len(entries) != 0}
-}
-
-type rtgAssemblyBindingParser struct {
-	source []byte
-	at     int
-}
-
-func (p *rtgAssemblyBindingParser) word() string {
-	p.space()
-	start := p.at
-	for p.at < len(p.source) && (p.source[p.at] >= 'a' && p.source[p.at] <= 'z' ||
-		p.source[p.at] >= 'A' && p.source[p.at] <= 'Z' || p.source[p.at] >= '0' && p.source[p.at] <= '9' || p.source[p.at] == '_') {
-		p.at++
-	}
-	return string(p.source[start:p.at])
-}
-
-func (p *rtgAssemblyBindingParser) take(want byte) bool {
-	p.space()
-	if p.at >= len(p.source) || p.source[p.at] != want {
-		return false
-	}
-	p.at++
-	return true
-}
-
-func (p *rtgAssemblyBindingParser) space() {
-	for p.at < len(p.source) {
-		if p.source[p.at] == ' ' || p.source[p.at] == '\t' || p.source[p.at] == '\r' || p.source[p.at] == '\n' {
-			p.at++
-		} else if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '/' {
-			p.at += 2
-			for p.at < len(p.source) && p.source[p.at] != '\n' {
-				p.at++
+	var out rtgAssemblyDocument
+	depth := 0
+	for at := 0; at < len(source); at++ {
+		if at+1 < len(source) && source[at] == '/' && source[at+1] == '/' {
+			for at < len(source) && source[at] != '\n' {
+				at++
 			}
-		} else if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '*' {
-			p.at += 2
-			for p.at+1 < len(p.source) && (p.source[p.at] != '*' || p.source[p.at+1] != '/') {
-				p.at++
-			}
-			if p.at+1 < len(p.source) {
-				p.at += 2
-			}
-		} else {
-			return
+			continue
 		}
-	}
-}
-
-func (p *rtgAssemblyBindingParser) body() bool {
-	depth := 1
-	for p.at < len(p.source) {
-		if p.at+1 < len(p.source) && p.source[p.at] == '/' && (p.source[p.at+1] == '/' || p.source[p.at+1] == '*') {
-			p.space()
-		} else if p.source[p.at] == '"' || p.source[p.at] == '\'' || p.source[p.at] == '`' {
-			quote := p.source[p.at]
-			p.at++
-			for p.at < len(p.source) && p.source[p.at] != quote {
-				if quote != '`' && p.source[p.at] == '\\' && p.at+1 < len(p.source) {
-					p.at++
-				}
-				p.at++
+		if at+1 < len(source) && source[at] == '/' && source[at+1] == '*' {
+			at += 2
+			for at+1 < len(source) && (source[at] != '*' || source[at+1] != '/') {
+				at++
 			}
-			if p.at < len(p.source) {
-				p.at++
-			}
-		} else {
-			if p.source[p.at] == '{' {
-				depth++
-			} else if p.source[p.at] == '}' {
-				depth--
-				if depth == 0 {
-					p.at++
-					return true
+			at++
+			continue
+		}
+		if source[at] == '"' || source[at] == '\'' || source[at] == '`' {
+			quote := source[at]
+			for at++; at < len(source) && source[at] != quote; at++ {
+				if quote != '`' && source[at] == '\\' && at+1 < len(source) {
+					at++
 				}
 			}
-			p.at++
+			continue
 		}
+		if source[at] == '{' {
+			depth++
+			continue
+		}
+		if source[at] == '}' {
+			depth--
+			continue
+		}
+		marker := "(out:emitter)"
+		if depth != 1 || at+len(marker) > len(source) || string(source[at:at+len(marker)]) != marker {
+			continue
+		}
+		end := at
+		for at > 0 && rtgAssemblyIdent(source[at-1]) {
+			at--
+		}
+		if at == end {
+			return rtgAssemblyDocument{entries: out.entries, errorOffset: at}
+		}
+		name := string(source[at:end])
+		for i := 0; i < len(out.entries); i++ {
+			if out.entries[i].name == name {
+				return rtgAssemblyDocument{entries: out.entries, errorOffset: at}
+			}
+		}
+		out.entries = append(out.entries, rtgAssemblyEntry{name: name, offset: at})
+		at = end + len(marker) - 1
 	}
-	return false
+	out.errorOffset = len(source)
+	out.ok = depth == 0 && len(out.entries) != 0
+	return out
+}
+
+func rtgAssemblyIdent(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' || value == '_'
 }
