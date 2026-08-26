@@ -187,6 +187,7 @@ let buildRevision = 1;
 let pendingBuild;
 let runAfterBuild = false;
 let artifactUrls = [];
+const inlineDownloadLimit = 16 * 1024 * 1024;
 let lastRunnableArtifact;
 let espPort;
 let espSession;
@@ -1876,9 +1877,9 @@ function projectFiles() {
 
 function exportProject() {
   const data = encodeProjectZip(projectFiles());
-  const url = URL.createObjectURL(new Blob([data], { type: "application/zip" }));
+  const url = createDownloadURL(data, "application/zip");
   const link = document.createElement("a"); link.href = url; link.download = `${safeProjectName(projectName)}.zip`; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setTimeout(() => releaseDownloadURL(url), 0);
 }
 
 function toggleProjectActionMenu() {
@@ -2549,12 +2550,13 @@ function renderArtifacts(files) {
     const filename = file.name.split("/").pop();
     const actions = document.createElement("span"); actions.className = "artifact-actions";
     const rawLink = document.createElement("a");
-    const rawURL = URL.createObjectURL(new Blob([file.data], { type: file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" }));
+    const rawURL = createDownloadURL(file.data, file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream");
     artifactUrls.push(rawURL); rawLink.href = rawURL; rawLink.download = filename;
     if (/\.(?:com|exe)$/i.test(filename)) {
       const zipLink = document.createElement("a");
-      const zipURL = URL.createObjectURL(new Blob([encodeProjectZip({ [filename]: file.data })], { type: "application/zip" }));
-      artifactUrls.push(zipURL); zipLink.href = zipURL; zipLink.download = `${filename}.zip`; zipLink.textContent = "Download ZIP";
+      const zipURL = createDownloadURL(encodeProjectZip({ [filename]: file.data }), "application/zip");
+      artifactUrls.push(zipURL); zipLink.href = zipURL; zipLink.download = `${filename}.zip`;
+      zipLink.textContent = "Download ZIP";
       rawLink.textContent = "Raw";
       actions.append(zipLink, rawLink);
     } else {
@@ -3021,7 +3023,21 @@ async function restoreProject() {
   syncBuildRootFromCommand();
 }
 
-function clearArtifactUrls() { for (const url of artifactUrls) URL.revokeObjectURL(url); artifactUrls = []; }
+function createDownloadURL(data, type) {
+  if (data.byteLength <= inlineDownloadLimit) {
+    const bytes = new Uint8Array(data);
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    return `data:${type};base64,${btoa(chunks.join(""))}`;
+  }
+  return URL.createObjectURL(new Blob([data], { type }));
+}
+
+function releaseDownloadURL(url) { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }
+
+function clearArtifactUrls() { for (const url of artifactUrls) releaseDownloadURL(url); artifactUrls = []; }
 
 function splitArguments(text) {
   const args = []; let value = ""; let quote = ""; let escaped = false; let active = false;
