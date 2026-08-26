@@ -43,6 +43,29 @@ func TestParseDirectoryEntry(t *testing.T) {
 	}
 }
 
+func TestFinderIgnoresUndefinedSetDTAFlags(t *testing.T) {
+	t.Cleanup(resetHooks)
+	var calls int
+	InterruptHook = func(vector byte, regs *Registers) {
+		if vector != 0x21 {
+			t.Fatalf("interrupt = %#x", vector)
+		}
+		calls++
+		if regs.AX == 0x1a00 {
+			regs.Flags |= FlagCarry
+			return
+		}
+		if regs.AX != 0x4e00 {
+			t.Fatalf("function = %#x", regs.AX)
+		}
+		regs.Flags &^= FlagCarry
+	}
+	entry, ok, err := Find("*.TXT", AttributeDirectory).Next()
+	if err != nil || !ok || entry.Name != "" || calls != 2 {
+		t.Fatalf("Next = %#v, %v, %v; calls = %d", entry, ok, err, calls)
+	}
+}
+
 func TestVGAPaletteAndSpeakerPorts(t *testing.T) {
 	t.Cleanup(resetHooks)
 	type write struct {

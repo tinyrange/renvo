@@ -58,23 +58,19 @@ go backend {
 		emitReturn(out)
 	}
 	func emitDOSPortOut8(out *RTGEmitter) {
-		out.Bytes2(0x89, 0xd3) // MOV BX,DX
-		out.Bytes2(0x89, 0xc2) // MOV DX,AX
-		out.Bytes2(0x89, 0xd8) // MOV AX,BX
+		// Renvo pushes arguments in source order, then pops call words into
+		// AX,DX,..., so portOut8(port,value) arrives as AX=value, DX=port.
 		out.Byte(0xee) // OUT DX,AL
 		emitReturn(out)
 	}
 	func emitDOSPortOut16(out *RTGEmitter) {
-		out.Bytes2(0x89, 0xd3)
-		out.Bytes2(0x89, 0xc2)
-		out.Bytes2(0x89, 0xd8)
 		out.Byte(0xef) // OUT DX,AX
 		emitReturn(out)
 	}
 	func emitDOSSegmentLoad8(out *RTGEmitter) {
 		out.Byte(0x1e) // PUSH DS
-		out.Bytes2(0x8e, 0xd8) // MOV DS,AX
-		out.Bytes2(0x89, 0xd3) // MOV BX,DX
+		out.Bytes2(0x8e, 0xda) // MOV DS,DX (segment)
+		out.Bytes2(0x89, 0xc3) // MOV BX,AX (offset)
 		out.Bytes2(0x31, 0xc0)
 		out.Bytes2(0x8a, 0x07) // MOV AL,[BX]
 		out.Byte(0x1f)
@@ -82,19 +78,19 @@ go backend {
 	}
 	func emitDOSSegmentStore8(out *RTGEmitter) {
 		out.Byte(0x06) // PUSH ES
-		out.Bytes2(0x8e, 0xc0) // MOV ES,AX
+		out.Bytes2(0x8e, 0xc1) // MOV ES,CX (segment)
 		out.Bytes2(0x89, 0xd3) // MOV BX,DX
-		out.Bytes2(0x89, 0xc8) // MOV AX,CX
 		out.Bytes3(0x26, 0x88, 0x07) // MOV ES:[BX],AL
 		out.Byte(0x07)
 		emitReturn(out)
 	}
 	func emitDOSSegmentFill8(out *RTGEmitter) {
 		out.Byte(0x06)
-		out.Bytes2(0x8e, 0xc0) // ES=segment
-		out.Bytes2(0x89, 0xd7) // DI=offset
-		out.Bytes2(0x89, 0xc8) // AX=value
-		out.Bytes2(0x89, 0xd9) // CX=count
+		out.Bytes2(0x89, 0xc6) // SI=count
+		out.Bytes2(0x8e, 0xc3) // ES=segment
+		out.Bytes2(0x89, 0xcf) // DI=offset
+		out.Bytes2(0x89, 0xd0) // AX=value
+		out.Bytes2(0x89, 0xf1) // CX=count
 		out.Byte(0xfc)
 		out.Bytes2(0xf3, 0xaa) // REP STOSB
 		out.Byte(0x07)
@@ -102,10 +98,10 @@ go backend {
 	}
 	func emitDOSSegmentWrite(out *RTGEmitter) {
 		out.Byte(0x06)
-		out.Bytes2(0x8e, 0xc0) // ES=segment
-		out.Bytes2(0x89, 0xd7) // DI=offset
-		out.Bytes2(0x89, 0xce) // SI=data
-		out.Bytes2(0x89, 0xd9) // CX=len
+		out.Bytes2(0x8e, 0xc7) // ES=segment
+		out.Bytes2(0x89, 0xdf) // DI=offset
+		out.Bytes2(0x89, 0xc6) // SI=data
+		out.Bytes2(0x89, 0xd1) // CX=len
 		out.Byte(0xfc)
 		out.Bytes2(0xf3, 0xa4) // REP MOVSB
 		out.Byte(0x07)

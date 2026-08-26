@@ -100,6 +100,12 @@ func TestMSDOSMZTargetAndDeviceLibrary(t *testing.T) {
 import "renvo.dev/device/dos"
 func main() {
 	dos.SetVideoMode(dos.ModeText80x25)
+	screen := dos.OpenVGA13()
+	screen.Clear(1)
+	screen.Blit(0, []byte{1})
+	segment := dos.Segment(0xa000)
+	segment.Store8(0, 1)
+	_ = segment.Load8(0)
 	_ = dos.Now()
 	dos.SpeakerOff()
 }
@@ -130,5 +136,22 @@ func main() {
 	}
 	if !bytes.Contains(image, []byte{0xcd, 0x10}) || !bytes.Contains(image, []byte{0xcd, 0x21}) || !bytes.Contains(image, []byte{0xee}) {
 		t.Fatal("MZ image omits device/dos RTGASM interrupt or port-I/O fragments")
+	}
+	segmentFill := []byte{0x06, 0x89, 0xc6, 0x8e, 0xc3, 0x89, 0xcf, 0x89, 0xd0, 0x89, 0xf1, 0xfc, 0xf3, 0xaa, 0x07, 0xc3}
+	if !bytes.Contains(image, segmentFill) {
+		t.Fatal("MZ image omits reverse-call-word segment fill fragment")
+	}
+	segmentWrite := []byte{0x06, 0x8e, 0xc7, 0x89, 0xdf, 0x89, 0xc6, 0x89, 0xd1, 0xfc, 0xf3, 0xa4, 0x07, 0xc3}
+	if !bytes.Contains(image, segmentWrite) {
+		t.Fatal("MZ image omits reverse-call-word segment write fragment")
+	}
+	segmentLoad := []byte{0x1e, 0x8e, 0xda, 0x89, 0xc3, 0x31, 0xc0, 0x8a, 0x07, 0x1f, 0xc3}
+	segmentStore := []byte{0x06, 0x8e, 0xc1, 0x89, 0xd3, 0x26, 0x88, 0x07, 0x07, 0xc3}
+	if !bytes.Contains(image, segmentLoad) || !bytes.Contains(image, segmentStore) {
+		t.Fatal("MZ image omits reverse-call-word segment load/store fragments")
+	}
+	oldPortOut := []byte{0x89, 0xd3, 0x89, 0xc2, 0x89, 0xd8, 0xee, 0xc3}
+	if bytes.Contains(image, oldPortOut) {
+		t.Fatal("MZ image retains source-order port output fragment")
 	}
 }

@@ -214,9 +214,8 @@ func (f *Finder) Next() (DirEntry, bool, error) {
 	}
 	set := Registers{AX: 0x1a00, DX: nearPointer(f.dta)}
 	interrupt21(&set)
-	if err := result(&set); err != nil {
-		return DirEntry{}, false, err
-	}
+	// DOS does not define carry or an error return for Set DTA. In particular,
+	// carry may retain the state of an earlier call and must not be inspected.
 	regs := Registers{AX: 0x4f00}
 	if !f.started {
 		regs.AX = 0x4e00
