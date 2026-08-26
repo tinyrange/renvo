@@ -1,6 +1,6 @@
 package unit
 
-const frontendCacheMagic = "RVFC2"
+const frontendCacheMagic = "RVFC3"
 
 // MarshalFrontendCache preserves the linker-only semantic tables omitted from
 // the backend unit format. It is used for in-process package caching; it is not
@@ -101,6 +101,18 @@ func MarshalFrontendCache(program Program) ([]byte, bool) {
 		out = appendFrontendCacheInt(out, item.ReceiveArity)
 		out = appendFrontendCacheString(out, item.ElementType)
 	}
+	out = appendFrontendCacheInt(out, len(program.RTGAssembly))
+	for i := 0; i < len(program.RTGAssembly); i++ {
+		out = appendFrontendCacheString(out, program.RTGAssembly[i].Path)
+		out = appendFrontendCacheBytes(out, program.RTGAssembly[i].Source)
+	}
+	out = appendFrontendCacheInt(out, len(program.RTGAssemblyFuncs))
+	for i := 0; i < len(program.RTGAssemblyFuncs); i++ {
+		out = appendFrontendCacheInt(out, program.RTGAssemblyFuncs[i].Func)
+		out = appendFrontendCacheInt(out, program.RTGAssemblyFuncs[i].Source)
+		out = appendFrontendCacheInt(out, program.RTGAssemblyFuncs[i].Entry)
+		out = appendFrontendCacheBytes(out, program.RTGAssemblyFuncs[i].Code)
+	}
 	return out, true
 }
 
@@ -171,6 +183,20 @@ func UnmarshalFrontendCache(data []byte) (Program, bool) {
 			Kind: r.intValue(), Token: r.intValue(), Direction: r.intValue(),
 			ReceiveArity: r.intValue(), ElementType: r.stringValue(),
 		}
+	}
+	assemblyCount := r.count()
+	if assemblyCount > 0 {
+		out.RTGAssembly = make([]RTGAssemblySource, assemblyCount)
+	}
+	for i := 0; i < len(out.RTGAssembly); i++ {
+		out.RTGAssembly[i] = RTGAssemblySource{Path: r.stringValue(), Source: r.byteValue()}
+	}
+	assemblyFuncCount := r.count()
+	if assemblyFuncCount > 0 {
+		out.RTGAssemblyFuncs = make([]RTGAssemblyBinding, assemblyFuncCount)
+	}
+	for i := 0; i < len(out.RTGAssemblyFuncs); i++ {
+		out.RTGAssemblyFuncs[i] = RTGAssemblyBinding{Func: r.intValue(), Source: r.intValue(), Entry: r.intValue(), Code: r.byteValue()}
 	}
 	return out, r.ok && r.pos == len(r.data)
 }

@@ -1057,12 +1057,30 @@ type renvoPackageTable struct {
 	items []renvoPackageInfo
 }
 
+type renvoRTGAssemblySource struct {
+	path   []byte
+	source []byte
+}
+
+type renvoRTGAssemblyBinding struct {
+	function int
+	source   int
+	entry    int
+	code     []byte
+}
+
+type renvoRTGAssemblyTable struct {
+	sources  []renvoRTGAssemblySource
+	bindings []renvoRTGAssemblyBinding
+}
+
 type renvoProgram struct {
 	src           []byte
 	toks          renvoTokens
 	decls         []renvoDecl
 	funcs         []renvoFuncDecl
 	packageTable  *renvoPackageTable
+	rtgAssembly   *renvoRTGAssemblyTable
 	ok            bool
 	parsedIntHigh int
 	compilerInt32 bool
@@ -5634,12 +5652,16 @@ func renvoParseFuncInfo(m *renvoMeta, fnIndex int) {
 		resultType, resultCount = renvoParseFuncResults(m, p, rparen+1, fn.bodyStart)
 	}
 	linkStatic := renvoParseLinkStaticDirective(p, fn.nameStart)
+	bodyStart := fn.bodyStart + 1
+	if fn.bodyStart == fn.bodyEnd {
+		bodyStart = fn.bodyStart
+	}
 	if renvoFixedTarget != 0 {
-		m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
+		m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: bodyStart, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
 	} else {
 		export := renvoParseExportDirective(p, fn.nameStart)
 		objectDecl := renvoParseObjectDirective(m, p, fn.nameStart)
-		m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd, objectDecl: objectDecl})
+		m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: bodyStart, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd, objectDecl: objectDecl})
 	}
 	if receiverType != 0 && renvoResolveType(m, receiverType).kind != renvoTypePointer {
 		renvoAddPointerType(m, receiverType, renvoPointerSpaceData)

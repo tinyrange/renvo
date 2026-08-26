@@ -306,9 +306,14 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 	fn.ParamsEnd = paramsEnd
 	i = paramsEnd
 	fn.ResultStart = i
-	bodyStart := findFuncBody(file, i)
+	bodyStart, declarationEnd := findFuncBody(file, i)
 	if bodyStart < 0 {
-		return fn, false
+		// Bodyless declarations are retained for project assembly binding.  The
+		// checker/lowerer reject them later unless a selected .rtgasm entry owns
+		// the implementation.
+		fn.ResultEnd = declarationEnd
+		fn.EndTok = declarationEnd
+		return fn, declarationEnd >= i
 	}
 	fn.ResultEnd = bodyStart
 	bodyEnd := skipBalanced(file, bodyStart, '{', '}')
@@ -321,13 +326,28 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 	return fn, true
 }
 
-func findFuncBody(file *File, start int) int {
+func findFuncBody(file *File, start int) (int, int) {
 	i := start
 	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
+		if tokCharIs(file.Tokens, i, ';') {
+			return -1, i + 1
+		}
+		kind := file.Tokens[i].KindLine & 255
+		previousLine := TokenLine(file.Tokens[start-1])
+		if i > start {
+			previousLine = TokenLine(file.Tokens[i-1])
+		}
+		functionDecl := kind == TokenFunc && i+1 < len(file.Tokens) &&
+			file.Tokens[i+1].KindLine&255 == TokenIdent
+		if TokenLine(file.Tokens[i]) > previousLine &&
+			(functionDecl || kind == TokenConst || kind == TokenVar ||
+				kind == TokenType || kind == TokenImport) {
+			return -1, i
+		}
 		if tokCharIs(file.Tokens, i, '(') {
 			next := skipBalanced(file, i, '(', ')')
 			if next <= i {
-				return -1
+				return -1, -1
 			}
 			i = next
 			continue
@@ -335,7 +355,7 @@ func findFuncBody(file *File, start int) int {
 		if tokCharIs(file.Tokens, i, '[') {
 			next := skipBalanced(file, i, '[', ']')
 			if next <= i {
-				return -1
+				return -1, -1
 			}
 			i = next
 			continue
@@ -344,16 +364,19 @@ func findFuncBody(file *File, start int) int {
 			if i > 0 && (file.Tokens[i-1].KindLine&255 == TokenStruct || file.Tokens[i-1].KindLine&255 == TokenInterface) {
 				next := skipBalanced(file, i, '{', '}')
 				if next <= i {
-					return -1
+					return -1, -1
 				}
 				i = next
 				continue
 			}
-			return i
+			return i, i
 		}
 		i++
 	}
-	return -1
+	if i < len(file.Tokens) && file.Tokens[i].KindLine&255 == TokenEOF {
+		return -1, i
+	}
+	return -1, -1
 }
 
 func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {

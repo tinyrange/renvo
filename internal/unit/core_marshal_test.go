@@ -71,6 +71,35 @@ func TestCoreUnitDecodesWithPublicReader(t *testing.T) {
 	}
 }
 
+func TestCoreUnitPreservesRTGAssemblySource(t *testing.T) {
+	program := coreGoldenProgram()
+	program.RTGAssembly = []RTGAssemblySource{{
+		Path:   "bits_amd64.rtgasm",
+		Source: []byte("rtgasm 1 assembly { Swap(out:emitter) { out.Byte(0xc3) } }"),
+	}}
+	program.RTGAssemblyFuncs = []RTGAssemblyBinding{{Func: 0, Source: 0, Entry: 0}}
+	data, ok := MarshalCore(CoreProgramFrom(program))
+	if !ok {
+		t.Fatal("MarshalCore failed")
+	}
+	sources, bindings, ok := ReadRTGAssembly(data)
+	if !ok || len(sources) != 1 || len(bindings) != 1 || sources[0].Path != "bits_amd64.rtgasm" || !bytes.Equal(sources[0].Source, program.RTGAssembly[0].Source) || bindings[0].Func != 0 || bindings[0].Source != 0 || bindings[0].Entry != 0 {
+		t.Fatalf("decoded RTGASM = %#v %#v, ok=%v", sources, bindings, ok)
+	}
+	evaluated, ok := AttachRTGAssemblyCode(data, [][]byte{{0x90, 0xc3}})
+	if !ok {
+		t.Fatal("AttachRTGAssemblyCode failed")
+	}
+	_, bindings, ok = ReadRTGAssembly(evaluated)
+	if !ok || len(bindings) != 1 || !bytes.Equal(bindings[0].Code, []byte{0x90, 0xc3}) {
+		t.Fatalf("evaluated RTGASM = %#v, ok=%v", bindings, ok)
+	}
+	// The public version-1 reader must continue skipping the new optional table.
+	if _, err := wireunit.Unmarshal(data); err != nil {
+		t.Fatalf("public reader rejected optional RTGASM table: %v", err)
+	}
+}
+
 func TestCoreUnitPublicReaderPreservesLargeTokenLines(t *testing.T) {
 	program := coreGoldenProgram()
 	for i := 0; i < len(program.Tokens); i++ {

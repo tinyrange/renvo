@@ -515,6 +515,10 @@ func Marshal(program Program) ([]byte, error) {
 		NewNode(TagRefs, encodeRefs(program.Refs)),
 		NewNode(TagSels, encodeSelectors(program.Selectors)),
 		NewNode(TagPackages, encodePackages(program.Packages)),
+		// The public v1 codec does not interpret project RTGASM, but emits its
+		// optional slot so schema conformance and duplicate-tag validation remain
+		// complete. Compiler-facing codecs carry the actual opaque payload.
+		NewNode(TagRTGAssembly, nil),
 	)
 
 	var out bytes.Buffer

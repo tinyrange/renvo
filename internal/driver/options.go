@@ -662,12 +662,16 @@ func optionArgIsCFile(arg string) bool {
 	return len(arg) > 2 && arg[len(arg)-2:] == ".c"
 }
 
+func optionArgIsRTGAsmFile(arg string) bool {
+	return len(arg) > 7 && arg[len(arg)-7:] == ".rtgasm"
+}
+
 func optionArgIsPreprocessedCFile(arg string) bool {
 	return len(arg) > 2 && arg[len(arg)-2:] == ".i"
 }
 
 func optionArgIsSourceFile(arg string) bool {
-	return optionArgIsGoFile(arg) || optionArgIsCFile(arg) || optionArgIsPreprocessedCFile(arg)
+	return optionArgIsGoFile(arg) || optionArgIsCFile(arg) || optionArgIsRTGAsmFile(arg) || optionArgIsPreprocessedCFile(arg)
 }
 
 func parseBuildTags(value string) ([]string, bool) {

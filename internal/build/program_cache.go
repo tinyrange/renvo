@@ -201,6 +201,19 @@ func packageSourceHash(pkg load.Package) (int, int) {
 		a = packageCacheHashInt(a, len(pkg.Files[i].Src))
 		b = packageCacheHashIntB(b, len(pkg.Files[i].Src))
 	}
+	for i := 0; i < len(pkg.Assemblies); i++ {
+		path := pkg.Assemblies[i].Path
+		if len(path) > len(pkg.Ref.Dir) && path[len(pkg.Ref.Dir)] == '/' && path[:len(pkg.Ref.Dir)] == pkg.Ref.Dir {
+			path = path[len(pkg.Ref.Dir)+1:]
+		}
+		a, b = packageCacheHashMix(a, b, path)
+		for j := 0; j < len(pkg.Assemblies[i].Src); j++ {
+			a = packageCacheHashInt(a, int(pkg.Assemblies[i].Src[j]))
+			b = packageCacheHashIntB(b, int(pkg.Assemblies[i].Src[j]))
+		}
+		a = packageCacheHashInt(a, len(pkg.Assemblies[i].Src))
+		b = packageCacheHashIntB(b, len(pkg.Assemblies[i].Src))
+	}
 	return a, b
 }
 

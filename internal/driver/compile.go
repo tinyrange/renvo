@@ -2,7 +2,10 @@
 
 package driver
 
-import "renvo.dev/internal/load"
+import (
+	"renvo.dev/internal/load"
+	"renvo.dev/internal/unit"
+)
 
 const (
 	CompileOK = iota
@@ -35,6 +38,12 @@ type BackendCompileOptions struct {
 
 type OptionsBackend interface {
 	CompileUnitWithOptions(unit []byte, options BackendCompileOptions) BackendResult
+}
+
+// RTGAssemblyBackend marks CompilerJIT adapters that can evaluate preserved
+// project assembly before invoking their prepared compiler.
+type RTGAssemblyBackend interface {
+	SupportsRTGAssembly() bool
 }
 
 type BackendResult struct {
@@ -98,6 +107,13 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	}
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
+	}
+	if _, bindings, ok := unit.ReadRTGAssembly(built.Unit); ok && len(bindings) != 0 {
+		assemblyBackend, supported := backend.(RTGAssemblyBackend)
+		if !supported || !assemblyBackend.SupportsRTGAssembly() {
+			result.Diagnostic = Diagnostic{Phase: "rtgasm", Code: "RENVO-RTGASM-010", Message: "RTGASM requires a CompilerJIT backend"}
+			return compileFail(result, CompileErrBackend)
+		}
 	}
 	var backendResult BackendResult
 	optionsBackend, acceptsOptions := backend.(OptionsBackend)

@@ -7,7 +7,62 @@ import (
 	"renvo.dev/backend/unit"
 	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
+	coreunit "renvo.dev/internal/unit"
 )
+
+func TestBuildUnitPreservesAndBindsRTGAssembly(t *testing.T) {
+	assembly := []byte("rtgasm 1\nassembly { Swap(out:emitter) { out.Bytes3(0x48, 0x89, 0xf8); out.Byte(0xc3) } }\n")
+	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc Swap(value int) int\nfunc main() { if Swap(42) == 42 { print(\"PASS\\n\") } }\n")},
+		{Path: "/repo/case/cmd/app/bits_amd64.rtgasm", Src: assembly},
+	})
+	if !result.Ok {
+		t.Fatalf("BuildUnit failed: err=%d pkg=%d file=%d tok=%d build=%#v", result.Error, result.ErrorPackage, result.ErrorFile, result.ErrorToken, result.Build)
+	}
+	sources, bindings, ok := coreunit.ReadRTGAssembly(result.Link.Data)
+	if !ok || len(sources) != 1 || len(bindings) != 1 || sources[0].Path != "bits_amd64.rtgasm" || !bytes.Equal(sources[0].Source, assembly) {
+		t.Fatalf("linked RTGASM = %#v %#v, ok=%v", sources, bindings, ok)
+	}
+	decoded, err := unit.Unmarshal(result.Link.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bindings[0].Func < 0 || bindings[0].Func >= len(decoded.Funcs) {
+		t.Fatalf("binding function index = %d, funcs=%d", bindings[0].Func, len(decoded.Funcs))
+	}
+	fn := decoded.Funcs[bindings[0].Func]
+	if string(decoded.Text[fn.NameStart:fn.NameEnd]) != "Swap" {
+		t.Fatalf("binding resolved to %q", decoded.Text[fn.NameStart:fn.NameEnd])
+	}
+}
+
+func TestBuildUnitRejectsUnboundOrDuplicateRTGAssemblyDeclarations(t *testing.T) {
+	tests := []struct {
+		name     string
+		goSource string
+		assembly []byte
+	}{
+		{name: "unbound", goSource: "package main\nfunc Missing()\nfunc main() {}\n"},
+		{name: "Go body", goSource: "package main\nfunc Bound() {}\nfunc main() {}\n", assembly: []byte("rtgasm 1\nassembly { Bound(out:emitter) { out.Byte(0xc3) } }\n")},
+		{name: "method", goSource: "package main\ntype T int\nfunc (T) Bound()\nfunc main() {}\n", assembly: []byte("rtgasm 1\nassembly { Bound(out:emitter) { out.Byte(0xc3) } }\n")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			files := []load.SourceFile{
+				{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+				{Path: "/repo/case/main.go", Src: []byte(test.goSource)},
+			}
+			if len(test.assembly) != 0 {
+				files = append(files, load.SourceFile{Path: "/repo/case/impl_amd64.rtgasm", Src: test.assembly})
+			}
+			result := BuildUnit("/repo/case", "/std", ".", files)
+			if result.Ok {
+				t.Fatal("BuildUnit accepted an invalid RTGASM binding")
+			}
+		})
+	}
+}
 
 func TestBuildObjectUnitPreservesC11SemanticsDirective(t *testing.T) {
 	result := BuildObjectUnit("/repo/case", "/std", ".", []load.SourceFile{

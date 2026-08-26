@@ -16,6 +16,13 @@ environment, and exit. It selects a 24 KiB arena by default, zeroes BSS at
 startup, leaves zero-filled BSS out of the file image, and reserves 4 KiB for
 the machine stack.
 
+The program also demonstrates project-local assembly. `main.go` declares the
+bodyless `rtgasmAnswer` function and `answer_msdos_i8086.rtgasm` implements it
+with the target's existing emitter helpers, including a local label and patched
+jump. CompilerJIT evaluates that small source fragment in VM32 and inserts the
+result at the ordinary function label; no opcode knowledge is added to the
+frontend or shared compiler.
+
 From the repository root:
 
 ```sh

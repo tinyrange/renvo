@@ -124,6 +124,22 @@ func three() map[string]struct { value int } { return nil }
 	}
 }
 
+func TestParseBodylessFunctionDeclarations(t *testing.T) {
+	src := []byte("package main\nfunc one(value int) int\nfunc two()\nfunc three() {}\n")
+	file := ParseFile(src)
+	if !file.Ok || len(file.Funcs) != 3 {
+		t.Fatalf("ParseFile = ok %v err %d funcs %d", file.Ok, file.Error, len(file.Funcs))
+	}
+	for i := 0; i < 2; i++ {
+		if file.Funcs[i].BodyStart != -1 || file.Funcs[i].BodyEnd != -1 {
+			t.Fatalf("bodyless function %d body = %d:%d", i, file.Funcs[i].BodyStart, file.Funcs[i].BodyEnd)
+		}
+	}
+	if file.Funcs[2].BodyStart < 0 {
+		t.Fatal("ordinary function lost its body")
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	cases := []struct {
 		name string
@@ -133,7 +149,7 @@ func TestParseErrors(t *testing.T) {
 		{name: "missing package", src: "func main() {}\n", err: ParseErrPackage},
 		{name: "bad import", src: "package main\nimport bad\n", err: ParseErrImport},
 		{name: "bad decl", src: "package main\nvar = 1\n", err: ParseErrDecl},
-		{name: "bad func", src: "package main\nfunc f()\n", err: ParseErrFunc},
+		{name: "bad func", src: "package main\nfunc ()\n", err: ParseErrFunc},
 		{name: "bad scan", src: "package main\nvar s = \"unterminated\n", err: ParseErrScan},
 	}
 	for _, tc := range cases {

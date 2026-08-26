@@ -138,6 +138,7 @@ func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool { return false }
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {}
 func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {}
+func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool { return false }
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	return renvoCompileResult{}
 }
@@ -153,6 +154,11 @@ func renvoRTGEmitKernelCallbackArgReverse(
 // projections deliberately use identical unit mangling, so the same generated
 // backend contract is exercised in both release topologies.
 func GeneratePreparedBackend(resolved ResolveResult, targetName string) GenerateResult {
+	return generatePreparedBackendWithRoots(resolved, targetName, nil, nil)
+}
+
+func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
+	extraGoRoots []string, extraSequenceRoots []string) GenerateResult {
 	ensureDirectEmitterV1()
 	if !resolved.Ok {
 		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
@@ -177,9 +183,17 @@ func GeneratePreparedBackend(resolved ResolveResult, targetName string) Generate
 	source = appendArchitectureBackendAPI(source)
 	source = appendPreparedTargetFacts(source, target.Descriptor, true)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
-	source = appendTargetEmbeddedGo(source, resolved.Document, target, true, true, false)
-	_, sequences := resolveArchitectureSequenceProjection(resolved.Document, target.Arch,
-		baseTargetGoRoots(resolved.Document, target), targetSequenceRoots(resolved.Document, target))
+	goRoots := baseTargetGoRoots(resolved.Document, target)
+	sequenceRoots := targetSequenceRoots(resolved.Document, target)
+	goRoots = append(goRoots, extraGoRoots...)
+	sequenceRoots = append(sequenceRoots, extraSequenceRoots...)
+	selectedGo, sequences := resolveArchitectureSequenceProjection(resolved.Document, target.Arch,
+		goRoots, sequenceRoots)
+	if len(extraGoRoots) == 0 && len(extraSequenceRoots) == 0 {
+		source = appendTargetEmbeddedGo(source, resolved.Document, target, true, true, false)
+	} else {
+		source = appendReachableEmbeddedGo(source, resolved.Document, selectedGo, true, nil)
+	}
 	source = appendArchitectureSequences(source, resolved.Document, target.Arch,
 		true, false, false, sequences)
 	source = appendDeclarativeFormatImage(source, resolved.Document, target, true)

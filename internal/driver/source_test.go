@@ -7,6 +7,27 @@ import (
 	"renvo.dev/internal/load"
 )
 
+func TestCollectSourcesSelectsRTGAssemblyByTarget(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\nfunc main() {}\n")},
+		{Path: "/repo/case/value_linux_amd64.rtgasm", Src: []byte("rtgasm 1 assembly { value(out:emitter) {} }")},
+		{Path: "/repo/case/value_windows_amd64.rtgasm", Src: []byte("rtgasm 1 assembly { value(out:emitter) {} }")},
+	}}
+	result := CollectSourcesForTarget("/repo/case", "/std", ".", "linux/amd64", fs)
+	if !result.Ok {
+		t.Fatalf("CollectSourcesForTarget failed: %#v", result)
+	}
+	foundLinux, foundWindows := false, false
+	for _, file := range result.Files {
+		foundLinux = foundLinux || load.BasePath(file.Path) == "value_linux_amd64.rtgasm"
+		foundWindows = foundWindows || load.BasePath(file.Path) == "value_windows_amd64.rtgasm"
+	}
+	if !foundLinux || foundWindows {
+		t.Fatalf("selected assembly files linux=%v windows=%v: %#v", foundLinux, foundWindows, result.Files)
+	}
+}
+
 func TestCollectSourcesDiscoversPackageGraph(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -201,6 +222,25 @@ func TestVM32TargetProvidesVMAndVM32Tags(t *testing.T) {
 	enabled, valid := evalBuildExprWithTags([]byte("renvo && vm && vm32 && !linux && !wasi"), "vm/vm32", nil)
 	if !valid || !enabled {
 		t.Fatalf("VM build expression = %v, %v", enabled, valid)
+	}
+}
+
+func TestRTGAssemblyCustomTargetSuffixes(t *testing.T) {
+	tests := []struct {
+		name string
+		tags []string
+		want bool
+	}{
+		{"answer_msdos_i8086.rtgasm", []string{"msdos", "i8086"}, true},
+		{"answer_msdos_i8086.rtgasm", []string{"unixv7", "pdp11"}, false},
+		{"answer_unixv7_pdp11.rtgasm", []string{"unixv7", "pdp11"}, true},
+		{"answer_esp32c6_riscv32.rtgasm", []string{"esp32c6", "riscv32"}, true},
+		{"answer_xtensa_lx7.rtgasm", []string{"esp32s3", "xtensa_lx7"}, true},
+	}
+	for _, test := range tests {
+		if got := sourceFilenameEnabledWithExtension(test.name, ".rtgasm", "custom/target", test.tags); got != test.want {
+			t.Errorf("%s with %v = %v, want %v", test.name, test.tags, got, test.want)
+		}
 	}
 }
 

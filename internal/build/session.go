@@ -170,6 +170,8 @@ func (s *ProgramSession) Step() bool {
 			arena.PersistReset(persistMark)
 		}
 		s.result.ErrorDetail = emit.Error
+		s.result.ErrorPath = emit.ErrorPath
+		s.result.ErrorOffset = emit.ErrorOffset
 		s.result = buildFail(s.result, BuildErrLower, i, emit.ErrorFile, emit.ErrorToken)
 		s.stage = 2
 		return true
@@ -212,6 +214,9 @@ func (s *ProgramSession) discardPackage(pkg load.Package) {
 	}
 	for i := 0; i < len(pkg.Files); i++ {
 		arena.Discard(pkg.Files[i].ArenaStart, pkg.Files[i].ArenaEnd)
+	}
+	for i := 0; i < len(pkg.Assemblies); i++ {
+		arena.Discard(pkg.Assemblies[i].ArenaStart, pkg.Assemblies[i].ArenaEnd)
 	}
 	arena.Discard(pkg.CoreArenaStart, pkg.CoreArenaEnd)
 }

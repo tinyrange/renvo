@@ -24,6 +24,36 @@ type importBuilder struct {
 	imports     int
 }
 
+// SourceBundle returns the original root and imported files needed to recreate
+// a resolved definition without access to its source tree.
+func SourceBundle(document Document) []ImportSource {
+	var out []ImportSource
+	appendFile := func(filename string, source []byte) {
+		if filename == "" || source == nil {
+			return
+		}
+		for i := 0; i < len(out); i++ {
+			if out[i].Filename == filename {
+				return
+			}
+		}
+		copySource := append([]byte(nil), source...)
+		out = append(out, ImportSource{Filename: filename, Source: copySource, Ok: true})
+	}
+	for i := 0; i < len(document.sourceMap); i++ {
+		if document.sourceMap[i].filename == document.Filename {
+			appendFile(document.sourceMap[i].filename, document.sourceMap[i].source)
+		}
+	}
+	for i := 0; i < len(document.sourceMap); i++ {
+		appendFile(document.sourceMap[i].filename, document.sourceMap[i].source)
+	}
+	if len(out) == 0 {
+		appendFile(document.Filename, document.Source)
+	}
+	return out
+}
+
 func (b *importBuilder) expand(source []byte, filename string) bool {
 	if len(source) > maxDefinitionBytes {
 		b.fail(filename, source, 0, 0, "RTG-LIMIT-001",

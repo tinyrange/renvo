@@ -294,6 +294,8 @@ func cloneCoreLinkString(value string) string {
 }
 
 func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
+	assembly := dst.RTGAssembly
+	assemblyFuncs := dst.RTGAssemblyFuncs
 	dst.Package = src.Package
 	dst.ImportPath = src.ImportPath
 	dst.Text = src.Text
@@ -308,6 +310,8 @@ func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
 	dst.Selectors = src.Selectors
 	dst.ConcurrencySites = src.ConcurrencySites
 	dst.Packages = src.Packages
+	dst.RTGAssembly = assembly
+	dst.RTGAssemblyFuncs = assemblyFuncs
 }
 
 func beginLinkedPackageInfo(program *unit.Program, pkg build.PackageUnit) int {
@@ -750,6 +754,7 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 		}
 		dst.Decls = append(dst.Decls, decl)
 	}
+	funcBase := len(dst.Funcs)
 	for i := 0; i < len(src.Funcs); i++ {
 		fn := src.Funcs[i]
 		if !transient {
@@ -771,6 +776,23 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			fn.EndTok = mapLinkedFuncEndToken(tokens, fn.EndTok, fn.BodyEnd, finalEOF)
 		}
 		dst.Funcs = append(dst.Funcs, fn)
+	}
+	assemblyBase := len(dst.RTGAssembly)
+	for i := 0; i < len(src.RTGAssembly); i++ {
+		item := src.RTGAssembly[i]
+		path := cloneCoreLinkString(item.Path)
+		source := make([]byte, len(item.Source))
+		copy(source, item.Source)
+		dst.RTGAssembly = append(dst.RTGAssembly, unit.RTGAssemblySource{Path: path, Source: source})
+	}
+	for i := 0; i < len(src.RTGAssemblyFuncs); i++ {
+		item := src.RTGAssemblyFuncs[i]
+		if item.Func < 0 || item.Func >= len(src.Funcs) || item.Source < 0 || item.Source >= len(src.RTGAssembly) || item.Entry < 0 {
+			return false, line
+		}
+		item.Func += funcBase
+		item.Source += assemblyBase
+		dst.RTGAssemblyFuncs = append(dst.RTGAssemblyFuncs, item)
 	}
 	for i := 0; i < len(src.ConcurrencySites); i++ {
 		site := src.ConcurrencySites[i]

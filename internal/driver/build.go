@@ -67,7 +67,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	built := pipeline.BuildUnit(workDir, stdRoot, rootArg, filtered)
 	result.Pipeline = built
 	if !built.Ok {
-		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
 	bindBuiltInTarget(&result.Unit, options)
@@ -98,7 +98,7 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
 	result.Pipeline = built
 	if !built.Ok {
-		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
 	bindBuiltInTarget(&result.Unit, result.Options)
@@ -259,7 +259,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	}
 	result.Pipeline = built
 	if !built.Ok {
-		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
 	bindBuiltInTarget(&result.Unit, options)
@@ -344,7 +344,7 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	}
 	result.Pipeline = built
 	if !built.Ok {
-		return buildFail(result, BuildErrPipeline, "", "", -1, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
+		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
 	bindBuiltInTarget(&result.Unit, options)

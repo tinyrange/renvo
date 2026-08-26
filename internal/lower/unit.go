@@ -4,6 +4,7 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/syntax"
 	"renvo.dev/internal/unit"
 )
@@ -57,6 +58,12 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
 	}
+	if !builder.addRTGAssembly(pkg) {
+		result = emitFail(result, EmitErrAssembly, builder.errFile, builder.errToken)
+		result.ErrorPath = builder.assemblyErrorPath
+		result.ErrorOffset = builder.assemblyErrorOffset
+		return result
+	}
 	if !builder.finishUnit() {
 		return emitFail(result, builder.err, builder.errFile, builder.errToken)
 	}
@@ -65,14 +72,82 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 }
 
 type coreUnitBuilder struct {
-	program    unit.Program
-	lineOffset int
-	finalEOF   int
-	err        int
-	errFile    int
-	errToken   int
-	declRows   []int
-	funcRows   []int
+	program             unit.Program
+	lineOffset          int
+	finalEOF            int
+	err                 int
+	errFile             int
+	errToken            int
+	assemblyErrorPath   string
+	assemblyErrorOffset int
+	declRows            []int
+	funcRows            []int
+}
+
+func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
+	bound := make([]bool, len(b.program.Funcs))
+	for fileIndex := 0; fileIndex < len(pkg.Assemblies); fileIndex++ {
+		file := pkg.Assemblies[fileIndex]
+		document := rtg.ParseAssembly(file.Src, file.Path)
+		if !document.Ok {
+			b.errFile = len(pkg.Files) + fileIndex
+			b.errToken = -1
+			b.assemblyErrorPath = file.Path
+			if len(document.Diagnostics) != 0 {
+				b.assemblyErrorOffset = document.Diagnostics[0].Span.Start.Offset
+			}
+			return false
+		}
+		path := file.Path
+		if len(path) > len(pkg.Ref.Dir) && path[:len(pkg.Ref.Dir)] == pkg.Ref.Dir && path[len(pkg.Ref.Dir)] == '/' {
+			path = path[len(pkg.Ref.Dir)+1:]
+		}
+		sourceIndex := len(b.program.RTGAssembly)
+		source := make([]byte, len(file.Src))
+		copy(source, file.Src)
+		b.program.RTGAssembly = append(b.program.RTGAssembly, unit.RTGAssemblySource{Path: cloneCoreString(path), Source: source})
+		for entryIndex := 0; entryIndex < len(document.Entries); entryIndex++ {
+			entry := document.Entries[entryIndex]
+			function := -1
+			for i := 0; i < len(b.program.Funcs); i++ {
+				fn := b.program.Funcs[i]
+				if fn.ReceiverStart == fn.ReceiverEnd &&
+					fn.NameEnd-fn.NameStart == len(entry.Name) &&
+					string(b.program.Text[fn.NameStart:fn.NameEnd]) == entry.Name {
+					function = i
+					break
+				}
+			}
+			if function < 0 || bound[function] {
+				b.errFile = len(pkg.Files) + fileIndex
+				b.errToken = -1
+				b.assemblyErrorPath = file.Path
+				b.assemblyErrorOffset = entry.NameSpan.Start.Offset
+				return false
+			}
+			fn := b.program.Funcs[function]
+			if fn.BodyEnd != fn.BodyStart {
+				b.errFile = len(pkg.Files) + fileIndex
+				b.errToken = -1
+				b.assemblyErrorPath = file.Path
+				b.assemblyErrorOffset = entry.NameSpan.Start.Offset
+				return false
+			}
+			bound[function] = true
+			b.program.RTGAssemblyFuncs = append(b.program.RTGAssemblyFuncs, unit.RTGAssemblyBinding{
+				Func: function, Source: sourceIndex, Entry: entryIndex,
+			})
+		}
+	}
+	for function := 0; function < len(b.program.Funcs); function++ {
+		fn := b.program.Funcs[function]
+		if fn.BodyStart == fn.BodyEnd && !bound[function] {
+			b.errFile = -1
+			b.errToken = fn.NameTok
+			return false
+		}
+	}
+	return true
 }
 
 type coreFileTokens struct {
@@ -408,8 +483,16 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		return false
 	}
 	nameTok := mapCoreToken(mapping, fn.NameTok, b.finalEOF)
+	bodyStart := fn.BodyStart
 	bodyEnd := fn.BodyEnd - 1
-	if bodyEnd < fn.BodyStart {
+	endTok := fn.EndTok
+	if fn.BodyStart < 0 {
+		// A bodyless declaration has no brace tokens. Point its empty body at
+		// the declaration boundary; the RTGASM binding makes that sentinel
+		// executable in the backend.
+		bodyStart = fn.EndTok
+		bodyEnd = fn.EndTok
+	} else if bodyEnd < fn.BodyStart {
 		b.setErr(EmitErrToken, fileIndex, fn.BodyEnd)
 		return false
 	}
@@ -425,9 +508,9 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		NameTok:       nameTok,
 		ReceiverStart: mapCoreToken(mapping, fn.ReceiverStart, b.finalEOF),
 		ReceiverEnd:   mapCoreToken(mapping, fn.ReceiverEnd, b.finalEOF),
-		BodyStart:     mapCoreToken(mapping, fn.BodyStart, b.finalEOF),
+		BodyStart:     mapCoreToken(mapping, bodyStart, b.finalEOF),
 		BodyEnd:       mapCoreToken(mapping, bodyEnd, b.finalEOF),
-		EndTok:        mapCoreToken(mapping, fn.EndTok, b.finalEOF),
+		EndTok:        mapCoreToken(mapping, endTok, b.finalEOF),
 	})
 	return true
 }

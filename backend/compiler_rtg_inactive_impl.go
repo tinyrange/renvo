@@ -744,6 +744,7 @@ func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool { return false }
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {}
 func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {}
+func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool { return false }
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	return renvoCompileResult{}
 }
