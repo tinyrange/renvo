@@ -362,6 +362,7 @@ pre.panel-view { padding: 3px 12px 10px; color: #c8c8c8; background: transparent
 .problem-location { color: var(--muted); font: 11px ui-monospace, monospace; }
 .artifact-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; }
 .artifact-size { color: var(--muted); font: 11px ui-monospace, monospace; }
+.artifact-actions { display: flex; gap: 10px; white-space: nowrap; }
 .artifact-row a { color: #75beff; text-decoration: none; }
 .artifact-row a:hover { text-decoration: underline; }
 .search-results.active { display: block; }

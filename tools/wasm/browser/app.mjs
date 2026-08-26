@@ -2546,10 +2546,22 @@ function renderArtifacts(files) {
     row.className = "artifact-row";
     const name = document.createElement("span"); name.textContent = file.name;
     const size = document.createElement("span"); size.className = "artifact-size"; size.textContent = formatBytes(file.data.byteLength);
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(new Blob([file.data], { type: file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" }));
-    artifactUrls.push(url); link.href = url; link.download = file.name.split("/").pop(); link.textContent = "Download";
-    row.append(name, size, link);
+    const filename = file.name.split("/").pop();
+    const actions = document.createElement("span"); actions.className = "artifact-actions";
+    const rawLink = document.createElement("a");
+    const rawURL = URL.createObjectURL(new Blob([file.data], { type: file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream" }));
+    artifactUrls.push(rawURL); rawLink.href = rawURL; rawLink.download = filename;
+    if (/\.(?:com|exe)$/i.test(filename)) {
+      const zipLink = document.createElement("a");
+      const zipURL = URL.createObjectURL(new Blob([encodeProjectZip({ [filename]: file.data })], { type: "application/zip" }));
+      artifactUrls.push(zipURL); zipLink.href = zipURL; zipLink.download = `${filename}.zip`; zipLink.textContent = "Download ZIP";
+      rawLink.textContent = "Raw";
+      actions.append(zipLink, rawLink);
+    } else {
+      rawLink.textContent = "Download";
+      actions.append(rawLink);
+    }
+    row.append(name, size, actions);
     return row;
   }));
 }
