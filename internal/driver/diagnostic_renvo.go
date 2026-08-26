@@ -45,64 +45,25 @@ func renvoDiagnosticCode(group string, number int) string {
 	return "RENVO-" + group + "-" + text
 }
 
+const renvoOptionMessageBlob = "missing output after -omissing target after -tunsupported targetmissing tags after -tagsinvalid build tagsmissing package pathextra package path-windows-gui requires a Windows targetmissing arena size after -arena-sizeinvalid arena sizemissing output mode after -mode=unsupported output modekernel-module mode requires linux/amd64invalid renvo:module-license directiveconflicting renvo:module-license directives-script requires one explicit source file-script accepts exactly one source file-emit-unit and -emit-image cannot be used togethermissing system profile after -system-system cannot be combined with -t-system cannot be combined with -arena-sizemissing backend definition after -backendcould not read backend definitioninvalid backend definitionbackend definition does not export target-script requires a .go source fileobject mode requires linux/amd64object mode requires exactly one explicit source file"
+
+var renvoOptionMessageOffsets = [...]int{0, 0, 23, 46, 64, 64, 88, 106, 126, 144, 182, 182, 218, 236, 268, 291, 330, 368, 411, 452, 491, 541, 577, 577, 577, 611, 654, 695, 728, 754, 795, 829, 861, 914, 914}
+
+const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scope"
+
+var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225}
+
+const renvoLowerMessageBlob = "invalid checked graph reached the lowererinvalid package index reached the lowererinvalid source token reached the lowererpackage unit construction failedunchecked program reached the lowerer"
+
+var renvoLowerMessageOffsets = [...]int{0, 0, 41, 82, 122, 154, 191}
+
+const renvoLinkMessageBlob = "linker received a failed package buildroot package is missinglinked unit is invalid"
+
+var renvoLinkMessageOffsets = [...]int{0, 0, 38, 61, 83}
+
 func renvoOptionMessage(detail int) string {
-	switch detail {
-	case ParseErrMissingOutput:
-		return "missing output after -o"
-	case ParseErrMissingTarget:
-		return "missing target after -t"
-	case ParseErrUnsupportedTarget:
-		return "unsupported target"
-	case ParseErrMissingTags:
-		return "missing tags after -tags"
-	case ParseErrInvalidTags:
-		return "invalid build tags"
-	case ParseErrMissingPackage:
-		return "missing package path"
-	case ParseErrExtraPackage:
-		return "extra package path"
-	case ParseErrWindowsGUIRequiresWindows:
-		return "-windows-gui requires a Windows target"
-	case ParseErrMissingArenaSize:
-		return "missing arena size after -arena-size"
-	case ParseErrInvalidArenaSize:
-		return "invalid arena size"
-	case ParseErrMissingMode:
-		return "missing output mode after -mode="
-	case ParseErrUnsupportedMode:
-		return "unsupported output mode"
-	case ParseErrModeRequiresLinuxAmd64:
-		return "kernel-module mode requires linux/amd64"
-	case ParseErrInvalidModuleLicense:
-		return "invalid renvo:module-license directive"
-	case ParseErrConflictingModuleLicense:
-		return "conflicting renvo:module-license directives"
-	case ParseErrMissingSystem:
-		return "missing system profile after -system"
-	case ParseErrSystemTargetConflict:
-		return "-system cannot be combined with -t"
-	case ParseErrSystemArenaConflict:
-		return "-system cannot be combined with -arena-size"
-	case ParseErrMissingBackend:
-		return "missing backend definition after -backend"
-	case ParseErrBackendRead:
-		return "could not read backend definition"
-	case ParseErrInvalidBackend:
-		return "invalid backend definition"
-	case ParseErrBackendTarget:
-		return "backend definition does not export target"
-	case ParseErrScriptRequiresGo:
-		return "-script requires a .go source file"
-	case ParseErrScriptRequiresFile:
-		return "-script requires one explicit source file"
-	case ParseErrScriptFileCount:
-		return "-script accepts exactly one source file"
-	case ParseErrConflictingEmit:
-		return "-emit-unit and -emit-image cannot be used together"
-	case ParseErrObjectRequiresLinuxAmd64:
-		return "object mode requires linux/amd64"
-	case ParseErrObjectFileCount:
-		return "object mode requires exactly one explicit source file"
+	if detail > ParseOK && detail+1 < len(renvoOptionMessageOffsets) {
+		return renvoOptionMessageBlob[renvoOptionMessageOffsets[detail]:renvoOptionMessageOffsets[detail+1]]
 	}
 	return ""
 }
@@ -116,18 +77,12 @@ func renvoSetDiagnosticDetail(d *Diagnostic, code string, message string) {
 }
 
 func renvoSyntaxErrorDiagnostic(d *Diagnostic, detail int) {
-	if detail == syntax.ParseErrScan {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-001", "source contains an invalid or unterminated token")
-	} else if detail == syntax.ParseErrPackage {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-003", "invalid or missing package clause")
-	} else if detail == syntax.ParseErrImport {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-004", "invalid import declaration")
-	} else if detail == syntax.ParseErrDecl {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-005", "invalid top-level declaration")
-	} else if detail == syntax.ParseErrFunc {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-006", "invalid function or method declaration")
-	} else if detail == syntax.ParseErrTopLevel {
-		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-007", "unexpected statement or expression at package scope")
+	if detail > syntax.ParseOK && detail <= syntax.ParseErrTopLevel {
+		number := detail + 1
+		if detail == syntax.ParseErrScan {
+			number = 1
+		}
+		renvoSetDiagnostic(d, "parser", renvoDiagnosticCode("PARSE", number), renvoSyntaxMessageBlob[renvoSyntaxMessageOffsets[detail]:renvoSyntaxMessageOffsets[detail+1]])
 	} else {
 		renvoSetDiagnostic(d, "compiler", "RENVO-BUG-004", "compiler bug: parser returned undeclared error code "+diagnosticIntText(detail))
 	}
@@ -276,6 +231,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-008", "compiler bug: workspace loader returned undeclared error code "+diagnosticIntText(workspaceError))
 			return d
 		}
+		d.Phase = "loader"
 		graph := built.Workspace.Graph
 		if graph.Error == load.GraphErrCycle {
 			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-011", "import cycle detected")
@@ -347,16 +303,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if built.Build.Error == build.BuildErrLower {
 			detail := built.Build.ErrorDetail
 			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(detail))
-			if detail == lower.EmitErrGraph {
-				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-001", "invalid checked graph reached the lowerer")
-			} else if detail == lower.EmitErrPackage {
-				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-002", "invalid package index reached the lowerer")
-			} else if detail == lower.EmitErrToken {
-				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-003", "invalid source token reached the lowerer")
-			} else if detail == lower.EmitErrUnit {
-				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-004", "package unit construction failed")
-			} else if detail == lower.EmitErrCheck {
-				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-005", "unchecked program reached the lowerer")
+			if detail > lower.EmitOK && detail < lower.EmitErrAssembly {
+				renvoSetDiagnostic(&d, "lowerer", renvoDiagnosticCode("LOWER", detail), renvoLowerMessageBlob[renvoLowerMessageOffsets[detail]:renvoLowerMessageOffsets[detail+1]])
 			} else if detail == lower.EmitErrAssembly {
 				renvoSetDiagnostic(&d, "rtgasm", "RENVO-RTGASM-001", "invalid RTGASM source or function binding")
 				d.Path = built.ErrorPath
@@ -372,14 +320,11 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-002", "root package is missing")
 		}
 	} else if built.Error == pipeline.PipelineErrLink {
-		if built.Link.Error == link.LinkErrBuild {
-			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-001", "linker received a failed package build")
-		} else if built.Link.Error == link.LinkErrRoot {
-			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-002", "root package is missing")
-		} else if built.Link.Error == link.LinkErrUnit {
-			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-003", "linked unit is invalid")
+		detail := built.Link.Error
+		if detail > link.LinkOK && detail <= link.LinkErrUnit {
+			renvoSetDiagnostic(&d, "linker", renvoDiagnosticCode("LINK", detail), renvoLinkMessageBlob[renvoLinkMessageOffsets[detail]:renvoLinkMessageOffsets[detail+1]])
 		} else {
-			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-011", "compiler bug: linker returned undeclared error code "+diagnosticIntText(built.Link.Error))
+			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-011", "compiler bug: linker returned undeclared error code "+diagnosticIntText(detail))
 		}
 	} else {
 		renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-002", "compiler bug: pipeline returned undeclared error code "+diagnosticIntText(built.Error))

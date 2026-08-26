@@ -259,6 +259,7 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 	if workspace.Error != load.WorkspaceErrGraph {
 		return Diagnostic{Phase: "compiler", Code: "RENVO-BUG-008", Message: "compiler bug: workspace loader returned undeclared error code " + diagnosticIntText(workspace.Error)}
 	}
+	diagnostic.Phase = "loader"
 	graph := workspace.Graph
 	if graph.Error == load.GraphErrCycle {
 		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-011", "import cycle detected"

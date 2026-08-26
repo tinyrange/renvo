@@ -11,9 +11,6 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
-		if tok := malformedTypeAssertionComposite(file, stmt.StartTok, stmt.EndTok); tok >= 0 {
-			return CheckErrTypeAssertion, tok
-		}
 		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrGoroutine, stmt.ExprStart
 		}
@@ -50,7 +47,16 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 			callEnd = stmt.ExprEnd
 		}
 		for tok := callStart; tok >= 0 && tok+1 < callEnd; tok++ {
-			if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			kindLine := file.Tokens[tok].KindLine
+			if kindLine&255 == syntax.TokenOperator {
+				char := kindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+				if char == '.' && tok+2 < callEnd && file.Tokens[tok+1].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == '(' {
+					if composite := malformedTypeAssertionComposite(file, tok, callEnd); composite >= 0 {
+						return CheckErrTypeAssertion, composite
+					}
+				}
+			}
+			if kindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}
@@ -97,21 +103,15 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 // x.(T{...}) and x.([]T{...}) cannot be calls: the composite literal begins
 // before the assertion's closing parenthesis. Struct and interface type bodies
 // are permitted because their braces are part of the asserted type itself.
-func malformedTypeAssertionComposite(file syntax.File, start int, end int) int {
-	for dot := start; dot+2 < end && dot+2 < len(file.Tokens); dot++ {
-		if !tokCharIs(&file, dot, '.') || !tokCharIs(&file, dot+1, '(') {
-			continue
+func malformedTypeAssertionComposite(file syntax.File, dot int, end int) int {
+	close := findTypeMatching(file, dot+1, '(', ')')
+	if close <= dot+2 || close > end {
+		return -1
+	}
+	for tok := dot + 2; tok < close-1; tok++ {
+		if tokCharIs(&file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
+			return tok
 		}
-		close := findTypeMatching(file, dot+1, '(', ')')
-		if close <= dot+2 || close > end {
-			continue
-		}
-		for tok := dot + 2; tok < close-1; tok++ {
-			if tokCharIs(&file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
-				return tok
-			}
-		}
-		dot = close - 1
 	}
 	return -1
 }
