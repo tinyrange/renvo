@@ -1,6 +1,6 @@
-// Package dos exposes MS-DOS and PC BIOS services that do not have a portable
-// standard-library equivalent. Portable file operations should continue to use
-// os; this package provides DOS-specific metadata, enumeration, and devices.
+// Package dos exposes compact MS-DOS and PC BIOS services. DOS programs should
+// prefer these target-specific APIs over generalized packages when code size
+// matters because code, data, BSS, heap, and stack share one 16-bit segment.
 package dos
 
 import "unsafe"

@@ -19,7 +19,7 @@ func TestMSDOSCOMExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "msdos", "msdos_com.rtg")
+	definition := filepath.Join(root, "backends", "msdos.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
 		t.TempDir(), backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
@@ -88,7 +88,7 @@ func TestMSDOSMZTargetAndDeviceLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "msdos", "msdos_com.rtg")
+	definition := filepath.Join(root, "backends", "msdos.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
 		t.TempDir(), backendcompiled.Backend{})
 	project := t.TempDir()

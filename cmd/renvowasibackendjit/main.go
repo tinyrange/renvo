@@ -102,6 +102,9 @@ func outputName(target string, kind string) string {
 	if kind == "dos-com" {
 		return "app.com"
 	}
+	if kind == "dos-mz" {
+		return "app.exe"
+	}
 	if strings.HasPrefix(target, "windows/") {
 		return "app.exe"
 	}

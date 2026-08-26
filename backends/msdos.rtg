@@ -2,7 +2,7 @@ definition 1
 unit msdos_com
 implements direct_emitter_v1
 
-# A compact, real-mode 8086 backend for headerless MS-DOS COM executables.
+# A compact, real-mode 8086 backend for MS-DOS COM and MZ executables.
 # DOS loads the image at CS:0100 with CS=DS=ES=SS. All pointers and label
 # addresses are therefore near offsets in that one segment.
 go backend {

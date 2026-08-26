@@ -4,7 +4,7 @@ Build a relocatable MZ executable from the repository root:
 
 ```sh
 go run ./cmd/renvo \
-  -backend examples/msdos/msdos_com.rtg \
+  -backend backends/msdos.rtg \
   -t msdos/8086-mz -s -o sandbox/vga.exe \
   examples/msdos-vga
 ```

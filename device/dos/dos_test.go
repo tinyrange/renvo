@@ -61,3 +61,37 @@ func TestVGAPaletteAndSpeakerPorts(t *testing.T) {
 		t.Fatalf("440 Hz divisor = %d", got)
 	}
 }
+
+func TestFileHandlesUseDOSContracts(t *testing.T) {
+	t.Cleanup(resetHooks)
+	var calls []Registers
+	InterruptHook = func(vector byte, regs *Registers) {
+		if vector != 0x21 {
+			t.Fatalf("interrupt = %#x", vector)
+		}
+		calls = append(calls, *regs)
+		switch regs.AX >> 8 {
+		case 0x3c, 0x3d:
+			regs.AX = 7
+		case 0x3f, 0x40:
+			regs.AX = regs.CX
+		}
+	}
+	file, err := CreateFile("TEST.TXT", AttributeArchive)
+	if err != nil || file.Handle != 7 {
+		t.Fatalf("CreateFile = %#v, %v", file, err)
+	}
+	if written, writeErr := file.Write([]byte("abc")); written != 3 || writeErr != nil {
+		t.Fatalf("Write = %d, %v", written, writeErr)
+	}
+	if read, readErr := file.Read(make([]byte, 4)); read != 4 || readErr != nil {
+		t.Fatalf("Read = %d, %v", read, readErr)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 4 || calls[0].AX != 0x3c00 || calls[0].CX != AttributeArchive ||
+		calls[1].AX != 0x4000 || calls[1].BX != 7 || calls[2].AX != 0x3f00 || calls[3].AX != 0x3e00 {
+		t.Fatalf("DOS file calls = %#v", calls)
+	}
+}

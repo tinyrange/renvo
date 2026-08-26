@@ -47,7 +47,7 @@ answer(out:emitter) {
 	if err = os.WriteFile(filepath.Join(project, "answer.rtgasm"), assembly, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	definition := filepath.Join(root, "examples", "msdos", "msdos_com.rtg")
+	definition := filepath.Join(root, "backends", "msdos.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
 		backendJITTestCacheDir, backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
@@ -152,7 +152,7 @@ func TestRTGAssemblyExamplesCompile(t *testing.T) {
 		target     string
 		project    string
 	}{
-		{name: "msdos", definition: "examples/msdos/msdos_com.rtg", target: "msdos/8086", project: "examples/msdos"},
+		{name: "msdos", definition: "backends/msdos.rtg", target: "msdos/8086", project: "examples/msdos"},
 		{name: "pdp11", definition: "examples/pdp11v7/pdp11_v7.rtg", target: "unixv7/pdp11", project: "examples/pdp11v7"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

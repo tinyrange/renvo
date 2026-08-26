@@ -3356,7 +3356,7 @@ async function handleExampleAction(event) {
       openFiles: [active],
       target,
       backendRoots: backendDefinition ? [backendDefinition] : [],
-      command: `-s -o ${targetDefinition?.output || "app.wasm"} .`,
+      command: `${entry.item.arenaSize ? `-arena-size ${entry.item.arenaSize} ` : ""}-s -o ${targetDefinition?.output || "app.wasm"} .`,
     });
     if (backendDefinition) await useProjectBackend(backendDefinition);
     else elements.languageStatus.textContent = `${entry.title} is open`;

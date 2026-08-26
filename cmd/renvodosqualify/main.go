@@ -70,7 +70,7 @@ func main() {
 		check(fmt.Errorf("no matching cases"))
 	}
 
-	definition := filepath.Join(root, "examples", "msdos", "msdos_com.rtg")
+	definition := filepath.Join(root, "backends", "msdos.rtg")
 	cache, err := os.MkdirTemp("", "renvo-dos-backend-cache-*")
 	check(err)
 	defer os.RemoveAll(cache)
@@ -166,7 +166,7 @@ func runCase(root, runner string, backend *backendjit.Backend, tc testCase, aren
 			result := backend.CompileSourceWithArena(source, "msdos/8086", true, candidate)
 			compiled = driver.CompileResult{Binary: result.Binary, Ok: result.Ok, Diagnostic: result.Diagnostic}
 		} else {
-			args := []string{"-backend", filepath.Join(root, "examples", "msdos", "msdos_com.rtg"), "-t", "msdos/8086", "-s", "-o", "program.com"}
+			args := []string{"-backend", filepath.Join(root, "backends", "msdos.rtg"), "-t", "msdos/8086", "-s", "-o", "program.com"}
 			if candidate > 0 {
 				args = append(args, "-arena-size", fmt.Sprint(candidate))
 			}
