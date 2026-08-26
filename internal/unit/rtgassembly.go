@@ -1,3 +1,5 @@
+//go:build !renvo
+
 package unit
 
 // ReadRTGAssembly returns the optional source-preserving RTGASM table from a

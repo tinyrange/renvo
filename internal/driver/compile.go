@@ -108,7 +108,7 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
-	if _, bindings, ok := unit.ReadRTGAssembly(built.Unit); ok && len(bindings) != 0 {
+	if unit.HasRTGAssembly(built.Unit) {
 		assemblyBackend, supported := backend.(RTGAssemblyBackend)
 		if !supported || !assemblyBackend.SupportsRTGAssembly() {
 			result.Diagnostic = Diagnostic{Phase: "rtgasm", Code: "RENVO-RTGASM-010", Message: "RTGASM requires a CompilerJIT backend"}

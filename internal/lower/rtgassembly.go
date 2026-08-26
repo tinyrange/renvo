@@ -1,3 +1,5 @@
+//go:build !renvo
+
 package lower
 
 type rtgAssemblyEntry struct {
@@ -11,72 +13,55 @@ type rtgAssemblyDocument struct {
 	ok          bool
 }
 
-// parseRTGAssemblyBindings reads only the source wrapper needed to bind entry
-// names to Go declarations. CompilerJIT owns interpretation of each preserved
-// body against the selected backend definition.
+// parseRTGAssemblyBindings reads the wrapper and preserves entry bodies for
+// CompilerJIT, which interprets them against the selected backend definition.
 func parseRTGAssemblyBindings(source []byte) rtgAssemblyDocument {
 	p := rtgAssemblyBindingParser{source: source}
-	if !p.takeWord("rtgasm") || !p.takeWord("1") || !p.takeWord("assembly") || !p.takeByte('{') {
-		return p.result()
+	var entries []rtgAssemblyEntry
+	if p.word() != "rtgasm" || p.word() != "1" || p.word() != "assembly" || !p.take('{') {
+		return rtgAssemblyDocument{errorOffset: p.at}
 	}
 	for {
-		p.skipSpace()
-		if p.takeByte('}') {
+		p.space()
+		if p.take('}') {
 			break
 		}
 		start := p.at
 		name := p.word()
-		if name == "" || p.duplicate(name) || !p.takeByte('(') || !p.takeWord("out") ||
-			!p.takeByte(':') || !p.takeWord("emitter") || !p.takeByte(')') || !p.takeByte('{') {
-			return p.result()
+		duplicate := false
+		for i := 0; i < len(entries); i++ {
+			duplicate = duplicate || entries[i].name == name
 		}
-		p.entries = append(p.entries, rtgAssemblyEntry{name: name, offset: start})
-		if !p.skipBody() {
-			return p.result()
+		if name == "" || duplicate || !p.take('(') || p.word() != "out" ||
+			!p.take(':') || p.word() != "emitter" || !p.take(')') || !p.take('{') {
+			return rtgAssemblyDocument{entries: entries, errorOffset: p.at}
+		}
+		entries = append(entries, rtgAssemblyEntry{name: name, offset: start})
+		if !p.body() {
+			return rtgAssemblyDocument{entries: entries, errorOffset: p.at}
 		}
 	}
-	p.skipSpace()
-	p.ok = p.at == len(source) && len(p.entries) != 0
-	return p.result()
+	p.space()
+	return rtgAssemblyDocument{entries: entries, errorOffset: p.at, ok: p.at == len(source) && len(entries) != 0}
 }
 
 type rtgAssemblyBindingParser struct {
-	source  []byte
-	at      int
-	entries []rtgAssemblyEntry
-	ok      bool
-}
-
-func (p *rtgAssemblyBindingParser) result() rtgAssemblyDocument {
-	return rtgAssemblyDocument{entries: p.entries, errorOffset: p.at, ok: p.ok}
-}
-
-func (p *rtgAssemblyBindingParser) duplicate(name string) bool {
-	for i := 0; i < len(p.entries); i++ {
-		if p.entries[i].name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func (p *rtgAssemblyBindingParser) takeWord(want string) bool {
-	return p.word() == want
+	source []byte
+	at     int
 }
 
 func (p *rtgAssemblyBindingParser) word() string {
-	p.skipSpace()
+	p.space()
 	start := p.at
 	for p.at < len(p.source) && (p.source[p.at] >= 'a' && p.source[p.at] <= 'z' ||
-		p.source[p.at] >= 'A' && p.source[p.at] <= 'Z' || p.source[p.at] >= '0' && p.source[p.at] <= '9' ||
-		p.source[p.at] == '_') {
+		p.source[p.at] >= 'A' && p.source[p.at] <= 'Z' || p.source[p.at] >= '0' && p.source[p.at] <= '9' || p.source[p.at] == '_') {
 		p.at++
 	}
 	return string(p.source[start:p.at])
 }
 
-func (p *rtgAssemblyBindingParser) takeByte(want byte) bool {
-	p.skipSpace()
+func (p *rtgAssemblyBindingParser) take(want byte) bool {
+	p.space()
 	if p.at >= len(p.source) || p.source[p.at] != want {
 		return false
 	}
@@ -84,20 +69,16 @@ func (p *rtgAssemblyBindingParser) takeByte(want byte) bool {
 	return true
 }
 
-func (p *rtgAssemblyBindingParser) skipSpace() {
+func (p *rtgAssemblyBindingParser) space() {
 	for p.at < len(p.source) {
 		if p.source[p.at] == ' ' || p.source[p.at] == '\t' || p.source[p.at] == '\r' || p.source[p.at] == '\n' {
 			p.at++
-			continue
-		}
-		if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '/' {
+		} else if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '/' {
 			p.at += 2
 			for p.at < len(p.source) && p.source[p.at] != '\n' {
 				p.at++
 			}
-			continue
-		}
-		if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '*' {
+		} else if p.at+1 < len(p.source) && p.source[p.at] == '/' && p.source[p.at+1] == '*' {
 			p.at += 2
 			for p.at+1 < len(p.source) && (p.source[p.at] != '*' || p.source[p.at+1] != '/') {
 				p.at++
@@ -105,20 +86,18 @@ func (p *rtgAssemblyBindingParser) skipSpace() {
 			if p.at+1 < len(p.source) {
 				p.at += 2
 			}
-			continue
+		} else {
+			return
 		}
-		break
 	}
 }
 
-func (p *rtgAssemblyBindingParser) skipBody() bool {
+func (p *rtgAssemblyBindingParser) body() bool {
 	depth := 1
 	for p.at < len(p.source) {
 		if p.at+1 < len(p.source) && p.source[p.at] == '/' && (p.source[p.at+1] == '/' || p.source[p.at+1] == '*') {
-			p.skipSpace()
-			continue
-		}
-		if p.source[p.at] == '"' || p.source[p.at] == '\'' || p.source[p.at] == '`' {
+			p.space()
+		} else if p.source[p.at] == '"' || p.source[p.at] == '\'' || p.source[p.at] == '`' {
 			quote := p.source[p.at]
 			p.at++
 			for p.at < len(p.source) && p.source[p.at] != quote {
@@ -130,18 +109,18 @@ func (p *rtgAssemblyBindingParser) skipBody() bool {
 			if p.at < len(p.source) {
 				p.at++
 			}
-			continue
-		}
-		if p.source[p.at] == '{' {
-			depth++
-		} else if p.source[p.at] == '}' {
-			depth--
-			if depth == 0 {
-				p.at++
-				return true
+		} else {
+			if p.source[p.at] == '{' {
+				depth++
+			} else if p.source[p.at] == '}' {
+				depth--
+				if depth == 0 {
+					p.at++
+					return true
+				}
 			}
+			p.at++
 		}
-		p.at++
 	}
 	return false
 }

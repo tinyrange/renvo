@@ -132,9 +132,9 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	if len(selected) == 0 {
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
-	code := make([]SourceFile, 0, len(selected))
+	code := selected[:0]
 	for i := 0; i < len(selected); i++ {
-		if !isRTGAsmSourceFile(selected[i].Path) {
+		if !stringHasSuffix(selected[i].Path, ".rtgasm") {
 			code = append(code, selected[i])
 			continue
 		}

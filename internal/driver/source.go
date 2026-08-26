@@ -239,7 +239,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		path := paths[i]
 		name := load.BasePath(path)
 		goSource := isGoSourceName(name)
-		assemblySource := isRTGAsmSourceName(name)
+		assemblySource := !goSource && isRTGAsmSourceName(name)
 		if !explicit && !frontendFilenameEnabledWithTags(name, c.target, c.tags) {
 			continue
 		}

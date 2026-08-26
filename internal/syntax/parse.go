@@ -332,18 +332,6 @@ func findFuncBody(file *File, start int) (int, int) {
 		if tokCharIs(file.Tokens, i, ';') {
 			return -1, i + 1
 		}
-		kind := file.Tokens[i].KindLine & 255
-		previousLine := TokenLine(file.Tokens[start-1])
-		if i > start {
-			previousLine = TokenLine(file.Tokens[i-1])
-		}
-		functionDecl := kind == TokenFunc && i+1 < len(file.Tokens) &&
-			file.Tokens[i+1].KindLine&255 == TokenIdent
-		if TokenLine(file.Tokens[i]) > previousLine &&
-			(functionDecl || kind == TokenConst || kind == TokenVar ||
-				kind == TokenType || kind == TokenImport) {
-			return -1, i
-		}
 		if tokCharIs(file.Tokens, i, '(') {
 			next := skipBalanced(file, i, '(', ')')
 			if next <= i {
@@ -370,6 +358,17 @@ func findFuncBody(file *File, start int) (int, int) {
 				continue
 			}
 			return i, i
+		}
+		previous := start - 1
+		if i > start {
+			previous = i - 1
+		}
+		if TokenLine(file.Tokens[i]) > TokenLine(file.Tokens[previous]) {
+			kind := file.Tokens[i].KindLine & 255
+			if kind == TokenConst || kind == TokenVar || kind == TokenType || kind == TokenImport ||
+				kind == TokenFunc && i+1 < len(file.Tokens) && file.Tokens[i+1].KindLine&255 == TokenIdent {
+				return -1, i
+			}
 		}
 		i++
 	}

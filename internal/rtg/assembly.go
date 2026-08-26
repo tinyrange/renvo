@@ -1,3 +1,5 @@
+//go:build !renvo
+
 package rtg
 
 // AssemblyDocument is the source-preserving parse surface for project

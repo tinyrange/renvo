@@ -44,6 +44,9 @@ func InitializePackageArtifactCache() {
 
 func loadPackageArtifact(pkg build.PackageUnit, packageIndex int, contextA int, contextB int) (unit.Program, bool) {
 	var empty unit.Program
+	if len(pkg.Program.RTGAssembly) != 0 {
+		return empty, false
+	}
 	pathA, pathB := incrementalArtifactHashString(307, 401, pkg.ImportPath)
 	for i := 0; i < packageArtifactCacheCapacity; i++ {
 		match := packageArtifactCacheUsed[i] && packageArtifactCachePackage[i] == packageIndex
@@ -72,6 +75,9 @@ func loadPackageArtifact(pkg build.PackageUnit, packageIndex int, contextA int, 
 }
 
 func storePackageArtifact(pkg build.PackageUnit, packageIndex int, contextA int, contextB int, artifact unit.Program) {
+	if len(pkg.Program.RTGAssembly) != 0 {
+		return
+	}
 	data, ok := unit.MarshalFrontendCache(artifact)
 	if !ok {
 		return

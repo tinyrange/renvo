@@ -81,70 +81,7 @@ type coreUnitBuilder struct {
 	assemblyErrorOffset int
 	declRows            []int
 	funcRows            []int
-}
-
-func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
-	bound := make([]bool, len(b.program.Funcs))
-	for fileIndex := 0; fileIndex < len(pkg.Assemblies); fileIndex++ {
-		file := pkg.Assemblies[fileIndex]
-		document := parseRTGAssemblyBindings(file.Src)
-		if !document.ok {
-			b.errFile = len(pkg.Files) + fileIndex
-			b.errToken = -1
-			b.assemblyErrorPath = file.Path
-			b.assemblyErrorOffset = document.errorOffset
-			return false
-		}
-		path := file.Path
-		if len(path) > len(pkg.Ref.Dir) && path[:len(pkg.Ref.Dir)] == pkg.Ref.Dir && path[len(pkg.Ref.Dir)] == '/' {
-			path = path[len(pkg.Ref.Dir)+1:]
-		}
-		sourceIndex := len(b.program.RTGAssembly)
-		source := make([]byte, len(file.Src))
-		copy(source, file.Src)
-		b.program.RTGAssembly = append(b.program.RTGAssembly, unit.RTGAssemblySource{Path: cloneCoreString(path), Source: source})
-		for entryIndex := 0; entryIndex < len(document.entries); entryIndex++ {
-			entry := document.entries[entryIndex]
-			function := -1
-			for i := 0; i < len(b.program.Funcs); i++ {
-				fn := b.program.Funcs[i]
-				if fn.ReceiverStart == fn.ReceiverEnd &&
-					fn.NameEnd-fn.NameStart == len(entry.name) &&
-					string(b.program.Text[fn.NameStart:fn.NameEnd]) == entry.name {
-					function = i
-					break
-				}
-			}
-			if function < 0 || bound[function] {
-				b.errFile = len(pkg.Files) + fileIndex
-				b.errToken = -1
-				b.assemblyErrorPath = file.Path
-				b.assemblyErrorOffset = entry.offset
-				return false
-			}
-			fn := b.program.Funcs[function]
-			if fn.BodyEnd != fn.BodyStart {
-				b.errFile = len(pkg.Files) + fileIndex
-				b.errToken = -1
-				b.assemblyErrorPath = file.Path
-				b.assemblyErrorOffset = entry.offset
-				return false
-			}
-			bound[function] = true
-			b.program.RTGAssemblyFuncs = append(b.program.RTGAssemblyFuncs, unit.RTGAssemblyBinding{
-				Func: function, Source: sourceIndex, Entry: entryIndex,
-			})
-		}
-	}
-	for function := 0; function < len(b.program.Funcs); function++ {
-		fn := b.program.Funcs[function]
-		if fn.BodyStart == fn.BodyEnd && !bound[function] {
-			b.errFile = -1
-			b.errToken = fn.NameTok
-			return false
-		}
-	}
-	return true
+	bodylessFuncs       []int
 }
 
 type coreFileTokens struct {
@@ -489,6 +426,7 @@ func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping 
 		// executable in the backend.
 		bodyStart = fn.EndTok
 		bodyEnd = fn.EndTok
+		b.bodylessFuncs = append(b.bodylessFuncs, len(b.program.Funcs))
 	} else if bodyEnd < fn.BodyStart {
 		b.setErr(EmitErrToken, fileIndex, fn.BodyEnd)
 		return false
