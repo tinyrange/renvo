@@ -83,6 +83,9 @@ func ParseFuncBodyStatements(file File, fn FuncDecl) Body {
 }
 
 func parseFuncBody(body Body, file *File, fn FuncDecl) Body {
+	if fn.BodyStart < 0 && fn.BodyEnd < 0 {
+		return body
+	}
 	closeTok := fn.BodyEnd - 1
 	if fn.BodyStart < 0 || closeTok <= fn.BodyStart || !tokCharIs(file.Tokens, fn.BodyStart, '{') || !tokCharIs(file.Tokens, closeTok, '}') {
 		return bodyFail(body, BodyErrFunc, fn.BodyStart)

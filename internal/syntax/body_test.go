@@ -227,6 +227,17 @@ func appMain() int {
 	}
 }
 
+func TestParseBodylessFuncBodyIsEmpty(t *testing.T) {
+	file := ParseFile([]byte("package main\nfunc assembled(value int) int\n"))
+	if !file.Ok || len(file.Funcs) != 1 {
+		t.Fatalf("ParseFile = ok %v err %d funcs %d", file.Ok, file.Error, len(file.Funcs))
+	}
+	body := ParseFuncBodyStatements(file, file.Funcs[0])
+	if !body.Ok || len(body.Stmts) != 0 {
+		t.Fatalf("bodyless function body = %#v", body)
+	}
+}
+
 func parseOneFuncBodyTestFile(t *testing.T, src string) File {
 	t.Helper()
 	file := ParseFile([]byte(src))

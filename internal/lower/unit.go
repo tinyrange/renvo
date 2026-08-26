@@ -4,7 +4,6 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/check"
 	"renvo.dev/internal/load"
-	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/syntax"
 	"renvo.dev/internal/unit"
 )
@@ -88,14 +87,12 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 	bound := make([]bool, len(b.program.Funcs))
 	for fileIndex := 0; fileIndex < len(pkg.Assemblies); fileIndex++ {
 		file := pkg.Assemblies[fileIndex]
-		document := rtg.ParseAssembly(file.Src, file.Path)
-		if !document.Ok {
+		document := parseRTGAssemblyBindings(file.Src)
+		if !document.ok {
 			b.errFile = len(pkg.Files) + fileIndex
 			b.errToken = -1
 			b.assemblyErrorPath = file.Path
-			if len(document.Diagnostics) != 0 {
-				b.assemblyErrorOffset = document.Diagnostics[0].Span.Start.Offset
-			}
+			b.assemblyErrorOffset = document.errorOffset
 			return false
 		}
 		path := file.Path
@@ -106,14 +103,14 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 		source := make([]byte, len(file.Src))
 		copy(source, file.Src)
 		b.program.RTGAssembly = append(b.program.RTGAssembly, unit.RTGAssemblySource{Path: cloneCoreString(path), Source: source})
-		for entryIndex := 0; entryIndex < len(document.Entries); entryIndex++ {
-			entry := document.Entries[entryIndex]
+		for entryIndex := 0; entryIndex < len(document.entries); entryIndex++ {
+			entry := document.entries[entryIndex]
 			function := -1
 			for i := 0; i < len(b.program.Funcs); i++ {
 				fn := b.program.Funcs[i]
 				if fn.ReceiverStart == fn.ReceiverEnd &&
-					fn.NameEnd-fn.NameStart == len(entry.Name) &&
-					string(b.program.Text[fn.NameStart:fn.NameEnd]) == entry.Name {
+					fn.NameEnd-fn.NameStart == len(entry.name) &&
+					string(b.program.Text[fn.NameStart:fn.NameEnd]) == entry.name {
 					function = i
 					break
 				}
@@ -122,7 +119,7 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 				b.errFile = len(pkg.Files) + fileIndex
 				b.errToken = -1
 				b.assemblyErrorPath = file.Path
-				b.assemblyErrorOffset = entry.NameSpan.Start.Offset
+				b.assemblyErrorOffset = entry.offset
 				return false
 			}
 			fn := b.program.Funcs[function]
@@ -130,7 +127,7 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 				b.errFile = len(pkg.Files) + fileIndex
 				b.errToken = -1
 				b.assemblyErrorPath = file.Path
-				b.assemblyErrorOffset = entry.NameSpan.Start.Offset
+				b.assemblyErrorOffset = entry.offset
 				return false
 			}
 			bound[function] = true

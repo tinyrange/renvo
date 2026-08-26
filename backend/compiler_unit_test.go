@@ -58,11 +58,6 @@ func TestBackendRenvoUnitKeepsLinesBeyondSixteenBits(t *testing.T) {
 }
 
 func TestBackendRenvoUnitDecodesRTGAssemblyTable(t *testing.T) {
-	program := unitProgramFromSource(t, []byte("package main\nfunc appMain() int { return 0 }\n"))
-	data, err := unit.Marshal(program)
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := []byte("bits_amd64.rtgasm")
 	source := []byte("rtgasm 1 assembly { appMain(out:emitter) { out.Byte(0xc3) } }")
 	payload := []byte{1, byte(len(path))}
@@ -70,16 +65,12 @@ func TestBackendRenvoUnitDecodesRTGAssemblyTable(t *testing.T) {
 	payload = append(payload, byte(len(source)))
 	payload = append(payload, source...)
 	payload = append(payload, 1, 0, 0, 0, 0)
-	data = appendBackendUnitChild(data, unit.TagRTGAssembly, payload)
-	decoded, isUnit, ok := renvoDecodeUnitProgram(data)
-	if isUnit && ok {
-		ok = renvoDecodeRTGAssemblyTable(&decoded, payload)
+	decoded := renvoProgram{funcs: make([]renvoFuncDecl, 1)}
+	if !renvoDecodeRTGAssemblyTable(&decoded, payload) || len(renvoRTGAssembly.sources) != 1 || len(renvoRTGAssembly.bindings) != 1 {
+		t.Fatalf("RTGASM decode: table=%#v", renvoRTGAssembly)
 	}
-	if !isUnit || !ok || decoded.rtgAssembly == nil || len(decoded.rtgAssembly.sources) != 1 || len(decoded.rtgAssembly.bindings) != 1 {
-		t.Fatalf("RTGASM decode: isUnit=%v ok=%v table=%#v", isUnit, ok, decoded.rtgAssembly)
-	}
-	if string(decoded.rtgAssembly.sources[0].path) != string(path) || string(decoded.rtgAssembly.sources[0].source) != string(source) || decoded.rtgAssembly.bindings[0].function != 0 {
-		t.Fatalf("RTGASM table = %#v", decoded.rtgAssembly)
+	if string(renvoRTGAssembly.sources[0].path) != string(path) || string(renvoRTGAssembly.sources[0].source) != string(source) || renvoRTGAssembly.bindings[0].function != 0 {
+		t.Fatalf("RTGASM table = %#v", renvoRTGAssembly)
 	}
 }
 

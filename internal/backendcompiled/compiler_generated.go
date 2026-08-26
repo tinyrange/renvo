@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "213ac0c132b346212c160a659b16f637c792729cb0ad263ba967ddec410bd6ca"
+const CompilerSourceDigest = "a064de7f1a374b81259624ddac877923347f090868a57012f964c8682b2ab7c6"
 
 // source: backend/compiler_common_impl.go
 
@@ -1064,30 +1064,12 @@ type renvoPackageTable struct {
 items []renvoPackageInfo
 }
 
-type renvoRTGAssemblySource struct {
-path   []byte
-source []byte
-}
-
-type renvoRTGAssemblyBinding struct {
-function int
-source   int
-entry    int
-code     []byte
-}
-
-type renvoRTGAssemblyTable struct {
-sources  []renvoRTGAssemblySource
-bindings []renvoRTGAssemblyBinding
-}
-
 type renvoProgram struct {
 src           []byte
 toks          renvoTokens
 decls         []renvoDecl
 funcs         []renvoFuncDecl
 packageTable  *renvoPackageTable
-rtgAssembly   *renvoRTGAssemblyTable
 ok            bool
 parsedIntHigh int
 compilerInt32 bool
@@ -5659,16 +5641,12 @@ if rparen+1 < fn.bodyStart {
 resultType, resultCount = renvoParseFuncResults(m, p, rparen+1, fn.bodyStart)
 }
 linkStatic := renvoParseLinkStaticDirective(p, fn.nameStart)
-bodyStart := fn.bodyStart + 1
-if fn.bodyStart == fn.bodyEnd {
-bodyStart = fn.bodyStart
-}
 if renvoFixedTarget != 0 {
-m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: bodyStart, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
+m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd})
 } else {
 export := renvoParseExportDirective(p, fn.nameStart)
 objectDecl := renvoParseObjectDirective(m, p, fn.nameStart)
-m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: bodyStart, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd, objectDecl: objectDecl})
+m.funcs = append(m.funcs, renvoFuncInfo{declIndex: fnIndex, nameStart: nameStart, nameEnd: nameEnd, firstParam: firstParam, paramCount: paramCount, firstResult: firstResult, resultCount: resultCount, resultType: resultType, receiverType: receiverType, bodyStart: fn.bodyStart + 1, bodyEnd: fn.bodyEnd, linkStatic: linkStatic.ok, linkDLLStart: linkStatic.dllStart, linkDLLEnd: linkStatic.dllEnd, linkMethodStart: linkStatic.methodStart, linkMethodEnd: linkStatic.methodEnd, exportNameStart: export.nameStart, exportNameEnd: export.nameEnd, objectDecl: objectDecl})
 }
 if receiverType != 0 && renvoResolveType(m, receiverType).kind != renvoTypePointer {
 renvoAddPointerType(m, receiverType, renvoPointerSpaceData)
@@ -37732,14 +37710,37 @@ return renvoBuiltInTargetBinding(target)
 
 // source: backend/compiler_rtg_adapter_impl.go
 
+type renvoRTGAssemblySource struct {
+path   []byte
+source []byte
+}
+
+type renvoRTGAssemblyBinding struct {
+function int
+source   int
+entry    int
+code     []byte
+}
+
+type renvoRTGAssemblyTable struct {
+sources  []renvoRTGAssemblySource
+bindings []renvoRTGAssemblyBinding
+}
+
+var renvoRTGAssembly renvoRTGAssemblyTable
+
 func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
 renvoNonNil(prog)
+renvoRTGAssembly = renvoRTGAssemblyTable{}
+if len(data) == 0 {
+return true
+}
 r := renvoUnitReader{src: data, end: len(data), ok: true}
 sourceCount := renvoUnitReadVar(&r)
 if !r.ok || sourceCount < 0 || sourceCount > len(data) {
 return false
 }
-table := &renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
+table := renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
 for i := 0; i < sourceCount; i++ {
 pathLength := renvoUnitReadVar(&r)
 if !r.ok || pathLength <= 0 || r.pos+pathLength < r.pos || r.pos+pathLength > r.end {
@@ -37783,7 +37784,7 @@ table.bindings = append(table.bindings, binding)
 if r.pos != r.end {
 return false
 }
-prog.rtgAssembly = table
+renvoRTGAssembly = table
 return true
 }
 
@@ -38060,9 +38061,8 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 renvoNonNil(g)
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
-if g.prog.rtgAssembly != nil {
-for i := 0; i < len(g.prog.rtgAssembly.bindings); i++ {
-binding := &g.prog.rtgAssembly.bindings[i]
+for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+binding := &renvoRTGAssembly.bindings[i]
 if binding.function != metaFn.declIndex {
 continue
 }
@@ -38077,7 +38077,6 @@ a.code = append(a.code, binding.code[at])
 }
 renvoRTGFunctionFinish(a)
 return true
-}
 }
 localCapacity := 16
 if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
@@ -55138,7 +55137,7 @@ prog.funcs = append(prog.funcs, fn)
 if funcReader.pos != funcReader.end {
 return false
 }
-if renvoPreparedBackendActive != 0 && len(assemblyData) > 0 &&
+if renvoPreparedBackendActive != 0 &&
 !renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 return false
 }

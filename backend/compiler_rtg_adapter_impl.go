@@ -2,14 +2,37 @@
 
 package main
 
+type renvoRTGAssemblySource struct {
+	path   []byte
+	source []byte
+}
+
+type renvoRTGAssemblyBinding struct {
+	function int
+	source   int
+	entry    int
+	code     []byte
+}
+
+type renvoRTGAssemblyTable struct {
+	sources  []renvoRTGAssemblySource
+	bindings []renvoRTGAssemblyBinding
+}
+
+var renvoRTGAssembly renvoRTGAssemblyTable
+
 func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
 	renvoNonNil(prog)
+	renvoRTGAssembly = renvoRTGAssemblyTable{}
+	if len(data) == 0 {
+		return true
+	}
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	sourceCount := renvoUnitReadVar(&r)
 	if !r.ok || sourceCount < 0 || sourceCount > len(data) {
 		return false
 	}
-	table := &renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
+	table := renvoRTGAssemblyTable{sources: make([]renvoRTGAssemblySource, 0, sourceCount)}
 	for i := 0; i < sourceCount; i++ {
 		pathLength := renvoUnitReadVar(&r)
 		if !r.ok || pathLength <= 0 || r.pos+pathLength < r.pos || r.pos+pathLength > r.end {
@@ -53,7 +76,7 @@ func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
 	if r.pos != r.end {
 		return false
 	}
-	prog.rtgAssembly = table
+	renvoRTGAssembly = table
 	return true
 }
 
@@ -330,24 +353,22 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	renvoNonNil(g)
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
-	if g.prog.rtgAssembly != nil {
-		for i := 0; i < len(g.prog.rtgAssembly.bindings); i++ {
-			binding := &g.prog.rtgAssembly.bindings[i]
-			if binding.function != metaFn.declIndex {
-				continue
-			}
-			if len(binding.code) == 0 {
-				renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
-				return false
-			}
-			renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-			renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-			for at := 0; at < len(binding.code); at++ {
-				a.code = append(a.code, binding.code[at])
-			}
-			renvoRTGFunctionFinish(a)
-			return true
+	for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+		binding := &renvoRTGAssembly.bindings[i]
+		if binding.function != metaFn.declIndex {
+			continue
 		}
+		if len(binding.code) == 0 {
+			renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
+			return false
+		}
+		renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
+		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+		for at := 0; at < len(binding.code); at++ {
+			a.code = append(a.code, binding.code[at])
+		}
+		renvoRTGFunctionFinish(a)
+		return true
 	}
 	localCapacity := 16
 	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {

@@ -107,25 +107,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
-			if fn.BodyStart < 0 {
-				signature := buildFuncSignature(file, fn)
-				scope, ok, scopeTok := buildFuncScopeCore(file, fn)
-				if !ok {
-					arena.Reset(functionArenaStart)
-					return info, false, CheckErrScope, fileIndex, scopeTok
-				}
-				var out CoreFuncBody
-				out.Kind = coreFuncKind(fn)
-				out.File = fileIndex
-				out.Func = i
-				out.ErrorToken = fn.NameTok
-				out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked,
-					signature, nil, scope)
-				out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(out.CoreTypeRefs)
-				arena.Reset(functionArenaStart)
-				info.CoreBodies = append(info.CoreBodies, out)
-				continue
-			}
 			body := syntax.ParseFuncBodyStatements(file, fn)
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
@@ -140,6 +121,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
 			}
 			arena.Reset(functionArenaStart)
+			if fn.BodyStart < 0 {
+				// Bodyless declarations are checked through the ordinary function
+				// path with an empty body range. The unit builder later requires an
+				// RTGASM entry to bind every such declaration.
+				fn.BodyStart = fn.EndTok
+				fn.BodyEnd = fn.EndTok
+			}
 			signature := buildFuncSignature(file, fn)
 			if returnErr, returnTok := invalidReturnCount(file, fn, signature); returnErr != CheckOK {
 				return info, false, returnErr, fileIndex, returnTok

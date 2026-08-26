@@ -14,7 +14,7 @@ func TestBuildUnitPreservesAndBindsRTGAssembly(t *testing.T) {
 	assembly := []byte("rtgasm 1\nassembly { Swap(out:emitter) { out.Bytes3(0x48, 0x89, 0xf8); out.Byte(0xc3) } }\n")
 	result := BuildUnit("/repo/case", "/std", "./cmd/app", []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc Swap(value int) int\nfunc main() { if Swap(42) == 42 { print(\"PASS\\n\") } }\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc Swap(value int) int\nfunc main() { for { if Swap(42) == 42 { break } }; print(\"PASS\\n\") }\n")},
 		{Path: "/repo/case/cmd/app/bits_amd64.rtgasm", Src: assembly},
 	})
 	if !result.Ok {

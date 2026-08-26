@@ -368,7 +368,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if funcReader.pos != funcReader.end {
 		return false
 	}
-	if renvoPreparedBackendActive != 0 && len(assemblyData) > 0 &&
+	if renvoPreparedBackendActive != 0 &&
 		!renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 		return false
 	}
