@@ -11,6 +11,9 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if tok := malformedTypeAssertionComposite(file, stmt.StartTok, stmt.EndTok); tok >= 0 {
+			return CheckErrTypeAssertion, tok
+		}
 		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrGoroutine, stmt.ExprStart
 		}
@@ -88,6 +91,29 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 		}
 	}
 	return CheckOK, -1
+}
+
+// A type assertion contains a type between its parentheses. In particular,
+// x.(T{...}) and x.([]T{...}) cannot be calls: the composite literal begins
+// before the assertion's closing parenthesis. Struct and interface type bodies
+// are permitted because their braces are part of the asserted type itself.
+func malformedTypeAssertionComposite(file syntax.File, start int, end int) int {
+	for dot := start; dot+2 < end && dot+2 < len(file.Tokens); dot++ {
+		if !tokCharIs(&file, dot, '.') || !tokCharIs(&file, dot+1, '(') {
+			continue
+		}
+		close := findTypeMatching(file, dot+1, '(', ')')
+		if close <= dot+2 || close > end {
+			continue
+		}
+		for tok := dot + 2; tok < close-1; tok++ {
+			if tokCharIs(&file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
+				return tok
+			}
+		}
+		dot = close - 1
+	}
+	return -1
 }
 
 func definiteCallExpression(file syntax.File, start int, end int) bool {

@@ -12,7 +12,7 @@ func cDiagnosticIdentifier(path string, name []byte) string {
 // fmt, so the host and self-hosted frontend use exactly the same text.
 func FormatDiagnostic(d Diagnostic) string {
 	if !d.Valid() {
-		return "renvo: error RENVO-UNKNOWN-001 (unknown): compilation failed\n"
+		return "renvo: error RENVO-BUG-003 (compiler): compiler bug: failure reached the user interface without a diagnostic\n"
 	}
 	out := ""
 	if d.Path != "" {

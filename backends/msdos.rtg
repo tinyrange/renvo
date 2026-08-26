@@ -798,7 +798,13 @@ go backend {
 		// Keep 4 KiB above BSS for the machine stack. COM has no header in which
 		// to express this reservation, so reject images that cannot fit the
 		// single-segment memory model.
-		if len(result) > 0xff00 || 0x100+len(result)+out.BSSSize() > 0xf000 {
+		if len(result) > 0xff00 {
+			out.RejectImageSize(false, len(result), 0xff00)
+			return nil
+		}
+		memorySize := 0x100 + len(result) + out.BSSSize()
+		if memorySize > 0xf000 {
+			out.RejectImageSize(true, memorySize, 0xf000)
 			return nil
 		}
 		return result
@@ -817,6 +823,7 @@ go backend {
 		module = append(module, out.Data()...)
 		stackTop := RTGAlignValue(len(module)+out.BSSSize()+4096, 2)
 		if stackTop > 0xfffe {
+			out.RejectImageSize(true, stackTop, 0xfffe)
 			return nil
 		}
 		fileSize := 32 + len(module)

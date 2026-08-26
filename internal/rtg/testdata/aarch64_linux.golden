@@ -230,6 +230,13 @@ func (out *RTGEmitter) BSSSize() int {
 	return out.asm.bssSize
 }
 
+// RejectImageSize lets a target-owned image encoder explain why it could not
+// represent an otherwise valid program. The shared compiler reports the
+// retained size and layout details if the encoder returns an empty image.
+func (out *RTGEmitter) RejectImageSize(memory bool, needed int, limit int) {
+	renvoRTGRejectImageSize(memory, needed, limit)
+}
+
 func (out *RTGEmitter) ReserveBSS(size int, alignment int) int {
 	if alignment <= 0 {
 		alignment = 1

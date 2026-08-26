@@ -163,7 +163,7 @@ func appMain(args []string, env []string) int {
 		built = driver.BuildPackageUnitCompactMode(packageArg, target, tags, mode, workDir, stdRoot, driver.RenvoFS{})
 	}
 	if !built.Ok {
-		print("renvo: frontend compilation failed\n")
+		print(driver.FormatDiagnostic(built.Diagnostic))
 		return 1
 	}
 	if definition != "" {

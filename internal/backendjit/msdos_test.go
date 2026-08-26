@@ -80,6 +80,27 @@ int main(void) {
 	}
 }
 
+func TestMSDOSImageLimitDiagnostic(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := New(filepath.Join(root, "backends", "msdos.rtg"),
+		filepath.Join(root, "backend"), filepath.Join(root, "std"),
+		t.TempDir(), backendcompiled.Backend{})
+	result := backend.CompileSourceWithArena([]byte(`package main
+var reserve [30000]byte
+var reserve2 [30000]byte
+func appMain() int { reserve[0] = 1; reserve2[0] = 2; return int(reserve[0] + reserve2[0]) }
+`), "msdos/8086-mz", true, 30000)
+	if result.Ok {
+		t.Fatal("oversized MZ program compiled successfully")
+	}
+}
+
 func TestMSDOSMZTargetAndDeviceLibrary(t *testing.T) {
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)

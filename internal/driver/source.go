@@ -27,6 +27,7 @@ const (
 	SourceErrFileListEmpty
 	SourceErrCInclude
 	SourceErrCPreprocess
+	SourceErrNoSelectedFiles
 )
 
 type DirEntry struct {
@@ -344,7 +345,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		}
 	}
 	if !found {
-		c.fail(SourceErrReadDir, ref.Dir)
+		c.fail(SourceErrNoSelectedFiles, ref.ImportPath)
 		return
 	}
 	c.loading = c.loading[:len(c.loading)-1]

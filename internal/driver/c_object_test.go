@@ -144,7 +144,7 @@ func TestBuildCObjectReportsPreprocessorFailure(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{{Path: "/repo/case/main.c", Src: []byte("#if 1 / 0\nint main(void) { return 0; }\n#endif\n")}}}
 	result := BuildFromFS([]string{"-c", "-o", "main.o", "main.c"}, "/repo/case", "/std", fs)
 	if result.Ok || result.Sources.Error != SourceErrCPreprocess || result.Diagnostic.Phase != "preprocessor" ||
-		result.Diagnostic.Code != "RENVO-CPP-002" || result.Diagnostic.Line != 1 {
+		result.Diagnostic.Code != "RENVO-CPP-004" || result.Diagnostic.Line != 1 {
 		t.Fatalf("C preprocessor failure result = %#v", result)
 	}
 }

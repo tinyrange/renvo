@@ -1,3 +1,5 @@
+//go:build !renvo || m5nanoc6 || m5atoms3lite || m5sticks3 || m5cardputeradv || m5tab5
+
 // Package board exposes the hardware capabilities of the board selected by the
 // compilation target.
 //

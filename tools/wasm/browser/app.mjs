@@ -11,6 +11,7 @@ import { C_LANGUAGE_ID, registerCLanguage } from "./c-language.mjs";
 import { RTG_LANGUAGE_ID, registerRTGLanguage } from "./rtg-language.mjs";
 import { generateBrowserTestProject } from "./test-project.mjs";
 import { deleteProjectSnapshot, loadCurrentProject, loadPreparedBackends, loadProjectSnapshots, saveCurrentProject, savePreparedBackend, saveProjectSnapshot } from "./workspace-store.mjs";
+import { buildReadiness } from "./build-readiness.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -51,10 +52,8 @@ const elements = {
   memoryStatus: document.querySelector("#memory-status"),
   problemStatus: document.querySelector("#problem-status"),
   problemCount: document.querySelector("#problem-count"),
-  artifactCount: document.querySelector("#artifact-count"),
   output: document.querySelector("#output"),
   problems: document.querySelector("#problems"),
-  artifacts: document.querySelector("#artifacts"),
   testsOutput: document.querySelector("#tests-output"),
   searchResults: document.querySelector("#search-results"),
   searchQuery: document.querySelector("#search-query"),
@@ -62,6 +61,10 @@ const elements = {
   preview: document.querySelector("#preview"),
   workbench: document.querySelector(".workbench"),
   editorHost: document.querySelector("#editor"),
+  helpView: document.querySelector("#help-view"),
+  helpTree: document.querySelector("#help-tree"),
+  sidebarExamples: document.querySelector("#sidebar-examples"),
+  sidebarExampleCount: document.querySelector("#sidebar-example-count"),
   stdlibTree: document.querySelector("#stdlib-tree"),
   fileTree: document.querySelector("#file-tree"),
   openEditorTabs: document.querySelector("#open-editor-tabs"),
@@ -71,6 +74,7 @@ const elements = {
   projectFileCount: document.querySelector("#project-file-count"),
   toggleSidebar: document.querySelector("#toggle-sidebar"),
   outlineCount: document.querySelector("#outline-count"),
+  copyHelpPage: document.querySelector("#copy-help-page"),
   projectMenuButton: document.querySelector("#project-menu"),
   projectActionMenu: document.querySelector("#project-action-menu"),
   fileActionMenu: document.querySelector("#file-action-menu"),
@@ -168,6 +172,8 @@ const editableBaselines = new Map(Object.entries(fileValues));
 const models = new Map();
 const openFiles = [];
 const stdlibFiles = new Map();
+const examplePreviewFiles = new Map();
+const expandedExamples = new Set();
 const loadedStandardPackages = new Set();
 const loadingStandardPackages = new Map();
 const languageRequests = new Map();
@@ -180,13 +186,16 @@ const prefetchingBackends = new Set();
 let monaco;
 let editor;
 let activeFile = "main.go";
+let lastWorkspaceFile = "main.go";
+let activeHelp = "";
+let deepLinksReady = false;
+let applyingDeepLink = false;
 let compilerReady = false;
 let building = false;
 let running = false;
 let buildRevision = 1;
 let pendingBuild;
 let runAfterBuild = false;
-let artifactUrls = [];
 const inlineDownloadLimit = 16 * 1024 * 1024;
 let lastRunnableArtifact;
 let espPort;
@@ -202,6 +211,12 @@ let exampleBoardSelectionTouched = false;
 let analysisTimer;
 let languageGeneration = 0;
 let latestAnalysisRequestID = 0;
+let validationTimer;
+let validationGeneration = 0;
+let pendingValidation;
+let buildValidationState = "checking";
+let buildValidationRevision = 0;
+let validatedBuild;
 let requestID = 0;
 let focusedTargetIndex = -1;
 let activeBuildRoot = ".";
@@ -265,6 +280,12 @@ async function boot() {
   }
   await monacoPromise;
   if (elements.exampleDialog.open && standardCatalog) renderExampleBrowser();
+  const viewParameters = new URLSearchParams(location.search);
+  if (["help", "source", "example"].some((name) => viewParameters.has(name)) && standardCatalogPromise) {
+    try { await standardCatalogPromise; } catch {}
+  }
+  await restoreDeepLink();
+  deepLinksReady = true;
   installLanguageProviders();
   const languageService = catalog.languageService ? new URL(catalog.languageService, catalogUrl).href : "";
   const formatter = catalog.formatter ? new URL(catalog.formatter, catalogUrl).href : "";
@@ -278,6 +299,7 @@ async function boot() {
   prefetchExampleBoard();
   await restoreProjectBackends();
   scheduleAnalysis(20);
+  scheduleBuildValidation(20);
 }
 
 async function loadTargetCatalog() {
@@ -295,8 +317,14 @@ async function loadTargetCatalog() {
           return standardCatalog;
         });
       });
-      standardCatalogPromise.then(renderLibraryCatalog, (error) => {
+      standardCatalogPromise.then((value) => {
+        renderLibraryCatalog(value);
+        renderHelpCatalog(value);
+        renderSidebarExamples(value);
+      }, (error) => {
         elements.stdlibTree.textContent = error.message;
+        elements.helpTree.textContent = error.message;
+        elements.sidebarExamples.textContent = error.message;
       });
     }
     return catalog;
@@ -341,8 +369,8 @@ function configureTargets(targets) {
     option.dataset.index = String(index);
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", "false");
-    option.textContent = target.label || target.name;
-    option.title = target.label ? target.name : "";
+    option.textContent = targetDisplayName(target);
+    option.title = target.name;
     entries.push(option);
     const mobileOption = document.createElement("button");
     mobileOption.type = "button";
@@ -350,8 +378,8 @@ function configureTargets(targets) {
     mobileOption.dataset.target = target.name;
     mobileOption.setAttribute("role", "option");
     mobileOption.setAttribute("aria-selected", "false");
-    mobileOption.textContent = target.label || target.name;
-    mobileOption.title = target.label ? target.name : "";
+    mobileOption.textContent = targetDisplayName(target);
+    mobileOption.title = target.name;
     mobileOption.addEventListener("click", () => {
       selectTarget(target.name, true);
       updateMobileHeader();
@@ -423,7 +451,7 @@ async function loadMonaco() {
   editor.onDidChangeCursorPosition(({ position }) => {
     elements.cursorStatus.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
   });
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, compile);
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, primaryTargetAction);
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, runTests);
   editor.addCommand(monaco.KeyCode.F5, runArtifact);
   editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, formatActiveFile);
@@ -482,6 +510,7 @@ function prefetchExampleBoard() {
 
 worker.addEventListener("message", (event) => {
   if (event.data.type === "result") renderResult(event.data);
+  else if (event.data.type === "validation-result") receiveBuildValidation(event.data);
   else if (event.data.type === "run-result") renderRunResult(event.data);
   else if (event.data.type === "language-result") receiveLanguageResult(event.data);
   else if (event.data.type === "format-result") receiveFormatResult(event.data);
@@ -494,11 +523,11 @@ worker.addEventListener("message", (event) => {
 worker.addEventListener("error", (event) => showFatalError(new Error(event.message)));
 
 function setupShell() {
-  elements.compile.addEventListener("click", compile);
-  elements.run.addEventListener("click", runArtifact);
+  elements.compile.addEventListener("click", primaryTargetAction);
+  elements.run.addEventListener("click", secondaryTargetAction);
   elements.test.addEventListener("click", runTests);
   document.querySelector("#new-file").addEventListener("click", createWorkspaceFile);
-  document.querySelector("#browse-examples").addEventListener("click", openExampleBrowser);
+  document.querySelector("#browse-examples").addEventListener("click", () => isPhoneWorkspace() ? openExampleBrowser() : openSidebarExamples());
   elements.toggleSidebar.addEventListener("click", toggleSidebar);
   elements.projectMenuButton.addEventListener("click", toggleProjectActionMenu);
   elements.projectActionMenu.addEventListener("click", handleProjectAction);
@@ -506,10 +535,13 @@ function setupShell() {
   document.querySelector("#import-backend").addEventListener("click", () => elements.backendFileInput.click());
   elements.formatFile.addEventListener("click", formatActiveFile);
   elements.useBackend.addEventListener("click", () => useProjectBackend(activeFile));
+  elements.copyHelpPage.addEventListener("click", copyActiveHelpPage);
   document.querySelector("#search-project").addEventListener("click", searchProject);
   document.querySelector("#search-form").addEventListener("submit", submitProjectSearch);
   document.querySelector("#advanced-heading").addEventListener("click", toggleAdvancedBuild);
   document.querySelector("#outline-heading").addEventListener("click", toggleOutline);
+  document.querySelector("#examples-heading").addEventListener("click", toggleSidebarExamples);
+  document.querySelector("#help-heading").addEventListener("click", toggleHelp);
   document.querySelector("#library-heading").addEventListener("click", toggleLibrary);
   elements.projectFileInput.addEventListener("change", () => importProjectFiles(elements.projectFileInput.files));
   elements.projectDirectoryInput.addEventListener("change", () => importProjectFiles(elements.projectDirectoryInput.files, true));
@@ -524,8 +556,8 @@ function setupShell() {
     if (mobileDeploymentActive) openMobileFlashView(elements.mobileFlashState.textContent);
     else runArtifact();
   });
-  elements.mobileDeviceBuild.addEventListener("click", compile);
-  elements.mobileDeviceRun.addEventListener("click", runArtifact);
+  elements.mobileDeviceBuild.addEventListener("click", primaryTargetAction);
+  elements.mobileDeviceRun.addEventListener("click", secondaryTargetAction);
   elements.mobileTargetButton.addEventListener("click", () => {
     showMobileView(elements.ide.dataset.mobileView === "device" ? "editor" : "device");
   });
@@ -545,6 +577,7 @@ function setupShell() {
   phoneWorkspace.addEventListener?.("change", configureMobileWorkspace);
   globalThis.visualViewport?.addEventListener("resize", layoutMobileEditor);
   window.addEventListener("resize", layoutMobileEditor);
+  window.addEventListener("popstate", () => { if (deepLinksReady) restoreDeepLink(); });
   configureMobileWorkspace();
   elements.targetButton.addEventListener("click", () => toggleTargetMenu());
   elements.targetButton.addEventListener("keydown", handleTargetKeydown);
@@ -560,7 +593,7 @@ function setupShell() {
     if (!elements.targetPicker.contains(event.target)) closeTargetMenu();
   });
   elements.command.addEventListener("input", () => { syncBuildRootFromCommand(); markBuildStale(); saveFiles(); });
-  elements.command.addEventListener("keydown", (event) => { if (event.key === "Enter") compile(); });
+  elements.command.addEventListener("keydown", (event) => { if (event.key === "Enter") primaryTargetAction(); });
   elements.fileTree.addEventListener("contextmenu", handleWorkspaceFileMenu);
   document.addEventListener("pointerdown", (event) => {
     if (!elements.projectActionMenu.contains(event.target) && event.target !== elements.projectMenuButton) closeProjectActionMenu();
@@ -633,8 +666,8 @@ function selectTarget(name, updateCommand) {
     espPort = undefined;
     espPortTransport = undefined;
   }
-  elements.targetLabel.textContent = selectedTarget.label || selectedTarget.name;
-  elements.targetButton.title = `Build target: ${selectedTarget.name}`;
+  elements.targetLabel.textContent = targetDisplayName(selectedTarget);
+  elements.targetButton.title = `${targetDisplayName(selectedTarget)} · ${selectedTarget.name}`;
   const board = selectedTarget.device === "esp32";
   elements.flashTransport.hidden = !board;
   elements.run.title = board ? "Build, flash, and run on the connected ESP board (F5)" : "Run console app (F5)";
@@ -653,6 +686,7 @@ function selectTarget(name, updateCommand) {
   updateReadyState();
   scheduleAnalysis(20);
   if (changed) prefetchTargetBackend(selectedTarget);
+  if (changed && standardCatalog) renderSidebarExamples(standardCatalog);
   if (changed && monaco) saveFiles();
 }
 
@@ -717,13 +751,82 @@ function handleTargetKeydown(event) {
   else setFocusedTarget(focusedTargetIndex + (event.key === "ArrowDown" ? 1 : -1), true);
 }
 
-async function compile() {
-  return compileTarget(selectedTarget);
+function primaryTargetAction() {
+  if (selectedTarget?.device === "esp32") return runArtifact();
+  return downloadValidatedArtifact();
+}
+
+function secondaryTargetAction() {
+  if (selectedTarget?.device === "esp32") return downloadValidatedArtifact();
+  return runArtifact();
+}
+
+function targetDisplayName(target) {
+  if (target?.label) return target.label;
+  const [platform = "Target", architecture = ""] = (target?.name || "").split("/");
+  const platforms = {
+    browser: "Web application", darwin: "macOS", freebsd: "FreeBSD", linux: "Linux",
+    netbsd: "NetBSD", openbsd: "OpenBSD", vm: "Renvo VM", wasi: "WebAssembly (WASI)", windows: "Windows",
+  };
+  const architectures = {
+    "386": "x86 (32-bit)", amd64: "x86-64", arm: "ARM (32-bit)", aarch64: "ARM64", arm64: "ARM64",
+    riscv32: "RISC-V 32-bit", vm32: "32-bit bytecode", wasm32: "WebAssembly",
+  };
+  const system = platforms[platform] || platform.replaceAll(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const machine = architectures[architecture] || architecture.replaceAll(/[-_]/g, " ").toUpperCase();
+  return machine ? `${system} · ${machine}` : system;
+}
+
+function downloadValidatedArtifact() {
+  const cached = validatedBuild;
+  if (!cached || cached.revision !== buildRevision || cached.target.name !== selectedTarget?.name || cached.result.exitCode !== 0) return;
+  const artifact = cached.result.files.find((file) => file.name === cached.target.output) || cached.result.files[0];
+  if (!artifact) {
+    setCompilerStatus("error", "Build produced no downloadable output");
+    return;
+  }
+  const data = artifact.data;
+  const filename = artifact.name.split("/").pop();
+  const type = filename.endsWith(".wasm") ? "application/wasm" : "application/octet-stream";
+  const url = createDownloadURL(data, type);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  if (url.startsWith("blob:")) setTimeout(() => releaseDownloadURL(url), 60000);
+  setCompilerStatus("ready", `Downloading ${filename}`);
+}
+
+function publishValidatedBuild() {
+  const cached = validatedBuild;
+  if (!cached || cached.revision !== buildRevision || cached.target.name !== selectedTarget?.name || cached.result.exitCode !== 0) return false;
+  saveFiles();
+  clearMarkers();
+  lastRunnableArtifact = undefined;
+  elements.output.textContent = `$ renvo ${cached.args.join(" ")}\n`;
+  showPanel("output");
+  pendingBuild = {
+    id: cached.result.id,
+    revision: cached.revision,
+    target: cached.target,
+    backend: cached.backend,
+    args: cached.args,
+    action: "build",
+  };
+  renderResult({ ...cached.result, type: "result" });
+  return true;
 }
 
 async function compileTarget(buildTarget) {
   if (!compilerReady || building || !monaco || !selectedTarget) return;
   if (!buildTarget) return;
+  if (buildTarget.name === selectedTarget.name) {
+    if (publishValidatedBuild()) return;
+    if (buildValidationState !== "success" || buildValidationRevision !== buildRevision) return;
+  }
   if (buildTarget.projectBackend && (buildTarget.backendStale || !buildTarget.backend)) {
     building = true;
     updateReadyState();
@@ -757,7 +860,6 @@ async function compileTarget(buildTarget) {
   }
   saveFiles();
   clearMarkers();
-  clearArtifactUrls();
   lastRunnableArtifact = undefined;
   building = true;
   updateReadyState();
@@ -776,7 +878,7 @@ async function compileTarget(buildTarget) {
     await ensureWorkspaceDependencies();
     const payload = workspacePayload();
     const id = ++requestID;
-    pendingBuild = { id, revision, target: buildTarget, backend, action: "build" };
+    pendingBuild = { id, revision, target: buildTarget, backend, args, action: "build" };
     worker.postMessage({
       type: "compile", id, args, files: payload.files,
       backend, backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
@@ -856,7 +958,7 @@ async function runTests() {
   let generated;
   try { generated = generateBrowserTestProject(projectFiles()); }
   catch (error) { elements.testsOutput.textContent = `${error.message || error}\n`; showPanel("tests"); return; }
-  building = true; testBuild = true; updateReadyState(); clearMarkers(); clearArtifactUrls();
+  building = true; testBuild = true; updateReadyState(); clearMarkers();
   elements.testsOutput.textContent = `$ renvo test .\nDiscovered ${generated.tests.length} test${generated.tests.length === 1 ? "" : "s"}; building…\n`;
   showPanel("tests");
   setCompilerStatus("busy", "Building tests…");
@@ -900,7 +1002,11 @@ function renderResult(result) {
   const diagnosticText = result.exitCode === 0 ? "" : [result.stderr, result.stdout].filter(Boolean).join("\n");
   const problems = parseDiagnostics(diagnosticText);
   renderProblems(problems);
-  renderArtifacts(result.files);
+  if (build.revision === buildRevision && build.target?.name === selectedTarget?.name) {
+    buildValidationRevision = build.revision;
+    buildValidationState = result.exitCode === 0 ? "success" : "failure";
+    validatedBuild = result.exitCode === 0 ? { ...build, result } : undefined;
+  }
   if (result.exitCode === 0) {
     backendReady.add(build.backend);
     const artifact = result.files.find((file) => file.name === build.target.output) || result.files[0];
@@ -916,7 +1022,6 @@ function renderResult(result) {
   runAfterBuild = false;
   updateReadyState();
   if (result.exitCode !== 0) showPanel(problems.length ? "problems" : "output");
-  else if (result.files.length) showPanel("artifacts");
   if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
     elements.terminalOutput.textContent = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
     failMobileDeployment(mobileDeploymentStep || "firmware", "The firmware build failed. Open the activity log for the compiler message.");
@@ -1071,7 +1176,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     try {
       const progress = (value) => {
         const verb = jtag ? "Loading" : "Flashing";
-        elements.run.querySelector("span").textContent = `${verb} ${Math.round(value * 100)}%`;
+        elements.compile.querySelector("span").textContent = `${verb} ${Math.round(value * 100)}%`;
         setMobileDeployStep("load", "active", `${verb} firmware, ${Math.round(value * 100)}%.`, value);
       };
       let report;
@@ -1232,6 +1337,8 @@ async function loadStandardPackage(importPath, catalog) {
   loadingStandardPackages.set(key, loading);
   try {
     await loading;
+  } catch (error) {
+    elements.languageStatus.textContent = `Could not open link: ${error.message || error}`;
   } finally {
     loadingStandardPackages.delete(key);
   }
@@ -1436,6 +1543,86 @@ function scheduleAnalysis(delay = 280) {
   analysisTimer = setTimeout(() => runAnalysis(generation), delay);
 }
 
+function scheduleBuildValidation(delay = 650) {
+  clearTimeout(validationTimer);
+  const generation = ++validationGeneration;
+  validatedBuild = undefined;
+  buildValidationState = "checking";
+  buildValidationRevision = 0;
+  if (compilerReady && monaco && selectedTarget && !building) setCompilerStatus("busy", "Checking build…");
+  updateReadyState();
+  validationTimer = setTimeout(() => runBuildValidation(generation), delay);
+}
+
+async function runBuildValidation(generation) {
+  if (!compilerReady || !monaco || !selectedTarget || building || generation !== validationGeneration) return;
+  if (pendingValidation) {
+    validationTimer = setTimeout(() => runBuildValidation(generation), 100);
+    return;
+  }
+  const revision = buildRevision;
+  let target = selectedTarget;
+  try {
+    if (target.projectBackend && (target.backendStale || !target.backend)) {
+      target = await prepareProjectBackend(target);
+      if (generation !== validationGeneration) return;
+    }
+    let args = splitArguments(elements.command.value);
+    args = controlledArguments(args, target);
+    await ensureWorkspaceDependencies();
+    if (generation !== validationGeneration || revision !== buildRevision || target.name !== selectedTarget?.name) return;
+    const payload = workspacePayload();
+    const backendPath = activeBuildLanguage() === "c" && target.cBackend ? target.cBackend : target.backend;
+    const backend = backendPath ? new URL(backendPath, catalogUrl).href : "";
+    const id = ++requestID;
+    pendingValidation = { id, generation, revision, target, backend, args };
+    worker.postMessage({
+      type: "validate", id, args, files: payload.files,
+      backend, backendTarget: target.backendTarget, backendFormat: target.backendFormat || "wasm",
+      rtgDefinition: target.rtgDefinition || "",
+    }, payload.transfers);
+  } catch (error) {
+    if (generation !== validationGeneration || revision !== buildRevision) return;
+    applyBuildValidationFailure(revision, error.message || String(error));
+  }
+}
+
+function receiveBuildValidation(result) {
+  const pending = pendingValidation;
+  if (!pending || pending.id !== result.id) return;
+  pendingValidation = undefined;
+  if (pending.generation !== validationGeneration || pending.revision !== buildRevision || pending.target.name !== selectedTarget?.name) {
+    validationTimer = setTimeout(() => runBuildValidation(validationGeneration), 20);
+    return;
+  }
+  const diagnosticText = result.exitCode === 0 ? "" : [result.stderr, result.stdout].filter(Boolean).join("\n");
+  clearMarkers(false);
+  renderProblems(parseDiagnostics(diagnosticText));
+  buildValidationRevision = pending.revision;
+  elements.memoryStatus.textContent = `${(result.linearMemoryBytes / 1048576).toFixed(1)} MiB`;
+  if (result.exitCode === 0) {
+    buildValidationState = "success";
+    validatedBuild = { ...pending, result };
+    if (pending.backend) backendReady.add(pending.backend);
+    setCompilerStatus("ready", "Build ready");
+  } else {
+    buildValidationState = "failure";
+    validatedBuild = undefined;
+    setCompilerStatus("error", "Build has errors");
+  }
+  updateReadyState();
+}
+
+function applyBuildValidationFailure(revision, message) {
+  buildValidationState = "failure";
+  buildValidationRevision = revision;
+  validatedBuild = undefined;
+  clearMarkers(false);
+  renderProblems(parseDiagnostics(message));
+  setCompilerStatus("error", "Build has errors");
+  updateReadyState();
+}
+
 async function runAnalysis(generation) {
 	if (!compilerReady || !targetCatalog?.languageService || !selectedTarget || generation !== languageGeneration) return;
 	elements.languageStatus.textContent = activeBuildLanguage() === "c" ? "Checking C…" : "Checking…";
@@ -1460,6 +1647,7 @@ async function runAnalysis(generation) {
 
 function applyAnalysis(id, records, error) {
   if (id !== latestAnalysisRequestID) return;
+	if (buildValidationRevision === buildRevision) return;
   const problems = records.filter((record) => record[0] === "D").map((record) => ({
     file: cleanPath(record[1]), start: Number(record[2]), end: Number(record[3]),
     line: Number(record[4]), column: Number(record[5]), code: record[6], message: record[7],
@@ -1557,11 +1745,18 @@ function scanImports(source) {
 function openFile(name) {
   const model = models.get(name);
   if (!model || !editor) return;
+  activeHelp = "";
   activeFile = name;
   if (!openFiles.includes(name)) openFiles.push(name);
+  elements.helpView.hidden = true;
+  elements.editorHost.hidden = false;
+  elements.copyHelpPage.hidden = true;
+  document.querySelector("#search-project").hidden = false;
+  elements.formatFile.hidden = false;
   renderEditorTabs();
   editor.setModel(model);
   const editable = isEditableFile(name);
+  if (editable) lastWorkspaceFile = name;
   editor.updateOptions({ readOnly: !editable, readOnlyMessage: { value: "Copy this library source into the project to edit it." } });
   elements.copyToPlayground.hidden = editable;
   elements.copyToPlayground.textContent = `Copy ${name.split("/").pop()} to project`;
@@ -1574,6 +1769,8 @@ function openFile(name) {
   document.querySelectorAll(".stdlib-file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   renderOutline(model);
   updateMobileHeader();
+  syncCodeDeepLink(name, editable);
+  requestAnimationFrame(() => editor?.layout());
   if (!isPhoneWorkspace()) editor.focus();
 }
 
@@ -1641,7 +1838,8 @@ function createProjectModel(name, value = "") {
 function languageForFile(name) {
   if (name.endsWith(".go")) return "go";
   if (name.endsWith(".c") || name.endsWith(".h")) return C_LANGUAGE_ID;
-  if (name.endsWith(".rtg")) return RTG_LANGUAGE_ID;
+  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
+  if (name.endsWith(".md")) return "markdown";
   if (name.endsWith(".json")) return "json";
   return "plaintext";
 }
@@ -1649,7 +1847,8 @@ function languageForFile(name) {
 function fileIcon(name) {
   if (name.endsWith(".go")) return ["Go", "go-icon"];
   if (name.endsWith(".c") || name.endsWith(".h")) return ["C", "c-icon"];
-  if (name.endsWith(".rtg")) return ["RTG", "rtg-icon"];
+  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return ["RTG", "rtg-icon"];
+  if (name.endsWith(".md")) return ["MD", "mod-icon"];
   return [name === "go.mod" ? "M" : "·", "mod-icon"];
 }
 
@@ -1683,17 +1882,18 @@ function renderWorkspaceFiles() {
 }
 
 function renderEditorTabs() {
-  elements.openEditorTabs.replaceChildren(...openFiles.filter((name) => models.has(name)).map((name) => {
+  elements.openEditorTabs.replaceChildren(...openFiles.filter((name) => models.has(name) || isHelpTab(name)).map((name) => {
     const tab = document.createElement("button");
     tab.type = "button"; tab.className = "editor-tab"; tab.dataset.file = name; tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", String(name === activeFile)); tab.classList.toggle("active", name === activeFile); tab.title = name;
-    const [text, className] = fileIcon(name);
+    const active = isHelpTab(name) ? name === activeHelp : !activeHelp && name === activeFile;
+    tab.setAttribute("aria-selected", String(active)); tab.classList.toggle("active", active); tab.title = isHelpTab(name) ? helpImportPath(name) : name;
+    const [text, className] = isHelpTab(name) ? ["?", "help-icon"] : fileIcon(name);
     const icon = document.createElement("span"); icon.className = className; icon.textContent = text;
-    const label = document.createElement("span"); label.textContent = name.split("/").pop();
+    const label = document.createElement("span"); label.textContent = isHelpTab(name) ? helpImportPath(name).split("/").pop() : name.split("/").pop();
     const close = document.createElement("span"); close.className = "tab-close"; close.textContent = "×"; close.title = `Close ${name}`;
     close.addEventListener("click", (event) => { event.stopPropagation(); closeEditorTab(name); });
     tab.append(icon, label, close);
-    tab.addEventListener("click", () => openFile(name));
+    tab.addEventListener("click", () => isHelpTab(name) ? openHelpPage(helpImportPath(name)) : openFile(name));
     tab.addEventListener("auxclick", (event) => { if (event.button === 1) closeEditorTab(name); });
     return tab;
   }));
@@ -1703,9 +1903,10 @@ function closeEditorTab(name) {
   const at = openFiles.indexOf(name);
   if (at < 0) return;
   openFiles.splice(at, 1);
-  if (activeFile === name) {
+  if (activeHelp === name || !activeHelp && activeFile === name) {
     const next = openFiles[Math.min(at, openFiles.length - 1)] || [...editableFiles][0];
-    if (next) openFile(next);
+    if (isHelpTab(next)) openHelpPage(helpImportPath(next));
+    else if (next) openFile(next);
   }
   renderEditorTabs();
 }
@@ -2019,6 +2220,7 @@ function replaceProject(project) {
   const files = project.files && Object.keys(project.files).length ? project.files : fallbackFiles;
   for (const [name, source] of Object.entries(files)) { createProjectModel(name, source); editableBaselines.set(name, source); }
   activeFile = Object.hasOwn(files, project.activeFile) ? project.activeFile : Object.keys(files)[0];
+  lastWorkspaceFile = activeFile;
   for (const name of project.openFiles || []) if (Object.hasOwn(files, name) && !openFiles.includes(name)) openFiles.push(name);
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
   projectName = project.name || "playground"; syncProjectName();
@@ -2176,6 +2378,31 @@ function toggleOutline() {
   elements.outlineTree.hidden = !elements.outlineTree.hidden;
   document.querySelector("#outline-heading").classList.toggle("collapsed", elements.outlineTree.hidden);
   document.querySelector("#outline-heading .chevron").textContent = elements.outlineTree.hidden ? "›" : "⌄";
+}
+
+function toggleSidebarExamples() {
+  elements.sidebarExamples.hidden = !elements.sidebarExamples.hidden;
+  document.querySelector("#examples-heading").classList.toggle("collapsed", elements.sidebarExamples.hidden);
+  document.querySelector("#examples-heading .chevron").textContent = elements.sidebarExamples.hidden ? "›" : "⌄";
+  if (!elements.sidebarExamples.hidden && standardCatalog) renderSidebarExamples();
+}
+
+function openSidebarExamples() {
+  elements.sidebarExamples.hidden = false;
+  document.querySelector("#examples-heading").classList.remove("collapsed");
+  document.querySelector("#examples-heading .chevron").textContent = "⌄";
+  if (standardCatalog) renderSidebarExamples();
+  document.querySelector("#examples-heading").scrollIntoView({ block: "nearest" });
+}
+
+function toggleHelp() {
+  elements.helpTree.hidden = !elements.helpTree.hidden;
+  document.querySelector("#help-heading").classList.toggle("collapsed", elements.helpTree.hidden);
+  document.querySelector("#help-heading .chevron").textContent = elements.helpTree.hidden ? "›" : "⌄";
+  if (!elements.helpTree.hidden && standardCatalog) {
+    renderHelpCatalog();
+    queueMicrotask(() => elements.helpTree.querySelector("input")?.focus());
+  }
 }
 
 function toggleLibrary() {
@@ -2487,7 +2714,7 @@ function backendCacheID(manifest) {
 
 function markBuildStale() {
   buildRevision++;
-  updateReadyState();
+  scheduleBuildValidation();
 }
 
 function renderProblems(problems) {
@@ -2536,48 +2763,26 @@ function positionAtByteOffset(model, offset) {
   return model.getPositionAt(units);
 }
 
-function renderArtifacts(files) {
-  elements.artifactCount.textContent = String(files.length);
-  if (!files.length) {
-    elements.artifacts.innerHTML = '<div class="empty-state">No artifacts produced.</div>';
-    return;
-  }
-  elements.artifacts.replaceChildren(...files.map((file) => {
-    const row = document.createElement("div");
-    row.className = "artifact-row";
-    const name = document.createElement("span"); name.textContent = file.name;
-    const size = document.createElement("span"); size.className = "artifact-size"; size.textContent = formatBytes(file.data.byteLength);
-    const filename = file.name.split("/").pop();
-    const actions = document.createElement("span"); actions.className = "artifact-actions";
-    const rawLink = document.createElement("a");
-    const rawURL = createDownloadURL(file.data, file.name.endsWith(".wasm") ? "application/wasm" : "application/octet-stream");
-    artifactUrls.push(rawURL); rawLink.href = rawURL; rawLink.download = filename;
-    if (/\.(?:com|exe)$/i.test(filename)) {
-      const zipLink = document.createElement("a");
-      const zipURL = createDownloadURL(encodeProjectZip({ [filename]: file.data }), "application/zip");
-      artifactUrls.push(zipURL); zipLink.href = zipURL; zipLink.download = `${filename}.zip`;
-      zipLink.textContent = "Download ZIP";
-      rawLink.textContent = "Raw";
-      actions.append(zipLink, rawLink);
-    } else {
-      rawLink.textContent = "Download";
-      actions.append(rawLink);
-    }
-    row.append(name, size, actions);
-    return row;
-  }));
-}
-
 function parseDiagnostics(stderr) {
   const problems = [];
   for (const rawLine of stderr.split("\n")) {
     const line = rawLine.trim();
     if (!line) continue;
-    const match = /^(?:renvo:\s*)?([^:\s]+\.(?:go|c|h|rtg)):(\d+)(?::(\d+))?:\s*(.*)$/.exec(line);
-    if (match) problems.push({ file: cleanPath(match[1]), line: Number(match[2]), column: Number(match[3] || 1), message: match[4] });
-    else problems.push({ file: "", line: 0, column: 0, message: line.replace(/^renvo:\s*/, "") });
+    const match = /^(?:renvo:\s*)?(.+?\.(?:go|c|h|rtg|rtgasm)):(\d+)(?::(\d+))?:\s*(.*)$/.exec(line);
+    if (match) {
+      const structured = /^error\s+([A-Z0-9-]+)(?:\s+\([^)]+\))?:\s*(.*)$/.exec(match[4]);
+      problems.push({
+        file: cleanPath(match[1]), line: Number(match[2]), column: Number(match[3] || 1),
+        code: structured?.[1] || "", message: structured?.[2] || match[4],
+      });
+    } else {
+      const text = line.replace(/^renvo:\s*/, "");
+      const structured = /^error\s+([A-Z0-9-]+)(?:\s+\([^)]+\))?:\s*(.*)$/.exec(text);
+      problems.push({ file: "", line: 0, column: 0, code: structured?.[1] || "", message: structured?.[2] || text });
+    }
   }
-  return problems;
+  if (!problems.some((problem) => problem.code)) return problems;
+  return problems.filter((problem) => problem.code || !/^(?:compilation|frontend compilation|build) failed$/i.test(problem.message));
 }
 
 function revealProblem(problem) {
@@ -2688,25 +2893,31 @@ function setSetupStep(step, state, detail) {
 }
 
 function updateReadyState() {
-  elements.compile.disabled = !compilerReady || !monaco || building;
-  elements.compile.querySelector("span").textContent = building ? "Building…" : "Build";
-  elements.mobileDeviceBuild.disabled = elements.compile.disabled;
-  elements.mobileDeviceBuild.textContent = building ? "Building…" : "Build";
-  elements.test.disabled = !compilerReady || !monaco || building || running;
-  elements.test.textContent = testBuild ? "Testing…" : "Test";
-  elements.targetButton.disabled = building || running;
   const board = selectedTarget?.device === "esp32";
   const jtag = board && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
   const deviceAction = jtag ? "JTAG load" : "Flash";
-  const executable = selectedTarget?.runnable || board;
-  elements.run.disabled = !compilerReady || !monaco || !executable || running || runAfterBuild;
+  const primaryLabel = board ? deviceAction : "Download";
+  const readiness = buildReadiness({
+    compilerReady, editorReady: Boolean(monaco), building, state: buildValidationState,
+    currentRevision: buildRevision, validatedRevision: buildValidationRevision, readyLabel: primaryLabel,
+  });
+  elements.compile.disabled = !readiness.ready || running || runAfterBuild;
+  elements.compile.title = readiness.title;
+  elements.compile.querySelector("span").textContent = running && board ? `${deviceAction}…` : runAfterBuild && board ? "Preparing…" : readiness.label;
+  elements.compile.querySelector("path").setAttribute("d", board ? "M8 14V6m-3 3 3-3 3 3M3 3h10" : "M8 2v8m-3-3 3 3 3-3M3 13h10");
+  elements.mobileDeviceBuild.disabled = elements.compile.disabled;
+  elements.mobileDeviceBuild.textContent = elements.compile.querySelector("span").textContent;
+  elements.test.disabled = !compilerReady || !monaco || building || running;
+  elements.test.textContent = testBuild ? "Testing…" : "Test";
+  elements.targetButton.disabled = building || running;
+  elements.run.disabled = !readiness.ready || (!board && !selectedTarget?.runnable) || running || runAfterBuild;
   elements.flashTransport.disabled = building || running || runAfterBuild;
-  elements.run.title = board ? `Build, ${jtag ? "load over JTAG" : "flash"}, and run on the selected device (F5)` : "Run console app (F5)";
-  elements.run.querySelector("span").textContent = running ? (board ? `${deviceAction}…` : "Running…") :
-    runAfterBuild ? (board ? "Pending…" : "Run pending…") : (board ? deviceAction : "Run");
-  elements.mobileRun.disabled = elements.run.disabled;
+  elements.run.title = board ? "Download firmware" : "Run (F5)";
+  elements.run.querySelector("span").textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Run pending…" : "Run";
+  elements.run.querySelector("path").setAttribute("d", board ? "M8 2v8m-3-3 3 3 3-3M3 13h10" : "m5 3 8 5-8 5V3Z");
+  elements.mobileRun.disabled = board ? elements.compile.disabled : elements.run.disabled;
   elements.mobileRun.textContent = !compilerReady || !monaco ? "Loading…" : running ? (board ? `${deviceAction}…` : "Running…") :
-    runAfterBuild ? (board ? "Pending…" : "Pending…") : (board ? deviceAction : "Run");
+    runAfterBuild ? "Pending…" : (board ? deviceAction : "Run");
   elements.mobileRun.classList.toggle("deploying", mobileDeploymentActive);
   if (mobileDeploymentActive) {
     elements.mobileRun.disabled = false;
@@ -2714,11 +2925,10 @@ function updateReadyState() {
     elements.mobileRun.title = "Tap to see JTAG load details";
   }
   elements.mobileDeviceRun.disabled = elements.run.disabled;
-  elements.mobileDeviceRun.textContent = running ? (board ? `${deviceAction}…` : "Running…") :
-    runAfterBuild ? "Waiting…" : (board ? deviceAction : "Run");
-  if (autoBuildPending && compilerReady && monaco && selectedTarget && !building) {
+  elements.mobileDeviceRun.textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Waiting…" : "Run";
+  if (autoBuildPending && readiness.ready && selectedTarget && !building) {
     autoBuildPending = false;
-    queueMicrotask(compile);
+    queueMicrotask(selectedTarget.runnable ? runArtifact : primaryTargetAction);
   }
 }
 
@@ -2947,19 +3157,31 @@ function defineTheme() {
   monaco.editor.defineTheme("renvo-dark", {
     base: "vs-dark", inherit: true,
     rules: [
-      { token: "keyword", foreground: "C586C0" }, { token: "type", foreground: "4EC9B0" },
-      { token: "keyword.directive", foreground: "C586C0" }, { token: "identifier.function", foreground: "DCDCAA" },
-      { token: "string", foreground: "CE9178" }, { token: "number", foreground: "B5CEA8" },
-      { token: "comment", foreground: "6A9955" },
+      { token: "keyword", foreground: "E36388" }, { token: "type", foreground: "A6BE82" },
+      { token: "keyword.directive", foreground: "D79BC8" }, { token: "identifier.function", foreground: "DCCDE8" },
+      { token: "string", foreground: "AFC29D" }, { token: "number", foreground: "D0B06E" },
+      { token: "comment", foreground: "8D9E7E", fontStyle: "italic" },
+      { token: "operator", foreground: "CDA8D5" }, { token: "delimiter", foreground: "B6A4BA" },
+      { token: "identifier", foreground: "E8DDEA" },
     ],
     colors: {
-      "editor.background": "#1e1e1e", "editor.foreground": "#d4d4d4",
-      "editorLineNumber.foreground": "#858585", "editorLineNumber.activeForeground": "#c6c6c6",
-      "editor.lineHighlightBackground": "#2a2d2e66", "editorCursor.foreground": "#aeafad",
-      "editor.selectionBackground": "#264f78", "editor.inactiveSelectionBackground": "#3a3d41",
-      "editorIndentGuide.background1": "#404040", "editorIndentGuide.activeBackground1": "#707070",
-      "editorGutter.background": "#1e1e1e", "scrollbarSlider.background": "#79797966",
-      "scrollbarSlider.hoverBackground": "#646464b3",
+      "editor.background": "#1b0718", "editor.foreground": "#d8cae2",
+      "editorLineNumber.foreground": "#846f88", "editorLineNumber.activeForeground": "#dccde8",
+      "editor.lineHighlightBackground": "#35142e99", "editorCursor.foreground": "#f4ebf7",
+      "editor.selectionBackground": "#596f3f99", "editor.inactiveSelectionBackground": "#45503b80",
+      "editor.selectionHighlightBackground": "#596f3f4d", "editor.wordHighlightBackground": "#45503b66",
+      "editorIndentGuide.background1": "#3c2235", "editorIndentGuide.activeBackground1": "#6c4d64",
+      "editorWhitespace.foreground": "#5a3a51", "editorGutter.background": "#1b0718",
+      "editorError.foreground": "#e36388", "editorWarning.foreground": "#d0b06e",
+      "editorInfo.foreground": "#a6be82", "editorHint.foreground": "#9aad87",
+      "editorWidget.background": "#301129", "editorWidget.border": "#5a3a51",
+      "editorHoverWidget.background": "#301129", "editorHoverWidget.border": "#5a3a51",
+      "editorSuggestWidget.background": "#301129", "editorSuggestWidget.border": "#5a3a51",
+      "editorSuggestWidget.selectedBackground": "#29321f", "editorSuggestWidget.highlightForeground": "#a6be82",
+      "input.background": "#130410", "input.border": "#5a3a51", "input.foreground": "#d8cae2",
+      "focusBorder": "#b2c98d", "list.hoverBackground": "#35142e", "list.activeSelectionBackground": "#29321f",
+      "scrollbarSlider.background": "#5a3a5166", "scrollbarSlider.hoverBackground": "#b6244f80",
+      "scrollbarSlider.activeBackground": "#e3638899", "minimap.background": "#180414",
     },
   });
 }
@@ -3013,6 +3235,7 @@ async function restoreProject() {
   projectBackendRoots.clear();
   for (const name of project?.backendRoots || []) if (typeof name === "string") projectBackendRoots.add(name);
   activeFile = project?.activeFile && Object.hasOwn(fileValues, project.activeFile) ? project.activeFile : Object.keys(fileValues)[0];
+  lastWorkspaceFile = activeFile;
   openFiles.length = 0;
   for (const name of project?.openFiles || []) if (Object.hasOwn(fileValues, name) && !openFiles.includes(name)) openFiles.push(name);
   if (!openFiles.includes(activeFile)) openFiles.push(activeFile);
@@ -3036,8 +3259,6 @@ function createDownloadURL(data, type) {
 }
 
 function releaseDownloadURL(url) { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }
-
-function clearArtifactUrls() { for (const url of artifactUrls) releaseDownloadURL(url); artifactUrls = []; }
 
 function splitArguments(text) {
   const args = []; let value = ""; let quote = ""; let escaped = false; let active = false;
@@ -3260,7 +3481,7 @@ function selectInitialExampleBoard(entries = exampleEntries()) {
 }
 
 function maybeOpenMobileExamples() {
-  if (!isPhoneWorkspace() || elements.exampleDialog.open || document.querySelector("dialog[open]")) return;
+  if (parameters.has("help") || !isPhoneWorkspace() || elements.exampleDialog.open || document.querySelector("dialog[open]")) return;
   openExampleBrowser();
 }
 
@@ -3317,9 +3538,12 @@ function renderExampleBrowser() {
     const category = document.createElement("span"); category.className = `example-category ${presentation.tone}`; category.textContent = presentation.category;
     const name = document.createElement("strong"); name.textContent = entry.title;
     title.append(category, name);
+    const actions = document.createElement("div"); actions.className = "example-card-actions";
+    const view = document.createElement("button"); view.type = "button"; view.className = "dialog-secondary"; view.dataset.exampleView = entry.importPath;
+    view.disabled = !monaco; view.textContent = monaco ? "View code" : "Editor loading";
     const load = document.createElement("button"); load.type = "button"; load.className = "dialog-primary"; load.dataset.example = entry.importPath;
-    load.disabled = !monaco; load.textContent = monaco ? "Open" : "Editor loading";
-    heading.append(title, load);
+    load.disabled = !monaco; load.textContent = monaco ? "Use" : "Editor loading";
+    actions.append(view, load); heading.append(title, actions);
     const metadata = document.createElement("div"); metadata.className = "example-metadata";
     const language = document.createElement("span"); language.className = "example-language"; language.textContent = entry.item.language === "c" ? "C" : "Go";
     const files = document.createElement("span"); files.textContent = `${entry.item.files.length} file${entry.item.files.length === 1 ? "" : "s"}`;
@@ -3349,19 +3573,371 @@ function renderExampleBrowser() {
   }));
 }
 
+const viewParameterNames = ["help", "source", "example", "file"];
+
+function setViewDeepLink(kind = "", value = "", file = "") {
+  if (!deepLinksReady || applyingDeepLink) return;
+  const url = new URL(location.href);
+  for (const name of viewParameterNames) url.searchParams.delete(name);
+  if (kind && value) url.searchParams.set(kind, value);
+  if (kind === "example" && file) url.searchParams.set("file", file);
+  if (url.href !== location.href) history.pushState({ renvoView: true }, "", url);
+}
+
+function syncCodeDeepLink(name, editable) {
+  if (editable) {
+    setViewDeepLink();
+    return;
+  }
+  const example = examplePreviewFiles.get(name);
+  if (example) setViewDeepLink("example", example.importPath, example.file);
+  else setViewDeepLink("source", name);
+}
+
+async function restoreDeepLink() {
+  if (!monaco) return;
+  applyingDeepLink = true;
+  try {
+    const current = new URLSearchParams(location.search);
+    const help = current.get("help");
+    const example = current.get("example");
+    const source = current.get("source");
+    if (help) {
+      if (helpDocument(help)) openHelpPage(help);
+      else elements.languageStatus.textContent = `Documentation not found: ${help}`;
+      return;
+    }
+    if (example) {
+      const entry = exampleEntries().find((candidate) => candidate.importPath === example);
+      if (entry) await viewExample(entry, current.get("file") || "");
+      else elements.languageStatus.textContent = `Example not found: ${example}`;
+      return;
+    }
+    if (source) {
+      const model = await ensureSourceModel(source);
+      if (model) openFile(cleanPath(source));
+      else elements.languageStatus.textContent = `Library source not found: ${source}`;
+      return;
+    }
+    if (activeHelp || !isEditableFile(activeFile)) {
+      const fallback = models.has(lastWorkspaceFile) ? lastWorkspaceFile : [...editableFiles][0];
+      if (fallback) openFile(fallback);
+    }
+  } finally {
+    applyingDeepLink = false;
+  }
+}
+
+function isHelpTab(name) { return typeof name === "string" && name.startsWith("help:"); }
+function helpTab(importPath) { return `help:${importPath}`; }
+function helpImportPath(name) { return name.slice("help:".length); }
+
+function helpDocuments(catalog = standardCatalog) {
+  const documents = [];
+  if (catalog?.builtins) documents.push(catalog.builtins);
+  for (const [importPath, item] of Object.entries(catalog?.packages || {})) {
+    if (item.docs) documents.push({ ...item.docs, importPath });
+  }
+  for (const [importPath, item] of Object.entries(catalog?.platforms || {})) {
+    if (item.docs && !item.main) documents.push({ ...item.docs, importPath });
+  }
+  return documents.sort((left, right) => left.importPath.localeCompare(right.importPath));
+}
+
+function helpDocument(importPath) {
+  return helpDocuments().find((item) => item.importPath === importPath);
+}
+
+function renderHelpCatalog(catalog = standardCatalog, query = "") {
+  if (!catalog) return;
+  const normalized = query.trim().toLowerCase();
+  const documents = helpDocuments(catalog).filter((item) => {
+    const declarations = [...(item.constants || []), ...(item.variables || []), ...(item.functions || []), ...(item.types || [])];
+    return !normalized || [item.importPath, item.name, item.doc, ...declarations.flatMap((entry) => [entry.name, entry.doc])]
+      .join(" ").toLowerCase().includes(normalized);
+  });
+  const search = document.createElement("label"); search.className = "help-search";
+  const input = document.createElement("input"); input.type = "search"; input.placeholder = "Package or symbol";
+  input.value = query; input.setAttribute("aria-label", "Search documentation");
+  input.addEventListener("input", () => renderHelpCatalog(catalog, input.value));
+  search.append(input);
+  const children = [search];
+  const appendGroup = (title, choices) => {
+    if (!choices.length) return;
+    const heading = document.createElement("div"); heading.className = "library-group"; heading.textContent = title; children.push(heading);
+    for (const item of choices) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "help-package";
+      button.textContent = item.importPath; button.title = item.doc || `Open ${item.importPath} documentation`;
+      button.addEventListener("click", () => openHelpPage(item.importPath)); children.push(button);
+    }
+  };
+  appendGroup("Language", documents.filter((item) => item.importPath === "builtin"));
+  appendGroup("Standard library", documents.filter((item) => !item.importPath.startsWith("renvo.dev/") && item.importPath !== "builtin"));
+  appendGroup("Device APIs", documents.filter((item) => item.importPath.startsWith("renvo.dev/device/")));
+  appendGroup("Frameworks", documents.filter((item) => item.importPath.startsWith("renvo.dev/") && !item.importPath.startsWith("renvo.dev/device/")));
+  if (children.length === 1) {
+    const empty = document.createElement("span"); empty.className = "tree-loading"; empty.textContent = "No documentation found."; children.push(empty);
+  }
+  elements.helpTree.replaceChildren(...children);
+  if (query) queueMicrotask(() => {
+    const next = elements.helpTree.querySelector(".help-search input");
+    next?.focus(); next?.setSelectionRange(query.length, query.length);
+  });
+}
+
+function openHelpPage(importPath) {
+  const page = helpDocument(importPath);
+  if (!page) return;
+  activeHelp = helpTab(importPath);
+  if (!openFiles.includes(activeHelp)) openFiles.push(activeHelp);
+  elements.editorHost.hidden = true;
+  elements.helpView.hidden = false;
+  elements.copyHelpPage.hidden = false;
+  elements.copyToPlayground.hidden = true;
+  elements.useBackend.hidden = true;
+  elements.formatFile.disabled = true;
+  elements.formatFile.hidden = true;
+  document.querySelector("#search-project").hidden = true;
+  elements.languageMode.textContent = "Docs";
+  elements.cursorStatus.textContent = importPath;
+  renderHelpPage(page);
+  renderEditorTabs();
+  setViewDeepLink("help", importPath);
+  if (isPhoneWorkspace()) showMobileView("editor");
+}
+
+function helpAnchor(section, name) {
+  return `doc-${section}-${name}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+}
+
+function renderHelpPage(page) {
+  const breadcrumb = document.createElement("div"); breadcrumb.className = "help-breadcrumb";
+  const home = document.createElement("button"); home.type = "button"; home.textContent = "Renvo documentation";
+  home.addEventListener("click", () => {
+    elements.helpTree.hidden = false;
+    document.querySelector("#help-heading").classList.remove("collapsed");
+    document.querySelector("#help-heading .chevron").textContent = "⌄";
+  });
+  breadcrumb.append(home, document.createTextNode(` / ${page.importPath}`));
+  const title = document.createElement("h1"); title.className = "help-package-title"; title.textContent = `package ${page.name}`;
+  const path = document.createElement("div"); path.className = "help-import-path"; path.textContent = page.importPath;
+  const overview = document.createElement("p"); overview.className = "help-overview";
+  overview.textContent = page.doc || "This package has no overview documentation yet.";
+  const nodes = [breadcrumb, title, path, overview];
+  const sections = [
+    ["Constants", page.constants || []], ["Variables", page.variables || []],
+    ["Functions", page.functions || []], ["Types", page.types || []],
+  ].filter(([, entries]) => entries.length);
+  if (sections.length) {
+    const indexTitle = document.createElement("h2"); indexTitle.textContent = "Index"; nodes.push(indexTitle);
+    const index = document.createElement("ul"); index.className = "help-index";
+    for (const [section, entries] of sections) for (const entry of entries) {
+      const item = document.createElement("li"); const link = document.createElement("a");
+      link.href = `#${helpAnchor(section, entry.name)}`; link.textContent = helpIndexLabel(section, entry); item.append(link); index.append(item);
+      link.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(link.getAttribute("href"))?.scrollIntoView(); });
+      for (const method of entry.methods || []) {
+        const methodItem = document.createElement("li"); const methodLink = document.createElement("a");
+        methodLink.href = `#${helpAnchor("method", `${entry.name}-${method.name}`)}`; methodLink.textContent = method.signature.split("\n")[0];
+        methodLink.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(methodLink.getAttribute("href"))?.scrollIntoView(); });
+        methodItem.append(methodLink); index.append(methodItem);
+      }
+    }
+    nodes.push(index);
+  }
+  for (const [section, entries] of sections) {
+    const heading = document.createElement("h2"); heading.textContent = section; nodes.push(heading);
+    for (const entry of entries) {
+      const declaration = renderHelpDeclaration(page, entry, helpAnchor(section, entry.name)); nodes.push(declaration);
+      if (entry.methods?.length) {
+        const methods = document.createElement("div"); methods.className = "help-methods";
+        for (const method of entry.methods) methods.append(renderHelpDeclaration(page, method, helpAnchor("method", `${entry.name}-${method.name}`)));
+        declaration.append(methods);
+      }
+    }
+  }
+  elements.helpView.replaceChildren(...nodes);
+  elements.helpView.scrollTop = 0;
+}
+
+function helpIndexLabel(section, entry) {
+  if (section === "Constants") return `const ${entry.name}`;
+  if (section === "Variables") return `var ${entry.name}`;
+  if (section === "Types") return `type ${entry.name}`;
+  return entry.signature.split("\n")[0];
+}
+
+function renderHelpDeclaration(page, entry, id) {
+  const declaration = document.createElement("section"); declaration.className = "help-declaration"; declaration.id = id;
+  const headingRow = document.createElement("div"); headingRow.className = "help-declaration-heading";
+  const heading = document.createElement("h3"); heading.textContent = entry.name;
+  headingRow.append(heading);
+  if (entry.file && entry.line) {
+    const source = document.createElement("button"); source.type = "button"; source.className = "help-source-link";
+    source.textContent = `${entry.file}:${entry.line}`; source.title = `Open ${entry.name} in ${entry.file}`;
+    source.addEventListener("click", () => openHelpSource(page, entry)); headingRow.append(source);
+  }
+  const signature = document.createElement("pre"); signature.className = "help-signature";
+  colorizeHelpSignature(signature, entry.signature);
+  const docs = document.createElement("p"); docs.className = `help-doc${entry.doc ? "" : " help-empty-doc"}`;
+  docs.textContent = entry.doc || "No documentation is available for this declaration.";
+  declaration.append(headingRow, signature, docs); return declaration;
+}
+
+async function openHelpSource(page, entry) {
+  const platform = standardCatalog?.platforms?.[page.importPath];
+  let path = platform ? `${platform.root}/${entry.file}` : "";
+  if (!path) {
+    const name = page.importPath.startsWith("renvo.dev/std/") ? page.importPath.slice("renvo.dev/std/".length) : page.importPath;
+    if (standardCatalog?.packages?.[name]) path = `std/${name}/${entry.file}`;
+  }
+  if (!path) return;
+  try {
+    const model = await ensureSourceModel(path);
+    if (!model) throw new Error(`${path} is not in the browser bundle`);
+    openFile(path);
+    const position = { lineNumber: entry.line, column: 1 };
+    editor.setPosition(position); editor.revealPositionInCenter(position); editor.focus();
+  } catch (error) {
+    elements.languageStatus.textContent = `Could not open source: ${error.message || error}`;
+  }
+}
+
+function colorizeHelpSignature(element, source) {
+  element.textContent = source;
+  if (!monaco?.editor?.colorize) return;
+  monaco.editor.colorize(source, "go", { tabSize: 4 }).then((html) => {
+    if (element.isConnected && element.textContent === source) element.innerHTML = html;
+  }).catch(() => {});
+}
+
+function helpPageText(page) {
+  const output = [`# package ${page.name}`, "", `Import path: ${page.importPath}`, "", page.doc || "No package overview."];
+  const sections = [["Constants", page.constants], ["Variables", page.variables], ["Functions", page.functions], ["Types", page.types]];
+  for (const [title, entries] of sections) {
+    if (!entries?.length) continue;
+    output.push("", `## ${title}`);
+    for (const entry of entries) {
+      output.push("", `### ${entry.name}`, "", "```go", entry.signature, "```", "", entry.doc || "No documentation is available for this declaration.");
+      for (const method of entry.methods || []) {
+        output.push("", `#### ${method.name}`, "", "```go", method.signature, "```", "", method.doc || "No documentation is available for this declaration.");
+      }
+    }
+  }
+  return `${output.join("\n").trim()}\n`;
+}
+
+async function copyActiveHelpPage() {
+  const page = activeHelp && helpDocument(helpImportPath(activeHelp));
+  if (!page) return;
+  try {
+    await navigator.clipboard.writeText(helpPageText(page));
+    elements.copyHelpPage.textContent = "Copied";
+    elements.languageStatus.textContent = `Copied all ${page.importPath} documentation`;
+    setTimeout(() => { elements.copyHelpPage.textContent = "Copy docs"; }, 1400);
+  } catch (error) {
+    elements.languageStatus.textContent = `Could not copy documentation: ${error.message || error}`;
+  }
+}
+
 async function handleExampleAction(event) {
-  const button = event.target.closest("[data-example]");
+  const button = event.target.closest("[data-example], [data-example-view]");
   if (!button || !standardCatalog) return;
-  const entry = exampleEntries().find((candidate) => candidate.importPath === button.dataset.example);
+  const importPath = button.dataset.exampleView || button.dataset.example;
+  const entry = exampleEntries().find((candidate) => candidate.importPath === importPath);
   if (!entry) return;
-  elements.exampleDialog.close();
+  if (button.dataset.exampleView) {
+    elements.exampleDialog.close();
+    await viewExample(entry);
+  } else await useExample(entry, true);
+}
+
+function renderSidebarExamples(catalog = standardCatalog) {
+  if (!catalog) return;
+  const entries = exampleEntries(catalog).sort((left, right) => {
+    const leftMatches = left.targets.includes(selectedTarget?.name) ? 0 : 1;
+    const rightMatches = right.targets.includes(selectedTarget?.name) ? 0 : 1;
+    return leftMatches - rightMatches || left.title.localeCompare(right.title);
+  });
+  elements.sidebarExampleCount.textContent = String(entries.length);
+  const rows = entries.map((entry) => {
+    const row = document.createElement("div"); row.className = "sidebar-example"; row.dataset.exampleTree = entry.importPath; row.setAttribute("role", "none");
+    const folder = document.createElement("div"); folder.className = "sidebar-example-folder";
+    const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "sidebar-example-toggle";
+    toggle.setAttribute("role", "treeitem");
+    const open = expandedExamples.has(entry.importPath);
+    toggle.setAttribute("aria-expanded", String(open));
+    const chevron = document.createElement("span"); chevron.className = "sidebar-example-chevron"; chevron.textContent = open ? "⌄" : "›";
+    const details = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = entry.title;
+    const target = document.createElement("small");
+    target.textContent = entry.targets.includes(selectedTarget?.name) ? targetDisplayName(selectedTarget) : entry.targets.map((name) => targetDisplayName(targetCatalog?.targets.find((item) => item.name === name) || { name })).join(", ");
+    details.append(title, target);
+    toggle.append(chevron, details);
+    const use = document.createElement("button"); use.type = "button"; use.textContent = "Use";
+    use.className = "sidebar-example-use";
+    use.title = `Replace the current project with ${entry.title}`;
+    use.addEventListener("click", () => useExample(entry, false));
+    const files = document.createElement("div"); files.className = "sidebar-example-files"; files.hidden = !open;
+    files.setAttribute("role", "group");
+    files.replaceChildren(...entry.item.files.map((file) => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "sidebar-example-file";
+      button.setAttribute("role", "treeitem"); button.title = `View ${entry.title} · ${file}`;
+      button.classList.toggle("active", activeFile === `${entry.item.root}/${file}` && !activeHelp);
+      const [iconText, iconClass] = fileIcon(file);
+      const icon = document.createElement("span"); icon.className = iconClass; icon.textContent = iconText;
+      const label = document.createElement("span"); label.textContent = file;
+      button.append(icon, label);
+      button.addEventListener("click", () => viewExample(entry, file));
+      return button;
+    }));
+    toggle.addEventListener("click", () => {
+      const opening = files.hidden;
+      files.hidden = !opening;
+      toggle.setAttribute("aria-expanded", String(opening));
+      chevron.textContent = opening ? "⌄" : "›";
+      if (opening) expandedExamples.add(entry.importPath); else expandedExamples.delete(entry.importPath);
+    });
+    folder.append(toggle, use); row.append(folder, files); return row;
+  });
+  const browse = document.createElement("button"); browse.type = "button"; browse.className = "sidebar-browser-action";
+  browse.textContent = "Browse by hardware…"; browse.addEventListener("click", openExampleBrowser); rows.push(browse);
+  elements.sidebarExamples.replaceChildren(...rows);
+}
+
+async function viewExample(entry, requestedFile = "") {
+  try {
+    elements.languageStatus.textContent = `Loading ${entry.title}…`;
+    await loadStandardPackage(entry.importPath, standardCatalog);
+    const sourceFiles = entry.item.files;
+    for (const file of sourceFiles) examplePreviewFiles.set(`${entry.item.root}/${file}`, { importPath: entry.importPath, file });
+    const file = sourceFiles.includes(requestedFile) ? requestedFile :
+      sourceFiles.find((name) => name === "main.go" || name === "main.c") || sourceFiles[0];
+    if (!file) throw new Error(`${entry.title} has no source files`);
+    const path = `${entry.item.root}/${file}`;
+    const model = await ensureSourceModel(path);
+    if (!model) throw new Error(`${path} is not in the browser bundle`);
+    openFile(path);
+    expandedExamples.add(entry.importPath);
+    openSidebarExamples();
+    queueMicrotask(() => [...elements.sidebarExamples.querySelectorAll("[data-example-tree]")]
+      .find((row) => row.dataset.exampleTree === entry.importPath)?.scrollIntoView({ block: "nearest" }));
+    elements.languageStatus.textContent = `Viewing ${entry.title} · project unchanged`;
+    if (isPhoneWorkspace()) showMobileView("editor");
+  } catch (error) {
+    showProjectError(error);
+    elements.languageStatus.textContent = `Could not open ${entry.title}`;
+  }
+}
+
+async function useExample(entry, fromDialog) {
+  if (fromDialog) elements.exampleDialog.close();
   const accepted = await requestConfirmation({
-    title: `Open ${entry.title}?`,
+    title: `Use ${entry.title}?`,
     message: "This replaces the current files. Saved snapshots and exported ZIP files will stay where they are.",
-    accept: "Open example",
+    accept: "Replace project",
     danger: false,
   });
-  if (!accepted) { elements.exampleDialog.showModal(); return; }
+  if (!accepted) { if (fromDialog) elements.exampleDialog.showModal(); return; }
   try {
     elements.languageStatus.textContent = `Loading ${entry.title}…`;
     const files = {};
@@ -3392,6 +3968,7 @@ async function handleExampleAction(event) {
     });
     if (backendDefinition) await useProjectBackend(backendDefinition);
     else elements.languageStatus.textContent = `${entry.title} is open`;
+    renderSidebarExamples();
     if (isPhoneWorkspace()) showMobileView("editor");
   } catch (error) {
     showProjectError(error);
@@ -3563,11 +4140,6 @@ async function ensureSourceModel(path) {
   return model;
 }
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1048576).toFixed(1)} MiB`;
-}
 
 function formatElapsed(milliseconds) {
   return milliseconds < 1000 ? `${milliseconds.toFixed(1)} ms` : `${(milliseconds / 1000).toFixed(2)} s`;

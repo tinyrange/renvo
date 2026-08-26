@@ -26,6 +26,17 @@ test("catalog source paths resolve outside the playground module", () => {
   assert.equal(sourceImportPath("/workspace/device/board/m5atoms3lite_impl.go", catalog), "renvo.dev/device/board");
 });
 
+test("example paths keep their full root when nested under device", () => {
+  const catalog = {
+    platforms: {
+      "renvo.dev/examples/device/blink": { root: "examples/device/blink", files: ["main.go"] },
+    },
+  };
+  assert.equal(cleanLanguagePath("examples/device/blink/main.go"), "examples/device/blink/main.go");
+  assert.equal(cleanLanguagePath("/workspace/examples/device/blink/main.go"), "examples/device/blink/main.go");
+  assert.equal(sourceImportPath("examples/device/blink/main.go", catalog), "renvo.dev/examples/device/blink");
+});
+
 test("bundled C library headers and implementations are navigable sources", () => {
   const catalog = { libc: ["include/stdio.h", "src/stdio.c"] };
   assert.equal(isCLibrarySourcePath("/workspace/libc/include/stdio.h", catalog), true);

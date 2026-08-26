@@ -73,7 +73,7 @@ export class SerialPlotter {
   }
 }
 
-const colors = ["#4ec9b0", "#75beff", "#dcdcaa", "#c586c0", "#f48771", "#ce9178", "#9cdcfe", "#b5cea8"];
+const colors = ["#a6be82", "#e36388", "#afc29d", "#d79bc8", "#d0b06e", "#78a887", "#bea66c", "#dba7b8"];
 
 export class SerialPlotterView {
   constructor(canvas, legend) {
@@ -123,7 +123,7 @@ export class SerialPlotterView {
     const context = this.canvas.getContext("2d");
     context.setTransform(scale, 0, 0, scale, 0, 0);
     context.clearRect(0, 0, rect.width, rect.height);
-    context.fillStyle = "#111";
+    context.fillStyle = "#12010f";
     context.fillRect(0, 0, rect.width, rect.height);
     if (!this.data.series.length) return;
 
@@ -145,7 +145,7 @@ export class SerialPlotterView {
       minimum -= padding;
       maximum += padding;
 
-      context.strokeStyle = "#292929";
+      context.strokeStyle = "#3c2235";
       context.beginPath();
       context.moveTo(left, top + laneHeight / 2);
       context.lineTo(rect.width - right, top + laneHeight / 2);
@@ -153,9 +153,9 @@ export class SerialPlotterView {
       if (index) {
         context.beginPath(); context.moveTo(0, top); context.lineTo(rect.width, top); context.stroke();
       }
-      context.fillStyle = "#aaa";
+      context.fillStyle = "#dccde8";
       context.fillText(series.name, 8, top + 15);
-      context.fillStyle = "#777";
+      context.fillStyle = "#a894ac";
       context.fillText(formatValue(maximum), 8, top + 30);
       context.fillText(formatValue(minimum), 8, Math.max(top + 43, bottom - 7));
 

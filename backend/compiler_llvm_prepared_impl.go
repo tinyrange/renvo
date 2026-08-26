@@ -2040,6 +2040,12 @@ return true
 return false
 }
 
+func renvoRTGRejectImageSize(memory bool, needed int, limit int) {
+	renvoRTGImageLimitMemory = memory
+	renvoRTGImageLimitNeeded = needed
+	renvoRTGImageLimit = limit
+}
+
 const renvoRTGCodeOffset = 0
 func renvoRTGImage(out *renvoAsm) []byte {
 	return rtgLlvmLlvmAmd64PackageLlvmImage(out)

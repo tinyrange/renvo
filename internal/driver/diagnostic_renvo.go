@@ -4,9 +4,10 @@ package driver
 
 import (
 	"renvo.dev/internal/build"
-	"renvo.dev/internal/c11"
 	"renvo.dev/internal/check"
+	"renvo.dev/internal/link"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/lower"
 	"renvo.dev/internal/pipeline"
 	"renvo.dev/internal/syntax"
 )
@@ -46,6 +47,32 @@ func renvoDiagnosticCode(group string, number int) string {
 
 func renvoOptionMessage(detail int) string {
 	switch detail {
+	case ParseErrMissingOutput:
+		return "missing output after -o"
+	case ParseErrMissingTarget:
+		return "missing target after -t"
+	case ParseErrUnsupportedTarget:
+		return "unsupported target"
+	case ParseErrMissingTags:
+		return "missing tags after -tags"
+	case ParseErrInvalidTags:
+		return "invalid build tags"
+	case ParseErrMissingPackage:
+		return "missing package path"
+	case ParseErrExtraPackage:
+		return "extra package path"
+	case ParseErrWindowsGUIRequiresWindows:
+		return "-windows-gui requires a Windows target"
+	case ParseErrMissingArenaSize:
+		return "missing arena size after -arena-size"
+	case ParseErrInvalidArenaSize:
+		return "invalid arena size"
+	case ParseErrMissingMode:
+		return "missing output mode after -mode="
+	case ParseErrUnsupportedMode:
+		return "unsupported output mode"
+	case ParseErrModeRequiresLinuxAmd64:
+		return "kernel-module mode requires linux/amd64"
 	case ParseErrInvalidModuleLicense:
 		return "invalid renvo:module-license directive"
 	case ParseErrConflictingModuleLicense:
@@ -56,8 +83,22 @@ func renvoOptionMessage(detail int) string {
 		return "-system cannot be combined with -t"
 	case ParseErrSystemArenaConflict:
 		return "-system cannot be combined with -arena-size"
+	case ParseErrMissingBackend:
+		return "missing backend definition after -backend"
+	case ParseErrBackendRead:
+		return "could not read backend definition"
+	case ParseErrInvalidBackend:
+		return "invalid backend definition"
+	case ParseErrBackendTarget:
+		return "backend definition does not export target"
 	case ParseErrScriptRequiresGo:
 		return "-script requires a .go source file"
+	case ParseErrScriptRequiresFile:
+		return "-script requires one explicit source file"
+	case ParseErrScriptFileCount:
+		return "-script accepts exactly one source file"
+	case ParseErrConflictingEmit:
+		return "-emit-unit and -emit-image cannot be used together"
 	case ParseErrObjectRequiresLinuxAmd64:
 		return "object mode requires linux/amd64"
 	case ParseErrObjectFileCount:
@@ -72,6 +113,24 @@ func renvoSetDiagnostic(d *Diagnostic, phase string, code string, message string
 
 func renvoSetDiagnosticDetail(d *Diagnostic, code string, message string) {
 	d.Code, d.Message = code, message
+}
+
+func renvoSyntaxErrorDiagnostic(d *Diagnostic, detail int) {
+	if detail == syntax.ParseErrScan {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-001", "source contains an invalid or unterminated token")
+	} else if detail == syntax.ParseErrPackage {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-003", "invalid or missing package clause")
+	} else if detail == syntax.ParseErrImport {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-004", "invalid import declaration")
+	} else if detail == syntax.ParseErrDecl {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-005", "invalid top-level declaration")
+	} else if detail == syntax.ParseErrFunc {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-006", "invalid function or method declaration")
+	} else if detail == syntax.ParseErrTopLevel {
+		renvoSetDiagnostic(d, "parser", "RENVO-PARSE-007", "unexpected statement or expression at package scope")
+	} else {
+		renvoSetDiagnostic(d, "compiler", "RENVO-BUG-004", "compiler bug: parser returned undeclared error code "+diagnosticIntText(detail))
+	}
 }
 
 func (d Diagnostic) Valid() bool { return d.Code != "" }
@@ -98,7 +157,7 @@ func printRenvoDiagnostic(d Diagnostic) {
 }
 
 func diagnosticForBuild(result BuildResult) Diagnostic {
-	d := Diagnostic{Phase: "frontend", Code: "RENVO-FRONTEND-001", Message: "frontend build failed"}
+	d := Diagnostic{Phase: "compiler", Code: "RENVO-BUG-001", Message: "compiler bug: build returned undeclared error code " + diagnosticIntText(result.Error)}
 	if result.Error == BuildErrOptions {
 		renvoSetDiagnostic(&d, "options", "RENVO-OPTION-001", "invalid command options")
 		optionError := result.Options.Error
@@ -115,11 +174,24 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else {
 			message := renvoOptionMessage(optionError)
 			if message != "" {
+				if optionError == ParseErrUnsupportedTarget || optionError == ParseErrInvalidTags || optionError == ParseErrExtraPackage || optionError == ParseErrInvalidArenaSize || optionError == ParseErrUnsupportedMode || optionError == ParseErrBackendRead || optionError == ParseErrBackendTarget {
+					message += " " + result.Options.ErrorArg
+				} else if optionError == ParseErrInvalidBackend {
+					message += ": " + result.Options.ErrorArg
+				}
 				number := optionError + 1
-				if optionError >= ParseErrMissingSystem {
+				if optionError == ParseErrScriptRequiresFile {
+					number = 33
+				} else if optionError == ParseErrScriptFileCount {
+					number = 34
+				} else if optionError == ParseErrConflictingEmit {
+					number = 35
+				} else if optionError >= ParseErrMissingSystem {
 					number = optionError - 2
 				}
 				renvoSetDiagnosticDetail(&d, renvoDiagnosticCode("OPTION", number), message)
+			} else {
+				renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-017", "compiler bug: option parser returned undeclared error code "+diagnosticIntText(optionError))
 			}
 		}
 		return d
@@ -132,7 +204,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			d.Message = renvoSourceMessageBlob[renvoSourceMessageOffsets[sourceError]:renvoSourceMessageOffsets[sourceError+1]]
 			number := sourceError + 1
 			if sourceError == SourceErrParse {
-				d.Phase, d.Code = "parser", "RENVO-PARSE-001"
+				renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-015", "compiler bug: parser failure source file was not retained")
 			} else if sourceError == SourceErrCInclude {
 				d.Phase, d.Code = "preprocessor", "RENVO-CPP-001"
 			} else {
@@ -152,11 +224,26 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		} else if sourceError == SourceErrCPreprocess {
 			return cPreprocessDiagnostic(result.Sources.CPreprocessError, result.Sources.ErrorPath,
 				result.Sources.CPreprocessLine, result.Sources.CPreprocessDetail)
+		} else if sourceError == SourceErrNoSelectedFiles {
+			if result.Sources.ErrorPath == "renvo.dev/device/board" {
+				renvoSetDiagnostic(&d, "target", "RENVO-BOARD-001", "device/board requires a supported board target; select a board such as m5nanoc6/riscv32")
+			} else {
+				renvoSetDiagnostic(&d, "loader", "RENVO-LOAD-024", "package has no files selected by this target and its build tags: "+result.Sources.ErrorPath)
+			}
+		} else {
+			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-018", "compiler bug: source collector returned undeclared error code "+diagnosticIntText(sourceError))
 		}
 		if result.Sources.ErrorSourcePath != "" {
 			d.Path = result.Sources.ErrorSourcePath
 			for i := 0; i < len(result.Sources.Files); i++ {
 				if result.Sources.Files[i].Path == d.Path {
+					if sourceError == SourceErrParse {
+						parsed := syntax.ParseFile(result.Sources.Files[i].Src)
+						renvoSyntaxErrorDiagnostic(&d, parsed.Error)
+						if parsed.ErrorTok >= 0 && parsed.ErrorTok < len(parsed.Tokens) {
+							return renvoDiagnosticOffset(d, result.Sources.Files[i].Src, syntax.TokenStart(parsed.Tokens[parsed.ErrorTok]))
+						}
+					}
 					d = renvoDiagnosticOffset(d, result.Sources.Files[i].Src, result.Sources.ErrorOffset)
 				}
 			}
@@ -168,7 +255,27 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	}
 	built := result.Pipeline
 	if built.Error == pipeline.PipelineErrLoad {
-		renvoSetDiagnostic(&d, "loader", "RENVO-LOAD-009", "workspace loading failed")
+		renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-016", "compiler bug: workspace graph failure has no declared graph error")
+		workspaceError := built.Workspace.Error
+		if workspaceError == load.WorkspaceErrDuplicateFile {
+			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-010", "duplicate source file")
+			if built.Workspace.ErrorFile >= 0 && built.Workspace.ErrorFile < len(built.Workspace.Files) {
+				d.Path = built.Workspace.Files[built.Workspace.ErrorFile].Path
+			}
+			return d
+		} else if workspaceError == load.WorkspaceErrMissingModule {
+			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-002", "go.mod was not found")
+			return d
+		} else if workspaceError == load.WorkspaceErrModule {
+			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-003", "invalid module declaration")
+			if built.Workspace.ErrorFile >= 0 && built.Workspace.ErrorFile < len(built.Workspace.Files) {
+				d.Path = built.Workspace.Files[built.Workspace.ErrorFile].Path
+			}
+			return d
+		} else if workspaceError != load.WorkspaceErrGraph {
+			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-008", "compiler bug: workspace loader returned undeclared error code "+diagnosticIntText(workspaceError))
+			return d
+		}
 		graph := built.Workspace.Graph
 		if graph.Error == load.GraphErrCycle {
 			renvoSetDiagnosticDetail(&d, "RENVO-LOAD-011", "import cycle detected")
@@ -180,30 +287,38 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			}
 			return d
 		} else {
+			if graph.Error == load.GraphErrRoot {
+				renvoSetDiagnosticDetail(&d, "RENVO-LOAD-004", "root package could not be resolved")
+			} else if graph.Error != load.GraphErrPackage {
+				renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-009", "compiler bug: package graph returned undeclared error code "+diagnosticIntText(graph.Error))
+				return d
+			}
 			pkg := graph.ErrorPackage
 			if pkg < 0 {
 				pkg = built.Workspace.ErrorFile
 			}
 			if pkg >= 0 && pkg < len(graph.Packages) {
 				packageError := graph.Packages[pkg].Error
-				if packageError == load.PackageErrParse {
-					renvoSetDiagnostic(&d, "parser", "RENVO-PARSE-001", "source syntax is invalid")
+				if packageError == load.PackageErrRef {
+					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-023", "package reference could not be resolved")
+				} else if packageError == load.PackageErrParse {
+					renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-005", "compiler bug: parser failure has no source file coordinate")
 				} else if packageError == load.PackageErrC11 {
-					renvoSetDiagnostic(&d, "c11", "RENVO-C11-001", "C11 source is not supported or is invalid")
-					if graph.Packages[pkg].C11Error == c11.TranslateErrVLA {
-						renvoSetDiagnosticDetail(&d, "RENVO-C11-002", "variable length arrays are not supported")
-					}
+					d = c11ErrorDiagnostic(d, graph.Packages[pkg].C11Error)
 				} else if packageError == load.PackageErrName {
 					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-012", "files in one directory declare different packages")
 				} else if packageError == load.PackageErrImport {
 					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-008", "import could not be resolved")
 				} else if packageError == load.PackageErrNoFiles {
 					renvoSetDiagnosticDetail(&d, "RENVO-LOAD-013", "package contains no selected Go or C files")
+				} else {
+					renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-010", "compiler bug: package loader returned undeclared error code "+diagnosticIntText(packageError))
 				}
 				result.ErrorPackage = pkg
 				result.ErrorFile = graph.Packages[pkg].ErrorFile
 				if packageError == load.PackageErrParse && result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
 					file := graph.Packages[pkg].Files[result.ErrorFile]
+					renvoSyntaxErrorDiagnostic(&d, file.File.Error)
 					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
 						renvoSetDiagnosticDetail(&d, "RENVO-PARSE-002", "generics are not supported by RENVO")
 						for i := 0; i < len(file.File.Tokens); i++ {
@@ -218,15 +333,56 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			}
 		}
 	} else if built.Error == pipeline.PipelineErrBuild {
-		renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "type checking failed")
-		if built.Build.Error == build.BuildErrLower {
-			renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-001", "checked program could not be lowered")
-		} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
-			d.Code = renvoDiagnosticCode("CHECK", built.Build.ErrorDetail)
-			d.Message = renvoCheckMessage(built.Build.ErrorDetail)
+		renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-012", "compiler bug: build stage returned undeclared error code "+diagnosticIntText(built.Build.Error))
+		if built.Build.Error == build.BuildErrCheck {
+			if built.Build.ErrorDetail == check.CheckErrGraph {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
+			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-033", "type assertion requires a type; found a composite literal")
+			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
+				renvoSetDiagnostic(&d, "checker", renvoDiagnosticCode("CHECK", built.Build.ErrorDetail), renvoCheckMessage(built.Build.ErrorDetail))
+			} else {
+				renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-013", "compiler bug: type checker returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail))
+			}
+		} else if built.Build.Error == build.BuildErrLower {
+			detail := built.Build.ErrorDetail
+			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(detail))
+			if detail == lower.EmitErrGraph {
+				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-001", "invalid checked graph reached the lowerer")
+			} else if detail == lower.EmitErrPackage {
+				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-002", "invalid package index reached the lowerer")
+			} else if detail == lower.EmitErrToken {
+				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-003", "invalid source token reached the lowerer")
+			} else if detail == lower.EmitErrUnit {
+				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-004", "package unit construction failed")
+			} else if detail == lower.EmitErrCheck {
+				renvoSetDiagnostic(&d, "lowerer", "RENVO-LOWER-005", "unchecked program reached the lowerer")
+			} else if detail == lower.EmitErrAssembly {
+				renvoSetDiagnostic(&d, "rtgasm", "RENVO-RTGASM-001", "invalid RTGASM source or function binding")
+				d.Path = built.ErrorPath
+				for i := 0; i < len(result.Sources.Files); i++ {
+					if result.Sources.Files[i].Path == d.Path {
+						return renvoDiagnosticOffset(d, result.Sources.Files[i].Src, built.ErrorOffset)
+					}
+				}
+			}
+		} else if built.Build.Error == build.BuildErrUnit {
+			renvoSetDiagnostic(&d, "unit", "RENVO-UNIT-001", "lowered package unit is invalid")
+		} else if built.Build.Error == build.BuildErrRoot {
+			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-002", "root package is missing")
+		}
+	} else if built.Error == pipeline.PipelineErrLink {
+		if built.Link.Error == link.LinkErrBuild {
+			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-001", "linker received a failed package build")
+		} else if built.Link.Error == link.LinkErrRoot {
+			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-002", "root package is missing")
+		} else if built.Link.Error == link.LinkErrUnit {
+			renvoSetDiagnostic(&d, "linker", "RENVO-LINK-003", "linked unit is invalid")
+		} else {
+			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-011", "compiler bug: linker returned undeclared error code "+diagnosticIntText(built.Link.Error))
 		}
 	} else {
-		renvoSetDiagnostic(&d, "linker", "RENVO-LINK-001", "package linking failed")
+		renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-002", "compiler bug: pipeline returned undeclared error code "+diagnosticIntText(built.Error))
 	}
 	return renvoBuildDiagnosticLocation(result, d)
 }

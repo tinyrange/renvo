@@ -1231,6 +1231,13 @@ func (out *RTGEmitter) BSSSize() int {
 	return out.asm.bssSize
 }
 
+// RejectImageSize lets a target-owned image encoder explain why it could not
+// represent an otherwise valid program. The shared compiler reports the
+// retained size and layout details if the encoder returns an empty image.
+func (out *RTGEmitter) RejectImageSize(memory bool, needed int, limit int) {
+	renvoRTGRejectImageSize(memory, needed, limit)
+}
+
 func (out *RTGEmitter) ReserveBSS(size int, alignment int) int {
 	if alignment <= 0 {
 		alignment = 1
@@ -2214,7 +2221,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
-		method != "Data" && method != "SetData" && method != "BSSSize" && method != "WasmLocalSlots" &&
+		method != "Data" && method != "SetData" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
 		method != "WindowsSubsystem" && method != "StaticImportCount" &&
 		method != "StaticImportDLL" && method != "StaticImportName" &&
 		method != "RelocationCount" &&
@@ -2305,6 +2312,15 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method == "BSSSize" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".bssSize"...), end, true
+	}
+	if method == "RejectImageSize" && len(arguments) == 3 {
+		replacement = append(replacement, "renvoRTGRejectImageSize("...)
+		replacement = append(replacement, arguments[0]...)
+		replacement = append(replacement, ", "...)
+		replacement = append(replacement, arguments[1]...)
+		replacement = append(replacement, ", "...)
+		replacement = append(replacement, arguments[2]...)
+		return append(replacement, ')'), end, true
 	}
 	if method == "WasmLocalSlots" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

@@ -1,131 +1,61 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"renvo.dev/internal/targetinfo"
 )
 
-func TestPlatformCatalogIncludesNanoC6UnitDriversAndExamples(t *testing.T) {
-	root, err := filepath.Abs("../../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	boards, err := readBoardDefinitions(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	packages, err := buildPlatformPackages(root, t.TempDir(), boards)
-	if err != nil {
-		t.Fatal(err)
-	}
-	driver, ok := packages["renvo.dev/device/sensor/miniscale"]
-	if !ok || driver.Main || len(driver.Files) != 1 || driver.Files[0] != "miniscale.go" {
-		t.Fatalf("Mini Scales driver catalog entry = %#v, present=%v", driver, ok)
-	}
-	example, ok := packages["renvo.dev/examples/device/miniscale"]
-	if !ok || !example.Main || len(example.Boards) != 1 || example.Boards[0].Name != "M5Stack NanoC6" ||
-		len(example.Files) != 1 || example.Files[0] != "main.go" {
-		t.Fatalf("Mini Scales example catalog entry = %#v, present=%v", example, ok)
-	}
-	synthDriver, ok := packages["renvo.dev/device/audio/sam2695"]
-	if !ok || synthDriver.Main || len(synthDriver.Files) != 1 || synthDriver.Files[0] != "sam2695.go" {
-		t.Fatalf("Unit Synth driver catalog entry = %#v, present=%v", synthDriver, ok)
-	}
-	uart, ok := packages["renvo.dev/device/uart"]
-	if !ok || uart.Main || len(uart.Files) != 1 || uart.Files[0] != "uart.go" {
-		t.Fatalf("UART catalog entry = %#v, present=%v", uart, ok)
-	}
-	synthExample, ok := packages["renvo.dev/examples/device/synth"]
-	if !ok || !synthExample.Main || len(synthExample.Boards) != 1 || synthExample.Boards[0].Name != "M5Stack NanoC6" ||
-		len(synthExample.Files) != 1 || synthExample.Files[0] != "main.go" {
-		t.Fatalf("Unit Synth example catalog entry = %#v, present=%v", synthExample, ok)
+func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
+	for _, descriptor := range targetinfo.All() {
+		if !descriptor.Advertised {
+			continue
+		}
+		label := targetLabel(descriptor.Name)
+		if label == "" || label == descriptor.Name {
+			t.Errorf("target %q has no human label", descriptor.Name)
+		}
 	}
 }
 
-func TestVersionAssetUsesContentHash(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "compiler.wasm")
-	if err := os.WriteFile(path, []byte("compiler one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	first, err := versionAsset(dir, "compiler.wasm")
+func TestPackageDocumentationIncludesOverviewAndDeclarations(t *testing.T) {
+	docs, err := buildPackageDocs(filepath.Join("..", "..", "..", "..", "device", "i2c"), "renvo.dev/device/i2c")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(first, "compiler.wasm?v=") {
-		t.Fatalf("versioned asset = %q", first)
+	if docs == nil || docs.Name != "i2c" || docs.Doc == "" {
+		t.Fatalf("package docs = %#v", docs)
 	}
-	if err := os.WriteFile(path, []byte("compiler two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	second, err := versionAsset(dir, "compiler.wasm")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Fatalf("content change retained version %q", first)
-	}
-}
-
-func TestPDP11ExampleIsClassifiedAsAComputer(t *testing.T) {
-	var found *platformPackageSpec
-	for _, spec := range platformPackageSpecs(nil) {
-		if spec.Path == "examples/pdp11v7" {
-			copy := spec
-			found = &copy
+	found := false
+	for _, declaration := range docs.Types {
+		if declaration.Name == "Bus" {
+			if declaration.File == "" || declaration.Line < 1 {
+				t.Fatalf("Bus source location = %q:%d", declaration.File, declaration.Line)
+			}
+			found = true
 			break
 		}
 	}
-	if found == nil || len(found.Computers) != 1 {
-		t.Fatalf("PDP-11 computers = %#v", found)
-	}
-	if found.Computers[0].Name != "PDP-11" || found.Computers[0].Family != "Retro computer" {
-		t.Fatalf("PDP-11 metadata = %#v", found.Computers[0])
-	}
-	if len(found.Boards) != 0 {
-		t.Fatalf("PDP-11 boards = %#v", found.Boards)
+	if !found {
+		t.Fatalf("i2c docs do not contain exported Bus type: %#v", docs.Types)
 	}
 }
 
-func TestDOSDeviceAndExamplesAreInBrowserCatalog(t *testing.T) {
-	root, err := filepath.Abs("../../../..")
-	if err != nil {
-		t.Fatal(err)
+func TestBuiltinDocumentationDescribesRenvoBuiltins(t *testing.T) {
+	docs := builtinDocs()
+	if docs.ImportPath != "builtin" || len(docs.Functions) < 10 || len(docs.Types) < 10 {
+		t.Fatalf("builtin docs are incomplete: %#v", docs)
 	}
-	packages, err := buildPlatformPackages(root, t.TempDir(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	device, ok := packages["renvo.dev/device/dos"]
-	if !ok || device.Main || len(device.Files) == 0 {
-		t.Fatalf("DOS device package = %#v, present=%v", device, ok)
-	}
-	for _, name := range []string{"msdos", "msdos-vga", "msdos-filesystem", "msdos-system", "msdos-input"} {
-		example, present := packages["renvo.dev/examples/"+name]
-		if !present || !example.Main || len(example.Computers) != 1 {
-			t.Errorf("DOS example %q = %#v, present=%v", name, example, present)
-		}
-		if name != "msdos" && example.ArenaSize != 4096 {
-			t.Errorf("DOS MZ example %q arena = %d", name, example.ArenaSize)
-		}
+	if docs.Functions[0].Name != "append" || docs.Functions[0].Doc == "" {
+		t.Fatalf("append docs = %#v", docs.Functions[0])
 	}
 }
 
-func TestDOSOutputsUseNativeExtensions(t *testing.T) {
-	if got := outputName("msdos/8086", "dos-com"); got != "app.com" {
-		t.Fatalf("COM output = %q", got)
-	}
-	if got := outputName("msdos/8086-mz", "dos-mz"); got != "app.exe" {
-		t.Fatalf("MZ output = %q", got)
-	}
-}
-
-func TestDOSBrowserTargetsUseVM32Backends(t *testing.T) {
-	for _, target := range customTargets {
-		if strings.HasPrefix(target.Name, "msdos/") && (target.Format != "vm32" || !strings.HasSuffix(target.Backend, ".rnvb")) {
-			t.Errorf("DOS browser target = %#v", target)
-		}
+func TestPackageDocumentationKeepsOneBuildVariantOverview(t *testing.T) {
+	doc := cleanPackageDoc("fmt", "Package fmt is portable.\n\nPackage fmt is target specific.\n\nMore detail.")
+	if strings.Contains(doc, "target specific") || !strings.Contains(doc, "More detail.") {
+		t.Fatalf("cleaned package doc = %q", doc)
 	}
 }

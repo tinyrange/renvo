@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/doc"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -64,6 +67,30 @@ type standardPackage struct {
 	Boards    []boardTarget    `json:"boards,omitempty"`
 	Computers []computerTarget `json:"computers,omitempty"`
 	Language  string           `json:"language,omitempty"`
+	Docs      *packageDocs     `json:"docs,omitempty"`
+}
+
+type docEntry struct {
+	Name      string `json:"name"`
+	Signature string `json:"signature"`
+	Doc       string `json:"doc,omitempty"`
+	File      string `json:"file,omitempty"`
+	Line      int    `json:"line,omitempty"`
+}
+
+type docType struct {
+	docEntry
+	Methods []docEntry `json:"methods,omitempty"`
+}
+
+type packageDocs struct {
+	Name       string     `json:"name"`
+	ImportPath string     `json:"importPath"`
+	Doc        string     `json:"doc,omitempty"`
+	Constants  []docEntry `json:"constants,omitempty"`
+	Variables  []docEntry `json:"variables,omitempty"`
+	Functions  []docEntry `json:"functions,omitempty"`
+	Types      []docType  `json:"types,omitempty"`
 }
 
 type boardTarget struct {
@@ -93,6 +120,7 @@ type standardCatalog struct {
 	Platforms map[string]standardPackage `json:"platforms,omitempty"`
 	Libc      []string                   `json:"libc,omitempty"`
 	Module    string                     `json:"module,omitempty"`
+	Builtins  packageDocs                `json:"builtins"`
 }
 
 type customTarget struct {
@@ -161,7 +189,7 @@ func main() {
 			backend = "backends/wasi-wasm32.wasm"
 		}
 		catalog.Targets = append(catalog.Targets, targetAsset{
-			Name: descriptor.Name, BackendTarget: descriptor.Backend,
+			Name: descriptor.Name, Label: targetLabel(descriptor.Name), BackendTarget: descriptor.Backend,
 			Backend: backend, CBackend: "backends/native-c.wasm", Output: outputName(descriptor.Name, descriptor.Image),
 			Runnable: descriptor.Backend == "wasi/wasm32", Tags: descriptor.Tags,
 		})
@@ -234,6 +262,40 @@ func main() {
 	if err = buildStandardLibrary(root, *output, boards); err != nil {
 		fail(err)
 	}
+}
+
+func targetLabel(name string) string {
+	switch name {
+	case "linux/amd64":
+		return "Linux x86-64"
+	case "linux/386":
+		return "Linux x86 (32-bit)"
+	case "linux/aarch64":
+		return "Linux ARM64"
+	case "linux/arm":
+		return "Linux ARM (32-bit)"
+	case "windows/amd64":
+		return "Windows x86-64"
+	case "windows/386":
+		return "Windows x86 (32-bit)"
+	case "windows/arm64":
+		return "Windows ARM64"
+	case "darwin/arm64":
+		return "macOS ARM64"
+	case "wasi/wasm32":
+		return "WebAssembly (WASI)"
+	case "browser/wasm32":
+		return "Web application"
+	case "vm/vm32":
+		return "Renvo VM bytecode"
+	case "freebsd/amd64":
+		return "FreeBSD x86-64"
+	case "openbsd/amd64":
+		return "OpenBSD x86-64"
+	case "netbsd/amd64":
+		return "NetBSD x86-64"
+	}
+	return name
 }
 
 func versionAsset(output, name string) (string, error) {
@@ -352,7 +414,11 @@ func buildStandardLibrary(root string, output string, boards []boardDefinition) 
 			return relErr
 		}
 		name := filepath.ToSlash(relative)
-		item := standardPackage{}
+		docs, docsErr := buildPackageDocs(path, name)
+		if docsErr != nil {
+			return docsErr
+		}
+		item := standardPackage{Docs: docs}
 		imports := make(map[string]bool)
 		for _, child := range entries {
 			if child.IsDir() || strings.HasSuffix(child.Name(), "_test.go") || strings.HasPrefix(child.Name(), ".") {
@@ -393,7 +459,9 @@ func buildStandardLibrary(root string, output string, boards []boardDefinition) 
 	if err != nil {
 		return err
 	}
-	return writeJSON(filepath.Join(output, "stdlib", "catalog.json"), standardCatalog{Packages: packages, Platforms: platforms, Libc: libc, Module: string(module)})
+	return writeJSON(filepath.Join(output, "stdlib", "catalog.json"), standardCatalog{
+		Packages: packages, Platforms: platforms, Libc: libc, Module: string(module), Builtins: builtinDocs(),
+	})
 }
 
 func buildCLibrary(root string, output string) ([]string, error) {
@@ -567,9 +635,196 @@ func buildPlatformPackages(root string, output string, boards []boardDefinition)
 		}
 		sort.Strings(item.Files)
 		sort.Strings(item.Imports)
-		packages["renvo.dev/"+spec.Path] = item
+		importPath := "renvo.dev/" + spec.Path
+		if !item.Main {
+			item.Docs, err = buildPackageDocs(path, importPath)
+			if err != nil {
+				return nil, err
+			}
+		}
+		packages[importPath] = item
 	}
 	return packages, nil
+}
+
+func buildPackageDocs(dir string, importPath string) (*packageDocs, error) {
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseDir(fset, dir, func(entry os.FileInfo) bool {
+		return !strings.HasSuffix(entry.Name(), "_test.go") && strings.HasSuffix(entry.Name(), ".go")
+	}, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("document %s: %w", importPath, err)
+	}
+	var syntaxPackage *ast.Package
+	for name, candidate := range parsed {
+		if !strings.HasSuffix(name, "_test") {
+			syntaxPackage = candidate
+			break
+		}
+	}
+	if syntaxPackage == nil {
+		return nil, nil
+	}
+	for _, file := range syntaxPackage.Files {
+		ast.FileExports(file)
+	}
+	pkg := doc.New(syntaxPackage, importPath, doc.PreserveAST)
+	result := &packageDocs{Name: pkg.Name, ImportPath: importPath, Doc: cleanPackageDoc(pkg.Name, pkg.Doc)}
+	appendValues := func(destination *[]docEntry, values []*doc.Value) error {
+		for _, value := range values {
+			signature, formatErr := formatGenDeclSignature(fset, value.Decl)
+			if formatErr != nil {
+				return formatErr
+			}
+			file, line := docSource(fset, value.Decl)
+			*destination = append(*destination, docEntry{Name: strings.Join(value.Names, ", "), Signature: signature,
+				Doc: strings.TrimSpace(value.Doc), File: file, Line: line})
+		}
+		return nil
+	}
+	if err = appendValues(&result.Constants, pkg.Consts); err != nil {
+		return nil, fmt.Errorf("document constants in %s: %w", importPath, err)
+	}
+	if err = appendValues(&result.Variables, pkg.Vars); err != nil {
+		return nil, fmt.Errorf("document variables in %s: %w", importPath, err)
+	}
+	for _, function := range pkg.Funcs {
+		signature, formatErr := formatFunctionSignature(fset, function.Decl)
+		if formatErr != nil {
+			return nil, fmt.Errorf("document function %s.%s: %w", importPath, function.Name, formatErr)
+		}
+		file, line := docSource(fset, function.Decl)
+		result.Functions = append(result.Functions, docEntry{Name: function.Name, Signature: signature, Doc: strings.TrimSpace(function.Doc), File: file, Line: line})
+	}
+	for _, typ := range pkg.Types {
+		signature, formatErr := formatGenDeclSignature(fset, typ.Decl)
+		if formatErr != nil {
+			return nil, fmt.Errorf("document type %s.%s: %w", importPath, typ.Name, formatErr)
+		}
+		file, line := docSource(fset, typ.Decl)
+		entry := docType{docEntry: docEntry{Name: typ.Name, Signature: signature, Doc: strings.TrimSpace(typ.Doc), File: file, Line: line}}
+		for _, method := range typ.Methods {
+			methodSignature, methodErr := formatFunctionSignature(fset, method.Decl)
+			if methodErr != nil {
+				return nil, fmt.Errorf("document method %s.%s: %w", importPath, method.Name, methodErr)
+			}
+			methodFile, methodLine := docSource(fset, method.Decl)
+			entry.Methods = append(entry.Methods, docEntry{Name: method.Name, Signature: methodSignature, Doc: strings.TrimSpace(method.Doc), File: methodFile, Line: methodLine})
+		}
+		result.Types = append(result.Types, entry)
+	}
+	return result, nil
+}
+
+func docSource(fset *token.FileSet, node ast.Node) (string, int) {
+	position := fset.Position(node.Pos())
+	return filepath.Base(position.Filename), position.Line
+}
+
+func cleanPackageDoc(name string, text string) string {
+	paragraphs := strings.Split(strings.TrimSpace(text), "\n\n")
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(paragraphs))
+	packageIntroduction := false
+	for _, paragraph := range paragraphs {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" || seen[paragraph] {
+			continue
+		}
+		introduction := strings.HasPrefix(paragraph, "Package "+name+" ")
+		if introduction && packageIntroduction {
+			continue
+		}
+		seen[paragraph] = true
+		packageIntroduction = packageIntroduction || introduction
+		result = append(result, paragraph)
+	}
+	return strings.Join(result, "\n\n")
+}
+
+func formatFunctionSignature(fset *token.FileSet, declaration *ast.FuncDecl) (string, error) {
+	copy := *declaration
+	copy.Doc = nil
+	copy.Body = nil
+	return formatDocNode(fset, &copy)
+}
+
+func formatGenDeclSignature(fset *token.FileSet, declaration *ast.GenDecl) (string, error) {
+	copy := *declaration
+	copy.Doc = nil
+	copy.Specs = make([]ast.Spec, 0, len(declaration.Specs))
+	for _, spec := range declaration.Specs {
+		switch value := spec.(type) {
+		case *ast.ValueSpec:
+			clean := *value
+			clean.Doc = nil
+			clean.Comment = nil
+			copy.Specs = append(copy.Specs, &clean)
+		case *ast.TypeSpec:
+			clean := *value
+			clean.Doc = nil
+			clean.Comment = nil
+			copy.Specs = append(copy.Specs, &clean)
+		}
+	}
+	return formatDocNode(fset, &copy)
+}
+
+func formatDocNode(fset *token.FileSet, node ast.Node) (string, error) {
+	var output bytes.Buffer
+	if err := format.Node(&output, fset, node); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+func builtinDocs() packageDocs {
+	functions := []docEntry{
+		{Name: "append", Signature: "func append(slice []T, values ...T) []T", Doc: "Appends values to a slice and returns the resulting slice."},
+		{Name: "cap", Signature: "func cap(value T) int", Doc: "Returns the capacity of an array, slice, or channel."},
+		{Name: "clear", Signature: "func clear(value T)", Doc: "Deletes all map entries or zeroes all slice elements."},
+		{Name: "close", Signature: "func close(channel chan<- T)", Doc: "Closes a channel. A receive can continue until buffered values have been received."},
+		{Name: "complex", Signature: "func complex(real, imag T) ComplexT", Doc: "Constructs a complex value from real and imaginary components."},
+		{Name: "copy", Signature: "func copy(dst, src []T) int", Doc: "Copies elements and returns the number copied. Source and destination may overlap."},
+		{Name: "delete", Signature: "func delete(m map[K]V, key K)", Doc: "Deletes the map entry for key. Deleting from a nil map or deleting a missing key has no effect."},
+		{Name: "imag", Signature: "func imag(value ComplexT) T", Doc: "Returns the imaginary component of a complex value."},
+		{Name: "len", Signature: "func len(value T) int", Doc: "Returns the length of a string, array, slice, map, or channel."},
+		{Name: "make", Signature: "func make(T, size ...int) T", Doc: "Allocates and initializes a slice, map, or channel."},
+		{Name: "max", Signature: "func max(values ...T) T", Doc: "Returns the largest value from one or more ordered values."},
+		{Name: "min", Signature: "func min(values ...T) T", Doc: "Returns the smallest value from one or more ordered values."},
+		{Name: "new", Signature: "func new(T) *T", Doc: "Allocates a zero value and returns a pointer to it."},
+		{Name: "panic", Signature: "func panic(value any)", Doc: "Stops normal execution and begins panicking. Deferred functions run while the panic moves up the call stack."},
+		{Name: "print", Signature: "func print(values ...T)", Doc: "Writes values using Renvo's implementation-defined debug format."},
+		{Name: "println", Signature: "func println(values ...T)", Doc: "Writes values using Renvo's implementation-defined debug format followed by a newline."},
+		{Name: "real", Signature: "func real(value ComplexT) T", Doc: "Returns the real component of a complex value."},
+		{Name: "recover", Signature: "func recover() any", Doc: "Stops a panicking sequence when called directly by a deferred function and returns the value passed to panic."},
+	}
+	typeNames := []string{"any", "bool", "byte", "complex64", "complex128", "error", "float32", "float64", "int", "int8", "int16", "int32", "int64", "rune", "string", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr"}
+	types := make([]docType, 0, len(typeNames))
+	for _, name := range typeNames {
+		description := "Predeclared type."
+		switch name {
+		case "any":
+			description = "Predeclared alias for interface{}; it accepts a value of any type."
+		case "byte":
+			description = "Predeclared alias for uint8."
+		case "rune":
+			description = "Predeclared alias for int32, conventionally used for Unicode code points."
+		case "error":
+			description = "Predeclared interface for values that describe an error condition."
+		}
+		types = append(types, docType{docEntry: docEntry{Name: name, Signature: "type " + name, Doc: description}})
+	}
+	return packageDocs{
+		Name: "builtin", ImportPath: "builtin",
+		Doc: "Package builtin documents Renvo's predeclared identifiers. These names are available without an import.",
+		Constants: []docEntry{
+			{Name: "true, false", Signature: "const (\n\ttrue = 0 == 0\n\tfalse = 0 != 0\n)", Doc: "true and false are the two untyped boolean values."},
+			{Name: "iota", Signature: "const iota = 0", Doc: "iota is the zero-based ordinal of the current const specification."},
+		},
+		Variables: []docEntry{{Name: "nil", Signature: "var nil T", Doc: "nil is the zero value for pointer, channel, function, interface, map, and slice types."}},
+		Functions: functions, Types: types,
+	}
 }
 
 func sourcePackage(path string) string {

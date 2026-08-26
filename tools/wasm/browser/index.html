@@ -13,18 +13,26 @@
       <button class="brand" id="toggle-sidebar" type="button" aria-label="Toggle project sidebar" aria-expanded="true" title="Toggle project sidebar">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg>
       </button>
-      <div class="project-title"><span class="project-kicker">Renvo project</span><strong id="project-name">playground</strong></div>
+      <div class="project-title"><strong id="project-name">playground</strong></div>
       <label class="command-input" title="Compiler arguments">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5M10 13h3"/></svg>
         <input id="command" value="-s -o app.wasm ." spellcheck="false" aria-label="Compiler arguments">
       </label>
       <div class="command-actions">
-        <div class="target-picker" id="target-picker">
-          <button id="target-button" type="button" aria-label="Build target" aria-haspopup="listbox" aria-expanded="false">
-            <span id="target-label">wasi/wasm32</span>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
-          </button>
-          <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
+        <div class="target-control">
+          <div class="target-destination">
+            <div class="target-picker" id="target-picker">
+              <button id="target-button" type="button" aria-label="Build target" aria-haspopup="listbox" aria-expanded="false">
+                <span id="target-label">WebAssembly (WASI)</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+              </button>
+              <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
+            </div>
+            <select id="flash-transport" aria-label="ESP flash transport" title="ESP flash transport" hidden>
+              <option value="webserial">WebSerial</option>
+              <option value="webusb">WebUSB</option>
+            </select>
+          </div>
         </div>
         <div class="run-actions">
           <button class="secondary-action" id="test" disabled title="Run tests (Ctrl+Shift+Enter)">
@@ -34,14 +42,10 @@
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
             <span>Run</span>
           </button>
-          <select id="flash-transport" aria-label="ESP flash transport" title="ESP flash transport" hidden>
-            <option value="webserial">WebSerial</option>
-            <option value="webusb">WebUSB</option>
-          </select>
         </div>
-        <button class="primary-action" id="compile" disabled title="Build (Ctrl+Enter)">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5V3Z"/></svg>
-          <span>Build</span>
+        <button class="primary-action" id="compile" disabled title="Download (Ctrl+Enter)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 13h10"/></svg>
+          <span>Download</span>
         </button>
       </div>
     </header>
@@ -92,8 +96,12 @@
       <input id="project-directory-input" type="file" webkitdirectory multiple hidden>
       <input id="backend-file-input" type="file" accept=".json,.wasm,.rtg" multiple hidden>
       <div class="file-tree" id="file-tree" role="tree"></div>
+      <div class="section-title utility-heading collapsed" id="examples-heading"><span class="chevron">›</span><span>EXAMPLES</span><span id="sidebar-example-count" class="utility-meta"></span></div>
+      <div class="sidebar-examples" id="sidebar-examples" role="tree" hidden><span class="tree-loading">Loading examples…</span></div>
       <div class="section-title utility-heading collapsed" id="outline-heading"><span class="chevron">›</span><span>OUTLINE</span><span id="outline-count" class="utility-meta"></span></div>
       <div class="outline-tree" id="outline-tree" role="tree" hidden></div>
+      <div class="section-title utility-heading collapsed" id="help-heading"><span class="chevron">›</span><span>HELP &amp; DOCUMENTATION</span></div>
+      <div class="help-tree" id="help-tree" role="tree" hidden><span class="tree-loading">Loading documentation…</span></div>
       <div class="section-title utility-heading collapsed" id="library-heading"><span class="chevron">›</span><span>API &amp; LIBRARIES</span></div>
       <div class="stdlib-tree" id="stdlib-tree" role="tree" hidden><span class="tree-loading">Loading packages…</span></div>
       <div class="section-title utility-heading collapsed" id="advanced-heading"><span class="chevron">›</span><span>BUILD OPTIONS</span></div>
@@ -137,6 +145,7 @@
       <div class="editor-tabs" role="tablist" aria-label="Open editors">
         <div class="open-editor-tabs" id="open-editor-tabs"></div>
         <div class="editor-toolbar">
+          <button id="copy-help-page" class="editor-text-action" type="button" title="Copy all documentation on this page" hidden>Copy docs</button>
           <button id="copy-to-playground" type="button" title="Copy this library source into the editable project" hidden>Copy to project</button>
           <button id="use-backend" class="editor-text-action" type="button" title="Add targets from this RTG definition" hidden>Use backend</button>
           <button id="format-file" type="button" title="Format document (Shift+Alt+F)">Format</button>
@@ -149,6 +158,7 @@
       <div class="editor-host" id="editor" aria-label="Code editor">
         <div class="editor-loading"><span class="spinner"></span><span>Loading editor…</span></div>
       </div>
+      <article class="help-view" id="help-view" aria-label="Documentation" hidden></article>
 
       <section class="panel" id="panel" aria-label="Build panel">
         <div class="panel-tabs" role="tablist">
@@ -159,7 +169,6 @@
           <button class="panel-tab" data-panel="tests" role="tab" aria-selected="false">Tests</button>
           <button class="panel-tab" data-panel="search" role="tab" aria-selected="false">Search</button>
           <button class="panel-tab" data-panel="preview" role="tab" aria-selected="false">Preview</button>
-          <button class="panel-tab" data-panel="artifacts" role="tab" aria-selected="false">Artifacts <span id="artifact-count">0</span></button>
           <div class="panel-actions">
             <button id="toggle-plotter-size" title="Expand plotter over editor" aria-pressed="false" hidden>Expand</button>
             <button id="clear-output" title="Clear output">Clear</button>
@@ -186,7 +195,6 @@
             <div id="search-matches"><div class="empty-state">Search the project with Ctrl+Shift+F.</div></div>
           </div>
           <div class="panel-view preview" id="preview" data-panel-view="preview"><div class="empty-state">Build and run browser/wasm32 to preview the application.</div></div>
-          <div class="panel-view artifacts" data-panel-view="artifacts" id="artifacts"><div class="empty-state">Build outputs will appear here.</div></div>
         </div>
       </section>
     </main>
@@ -323,7 +331,7 @@
               <label><span>Target</span><select id="example-target-filter"><option value="">All targets</option></select></label>
               <select id="example-board-filter" aria-label="Hardware" hidden><option value="">All hardware</option></select>
             </div>
-            <div class="example-summary"><span id="example-result-count">Loading examples…</span><span>Opening an example replaces the current files.</span></div>
+            <div class="example-summary"><span id="example-result-count">Loading examples…</span><span>Use example replaces the current project after confirmation.</span></div>
             <div class="example-results" id="example-results" aria-live="polite"></div>
           </section>
         </div>

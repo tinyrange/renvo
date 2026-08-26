@@ -143,17 +143,18 @@ self.addEventListener("message", async (event) => {
     });
     return;
   }
-  if (request.type !== "compile") return;
+  if (request.type !== "compile" && request.type !== "validate") return;
   if (!frontendModule) {
-    self.postMessage({ type: "result", exitCode: 1, stdout: "", stderr: String(compilerError || "compiler is not ready"), files: [], elapsedMilliseconds: 0, linearMemoryBytes: 0 });
+    self.postMessage({ type: request.type === "validate" ? "validation-result" : "result", id: request.id, exitCode: 1, stdout: "", stderr: String(compilerError || "compiler is not ready"), files: [], elapsedMilliseconds: 0, linearMemoryBytes: 0 });
     return;
   }
   try {
     const result = await runPipeline(request);
+    if (request.type === "validate") result.type = "validation-result";
     self.postMessage(result, result.files.map((file) => file.data));
   } catch (error) {
     self.postMessage({
-      type: "result", id: request.id, exitCode: 1, stdout: "", stderr: String(error),
+      type: request.type === "validate" ? "validation-result" : "result", id: request.id, exitCode: 1, stdout: "", stderr: String(error),
       files: [], elapsedMilliseconds: 0, frontendMilliseconds: 0,
       backendMilliseconds: 0, linearMemoryBytes: 0,
     });
@@ -217,7 +218,7 @@ async function runPipeline(request) {
   const plan = pipelineArguments(request.args, files, request.backendTarget);
   const started = performance.now();
   const frontendStarted = performance.now();
-  self.postMessage({ type: "compile-progress", id: request.id, phase: "check", message: "Checking and compiling project code…" });
+  if (request.type !== "validate") self.postMessage({ type: "compile-progress", id: request.id, phase: "check", message: "Checking and compiling project code…" });
   let exitCode = await runModule(frontendModule, context, ["renvo", ...plan.frontend]);
   const frontendMilliseconds = performance.now() - frontendStarted;
   let backendMilliseconds = 0;
@@ -243,12 +244,14 @@ async function runPipeline(request) {
     }
     const backendReady = request.backendFormat === "vm32" ? readyBackendPrograms.has(request.backend) : readyBackendModules.has(request.backend);
     const backendLoading = request.backendFormat === "vm32" ? backendPrograms.has(request.backend) : backendModules.has(request.backend);
-    self.postMessage({
-      type: "compile-progress", id: request.id, phase: "firmware",
-      message: backendReady ? "Building firmware for the board…" : backendLoading
-        ? "Finishing the board compiler download…"
-        : "Downloading the board compiler. This only happens on the first build…",
-    });
+    if (request.type !== "validate") {
+      self.postMessage({
+        type: "compile-progress", id: request.id, phase: "firmware",
+        message: backendReady ? "Building firmware for the board…" : backendLoading
+          ? "Finishing the board compiler download…"
+          : "Downloading the board compiler. This only happens on the first build…",
+      });
+    }
     if (request.backendFormat === "vm32") {
       if (!vmBackendURL) throw new Error("VM32 backend execution is unavailable");
       if (!vmBackendModule) vmBackendModule = loadModule(vmBackendURL, "VM backend runner");
