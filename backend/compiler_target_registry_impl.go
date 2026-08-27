@@ -52,7 +52,7 @@ func renvoParseTargetArg(target string) int {
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 	if target == renvoTargetLinuxAmd64 {
-		return "linux/amd64", "|/\x9bv\x92w\x1f\xf9\x82vk\xfb\br@\x89\x8b\xcf\xf7V)dYʮP\xa1\xdcw:\xcd1", 3, true
+		return "linux/amd64", "wӷUA65\v\xa9_\xf6\xe3\x86g\xd6UJp\x1cþ\x18\x1f\xb3\xe9\"7T\u0380#/", 3, true
 	}
 	if target == renvoTargetLinux386 {
 		return "linux/386", "\x1e\xd2A\xf1+&cc\xf9\xb3(0\xa2\xb5\xb9j<\x01\xe4\x0eLd\x8ch\x99\xf2X_o\x9a\xe7\x94", 3, true
@@ -64,7 +64,7 @@ func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 		return "linux/arm", "\xc6Α(\x066\xf1E\x15\xf2]V\xb5r|gFc\xf9\xadv\xbe\xa8}\x99t\xce\x1f\xd1+ef", 3, true
 	}
 	if target == renvoTargetWindowsAmd64 {
-		return "windows/amd64", "\xe10\x04\x02\xce\xd9k5\xff\x1cJ\x85\x8a\x11\xac\xe7q\xf9ɠ\x90\xe2O\x04\xbeX\x8e\xb8\x8aͺ\x01", 3, true
+		return "windows/amd64", "\brl\x8fX\xa0\vOFa\xb4n¬\xa7\x1dSd\xc4\xc7\n`ޚp\x19Gh\x05\xa2\x95D", 3, true
 	}
 	if target == renvoTargetWindows386 {
 		return "windows/386", ",\xd4\a\xe0\xe9(\n\xdb\x02\xf57\x89\x97YZ\xf9\x97\x0f\xb9\xfbh\x9a\xf2\x92\x1d\xf0\x10\xda\xc3\x12W\x7f", 3, true
@@ -76,7 +76,7 @@ func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 		return "darwin/arm64", "\xe8!)f\x95\xf13Ǝ\xf4\x81\xc1`k\xb6\xd3{C\xba\xd9\xf1u\xcca\x1c{4\xeb\x00\x80\xd6;", 3, true
 	}
 	if target == renvoTargetLinuxKernelAmd64 {
-		return "linux-kernel/amd64", "\xe9R\x9fP]\xf2\x8fKK\xb7,\xa5;!\xe6&\xe8\xf8\xb7\xd5\x1ft\xbcj7B\xa7C\x19P\x11\xe0", 3, true
+		return "linux-kernel/amd64", ":\x03\x91\xe9,\xa4\x02\a\x05u\x89uI0\x9dC\xab\x8b\xf2\xc7/\xd0HlĴ\xbd\x19\xfa$\xbd\xf2", 3, true
 	}
 	if target == renvoTargetWindowsArm64 {
 		return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
@@ -85,13 +85,13 @@ func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 		return "vm/vm32", "\xd14\xe6\x10E\x15\x88\xc6\xc5F\x15D\x8d\x86RNo{Ke\x00\xa6\x7f\x8f\xdct\x17(\x95\xdb\xea\xc7", 3, true
 	}
 	if target == renvoTargetFreeBSDAmd64 {
-		return "freebsd/amd64", "۠\fȿ\xb8\xce\x11\x81e\x17\xc6\x16V\xa7\xaf?\x10\x99\xb2\x14\x05*U\x94\x949\xd7'*Ǻ", 3, true
+		return "freebsd/amd64", "&\xf6IR\xf8'k4e\xa4\x8a\x8c\x81WM\x93)4\xc0Τ\x1b\xa2&RvD\xa3\xddKmj", 3, true
 	}
 	if target == renvoTargetOpenBSDAmd64 {
-		return "openbsd/amd64", "\x01\xe4\xed\xce*\xe5u\xe6VW\xb9\x91l\xc0\x8f\xe7\x81\x01\x7f>\xd2,\xca<`q\xd6@\xd7\x12\xa0\xa7", 3, true
+		return "openbsd/amd64", "\x9e\x10lM_\xf2\"y){\xbc\xb8\x90==\xf0\x87\xe0\xbf+\x1e'~\xe5]\xdd6\xb6\x7f\xd3\xd0\xf3", 3, true
 	}
 	if target == renvoTargetNetBSDAmd64 {
-		return "netbsd/amd64", "6\xd8\xd1\xda\aL\xa0\f \xec\x9fU\xed r\aI6\xe6cz\xeePC\x06\xf1\v\xf1\x19\x82\xf0\xc0", 3, true
+		return "netbsd/amd64", "t\xf4\x9b\x04\x979a\xfch\x11\x82[\xdaJ\x81ρ\x9d\x17\a\xef\x8f\x05\xf9\xf2\x12\xf2/uL\xcfY", 3, true
 	}
 	return "", "", 0, false
 }

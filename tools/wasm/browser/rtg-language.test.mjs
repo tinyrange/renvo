@@ -42,7 +42,9 @@ test("project RTG targets use the browser JIT and VM backend pipeline", async ()
   assert.match(worker, /request\.type === "backend-inspect" \|\| request\.type === "backend-prepare"/);
   assert.match(worker, /request\.backendFormat === "vm32"/);
   assert.match(worker, /"-evaluate-unit", plan\.temporary/);
-  assert.match(app, /rtgDefinition: buildTarget\.rtgDefinition \|\| ""/);
+  assert.match(app, /rtgDefinition: buildTarget\.rtgDefinition \? new URL\(buildTarget\.rtgDefinition, catalogUrl\)\.href : ""/);
+  assert.match(app, /rtgImports: \(buildTarget\.rtgImports \|\| \[\]\)\.map/);
+  assert.match(worker, /request\.rtgImports \|\| \[\]/);
   assert.match(worker, /fd_sync: \(\) => 0/);
   assert.match(worker, /path_create_directory: .*pathCreateDirectory/);
   assert.match(worker, /path_rename:/);

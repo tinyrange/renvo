@@ -1,0 +1,22 @@
+rtgasm 1
+
+assembly {
+	# These fragments deliberately contain no duplicated instruction bytes. The
+	# UEFI backend owns the implementations so every package uses the same ABI:
+	# imageHandle and systemTable return the firmware values preserved at entry,
+	# while call0..call5 bridge the Renvo raw calling convention to Microsoft x64.
+	# See emitUEFIImageHandle, emitUEFISystemTable, and emitUEFICall in the
+	# uefi/amd64 backend for the annotated instruction sequences.
+	imageHandle(out:emitter) { uefi_amd64.emitUEFIImageHandle(out) }
+	systemTable(out:emitter) { uefi_amd64.emitUEFISystemTable(out) }
+
+	# The suffix is the number of EFI call arguments following the function
+	# pointer. Keeping separate fragments makes each call-site stack use and
+	# register shuffle fixed and auditable.
+	call0(out:emitter) { uefi_amd64.emitUEFICall(out, 0) }
+	call1(out:emitter) { uefi_amd64.emitUEFICall(out, 1) }
+	call2(out:emitter) { uefi_amd64.emitUEFICall(out, 2) }
+	call3(out:emitter) { uefi_amd64.emitUEFICall(out, 3) }
+	call4(out:emitter) { uefi_amd64.emitUEFICall(out, 4) }
+	call5(out:emitter) { uefi_amd64.emitUEFICall(out, 5) }
+}

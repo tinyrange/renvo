@@ -230,12 +230,16 @@ async function runPipeline(request) {
       const definitionName = ".renvo/target.rtg";
       const evaluatedName = ".renvo/evaluated.unit";
       context.files.set(definitionName, (await loadBytes(request.rtgDefinition, "target definition")).slice());
+      for (const imported of request.rtgImports || []) {
+        context.files.set(clean(imported.name), (await loadBytes(imported.source, "target definition import")).slice());
+      }
       const evaluateExit = await runModule(await backendJITModule, context, [
         "renvo-backend-jit", "-definition", definitionName, "-target", request.backendTarget,
         "-evaluate-unit", plan.temporary, "-o", evaluatedName,
       ]);
       const evaluated = context.files.get(evaluatedName);
       context.files.delete(definitionName); context.files.delete(evaluatedName);
+      for (const imported of request.rtgImports || []) context.files.delete(clean(imported.name));
       if (evaluateExit !== 0 || !evaluated) {
         return pipelineResult(request, files, inputNames, context, plan, started,
           frontendMilliseconds, performance.now() - backendStarted, evaluateExit || 1);

@@ -80,7 +80,7 @@ The current classification is:
 | --- | --- |
 | **Tier 1** | `linux/amd64`, `linux/386`, `linux/aarch64`, `linux/arm`, `windows/amd64`, `windows/386`, `darwin/arm64`, `wasi/wasm32`, `vm/vm32` |
 | **Tier 2** | `linux-object/amd64`, `llvm/linux-amd64`, `esp32c6/riscv32`, `esp32c6-jtag/riscv32`, `esp32s3/xtensa_lx7` |
-| **Tier 3** | `windows/arm64`, `browser/wasm32`, `freebsd/amd64`, `openbsd/amd64`, `netbsd/amd64`, `linux-kernel/amd64`, `c89/hosted32`, `c89/hosted32-auto`, `c89/freestanding32`, `android/arm64`, `ios/arm64`, `esp32p4/riscv32`, `msdos/8086`, `msdos/8086-mz` |
+| **Tier 3** | `windows/arm64`, `browser/wasm32`, `freebsd/amd64`, `openbsd/amd64`, `netbsd/amd64`, `linux-kernel/amd64`, `c89/hosted32`, `c89/hosted32-auto`, `c89/freestanding32`, `android/arm64`, `ios/arm64`, `esp32p4/riscv32`, `msdos/8086`, `msdos/8086-mz`, `uefi/amd64` |
 
 New backends start in Tier 3. Promotion to Tier 2 requires a required CI test
 that executes generated code for that target and a commitment to keep the
@@ -304,6 +304,28 @@ The [M5NanoC6 example](examples/m5nanoc6/README.md) uses this path to combine a
 shared RV32IM definition with an ESP32-C6 runtime and flash image. Its emulator
 oracle and SDK-free GPIO7 blink provide an end-to-end microcontroller bring-up
 without adding the board to the compiled-in host target list.
+
+The Tier 3 `uefi/amd64` definition emits a PE32+ EFI application without a
+Windows import table. `renvo.dev/device/uefi` exposes the firmware system table,
+text console, boot and runtime services, GOP framebuffer, and Simple File
+System protocols. The web IDE includes hello, graphics, filesystem, and Linux
+bootloader demos and downloads them as `BOOTX64.EFI`. Local OVMF smoke tests
+boot images in QEMU and exercise console output, timing, protocol discovery,
+filesystem access, and a complete Linux handoff:
+
+```sh
+./tools/uefi/test-qemu
+./tools/uefi/test-linux-qemu
+```
+
+The Linux smoke test downloads an official Alpine `vmlinuz-virt` and verified
+minirootfs, builds a tiny initramfs around Alpine BusyBox, then checks for a
+userspace success marker over QEMU's serial port. The bootloader uses Linux's
+native x86-64 boot protocol rather than the kernel EFI stub.
+
+Set `RENVO_OVMF_CODE`, `RENVO_UEFI_QEMU`, or `RENVO` when those tools or the
+compiler are outside their usual locations. This test is deliberately local;
+it is not a Tier 2 CI guarantee.
 
 The `vm/vm32` target uses 32-bit words and pointers and is executed by
 `renvo.dev/std/vm`. Callers provide hard instruction and linear-memory limits

@@ -1,0 +1,78 @@
+#!/bin/sh
+set -eu
+
+tool_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$tool_root/../.." && pwd)
+
+qemu=${RENVO_UEFI_QEMU:-qemu-system-x86_64}
+if ! command -v "$qemu" >/dev/null 2>&1; then
+	echo "qemu-system-x86_64 not found; set RENVO_UEFI_QEMU" >&2
+	exit 2
+fi
+
+timeout_command=${RENVO_UEFI_TIMEOUT:-}
+if [ -z "$timeout_command" ]; then
+	if command -v timeout >/dev/null 2>&1; then
+		timeout_command=timeout
+	elif command -v gtimeout >/dev/null 2>&1; then
+		timeout_command=gtimeout
+	else
+		echo "timeout or gtimeout not found; set RENVO_UEFI_TIMEOUT" >&2
+		exit 2
+	fi
+fi
+
+ovmf_code=${RENVO_OVMF_CODE:-}
+if [ -z "$ovmf_code" ]; then
+	for candidate in \
+		/usr/share/OVMF/OVMF_CODE.fd \
+		/usr/share/OVMF/OVMF_CODE_4M.fd \
+		/usr/share/edk2/x64/OVMF_CODE.fd \
+		/usr/share/edk2/ovmf/OVMF_CODE.fd \
+		/usr/share/qemu/OVMF_CODE.fd
+	do
+		if [ -f "$candidate" ]; then ovmf_code=$candidate; break; fi
+	done
+fi
+if [ -z "$ovmf_code" ] || [ ! -f "$ovmf_code" ]; then
+	echo "OVMF_CODE.fd not found; set RENVO_OVMF_CODE" >&2
+	exit 2
+fi
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+esp=$temporary/esp
+serial_log=$temporary/serial.log
+mkdir -p "$esp/EFI/BOOT"
+
+if [ -n "${RENVO:-}" ]; then
+	renvo=$RENVO
+else
+	renvo=$temporary/renvo
+	(cd "$repository_root" && go build -o "$renvo" ./cmd/renvo)
+fi
+
+"$renvo" -backend "$repository_root/backends/uefi_amd64.rtg" \
+	-t uefi/amd64 -s -o "$esp/EFI/BOOT/BOOTX64.EFI" \
+	"$repository_root/examples/uefi-smoke"
+
+set +e
+"$timeout_command" 20s "$qemu" \
+	-machine q35 -m 128M -display none -serial "file:$serial_log" -monitor none -no-reboot \
+	-drive "if=pflash,format=raw,readonly=on,file=$ovmf_code" \
+	-drive "format=raw,file=fat:rw:$esp" \
+	-device isa-debug-exit,iobase=0xf4,iosize=0x04
+status=$?
+set -e
+
+# isa-debug-exit returns (value << 1) | 1. The oracle uses 42 after a
+# successful firmware OutputString call.
+if [ "$status" -ne 85 ]; then
+	echo "UEFI QEMU smoke failed: emulator exit status $status (expected 85)" >&2
+	exit 1
+fi
+if ! grep -q "PASS" "$serial_log"; then
+	echo "UEFI QEMU smoke failed: ordinary print output did not reach the console" >&2
+	exit 1
+fi
+echo "PASS: uefi/amd64 used console, timing, graphics, and filesystem protocols under OVMF"

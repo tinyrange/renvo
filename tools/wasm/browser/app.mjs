@@ -882,7 +882,8 @@ async function compileTarget(buildTarget) {
     worker.postMessage({
       type: "compile", id, args, files: payload.files,
       backend, backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
-      rtgDefinition: buildTarget.rtgDefinition || "",
+      rtgDefinition: buildTarget.rtgDefinition ? new URL(buildTarget.rtgDefinition, catalogUrl).href : "",
+      rtgImports: (buildTarget.rtgImports || []).map((item) => ({ ...item, source: new URL(item.source, catalogUrl).href })),
     }, payload.transfers);
   } catch (error) {
     building = false;
@@ -1579,7 +1580,8 @@ async function runBuildValidation(generation) {
     worker.postMessage({
       type: "validate", id, args, files: payload.files,
       backend, backendTarget: target.backendTarget, backendFormat: target.backendFormat || "wasm",
-      rtgDefinition: target.rtgDefinition || "",
+      rtgDefinition: target.rtgDefinition ? new URL(target.rtgDefinition, catalogUrl).href : "",
+      rtgImports: (target.rtgImports || []).map((item) => ({ ...item, source: new URL(item.source, catalogUrl).href })),
     }, payload.transfers);
   } catch (error) {
     if (generation !== validationGeneration || revision !== buildRevision) return;

@@ -455,6 +455,21 @@ go backend {
 		out.Mark(done)
 	}
 
+	func unsignedDivide(out *RTGEmitter, remainder bool) bool {
+		// DIV consumes RDX:RAX, so preserve RBX while it holds the divisor,
+		// move the Renvo dividend from RCX to RAX, and clear the high half.
+		out.Byte(0x53) // PUSH RBX
+		out.Bytes3(0x48, 0x89, 0xc3) // MOV RBX, RAX
+		out.Bytes3(0x48, 0x89, 0xc8) // MOV RAX, RCX
+		out.Bytes2(0x31, 0xd2) // XOR EDX, EDX
+		out.Bytes3(0x48, 0xf7, 0xf3) // DIV RBX
+		if remainder {
+			out.Bytes3(0x48, 0x89, 0xd0) // MOV RAX, RDX
+		}
+		out.Byte(0x5b) // POP RBX
+		return true
+	}
+
 	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 15) & -16
 		if frame > 65520 {
@@ -777,6 +792,7 @@ abi renvo_x86_64 {
     arch = x86_64
     frame_start = sequence frameStart
     frame_finish = go frameFinish
+	unsigned_divide = go unsignedDivide
     call_words = [rdi, rsi, rdx, rcx, r8, r9]
     overflow_stride = 8
     scalar_result = rax
