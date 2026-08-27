@@ -116,9 +116,10 @@ func (s *FSBuildSession) Step() bool {
 			s.pipeline = pipeline.BeginObjectSession(
 				s.workDir, s.stdRoot, s.rootArg, sources.Files, s.cached)
 		} else {
+			compactPipeline := s.compact && len(s.foreignPrograms) == 0
 			s.pipeline = pipeline.BeginSession(
 				s.workDir, s.stdRoot, s.rootArg, sources.Files,
-				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+				s.sourcesStart, s.sourcesEnd, compactPipeline, s.cached && compactPipeline)
 		}
 		s.stage = 2
 		return false
@@ -135,7 +136,7 @@ func (s *FSBuildSession) Step() bool {
 			return true
 		}
 		s.result.Unit = built.Link.Data
-		if !bindForeignPrograms(&s.result.Unit, s.foreignPrograms) {
+		if !bindForeignPrograms(&s.result.Unit, built.Link.Program, s.foreignPrograms) {
 			s.result = buildForeignFail(s.result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 			s.stage = 4
 			return true

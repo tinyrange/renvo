@@ -15,12 +15,16 @@ func TestForeignProgramAndEntrypointNodes(t *testing.T) {
 	if !ok {
 		t.Fatal("bind entrypoint failed")
 	}
-	withForeign, ok := BindForeignPrograms(withEntry, []ForeignProgram{{Name: "payload", Kind: ForeignProgramBytes, Target: "linux/amd64", Unit: []byte("unit")}})
+	child, ok := BindTarget(base, TargetBinding{Target: "linux/amd64", Definition: string(make([]byte, 32)), DescriptorVersion: 1})
+	if !ok {
+		t.Fatal("bind child target failed")
+	}
+	withForeign, ok := BindForeignPrograms(withEntry, []ForeignProgram{{Global: 8, Kind: ForeignProgramBytes, Target: "linux/amd64", Unit: child}})
 	if !ok || len(withForeign) <= len(withEntry) || readUint32Foreign(withForeign, 10) != len(withForeign)-14 {
 		t.Fatalf("foreign binding failed: ok=%v size=%d", ok, len(withForeign))
 	}
 	programs, ok := ReadForeignPrograms(withForeign)
-	if !ok || len(programs) != 1 || programs[0].Name != "payload" || string(programs[0].Unit) != "unit" {
+	if !ok || len(programs) != 1 || programs[0].Global != 8 || programs[0].Target != "linux/amd64" || len(programs[0].Unit) == 0 {
 		t.Fatalf("foreign read = %#v, %v", programs, ok)
 	}
 	programs[0].Unit = nil
@@ -36,12 +40,13 @@ func TestForeignProgramAndEntrypointNodes(t *testing.T) {
 	if _, ok := BindEntrypoint(withForeign, 0); ok {
 		t.Fatal("duplicate entrypoint was accepted")
 	}
-	programs[0].Unit = []byte("stale unit")
+	programs[0].Kind = ForeignProgramEntrypoint
+	programs[0].EntryOffset = len(programs[0].Artifact)
 	invalid, ok := ResolveForeignPrograms(resolved, programs)
 	if !ok {
 		t.Fatal("could not construct malformed foreign table")
 	}
 	if _, ok := ReadForeignPrograms(invalid); ok {
-		t.Fatal("foreign table retained both an unresolved unit and a resolved artifact")
+		t.Fatal("foreign table accepted an out-of-range entrypoint")
 	}
 }

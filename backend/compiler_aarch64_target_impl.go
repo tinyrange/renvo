@@ -457,7 +457,7 @@ type renvoAarch64ProgramSession struct {
 }
 
 func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-	appIndex := renvoProgramEntryFunction(p, meta)
+	appIndex := p.entryFunc
 	if appIndex < 0 {
 		return nil
 	}

@@ -162,6 +162,7 @@ const (
 // backend consumes only the resolved artifact and entry offset.
 type ForeignProgram struct {
 	Name        string
+	Global      int
 	Kind        int
 	Target      string
 	InPlace     bool

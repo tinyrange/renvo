@@ -36,13 +36,9 @@ type foreignPreparation struct {
 }
 
 type foreignDirectiveArguments struct {
-	Start0 int
-	End0   int
-	Start1 int
-	End1   int
-	Start2 int
-	End2   int
-	Count  int
+	Start [3]int
+	End   [3]int
+	Count int
 }
 
 func prepareForeignPrograms(options Options, workDir string, stdRoot string, moduleCache string, sources SourceResult, fs SourceFS) foreignPreparation {
@@ -140,15 +136,6 @@ func removeForeignTag(tags []string, unwanted string) []string {
 	return out
 }
 
-func targetDescriptorCapability(capabilities []string, wanted string) bool {
-	for i := 0; i < len(capabilities); i++ {
-		if capabilities[i] == wanted {
-			return true
-		}
-	}
-	return false
-}
-
 func linkedForeignFunction(program unit.Program, name string) int {
 	start, end := 0, len(program.Funcs)
 	for i := 0; i < len(program.Packages); i++ {
@@ -171,6 +158,24 @@ func linkedForeignFunction(program unit.Program, name string) int {
 	return found
 }
 
+func linkedForeignGlobal(program unit.Program, name string) int {
+	start, end := 0, len(program.Decls)
+	for i := 0; i < len(program.Packages); i++ {
+		pkg := program.Packages[i]
+		if pkg.ImportPath == program.ImportPath {
+			start, end = pkg.DeclStart, pkg.DeclEnd
+			break
+		}
+	}
+	for i := start; i < end; i++ {
+		decl := program.Decls[i]
+		if decl.Kind == unit.TokenVar && decl.NameStart >= 0 && decl.NameEnd <= len(program.Text) && string(program.Text[decl.NameStart:decl.NameEnd]) == name {
+			return decl.NameStart
+		}
+	}
+	return -1
+}
+
 func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDirective, Diagnostic, bool) {
 	var directives []foreignDirective
 	for i := 0; i < len(files); i++ {
@@ -179,8 +184,6 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 		if load.DirPath(file.Path) != rootDir || len(name) < 3 || name[len(name)-3:] != ".go" {
 			continue
 		}
-		var parsed syntax.File
-		parsedFile := false
 		line := 1
 		for lineStart := 0; lineStart < len(file.Src); {
 			lineEnd := lineStart
@@ -193,20 +196,17 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 			}
 			argsStart := foreignDirectiveArgsStart(file.Src, contentStart, lineEnd)
 			if argsStart >= 0 {
-				if !parsedFile {
-					parsed = syntax.ParseFile(file.Src)
-					parsedFile = true
-				}
+				parsed := syntax.ParseFile(file.Src)
 				if !parsed.Ok {
 					break
 				}
 				fields := foreignDirectiveFields(file.Src, argsStart, lineEnd)
 				base := foreignDirective{Path: file.Path, Offset: contentStart, Line: line, Column: contentStart - lineStart + 1}
-				if fields.Count != 3 || string(file.Src[fields.Start0:fields.End0]) != "-t" {
+				if fields.Count != 3 || string(file.Src[fields.Start[0]:fields.End[0]]) != "-t" {
 					return nil, foreignDiagnostic(base, foreignErrDirective, "expected //renvo:compile -t <target> <entry>", nil), false
 				}
-				base.Target = string(file.Src[fields.Start1:fields.End1])
-				base.Entry = string(file.Src[fields.Start2:fields.End2])
+				base.Target = string(file.Src[fields.Start[1]:fields.End[1]])
+				base.Entry = string(file.Src[fields.Start[2]:fields.End[2]])
 				decl, kind, ok := foreignDirectiveDeclaration(parsed, lineEnd)
 				if !ok {
 					return nil, foreignDiagnostic(base, foreignErrDeclaration, "renvo:compile must immediately precede one uninitialized package variable", nil), false
@@ -258,12 +258,8 @@ func foreignDirectiveFields(src []byte, start int, end int) foreignDirectiveArgu
 		for start < end && src[start] != ' ' && src[start] != '\t' {
 			start++
 		}
-		if fields.Count == 0 {
-			fields.Start0, fields.End0 = fieldStart, start
-		} else if fields.Count == 1 {
-			fields.Start1, fields.End1 = fieldStart, start
-		} else if fields.Count == 2 {
-			fields.Start2, fields.End2 = fieldStart, start
+		if fields.Count < 3 {
+			fields.Start[fields.Count], fields.End[fields.Count] = fieldStart, start
 		}
 		fields.Count++
 	}
@@ -311,18 +307,13 @@ func foreignDirectiveImmediatelyPrecedes(src []byte, after int, declaration int)
 	if after < 0 || after >= len(src) || declaration <= after || declaration > len(src) {
 		return false
 	}
-	if src[after] == '\r' {
-		after++
-		if after < declaration && src[after] == '\n' {
-			after++
-		}
-	} else if src[after] == '\n' {
-		after++
-		if after < declaration && src[after] == '\r' {
-			after++
-		}
-	} else {
+	newline := src[after]
+	if newline != '\r' && newline != '\n' {
 		return false
+	}
+	after++
+	if after < declaration && src[after] != newline && (src[after] == '\r' || src[after] == '\n') {
+		after++
 	}
 	for after < declaration && (src[after] == ' ' || src[after] == '\t') {
 		after++

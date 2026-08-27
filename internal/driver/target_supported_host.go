@@ -42,5 +42,5 @@ func resolveForeignTarget(options Options, workDir string, target string, fs Sou
 	}
 	descriptor := resolved.Descriptor
 	return unit.TargetBinding{Target: descriptor.Name, Definition: string(descriptor.Definition[:]), DescriptorVersion: descriptor.Version},
-		targetDescriptorCapability(descriptor.Capabilities, "in_place_entry"), descriptor.BuildTags, true
+		findString(descriptor.Capabilities, "in_place_entry") >= 0, descriptor.BuildTags, true
 }

@@ -33,19 +33,27 @@ func ReadForeignPrograms(data []byte) ([]ForeignProgram, bool) {
 	programs := make([]ForeignProgram, 0, count)
 	for i := 0; i < count && r.ok; i++ {
 		program := ForeignProgram{}
-		program.Name = r.text()
-		program.Kind = r.varint()
-		program.Target = r.text()
-		inPlace := r.varint()
-		program.InPlace = inPlace == 1
-		program.Unit = r.bytes()
-		program.Artifact = r.bytes()
+		program.Global = r.varint()
+		state := r.varint()
+		payload := r.bytes()
 		program.EntryOffset = r.varint()
-		if program.Name == "" || program.Target == "" || (inPlace != 0 && inPlace != 1) ||
-			(program.Kind != ForeignProgramBytes && program.Kind != ForeignProgramEntrypoint) ||
-			program.EntryOffset < 0 || (len(program.Unit) == 0) == (len(program.Artifact) == 0) ||
+		program.Kind = state
+		if state > 2 {
+			program.Kind -= 2
+			program.Artifact = payload
+		} else {
+			program.Unit = payload
+			binding, bound := ReadTargetBinding(payload)
+			if bound {
+				program.Target = binding.Target
+			}
+		}
+		program.InPlace = program.Kind == ForeignProgramEntrypoint
+		if program.Global < 0 || state < 1 || state > 4 || len(payload) == 0 ||
+			program.Kind < ForeignProgramBytes || program.Kind > ForeignProgramEntrypoint ||
+			(len(program.Unit) > 0 && program.Target == "") || program.EntryOffset < 0 ||
 			(program.Kind == ForeignProgramBytes && program.EntryOffset != 0) ||
-			(program.Kind == ForeignProgramEntrypoint && len(program.Artifact) > 0 && program.EntryOffset >= len(program.Artifact)) {
+			(state == 4 && program.EntryOffset >= len(program.Artifact)) {
 			r.ok = false
 		}
 		programs = append(programs, program)
@@ -75,21 +83,9 @@ func ResolveForeignPrograms(data []byte, programs []ForeignProgram) ([]byte, boo
 }
 
 func appendOptionalChild(data []byte, tag int, payload []byte) ([]byte, bool) {
-	if len(data) < 14 || string(data[:4]) != Magic || int(data[4])|int(data[5])<<8 != Version ||
-		int(data[8])|int(data[9])<<8 != TagUnit || readUint32Foreign(data, 10) != len(data)-14 {
+	_, _, found, ok := findOptionalChild(data, tag)
+	if !ok || found {
 		return nil, false
-	}
-	for pos := 14; pos < len(data); {
-		if pos+6 > len(data) {
-			return nil, false
-		}
-		childTag := int(data[pos]) | int(data[pos+1])<<8
-		length := readUint32Foreign(data, pos+2)
-		next := pos + 6 + length
-		if length < 0 || next < pos || next > len(data) || childTag == tag {
-			return nil, false
-		}
-		pos = next
 	}
 	out := make([]byte, len(data), len(data)+6+len(payload))
 	copy(out, data)
@@ -99,8 +95,7 @@ func appendOptionalChild(data []byte, tag int, payload []byte) ([]byte, bool) {
 }
 
 func findOptionalChild(data []byte, wanted int) (int, []byte, bool, bool) {
-	if len(data) < 14 || string(data[:4]) != Magic || int(data[4])|int(data[5])<<8 != Version ||
-		int(data[8])|int(data[9])<<8 != TagUnit || readUint32Foreign(data, 10) != len(data)-14 {
+	if !validUnitRoot(data) {
 		return 0, nil, false, false
 	}
 	for pos := 14; pos < len(data); {
@@ -165,8 +160,6 @@ func (r *foreignReader) bytes() []byte {
 	r.pos += length
 	return value
 }
-
-func (r *foreignReader) text() string { return string(r.bytes()) }
 
 func readUint32Foreign(data []byte, at int) int {
 	if at < 0 || at+4 > len(data) {

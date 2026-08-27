@@ -83,6 +83,6 @@
     {"name":"RTGAssemblySource","fields":[{"name":"path","encoding":"length-prefixed bytes"},{"name":"source","encoding":"length-prefixed bytes"}]},
     {"name":"RTGAssemblyBinding","fields":[{"name":"func_index","encoding":"uvarint"},{"name":"source_index","encoding":"uvarint"},{"name":"entry_index","encoding":"uvarint"},{"name":"evaluated_code","encoding":"length-prefixed bytes"}]},
     {"name":"RTGAssembly","fields":[{"name":"sources","encoding":"counted RTGAssemblySource"},{"name":"bindings","encoding":"counted RTGAssemblyBinding"}]},
-    {"name":"ForeignProgram","fields":[{"name":"name","encoding":"length-prefixed bytes"},{"name":"kind","encoding":"uvarint enum: bytes=1, entrypoint=2"},{"name":"target","encoding":"length-prefixed bytes"},{"name":"in_place_entry","encoding":"uvarint boolean"},{"name":"unit","encoding":"length-prefixed bytes"},{"name":"artifact","encoding":"length-prefixed bytes"},{"name":"entry_offset","encoding":"uvarint"}]}
+    {"name":"ForeignProgram","fields":[{"name":"global","encoding":"uvarint source offset"},{"name":"state","encoding":"uvarint enum: unit_bytes=1, unit_entrypoint=2, artifact_bytes=3, artifact_entrypoint=4"},{"name":"payload","encoding":"length-prefixed bytes"},{"name":"entry_offset","encoding":"uvarint"}]}
   ]
 }

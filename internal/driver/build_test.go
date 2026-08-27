@@ -53,7 +53,10 @@ func main() { print(len(payload)) }
 	if !ok || len(programs) != 1 {
 		t.Fatalf("foreign programs = %#v, ok=%v", programs, ok)
 	}
-	if programs[0].Name != "payload" || programs[0].Kind != wireunit.ForeignProgramBytes || programs[0].Target != "linux/386" || len(programs[0].Unit) == 0 {
+	program := result.Pipeline.Link.Program
+	global := programs[0].Global
+	if global < 0 || global+len("payload") > len(program.Text) || string(program.Text[global:global+len("payload")]) != "payload" ||
+		programs[0].Kind != wireunit.ForeignProgramBytes || programs[0].Target != "linux/386" || len(programs[0].Unit) == 0 {
 		t.Fatalf("foreign program = %#v", programs[0])
 	}
 	binding, ok := wireunit.ReadTargetBinding(programs[0].Unit)

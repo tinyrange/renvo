@@ -78,7 +78,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
 		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 	}
 	bindBuiltInTarget(&result.Unit, options)
@@ -116,7 +116,7 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
 		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 	}
 	bindBuiltInTarget(&result.Unit, result.Options)
@@ -182,7 +182,7 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		return result
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
 		result.Phase = BuildErrForeign
 		result.Diagnostic = Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"}
 		return result
@@ -292,7 +292,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		// retiring its arena pages during the link can alias a small destination
 		// unit and turn token indexes into source lines before backend decoding.
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
-	} else if options.EmitUnit {
+	} else if options.EmitUnit || len(foreign.Programs) > 0 {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit
 		// the same canonical bytes.
@@ -305,7 +305,7 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
 		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 	}
 	bindBuiltInTarget(&result.Unit, options)
@@ -381,6 +381,8 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if options.Mode == ModeObject {
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+	} else if compact && len(foreign.Programs) > 0 {
+		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
 	} else if compact && options.CCompiler {
 		// Demand-selected libc sources are synthesized during collection rather
 		// than retained by the editor cache. Use the one-shot transient linker so
@@ -397,7 +399,7 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
 		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 	}
 	bindBuiltInTarget(&result.Unit, options)
@@ -423,7 +425,13 @@ func bindBuiltInTarget(data *[]byte, options Options) {
 	unit.BindUnboundTarget(data, targetBinding)
 }
 
-func bindForeignPrograms(data *[]byte, programs []unit.ForeignProgram) bool {
+func bindForeignPrograms(data *[]byte, program unit.Program, programs []unit.ForeignProgram) bool {
+	for i := 0; i < len(programs); i++ {
+		programs[i].Global = linkedForeignGlobal(program, programs[i].Name)
+		if programs[i].Global < 0 {
+			return false
+		}
+	}
 	bound, ok := unit.BindForeignPrograms(*data, programs)
 	if ok {
 		*data = bound
