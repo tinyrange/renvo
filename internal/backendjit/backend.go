@@ -152,6 +152,12 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 			}}
 		}
 	}
+	type pendingAssembly struct {
+		binding int
+		key     [32]byte
+		entry   rtg.AssemblyEvaluatorEntry
+	}
+	var pending []pendingAssembly
 	for i := 0; i < len(bindings); i++ {
 		if len(bindings[i].Code) != 0 {
 			code[i] = bindings[i].Code
@@ -170,7 +176,16 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 			code[i] = append([]byte(nil), cached...)
 			continue
 		}
-		generated := rtg.GenerateAssemblyEvaluator(prepared.Resolved, prepared.Artifact.Descriptor.Name, documents[binding.Source], binding.Entry)
+		pending = append(pending, pendingAssembly{binding: i, key: cacheKey, entry: rtg.AssemblyEvaluatorEntry{
+			Assembly: documents[binding.Source], EntryIndex: binding.Entry,
+		}})
+	}
+	if len(pending) != 0 {
+		entries := make([]rtg.AssemblyEvaluatorEntry, len(pending))
+		for i := range pending {
+			entries[i] = pending[i].entry
+		}
+		generated := rtg.GenerateAssemblyEvaluators(prepared.Resolved, prepared.Artifact.Descriptor.Name, entries)
 		if !generated.Ok {
 			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-005", generated.Diagnostics[0].Message)
 		}
@@ -182,11 +197,11 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 		args = append(args, names...)
 		compiled := driver.CompileUnit(args, "/backend", b.stdRoot, files, b.bootstrap)
 		if !compiled.Ok {
-			entry := documents[binding.Source].Entries[binding.Entry]
+			entry := pending[0].entry.Assembly.Entries[pending[0].entry.EntryIndex]
 			return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
 				Phase: "rtgasm", Code: "RENVO-RTGASM-011",
 				Message: "RTGASM fragment does not compile against the selected target: " + compiled.Diagnostic.Message,
-				Path:    sources[binding.Source].Path, Start: entry.Span.Start.Offset,
+				Path:    pending[0].entry.Assembly.Filename, Start: entry.Span.Start.Offset,
 			}}
 		}
 		image, err := linkedimage.Decode(compiled.Binary)
@@ -197,11 +212,28 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 		if run.Trap != vm.TrapNone || run.ExitCode != 0 || len(run.Output) == 0 {
 			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator failed")
 		}
-		code[i] = run.Output
 		if b.assemblyCache == nil {
 			b.assemblyCache = make(map[[32]byte][]byte)
 		}
-		b.assemblyCache[cacheKey] = append([]byte(nil), run.Output...)
+		at := 0
+		for i := range pending {
+			if at+4 > len(run.Output) {
+				return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator returned truncated output")
+			}
+			length := int(run.Output[at]) | int(run.Output[at+1])<<8 |
+				int(run.Output[at+2])<<16 | int(run.Output[at+3])<<24
+			at += 4
+			if length < 0 || at+length < at || at+length > len(run.Output) {
+				return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator returned invalid output")
+			}
+			fragment := append([]byte(nil), run.Output[at:at+length]...)
+			at += length
+			code[pending[i].binding] = fragment
+			b.assemblyCache[pending[i].key] = append([]byte(nil), fragment...)
+		}
+		if at != len(run.Output) {
+			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator returned trailing output")
+		}
 	}
 	evaluated, ok := attachRTGAssemblyCode(source, code)
 	if !ok {
