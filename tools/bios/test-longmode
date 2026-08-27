@@ -28,7 +28,7 @@ else
 	(cd "$repository_root" && go build -o "$renvo" ./cmd/renvo)
 fi
 
-"$renvo" -backend "$repository_root/backends/msdos.rtg" \
+"$renvo" -backend "$repository_root/backends/bios_multistage.rtg" \
 	-t bios/8086 -s -o "$image" "$repository_root/examples/bios-longmode"
 
 set +e

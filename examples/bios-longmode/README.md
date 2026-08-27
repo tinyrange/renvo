@@ -7,7 +7,7 @@ initializes `longModeEntry` to that image's entrypoint. Both units compile
 `sharedMessage` for their own architecture.
 
 ```sh
-go run ./cmd/renvo -backend backends/msdos.rtg \
+go run ./cmd/renvo -backend backends/bios_multistage.rtg \
   -t bios/8086 -s -o sandbox/bios-longmode.img examples/bios-longmode
 ```
 

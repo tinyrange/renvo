@@ -8,7 +8,7 @@ import (
 )
 
 func TestBIOS8086ExternalDefinition(t *testing.T) {
-	const filename = "../../backends/msdos.rtg"
+	const filename = "../../backends/bios_multistage.rtg"
 	resolved := Resolve(parseDefinitionFile(t, filename))
 	if !resolved.Ok {
 		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)

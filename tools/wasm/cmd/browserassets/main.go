@@ -167,7 +167,7 @@ var customTargets = []customTarget{
 	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Device: "esp32", Hidden: true},
 	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
 	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
-	{Name: "bios/8086", Label: "PC BIOS 8086 (boot disk)", Definition: "backends/msdos.rtg", Backend: "backends/bios-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
+	{Name: "bios/8086", Label: "PC BIOS 8086 (boot disk)", Definition: "backends/bios_multistage.rtg", Backend: "backends/bios-8086.rnvb", Format: "vm32", RTGSource: "backends/bios_multistage.rtg", RTGImports: biosMultistageDefinitionImports(), Device: "computer"},
 	{Name: "uefi/amd64", Label: "UEFI x86-64 (.EFI)", Definition: "backends/uefi_amd64.rtg", Backend: "backends/uefi-amd64.rnvb", Format: "vm32", RTGSource: "backends/uefi_amd64.rtg", RTGImports: []targetDefinitionAsset{
 		{Name: "backend/definitions/x86_64.rtg", Source: "backends/definitions/x86_64.rtg"},
 		{Name: "backend/definitions/elf_amd64_primitives.rtg", Source: "backends/definitions/elf_amd64_primitives.rtg"},
@@ -176,6 +176,13 @@ var customTargets = []customTarget{
 
 func pc8086DefinitionImports() []targetDefinitionAsset {
 	return []targetDefinitionAsset{
+		{Name: ".renvo/bios_8086.rtg", Source: "backends/bios_8086.rtg"},
+	}
+}
+
+func biosMultistageDefinitionImports() []targetDefinitionAsset {
+	return []targetDefinitionAsset{
+		{Name: ".renvo/msdos.rtg", Source: "backends/msdos.rtg"},
 		{Name: ".renvo/bios_8086.rtg", Source: "backends/bios_8086.rtg"},
 		{Name: ".renvo/freestanding_amd64.rtg", Source: "backends/freestanding_amd64.rtg"},
 		{Name: "backend/definitions/x86_64.rtg", Source: "backends/definitions/x86_64.rtg"},
