@@ -31,6 +31,14 @@ test("sidebar examples expose a read-only file tree and replace only after confi
   assert.match(app, /if \(!accepted\).*return;/);
 });
 
+test("the primary Examples action opens the hardware-first browser on every viewport", () => {
+  assert.match(index, /id="browse-examples"/);
+  assert.match(index, /id="example-dialog"/);
+  assert.match(index, /<strong>What are you using\?<\/strong>/);
+  assert.match(app, /querySelector\("#browse-examples"\)\.addEventListener\("click", openExampleBrowser\)/);
+  assert.doesNotMatch(app, /#browse-examples[\s\S]{0,160}openSidebarExamples/);
+});
+
 test("external views round-trip through URL deep links", () => {
   assert.match(app, /const viewParameterNames = \["help", "source", "example", "file"\]/);
   assert.match(app, /history\.pushState\(\{ renvoView: true \}, "", url\)/);
