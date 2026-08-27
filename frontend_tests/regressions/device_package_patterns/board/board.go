@@ -59,7 +59,7 @@ func (c *controller) Tx(address uint16, write, read []byte) error {
 var ledPin = pin{}
 var buttonPin = pin{high: true}
 
-var BlueLED = gpio.NewLED(&ledPin, false)
+var LED = gpio.NewLED(&ledPin, false)
 var Button = gpio.NewButton(&buttonPin, gpio.PullUp, true)
 
 var clockSource = source{}

@@ -9,7 +9,7 @@ import (
 // stores all executed successfully without making the test artificially slow.
 func main() {
 	board.Clock.DelayMicroseconds(100)
-	board.BlueLED.Set(true)
+	board.LED.Set(true)
 	for {
 	}
 }

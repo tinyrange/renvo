@@ -6,9 +6,9 @@
 
 void cBlinkForever(int intervalMilliseconds) {
 	for (;;) {
-		goSetBlueLED(1);
+		goSetLED(1);
 		goDelayMilliseconds(intervalMilliseconds);
-		goSetBlueLED(0);
+		goSetLED(0);
 		goDelayMilliseconds(intervalMilliseconds);
 	}
 }

@@ -7,11 +7,8 @@ import (
 	"renvo.dev/device/rp2"
 )
 
-// BlueLED is the active-high indicator connected to GPIO25.
-var BlueLED = rp2.GPIO(25)
-
-// LED is the board status indicator.
-var LED = BlueLED
+// LED is the active-high status indicator connected to GPIO25.
+var LED = rp2.GPIO(25)
 
 // Clock is the board monotonic clock and busy-wait timer.
 var Clock = rp2.Clock{}

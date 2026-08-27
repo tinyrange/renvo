@@ -237,7 +237,7 @@ func configure(synth *sam2695.Device) {
 }
 
 func main() {
-	board.BlueLED.Set(false)
+	board.LED.Set(false)
 	board.Clock.DelayMilliseconds(500)
 
 	synth := sam2695.New(uart.New(board.GroveUART, 31250))
@@ -256,7 +256,7 @@ func main() {
 	}
 	print("Unit Synth ready; generating a twelve-channel groove\n")
 
-	board.BlueLED.Set(true)
+	board.LED.Set(true)
 	for {
 		playCycle(synth)
 	}

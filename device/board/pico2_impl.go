@@ -9,11 +9,8 @@ import (
 	"renvo.dev/device/rp2350"
 )
 
-// BlueLED is the active-high indicator connected to GPIO25.
-var BlueLED = gpio.NewLED(rp2350.GPIO(25), false)
-
-// LED is the board status indicator.
-var LED = BlueLED
+// LED is the active-high status indicator connected to GPIO25.
+var LED = gpio.NewLED(rp2350.GPIO(25), false)
 
 var clockSource = rp2350.SystemTimer{}
 

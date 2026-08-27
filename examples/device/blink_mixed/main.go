@@ -9,9 +9,9 @@ import "C"
 // boundary. The C implementation can stay board-agnostic while Go supplies
 // Renvo's typed board capabilities.
 //
-//export goSetBlueLED
-func goSetBlueLED(on int) {
-	board.BlueLED.Set(on != 0)
+//export goSetLED
+func goSetLED(on int) {
+	board.LED.Set(on != 0)
 }
 
 //export goDelayMilliseconds

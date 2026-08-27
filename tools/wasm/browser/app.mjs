@@ -1195,12 +1195,12 @@ function deploymentBuildTarget() {
   if (selectedTarget?.device === "rp2") {
     const target = targetCatalog?.targets.find((candidate) => candidate.name === "rp2-debug/thumb");
     if (!target) throw new Error("The RP2 monitor debug backend is unavailable in this browser bundle.");
-    return target;
+    return { ...target, tags: [...new Set([...(selectedTarget.tags || []), ...(target.tags || [])])] };
   }
   if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget())) {
     const target = targetCatalog?.targets.find((candidate) => candidate.name === "esp32c6-jtag/riscv32");
     if (!target) throw new Error("The ESP32-C6 JTAG backend is unavailable in this browser bundle.");
-    return target;
+    return { ...target, tags: [...new Set([...(selectedTarget.tags || []), ...(target.tags || [])])] };
   }
   return selectedTarget;
 }

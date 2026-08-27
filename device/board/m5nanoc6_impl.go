@@ -12,11 +12,8 @@ import (
 	"renvo.dev/device/ws2812"
 )
 
-// BlueLED is the active-high blue indicator connected to GPIO7.
-var BlueLED = gpio.NewLED(esp32c6.GPIO(7), false)
-
-// LED is the board status indicator.
-var LED = BlueLED
+// LED is the active-high blue status indicator connected to GPIO7.
+var LED = gpio.NewLED(esp32c6.GPIO(7), false)
 
 // Button is the active-low front button on GPIO9. Its pull-up also preserves
 // the normal boot strapping level when released.

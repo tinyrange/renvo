@@ -158,6 +158,7 @@ const published = Object.entries(standardCatalog.platforms || {})
   .filter(([, item]) => item.main && !item.hidden)
   .sort(([left], [right]) => left.localeCompare(right));
 let compiled = 0;
+let monitorCompiled = 0;
 const failures = [];
 for (const [importPath, item] of published) {
   const files = await exampleFiles(importPath, item);
@@ -198,8 +199,40 @@ for (const [importPath, item] of published) {
     }
     compiled++;
     process.stdout.write(`PASS ${importPath} (${targetName}) ${(performance.now() - started).toFixed(0)} ms\n`);
+
+    if (target.device === "rp2" && item.language !== "c") {
+      const debugTarget = targetCatalog.targets.find((candidate) => candidate.name === "rp2-debug/thumb");
+      if (!debugTarget) throw new Error("browser bundle has no rp2-debug/thumb target");
+      const debugArgs = [];
+      for (const tag of new Set([...(target.tags || []), ...(debugTarget.tags || [])])) debugArgs.push("-tags", tag);
+      if (debugTarget.definition) {
+        debugArgs.push("-target-definition", debugTarget.definition,
+          "-target-version", String(debugTarget.descriptorVersion));
+      }
+      debugArgs.push("-t", debugTarget.frontendTarget || debugTarget.name,
+        "-s", "-o", debugTarget.output || "app.elf", ".");
+      const debugBackend = new URL(debugTarget.backend, bundleURL).href;
+      const debugResult = await request({
+        type: "compile", id: ++requestID, args: debugArgs, files: workerFiles(files),
+        backend: debugBackend, backendTarget: debugTarget.backendTarget || debugTarget.name,
+        backendFormat: debugTarget.backendFormat || "wasm",
+      }, "result");
+      if (debugResult.exitCode !== 0) {
+        const diagnostic = [debugResult.stderr, debugResult.stdout].filter(Boolean).join("\n").trim();
+        failures.push(`${importPath} (${targetName}, monitor load) failed:\n${diagnostic}`);
+        process.stdout.write(`FAIL ${importPath} (${targetName}, monitor load)\n`);
+      } else {
+        const debugArtifact = debugResult.files.find((file) => file.name === (debugTarget.output || "app.elf"));
+        if (!debugArtifact || debugArtifact.data.byteLength === 0) {
+          throw new Error(`${importPath} (${targetName}, monitor load) produced no ${debugTarget.output || "app.elf"}`);
+        }
+        monitorCompiled++;
+        process.stdout.write(`PASS ${importPath} (${targetName}, monitor load)\n`);
+      }
+    }
   }
 }
 
 process.stdout.write(`Compiled ${compiled} published browser example/target combinations.\n`);
+process.stdout.write(`Compiled ${monitorCompiled} RP2 monitor-load combinations.\n`);
 if (failures.length) throw new Error(failures.join("\n\n"));

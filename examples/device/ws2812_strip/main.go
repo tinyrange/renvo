@@ -35,13 +35,13 @@ func show(strip *ws2812.Strip, phase uint8) {
 	}
 	if !strip.SetPixels(pixels[:]) {
 		// Latch the board LED on if an RMT refill ever misses its deadline.
-		board.BlueLED.Set(true)
+		board.LED.Set(true)
 	}
 }
 
 func main() {
 	strip := ws2812.New(board.GroveData, nil)
-	board.BlueLED.Set(false)
+	board.LED.Set(false)
 	phase := uint8(0)
 	for {
 		show(&strip, phase)

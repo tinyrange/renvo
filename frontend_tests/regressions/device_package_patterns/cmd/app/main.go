@@ -12,7 +12,7 @@ func main() {
 		return
 	}
 
-	board.BlueLED.Set(true)
+	board.LED.Set(true)
 	board.PressButton()
 	if !board.Button.Pressed() {
 		print("FAIL: package-global device\n")
