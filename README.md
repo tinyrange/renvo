@@ -89,6 +89,31 @@ applicable suites and explicit performance or resource budgets. If required
 coverage can no longer be maintained, the target should be moved to the lower
 tier in the same change rather than silently weakening its tests.
 
+### Performance gates
+
+Performance limits are regression budgets, not benchmark claims. The compiler
+tests make three attempts and use the best observed elapsed time and peak RSS;
+binary-size limits apply to the stripped compiler artifact. The current hard
+limits are:
+
+| Gate | Targets | Required limits |
+| --- | --- | --- |
+| Fixed-target compiler resources | `linux/amd64`, `linux/386`, `linux/aarch64`, `linux/arm`, `windows/amd64`, `windows/386` | 16 MiB peak RSS; 320 KiB compiler |
+| Fixed-target compiler elapsed time | The same Linux and Windows targets | 50 ms; run by `./tools/check performance` outside shared CI |
+| Darwin fixed-target compiler | `darwin/arm64` | 50 ms; 320 KiB compiler; run on the native macOS CI runner |
+| WASI fixed-target compiler | `wasi/wasm32` | 125 ms; 20 MiB peak RSS; 384 KiB compiler |
+| Self-hosted frontend | Native Linux target for the runner | 42 MiB peak RSS; 4 MiB stripped stage-3 compiler |
+| Self-hosted VM backend | `vm/vm32` | 2 MiB compiler bytecode; 400,000 VM steps; 80 MiB peak VM memory |
+| Self-hosted VM frontend | `vm/vm32` producing `linux/amd64` | 6 MiB frontend bytecode; 4 MiB output compiler; 12 billion VM steps; 150 MiB peak VM memory |
+
+`./tools/check ci-performance` runs the resource and binary-size gates that are
+stable on shared Linux runners, together with the WASI gate. It also records
+normalized frontend CPU time as telemetry, but CPU time is not currently a
+hard frontend limit. `./tools/check performance` adds the 50 ms fixed-target
+elapsed-time gate. The native Darwin job and the required backend/frontend jobs
+own the Darwin and VM gates respectively. The VM backend corpus additionally
+caps each regression program at 500 million steps and 16 MiB of VM memory.
+
 The frontend supports packages and modules, local replacements, build tags and
 target-specific files, `//go:embed`, and an offline module cache. Language
 coverage includes ordinary control flow, methods, maps, interfaces, closures,
