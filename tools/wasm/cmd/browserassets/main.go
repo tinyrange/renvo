@@ -175,7 +175,12 @@ var customTargets = []customTarget{
 }
 
 func pc8086DefinitionImports() []targetDefinitionAsset {
-	return []targetDefinitionAsset{{Name: ".renvo/bios_8086.rtg", Source: "backends/bios_8086.rtg"}}
+	return []targetDefinitionAsset{
+		{Name: ".renvo/bios_8086.rtg", Source: "backends/bios_8086.rtg"},
+		{Name: ".renvo/freestanding_amd64.rtg", Source: "backends/freestanding_amd64.rtg"},
+		{Name: "backend/definitions/x86_64.rtg", Source: "backends/definitions/x86_64.rtg"},
+		{Name: "backend/definitions/elf_amd64_primitives.rtg", Source: "backends/definitions/elf_amd64_primitives.rtg"},
+	}
 }
 
 func main() {
