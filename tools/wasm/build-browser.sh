@@ -127,6 +127,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/target-capabilities.mjs \
+	tools/wasm/browser/api-help.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/asset-fetch.mjs \
@@ -145,6 +146,7 @@ if [ "$layout" = pages ]; then
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/target-capabilities.mjs \
+	tools/wasm/browser/api-help.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/asset-fetch.mjs \
