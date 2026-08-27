@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0093f4e9e3b3eddaa5b514d0f26b34595fee00746f97be9fdd1bb7b60657cd59"
+const CompilerSourceDigest = "916fd5c9d90579a21a79f302ef5ed70c35dcc62ab52ab2a098fd35b84ff5a54b"
 
 // source: backend/compiler_common_impl.go
 
@@ -14976,10 +14976,19 @@ const renvoNativeCopyBSSToStack = 5
 func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 renvoNonNil(g)
 a := &g.asm
-for at := 0; at < size; at += g.c.renvoNativeIntSize {
+for at := 0; at < size; {
 chunkSize := g.c.renvoNativeIntSize
 if size-at < chunkSize {
 chunkSize = size - at
+}
+
+
+
+
+if chunkSize > 4 && chunkSize < 8 {
+chunkSize = 4
+} else if chunkSize == 3 {
+chunkSize = 2
 }
 if mode == renvoNativeCopyMemToStack {
 renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, chunkSize)
@@ -14995,6 +15004,7 @@ renvoAsmStorePrimaryBss(a, destOffset+at)
 } else {
 renvoAsmStorePrimaryStackSize(a, destOffset-at, chunkSize)
 }
+at += chunkSize
 }
 }
 

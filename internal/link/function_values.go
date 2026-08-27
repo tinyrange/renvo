@@ -407,7 +407,7 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 		candidate, end, valid := parseFunctionValueSignature(program, funcTok, "")
 		conversion := functionValueTokenEquals(program, funcTok-1, "(") &&
 			functionValueTokenEquals(program, end, ")") && functionValueTokenEquals(program, end+1, "(")
-		accessorResult := functionValueTokenEquals(program, funcTok-1, "*") && functionValueTokenInDeclaredSignature(program, funcTok)
+		accessorResult := functionValueTokenEquals(program, funcTok-1, "*") && functionValueTokenInDeclaredResult(program, funcTok)
 		if !valid || !conversion && !accessorResult {
 			continue
 		}
@@ -691,6 +691,21 @@ func functionValueTokenInDeclaredSignature(program *unit.Program, token int) boo
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
 		if fn.StartTok < token && token < fn.BodyStart {
+			return true
+		}
+	}
+	return false
+}
+
+func functionValueTokenInDeclaredResult(program *unit.Program, token int) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		open := fn.NameTok + 1
+		if !functionValueTokenEquals(program, open, "(") {
+			continue
+		}
+		close := functionValueFindMatchingParen(program, open)
+		if close < token && token < fn.BodyStart {
 			return true
 		}
 	}
@@ -1363,7 +1378,11 @@ func functionValueLiteralArgumentSignature(program *unit.Program, funcTok int, b
 		}
 		for i := 0; i < len(argStarts); i++ {
 			if argStarts[i] <= funcTok && bodyClose < argEnds[i] {
-				return functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
+				sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
+				if sigIndex < 0 {
+					sigIndex = functionValueSignatureByTypeText(signatures, paramTypes[i])
+				}
+				return sigIndex
 			}
 		}
 	}
@@ -2003,8 +2022,9 @@ func functionValuePrimaryTokenBefore(program *unit.Program, before int) int {
 		if open < 0 {
 			return -1
 		}
-		if open > 0 && (program.Tokens[open-1].KindLine&255 == unit.TokenIdent ||
-			functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
+		if open > 0 && program.Tokens[open-1].KindLine>>8 == program.Tokens[open].KindLine>>8 &&
+			(program.Tokens[open-1].KindLine&255 == unit.TokenIdent ||
+				functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
 			return end
 		}
 		end--
@@ -2040,7 +2060,8 @@ func functionValuePrimaryStart(program *unit.Program, end int) int {
 			return -1
 		}
 		start = open
-		if open > 0 && (program.Tokens[open-1].KindLine&255 == unit.TokenIdent || functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
+		if open > 0 && program.Tokens[open-1].KindLine>>8 == program.Tokens[open].KindLine>>8 &&
+			(program.Tokens[open-1].KindLine&255 == unit.TokenIdent || functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
 			start = functionValuePrimaryStart(program, open-1)
 		}
 	}

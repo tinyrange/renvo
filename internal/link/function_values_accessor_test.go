@@ -24,6 +24,7 @@ func main() {
 	var value holder
 	(*value.callback()) = nil
 	(*value.callback()) = increment
+	print("invoke")
 	if (*value.callback()) != nil && (*value.callback())(2) == 3 { print("PASS\n") }
 }
 `)},

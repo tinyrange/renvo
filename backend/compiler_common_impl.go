@@ -14969,10 +14969,19 @@ const renvoNativeCopyBSSToStack = 5
 func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 	renvoNonNil(g)
 	a := &g.asm
-	for at := 0; at < size; at += g.c.renvoNativeIntSize {
+	for at := 0; at < size; {
 		chunkSize := g.c.renvoNativeIntSize
 		if size-at < chunkSize {
 			chunkSize = size - at
+		}
+		// Scalar load/store emitters accept power-of-two widths. Split an
+		// aggregate tail such as a three-byte array into 2+1 bytes instead of
+		// accidentally selecting the native-width fallback and overwriting the
+		// object immediately following it.
+		if chunkSize > 4 && chunkSize < 8 {
+			chunkSize = 4
+		} else if chunkSize == 3 {
+			chunkSize = 2
 		}
 		if mode == renvoNativeCopyMemToStack {
 			renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, chunkSize)
@@ -14988,6 +14997,7 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 		} else {
 			renvoAsmStorePrimaryStackSize(a, destOffset-at, chunkSize)
 		}
+		at += chunkSize
 	}
 }
 
