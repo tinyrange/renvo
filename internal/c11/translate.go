@@ -26,11 +26,10 @@ const (
 // Result is the C11 source adapter result. Source is ordinary Renvo Go input,
 // so every later frontend phase is shared with Go packages.
 type Result struct {
-	Source            []byte
-	DeclaredFunctions []string
-	Ok                bool
-	Error             int
-	ErrorAt           int
+	Source  []byte
+	Ok      bool
+	Error   int
+	ErrorAt int
 }
 
 type declarator struct {
@@ -355,10 +354,10 @@ func TranslateWithPreludeConfig(packageName string, src []byte, prelude []byte, 
 	return translateObjectConfig(packageName, src, prelude, false, config, false)
 }
 
-// InspectDeclarationsWithConfig parses C declarations without emitting source.
-// It is used for the cgo preamble attached to import "C".
+// InspectDeclarationsWithConfig parses a cgo preamble. Source contains one
+// declared function name per line so the loader can retain the explicit set.
 func InspectDeclarationsWithConfig(src []byte, config ObjectConfig) Result {
-	return translateObjectConfig("main", src, nil, false, config, true)
+	return translateObjectConfig("", src, nil, false, config, true)
 }
 
 // TranslateObject lowers a hosted C translation unit. Prelude contains
@@ -472,7 +471,14 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
 	}
 	if checkOnly {
-		return Result{DeclaredFunctions: t.declaredFunctionNames(), Ok: true, Error: TranslateOK, ErrorAt: -1}
+		if packageName == "" {
+			t.out = t.out[:0]
+			for i := 0; i < len(t.functions); i++ {
+				t.out = append(t.out, t.functions[i].name...)
+				t.out = append(t.out, '\n')
+			}
+		}
+		return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
 	}
 	if assemblyOutput {
 		if len(t.assemblyOut) == 0 {
@@ -493,17 +499,6 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		copy(t.out[at:], declaration)
 	}
 	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
-}
-
-func (t *translator) declaredFunctionNames() []string {
-	if len(t.functions) == 0 {
-		return nil
-	}
-	out := make([]string, len(t.functions))
-	for i := 0; i < len(t.functions); i++ {
-		out[i] = t.functions[i].name
-	}
-	return out
 }
 
 // rememberTranslationUnitFunctionDefinitions records ordinary function

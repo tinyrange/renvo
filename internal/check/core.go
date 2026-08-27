@@ -638,10 +638,16 @@ func cImportDeclaredTokenCore(info *PackageInfo, fileIndex int, file *syntax.Fil
 	if info.Cgo == nil || fileIndex < 0 || fileIndex >= len(info.Cgo.Imports) {
 		return false
 	}
-	for i := 0; i < len(info.Cgo.Imports[fileIndex]); i++ {
-		if tokenMatchesCoreName(file, tok, info.Cgo.Imports[fileIndex][i]) {
+	names := info.Cgo.Imports[fileIndex]
+	for start := 0; start < len(names); {
+		end := start
+		for end < len(names) && names[end] != '\n' {
+			end++
+		}
+		if tokenMatchesCoreName(file, tok, string(names[start:end])) {
 			return true
 		}
+		start = end + 1
 	}
 	return false
 }

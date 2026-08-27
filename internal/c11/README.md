@@ -12,6 +12,10 @@ are declared in a synthetic `_cgo_export.h`; C files include that header to call
 them. The logical namespace is separate, so identically named Go and C
 declarations can coexist.
 
+The compact synthetic-header ABI currently covers void functions and functions
+whose parameters and result use Go `int`. Preambles may use a block comment or
+a single `//` line immediately before the standalone import.
+
 The adapter is intentionally compact:
 
 - tokens are three integers containing a packed kind/line and two byte offsets;

@@ -289,7 +289,8 @@ are published to C through a synthetic `_cgo_export.h`. The `#pragma go`
 C-project workflow remains a C-first direct-binding mode. Keep
 C-specific parsing and source adaptation above the shared checker boundary; do
 not duplicate the linker or add C semantics to a target backend. The supported
-C subset and its current limitations are documented beside that frontend.
+C subset and its current limitations, including the initial integer-only export
+header ABI, are documented beside that frontend.
 
 The closed out-of-scope list is:
 

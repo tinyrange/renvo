@@ -10,7 +10,7 @@ func TestCgoPreamble(t *testing.T) {
 		ok   bool
 	}{
 		{name: "block", src: "package p\n/*\nint value(void);\n*/\nimport \"C\"\n", want: "\nint value(void);\n", ok: true},
-		{name: "line group", src: "package p\n// int first(void);\n// int second(void);\nimport \"C\"\n", want: "int first(void);\nint second(void);\n", ok: true},
+		{name: "line", src: "package p\n// int first(void);\nimport \"C\"\n", want: " int first(void);", ok: true},
 		{name: "no comment", src: "package p\nimport \"C\"\n", want: "", ok: true},
 		{name: "blank line", src: "package p\n// int value(void);\n\nimport \"C\"\n", want: "", ok: true},
 		{name: "ordinary import", src: "package p\nimport \"fmt\"\n", ok: false},

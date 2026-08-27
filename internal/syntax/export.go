@@ -85,7 +85,7 @@ func CgoPreamble(file File, decl ImportDecl) ([]byte, int, bool) {
 	}
 	i := TokenStart(file.Tokens[importTok])
 	newlines := 0
-	for i > 0 && cgoWhitespace(file.Src[i-1]) {
+	for i > 0 && (file.Src[i-1] == ' ' || file.Src[i-1] == '\t' || file.Src[i-1] == '\r' || file.Src[i-1] == '\n') {
 		if file.Src[i-1] == '\n' {
 			newlines++
 		}
@@ -103,62 +103,15 @@ func CgoPreamble(file File, decl ImportDecl) ([]byte, int, bool) {
 		}
 		return nil, -1, false
 	}
-	lineEnd := i
-	lineStart := cgoLineStart(file.Src, lineEnd)
-	if !cgoLineComment(file.Src, lineStart, lineEnd) {
-		return nil, -1, true
+	line := i
+	for line > 0 && file.Src[line-1] != '\n' {
+		line--
 	}
-	first := lineStart
-	for first > 0 {
-		previousEnd := first - 1
-		if previousEnd > 0 && file.Src[previousEnd-1] == '\r' {
-			previousEnd--
-		}
-		previousStart := cgoLineStart(file.Src, previousEnd)
-		if !cgoLineComment(file.Src, previousStart, previousEnd) {
-			break
-		}
-		first = previousStart
+	for line < i && (file.Src[line] == ' ' || file.Src[line] == '\t') {
+		line++
 	}
-	out := make([]byte, 0, lineEnd-first)
-	contentStart := -1
-	for pos := first; pos < lineEnd; {
-		end := pos
-		for end < lineEnd && file.Src[end] != '\n' {
-			end++
-		}
-		trimmed := pos
-		for trimmed < end && (file.Src[trimmed] == ' ' || file.Src[trimmed] == '\t') {
-			trimmed++
-		}
-		content := trimmed + 2
-		if content < end && file.Src[content] == ' ' {
-			content++
-		}
-		if contentStart < 0 {
-			contentStart = content
-		}
-		out = append(out, file.Src[content:end]...)
-		out = append(out, '\n')
-		pos = end + 1
+	if line+2 <= i && file.Src[line] == '/' && file.Src[line+1] == '/' {
+		return file.Src[line+2 : i], line + 2, true
 	}
-	return out, contentStart, true
-}
-
-func cgoWhitespace(ch byte) bool {
-	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
-}
-
-func cgoLineStart(src []byte, end int) int {
-	for end > 0 && src[end-1] != '\n' {
-		end--
-	}
-	return end
-}
-
-func cgoLineComment(src []byte, start int, end int) bool {
-	for start < end && (src[start] == ' ' || src[start] == '\t') {
-		start++
-	}
-	return start+2 <= end && src[start] == '/' && src[start+1] == '/'
+	return nil, -1, true
 }

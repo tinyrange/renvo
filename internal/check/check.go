@@ -2,7 +2,6 @@ package check
 
 import (
 	"renvo.dev/internal/arena"
-	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -91,7 +90,7 @@ type PackageInfo struct {
 
 type CgoInfo struct {
 	Files   []bool
-	Imports [][]string
+	Imports [][]byte
 	Exports []CExport
 }
 
@@ -269,18 +268,11 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	if pkg.ExplicitC {
 		info.Cgo = &CgoInfo{Files: make([]bool, len(pkg.Files))}
-		info.Cgo.Imports = make([][]string, len(pkg.Files))
+		info.Cgo.Imports = make([][]byte, len(pkg.Files))
 		for i := 0; i < len(pkg.Files); i++ {
 			info.Cgo.Files[i] = pkg.Files[i].C
-			if pkg.Files[i].C {
-				continue
-			}
-			file := pkg.Files[i].File
-			for j := 0; j < len(file.Imports); j++ {
-				preamble, _, cgoImport := syntax.CgoPreamble(file, file.Imports[j])
-				if cgoImport {
-					info.Cgo.Imports[i] = c11.InspectDeclarationsWithConfig(preamble, c11.ObjectConfig{DataModel: c11.DataModelLP64}).DeclaredFunctions
-				}
+			if len(pkg.Files[i].File.Src) > len(pkg.Files[i].Src) {
+				info.Cgo.Imports[i] = pkg.Files[i].File.Src[len(pkg.Files[i].Src)+1:]
 			}
 		}
 	}

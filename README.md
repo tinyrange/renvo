@@ -157,6 +157,8 @@ source adapter into the same package checker, linker, unit format, and backends
 used for Go. Mixed packages use the standard cgo shape: the comment preamble
 immediately before `import "C"` declares the C names available to that Go file,
 and `//export` functions are declared for C in a synthetic `_cgo_export.h`.
+The current compact boundary accepts block or single-line preambles and emits
+header prototypes for exported functions using Go `int` parameters and results.
 Its current scalar/control-flow subset is deliberately smaller than the Go
 frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
 scope and growth boundary.
@@ -196,8 +198,8 @@ int cAdd(int left, int right) { return goValue() + left + right; }
 ```
 
 As with standard cgo, C source includes `_cgo_export.h` when it calls exported
-Go functions. Renvo generates that header in memory and copies the package's C
-preambles into it before the export declarations.
+Go functions. Renvo generates that header in memory for the package's exported
+integer functions.
 
 The bootstrap looks for `renvo-backend` beside its own executable. Tooling that
 keeps the backend elsewhere can pass `-bootstrap-backend <path>` immediately

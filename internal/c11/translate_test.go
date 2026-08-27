@@ -59,8 +59,8 @@ extern long second(long value);
 	if !result.Ok {
 		t.Fatalf("InspectDeclarationsWithConfig failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if len(result.DeclaredFunctions) != 2 || result.DeclaredFunctions[0] != "first" || result.DeclaredFunctions[1] != "second" {
-		t.Fatalf("declared functions = %#v", result.DeclaredFunctions)
+	if string(result.Source) != "first\nsecond\n" {
+		t.Fatalf("declared functions = %q", result.Source)
 	}
 }
 
