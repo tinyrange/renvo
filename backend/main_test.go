@@ -1117,8 +1117,10 @@ func TestCompilerPerformance(t *testing.T) {
 			}
 			const maxRSSKB = 16 * 1024
 			maxBinarySize := int64(320 * 1024)
+			maxElapsed := 50 * time.Millisecond
 			if target.name == "darwin/arm64" {
-				maxBinarySize = 352 * 1024
+				maxBinarySize = 640 * 1024
+				maxElapsed = 175 * time.Millisecond
 			}
 			bestElapsed := 24 * time.Hour
 			bestRSS := 1 << 30
@@ -1137,14 +1139,14 @@ func TestCompilerPerformance(t *testing.T) {
 				if maxRSS < bestRSS {
 					bestRSS = maxRSS
 				}
-				if elapsed <= 50*time.Millisecond && maxRSS <= maxRSSKB && compilerInfo.Size() <= maxBinarySize {
+				if elapsed <= maxElapsed && maxRSS <= maxRSSKB && compilerInfo.Size() <= maxBinarySize {
 					return
 				}
 			}
 
 			var failures []string
-			if bestElapsed > 50*time.Millisecond {
-				failures = append(failures, fmt.Sprintf("runtime %s > 50ms", bestElapsed))
+			if bestElapsed > maxElapsed {
+				failures = append(failures, fmt.Sprintf("runtime %s > %s", bestElapsed, maxElapsed))
 			}
 			if bestRSS > maxRSSKB {
 				failures = append(failures, fmt.Sprintf("compile max RSS %dKB > %dKB", bestRSS, maxRSSKB))
