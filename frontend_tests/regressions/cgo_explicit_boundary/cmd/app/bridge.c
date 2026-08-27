@@ -1,4 +1,4 @@
-extern int go_callback(int value);
+#include "_cgo_export.h"
 
 int shared(int value) {
 	return value + 1;

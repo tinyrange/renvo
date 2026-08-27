@@ -4,10 +4,13 @@ This package is an alternate source frontend, not a second compiler pipeline.
 It adapts C declarations and statements to the same checked package syntax used
 by the Go frontend. Package checking, symbol resolution, whole-program linking,
 unit serialization, dead-code elimination, and backend code generation remain
-shared. Ordinary mixed packages expose C declarations through Go's `import
-"C"` namespace, while C may call only Go functions carrying an adjacent
-`//export name` directive. The logical namespace is separate, so identically
-named Go and C declarations can coexist.
+shared. Ordinary mixed packages follow cgo's explicit source contract. The
+comment immediately preceding a standalone `import "C"` is parsed as a C
+preamble, and only functions declared there are visible through that Go file's
+`C.name` namespace. Go functions carrying an adjacent `//export name` directive
+are declared in a synthetic `_cgo_export.h`; C files include that header to call
+them. The logical namespace is separate, so identically named Go and C
+declarations can coexist.
 
 The adapter is intentionally compact:
 

@@ -283,9 +283,10 @@ Renvo is not a drop-in Go compiler.
 
 The alternate C11 frontend under `internal/c11` feeds the same checked-package
 and linked-unit pipeline as Go without invoking a host C toolchain. Mixed `.go`
-and `.c` files use a cgo-style explicit boundary: Go selects C declarations
-through `import "C"`, and C can reach only Go functions marked with `//export`.
-The `#pragma go` C-project workflow remains a C-first direct-binding mode. Keep
+and `.c` files use a cgo-style explicit boundary: a preamble immediately before
+`import "C"` declares that Go file's C functions, while `//export` functions
+are published to C through a synthetic `_cgo_export.h`. The `#pragma go`
+C-project workflow remains a C-first direct-binding mode. Keep
 C-specific parsing and source adaptation above the shared checker boundary; do
 not duplicate the linker or add C semantics to a target backend. The supported
 C subset and its current limitations are documented beside that frontend.

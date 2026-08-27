@@ -84,6 +84,7 @@ type PackageInfo struct {
 	CoreArenaEnd   int
 	ExplicitC      bool
 	CFiles         []bool
+	CImports       [][]string
 	CExports       []CExport
 	Methods        []MethodInfo
 	Bodies         []FuncBody
@@ -265,8 +266,10 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	if pkg.ExplicitC {
 		info.CFiles = make([]bool, len(pkg.Files))
+		info.CImports = make([][]string, len(pkg.Files))
 		for i := 0; i < len(pkg.Files); i++ {
 			info.CFiles[i] = pkg.Files[i].C
+			info.CImports[i] = pkg.Files[i].CImports
 		}
 	}
 	var symbolHash []int

@@ -154,8 +154,9 @@ func main() {
 
 Packages may also contain `.c` files. The initial C11 frontend is a compact
 source adapter into the same package checker, linker, unit format, and backends
-used for Go. Mixed packages use `import "C"` for Go-to-C calls and `//export`
-for the functions C may call back into.
+used for Go. Mixed packages use the standard cgo shape: the comment preamble
+immediately before `import "C"` declares the C names available to that Go file,
+and `//export` functions are declared for C in a synthetic `_cgo_export.h`.
 Its current scalar/control-flow subset is deliberately smaller than the Go
 frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
 scope and growth boundary.
@@ -180,6 +181,7 @@ boundary without invoking a host C toolchain:
 ```go
 package main
 
+/* int cAdd(int left, int right); */
 import "C"
 
 //export goValue
@@ -189,9 +191,13 @@ func main() { print(C.cAdd(1, 1)) }
 ```
 
 ```c
-extern int goValue(void);
+#include "_cgo_export.h"
 int cAdd(int left, int right) { return goValue() + left + right; }
 ```
+
+As with standard cgo, C source includes `_cgo_export.h` when it calls exported
+Go functions. Renvo generates that header in memory and copies the package's C
+preambles into it before the export declarations.
 
 The bootstrap looks for `renvo-backend` beside its own executable. Tooling that
 keeps the backend elsewhere can pass `-bootstrap-backend <path>` immediately

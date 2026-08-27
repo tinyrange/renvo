@@ -139,7 +139,7 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 		{
 			name: "c_unexported_go_reference",
 			files: map[string]string{
-				"cmd/app/main.go": "package main\nimport \"C\"\nfunc callback() int { return 42 }\nfunc main() { _ = C.call_go() }\n",
+				"cmd/app/main.go": "package main\n/* int call_go(void); */\nimport \"C\"\nfunc callback() int { return 42 }\nfunc main() { _ = C.call_go() }\n",
 				"cmd/app/value.c": "extern int callback(void);\nint call_go(void) { return callback(); }\n",
 			},
 			wantCode:   "RENVO-CHECK-029",
@@ -147,13 +147,24 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantDetail: "undefined identifier",
 		},
 		{
-			name: "c_unknown_selector",
+			name: "c_undeclared_selector",
 			files: map[string]string{
-				"cmd/app/main.go": "package main\nimport \"C\"\nfunc main() { _ = C.missing() }\n",
+				"cmd/app/main.go": "package main\nimport \"C\"\nfunc main() { _ = C.present() }\n",
 				"cmd/app/value.c": "int present(void) { return 42; }\n",
 			},
 			wantCode:   "RENVO-CHECK-029",
 			wantFile:   "cmd/app/main.go",
+			wantDetail: "undefined identifier",
+		},
+		{
+			name: "c_declaration_is_file_local",
+			files: map[string]string{
+				"cmd/app/main.go":  "package main\n/* int present(void); */\nimport \"C\"\nfunc main() {}\n",
+				"cmd/app/other.go": "package main\nimport \"C\"\nfunc other() { _ = C.present() }\n",
+				"cmd/app/value.c":  "int present(void) { return 42; }\n",
+			},
+			wantCode:   "RENVO-CHECK-029",
+			wantFile:   "cmd/app/other.go",
 			wantDetail: "undefined identifier",
 		},
 		{

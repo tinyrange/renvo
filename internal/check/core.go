@@ -586,6 +586,9 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 	}
 	var symbol int
 	if info.Imports[importIndex].ImportPath == "C" {
+		if !cImportDeclaredTokenCore(info, fileIndex, file, nameTok) {
+			return selector
+		}
 		symbol = lookupCPackageSymbolTextCore(&checked[selector.BasePackage], file, nameTok)
 	} else {
 		symbol = lookupPackageSymbolTextCore(&checked[selector.BasePackage], file, nameTok)
@@ -615,6 +618,9 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 	}
 	var symbol int
 	if info.Imports[importIndex].ImportPath == "C" {
+		if !cImportDeclaredTokenCore(&info, fileIndex, &file, nameTok) {
+			return ref
+		}
 		symbol = lookupCPackageSymbolTextCore(&checked[pkg], &file, nameTok)
 	} else {
 		symbol = lookupPackageSymbolTextCore(&checked[pkg], &file, nameTok)
@@ -626,6 +632,18 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 	ref.Package = pkg
 	ref.Symbol = symbol
 	return ref
+}
+
+func cImportDeclaredTokenCore(info *PackageInfo, fileIndex int, file *syntax.File, tok int) bool {
+	if fileIndex < 0 || fileIndex >= len(info.CImports) {
+		return false
+	}
+	for i := 0; i < len(info.CImports[fileIndex]); i++ {
+		if tokenMatchesCoreName(file, tok, info.CImports[fileIndex][i]) {
+			return true
+		}
+	}
+	return false
 }
 
 func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {

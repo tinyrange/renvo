@@ -1,6 +1,8 @@
 package main
 
 import "renvo.dev/device/board"
+
+/* void cBlinkForever(int intervalMilliseconds); */
 import "C"
 
 // These narrow functions are the explicitly exported Go side of the C/Go

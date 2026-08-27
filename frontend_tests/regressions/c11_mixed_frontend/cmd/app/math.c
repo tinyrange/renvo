@@ -1,6 +1,5 @@
 #include <stdint.h>
-
-extern int goDouble(int value);
+#include "_cgo_export.h"
 
 int cAdd(int left, int right) {
 	int result = left + right;

@@ -45,6 +45,7 @@ type ParsedFile struct {
 	Src        []byte
 	File       syntax.File
 	C          bool
+	CImports   []string
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -165,9 +166,22 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	// C-first shared-name contract.
 	pkg.ExplicitC = hasC && hasGo && !cCompiler
 	var parsedGo []syntax.File
-	var goExports []c11.GoExport
+	var goExportDefs []goExportDefinition
+	var goCImports [][]string
+	var goPreambleErrors []c11.Result
+	var goPreambleOffsets []int
 	if hasC {
 		parsedGo = make([]syntax.File, len(selected))
+		goCImports = make([][]string, len(selected))
+		goPreambleErrors = make([]c11.Result, len(selected))
+		goPreambleOffsets = make([]int, len(selected))
+		cgoDataModel := c11.DataModelLP64
+		for i := 0; i < len(selected); i++ {
+			if isCSourceFile(selected[i].Path) && selected[i].CDataModel != c11.DataModelInvalid {
+				cgoDataModel = selected[i].CDataModel
+				break
+			}
+		}
 		for i := 0; i < len(selected); i++ {
 			if !isGoSourceFile(selected[i].Path) {
 				continue
@@ -183,6 +197,21 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				// Preserve the established file index contract below.
 				break
 			}
+			for j := 0; j < len(parsedGo[i].Imports); j++ {
+				preamble, offset, cgoImport := syntax.CgoPreamble(parsedGo[i], parsedGo[i].Imports[j])
+				if !cgoImport {
+					continue
+				}
+				inspected := c11.InspectDeclarationsWithConfig(preamble, c11.ObjectConfig{DataModel: cgoDataModel})
+				if !inspected.Ok {
+					goPreambleErrors[i] = inspected
+					goPreambleOffsets[i] = offset
+					continue
+				}
+				for k := 0; k < len(inspected.DeclaredFunctions); k++ {
+					goCImports[i] = appendStringUnique(goCImports[i], inspected.DeclaredFunctions[k])
+				}
+			}
 		}
 		if pkg.Name == "" {
 			pkg.Name = cPackageName(ref, root)
@@ -196,7 +225,9 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				for j := 0; j < len(file.Funcs); j++ {
 					if name := syntax.ExportDirective(file, file.Funcs[j]); name != "" {
 						goName := string(syntax.TokenText(file.Src, file.Tokens[file.Funcs[j].NameTok]))
-						goExports = append(goExports, c11.GoExport{CName: name, GoName: goName})
+						goExportDefs = append(goExportDefs, goExportDefinition{
+							Mapping: c11.GoExport{CName: name, GoName: goName}, File: i, Func: j,
+						})
 					}
 				}
 			}
@@ -210,7 +241,29 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			parsed = syntax.ParseFile(selected[i].Src)
 		}
 		source := selected[i]
+		if isGoSourceFile(source.Path) && goPreambleErrors != nil && !goPreambleErrors[i].Ok && goPreambleErrors[i].Error != c11.TranslateOK {
+			pkg.ErrorOffset = goPreambleOffsets[i] + goPreambleErrors[i].ErrorAt
+			pkg.C11Error = goPreambleErrors[i].Error
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+			return packageFail(pkg, PackageErrC11, i, -1)
+		}
 		if isCSourceFile(source.Path) {
+			goExports := cgoExportMappings(goExportDefs)
+			var exportHeader []byte
+			if cgoSourceIncludesExportHeader(source.Src) {
+				dataModel := source.CDataModel
+				if dataModel == c11.DataModelInvalid {
+					dataModel = c11.DataModelLP64
+				}
+				var headerOK bool
+				exportHeader, headerOK = cgoExportHeader(parsedGo, goExportDefs, dataModel)
+				if !headerOK {
+					pkg.ErrorOffset = 0
+					pkg.C11Error = c11.TranslateErrUnsupported
+					pkg.Files = append(pkg.Files, newParsedFile(source, parsed, nil))
+					return packageFail(pkg, PackageErrC11, i, -1)
+				}
+			}
 			var translated c11.Result
 			if source.CObject {
 				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
@@ -228,7 +281,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				if dataModel == c11.DataModelInvalid {
 					dataModel = c11.DataModelLP64
 				}
-				translated = c11.TranslateWithConfig(pkg.Name, source.Src, c11.ObjectConfig{
+				translated = c11.TranslateWithPreludeConfig(pkg.Name, source.Src, exportHeader, c11.ObjectConfig{
 					DataModel: dataModel, ShortWChar: source.CShortWChar, UnsignedChar: source.CUnsignedChar,
 					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler, GoExports: goExports,
 				})
@@ -243,38 +296,55 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			parsed = syntax.ParseFile(source.Src)
 		}
 		if !parsed.Ok {
-			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
 			return packageFail(pkg, PackageErrParse, i, -1)
 		}
 		name := string(syntax.TokenText(parsed.Src, parsed.Tokens[parsed.PackageName]))
 		if pkg.Name == "" {
 			pkg.Name = name
 		} else if pkg.Name != name {
-			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
 		refs := FileImportsWithDependencies(module, stdRoot, dependencies, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
-				pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+				pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
 				return packageFail(pkg, PackageErrImport, i, len(pkg.Imports)-1)
 			}
 		}
-		pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+		pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
 	}
 	return pkg
 }
 
-func newParsedFile(source SourceFile, file syntax.File) ParsedFile {
+func newParsedFile(source SourceFile, file syntax.File, cImports []string) ParsedFile {
 	return ParsedFile{
 		Path:       source.Path,
 		Src:        source.Src,
 		File:       file,
 		C:          isCSourceFile(source.Path),
+		CImports:   cImports,
 		ArenaStart: source.ArenaStart,
 		ArenaEnd:   source.ArenaEnd,
 	}
+}
+
+func appendStringUnique(values []string, value string) []string {
+	for i := 0; i < len(values); i++ {
+		if values[i] == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func cImportsAt(imports [][]string, index int) []string {
+	if index < 0 || index >= len(imports) {
+		return nil
+	}
+	return imports[index]
 }
 
 type graphBuilder struct {

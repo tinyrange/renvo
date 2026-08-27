@@ -1,9 +1,8 @@
 /*
- * The application loop is ordinary C11. The Go file explicitly exports the
- * two board adapters named by these declarations.
+ * The application loop is ordinary C11. _cgo_export.h declares the two board
+ * adapters explicitly exported by the Go file.
  */
-extern void goSetBlueLED(int on);
-extern void goDelayMilliseconds(int milliseconds);
+#include "_cgo_export.h"
 
 void cBlinkForever(int intervalMilliseconds) {
 	for (;;) {

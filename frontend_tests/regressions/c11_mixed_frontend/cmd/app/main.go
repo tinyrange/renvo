@@ -1,5 +1,9 @@
 package main
 
+/*
+int cAdd(int left, int right);
+int cCallGo(int value);
+*/
 import "C"
 
 //export goDouble
