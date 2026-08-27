@@ -26,57 +26,6 @@ type includeSpec struct {
 	at     int
 }
 
-// BuildObjectPrelude reads the translation unit's real headers and retains
-// only externally linked function declarations referenced by the source. This
-// is the deliberately narrow hosted-header slice: it bounds memory by avoiding
-// a materialized copy of every unrelated declaration in a large libc header.
-func BuildObjectPrelude(path string, src []byte, reader IncludeReader, headers ...HeaderSource) HeaderResult {
-	result := HeaderResult{Ok: true, ErrorAt: -1}
-	includes := sourceIncludes(src)
-	count := len(includes)
-	if len(headers) > 0 {
-		count = len(headers)
-		if textContains(src, "va_list") {
-			result.Prelude = append(result.Prelude, "typedef __builtin_va_list va_list;\n"...)
-		}
-	}
-	if count == 0 {
-		return result
-	}
-	wanted := sourceCallNames(src)
-	var emitted []string
-	for i := 0; i < count; i++ {
-		var header []byte
-		var headerPath string
-		var ok bool
-		at := -1
-		if len(headers) > 0 {
-			headerPath = headers[i].Path
-			header = headers[i].Source
-			ok = true
-		} else {
-			at = includes[i].at
-			header, headerPath, ok = reader.ReadInclude(path, includes[i].name, includes[i].angled)
-		}
-		if !ok {
-			if headerPath == "" {
-				headerPath = includes[i].name
-			}
-			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: at}
-		}
-		if findText(result.Dependencies, headerPath) < 0 {
-			result.Dependencies = append(result.Dependencies, headerPath)
-		}
-		declarations, names, ok := headerDeclarations(header, wanted, emitted)
-		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: at}
-		}
-		result.Prelude = append(result.Prelude, declarations...)
-		emitted = append(emitted, names...)
-	}
-	return result
-}
-
 func sourceIncludes(src []byte) []includeSpec {
 	var out []includeSpec
 	for lineStart := 0; lineStart < len(src); {
