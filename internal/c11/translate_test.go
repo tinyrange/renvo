@@ -35,6 +35,35 @@ int call_go(int value) {
 	}
 }
 
+func TestTranslateExplicitGoExportName(t *testing.T) {
+	result := TranslateWithConfig("main", []byte(`
+extern int c_callback(int value);
+int call_go(int value) { return c_callback(value); }
+`), ObjectConfig{
+		DataModel: DataModelLP64,
+		GoExports: []GoExport{{CName: "c_callback", GoName: "goCallback"}},
+	})
+	if !result.Ok {
+		t.Fatalf("TranslateWithConfig failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("return goCallback(value)")) || bytes.Contains(result.Source, []byte("return c_callback(value)")) {
+		t.Fatalf("explicit Go export was not selected:\n%s", result.Source)
+	}
+}
+
+func TestInspectDeclarations(t *testing.T) {
+	result := InspectDeclarationsWithConfig([]byte(`
+int first(void);
+extern long second(long value);
+`), ObjectConfig{DataModel: DataModelLP64})
+	if !result.Ok {
+		t.Fatalf("InspectDeclarationsWithConfig failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if string(result.Source) != "first\nsecond\n" {
+		t.Fatalf("declared functions = %q", result.Source)
+	}
+}
+
 func TestTranslateCMainAndControlFlow(t *testing.T) {
 	source := []byte(`
 int main(void) {

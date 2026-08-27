@@ -584,7 +584,15 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 	if selector.BasePackage < 0 || selector.BasePackage >= len(checked) {
 		return selector
 	}
-	symbol := lookupPackageSymbolTextCore(&checked[selector.BasePackage], file, nameTok)
+	var symbol int
+	if info.Imports[importIndex].ImportPath == "C" {
+		if !cImportDeclaredTokenCore(info, fileIndex, file, nameTok) {
+			return selector
+		}
+		symbol = lookupCPackageSymbolTextCore(&checked[selector.BasePackage], file, nameTok)
+	} else {
+		symbol = lookupPackageSymbolTextCore(&checked[selector.BasePackage], file, nameTok)
+	}
 	if symbol < 0 {
 		return selector
 	}
@@ -608,7 +616,15 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 	if pkg < 0 || pkg >= len(checked) {
 		return ref
 	}
-	symbol := lookupPackageSymbolTextCore(&checked[pkg], &file, nameTok)
+	var symbol int
+	if info.Imports[importIndex].ImportPath == "C" {
+		if !cImportDeclaredTokenCore(&info, fileIndex, &file, nameTok) {
+			return ref
+		}
+		symbol = lookupCPackageSymbolTextCore(&checked[pkg], &file, nameTok)
+	} else {
+		symbol = lookupPackageSymbolTextCore(&checked[pkg], &file, nameTok)
+	}
 	if symbol < 0 {
 		return ref
 	}
@@ -616,6 +632,24 @@ func resolveImportSelectorTypeRefCore(fileIndex int, info PackageInfo, checked [
 	ref.Package = pkg
 	ref.Symbol = symbol
 	return ref
+}
+
+func cImportDeclaredTokenCore(info *PackageInfo, fileIndex int, file *syntax.File, tok int) bool {
+	if info.Cgo == nil || fileIndex < 0 || fileIndex >= len(info.Cgo.Imports) {
+		return false
+	}
+	names := info.Cgo.Imports[fileIndex]
+	for start := 0; start < len(names); {
+		end := start
+		for end < len(names) && names[end] != '\n' {
+			end++
+		}
+		if tokenMatchesCoreName(file, tok, string(names[start:end])) {
+			return true
+		}
+		start = end + 1
+	}
+	return false
 }
 
 func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
@@ -711,8 +745,41 @@ func lookupImportTokenNameCore(info *PackageInfo, fileIndex int, file *syntax.Fi
 }
 
 func lookupPackageSymbolTokenCore(info *PackageInfo, file *syntax.File, fileIndex int, tok int) int {
-	_ = fileIndex
+	if info.Cgo != nil && fileIndex >= 0 && fileIndex < len(info.Cgo.Files) && info.Cgo.Files[fileIndex] {
+		if symbol := lookupCPackageSymbolTextCore(info, file, tok); symbol >= 0 {
+			return symbol
+		}
+		for i := 0; i < len(info.Cgo.Exports); i++ {
+			if tokenMatchesCoreName(file, tok, info.Cgo.Exports[i].Name) || tokenMatchesCoreName(file, tok, info.Cgo.Exports[i].GoName) {
+				return info.Cgo.Exports[i].Symbol
+			}
+		}
+		return -1
+	}
 	return lookupPackageSymbolTextCore(info, file, tok)
+}
+
+func lookupCPackageSymbolTextCore(info *PackageInfo, file *syntax.File, tok int) int {
+	if tok < 0 || tok >= len(file.Tokens) {
+		return -1
+	}
+	for i := 0; i < len(info.Symbols); i++ {
+		name := info.Symbols[i].Name
+		if info.Symbols[i].Kind != SymbolMethod && len(name) >= 2 && name[0] == 'C' && name[1] == '.' && tokenMatchesCoreName(file, tok, name[2:]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func tokenMatchesCoreName(file *syntax.File, tok int, name string) bool {
+	if tok < 0 || tok >= len(file.Tokens) {
+		return false
+	}
+	token := file.Tokens[tok]
+	start := int(token.Start)
+	size := int(token.End - token.Start)
+	return size == len(name) && start >= 0 && start+size <= len(file.Src) && tokenMatchesCoreSymbol(file.Src, start, size, name)
 }
 
 func lookupPackageSymbolTextCore(info *PackageInfo, file *syntax.File, tok int) int {

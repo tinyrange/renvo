@@ -44,6 +44,7 @@ type ParsedFile struct {
 	Path       string
 	Src        []byte
 	File       syntax.File
+	C          bool
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -67,6 +68,7 @@ type Package struct {
 	ErrorImport    int
 	ErrorOffset    int
 	C11Error       int
+	ExplicitC      bool
 	CoreArenaStart int
 	CoreArenaEnd   int
 }
@@ -148,15 +150,35 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
 	hasC := false
+	hasGo := false
+	cCompiler := false
 	for i := 0; i < len(selected); i++ {
 		if isCSourceFile(selected[i].Path) {
 			hasC = true
-			break
+			cCompiler = cCompiler || selected[i].CCompiler
+		} else if isGoSourceFile(selected[i].Path) {
+			hasGo = true
 		}
 	}
+	// Ordinary mixed packages use the explicit import "C" boundary. Explicit
+	// C compiler invocations, including #pragma go, intentionally retain their
+	// C-first shared-name contract.
+	pkg.ExplicitC = hasC && hasGo && !cCompiler
 	var parsedGo []syntax.File
+	var goExportDefs []goExportDefinition
+	var goPreambleErrors []c11.Result
+	var goPreambleOffsets []int
 	if hasC {
 		parsedGo = make([]syntax.File, len(selected))
+		goPreambleErrors = make([]c11.Result, len(selected))
+		goPreambleOffsets = make([]int, len(selected))
+		cgoDataModel := c11.DataModelLP64
+		for i := 0; i < len(selected); i++ {
+			if isCSourceFile(selected[i].Path) && selected[i].CDataModel != c11.DataModelInvalid {
+				cgoDataModel = selected[i].CDataModel
+				break
+			}
+		}
 		for i := 0; i < len(selected); i++ {
 			if !isGoSourceFile(selected[i].Path) {
 				continue
@@ -172,9 +194,48 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				// Preserve the established file index contract below.
 				break
 			}
+			for j := 0; j < len(parsedGo[i].Imports); j++ {
+				preamble, offset, cgoImport := syntax.CgoPreamble(parsedGo[i], parsedGo[i].Imports[j])
+				if !cgoImport {
+					continue
+				}
+				inspected := c11.InspectDeclarationsWithConfig(preamble, c11.ObjectConfig{DataModel: cgoDataModel})
+				if !inspected.Ok {
+					goPreambleErrors[i] = inspected
+					goPreambleOffsets[i] = offset
+					continue
+				}
+				if len(inspected.Source) > 0 {
+					// Keep mixed-only declaration metadata behind the parsed EOF;
+					// token offsets remain relative to the original source.
+					if len(parsedGo[i].Src) == len(selected[i].Src) {
+						metadata := make([]byte, len(parsedGo[i].Src))
+						copy(metadata, parsedGo[i].Src)
+						parsedGo[i].Src = metadata
+						parsedGo[i].Src = append(parsedGo[i].Src, '\n')
+					}
+					parsedGo[i].Src = append(parsedGo[i].Src, inspected.Source...)
+				}
+			}
 		}
 		if pkg.Name == "" {
 			pkg.Name = cPackageName(ref, root)
+		}
+		if pkg.ExplicitC {
+			for i := 0; i < len(parsedGo); i++ {
+				file := parsedGo[i]
+				if !file.Ok {
+					continue
+				}
+				for j := 0; j < len(file.Funcs); j++ {
+					if name := syntax.ExportDirective(file, file.Funcs[j]); name != "" {
+						goName := string(syntax.TokenText(file.Src, file.Tokens[file.Funcs[j].NameTok]))
+						goExportDefs = append(goExportDefs, goExportDefinition{
+							Mapping: c11.GoExport{CName: name, GoName: goName}, File: i, Func: j,
+						})
+					}
+				}
+			}
 		}
 	}
 	for i := 0; i < len(selected); i++ {
@@ -185,7 +246,25 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			parsed = syntax.ParseFile(selected[i].Src)
 		}
 		source := selected[i]
+		if isGoSourceFile(source.Path) && goPreambleErrors != nil && !goPreambleErrors[i].Ok && goPreambleErrors[i].Error != c11.TranslateOK {
+			pkg.ErrorOffset = goPreambleOffsets[i] + goPreambleErrors[i].ErrorAt
+			pkg.C11Error = goPreambleErrors[i].Error
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+			return packageFail(pkg, PackageErrC11, i, -1)
+		}
 		if isCSourceFile(source.Path) {
+			goExports := make([]c11.GoExport, len(goExportDefs))
+			for j := 0; j < len(goExportDefs); j++ {
+				goExports[j] = goExportDefs[j].Mapping
+			}
+			var exportHeader []byte
+			if cgoSourceIncludesExportHeader(source.Src) {
+				dataModel := source.CDataModel
+				if dataModel == c11.DataModelInvalid {
+					dataModel = c11.DataModelLP64
+				}
+				exportHeader = cgoExportHeader(parsedGo, goExportDefs, dataModel)
+			}
 			var translated c11.Result
 			if source.CObject {
 				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
@@ -196,15 +275,16 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					KernelCodeModel:    source.CKernelCodeModel,
 					PruneUnusedStatics: source.COptimize,
 					IsolateGoBuiltins:  source.CCompiler,
+					GoExports:          goExports,
 				})
 			} else {
 				dataModel := source.CDataModel
 				if dataModel == c11.DataModelInvalid {
 					dataModel = c11.DataModelLP64
 				}
-				translated = c11.TranslateWithConfig(pkg.Name, source.Src, c11.ObjectConfig{
+				translated = c11.TranslateWithPreludeConfig(pkg.Name, source.Src, exportHeader, c11.ObjectConfig{
 					DataModel: dataModel, ShortWChar: source.CShortWChar, UnsignedChar: source.CUnsignedChar,
-					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler,
+					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler, GoExports: goExports,
 				})
 			}
 			if !translated.Ok {
@@ -245,6 +325,7 @@ func newParsedFile(source SourceFile, file syntax.File) ParsedFile {
 		Path:       source.Path,
 		Src:        source.Src,
 		File:       file,
+		C:          isCSourceFile(source.Path),
 		ArenaStart: source.ArenaStart,
 		ArenaEnd:   source.ArenaEnd,
 	}
@@ -521,4 +602,53 @@ func stringHasSuffix(text string, suffix string) bool {
 		}
 	}
 	return true
+}
+
+type goExportDefinition struct {
+	Mapping c11.GoExport
+	File    int
+	Func    int
+}
+
+func cgoExportHeader(files []syntax.File, definitions []goExportDefinition, dataModel int) []byte {
+	out := "/* Code generated by Renvo cgo; DO NOT EDIT. */\n"
+	intType := "long long"
+	if dataModel == c11.DataModelILP32 {
+		intType = "int"
+	}
+	for i := 0; i < len(definitions); i++ {
+		definition := definitions[i]
+		file := files[definition.File]
+		fn := file.Funcs[definition.Func]
+		out += "extern "
+		if fn.ResultStart < fn.ResultEnd {
+			out += intType
+		} else {
+			out += "void"
+		}
+		out += " " + definition.Mapping.CName + "("
+		start, end := fn.ParamsStart+1, fn.ParamsEnd-1
+		if start >= end {
+			out += "void"
+		} else {
+			out += intType
+			for ; start < end; start++ {
+				if file.Tokens[start].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == ',' {
+					out += ", " + intType
+				}
+			}
+		}
+		out += ");\n"
+	}
+	return []byte(out)
+}
+
+func cgoSourceIncludesExportHeader(src []byte) bool {
+	const name = "_cgo_export.h"
+	for i := 0; i+len(name) <= len(src); i++ {
+		if bytesEqual(src, i, i+len(name), name) {
+			return true
+		}
+	}
+	return false
 }

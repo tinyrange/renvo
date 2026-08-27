@@ -137,6 +137,7 @@ type translator struct {
 	pos                     int
 	packageName             string
 	isolateGoBuiltins       bool
+	goExports               []GoExport
 	out                     []byte
 	object                  bool
 	checkOnly               bool
@@ -346,6 +347,19 @@ func TranslateWithConfig(packageName string, src []byte, config ObjectConfig) Re
 	return translateObjectConfig(packageName, src, nil, false, config, false)
 }
 
+// TranslateWithPreludeConfig lowers an executable C translation unit after
+// parsing declarations supplied by a synthetic header. Prelude diagnostics do
+// not use source offsets from src.
+func TranslateWithPreludeConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
+	return translateObjectConfig(packageName, src, prelude, false, config, false)
+}
+
+// InspectDeclarationsWithConfig parses a cgo preamble. Source contains one
+// declared function name per line so the loader can retain the explicit set.
+func InspectDeclarationsWithConfig(src []byte, config ObjectConfig) Result {
+	return translateObjectConfig("", src, nil, false, config, true)
+}
+
 // TranslateObject lowers a hosted C translation unit. Prelude contains
 // declarations recovered from the translation unit's included headers; it is
 // kept separate so diagnostics in src retain their original byte offsets.
@@ -369,6 +383,14 @@ type ObjectConfig struct {
 	KernelCodeModel    bool
 	PruneUnusedStatics bool
 	IsolateGoBuiltins  bool
+	GoExports          []GoExport
+}
+
+// GoExport maps an external C identifier to the Go function named by a
+// //export directive in an explicit mixed-language package.
+type GoExport struct {
+	CName  string
+	GoName string
 }
 
 func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
@@ -403,6 +425,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 	t := translator{
 		packageName:        packageName,
 		isolateGoBuiltins:  config.IsolateGoBuiltins,
+		goExports:          config.GoExports,
 		out:                make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
 		object:             object,
 		checkOnly:          checkOnly,
@@ -448,7 +471,14 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
 	}
 	if checkOnly {
-		return Result{Ok: true, Error: TranslateOK, ErrorAt: -1}
+		if packageName == "" {
+			t.out = t.out[:0]
+			for i := 0; i < len(t.functions); i++ {
+				t.out = append(t.out, t.functions[i].name...)
+				t.out = append(t.out, '\n')
+			}
+		}
+		return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
 	}
 	if assemblyOutput {
 		if len(t.assemblyOut) == 0 {
@@ -3373,6 +3403,11 @@ func (t *translator) cIdentifierIsGoPredeclared(name string) bool {
 }
 
 func (t *translator) cFunctionGoName(name string) string {
+	for i := 0; i < len(t.goExports); i++ {
+		if t.goExports[i].CName == name {
+			return t.goExports[i].GoName
+		}
+	}
 	if t.object {
 		return name
 	}

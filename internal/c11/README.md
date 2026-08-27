@@ -4,8 +4,17 @@ This package is an alternate source frontend, not a second compiler pipeline.
 It adapts C declarations and statements to the same checked package syntax used
 by the Go frontend. Package checking, symbol resolution, whole-program linking,
 unit serialization, dead-code elimination, and backend code generation remain
-shared. Consequently, C and Go files in one directory can call each other's
-package-level functions directly.
+shared. Ordinary mixed packages follow cgo's explicit source contract. The
+comment immediately preceding a standalone `import "C"` is parsed as a C
+preamble, and only functions declared there are visible through that Go file's
+`C.name` namespace. Go functions carrying an adjacent `//export name` directive
+are declared in a synthetic `_cgo_export.h`; C files include that header to call
+them. The logical namespace is separate, so identically named Go and C
+declarations can coexist.
+
+The compact synthetic-header ABI currently covers void functions and functions
+whose parameters and result use Go `int`. Preambles may use a block comment or
+a single `//` line immediately before the standalone import.
 
 The adapter is intentionally compact:
 
@@ -43,7 +52,8 @@ portable read, write, and exit runtime operations.
 An active `#pragma go "filename.go"` adds that same-directory Go source and its
 transitive imports to an executable C build. Quoted, angle-bracket, and bare
 filenames are accepted; inactive conditional branches do not add sources, and
-adjacent Go files remain excluded unless explicitly named.
+adjacent Go files remain excluded unless explicitly named. This C-first mode
+intentionally retains direct shared-name linkage for its selected Go adapters.
 
 The browser language service indexes original C and header byte spans rather
 than the generated Go-shaped source. It provides live preprocessing/scanning
@@ -71,8 +81,10 @@ octal/hex escapes are decoded before their single trailing NUL is emitted.
 Linux/x86_64 thread-duration definitions use libc thread-specific keys behind a
 process-wide initialization mutex; linked pthread regressions verify independent
 state and persistence under host and stage3 compilers.
-Header directive lines and function prototypes are accepted so declarations can
-be supplied by Go files in the same package. The output-only preprocessing path
+Header directive lines and function prototypes are accepted. In an ordinary
+mixed package a prototype can be supplied by an explicitly exported Go
+function; `#pragma go` projects retain their direct C-first binding. The
+output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
 `include_next`, guards/`pragma once`, object/function/variadic macros, rescanning
 with hide sets, stringizing/pasting, conditionals and integer expressions,

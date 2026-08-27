@@ -181,10 +181,15 @@ func TestCompiledInBootstrapCompilesESP32C6MixedC11Fmt(t *testing.T) {
 		"go.mod": "module example.com/mixedfmt\n\ngo 1.23\n",
 		"main.go": `package main
 
+/*
+void setValue(int *value);
+*/
+import "C"
+
 import "fmt"
 
 func main() {
-	setValue(&value)
+	C.setValue(&value)
 	fmt.Printf("value: %d\n", value)
 }
 

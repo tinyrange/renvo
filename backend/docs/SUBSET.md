@@ -7,11 +7,12 @@ smaller than Go.
 This is not the full frontend roadmap. The frontend may accept ordinary Go
 features outside this direct backend subset by checking and lowering them into
 platform-independent units before they reach the backend. The closed frontend
-exclusion list is: cgo and generics. Everything
+exclusion list is generics. Everything
 else, including `defer`, `panic`, `recover`, maps, interfaces, arrays, function
 values, dynamic dispatch, complex numbers, ordinary builtins, and unsafe
 intrinsics, is frontend work unless this file is updated to make it a backend
-requirement too.
+requirement too. The frontend's explicit `import "C"` / `//export` boundary is
+also lowered before this direct backend subset.
 
 ## Program Shape
 
@@ -73,10 +74,10 @@ Frontend-in-scope but not directly in the backend subset:
 - function values and closures
 - method values and interface-style dynamic dispatch
 - goroutines, channels, and `select` lowered through `renvo.dev/x/runtime`
+- cgo-style explicit C imports and Go exports lowered by the frontend
 
 Excluded from the frontend and not directly in the backend subset:
 
-- cgo
 - generics
 
 ## Literals
@@ -173,10 +174,10 @@ Frontend-in-scope but not directly in the backend subset:
 - `panic` and `recover`
 - `range`
 - goroutines, channels, and `select` lowered through `renvo.dev/x/runtime`
+- cgo-style explicit C imports and Go exports lowered by the frontend
 
 Excluded from the frontend and not directly in the backend subset:
 
-- cgo
 - generics
 
 ## Functions

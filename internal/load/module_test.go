@@ -176,6 +176,7 @@ func TestFileImports(t *testing.T) {
 	src := []byte(`package main
 
 import (
+	"C"
 	"runtime"
 	lib "example.com/renvotests/quick/packages/case000/pkg/lib"
 )
