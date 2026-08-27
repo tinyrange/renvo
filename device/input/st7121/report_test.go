@@ -1,6 +1,9 @@
 package st7121
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestDecodeReport(t *testing.T) {
 	page := make([]byte, ReportSize(2))
@@ -30,4 +33,17 @@ func TestDecodeReportRejectsShortPage(t *testing.T) {
 	if _, _, ok := DecodeReport(make([]byte, ReportSize(1)-1), 1, NativeWidth, NativeHeight, nil); ok {
 		t.Fatal("short report accepted")
 	}
+}
+
+// DecodeReport writes valid contacts into caller-owned storage without allocating.
+func ExampleDecodeReport() {
+	page := make([]byte, ReportSize(1))
+	page[0] = 0x08
+	page[4] = 0x80 | 0x02
+	page[5], page[6] = 0x34, 0x01
+	page[7], page[8] = 0x23, 7
+	points := make([]Point, 1)
+	_, count, ok := DecodeReport(page, 1, NativeWidth, NativeHeight, points)
+	fmt.Printf("count=%d ok=%v point=(%d,%d)\n", count, ok, points[0].X, points[0].Y)
+	// Output: count=1 ok=true point=(564,291)
 }

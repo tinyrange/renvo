@@ -5,15 +5,17 @@ package driver
 import (
 	"renvo.dev/internal/backenddef"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgprofile"
 	"renvo.dev/internal/unit"
 )
 
 type backendBuildOptions struct {
-	options    Options
-	descriptor rtg.TargetDescriptor
-	hasBackend bool
+	options      Options
+	descriptor   rtg.TargetDescriptor
+	libraryFiles []rbe.File
+	hasBackend   bool
 }
 
 func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) backendBuildOptions {
@@ -144,7 +146,8 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 	if options.Mode == ModeKernelModule && !hostContains(resolved.Descriptor.Capabilities, "kernel_module") {
 		options = parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, backendAt)
 	}
-	return backendBuildOptions{options: options, descriptor: resolved.Descriptor, hasBackend: true}
+	return backendBuildOptions{options: options, descriptor: resolved.Descriptor,
+		libraryFiles: resolved.LibraryFiles, hasBackend: true}
 }
 
 type backendDefinitionImportLoader struct {
@@ -165,6 +168,9 @@ func BuildFromFSWithBackend(args []string, workDir string, stdRoot string, fs So
 
 func BuildFromFSWithBackendModuleCache(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS) BuildResult {
 	resolved := resolveBackendBuildOptions(args, workDir, fs)
+	if len(resolved.libraryFiles) != 0 {
+		fs = backendEnablementFS{base: fs, stdRoot: load.CleanPath(stdRoot), files: resolved.libraryFiles}
+	}
 	result := buildFromFSOptions(resolved.options, workDir, stdRoot, moduleCache, fs, false)
 	if !result.Ok || !resolved.hasBackend {
 		return result

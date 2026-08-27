@@ -26,7 +26,7 @@ const goKeywords = [
 
 export function registerRTGLanguage(monaco) {
   if (monaco.languages.getLanguages().some((language) => language.id === RTG_LANGUAGE_ID)) return;
-  monaco.languages.register({ id: RTG_LANGUAGE_ID, aliases: ["Renvo Target Generation", "RTG"], extensions: [".rtg"] });
+  monaco.languages.register({ id: RTG_LANGUAGE_ID, aliases: ["Renvo Target Generation", "RTG", "Renvo Backend Enablement", "RBE"], extensions: [".rtg", ".rbe"] });
   monaco.languages.setLanguageConfiguration(RTG_LANGUAGE_ID, {
     comments: { lineComment: "#", blockComment: ["/*", "*/"] },
     brackets: [["{", "}"], ["[", "]"], ["(", ")"]],

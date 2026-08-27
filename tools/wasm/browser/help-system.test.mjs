@@ -9,7 +9,7 @@ test("documentation opens in a native workbench tab and copies a complete page",
   assert.match(index, /id="help-heading"/);
   assert.match(index, /id="help-view"/);
   assert.match(index, /id="copy-help-page"[^>]*>Copy docs</);
-  assert.match(app, /function openHelpPage\(importPath\)/);
+  assert.match(app, /function openHelpPage\(importPath, anchor = ""\)/);
   assert.match(app, /openFiles\.includes\(activeHelp\)/);
   assert.match(app, /navigator\.clipboard\.writeText\(helpPageText\(page\)\)/);
   assert.match(app, /\["Constants", page\.constants\].*\["Types", page\.types\]/s);
@@ -40,12 +40,12 @@ test("the primary Examples action opens the hardware-first browser on every view
 });
 
 test("external views round-trip through URL deep links", () => {
-  assert.match(app, /const viewParameterNames = \["help", "source", "example", "file"\]/);
+  assert.match(app, /const viewParameterNames = \["help", "source", "example", "file", "symbol"\]/);
   assert.match(app, /history\.pushState\(\{ renvoView: true \}, "", url\)/);
   assert.match(app, /window\.addEventListener\("popstate", \(\) => \{ if \(deepLinksReady\) restoreDeepLink\(\); \}\)/);
   assert.match(app, /setViewDeepLink\("example", example\.importPath, example\.file\)/);
   assert.match(app, /setViewDeepLink\("source", name\)/);
-  assert.match(app, /setViewDeepLink\("help", importPath\)/);
+  assert.match(app, /setViewDeepLink\("help", importPath, anchor\)/);
 });
 
 test("structured compiler errors suppress generic failure summaries", () => {

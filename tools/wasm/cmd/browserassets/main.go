@@ -11,6 +11,7 @@ import (
 	"go/doc"
 	"go/format"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -79,11 +80,20 @@ type standardPackage struct {
 }
 
 type docEntry struct {
-	Name      string `json:"name"`
-	Signature string `json:"signature"`
+	Name      string       `json:"name"`
+	Signature string       `json:"signature"`
+	Doc       string       `json:"doc,omitempty"`
+	File      string       `json:"file,omitempty"`
+	Line      int          `json:"line,omitempty"`
+	Examples  []docExample `json:"examples,omitempty"`
+}
+
+type docExample struct {
+	Name      string `json:"name,omitempty"`
 	Doc       string `json:"doc,omitempty"`
-	File      string `json:"file,omitempty"`
-	Line      int    `json:"line,omitempty"`
+	Code      string `json:"code"`
+	Output    string `json:"output,omitempty"`
+	Unordered bool   `json:"unordered,omitempty"`
 }
 
 type docType struct {
@@ -92,13 +102,14 @@ type docType struct {
 }
 
 type packageDocs struct {
-	Name       string     `json:"name"`
-	ImportPath string     `json:"importPath"`
-	Doc        string     `json:"doc,omitempty"`
-	Constants  []docEntry `json:"constants,omitempty"`
-	Variables  []docEntry `json:"variables,omitempty"`
-	Functions  []docEntry `json:"functions,omitempty"`
-	Types      []docType  `json:"types,omitempty"`
+	Name       string       `json:"name"`
+	ImportPath string       `json:"importPath"`
+	Doc        string       `json:"doc,omitempty"`
+	Constants  []docEntry   `json:"constants,omitempty"`
+	Variables  []docEntry   `json:"variables,omitempty"`
+	Functions  []docEntry   `json:"functions,omitempty"`
+	Types      []docType    `json:"types,omitempty"`
+	Examples   []docExample `json:"examples,omitempty"`
 }
 
 type boardTarget struct {
@@ -712,27 +723,30 @@ func buildPlatformPackages(root string, output string, boards []boardDefinition)
 
 func buildPackageDocs(dir string, importPath string) (*packageDocs, error) {
 	fset := token.NewFileSet()
-	parsed, err := parser.ParseDir(fset, dir, func(entry os.FileInfo) bool {
-		return !strings.HasSuffix(entry.Name(), "_test.go") && strings.HasSuffix(entry.Name(), ".go")
-	}, parser.ParseComments)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("document %s: %w", importPath, err)
 	}
-	var syntaxPackage *ast.Package
-	for name, candidate := range parsed {
-		if !strings.HasSuffix(name, "_test") {
-			syntaxPackage = candidate
-			break
+	files := make([]*ast.File, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
 		}
+		path := filepath.Join(dir, entry.Name())
+		file, parseErr := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if parseErr != nil {
+			return nil, fmt.Errorf("document %s: %w", importPath, parseErr)
+		}
+		files = append(files, file)
 	}
-	if syntaxPackage == nil {
+	if len(files) == 0 {
 		return nil, nil
 	}
-	for _, file := range syntaxPackage.Files {
-		ast.FileExports(file)
+	pkg, err := doc.NewFromFiles(fset, files, importPath, doc.PreserveAST)
+	if err != nil {
+		return nil, fmt.Errorf("document %s: %w", importPath, err)
 	}
-	pkg := doc.New(syntaxPackage, importPath, doc.PreserveAST)
-	result := &packageDocs{Name: pkg.Name, ImportPath: importPath, Doc: cleanPackageDoc(pkg.Name, pkg.Doc)}
+	result := &packageDocs{Name: pkg.Name, ImportPath: importPath, Doc: cleanPackageDoc(pkg.Name, pkg.Doc), Examples: formatDocExamples(fset, pkg.Examples)}
 	appendValues := func(destination *[]docEntry, values []*doc.Value) error {
 		for _, value := range values {
 			signature, formatErr := formatGenDeclSignature(fset, value.Decl)
@@ -751,32 +765,85 @@ func buildPackageDocs(dir string, importPath string) (*packageDocs, error) {
 	if err = appendValues(&result.Variables, pkg.Vars); err != nil {
 		return nil, fmt.Errorf("document variables in %s: %w", importPath, err)
 	}
-	for _, function := range pkg.Funcs {
+	appendFunction := func(function *doc.Func) error {
 		signature, formatErr := formatFunctionSignature(fset, function.Decl)
 		if formatErr != nil {
-			return nil, fmt.Errorf("document function %s.%s: %w", importPath, function.Name, formatErr)
+			return fmt.Errorf("document function %s.%s: %w", importPath, function.Name, formatErr)
 		}
 		file, line := docSource(fset, function.Decl)
-		result.Functions = append(result.Functions, docEntry{Name: function.Name, Signature: signature, Doc: strings.TrimSpace(function.Doc), File: file, Line: line})
+		result.Functions = append(result.Functions, docEntry{Name: function.Name, Signature: signature, Doc: strings.TrimSpace(function.Doc), File: file, Line: line,
+			Examples: formatDocExamples(fset, function.Examples)})
+		return nil
 	}
+	for _, function := range pkg.Funcs {
+		if err = appendFunction(function); err != nil {
+			return nil, err
+		}
+	}
+	for _, typ := range pkg.Types {
+		for _, function := range typ.Funcs {
+			if err = appendFunction(function); err != nil {
+				return nil, err
+			}
+		}
+	}
+	sort.Slice(result.Functions, func(i, j int) bool { return result.Functions[i].Name < result.Functions[j].Name })
 	for _, typ := range pkg.Types {
 		signature, formatErr := formatGenDeclSignature(fset, typ.Decl)
 		if formatErr != nil {
 			return nil, fmt.Errorf("document type %s.%s: %w", importPath, typ.Name, formatErr)
 		}
 		file, line := docSource(fset, typ.Decl)
-		entry := docType{docEntry: docEntry{Name: typ.Name, Signature: signature, Doc: strings.TrimSpace(typ.Doc), File: file, Line: line}}
+		entry := docType{docEntry: docEntry{Name: typ.Name, Signature: signature, Doc: strings.TrimSpace(typ.Doc), File: file, Line: line,
+			Examples: formatDocExamples(fset, typ.Examples)}}
 		for _, method := range typ.Methods {
 			methodSignature, methodErr := formatFunctionSignature(fset, method.Decl)
 			if methodErr != nil {
 				return nil, fmt.Errorf("document method %s.%s: %w", importPath, method.Name, methodErr)
 			}
 			methodFile, methodLine := docSource(fset, method.Decl)
-			entry.Methods = append(entry.Methods, docEntry{Name: method.Name, Signature: methodSignature, Doc: strings.TrimSpace(method.Doc), File: methodFile, Line: methodLine})
+			entry.Methods = append(entry.Methods, docEntry{Name: method.Name, Signature: methodSignature, Doc: strings.TrimSpace(method.Doc), File: methodFile, Line: methodLine,
+				Examples: formatDocExamples(fset, method.Examples)})
 		}
 		result.Types = append(result.Types, entry)
 	}
 	return result, nil
+}
+
+func formatDocExamples(fset *token.FileSet, examples []*doc.Example) []docExample {
+	result := make([]docExample, 0, len(examples))
+	for _, example := range examples {
+		comments := make([]*ast.CommentGroup, 0, len(example.Comments))
+		for _, group := range example.Comments {
+			text := strings.ToLower(strings.TrimSpace(group.Text()))
+			if strings.HasPrefix(text, "output:") || strings.HasPrefix(text, "unordered output:") {
+				continue
+			}
+			comments = append(comments, group)
+		}
+		var output bytes.Buffer
+		node := &printer.CommentedNode{Node: example.Code, Comments: comments}
+		if err := format.Node(&output, fset, node); err != nil {
+			continue
+		}
+		code := strings.TrimSpace(output.String())
+		if _, block := example.Code.(*ast.BlockStmt); block {
+			code = strings.TrimPrefix(code, "{")
+			code = strings.TrimSuffix(code, "}")
+			code = strings.TrimSpace(code)
+			lines := strings.Split(code, "\n")
+			for i := range lines {
+				lines[i] = strings.TrimPrefix(lines[i], "\t")
+			}
+			code = strings.Join(lines, "\n")
+		}
+		if code == "" {
+			continue
+		}
+		result = append(result, docExample{Name: example.Suffix, Doc: strings.TrimSpace(example.Doc), Code: code,
+			Output: strings.TrimSpace(example.Output), Unordered: example.Unordered})
+	}
+	return result
 }
 
 func docSource(fset *token.FileSet, node ast.Node) (string, int) {

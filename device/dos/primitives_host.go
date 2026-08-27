@@ -2,8 +2,17 @@
 
 package dos
 
+// InterruptHook handles simulated real-mode interrupts in host builds. It is
+// unavailable to Renvo MS-DOS/8086 programs and is intended for host tests and
+// emulators.
 var InterruptHook func(vector byte, regs *Registers)
+
+// PortInHook supplies simulated port input in host builds. It is unavailable
+// to Renvo MS-DOS/8086 programs and is intended for host tests and emulators.
 var PortInHook func(port uint16) byte
+
+// PortOutHook observes simulated port output in host builds. It is unavailable
+// to Renvo MS-DOS/8086 programs and is intended for host tests and emulators.
 var PortOutHook func(port uint16, value uint16, width int)
 
 func hostInterrupt(vector byte, regs *Registers) {

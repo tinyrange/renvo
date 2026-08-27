@@ -75,6 +75,34 @@ func TestBackendDefinitionResolvesBeforeSourceSelection(t *testing.T) {
 	}
 }
 
+func TestBackendEnablementAddsStandardLibraryPackage(t *testing.T) {
+	rbeSource := testBackendDefinition + `
+@stdlib "acmefeature/feature.go"
+package acmefeature
+func Answer() int { return 42 }
+@endstdlib
+`
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/acme.rbe", Src: []byte(rbeSource)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"acmefeature\"\nfunc appMain() int { return acmefeature.Answer() }\n")},
+	}
+	result := BuildFromFSWithBackend([]string{
+		"-backend", "acme.rbe", "-t", "acme/aarch64", "-emit-unit",
+		"-o", "app.unit", "./cmd/app",
+	}, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("RBE build failed: %#v", result.Diagnostic)
+	}
+	found := false
+	for _, file := range result.Sources.Files {
+		found = found || file.Path == "/std/acmefeature/feature.go"
+	}
+	if !found {
+		t.Fatalf("RBE library source missing from %#v", result.Sources.Files)
+	}
+}
+
 func TestBuildSessionAcceptsBackendDefinition(t *testing.T) {
 	files := []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
