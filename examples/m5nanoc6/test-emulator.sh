@@ -5,7 +5,7 @@ example_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_root=$(CDPATH= cd -- "$example_root/../.." && pwd)
 emulator_root=${RENVO_EMU_ROOT:-"$repository_root/../renvo_emu"}
 
-if [ ! -f "$emulator_root/Cargo.toml" ]; then
+if [ -z "${RENVO_EMU:-}" ] && [ ! -f "$emulator_root/Cargo.toml" ]; then
 	echo "renvo_emu not found at $emulator_root; set RENVO_EMU_ROOT" >&2
 	exit 2
 fi
