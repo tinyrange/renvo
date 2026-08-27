@@ -486,6 +486,9 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	renvoRTGUnsupportedOperation = 0
 	renvoRTGFailureDetail = -1
+	renvoRTGImageLimitMemory = false
+	renvoRTGImageLimitNeeded = 0
+	renvoRTGImageLimit = 0
 	if renvoRTGPreparedObject != 0 {
 		return renvoTryCompileObjectProgramRTG(p, meta)
 	}
@@ -595,7 +598,11 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	if len(data) == 0 {
-		renvoPrintErr("renvo: prepared backend produced empty output\n")
+		if renvoRTGImageLimit > 0 {
+			renvoRTGReportImageSize(g)
+		} else {
+			renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
+		}
 		renvoRTGUnsupportedOperation = 5001
 		return renvoCompileResult{}
 	}
@@ -702,6 +709,36 @@ func renvoRTGReportFailure(g *renvoLinearGen) {
 }
 
 var renvoRTGFailureDetail = -1
+var renvoRTGImageLimitMemory bool
+var renvoRTGImageLimitNeeded int
+var renvoRTGImageLimit int
+
+func renvoRTGReportImageSize(g *renvoLinearGen) {
+	renvoPrintErr("renvo: error RENVO-BACKEND-011 (backend): target ")
+	name, _, _, found := renvoRTGTargetBinding(renvoTargetRTG)
+	if found {
+		renvoPrintErr(name)
+	} else {
+		renvoPrintErr("<unknown>")
+	}
+	if renvoRTGImageLimitMemory {
+		renvoPrintErr(" program exceeds its single-segment memory limit: needs ")
+	} else {
+		renvoPrintErr(" program exceeds its executable image limit: needs ")
+	}
+	renvoPrintIntErr(renvoRTGImageLimitNeeded)
+	renvoPrintErr(" bytes, limit ")
+	renvoPrintIntErr(renvoRTGImageLimit)
+	renvoPrintErr(" bytes (code ")
+	renvoPrintIntErr(len(g.asm.code))
+	renvoPrintErr(", initialized data ")
+	renvoPrintIntErr(len(g.asm.data))
+	renvoPrintErr(", zero-initialized data ")
+	renvoPrintIntErr(g.asm.bssSize)
+	renvoPrintErr(", arena ")
+	renvoPrintIntErr(g.arenaSize)
+	renvoPrintErr("); reduce -arena-size or program code/global data\n")
+}
 
 func renvoRTGValidateRelocations(out *renvoAsm) {
 	if out.patchFailed && renvoRTGUnsupportedOperation == 0 {

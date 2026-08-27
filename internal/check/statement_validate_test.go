@@ -17,6 +17,7 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 		{name: "assignment count", body: "a, b := 1; _, _ = a, b", want: CheckErrAssignCount},
 		{name: "bare break", body: "break", want: CheckErrBreak},
 		{name: "bare continue", body: "continue", want: CheckErrContinue},
+		{name: "composite literal in type assertion", body: "var x any; _, _ = x.([]byte{1})", want: CheckErrTypeAssertion},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -30,6 +31,17 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 				t.Fatalf("validation = (%d, %d), want error %d", got, tok, tc.want)
 			}
 		})
+	}
+}
+
+func TestTypeAssertionValidationPreservesTypeBodies(t *testing.T) {
+	file := syntax.ParseFile([]byte("package main\nfunc inspect(value any) { _, _ = value.(struct{ field int }); _, _ = value.(interface{ inspect() }) }\n"))
+	if !file.Ok || len(file.Funcs) != 1 {
+		t.Fatalf("parse failed: %#v", file)
+	}
+	body := syntax.ParseFuncBody(file, file.Funcs[0])
+	if code, tok := invalidDefiniteStatement(file, body); code != CheckOK {
+		t.Fatalf("type body rejected: error=%d token=%d", code, tok)
 	}
 }
 

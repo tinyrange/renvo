@@ -7,9 +7,13 @@ export function cleanLanguagePath(name, models = new Map(), initialFiles = {}) {
   let value = name.replaceAll("\\", "/").replace(/^\.\//, "");
   for (const root of sourceRoots) {
     if (value.startsWith(`${root}/`)) return value;
-    const at = value.indexOf(`/${root}/`);
-    if (at >= 0) return value.slice(at + 1);
   }
+  let sourceAt = -1;
+  for (const root of sourceRoots) {
+    const at = value.indexOf(`/${root}/`);
+    if (at >= 0 && (sourceAt < 0 || at < sourceAt)) sourceAt = at;
+  }
+  if (sourceAt >= 0) return value.slice(sourceAt + 1);
   while (value.startsWith("../")) value = value.slice(3);
   value = value.replace(/^\/+/, "");
   if (models.has(value)) return value;

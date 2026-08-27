@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("DOS executables offer a ZIP download and retain the raw artifact", async () => {
+test("artifact downloads preserve the raw output", async () => {
   const app = await readFile(new URL("./app.mjs", import.meta.url), "utf8");
-  assert.match(app, /\/\\\.\(\?:com\|exe\)\$\/i\.test\(filename\)/);
-  assert.match(app, /createDownloadURL\(encodeProjectZip\(\{ \[filename\]: file\.data \}\), "application\/zip"\)/);
-  assert.match(app, /zipLink\.textContent = "Download ZIP"/);
-  assert.match(app, /rawLink\.textContent = "Raw"/);
+  const start = app.indexOf("function downloadValidatedArtifact()");
+  const end = app.indexOf("function publishValidatedBuild()", start);
+  const download = app.slice(start, end);
+  assert.match(download, /const data = artifact\.data/);
+  assert.match(download, /const filename = artifact\.name\.split\("\/"\)\.pop\(\)/);
+  assert.match(download, /link\.download = filename/);
+  assert.doesNotMatch(download, /encodeProjectZip|application\/zip|\.zip/);
 });
 
 test("small downloads avoid blob URLs", async () => {

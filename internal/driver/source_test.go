@@ -128,6 +128,18 @@ func Value() int { return 42 }
 	assertSourcePaths(t, result.Files, want)
 }
 
+func TestCollectSourcesReportsPackageExcludedByBuildTags(t *testing.T) {
+	fs := memorySourceFS{files: []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\nimport _ \"example.com/case/device\"\nfunc main() {}\n")},
+		{Path: "/repo/case/device/device.go", Src: []byte("//go:build selected_board\n\npackage device\n")},
+	}}
+	result := CollectSourcesForTarget("/repo/case", "/std", ".", "linux/amd64", fs)
+	if result.Ok || result.Error != SourceErrNoSelectedFiles || result.ErrorPath != "example.com/case/device" || result.ErrorSourcePath != "/repo/case/main.go" {
+		t.Fatalf("excluded package result = %#v", result)
+	}
+}
+
 func TestCollectSourcesAppliesDarwinArm64BuildTags(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},

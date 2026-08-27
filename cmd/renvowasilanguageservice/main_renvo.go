@@ -131,19 +131,7 @@ func analysisDiagnostic(d driver.Diagnostic) {
 }
 
 func analysisSourceFailure(source driver.SourceResult) {
-	message := "workspace source loading failed"
-	if source.Error == driver.SourceErrMissingModule {
-		message = "go.mod was not found"
-	} else if source.Error == driver.SourceErrImport || source.Error == driver.SourceErrDependencyMissing || source.Error == driver.SourceErrStandardPackage {
-		message = "import could not be resolved"
-		if source.ErrorPath != "" {
-			message += ": " + source.ErrorPath
-		}
-	} else if source.Error == driver.SourceErrParse {
-		message = "source syntax is invalid"
-	}
-	analysisLine("D", source.ErrorPath, analysisDecimal(source.ErrorOffset),
-		analysisDecimal(source.ErrorOffset+1), "1", "1", "RENVO-LOAD-009", message)
+	analysisDiagnostic(driver.SourceDiagnostic(source))
 }
 
 func analysisCompletion(item check.CompletionItem) {
@@ -289,8 +277,9 @@ func analysisCFiles(workDir string, stdRoot string, target string, queryPath str
 			if path == "" {
 				path = sources[i].Path
 			}
+			shared := driver.CPreprocessorDiagnostic(processed.Error, path, processed.Line, processed.Detail)
 			diagnostics = append(diagnostics, c11.LanguageDiagnostic{Path: path, Line: processed.Line, Column: 1,
-				Code: "RENVO-C-PP-001", Message: analysisCPreprocessMessage(processed)})
+				Code: shared.Code, Message: shared.Message})
 			continue
 		}
 		for j := 0; j < len(processed.Dependencies); j++ {
@@ -308,8 +297,9 @@ func analysisCFiles(workDir string, stdRoot string, target string, queryPath str
 		}
 		checked := c11.CheckObjectForDataModel(processed.Source, analysisCDataModel(target))
 		if !checked.Ok {
+			shared := driver.CTranslatorDiagnostic(checked.Error, sources[i].Path, checked.ErrorAt, 1, 1)
 			diagnostic := c11.LanguageDiagnostic{Path: sources[i].Path, Start: checked.ErrorAt,
-				End: checked.ErrorAt + 1, Line: 1, Column: 1, Code: "RENVO-C-CHECK-001", Message: analysisCCheckMessage(checked.Error)}
+				End: checked.ErrorAt + 1, Line: 1, Column: 1, Code: shared.Code, Message: shared.Message}
 			if origin, found := processed.OriginAt(checked.ErrorAt); found {
 				diagnostic.Path, diagnostic.Start, diagnostic.End = origin.Path, origin.Start, origin.End
 				if original, read := reader.fs.ReadFile(origin.Path); read {
@@ -354,25 +344,6 @@ func analysisEndsWith(value string, suffix string) bool {
 	return len(value) >= len(suffix) && value[len(value)-len(suffix):] == suffix
 }
 
-func analysisCCheckMessage(code int) string {
-	if code == c11.TranslateErrScan {
-		return "C tokenization failed"
-	}
-	if code == c11.TranslateErrDeclaration {
-		return "invalid C declaration"
-	}
-	if code == c11.TranslateErrStatement {
-		return "invalid C statement or expression"
-	}
-	if code == c11.TranslateErrUnsupported {
-		return "C construct is not supported"
-	}
-	if code == c11.TranslateErrVLA {
-		return "variable-length arrays are not supported"
-	}
-	return "C type checking failed"
-}
-
 func analysisSourceLineColumn(source []byte, offset int) (int, int) {
 	if offset < 0 {
 		offset = 0
@@ -399,23 +370,6 @@ func analysisCAppendFile(files []c11.LanguageFile, path string, source []byte, s
 		}
 	}
 	return append(files, c11.LanguageFile{Path: path, Source: source, SuppressDiagnostics: suppressDiagnostics})
-}
-
-func analysisCPreprocessMessage(result c11.PreprocessResult) string {
-	message := "C preprocessing failed"
-	if result.Error == c11.PreprocessErrInclude {
-		message = "include could not be resolved"
-	} else if result.Error == c11.PreprocessErrMacro {
-		message = "invalid macro expansion"
-	} else if result.Error == c11.PreprocessErrExpression {
-		message = "invalid preprocessor expression"
-	} else if result.Error == c11.PreprocessErrDirective {
-		message = "invalid preprocessor directive"
-	}
-	if result.Detail != "" {
-		message += ": " + result.Detail
-	}
-	return message
 }
 
 func analysisCPath(path string) bool {

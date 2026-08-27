@@ -12,7 +12,7 @@ func TestAnalyzeWorkspaceReportsParserAndCheckerDiagnostics(t *testing.T) {
 		src  string
 		code string
 	}{
-		{"parser", "package main\nfunc main( {\n", "RENVO-PARSE-001"},
+		{"parser", "package main\nfunc main( {\n", "RENVO-PARSE-006"},
 		{"checker", "package main\nfunc main() { var value bool; value = 1; _ = value }\n", "RENVO-CHECK-008"},
 	}
 	for _, test := range tests {

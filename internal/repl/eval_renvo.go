@@ -149,11 +149,7 @@ func Evaluate(source []byte, env []string) EvalResult {
 }
 
 func replBuildFailure(diagnostic driver.Diagnostic, mark int) EvalResult {
-	text := "renvorepl: frontend compilation failed\n"
-	if diagnostic.Valid() {
-		text = driver.FormatDiagnostic(diagnostic)
-	}
-	result := replDiagnostic(text)
+	result := replDiagnostic(driver.FormatDiagnostic(diagnostic))
 	arena.Reset(mark)
 	return result
 }

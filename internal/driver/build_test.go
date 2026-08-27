@@ -56,6 +56,27 @@ func TestCompactKernelModuleCarriesKernelTargetBinding(t *testing.T) {
 	}
 }
 
+func TestCompactPackageUnitPreservesStructuredDiagnostic(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n\nfunc main() { print(missing) }\n")},
+	}
+	result := BuildPackageUnitCompact("./cmd/app", "wasi/wasm32", nil, "/repo/case", "/std", memorySourceFS{files: files})
+	if result.Ok {
+		t.Fatal("compact package build unexpectedly succeeded")
+	}
+	want := Diagnostic{
+		Phase: "checker", Code: "RENVO-CHECK-029", Path: "/repo/case/cmd/app/main.go",
+		Line: 3, Column: 21,
+	}
+	if result.Diagnostic.Phase != want.Phase || result.Diagnostic.Code != want.Code ||
+		result.Diagnostic.Path != want.Path || result.Diagnostic.Line != want.Line ||
+		result.Diagnostic.Column != want.Column {
+		t.Fatalf("compact diagnostic = %#v, want phase=%q code=%q path=%q line=%d column=%d",
+			result.Diagnostic, want.Phase, want.Code, want.Path, want.Line, want.Column)
+	}
+}
+
 func TestOneShotEmitUnitPreservesCanonicalPackageMetadata(t *testing.T) {
 	args := []string{"-emit-unit", "-t", "linux/amd64", "-o", "program.unit", "./cmd/app"}
 	files := driverTestFiles()
@@ -213,7 +234,7 @@ func TestBuildUnitReportsStructuredParserDiagnostic(t *testing.T) {
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc broken( {\n")},
 	})
-	if result.Ok || result.Diagnostic.Code != "RENVO-PARSE-001" || result.Diagnostic.Path != "/repo/case/cmd/app/main.go" || result.Diagnostic.Line < 1 || result.Diagnostic.Column < 1 {
+	if result.Ok || result.Diagnostic.Code != "RENVO-PARSE-006" || result.Diagnostic.Path != "/repo/case/cmd/app/main.go" || result.Diagnostic.Line < 1 || result.Diagnostic.Column < 1 {
 		t.Fatalf("parser diagnostic = %#v", result.Diagnostic)
 	}
 }

@@ -32,7 +32,7 @@ test("keeps an existing RTG registration", () => {
 test("project RTG targets use the browser JIT and VM backend pipeline", async () => {
   const app = await readFile(new URL("./app.mjs", import.meta.url), "utf8");
   const worker = await readFile(new URL("./worker.mjs", import.meta.url), "utf8");
-  assert.match(app, /if \(name\.endsWith\("\.rtg"\)\) return RTG_LANGUAGE_ID/);
+  assert.match(app, /if \(name\.endsWith\("\.rtg"\) \|\| name\.endsWith\("\.rtgasm"\)\) return RTG_LANGUAGE_ID/);
   assert.match(app, /type, id, definition, target, files: payload\.files/);
   assert.match(app, /backendFormat: buildTarget\.backendFormat \|\| "wasm"/);
   assert.match(app, /function starterCommand\(\)[\s\S]*selectedTarget\?\.output/);

@@ -40,6 +40,7 @@ const (
 	CheckErrOperand
 	CheckErrReturnType
 	CheckErrCallArity
+	CheckErrTypeAssertion
 )
 
 const (

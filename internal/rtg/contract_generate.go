@@ -573,6 +573,8 @@ func appendPreparedFormatAdapters(out []byte, document Document, target Resolved
 	if !ok {
 		codeOffset = 0
 	}
+	out = append(out, "\nfunc renvoRTGRejectImageSize(memory bool, needed int, limit int) {\n"...)
+	out = append(out, "\trenvoRTGImageLimitMemory = memory\n\trenvoRTGImageLimitNeeded = needed\n\trenvoRTGImageLimit = limit\n}\n"...)
 	out = append(out, "\nconst renvoRTGCodeOffset = "...)
 	out = appendDecimalFrame(out, codeOffset)
 	out = append(out, "\nfunc renvoRTGImage(out *renvoAsm) []byte {\n"...)

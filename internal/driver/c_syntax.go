@@ -131,7 +131,7 @@ func CSyntaxCommandDiagnostic(result CSyntaxCommandResult) Diagnostic {
 	if result.Preprocess || result.Error == c11.PreprocessErrInclude {
 		return cPreprocessDiagnostic(result.Error, result.ErrorPath, result.ErrorLine, result.Detail)
 	}
-	return Diagnostic{Phase: "c11", Code: "RENVO-C11-001", Message: "C11 source is not supported or is invalid", Path: result.ErrorPath, Line: result.ErrorLine, Column: result.ErrorColumn}
+	return CTranslatorDiagnostic(result.Error, result.ErrorPath, result.ErrorAt, result.ErrorLine, result.ErrorColumn)
 }
 
 func cSourcePosition(source []byte, offset int) (int, int) {

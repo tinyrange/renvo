@@ -114,11 +114,11 @@ type PackageUnitResult struct {
 	ErrorPackage int
 	ErrorFile    int
 	ErrorToken   int
+	Diagnostic   Diagnostic
 }
 
-// BuildPackageUnitCompact returns machine-readable failure coordinates. The
-// command or browser host owns human-readable diagnostic text, keeping that UI
-// policy out of a size-constrained frontend module.
+// BuildPackageUnitCompact preserves the shared structured diagnostic while
+// leaving its presentation to the command or browser host.
 func BuildPackageUnitCompact(packageArg string, target string, tags []string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
 	return BuildPackageUnitCompactMode(packageArg, target, tags, ModeExecutable, workDir, stdRoot, fs)
 }
@@ -132,6 +132,9 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		result.Phase = BuildErrSource
 		result.Error = sources.Error
 		result.Path = sources.ErrorPath
+		failed := BuildResult{Sources: sources, Error: BuildErrSource, ErrorPath: sources.ErrorPath,
+			ErrorAt: -1, ErrorPackage: -1, ErrorFile: -1, ErrorToken: -1}
+		result.Diagnostic = diagnosticForBuild(failed)
 		return result
 	}
 	var built pipeline.Result
@@ -143,9 +146,14 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 	if !built.Ok {
 		result.Phase = BuildErrPipeline
 		result.Error = built.Error
+		result.Path = built.ErrorPath
 		result.ErrorPackage = built.ErrorPackage
 		result.ErrorFile = built.ErrorFile
 		result.ErrorToken = built.ErrorToken
+		failed := BuildResult{Sources: sources, Pipeline: built, Error: BuildErrPipeline,
+			ErrorPath: built.ErrorPath, ErrorAt: built.ErrorOffset, ErrorPackage: built.ErrorPackage,
+			ErrorFile: built.ErrorFile, ErrorToken: built.ErrorToken}
+		result.Diagnostic = diagnosticForBuild(failed)
 		return result
 	}
 	result.Unit = built.Link.Data
@@ -171,6 +179,7 @@ func BuildCExecutableUnitCompact(files []string, target string, tags []string, w
 	result := PackageUnitResult{
 		Unit: built.Unit, Path: built.ErrorPath, Ok: built.Ok, Phase: built.Error,
 		ErrorPackage: built.ErrorPackage, ErrorFile: built.ErrorFile, ErrorToken: built.ErrorToken,
+		Diagnostic: built.Diagnostic,
 	}
 	if built.Ok {
 		result.Phase = BuildOK

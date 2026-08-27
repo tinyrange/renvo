@@ -132,30 +132,38 @@ func CPreprocessCommandDiagnostic(result CPreprocessCommandResult) Diagnostic {
 }
 
 func cPreprocessDiagnostic(preprocessError int, path string, line int, detail string) Diagnostic {
-	message := "C preprocessing failed"
-	code := "RENVO-CPP-002"
+	message := ""
+	code := ""
 	if preprocessError == c11.PreprocessErrToken {
+		code = "RENVO-CPP-002"
 		message = "invalid preprocessing token or unterminated comment/literal"
 		if detail != "" {
 			message += ": " + detail
 		}
 	} else if preprocessError == c11.PreprocessErrDirective {
+		code = "RENVO-CPP-003"
 		message = "invalid or unsupported preprocessing directive"
 		if detail != "" {
 			message += ": " + detail
 		}
 	} else if preprocessError == c11.PreprocessErrExpression {
+		code = "RENVO-CPP-004"
 		message = "invalid preprocessor constant expression"
 	} else if preprocessError == c11.PreprocessErrMacro {
+		code = "RENVO-CPP-005"
 		message = "invalid macro definition or expansion"
 		if detail != "" {
 			message += ": " + detail
 		}
 	} else if preprocessError == c11.PreprocessErrDepth {
+		code = "RENVO-CPP-006"
 		message = "preprocessor include or expansion depth exceeded"
 	} else if preprocessError == c11.PreprocessErrInclude {
 		message = "C include could not be read: " + path
 		code = "RENVO-CPP-001"
+	} else {
+		code = "RENVO-BUG-006"
+		message = "compiler bug: preprocessor returned undeclared error code " + diagnosticIntText(preprocessError)
 	}
 	return Diagnostic{Phase: "preprocessor", Code: code, Message: message, Path: path, Line: line, Column: 1}
 }

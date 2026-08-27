@@ -1,0 +1,8 @@
+{
+  "phase": "target",
+  "code": "RENVO-BOARD-001",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 9,
+  "message": "device/board requires a supported board target; select a board such as m5nanoc6/riscv32"
+}

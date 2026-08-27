@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,8 @@ type frontendDiagnosticCase struct {
 	wantCode   string
 	wantFile   string
 	wantDetail string
+	wantLine   int
+	wantColumn int
 }
 
 func TestFrontendStructuredDiagnostics(t *testing.T) {
@@ -37,9 +40,56 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 		{
 			name:       "syntax",
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main( {\n"},
-			wantCode:   "RENVO-PARSE-001",
+			wantCode:   "RENVO-PARSE-006",
 			wantFile:   "cmd/app/main.go",
-			wantDetail: "source syntax is invalid",
+			wantDetail: "invalid function or method declaration",
+			wantLine:   3,
+			wantColumn: 1,
+		},
+		{
+			name:       "composite_literal_in_type_assertion",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { var sensor any; _, _ = sensor.([]byte{0x01}) }\n"},
+			wantCode:   "RENVO-CHECK-033",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "type assertion requires a type; found a composite literal",
+			wantLine:   3,
+			wantColumn: 52,
+		},
+		{
+			name:       "package_clause",
+			files:      map[string]string{"cmd/app/main.go": "package\n\nfunc main() {}\n"},
+			wantCode:   "RENVO-PARSE-003",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid or missing package clause",
+			wantLine:   1,
+			wantColumn: 1,
+		},
+		{
+			name:       "import_declaration",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nimport\nfunc main() {}\n"},
+			wantCode:   "RENVO-PARSE-004",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid import declaration",
+			wantLine:   3,
+			wantColumn: 1,
+		},
+		{
+			name:       "top_level_declaration",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nvar\nfunc main() {}\n"},
+			wantCode:   "RENVO-PARSE-005",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid top-level declaration",
+			wantLine:   3,
+			wantColumn: 1,
+		},
+		{
+			name:       "package_scope_statement",
+			files:      map[string]string{"cmd/app/main.go": "package main\n\nprint(1)\nfunc main() {}\n"},
+			wantCode:   "RENVO-PARSE-007",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "unexpected statement or expression at package scope",
+			wantLine:   3,
+			wantColumn: 1,
 		},
 		{
 			name:       "excluded_generics_declaration",
@@ -99,6 +149,27 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantCode:   "RENVO-LOAD-011",
 			wantFile:   "lib/lib.go",
 			wantDetail: "import cycle detected",
+		},
+		{
+			name: "duplicate_declaration",
+			files: map[string]string{
+				"cmd/app/a.go": "package main\nvar collision int\n",
+				"cmd/app/b.go": "package main\nfunc collision() {}\nfunc main() {}\n",
+			},
+			wantCode:   "RENVO-CHECK-002",
+			wantFile:   "cmd/app/b.go",
+			wantDetail: "duplicate declaration",
+			wantLine:   2,
+			wantColumn: 6,
+		},
+		{
+			name:       "duplicate_parameter",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc value(item int, item string) {}\nfunc main() {}\n"},
+			wantCode:   "RENVO-CHECK-006",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid name or scope",
+			wantLine:   2,
+			wantColumn: 22,
 		},
 		{
 			name:       "return_count",
@@ -185,7 +256,7 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			files:      map[string]string{"cmd/app/main.go": "package main\n\nfunc main() { print(\"unterminated\n) }\n"},
 			wantCode:   "RENVO-PARSE-001",
 			wantFile:   "cmd/app/main.go",
-			wantDetail: "source syntax is invalid",
+			wantDetail: "source contains an invalid or unterminated token",
 		},
 		{
 			name:       "invalid_goroutine",
@@ -217,6 +288,87 @@ func TestFrontendStructuredDiagnostics(t *testing.T) {
 			wantCode:   "RENVO-CHECK-010",
 			wantFile:   "cmd/app/main.go",
 			wantDetail: "import is not used",
+		},
+		{
+			name:       "unused_local",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main() { unused := 1 }\n"},
+			wantCode:   "RENVO-CHECK-020",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "local variable is declared but not used",
+			wantLine:   2,
+			wantColumn: 15,
+		},
+		{
+			name:       "missing_main",
+			files:      map[string]string{"cmd/app/main.go": "package main\nvar value = 1\n"},
+			wantCode:   "RENVO-CHECK-021",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "package main has no top-level func main()",
+			wantLine:   1,
+			wantColumn: 9,
+		},
+		{
+			name:       "invalid_main_signature",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main(value int) {}\n"},
+			wantCode:   "RENVO-CHECK-022",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "func main must have no parameters or results",
+			wantLine:   2,
+			wantColumn: 6,
+		},
+		{
+			name:       "main_method_is_not_entrypoint",
+			files:      map[string]string{"cmd/app/main.go": "package main\ntype runner int\nfunc (runner) main() {}\n"},
+			wantCode:   "RENVO-CHECK-023",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "method main does not define the package entry point",
+			wantLine:   3,
+			wantColumn: 15,
+		},
+		{
+			name:       "unaddressable_array_slice",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc values() [3]int { return [3]int{} }\nfunc main() { _ = values()[:] }\n"},
+			wantCode:   "RENVO-CHECK-024",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "cannot slice an unaddressable array value",
+			wantLine:   3,
+			wantColumn: 27,
+		},
+		{
+			name:       "constant_array_index",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main() { _ = [3]int{}[3] }\n"},
+			wantCode:   "RENVO-CHECK-025",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "constant array index is out of bounds",
+			wantLine:   2,
+			wantColumn: 28,
+		},
+		{
+			name:       "deferred_value_builtin",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main() { defer len(\"value\") }\n"},
+			wantCode:   "RENVO-CHECK-026",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "deferred builtin call discards a result",
+			wantLine:   2,
+			wantColumn: 21,
+		},
+		{
+			name:       "builtin_arity",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main() { _ = len() }\n"},
+			wantCode:   "RENVO-CHECK-027",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid number of arguments to builtin",
+			wantLine:   2,
+			wantColumn: 19,
+		},
+		{
+			name:       "builtin_operand",
+			files:      map[string]string{"cmd/app/main.go": "package main\nfunc main() { _ = min(1, \"value\") }\n"},
+			wantCode:   "RENVO-CHECK-028",
+			wantFile:   "cmd/app/main.go",
+			wantDetail: "invalid operand type for builtin",
+			wantLine:   2,
+			wantColumn: 26,
 		},
 		{
 			name:       "non_function_call",
@@ -290,6 +442,49 @@ func TestFrontendBackendDiagnosticPreservesDetail(t *testing.T) {
 	runFrontendDiagnosticCase(t, frontend, tc, nil)
 }
 
+func TestFrontendStructuredOptionDiagnostics(t *testing.T) {
+	root := repoRoot(t)
+	frontends := []struct {
+		name   string
+		config frontendConfig
+	}{
+		{name: "host", config: frontendCompiler(t, root)},
+		{name: "stage3", config: selfHostedFrontendCompiler(t, root)},
+	}
+	cases := []struct {
+		name string
+		args []string
+		code string
+	}{
+		{name: "script_requires_file", args: []string{"-script", "-o", "app", "."}, code: "RENVO-OPTION-033"},
+		{name: "script_file_count", args: []string{"-script", "-o", "app", "first.go", "second.go"}, code: "RENVO-OPTION-034"},
+		{name: "conflicting_emit", args: []string{"-emit-unit", "-emit-image", "-o", "app", "first.go"}, code: "RENVO-OPTION-035"},
+	}
+	for _, frontend := range frontends {
+		for _, tc := range cases {
+			t.Run(frontend.name+"/"+tc.name, func(t *testing.T) {
+				dir := t.TempDir()
+				for _, name := range []string{"first.go", "second.go"} {
+					if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\nfunc main() {}\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				cmd := frontendCommand(frontend.config, tc.args...)
+				cmd.Dir = dir
+				cmd.Env = frontendCommandEnv(frontend.config.env, dir)
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					t.Fatalf("frontend unexpectedly accepted options %q", tc.args)
+				}
+				text := string(out)
+				if strings.Count(text, "error RENVO-") != 1 || !strings.Contains(text, "error "+tc.code+" ") {
+					t.Fatalf("diagnostic = %q, want exactly one %s error", text, tc.code)
+				}
+			})
+		}
+	}
+}
+
 func runFrontendDiagnosticCase(t *testing.T, frontend frontendConfig, tc frontendDiagnosticCase, envOverride []string) {
 	t.Helper()
 	if frontend.compiler == "" {
@@ -322,6 +517,15 @@ func runFrontendDiagnosticCase(t *testing.T, frontend frontendConfig, tc fronten
 		t.Fatalf("frontend unexpectedly accepted %s", tc.name)
 	}
 	text := string(out)
+	if strings.Count(text, "error RENVO-") != 1 {
+		t.Fatalf("diagnostic = %q, want exactly one structured error", text)
+	}
+	if strings.Contains(text, "frontend compilation failed") {
+		t.Fatalf("diagnostic fell back to generic frontend failure: %q", text)
+	}
+	if strings.Contains(text, "renvo: compilation failed") || strings.Contains(text, "renvo: wasm32 compilation failed") {
+		t.Fatalf("diagnostic included a generic backend failure: %q", text)
+	}
 	if !strings.Contains(text, "error "+tc.wantCode+" ") {
 		t.Fatalf("diagnostic = %q, want stable code %s", text, tc.wantCode)
 	}
@@ -329,14 +533,39 @@ func runFrontendDiagnosticCase(t *testing.T, frontend frontendConfig, tc fronten
 		t.Fatalf("diagnostic = %q, want detail %q", text, tc.wantDetail)
 	}
 	if tc.wantFile != "" {
-		wantPath := filepath.Join(dir, filepath.FromSlash(tc.wantFile)) + ":"
-		if !strings.Contains(text, wantPath) {
-			t.Fatalf("diagnostic = %q, want source location beginning %q", text, wantPath)
+		wantPath := filepath.Join(dir, filepath.FromSlash(tc.wantFile))
+		line, column := frontendSourceLocation(t, text, wantPath)
+		if tc.wantLine > 0 && (line != tc.wantLine || column != tc.wantColumn) {
+			t.Fatalf("diagnostic = %q, location = %d:%d, want %d:%d", text, line, column, tc.wantLine, tc.wantColumn)
 		}
 	}
 	if _, statErr := os.Stat(output); !os.IsNotExist(statErr) {
 		t.Fatalf("failed compilation left output %q (stat error %v)", output, statErr)
 	}
+}
+
+func frontendSourceLocation(t *testing.T, diagnostic string, wantPath string) (int, int) {
+	t.Helper()
+	prefix := wantPath + ":"
+	start := strings.Index(diagnostic, prefix)
+	if start < 0 {
+		t.Fatalf("diagnostic = %q, want source location beginning %q", diagnostic, prefix)
+	}
+	remainder := diagnostic[start+len(prefix):]
+	lineEnd := strings.IndexByte(remainder, ':')
+	if lineEnd < 1 {
+		t.Fatalf("diagnostic = %q, want a line after %q", diagnostic, prefix)
+	}
+	columnEnd := strings.IndexByte(remainder[lineEnd+1:], ':')
+	if columnEnd < 1 {
+		t.Fatalf("diagnostic = %q, want a column after %q", diagnostic, prefix)
+	}
+	line, lineErr := strconv.Atoi(remainder[:lineEnd])
+	column, columnErr := strconv.Atoi(remainder[lineEnd+1 : lineEnd+1+columnEnd])
+	if lineErr != nil || columnErr != nil || line < 1 || column < 1 {
+		t.Fatalf("diagnostic = %q, want positive line and column for %q", diagnostic, wantPath)
+	}
+	return line, column
 }
 
 func setFrontendEnv(env []string, item string) []string {

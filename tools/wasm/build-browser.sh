@@ -114,6 +114,7 @@ cp backends/msdos.rtg "$output/backends/msdos.rtg"
 go run ./tools/wasm/cmd/browserassets -o "$output"
 cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
+	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/asset-fetch.mjs \
@@ -129,6 +130,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 if [ "$layout" = pages ]; then
   cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
+	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
 	tools/wasm/browser/asset-fetch.mjs \

@@ -116,9 +116,10 @@ func TestVM32FrontendPerformanceGate(t *testing.T) {
 		output[1] != 'E' || output[2] != 'L' || output[3] != 'F' {
 		t.Fatalf("VM frontend Linux output prefix = % x", output[:minBundleLength(len(output), 4)])
 	}
+	// Keep enough execution headroom for richer self-hosted diagnostics.
 	if len(image) > 6*1024*1024 ||
 		len(output) > 4*1024*1024 ||
-		compileResult.Steps > 11*1000*1000*1000 ||
+		compileResult.Steps > 12*1000*1000*1000 ||
 		compileResult.PeakMemory > 150*1024*1024 {
 		t.Fatalf("VM frontend performance budget exceeded: artifact=%dB, output=%dB, execution=%d steps, peak=%dB",
 			len(image), len(output), compileResult.Steps, compileResult.PeakMemory)
