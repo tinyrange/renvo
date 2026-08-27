@@ -447,6 +447,8 @@ pre.panel-view { padding: 3px 12px 10px; color: var(--text); background: transpa
 .terminal-options input { height: 23px; padding: 1px 5px; }
 .terminal-options textarea { min-height: 50px; flex: 1; resize: none; padding: 3px 5px; }
 .terminal-options input:focus, .terminal-options textarea:focus { border-color: var(--focus); }
+.terminal-options button { min-height: 25px; border: 1px solid var(--border-strong); background: var(--surface-raised); color: var(--text); cursor: pointer; }
+.terminal-options button:hover { border-color: var(--accent); }
 #terminal-output { height: 100%; margin: 0; overflow: auto; padding: 4px 10px 10px; color: var(--text); font: 12px/19px ui-monospace, monospace; white-space: pre-wrap; }
 .plotter.active { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: var(--canvas); }
 #plotter-legend { display: flex; min-height: 28px; align-items: center; gap: 13px; overflow-x: auto; padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--muted); white-space: nowrap; font: 11px/18px ui-monospace, monospace; }

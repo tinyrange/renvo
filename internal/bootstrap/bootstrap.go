@@ -12,6 +12,12 @@ import (
 
 func Run(args []string, env []string, backend driver.Backend) int {
 	args, backend = bootstrapArgs(args, backend)
+	if makeCommandRequested(args) {
+		return runMakeCommand(args, env, backend)
+	}
+	if objectLinkCommandRequested(args) {
+		return runObjectLinkCommand(args)
+	}
 	if response := driver.ExpandCCompilerResponseFiles(args, driver.OSFS{}); response.Ok {
 		args = response.Args
 	} else {

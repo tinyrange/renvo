@@ -15,6 +15,46 @@ type HeaderResult struct {
 	ErrorAt      int
 }
 
+type HeaderSource struct {
+	Path   string
+	Source []byte
+}
+
+// BuildObjectPreludeFromHeaders retains referenced external declarations from
+// the headers which the preprocessor actually opened. In particular, includes
+// in inactive conditional branches are absent from this list.
+func BuildObjectPreludeFromHeaders(src []byte, headers []HeaderSource) HeaderResult {
+	result := HeaderResult{Ok: true, ErrorAt: -1}
+	if sourceUsesIdentifier(src, "va_list") {
+		result.Prelude = append(result.Prelude, "typedef __builtin_va_list va_list;\n"...)
+	}
+	wanted := sourceCallNames(src)
+	var emitted []string
+	for i := 0; i < len(headers); i++ {
+		declarations, names, ok := headerDeclarations(headers[i].Source, wanted, emitted)
+		if !ok {
+			return HeaderResult{Ok: false, ErrorPath: headers[i].Path, ErrorAt: -1}
+		}
+		result.Prelude = append(result.Prelude, declarations...)
+		result.Dependencies = append(result.Dependencies, headers[i].Path)
+		emitted = append(emitted, names...)
+	}
+	return result
+}
+
+func sourceUsesIdentifier(src []byte, name string) bool {
+	scanned := scan(src)
+	if !scanned.ok {
+		return false
+	}
+	for i := 0; i < len(scanned.tokens); i++ {
+		if tokenKind(scanned.tokens[i]) == tokenIdent && textEquals(tokenText(src, scanned.tokens[i]), name) {
+			return true
+		}
+	}
+	return false
+}
+
 type includeSpec struct {
 	name   string
 	angled bool
@@ -156,6 +196,17 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		}
 		for start < i && headerDeclarationDecoration(src, scanned.tokens[start]) {
 			start++
+		}
+		braceDepth := 0
+		for j := 0; j < start; j++ {
+			if tokenIs(src, scanned.tokens[j], "{") {
+				braceDepth++
+			} else if tokenIs(src, scanned.tokens[j], "}") && braceDepth > 0 {
+				braceDepth--
+			}
+		}
+		if braceDepth != 0 {
+			continue
 		}
 		hasStatic := false
 		hasTypedef := false

@@ -219,11 +219,22 @@ cc hello.o -o hello
 ./hello
 ```
 
-The system C driver is used only for startup objects and the final link. Renvo
-is the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
+Renvo can also statically link one or more Renvo-produced objects without a
+host linker. The input objects use the x86-64 System V ABI; the built-in linker
+resolves their `R_X86_64_64`, `PC32`, and `PLT32` relocations and writes a raw
+Linux executable:
+
+```sh
+renvo cc -c main.c -o main.o
+renvo cc -c database.c -o database.o
+renvo cc main.o database.o -o app
+```
+
+A system C driver remains useful when an object intentionally refers to a host
+library such as libc. Renvo is still the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
 headers, retains referenced external declarations from the real header, emits
 NUL-terminated C string data and an undefined `puts` with a standard x86_64
-PLT relocation, and leaves libc resolution to the system link. The C frontend
+PLT relocation, and leaves libc resolution to that system link. The C frontend
 also implements the macro and GNU C surface exercised by the pinned Linux
 bring-up; unsupported constructs fail explicitly. Its current boundaries are
 documented in `internal/c11/README.md`.
@@ -277,6 +288,30 @@ Supported-board metadata and demo membership live in
 
 Running `renvo` with no arguments or with `--help` prints the complete command
 reference and target list.
+
+### Makefiles
+
+`renvo make` evaluates a compact, deterministic Makefile language in the
+current directory. It supports dependency rules, `.PHONY`, `=`, `:=`, `?=`,
+`+=`, `$(NAME)` variables, and the `$@`, `$<`, and `$^` automatic variables.
+Recipes must invoke `renvo` directly and are not interpreted by a host shell,
+so the same project works in a terminal and in the Web IDE virtual filesystem:
+
+```make
+CC := renvo cc
+
+app: main.o database.o
+	$(CC) -t linux/amd64 $^ -o $@
+
+main.o: main.c
+	$(CC) -t linux/amd64 -c $< -o $@
+```
+
+Use `renvo make -f Buildfile target` to select another file or target. The
+[SQLite-style C hash-table example](examples/c-sqlite-hash) is a multi-file
+demonstration of object compilation, dependency ordering, and the built-in
+linker. In the Web IDE, open the example, select Linux x86-64, and run
+`renvo make` from the Terminal tab.
 
 ## Generated and custom backends
 

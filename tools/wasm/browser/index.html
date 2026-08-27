@@ -181,10 +181,12 @@
           <div class="panel-view problems" data-panel-view="problems" id="problems"><div class="empty-state">No problems detected.</div></div>
           <div class="panel-view terminal" data-panel-view="terminal" id="terminal">
             <div class="terminal-options">
+              <label>COMMAND <input id="terminal-command" spellcheck="false" value="renvo make" placeholder="renvo make [target]"></label>
+              <button id="terminal-command-run" type="button">Run command</button>
               <label>ARGS <input id="run-args" spellcheck="false" placeholder="command-line arguments"></label>
               <label>STDIN <textarea id="run-stdin" spellcheck="false" placeholder="optional input"></textarea></label>
             </div>
-            <pre id="terminal-output" aria-live="polite">Build a WASI target, then press Run.</pre>
+            <pre id="terminal-output" aria-live="polite">Run renvo make here, or build a WASI target and press Run.</pre>
           </div>
           <div class="panel-view plotter" data-panel-view="plotter" id="plotter">
             <div id="plotter-legend" aria-live="polite"></div>

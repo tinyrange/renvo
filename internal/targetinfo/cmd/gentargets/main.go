@@ -217,6 +217,8 @@ func contains(values []string, value string) bool {
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
 	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
 		"       renvo cc -c [-I <dir>] [-isystem <dir>] <source.c> -o <object.o>\n" +
+		"       renvo cc <object.o...> -o <linux-executable>\n" +
+		"       renvo make [-f Makefile] [target...]\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +

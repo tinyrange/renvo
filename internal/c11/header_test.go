@@ -37,6 +37,14 @@ func TestBuildObjectPreludeReportsMissingHeaderAtDirective(t *testing.T) {
 	}
 }
 
+func TestBuildObjectPreludeFromHeadersIgnoresInactiveInclude(t *testing.T) {
+	source := []byte("#if 0\n#include <missing.h>\n#endif\n#include <api.h>\nint main(void) { return answer(); }\n")
+	result := BuildObjectPreludeFromHeaders(source, []HeaderSource{{Path: "/include/api.h", Source: []byte("int answer(void);\n")}})
+	if !result.Ok || string(result.Prelude) != "int answer ( void );\n" {
+		t.Fatalf("prelude = %#v, %q", result, result.Prelude)
+	}
+}
+
 func TestBuildObjectPreludeAcceptsDefaultExternalLibraryPrototypes(t *testing.T) {
 	source := []byte("#include <crypto.h>\nint main(void) { return EVP_DigestUpdate(0, 0, 0); }\n")
 	header := []byte("static int private_helper(void);\n#define UNUSED_HELPER() private_helper()\n#endif\n__owur int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count);\n")
