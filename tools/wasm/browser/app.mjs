@@ -527,7 +527,7 @@ function setupShell() {
   elements.run.addEventListener("click", secondaryTargetAction);
   elements.test.addEventListener("click", runTests);
   document.querySelector("#new-file").addEventListener("click", createWorkspaceFile);
-  document.querySelector("#browse-examples").addEventListener("click", () => isPhoneWorkspace() ? openExampleBrowser() : openSidebarExamples());
+  document.querySelector("#browse-examples").addEventListener("click", openExampleBrowser);
   elements.toggleSidebar.addEventListener("click", toggleSidebar);
   elements.projectMenuButton.addEventListener("click", toggleProjectActionMenu);
   elements.projectActionMenu.addEventListener("click", handleProjectAction);
@@ -2387,14 +2387,6 @@ function toggleSidebarExamples() {
   document.querySelector("#examples-heading").classList.toggle("collapsed", elements.sidebarExamples.hidden);
   document.querySelector("#examples-heading .chevron").textContent = elements.sidebarExamples.hidden ? "›" : "⌄";
   if (!elements.sidebarExamples.hidden && standardCatalog) renderSidebarExamples();
-}
-
-function openSidebarExamples() {
-  elements.sidebarExamples.hidden = false;
-  document.querySelector("#examples-heading").classList.remove("collapsed");
-  document.querySelector("#examples-heading .chevron").textContent = "⌄";
-  if (standardCatalog) renderSidebarExamples();
-  document.querySelector("#examples-heading").scrollIntoView({ block: "nearest" });
 }
 
 function toggleHelp() {
