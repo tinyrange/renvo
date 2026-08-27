@@ -102,16 +102,7 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 	}
 	var out []byte
 	var names []string
-	braceDepth := 0
 	for i := 0; i+1 < len(scanned.tokens); i++ {
-		if tokenIs(src, scanned.tokens[i], "{") {
-			braceDepth++
-		} else if tokenIs(src, scanned.tokens[i], "}") && braceDepth > 0 {
-			braceDepth--
-		}
-		if braceDepth != 0 {
-			continue
-		}
 		if tokenKind(scanned.tokens[i]) != tokenIdent || !tokenIs(src, scanned.tokens[i+1], "(") {
 			continue
 		}
@@ -140,6 +131,22 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		}
 		for start < i && headerDeclarationDecoration(src, scanned.tokens[start]) {
 			start++
+		}
+		braceDepth := 0
+		for j := 0; j < start; j++ {
+			if tokenIs(src, scanned.tokens[j], "{") {
+				// System headers commonly wrap C declarations in a C++-only
+				// extern "C" block. We inspect raw active headers here, so that
+				// conditional wrapper must not hide the C declarations within it.
+				if j < 2 || !tokenIs(src, scanned.tokens[j-2], "extern") || !tokenIs(src, scanned.tokens[j-1], "\"C\"") {
+					braceDepth++
+				}
+			} else if tokenIs(src, scanned.tokens[j], "}") && braceDepth > 0 {
+				braceDepth--
+			}
+		}
+		if braceDepth != 0 {
+			continue
 		}
 		hasStatic := false
 		hasTypedef := false

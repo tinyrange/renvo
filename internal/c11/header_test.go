@@ -55,6 +55,15 @@ func TestBuildObjectPreludeAcceptsDefaultExternalLibraryPrototypes(t *testing.T)
 	}
 }
 
+func TestBuildObjectPreludeKeepsDeclarationsInsideCXXLinkageGuard(t *testing.T) {
+	source := []byte("#include <api.h>\nint main(void) { return answer(); }\n")
+	header := []byte("#ifdef __cplusplus\nextern \"C\" {\n#endif\nint answer(void);\n#ifdef __cplusplus\n}\n#endif\n")
+	result := BuildObjectPrelude("/tmp/main.c", source, headerTestReader{name: "api.h", src: header})
+	if !result.Ok || string(result.Prelude) != "int answer ( void );\n" {
+		t.Fatalf("prelude = %#v, %q", result, result.Prelude)
+	}
+}
+
 func TestBuildObjectPreludeDoesNotRetainMultilineMacroBody(t *testing.T) {
 	source := []byte("#include <rand.h>\nint main(void) { return RAND_bytes(0, 0); }\n")
 	header := []byte("#define RAND_cleanup() \\\n+    while (0) \\\n+    continue\n#endif\nint RAND_bytes(unsigned char *buf, int num);\n")
