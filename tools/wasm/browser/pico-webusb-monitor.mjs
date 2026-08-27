@@ -7,12 +7,13 @@ const COMMAND_BEGIN = 2;
 const COMMAND_WRITE = 3;
 const COMMAND_COMMIT = 4;
 const COMMAND_WRITE_FAST = 5;
-const PROTOCOL_MAJOR = 1;
+const PROTOCOL_MAJOR = 2;
 const PROTOCOL_MINOR = 0;
-const CLIENT_VERSION = 1 << 16;
+const CLIENT_VERSION = 1 << 16 | 1 << 8;
 const CAPABILITY_FAST_WRITE = 1;
 const PACKET_SIZE = 64;
 const WRITE_HEADER_SIZE = 12;
+const USB_TIMEOUT_MS = 4000;
 
 export async function requestPicoMonitor() {
   if (!globalThis.navigator?.usb) {
@@ -54,16 +55,16 @@ export class PicoWebUSBMonitor {
     if (this.opened) return;
     this.disconnected = false;
     try {
-      if (!this.device.opened) await this.device.open();
+      if (!this.device.opened) await usbOperation(this.device.open(), "open");
       const selected = findMonitorInterface(this.device.configurations);
       if (!selected) throw new Error("device does not expose the Renvo reload interface");
       if (this.device.configuration?.configurationValue !== selected.configuration.configurationValue) {
-        await this.device.selectConfiguration(selected.configuration.configurationValue);
+        await usbOperation(this.device.selectConfiguration(selected.configuration.configurationValue), "select configuration");
       }
       const active = findMonitorInterface([this.device.configuration]) || selected;
-      await this.device.claimInterface(active.iface.interfaceNumber);
+      await usbOperation(this.device.claimInterface(active.iface.interfaceNumber), "claim interface");
       if (active.alternate.alternateSetting !== 0) {
-        await this.device.selectAlternateInterface(active.iface.interfaceNumber, active.alternate.alternateSetting);
+        await usbOperation(this.device.selectAlternateInterface(active.iface.interfaceNumber, active.alternate.alternateSetting), "select interface");
       }
       this.bulkOut = active.bulkOut;
       this.bulkIn = active.bulkIn;
@@ -85,7 +86,7 @@ export class PicoWebUSBMonitor {
 
   async close() {
     this.opened = false;
-    try { if (this.device.opened) await this.device.close(); } catch {}
+    try { if (this.device.opened) await usbOperation(this.device.close(), "close", 1000); } catch {}
     this.usb?.removeEventListener?.("disconnect", this.handleDisconnect);
   }
 
@@ -98,17 +99,22 @@ export class PicoWebUSBMonitor {
     packet[7] = PROTOCOL_MINOR;
     new DataView(packet.buffer).setUint32(8, address >>> 0, true);
     packet.set(payload, WRITE_HEADER_SIZE);
-    const sent = await this.device.transferOut(this.bulkOut.endpointNumber, packet);
+    const sent = await usbOperation(this.device.transferOut(this.bulkOut.endpointNumber, packet), `write command ${operation}`);
     if (sent.status && sent.status !== "ok") throw new Error(`Pico monitor USB write ${sent.status}`);
-    const received = await this.device.transferIn(this.bulkIn.endpointNumber, PACKET_SIZE);
+    const received = await usbOperation(this.device.transferIn(this.bulkIn.endpointNumber, PACKET_SIZE), `read command ${operation}`);
     if (received.status && received.status !== "ok") throw new Error(`Pico monitor USB read ${received.status}`);
     const response = new Uint8Array(received.data.buffer, received.data.byteOffset, received.data.byteLength);
     if (response.length < WRITE_HEADER_SIZE || response[0] !== 0x52 || response[1] !== 0x4e ||
         response[2] !== 0x56 || response[3] !== 0x32 || response[4] !== operation) {
       throw new Error("Pico monitor returned an invalid response");
     }
-    if (response[5] !== 0) throw new Error(`Pico monitor rejected command ${operation} (status ${response[5]})`);
     if (response.length >= 36) this.monitorInfo = parseMonitorInfo(response);
+    if (response[5] !== 0) {
+      const diagnostic = operation === COMMAND_BEGIN || operation === COMMAND_COMMIT
+        ? `; launch stage ${this.monitorInfo?.launchStage ?? "unknown"}, failure ${this.monitorInfo?.launchFailure ?? "unknown"}, FIFO state ${this.monitorInfo?.launchState ?? "unknown"}`
+        : "";
+      throw new Error(`Pico monitor rejected command ${operation} (status ${response[5]}${diagnostic})`);
+    }
     return response;
   }
 
@@ -125,7 +131,7 @@ export class PicoWebUSBMonitor {
     packet[7] = PROTOCOL_MINOR;
     new DataView(packet.buffer).setUint32(8, address >>> 0, true);
     packet.set(payload, WRITE_HEADER_SIZE);
-    const sent = await this.device.transferOut(this.bulkOut.endpointNumber, packet);
+    const sent = await usbOperation(this.device.transferOut(this.bulkOut.endpointNumber, packet), "write firmware");
     if (sent.status && sent.status !== "ok") throw new Error(`Pico monitor USB write ${sent.status}`);
   }
 }
@@ -141,6 +147,8 @@ export class PicoMonitorHotReloadSession {
     const image = parsePicoDebugImage(source);
     const patches = planPicoPatches(this.previous, image);
     if (!patches.length && this.previous) {
+      await this.monitor.open();
+      await this.monitor.command(COMMAND_INFO, CLIENT_VERSION);
       return { entry: image.entry, patchCount: 0, bytesWritten: 0, unchanged: true, monitorInfo: this.monitor.getInfo?.() };
     }
     await this.monitor.open();
@@ -158,6 +166,10 @@ export class PicoMonitorHotReloadSession {
       }
     }
     await this.monitor.command(COMMAND_COMMIT, image.entry);
+    // COMMIT is acknowledged only after core 1 has accepted the complete ROM
+    // launch sequence. Verify the monitor is still servicing USB before we
+    // retain this image as the basis for the next differential update.
+    await this.monitor.command(COMMAND_INFO, CLIENT_VERSION);
     this.previous = image;
     this.progress(1);
     return { entry: image.entry, patchCount: packets, bytesWritten: written, unchanged: false, monitorInfo: this.monitor.getInfo?.() };
@@ -185,12 +197,34 @@ function parseMonitorInfo(response) {
     monitorVersion: view.getUint32(24, true),
     chip: view.getUint32(28, true),
     clientVersion: view.getUint32(32, true),
+    launchStage: response.byteLength >= 40 ? view.getUint32(36, true) : 0,
+    launchEcho: response.byteLength >= 44 ? view.getUint32(40, true) : 0,
+    launchState: response.byteLength >= 48 ? view.getUint32(44, true) : 0,
+    launchFailure: response.byteLength >= 52 ? view.getUint32(48, true) : 0,
   };
 }
 
+function formatVersion(version = 0) {
+  version >>>= 0;
+  return `${version >>> 16}.${version >>> 8 & 0xff}.${version & 0xff}`;
+}
+
+async function usbOperation(promise, action, timeout = USB_TIMEOUT_MS) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Pico monitor USB ${action} timed out after ${timeout} ms`)), timeout);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function formatPicoMonitorInfo(info = {}) {
-  const version = info.monitorVersion >>> 0;
-  const firmware = `${version >>> 16}.${version >>> 8 & 0xff}.${version & 0xff}`;
+  const firmware = formatVersion(info.monitorVersion);
   const chip = info.chip === 0x2040 ? "RP2040" : info.chip === 0x2350 ? "RP2350" : `chip 0x${(info.chip || 0).toString(16)}`;
   return `firmware ${firmware} · protocol ${info.protocolMajor || 0}.${info.protocolMinor || 0} · ${chip} · generation ${info.generation || 0}`;
 }

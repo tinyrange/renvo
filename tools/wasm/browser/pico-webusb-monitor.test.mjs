@@ -9,15 +9,17 @@ test("Renvo Pico monitor claims its vendor bulk interface", async () => {
   await monitor.open();
   assert.deepEqual(device.claimed, [2]);
   assert.equal(device.out[0][4], 1);
-  assert.equal(device.out[0][6], 1);
-  assert.equal(new DataView(device.out[0].buffer).getUint32(8, true), 0x00010000);
+  assert.equal(device.out[0][6], 2);
+  assert.equal(device.out[0][7], 0);
+  assert.equal(new DataView(device.out[0].buffer).getUint32(8, true), 0x00010100);
   assert.equal(monitor.fastWrite, true);
   assert.deepEqual(monitor.getInfo(), {
     usbVendorId: 0xcafe, usbProductId: 0x4021,
-    protocolMajor: 1, protocolMinor: 0, generation: 7,
+    protocolMajor: 2, protocolMinor: 0, generation: 7,
     reloadStart: 0x20010000, reloadEnd: 0x20040000,
-    capabilities: 1, monitorVersion: 0x00010000, chip: 0x2040,
-    clientVersion: 0x00010000,
+    capabilities: 1, monitorVersion: 0x00010100, chip: 0x2040,
+    clientVersion: 0x00010100,
+    launchStage: 0, launchEcho: 0, launchState: 0, launchFailure: 0,
   });
 });
 
@@ -38,9 +40,10 @@ test("Renvo Pico monitor chunks ELF patches and commits the Thumb entry", async 
   const result = await session.update(image);
   assert.equal(result.bytesWritten, 120);
   assert.equal(result.patchCount, 3);
-  assert.deepEqual(monitor.calls.map((call) => call[0]), ["open", 2, "write", "write", "write", 4]);
-  assert.equal(monitor.calls.at(-1)[1], 0x20020101);
+  assert.deepEqual(monitor.calls.map((call) => call[0]), ["open", 2, "write", "write", "write", 4, 1]);
+  assert.equal(monitor.calls.at(-2)[1], 0x20020101);
   assert.equal((await session.update(image)).unchanged, true);
+  assert.deepEqual(monitor.calls.slice(-2).map((call) => call[0]), ["open", 1]);
 });
 
 test("Renvo Pico monitor rejects an unversioned monitor handshake", async () => {
@@ -60,9 +63,10 @@ class MockUSB {
 }
 
 class MockMonitor {
-  constructor(fastWrite = true, protocolMajor = 1) {
+  constructor(fastWrite = true, protocolMajor = 2, monitorVersion = 0x00010100) {
     this.fastWrite = fastWrite;
     this.protocolMajor = protocolMajor;
+    this.monitorVersion = monitorVersion;
     this.inCount = 0;
     this.vendorId = 0xcafe; this.productId = 0x4021; this.opened = false; this.configuration = null; this.claimed = []; this.out = [];
     this.configurations = [{ configurationValue: 1, interfaces: [{ interfaceNumber: 2, alternates: [{
@@ -80,7 +84,7 @@ class MockMonitor {
     const response = new Uint8Array(64); response.set([0x52, 0x4e, 0x56, 0x32, this.out.at(-1)[4], 0, this.protocolMajor, 0]);
     const view = new DataView(response.buffer);
     view.setUint32(8, 7, true); view.setUint32(12, 0x20010000, true); view.setUint32(16, 0x20040000, true);
-    view.setUint32(20, this.fastWrite ? 1 : 0, true); view.setUint32(24, 0x00010000, true);
+    view.setUint32(20, this.fastWrite ? 1 : 0, true); view.setUint32(24, this.monitorVersion, true);
     view.setUint32(28, 0x2040, true); view.setUint32(32, viewFor(this.out.at(-1)).getUint32(8, true), true);
     return { status: "ok", data: new DataView(response.buffer) };
   }

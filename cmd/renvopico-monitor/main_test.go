@@ -11,10 +11,16 @@ func TestCoreLaunchSequence(t *testing.T) {
 }
 
 func TestMonitorVersionContract(t *testing.T) {
-	if protocolMajor != 1 || protocolMinor != 0 || monitorVersion != 0x00010000 {
+	if protocolMajor != 2 || protocolMinor != 0 || monitorVersion != 0x00010100 {
 		t.Fatalf("monitor version = protocol %d.%d firmware %#x", protocolMajor, protocolMinor, monitorVersion)
 	}
 	if chipRP2040 != 0x2040 || chipRP2350 != 0x2350 {
 		t.Fatalf("monitor chip identifiers = %#x, %#x", chipRP2040, chipRP2350)
+	}
+}
+
+func TestCoreLaunchIsBounded(t *testing.T) {
+	if coreLaunchPollLimit <= 0 || coreLaunchRetryLimit <= 0 {
+		t.Fatalf("core launch bounds = %d polls, %d retries", coreLaunchPollLimit, coreLaunchRetryLimit)
 	}
 }

@@ -12,9 +12,9 @@ const (
 	commandCommit    = byte(4)
 	commandWriteFast = byte(5)
 
-	protocolMajor  = byte(1)
+	protocolMajor  = byte(2)
 	protocolMinor  = byte(0)
-	monitorVersion = uint32(1 << 16) // 1.0.0
+	monitorVersion = uint32(1<<16 | 1<<8) // 1.1.0
 
 	capabilityFastWrite = uint32(1)
 	chipRP2040          = uint32(0x2040)
@@ -28,11 +28,18 @@ const (
 	fifoState = sioBase + 0x50
 	fifoWrite = sioBase + 0x54
 	fifoRead  = sioBase + 0x58
+
+	coreLaunchPollLimit  = 65536
+	coreLaunchRetryLimit = 8
 )
 
 var generation uint32
 var clientVersion uint32
 var handshakeCompatible bool
+var launchStage uint32
+var launchEcho uint32
+var launchState uint32
+var launchFailure uint32
 
 func load32(data []byte, offset int) uint32 {
 	return uint32(data[offset]) | uint32(data[offset+1])<<8 |
@@ -62,59 +69,108 @@ func psm() (uintptr, uint32) {
 	return 0x40010000, 1 << 16
 }
 
-func fifoPop() uint32 {
-	for mmio.Load32(fifoState)&1 == 0 {
+func fifoPop(usb *rp2.USBDevice) (uint32, bool) {
+	for attempt := 0; attempt < coreLaunchPollLimit; attempt++ {
+		if mmio.Load32(fifoState)&1 != 0 {
+			return mmio.Load32(fifoRead), true
+		}
+		usb.Poll()
 	}
-	return mmio.Load32(fifoRead)
+	return 0, false
 }
 
-func fifoPush(value uint32) {
-	for mmio.Load32(fifoState)&2 == 0 {
+func fifoPush(usb *rp2.USBDevice, value uint32) bool {
+	for attempt := 0; attempt < coreLaunchPollLimit; attempt++ {
+		if mmio.Load32(fifoState)&2 != 0 {
+			mmio.Store32(fifoWrite, value)
+			// Core 1 waits with WFE while its inbound FIFO is empty. Match
+			// multicore_fifo_push_blocking_inline and publish an event after the
+			// word is visible; the earlier synchronizing SEV for zero can arrive
+			// before this store and is not sufficient on its own.
+			print(" ")
+			return true
+		}
+		usb.Poll()
 	}
-	mmio.Store32(fifoWrite, value)
+	return false
 }
 
 func fifoDrain() {
-	for mmio.Load32(fifoState)&1 != 0 {
+	// The hardware FIFO has eight entries. The bound also protects the monitor
+	// if a faulty application core keeps writing while it is being stopped.
+	for count := 0; count < 16 && mmio.Load32(fifoState)&1 != 0; count++ {
 		_ = mmio.Load32(fifoRead)
 	}
 }
 
-func resetApplicationCore() {
+func resetApplicationCore(usb *rp2.USBDevice) bool {
 	base, mask := psm()
 	forceOff := base + 4
 	mmio.Store32(forceOff+0x2000, mask)
-	for mmio.Load32(forceOff)&mask == 0 {
+	for attempt := 0; attempt < coreLaunchPollLimit; attempt++ {
+		if mmio.Load32(forceOff)&mask != 0 {
+			fifoDrain()
+			// Core 1's ROM drains its inbound FIFO after reset, then sends a
+			// separate zero to announce that it is ready for the launch
+			// sequence. Consume that announcement here; treating it as the echo
+			// of the sequence's first zero races and permanently desynchronizes
+			// the two cores.
+			mmio.Store32(forceOff+0x3000, mask)
+			ready, ok := fifoPop(usb)
+			launchEcho = ready
+			return ok && ready == 0
+		}
+		usb.Poll()
 	}
-	fifoDrain()
+	return false
 }
 
 func coreLaunchSequence(entry uint32) [6]uint32 {
 	return [6]uint32{0, 0, 1, uint32(reloadStart), stackTop, entry | 1}
 }
 
-func launchApplication(entry uint32) {
-	base, mask := psm()
-	mmio.Store32(base+4+0x3000, mask)
+func launchApplication(usb *rp2.USBDevice, entry uint32) bool {
 	// Match the ROM handshake used by pico_multicore: two synchronizing zeros,
 	// the launch command, vector table, stack pointer, and Thumb entry point.
 	// Core 1 echoes every word. A mismatch restarts the sequence.
 	commands := coreLaunchSequence(entry)
 	index := 0
+	retries := 0
+	launchFailure = 0
 	for index < len(commands) {
 		command := commands[index]
+		launchStage = uint32(index)
 		if command == 0 {
 			fifoDrain()
 			// Freestanding print emits SEV, waking a ROM core parked in WFE.
 			print(" ")
 		}
-		fifoPush(command)
-		if fifoPop() == command {
+		if !fifoPush(usb, command) {
+			launchState = mmio.Load32(fifoState)
+			launchFailure = 1
+			return false
+		}
+		echo, ok := fifoPop(usb)
+		if !ok {
+			launchState = mmio.Load32(fifoState)
+			launchFailure = 2
+			return false
+		}
+		launchEcho = echo
+		if echo == command {
 			index++
 		} else {
 			index = 0
+			retries++
+			if retries >= coreLaunchRetryLimit {
+				launchState = mmio.Load32(fifoState)
+				launchFailure = 3
+				return false
+			}
 		}
 	}
+	launchState = mmio.Load32(fifoState)
+	return true
 }
 
 func reply(usb *rp2.USBDevice, operation byte, status byte) {
@@ -129,6 +185,10 @@ func reply(usb *rp2.USBDevice, operation byte, status byte) {
 	store32(packet[:], 24, monitorVersion)
 	store32(packet[:], 28, chipIdentifier())
 	store32(packet[:], 32, clientVersion)
+	store32(packet[:], 36, launchStage)
+	store32(packet[:], 40, launchEcho)
+	store32(packet[:], 44, launchState)
+	store32(packet[:], 48, launchFailure)
 	for !usb.WritePacket(packet[:]) {
 		usb.Poll()
 	}
@@ -151,8 +211,14 @@ func handle(usb *rp2.USBDevice, packet []byte, count int) {
 		return
 	}
 	if operation == commandBegin {
-		resetApplicationCore()
-		reply(usb, operation, 0)
+		if resetApplicationCore(usb) {
+			reply(usb, operation, 0)
+		} else {
+			launchStage = 0xffffffff
+			launchState = mmio.Load32(fifoState)
+			launchFailure = 4
+			reply(usb, operation, 3)
+		}
 		return
 	}
 	if operation == commandWrite || operation == commandWriteFast {
@@ -179,9 +245,12 @@ func handle(usb *rp2.USBDevice, packet []byte, count int) {
 			reply(usb, operation, 1)
 			return
 		}
-		generation = generation + 1
-		reply(usb, operation, 0)
-		launchApplication(entry)
+		if launchApplication(usb, entry) {
+			generation = generation + 1
+			reply(usb, operation, 0)
+		} else {
+			reply(usb, operation, 3)
+		}
 		return
 	}
 	reply(usb, operation, 1)
