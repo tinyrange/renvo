@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "71aa7eed6ad41be5ba64f18849755cfafa5427b5fd01d117e92d3324f7c3524d"
+const CompilerSourceDigest = "8b506fb3cc9ad93fdc0af1cd01d1961b22555a29d1d6585306f04b85862b9f07"
 
 // source: backend/compiler_common_impl.go
 
@@ -6810,7 +6810,11 @@ return kind == renvoTypeByte || kind == renvoTypeUint16 || kind == renvoTypeUint
 }
 
 func renvoTypeKindIsWideValue(kind int) bool {
-return renvoTypeKindIsWideInt(kind) || kind == renvoTypeFloat64
+
+
+
+
+return renvoTypeKindIsWideInt(kind) || kind == renvoTypeFloat64 && renvoPreparedBackendActive == 0
 }
 
 func renvoTypeKindIsScalarValue(kind int) bool {

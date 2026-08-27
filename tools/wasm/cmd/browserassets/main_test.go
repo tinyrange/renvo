@@ -6,9 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/backenddef"
+	"renvo.dev/internal/backendjit"
+	"renvo.dev/internal/driver"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/targetinfo"
+	"renvo.dev/internal/unit"
 )
 
 type browserDefinitionImports map[string][]byte
@@ -17,6 +21,14 @@ func (imports browserDefinitionImports) LoadImport(importingFilename, importPath
 	name := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath)))
 	source, ok := imports[name]
 	return rtg.ImportSource{Source: source, Filename: name, Ok: ok}
+}
+
+func readBrowserDefinitionImport(root string, imported targetDefinitionAsset) ([]byte, error) {
+	source, err := os.ReadFile(filepath.Join(root, imported.Source))
+	if err == nil || strings.HasPrefix(imported.Name, ".renvo/") {
+		return source, err
+	}
+	return os.ReadFile(filepath.Join(root, imported.Name))
 }
 
 func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
@@ -31,27 +43,78 @@ func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
 	}
 }
 
-func TestBrowserPC8086DefinitionsIncludeBIOSFragment(t *testing.T) {
+func TestBrowserCustomDefinitionsResolveFromPackagedNames(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..")
 	for _, target := range customTargets {
-		if target.RTGSource != "backends/msdos.rtg" {
+		if target.RTGSource == "" {
 			continue
 		}
-		source, err := os.ReadFile(filepath.Join(root, target.RTGSource))
-		if err != nil {
-			t.Fatal(err)
-		}
-		imports := browserDefinitionImports{}
-		for _, imported := range target.RTGImports {
-			imports[imported.Name], err = os.ReadFile(filepath.Join(root, imported.Source))
+		t.Run(target.Name, func(t *testing.T) {
+			source, err := os.ReadFile(filepath.Join(root, target.RTGSource))
 			if err != nil {
 				t.Fatal(err)
 			}
+			imports := browserDefinitionImports{}
+			for _, imported := range target.RTGImports {
+				imports[imported.Name], err = readBrowserDefinitionImport(root, imported)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolved := backenddef.ResolveImports(source, packagedDefinitionName(target.RTGSource), target.Name, imports)
+			if !resolved.Ok {
+				t.Errorf("browser target cannot resolve its packaged definition: %s", resolved.Message)
+			}
+		})
+	}
+}
+
+func TestBrowserUEFILinuxBootAssemblyEvaluates(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target customTarget
+	for _, candidate := range customTargets {
+		if candidate.Name == "uefi/amd64" {
+			target = candidate
+			break
 		}
-		resolved := backenddef.ResolveImports(source, ".renvo/target.rtg", target.Name, imports)
-		if !resolved.Ok {
-			t.Errorf("browser target %s cannot resolve its packaged definition: %s", target.Name, resolved.Message)
+	}
+	if target.RTGSource == "" {
+		t.Fatal("browser catalog does not publish uefi/amd64")
+	}
+	source, err := os.ReadFile(filepath.Join(root, target.RTGSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports := browserDefinitionImports{}
+	for _, imported := range target.RTGImports {
+		imports[imported.Name], err = readBrowserDefinitionImport(root, imported)
+		if err != nil {
+			t.Fatal(err)
 		}
+	}
+	resolved := rtg.ResolveDefinitions(rtg.ParseImports(source, packagedDefinitionName(target.RTGSource), imports))
+	if !resolved.Ok || len(resolved.Targets) != 1 {
+		t.Fatalf("resolve browser UEFI definition: %#v", resolved.Diagnostics)
+	}
+	descriptor := resolved.Targets[0].Descriptor
+	project := filepath.Join(root, "examples", "uefi-linux-boot")
+	stdRoot := filepath.Join(root, "std")
+	built := driver.BuildPackageUnitCompact(".", descriptor.Name, descriptor.BuildTags, project, stdRoot, driver.OSFS{})
+	if !built.Ok {
+		t.Fatalf("build browser compact unit: %#v", built.Diagnostic)
+	}
+	bound, ok := unit.BindTarget(built.Unit, unit.TargetBinding{
+		Target: descriptor.Name, Definition: string(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
+	})
+	if !ok {
+		t.Fatal("bind browser compact unit to UEFI target")
+	}
+	_, evaluated := backendjit.EvaluateRTGAssembly(bound, resolved, descriptor, stdRoot, backendcompiled.Backend{})
+	if !evaluated.Ok {
+		t.Fatalf("evaluate browser UEFI RTGASM: %#v", evaluated.Diagnostic)
 	}
 }
 

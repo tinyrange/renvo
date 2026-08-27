@@ -128,6 +128,32 @@ func TestCompiledInBootstrapCompilesESP32C6MicrocontrollerSuite(t *testing.T) {
 	}
 }
 
+func TestCompiledInBootstrapPreservesPreparedFloatAndTupleCompatibility(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s",
+			runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "backends", "esp32c6.rtg")
+	source, err := os.ReadFile(filepath.Join(root, "backend", "tests", "prepared_compat_float_struct_and_tuple.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+		backendJITTestCacheDir, backendcompiled.Backend{})
+	result := backend.CompileSourceWithArena(source, "esp32c6/riscv32", true, 0)
+	if !result.Ok {
+		t.Fatalf("ESP32-C6 prepared compatibility compile failed: %#v", result.Diagnostic)
+	}
+	if len(result.Binary) < 52 || !bytes.Equal(result.Binary[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("prepared compatibility output is not ELF32: % x",
+			result.Binary[:minInt(4, len(result.Binary))])
+	}
+}
+
 func TestCompiledInBootstrapCompilesESP32C6JTAGImageIntoSRAM(t *testing.T) {
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
