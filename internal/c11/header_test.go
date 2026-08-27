@@ -37,9 +37,9 @@ func TestBuildObjectPreludeReportsMissingHeaderAtDirective(t *testing.T) {
 	}
 }
 
-func TestBuildObjectPreludeFromHeadersIgnoresInactiveInclude(t *testing.T) {
+func TestBuildObjectPreludeIgnoresInactiveIncludeWithDependencies(t *testing.T) {
 	source := []byte("#if 0\n#include <missing.h>\n#endif\n#include <api.h>\nint main(void) { return answer(); }\n")
-	result := BuildObjectPreludeFromHeaders(source, []HeaderSource{{Path: "/include/api.h", Source: []byte("int answer(void);\n")}})
+	result := BuildObjectPrelude("/tmp/main.c", source, headerTestReader{}, HeaderSource{Path: "/include/api.h", Source: []byte("int answer(void);\n")})
 	if !result.Ok || string(result.Prelude) != "int answer ( void );\n" {
 		t.Fatalf("prelude = %#v, %q", result, result.Prelude)
 	}

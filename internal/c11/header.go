@@ -7,52 +7,17 @@ type IncludeReader interface {
 	ReadIncludeNext(from string, name string, angled bool) ([]byte, string, bool)
 }
 
+type HeaderSource struct {
+	Path   string
+	Source []byte
+}
+
 type HeaderResult struct {
 	Prelude      []byte
 	Dependencies []string
 	Ok           bool
 	ErrorPath    string
 	ErrorAt      int
-}
-
-type HeaderSource struct {
-	Path   string
-	Source []byte
-}
-
-// BuildObjectPreludeFromHeaders retains referenced external declarations from
-// the headers which the preprocessor actually opened. In particular, includes
-// in inactive conditional branches are absent from this list.
-func BuildObjectPreludeFromHeaders(src []byte, headers []HeaderSource) HeaderResult {
-	result := HeaderResult{Ok: true, ErrorAt: -1}
-	if sourceUsesIdentifier(src, "va_list") {
-		result.Prelude = append(result.Prelude, "typedef __builtin_va_list va_list;\n"...)
-	}
-	wanted := sourceCallNames(src)
-	var emitted []string
-	for i := 0; i < len(headers); i++ {
-		declarations, names, ok := headerDeclarations(headers[i].Source, wanted, emitted)
-		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: headers[i].Path, ErrorAt: -1}
-		}
-		result.Prelude = append(result.Prelude, declarations...)
-		result.Dependencies = append(result.Dependencies, headers[i].Path)
-		emitted = append(emitted, names...)
-	}
-	return result
-}
-
-func sourceUsesIdentifier(src []byte, name string) bool {
-	scanned := scan(src)
-	if !scanned.ok {
-		return false
-	}
-	for i := 0; i < len(scanned.tokens); i++ {
-		if tokenKind(scanned.tokens[i]) == tokenIdent && textEquals(tokenText(src, scanned.tokens[i]), name) {
-			return true
-		}
-	}
-	return false
 }
 
 type includeSpec struct {
@@ -65,25 +30,46 @@ type includeSpec struct {
 // only externally linked function declarations referenced by the source. This
 // is the deliberately narrow hosted-header slice: it bounds memory by avoiding
 // a materialized copy of every unrelated declaration in a large libc header.
-func BuildObjectPrelude(path string, src []byte, reader IncludeReader) HeaderResult {
+func BuildObjectPrelude(path string, src []byte, reader IncludeReader, headers ...HeaderSource) HeaderResult {
 	result := HeaderResult{Ok: true, ErrorAt: -1}
 	includes := sourceIncludes(src)
-	if len(includes) == 0 {
+	count := len(includes)
+	if len(headers) > 0 {
+		count = len(headers)
+		if textContains(src, "va_list") {
+			result.Prelude = append(result.Prelude, "typedef __builtin_va_list va_list;\n"...)
+		}
+	}
+	if count == 0 {
 		return result
 	}
 	wanted := sourceCallNames(src)
 	var emitted []string
-	for i := 0; i < len(includes); i++ {
-		header, headerPath, ok := reader.ReadInclude(path, includes[i].name, includes[i].angled)
+	for i := 0; i < count; i++ {
+		var header []byte
+		var headerPath string
+		var ok bool
+		at := -1
+		if len(headers) > 0 {
+			headerPath = headers[i].Path
+			header = headers[i].Source
+			ok = true
+		} else {
+			at = includes[i].at
+			header, headerPath, ok = reader.ReadInclude(path, includes[i].name, includes[i].angled)
+		}
 		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: includes[i].name, ErrorAt: includes[i].at}
+			if headerPath == "" {
+				headerPath = includes[i].name
+			}
+			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: at}
 		}
 		if findText(result.Dependencies, headerPath) < 0 {
 			result.Dependencies = append(result.Dependencies, headerPath)
 		}
 		declarations, names, ok := headerDeclarations(header, wanted, emitted)
 		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: includes[i].at}
+			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: at}
 		}
 		result.Prelude = append(result.Prelude, declarations...)
 		emitted = append(emitted, names...)
@@ -167,7 +153,16 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 	}
 	var out []byte
 	var names []string
+	braceDepth := 0
 	for i := 0; i+1 < len(scanned.tokens); i++ {
+		if tokenIs(src, scanned.tokens[i], "{") {
+			braceDepth++
+		} else if tokenIs(src, scanned.tokens[i], "}") && braceDepth > 0 {
+			braceDepth--
+		}
+		if braceDepth != 0 {
+			continue
+		}
 		if tokenKind(scanned.tokens[i]) != tokenIdent || !tokenIs(src, scanned.tokens[i+1], "(") {
 			continue
 		}
@@ -196,17 +191,6 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		}
 		for start < i && headerDeclarationDecoration(src, scanned.tokens[start]) {
 			start++
-		}
-		braceDepth := 0
-		for j := 0; j < start; j++ {
-			if tokenIs(src, scanned.tokens[j], "{") {
-				braceDepth++
-			} else if tokenIs(src, scanned.tokens[j], "}") && braceDepth > 0 {
-				braceDepth--
-			}
-		}
-		if braceDepth != 0 {
-			continue
 		}
 		hasStatic := false
 		hasTypedef := false
