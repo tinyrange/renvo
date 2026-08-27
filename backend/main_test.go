@@ -257,6 +257,18 @@ func appMain(args []string, env []string) int {
 		performanceAbsPath(t, "compiler_common_impl.go"),
 		wrapper,
 	}
+	if target.name == "darwin/arm64" {
+		// Some shared AArch64 lowering helpers currently live in the Linux
+		// integration file. Keep those helpers without pulling the complete ELF
+		// image builder into the fixed Darwin performance compiler. The shared
+		// finalizer names that builder before selecting Mach-O, but Darwin never
+		// observes its result.
+		helper := filepath.Join(outDir, "performance_darwin_aarch64_common.go")
+		if err := os.WriteFile(helper, []byte(getPerformanceDarwinAarch64Common(t)), 0o644); err != nil {
+			t.Fatalf("failed to write performance Darwin AArch64 helper: %v", err)
+		}
+		files = append(files, helper)
+	}
 	if target.name == "windows/amd64" || target.name == "windows/386" {
 		files = append(files, performanceAbsPath(t, "compiler_pe_impl.go"))
 	}
@@ -294,6 +306,25 @@ func getPerformanceLinuxRuntime(t *testing.T) string {
 		t.Fatal("failed to locate Linux runtime lowering")
 	}
 	return "package main\n\n" + src[sysStart:]
+}
+
+func getPerformanceDarwinAarch64Common(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("compiler_linux_aarch64_impl.go")
+	if err != nil {
+		t.Fatalf("failed to read compiler_linux_aarch64_impl.go: %v", err)
+	}
+	src := string(data)
+	start := strings.Index(src, "func renvoAarch64AsmPrepareReadWriteBuf")
+	end := strings.Index(src, "func renvoAsmImageAarch64")
+	if start < 0 || end <= start {
+		t.Fatal("failed to locate shared AArch64 helpers")
+	}
+	helper := src[start:end]
+	helper = removePerformanceFunc(helper, "compileLinuxAarch64")
+	helper = removePerformanceFunc(helper, "compileLinuxAarch64Arena")
+	return "package main\n\n" + helper +
+		"func renvoAsmImageAarch64(a *renvoAsm) []byte { return nil }\n"
 }
 
 func getPerformanceWindowsRuntime(t *testing.T, targetName string) string {
@@ -401,6 +432,8 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 		return "renvoTargetWindows386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_386_target_impl.go", "compiler_windows_386_impl.go"}
 	case "wasi/wasm32":
 		return "renvoTargetWasiWasm32", "renvoTryCompileScalarProgramWasm32", []string{"@amd64-common", "compiler_wasm32_impl.go", "compiler_wasi_wasm32_impl.go"}
+	case "darwin/arm64":
+		return "renvoTargetDarwinArm64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_aarch64_impl.go", "compiler_aarch64_target_impl.go", "compiler_darwin_arm64_impl.go"}
 	default:
 		t.Fatalf("unsupported performance target %s", targetName)
 		return "", "", nil
@@ -409,8 +442,11 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 
 func performanceCompilerTargets(t *testing.T) []compilerTarget {
 	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skipf("compiler performance gate requires Linux host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return []compilerTarget{{name: "darwin/arm64"}}
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("compiler performance gate requires Linux/amd64 or Darwin/arm64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	return []compilerTarget{
 		{name: "linux/amd64"},
@@ -1080,7 +1116,12 @@ func TestCompilerPerformance(t *testing.T) {
 				t.Fatalf("failed to stat compiler binary: %v", err)
 			}
 			const maxRSSKB = 16 * 1024
-			const maxBinarySize = 320 * 1024
+			maxBinarySize := int64(320 * 1024)
+			maxElapsed := 50 * time.Millisecond
+			if target.name == "darwin/arm64" {
+				maxBinarySize = 640 * 1024
+				maxElapsed = 175 * time.Millisecond
+			}
 			bestElapsed := 24 * time.Hour
 			bestRSS := 1 << 30
 			for attempt := 0; attempt < 3; attempt++ {
@@ -1098,14 +1139,14 @@ func TestCompilerPerformance(t *testing.T) {
 				if maxRSS < bestRSS {
 					bestRSS = maxRSS
 				}
-				if elapsed <= 50*time.Millisecond && maxRSS <= maxRSSKB && compilerInfo.Size() <= maxBinarySize {
+				if elapsed <= maxElapsed && maxRSS <= maxRSSKB && compilerInfo.Size() <= maxBinarySize {
 					return
 				}
 			}
 
 			var failures []string
-			if bestElapsed > 50*time.Millisecond {
-				failures = append(failures, fmt.Sprintf("runtime %s > 50ms", bestElapsed))
+			if bestElapsed > maxElapsed {
+				failures = append(failures, fmt.Sprintf("runtime %s > %s", bestElapsed, maxElapsed))
 			}
 			if bestRSS > maxRSSKB {
 				failures = append(failures, fmt.Sprintf("compile max RSS %dKB > %dKB", bestRSS, maxRSSKB))

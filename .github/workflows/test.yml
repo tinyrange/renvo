@@ -155,6 +155,11 @@ jobs:
           tests="$(go test -list '^Test' ./backend | grep '^Test' | grep -v '^TestCompilerPerformance$' | grep -v '^TestCompilerPerformanceWASI$' | grep -v '^TestCompilerResourceGates$' | grep -v '^TestFrontendCompilerPerformance$' | paste -sd'|' -)"
           go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
 
+      - name: Run Darwin compiler performance gate
+        env:
+          RENVO_STDROOT: ${{ github.workspace }}/std
+        run: go test -count=1 -timeout 15m -run '^TestCompilerPerformance$' ./backend
+
       - name: Run Darwin frontend corpus
         run: go test -count=1 -timeout 30m ./frontend_tests
 
@@ -248,6 +253,47 @@ jobs:
       - name: Run frontend corpus tests
         run: ./tools/check frontend
 
+  esp-emulator:
+    name: ESP targets in renvo_emu
+    needs: preflight
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check out pinned renvo_emu
+        uses: actions/checkout@v7
+        with:
+          repository: tinyrange/renvo_emu
+          ref: 3c8fa1994a21a55fb7c9e5ea68befea11f761469
+          path: renvo_emu
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build Renvo and renvo_emu
+        run: |
+          go build -o "$RUNNER_TEMP/renvo" ./cmd/renvo
+          cargo build --locked --release -p remu-cli --bin remu --manifest-path renvo_emu/Cargo.toml
+
+      - name: Execute ESP32-C6 flash and JTAG targets
+        env:
+          RENVO: ${{ runner.temp }}/renvo
+          RENVO_EMU: ${{ github.workspace }}/renvo_emu/target/release/remu
+        run: ./examples/m5nanoc6/test-emulator.sh
+
+      - name: Execute ESP32-S3 target
+        env:
+          RENVO: ${{ runner.temp }}/renvo
+          RENVO_EMU: ${{ github.workspace }}/renvo_emu/target/release/remu
+        run: ./examples/m5sticks3/test-emulator.sh
+
   required:
     name: Required
     if: ${{ always() }}
@@ -260,6 +306,7 @@ jobs:
       - package-tests
       - performance
       - frontend-corpus
+      - esp-emulator
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
@@ -281,6 +328,7 @@ jobs:
               '${{ needs.package-tests.result }}'
               '${{ needs.performance.result }}'
               '${{ needs.frontend-corpus.result }}'
+              '${{ needs.esp-emulator.result }}'
             )
           fi
           for result in "${results[@]}"; do
