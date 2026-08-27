@@ -16,10 +16,14 @@ Keep these files in the root of the EFI System Partition beside
 ```text
 kernel=VMLINUZ
 initramfs=INITRAMFS
-cmdline=console=ttyS0,115200 rdinit=/init panic=-1
+cmdline=console=ttyS0,115200 console=tty0 rdinit=/init panic=-1
 ```
 
 The kernel must be a relocatable x86-64 `bzImage` implementing boot protocol
-2.12 or newer. Initramfs images are limited to 64 MiB. Run
-`tools/uefi/test-linux-qemu` to build a minimal Alpine initramfs and exercise
-the complete handoff under OVMF.
+2.12 or newer. Initramfs images are limited to 64 MiB. The loader clears the
+firmware splash and reports its disk-loading stages on the UEFI console. A
+cherry-red strip at the top of the display means `ExitBootServices` succeeded.
+Its handoff passes the GOP framebuffer and ACPI root to Linux and installs
+four- and five-level identity maps rather than depending on firmware page
+tables. Run `tools/uefi/test-linux-qemu` to download Alpine's LTS kernel,
+build a minimal Alpine initramfs, and exercise the complete handoff under OVMF.

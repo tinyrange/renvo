@@ -7,6 +7,9 @@ import (
 )
 
 func main() {
+	uefi.ClearScreen()
+	fmt.Println("Renvo Linux boot loader")
+	fmt.Println("Reading config.txt...")
 	volume, status := uefi.OpenVolume()
 	if status.Failed() {
 		fmt.Println("Cannot open boot volume: " + status.Error())

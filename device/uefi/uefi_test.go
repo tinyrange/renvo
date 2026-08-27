@@ -28,6 +28,22 @@ func TestMemoryMapControl(t *testing.T) {
 	}
 }
 
+func TestConfigurationTable(t *testing.T) {
+	guid := GUID{0x1122334455667788, 0x99aabbccddeeff00}
+	entries := make([]byte, 48)
+	entry := uintptr(unsafe.Pointer(&entries[0])) + 24
+	store64(entry, 0, guid.Low)
+	store64(entry, 8, guid.High)
+	store64(entry, 16, 0x12345678)
+	tableBytes := make([]byte, 120)
+	table := uintptr(unsafe.Pointer(&tableBytes[0]))
+	store64(table, 104, 2)
+	store64(table, 112, uint64(uintptr(unsafe.Pointer(&entries[0]))))
+	if got := SystemTable(table).ConfigurationTable(guid); got != 0x12345678 {
+		t.Fatalf("configuration table = %#x", got)
+	}
+}
+
 func TestUTF16RoundTrip(t *testing.T) {
 	units := utf16z("Renvo U0001f33f")
 	if units[len(units)-1] != 0 || string16(&units[0]) != "Renvo U0001f33f" {

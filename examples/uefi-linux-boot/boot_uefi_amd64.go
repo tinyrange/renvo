@@ -3,4 +3,4 @@
 package main
 
 func zeroMemory(address, size uintptr)
-func enterLinux64(entry, bootParams, stackTop uintptr)
+func enterLinux64(transition uintptr)

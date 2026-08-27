@@ -169,6 +169,26 @@ func (s SystemTable) Boot() *BootServices {
 	return (*BootServices)(unsafe.Pointer(loadWord(uintptr(s), 96)))
 }
 
+// ConfigurationTable returns the vendor table registered for guid, or zero
+// when the firmware did not publish one.
+func (s SystemTable) ConfigurationTable(guid GUID) uintptr {
+	if !s.Valid() {
+		return 0
+	}
+	count := loadWord(uintptr(s), 104)
+	entries := loadWord(uintptr(s), 112)
+	if entries == 0 || count > 4096 {
+		return 0
+	}
+	for i := uintptr(0); i < count; i++ {
+		entry := entries + i*24
+		if load64(entry, 0) == guid.Low && load64(entry, 8) == guid.High {
+			return loadWord(entry, 16)
+		}
+	}
+	return 0
+}
+
 func FirmwareVendor() string {
 	table := CurrentSystemTable()
 	if !table.Valid() {

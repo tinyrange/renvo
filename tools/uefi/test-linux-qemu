@@ -66,7 +66,7 @@ if [ -z "$minirootfs" ] || [ -z "$minirootfs_sha256" ]; then
 fi
 
 rootfs_archive=$cache/$minirootfs
-kernel=$cache/vmlinuz-virt
+kernel=$cache/vmlinuz-lts
 if [ ! -f "$rootfs_archive" ]; then
 	curl -fL "$alpine_base/$minirootfs" -o "$rootfs_archive"
 fi
@@ -80,7 +80,7 @@ if [ "$actual_sha256" != "$minirootfs_sha256" ]; then
 	exit 1
 fi
 if [ ! -f "$kernel" ]; then
-	curl -fL "$alpine_base/netboot/vmlinuz-virt" -o "$kernel"
+	curl -fL "$alpine_base/netboot/vmlinuz-lts" -o "$kernel"
 fi
 
 temporary=$(mktemp -d)
@@ -96,7 +96,9 @@ printf '%s\n' \
 	'mount -t proc proc /proc' \
 	'mount -t sysfs sysfs /sys' \
 	'echo "RENVO UEFI ALPINE PASS" >/dev/ttyS0' \
+	'echo "RENVO UEFI ALPINE PASS" >/dev/console' \
 	'echo "Alpine $(cat /etc/alpine-release), Linux $(uname -r)" >/dev/ttyS0' \
+	'echo "Alpine $(cat /etc/alpine-release), Linux $(uname -r)" >/dev/console' \
 	'sync' \
 	'poweroff -f' \
 	'exec /bin/busybox sh' >"$rootfs/init"
