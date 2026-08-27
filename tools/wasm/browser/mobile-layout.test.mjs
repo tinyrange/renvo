@@ -27,6 +27,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(html, /Choose a board or computer/);
   assert.match(html, /id="example-target-filter"/);
   assert.match(html, /id="mobile-setup-progress"/);
+  assert.match(html, /id="deployment-progress"/);
   assert.doesNotMatch(html, /Initializing compiler/);
   for (const step of ["workspace", "catalog", "editor", "compiler"]) {
     assert.match(html, new RegExp(`data-setup-step="${step}"`));
@@ -71,6 +72,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(css, /\.ide\[data-mobile-view="device"\] \.mobile-target-view/);
   assert.match(css, /\.ide\[data-mobile-view="editor"\] \.workbench/);
   assert.match(css, /\.mobile-flash-view \{[\s\S]*position: fixed/);
+  assert.match(css, /#deployment-progress \{[\s\S]*position: absolute/);
   assert.match(css, /\.workbench\.plotter-expanded \{[\s\S]*grid-template-rows: 38px 0 minmax\(0, 1fr\)/);
   assert.match(app, /showMobileView\("editor"\)/);
   assert.match(app, /copyActiveFileToPlayground/);

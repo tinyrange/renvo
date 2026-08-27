@@ -6,10 +6,13 @@ import (
 )
 
 const (
-	commandInfo   = byte(1)
-	commandBegin  = byte(2)
-	commandWrite  = byte(3)
-	commandCommit = byte(4)
+	commandInfo      = byte(1)
+	commandBegin     = byte(2)
+	commandWrite     = byte(3)
+	commandCommit    = byte(4)
+	commandWriteFast = byte(5)
+
+	capabilityFastWrite = uint32(1)
 
 	reloadStart = uintptr(0x20010000)
 	reloadEnd   = uintptr(0x20040000)
@@ -106,6 +109,7 @@ func reply(usb *rp2.USBDevice, operation byte, status byte) {
 	store32(packet[:], 8, generation)
 	store32(packet[:], 12, uint32(reloadStart))
 	store32(packet[:], 16, uint32(reloadEnd))
+	store32(packet[:], 20, capabilityFastWrite)
 	for !usb.WritePacket(packet[:]) {
 		usb.Poll()
 	}
@@ -126,18 +130,22 @@ func handle(usb *rp2.USBDevice, packet []byte, count int) {
 		reply(usb, operation, 0)
 		return
 	}
-	if operation == commandWrite {
+	if operation == commandWrite || operation == commandWriteFast {
 		address := uintptr(load32(packet, 8))
 		length := count - 12
 		if address&3 != 0 || length&3 != 0 || address < reloadStart || address > reloadEnd ||
 			uintptr(length) > reloadEnd-address {
-			reply(usb, operation, 1)
+			if operation == commandWrite {
+				reply(usb, operation, 1)
+			}
 			return
 		}
 		for index := 0; index < length; index += 4 {
 			mmio.Store32(address+uintptr(index), load32(packet, 12+index))
 		}
-		reply(usb, operation, 0)
+		if operation == commandWrite {
+			reply(usb, operation, 0)
+		}
 		return
 	}
 	if operation == commandCommit {

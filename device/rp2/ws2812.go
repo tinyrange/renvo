@@ -28,12 +28,26 @@ const (
 	pioPullThreshold24 = uint32(24 << 25)
 	pioSideSetCount1   = uint32(1 << 29)
 	pioSetCount1       = uint32(1 << 26)
+	rp2040Resets       = uintptr(0x4000c000)
+	rp2350Resets       = uintptr(0x40020000)
+	rp2040PIO0Reset    = uint32(1 << 10)
+	rp2350PIO0Reset    = uint32(1 << 11)
 
 	// RP2 programs currently retain the ROM's 12 MHz system clock. The PIO
 	// program consumes ten 8 MHz cycles per bit, producing the WS2812 800 kHz
 	// waveform with the standard T1/T2/T3 timing split.
 	pioClockDiv8MHz = uint32(1<<16 | 128<<8)
 )
+
+func releasePIO0Reset() {
+	base, mask := rp2040Resets, rp2040PIO0Reset
+	if isRP2350() {
+		base, mask = rp2350Resets, rp2350PIO0Reset
+	}
+	mmio.Store32(base+0x3000, mask)
+	for mmio.Load32(base+8)&mask == 0 {
+	}
+}
 
 var ws2812Program = [4]uint32{
 	0x6221, // out x, 1       side 0 [2]
@@ -62,6 +76,7 @@ func (p *ws2812PIO) initialize() {
 		p.power.Set(true)
 		_ = p.power.Configure(gpio.Config{Direction: gpio.Output})
 	}
+	releasePIO0Reset()
 
 	// Stop SM0 while replacing its program and pin routing. PIO0/SM0 is the
 	// board-level WS2812 resource; the portable driver owns it for the lifetime

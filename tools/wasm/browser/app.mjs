@@ -33,6 +33,7 @@ const worker = new Worker(new URL("./worker.mjs", import.meta.url), { type: "mod
 const elements = {
   command: document.querySelector("#command"),
   compile: document.querySelector("#compile"),
+  deploymentProgress: document.querySelector("#deployment-progress"),
   run: document.querySelector("#run"),
   test: document.querySelector("#test"),
   flashTransport: document.querySelector("#flash-transport"),
@@ -246,6 +247,7 @@ let devicePermissionResolve;
 let mobileDeploymentActive = false;
 let mobileDeploymentLabel = "";
 let mobileDeploymentStep = "";
+let deploymentProgressTimer;
 let cLibraryPromise;
 const customBackendURLs = new Map();
 const cachedBackendRecords = new Map();
@@ -3171,11 +3173,15 @@ function openMobileFlashView(state = "Preparing…") {
 }
 
 function startMobileDeployment(jtag) {
+  clearTimeout(deploymentProgressTimer);
   mobileDeploymentActive = true;
   mobileDeploymentLabel = "Starting…";
   mobileDeploymentStep = "";
   elements.mobileFlashView.hidden = true;
   elements.mobileFlashProgress.value = 0;
+  elements.deploymentProgress.value = 0;
+  elements.deploymentProgress.hidden = false;
+  elements.deploymentProgress.title = "Preparing board load";
   const monitor = selectedTarget?.device === "rp2";
   elements.mobileFlashState.textContent = monitor ? "Monitor load" : jtag ? "JTAG load" : "Flash board";
   elements.mobileFlashDetail.textContent = "Preparing the board…";
@@ -3205,7 +3211,10 @@ function setMobileDeployStep(step, state, detail, partial = 0) {
   const items = order.map((name) => document.querySelector(`[data-deploy-step="${name}"]`));
   const done = items.filter((entry) => entry.dataset.state === "done").length;
   const position = state === "active" ? order.indexOf(step) + Math.max(0, Math.min(1, partial)) : done;
-  elements.mobileFlashProgress.value = Math.max(done, position) / order.length;
+  const progress = Math.max(done, position) / order.length;
+  elements.mobileFlashProgress.value = progress;
+  elements.deploymentProgress.value = progress;
+  elements.deploymentProgress.title = detail;
   elements.mobileFlashState.textContent = state === "error" ? "Load failed" : item.querySelector("strong").textContent;
   elements.mobileFlashDetail.textContent = detail;
   updateReadyState();
@@ -3216,6 +3225,9 @@ function finishMobileDeployment(state) {
   mobileDeploymentLabel = "";
   mobileDeploymentStep = "run";
   elements.mobileFlashProgress.value = 1;
+  elements.deploymentProgress.value = 1;
+  elements.deploymentProgress.title = state;
+  deploymentProgressTimer = setTimeout(() => { elements.deploymentProgress.hidden = true; }, 1000);
   elements.mobileFlashState.textContent = state;
   updateReadyState();
 }
@@ -3225,6 +3237,8 @@ function failMobileDeployment(step, detail) {
   setMobileDeployStep(step, "error", detail);
   mobileDeploymentActive = false;
   mobileDeploymentLabel = "";
+  elements.deploymentProgress.title = detail;
+  deploymentProgressTimer = setTimeout(() => { elements.deploymentProgress.hidden = true; }, 3000);
   document.querySelector(".mobile-flash-log").open = true;
   openMobileFlashView("Load failed");
   updateReadyState();

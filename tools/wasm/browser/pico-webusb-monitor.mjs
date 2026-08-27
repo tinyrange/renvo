@@ -6,6 +6,8 @@ const COMMAND_INFO = 1;
 const COMMAND_BEGIN = 2;
 const COMMAND_WRITE = 3;
 const COMMAND_COMMIT = 4;
+const COMMAND_WRITE_FAST = 5;
+const CAPABILITY_FAST_WRITE = 1;
 const PACKET_SIZE = 64;
 const WRITE_HEADER_SIZE = 12;
 
@@ -57,7 +59,9 @@ export class PicoWebUSBMonitor {
       this.bulkOut = active.bulkOut;
       this.bulkIn = active.bulkIn;
       this.opened = true;
-      await this.command(COMMAND_INFO);
+      const info = await this.command(COMMAND_INFO);
+      this.fastWrite = info.byteLength >= 24 &&
+        (new DataView(info.buffer, info.byteOffset, info.byteLength).getUint32(20, true) & CAPABILITY_FAST_WRITE) !== 0;
     } catch (error) {
       await this.close();
       throw new Error(`could not open the Renvo Pico monitor: ${error.message || error}`);
@@ -89,6 +93,21 @@ export class PicoWebUSBMonitor {
     if (response[5] !== 0) throw new Error(`Pico monitor rejected command ${operation} (status ${response[5]})`);
     return response;
   }
+
+  async write(address, payload) {
+    if (!this.fastWrite) {
+      await this.command(COMMAND_WRITE, address, payload);
+      return;
+    }
+    if (!this.opened) throw new Error("Pico monitor is not open");
+    if (payload.length > PACKET_SIZE - WRITE_HEADER_SIZE) throw new Error("Pico monitor write packet is too large");
+    const packet = new Uint8Array(WRITE_HEADER_SIZE + payload.length);
+    packet.set([0x52, 0x4e, 0x56, 0x32, COMMAND_WRITE_FAST]);
+    new DataView(packet.buffer).setUint32(8, address >>> 0, true);
+    packet.set(payload, WRITE_HEADER_SIZE);
+    const sent = await this.device.transferOut(this.bulkOut.endpointNumber, packet);
+    if (sent.status && sent.status !== "ok") throw new Error(`Pico monitor USB write ${sent.status}`);
+  }
 }
 
 export class PicoMonitorHotReloadSession {
@@ -112,7 +131,7 @@ export class PicoMonitorHotReloadSession {
     for (const patch of patches) {
       for (let offset = 0; offset < patch.data.length; offset += PACKET_SIZE - WRITE_HEADER_SIZE) {
         const part = patch.data.subarray(offset, offset + PACKET_SIZE - WRITE_HEADER_SIZE);
-        await this.monitor.command(COMMAND_WRITE, patch.address + offset, part);
+        await this.monitor.write(patch.address + offset, part);
         written += part.length;
         packets++;
         this.progress(total ? written / total : 1);

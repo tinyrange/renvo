@@ -9,6 +9,17 @@ test("Renvo Pico monitor claims its vendor bulk interface", async () => {
   await monitor.open();
   assert.deepEqual(device.claimed, [2]);
   assert.equal(device.out[0][4], 1);
+  assert.equal(monitor.fastWrite, true);
+});
+
+test("Renvo Pico monitor falls back to acknowledged writes with an older monitor", async () => {
+  const device = new MockMonitor(false);
+  const monitor = new PicoWebUSBMonitor(device, new MockUSB());
+  await monitor.open();
+  await monitor.write(0x20010000, new Uint8Array(4));
+  assert.equal(monitor.fastWrite, false);
+  assert.equal(device.out.at(-1)[4], 3);
+  assert.equal(device.inCount, 2);
 });
 
 test("Renvo Pico monitor chunks ELF patches and commits the Thumb entry", async () => {
@@ -18,7 +29,7 @@ test("Renvo Pico monitor chunks ELF patches and commits the Thumb entry", async 
   const result = await session.update(image);
   assert.equal(result.bytesWritten, 120);
   assert.equal(result.patchCount, 3);
-  assert.deepEqual(monitor.calls.map((call) => call[0]), ["open", 2, 3, 3, 3, 4]);
+  assert.deepEqual(monitor.calls.map((call) => call[0]), ["open", 2, "write", "write", "write", 4]);
   assert.equal(monitor.calls.at(-1)[1], 0x20020101);
   assert.equal((await session.update(image)).unchanged, true);
 });
@@ -29,7 +40,9 @@ class MockUSB {
 }
 
 class MockMonitor {
-  constructor() {
+  constructor(fastWrite = true) {
+    this.fastWrite = fastWrite;
+    this.inCount = 0;
     this.vendorId = 0xcafe; this.productId = 0x4021; this.opened = false; this.configuration = null; this.claimed = []; this.out = [];
     this.configurations = [{ configurationValue: 1, interfaces: [{ interfaceNumber: 2, alternates: [{
       alternateSetting: 0, interfaceClass: 0xff, interfaceSubclass: 0x52, interfaceProtocol: 1,
@@ -42,7 +55,9 @@ class MockMonitor {
   async claimInterface(number) { this.claimed.push(number); }
   async transferOut(_endpoint, data) { this.out.push(data); return { status: "ok" }; }
   async transferIn() {
+    this.inCount++;
     const response = new Uint8Array(64); response.set([0x52, 0x4e, 0x56, 0x32, this.out.at(-1)[4], 0]);
+    new DataView(response.buffer).setUint32(20, this.fastWrite ? 1 : 0, true);
     return { status: "ok", data: new DataView(response.buffer) };
   }
 }
@@ -51,6 +66,7 @@ class RecordingMonitor {
   constructor() { this.calls = []; }
   async open() { this.calls.push(["open"]); }
   async command(operation, address, data = new Uint8Array()) { this.calls.push([operation, address, data.length]); }
+  async write(address, data) { this.calls.push(["write", address, data.length]); }
   async close() {}
 }
 

@@ -17,3 +17,12 @@ func TestWS2812PIOUsesSharedRP2Registers(t *testing.T) {
 		t.Fatalf("unexpected PIO0 register map: base=%#x clkdiv=%#x pinctrl=%#x", pio0Base, pioSM0ClockDiv, pioSM0Pin)
 	}
 }
+
+func TestWS2812PIOResetBits(t *testing.T) {
+	if rp2040Resets != 0x4000c000 || rp2040PIO0Reset != 1<<10 {
+		t.Fatalf("unexpected RP2040 PIO0 reset mapping")
+	}
+	if rp2350Resets != 0x40020000 || rp2350PIO0Reset != 1<<11 {
+		t.Fatalf("unexpected RP2350 PIO0 reset mapping")
+	}
+}
