@@ -1315,6 +1315,11 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			if name == "init" {
 				out[index] = coreInitFunctionAliasName(i, initOrdinal)
 				initOrdinal++
+			} else if len(name) > 2 && name[0] == 'C' && name[1] == '.' {
+				// Explicit mixed-language packages keep C declarations in a
+				// separate logical namespace. Give their emitted root-package
+				// tokens a legal, collision-free backend name as well.
+				out[index] = coreSymbolAliasName(i, name)
 			} else if alias := coreCompilerIntrinsicAlias(programs[i].ImportPath, name); alias != "" {
 				out[index] = alias
 			} else if directiveSize >= 0 {

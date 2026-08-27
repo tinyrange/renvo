@@ -1,6 +1,6 @@
 /*
- * The application loop is ordinary C11. Renvo links these declarations to
- * package-level Go functions with the same names.
+ * The application loop is ordinary C11. The Go file explicitly exports the
+ * two board adapters named by these declarations.
  */
 extern void goSetBlueLED(int on);
 extern void goDelayMilliseconds(int milliseconds);

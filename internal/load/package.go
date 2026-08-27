@@ -44,6 +44,7 @@ type ParsedFile struct {
 	Path       string
 	Src        []byte
 	File       syntax.File
+	C          bool
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -67,6 +68,7 @@ type Package struct {
 	ErrorImport    int
 	ErrorOffset    int
 	C11Error       int
+	ExplicitC      bool
 	CoreArenaStart int
 	CoreArenaEnd   int
 }
@@ -148,13 +150,22 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
 	}
 	hasC := false
+	hasGo := false
+	cCompiler := false
 	for i := 0; i < len(selected); i++ {
 		if isCSourceFile(selected[i].Path) {
 			hasC = true
-			break
+			cCompiler = cCompiler || selected[i].CCompiler
+		} else if isGoSourceFile(selected[i].Path) {
+			hasGo = true
 		}
 	}
+	// Ordinary mixed packages use the explicit import "C" boundary. Explicit
+	// C compiler invocations, including #pragma go, intentionally retain their
+	// C-first shared-name contract.
+	pkg.ExplicitC = hasC && hasGo && !cCompiler
 	var parsedGo []syntax.File
+	var goExports []c11.GoExport
 	if hasC {
 		parsedGo = make([]syntax.File, len(selected))
 		for i := 0; i < len(selected); i++ {
@@ -176,6 +187,20 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		if pkg.Name == "" {
 			pkg.Name = cPackageName(ref, root)
 		}
+		if pkg.ExplicitC {
+			for i := 0; i < len(parsedGo); i++ {
+				file := parsedGo[i]
+				if !file.Ok {
+					continue
+				}
+				for j := 0; j < len(file.Funcs); j++ {
+					if name := syntax.ExportDirective(file, file.Funcs[j]); name != "" {
+						goName := string(syntax.TokenText(file.Src, file.Tokens[file.Funcs[j].NameTok]))
+						goExports = append(goExports, c11.GoExport{CName: name, GoName: goName})
+					}
+				}
+			}
+		}
 	}
 	for i := 0; i < len(selected); i++ {
 		var parsed syntax.File
@@ -196,6 +221,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					KernelCodeModel:    source.CKernelCodeModel,
 					PruneUnusedStatics: source.COptimize,
 					IsolateGoBuiltins:  source.CCompiler,
+					GoExports:          goExports,
 				})
 			} else {
 				dataModel := source.CDataModel
@@ -204,7 +230,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				}
 				translated = c11.TranslateWithConfig(pkg.Name, source.Src, c11.ObjectConfig{
 					DataModel: dataModel, ShortWChar: source.CShortWChar, UnsignedChar: source.CUnsignedChar,
-					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler,
+					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler, GoExports: goExports,
 				})
 			}
 			if !translated.Ok {
@@ -245,6 +271,7 @@ func newParsedFile(source SourceFile, file syntax.File) ParsedFile {
 		Path:       source.Path,
 		Src:        source.Src,
 		File:       file,
+		C:          isCSourceFile(source.Path),
 		ArenaStart: source.ArenaStart,
 		ArenaEnd:   source.ArenaEnd,
 	}

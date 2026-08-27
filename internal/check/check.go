@@ -82,9 +82,18 @@ type PackageInfo struct {
 	CoreTypeRefs   []CoreTypeRef
 	CoreArenaStart int
 	CoreArenaEnd   int
+	ExplicitC      bool
+	CFiles         []bool
+	CExports       []CExport
 	Methods        []MethodInfo
 	Bodies         []FuncBody
 	CoreBodies     []CoreFuncBody
+}
+
+type CExport struct {
+	Name   string
+	GoName string
+	Symbol int
 }
 
 type Symbol struct {
@@ -248,10 +257,17 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		importCapacity += len(pkg.Files[i].File.Imports)
 	}
 	info := PackageInfo{
-		Name:    cloneCheckString(pkg.Name),
-		Package: pkgIndex,
-		Symbols: make([]Symbol, 0, symbolCapacity),
-		Imports: make([]Import, 0, importCapacity),
+		Name:      cloneCheckString(pkg.Name),
+		Package:   pkgIndex,
+		Symbols:   make([]Symbol, 0, symbolCapacity),
+		Imports:   make([]Import, 0, importCapacity),
+		ExplicitC: pkg.ExplicitC,
+	}
+	if pkg.ExplicitC {
+		info.CFiles = make([]bool, len(pkg.Files))
+		for i := 0; i < len(pkg.Files); i++ {
+			info.CFiles[i] = pkg.Files[i].C
+		}
 	}
 	var symbolHash []int
 	if symbolCapacity > 0 {
@@ -265,6 +281,9 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
 			name := tokenString(&file, decl.NameTok)
+			if pkg.ExplicitC && pkg.Files[fileIndex].C {
+				name = "C." + name
+			}
 			kind := declSymbolKind(decl.Kind)
 			if findSymbolHashed(info.Symbols, symbolHash, name, kind) >= 0 {
 				return info, false, CheckErrDuplicate, fileIndex, decl.NameTok
@@ -275,6 +294,10 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			name := tokenString(&file, fn.NameTok)
+			goName := name
+			if pkg.ExplicitC && pkg.Files[fileIndex].C {
+				name = "C." + name
+			}
 			kind := SymbolFunc
 			signatureStart := arena.Mark()
 			signature := buildFuncSignature(file, fn)
@@ -297,8 +320,20 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			}
 			info.Symbols = append(info.Symbols, Symbol{Name: name, Kind: kind, File: fileIndex, Token: fn.NameTok, Arity: arity})
 			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
+			if pkg.ExplicitC && !pkg.Files[fileIndex].C {
+				if export := syntax.ExportDirective(file, fn); export != "" {
+					for j := 0; j < len(info.CExports); j++ {
+						if info.CExports[j].Name == export {
+							return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
+						}
+					}
+					info.CExports = append(info.CExports, CExport{Name: export, GoName: goName, Symbol: -1})
+				}
+			}
 		}
 	}
+	// Symbols are sorted below, so bind export directives to their final rows
+	// after collecting their external names.
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Imports); i++ {
@@ -314,6 +349,9 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
+	for i := 0; i < len(info.CExports); i++ {
+		info.CExports[i].Symbol = LookupPackageSymbol(info, info.CExports[i].GoName)
+	}
 	return info, true, CheckOK, -1, -1
 }
 
@@ -421,10 +459,19 @@ func buildImport(graph load.Graph, pkgIndex int, fileIndex int, file syntax.File
 		return Import{}, false
 	}
 	target := findGraphPackage(graph, path)
+	if path == "C" {
+		if pkgIndex < 0 || pkgIndex >= len(graph.Packages) || !graph.Packages[pkgIndex].ExplicitC {
+			return Import{}, false
+		}
+		target = pkgIndex
+	}
 	if target < 0 {
 		return Import{}, false
 	}
 	name := cloneCheckString(graph.Packages[target].Name)
+	if path == "C" {
+		name = "C"
+	}
 	dot := false
 	blank := false
 	tok := decl.PathTok

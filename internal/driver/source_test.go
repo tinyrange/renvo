@@ -584,8 +584,8 @@ func TestBuildFromFS(t *testing.T) {
 func TestBuildFromFSMixedGoAndC11(t *testing.T) {
 	fs := memorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
-		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc goValue() int { return 40 }\nfunc main() { if cValue() == 42 { print(\"PASS\\n\") } }\n")},
-		{Path: "/repo/case/cmd/app/value.c", Src: []byte("int cValue(void) { return goValue() + 2; }\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"C\"\n//export go_value\nfunc goValue() int { return 40 }\nfunc main() { if C.cValue() == 42 { print(\"PASS\\n\") } }\n")},
+		{Path: "/repo/case/cmd/app/value.c", Src: []byte("int cValue(void) { return go_value() + 2; }\n")},
 	}}
 	result := BuildFromFS([]string{"-emit-unit", "-o", "app.unit", "./cmd/app"}, "/repo/case", "/std", fs)
 	if !result.Ok {

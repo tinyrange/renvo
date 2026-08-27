@@ -118,8 +118,8 @@ The frontend supports packages and modules, local replacements, build tags and
 target-specific files, `//go:embed`, and an offline module cache. Language
 coverage includes ordinary control flow, methods, maps, interfaces, closures,
 defer/panic/recover, arrays and slices, complex values, goroutines, channels,
-`select`, and the builtins needed by Renvo itself. Generics and cgo are
-currently out of scope.
+`select`, cgo-style explicit C package boundaries, and the builtins needed by
+Renvo itself. Generics remain out of scope.
 
 Concurrency is a frontend feature: it lowers to the pluggable
 `renvo.dev/x/runtime` handler API before the compact backend unit. The bundled
@@ -154,7 +154,8 @@ func main() {
 
 Packages may also contain `.c` files. The initial C11 frontend is a compact
 source adapter into the same package checker, linker, unit format, and backends
-used for Go, allowing direct calls between C and Go functions in one package.
+used for Go. Mixed packages use `import "C"` for Go-to-C calls and `//export`
+for the functions C may call back into.
 Its current scalar/control-flow subset is deliberately smaller than the Go
 frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
 scope and growth boundary.
@@ -173,16 +174,23 @@ go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
   -t linux/amd64 -o hello ./path/to/hello-package
 ```
 
-A package can mix the two source languages without cgo:
+A package can mix the two source languages through an explicit cgo-style
+boundary without invoking a host C toolchain:
 
 ```go
 package main
 
-func main() { print(cAdd(20, 22)) }
+import "C"
+
+//export goValue
+func goValue() int { return 40 }
+
+func main() { print(C.cAdd(1, 1)) }
 ```
 
 ```c
-int cAdd(int left, int right) { return left + right; }
+extern int goValue(void);
+int cAdd(int left, int right) { return goValue() + left + right; }
 ```
 
 The bootstrap looks for `renvo-backend` beside its own executable. Tooling that

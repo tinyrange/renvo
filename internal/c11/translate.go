@@ -137,6 +137,7 @@ type translator struct {
 	pos                     int
 	packageName             string
 	isolateGoBuiltins       bool
+	goExports               []GoExport
 	out                     []byte
 	object                  bool
 	checkOnly               bool
@@ -369,6 +370,14 @@ type ObjectConfig struct {
 	KernelCodeModel    bool
 	PruneUnusedStatics bool
 	IsolateGoBuiltins  bool
+	GoExports          []GoExport
+}
+
+// GoExport maps an external C identifier to the Go function named by a
+// //export directive in an explicit mixed-language package.
+type GoExport struct {
+	CName  string
+	GoName string
 }
 
 func TranslateObjectWithConfig(packageName string, src []byte, prelude []byte, config ObjectConfig) Result {
@@ -403,6 +412,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 	t := translator{
 		packageName:        packageName,
 		isolateGoBuiltins:  config.IsolateGoBuiltins,
+		goExports:          config.GoExports,
 		out:                make([]byte, 0, len(src)+len(src)/4+len(prelude)+64),
 		object:             object,
 		checkOnly:          checkOnly,
@@ -3373,6 +3383,11 @@ func (t *translator) cIdentifierIsGoPredeclared(name string) bool {
 }
 
 func (t *translator) cFunctionGoName(name string) string {
+	for i := 0; i < len(t.goExports); i++ {
+		if t.goExports[i].CName == name {
+			return t.goExports[i].GoName
+		}
+	}
 	if t.object {
 		return name
 	}

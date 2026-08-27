@@ -282,17 +282,17 @@ embedding:
 Renvo is not a drop-in Go compiler.
 
 The alternate C11 frontend under `internal/c11` feeds the same checked-package
-and linked-unit pipeline as Go. It is not cgo and does not invoke a host C
-toolchain. Mixed `.go` and `.c` files in a package therefore share symbols and
-all downstream optimization/code-generation work. Keep C-specific parsing and
-source adaptation above the shared checker boundary; do not duplicate the
-linker or add C semantics to a target backend. The supported C subset and its
-current limitations are documented beside that frontend.
+and linked-unit pipeline as Go without invoking a host C toolchain. Mixed `.go`
+and `.c` files use a cgo-style explicit boundary: Go selects C declarations
+through `import "C"`, and C can reach only Go functions marked with `//export`.
+The `#pragma go` C-project workflow remains a C-first direct-binding mode. Keep
+C-specific parsing and source adaptation above the shared checker boundary; do
+not duplicate the linker or add C semantics to a target backend. The supported
+C subset and its current limitations are documented beside that frontend.
 
 The closed out-of-scope list is:
 
-- generics;
-- cgo.
+- generics.
 
 Goroutines, channels, and `select` are accepted by the frontend and lowered to
 the `renvo.dev/x/runtime` handler ABI before backend compilation. Version 1

@@ -304,8 +304,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		for j := 0; j < len(imports); j++ {
 			importOffset := sourceTextOffset(src, imports[j].ImportPath)
 			if imports[j].ImportPath == "C" {
-				c.failAt(SourceErrCgo, "C", path, importOffset)
-				return
+				// C is a pseudo-package resolved against C translation units in
+				// this directory; it has no source tree to collect recursively.
+				continue
 			}
 			if imports[j].Kind == load.PackageStandard {
 				if _, present := c.fs.ReadDir(imports[j].Dir); !present {
@@ -1179,7 +1180,7 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if findString(tags, tag) >= 0 {
 		return true
 	}
-	if tag == "renvo" {
+	if tag == "renvo" || tag == "cgo" {
 		return true
 	}
 	return targetinfo.HasBuildTag(target, tag) || renvoBackendTargetHasBuildTag(target, tag)

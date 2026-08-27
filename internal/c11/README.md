@@ -4,8 +4,10 @@ This package is an alternate source frontend, not a second compiler pipeline.
 It adapts C declarations and statements to the same checked package syntax used
 by the Go frontend. Package checking, symbol resolution, whole-program linking,
 unit serialization, dead-code elimination, and backend code generation remain
-shared. Consequently, C and Go files in one directory can call each other's
-package-level functions directly.
+shared. Ordinary mixed packages expose C declarations through Go's `import
+"C"` namespace, while C may call only Go functions carrying an adjacent
+`//export name` directive. The logical namespace is separate, so identically
+named Go and C declarations can coexist.
 
 The adapter is intentionally compact:
 
@@ -43,7 +45,8 @@ portable read, write, and exit runtime operations.
 An active `#pragma go "filename.go"` adds that same-directory Go source and its
 transitive imports to an executable C build. Quoted, angle-bracket, and bare
 filenames are accepted; inactive conditional branches do not add sources, and
-adjacent Go files remain excluded unless explicitly named.
+adjacent Go files remain excluded unless explicitly named. This C-first mode
+intentionally retains direct shared-name linkage for its selected Go adapters.
 
 The browser language service indexes original C and header byte spans rather
 than the generated Go-shaped source. It provides live preprocessing/scanning
@@ -71,8 +74,10 @@ octal/hex escapes are decoded before their single trailing NUL is emitted.
 Linux/x86_64 thread-duration definitions use libc thread-specific keys behind a
 process-wide initialization mutex; linked pthread regressions verify independent
 state and persistence under host and stage3 compilers.
-Header directive lines and function prototypes are accepted so declarations can
-be supplied by Go files in the same package. The output-only preprocessing path
+Header directive lines and function prototypes are accepted. In an ordinary
+mixed package a prototype can be supplied by an explicitly exported Go
+function; `#pragma go` projects retain their direct C-first binding. The
+output-only preprocessing path
 implements translation-phase splicing/comments, recursive includes and
 `include_next`, guards/`pragma once`, object/function/variadic macros, rescanning
 with hide sets, stringizing/pasting, conditionals and integer expressions,

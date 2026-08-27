@@ -333,6 +333,11 @@ func FileImportsWithDependencies(module Module, stdRoot string, dependencies []M
 			out = append(out, PackageRef{Kind: PackageInvalid, Ok: false, Error: ResolveErrImport})
 			continue
 		}
+		// import "C" is a frontend pseudo-package backed by C translation
+		// units in the importing package, not a module-graph dependency.
+		if path == "C" {
+			continue
+		}
 		out = append(out, ResolveImportWithDependencies(module, stdRoot, path, dependencies))
 	}
 	return out
