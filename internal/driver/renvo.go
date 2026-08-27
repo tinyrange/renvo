@@ -6,6 +6,7 @@ import (
 	"renvo.dev/internal/arena"
 	"renvo.dev/internal/backendbridge"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/unit"
 	"renvo.dev/std/os"
 )
 
@@ -148,6 +149,12 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 	if built.Options.CAssemblyOutput {
 		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-007", Message: "C assembly output is not implemented"}, resetArena, mark)
 	}
+	var foreignDiagnostic Diagnostic
+	var foreignOK bool
+	unit, foreignDiagnostic, foreignOK = resolveForeignProgramsEmbedded(unit)
+	if !foreignOK {
+		return finishRenvoCommandFailure(renvoCommandDiagnosticBuffer[:], foreignDiagnostic, resetArena, mark)
+	}
 	persistMark := 0
 	if resetArena {
 		persistMark = arena.PersistMark()
@@ -208,6 +215,43 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		arena.PersistReset(persistMark)
 	}
 	return 0, ""
+}
+
+func resolveForeignProgramsEmbedded(data []byte) ([]byte, Diagnostic, bool) {
+	programs, ok := unit.ReadForeignPrograms(data)
+	if !ok {
+		return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "foreign program table is invalid"}, false
+	}
+	if len(programs) == 0 {
+		return data, Diagnostic{}, true
+	}
+	persistMark := arena.PersistMark()
+	for i := 0; i < len(programs); i++ {
+		program := &programs[i]
+		if len(program.Unit) == 0 || len(program.Artifact) != 0 {
+			arena.PersistReset(persistMark)
+			return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "foreign program is not an unresolved frontend unit: " + program.Name}, false
+		}
+		artifact, compiled := backendbridge.CompileUnitToBytes(program.Unit, program.Target, true, false, false,
+			backendArenaSize(program.Target, nil, 0, ModeExecutable), DefaultModuleLicense)
+		if !compiled || len(artifact) == 0 {
+			arena.PersistReset(persistMark)
+			return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-009", Message: "backend failed to compile foreign program " + program.Name + " for " + program.Target}, false
+		}
+		if program.Kind == unit.ForeignProgramEntrypoint && !program.InPlace {
+			arena.PersistReset(persistMark)
+			return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-010", Message: "target does not produce an in-place executable entrypoint: " + program.Target}, false
+		}
+		program.Unit = nil
+		program.Artifact = arena.PersistBytes(artifact)
+		program.EntryOffset = 0
+	}
+	resolved, ok := unit.ResolveForeignPrograms(data, programs)
+	arena.PersistReset(persistMark)
+	if !ok {
+		return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not resolve foreign program artifacts"}, false
+	}
+	return resolved, Diagnostic{}, true
 }
 
 func renvoReadStandardInput() ([]byte, bool) {

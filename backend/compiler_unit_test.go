@@ -74,6 +74,18 @@ func TestBackendRenvoUnitDecodesRTGAssemblyTable(t *testing.T) {
 	}
 }
 
+func TestBackendRenvoUnitForeignArtifactExcludesRecordMetadata(t *testing.T) {
+	program := renvoProgram{}
+	payload := []byte{1, 7, 3, 3, 0xaa, 0xbb, 0xcc, 0}
+	if !renvoDecodeForeignPrograms(&program, payload) || program.foreign == nil {
+		t.Fatal("foreign-program table did not decode")
+	}
+	artifact := program.foreign.artifact
+	if len(artifact) != 3 || artifact[0] != 0xaa || artifact[1] != 0xbb || artifact[2] != 0xcc {
+		t.Fatalf("foreign artifact = %x, want aabbcc", artifact)
+	}
+}
+
 func TestBackendRenvoUnitRejectsMissingDuplicateAndMalformedData(t *testing.T) {
 	core := readBackendGolden(t, "unit/testdata/v1-core.hex")
 	for _, item := range unit.WireSchemaTags {

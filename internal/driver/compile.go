@@ -108,6 +108,13 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	if backend == nil {
 		return compileFail(result, CompileErrBackend)
 	}
+	resolvedUnit, resolveDiagnostic, resolved := resolveForeignProgramsWithBackend(built.Unit, backend)
+	if !resolved {
+		result.Diagnostic = resolveDiagnostic
+		return compileFail(result, CompileErrBackend)
+	}
+	built.Unit = resolvedUnit
+	result.Build.Unit = resolvedUnit
 	if unit.HasRTGAssembly(built.Unit) {
 		assemblyBackend, supported := backend.(RTGAssemblyBackend)
 		if !supported || !assemblyBackend.SupportsRTGAssembly() {
@@ -147,6 +154,58 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 		return compileFail(result, CompileErrSystem)
 	}
 	return result
+}
+
+func resolveForeignProgramsWithBackend(data []byte, backend Backend) ([]byte, Diagnostic, bool) {
+	programs, ok := unit.ReadForeignPrograms(data)
+	if !ok {
+		return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "foreign program table is invalid"}, false
+	}
+	if len(programs) == 0 {
+		return data, Diagnostic{}, true
+	}
+	for i := 0; i < len(programs); i++ {
+		program := &programs[i]
+		if len(program.Unit) == 0 || len(program.Artifact) != 0 {
+			return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "foreign program is not an unresolved frontend unit: " + program.Name}, false
+		}
+		if unit.HasRTGAssembly(program.Unit) {
+			assemblyBackend, supported := backend.(RTGAssemblyBackend)
+			if !supported || !assemblyBackend.SupportsRTGAssembly() {
+				return nil, Diagnostic{Phase: "foreign", Code: "RENVO-RTGASM-010", Message: "foreign RTGASM requires a CompilerJIT backend"}, false
+			}
+		}
+		var compiled BackendResult
+		if arenaBackend, acceptsArena := backend.(ArenaBackend); acceptsArena {
+			compiled = arenaBackend.CompileUnitWithArena(program.Unit, program.Target, true, false,
+				backendArenaSize(program.Target, nil, 0, ModeExecutable))
+		} else {
+			compiled = backend.CompileUnit(program.Unit, program.Target, true, false)
+		}
+		if !compiled.Ok || len(compiled.Binary) == 0 {
+			diagnostic := compiled.Diagnostic
+			if !diagnostic.Valid() {
+				diagnostic = Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-009", Message: "backend failed to compile foreign program " + program.Name + " for " + program.Target}
+			} else {
+				diagnostic.Phase = "foreign"
+				diagnostic.Code = "RENVO-FOREIGN-009"
+				diagnostic.Message = "backend failed to compile foreign program " + program.Name + " for " + program.Target + ": " + diagnostic.Message
+			}
+			return nil, diagnostic, false
+		}
+		if program.Kind == unit.ForeignProgramEntrypoint && !program.InPlace {
+			return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-010", Message: "target does not produce an in-place executable entrypoint: " + program.Target}, false
+		}
+		program.Unit = nil
+		program.Artifact = make([]byte, len(compiled.Binary))
+		copy(program.Artifact, compiled.Binary)
+		program.EntryOffset = 0
+	}
+	resolved, ok := unit.ResolveForeignPrograms(data, programs)
+	if !ok {
+		return nil, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not resolve foreign program artifacts"}, false
+	}
+	return resolved, Diagnostic{}, true
 }
 
 func compileFail(result CompileResult, err int) CompileResult {

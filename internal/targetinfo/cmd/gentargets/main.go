@@ -378,6 +378,41 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		out.WriteString(" }\n")
 	}
 	out.WriteString("return false\n}\n\n")
+	out.WriteString("func HasCapability(name string, capability string) bool {\n")
+	for _, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
+		for _, alias := range descriptor.Aliases {
+			fmt.Fprintf(&out, " || name == %q", alias)
+		}
+		out.WriteString(" { return ")
+		for i, capability := range descriptor.Capabilities {
+			if i > 0 {
+				out.WriteString(" || ")
+			}
+			fmt.Fprintf(&out, "capability == %q", capability)
+		}
+		out.WriteString(" }\n")
+	}
+	out.WriteString("return false\n}\n\n")
+	out.WriteString("func SupportsInPlaceEntry(name string) bool { return ")
+	first = true
+	for _, descriptor := range descriptors {
+		if !contains(descriptor.Capabilities, "in_place_entry") {
+			continue
+		}
+		if !first {
+			out.WriteString(" || ")
+		}
+		fmt.Fprintf(&out, "name == %q", descriptor.Name)
+		for _, alias := range descriptor.Aliases {
+			fmt.Fprintf(&out, " || name == %q", alias)
+		}
+		first = false
+	}
+	if first {
+		out.WriteString("false")
+	}
+	out.WriteString(" }\n\n")
 	out.WriteString("func DefaultArena(name string) int {\n")
 	for _, descriptor := range descriptors {
 		if descriptor.DefaultArena != 0 {

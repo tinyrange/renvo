@@ -774,12 +774,7 @@ func compileWasm32Arena(input []int, output int, arenaSize int) int {
 }
 
 func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := p.entryFunc
 	if appIndex < 0 {
 		return renvoCompileResult{}
 	}
@@ -887,12 +882,7 @@ func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
 }
 
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := p.entryFunc
 	if appIndex < 0 {
 		var result renvoCompileResult
 		return result

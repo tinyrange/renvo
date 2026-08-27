@@ -19,6 +19,7 @@ var PortOutHook func(port uint16, value uint16, width int)
 // unavailable to Renvo BIOS/8086 programs and is intended for host tests and
 // emulators.
 var BootDriveHook func() byte
+var EnterLongModeHook func(entry uintptr)
 
 func hostInterrupt(vector byte, regs *Registers) {
 	if InterruptHook != nil {
@@ -56,4 +57,9 @@ func bootDrive() byte {
 		return BootDriveHook()
 	}
 	return 0x80
+}
+func enterLongMode(entry uintptr) {
+	if EnterLongModeHook != nil {
+		EnterLongModeHook(entry)
+	}
 }

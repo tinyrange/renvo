@@ -85,3 +85,14 @@ func TestDiskReadsRejectUnsafeTransfersAndReportFirmwareErrors(t *testing.T) {
 		t.Fatalf("EDD packet LBA = %x, want %x", packet[8:16], wantLBA)
 	}
 }
+
+func TestEnterLongModeForwardsEntrypoint(t *testing.T) {
+	oldHook := EnterLongModeHook
+	defer func() { EnterLongModeHook = oldHook }()
+	var got uintptr
+	EnterLongModeHook = func(entry uintptr) { got = entry }
+	EnterLongMode(0x1234)
+	if got != 0x1234 {
+		t.Fatalf("EnterLongMode entry = %#x", got)
+	}
+}

@@ -165,6 +165,10 @@ for (const [importPath, item] of published) {
   for (const targetName of exampleTargets(item)) {
     const target = targetCatalog.targets.find((candidate) => candidate.name === targetName) || projectTargets.get(targetName);
     if (!target) throw new Error(`${importPath} publishes unavailable target ${targetName}`);
+    const targetFiles = new Map(files);
+    for (const library of target.libraryFiles || []) {
+      targetFiles.set(`std/${library.name}`, bytes(new TextEncoder().encode(library.source)));
+    }
     const args = [];
     if (item.language === "c") args.push("cc");
     for (const tag of target.tags || []) args.push("-tags", tag);
@@ -178,7 +182,7 @@ for (const [importPath, item] of published) {
     const backend = backendPath.includes(":") ? backendPath : new URL(backendPath, bundleURL).href;
     const started = performance.now();
     const result = await request({
-      type: "compile", id: ++requestID, args, files: workerFiles(files),
+      type: "compile", id: ++requestID, args, files: workerFiles(targetFiles),
       backend, backendTarget: target.backendTarget || target.name, backendFormat: target.backendFormat || "wasm",
       rtgDefinition: target.rtgDefinition ? new URL(target.rtgDefinition, bundleURL).href : "",
       rtgDefinitionName: target.rtgDefinitionName || target.projectDefinition || "",

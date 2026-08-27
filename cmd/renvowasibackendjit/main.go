@@ -16,6 +16,7 @@ import (
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/backendjit"
 	"renvo.dev/internal/linkedimage"
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 )
 
@@ -45,7 +46,11 @@ func main() {
 	if err != nil {
 		fail("read definition: " + err.Error())
 	}
-	resolved := rtg.ResolveDefinitions(rtg.ParseImports(source, *definition, filesystemImports{}))
+	bundle := rbe.Parse(source)
+	if !bundle.Ok {
+		fail("invalid backend enablement: " + bundle.Message)
+	}
+	resolved := rtg.ResolveDefinitions(rtg.ParseImports(bundle.Definition, *definition, filesystemImports{}))
 	if !resolved.Ok {
 		failDiagnostics(resolved.Diagnostics)
 	}

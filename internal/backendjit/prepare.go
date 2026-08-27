@@ -77,10 +77,6 @@ func Prepare(config PrepareConfig) Prepared {
 	if !resolved.Ok {
 		return prepareFailure("RENVO-RTG-001", resolved.Diagnostics[0].Message)
 	}
-	generated := rtg.GeneratePreparedBackend(resolved, config.Target)
-	if !generated.Ok {
-		return prepareFailure("RENVO-RTG-002", generated.Diagnostics[0].Message)
-	}
 	host := config.HostTarget
 	if host == "" {
 		host = hostTarget()
@@ -92,18 +88,34 @@ func Prepare(config PrepareConfig) Prepared {
 	if arenaSize == 0 {
 		arenaSize = preparedBackendArenaSize
 	}
-	key := cacheKeyForEnablement(generated.Descriptor, host, arenaSize, enablement)
+	key := ""
 	cachePath := ""
 	cache := config.Cache
 	if cache == nil && config.CacheDir != "" {
-		cachePath = filepath.Join(config.CacheDir, key+".rtgb")
 		cache = FileCache{Directory: config.CacheDir}
 	}
-	if cache != nil {
+	descriptor, hasDescriptor := resolvedTargetDescriptor(resolved, config.Target)
+	if hasDescriptor {
+		key = cacheKeyForEnablement(descriptor, host, arenaSize, enablement)
+		if config.CacheDir != "" {
+			cachePath = filepath.Join(config.CacheDir, key+".rtgb")
+		}
+	}
+	if cache != nil && key != "" {
 		if source, found := cache.Load(key); found {
-			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, generated.Descriptor, host, enablement) {
+			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, descriptor, host, enablement) {
 				return Prepared{Artifact: artifact, Resolved: resolved, Encoded: source, CachePath: cachePath, CacheHit: true, Ok: true}
 			}
+		}
+	}
+	generated := rtg.GeneratePreparedBackend(resolved, config.Target)
+	if !generated.Ok {
+		return prepareFailure("RENVO-RTG-002", generated.Diagnostics[0].Message)
+	}
+	if key == "" {
+		key = cacheKeyForEnablement(generated.Descriptor, host, arenaSize, enablement)
+		if config.CacheDir != "" {
+			cachePath = filepath.Join(config.CacheDir, key+".rtgb")
 		}
 	}
 	sources, names, err := preparationSources(config.BackendRoot, generated)
@@ -144,6 +156,16 @@ func Prepare(config PrepareConfig) Prepared {
 		}
 	}
 	return Prepared{Artifact: artifact, Resolved: resolved, Encoded: encoded, CachePath: cachePath, Ok: true}
+}
+
+func resolvedTargetDescriptor(resolved rtg.ResolveResult, name string) (rtg.TargetDescriptor, bool) {
+	for i := range resolved.Targets {
+		descriptor := resolved.Targets[i].Descriptor
+		if descriptor.Name == name || contains(descriptor.Aliases, name) {
+			return descriptor, true
+		}
+	}
+	return rtg.TargetDescriptor{}, false
 }
 
 // FileCache is the process-host adapter for content-addressed artifacts.

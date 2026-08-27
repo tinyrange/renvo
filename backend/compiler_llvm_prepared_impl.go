@@ -544,6 +544,11 @@ if target != renvoTargetRTG { return false }
 return tag == "amd64" || tag == "linux" || tag == "renvo_prepared" || tag == "unix"
 }
 
+func renvoRTGTargetHasCapability(target int, capability string) bool {
+if target != renvoTargetRTG { return false }
+return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "linkstatic" || capability == "object"
+}
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 if target != renvoTargetRTG { return renvoTargetProfile{} }
 p := renvoTargetProfile{}

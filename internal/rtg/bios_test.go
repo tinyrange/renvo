@@ -8,7 +8,7 @@ import (
 )
 
 func TestBIOS8086ExternalDefinition(t *testing.T) {
-	const filename = "../../backends/msdos.rtg"
+	const filename = "../../backends/bios_multistage.rtg"
 	resolved := Resolve(parseDefinitionFile(t, filename))
 	if !resolved.Ok {
 		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)
@@ -43,4 +43,29 @@ func TestBIOS8086ExternalDefinition(t *testing.T) {
 			t.Errorf("prepared BIOS backend omitted %q", want)
 		}
 	}
+
+	// The same definition exports the next-stage, freestanding target. Checking
+	// it from the already-resolved document avoids parsing the large shared 8086
+	// architecture twice in the package suite.
+	for i := 0; i < len(resolved.Targets); i++ {
+		descriptor := resolved.Targets[i].Descriptor
+		if descriptor.Name != "freestanding/amd64" {
+			continue
+		}
+		if descriptor.OutputKind != "flat-memory" || descriptor.PointerBits != 64 ||
+			!containsString(descriptor.Capabilities, "in_place_entry") {
+			t.Fatalf("long-mode descriptor = %#v", descriptor)
+		}
+		return
+	}
+	t.Fatal("definition does not export freestanding/amd64")
+}
+
+func containsString(values []string, wanted string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == wanted {
+			return true
+		}
+	}
+	return false
 }

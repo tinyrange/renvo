@@ -228,6 +228,108 @@ go backend {
 		out.Byte(0xc3)
 	}
 
+	func biosStoreESByte(out *RTGEmitter, offset int, value int) {
+		// MOV byte ptr ES:[offset],value. Keeping the setup data out of the
+		// generated program image means the far transfer can use a fixed physical
+		// address and needs no new absolute-label relocation kind.
+		out.Bytes4(0x26, 0xc6, 0x06, offset)
+		out.Byte(byte(offset >> 8))
+		out.Byte(byte(value))
+	}
+
+	func biosEnterLongMode(out *RTGEmitter) {
+		// The second-stage image runs at physical 10000h with near pointers. Save
+		// the complete physical address of the embedded amd64 entrypoint where the
+		// fixed long-mode trampoline can load it.
+		out.Byte(0xfa) // CLI: firmware interrupts are invalid after the transition
+		out.Bytes4(0x66, 0x0f, 0xb7, 0xc0) // MOVZX EAX,AX
+		out.Bytes2(0x66, 0x05) // ADD EAX,10000h
+		out.Uint32(0x10000)
+		out.Bytes3(0xba, 0x00, 0x73) // MOV DX,7300h
+		out.Bytes2(0x8e, 0xc2) // MOV ES,DX
+		out.Bytes4(0x26, 0x66, 0xa3, 0xf0) // MOV ES:[0FF0h],EAX
+		out.Byte(0x0f)
+
+		// Install a small 64-bit trampoline at physical 74000h. It establishes
+		// flat data segments and a stack, then jumps to the saved foreign entry.
+		out.Bytes3(0xba, 0x00, 0x74)
+		out.Bytes2(0x8e, 0xc2) // ES=7400h
+		for offset, value := range []int{
+			0x66, 0xb8, 0x10, 0x00,             // MOV AX,10h
+			0x8e, 0xd8,                         // MOV DS,AX
+			0x8e, 0xc0,                         // MOV ES,AX
+			0x8e, 0xd0,                         // MOV SS,AX
+			0x48, 0xbc, 0x00, 0xf0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, // RSP=7F000h
+			0x48, 0xa1, 0xf0, 0x3f, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, // RAX=[73FF0h]
+			0xff, 0xe0,                         // JMP RAX
+		} {
+			biosStoreESByte(out, offset, value)
+		}
+
+		// Clear and populate PML4, PDPT, and PD pages at 70000h. The PD uses
+		// 2 MiB leaves, identity mapping the first GiB without a fourth table.
+		out.Bytes3(0xba, 0x00, 0x70)
+		out.Bytes2(0x8e, 0xc2) // ES=7000h
+		out.Bytes2(0x31, 0xff) // XOR DI,DI
+		out.Bytes3(0xb9, 0x00, 0x18) // CX=3000h/2
+		out.Bytes2(0x31, 0xc0)
+		out.Bytes2(0xf3, 0xab) // REP STOSW
+		out.Bytes4(0x26, 0x66, 0xc7, 0x06)
+		out.Uint16(0x0000)
+		out.Uint32(0x71003) // PML4[0] -> PDPT
+		out.Bytes4(0x26, 0x66, 0xc7, 0x06)
+		out.Uint16(0x1000)
+		out.Uint32(0x72003) // PDPT[0] -> PD
+		out.Bytes2(0x66, 0xb8)
+		out.Uint32(0x83) // present, writable, 2 MiB page
+		out.Bytes3(0xbf, 0x00, 0x20)
+		out.Bytes3(0xb9, 0x00, 0x02)
+		out.Bytes4(0x26, 0x66, 0x89, 0x05) // MOV ES:[DI],EAX
+		out.Bytes3(0x83, 0xc7, 0x08)
+		out.Bytes2(0x66, 0x05)
+		out.Uint32(0x200000)
+		out.Bytes2(0xe2, 0xf1) // LOOP over all 512 PD entries
+
+		// A null descriptor, a 64-bit code descriptor, and a flat data descriptor
+		// live at 73000h; the six bytes following them are the real-mode GDTR.
+		out.Bytes3(0xba, 0x00, 0x73)
+		out.Bytes2(0x8e, 0xc2) // ES=7300h
+		for offset, value := range []int{
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+			0xff, 0xff, 0x00, 0x00, 0x00, 0x9a, 0xaf, 0x00,
+			0xff, 0xff, 0x00, 0x00, 0x00, 0x92, 0xcf, 0x00,
+			0x17, 0x00, 0x00, 0x30, 0x07, 0x00,
+		} {
+			biosStoreESByte(out, offset, value)
+		}
+
+		// Enable A20, load the descriptor table, install the identity map, and
+		// enter IA-32e mode. The immediate far jump lands in the fixed trampoline.
+		out.Bytes2(0xe4, 0x92) // IN AL,92h
+		out.Bytes2(0x0c, 0x02)
+		out.Bytes2(0xe6, 0x92) // OUT 92h,AL
+		out.Bytes4(0x26, 0x0f, 0x01, 0x16) // LGDT ES:[0018h]
+		out.Uint16(0x0018)
+		out.Bytes3(0x0f, 0x20, 0xe0) // MOV EAX,CR4
+		out.Bytes4(0x66, 0x83, 0xc8, 0x20) // OR EAX,PAE
+		out.Bytes3(0x0f, 0x22, 0xe0) // MOV CR4,EAX
+		out.Bytes2(0x66, 0xb8)
+		out.Uint32(0x70000)
+		out.Bytes3(0x0f, 0x22, 0xd8) // MOV CR3,EAX
+		out.Bytes2(0x66, 0xb9)
+		out.Uint32(0xc0000080) // IA32_EFER
+		out.Bytes2(0x0f, 0x32) // RDMSR
+		out.Bytes2(0x66, 0x0d)
+		out.Uint32(0x100) // LME
+		out.Bytes2(0x0f, 0x30) // WRMSR
+		out.Bytes3(0x0f, 0x20, 0xc0) // MOV EAX,CR0
+		out.Bytes2(0x66, 0x0d)
+		out.Uint32(0x80000001) // PG|PE
+		out.Bytes3(0x0f, 0x22, 0xc0) // MOV CR0,EAX
+		out.Bytes4(0x66, 0xea, 0x00, 0x40) // JMP 0008:00074000h
+		out.Bytes4(0x07, 0x00, 0x08, 0x00)
+	}
+
 	func biosBootSector(sectors int) []byte {
 		boot := make([]byte, 512)
 		at := 0

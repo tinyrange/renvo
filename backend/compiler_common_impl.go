@@ -347,6 +347,8 @@ func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
 	return renvoRTGPreparedFunctionSymbols != 0
 }
 
+const renvoLargeProgramSourceThreshold = 1048576
+
 func renvoAsmInit(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmInitWithContext(a, renvoLegacyCompileContext())
@@ -355,85 +357,66 @@ func renvoAsmInit(a *renvoAsm) {
 func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	renvoNonNil(a, context)
 	a.c = context
-	var code []byte
-	var labelPos []int32
-	var relocs []int32
-	var absRelocs []int32
-	var symbols []renvoAsmSymbol
-	var symbolName []byte
-	var staticImports []renvoStaticImport
-	var darwinImports []renvoDarwinStaticImport
-	var data []byte
+	// Keep the mutually exclusive code reserves behind one runtime capacity.
+	// Constant-capacity makes cause the self-host backend to materialize every
+	// branch as a separate static ring, including branches for other targets.
+	codeCapacity := 0
+	a.symbols = nil
+	a.symbolName = nil
+	a.staticImports = nil
+	a.darwinImports = nil
 	if renvoFixedTarget != 0 {
-		codeCapacity := 2097152
 		if renvoFixedTarget == renvoTargetWasiWasm32 {
 			codeCapacity = 655360
+			a.labelPos = make([]int32, 0, 8192)
+			a.relocs = make([]int32, 0, 32768)
+			a.absRelocs = make([]int32, 0, 4096)
+		} else {
+			codeCapacity = 2097152
+			a.labelPos = make([]int32, 0, 32768)
+			a.relocs = make([]int32, 0, 65536)
+			a.absRelocs = make([]int32, 0, 49152)
 		}
-		labelCapacity := 32768
-		relocCapacity := 65536
-		absRelocCapacity := 49152
-		if renvoFixedTarget == renvoTargetWasiWasm32 {
-			labelCapacity = 8192
-			relocCapacity = 32768
-			absRelocCapacity = 4096
-		}
-		code = make([]byte, 0, codeCapacity)
-		labelPos = make([]int32, 0, labelCapacity)
-		relocs = make([]int32, 0, relocCapacity)
-		absRelocs = make([]int32, 0, absRelocCapacity)
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-			symbolCapacity := 1024
-			symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
+			a.symbols = make([]renvoAsmSymbol, 0, 1024)
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
-		codeCapacity := 655360
-		labelCapacity := 32768
-		relocCapacity := 131072
-		absRelocCapacity := 98304
-		symbolCapacity := 2048
-		code = make([]byte, 0, codeCapacity)
-		labelPos = make([]int32, 0, labelCapacity)
-		relocs = make([]int32, 0, relocCapacity)
-		absRelocs = make([]int32, 0, absRelocCapacity)
-		symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
-	} else {
-		codeCapacity := 2097152
-		code = make([]byte, 0, codeCapacity)
-		// The full frontend self-host remains below 17,000 labels and 65,000
-		// relative relocations. Keep practical growth room without eagerly
-		// committing memory that pushes the frontend RSS gate.
-		labelCapacity := 24576
-		relocCapacity := 81920
-		labelPos = make([]int32, 0, labelCapacity)
-		relocs = make([]int32, 0, relocCapacity)
-		// Absolute relocations are much less frequent than label references. A
-		// self-host build uses fewer than 2,800 on every native target, so avoid
-		// touching a 32,768-entry arena allocation for each compilation.
-		absRelocCapacity := 12288
-		absRelocs = make([]int32, 0, absRelocCapacity)
+		codeCapacity = 655360
+		a.labelPos = make([]int32, 0, 32768)
+		a.relocs = make([]int32, 0, 131072)
+		a.absRelocs = make([]int32, 0, 98304)
+		a.symbols = make([]renvoAsmSymbol, 0, 2048)
+	} else if a.c.optimizeRuntime {
+		// The full frontend currently emits about 3.47 MiB of code, 37,100
+		// labels, 154,300 relative relocations, and 30,200 absolute relocations.
+		// Reserve one measured growth range so arena-backed slices do not retain
+		// their undersized predecessor pages at the self-host peak.
+		codeCapacity = 3670016
+		a.labelPos = make([]int32, 0, 40960)
+		a.relocs = make([]int32, 0, 163840)
+		a.absRelocs = make([]int32, 0, 32768)
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-			symbolCapacity := 4096
-			symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
+			a.symbols = make([]renvoAsmSymbol, 0, 4096)
+		}
+	} else {
+		codeCapacity = 2097152
+		a.labelPos = make([]int32, 0, 24576)
+		a.relocs = make([]int32, 0, 81920)
+		a.absRelocs = make([]int32, 0, 12288)
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
 	}
-	dataCapacity := 65536
 	if renvoFixedTarget == renvoTargetWasiWasm32 {
-		dataCapacity = 8192
+		a.data = make([]byte, 0, 8192)
+	} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+		a.data = make([]byte, 0, 131072)
+	} else {
+		a.data = make([]byte, 0, 65536)
 	}
-	data = make([]byte, 0, dataCapacity)
 	if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-		symbolNameCapacity := 16384
-		symbolName = make([]byte, 0, symbolNameCapacity)
+		a.symbolName = make([]byte, 0, 16384)
 	}
-	a.code = code
-	a.labelPos = labelPos
-	a.relocs = relocs
-	a.absRelocs = absRelocs
-	a.symbols = symbols
-	a.symbolName = symbolName
-	a.staticImports = staticImports
-	a.darwinImports = darwinImports
-	a.data = data
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackendActive != 0 {
 		a.kernelImportNames = make([]byte, 0, 1024)
 		a.kernelImportOffsets = make([]int, 0, 128)
@@ -441,6 +424,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 		a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 	}
+	a.code = make([]byte, 0, codeCapacity)
 	a.bssSize = 0
 	a.codeOffset = 0
 	a.dataOffset = 0
@@ -1068,6 +1052,15 @@ type renvoProgram struct {
 	compilerInt32 bool
 	c             renvoCompileContext
 	c11Semantics  bool
+	entryFunc     int
+	foreign       *renvoForeignProgram
+}
+
+type renvoForeignProgram struct {
+	next        *renvoForeignProgram
+	global      int
+	artifact    []byte
+	entryOffset int
 }
 
 func renvoProgramPackages(p *renvoProgram) []renvoPackageInfo {
@@ -1427,6 +1420,7 @@ func renvoSetCompilerIntWidth(p *renvoProgram) {
 
 func renvoParseProgramInto(src []byte, p *renvoProgram) {
 	renvoNonNil(p)
+	p.entryFunc = -1
 	p.src = src
 	p.c11Semantics = renvoSourceHasC11Directive(src)
 	renvoSetCompilerIntWidth(p)
@@ -1503,6 +1497,9 @@ func renvoParseProgramInto(src []byte, p *renvoProgram) {
 			if fn.endTok <= i {
 				renvoProgramError(p)
 				return
+			}
+			if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "appMain") {
+				p.entryFunc = len(p.funcs)
 			}
 			p.funcs = append(p.funcs, fn)
 			i = fn.endTok
@@ -6955,7 +6952,7 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 	if renvoTypeUsesHiddenResult(meta, fn.resultType) {
 		callWord = renvoBackendHiddenResultWordCount
 	}
-	entry := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "appMain")
+	entry := fnIndex == g.prog.entryFunc
 	for at := 0; at < fn.paramCount; at++ {
 		i := fn.paramCount - 1 - at
 		if entry {
@@ -11126,6 +11123,38 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 		return true
 	}
 	off := s.iotaValue
+	var foreign *renvoForeignProgram
+	for item := g.prog.foreign; item != nil; item = item.next {
+		if s.nameStart == item.global {
+			foreign = item
+			break
+		}
+	}
+	if foreign != nil {
+		for len(g.asm.data)&15 != 0 {
+			g.asm.data = append(g.asm.data, 0)
+		}
+		dataOffset := len(g.asm.data)
+		g.asm.data = append(g.asm.data, foreign.artifact...)
+		if foreign.entryOffset < 0 {
+			typ := renvoResolveType(meta, s.typ)
+			if typ.kind != renvoTypeSlice || renvoResolveType(meta, typ.elem).kind != renvoTypeByte {
+				return false
+			}
+			renvoAsmPrimaryDataAddr(&g.asm, dataOffset)
+			renvoAsmSecondaryImm(&g.asm, len(foreign.artifact))
+			renvoAsmCopySecondaryToTertiary(&g.asm)
+			renvoAsmStoreSliceBss(&g.asm, off)
+		} else {
+			if !renvoTypeIsNativeInt(meta, s.typ) {
+				return false
+			}
+			renvoAsmPrimaryDataAddr(&g.asm, dataOffset+foreign.entryOffset)
+			renvoAsmStorePrimaryBss(&g.asm, off)
+		}
+		s.constValueOK = renvoInitDone
+		return true
+	}
 	skipInitializer := -1
 	if renvoFixedTarget == 0 {
 		if index < len(g.replRestoreOffsets) && g.replRestoreOffsets[index] >= 0 {
@@ -14879,6 +14908,22 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 	renvoNonNil(g)
+	// VM32 executes fixed copies substantially faster when they remain
+	// straight-line bytecode. The bulk loop is primarily a native-code size
+	// optimization, so retain the compact path for the hosted targets without
+	// imposing its loop overhead on the deterministic VM frontend.
+	if renvoFixedTarget == 0 && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
+		source := renvoAddUnnamedLocal(g, renvoTypeInt)
+		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
+		count := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmAddressPrimaryStack(&g.asm, srcOffset)
+		renvoAsmStorePrimaryStack(&g.asm, source)
+		renvoAsmAddressPrimaryStack(&g.asm, destOffset)
+		renvoAsmStorePrimaryStack(&g.asm, destination)
+		renvoAsmStoreStackImm(&g.asm, count, size)
+		renvoEmitCopyBytes(g, source, destination, count)
+		return
+	}
 	renvoEmitCopyNative(g, srcOffset, destOffset, size, renvoNativeCopyStackToStack)
 }
 func renvoEmitCopyStackToMemSecondary(g *renvoLinearGen, srcOffset int, destDisp int, size int) {
@@ -27177,6 +27222,7 @@ func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 	renvoAsmInitWithContext(&g.asm, g.c)
 	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
@@ -27253,7 +27299,7 @@ func renvo386EmitObjectCABIWrapperBodyMode(g *renvoLinearGen, fnIndex int, wordC
 	// Ordinary Renvo functions bind incoming call words from the final source
 	// parameter toward the first. appMain is the deliberate exception because
 	// its arguments arrive from the operating-system entry contract.
-	entry := renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
+	entry := fnIndex == g.prog.entryFunc
 	for at := 0; at < fixedWords; at++ {
 		word := at
 		if entry {

@@ -152,6 +152,25 @@ type RTGAssemblyBinding struct {
 	Code   []byte
 }
 
+const (
+	ForeignProgramBytes = iota + 1
+	ForeignProgramEntrypoint
+)
+
+// ForeignProgram binds one package variable to a separately targeted unit.
+// Frontends fill Unit, orchestration replaces it with Artifact, and the outer
+// backend consumes only the resolved artifact and entry offset.
+type ForeignProgram struct {
+	Name        string
+	Global      int
+	Kind        int
+	Target      string
+	InPlace     bool
+	Unit        []byte
+	Artifact    []byte
+	EntryOffset int
+}
+
 // Program is the shared lowering and linking model. Checker-only semantic
 // tables stay outside this boundary.
 type Program struct {
@@ -171,6 +190,10 @@ type Program struct {
 	Packages         []PackageInfo
 	RTGAssembly      []RTGAssemblySource
 	RTGAssemblyFuncs []RTGAssemblyBinding
+	// Entrypoint is encoded as function index + 1; zero retains the ordinary
+	// package-main entry selection used by existing units.
+	Entrypoint      int
+	ForeignPrograms []ForeignProgram
 }
 
 // CoreProgram is the complete serialized contract consumed by compiler
@@ -185,6 +208,8 @@ type CoreProgram struct {
 	Packages         []PackageInfo
 	RTGAssembly      []RTGAssemblySource
 	RTGAssemblyFuncs []RTGAssemblyBinding
+	Entrypoint       int
+	ForeignPrograms  []ForeignProgram
 }
 
 func CoreProgramFrom(program Program) CoreProgram {
@@ -198,6 +223,8 @@ func CoreProgramFrom(program Program) CoreProgram {
 		Packages:         program.Packages,
 		RTGAssembly:      program.RTGAssembly,
 		RTGAssemblyFuncs: program.RTGAssemblyFuncs,
+		Entrypoint:       program.Entrypoint,
+		ForeignPrograms:  program.ForeignPrograms,
 	}
 }
 

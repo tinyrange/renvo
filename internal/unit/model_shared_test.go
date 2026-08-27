@@ -11,6 +11,7 @@ func TestProgramIsTheExplicitSharedLinkingContract(t *testing.T) {
 		"Package", "ImportPath", "Text", "Tokens", "Imports", "Symbols",
 		"Decls", "Funcs", "TypeRefs", "Calls", "Refs", "Selectors",
 		"ConcurrencySites", "Packages", "RTGAssembly", "RTGAssemblyFuncs",
+		"Entrypoint", "ForeignPrograms",
 	}
 	if typeOf.NumField() != len(want) {
 		t.Fatalf("Program has %d fields, want %d", typeOf.NumField(), len(want))
@@ -24,7 +25,7 @@ func TestProgramIsTheExplicitSharedLinkingContract(t *testing.T) {
 
 func TestCoreProgramIsTheExplicitSerializedContract(t *testing.T) {
 	typeOf := reflect.TypeOf(CoreProgram{})
-	want := []string{"Package", "ImportPath", "Text", "Tokens", "Decls", "Funcs", "Packages", "RTGAssembly", "RTGAssemblyFuncs"}
+	want := []string{"Package", "ImportPath", "Text", "Tokens", "Decls", "Funcs", "Packages", "RTGAssembly", "RTGAssemblyFuncs", "Entrypoint", "ForeignPrograms"}
 	if typeOf.NumField() != len(want) {
 		t.Fatalf("CoreProgram has %d fields, want %d", typeOf.NumField(), len(want))
 	}

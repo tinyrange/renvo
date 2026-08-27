@@ -223,6 +223,14 @@ func RenvoTargetHasBuildTag(targetName string, tag string) bool {
 	return target != 0 && renvoRTGTargetHasBuildTag(target, tag)
 }
 
+// RenvoTargetHasCapability reports one capability from the selected target
+// descriptor. Multi-target frontends use it to distinguish complete artifacts
+// from images whose entrypoint can execute directly at their embedded address.
+func RenvoTargetHasCapability(targetName string, capability string) bool {
+	target := renvoParseTargetArg(targetName)
+	return target != 0 && renvoRTGTargetHasCapability(target, capability)
+}
+
 func RenvoDefaultArenaSize(targetName string) (int, bool) {
 	target := renvoParseTargetArg(targetName)
 	if target == 0 {

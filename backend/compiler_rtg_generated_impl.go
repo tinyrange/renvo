@@ -745,6 +745,10 @@ func renvoRTGTargetHasBuildTag(target int, tag string) bool {
 return false
 }
 
+func renvoRTGTargetHasCapability(target int, capability string) bool {
+return false
+}
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 return renvoTargetProfile{}
 }

@@ -1,0 +1,5 @@
+# Optional multi-architecture BIOS catalog. Ordinary MS-DOS and BIOS builds use
+# msdos.rtg without paying to prepare the x86-64 backend; programs which embed a
+# freestanding amd64 stage select this catalog explicitly.
+@import "msdos.rtg"
+@import "freestanding_amd64.rtg"
