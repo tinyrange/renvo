@@ -414,8 +414,10 @@ function configureTargets(targets) {
   }
   elements.targetMenu.replaceChildren(...entries);
   elements.mobileTargetList.replaceChildren(...mobileEntries);
+  const requestedTarget = parameters.get("target");
+  const requestedAvailable = requestedTarget && visibleTargets.some((target) => target.name === requestedTarget);
   const restoredAvailable = restoredTargetName && visibleTargets.some((target) => target.name === restoredTargetName);
-  const requested = restoredAvailable ? restoredTargetName : selectedTarget?.name || parameters.get("target");
+  const requested = requestedAvailable ? requestedTarget : restoredAvailable ? restoredTargetName : selectedTarget?.name;
   const initial = visibleTargets.some((target) => target.name === requested) ? requested :
     visibleTargets.some((target) => target.name === "wasi/wasm32") ? "wasi/wasm32" : visibleTargets[0].name;
   selectTarget(initial, false);

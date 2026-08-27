@@ -101,6 +101,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /setSetupStep\("compiler", "active"/);
   assert.doesNotMatch(html, /id="mobile-build"/);
   assert.match(app, /runTests/);
+  assert.match(app, /requestedAvailable \? requestedTarget : restoredAvailable \? restoredTargetName/);
   assert.match(app, /event\.metaKey[\s\S]*event\.key\.toLowerCase\(\) === "s"[\s\S]*saveAndDeploy\(\)/);
   assert.match(app, /function saveAndDeploy\(\)[\s\S]*isBoardTarget\(selectedTarget\)[\s\S]*runArtifact\(\)/);
   assert.match(app, /openSnapshotDialog/);

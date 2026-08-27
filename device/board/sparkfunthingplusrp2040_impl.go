@@ -8,8 +8,11 @@ import (
 	"renvo.dev/device/ws2812"
 )
 
-// BlueLED is the active-high status indicator on GPIO25.
-var BlueLED = rp2.NewLED(rp2.GPIO(25), false)
+// LED is the active-high status indicator on GPIO25.
+var LED = rp2.NewLED(rp2.GPIO(25), false)
+
+// BlueLED is retained for compatibility with existing board examples.
+var BlueLED = LED
 
 // Clock is the board monotonic clock and busy-wait timer.
 var Clock = rp2.Clock{}

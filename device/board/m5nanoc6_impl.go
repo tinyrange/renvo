@@ -15,6 +15,9 @@ import (
 // BlueLED is the active-high blue indicator connected to GPIO7.
 var BlueLED = gpio.NewLED(esp32c6.GPIO(7), false)
 
+// LED is the board status indicator.
+var LED = BlueLED
+
 // Button is the active-low front button on GPIO9. Its pull-up also preserves
 // the normal boot strapping level when released.
 var Button = gpio.NewButton(esp32c6.GPIO(9), gpio.PullUp, true)

@@ -12,6 +12,9 @@ import (
 // BlueLED is the active-high indicator connected to GPIO25.
 var BlueLED = gpio.NewLED(rp2350.GPIO(25), false)
 
+// LED is the board status indicator.
+var LED = BlueLED
+
 var clockSource = rp2350.SystemTimer{}
 
 // Clock is the board monotonic clock and busy-wait timer.
