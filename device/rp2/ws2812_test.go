@@ -26,3 +26,12 @@ func TestWS2812PIOResetBits(t *testing.T) {
 		t.Fatalf("unexpected RP2350 PIO0 reset mapping")
 	}
 }
+
+func TestWS2812PIOHotReloadState(t *testing.T) {
+	if pioJoinTX != 1<<30 || pioJoinRX != 1<<31 {
+		t.Fatalf("PIO FIFO join bits = %#x, %#x", pioJoinTX, pioJoinRX)
+	}
+	if ws2812PollLimit <= 0 {
+		t.Fatalf("WS2812 poll limit = %d", ws2812PollLimit)
+	}
+}

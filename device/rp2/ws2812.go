@@ -25,6 +25,8 @@ const (
 	pioTXFull          = uint32(1 << 16)
 	pioTXStall         = uint32(1 << 24)
 	pioAutoPull        = uint32(1 << 17)
+	pioJoinTX          = uint32(1 << 30)
+	pioJoinRX          = uint32(1 << 31)
 	pioPullThreshold24 = uint32(24 << 25)
 	pioSideSetCount1   = uint32(1 << 29)
 	pioSetCount1       = uint32(1 << 26)
@@ -32,6 +34,7 @@ const (
 	// program consumes ten 8 MHz cycles per bit, producing the WS2812 800 kHz
 	// waveform with the standard T1/T2/T3 timing split.
 	pioClockDiv8MHz = uint32(1<<16 | 128<<8)
+	ws2812PollLimit = 65536
 )
 
 func releasePIO0Reset() {
@@ -76,7 +79,12 @@ func (p *ws2812PIO) initialize() {
 	}
 	mmio.Store32(pioSM0ClockDiv, pioClockDiv8MHz)
 	mmio.Store32(pioSM0Exec, 3<<12) // wrap bottom 0, wrap top 3
-	mmio.Store32(pioSM0Shift, pioAutoPull|pioPullThreshold24)
+	// Match the SDK WS2812 configuration. Joining both FIFO halves for TX also
+	// makes toggling the opposite join bit a defined way to discard stale words
+	// left by an application interrupted during a hot reload.
+	mmio.Store32(pioSM0Shift, pioAutoPull|pioPullThreshold24|pioJoinTX)
+	mmio.Store32(pioSM0Shift, mmio.Load32(pioSM0Shift)^pioJoinRX)
+	mmio.Store32(pioSM0Shift, mmio.Load32(pioSM0Shift)^pioJoinRX)
 	mmio.Store32(pioSM0Pin,
 		uint32(p.data.number)<<5|uint32(p.data.number)<<10|pioSetCount1|pioSideSetCount1)
 
@@ -85,6 +93,7 @@ func (p *ws2812PIO) initialize() {
 	mmio.Store32(p.data.control(), pioFunction)
 	mmio.Store32(pioSM0Instr, 0xe081) // set pindirs, 1
 	mmio.Store32(pioSM0Instr, 0xe000) // set pins, 0
+	mmio.Store32(pioSM0Instr, 0x0000) // jmp 0
 	mmio.Store32(pioFDebug, pioTXStall)
 	mmio.Store32(pioControl, mmio.Load32(pioControl)|pioSM0Restart|pioSM0ClockRestart|pioSM0Enable)
 	p.initialized = true
@@ -95,14 +104,34 @@ func (p *ws2812PIO) Transmit(data []byte) bool {
 		return false
 	}
 	p.initialize()
-	mmio.Store32(pioFDebug, pioTXStall)
 	for index := 0; index < len(data); index += 3 {
-		for mmio.Load32(pio0Base+0x004)&pioTXFull != 0 {
+		ready := false
+		for attempt := 0; attempt < ws2812PollLimit; attempt++ {
+			if mmio.Load32(pio0Base+0x004)&pioTXFull == 0 {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			return false
 		}
 		word := uint32(data[index])<<24 | uint32(data[index+1])<<16 | uint32(data[index+2])<<8
 		mmio.Store32(pioTXFIFO0, word)
 	}
-	for mmio.Load32(pioFDebug)&pioTXStall == 0 {
+	// Clear the old empty-FIFO indication only after publishing the final word.
+	// Clearing it first races the already-stalled OUT instruction, which can
+	// immediately reassert TXSTALL before the FIFO write and make a caller treat
+	// an incomplete frame as finished.
+	mmio.Store32(pioFDebug, pioTXStall)
+	finished := false
+	for attempt := 0; attempt < ws2812PollLimit; attempt++ {
+		if mmio.Load32(pioFDebug)&pioTXStall != 0 {
+			finished = true
+			break
+		}
+	}
+	if !finished {
+		return false
 	}
 	Clock{}.DelayMicroseconds(80)
 	return true
