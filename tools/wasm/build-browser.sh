@@ -21,6 +21,11 @@ mkdir -p "$output/backends/definitions" "$output/browser"
 tools/wasm/build.sh "$output/renvo.wasm" "$output/backends/wasi-wasm32.wasm"
 
 "$native" \
+  -tags renvo_wasi_linker \
+  -system systems/frontend-wasi-wasm32.rtg \
+  -s -o "$output/renvo-linker.wasm" ./cmd/renvowasilinker
+
+"$native" \
   -tags renvo_wasi_language_service \
   -system systems/frontend-wasi-wasm32.rtg \
   -s -o "$output/renvo-language-service.wasm" ./cmd/renvowasilanguageservice
@@ -128,6 +133,7 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/makefile-language.mjs tools/wasm/browser/makefile.mjs \
 	tools/wasm/browser/rtg-language.mjs \
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \
@@ -145,6 +151,7 @@ if [ "$layout" = pages ]; then
 	tools/wasm/browser/serial-plotter.mjs \
 	tools/wasm/browser/project-archive.mjs tools/wasm/browser/device-profile.mjs \
 	tools/wasm/browser/c-language.mjs \
+	tools/wasm/browser/makefile-language.mjs tools/wasm/browser/makefile.mjs \
 	tools/wasm/browser/rtg-language.mjs \
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \

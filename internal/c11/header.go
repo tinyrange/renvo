@@ -21,36 +21,6 @@ type includeSpec struct {
 	at     int
 }
 
-// BuildObjectPrelude reads the translation unit's real headers and retains
-// only externally linked function declarations referenced by the source. This
-// is the deliberately narrow hosted-header slice: it bounds memory by avoiding
-// a materialized copy of every unrelated declaration in a large libc header.
-func BuildObjectPrelude(path string, src []byte, reader IncludeReader) HeaderResult {
-	result := HeaderResult{Ok: true, ErrorAt: -1}
-	includes := sourceIncludes(src)
-	if len(includes) == 0 {
-		return result
-	}
-	wanted := sourceCallNames(src)
-	var emitted []string
-	for i := 0; i < len(includes); i++ {
-		header, headerPath, ok := reader.ReadInclude(path, includes[i].name, includes[i].angled)
-		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: includes[i].name, ErrorAt: includes[i].at}
-		}
-		if findText(result.Dependencies, headerPath) < 0 {
-			result.Dependencies = append(result.Dependencies, headerPath)
-		}
-		declarations, names, ok := headerDeclarations(header, wanted, emitted)
-		if !ok {
-			return HeaderResult{Ok: false, ErrorPath: headerPath, ErrorAt: includes[i].at}
-		}
-		result.Prelude = append(result.Prelude, declarations...)
-		emitted = append(emitted, names...)
-	}
-	return result
-}
-
 func sourceIncludes(src []byte) []includeSpec {
 	var out []includeSpec
 	for lineStart := 0; lineStart < len(src); {
@@ -156,6 +126,22 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		}
 		for start < i && headerDeclarationDecoration(src, scanned.tokens[start]) {
 			start++
+		}
+		braceDepth := 0
+		for j := 0; j < start; j++ {
+			if tokenIs(src, scanned.tokens[j], "{") {
+				// System headers commonly wrap C declarations in a C++-only
+				// extern "C" block. We inspect raw active headers here, so that
+				// conditional wrapper must not hide the C declarations within it.
+				if j < 2 || !tokenIs(src, scanned.tokens[j-2], "extern") || !tokenIs(src, scanned.tokens[j-1], "\"C\"") {
+					braceDepth++
+				}
+			} else if tokenIs(src, scanned.tokens[j], "}") && braceDepth > 0 {
+				braceDepth--
+			}
+		}
+		if braceDepth != 0 {
+			continue
 		}
 		hasStatic := false
 		hasTypedef := false

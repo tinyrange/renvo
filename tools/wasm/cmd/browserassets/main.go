@@ -52,6 +52,7 @@ type targetDefinitionAsset struct {
 
 type targetCatalog struct {
 	Compiler        string        `json:"compiler"`
+	Linker          string        `json:"linker"`
 	LanguageService string        `json:"languageService"`
 	Formatter       string        `json:"formatter"`
 	BackendJIT      string        `json:"backendJIT"`
@@ -191,7 +192,7 @@ func main() {
 		fail(err)
 	}
 	catalog := targetCatalog{
-		Compiler: "renvo.wasm", LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
+		Compiler: "renvo.wasm", Linker: "renvo-linker.wasm", LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
 		BackendJIT: "renvo-backend-jit.wasm", VMBackend: "renvo-vm-backend.wasm",
 		BrowserPrefix: "browser-host-prefix.html", BrowserSuffix: "browser-host-suffix.html",
 		Stdlib: "stdlib/catalog.json",
@@ -249,7 +250,7 @@ func main() {
 			DescriptorVersion: descriptor.Version, Device: "esp32", Docs: board.Docs, Artwork: board.Artwork,
 		})
 	}
-	for _, asset := range []*string{&catalog.Compiler, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend} {
+	for _, asset := range []*string{&catalog.Compiler, &catalog.Linker, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend} {
 		if *asset, err = versionAsset(*output, *asset); err != nil {
 			fail(err)
 		}
@@ -564,6 +565,7 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "examples/uefi-graphics", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "examples/uefi-filesystem", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "examples/uefi-linux-boot", Target: "uefi/amd64", Computers: uefiComputer},
+		{Path: "examples/c-sqlite-hash", Target: "linux/amd64", Language: "c"},
 		{Path: "device/dos"},
 		{Path: "device/bios"},
 		{Path: "device/uefi"},

@@ -9,6 +9,7 @@ import { decodeProjectZip, decodeSharedProject, encodeProjectZip, encodeSharedPr
 import { chooseESPTransportAvailability, detectDeviceProfile } from "./device-profile.mjs";
 import { C_LANGUAGE_ID, registerCLanguage } from "./c-language.mjs";
 import { RTG_LANGUAGE_ID, registerRTGLanguage } from "./rtg-language.mjs";
+import { MAKEFILE_LANGUAGE_ID, registerMakefileLanguage } from "./makefile-language.mjs";
 import { generateBrowserTestProject } from "./test-project.mjs";
 import { deleteProjectSnapshot, loadCurrentProject, loadPreparedBackends, loadProjectSnapshots, saveCurrentProject, savePreparedBackend, saveProjectSnapshot } from "./workspace-store.mjs";
 import { buildReadiness } from "./build-readiness.mjs";
@@ -40,6 +41,8 @@ const elements = {
   targetMenu: document.querySelector("#target-menu"),
   runArgs: document.querySelector("#run-args"),
   runStdin: document.querySelector("#run-stdin"),
+  terminalCommand: document.querySelector("#terminal-command"),
+  terminalCommandRun: document.querySelector("#terminal-command-run"),
   terminalOutput: document.querySelector("#terminal-output"),
   plotterLegend: document.querySelector("#plotter-legend"),
   plotterCanvas: document.querySelector("#serial-plotter-canvas"),
@@ -294,8 +297,9 @@ async function boot() {
   const backendJIT = catalog.backendJIT ? new URL(catalog.backendJIT, catalogUrl).href : "";
   const vmBackend = catalog.vmBackend ? new URL(catalog.vmBackend, catalogUrl).href : "";
   const compiler = compilerURLOverride || new URL(catalog.compiler || "renvo.wasm", catalogUrl).href;
+  const linker = new URL(catalog.linker || "renvo-linker.wasm", catalogUrl).href;
   setSetupStep("compiler", "active", "Downloading the compiler…");
-  await initializeCompiler(compiler, languageService, formatter, backendJIT, vmBackend);
+  await initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend);
   setSetupStep("compiler", "done", "Compiler ready. Choose an example to continue.");
   prefetchTargetBackend(selectedTarget);
   prefetchExampleBoard();
@@ -439,6 +443,7 @@ async function loadMonaco() {
   monaco = window.monaco;
   registerCLanguage(monaco);
   registerRTGLanguage(monaco);
+  registerMakefileLanguage(monaco, () => [...models.keys()]);
   defineTheme();
   for (const [name, value] of Object.entries(fileValues)) {
     createProjectModel(name, value);
@@ -481,7 +486,7 @@ async function loadMonaco() {
   if (!isPhoneWorkspace()) editor.focus();
 }
 
-function initializeCompiler(compiler, languageService, formatter, backendJIT, vmBackend) {
+function initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend) {
   return new Promise((resolve, reject) => {
     const onReady = (event) => {
       if (event.data.type !== "ready") return;
@@ -494,7 +499,7 @@ function initializeCompiler(compiler, languageService, formatter, backendJIT, vm
     };
     worker.addEventListener("message", onReady);
     worker.addEventListener("error", reject, { once: true });
-    worker.postMessage({ type: "init", compiler, languageService, formatter, backendJIT, vmBackend });
+    worker.postMessage({ type: "init", compiler, linker, languageService, formatter, backendJIT, vmBackend });
   });
 }
 
@@ -544,6 +549,8 @@ function setupShell() {
   elements.compile.addEventListener("click", primaryTargetAction);
   elements.run.addEventListener("click", secondaryTargetAction);
   elements.test.addEventListener("click", runTests);
+  elements.terminalCommandRun.addEventListener("click", runTerminalCommand);
+  elements.terminalCommand.addEventListener("keydown", (event) => { if (event.key === "Enter") runTerminalCommand(); });
   document.querySelector("#new-file").addEventListener("click", createWorkspaceFile);
   document.querySelector("#browse-examples").addEventListener("click", openExampleBrowser);
   elements.toggleSidebar.addEventListener("click", toggleSidebar);
@@ -941,6 +948,7 @@ function controlledArguments(args, target) {
     result.push(args[i]);
   }
   validateBrowserArguments(result);
+  if (result[0] === "make") return result;
   result.unshift("-t", target.frontendTarget || target.name);
   for (const tag of target.tags || []) result.unshift("-tags", tag);
   if (target.definition) result.unshift("-target-version", String(target.descriptorVersion), "-target-definition", target.definition);
@@ -1017,7 +1025,8 @@ function renderResult(result) {
     renderTestBuildResult(result, build, summary, text);
     return;
   }
-  elements.output.textContent += `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
+  const buildOutput = build.action === "terminal" ? elements.terminalOutput : elements.output;
+  buildOutput.textContent += `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
   elements.memoryStatus.textContent = `${(result.linearMemoryBytes / 1048576).toFixed(1)} MiB`;
   setCompilerStatus(result.exitCode === 0 ? "ready" : "error", result.exitCode === 0 ? "Build succeeded" : "Build failed");
   const diagnosticText = result.exitCode === 0 ? "" : [result.stderr, result.stdout].filter(Boolean).join("\n");
@@ -1042,7 +1051,7 @@ function renderResult(result) {
   const shouldRun = runAfterBuild;
   runAfterBuild = false;
   updateReadyState();
-  if (result.exitCode !== 0) showPanel(problems.length ? "problems" : "output");
+  if (result.exitCode !== 0) showPanel(build.action === "terminal" ? "terminal" : problems.length ? "problems" : "output");
   if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
     elements.terminalOutput.textContent = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
     failMobileDeployment(mobileDeploymentStep || "firmware", "The firmware build failed. Open the activity log for the compiler message.");
@@ -1053,6 +1062,32 @@ function renderResult(result) {
       setMobileDeployStep("firmware", "done", "Firmware built for the selected board.");
     }
     queueMicrotask(resumeArtifactAfterBuild);
+  }
+}
+
+async function runTerminalCommand() {
+  if (!compilerReady || building || !selectedTarget) return;
+  let args;
+  try {
+    args = splitArguments(elements.terminalCommand.value.trim());
+    if (args[0] === "renvo") args.shift();
+    if (args[0] !== "make") throw new Error("The Web IDE terminal currently runs renvo make commands.");
+  } catch (error) {
+    elements.terminalOutput.textContent = `${error.message || error}\n`; showPanel("terminal"); return;
+  }
+  saveFiles(); building = true; updateReadyState(); clearMarkers(); showPanel("terminal");
+  elements.terminalOutput.textContent = `$ renvo ${args.join(" ")}\n`;
+  try {
+    await ensureWorkspaceDependencies();
+    const payload = workspacePayload(), id = ++requestID;
+    const backendPath = selectedTarget.cBackend || selectedTarget.backend;
+    const backend = new URL(backendPath, catalogUrl).href;
+    pendingBuild = { id, revision: buildRevision, target: selectedTarget, backend, args, action: "terminal" };
+    worker.postMessage({ type: "compile", id, args, files: payload.files, backend,
+      backendTarget: selectedTarget.backendTarget, backendFormat: selectedTarget.backendFormat || "wasm" }, payload.transfers);
+  } catch (error) {
+    building = false; pendingBuild = undefined; updateReadyState();
+    elements.terminalOutput.textContent += `${error.message || error}\n`;
   }
 }
 
@@ -1858,6 +1893,8 @@ function createProjectModel(name, value = "") {
 }
 
 function languageForFile(name) {
+	const base = name.split("/").pop();
+	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return MAKEFILE_LANGUAGE_ID;
   if (name.endsWith(".go")) return "go";
   if (name.endsWith(".c") || name.endsWith(".h")) return C_LANGUAGE_ID;
   if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
@@ -1867,6 +1904,8 @@ function languageForFile(name) {
 }
 
 function fileIcon(name) {
+	const base = name.split("/").pop();
+	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return ["MK", "make-icon"];
   if (name.endsWith(".go")) return ["Go", "go-icon"];
   if (name.endsWith(".c") || name.endsWith(".h")) return ["C", "c-icon"];
   if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return ["RTG", "rtg-icon"];

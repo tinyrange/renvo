@@ -83,6 +83,9 @@ func appMain(args []string, env []string) int {
 			stdRoot = item[14:]
 		}
 	}
+	if handled, status := renvoWasiCObjectCompile(args, workDir, stdRoot); handled {
+		return status
+	}
 	output := "a.unit"
 	packageArg := "."
 	target := "wasi/wasm32"

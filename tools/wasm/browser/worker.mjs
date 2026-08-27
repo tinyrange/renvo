@@ -1,4 +1,7 @@
+import { parseMakefile, planMakefile } from "./makefile.mjs";
+
 let frontendModule;
+let linkerModule;
 let languageServiceModule;
 let formatterModule;
 let formatterURL;
@@ -24,8 +27,9 @@ self.addEventListener("message", async (event) => {
       vmBackendURL = request.vmBackend || "";
       formatterURL = request.formatter || "";
       self.postMessage({ type: "init-progress", message: "Downloading the compiler and code checks…" });
-      [frontendModule, languageServiceModule] = await Promise.all([
+      [frontendModule, linkerModule, languageServiceModule] = await Promise.all([
         loadInitModule(request.compiler, "compiler"),
+        loadInitModule(request.linker, "linker"),
         request.languageService ? loadInitModule(request.languageService, "code checks") : Promise.resolve(null),
       ]);
       self.postMessage({ type: "ready" });
@@ -149,7 +153,7 @@ self.addEventListener("message", async (event) => {
     return;
   }
   try {
-    const result = await runPipeline(request);
+    const result = request.args?.[0] === "make" ? await runMakePipeline(request) : await runPipeline(request);
     if (request.type === "validate") result.type = "validation-result";
     self.postMessage(result, result.files.map((file) => file.data));
   } catch (error) {
@@ -211,10 +215,21 @@ async function loadModule(url, name) {
   }
 }
 
-async function runPipeline(request) {
-  const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+async function runPipeline(request, sharedFiles = null) {
+  const files = sharedFiles || new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
   const inputNames = new Set(files.keys());
   const context = newContext(files);
+  const objectLink = request.args[0] === "cc" && request.args.some((arg) => arg.endsWith(".o")) && !request.args.some((arg) => arg.endsWith(".c"));
+  if (objectLink) {
+    const started = performance.now(); let output = "a.out", inputs = [];
+    for (let i = 1; i < request.args.length; i++) {
+      if (request.args[i] === "-o" && i + 1 < request.args.length) output = request.args[++i];
+      else if (request.args[i] === "-t" && i + 1 < request.args.length) i++;
+      else if (request.args[i].endsWith(".o")) inputs.push(request.args[i]);
+    }
+    const exitCode = await runModule(linkerModule, context, ["renvo-linker", "-o", output, ...inputs]);
+    return pipelineResult(request, files, inputNames, context, { backend: null, temporary: "" }, started, performance.now() - started, 0, exitCode);
+  }
   const plan = pipelineArguments(request.args, files, request.backendTarget);
   const started = performance.now();
   const frontendStarted = performance.now();
@@ -271,6 +286,58 @@ async function runPipeline(request) {
     backendMilliseconds = performance.now() - backendStarted;
   }
   return pipelineResult(request, files, inputNames, context, plan, started, frontendMilliseconds, backendMilliseconds, exitCode);
+}
+
+async function runMakePipeline(request) {
+  const started = performance.now();
+  const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+  const inputNames = new Set(files.keys());
+  const planStarted = performance.now();
+  let makefileName = "Makefile", targets = [];
+  for (let i = 1; i < request.args.length; i++) {
+    if (request.args[i] === "-f" && i + 1 < request.args.length) makefileName = clean(request.args[++i]);
+    else if (request.args[i].startsWith("-")) return makePipelineResult(request, files, inputNames, started, 0, 0, 2, "", `renvo make: unsupported option: ${request.args[i]}\n`, 0);
+    else targets.push(request.args[i]);
+  }
+  const makeSource = files.get(makefileName);
+  if (!makeSource) return makePipelineResult(request, files, inputNames, started, 0, 0, 1, "", `renvo make: could not read ${makefileName}\n`, 0);
+  let commands;
+  try { commands = planMakefile(parseMakefile(decoder.decode(makeSource)), targets, (name) => files.has(clean(name))); }
+  catch (error) {
+    const location = error.line ? `${makefileName}:${error.line}` : makefileName;
+    return makePipelineResult(request, files, inputNames, started, performance.now() - planStarted, 0, 1, "", `${location}: error RENVO-MAKE-001 (make): ${error.message}\n`, 0);
+  }
+  const planMilliseconds = performance.now() - planStarted;
+  let stdout = "";
+  let stderr = "";
+  let frontendMilliseconds = planMilliseconds;
+  let backendMilliseconds = 0;
+  let maxLinearMemoryBytes = 0;
+  for (const command of commands) {
+    if (!command.quiet) stdout += `${command.text}\n`;
+    const result = await runPipeline({ ...request, args: command.args.slice(1), files: [] }, files);
+    stdout += result.stdout;
+    stderr += result.stderr;
+    frontendMilliseconds += result.frontendMilliseconds;
+    backendMilliseconds += result.backendMilliseconds;
+    maxLinearMemoryBytes = Math.max(maxLinearMemoryBytes, result.linearMemoryBytes);
+    if (result.exitCode !== 0) {
+      return makePipelineResult(request, files, inputNames, started, frontendMilliseconds, backendMilliseconds, result.exitCode, stdout, stderr, maxLinearMemoryBytes);
+    }
+  }
+  return makePipelineResult(request, files, inputNames, started, frontendMilliseconds, backendMilliseconds, 0, stdout, stderr, maxLinearMemoryBytes);
+}
+
+function makePipelineResult(request, files, inputNames, started, frontendMilliseconds, backendMilliseconds, exitCode, stdout, stderr, linearMemoryBytes) {
+  const outputs = [];
+  for (const [name, data] of files) {
+    if (inputNames.has(name) || name.startsWith(".renvo/")) continue;
+    const copy = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    outputs.push({ name, data: copy });
+  }
+  outputs.sort((left, right) => left.name.localeCompare(right.name));
+  return { type: "result", id: request.id, exitCode, stdout, stderr, files: outputs,
+    elapsedMilliseconds: performance.now() - started, frontendMilliseconds, backendMilliseconds, linearMemoryBytes };
 }
 
 function pipelineResult(request, files, inputNames, context, plan, started, frontendMilliseconds, backendMilliseconds, exitCode) {
@@ -347,6 +414,8 @@ function pipelineArguments(args, files, backendTarget) {
       frontend.push(args[i]);
     }
   }
+  const objectLink = args[0] === "cc" && args.some((arg) => arg.endsWith(".o")) && !args.some((arg) => arg.endsWith(".c"));
+  if (objectLink) return { frontend, backend: null, temporary: "" };
   if (emitUnit || outputAt < 0) return { frontend, backend: null, temporary: "" };
   let temporary = ".renvo/frontend.unit";
   for (let suffix = 1; files.has(temporary); suffix++) temporary = `.renvo/frontend-${suffix}.unit`;

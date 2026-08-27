@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestPreprocessCharacterEscapesInConstantExpression(t *testing.T) {
+	result := Preprocess(PreprocessConfig{Path: "main.c", Source: []byte("#if 'A' == '\\101' && '\\x41' == 65\nPASS\n#else\nFAIL\n#endif\n")})
+	if !result.Ok || !bytes.Contains(result.Source, []byte("PASS")) || bytes.Contains(result.Source, []byte("FAIL")) {
+		t.Fatalf("character escape condition = %#v, source %q", result, result.Source)
+	}
+}
+
 type preprocessTestReader struct {
 	files map[string][]byte
 }

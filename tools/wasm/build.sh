@@ -37,7 +37,7 @@ env GOOS="$host_os" GOARCH="$host_arch" go build -tags renvo_bundle -o "$bootstr
   -t "$host_target" -arena-size 134217728 \
   -s -o "$native" ./cmd/renvo
 "$native" \
-  -tags renvo_wasi_frontend \
+  -tags renvo_wasi_frontend,renvo_wasi_c_object \
   -system systems/frontend-wasi-wasm32.rtg \
   -s -o "$output" ./cmd/renvowasi
 

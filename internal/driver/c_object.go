@@ -87,28 +87,6 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		}
 		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
 		source := result.Files[i].Src
-		headerSource := source
-		if len(options.CForcedInclude) > 0 {
-			prefix := make([]byte, 0, len(options.CForcedInclude)*32)
-			for j := 0; j < len(options.CForcedInclude); j++ {
-				path := load.JoinPath(workDir, options.CForcedInclude[j])
-				prefix = append(prefix, "#include \""...)
-				prefix = append(prefix, path...)
-				prefix = append(prefix, '"', '\n')
-			}
-			prefix = append(prefix, source...)
-			headerSource = prefix
-		}
-		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
-		if object && !options.CNoStdIncludes {
-			header = c11.BuildObjectPrelude(result.Files[i].Path, headerSource, reader)
-			if !header.Ok {
-				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
-				result.ErrorSourcePath = result.Files[i].Path
-				result.ErrorOffset = header.ErrorAt
-				return result
-			}
-		}
 		processed := c11.Preprocess(c11.PreprocessConfig{
 			Path: result.Files[i].Path, Source: source, Reader: reader,
 			Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
@@ -116,11 +94,27 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 			SuppressForcedIncludes: object && !options.CNoStdIncludes,
 		})
 		if !processed.Ok {
-			result = sourceFail(result, SourceErrCPreprocess, processed.ErrorPath)
+			errorKind := SourceErrCPreprocess
+			if processed.Error == c11.PreprocessErrInclude {
+				errorKind = SourceErrCInclude
+			}
+			result = sourceFail(result, errorKind, processed.ErrorPath)
+			result.ErrorSourcePath = result.Files[i].Path
+			result.ErrorOffset = 0
 			result.CPreprocessError = processed.Error
 			result.CPreprocessLine = processed.Line
 			result.CPreprocessDetail = processed.Detail
 			return result
+		}
+		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
+		if object && !options.CNoStdIncludes {
+			header = cObjectHeaderPrelude(result.Files[i].Path, source, processed, reader, fs)
+			if !header.Ok {
+				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
+				result.ErrorSourcePath = result.Files[i].Path
+				result.ErrorOffset = header.ErrorAt
+				return result
+			}
 		}
 		result.Files[i].CObject = object
 		result.Files[i].CCompiler = options.CCompiler
