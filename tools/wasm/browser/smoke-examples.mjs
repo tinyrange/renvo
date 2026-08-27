@@ -216,6 +216,11 @@ for (const [importPath, item] of published) {
         type: "compile", id: ++requestID, args: debugArgs, files: workerFiles(files),
         backend: debugBackend, backendTarget: debugTarget.backendTarget || debugTarget.name,
         backendFormat: debugTarget.backendFormat || "wasm",
+        rtgDefinition: debugTarget.rtgDefinition ? new URL(debugTarget.rtgDefinition, bundleURL).href : "",
+        rtgDefinitionName: debugTarget.rtgDefinitionName || debugTarget.projectDefinition || "",
+        rtgImports: (debugTarget.rtgImports || []).map((entry) => ({
+          ...entry, source: new URL(entry.source, bundleURL).href,
+        })),
       }, "result");
       if (debugResult.exitCode !== 0) {
         const diagnostic = [debugResult.stderr, debugResult.stdout].filter(Boolean).join("\n").trim();

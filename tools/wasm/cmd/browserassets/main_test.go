@@ -43,6 +43,12 @@ func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
 	}
 }
 
+func TestEmptyPackagedDefinitionHasNoName(t *testing.T) {
+	if got := packagedDefinitionName(""); got != "" {
+		t.Fatalf("packagedDefinitionName(empty) = %q, want empty", got)
+	}
+}
+
 func TestBrowserCustomDefinitionsResolveFromPackagedNames(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..")
 	for _, target := range customTargets {

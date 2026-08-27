@@ -293,6 +293,9 @@ func main() {
 }
 
 func packagedDefinitionName(source string) string {
+	if source == "" {
+		return ""
+	}
 	return filepath.ToSlash(filepath.Join(".renvo", filepath.Base(source)))
 }
 
