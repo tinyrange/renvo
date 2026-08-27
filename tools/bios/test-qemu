@@ -1,0 +1,89 @@
+#!/bin/sh
+set -eu
+
+tool_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$tool_root/../.." && pwd)
+
+qemu=${RENVO_BIOS_QEMU:-qemu-system-i386}
+if ! command -v "$qemu" >/dev/null 2>&1; then
+	echo "qemu-system-i386 not found; set RENVO_BIOS_QEMU" >&2
+	exit 2
+fi
+
+timeout_command=${RENVO_BIOS_TIMEOUT:-}
+if [ -z "$timeout_command" ]; then
+	if command -v timeout >/dev/null 2>&1; then
+		timeout_command=timeout
+	elif command -v gtimeout >/dev/null 2>&1; then
+		timeout_command=gtimeout
+	else
+		echo "timeout or gtimeout not found; set RENVO_BIOS_TIMEOUT" >&2
+		exit 2
+	fi
+fi
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+image=$temporary/renvo-bios.img
+serial_log=$temporary/serial.log
+debug_log=$temporary/debug.log
+floppy_image=$temporary/renvo-bios-floppy.img
+floppy_serial_log=$temporary/floppy-serial.log
+floppy_debug_log=$temporary/floppy-debug.log
+
+if [ -n "${RENVO:-}" ]; then
+	renvo=$RENVO
+else
+	renvo=$temporary/renvo
+	(cd "$repository_root" && go build -o "$renvo" ./cmd/renvo)
+fi
+
+"$renvo" -backend "$repository_root/backends/msdos.rtg" \
+	-t bios/8086 -s -o "$image" "$repository_root/examples/bios-smoke"
+
+set +e
+"$timeout_command" 20s "$qemu" \
+	-machine pc -m 32M -display none -serial "file:$serial_log" -monitor none -no-reboot \
+	-debugcon "file:$debug_log" -global isa-debugcon.iobase=0xe9 \
+	-drive "format=raw,file=$image,if=ide,index=0" -boot c \
+	-device isa-debug-exit,iobase=0xf4,iosize=0x04
+status=$?
+set -e
+
+if [ "$status" -ne 85 ]; then
+	echo "BIOS QEMU smoke failed: emulator exit status $status (expected 85)" >&2
+	if [ -f "$debug_log" ]; then
+		echo "BIOS smoke checkpoints: $(cat "$debug_log")" >&2
+	fi
+	exit 1
+fi
+if ! grep -q "PASS" "$serial_log"; then
+	echo "BIOS QEMU smoke failed: BIOS serial output did not reach COM1" >&2
+	exit 1
+fi
+
+# A short raw image is a valid hard-disk/USB image, but QEMU needs the standard
+# media length to infer 1.44 MB floppy geometry. Padding does not alter any
+# compiled sectors and forces the boot loader through its non-EDD CHS fallback.
+cp "$image" "$floppy_image"
+dd if=/dev/zero of="$floppy_image" bs=1 count=0 seek=1474560 2>/dev/null
+set +e
+"$timeout_command" 20s "$qemu" \
+	-machine pc -m 32M -display none -serial "file:$floppy_serial_log" -monitor none -no-reboot \
+	-debugcon "file:$floppy_debug_log" -global isa-debugcon.iobase=0xe9 \
+	-drive "format=raw,file=$floppy_image,if=floppy,index=0" -boot a \
+	-device isa-debug-exit,iobase=0xf4,iosize=0x04
+floppy_status=$?
+set -e
+if [ "$floppy_status" -ne 85 ]; then
+	echo "BIOS floppy smoke failed: emulator exit status $floppy_status (expected 85)" >&2
+	if [ -f "$floppy_debug_log" ]; then
+		echo "BIOS floppy checkpoints: $(cat "$floppy_debug_log")" >&2
+	fi
+	exit 1
+fi
+if ! grep -q "PASS" "$floppy_serial_log"; then
+	echo "BIOS floppy smoke failed: serial output did not reach COM1" >&2
+	exit 1
+fi
+echo "PASS: bios/8086 booted through EDD and CHS, then used disk, timer, teletype, and serial services under SeaBIOS"

@@ -1,0 +1,18 @@
+rtgasm 1
+
+assembly {
+	interrupt10(out:emitter) { bios_8086.biosInterruptBridge(out, 0x10) }
+	interrupt13(out:emitter) { bios_8086.biosInterruptBridge(out, 0x13) }
+	interrupt14(out:emitter) { bios_8086.biosInterruptBridge(out, 0x14) }
+	interrupt15(out:emitter) { bios_8086.biosInterruptBridge(out, 0x15) }
+	interrupt16(out:emitter) { bios_8086.biosInterruptBridge(out, 0x16) }
+	interrupt17(out:emitter) { bios_8086.biosInterruptBridge(out, 0x17) }
+	interrupt1A(out:emitter) { bios_8086.biosInterruptBridge(out, 0x1a) }
+	portIn8(out:emitter) { bios_8086.biosPortIn8(out) }
+	portOut8(out:emitter) { bios_8086.biosPortOut8(out) }
+	portOut16(out:emitter) { bios_8086.biosPortOut16(out) }
+	segmentLoad8(out:emitter) { bios_8086.biosSegmentLoad8(out) }
+	segmentStore8(out:emitter) { bios_8086.biosSegmentStore8(out) }
+	segmentWrite(out:emitter) { bios_8086.biosSegmentWrite(out) }
+	bootDrive(out:emitter) { bios_8086.biosBootDrive(out) }
+}

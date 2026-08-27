@@ -1,12 +1,23 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"renvo.dev/internal/backenddef"
+	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/targetinfo"
 )
+
+type browserDefinitionImports map[string][]byte
+
+func (imports browserDefinitionImports) LoadImport(importingFilename, importPath string) rtg.ImportSource {
+	name := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(importingFilename), importPath)))
+	source, ok := imports[name]
+	return rtg.ImportSource{Source: source, Filename: name, Ok: ok}
+}
 
 func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
 	for _, descriptor := range targetinfo.All() {
@@ -16,6 +27,30 @@ func TestAdvertisedTargetsHaveHumanLabels(t *testing.T) {
 		label := targetLabel(descriptor.Name)
 		if label == "" || label == descriptor.Name {
 			t.Errorf("target %q has no human label", descriptor.Name)
+		}
+	}
+}
+
+func TestBrowserPC8086DefinitionsIncludeBIOSFragment(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..")
+	for _, target := range customTargets {
+		if target.RTGSource != "backends/msdos.rtg" {
+			continue
+		}
+		source, err := os.ReadFile(filepath.Join(root, target.RTGSource))
+		if err != nil {
+			t.Fatal(err)
+		}
+		imports := browserDefinitionImports{}
+		for _, imported := range target.RTGImports {
+			imports[imported.Name], err = os.ReadFile(filepath.Join(root, imported.Source))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		resolved := backenddef.ResolveImports(source, ".renvo/target.rtg", target.Name, imports)
+		if !resolved.Ok {
+			t.Errorf("browser target %s cannot resolve its packaged definition: %s", target.Name, resolved.Message)
 		}
 	}
 }

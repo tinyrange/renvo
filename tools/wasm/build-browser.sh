@@ -109,8 +109,10 @@ build_vm_backend() {
 
 build_vm_backend msdos/8086 backends/msdos.rtg msdos-8086
 build_vm_backend msdos/8086-mz backends/msdos.rtg msdos-8086-mz
+build_vm_backend bios/8086 backends/msdos.rtg bios-8086
 build_vm_backend uefi/amd64 backends/uefi_amd64.rtg uefi-amd64
 cp backends/msdos.rtg "$output/backends/msdos.rtg"
+cp backends/bios_8086.rtg "$output/backends/bios_8086.rtg"
 cp backends/uefi_amd64.rtg "$output/backends/uefi_amd64.rtg"
 cp backend/definitions/x86_64.rtg backend/definitions/elf_amd64_primitives.rtg \
 	"$output/backends/definitions/"

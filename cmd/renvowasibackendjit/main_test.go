@@ -26,6 +26,7 @@ func TestOutputNameFollowsTargetImage(t *testing.T) {
 		{"msdos/8086", "dos-com", "app.com"},
 		{"msdos/8086-mz", "dos-mz", "app.exe"},
 		{"uefi/amd64", "uefi-pe", "BOOTX64.EFI"},
+		{"bios/8086", "bios-disk", "renvo-bios.img"},
 		{"windows/custom", "pe", "app.exe"},
 		{"example/riscv32", "elf", "app.elf"},
 		{"unixv7/pdp11", "v7-a.out", "app"},
