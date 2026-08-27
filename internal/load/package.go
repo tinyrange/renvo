@@ -45,7 +45,6 @@ type ParsedFile struct {
 	Src        []byte
 	File       syntax.File
 	C          bool
-	CImports   []string
 	ArenaStart int
 	ArenaEnd   int
 }
@@ -167,12 +166,10 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	pkg.ExplicitC = hasC && hasGo && !cCompiler
 	var parsedGo []syntax.File
 	var goExportDefs []goExportDefinition
-	var goCImports [][]string
 	var goPreambleErrors []c11.Result
 	var goPreambleOffsets []int
 	if hasC {
 		parsedGo = make([]syntax.File, len(selected))
-		goCImports = make([][]string, len(selected))
 		goPreambleErrors = make([]c11.Result, len(selected))
 		goPreambleOffsets = make([]int, len(selected))
 		cgoDataModel := c11.DataModelLP64
@@ -208,9 +205,6 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					goPreambleOffsets[i] = offset
 					continue
 				}
-				for k := 0; k < len(inspected.DeclaredFunctions); k++ {
-					goCImports[i] = appendStringUnique(goCImports[i], inspected.DeclaredFunctions[k])
-				}
 			}
 		}
 		if pkg.Name == "" {
@@ -244,7 +238,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 		if isGoSourceFile(source.Path) && goPreambleErrors != nil && !goPreambleErrors[i].Ok && goPreambleErrors[i].Error != c11.TranslateOK {
 			pkg.ErrorOffset = goPreambleOffsets[i] + goPreambleErrors[i].ErrorAt
 			pkg.C11Error = goPreambleErrors[i].Error
-			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 			return packageFail(pkg, PackageErrC11, i, -1)
 		}
 		if isCSourceFile(source.Path) {
@@ -260,7 +254,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 				if !headerOK {
 					pkg.ErrorOffset = 0
 					pkg.C11Error = c11.TranslateErrUnsupported
-					pkg.Files = append(pkg.Files, newParsedFile(source, parsed, nil))
+					pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 					return packageFail(pkg, PackageErrC11, i, -1)
 				}
 			}
@@ -296,55 +290,38 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			parsed = syntax.ParseFile(source.Src)
 		}
 		if !parsed.Ok {
-			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 			return packageFail(pkg, PackageErrParse, i, -1)
 		}
 		name := string(syntax.TokenText(parsed.Src, parsed.Tokens[parsed.PackageName]))
 		if pkg.Name == "" {
 			pkg.Name = name
 		} else if pkg.Name != name {
-			pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+			pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 			return packageFail(pkg, PackageErrName, i, -1)
 		}
 		refs := FileImportsWithDependencies(module, stdRoot, dependencies, parsed)
 		for j := 0; j < len(refs); j++ {
 			pkg.Imports = appendImport(pkg.Imports, refs[j])
 			if !refs[j].Ok {
-				pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+				pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 				return packageFail(pkg, PackageErrImport, i, len(pkg.Imports)-1)
 			}
 		}
-		pkg.Files = append(pkg.Files, newParsedFile(source, parsed, cImportsAt(goCImports, i)))
+		pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
 	}
 	return pkg
 }
 
-func newParsedFile(source SourceFile, file syntax.File, cImports []string) ParsedFile {
+func newParsedFile(source SourceFile, file syntax.File) ParsedFile {
 	return ParsedFile{
 		Path:       source.Path,
 		Src:        source.Src,
 		File:       file,
 		C:          isCSourceFile(source.Path),
-		CImports:   cImports,
 		ArenaStart: source.ArenaStart,
 		ArenaEnd:   source.ArenaEnd,
 	}
-}
-
-func appendStringUnique(values []string, value string) []string {
-	for i := 0; i < len(values); i++ {
-		if values[i] == value {
-			return values
-		}
-	}
-	return append(values, value)
-}
-
-func cImportsAt(imports [][]string, index int) []string {
-	if index < 0 || index >= len(imports) {
-		return nil
-	}
-	return imports[index]
 }
 
 type graphBuilder struct {
@@ -618,4 +595,201 @@ func stringHasSuffix(text string, suffix string) bool {
 		}
 	}
 	return true
+}
+
+type goExportDefinition struct {
+	Mapping c11.GoExport
+	File    int
+	Func    int
+}
+
+type cgoTypeSpan struct {
+	Start int
+	End   int
+}
+
+var cgoScalarTypes = []string{
+	"bool", "_Bool", "byte", "unsigned char", "uint8", "unsigned char",
+	"int8", "signed char", "int16", "short", "uint16", "unsigned short",
+	"int32", "int", "rune", "int", "uint32", "unsigned int",
+	"int64", "long long", "uint64", "unsigned long long",
+	"float32", "float", "float64", "double",
+}
+
+func cgoExportMappings(definitions []goExportDefinition) []c11.GoExport {
+	if len(definitions) == 0 {
+		return nil
+	}
+	out := make([]c11.GoExport, len(definitions))
+	for i := 0; i < len(definitions); i++ {
+		out[i] = definitions[i].Mapping
+	}
+	return out
+}
+
+func cgoExportHeader(files []syntax.File, definitions []goExportDefinition, dataModel int) ([]byte, bool) {
+	if len(definitions) == 0 {
+		return []byte("/* Code generated by Renvo cgo; DO NOT EDIT. */\n"), true
+	}
+	out := []byte("/* Code generated by Renvo cgo; DO NOT EDIT. */\n")
+	for i := 0; i < len(files); i++ {
+		for j := 0; j < len(files[i].Imports); j++ {
+			preamble, _, cgoImport := syntax.CgoPreamble(files[i], files[i].Imports[j])
+			if cgoImport && len(preamble) > 0 {
+				out = append(out, preamble...)
+				if out[len(out)-1] != '\n' {
+					out = append(out, '\n')
+				}
+			}
+		}
+	}
+	for i := 0; i < len(definitions); i++ {
+		definition := definitions[i]
+		if definition.File < 0 || definition.File >= len(files) || definition.Func < 0 || definition.Func >= len(files[definition.File].Funcs) {
+			return nil, false
+		}
+		file := files[definition.File]
+		fn := file.Funcs[definition.Func]
+		params, ok := cgoFunctionFieldTypes(file, fn.ParamsStart+1, fn.ParamsEnd-1)
+		if !ok {
+			return nil, false
+		}
+		results, ok := cgoFunctionResultTypes(file, fn)
+		if !ok || len(results) > 1 {
+			return nil, false
+		}
+		resultType := "void"
+		if len(results) == 1 {
+			resultType, ok = cgoCType(file, results[0], dataModel)
+			if !ok {
+				return nil, false
+			}
+		}
+		out = append(out, "extern "...)
+		out = append(out, resultType...)
+		out = append(out, ' ')
+		out = append(out, definition.Mapping.CName...)
+		out = append(out, '(')
+		if len(params) == 0 {
+			out = append(out, "void"...)
+		}
+		for j := 0; j < len(params); j++ {
+			if j > 0 {
+				out = append(out, ',', ' ')
+			}
+			typeName, valid := cgoCType(file, params[j], dataModel)
+			if !valid {
+				return nil, false
+			}
+			out = append(out, typeName...)
+		}
+		out = append(out, ')', ';', '\n')
+	}
+	return out, true
+}
+
+func cgoFunctionResultTypes(file syntax.File, fn syntax.FuncDecl) ([]cgoTypeSpan, bool) {
+	if fn.ResultStart < 0 || fn.ResultEnd <= fn.ResultStart {
+		return nil, true
+	}
+	if cgoTokenIs(file, fn.ResultStart, "(") && cgoTokenIs(file, fn.ResultEnd-1, ")") {
+		return cgoFunctionFieldTypes(file, fn.ResultStart+1, fn.ResultEnd-1)
+	}
+	return []cgoTypeSpan{{Start: fn.ResultStart, End: fn.ResultEnd}}, true
+}
+
+func cgoFunctionFieldTypes(file syntax.File, start int, end int) ([]cgoTypeSpan, bool) {
+	if start < 0 || end < start || end > len(file.Tokens) {
+		return nil, false
+	}
+	var out []cgoTypeSpan
+	var pending []int
+	for i := start; i < end; {
+		segmentEnd := end
+		for j := i; j < end; j++ {
+			if cgoTokenIs(file, j, ",") {
+				segmentEnd = j
+				break
+			}
+		}
+		if segmentEnd-i == 1 && file.Tokens[i].KindLine&255 == syntax.TokenIdent {
+			pending = append(pending, i)
+		} else if i < segmentEnd {
+			typeStart := i
+			if file.Tokens[i].KindLine&255 == syntax.TokenIdent && i+1 < segmentEnd && !cgoTokenIs(file, i+1, ".") {
+				typeStart++
+			}
+			for j := 0; j <= len(pending); j++ {
+				out = append(out, cgoTypeSpan{Start: typeStart, End: segmentEnd})
+			}
+			pending = pending[:0]
+		}
+		i = segmentEnd + 1
+	}
+	for i := 0; i < len(pending); i++ {
+		out = append(out, cgoTypeSpan{Start: pending[i], End: pending[i] + 1})
+	}
+	return out, true
+}
+
+func cgoCType(file syntax.File, span cgoTypeSpan, dataModel int) (string, bool) {
+	if span.Start < 0 || span.End <= span.Start || span.End > len(file.Tokens) {
+		return "", false
+	}
+	if cgoTokenIs(file, span.Start, "*") {
+		base, ok := cgoCType(file, cgoTypeSpan{Start: span.Start + 1, End: span.End}, dataModel)
+		if !ok {
+			return "", false
+		}
+		return base + " *", true
+	}
+	if span.End-span.Start == 3 && cgoTokenIs(file, span.Start, "C") && cgoTokenIs(file, span.Start+1, ".") {
+		return string(syntax.TokenText(file.Src, file.Tokens[span.Start+2])), true
+	}
+	if span.End-span.Start == 3 && cgoTokenIs(file, span.Start, "unsafe") && cgoTokenIs(file, span.Start+1, ".") && cgoTokenIs(file, span.Start+2, "Pointer") {
+		return "void *", true
+	}
+	if span.End-span.Start != 1 {
+		return "", false
+	}
+	name := string(syntax.TokenText(file.Src, file.Tokens[span.Start]))
+	for i := 0; i < len(cgoScalarTypes); i += 2 {
+		if name == cgoScalarTypes[i] {
+			return cgoScalarTypes[i+1], true
+		}
+	}
+	if name == "int" {
+		if dataModel != c11.DataModelILP32 {
+			return "long long", true
+		}
+		return "int", true
+	}
+	if name == "uint" || name == "uintptr" {
+		if dataModel != c11.DataModelILP32 {
+			return "unsigned long long", true
+		}
+		return "unsigned int", true
+	}
+	return "", false
+}
+
+func cgoTokenIs(file syntax.File, tok int, text string) bool {
+	return tok >= 0 && tok < len(file.Tokens) && string(syntax.TokenText(file.Src, file.Tokens[tok])) == text
+}
+
+func cgoSourceIncludesExportHeader(src []byte) bool {
+	const name = "_cgo_export.h"
+	for i := 0; i+len(name) <= len(src); i++ {
+		match := true
+		for j := 0; j < len(name); j++ {
+			if src[i+j] != name[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

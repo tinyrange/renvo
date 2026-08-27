@@ -22,11 +22,11 @@ func c_mix(left, right int, scale int32) int64 { return 0 }
 	definition := goExportDefinition{Mapping: c11.GoExport{CName: "c_mix", GoName: "c_mix"}, File: 0, Func: 0}
 	header, ok := cgoExportHeader([]syntax.File{file}, []goExportDefinition{definition}, c11.DataModelLP64)
 	if !ok || !bytes.Contains(header, []byte("int imported_value(void);")) ||
-		!bytes.Contains(header, []byte("extern long long c_mix(long long p0, long long p1, int p2);")) {
+		!bytes.Contains(header, []byte("extern long long c_mix(long long, long long, int);")) {
 		t.Fatalf("LP64 export header = %q, ok=%v", header, ok)
 	}
 	header, ok = cgoExportHeader([]syntax.File{file}, []goExportDefinition{definition}, c11.DataModelILP32)
-	if !ok || !bytes.Contains(header, []byte("extern long long c_mix(int p0, int p1, int p2);")) {
+	if !ok || !bytes.Contains(header, []byte("extern long long c_mix(int, int, int);")) {
 		t.Fatalf("ILP32 export header = %q, ok=%v", header, ok)
 	}
 }

@@ -2,6 +2,7 @@ package check
 
 import (
 	"renvo.dev/internal/arena"
+	"renvo.dev/internal/c11"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -82,13 +83,16 @@ type PackageInfo struct {
 	CoreTypeRefs   []CoreTypeRef
 	CoreArenaStart int
 	CoreArenaEnd   int
-	ExplicitC      bool
-	CFiles         []bool
-	CImports       [][]string
-	CExports       []CExport
+	Cgo            *CgoInfo
 	Methods        []MethodInfo
 	Bodies         []FuncBody
 	CoreBodies     []CoreFuncBody
+}
+
+type CgoInfo struct {
+	Files   []bool
+	Imports [][]string
+	Exports []CExport
 }
 
 type CExport struct {
@@ -258,18 +262,26 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		importCapacity += len(pkg.Files[i].File.Imports)
 	}
 	info := PackageInfo{
-		Name:      cloneCheckString(pkg.Name),
-		Package:   pkgIndex,
-		Symbols:   make([]Symbol, 0, symbolCapacity),
-		Imports:   make([]Import, 0, importCapacity),
-		ExplicitC: pkg.ExplicitC,
+		Name:    cloneCheckString(pkg.Name),
+		Package: pkgIndex,
+		Symbols: make([]Symbol, 0, symbolCapacity),
+		Imports: make([]Import, 0, importCapacity),
 	}
 	if pkg.ExplicitC {
-		info.CFiles = make([]bool, len(pkg.Files))
-		info.CImports = make([][]string, len(pkg.Files))
+		info.Cgo = &CgoInfo{Files: make([]bool, len(pkg.Files))}
+		info.Cgo.Imports = make([][]string, len(pkg.Files))
 		for i := 0; i < len(pkg.Files); i++ {
-			info.CFiles[i] = pkg.Files[i].C
-			info.CImports[i] = pkg.Files[i].CImports
+			info.Cgo.Files[i] = pkg.Files[i].C
+			if pkg.Files[i].C {
+				continue
+			}
+			file := pkg.Files[i].File
+			for j := 0; j < len(file.Imports); j++ {
+				preamble, _, cgoImport := syntax.CgoPreamble(file, file.Imports[j])
+				if cgoImport {
+					info.Cgo.Imports[i] = c11.InspectDeclarationsWithConfig(preamble, c11.ObjectConfig{DataModel: c11.DataModelLP64}).DeclaredFunctions
+				}
+			}
 		}
 	}
 	var symbolHash []int
@@ -325,12 +337,12 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			insertSymbolHash(info.Symbols, symbolHash, len(info.Symbols)-1)
 			if pkg.ExplicitC && !pkg.Files[fileIndex].C {
 				if export := syntax.ExportDirective(file, fn); export != "" {
-					for j := 0; j < len(info.CExports); j++ {
-						if info.CExports[j].Name == export {
+					for j := 0; j < len(info.Cgo.Exports); j++ {
+						if info.Cgo.Exports[j].Name == export {
 							return info, false, CheckErrDuplicate, fileIndex, fn.NameTok
 						}
 					}
-					info.CExports = append(info.CExports, CExport{Name: export, GoName: goName, Symbol: -1})
+					info.Cgo.Exports = append(info.Cgo.Exports, CExport{Name: export, GoName: goName, Symbol: -1})
 				}
 			}
 		}
@@ -352,8 +364,10 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	sortSymbols(info.Symbols)
 	sortImports(info.Imports)
-	for i := 0; i < len(info.CExports); i++ {
-		info.CExports[i].Symbol = LookupPackageSymbol(info, info.CExports[i].GoName)
+	if info.Cgo != nil {
+		for i := 0; i < len(info.Cgo.Exports); i++ {
+			info.Cgo.Exports[i].Symbol = LookupPackageSymbol(info, info.Cgo.Exports[i].GoName)
+		}
 	}
 	return info, true, CheckOK, -1, -1
 }
