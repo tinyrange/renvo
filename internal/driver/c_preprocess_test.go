@@ -73,6 +73,8 @@ func TestPreprocessCCommandDumpsMacrosForNullProbe(t *testing.T) {
 	args := NormalizeCCompilerCommand([]string{"renvo", "cc", "-dM", "-E", "-x", "c", "/dev/null"})
 	result := PreprocessCCommand(args, "/repo", memorySourceFS{})
 	if !result.Ok || !strings.Contains(string(result.Source), "#define __GNUC__ 5\n") ||
+		!strings.Contains(string(result.Source), "#define __INT_LEAST8_TYPE__ signed char\n") ||
+		!strings.Contains(string(result.Source), "#define __UINTMAX_TYPE__ long unsigned int\n") ||
 		strings.Contains(string(result.Source), "__clang__") {
 		t.Fatalf("null macro-dump result = %#v, source %q", result, result.Source)
 	}
@@ -84,6 +86,8 @@ func TestPreprocessCCommandReportsI386DataModel(t *testing.T) {
 	text := string(result.Source)
 	if !result.Ok || !strings.Contains(text, "#define __i386__ 1\n") ||
 		!strings.Contains(text, "#define __SIZEOF_POINTER__ 4\n") ||
+		!strings.Contains(text, "#define __INT64_TYPE__ long long int\n") ||
+		!strings.Contains(text, "#define __INT_FAST32_TYPE__ int\n") ||
 		!strings.Contains(text, "#define __CHAR_UNSIGNED__ 1\n") ||
 		strings.Contains(text, "#define __x86_64__ 1\n") || strings.Contains(text, "#define __LP64__ 1\n") {
 		t.Fatalf("i386 macro dump = %#v, source %q", result, result.Source)

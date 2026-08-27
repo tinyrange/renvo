@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+work=${RENVO_SQLITE_SMOKE_WORK:-"$root/sandbox/sqlite-smoke"}
+version=3530400
+archive="$work/sqlite-amalgamation-$version.zip"
+source_dir="$work/sqlite-amalgamation-$version"
+url="https://www.sqlite.org/2026/sqlite-amalgamation-$version.zip"
+expected_sha3=628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
+
+mkdir -p "$work"
+if [ ! -f "$archive" ]; then
+    curl --fail --location --output "$archive" "$url"
+fi
+
+actual_sha3=$(openssl dgst -sha3-256 "$archive" | sed 's/^.*= //')
+if [ "$actual_sha3" != "$expected_sha3" ]; then
+    echo "SQLite archive checksum mismatch" >&2
+    exit 1
+fi
+
+if [ ! -f "$source_dir/sqlite3.c" ]; then
+    unzip -q "$archive" -d "$work"
+fi
+
+go build -o "$work/renvo" ./cmd/renvo
+
+"$work/renvo" cc \
+    -arena-size 1073741824 \
+    -I "$source_dir" \
+    -isystem "$root/tools/sqlite-smoke/include" \
+    -DSQLITE_THREADSAFE=0 \
+    -DSQLITE_OMIT_LOAD_EXTENSION=1 \
+    -DSQLITE_DEFAULT_MEMSTATUS=0 \
+    -DSQLITE_OMIT_DATETIME_FUNCS=1 \
+    -DSQLITE_OMIT_WAL=1 \
+    -DSQLITE_OS_OTHER=1 \
+    -DSQLITE_DISABLE_INTRINSIC=1 \
+    -DSQLITE_TEMP_STORE=3 \
+    "$root/tools/sqlite-smoke/sqlite_wrapper.c" \
+    -o "$work/sqlite-smoke"
+
+actual=$("$work/sqlite-smoke")
+expected='name=C year=1972
+name=SQL year=1974'
+if [ "$actual" != "$expected" ]; then
+    echo "unexpected SQLite smoke output:" >&2
+    printf '%s\n' "$actual" >&2
+    exit 1
+fi
+
+printf '%s\n' "$actual"

@@ -256,6 +256,10 @@ and `main(int, char **)` are supported. C identifiers do not fall through to
 Go builtins; for example, `print` is not a C output function—include
 `<stdio.h>` and use `printf`, `puts`, or the stream APIs.
 
+For a larger local exercise, [`tools/sqlite-smoke`](tools/sqlite-smoke) builds
+the pinned official SQLite amalgamation and runs queries against an in-memory
+database. It is intentionally a manual smoke test, not a CI support gate.
+
 A native C entrypoint can opt into a narrow Go adapter from the same directory:
 
 ```c
