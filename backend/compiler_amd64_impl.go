@@ -1,8 +1,6 @@
 package main
 
 const renvoAmd64ELFCodeOffset = 0xb0
-const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
-
 const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
 const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
 const renvoHostedAmd64EnvironmentBSSSize = renvoLinuxAmd64EnvironmentBSSSize
@@ -91,12 +89,6 @@ func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinear
 		return nil
 	}
 	a := &g.asm
-	if renvoFixedTarget == 0 {
-		// Large dynamic programs have enough output-size headroom to favor
-		// faster instructions. Fixed-target compilers retain their compact
-		// path so their strict binary gates remain unchanged.
-		g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
-	}
 	a.codeOffset = renvoAmd64ELFCodeOffset
 	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
 		renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSOpenBSD {

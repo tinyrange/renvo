@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "293f4c2bd541389a7f6b32c773e1eab422d3a9fe3660030dde89a7aaf047f9df"
+const CompilerSourceDigest = "55de28f3db1685f934da08b8a6636c2264ff3db6a5d4ff63d2efba6c2f21330e"
 
 // source: backend/compiler_common_impl.go
 
@@ -354,6 +354,8 @@ return false
 return renvoRTGPreparedFunctionSymbols != 0
 }
 
+const renvoLargeProgramSourceThreshold = 1048576
+
 func renvoAsmInit(a *renvoAsm) {
 renvoNonNil(a)
 renvoAsmInitWithContext(a, renvoLegacyCompileContext())
@@ -388,6 +390,7 @@ a.relocs = make([]int32, 0, 131072)
 a.absRelocs = make([]int32, 0, 98304)
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else {
+if a.c.optimizeRuntime {
 
 
 
@@ -396,13 +399,19 @@ a.code = make([]byte, 0, 3670016)
 a.labelPos = make([]int32, 0, 40960)
 a.relocs = make([]int32, 0, 163840)
 a.absRelocs = make([]int32, 0, 32768)
+} else {
+a.code = make([]byte, 0, 2097152)
+a.labelPos = make([]int32, 0, 24576)
+a.relocs = make([]int32, 0, 81920)
+a.absRelocs = make([]int32, 0, 12288)
+}
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
 }
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 a.data = make([]byte, 0, 8192)
-} else if renvoFixedTarget == 0 {
+} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 a.data = make([]byte, 0, 131072)
 } else {
 a.data = make([]byte, 0, 65536)
@@ -32025,6 +32034,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 renvoNonNil(prog)
 renvoSetTarget(target)
 context := renvoNewCompileContext(target, renvoCompilerStripSymbols, renvoCompilerWindowsSubsystem == 2, renvoCompilerEmitImage)
+context.optimizeRuntime = len(prog.src) >= renvoLargeProgramSourceThreshold
 prog.c = *context
 if !prog.ok {
 renvoPrintErr("renvo: parse failed\n")
@@ -38577,8 +38587,6 @@ return 1
 // source: backend/compiler_amd64_impl.go
 
 const renvoAmd64ELFCodeOffset = 0xb0
-const renvoAmd64RuntimeOptimizationSourceThreshold = 1048576
-
 const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
 const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
 const renvoHostedAmd64EnvironmentBSSSize = renvoLinuxAmd64EnvironmentBSSSize
@@ -38667,12 +38675,6 @@ if g == nil {
 return nil
 }
 a := &g.asm
-if renvoFixedTarget == 0 {
-
-
-
-g.c.optimizeRuntime = len(p.src) >= renvoAmd64RuntimeOptimizationSourceThreshold
-}
 a.codeOffset = renvoAmd64ELFCodeOffset
 if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
 renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSOpenBSD {
