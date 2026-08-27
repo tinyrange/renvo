@@ -24,23 +24,28 @@ func renvoBackendTargetHasBuildTag(target string, tag string) bool {
 	return false
 }
 
-func resolveForeignTarget(options Options, workDir string, target string, fs SourceFS) (unit.TargetBinding, bool, []string, bool) {
+func resolveForeignTarget(options *Options, workDir string, target string, fs SourceFS, result *foreignTarget) {
 	if name, definition, version, ok := targetinfo.Binding(target); ok {
-		return unit.TargetBinding{Target: name, Definition: definition, DescriptorVersion: version}, targetinfo.HasCapability(target, "in_place_entry"), nil, true
+		result.Binding = unit.TargetBinding{Target: name, Definition: definition, DescriptorVersion: version}
+		result.InPlace = targetinfo.SupportsInPlaceEntry(target)
+		result.Ok = true
+		return
 	}
 	if options.BackendDefinition == "" || fs == nil {
-		return unit.TargetBinding{}, false, nil, false
+		return
 	}
 	path := load.JoinPath(workDir, options.BackendDefinition)
 	source, ok := fs.ReadFile(path)
 	if !ok {
-		return unit.TargetBinding{}, false, nil, false
+		return
 	}
 	resolved := backenddef.ResolveImports(source, path, target, backendDefinitionImportLoader{fs: fs})
 	if !resolved.Ok {
-		return unit.TargetBinding{}, false, nil, false
+		return
 	}
 	descriptor := resolved.Descriptor
-	return unit.TargetBinding{Target: descriptor.Name, Definition: string(descriptor.Definition[:]), DescriptorVersion: descriptor.Version},
-		findString(descriptor.Capabilities, "in_place_entry") >= 0, descriptor.BuildTags, true
+	result.Binding = unit.TargetBinding{Target: descriptor.Name, Definition: string(descriptor.Definition[:]), DescriptorVersion: descriptor.Version}
+	result.InPlace = findString(descriptor.Capabilities, "in_place_entry") >= 0
+	result.Tags = descriptor.BuildTags
+	result.Ok = true
 }

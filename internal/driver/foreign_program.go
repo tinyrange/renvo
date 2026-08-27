@@ -35,70 +35,74 @@ type foreignPreparation struct {
 	Ok         bool
 }
 
+type foreignTarget struct {
+	Binding unit.TargetBinding
+	Tags    []string
+	InPlace bool
+	Ok      bool
+}
+
 type foreignDirectiveArguments struct {
 	Start [3]int
 	End   [3]int
 	Count int
 }
 
-func prepareForeignPrograms(options Options, workDir string, stdRoot string, moduleCache string, sources SourceResult, fs SourceFS) foreignPreparation {
-	directives, diagnostic, ok := scanForeignDirectives(sources.Files, sources.Root.Dir)
+func prepareForeignPrograms(options *Options, workDir string, stdRoot string, moduleCache string, sources *SourceResult, fs SourceFS, result *foreignPreparation) {
+	directives, ok := scanForeignDirectives(sources.Files, sources.Root.Dir, result)
 	if !ok {
-		return foreignPreparation{Diagnostic: diagnostic}
+		return
 	}
 	if len(directives) == 0 {
-		return foreignPreparation{Ok: true}
+		result.Ok = true
+		return
 	}
 	if options.Mode != ModeExecutable || options.CCompiler || options.Script {
-		return foreignPreparation{Diagnostic: foreignDiagnostic(directives[0], foreignErrMode, "renvo:compile is only valid in Go executable builds", nil)}
+		setForeignDiagnostic(&result.Diagnostic, directives[0], foreignErrMode, "renvo:compile is only valid in Go executable builds", nil)
+		return
 	}
 	programs := make([]unit.ForeignProgram, 0, len(directives))
 	for i := 0; i < len(directives); i++ {
 		directive := directives[i]
-		binding, inPlace, targetTags, supported := resolveForeignTarget(options, workDir, directive.Target, fs)
-		if !supported {
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrTarget, "renvo:compile target is not available from the selected backend: "+directive.Target, nil)}
+		target := new(foreignTarget)
+		resolveForeignTarget(options, workDir, directive.Target, fs, target)
+		if !target.Ok {
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrTarget, "renvo:compile target is not available from the selected backend: "+directive.Target, nil)
+			return
 		}
-		childOptions := options
-		childOptions.Tags = make([]string, len(options.Tags))
-		copy(childOptions.Tags, options.Tags)
-		childOptions.Target = directive.Target
-		childOptions.TargetExplicit = true
-		childOptions.Output = ""
-		childOptions.EmitUnit = true
-		childOptions.EmitImage = false
-		childOptions.Strip = true
-		childOptions.BinaryLimit = 0
-		childOptions.System = ""
-		childOptions.SystemName = ""
-		childOptions.ArenaSize = 0
+		childTags := make([]string, len(options.Tags))
+		copy(childTags, options.Tags)
 		for tag := 0; tag < len(options.BackendBuildTags); tag++ {
-			childOptions.Tags = removeForeignTag(childOptions.Tags, options.BackendBuildTags[tag])
+			childTags = removeForeignTag(childTags, options.BackendBuildTags[tag])
 		}
-		for tag := 0; tag < len(targetTags); tag++ {
-			if findString(childOptions.Tags, targetTags[tag]) < 0 {
-				childOptions.Tags = append(childOptions.Tags, targetTags[tag])
+		for tag := 0; tag < len(target.Tags); tag++ {
+			if findString(childTags, target.Tags[tag]) < 0 {
+				childTags = append(childTags, target.Tags[tag])
 			}
 		}
 		var childSources SourceResult
 		if fs != nil {
-			if len(childOptions.Files) > 0 {
-				childSources = CollectSourceFilesForTargetTagsWithModuleCache(workDir, stdRoot, childOptions.Files, childOptions.Target, childOptions.Tags, moduleCache, fs)
+			if len(options.Files) > 0 {
+				childSources = CollectSourceFilesForTargetTagsWithModuleCache(workDir, stdRoot, options.Files, directive.Target, childTags, moduleCache, fs)
 			} else {
-				childSources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, childOptions.Package, childOptions.Target, childOptions.Tags, moduleCache, fs)
+				childSources = CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, options.Package, directive.Target, childTags, moduleCache, fs)
 			}
 		} else {
-			filtered, path, sourceError := filterSourcesForOptions(sources.Files, workDir, childOptions)
-			childSources = SourceResult{Files: filtered, Module: sources.Module, Root: sources.Root, Ok: sourceError == SourceOK, Error: sourceError, ErrorPath: path}
+			filtered, path, valid := filterSourcesForTargetTags(sources.Files, directive.Target, childTags)
+			childSources = SourceResult{Files: filtered, Module: sources.Module, Root: sources.Root, Ok: valid, ErrorPath: path}
+			if !valid {
+				childSources.Error = SourceErrBuildConstraint
+			}
 		}
 		if !childSources.Ok {
 			failed := BuildResult{Error: BuildErrSource, ErrorPath: childSources.ErrorPath, Sources: childSources,
 				ErrorAt: -1, ErrorPackage: -1, ErrorFile: -1, ErrorToken: -1}
 			cause := diagnosticForBuild(failed)
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrBuild, "foreign frontend for "+directive.Target+" failed: "+cause.Message, &cause)}
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrBuild, "foreign frontend for "+directive.Target+" failed: "+cause.Message, &cause)
+			return
 		}
-		rootArg := childOptions.Package
-		if len(childOptions.Files) > 0 {
+		rootArg := options.Package
+		if len(options.Files) > 0 {
 			rootArg = childSources.Root.Dir
 		}
 		built := pipeline.BuildUnit(workDir, stdRoot, rootArg, childSources.Files)
@@ -106,24 +110,29 @@ func prepareForeignPrograms(options Options, workDir string, stdRoot string, mod
 			failed := BuildResult{Error: BuildErrPipeline, Pipeline: built, Sources: childSources,
 				ErrorAt: built.ErrorOffset, ErrorPackage: built.ErrorPackage, ErrorFile: built.ErrorFile, ErrorToken: built.ErrorToken}
 			cause := diagnosticForBuild(failed)
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrBuild, "foreign frontend for "+directive.Target+" failed: "+cause.Message, &cause)}
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrBuild, "foreign frontend for "+directive.Target+" failed: "+cause.Message, &cause)
+			return
 		}
-		entry := linkedForeignFunction(built.Link.Program, directive.Entry)
+		entry := linkedForeignFunction(&built.Link.Program, directive.Entry)
 		if entry < 0 {
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrEntrypoint, "foreign entry function was not found in the root package: "+directive.Entry, nil)}
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrEntrypoint, "foreign entry function was not found in the root package: "+directive.Entry, nil)
+			return
 		}
 		childUnit, bound := unit.BindEntrypoint(built.Link.Data, entry)
 		if !bound {
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrUnit, "could not bind the foreign entrypoint into its unit", nil)}
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrUnit, "could not bind the foreign entrypoint into its unit", nil)
+			return
 		}
-		childUnit, bound = unit.BindTarget(childUnit, binding)
+		childUnit, bound = unit.BindTarget(childUnit, target.Binding)
 		if !bound {
-			return foreignPreparation{Diagnostic: foreignDiagnostic(directive, foreignErrTarget, "foreign target has no backend binding: "+directive.Target, nil)}
+			setForeignDiagnostic(&result.Diagnostic, directive, foreignErrTarget, "foreign target has no backend binding: "+directive.Target, nil)
+			return
 		}
 		programs = append(programs, unit.ForeignProgram{Name: directive.Name, Kind: directive.Kind,
-			Target: binding.Target, InPlace: inPlace, Unit: childUnit})
+			Target: target.Binding.Target, InPlace: target.InPlace, Unit: childUnit})
 	}
-	return foreignPreparation{Programs: programs, Ok: true}
+	result.Programs = programs
+	result.Ok = true
 }
 
 func removeForeignTag(tags []string, unwanted string) []string {
@@ -136,7 +145,7 @@ func removeForeignTag(tags []string, unwanted string) []string {
 	return out
 }
 
-func linkedForeignFunction(program unit.Program, name string) int {
+func linkedForeignFunction(program *unit.Program, name string) int {
 	start, end := 0, len(program.Funcs)
 	for i := 0; i < len(program.Packages); i++ {
 		pkg := program.Packages[i]
@@ -158,7 +167,7 @@ func linkedForeignFunction(program unit.Program, name string) int {
 	return found
 }
 
-func linkedForeignGlobal(program unit.Program, name string) int {
+func linkedForeignGlobal(program *unit.Program, name string) int {
 	start, end := 0, len(program.Decls)
 	for i := 0; i < len(program.Packages); i++ {
 		pkg := program.Packages[i]
@@ -176,7 +185,7 @@ func linkedForeignGlobal(program unit.Program, name string) int {
 	return -1
 }
 
-func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDirective, Diagnostic, bool) {
+func scanForeignDirectives(files []load.SourceFile, rootDir string, result *foreignPreparation) ([]foreignDirective, bool) {
 	var directives []foreignDirective
 	for i := 0; i < len(files); i++ {
 		file := files[i]
@@ -204,22 +213,26 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 				fields := foreignDirectiveFields(file.Src, argsStart, lineEnd)
 				base := foreignDirective{Path: file.Path, Offset: contentStart, Line: line, Column: contentStart - lineStart + 1}
 				if fields.Count != 3 || string(file.Src[fields.Start[0]:fields.End[0]]) != "-t" {
-					return nil, foreignDiagnostic(base, foreignErrDirective, "expected //renvo:compile -t <target> <entry>", nil), false
+					setForeignDiagnostic(&result.Diagnostic, base, foreignErrDirective, "expected //renvo:compile -t <target> <entry>", nil)
+					return nil, false
 				}
 				base.Target = string(file.Src[fields.Start[1]:fields.End[1]])
 				base.Entry = string(file.Src[fields.Start[2]:fields.End[2]])
 				decl, kind, ok := foreignDirectiveDeclaration(parsed, lineEnd)
 				if !ok {
-					return nil, foreignDiagnostic(base, foreignErrDeclaration, "renvo:compile must immediately precede one uninitialized package variable", nil), false
+					setForeignDiagnostic(&result.Diagnostic, base, foreignErrDeclaration, "renvo:compile must immediately precede one uninitialized package variable", nil)
+					return nil, false
 				}
 				base.Name = string(syntax.TokenText(file.Src, parsed.Tokens[decl.NameTok]))
 				base.Kind = kind
 				if kind == 0 {
-					return nil, foreignDiagnostic(base, foreignErrType, "renvo:compile variable type must be []byte or uintptr", nil), false
+					setForeignDiagnostic(&result.Diagnostic, base, foreignErrType, "renvo:compile variable type must be []byte or uintptr", nil)
+					return nil, false
 				}
 				for previous := 0; previous < len(directives); previous++ {
 					if directives[previous].Name == base.Name {
-						return nil, foreignDiagnostic(base, foreignErrDeclaration, "duplicate renvo:compile variable: "+base.Name, nil), false
+						setForeignDiagnostic(&result.Diagnostic, base, foreignErrDeclaration, "duplicate renvo:compile variable: "+base.Name, nil)
+						return nil, false
 					}
 				}
 				directives = append(directives, base)
@@ -231,42 +244,16 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 			line++
 		}
 	}
-	return directives, Diagnostic{}, true
+	return directives, true
 }
 
 func foreignSourceContainsDirective(src []byte) bool {
-	for i := 0; i+13 <= len(src); {
-		last := src[i+12]
-		if last == 'e' && src[i] == 'r' && src[i+1] == 'e' && src[i+2] == 'n' &&
+	for i := 0; i+13 <= len(src); i++ {
+		if src[i] == 'r' && src[i+1] == 'e' && src[i+2] == 'n' &&
 			src[i+3] == 'v' && src[i+4] == 'o' && src[i+5] == ':' &&
 			src[i+6] == 'c' && src[i+7] == 'o' && src[i+8] == 'm' &&
-			src[i+9] == 'p' && src[i+10] == 'i' && src[i+11] == 'l' {
+			src[i+9] == 'p' && src[i+10] == 'i' && src[i+11] == 'l' && src[i+12] == 'e' {
 			return true
-		}
-		if last == 'l' {
-			i++
-		} else if last == 'i' {
-			i += 2
-		} else if last == 'p' {
-			i += 3
-		} else if last == 'm' {
-			i += 4
-		} else if last == 'o' {
-			i += 5
-		} else if last == 'c' {
-			i += 6
-		} else if last == ':' {
-			i += 7
-		} else if last == 'v' {
-			i += 9
-		} else if last == 'n' {
-			i += 10
-		} else if last == 'e' {
-			i += 11
-		} else if last == 'r' {
-			i += 12
-		} else {
-			i += 13
 		}
 	}
 	return false
@@ -360,13 +347,16 @@ func foreignDirectiveImmediatelyPrecedes(src []byte, after int, declaration int)
 	return after == declaration
 }
 
-func foreignDiagnostic(directive foreignDirective, detail int, message string, cause *Diagnostic) Diagnostic {
-	d := Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-00" + diagnosticIntText(detail), Message: message,
-		Path: directive.Path, Start: directive.Offset, End: directive.Offset}
+func setForeignDiagnostic(d *Diagnostic, directive foreignDirective, detail int, message string, cause *Diagnostic) {
+	d.Phase = "foreign"
+	d.Code = "RENVO-FOREIGN-00" + diagnosticIntText(detail)
+	d.Message = message
+	d.Path = directive.Path
+	d.Start = directive.Offset
+	d.End = directive.Offset
 	if cause != nil && cause.Path != "" {
 		d.Path, d.Start, d.End, d.Line, d.Column = cause.Path, cause.Start, cause.End, cause.Line, cause.Column
-		return d
+		return
 	}
 	d.Line, d.Column = directive.Line, directive.Column
-	return d
 }

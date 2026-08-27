@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "07a06a670c4ac7c14039e4b4c3c219160bba8c2ad780b37e654a35c06cd6ce21"
+const CompilerSourceDigest = "109c77bc7d18adb19a27cd1527e9e9b5e9735eb2ff7d8c31b8bcba0010e79e20"
 
 // source: backend/compiler_common_impl.go
 
@@ -364,18 +364,22 @@ renvoAsmInitWithContext(a, renvoLegacyCompileContext())
 func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 renvoNonNil(a, context)
 a.c = context
+
+
+
+codeCapacity := 0
 a.symbols = nil
 a.symbolName = nil
 a.staticImports = nil
 a.darwinImports = nil
 if renvoFixedTarget != 0 {
 if renvoFixedTarget == renvoTargetWasiWasm32 {
-a.code = make([]byte, 0, 655360)
+codeCapacity = 655360
 a.labelPos = make([]int32, 0, 8192)
 a.relocs = make([]int32, 0, 32768)
 a.absRelocs = make([]int32, 0, 4096)
 } else {
-a.code = make([]byte, 0, 2097152)
+codeCapacity = 2097152
 a.labelPos = make([]int32, 0, 32768)
 a.relocs = make([]int32, 0, 65536)
 a.absRelocs = make([]int32, 0, 49152)
@@ -384,7 +388,7 @@ if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 1024)
 }
 } else if a.c.renvoTargetArch == renvoArchWasm32 {
-a.code = make([]byte, 0, 655360)
+codeCapacity = 655360
 a.labelPos = make([]int32, 0, 32768)
 a.relocs = make([]int32, 0, 131072)
 a.absRelocs = make([]int32, 0, 98304)
@@ -394,7 +398,7 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 
 
-a.code = make([]byte, 0, 3670016)
+codeCapacity = 3670016
 a.labelPos = make([]int32, 0, 40960)
 a.relocs = make([]int32, 0, 163840)
 a.absRelocs = make([]int32, 0, 32768)
@@ -419,6 +423,7 @@ a.kernelImportOffsets = make([]int, 0, 128)
 if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 }
+a.code = make([]byte, 0, codeCapacity)
 a.bssSize = 0
 a.codeOffset = 0
 a.dataOffset = 0
@@ -14898,6 +14903,18 @@ return true
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 renvoNonNil(g)
+if renvoFixedTarget == 0 && size >= 64 {
+source := renvoAddUnnamedLocal(g, renvoTypeInt)
+destination := renvoAddUnnamedLocal(g, renvoTypeInt)
+count := renvoAddUnnamedLocal(g, renvoTypeInt)
+renvoAsmAddressPrimaryStack(&g.asm, srcOffset)
+renvoAsmStorePrimaryStack(&g.asm, source)
+renvoAsmAddressPrimaryStack(&g.asm, destOffset)
+renvoAsmStorePrimaryStack(&g.asm, destination)
+renvoAsmStoreStackImm(&g.asm, count, size)
+renvoEmitCopyBytes(g, source, destination, count)
+return
+}
 renvoEmitCopyNative(g, srcOffset, destOffset, size, renvoNativeCopyStackToStack)
 }
 func renvoEmitCopyStackToMemSecondary(g *renvoLinearGen, srcOffset int, destDisp int, size int) {

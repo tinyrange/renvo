@@ -270,6 +270,8 @@ func HasCapability(name string, capability string) bool {
 	return false
 }
 
+func SupportsInPlaceEntry(name string) bool { return false }
+
 func DefaultArena(name string) int {
 	if name == "browser/wasm32" {
 		return 134217728

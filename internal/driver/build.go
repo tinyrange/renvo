@@ -17,23 +17,22 @@ const (
 )
 
 type BuildResult struct {
-	Options           Options
-	Sources           SourceResult
-	Pipeline          pipeline.Result
-	Unit              []byte
-	Ok                bool
-	Error             int
-	ErrorArg          string
-	ErrorPath         string
-	ErrorAt           int
-	ErrorPackage      int
-	ErrorFile         int
-	ErrorToken        int
-	Diagnostic        Diagnostic
-	ForeignDiagnostic Diagnostic
-	CacheKeyA         int
-	CacheKeyB         int
-	CacheHit          bool
+	Options      Options
+	Sources      SourceResult
+	Pipeline     pipeline.Result
+	Unit         []byte
+	Ok           bool
+	Error        int
+	ErrorArg     string
+	ErrorPath    string
+	ErrorAt      int
+	ErrorPackage int
+	ErrorFile    int
+	ErrorToken   int
+	Diagnostic   Diagnostic
+	CacheKeyA    int
+	CacheKeyB    int
+	CacheHit     bool
 }
 
 var embeddedBuildCacheValid bool
@@ -68,9 +67,11 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	}
 	foreignRoot := load.JoinPath(workDir, rootArg)
 	foreignSources := SourceResult{Files: filtered, Root: load.PackageRef{Dir: foreignRoot}, Ok: true}
-	foreign := prepareForeignPrograms(options, workDir, stdRoot, "", foreignSources, nil)
+	foreign := new(foreignPreparation)
+	prepareForeignPrograms(&options, workDir, stdRoot, "", &foreignSources, nil, foreign)
 	if !foreign.Ok {
-		return buildForeignFail(result, foreign.Diagnostic)
+		setBuildForeignFail(&result, foreign.Diagnostic)
+		return result
 	}
 	built := pipeline.BuildUnit(workDir, stdRoot, rootArg, filtered)
 	result.Pipeline = built
@@ -78,8 +79,9 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
-		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	if !bindForeignPrograms(&result.Unit, &built.Link.Program, foreign.Programs) {
+		setBuildForeignFail(&result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+		return result
 	}
 	bindBuiltInTarget(&result.Unit, options)
 	return result
@@ -106,9 +108,11 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
-	foreign := prepareForeignPrograms(result.Options, workDir, stdRoot, "", sources, fs)
+	foreign := new(foreignPreparation)
+	prepareForeignPrograms(&result.Options, workDir, stdRoot, "", &sources, fs, foreign)
 	if !foreign.Ok {
-		return buildForeignFail(result, foreign.Diagnostic)
+		setBuildForeignFail(&result, foreign.Diagnostic)
+		return result
 	}
 	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
 	result.Pipeline = built
@@ -116,8 +120,9 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
-		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	if !bindForeignPrograms(&result.Unit, &built.Link.Program, foreign.Programs) {
+		setBuildForeignFail(&result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+		return result
 	}
 	bindBuiltInTarget(&result.Unit, result.Options)
 	return result
@@ -156,7 +161,8 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		result.Diagnostic = diagnosticForBuild(failed)
 		return result
 	}
-	foreign := prepareForeignPrograms(options, workDir, stdRoot, "", sources, fs)
+	foreign := new(foreignPreparation)
+	prepareForeignPrograms(&options, workDir, stdRoot, "", &sources, fs, foreign)
 	if !foreign.Ok {
 		result.Phase = BuildErrForeign
 		result.Diagnostic = foreign.Diagnostic
@@ -182,7 +188,7 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		return result
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
+	if !bindForeignPrograms(&result.Unit, &built.Link.Program, foreign.Programs) {
 		result.Phase = BuildErrForeign
 		result.Diagnostic = Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"}
 		return result
@@ -279,9 +285,11 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if len(options.Files) > 0 {
 		rootArg = sources.Root.Dir
 	}
-	foreign := prepareForeignPrograms(options, workDir, stdRoot, moduleCache, sources, fs)
+	foreign := new(foreignPreparation)
+	prepareForeignPrograms(&options, workDir, stdRoot, moduleCache, &sources, fs, foreign)
 	if !foreign.Ok {
-		return buildForeignFail(result, foreign.Diagnostic)
+		setBuildForeignFail(&result, foreign.Diagnostic)
+		return result
 	}
 	var built pipeline.Result
 	if options.Mode == ModeObject && options.EmitUnit {
@@ -305,8 +313,9 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
-		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	if !bindForeignPrograms(&result.Unit, &built.Link.Program, foreign.Programs) {
+		setBuildForeignFail(&result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+		return result
 	}
 	bindBuiltInTarget(&result.Unit, options)
 	result.Sources = SourceResult{}
@@ -369,9 +378,11 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	if len(options.Files) > 0 {
 		rootArg = sources.Root.Dir
 	}
-	foreign := prepareForeignPrograms(options, workDir, stdRoot, moduleCache, sources, fs)
+	foreign := new(foreignPreparation)
+	prepareForeignPrograms(&options, workDir, stdRoot, moduleCache, &sources, fs, foreign)
 	if !foreign.Ok {
-		return buildForeignFail(result, foreign.Diagnostic)
+		setBuildForeignFail(&result, foreign.Diagnostic)
+		return result
 	}
 	var built pipeline.Result
 	if compact && options.Mode == ModeObject {
@@ -399,8 +410,9 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
-	if !bindForeignPrograms(&result.Unit, built.Link.Program, foreign.Programs) {
-		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	if !bindForeignPrograms(&result.Unit, &built.Link.Program, foreign.Programs) {
+		setBuildForeignFail(&result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+		return result
 	}
 	bindBuiltInTarget(&result.Unit, options)
 	if compact {
@@ -425,7 +437,7 @@ func bindBuiltInTarget(data *[]byte, options Options) {
 	unit.BindUnboundTarget(data, targetBinding)
 }
 
-func bindForeignPrograms(data *[]byte, program unit.Program, programs []unit.ForeignProgram) bool {
+func bindForeignPrograms(data *[]byte, program *unit.Program, programs []unit.ForeignProgram) bool {
 	for i := 0; i < len(programs); i++ {
 		programs[i].Global = linkedForeignGlobal(program, programs[i].Name)
 		if programs[i].Global < 0 {
@@ -623,7 +635,13 @@ func buildFail(result BuildResult, err int, arg string, path string, at int, pkg
 	return result
 }
 
-func buildForeignFail(result BuildResult, diagnostic Diagnostic) BuildResult {
-	result.ForeignDiagnostic = diagnostic
-	return buildFail(result, BuildErrForeign, "", diagnostic.Path, diagnostic.Start, -1, -1, -1)
+func setBuildForeignFail(result *BuildResult, diagnostic Diagnostic) {
+	result.Ok = false
+	result.Error = BuildErrForeign
+	result.ErrorPath = diagnostic.Path
+	result.ErrorAt = diagnostic.Start
+	result.ErrorPackage = -1
+	result.ErrorFile = -1
+	result.ErrorToken = -1
+	result.Diagnostic = diagnostic
 }

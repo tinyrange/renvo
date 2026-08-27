@@ -394,6 +394,25 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		out.WriteString(" }\n")
 	}
 	out.WriteString("return false\n}\n\n")
+	out.WriteString("func SupportsInPlaceEntry(name string) bool { return ")
+	first = true
+	for _, descriptor := range descriptors {
+		if !contains(descriptor.Capabilities, "in_place_entry") {
+			continue
+		}
+		if !first {
+			out.WriteString(" || ")
+		}
+		fmt.Fprintf(&out, "name == %q", descriptor.Name)
+		for _, alias := range descriptor.Aliases {
+			fmt.Fprintf(&out, " || name == %q", alias)
+		}
+		first = false
+	}
+	if first {
+		out.WriteString("false")
+	}
+	out.WriteString(" }\n\n")
 	out.WriteString("func DefaultArena(name string) int {\n")
 	for _, descriptor := range descriptors {
 		if descriptor.DefaultArena != 0 {

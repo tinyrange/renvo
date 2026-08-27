@@ -103,9 +103,10 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
-		foreign := prepareForeignPrograms(options, s.workDir, s.stdRoot, s.moduleCache, sources, s.fs)
+		foreign := new(foreignPreparation)
+		prepareForeignPrograms(&options, s.workDir, s.stdRoot, s.moduleCache, &sources, s.fs, foreign)
 		if !foreign.Ok {
-			s.result = buildForeignFail(s.result, foreign.Diagnostic)
+			setBuildForeignFail(&s.result, foreign.Diagnostic)
 			s.stage = 4
 			return true
 		}
@@ -136,8 +137,8 @@ func (s *FSBuildSession) Step() bool {
 			return true
 		}
 		s.result.Unit = built.Link.Data
-		if !bindForeignPrograms(&s.result.Unit, built.Link.Program, s.foreignPrograms) {
-			s.result = buildForeignFail(s.result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+		if !bindForeignPrograms(&s.result.Unit, &built.Link.Program, s.foreignPrograms) {
+			setBuildForeignFail(&s.result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
 			s.stage = 4
 			return true
 		}

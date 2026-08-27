@@ -357,18 +357,22 @@ func renvoAsmInit(a *renvoAsm) {
 func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	renvoNonNil(a, context)
 	a.c = context
+	// Keep the mutually exclusive code reserves behind one runtime capacity.
+	// Constant-capacity makes cause the self-host backend to materialize every
+	// branch as a separate static ring, including branches for other targets.
+	codeCapacity := 0
 	a.symbols = nil
 	a.symbolName = nil
 	a.staticImports = nil
 	a.darwinImports = nil
 	if renvoFixedTarget != 0 {
 		if renvoFixedTarget == renvoTargetWasiWasm32 {
-			a.code = make([]byte, 0, 655360)
+			codeCapacity = 655360
 			a.labelPos = make([]int32, 0, 8192)
 			a.relocs = make([]int32, 0, 32768)
 			a.absRelocs = make([]int32, 0, 4096)
 		} else {
-			a.code = make([]byte, 0, 2097152)
+			codeCapacity = 2097152
 			a.labelPos = make([]int32, 0, 32768)
 			a.relocs = make([]int32, 0, 65536)
 			a.absRelocs = make([]int32, 0, 49152)
@@ -377,7 +381,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 			a.symbols = make([]renvoAsmSymbol, 0, 1024)
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
-		a.code = make([]byte, 0, 655360)
+		codeCapacity = 655360
 		a.labelPos = make([]int32, 0, 32768)
 		a.relocs = make([]int32, 0, 131072)
 		a.absRelocs = make([]int32, 0, 98304)
@@ -387,7 +391,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// labels, 154,300 relative relocations, and 30,200 absolute relocations.
 		// Reserve one measured growth range so arena-backed slices do not retain
 		// their undersized predecessor pages at the self-host peak.
-		a.code = make([]byte, 0, 3670016)
+		codeCapacity = 3670016
 		a.labelPos = make([]int32, 0, 40960)
 		a.relocs = make([]int32, 0, 163840)
 		a.absRelocs = make([]int32, 0, 32768)
@@ -412,6 +416,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 		a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 	}
+	a.code = make([]byte, 0, codeCapacity)
 	a.bssSize = 0
 	a.codeOffset = 0
 	a.dataOffset = 0
@@ -14891,6 +14896,18 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 	renvoNonNil(g)
+	if renvoFixedTarget == 0 && size >= 64 {
+		source := renvoAddUnnamedLocal(g, renvoTypeInt)
+		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
+		count := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmAddressPrimaryStack(&g.asm, srcOffset)
+		renvoAsmStorePrimaryStack(&g.asm, source)
+		renvoAsmAddressPrimaryStack(&g.asm, destOffset)
+		renvoAsmStorePrimaryStack(&g.asm, destination)
+		renvoAsmStoreStackImm(&g.asm, count, size)
+		renvoEmitCopyBytes(g, source, destination, count)
+		return
+	}
 	renvoEmitCopyNative(g, srcOffset, destOffset, size, renvoNativeCopyStackToStack)
 }
 func renvoEmitCopyStackToMemSecondary(g *renvoLinearGen, srcOffset int, destDisp int, size int) {
