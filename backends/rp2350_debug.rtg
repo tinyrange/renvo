@@ -1,0 +1,27 @@
+@import "../backend/definitions/rp2350_common.rtg"
+
+go backend {
+	func hotReloadFunctionFinish(out *RTGEmitter) {
+		for out.Len()&255 != 0 {
+			riscv32.emit(out, 0x00000013)
+		}
+	}
+}
+
+abi rp2350_debug_internal {
+	internal = riscv32_internal
+	function_finish = go hotReloadFunctionFinish
+}
+
+target rp2350-debug/riscv32 {
+	family = native_v1
+	os = rp2350
+	arch = riscv32
+	frontend_arch = riscv32
+	abi = rp2350_debug_internal
+	runtime = rp2350_debug_freestanding
+	executable = rp2350_debug_elf
+	build_tags = [rp2350, riscv32, renvo_hotreload]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}

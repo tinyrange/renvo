@@ -154,6 +154,7 @@ type boardDefinition struct {
 	Name       string         `json:"name"`
 	Target     string         `json:"target"`
 	Tag        string         `json:"tag"`
+	Device     string         `json:"device,omitempty"`
 	Docs       string         `json:"docs,omitempty"`
 	Artwork    string         `json:"artwork,omitempty"`
 	Machine    string         `json:"machine"`
@@ -165,6 +166,8 @@ type boardDefinition struct {
 
 var customTargets = []customTarget{
 	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Device: "esp32", Hidden: true},
+	{Name: "rp2-debug/thumb", Definition: "backends/rp2_debug.rtg", Backend: "backends/rp2-debug-thumb.wasm", Device: "rp2", Hidden: true},
+	{Name: "rp2350/riscv32", Label: "RP2350 RISC-V (experimental)", Definition: "backends/rp2350.rtg", Backend: "backends/rp2350-riscv32.wasm", Device: "rp2", Hidden: true},
 	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
 	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
 	{Name: "bios/8086", Label: "PC BIOS 8086 (boot disk)", Definition: "backends/msdos.rtg", Backend: "backends/bios-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
@@ -249,7 +252,7 @@ func main() {
 			Name: board.Target, Label: board.Name, FrontendTarget: board.Machine, BackendTarget: board.Machine,
 			Backend: board.Backend, Output: outputName(board.Machine, descriptor.OutputKind),
 			Tags: tags, Definition: hex.EncodeToString(descriptor.Definition[:]),
-			DescriptorVersion: descriptor.Version, Device: "esp32", Docs: board.Docs, Artwork: board.Artwork,
+			DescriptorVersion: descriptor.Version, Device: boardDevice(board), Docs: board.Docs, Artwork: board.Artwork,
 		})
 	}
 	for _, asset := range []*string{&catalog.Compiler, &catalog.Linker, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend} {
@@ -374,6 +377,13 @@ func readBoardDefinitions(root string) ([]boardDefinition, error) {
 	return boards, nil
 }
 
+func boardDevice(board boardDefinition) string {
+	if board.Device != "" {
+		return board.Device
+	}
+	return "esp32"
+}
+
 func writeBrowserHost(output string) error {
 	const marker = `const wasm64="`
 	packaged := driver.PackageBrowserHTML(nil)
@@ -412,6 +422,9 @@ func outputName(target string, image string) string {
 	}
 	if image == "bios-disk" {
 		return "renvo-bios.img"
+	}
+	if image == "uf2" {
+		return "app.uf2"
 	}
 	if strings.HasPrefix(target, "esp32") || strings.Contains(image, "elf") {
 		return "app.elf"

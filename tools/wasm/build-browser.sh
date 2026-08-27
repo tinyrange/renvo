@@ -17,7 +17,7 @@ case "$layout" in
     ;;
 esac
 
-mkdir -p "$output/backends/definitions" "$output/browser"
+mkdir -p "$output/backends/definitions" "$output/browser/firmware"
 tools/wasm/build.sh "$output/renvo.wasm" "$output/backends/wasi-wasm32.wasm"
 
 "$native" \
@@ -102,6 +102,14 @@ build_custom_backend esp32c6-jtag/riscv32 backends/esp32c6_jtag.rtg esp32c6-jtag
 build_custom_backend esp32c6/riscv32 backends/esp32c6.rtg esp32c6-riscv32 go
 build_custom_backend esp32s3/xtensa_lx7 backends/esp32s3.rtg esp32s3-xtensa_lx7 go
 build_custom_backend esp32p4/riscv32 backends/esp32p4.rtg esp32p4-riscv32 go
+build_custom_backend rp2/thumb backends/rp2.rtg rp2-thumb go
+build_custom_backend rp2-debug/thumb backends/rp2_debug.rtg rp2-debug-thumb go
+build_custom_backend rp2350/riscv32 backends/rp2350.rtg rp2350-riscv32 go
+
+# The resident Pico monitor is itself a Renvo program. No vendor SDK or native
+# embedded toolchain participates in the browser artifact.
+go run ./cmd/renvo -backend backends/rp2.rtg -t rp2/thumb -tags pico2 -arena-size 8192 \
+  -o "$output/browser/firmware/renvo-rp2-monitor.uf2" ./cmd/renvopico-monitor
 
 build_vm_backend() {
   target_name=$1
@@ -138,9 +146,12 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \
 	tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
-	tools/wasm/browser/esp-webusb-jtag.mjs "$output/browser/"
+	tools/wasm/browser/esp-webusb-jtag.mjs tools/wasm/browser/pico-cmsis-dap.mjs \
+	tools/wasm/browser/pico-webusb-monitor.mjs "$output/browser/"
 
 if [ "$layout" = pages ]; then
+  mkdir -p "$output/firmware"
+  cp "$output/browser/firmware/renvo-rp2-monitor.uf2" "$output/firmware/"
   cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/build-readiness.mjs \
@@ -156,7 +167,8 @@ if [ "$layout" = pages ]; then
 	tools/wasm/browser/test-project.mjs tools/wasm/browser/workspace-store.mjs \
 	tools/wasm/browser/service-worker.mjs \
     tools/wasm/browser/esp-webserial.mjs tools/wasm/browser/esp-webusb.mjs \
-    tools/wasm/browser/esp-webusb-jtag.mjs "$output/"
+    tools/wasm/browser/esp-webusb-jtag.mjs tools/wasm/browser/pico-cmsis-dap.mjs \
+    tools/wasm/browser/pico-webusb-monitor.mjs "$output/"
 fi
 
 find "$output" -type f \( -name '*.wasm' -o -name '*.mjs' -o -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) \

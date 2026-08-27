@@ -1,0 +1,14 @@
+@import "../backend/definitions/rp2_common.rtg"
+
+target rp2/thumb {
+	family = native_v1
+	os = rp2
+	arch = thumb
+	frontend_arch = thumb
+	abi = thumb_internal
+	runtime = rp2_flash_freestanding
+	executable = rp2_uf2
+	build_tags = [rp2, thumb]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}

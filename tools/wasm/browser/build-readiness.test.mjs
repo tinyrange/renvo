@@ -46,8 +46,8 @@ test("target actions replace the artifact panel", async () => {
     readFile(new URL("app.mjs", import.meta.url), "utf8"),
     readFile(new URL("index.html", import.meta.url), "utf8"),
   ]);
-  assert.match(app, /function primaryTargetAction[\s\S]*device === "esp32"[\s\S]*runArtifact/);
-  assert.match(app, /function secondaryTargetAction[\s\S]*device === "esp32"[\s\S]*downloadValidatedArtifact/);
+  assert.match(app, /function primaryTargetAction[\s\S]*isBoardTarget\(selectedTarget\)[\s\S]*runArtifact/);
+  assert.match(app, /function secondaryTargetAction[\s\S]*isBoardTarget\(selectedTarget\)[\s\S]*downloadValidatedArtifact/);
   assert.match(app, /function downloadValidatedArtifact/);
   assert.doesNotMatch(page, /data-panel="artifacts"|id="artifacts"/);
 });

@@ -1,6 +1,7 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
+import { PicoMonitorHotReloadSession, requestPicoMonitor } from "./pico-webusb-monitor.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
 import { fetchAsset } from "./asset-fetch.mjs";
 import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
@@ -127,6 +128,7 @@ const elements = {
   devicePermissionNote: document.querySelector("#device-permission-note"),
   devicePermissionAccept: document.querySelector("#device-permission-accept"),
   deviceWebUSBStatus: document.querySelector("#device-webusb-status"),
+  picoMonitorInstaller: document.querySelector("#pico-monitor-installer"),
   deviceWebSerialStatus: document.querySelector("#device-webserial-status"),
   ide: document.querySelector("#ide"),
   mobileStep: document.querySelector("#mobile-step"),
@@ -346,8 +348,8 @@ async function loadTargetCatalog() {
 
 function configureTargets(targets) {
   const visibleTargets = targets.filter((target) => !target.hidden).sort((left, right) => {
-    const leftBoard = left.device === "esp32" ? 0 : 1;
-    const rightBoard = right.device === "esp32" ? 0 : 1;
+    const leftBoard = isBoardTarget(left) ? 0 : 1;
+    const rightBoard = isBoardTarget(right) ? 0 : 1;
     return leftBoard - rightBoard;
   });
   const entries = [];
@@ -419,7 +421,7 @@ function configureTargets(targets) {
 
 function targetGroup(target) {
   if (target.projectBackend) return "Project backends";
-  if (target.device === "esp32") return "Boards";
+  if (isBoardTarget(target)) return "Boards";
   const name = target.name;
   if (name.startsWith("linux/")) return "Linux";
   if (name.startsWith("windows/")) return "Windows";
@@ -504,9 +506,11 @@ function initializeCompiler(compiler, linker, languageService, formatter, backen
 }
 
 function prefetchTargetBackend(target) {
-  if (!compilerReady || !targetCatalog || target?.device !== "esp32") return;
+  if (!compilerReady || !targetCatalog || !isBoardTarget(target)) return;
   let buildTarget = target;
-  if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget(target))) {
+  if (target.device === "rp2") {
+    buildTarget = targetCatalog.targets.find((candidate) => candidate.name === "rp2-debug/thumb") || target;
+  } else if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget(target))) {
     buildTarget = targetCatalog.targets.find((candidate) => candidate.name === "esp32c6-jtag/riscv32") || target;
   }
   if (!buildTarget.backend) return;
@@ -685,7 +689,7 @@ function selectTarget(name, updateCommand) {
   selectedTarget = targetCatalog?.targets.find((target) => target.name === name);
   if (!selectedTarget) return;
   if (updateCommand) restoredTargetName = selectedTarget.name;
-  if (changed && previousTarget?.device === "esp32" && espPort) {
+  if (changed && isBoardTarget(previousTarget) && espPort) {
     if (espSession) espSession.close().catch(() => {});
     else espPort.close().catch(() => {});
     espSession = undefined;
@@ -694,7 +698,9 @@ function selectTarget(name, updateCommand) {
   }
   elements.targetLabel.textContent = targetDisplayName(selectedTarget);
   elements.targetButton.title = `${targetDisplayName(selectedTarget)} · ${selectedTarget.name}`;
-  const board = selectedTarget.device === "esp32";
+  const board = isBoardTarget(selectedTarget);
+  if (selectedTarget.device === "rp2") elements.flashTransport.value = "webusb";
+  updateFlashTransportChoices();
   elements.flashTransport.hidden = !board;
   elements.run.title = board ? "Build, flash, and run on the connected ESP board (F5)" : "Run console app (F5)";
   elements.runArgs.closest("label").hidden = board;
@@ -778,12 +784,12 @@ function handleTargetKeydown(event) {
 }
 
 function primaryTargetAction() {
-  if (selectedTarget?.device === "esp32") return runArtifact();
+  if (isBoardTarget(selectedTarget)) return runArtifact();
   return downloadValidatedArtifact();
 }
 
 function secondaryTargetAction() {
-  if (selectedTarget?.device === "esp32") return downloadValidatedArtifact();
+  if (isBoardTarget(selectedTarget)) return downloadValidatedArtifact();
   return runArtifact();
 }
 
@@ -966,6 +972,15 @@ function deviceMachineTarget(target = selectedTarget) {
   return target?.frontendTarget || target?.backendTarget || target?.name || "";
 }
 
+function isBoardTarget(target = selectedTarget) {
+  return target?.device === "esp32" || target?.device === "rp2";
+}
+
+function isHotReloadDeployment(target = selectedTarget) {
+  return target?.device === "rp2" ||
+    (target?.device === "esp32" && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget(target)));
+}
+
 function validateBrowserArguments(args) {
   const values = new Set(["-o", "-tags", "-arena-size", "-system", "-I", "-isystem", "-module-license"]);
   const flags = new Set(["-s", "-emit-unit", "-emit-image", "-windows-gui"]);
@@ -1041,7 +1056,7 @@ function renderResult(result) {
   if (result.exitCode === 0) {
     backendReady.add(build.backend);
     const artifact = result.files.find((file) => file.name === build.target.output) || result.files[0];
-    if ((build.target.runnable || build.target.device === "esp32") && artifact) {
+    if ((build.target.runnable || isBoardTarget(build.target)) && artifact) {
       lastRunnableArtifact = {
         name: artifact.name, data: artifact.data.slice(0),
         revision: build.revision, target: build.target.name,
@@ -1119,6 +1134,11 @@ function resumeArtifactAfterBuild() {
 }
 
 function deploymentBuildTarget() {
+  if (selectedTarget?.device === "rp2") {
+    const target = targetCatalog?.targets.find((candidate) => candidate.name === "rp2-debug/thumb");
+    if (!target) throw new Error("The RP2 monitor debug backend is unavailable in this browser bundle.");
+    return target;
+  }
   if (elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget())) {
     const target = targetCatalog?.targets.find((candidate) => candidate.name === "esp32c6-jtag/riscv32");
     if (!target) throw new Error("The ESP32-C6 JTAG backend is unavailable in this browser bundle.");
@@ -1128,8 +1148,8 @@ function deploymentBuildTarget() {
 }
 
 async function runArtifactWithMode(resumeAfterBuild) {
-  if ((!selectedTarget?.runnable && selectedTarget?.device !== "esp32") || running) return;
-  const board = selectedTarget.device === "esp32";
+  if ((!selectedTarget?.runnable && !isBoardTarget(selectedTarget)) || running) return;
+  const board = isBoardTarget(selectedTarget);
   const activeESPPort = espPort && (espPort.readable || espPort.writable);
   const reusableESPPort = espPortTransport === "webusb" && espPort?.canReopen?.();
   if (board && !resumeAfterBuild && !activeESPPort && !reusableESPPort) {
@@ -1137,7 +1157,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
       if (isPhoneWorkspace()) showMobileView("device");
       return;
     }
-    const plannedJTAG = elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
+    const plannedJTAG = isHotReloadDeployment();
     startMobileDeployment(plannedJTAG);
     setMobileDeployStep("usb", "active", "Choose your board in the browser's USB picker.");
     try {
@@ -1147,9 +1167,10 @@ async function runArtifactWithMode(resumeAfterBuild) {
       // live; cleanup can safely happen after the user selects the device.
       const transport = elements.flashTransport.value;
       const machineTarget = deviceMachineTarget();
-      const jtag = transport === "webusb" && supportsESPWebUSBJTAG(machineTarget);
-	  const nextPort = jtag
-		? await requestESPUSBJTAG(machineTarget)
+      const jtag = isHotReloadDeployment();
+	  const nextPort = selectedTarget.device === "rp2"
+		? await requestPicoMonitor()
+		: jtag ? await requestESPUSBJTAG(machineTarget)
 		: transport === "webusb" ? await requestESPUSBPort(machineTarget)
 		: await requestESPPort(machineTarget);
       espSession = undefined;
@@ -1168,12 +1189,12 @@ async function runArtifactWithMode(resumeAfterBuild) {
       return;
     }
   } else if (board && !resumeAfterBuild && !mobileDeploymentActive) {
-    const plannedJTAG = elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
+    const plannedJTAG = isHotReloadDeployment();
     startMobileDeployment(plannedJTAG);
     setMobileDeployStep("usb", "done", "Using the connected USB device.");
   }
   if (board && !espPort) {
-    elements.terminalOutput.textContent = "The selected ESP device disconnected before flashing. Click Flash & Run again.\n";
+    elements.terminalOutput.textContent = "The selected board or debug probe disconnected before loading. Click Flash & Run again.\n";
     failMobileDeployment("usb", "The USB device disconnected before the load started.");
     showPanel("terminal");
     return;
@@ -1219,26 +1240,30 @@ async function runArtifactWithMode(resumeAfterBuild) {
   updateReadyState();
   showPanel("terminal");
   if (board) {
-    setMobileDeployStep("load", "active", "Connecting to the board over JTAG…");
+    setMobileDeployStep("load", "active", selectedTarget.device === "rp2" ? "Connecting to the resident USB monitor…" : "Connecting to the board over JTAG…");
     const portInfo = espPort.getInfo?.() || {};
     const identity = portInfo.usbVendorId === undefined ? "" :
       ` (USB ${portInfo.usbVendorId.toString(16).padStart(4, "0")}:${(portInfo.usbProductId || 0).toString(16).padStart(4, "0")})`;
-    const jtag = espPort?.transport === "webusb-jtag";
+    const picoMonitor = espPort?.transport === "webusb-pico-monitor";
+    const jtag = espPort?.transport === "webusb-jtag" || espPort?.transport === "webusb-cmsis-dap";
+    const hotReload = jtag || picoMonitor;
     const transportName = espPortTransport === "webusb" ? "WebUSB" : "WebSerial";
     serialPlotter.clear();
     plotterAutoShown = false;
-    elements.terminalOutput.textContent = `$ ${jtag ? "jtag-load" : "flash"} --transport ${transportName} ${lastRunnableArtifact.target}${identity}\n`;
+    elements.terminalOutput.textContent = `$ ${picoMonitor ? "monitor-load" : jtag ? "jtag-load" : "flash"} --transport ${transportName} ${lastRunnableArtifact.target}${identity}\n`;
     elements.terminalOutput.textContent += `Build: ${formatElapsed(lastRunnableArtifact.buildMilliseconds)}\n`;
     const flashStarted = performance.now();
     try {
       const progress = (value) => {
-        const verb = jtag ? "Loading" : "Flashing";
+        const verb = hotReload ? "Loading" : "Flashing";
         elements.compile.querySelector("span").textContent = `${verb} ${Math.round(value * 100)}%`;
         setMobileDeployStep("load", "active", `${verb} firmware, ${Math.round(value * 100)}%.`, value);
       };
       let report;
-      if (jtag) {
-        if (!espSession) espSession = new ESPJTAGHotReloadSession(espPort, { progress });
+      if (hotReload) {
+        if (!espSession) espSession = picoMonitor
+          ? new PicoMonitorHotReloadSession(espPort, { progress })
+          : new ESPJTAGHotReloadSession(espPort, { progress });
         report = await espSession.update(lastRunnableArtifact.data);
       } else {
         if (!espSession) espSession = new ESPWebSerial(espPort, {
@@ -1249,13 +1274,13 @@ async function runArtifactWithMode(resumeAfterBuild) {
 		await espSession.flash(lastRunnableArtifact.data, deviceMachineTarget());
       }
       const flashMilliseconds = performance.now() - flashStarted;
-      if (jtag) {
+      if (hotReload) {
         const change = report.unchanged ? "no changed words" : `${report.bytesWritten} bytes in ${report.patchCount} patches`;
-        elements.terminalOutput.textContent += `JTAG load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
+        elements.terminalOutput.textContent += `${picoMonitor ? "Monitor" : "JTAG"} load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
         elements.terminalOutput.textContent += "Running from SRAM. Press Flash after an edit to load the changes.\n";
-        setMobileDeployStep("load", "done", "Firmware loaded over JTAG.");
+        setMobileDeployStep("load", "done", `Firmware loaded over ${picoMonitor ? "the Pico monitor" : "JTAG"}.`);
         setMobileDeployStep("run", "done", "Running from SRAM. Hot reload is ready.");
-        finishMobileDeployment("JTAG load complete");
+        finishMobileDeployment(`${picoMonitor ? "Monitor" : "JTAG"} load complete`);
       } else {
         elements.terminalOutput.textContent += `Flash: ${formatElapsed(flashMilliseconds)} · Build + flash: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
         setMobileDeployStep("load", "done", "Firmware flashed.");
@@ -1264,7 +1289,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
       }
     } catch (error) {
       const flashMilliseconds = performance.now() - flashStarted;
-      const failedAction = jtag ? "JTAG load" : "Flash";
+      const failedAction = picoMonitor ? "Monitor load" : jtag ? "JTAG load" : "Flash";
       elements.terminalOutput.textContent += `${failedAction} failed after ${formatElapsed(flashMilliseconds)}: ${error.message || error}\n`;
       failMobileDeployment("load", `${failedAction} failed: ${error.message || error}`);
       const failedSession = espSession;
@@ -2378,17 +2403,20 @@ function deviceAccessSupport() {
 
 function renderDevicePermission() {
   const { profile, choices, secure } = deviceAccessSupport();
+  const pico = selectedTarget?.device === "rp2";
+  elements.picoMonitorInstaller.hidden = !pico;
+  const availableChoices = pico ? { ...choices, webserial: false } : choices;
   const statuses = [
     [elements.deviceWebUSBStatus, "webusb", "WebUSB"],
     [elements.deviceWebSerialStatus, "webserial", "WebSerial"],
   ];
   for (const [element, key] of statuses) {
-    const available = choices[key];
+    const available = availableChoices[key];
     element.classList.toggle("available", available);
     element.classList.toggle("unavailable", !available);
     element.querySelector("small").textContent = available ? "Supported" : "Not supported";
   }
-  const available = choices.webusb || choices.webserial;
+  const available = availableChoices.webusb || availableChoices.webserial;
   if (profile.ios && !available) {
     elements.devicePermissionIntro.textContent = "Browsers on iPhone and iPad cannot flash USB boards.";
     elements.devicePermissionNote.textContent = "You can edit and build here. To flash, open the project in Chrome or Edge on a computer, or use a supported Android browser.";
@@ -2400,7 +2428,9 @@ function renderDevicePermission() {
     elements.devicePermissionNote.textContent = "Use Chrome or Edge on a computer, or a supported Android browser. You can still edit and build here.";
   } else {
     elements.devicePermissionIntro.textContent = "Your browser will ask which device Renvo may use.";
-    elements.devicePermissionNote.textContent = "Disconnect the board at any time to end access.";
+    elements.devicePermissionNote.textContent = pico
+      ? "Choose the Pico running the Renvo monitor. No debug probe is used; disconnect it at any time to end access."
+      : "Disconnect the board at any time to end access.";
   }
   elements.devicePermissionAccept.disabled = !available;
   elements.devicePermissionAccept.textContent = available ? "Select device" : "USB not supported";
@@ -2938,7 +2968,7 @@ function setSetupStep(step, state, detail) {
   } else if (done === order.length) {
     elements.mobileSetup.dataset.state = "done";
     elements.mobileSetupTitle.textContent = "Renvo is ready";
-    elements.mobileSetupDetail.textContent = "Choose an example, then use JTAG load in the editor.";
+    elements.mobileSetupDetail.textContent = "Choose an example, then load it onto the board in the editor.";
   } else {
     elements.mobileSetup.dataset.state = "loading";
     elements.mobileSetupTitle.textContent = "Getting Renvo ready";
@@ -2948,11 +2978,11 @@ function setSetupStep(step, state, detail) {
 }
 
 function updateReadyState() {
-  const board = selectedTarget?.device === "esp32";
+  const board = isBoardTarget(selectedTarget);
   const capabilities = targetCapabilities(selectedTarget);
   const downloadable = hasDownloadableOutput(selectedTarget);
-  const jtag = board && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
-  const deviceAction = jtag ? "JTAG load" : "Flash";
+  const jtag = selectedTarget?.device === "esp32" && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
+  const deviceAction = selectedTarget?.device === "rp2" ? "Monitor load" : jtag ? "JTAG load" : "Flash";
   const primaryLabel = board ? deviceAction : "Download";
   const readiness = buildReadiness({
     compilerReady, editorReady: Boolean(monaco), building, state: buildValidationState,
@@ -2988,7 +3018,7 @@ function updateReadyState() {
   if (mobileDeploymentActive) {
     elements.mobileRun.disabled = false;
     elements.mobileRun.textContent = mobileDeploymentLabel || "Working…";
-    elements.mobileRun.title = "Tap to see JTAG load details";
+    elements.mobileRun.title = "Tap to see device load details";
   }
   elements.mobileDeviceRun.disabled = elements.run.disabled;
   elements.mobileDeviceRun.textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Waiting…" : "Run";
@@ -3067,7 +3097,7 @@ function updateMobileHeader() {
   }
   if (elements.mobileDeviceTarget) elements.mobileDeviceTarget.textContent = selectedTarget?.label || selectedTarget?.name || "Choose a target";
   if (elements.mobileDeviceHint) elements.mobileDeviceHint.textContent = targetCapabilityHint(selectedTarget);
-  document.querySelector(".mobile-transport-picker").hidden = selectedTarget?.device !== "esp32";
+  document.querySelector(".mobile-transport-picker").hidden = !isBoardTarget(selectedTarget);
 }
 
 function openMobileFlashView(state = "Preparing…") {
@@ -3086,15 +3116,16 @@ function startMobileDeployment(jtag) {
   mobileDeploymentStep = "";
   elements.mobileFlashView.hidden = true;
   elements.mobileFlashProgress.value = 0;
-  elements.mobileFlashState.textContent = jtag ? "JTAG load" : "Flash board";
+  const monitor = selectedTarget?.device === "rp2";
+  elements.mobileFlashState.textContent = monitor ? "Monitor load" : jtag ? "JTAG load" : "Flash board";
   elements.mobileFlashDetail.textContent = "Preparing the board…";
   for (const item of document.querySelectorAll("[data-deploy-step]")) {
     item.dataset.state = "pending";
     item.querySelector("small").textContent = "Waiting";
   }
   const loadName = document.querySelector('[data-deploy-step="load"] strong');
-  if (loadName) loadName.textContent = jtag ? "JTAG load" : "Flash board";
-  elements.terminalOutput.textContent = `$ ${jtag ? "jtag-load" : "flash"} ${selectedTarget?.label || selectedTarget?.name || "board"}\n`;
+  if (loadName) loadName.textContent = monitor ? "Monitor load" : jtag ? "JTAG load" : "Flash board";
+  elements.terminalOutput.textContent = `$ ${monitor ? "monitor-load" : jtag ? "jtag-load" : "flash"} ${selectedTarget?.label || selectedTarget?.name || "board"}\n`;
   document.querySelector(".mobile-flash-log").open = false;
   updateReadyState();
 }
@@ -3169,6 +3200,19 @@ function configureFlashTransports() {
   syncMobileTransportPicker();
 }
 
+function updateFlashTransportChoices() {
+  const { choices } = deviceAccessSupport();
+  const pico = selectedTarget?.device === "rp2";
+  for (const option of elements.flashTransport.options) {
+    option.disabled = pico ? option.value !== "webusb" || !choices.webusb : !choices[option.value];
+    const name = option.value === "webusb"
+      ? pico ? "WebUSB (Pico monitor)" : "WebUSB (JTAG on ESP32-C6)"
+      : "WebSerial";
+    option.textContent = `${name}${option.disabled ? " unavailable" : ""}`;
+  }
+  syncMobileTransportPicker();
+}
+
 function currentDeviceProfile() {
   const userAgentData = navigator.userAgentData || {};
   const screenWidth = Math.min(screen?.width || innerWidth, screen?.height || innerHeight);
@@ -3208,6 +3252,7 @@ function syncMobileTransportPicker() {
   for (const button of document.querySelectorAll("[data-mobile-transport]")) {
     const option = elements.flashTransport.querySelector(`option[value="${button.dataset.mobileTransport}"]`);
     button.disabled = Boolean(option?.disabled);
+    button.hidden = selectedTarget?.device === "rp2" && button.dataset.mobileTransport !== "webusb";
     button.setAttribute("aria-checked", String(button.dataset.mobileTransport === elements.flashTransport.value));
   }
 }
@@ -3271,7 +3316,7 @@ function saveFiles() {
 
 function saveAndDeploy() {
   saveFiles();
-  if (selectedTarget?.device === "esp32") runArtifact();
+  if (isBoardTarget(selectedTarget)) runArtifact();
 }
 
 function currentProject() {

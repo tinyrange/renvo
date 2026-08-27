@@ -77,7 +77,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /function startMobileDeployment/);
   assert.match(app, /function receiveCompileProgress/);
   assert.match(app, /arenaSize: entry\.item\.arenaSize \|\| ""/);
-  assert.match(app, /Tap to see JTAG load details/);
+  assert.match(app, /Tap to see device load details/);
   assert.match(worker, /type: "compile-progress"/);
   assert.match(worker, /Downloading the board compiler/);
   assert.match(app, /appendSerialText/);
@@ -96,7 +96,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.doesNotMatch(html, /id="mobile-build"/);
   assert.match(app, /runTests/);
   assert.match(app, /event\.metaKey[\s\S]*event\.key\.toLowerCase\(\) === "s"[\s\S]*saveAndDeploy\(\)/);
-  assert.match(app, /function saveAndDeploy\(\)[\s\S]*selectedTarget\?\.device === "esp32"[\s\S]*runArtifact\(\)/);
+  assert.match(app, /function saveAndDeploy\(\)[\s\S]*isBoardTarget\(selectedTarget\)[\s\S]*runArtifact\(\)/);
   assert.match(app, /openSnapshotDialog/);
   assert.match(app, /function createNewWorkspaceFile[\s\S]*setBuildPackage\("\."\)/);
   assert.match(app, /function createNewProject[\s\S]*initialCFiles/);

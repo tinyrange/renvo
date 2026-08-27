@@ -981,7 +981,7 @@ func sourceFilenameEnabledWithExtension(name string, extension string, target st
 }
 
 func filenameKnownOS(tag string) bool {
-	return stringInBuildList(tag, "aix android browser c89 darwin dragonfly esp32c6 esp32p4 esp32s3 freebsd hurd illumos ios js linux msdos nacl netbsd openbsd plan9 solaris unixv7 vm wasi wasip1 windows zos")
+	return stringInBuildList(tag, "aix android browser c89 darwin dragonfly esp32c6 esp32p4 esp32s3 freebsd hurd illumos ios js linux msdos nacl netbsd openbsd plan9 rp2 rp2350 solaris thumb unixv7 vm wasi wasip1 windows zos")
 }
 
 func filenameKnownArch(tag string) bool {

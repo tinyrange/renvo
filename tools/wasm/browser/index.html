@@ -28,7 +28,7 @@
               </button>
               <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
             </div>
-            <select id="flash-transport" aria-label="ESP flash transport" title="ESP flash transport" hidden>
+            <select id="flash-transport" aria-label="Board connection" title="Board connection" hidden>
               <option value="webserial">WebSerial</option>
               <option value="webusb">WebUSB</option>
             </select>
@@ -127,9 +127,9 @@
         <button id="mobile-device-build" type="button" disabled>Build</button>
         <button id="mobile-device-run" type="button" disabled>Run</button>
       </div>
-      <div class="mobile-transport-picker" aria-label="ESP flash transport">
+      <div class="mobile-transport-picker" aria-label="Board connection">
         <div><strong>USB connection</strong><span id="mobile-transport-status">Checking this browser…</span></div>
-        <div role="radiogroup" aria-label="ESP flash transport">
+        <div role="radiogroup" aria-label="Board connection">
           <button type="button" data-mobile-transport="webusb" role="radio" aria-checked="false">WebUSB</button>
           <button type="button" data-mobile-transport="webserial" role="radio" aria-checked="false">WebSerial</button>
         </div>
@@ -233,11 +233,11 @@
       <progress id="mobile-flash-progress" max="1" aria-label="Flash progress"></progress>
       <div class="mobile-flash-body">
         <p id="mobile-flash-detail" aria-live="polite">Preparing the board…</p>
-        <ol class="mobile-flash-steps" aria-label="JTAG load steps">
+        <ol class="mobile-flash-steps" aria-label="Device load steps">
           <li data-deploy-step="usb"><span></span><div><strong>USB device</strong><small>Waiting</small></div></li>
           <li data-deploy-step="check"><span></span><div><strong>Check code</strong><small>Waiting</small></div></li>
           <li data-deploy-step="firmware"><span></span><div><strong>Build firmware</strong><small>Waiting</small></div></li>
-          <li data-deploy-step="load"><span></span><div><strong>JTAG load</strong><small>Waiting</small></div></li>
+          <li data-deploy-step="load"><span></span><div><strong>Device load</strong><small>Waiting</small></div></li>
           <li data-deploy-step="run"><span></span><div><strong>Run</strong><small>Waiting</small></div></li>
         </ol>
         <details class="mobile-flash-log">
@@ -347,14 +347,15 @@
         <div class="device-permission-body">
           <div class="device-permission-steps">
             <div><span>1</span><p><strong>Select a device</strong>Only the device you choose is shared with Renvo.</p></div>
-            <div><span>2</span><p><strong>Flash the build</strong>Renvo writes firmware when you press Flash.</p></div>
-            <div><span>3</span><p><strong>Read its output</strong>The connection stays open for serial messages.</p></div>
+            <div><span>2</span><p><strong>Load the build</strong>Renvo writes the selected firmware image.</p></div>
+            <div><span>3</span><p><strong>Run the program</strong>The connection stays open while the program runs.</p></div>
           </div>
           <div class="device-capabilities" aria-label="Browser device support">
             <div id="device-webusb-status"><span class="capability-dot"></span><p><strong>WebUSB</strong><small>Checking support…</small></p></div>
             <div id="device-webserial-status"><span class="capability-dot"></span><p><strong>WebSerial</strong><small>Checking support…</small></p></div>
           </div>
           <p class="device-permission-note" id="device-permission-note">Disconnect the board at any time to end access.</p>
+          <p id="pico-monitor-installer" hidden>First use? Hold BOOTSEL while connecting the Pico, then copy the <a href="firmware/renvo-rp2-monitor.uf2" download="renvo-rp2-monitor.uf2">Renvo monitor UF2</a> to its USB drive. Reconnect normally and select the Pico here.</p>
         </div>
         <footer><button type="button" class="dialog-secondary" id="device-permission-cancel">Cancel</button><button type="button" class="dialog-primary" id="device-permission-accept">Select device</button></footer>
       </div>

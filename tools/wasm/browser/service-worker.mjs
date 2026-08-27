@@ -1,11 +1,12 @@
-const CACHE = "renvo-web-ide-v59";
+const CACHE = "renvo-web-ide-v61";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.mjs", "./worker.mjs", "./build-readiness.mjs",
   "./target-capabilities.mjs",
   "./editor-navigation.mjs", "./language-path.mjs", "./asset-fetch.mjs", "./serial-plotter.mjs",
-  "./esp-webserial.mjs", "./esp-webusb.mjs", "./esp-webusb-jtag.mjs", "./project-archive.mjs",
+  "./esp-webserial.mjs", "./esp-webusb.mjs", "./esp-webusb-jtag.mjs", "./pico-cmsis-dap.mjs", "./pico-webusb-monitor.mjs", "./project-archive.mjs",
   "./device-profile.mjs", "./test-project.mjs", "./workspace-store.mjs",
   "./c-language.mjs", "./rtg-language.mjs",
+  "./firmware/renvo-rp2-monitor.uf2",
 ];
 
 self.addEventListener("install", (event) => {

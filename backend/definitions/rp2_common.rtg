@@ -1,0 +1,333 @@
+definition 1
+unit rp2
+implements direct_emitter_v1
+
+@import "thumb.rtg"
+
+go backend {
+	const flashBase = 0x10000000
+	const flashVectorOffset = 0x100
+	const flashCodeOffset = 0x108
+	const debugTextAddress = 0x20020000
+	const flashDataAddress = 0x20000000
+	const debugDataAddress = 0x20010000
+	const flashStackTop = 0x20042000
+	const debugStackTop = 0x20040000
+	const elfCodeOffset = 0x100
+	const elfPageSize = 0x1000
+	const uf2FamilyRP2040 = 0xe48bff56
+	const uf2FamilyRP2350ArmS = 0xe48bff59
+	var flashDataAddressPatch int
+	var flashDataSizePatch int
+
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func reverseBits(value int, count int) int {
+		result := 0
+		for index := 0; index < count; index++ {
+			result = (result<<1)|(value&1)
+			value >>= 1
+		}
+		return result
+	}
+
+	func bootCRC(data []byte) int {
+		// RP2040's ROM uses an uncomplemented CRC state seeded with all ones over
+		// bit-reversed input bytes, followed by a bit reversal of the result.
+		crc := 0xffffffff
+		for _, value := range data {
+			crc ^= reverseBits(int(value), 8)
+			for bit := 0; bit < 8; bit++ {
+				if crc&1 != 0 {
+					crc = (crc>>1)^0xedb88320
+				} else {
+					crc >>= 1
+				}
+			}
+		}
+		return reverseBits(crc, 32)
+	}
+
+	func w25q080Boot2() []byte {
+		// Raspberry Pi's BSD-3-Clause W25Q080 RP2040 stage-2 loader. This is the
+		// Pico SDK loader selected by Pico-family boards with Winbond-compatible
+		// flash, including the Seeed XIAO RP2040.
+		return []byte{
+			0x00, 0xb5, 0x32, 0x4b, 0x21, 0x20, 0x58, 0x60, 0x98, 0x68, 0x02, 0x21,
+			0x88, 0x43, 0x98, 0x60, 0xd8, 0x60, 0x18, 0x61, 0x58, 0x61, 0x2e, 0x4b,
+			0x00, 0x21, 0x99, 0x60, 0x02, 0x21, 0x59, 0x61, 0x01, 0x21, 0xf0, 0x22,
+			0x99, 0x50, 0x2b, 0x49, 0x19, 0x60, 0x01, 0x21, 0x99, 0x60, 0x35, 0x20,
+			0x00, 0xf0, 0x44, 0xf8, 0x02, 0x22, 0x90, 0x42, 0x14, 0xd0, 0x06, 0x21,
+			0x19, 0x66, 0x00, 0xf0, 0x34, 0xf8, 0x19, 0x6e, 0x01, 0x21, 0x19, 0x66,
+			0x00, 0x20, 0x18, 0x66, 0x1a, 0x66, 0x00, 0xf0, 0x2c, 0xf8, 0x19, 0x6e,
+			0x19, 0x6e, 0x19, 0x6e, 0x05, 0x20, 0x00, 0xf0, 0x2f, 0xf8, 0x01, 0x21,
+			0x08, 0x42, 0xf9, 0xd1, 0x00, 0x21, 0x99, 0x60, 0x1b, 0x49, 0x19, 0x60,
+			0x00, 0x21, 0x59, 0x60, 0x1a, 0x49, 0x1b, 0x48, 0x01, 0x60, 0x01, 0x21,
+			0x99, 0x60, 0xeb, 0x21, 0x19, 0x66, 0xa0, 0x21, 0x19, 0x66, 0x00, 0xf0,
+			0x12, 0xf8, 0x00, 0x21, 0x99, 0x60, 0x16, 0x49, 0x14, 0x48, 0x01, 0x60,
+			0x01, 0x21, 0x99, 0x60, 0x01, 0xbc, 0x00, 0x28, 0x00, 0xd0, 0x00, 0x47,
+			0x12, 0x48, 0x13, 0x49, 0x08, 0x60, 0x03, 0xc8, 0x80, 0xf3, 0x08, 0x88,
+			0x08, 0x47, 0x03, 0xb5, 0x99, 0x6a, 0x04, 0x20, 0x01, 0x42, 0xfb, 0xd0,
+			0x01, 0x20, 0x01, 0x42, 0xf8, 0xd1, 0x03, 0xbd, 0x02, 0xb5, 0x18, 0x66,
+			0x18, 0x66, 0xff, 0xf7, 0xf2, 0xff, 0x18, 0x6e, 0x18, 0x6e, 0x02, 0xbd,
+			0x00, 0x00, 0x02, 0x40, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x07, 0x00,
+			0x00, 0x03, 0x5f, 0x00, 0x21, 0x22, 0x00, 0x00, 0xf4, 0x00, 0x00, 0x18,
+			0x22, 0x20, 0x00, 0xa0, 0x00, 0x01, 0x00, 0x10, 0x08, 0xed, 0x00, 0xe0,
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		}
+	}
+
+	func rp2040BootBlock() []byte {
+		result := w25q080Boot2()
+		return append32(result, bootCRC(result))
+	}
+
+	func rp2350BootBlock() []byte {
+		var result []byte
+		result = appendUntil(result, 80)
+		result = append32(result, 0xffffded3)
+		result = append32(result, 0x10210142) // executable, secure ARM, RP2350
+		result = append32(result, 0x00000344) // explicit entry point, three words
+		result = append32(result, flashBase+flashCodeOffset+1)
+		result = append32(result, flashStackTop)
+		result = append32(result, 0x000004ff)
+		result = append32(result, 0)
+		result = append32(result, 0xab123579)
+		result = appendUntil(result, 252)
+		return appendUntil(result, 256)
+	}
+
+	func emitPatchableImmediate(out *RTGEmitter, register RTGRegister) int {
+		at := out.Len()
+		thumb.emitImmediateFixed(out, register.Code, 0)
+		return at
+	}
+
+	func patchAbsolute(out *RTGEmitter, dataAddress int, bssAddress int, textAddress int) {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			addend := out.AbsoluteRelocationAddend(index)
+			kind := out.AbsoluteRelocationKind(index)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataAddress, bssAddress)
+			if resolved {
+				instruction := RTGGet32At(out.Code(), at)
+				register := (instruction >> 24) & 7
+				thumb.patchImmediateFixed(out, at+2, register,
+					target-(textAddress+at+4))
+			}
+		}
+	}
+
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		thumb.emitAddress(out, thumb.secondary, RTGBSSAddress(0))
+		thumb.emitAddress(out, thumb.copyCount, RTGBSSEndAddress(4))
+		thumb.moveImmediate(out, thumb.primary, 0)
+		out.Mark(loop)
+		thumb.compare(out, thumb.secondary, thumb.copyCount)
+		thumb.jumpCondition(out, thumb.eq, done)
+		thumb.storeU32(out, RTGAddress{Base: thumb.secondary}, thumb.primary)
+		thumb.emitAddress(out, thumb.secondary,
+			RTGAddress{Base: thumb.secondary, Displacement: 4})
+		thumb.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func copyFlashData(out *RTGEmitter) {
+		flashDataAddressPatch = emitPatchableImmediate(out, thumb.copySource)
+		flashDataSizePatch = emitPatchableImmediate(out, thumb.scratch)
+		thumb.move(out, thumb.copyCount, thumb.scratch)
+		thumb.moveImmediate(out, thumb.copyDestination, int64(flashDataAddress))
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		thumb.moveImmediate(out, thumb.scratch, 0)
+		thumb.compare(out, thumb.copyCount, thumb.scratch)
+		thumb.jumpCondition(out, thumb.eq, done)
+		thumb.loadU8(out, thumb.primary, RTGAddress{Base: thumb.copySource})
+		thumb.storeU8(out,
+			RTGAddress{Base: thumb.copyDestination}, thumb.primary)
+		thumb.increment(out, thumb.copySource)
+		thumb.increment(out, thumb.copyDestination)
+		thumb.decrement(out, thumb.copyCount)
+		thumb.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func entryCommon(out *RTGEmitter, stackTop int) {
+		thumb.moveImmediate(out, thumb.stack, int64(stackTop))
+		thumb.move(out, thumb.frame, thumb.stack)
+		clearBSS(out)
+	}
+
+	func flashEntry(out *RTGEmitter, stateOffset int) bool {
+		copyFlashData(out)
+		entryCommon(out, flashStackTop)
+		return true
+	}
+
+	func debugEntry(out *RTGEmitter, stateOffset int) bool {
+		entryCommon(out, debugStackTop)
+		return true
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		thumb.jump(out, loop)
+	}
+
+	func discardWrite(out *RTGEmitter) {
+		// Freestanding RP2 has no console sink. Still issue SEV so a write can
+		// wake the other core from WFE during the ROM mailbox handshake.
+		thumb.emit16(out, 0xbf40)
+		thumb.move(out, thumb.primary, thumb.tertiary)
+	}
+
+	func appendUF2Block(out []byte, address int, block int,
+		count int, family int, payload []byte) []byte {
+		start := len(out)
+		out = append32(out, 0x0a324655)
+		out = append32(out, 0x9e5d5157)
+		out = append32(out, 0x00002000)
+		out = append32(out, address)
+		out = append32(out, 256)
+		out = append32(out, block)
+		out = append32(out, count)
+		out = append32(out, family)
+		out = append(out, payload...)
+		for len(out) < start+508 {
+			out = append(out, 0)
+		}
+		return append32(out, 0x0ab16f30)
+	}
+
+	func appendUF2Family(out []byte, binary []byte, family int) []byte {
+		blocks := len(binary)/256
+		for block := 0; block < blocks; block++ {
+			payload := binary[block*256:(block+1)*256]
+			out = appendUF2Block(out, flashBase+block*256,
+				block, blocks, family, payload)
+		}
+		return out
+	}
+
+	func flashImage(out *RTGEmitter) []byte {
+		data := out.Data()
+		bssAddress := RTGAlignValue(flashDataAddress+len(data), 8)
+		patchAbsolute(out, flashDataAddress, bssAddress, flashBase+flashCodeOffset)
+		code := out.Code()
+		dataOffset := RTGAlignValue(flashCodeOffset+len(code), 4)
+		thumb.patchImmediateFixed(out, flashDataAddressPatch,
+			thumb.copySource.Code, flashBase+dataOffset)
+		thumb.patchImmediateFixed(out, flashDataSizePatch,
+			thumb.scratch.Code, len(data))
+		code = out.Code()
+
+		rp2040 := rp2040BootBlock()
+		rp2040 = append32(rp2040, flashStackTop)
+		rp2040 = append32(rp2040, flashBase+flashCodeOffset+1)
+		rp2040 = append(rp2040, code...)
+		rp2040 = appendUntil(rp2040, dataOffset)
+		rp2040 = append(rp2040, data...)
+		rp2040 = appendUntil(rp2040, RTGAlignValue(len(rp2040), 256))
+
+		rp2350 := rp2350BootBlock()
+		rp2350 = append(rp2350, rp2040[256:]...)
+		var result []byte
+		result = appendUF2Family(result, rp2040, uf2FamilyRP2040)
+		return appendUF2Family(result, rp2350, uf2FamilyRP2350ArmS)
+	}
+
+	func appendProgramHeader(out []byte, offset int, address int,
+		fileSize int, memorySize int, flags int) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, elfPageSize)
+	}
+
+	func debugImage(out *RTGEmitter) []byte {
+		data := out.Data()
+		bssAddress := RTGAlignValue(debugDataAddress+len(data), 8)
+		patchAbsolute(out, debugDataAddress, bssAddress, debugTextAddress+elfCodeOffset)
+		code := out.Code()
+		dataOffset := RTGAlignValue(elfCodeOffset+len(code), elfPageSize)
+		dataMemorySize := bssAddress-debugDataAddress+RTGAlignValue(out.BSSSize(), 4)
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0)
+		result = append16(result, 2)
+		result = append16(result, 40)
+		result = append32(result, 1)
+		result = append32(result, debugTextAddress+elfCodeOffset+1)
+		result = append32(result, 52)
+		result = append32(result, 0)
+		result = append32(result, 0x05000000)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 2)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = appendProgramHeader(result, 0, debugTextAddress,
+			elfCodeOffset+len(code), elfCodeOffset+len(code), 5)
+		result = appendProgramHeader(result, dataOffset, debugDataAddress,
+			len(data), dataMemorySize, 6)
+		result = appendUntil(result, elfCodeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		return append(result, data...)
+	}
+}
+
+runtime rp2_flash_freestanding {
+	emit_entry_start = go flashEntry
+	emit_exit = go exit
+	operation write { emit = go discardWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+runtime rp2_debug_freestanding {
+	emit_entry_start = go debugEntry
+	emit_exit = go exit
+	operation write { emit = go discardWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format rp2_uf2 {
+	kind = uf2
+	byte_order = little
+	address_bits = 32
+	code_offset = 0x108
+	image = go flashImage
+}
+
+format rp2_debug_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 40
+	code_offset = 0x100
+	image = go debugImage
+}

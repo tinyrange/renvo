@@ -1,0 +1,651 @@
+# Shared ARMv6-M Thumb machine facts and direct emitter. The instruction
+# subset deliberately stays within Cortex-M0+ so the generated code also runs
+# unchanged on the Cortex-M33 cores in RP2350.
+go backend {
+	func emit16(out *RTGEmitter, instruction int) {
+		RTGByte(out, instruction)
+		RTGByte(out, instruction>>8)
+	}
+
+	func align4(out *RTGEmitter) {
+		if out.Len()&2 != 0 {
+			emit16(out, 0x46c0) // nop (mov r8, r8)
+		}
+	}
+
+	func move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == source.Code {
+			return
+		}
+		emit16(out, 0x4600|((destination.Code&8)<<4)|
+			((source.Code&15)<<3)|(destination.Code&7))
+	}
+
+	func emitImmediateFixed(out *RTGEmitter, register int, value int) {
+		// Eight halfwords make immediates patchable without moving later code.
+		emit16(out, 0x2000|(register<<8)|((value>>24)&255))
+		emit16(out, 0x0000|(8<<6)|(register<<3)|register)
+		emit16(out, 0x3000|(register<<8)|((value>>16)&255))
+		emit16(out, 0x0000|(8<<6)|(register<<3)|register)
+		emit16(out, 0x3000|(register<<8)|((value>>8)&255))
+		emit16(out, 0x0000|(8<<6)|(register<<3)|register)
+		emit16(out, 0x3000|(register<<8)|(value&255))
+		emit16(out, 0x46c0)
+	}
+
+	func patchImmediateFixed(out *RTGEmitter, at int, register int, value int) {
+		out.PatchUint32(at,
+			(0x2000|(register<<8)|((value>>24)&255))|
+			((0x0000|(8<<6)|(register<<3)|register)<<16))
+		out.PatchUint32(at+4,
+			(0x3000|(register<<8)|((value>>16)&255))|
+			((0x0000|(8<<6)|(register<<3)|register)<<16))
+		out.PatchUint32(at+8,
+			(0x3000|(register<<8)|((value>>8)&255))|
+			((0x0000|(8<<6)|(register<<3)|register)<<16))
+		out.PatchUint32(at+12,
+			(0x3000|(register<<8)|(value&255))|(0x46c0<<16))
+	}
+
+	func moveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		work := destination.Code
+		if work >= 8 {
+			work = scratch.Code
+		}
+		emitImmediateFixed(out, work, int(value))
+		if work != destination.Code {
+			move(out, destination, scratch)
+		}
+	}
+
+	func addLow(out *RTGEmitter, destination int, left int, right int) {
+		emit16(out, 0x1800|(right<<6)|(left<<3)|destination)
+	}
+
+	func subLow(out *RTGEmitter, destination int, left int, right int) {
+		emit16(out, 0x1a00|(right<<6)|(left<<3)|destination)
+	}
+
+	func add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code < 8 {
+			emit16(out, 0x4400|((destination.Code&8)<<4)|
+				((source.Code&15)<<3)|(destination.Code&7))
+			return
+		}
+		work := scratch
+		if source.Code == scratch.Code {
+			work = address
+		}
+		move(out, work, destination)
+		add(out, work, source)
+		move(out, destination, work)
+	}
+
+	func subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code < 8 && source.Code < 8 {
+			subLow(out, destination.Code, destination.Code, source.Code)
+			return
+		}
+		move(out, address, destination)
+		move(out, scratch, source)
+		subLow(out, address.Code, address.Code, scratch.Code)
+		move(out, destination, address)
+	}
+
+	func lowALU(out *RTGEmitter, destination RTGRegister,
+		source RTGRegister, opcode int) {
+		work := destination
+		if work.Code >= 8 {
+			work = scratch
+			move(out, work, destination)
+		}
+		right := source
+		if right.Code >= 8 {
+			right = address
+			move(out, right, source)
+		}
+		emit16(out, opcode|(right.Code<<3)|work.Code)
+		if work.Code != destination.Code {
+			move(out, destination, work)
+		}
+	}
+
+	func multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lowALU(out, destination, source, 0x4340)
+	}
+	func bitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lowALU(out, destination, source, 0x4000)
+	}
+	func bitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lowALU(out, destination, source, 0x4300)
+	}
+	func bitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lowALU(out, destination, source, 0x4040)
+	}
+
+	func compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		emit16(out, 0x4500|((left.Code&8)<<4)|
+			((right.Code&15)<<3)|(left.Code&7))
+	}
+
+	func test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		move(out, scratch, left)
+		lowALU(out, scratch, right, 0x4000)
+	}
+
+	func increment(out *RTGEmitter, operand RTGRegister) {
+		if operand.Code < 8 {
+			emit16(out, 0x3001|(operand.Code<<8))
+			return
+		}
+		move(out, scratch, operand)
+		emit16(out, 0x3001|(scratch.Code<<8))
+		move(out, operand, scratch)
+	}
+
+	func decrement(out *RTGEmitter, operand RTGRegister) {
+		if operand.Code < 8 {
+			emit16(out, 0x3801|(operand.Code<<8))
+			return
+		}
+		move(out, scratch, operand)
+		emit16(out, 0x3801|(scratch.Code<<8))
+		move(out, operand, scratch)
+	}
+
+	func shiftImmediate(out *RTGEmitter, operand RTGRegister,
+		value byte, opcode int) {
+		work := operand
+		if work.Code >= 8 {
+			work = scratch
+			move(out, work, operand)
+		}
+		emit16(out, opcode|((int(value)&31)<<6)|(work.Code<<3)|work.Code)
+		if work.Code != operand.Code {
+			move(out, operand, work)
+		}
+	}
+
+	func shiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, 0x0000)
+	}
+	func shiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, 0x0800)
+	}
+	func shiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, 0x1000)
+	}
+
+	func emitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			align4(out)
+			at := out.Len()
+			move(out, destination, pc)
+			work := scratch
+			if destination.Code == scratch.Code {
+				work = address
+			}
+			emitImmediateFixed(out, work.Code, 0)
+			add(out, destination, work)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		work := destination
+		if work.Code >= 8 || work.Code == stack.Code || work.Code == pc.Code {
+			work = address
+		}
+		if value.Base.Valid {
+			move(out, work, value.Base)
+		} else {
+			moveImmediate(out, work, 0)
+		}
+		if value.Index.Valid {
+			temporary := scratch
+			if work.Code == scratch.Code {
+				temporary = address
+			}
+			move(out, temporary, value.Index)
+			shiftLeftImmediate(out, temporary, byte(RTGLog2(value.Scale)))
+			add(out, work, temporary)
+		}
+		if value.Displacement != 0 {
+			temporary := scratch
+			if work.Code == scratch.Code {
+				temporary = address
+			}
+			moveImmediate(out, temporary, int64(value.Displacement))
+			add(out, work, temporary)
+		}
+		if work.Code != destination.Code {
+			move(out, destination, work)
+		}
+	}
+
+	func memoryAddress(out *RTGEmitter, value RTGAddress) RTGRegister {
+		emitAddress(out, address, value)
+		return address
+	}
+
+	func loadWidth(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress, opcode int, extend int) {
+		base := memoryAddress(out, value)
+		work := destination
+		if work.Code >= 8 || work.Code == base.Code {
+			work = scratch
+		}
+		emit16(out, opcode|(base.Code<<3)|work.Code)
+		if extend != 0 {
+			emit16(out, extend|(work.Code<<3)|work.Code)
+		}
+		if work.Code != destination.Code {
+			move(out, destination, work)
+		}
+	}
+
+	func storeWidth(out *RTGEmitter, value RTGAddress,
+		source RTGRegister, opcode int) {
+		preserved := source
+		if source.Code == address.Code || source.Code == scratch.Code || source.Code >= 8 {
+			// Address formation owns r3/r4. Preserve the value in one of r0-r2
+			// which is not itself an address input; at most base and index can
+			// exclude two of those three registers.
+			code := 0
+			for (value.Base.Valid && value.Base.Code == code) ||
+				(value.Index.Valid && value.Index.Code == code) {
+				code++
+			}
+			preserved = RTGRegister{Code:code, Valid:true}
+			move(out, preserved, source)
+		}
+		base := memoryAddress(out, value)
+		emit16(out, opcode|(base.Code<<3)|preserved.Code)
+	}
+
+	func loadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0x6800, 0)
+	}
+	func loadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadNative(out, destination, value)
+	}
+	func loadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadNative(out, destination, value)
+	}
+	func loadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0x8800, 0xb200)
+	}
+	func loadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0x8800, 0)
+	}
+	func loadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0x7800, 0xb240)
+	}
+	func loadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0x7800, 0)
+	}
+	func storeNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 0x6000)
+	}
+	func storeU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeNative(out, value, source)
+	}
+	func storeU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 0x8000)
+	}
+	func storeU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 0x7000)
+	}
+
+	func emitLongJump(out *RTGEmitter, label RTGLabel) {
+		align4(out)
+		at := out.Len()
+		move(out, scratch, pc)
+		emitImmediateFixed(out, address.Code, 0)
+		add(out, scratch, address)
+		emit16(out, 0x4700|(scratch.Code<<3))
+		out.RelocAt(at, label)
+	}
+
+	func call(out *RTGEmitter, label RTGLabel) {
+		align4(out)
+		at := out.Len()
+		RTGUint32(out, 0xf800f000)
+		out.RelocAt(at, label)
+	}
+
+	func callIndirect(out *RTGEmitter, operand RTGRegister) {
+		emit16(out, 0x4780|((operand.Code&15)<<3))
+	}
+
+	func jump(out *RTGEmitter, label RTGLabel) {
+		emitLongJump(out, label)
+	}
+
+	func jumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		// The inverse short branch skips a fixed-size, unlimited-range jump.
+		align4(out)
+		emit16(out, 0xd000|((condition.Code^1)<<8)|11)
+		emitLongJump(out, label)
+	}
+
+	func setCondition(out *RTGEmitter, condition RTGCondition,
+		destination RTGRegister) {
+		falseLabel := out.NewLabel()
+		done := out.NewLabel()
+		jumpCondition(out, condition, falseLabel)
+		moveImmediate(out, destination, 0)
+		jump(out, done)
+		out.Mark(falseLabel)
+		moveImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+
+	func ret(out *RTGEmitter) {
+		emit16(out, 0x4700|(link.Code<<3))
+	}
+
+	func leave(out *RTGEmitter) {
+		move(out, stack, frame)
+		emit16(out, 0xbc80) // pop {r7}
+		emit16(out, 0xbc08) // pop {r3}
+		emit16(out, 0xb006) // discard saved incoming r0-r5
+		move(out, link, scratch)
+	}
+
+	func hostSyscall(out *RTGEmitter) {
+		emit16(out, 0xbe00) // bkpt #0
+	}
+
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		opcode := 0x4080
+		if direction == RTGShiftRight {
+			opcode = 0x40c0
+			if signed {
+				opcode = 0x4100
+			}
+		}
+		// Count is primary and the value is tertiary.
+		move(out, scratch, tertiary)
+		lowALU(out, scratch, primary, opcode)
+		move(out, primary, scratch)
+	}
+
+	func unsignedDivideCore(out *RTGEmitter, remainder bool) {
+		// Restoring division, one dividend bit per iteration. r0 is the divisor,
+		// r2 is the dividend, r3 becomes the quotient, and r4 the remainder.
+		moveImmediate(out, scratch, 0)
+		moveImmediate(out, address, 0)
+		moveImmediate(out, secondary, 32)
+		loopAt := out.Len()
+		shiftLeftImmediate(out, tertiary, 1) // carry = next dividend bit
+		emit16(out, 0x4140|(address.Code<<3)|address.Code) // adcs r4, r4
+		shiftLeftImmediate(out, scratch, 1)
+		compare(out, address, primary)
+		// Skip exactly SUBS+ADDS when the partial remainder is smaller.
+		emit16(out, 0xd301) // blo +2
+		subtract(out, address, primary)
+		increment(out, scratch)
+		decrement(out, secondary)
+		delta := loopAt-(out.Len()+4)
+		emit16(out, 0xd100|((delta>>1)&255)) // bne loopAt
+		if remainder {
+			move(out, primary, address)
+		} else {
+			move(out, primary, scratch)
+		}
+	}
+
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		// Preserve every borrowed register except r1, the only register the
+		// signed-divide contract permits this operation to clobber.
+		emit16(out, 0xb43e) // push {r1, r2, r3, r4, r5}
+		sign := RTGRegister{Code: 5, Valid: true}
+		moveImmediate(out, sign, 0)
+		zero := scratch
+		moveImmediate(out, zero, 0)
+		divisorPositive := out.NewLabel()
+		compare(out, primary, zero)
+		jumpCondition(out, sge, divisorPositive)
+		subLow(out, primary.Code, zero.Code, primary.Code)
+		if !remainder {
+			increment(out, sign)
+		}
+		out.Mark(divisorPositive)
+		moveImmediate(out, zero, 0)
+		dividendPositive := out.NewLabel()
+		compare(out, tertiary, zero)
+		jumpCondition(out, sge, dividendPositive)
+		subLow(out, tertiary.Code, zero.Code, tertiary.Code)
+		moveImmediate(out, zero, 1)
+		bitXor(out, sign, zero)
+		out.Mark(dividendPositive)
+		unsignedDivideCore(out, remainder)
+		moveImmediate(out, zero, 0)
+		positiveResult := out.NewLabel()
+		compare(out, sign, zero)
+		jumpCondition(out, eq, positiveResult)
+		subLow(out, primary.Code, zero.Code, primary.Code)
+		out.Mark(positiveResult)
+		emit16(out, 0xbc3e) // pop {r1, r2, r3, r4, r5}
+	}
+
+	func unsignedDivide(out *RTGEmitter, remainder bool) bool {
+		emit16(out, 0xb41e) // push {r1, r2, r3, r4}
+		unsignedDivideCore(out, remainder)
+		emit16(out, 0xbc1e) // pop {r1, r2, r3, r4}
+		return true
+	}
+
+	func patchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := out.LabelPosition(out.RelocationLabel(index))
+			instruction := RTGGet32At(out.Code(), at)
+			if instruction == 0xf800f000 {
+				delta := target-(at+4)
+				s := (delta >> 24) & 1
+				i1 := (delta >> 23) & 1
+				i2 := (delta >> 22) & 1
+				j1 := (i1 ^ s ^ 1) & 1
+				j2 := (i2 ^ s ^ 1) & 1
+				first := 0xf000|(s<<10)|((delta>>12)&0x3ff)
+				second := 0xd000|(j1<<13)|(j2<<11)|((delta>>1)&0x7ff)
+				out.PatchUint32(at, first|(second<<16))
+			} else {
+				// Both address materialization and long jumps start with MOV Rd, PC.
+				register := (instruction >> 24) & 7
+				delta := target-(at+4)
+				// Long jumps and materialized function pointers are consumed by
+				// BX/BLX, so every code address carries the Thumb state bit.
+				delta++
+				patchImmediateFixed(out, at+2, register, delta)
+			}
+		}
+	}
+
+	func frameStart(out *RTGEmitter) int {
+		align4(out)
+		emit16(out, 0xb43f) // save incoming r0-r5 before address formation
+		emit16(out, 0xb580) // push {r7, lr}
+		move(out, frame, stack)
+		at := out.Len()
+		emitImmediateFixed(out, scratch.Code, 0)
+		subLow(out, address.Code, frame.Code, scratch.Code)
+		move(out, stack, address)
+		return at
+	}
+
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 15) & -8
+		patchImmediateFixed(out, at, scratch.Code, frameSize)
+	}
+
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		if word >= 0 && word < 6 {
+			// Incoming words were saved immediately above FP by frameStart.
+			displacement := 8 + word*4
+			emit16(out, 0x6800|((displacement/4)<<6)|(frame.Code<<3)|primary.Code)
+			frameStore(out, offset, primary)
+			return
+		}
+		loadNative(out, primary, RTGAddress{
+			Base:frame, Displacement:32+(word-6)*4,
+		})
+		frameStore(out, offset, primary)
+	}
+
+	func popRegister(out *RTGEmitter, destination RTGRegister) {
+		// The generic RTG pop increments SP through scratch after loading the
+		// destination. That destroys call word 3 when scratch itself is r3.
+		// Thumb has a native low-register POP which performs both operations.
+		emit16(out, 0xbc00|(1<<destination.Code))
+	}
+
+	func frameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		loadNative(out, destination,
+			RTGAddress{Base: frame, Displacement: -(offset+8)})
+	}
+	func frameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		storeNative(out,
+			RTGAddress{Base: frame, Displacement: -(offset+8)}, source)
+	}
+	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitAddress(out, destination,
+			RTGAddress{Base: frame, Displacement: -(offset+8)})
+	}
+}
+
+arch thumb {
+	alias = "thumb"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 2
+	stack_word_bytes = 4
+	stack_alignment = 8
+	patch_relocations = go patchRelocations
+
+	registers integer = [
+		r0, r1, r2, r3, r4, r5, r6, r7,
+		r8, r9, r10, r11, r12, stack, link, pc
+	]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		scratch = r3
+		address = r4
+		copy_destination = r5
+		copy_source = r6
+		copy_count = r8
+		stack = stack
+		frame = r7
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		uge = 2
+		ult = 3
+		ugt = 8
+		ule = 9
+		sge = 10
+		slt = 11
+		sgt = 12
+		sle = 13
+	}
+	bind {
+		move = go move
+		address = go emitAddress
+		load.native = go loadNative
+		load.i32 = go loadI32
+		load.u32 = go loadU32
+		load.i16 = go loadI16
+		load.u16 = go loadU16
+		load.i8 = go loadI8
+		load.u8 = go loadU8
+		store.native = go storeNative
+		store.u32 = go storeU32
+		store.u16 = go storeU16
+		store.u8 = go storeU8
+		add = go add
+		subtract = go subtract
+		multiply = go multiply
+		bit_and = go bitAnd
+		bit_or = go bitOr
+		bit_xor = go bitXor
+		compare = go compare
+		test = go test
+		increment = go increment
+		decrement = go decrement
+		shift_left_immediate = go shiftLeftImmediate
+		shift_right_unsigned_immediate = go shiftRightUnsignedImmediate
+		shift_right_signed_immediate = go shiftRightSignedImmediate
+		call = go call
+		call_indirect = go callIndirect
+		jump = go jump
+		jump_condition = go jumpCondition
+		set_condition = go setCondition
+		return = go ret
+		leave = go leave
+		host_syscall = go hostSyscall
+		move_immediate = go moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			compare(out, copyDestination, copySource)
+			jumpCondition(out, ult, forward)
+			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1, ))
+			compare(out, copyDestination, scratch)
+			jumpCondition(out, uge, forward)
+			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1, ))
+			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1, ))
+			out.Mark(backwardLoop)
+			moveImmediate(out, scratch, 0)
+			compare(out, copyCount, scratch)
+			jumpCondition(out, eq, done)
+			loadU8(out, scratch, record_address(Base:copySource, ))
+			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			decrement(out, copySource)
+			decrement(out, copyDestination)
+			decrement(out, copyCount)
+			jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			moveImmediate(out, scratch, 0)
+			compare(out, copyCount, scratch)
+			jumpCondition(out, eq, done)
+			loadU8(out, scratch, record_address(Base:copySource, ))
+			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			increment(out, copySource)
+			increment(out, copyDestination)
+			decrement(out, copyCount)
+			jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi thumb_internal {
+	arch = thumb
+	arguments = [r0, r1, r2, r3, r4, r5]
+	call_words = [r0, r1, r2, r3, r4, r5]
+	result = [r0, r1]
+	stack_alignment = 8
+	return_address = link
+	frame_pointer = r7
+	frame_start = go frameStart
+	frame_finish = go frameFinish
+	frame_load = go frameLoad
+	frame_store = go frameStore
+	frame_address = go frameAddress
+	pop_register = go popRegister
+	store_param_word = go storeParamWord
+	unsigned_divide = go unsignedDivide
+}

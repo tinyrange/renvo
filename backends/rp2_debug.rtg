@@ -1,0 +1,27 @@
+@import "../backend/definitions/rp2_common.rtg"
+
+go backend {
+	func hotReloadFunctionFinish(out *RTGEmitter) {
+		for out.Len()&255 != 0 {
+			thumb.emit16(out, 0x46c0)
+		}
+	}
+}
+
+abi rp2_debug_internal {
+	internal = thumb_internal
+	function_finish = go hotReloadFunctionFinish
+}
+
+target rp2-debug/thumb {
+	family = native_v1
+	os = rp2
+	arch = thumb
+	frontend_arch = thumb
+	abi = rp2_debug_internal
+	runtime = rp2_debug_freestanding
+	executable = rp2_debug_elf
+	build_tags = [rp2, thumb, renvo_hotreload]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}

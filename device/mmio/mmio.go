@@ -16,6 +16,16 @@ func Store32(address uintptr, value uint32) {
 	*(*uint32)(unsafe.Pointer(address)) = value
 }
 
+//renvo:load
+func Load8(address uintptr) uint8 {
+	return *(*uint8)(unsafe.Pointer(address))
+}
+
+//renvo:store
+func Store8(address uintptr, value uint8) {
+	*(*uint8)(unsafe.Pointer(address)) = value
+}
+
 // Load performs a volatile register read.
 func (r Register32) Load() uint32 { return Load32(uintptr(r)) }
 

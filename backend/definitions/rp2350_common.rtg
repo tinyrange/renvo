@@ -1,0 +1,260 @@
+definition 1
+unit rp2350
+implements direct_emitter_v1
+
+@import "riscv32.rtg"
+
+go backend {
+	const flashBase = 0x10000000
+	const flashCodeOffset = 0x100
+	const debugTextAddress = 0x20020000
+	const dataAddress = 0x20000000
+	const stackTop = 0x20082000
+	const elfCodeOffset = 0x100
+	const elfPageSize = 0x1000
+	const uf2FamilyRP2350Riscv = 0xe48bff5a
+	var flashDataAddressPatch int
+	var flashDataSizePatch int
+
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func patchImmediatePair(out *RTGEmitter, at int, register int, value int) {
+		hi := (value + 0x800) >> 12
+		lo := value - (hi << 12)
+		out.PatchUint32(at, 0x37|(register<<7)|(hi<<12))
+		out.PatchUint32(at+4,
+			0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+	}
+
+	func emitPatchableImmediate(out *RTGEmitter, register RTGRegister) int {
+		at := out.Len()
+		riscv32.emit(out, 0x37|(register.Code<<7))
+		riscv32.emit(out, 0x13|(register.Code<<7)|(register.Code<<15))
+		return at
+	}
+
+	func patchAbsolute(out *RTGEmitter, bssAddress int) {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			addend := out.AbsoluteRelocationAddend(index)
+			kind := out.AbsoluteRelocationKind(index)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataAddress, bssAddress)
+			if resolved {
+				instruction := RTGGet32At(out.Code(), at)
+				patchImmediatePair(out, at, (instruction>>7)&31, target)
+			}
+		}
+	}
+
+	func clearBSS(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.emitAddress(out, riscv32.secondary, RTGBSSAddress(0))
+		riscv32.emitAddress(out, riscv32.copyCount, RTGBSSEndAddress(4))
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.secondary, riscv32.copyCount)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.secondary}, riscv32.zero)
+		riscv32.emitAddress(out, riscv32.secondary,
+			RTGAddress{Base: riscv32.secondary, Displacement: 4})
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func copyFlashData(out *RTGEmitter) {
+		flashDataAddressPatch = emitPatchableImmediate(out, riscv32.copySource)
+		flashDataSizePatch = emitPatchableImmediate(out, riscv32.copyCount)
+		riscv32.moveImmediate(out, riscv32.copyDestination, int64(dataAddress))
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.copyCount, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.loadU8(out, riscv32.primary,
+			RTGAddress{Base: riscv32.copySource})
+		riscv32.storeU8(out,
+			RTGAddress{Base: riscv32.copyDestination}, riscv32.primary)
+		riscv32.increment(out, riscv32.copySource)
+		riscv32.increment(out, riscv32.copyDestination)
+		riscv32.decrement(out, riscv32.copyCount)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func entryCommon(out *RTGEmitter) {
+		riscv32.emit(out, 0x30047073) // csrci mstatus, 8
+		clearBSS(out)
+		riscv32.moveImmediate(out, riscv32.stack, int64(stackTop))
+		riscv32.move(out, riscv32.frame, riscv32.stack)
+	}
+
+	func flashEntry(out *RTGEmitter, stateOffset int) bool {
+		copyFlashData(out)
+		entryCommon(out)
+		return true
+	}
+
+	func debugEntry(out *RTGEmitter, stateOffset int) bool {
+		entryCommon(out)
+		return true
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		riscv32.jump(out, loop)
+	}
+
+	func discardWrite(out *RTGEmitter) {
+		riscv32.move(out, riscv32.primary, riscv32.tertiary)
+	}
+
+	func picobinHeader(entry int) []byte {
+		var result []byte
+		result = append32(result, 0xffffded3)
+		result = append32(result, 0x11010142) // executable, RP2350, RISC-V
+		result = append32(result, 0x00000344) // entry-point item, three words
+		result = append32(result, entry)
+		result = append32(result, stackTop)
+		result = append32(result, 0x000004ff) // last item; four item words
+		result = append32(result, 0)
+		return append32(result, 0xab123579)
+	}
+
+	func appendUF2Block(
+		out []byte, address int, block int, count int, payload []byte,
+	) []byte {
+		out = append32(out, 0x0a324655)
+		out = append32(out, 0x9e5d5157)
+		out = append32(out, 0x00002000)
+		out = append32(out, address)
+		out = append32(out, 256)
+		out = append32(out, block)
+		out = append32(out, count)
+		out = append32(out, uf2FamilyRP2350Riscv)
+		out = append(out, payload...)
+		out = appendUntil(out, (block+1)*512-4)
+		return append32(out, 0x0ab16f30)
+	}
+
+	func flashImage(out *RTGEmitter) []byte {
+		data := out.Data()
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		patchAbsolute(out, bssAddress)
+		code := out.Code()
+		dataOffset := RTGAlignValue(flashCodeOffset+len(code), 4)
+		patchImmediatePair(out, flashDataAddressPatch,
+			riscv32.copySource.Code, flashBase+dataOffset)
+		patchImmediatePair(out, flashDataSizePatch,
+			riscv32.copyCount.Code, len(data))
+		code = out.Code()
+
+		binary := picobinHeader(flashBase+flashCodeOffset)
+		binary = appendUntil(binary, flashCodeOffset)
+		binary = append(binary, code...)
+		binary = appendUntil(binary, dataOffset)
+		binary = append(binary, data...)
+		binary = appendUntil(binary, RTGAlignValue(len(binary), 256))
+		blocks := len(binary) / 256
+		var result []byte
+		for block := 0; block < blocks; block++ {
+			payload := binary[block*256:(block+1)*256]
+			result = appendUF2Block(result,
+				flashBase+block*256, block, blocks, payload)
+		}
+		return result
+	}
+
+	func appendProgramHeader(
+		out []byte, offset int, address int, fileSize int,
+		memorySize int, flags int,
+	) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, elfPageSize)
+	}
+
+	func debugImage(out *RTGEmitter) []byte {
+		data := out.Data()
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		patchAbsolute(out, bssAddress)
+		code := out.Code()
+		dataOffset := RTGAlignValue(elfCodeOffset+len(code), elfPageSize)
+		dataMemorySize := bssAddress-dataAddress+RTGAlignValue(out.BSSSize(), 4)
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0)
+		result = append16(result, 2)
+		result = append16(result, 243)
+		result = append32(result, 1)
+		result = append32(result, debugTextAddress+elfCodeOffset)
+		result = append32(result, 52)
+		result = append32(result, 0)
+		result = append32(result, 0)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 2)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = appendProgramHeader(result, 0, debugTextAddress,
+			elfCodeOffset+len(code), elfCodeOffset+len(code), 5)
+		result = appendProgramHeader(result, dataOffset, dataAddress,
+			len(data), dataMemorySize, 6)
+		result = appendUntil(result, elfCodeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		return append(result, data...)
+	}
+}
+
+runtime rp2350_flash_freestanding {
+	emit_entry_start = go flashEntry
+	emit_exit = go exit
+	operation write { emit = go discardWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+runtime rp2350_debug_freestanding {
+	emit_entry_start = go debugEntry
+	emit_exit = go exit
+	operation write { emit = go discardWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format rp2350_uf2 {
+	kind = uf2
+	byte_order = little
+	address_bits = 32
+	code_offset = 0x100
+	image = go flashImage
+}
+
+format rp2350_debug_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go debugImage
+}
