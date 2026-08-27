@@ -947,6 +947,8 @@ abi renvo_8086 {
 	stack_alignment = 2
 }
 
+@import "bios_8086.rtg"
+
 runtime msdos {
 	emit_entry_start = go dosEntryStart
 	emit_entry = go dosEntry

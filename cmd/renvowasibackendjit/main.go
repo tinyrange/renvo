@@ -136,6 +136,9 @@ func outputName(target string, kind string) string {
 	if kind == "uefi-pe" {
 		return "BOOTX64.EFI"
 	}
+	if kind == "bios-disk" {
+		return "renvo-bios.img"
+	}
 	if strings.HasPrefix(target, "windows/") {
 		return "app.exe"
 	}

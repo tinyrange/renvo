@@ -25,24 +25,24 @@ import (
 )
 
 type targetAsset struct {
-	Name              string   `json:"name"`
-	Label             string   `json:"label,omitempty"`
-	FrontendTarget    string   `json:"frontendTarget,omitempty"`
-	BackendTarget     string   `json:"backendTarget"`
-	Backend           string   `json:"backend"`
-	BackendFormat     string   `json:"backendFormat,omitempty"`
-	RTGDefinition     string   `json:"rtgDefinition,omitempty"`
+	Name              string                  `json:"name"`
+	Label             string                  `json:"label,omitempty"`
+	FrontendTarget    string                  `json:"frontendTarget,omitempty"`
+	BackendTarget     string                  `json:"backendTarget"`
+	Backend           string                  `json:"backend"`
+	BackendFormat     string                  `json:"backendFormat,omitempty"`
+	RTGDefinition     string                  `json:"rtgDefinition,omitempty"`
 	RTGImports        []targetDefinitionAsset `json:"rtgImports,omitempty"`
-	CBackend          string   `json:"cBackend,omitempty"`
-	Output            string   `json:"output"`
-	Runnable          bool     `json:"runnable,omitempty"`
-	Device            string   `json:"device,omitempty"`
-	Docs              string   `json:"docs,omitempty"`
-	Artwork           string   `json:"artwork,omitempty"`
-	Tags              []string `json:"tags,omitempty"`
-	Definition        string   `json:"definition,omitempty"`
-	DescriptorVersion int      `json:"descriptorVersion,omitempty"`
-	Hidden            bool     `json:"hidden,omitempty"`
+	CBackend          string                  `json:"cBackend,omitempty"`
+	Output            string                  `json:"output"`
+	Runnable          bool                    `json:"runnable,omitempty"`
+	Device            string                  `json:"device,omitempty"`
+	Docs              string                  `json:"docs,omitempty"`
+	Artwork           string                  `json:"artwork,omitempty"`
+	Tags              []string                `json:"tags,omitempty"`
+	Definition        string                  `json:"definition,omitempty"`
+	DescriptorVersion int                     `json:"descriptorVersion,omitempty"`
+	Hidden            bool                    `json:"hidden,omitempty"`
 }
 
 type targetDefinitionAsset struct {
@@ -163,12 +163,17 @@ type boardDefinition struct {
 
 var customTargets = []customTarget{
 	{Name: "esp32c6-jtag/riscv32", Definition: "backends/esp32c6_jtag.rtg", Backend: "backends/esp32c6-jtag-riscv32.wasm", Tags: []string{"m5nanoc6"}, Device: "esp32", Hidden: true},
-	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
-	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", Device: "computer"},
+	{Name: "msdos/8086", Label: "MS-DOS 8086 (.COM)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
+	{Name: "msdos/8086-mz", Label: "MS-DOS 8086 (.EXE)", Definition: "backends/msdos.rtg", Backend: "backends/msdos-8086-mz.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
+	{Name: "bios/8086", Label: "PC BIOS 8086 (boot disk)", Definition: "backends/msdos.rtg", Backend: "backends/bios-8086.rnvb", Format: "vm32", RTGSource: "backends/msdos.rtg", RTGImports: pc8086DefinitionImports(), Device: "computer"},
 	{Name: "uefi/amd64", Label: "UEFI x86-64 (.EFI)", Definition: "backends/uefi_amd64.rtg", Backend: "backends/uefi-amd64.rnvb", Format: "vm32", RTGSource: "backends/uefi_amd64.rtg", RTGImports: []targetDefinitionAsset{
 		{Name: "backend/definitions/x86_64.rtg", Source: "backends/definitions/x86_64.rtg"},
 		{Name: "backend/definitions/elf_amd64_primitives.rtg", Source: "backends/definitions/elf_amd64_primitives.rtg"},
 	}, Device: "computer"},
+}
+
+func pc8086DefinitionImports() []targetDefinitionAsset {
+	return []targetDefinitionAsset{{Name: ".renvo/bios_8086.rtg", Source: "backends/bios_8086.rtg"}}
 }
 
 func main() {
@@ -398,6 +403,9 @@ func outputName(target string, image string) string {
 	if image == "uefi-pe" {
 		return "BOOTX64.EFI"
 	}
+	if image == "bios-disk" {
+		return "renvo-bios.img"
+	}
 	if strings.HasPrefix(target, "esp32") || strings.Contains(image, "elf") {
 		return "app.elf"
 	}
@@ -527,6 +535,10 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		Name: "x86-64 UEFI system", Target: "uefi/amd64", Family: "Firmware", Artwork: "ibmpc",
 		Description: "PC or virtual machine with x86-64 UEFI firmware",
 	}}
+	biosComputer := []computerTarget{{
+		Name: "IBM PC-compatible BIOS", Target: "bios/8086", Family: "Firmware", Artwork: "ibmpc",
+		Description: "PC or virtual machine with legacy IBM PC-compatible BIOS firmware",
+	}}
 	specs := []platformPackageSpec{
 		{Path: "forms"},
 		{
@@ -547,11 +559,13 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "examples/msdos-filesystem", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
 		{Path: "examples/msdos-system", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
 		{Path: "examples/msdos-input", Target: "msdos/8086-mz", ArenaSize: 4096, Computers: dosComputer},
+		{Path: "examples/bios-hello", Target: "bios/8086", Computers: biosComputer},
 		{Path: "examples/uefi-hello", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "examples/uefi-graphics", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "examples/uefi-filesystem", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "examples/uefi-linux-boot", Target: "uefi/amd64", Computers: uefiComputer},
 		{Path: "device/dos"},
+		{Path: "device/bios"},
 		{Path: "device/uefi"},
 		{Path: "device/mmio"},
 		{Path: "device/gpio"},
