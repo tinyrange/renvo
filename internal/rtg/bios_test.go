@@ -43,14 +43,10 @@ func TestBIOS8086ExternalDefinition(t *testing.T) {
 			t.Errorf("prepared BIOS backend omitted %q", want)
 		}
 	}
-}
 
-func TestPCLongModeAmd64ExternalDefinition(t *testing.T) {
-	const filename = "../../backends/msdos.rtg"
-	resolved := Resolve(parseDefinitionFile(t, filename))
-	if !resolved.Ok {
-		t.Fatalf("resolve long-mode backend: %#v", resolved.Diagnostics)
-	}
+	// The same definition exports the next-stage, freestanding target. Checking
+	// it from the already-resolved document avoids parsing the large shared 8086
+	// architecture twice in the package suite.
 	for i := 0; i < len(resolved.Targets); i++ {
 		descriptor := resolved.Targets[i].Descriptor
 		if descriptor.Name != "freestanding/amd64" {

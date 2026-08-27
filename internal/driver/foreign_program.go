@@ -181,7 +181,8 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 	for i := 0; i < len(files); i++ {
 		file := files[i]
 		name := load.BasePath(file.Path)
-		if load.DirPath(file.Path) != rootDir || len(name) < 3 || name[len(name)-3:] != ".go" {
+		if load.DirPath(file.Path) != rootDir || len(name) < 3 || name[len(name)-3:] != ".go" ||
+			!foreignSourceContainsDirective(file.Src) {
 			continue
 		}
 		line := 1
@@ -231,6 +232,44 @@ func scanForeignDirectives(files []load.SourceFile, rootDir string) ([]foreignDi
 		}
 	}
 	return directives, Diagnostic{}, true
+}
+
+func foreignSourceContainsDirective(src []byte) bool {
+	for i := 0; i+13 <= len(src); {
+		last := src[i+12]
+		if last == 'e' && src[i] == 'r' && src[i+1] == 'e' && src[i+2] == 'n' &&
+			src[i+3] == 'v' && src[i+4] == 'o' && src[i+5] == ':' &&
+			src[i+6] == 'c' && src[i+7] == 'o' && src[i+8] == 'm' &&
+			src[i+9] == 'p' && src[i+10] == 'i' && src[i+11] == 'l' {
+			return true
+		}
+		if last == 'l' {
+			i++
+		} else if last == 'i' {
+			i += 2
+		} else if last == 'p' {
+			i += 3
+		} else if last == 'm' {
+			i += 4
+		} else if last == 'o' {
+			i += 5
+		} else if last == 'c' {
+			i += 6
+		} else if last == ':' {
+			i += 7
+		} else if last == 'v' {
+			i += 9
+		} else if last == 'n' {
+			i += 10
+		} else if last == 'e' {
+			i += 11
+		} else if last == 'r' {
+			i += 12
+		} else {
+			i += 13
+		}
+	}
+	return false
 }
 
 func foreignDirectiveArgsStart(src []byte, start int, end int) int {
