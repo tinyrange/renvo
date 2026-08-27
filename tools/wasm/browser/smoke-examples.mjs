@@ -101,6 +101,14 @@ async function exampleFiles(importPath, item) {
   for (const file of item.files || []) {
     await addFile(files, file, new URL(`module/${item.root}/${file}`, standardRoot));
   }
+  for (const [name, data] of [...files]) {
+    if (!name.endsWith(".rbe")) continue;
+    const source = new TextDecoder().decode(data);
+    const section = /^[ \t]*@stdlib[ \t]+"([^"\r\n]+)"[ \t]*\r?\n([\s\S]*?)^[ \t]*@endstdlib[ \t]*(?:\r?\n|$)/gm;
+    for (const match of source.matchAll(section)) {
+      files.set(`std/${match[1]}`, bytes(new TextEncoder().encode(match[2])));
+    }
+  }
   if ([...files.keys()].some((name) => name.endsWith(".go")) && !files.has("go.mod")) {
     files.set("go.mod", bytes(new TextEncoder().encode(standardCatalog.module)));
   }
@@ -119,7 +127,8 @@ function workerFiles(files) {
 }
 
 async function prepareProjectTargets(files) {
-  const definitions = [...files.keys()].filter((name) => name.endsWith(".rtg") && !name.includes("/"));
+  const definitions = [...files.keys()].filter((name) =>
+    (name.endsWith(".rtg") || name.endsWith(".rbe")) && !name.includes("/"));
   const targets = new Map();
   for (const definition of definitions) {
     const inspected = await request({
