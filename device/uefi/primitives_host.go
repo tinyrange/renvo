@@ -2,8 +2,18 @@
 
 package uefi
 
+// ImageHandleHook supplies a simulated image handle in host builds. It is
+// unavailable to Renvo UEFI/AMD64 programs and is intended for host tests and
+// emulators.
 var ImageHandleHook func() uintptr
+
+// SystemTableHook supplies a simulated system table address in host builds. It
+// is unavailable to Renvo UEFI/AMD64 programs and is intended for host tests
+// and emulators.
 var SystemTableHook func() uintptr
+
+// CallHook handles simulated UEFI ABI calls in host builds. It is unavailable
+// to Renvo UEFI/AMD64 programs and is intended for host tests and emulators.
 var CallHook func(function uintptr, arguments []uintptr) uintptr
 
 func imageHandle() uintptr {

@@ -2,6 +2,7 @@ import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
+import { catalogHelpPages, findAPIHelpReference, helpAnchor, installAPIHelpAction } from "./api-help.mjs";
 import { fetchAsset } from "./asset-fetch.mjs";
 import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
@@ -471,6 +472,7 @@ async function loadMonaco() {
     openFile,
     get editor() { return editor; },
   });
+  installAPIHelpAction(monaco, editor, openAPIHelpAtCursor);
   editor.onDidChangeCursorPosition(({ position }) => {
     elements.cursorStatus.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
   });
@@ -3639,14 +3641,15 @@ function renderExampleBrowser() {
   }));
 }
 
-const viewParameterNames = ["help", "source", "example", "file"];
+const viewParameterNames = ["help", "source", "example", "file", "symbol"];
 
-function setViewDeepLink(kind = "", value = "", file = "") {
+function setViewDeepLink(kind = "", value = "", detail = "") {
   if (!deepLinksReady || applyingDeepLink) return;
   const url = new URL(location.href);
   for (const name of viewParameterNames) url.searchParams.delete(name);
   if (kind && value) url.searchParams.set(kind, value);
-  if (kind === "example" && file) url.searchParams.set("file", file);
+  if (kind === "example" && detail) url.searchParams.set("file", detail);
+  if (kind === "help" && detail) url.searchParams.set("symbol", detail);
   if (url.href !== location.href) history.pushState({ renvoView: true }, "", url);
 }
 
@@ -3669,7 +3672,7 @@ async function restoreDeepLink() {
     const example = current.get("example");
     const source = current.get("source");
     if (help) {
-      if (helpDocument(help)) openHelpPage(help);
+      if (helpDocument(help)) openHelpPage(help, current.get("symbol") || "");
       else elements.languageStatus.textContent = `Documentation not found: ${help}`;
       return;
     }
@@ -3699,15 +3702,7 @@ function helpTab(importPath) { return `help:${importPath}`; }
 function helpImportPath(name) { return name.slice("help:".length); }
 
 function helpDocuments(catalog = standardCatalog) {
-  const documents = [];
-  if (catalog?.builtins) documents.push(catalog.builtins);
-  for (const [importPath, item] of Object.entries(catalog?.packages || {})) {
-    if (item.docs) documents.push({ ...item.docs, importPath });
-  }
-  for (const [importPath, item] of Object.entries(catalog?.platforms || {})) {
-    if (item.docs && !item.main) documents.push({ ...item.docs, importPath });
-  }
-  return documents.sort((left, right) => left.importPath.localeCompare(right.importPath));
+  return catalogHelpPages(catalog);
 }
 
 function helpDocument(importPath) {
@@ -3751,7 +3746,7 @@ function renderHelpCatalog(catalog = standardCatalog, query = "") {
   });
 }
 
-function openHelpPage(importPath) {
+function openHelpPage(importPath, anchor = "") {
   const page = helpDocument(importPath);
   if (!page) return;
   activeHelp = helpTab(importPath);
@@ -3768,12 +3763,27 @@ function openHelpPage(importPath) {
   elements.cursorStatus.textContent = importPath;
   renderHelpPage(page);
   renderEditorTabs();
-  setViewDeepLink("help", importPath);
+  setViewDeepLink("help", importPath, anchor);
+  if (anchor) queueMicrotask(() => elements.helpView.querySelector(`#${anchor}`)?.scrollIntoView());
   if (isPhoneWorkspace()) showMobileView("editor");
 }
 
-function helpAnchor(section, name) {
-  return `doc-${section}-${name}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+async function openAPIHelpAtCursor(model, position) {
+  if (!standardCatalog) return;
+  const word = model.getWordAtPosition(position)?.word || "";
+  const records = await requestLanguage("definition", model, byteOffset(model, position));
+  const definition = records.find((item) => item[0] === "L");
+  let reference;
+  if (definition) {
+    const location = await languageLocation(definition);
+    reference = findAPIHelpReference(standardCatalog, definition[1], location?.range?.startLineNumber || 0, word);
+  }
+  if (!reference) reference = findAPIHelpReference(standardCatalog, fileName(model), position.lineNumber, word);
+  if (!reference) {
+    elements.languageStatus.textContent = `No API documentation found for ${word || "this symbol"}`;
+    return;
+  }
+  openHelpPage(reference.importPath, reference.anchor);
 }
 
 function renderHelpPage(page) {
@@ -3790,6 +3800,10 @@ function renderHelpPage(page) {
   const overview = document.createElement("p"); overview.className = "help-overview";
   overview.textContent = page.doc || "This package has no overview documentation yet.";
   const nodes = [breadcrumb, title, path, overview];
+  if (page.examples?.length) {
+    const examplesTitle = document.createElement("h2"); examplesTitle.textContent = "Examples";
+    nodes.push(examplesTitle, renderHelpExamples(page.examples));
+  }
   const sections = [
     ["Constants", page.constants || []], ["Variables", page.variables || []],
     ["Functions", page.functions || []], ["Types", page.types || []],
@@ -3800,11 +3814,11 @@ function renderHelpPage(page) {
     for (const [section, entries] of sections) for (const entry of entries) {
       const item = document.createElement("li"); const link = document.createElement("a");
       link.href = `#${helpAnchor(section, entry.name)}`; link.textContent = helpIndexLabel(section, entry); item.append(link); index.append(item);
-      link.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(link.getAttribute("href"))?.scrollIntoView(); });
+      link.addEventListener("click", (event) => { event.preventDefault(); openHelpPage(page.importPath, link.getAttribute("href").slice(1)); });
       for (const method of entry.methods || []) {
         const methodItem = document.createElement("li"); const methodLink = document.createElement("a");
         methodLink.href = `#${helpAnchor("method", `${entry.name}-${method.name}`)}`; methodLink.textContent = method.signature.split("\n")[0];
-        methodLink.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(methodLink.getAttribute("href"))?.scrollIntoView(); });
+        methodLink.addEventListener("click", (event) => { event.preventDefault(); openHelpPage(page.importPath, methodLink.getAttribute("href").slice(1)); });
         methodItem.append(methodLink); index.append(methodItem);
       }
     }
@@ -3846,7 +3860,32 @@ function renderHelpDeclaration(page, entry, id) {
   colorizeHelpSignature(signature, entry.signature);
   const docs = document.createElement("p"); docs.className = `help-doc${entry.doc ? "" : " help-empty-doc"}`;
   docs.textContent = entry.doc || "No documentation is available for this declaration.";
-  declaration.append(headingRow, signature, docs); return declaration;
+  declaration.append(headingRow, signature, docs);
+  if (entry.examples?.length) declaration.append(renderHelpExamples(entry.examples));
+  return declaration;
+}
+
+function renderHelpExamples(examples) {
+  const container = document.createElement("div"); container.className = "help-examples";
+  for (const example of examples) {
+    const article = document.createElement("article"); article.className = "help-example";
+    const title = document.createElement("h4");
+    title.textContent = example.name ? `Example (${example.name.replaceAll("_", " ")})` : "Example";
+    article.append(title);
+    if (example.doc) {
+      const docs = document.createElement("p"); docs.className = "help-example-doc"; docs.textContent = example.doc; article.append(docs);
+    }
+    const code = document.createElement("pre"); code.className = "help-example-code";
+    colorizeHelpSignature(code, example.code); article.append(code);
+    if (example.output) {
+      const outputLabel = document.createElement("strong"); outputLabel.className = "help-example-output-label";
+      outputLabel.textContent = example.unordered ? "Unordered output" : "Output";
+      const output = document.createElement("pre"); output.className = "help-example-output"; output.textContent = example.output;
+      article.append(outputLabel, output);
+    }
+    container.append(article);
+  }
+  return container;
 }
 
 async function openHelpSource(page, entry) {
@@ -3878,18 +3917,32 @@ function colorizeHelpSignature(element, source) {
 
 function helpPageText(page) {
   const output = [`# package ${page.name}`, "", `Import path: ${page.importPath}`, "", page.doc || "No package overview."];
+  appendHelpExamplesText(output, page.examples, "## Examples");
   const sections = [["Constants", page.constants], ["Variables", page.variables], ["Functions", page.functions], ["Types", page.types]];
   for (const [title, entries] of sections) {
     if (!entries?.length) continue;
     output.push("", `## ${title}`);
     for (const entry of entries) {
       output.push("", `### ${entry.name}`, "", "```go", entry.signature, "```", "", entry.doc || "No documentation is available for this declaration.");
+      appendHelpExamplesText(output, entry.examples, "#### Examples");
       for (const method of entry.methods || []) {
         output.push("", `#### ${method.name}`, "", "```go", method.signature, "```", "", method.doc || "No documentation is available for this declaration.");
+        appendHelpExamplesText(output, method.examples, "##### Examples");
       }
     }
   }
   return `${output.join("\n").trim()}\n`;
+}
+
+function appendHelpExamplesText(output, examples, heading) {
+  if (!examples?.length) return;
+  output.push("", heading);
+  for (const example of examples) {
+    output.push("", example.name ? `Example (${example.name.replaceAll("_", " ")})` : "Example");
+    if (example.doc) output.push("", example.doc);
+    output.push("", "```go", example.code, "```");
+    if (example.output) output.push("", example.unordered ? "Unordered output:" : "Output:", "", "```text", example.output, "```");
+  }
 }
 
 async function copyActiveHelpPage() {

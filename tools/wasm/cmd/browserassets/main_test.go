@@ -126,18 +126,127 @@ func TestPackageDocumentationIncludesOverviewAndDeclarations(t *testing.T) {
 	if docs == nil || docs.Name != "i2c" || docs.Doc == "" {
 		t.Fatalf("package docs = %#v", docs)
 	}
+	constructor := false
+	for _, function := range docs.Functions {
+		if function.Name == "New" {
+			constructor = true
+			break
+		}
+	}
+	if !constructor {
+		t.Fatalf("i2c docs omit New constructor: %#v", docs.Functions)
+	}
 	found := false
 	for _, declaration := range docs.Types {
 		if declaration.Name == "Bus" {
 			if declaration.File == "" || declaration.Line < 1 {
 				t.Fatalf("Bus source location = %q:%d", declaration.File, declaration.Line)
 			}
-			found = true
+			for _, method := range declaration.Methods {
+				if method.Name != "Device" {
+					continue
+				}
+				if len(method.Examples) != 1 || !strings.Contains(method.Examples[0].Code, "i2c.New(board.Grove)") ||
+					!strings.Contains(method.Examples[0].Code, "bus.Device(0x53)") || strings.Contains(method.Examples[0].Code, "fake") {
+					t.Fatalf("Bus.Device examples = %#v", method.Examples)
+				}
+				found = true
+			}
 			break
 		}
 	}
 	if !found {
 		t.Fatalf("i2c docs do not contain exported Bus type: %#v", docs.Types)
+	}
+}
+
+func TestExternalDocumentationExamplesUseConsumerFacingAPIs(t *testing.T) {
+	docs, err := buildPackageDocs(filepath.Join("..", "..", "..", "..", "device", "dos"), "renvo.dev/device/dos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples := make([]docExample, 0)
+	for _, function := range docs.Functions {
+		examples = append(examples, function.Examples...)
+	}
+	for _, typ := range docs.Types {
+		examples = append(examples, typ.Examples...)
+		for _, method := range typ.Methods {
+			examples = append(examples, method.Examples...)
+		}
+	}
+	if len(examples) < 5 {
+		t.Fatalf("DOS documentation only publishes %d examples", len(examples))
+	}
+	foundNow := false
+	for _, example := range examples {
+		if strings.Contains(example.Code, "dos.Now()") {
+			foundNow = true
+		}
+		if strings.Contains(example.Code, "Hook") || strings.Contains(example.Code, "resetHooks") {
+			t.Fatalf("test scaffolding leaked into documentation example: %s", example.Code)
+		}
+	}
+	if !foundNow {
+		t.Fatalf("DOS Now example is not presented as consumer code: %#v", examples)
+	}
+}
+
+func TestI2CDriverDocumentationCoversTransactionLayers(t *testing.T) {
+	docs, err := buildPackageDocs(filepath.Join("..", "..", "..", "..", "device", "i2c"), "renvo.dev/device/i2c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	covered := make(map[string]bool)
+	total := 0
+	for _, function := range docs.Functions {
+		if len(function.Examples) != 0 {
+			covered[function.Name] = true
+			total += len(function.Examples)
+		}
+	}
+	for _, typ := range docs.Types {
+		for _, method := range typ.Methods {
+			if len(method.Examples) != 0 {
+				covered[typ.Name+"."+method.Name] = true
+				total += len(method.Examples)
+			}
+		}
+	}
+	for _, operation := range []string{"DefinePort", "NewBitBang", "BitBang.Tx", "Bus.Tx", "Device.Read", "Device.ReadAt", "Device.Write", "Device.WriteAt", "OperationError.Unwrap"} {
+		if !covered[operation] {
+			t.Errorf("I2C documentation has no %s example", operation)
+		}
+	}
+	if total < 10 {
+		t.Errorf("I2C documentation publishes %d driver examples, want at least 10", total)
+	}
+}
+
+func TestHostOnlyHooksAreMarkedUnavailableToTargetPrograms(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "device")
+	packages := map[string][]string{
+		"dos":  {"InterruptHook", "PortInHook", "PortOutHook"},
+		"bios": {"InterruptHook", "PortInHook", "PortOutHook", "BootDriveHook"},
+		"uefi": {"ImageHandleHook", "SystemTableHook", "CallHook"},
+	}
+	for name, hooks := range packages {
+		t.Run(name, func(t *testing.T) {
+			docs, err := buildPackageDocs(filepath.Join(root, name), "renvo.dev/device/"+name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			variables := make(map[string]docEntry, len(docs.Variables))
+			for _, variable := range docs.Variables {
+				variables[variable.Name] = variable
+			}
+			for _, hook := range hooks {
+				variable, ok := variables[hook]
+				if !ok || !strings.Contains(variable.Doc, "host builds") || !strings.Contains(variable.Doc, "unavailable") {
+					t.Errorf("%s documentation does not identify its host-only scope: %#v", hook, variable)
+				}
+			}
+		})
 	}
 }
 
@@ -155,5 +264,51 @@ func TestPackageDocumentationKeepsOneBuildVariantOverview(t *testing.T) {
 	doc := cleanPackageDoc("fmt", "Package fmt is portable.\n\nPackage fmt is target specific.\n\nMore detail.")
 	if strings.Contains(doc, "target specific") || !strings.Contains(doc, "More detail.") {
 		t.Fatalf("cleaned package doc = %q", doc)
+	}
+}
+
+func TestEveryPublicCustomBrowserPackagePublishesAnExample(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..")
+	boards, err := readBoardDefinitions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	total := 0
+	for _, spec := range platformPackageSpecs(boards) {
+		if seen[spec.Path] || strings.HasPrefix(spec.Path, "examples/") || strings.Contains(spec.Path, "/internal/") ||
+			(spec.Path != "forms" && !strings.HasPrefix(spec.Path, "device/")) {
+			continue
+		}
+		seen[spec.Path] = true
+		docs, docsErr := buildPackageDocs(filepath.Join(root, filepath.FromSlash(spec.Path)), "renvo.dev/"+spec.Path)
+		if docsErr != nil {
+			t.Errorf("%s: %v", spec.Path, docsErr)
+			continue
+		}
+		examples := append([]docExample(nil), docs.Examples...)
+		for _, entry := range docs.Functions {
+			examples = append(examples, entry.Examples...)
+		}
+		for _, entry := range docs.Types {
+			examples = append(examples, entry.Examples...)
+			for _, method := range entry.Methods {
+				examples = append(examples, method.Examples...)
+			}
+		}
+		if len(examples) == 0 {
+			t.Errorf("%s has no documentation example", spec.Path)
+		}
+		for _, example := range examples {
+			for _, scaffold := range []string{"fake", "recording", "resetHooks", "InterruptHook", "PortInHook", "PortOutHook"} {
+				if strings.Contains(example.Code, scaffold) {
+					t.Errorf("%s example contains test scaffolding %q: %s", spec.Path, scaffold, example.Code)
+				}
+			}
+		}
+		total += len(examples)
+	}
+	if total < 150 {
+		t.Errorf("custom API catalog publishes %d examples, want at least 150", total)
 	}
 }
