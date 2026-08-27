@@ -150,7 +150,7 @@ check_ci_performance() {
 	run_check "shared-runner compiler resource and normalized frontend gates" \
 		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
 		go test -count=1 -timeout 15m \
-		-run '^(TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
+		-run '^(TestCompilerPerformanceWASI|TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
 		./backend
 }
 

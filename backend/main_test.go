@@ -401,6 +401,8 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 		return "renvoTargetWindows386", "renvoTryCompileScalarProgram386", []string{"compiler_386_impl.go", "compiler_386_target_impl.go", "compiler_windows_386_impl.go"}
 	case "wasi/wasm32":
 		return "renvoTargetWasiWasm32", "renvoTryCompileScalarProgramWasm32", []string{"@amd64-common", "compiler_wasm32_impl.go", "compiler_wasi_wasm32_impl.go"}
+	case "darwin/arm64":
+		return "renvoTargetDarwinArm64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_aarch64_impl.go", "compiler_aarch64_target_impl.go", "compiler_darwin_arm64_impl.go"}
 	default:
 		t.Fatalf("unsupported performance target %s", targetName)
 		return "", "", nil
@@ -409,8 +411,11 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 
 func performanceCompilerTargets(t *testing.T) []compilerTarget {
 	t.Helper()
-	if runtime.GOOS != "linux" {
-		t.Skipf("compiler performance gate requires Linux host, got %s/%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		return []compilerTarget{{name: "darwin/arm64"}}
+	}
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skipf("compiler performance gate requires Linux/amd64 or Darwin/arm64 host, got %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	return []compilerTarget{
 		{name: "linux/amd64"},

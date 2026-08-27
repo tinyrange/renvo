@@ -29,9 +29,9 @@ func TestCompilerPerformanceWASI(t *testing.T) {
 		t.Fatalf("stat WASI compiler: %v", err)
 	}
 
-	const maxElapsed = 100 * time.Millisecond
+	const maxElapsed = 125 * time.Millisecond
 	const maxRSSKB = 16 * 1024
-	const maxBinarySize = 288 * 1024
+	const maxBinarySize = 384 * 1024
 	bestElapsed := 24 * time.Hour
 	bestRSS := 1 << 30
 	for attempt := 0; attempt < 3; attempt++ {

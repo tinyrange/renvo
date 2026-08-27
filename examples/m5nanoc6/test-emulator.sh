@@ -37,24 +37,35 @@ else
 	fi
 fi
 
-"$renvo" \
-	-backend "$repository_root/backends/esp32c6.rtg" \
-	-t esp32c6/riscv32 -tags m5nanoc6 \
-	-o "$temporary/oracle.elf" \
-	"$example_root/oracle"
+run_target() {
+	target=$1
+	definition=$2
+	name=$(printf '%s' "$target" | tr / -)
+	image="$temporary/$name.elf"
+	result="$temporary/$name.json"
 
-"$emulator" run \
-	--target esp32c6 \
-	--elf "$temporary/oracle.elf" \
-	--max-instructions 2000000 \
-	--stop-signal board.esp32c6.chip_gpio.pin7=rising \
-	--result "$temporary/result.json"
+	"$renvo" \
+		-backend "$repository_root/$definition" \
+		-t "$target" -tags m5nanoc6 \
+		-o "$image" \
+		"$example_root/oracle"
 
-if ! grep -Fq '"Signal": "board.esp32c6.chip_gpio.pin7"' "$temporary/result.json"; then
-	cat "$temporary/result.json" >&2
-	echo "renvo_emu did not observe the NanoC6 blue LED rising edge" >&2
-	exit 1
-fi
+	"$emulator" run \
+		--target esp32c6 \
+		--elf "$image" \
+		--max-instructions 2000000 \
+		--stop-signal board.esp32c6.chip_gpio.pin7=rising \
+		--result "$result"
 
-instructions=$(sed -n 's/^[[:space:]]*"instructions": \([0-9][0-9]*\),/\1/p' "$temporary/result.json")
-echo "PASS: renvo_emu observed GPIO7 rising after $instructions instructions"
+	if ! grep -Fq '"Signal": "board.esp32c6.chip_gpio.pin7"' "$result"; then
+		cat "$result" >&2
+		echo "renvo_emu did not observe the NanoC6 blue LED rising edge for $target" >&2
+		exit 1
+	fi
+
+	instructions=$(sed -n 's/^[[:space:]]*"instructions": \([0-9][0-9]*\),/\1/p' "$result")
+	echo "PASS: $target raised GPIO7 after $instructions instructions"
+}
+
+run_target esp32c6/riscv32 backends/esp32c6.rtg
+run_target esp32c6-jtag/riscv32 backends/esp32c6_jtag.rtg
