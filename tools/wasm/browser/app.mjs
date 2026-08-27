@@ -1,7 +1,7 @@
 import { ESPWebSerial, requestESPPort } from "./esp-webserial.mjs";
 import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
-import { PicoMonitorHotReloadSession, requestPicoMonitor } from "./pico-webusb-monitor.mjs";
+import { formatPicoMonitorInfo, PicoMonitorHotReloadSession, requestPicoMonitor } from "./pico-webusb-monitor.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
 import { fetchAsset } from "./asset-fetch.mjs";
 import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
@@ -1336,6 +1336,9 @@ async function runArtifactWithMode(resumeAfterBuild) {
       const flashMilliseconds = performance.now() - flashStarted;
       if (hotReload) {
         const change = report.unchanged ? "no changed words" : `${report.bytesWritten} bytes in ${report.patchCount} patches`;
+        if (picoMonitor && report.monitorInfo) {
+          elements.terminalOutput.textContent += `Monitor handshake: ${formatPicoMonitorInfo(report.monitorInfo)}\n`;
+        }
         elements.terminalOutput.textContent += `${picoMonitor ? "Monitor" : "JTAG"} load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
         elements.terminalOutput.textContent += "Running from SRAM. Press Flash after an edit to load the changes.\n";
         setMobileDeployStep("load", "done", `Firmware loaded over ${picoMonitor ? "the Pico monitor" : "JTAG"}.`);

@@ -12,7 +12,13 @@ const (
 	commandCommit    = byte(4)
 	commandWriteFast = byte(5)
 
+	protocolMajor  = byte(1)
+	protocolMinor  = byte(0)
+	monitorVersion = uint32(1 << 16) // 1.0.0
+
 	capabilityFastWrite = uint32(1)
+	chipRP2040          = uint32(0x2040)
+	chipRP2350          = uint32(0x2350)
 
 	reloadStart = uintptr(0x20010000)
 	reloadEnd   = uintptr(0x20040000)
@@ -25,6 +31,8 @@ const (
 )
 
 var generation uint32
+var clientVersion uint32
+var handshakeCompatible bool
 
 func load32(data []byte, offset int) uint32 {
 	return uint32(data[offset]) | uint32(data[offset+1])<<8 |
@@ -39,6 +47,13 @@ func store32(data []byte, offset int, value uint32) {
 }
 
 func isRP2350() bool { return (mmio.Load32(0xe000ed00)>>4)&0xfff == 0xd21 }
+
+func chipIdentifier() uint32 {
+	if isRP2350() {
+		return chipRP2350
+	}
+	return chipRP2040
+}
 
 func psm() (uintptr, uint32) {
 	if isRP2350() {
@@ -106,10 +121,14 @@ func reply(usb *rp2.USBDevice, operation byte, status byte) {
 	var packet [64]byte
 	packet[0], packet[1], packet[2], packet[3] = 'R', 'N', 'V', '2'
 	packet[4], packet[5] = operation, status
+	packet[6], packet[7] = protocolMajor, protocolMinor
 	store32(packet[:], 8, generation)
 	store32(packet[:], 12, uint32(reloadStart))
 	store32(packet[:], 16, uint32(reloadEnd))
 	store32(packet[:], 20, capabilityFastWrite)
+	store32(packet[:], 24, monitorVersion)
+	store32(packet[:], 28, chipIdentifier())
+	store32(packet[:], 32, clientVersion)
 	for !usb.WritePacket(packet[:]) {
 		usb.Poll()
 	}
@@ -122,7 +141,13 @@ func handle(usb *rp2.USBDevice, packet []byte, count int) {
 	}
 	operation := packet[4]
 	if operation == commandInfo {
+		clientVersion = load32(packet, 8)
+		handshakeCompatible = packet[6] == protocolMajor
 		reply(usb, operation, 0)
+		return
+	}
+	if !handshakeCompatible {
+		reply(usb, operation, 2)
 		return
 	}
 	if operation == commandBegin {

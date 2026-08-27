@@ -7,6 +7,9 @@ const COMMAND_BEGIN = 2;
 const COMMAND_WRITE = 3;
 const COMMAND_COMMIT = 4;
 const COMMAND_WRITE_FAST = 5;
+const PROTOCOL_MAJOR = 1;
+const PROTOCOL_MINOR = 0;
+const CLIENT_VERSION = 1 << 16;
 const CAPABILITY_FAST_WRITE = 1;
 const PACKET_SIZE = 64;
 const WRITE_HEADER_SIZE = 12;
@@ -38,7 +41,13 @@ export class PicoWebUSBMonitor {
     this.usb?.addEventListener?.("disconnect", this.handleDisconnect);
   }
 
-  getInfo() { return { usbVendorId: this.device.vendorId, usbProductId: this.device.productId }; }
+  getInfo() {
+    return {
+      usbVendorId: this.device.vendorId,
+      usbProductId: this.device.productId,
+      ...(this.monitorInfo || {}),
+    };
+  }
   canReopen() { return !this.disconnected; }
 
   async open() {
@@ -59,9 +68,15 @@ export class PicoWebUSBMonitor {
       this.bulkOut = active.bulkOut;
       this.bulkIn = active.bulkIn;
       this.opened = true;
-      const info = await this.command(COMMAND_INFO);
-      this.fastWrite = info.byteLength >= 24 &&
-        (new DataView(info.buffer, info.byteOffset, info.byteLength).getUint32(20, true) & CAPABILITY_FAST_WRITE) !== 0;
+      const info = await this.command(COMMAND_INFO, CLIENT_VERSION);
+      this.monitorInfo = parseMonitorInfo(info);
+      if (this.monitorInfo.protocolMajor !== PROTOCOL_MAJOR) {
+        throw new Error(`monitor protocol ${this.monitorInfo.protocolMajor}.${this.monitorInfo.protocolMinor} is incompatible with browser protocol ${PROTOCOL_MAJOR}.${PROTOCOL_MINOR}; install the current monitor`);
+      }
+      if (this.monitorInfo.clientVersion !== CLIENT_VERSION) {
+        throw new Error("monitor handshake did not echo the browser version; install the current monitor");
+      }
+      this.fastWrite = (this.monitorInfo.capabilities & CAPABILITY_FAST_WRITE) !== 0;
     } catch (error) {
       await this.close();
       throw new Error(`could not open the Renvo Pico monitor: ${error.message || error}`);
@@ -79,6 +94,8 @@ export class PicoWebUSBMonitor {
     if (payload.length > PACKET_SIZE - WRITE_HEADER_SIZE) throw new Error("Pico monitor write packet is too large");
     const packet = new Uint8Array(WRITE_HEADER_SIZE + payload.length);
     packet.set([0x52, 0x4e, 0x56, 0x32, operation]);
+    packet[6] = PROTOCOL_MAJOR;
+    packet[7] = PROTOCOL_MINOR;
     new DataView(packet.buffer).setUint32(8, address >>> 0, true);
     packet.set(payload, WRITE_HEADER_SIZE);
     const sent = await this.device.transferOut(this.bulkOut.endpointNumber, packet);
@@ -91,6 +108,7 @@ export class PicoWebUSBMonitor {
       throw new Error("Pico monitor returned an invalid response");
     }
     if (response[5] !== 0) throw new Error(`Pico monitor rejected command ${operation} (status ${response[5]})`);
+    if (response.length >= 36) this.monitorInfo = parseMonitorInfo(response);
     return response;
   }
 
@@ -103,6 +121,8 @@ export class PicoWebUSBMonitor {
     if (payload.length > PACKET_SIZE - WRITE_HEADER_SIZE) throw new Error("Pico monitor write packet is too large");
     const packet = new Uint8Array(WRITE_HEADER_SIZE + payload.length);
     packet.set([0x52, 0x4e, 0x56, 0x32, COMMAND_WRITE_FAST]);
+    packet[6] = PROTOCOL_MAJOR;
+    packet[7] = PROTOCOL_MINOR;
     new DataView(packet.buffer).setUint32(8, address >>> 0, true);
     packet.set(payload, WRITE_HEADER_SIZE);
     const sent = await this.device.transferOut(this.bulkOut.endpointNumber, packet);
@@ -121,7 +141,7 @@ export class PicoMonitorHotReloadSession {
     const image = parsePicoDebugImage(source);
     const patches = planPicoPatches(this.previous, image);
     if (!patches.length && this.previous) {
-      return { entry: image.entry, patchCount: 0, bytesWritten: 0, unchanged: true };
+      return { entry: image.entry, patchCount: 0, bytesWritten: 0, unchanged: true, monitorInfo: this.monitor.getInfo?.() };
     }
     await this.monitor.open();
     await this.monitor.command(COMMAND_BEGIN);
@@ -140,7 +160,7 @@ export class PicoMonitorHotReloadSession {
     await this.monitor.command(COMMAND_COMMIT, image.entry);
     this.previous = image;
     this.progress(1);
-    return { entry: image.entry, patchCount: packets, bytesWritten: written, unchanged: false };
+    return { entry: image.entry, patchCount: packets, bytesWritten: written, unchanged: false, monitorInfo: this.monitor.getInfo?.() };
   }
 
   close() { return this.monitor.close(); }
@@ -148,6 +168,31 @@ export class PicoMonitorHotReloadSession {
 
 function isRenvoMonitor(device) {
   return device.vendorId === RENVO_VENDOR_ID && device.productId === RENVO_MONITOR_PRODUCT_ID;
+}
+
+function parseMonitorInfo(response) {
+  if (response.byteLength < 36) {
+    return { protocolMajor: response[6] || 0, protocolMinor: response[7] || 0, clientVersion: 0, capabilities: 0 };
+  }
+  const view = new DataView(response.buffer, response.byteOffset, response.byteLength);
+  return {
+    protocolMajor: response[6],
+    protocolMinor: response[7],
+    generation: view.getUint32(8, true),
+    reloadStart: view.getUint32(12, true),
+    reloadEnd: view.getUint32(16, true),
+    capabilities: view.getUint32(20, true),
+    monitorVersion: view.getUint32(24, true),
+    chip: view.getUint32(28, true),
+    clientVersion: view.getUint32(32, true),
+  };
+}
+
+export function formatPicoMonitorInfo(info = {}) {
+  const version = info.monitorVersion >>> 0;
+  const firmware = `${version >>> 16}.${version >>> 8 & 0xff}.${version & 0xff}`;
+  const chip = info.chip === 0x2040 ? "RP2040" : info.chip === 0x2350 ? "RP2350" : `chip 0x${(info.chip || 0).toString(16)}`;
+  return `firmware ${firmware} · protocol ${info.protocolMajor || 0}.${info.protocolMinor || 0} · ${chip} · generation ${info.generation || 0}`;
 }
 
 function findMonitorInterface(configurations = []) {

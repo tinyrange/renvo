@@ -9,3 +9,12 @@ func TestCoreLaunchSequence(t *testing.T) {
 		t.Fatalf("core launch sequence = %#v, want %#v", got, want)
 	}
 }
+
+func TestMonitorVersionContract(t *testing.T) {
+	if protocolMajor != 1 || protocolMinor != 0 || monitorVersion != 0x00010000 {
+		t.Fatalf("monitor version = protocol %d.%d firmware %#x", protocolMajor, protocolMinor, monitorVersion)
+	}
+	if chipRP2040 != 0x2040 || chipRP2350 != 0x2350 {
+		t.Fatalf("monitor chip identifiers = %#x, %#x", chipRP2040, chipRP2350)
+	}
+}
