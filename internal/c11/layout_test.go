@@ -59,3 +59,20 @@ void *value(struct item *item) { return item->value; }
 		t.Fatalf("indirect child layout did not propagate to its parent:\n%s", result.Source)
 	}
 }
+
+func TestTranslatePointerCastStringInitializersUseStorageHelper(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+static unsigned char *values[] = { (unsigned char *)"A", (unsigned char *)"B" };
+int inspect(void) {
+	static unsigned char *space[] = { (unsigned char *)" " };
+	return values[0][0] + space[0][0];
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("pointer-cast string initializer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Count(result.Source, []byte("renvo_runtime_CStringPointer(")) != 4 ||
+		bytes.Contains(result.Source, []byte("*uint8)(\"")) {
+		t.Fatalf("pointer-cast strings did not use relocatable storage:\n%s", result.Source)
+	}
+}

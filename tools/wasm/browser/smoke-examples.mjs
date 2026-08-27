@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const bundleRoot = path.resolve(process.argv[2] || "dist/pages");
+const exampleFilter = process.argv[3] || "";
 const bundleURL = pathToFileURL(bundleRoot + path.sep);
 const standardRoot = new URL("stdlib/", bundleURL);
 
@@ -155,7 +156,7 @@ function exampleTargets(item) {
 }
 
 const published = Object.entries(standardCatalog.platforms || {})
-  .filter(([, item]) => item.main)
+  .filter(([importPath, item]) => item.main && (!exampleFilter || importPath.includes(exampleFilter)))
   .sort(([left], [right]) => left.localeCompare(right));
 let compiled = 0;
 const failures = [];

@@ -12514,10 +12514,20 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 		}
 	}
 	if info := t.typeInfo(typeID); info.kind == cTypePointer {
-		if _, ok := t.cStringBytes(initializerTokens); ok {
+		stringTokens := initializerTokens
+		if len(stringTokens) > 3 && tokenIs(t.src, stringTokens[0], "(") {
+			close := matchingToken(t.src, stringTokens, 0, "(", ")")
+			if close > 1 && close < len(stringTokens)-1 {
+				castType, castOK := t.typeFromTokens(stringTokens[1:close])
+				if castOK && t.typeInfo(castType).kind == cTypePointer {
+					stringTokens = stringTokens[close+1:]
+				}
+			}
+		}
+		if _, ok := t.cStringBytes(stringTokens); ok {
 			t.ensureStringPointerHelper()
 			t.appendText("renvo_runtime_CStringPointer(")
-			t.emitCStringValues(initializerTokens)
+			t.emitCStringValues(stringTokens)
 			t.appendText(")")
 			return
 		}

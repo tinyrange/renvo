@@ -86,6 +86,8 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	edits = appendFunctionValuePackageEdits(program, edits)
 	for i := 0; i < len(program.Tokens); i++ {
 		text := functionValueTokenText(program, i)
+		mark := arena.Mark()
+		before := len(edits)
 		if text == "=" {
 			edits, ok = lowerFunctionValueAssignment(program, i, signatures, fields, edits)
 			if !ok {
@@ -93,6 +95,9 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 			}
 		} else if text == ":" {
 			edits = lowerFunctionValueCompositeField(program, i, signatures, fields, edits)
+		}
+		if len(edits) == before {
+			arena.Rewind(mark)
 		}
 	}
 	edits = lowerFunctionValueArrayComposites(program, signatures, edits)
@@ -106,12 +111,22 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	for i := 0; i < len(program.Tokens); i++ {
 		text := functionValueTokenText(program, i)
 		if text == "==" || text == "!=" {
+			mark := arena.Mark()
+			before := len(edits)
 			edits = lowerFunctionValueComparison(program, i, signatures, fields, edits)
+			if len(edits) == before {
+				arena.Rewind(mark)
+			}
 		}
 	}
 	for i := 0; i < len(program.Tokens); i++ {
 		if functionValueTokenEquals(program, i, "(") {
+			mark := arena.Mark()
+			before := len(edits)
 			edits = lowerFunctionValueCall(program, i, signatures, fields, edits)
+			if len(edits) == before {
+				arena.Rewind(mark)
+			}
 		}
 	}
 	for i := 0; i < len(signatures); i++ {
@@ -890,42 +905,52 @@ func lowerFunctionValueCallArguments(program *unit.Program, signatures []functio
 		if !functionValueTokenEquals(program, open, "(") || functionValueCallIsDeclaration(program, open) {
 			continue
 		}
-		fn, ok := functionValueCalledFunction(program, open)
-		if !ok {
+		mark := arena.Mark()
+		before := len(edits)
+		edits = lowerFunctionValueCallArgumentsAt(program, open, signatures, edits)
+		if len(edits) == before {
+			arena.Rewind(mark)
+		}
+	}
+	return edits
+}
+
+func lowerFunctionValueCallArgumentsAt(program *unit.Program, open int, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
+	fn, ok := functionValueCalledFunction(program, open)
+	if !ok {
+		return edits
+	}
+	close := functionValueFindMatchingParen(program, open)
+	if close <= open {
+		return edits
+	}
+	paramTypes := functionValueFunctionParamTypes(program, fn)
+	argStarts, argEnds := functionValueCommaParts(program, open+1, close)
+	if len(argStarts) != len(paramTypes) {
+		return edits
+	}
+	for i := 0; i < len(argStarts); i++ {
+		sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
+		if sigIndex < 0 {
+			sigIndex = functionValueSignatureByTypeText(signatures, paramTypes[i])
+		}
+		if sigIndex < 0 {
 			continue
 		}
-		close := functionValueFindMatchingParen(program, open)
-		if close <= open {
+		valueStart := argStarts[i]
+		valueEnd := argEnds[i]
+		for valueEnd-valueStart >= 2 && functionValueTokenEquals(program, valueStart, "(") &&
+			functionValueFindMatchingParen(program, valueStart) == valueEnd-1 {
+			valueStart++
+			valueEnd--
+		}
+		argType := functionValueBareType(ordinaryBuiltinExprType(program, open, valueStart, valueEnd))
+		if ordinaryBuiltinTypeName(argType) {
+			replacement := signatures[sigIndex].name + "{kind: int(" + functionValueTokensText(program, valueStart, valueEnd) + ")}"
+			edits = append(edits, functionValueTokenRangeEdit(program, valueStart, valueEnd, replacement))
 			continue
 		}
-		paramTypes := functionValueFunctionParamTypes(program, fn)
-		argStarts, argEnds := functionValueCommaParts(program, open+1, close)
-		if len(argStarts) != len(paramTypes) {
-			continue
-		}
-		for i := 0; i < len(argStarts); i++ {
-			sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
-			if sigIndex < 0 {
-				sigIndex = functionValueSignatureByTypeText(signatures, paramTypes[i])
-			}
-			if sigIndex < 0 {
-				continue
-			}
-			valueStart := argStarts[i]
-			valueEnd := argEnds[i]
-			for valueEnd-valueStart >= 2 && functionValueTokenEquals(program, valueStart, "(") &&
-				functionValueFindMatchingParen(program, valueStart) == valueEnd-1 {
-				valueStart++
-				valueEnd--
-			}
-			argType := functionValueBareType(ordinaryBuiltinExprType(program, open, valueStart, valueEnd))
-			if ordinaryBuiltinTypeName(argType) {
-				replacement := signatures[sigIndex].name + "{kind: int(" + functionValueTokensText(program, valueStart, valueEnd) + ")}"
-				edits = append(edits, functionValueTokenRangeEdit(program, valueStart, valueEnd, replacement))
-				continue
-			}
-			edits = lowerFunctionValueAt(program, open, valueStart, sigIndex, signatures, edits)
-		}
+		edits = lowerFunctionValueAt(program, open, valueStart, sigIndex, signatures, edits)
 	}
 	return edits
 }
@@ -2337,6 +2362,7 @@ func functionValueSignatureByShape(signatures []functionValueSignature, candidat
 }
 
 func functionValueSignatureByTypeText(signatures []functionValueSignature, typ string) int {
+	mark := arena.Mark()
 	for i := 0; i < len(signatures); i++ {
 		sig := signatures[i]
 		text := "func(" + functionValueJoin(sig.paramTypes, ",") + ")"
@@ -2345,7 +2371,9 @@ func functionValueSignatureByTypeText(signatures []functionValueSignature, typ s
 		} else if len(sig.resultTypes) > 1 {
 			text += "(" + functionValueJoin(sig.resultTypes, ",") + ")"
 		}
-		if functionValueCompactTypeText(text) == functionValueCompactTypeText(typ) {
+		equal := functionValueCompactTypeText(text) == functionValueCompactTypeText(typ)
+		arena.Rewind(mark)
+		if equal {
 			return i
 		}
 	}
@@ -2353,13 +2381,15 @@ func functionValueSignatureByTypeText(signatures []functionValueSignature, typ s
 }
 
 func functionValueCompactTypeText(value string) string {
-	out := ""
+	out := make([]byte, len(value))
+	write := 0
 	for i := 0; i < len(value); i++ {
 		if !functionValueIsSpace(value[i]) {
-			out += value[i : i+1]
+			out[write] = value[i]
+			write++
 		}
 	}
-	return out
+	return string(out[:write])
 }
 
 func functionValueImplIndex(sig functionValueSignature, receiverType string, method string, function string) int {
