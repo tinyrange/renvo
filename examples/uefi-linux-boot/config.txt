@@ -1,0 +1,4 @@
+# Paths are relative to the EFI System Partition root.
+kernel=VMLINUZ
+initramfs=INITRAMFS
+cmdline=console=ttyS0,115200 rdinit=/init panic=-1

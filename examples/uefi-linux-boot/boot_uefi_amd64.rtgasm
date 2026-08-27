@@ -1,0 +1,100 @@
+rtgasm 1
+
+assembly {
+	zeroMemory(out:emitter) {
+		# Raw arguments arrive reversed: RDI=size, RSI=address.
+		# MOV RCX, RDI: REP STOSB consumes the byte count from RCX.
+		out.Bytes3(0x48, 0x89, 0xf9)
+		# MOV RDI, RSI: REP STOSB writes through RDI.
+		out.Bytes3(0x48, 0x89, 0xf7)
+		# XOR EAX, EAX: use zero as the fill byte.
+		out.Bytes2(0x31, 0xc0)
+		# REP STOSB: clear exactly size bytes starting at address.
+		out.Bytes2(0xf3, 0xaa)
+		# RET: return after the destination pointer has advanced past the range.
+		out.Byte(0xc3)
+	}
+
+	enterLinux64(out:emitter) {
+		# Raw arguments arrive as RDI=stackTop, RSI=bootParams, RDX=entry.
+		# UEFI supplies long mode and identity mappings. Linux additionally
+		# requires its conventional 0x10/0x18 code and data selectors.
+		# CLI: firmware interrupts must not run after ExitBootServices.
+		out.Byte(0xfa)
+
+		# Reserve 48 bytes on the firmware stack for this temporary GDT and GDTR:
+		#   +0x00 null descriptor       +0x08 reserved descriptor
+		#   +0x10 64-bit code (0x10)   +0x18 data (0x18)
+		#   +0x20 GDTR limit            +0x22 GDTR base
+		# SUB RSP, 0x30.
+		out.Bytes4(0x48, 0x83, 0xec, 0x30)
+		# MOV QWORD PTR [RSP], 0: install the null descriptor.
+		out.Bytes4(0x48, 0xc7, 0x04, 0x24)
+		out.Bytes4(0, 0, 0, 0)
+		# MOV QWORD PTR [RSP+8], 0: leave selector 0x08 unusable.
+		out.Bytes4(0x48, 0xc7, 0x44, 0x24)
+		out.Byte(0x08)
+		out.Bytes4(0, 0, 0, 0)
+
+		# MOV RAX, 0x00af9a000000ffff: present, executable, readable 64-bit code.
+		out.Bytes2(0x48, 0xb8)
+		out.Bytes4(0xff, 0xff, 0x00, 0x00)
+		out.Bytes4(0x00, 0x9a, 0xaf, 0x00)
+		# MOV [RSP+0x10], RAX: make it selector 0x10.
+		out.Bytes4(0x48, 0x89, 0x44, 0x24)
+		out.Byte(0x10)
+
+		# MOV RAX, 0x00cf92000000ffff: present, writable flat data segment.
+		out.Bytes2(0x48, 0xb8)
+		out.Bytes4(0xff, 0xff, 0x00, 0x00)
+		out.Bytes4(0x00, 0x92, 0xcf, 0x00)
+		# MOV [RSP+0x18], RAX: make it selector 0x18.
+		out.Bytes4(0x48, 0x89, 0x44, 0x24)
+		out.Byte(0x18)
+
+		# MOV WORD PTR [RSP+0x20], 0x1f: the four descriptors span 32 bytes.
+		out.Bytes4(0x66, 0xc7, 0x44, 0x24)
+		out.Bytes3(0x20, 0x1f, 0x00)
+		# LEA RAX, [RSP]; MOV [RSP+0x22], RAX: finish the packed GDTR.
+		out.Bytes4(0x48, 0x8d, 0x04, 0x24)
+		out.Bytes4(0x48, 0x89, 0x44, 0x24)
+		out.Byte(0x22)
+		# LGDT [RSP+0x20]: activate the Linux-compatible descriptor table.
+		out.Bytes4(0x0f, 0x01, 0x54, 0x24)
+		out.Byte(0x20)
+
+		# MOV AX, 0x18; load the new data selector into DS, ES, and SS.
+		out.Bytes4(0x66, 0xb8, 0x18, 0x00)
+		out.Bytes2(0x8e, 0xd8)
+		out.Bytes2(0x8e, 0xc0)
+		out.Bytes2(0x8e, 0xd0)
+		# Linux requires FS and GS to contain the null selector.
+		# XOR EAX, EAX; MOV FS, AX; MOV GS, AX.
+		out.Bytes2(0x31, 0xc0)
+		out.Bytes2(0x8e, 0xe0)
+		out.Bytes2(0x8e, 0xe8)
+
+		# MOV RSP, RDI; AND RSP, -16: leave the temporary GDT in memory and
+		# switch to the caller-allocated, 16-byte-aligned kernel stack.
+		out.Bytes3(0x48, 0x89, 0xfc)
+		out.Bytes4(0x48, 0x83, 0xe4, 0xf0)
+
+		# Reload CS with selector 0x10 using a far return. The RIP-relative LEA
+		# points three bytes past itself, immediately after the LRETQ.
+		# PUSH 0x10; LEA RAX, [RIP+3]; PUSH RAX; LRETQ.
+		out.Bytes2(0x6a, 0x10)
+		out.Bytes3(0x48, 0x8d, 0x05)
+		out.Bytes4(0x03, 0x00, 0x00, 0x00)
+		out.Byte(0x50)
+		out.Bytes2(0x48, 0xcb)
+
+		# Clear registers required to be zero by the x86 boot protocol. RSI is
+		# intentionally preserved: it carries the boot_params physical address.
+		# XOR EBP, EBP; XOR EBX, EBX; XOR EDI, EDI.
+		out.Bytes2(0x31, 0xed)
+		out.Bytes2(0x31, 0xdb)
+		out.Bytes2(0x31, 0xff)
+		# JMP RDX: transfer permanently to the protected-mode kernel entry.
+		out.Bytes2(0xff, 0xe2)
+	}
+}

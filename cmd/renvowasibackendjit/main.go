@@ -133,6 +133,9 @@ func outputName(target string, kind string) string {
 	if kind == "dos-mz" {
 		return "app.exe"
 	}
+	if kind == "uefi-pe" {
+		return "BOOTX64.EFI"
+	}
 	if strings.HasPrefix(target, "windows/") {
 		return "app.exe"
 	}

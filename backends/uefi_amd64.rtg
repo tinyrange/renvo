@@ -1,0 +1,329 @@
+definition 1
+unit uefi_amd64
+implements direct_emitter_v1
+
+@import "../backend/definitions/x86_64.rtg"
+
+# UEFI applications are PE32+ images, but they are not Windows programs: the
+# firmware supplies an image handle and EFI_SYSTEM_TABLE directly to the entry
+# point and every service is reached through a protocol function pointer.
+go backend {
+	func uefiPut16(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+	}
+
+	func uefiPut32(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+		data[at+2] = byte(value >> 16)
+		data[at+3] = byte(value >> 24)
+	}
+
+	func uefiPut64(data []byte, at int, value int) {
+		uefiPut32(data, at, value)
+		uefiPut32(data, at+4, value>>32)
+	}
+
+	func uefiAppendUntil(data []byte, size int) []byte {
+		for len(data) < size {
+			data = append(data, 0)
+		}
+		return data
+	}
+
+	func uefiEntryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		// Preserve every Microsoft x64 nonvolatile register for the firmware.
+		out.Byte(0x53) // RBX
+		out.Byte(0x55) // RBP
+		out.Byte(0x57) // RDI
+		out.Byte(0x56) // RSI
+		out.Bytes2(0x41, 0x54) // R12
+		out.Bytes2(0x41, 0x55) // R13
+		out.Bytes2(0x41, 0x56) // R14
+		out.Bytes2(0x41, 0x57) // R15
+		// R14 and R15 are otherwise unused by Renvo's internal ABI. Firmware
+		// calls preserve both, so they keep the entry values available to small
+		// project RTGASM fragments without smuggling relocations out of the JIT.
+		out.Bytes3(0x49, 0x89, 0xce) // MOV R14,RCX (ImageHandle)
+		out.Bytes3(0x49, 0x89, 0xd7) // MOV R15,RDX (SystemTable)
+		return true
+	}
+
+	func uefiExit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != 0 {
+			out.Byte(0x48)
+			if status.Code >= 8 {
+				out.Byte(0x41)
+			}
+			out.Byte(0x89)
+			out.Byte(byte(0xc0 | (status.Code&7)<<3))
+		}
+		out.Bytes2(0x41, 0x5f)
+		out.Bytes2(0x41, 0x5e)
+		out.Bytes2(0x41, 0x5d)
+		out.Bytes2(0x41, 0x5c)
+		out.Byte(0x5e)
+		out.Byte(0x5f)
+		out.Byte(0x5d)
+		out.Byte(0x5b)
+		out.Byte(0xc3)
+	}
+
+	func emitUEFIImageHandle(out *RTGEmitter) {
+		out.Bytes3(0x4c, 0x89, 0xf0) // MOV RAX,R14
+		out.Byte(0xc3)
+	}
+
+	func emitUEFISystemTable(out *RTGEmitter) {
+		out.Bytes3(0x4c, 0x89, 0xf8) // MOV RAX,R15
+		out.Byte(0xc3)
+	}
+
+	func uefiRuntimeOperation(out *RTGEmitter, operation int) bool {
+		if operation != RTGRuntimeWrite {
+			return false
+		}
+		// Runtime writes arrive as RAX=byte pointer, RDX=length. Convert a byte
+		// at a time to the UTF-16 strings required by OutputString; translate LF
+		// to CRLF so ordinary Go output behaves naturally on firmware consoles.
+		loop := out.NewLabel()
+		normal := out.NewLabel()
+		write := out.NewLabel()
+		done := out.NewLabel()
+		out.Byte(0x53) // preserve Renvo's working registers
+		out.Byte(0x51)
+		out.Byte(0x52)
+		out.Byte(0x56)
+		out.Byte(0x57)
+		out.Bytes2(0x41, 0x50)
+		out.Bytes2(0x41, 0x51)
+		out.Bytes2(0x41, 0x52)
+		out.Bytes2(0x41, 0x53)
+		out.Bytes2(0x41, 0x54)
+		out.Bytes2(0x41, 0x55)
+		out.Bytes3(0x49, 0x89, 0xc4)
+		out.Bytes3(0x49, 0x89, 0xd5)
+		out.Bytes3(0x49, 0x89, 0xe2)
+		out.Bytes4(0x48, 0x83, 0xe4, 0xf0)
+		out.Bytes4(0x48, 0x83, 0xec, 0x40)
+		out.Bytes4(0x4c, 0x89, 0x54, 0x24)
+		out.Byte(0x30)
+		out.Mark(loop)
+		out.Bytes3(0x4d, 0x85, 0xed)
+		out.Bytes2(0x0f, 0x84)
+		out.Rel32(done)
+		out.Bytes4(0x41, 0x0f, 0xb6, 0x04)
+		out.Byte(0x24)
+		out.Bytes3(0x49, 0xff, 0xc4)
+		out.Bytes3(0x49, 0xff, 0xcd)
+		out.Bytes2(0x3c, 0x0a)
+		out.Bytes2(0x0f, 0x85)
+		out.Rel32(normal)
+		out.Bytes4(0x66, 0xc7, 0x44, 0x24)
+		out.Bytes3(0x20, 0x0d, 0x00)
+		out.Bytes4(0x66, 0xc7, 0x44, 0x24)
+		out.Bytes3(0x22, 0x0a, 0x00)
+		out.Bytes4(0x66, 0xc7, 0x44, 0x24)
+		out.Bytes3(0x24, 0x00, 0x00)
+		out.Byte(0xe9)
+		out.Rel32(write)
+		out.Mark(normal)
+		out.Bytes4(0x66, 0x89, 0x44, 0x24)
+		out.Byte(0x20)
+		out.Bytes4(0x66, 0xc7, 0x44, 0x24)
+		out.Bytes3(0x22, 0x00, 0x00)
+		out.Mark(write)
+		out.Bytes4(0x49, 0x8b, 0x4f, 0x40)
+		out.Bytes3(0x48, 0x85, 0xc9)
+		out.Bytes2(0x0f, 0x84)
+		out.Rel32(done)
+		out.Bytes4(0x48, 0x8b, 0x41, 0x08)
+		out.Bytes4(0x48, 0x8d, 0x54, 0x24)
+		out.Byte(0x20)
+		out.Bytes2(0xff, 0xd0)
+		out.Byte(0xe9)
+		out.Rel32(loop)
+		out.Mark(done)
+		out.Bytes4(0x48, 0x8b, 0x64, 0x24)
+		out.Byte(0x30)
+		out.Bytes2(0x41, 0x5d)
+		out.Bytes2(0x41, 0x5c)
+		out.Bytes2(0x41, 0x5b)
+		out.Bytes2(0x41, 0x5a)
+		out.Bytes2(0x41, 0x59)
+		out.Bytes2(0x41, 0x58)
+		out.Byte(0x5f)
+		out.Byte(0x5e)
+		out.Byte(0x5a)
+		out.Byte(0x59)
+		out.Byte(0x5b)
+		out.Bytes2(0x31, 0xc0)
+		return true
+	}
+
+	func emitUEFICall(out *RTGEmitter, count int) {
+		// Renvo evaluates arguments in source order and pops them into its call
+		// words, so these raw fragments see the last source argument first.
+		// Reorder function,a0,... into the Microsoft x64 register contract.
+		if count == 0 {
+			out.Bytes3(0x48, 0x89, 0xf8) // RAX=RDI
+		} else if count == 1 {
+			out.Bytes3(0x48, 0x89, 0xf0) // RAX=RSI
+			out.Bytes3(0x48, 0x89, 0xf9) // RCX=RDI
+		} else if count == 2 {
+			out.Bytes3(0x48, 0x89, 0xd0) // RAX=RDX
+			out.Bytes3(0x48, 0x89, 0xfa) // RDX=RDI
+			out.Bytes3(0x48, 0x89, 0xf1) // RCX=RSI
+		} else if count == 3 {
+			out.Bytes3(0x48, 0x89, 0xc8) // RAX=RCX
+			out.Bytes3(0x48, 0x89, 0xd1) // RCX=RDX
+			out.Bytes3(0x48, 0x89, 0xf2) // RDX=RSI
+			out.Bytes3(0x49, 0x89, 0xf8) // R8=RDI
+		} else if count == 4 {
+			out.Bytes3(0x4c, 0x89, 0xc0) // RAX=R8
+			out.Bytes3(0x49, 0x89, 0xf0) // R8=RSI
+			out.Bytes3(0x49, 0x89, 0xf9) // R9=RDI
+		} else {
+			out.Bytes3(0x4c, 0x89, 0xc8) // RAX=R9
+			out.Bytes3(0x4d, 0x89, 0xc2) // R10=R8 (a0)
+			out.Bytes3(0x49, 0x89, 0xfb) // R11=RDI (a4)
+			out.Bytes3(0x49, 0x89, 0xf1) // R9=RSI (a3)
+			out.Bytes3(0x49, 0x89, 0xd0) // R8=RDX (a2)
+			out.Bytes3(0x48, 0x89, 0xca) // RDX=RCX (a1)
+			out.Bytes3(0x4c, 0x89, 0xd1) // RCX=R10 (a0)
+		}
+		out.Bytes2(0x41, 0x54) // preserve R12
+		out.Bytes3(0x49, 0x89, 0xe4) // MOV R12,RSP
+		out.Bytes4(0x48, 0x83, 0xe4, 0xf0) // AND RSP,-16
+		out.Bytes4(0x48, 0x83, 0xec, 0x30)
+		if count == 5 {
+			out.Bytes4(0x4c, 0x89, 0x5c, 0x24)
+			out.Byte(0x20)
+		}
+		out.Bytes2(0xff, 0xd0)
+		out.Bytes3(0x4c, 0x89, 0xe4) // MOV RSP,R12
+		out.Bytes2(0x41, 0x5c)
+		out.Byte(0xc3)
+	}
+
+	func uefiPatchRelocations(out *RTGEmitter, dataRVA int, bssRVA int) {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			addend := out.AbsoluteRelocationAddend(i)
+			kind := out.AbsoluteRelocationKind(i)
+			target, resolved := RTGResolveAbsoluteRelocation(
+				out, kind, addend, dataRVA, bssRVA)
+			if resolved {
+				out.PatchUint32(at, target-(0x1000+at+4))
+			}
+		}
+	}
+
+	func uefiSection(data []byte, at int, name string, virtualSize int,
+		rva int, rawSize int, rawAt int, flags int) {
+		for i := 0; i < len(name) && i < 8; i++ {
+			data[at+i] = name[i]
+		}
+		uefiPut32(data, at+8, virtualSize)
+		uefiPut32(data, at+12, rva)
+		uefiPut32(data, at+16, rawSize)
+		uefiPut32(data, at+20, rawAt)
+		uefiPut32(data, at+36, flags)
+	}
+
+	func uefiImage(out *RTGEmitter) []byte {
+		code := out.Code()
+		textSize := len(code)
+		textRaw := RTGAlignValue(textSize, 0x200)
+		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
+		data := out.Data()
+		dataRaw := RTGAlignValue(len(data), 0x200)
+		dataSize := len(data)+out.BSSSize()
+		bssRVA := dataRVA+len(data)
+		uefiPatchRelocations(out, dataRVA, bssRVA)
+
+		header := make([]byte, 0x200)
+		uefiPut16(header, 0, 0x5a4d)
+		uefiPut32(header, 0x3c, 0x80)
+		pe := 0x80
+		uefiPut32(header, pe, 0x00004550)
+		uefiPut16(header, pe+4, 0x8664)
+		uefiPut16(header, pe+6, 2)
+		uefiPut16(header, pe+20, 0xf0)
+		uefiPut16(header, pe+22, 0x22)
+		opt := pe+24
+		uefiPut16(header, opt, 0x20b)
+		uefiPut32(header, opt+4, textRaw)
+		uefiPut32(header, opt+8, dataRaw)
+		uefiPut32(header, opt+16, 0x1000)
+		uefiPut32(header, opt+20, 0x1000)
+		uefiPut64(header, opt+24, 0)
+		uefiPut32(header, opt+32, 0x1000)
+		uefiPut32(header, opt+36, 0x200)
+		uefiPut16(header, opt+40, 0)
+		uefiPut16(header, opt+48, 2)
+		uefiPut32(header, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
+		uefiPut32(header, opt+60, 0x200)
+		uefiPut16(header, opt+68, 10) // EFI application
+		uefiPut16(header, opt+70, 0x100) // NX compatible
+		uefiPut64(header, opt+72, 0x100000)
+		uefiPut64(header, opt+80, 0x1000)
+		uefiPut64(header, opt+88, 0x100000)
+		uefiPut64(header, opt+96, 0x1000)
+		uefiPut32(header, opt+108, 16)
+		uefiSection(header, opt+240, ".text", textSize, 0x1000,
+			textRaw, 0x200, 0x60000020)
+		uefiSection(header, opt+280, ".data", dataSize, dataRVA,
+			dataRaw, 0x200+textRaw, 0xc0000040)
+
+		image := make([]byte, 0, 0x200+textRaw+dataRaw)
+		image = append(image, header...)
+		image = append(image, out.Code()...)
+		image = uefiAppendUntil(image, 0x200+textRaw)
+		image = append(image, data...)
+		return uefiAppendUntil(image, 0x200+textRaw+dataRaw)
+	}
+}
+
+extend arch x86_64 {
+	sequences {
+		uefiImageHandle(out:emitter) { emitUEFIImageHandle(out) }
+		uefiSystemTable(out:emitter) { emitUEFISystemTable(out) }
+		uefiCall0(out:emitter) { emitUEFICall(out, 0) }
+		uefiCall1(out:emitter) { emitUEFICall(out, 1) }
+		uefiCall2(out:emitter) { emitUEFICall(out, 2) }
+		uefiCall3(out:emitter) { emitUEFICall(out, 3) }
+		uefiCall4(out:emitter) { emitUEFICall(out, 4) }
+		uefiCall5(out:emitter) { emitUEFICall(out, 5) }
+	}
+}
+
+runtime uefi_x86_64 {
+	emit_entry_start = go uefiEntryStart
+	emit_exit = go uefiExit
+	emit_operation = go uefiRuntimeOperation
+	operation write { builtin = true }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format uefi_pe64 {
+	kind = "uefi-pe"
+	byte_order = little
+	address_bits = 64
+	code_offset = 0x1000
+	image = go uefiImage
+}
+
+target uefi/amd64 {
+	family = native_v1
+	os = uefi
+	arch = x86_64
+	abi = renvo_x86_64
+	runtime = uefi_x86_64
+	executable = uefi_pe64
+	arena_default = 1048576
+	build_tags = [uefi, amd64]
+	capabilities = [hosted, executable, heap]
+}

@@ -1,0 +1,16 @@
+rtgasm 1
+
+assembly {
+	qemuExit(out:emitter) {
+		# The single raw argument arrives in RDI. The QEMU isa-debug-exit device
+		# listens on port 0xf4 and reports the written value as (value << 1) | 1.
+		# MOV DX, 0x00f4: select the debug-exit I/O port.
+		out.Bytes4(0x66, 0xba, 0xf4, 0x00)
+		# MOV EAX, EDI: move the requested exit value into the OUT operand.
+		out.Bytes2(0x89, 0xf8)
+		# OUT DX, EAX: terminate QEMU when the debug-exit device is installed.
+		out.Byte(0xef)
+		# RET: remain a valid function if the device is absent or ignores the OUT.
+		out.Byte(0xc3)
+	}
+}
