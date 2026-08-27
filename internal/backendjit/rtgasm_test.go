@@ -100,7 +100,7 @@ func TestCompilerJITProjectRTGAssemblyAcrossConstrainedTargets(t *testing.T) {
 		machine    []byte
 		cSource    bool
 	}{
-		{name: "pdp11", definition: "examples/pdp11v7/pdp11_v7.rtg", target: "unixv7/pdp11", assembly: "emitImmediate(out, r0, 42)\nemitReturn(out)", machine: []byte{0xc0, 0x15, 0x2a, 0x00, 0x87, 0x00}},
+		{name: "pdp11", definition: "examples/pdp11v7/pdp11_v7.rbe", target: "unixv7/pdp11", assembly: "emitImmediate(out, r0, 42)\nemitReturn(out)", machine: []byte{0xc0, 0x15, 0x2a, 0x00, 0x87, 0x00}},
 		{name: "esp32c6", definition: "backends/esp32c6.rtg", target: "esp32c6/riscv32", assembly: "moveImmediate(out, a0, 42)\nret(out)", machine: []byte{0x13, 0x05, 0xa0, 0x02, 0x67, 0x80, 0x00, 0x00}},
 		{name: "c89", definition: "backends/c89.rtg", target: "c89/hosted32", assembly: "c89MoveImmediate(out, c89vm32Primary, 42)\nc89Return(out)", machine: []byte{3, 0, 42, 0, 0, 0, 32}, cSource: true},
 	}
@@ -153,7 +153,7 @@ func TestRTGAssemblyExamplesCompile(t *testing.T) {
 		project    string
 	}{
 		{name: "msdos", definition: "backends/msdos.rtg", target: "msdos/8086", project: "examples/msdos"},
-		{name: "pdp11", definition: "examples/pdp11v7/pdp11_v7.rtg", target: "unixv7/pdp11", project: "examples/pdp11v7"},
+		{name: "pdp11", definition: "examples/pdp11v7/pdp11_v7.rbe", target: "unixv7/pdp11", project: "examples/pdp11v7"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			definition := filepath.Join(root, test.definition)

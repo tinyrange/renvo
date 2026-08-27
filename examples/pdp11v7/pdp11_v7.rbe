@@ -1,0 +1,1212 @@
+definition 1
+unit pdp11v7
+implements direct_emitter_v1
+
+# A compact PDP-11 backend for the original Unix V7 0407 a.out format. The
+# generated program is a normal, writable-text V7 executable and uses the
+# historical inline-argument system-call convention.
+go backend {
+	func emitWord(out *RTGEmitter, value int) {
+		out.Uint16(value)
+	}
+
+	func putWord(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+	}
+
+	func registerOperand(reg RTGRegister) int {
+		return reg.Code
+	}
+
+	func deferredOperand(reg RTGRegister) int {
+		return 8 + reg.Code
+	}
+
+	func autoIncrementOperand(reg RTGRegister) int {
+		return 16 + reg.Code
+	}
+
+	func autoIncrementDeferredOperand(reg RTGRegister) int {
+		return 24 + reg.Code
+	}
+
+	func autoDecrementOperand(reg RTGRegister) int {
+		return 32 + reg.Code
+	}
+
+	func indexedOperand(reg RTGRegister) int {
+		return 48 + reg.Code
+	}
+
+	func emitDouble(out *RTGEmitter, opcode int, source int, destination int) {
+		emitWord(out, opcode|(source<<6)|destination)
+	}
+
+	func emitMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitDouble(out, 0x1000, registerOperand(source), registerOperand(destination))
+	}
+
+	func emitImmediate(out *RTGEmitter, destination RTGRegister, value int) {
+		emitDouble(out, 0x1000, autoIncrementOperand(pc), registerOperand(destination))
+		emitWord(out, value)
+	}
+
+	func emitAddImmediate(out *RTGEmitter, destination RTGRegister, value int) {
+		if value == 0 {
+			return
+		}
+		emitDouble(out, 0x6000, autoIncrementOperand(pc), registerOperand(destination))
+		emitWord(out, value)
+	}
+
+	func emitAddress(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		if RTGAddressValid(memory) {
+			emitDouble(out, 0x1000, autoIncrementOperand(pc), registerOperand(destination))
+			at := out.Len()
+			emitWord(out, memory.Addend)
+			RTGAddressRelocAt(out, memory, at)
+			return
+		}
+		if memory.Base.Valid {
+			emitMove(out, destination, memory.Base)
+		} else {
+			emitImmediate(out, destination, 0)
+		}
+		if memory.Index.Valid {
+			scale := memory.Scale
+			if scale <= 0 {
+				scale = 1
+			}
+			for i := 0; i < scale; i++ {
+				emitDouble(out, 0x6000, registerOperand(memory.Index), registerOperand(destination))
+			}
+		}
+		emitAddImmediate(out, destination, memory.Displacement)
+	}
+
+	func memoryOperand(out *RTGEmitter, memory RTGAddress) int {
+		emitAddress(out, address, memory)
+		return deferredOperand(address)
+	}
+
+	func emitLoadWidth(out *RTGEmitter, destination RTGRegister, address RTGAddress, size int, signed bool) {
+		operand := memoryOperand(out, address)
+		if size == 1 {
+			emitDouble(out, 0x9000, operand, registerOperand(destination))
+			if !signed {
+				emitDouble(out, 0x4000, autoIncrementOperand(pc), registerOperand(destination))
+				emitWord(out, 0xff00)
+			}
+			return
+		}
+		// V7 permits packed data at odd addresses, while the PDP-11 traps on an
+		// odd word access. Assemble native words from two byte operations.
+		temporary := scratch
+		if destination.Code == scratch.Code {
+			temporary = tertiary
+		}
+		emitDouble(out, 0x9000, autoIncrementOperand(r4), registerOperand(destination))
+		emitDouble(out, 0x4000, autoIncrementOperand(pc), registerOperand(destination))
+		emitWord(out, 0xff00)
+		emitDouble(out, 0x9000, deferredOperand(r4), registerOperand(temporary))
+		emitDouble(out, 0x4000, autoIncrementOperand(pc), registerOperand(temporary))
+		emitWord(out, 0xff00)
+		emitWord(out, 0x00c0|registerOperand(temporary))
+		emitDouble(out, 0x5000, registerOperand(temporary), registerOperand(destination))
+	}
+
+	func emitLoadNative(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 2, true)
+	}
+	func emitLoadI32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 2, true)
+	}
+	func emitLoadU32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 2, false)
+	}
+	func emitLoadI16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 2, true)
+	}
+	func emitLoadU16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 2, false)
+	}
+	func emitLoadI8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 1, true)
+	}
+	func emitLoadU8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		emitLoadWidth(out, destination, address, 1, false)
+	}
+
+	func emitStoreWidth(out *RTGEmitter, address RTGAddress, source RTGRegister, size int) {
+		operand := memoryOperand(out, address)
+		if size == 1 {
+			emitDouble(out, 0x9000, registerOperand(source), operand)
+			return
+		}
+		temporary := scratch
+		if source.Code == scratch.Code {
+			temporary = tertiary
+		}
+		emitDouble(out, 0x9000, registerOperand(source), autoIncrementOperand(r4))
+		emitMove(out, temporary, source)
+		emitWord(out, 0x00c0|registerOperand(temporary))
+		emitDouble(out, 0x9000, registerOperand(temporary), deferredOperand(r4))
+	}
+	func emitStoreNative(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, address, source, 2)
+	}
+	func emitStoreU32(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, address, source, 2)
+	}
+	func emitStoreU16(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, address, source, 2)
+	}
+	func emitStoreU8(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		emitStoreWidth(out, address, source, 1)
+	}
+
+	func emitBinary(out *RTGEmitter, opcode int, destination RTGRegister, source RTGRegister) {
+		emitDouble(out, opcode, registerOperand(source), registerOperand(destination))
+	}
+	func emitAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x6000, destination, source)
+	}
+	func emitSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0xe000, destination, source)
+	}
+	func emitMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		// With an even destination MUL leaves the low half in the following odd
+		// register. Prepared-backend address scaling also multiplies tertiary
+		// (r2), so handle every usable pair rather than only primary.
+		emitWord(out, 0x7000|(destination.Code<<6)|registerOperand(source))
+		if destination.Code == 0 {
+			emitMove(out, destination, r1)
+			return
+		}
+		if destination.Code == 2 {
+			emitMove(out, destination, r3)
+			return
+		}
+		if destination.Code == 4 {
+			emitMove(out, destination, r5)
+		}
+	}
+	func emitBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		// BIC is AND NOT, so invert through the scratch register.
+		emitMove(out, scratch, source)
+		emitWord(out, 0x0a40|registerOperand(scratch))
+		emitBinary(out, 0x4000, destination, scratch)
+	}
+	func emitBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitBinary(out, 0x5000, destination, source)
+	}
+	func emitBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		emitWord(out, 0x7800|(source.Code<<6)|registerOperand(destination))
+	}
+	func emitCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		// PDP-11 CMP sets flags from source-destination (unlike SUB's
+		// destination-source result), so preserve the RTG left-right contract by
+		// placing left in the source field.
+		emitDouble(out, 0x2000, registerOperand(left), registerOperand(right))
+	}
+	func emitTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		emitDouble(out, 0x3000, registerOperand(right), registerOperand(left))
+	}
+	func emitIncrement(out *RTGEmitter, operand RTGRegister) {
+		emitWord(out, 0x0a80|registerOperand(operand))
+	}
+	func emitDecrement(out *RTGEmitter, operand RTGRegister) {
+		emitWord(out, 0x0ac0|registerOperand(operand))
+	}
+	func emitShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			emitWord(out, 0x0cc0|registerOperand(operand))
+		}
+	}
+	func emitShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			// ROR shifts carry into the high bit. CLC is required here; logical
+			// instructions leave carry unchanged on the PDP-11.
+			emitWord(out, 0x00a1)
+			emitWord(out, 0x0c00|registerOperand(operand))
+		}
+	}
+	func emitShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for i := 0; i < int(value); i++ {
+			emitWord(out, 0x0c80|registerOperand(operand))
+		}
+	}
+
+	func emitAbsoluteControl(out *RTGEmitter, opcode int, label RTGLabel) {
+		emitWord(out, opcode)
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func emitCall(out *RTGEmitter, label RTGLabel) {
+		emitAbsoluteControl(out, 0x09df, label)
+	}
+	func emitCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		emitWord(out, 0x0800|(pc.Code<<6)|deferredOperand(operand))
+	}
+	func emitJump(out *RTGEmitter, label RTGLabel) {
+		// JMP displacement(PC) keeps RTGASM fragments position independent when
+		// their already-evaluated bytes are inserted into the final program.
+		emitWord(out, 0x0077)
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+
+	func inverseBranch(condition RTGCondition) int {
+		if condition.Code == 0 { return 0x0200 }
+		if condition.Code == 1 { return 0x0300 }
+		if condition.Code == 2 { return 0x0600 }
+		if condition.Code == 3 { return 0x0700 }
+		if condition.Code == 4 { return 0x0400 }
+		if condition.Code == 5 { return 0x0500 }
+		if condition.Code == 6 { return 0x8600 }
+		if condition.Code == 7 { return 0x8700 }
+		if condition.Code == 8 { return 0x8200 }
+		return 0x8300
+	}
+	func emitJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		emitWord(out, inverseBranch(condition)|2)
+		emitJump(out, label)
+	}
+	func emitSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		// PDP-11 MOV updates N and Z, so materializing zero before branching
+		// destroys the flags produced by CMP. Branch first, then write the
+		// boolean value on each path.
+		trueLabel := out.NewLabel()
+		done := out.NewLabel()
+		emitJumpCondition(out, condition, trueLabel)
+		emitImmediate(out, destination, 0)
+		emitJump(out, done)
+		out.Mark(trueLabel)
+		emitImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+	func emitReturn(out *RTGEmitter) {
+		emitWord(out, 0x0087)
+	}
+	func emitLeave(out *RTGEmitter) {
+		emitMove(out, sp, frame)
+		emitDouble(out, 0x1000, autoIncrementOperand(sp), registerOperand(frame))
+	}
+	func emitHostSyscall(out *RTGEmitter) {
+		// V7's indir syscall executes a writable out-of-line syscall template.
+		// r4 carries the dynamic call number, r0/r1 are the historical register
+		// arguments, and r2/r3 are the two inline arguments exposed by the RBE
+		// syscall package.
+		operation := out.NewLabel()
+		argument0 := out.NewLabel()
+		argument1 := out.NewLabel()
+		done := out.NewLabel()
+		emitMoveImmediateLabel(out, 0x8900, operation)
+		emitBinaryLabel(out, 0x5000, r4, operation)
+		emitStoreLabel(out, r2, argument0)
+		emitStoreLabel(out, r3, argument1)
+		emitWord(out, 0x8900)
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(operation))
+		emitV7ErrorResult(out)
+		emitJump(out, done)
+		out.Mark(operation)
+		emitWord(out, 0x8900)
+		out.Mark(argument0)
+		emitWord(out, 0)
+		out.Mark(argument1)
+		emitWord(out, 0)
+		out.Mark(done)
+	}
+	func emitStoreLabel(out *RTGEmitter, source RTGRegister, label RTGLabel) {
+		emitDouble(out, 0x1000, registerOperand(source), autoIncrementDeferredOperand(pc))
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func emitMoveImmediateLabel(out *RTGEmitter, value int, label RTGLabel) {
+		emitDouble(out, 0x1000, autoIncrementOperand(pc), autoIncrementDeferredOperand(pc))
+		emitWord(out, value)
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func emitBinaryLabel(out *RTGEmitter, opcode int, source RTGRegister, label RTGLabel) {
+		emitDouble(out, opcode, registerOperand(source), autoIncrementDeferredOperand(pc))
+		at := out.Len()
+		emitWord(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func emitV7ErrorResult(out *RTGEmitter) {
+		// BCC skips NEG when the kernel returned with carry clear.
+		emitWord(out, 0x8601)
+		emitWord(out, 0x0b00|registerOperand(r0))
+	}
+	func emitV7ZeroResult(out *RTGEmitter) {
+		// Several early Unix calls leave their incoming r0 untouched on success,
+		// while Renvo's portable runtime contract requires zero. Preserve a
+		// negative errno on carry and normalize the successful result.
+		errorLabel := out.NewLabel()
+		done := out.NewLabel()
+		emitWord(out, 0x8602) // BCC over the two-word JMP.
+		emitJump(out, errorLabel)
+		emitImmediate(out, r0, 0)
+		emitJump(out, done)
+		out.Mark(errorLabel)
+		emitWord(out, 0x0b00|registerOperand(r0))
+		out.Mark(done)
+	}
+	func emitMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		emitImmediate(out, destination, int(value))
+	}
+	func emitVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		// Shared lowering places the shift count in primary and the value in
+		// tertiary. Iterate instead of using ASH's signed six-bit count so Go's
+		// defined behavior for counts greater than the word size is preserved.
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		emitWord(out, 0x0bc0|registerOperand(primary))
+		emitJumpCondition(out, RTGCondition{Code: 0}, done)
+		out.Mark(loop)
+		if direction == RTGShiftLeft {
+			emitWord(out, 0x0cc0|registerOperand(tertiary))
+		} else if signed {
+			emitWord(out, 0x0c80|registerOperand(tertiary))
+		} else {
+			emitWord(out, 0x00a1)
+			emitWord(out, 0x0c00|registerOperand(tertiary))
+		}
+		emitDecrement(out, primary)
+		emitWord(out, 0x0bc0|registerOperand(primary))
+		emitJumpCondition(out, RTGCondition{Code: 1}, loop)
+		out.Mark(done)
+		emitMove(out, primary, tertiary)
+	}
+	func emitSignedDivide(out *RTGEmitter, remainder bool) {
+		// Sign extend primary into the r0:r1 dividend pair and divide by scratch.
+		emitMove(out, scratch, tertiary)
+		emitMove(out, r1, primary)
+		emitWord(out, 0x0dc0|registerOperand(primary))
+		emitWord(out, 0x7200|(primary.Code<<6)|registerOperand(scratch))
+		if remainder {
+			emitMove(out, primary, r1)
+		}
+	}
+	func emitCopyBytes(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		emitImmediate(out, primary, 0)
+		emitCompare(out, copyCount, primary)
+		emitJumpCondition(out, eq, done)
+		out.Mark(loop)
+		emitDouble(out, 0x9000, autoIncrementOperand(copySource), autoIncrementOperand(copyDestination))
+		emitDecrement(out, copyCount)
+		emitJumpCondition(out, ne, loop)
+		out.Mark(done)
+	}
+
+	func patchRelocations(out *RTGEmitter) {
+		dataBase := RTGAlignValue(len(out.Code()), 2)
+		bssBase := dataBase + RTGAlignValue(len(out.Data()), 2)
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			target := out.LabelPosition(out.RelocationLabel(i))
+			if target >= 0 {
+				value := target
+				if at >= 2 && int(out.Code()[at-2])|(int(out.Code()[at-1])<<8) == 0x0077 {
+					value = target - (at + 2)
+				}
+				putWord(out.Code(), at, value)
+			}
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataBase, bssBase)
+			if ok {
+				putWord(out.Code(), at, target)
+			}
+		}
+	}
+
+	func frameStart(out *RTGEmitter) int {
+		emitDouble(out, 0x1000, registerOperand(frame), autoDecrementOperand(sp))
+		emitMove(out, frame, sp)
+		emitDouble(out, 0xe000, autoIncrementOperand(pc), registerOperand(sp))
+		at := out.Len()
+		emitWord(out, 0)
+		return at
+	}
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		putWord(out.Code(), at, RTGAlignValue(stackUsed, 2))
+	}
+	func pushRegister(out *RTGEmitter, source RTGRegister) {
+		emitDouble(out, 0x1000, registerOperand(source), autoDecrementOperand(sp))
+	}
+	func pushImmediate(out *RTGEmitter, value int) {
+		emitDouble(out, 0x1000, autoIncrementOperand(pc), autoDecrementOperand(sp))
+		emitWord(out, value)
+	}
+	func popRegister(out *RTGEmitter, destination RTGRegister) {
+		emitDouble(out, 0x1000, autoIncrementOperand(sp), registerOperand(destination))
+	}
+	func loadFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitDouble(out, 0x1000, indexedOperand(frame), registerOperand(destination))
+		emitWord(out, -offset)
+	}
+	func storeFrame(out *RTGEmitter, offset int, source RTGRegister) {
+		emitDouble(out, 0x1000, registerOperand(source), indexedOperand(frame))
+		emitWord(out, -offset)
+	}
+	func addressFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitMove(out, destination, frame)
+		emitAddImmediate(out, destination, -offset)
+	}
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{r0, r1, r2, r3}
+		if word >= 0 && word < len(registers) {
+			storeFrame(out, offset, registers[word])
+			return
+		}
+		// JSR and frameStart place the return address and saved frame below the
+		// incoming overflow area. callWordCount arranges word 4 first there.
+		loadFrame(out, primary, -(4+(word-len(registers))*2))
+		storeFrame(out, offset, primary)
+	}
+	func callWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		registers := []RTGRegister{r0, r1, r2, r3}
+		limit := wordCount
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		// Shared lowering leaves logical word zero at the top. Pop register
+		// words in order; any overflow words are already in the order expected
+		// above the return address by storeParamWord.
+		for i := 0; i < limit; i++ {
+			popRegister(out, registers[i])
+		}
+		emitCall(out, label)
+		for i := len(registers); i < wordCount; i++ {
+			popRegister(out, scratch)
+		}
+	}
+
+	func v7EntryStart(out *RTGEmitter, stateOffset int) bool {
+		// V7 enters a process with argc followed by argv and envp on the user
+		// stack. Preserve that pointer before arena and package initialization
+		// temporarily use the machine stack and the ordinary call registers.
+		emitStoreNative(out, RTGBSSAddress(stateOffset), sp)
+		return true
+	}
+
+	func v7Entry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount == 0 {
+			return true
+		}
+
+		// Compact-unit string elements use two eight-byte value slots even on a
+		// 16-bit target. Convert at most 32 native C strings from each V7 pointer
+		// table into those descriptors. The strings themselves stay on the V7
+		// initial stack for the lifetime of the process.
+		argsOffset := out.ReserveBSS(32*16, 2)
+		argsCountOffset := out.ReserveBSS(2, 2)
+		environmentOffset := -1
+		if parameterCount == 2 {
+			environmentOffset = out.ReserveBSS(32*16, 2)
+		}
+
+		// r0 = initial SP, r1 = argc. Native argv pointers are word aligned, so
+		// use a direct MOV rather than the general unaligned memory helper.
+		emitLoadNative(out, r0, RTGBSSAddress(stateOffset))
+		emitDouble(out, 0x1000, deferredOperand(r0), registerOperand(r1))
+		if parameterCount == 2 {
+			// envp begins after argc, argv[argc], and argv's terminating NULL.
+			emitMove(out, r5, r1)
+			emitShiftLeftImmediate(out, r5, 1)
+			emitAdd(out, r5, r0)
+			emitAddImmediate(out, r5, 4)
+			pushRegister(out, r5)
+		}
+		emitAddImmediate(out, r0, 2)
+
+		// Clamp corrupt or unusually large argument vectors to the bounded BSS
+		// table. CMP #32,r1 followed by BLE tests r1 <= 32.
+		emitImmediate(out, r2, 32)
+		emitCompare(out, r1, r2)
+		argcReady := out.NewLabel()
+		emitJumpCondition(out, RTGCondition{Code: 2}, argcReady)
+		emitMove(out, r1, r2)
+		out.Mark(argcReady)
+		emitStoreNative(out, RTGBSSAddress(argsCountOffset), r1)
+		emitAddress(out, r2, RTGBSSAddress(argsOffset))
+
+		argsLoop := out.NewLabel()
+		argsDone := out.NewLabel()
+		out.Mark(argsLoop)
+		emitTest(out, r1, r1)
+		emitJumpCondition(out, RTGCondition{Code: 0}, argsDone)
+		emitDouble(out, 0x1000, autoIncrementOperand(r0), registerOperand(r3))
+		emitDouble(out, 0x1000, registerOperand(r3), deferredOperand(r2))
+		emitMove(out, r4, r3)
+		emitImmediate(out, r5, 0)
+		argScan := out.NewLabel()
+		argScanDone := out.NewLabel()
+		out.Mark(argScan)
+		// TSTB (r4)+ scans a NUL-terminated V7 string without consuming a
+		// general-purpose register for the byte value.
+		emitWord(out, 0x8bc0|autoIncrementOperand(r4))
+		emitJumpCondition(out, RTGCondition{Code: 0}, argScanDone)
+		emitIncrement(out, r5)
+		emitJump(out, argScan)
+		out.Mark(argScanDone)
+		emitDouble(out, 0x1000, registerOperand(r5), indexedOperand(r2))
+		emitWord(out, 8)
+		emitAddImmediate(out, r2, 16)
+		emitDecrement(out, r1)
+		emitJump(out, argsLoop)
+		out.Mark(argsDone)
+
+		if parameterCount == 1 {
+			emitAddress(out, r0, RTGBSSAddress(argsOffset))
+			emitLoadNative(out, r1, RTGBSSAddress(argsCountOffset))
+			emitMove(out, r2, r1)
+			return true
+		}
+
+		popRegister(out, r0)
+		emitImmediate(out, r1, 0)
+		emitAddress(out, r2, RTGBSSAddress(environmentOffset))
+		environmentLoop := out.NewLabel()
+		environmentDone := out.NewLabel()
+		out.Mark(environmentLoop)
+		// Stop at either envp's NULL or the RBE's bounded descriptor count.
+		emitDouble(out, 0x2000, autoIncrementOperand(pc), registerOperand(r1))
+		emitWord(out, 32)
+		emitJumpCondition(out, RTGCondition{Code: 0}, environmentDone)
+		emitDouble(out, 0x1000, autoIncrementOperand(r0), registerOperand(r3))
+		emitTest(out, r3, r3)
+		emitJumpCondition(out, RTGCondition{Code: 0}, environmentDone)
+		emitDouble(out, 0x1000, registerOperand(r3), deferredOperand(r2))
+		emitMove(out, r4, r3)
+		emitImmediate(out, r5, 0)
+		environmentScan := out.NewLabel()
+		environmentScanDone := out.NewLabel()
+		out.Mark(environmentScan)
+		emitWord(out, 0x8bc0|autoIncrementOperand(r4))
+		emitJumpCondition(out, RTGCondition{Code: 0}, environmentScanDone)
+		emitIncrement(out, r5)
+		emitJump(out, environmentScan)
+		out.Mark(environmentScanDone)
+		emitDouble(out, 0x1000, registerOperand(r5), indexedOperand(r2))
+		emitWord(out, 8)
+		emitAddImmediate(out, r2, 16)
+		emitIncrement(out, r1)
+		emitJump(out, environmentLoop)
+		out.Mark(environmentDone)
+
+		// appMain([]string, []string) has six call words. The PDP-11 ABI places
+		// the first four in r0-r3 and leaves words four and five above the return
+		// address, with word four nearest the return address.
+		emitMove(out, r5, r1)
+		emitLoadNative(out, r1, RTGBSSAddress(argsCountOffset))
+		emitMove(out, r2, r1)
+		emitAddress(out, r0, RTGBSSAddress(argsOffset))
+		emitAddress(out, r3, RTGBSSAddress(environmentOffset))
+		pushRegister(out, r5)
+		pushRegister(out, r5)
+		return true
+	}
+	func v7Write(out *RTGEmitter) {
+		// On entry: r0=fd, r1=buffer, r2=count. V7 takes write's last two
+		// arguments from the words following the trap. 0407 text is writable,
+		// so fill those two words immediately before entering the kernel.
+		emitDouble(out, 0x1000, registerOperand(r1), indexedOperand(pc))
+		emitWord(out, 6)
+		emitDouble(out, 0x1000, registerOperand(r2), indexedOperand(pc))
+		emitWord(out, 4)
+		emitWord(out, 0x8904)
+		emitWord(out, 0)
+		emitWord(out, 0)
+		emitV7ErrorResult(out)
+	}
+	func v7Read(out *RTGEmitter) {
+		emitDouble(out, 0x1000, registerOperand(r1), indexedOperand(pc))
+		emitWord(out, 6)
+		emitDouble(out, 0x1000, registerOperand(r2), indexedOperand(pc))
+		emitWord(out, 4)
+		emitWord(out, 0x8903)
+		emitWord(out, 0)
+		emitWord(out, 0)
+		emitV7ErrorResult(out)
+	}
+	func v7Open(out *RTGEmitter) {
+		// V7 predates O_CREAT/O_TRUNC on open. The RBE's os flags reserve bits
+		// outside the native access-mode field so the portable Create and
+		// WriteFile paths can be translated to creat(2). Use V7's own indir
+		// convention here, as its libc does, so both arguments live in the
+		// writable out-of-line template instead of self-modifying this stub.
+		nativeOpen := out.NewLabel()
+		done := out.NewLabel()
+		emitDouble(out, 0x3000, autoIncrementOperand(pc), registerOperand(r1))
+		emitWord(out, 0x0300)
+		emitJumpCondition(out, eq, nativeOpen)
+		emitMove(out, r2, r0)
+		emitImmediate(out, r3, 0x01b6) // 0666; the process umask still applies.
+		emitImmediate(out, r4, 8)
+		emitHostSyscall(out)
+		emitJump(out, done)
+		out.Mark(nativeOpen)
+		// V7 open takes path and its 0..2 access mode as inline arguments.
+		emitDouble(out, 0x4000, autoIncrementOperand(pc), registerOperand(r1))
+		emitWord(out, 0xfffc)
+		emitMove(out, r2, r0)
+		emitMove(out, r3, r1)
+		emitImmediate(out, r4, 5)
+		emitHostSyscall(out)
+		out.Mark(done)
+	}
+	func v7Close(out *RTGEmitter) {
+		emitWord(out, 0x8906)
+		emitV7ZeroResult(out)
+	}
+	func v7ChmodFD(out *RTGEmitter) {
+		// V7 has chmod(path, mode), not fchmod. The portable os package invokes
+		// this hook with a descriptor after creation; keep that compatibility
+		// path successful while syscall.Chmod exposes the real V7 operation.
+		emitImmediate(out, r0, 0)
+	}
+	func v7Exit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != r0.Code {
+			emitMove(out, r0, status)
+		}
+		emitWord(out, 0x8901)
+	}
+
+	func appendWord(data []byte, value int) []byte {
+		return append(data, byte(value), byte(value>>8))
+	}
+	func v7Image(out *RTGEmitter) []byte {
+		code := out.Code()
+		data := out.Data()
+		codeSize := RTGAlignValue(len(code), 2)
+		dataSize := RTGAlignValue(len(data), 2)
+		result := make([]byte, 0, 16+codeSize+dataSize)
+		result = appendWord(result, 0x0107)
+		result = appendWord(result, codeSize)
+		result = appendWord(result, dataSize)
+		result = appendWord(result, out.BSSSize())
+		result = appendWord(result, 0)
+		result = appendWord(result, 0)
+		result = appendWord(result, 0)
+		result = appendWord(result, 1)
+		result = append(result, code...)
+		for len(result) < 16+codeSize {
+			result = append(result, 0)
+		}
+		result = append(result, data...)
+		for len(result) < 16+codeSize+dataSize {
+			result = append(result, 0)
+		}
+		return result
+	}
+}
+
+arch pdp11 {
+	alias = "pdp11"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 2
+	stack_word_bytes = 2
+	stack_alignment = 2
+	unaligned_memory = false
+	patch_relocations = go patchRelocations
+	registers integer = [r0, r1, r2, r3, r4, r5, sp, pc]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		scratch = r3
+		address = r4
+		copy_destination = r4
+		copy_source = r3
+		copy_count = r2
+		stack = sp
+		frame = r5
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go emitMove
+		address = go emitAddress
+		load.native = go emitLoadNative
+		load.i32 = go emitLoadI32
+		load.u32 = go emitLoadU32
+		load.i16 = go emitLoadI16
+		load.u16 = go emitLoadU16
+		load.i8 = go emitLoadI8
+		load.u8 = go emitLoadU8
+		store.native = go emitStoreNative
+		store.u32 = go emitStoreU32
+		store.u16 = go emitStoreU16
+		store.u8 = go emitStoreU8
+		add = go emitAdd
+		subtract = go emitSubtract
+		multiply = go emitMultiply
+		bit_and = go emitBitAnd
+		bit_or = go emitBitOr
+		bit_xor = go emitBitXor
+		compare = go emitCompare
+		test = go emitTest
+		increment = go emitIncrement
+		decrement = go emitDecrement
+		shift_left_immediate = go emitShiftLeftImmediate
+		shift_right_unsigned_immediate = go emitShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go emitShiftRightSignedImmediate
+		call = go emitCall
+		call_indirect = go emitCallIndirect
+		jump = go emitJump
+		jump_condition = go emitJumpCondition
+		set_condition = go emitSetCondition
+		return = go emitReturn
+		leave = go emitLeave
+		host_syscall = go emitHostSyscall
+		move_immediate = go emitMoveImmediate
+		variable_shift = go emitVariableShift
+		signed_divide = go emitSignedDivide
+		copy_bytes = go emitCopyBytes
+	}
+}
+
+abi renvo_pdp11 {
+	arch = pdp11
+	frame_start = go frameStart
+	frame_finish = go frameFinish
+	push_register = go pushRegister
+	push_immediate = go pushImmediate
+	pop_register = go popRegister
+	frame_load = go loadFrame
+	frame_store = go storeFrame
+	frame_address = go addressFrame
+	store_param_word = go storeParamWord
+	call_word_count = go callWordCount
+	call_words = [r0, r1, r2, r3]
+	overflow_stride = 2
+	scalar_result = r0
+	string_result = [r0, r1]
+	slice_result = [r0, r1, r2]
+	stack_alignment = 2
+}
+
+runtime unix_v7 {
+	entry_state_bytes = 2
+	emit_entry_start = go v7EntryStart
+	emit_entry = go v7Entry
+	emit_exit = go v7Exit
+	syscall {
+		number = r4
+		arguments = [r0, r1, r2, r3]
+		result = r0
+		instruction = host_syscall
+	}
+	operation read { emit = go v7Read }
+	operation write { emit = go v7Write }
+	operation open { emit = go v7Open }
+	operation close { emit = go v7Close }
+	operation chmod { emit = go v7ChmodFD }
+	operation print { use = write args = [stdout, buffer, count] }
+}
+
+format v7_aout_0407 {
+	kind = "v7-a.out"
+	byte_order = little
+	address_bits = 16
+	code_offset = 0
+	image = go v7Image
+}
+
+target unixv7/pdp11 {
+	family = native_v1
+	os = unixv7
+	arch = pdp11
+	max_align = 2
+	abi = renvo_pdp11
+	runtime = unix_v7
+	executable = v7_aout_0407
+	build_tags = [unix, unixv7, pdp11]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
+
+@stdlib "syscall/syscall_unixv7_pdp11_renvo.go"
+//go:build renvo && unixv7 && pdp11
+
+// Package syscall exposes the practical Unix Seventh Edition system-call
+// surface supported by the PDP-11 RBE. Results follow the modern convention:
+// failures return a non-nil Errno rather than the V7 carry flag.
+package syscall
+
+const (
+	O_RDONLY = 0
+	O_WRONLY = 1
+	O_RDWR   = 2
+
+	F_OK = 0
+	X_OK = 1
+	W_OK = 2
+	R_OK = 4
+)
+
+type Errno int
+
+func (e Errno) Error() string { return "unix v7 error" }
+
+// These layouts are the native V7/PDP-11 structures used by the kernel ABI.
+// Fixed-width fields keep their memory representation independent of Go's
+// target-sized int.
+type Stat_t struct {
+	Dev   int16
+	Ino   uint16
+	Mode  uint16
+	Nlink int16
+	Uid   int16
+	Gid   int16
+	Rdev  int16
+	Size  int32
+	Atime int32
+	Mtime int32
+	Ctime int32
+}
+
+type Tms struct {
+	Utime  int32
+	Stime  int32
+	CUtime int32
+	CStime int32
+}
+
+type Timeb struct {
+	Time     int32
+	Millitm  uint16
+	Timezone int16
+	Dstflag  int16
+}
+
+type Utimbuf struct {
+	Actime  int32
+	Modtime int32
+}
+
+type Sgttyb struct {
+	Ispeed byte
+	Ospeed byte
+	Erase  byte
+	Kill   byte
+	Flags  int16
+}
+
+// The linker gives these typed declarations distinct intrinsic names. Their
+// argument types tell the backend whether to pass a scalar, string pointer, or
+// byte-slice pointer through the target's syscall register contract.
+func renvoSyscallRR(number, r0, r1 int) int { return 0 }
+func renvoSyscallRRI(number, r0, r1, inline0 int) int { return 0 }
+func renvoSyscallRRII(number, r0, r1, inline0, inline1 int) int { return 0 }
+func renvoSyscallRRB(number, r0, r1 int, inline0 []byte) int { return 0 }
+func renvoSyscallRRBI(number, r0, r1 int, inline0 []byte, inline1 int) int { return 0 }
+func renvoSyscallRRBB(number, r0, r1 int, inline0, inline1 []byte) int { return 0 }
+
+func bytePtrFromString(value string) []byte {
+	data := make([]byte, len(value)+1)
+	for i := 0; i < len(value); i++ {
+		data[i] = value[i]
+	}
+	return data
+}
+
+func result(value int) (int, error) {
+	if value < 0 {
+		return -1, Errno(-value)
+	}
+	return value, nil
+}
+
+func get16(data []byte, at int) uint16 {
+	return uint16(data[at]) | uint16(data[at+1])<<8
+}
+
+func get32(data []byte, at int) int32 {
+	return int32(data[at]) | int32(data[at+1])<<8 |
+		int32(data[at+2])<<16 | int32(data[at+3])<<24
+}
+
+func put16(data []byte, at int, value uint16) {
+	data[at] = byte(value)
+	data[at+1] = byte(value >> 8)
+}
+
+func put32(data []byte, at int, value int32) {
+	data[at] = byte(value)
+	data[at+1] = byte(value >> 8)
+	data[at+2] = byte(value >> 16)
+	data[at+3] = byte(value >> 24)
+}
+
+func decodeStat(raw []byte, data *Stat_t) {
+	data.Dev = int16(get16(raw, 0))
+	data.Ino = get16(raw, 2)
+	data.Mode = get16(raw, 4)
+	data.Nlink = int16(get16(raw, 6))
+	data.Uid = int16(get16(raw, 8))
+	data.Gid = int16(get16(raw, 10))
+	data.Rdev = int16(get16(raw, 12))
+	data.Size = get32(raw, 14)
+	data.Atime = get32(raw, 18)
+	data.Mtime = get32(raw, 22)
+	data.Ctime = get32(raw, 26)
+}
+
+func Fork() (int, error)                         { return result(renvoSyscallRR(2, 0, 0)) }
+func Read(fd int, data []byte) (int, error)      { return result(renvoSyscallRRBI(3, fd, 0, data, len(data))) }
+func Write(fd int, data []byte) (int, error)     { return result(renvoSyscallRRBI(4, fd, 0, data, len(data))) }
+func Open(path string, mode int) (int, error)    { return result(renvoSyscallRRBI(5, 0, 0, bytePtrFromString(path), mode)) }
+func Close(fd int) error                         { _, err := result(renvoSyscallRR(6, fd, 0)); return err }
+func Wait() (int, error)                         { return result(renvoSyscallRR(7, 0, 0)) }
+func Creat(path string, mode int) (int, error)   { return result(renvoSyscallRRBI(8, 0, 0, bytePtrFromString(path), mode)) }
+func Link(oldpath, newpath string) error          { _, err := result(renvoSyscallRRBB(9, 0, 0, bytePtrFromString(oldpath), bytePtrFromString(newpath))); return err }
+func Unlink(path string) error                    { _, err := result(renvoSyscallRRB(10, 0, 0, bytePtrFromString(path))); return err }
+func Chdir(path string) error                     { _, err := result(renvoSyscallRRB(12, 0, 0, bytePtrFromString(path))); return err }
+func TimeLow() (int, error)                       { return result(renvoSyscallRR(13, 0, 0)) }
+func Chmod(path string, mode int) error           { _, err := result(renvoSyscallRRBI(15, 0, 0, bytePtrFromString(path), mode)); return err }
+func Brk(address []byte) error                    { _, err := result(renvoSyscallRRB(17, 0, 0, address)); return err }
+func Stat(path string, data *Stat_t) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 30)
+	_, err := result(renvoSyscallRRBB(18, 0, 0, bytePtrFromString(path), raw))
+	if err == nil { decodeStat(raw, data) }
+	return err
+}
+func Getpid() int                                 { value, _ := result(renvoSyscallRR(20, 0, 0)); return value }
+func Umount(path string) error                    { _, err := result(renvoSyscallRRB(22, 0, 0, bytePtrFromString(path))); return err }
+func Setuid(uid int) error                        { _, err := result(renvoSyscallRR(23, uid, 0)); return err }
+func Getuid() int                                 { value, _ := result(renvoSyscallRR(24, 0, 0)); return value }
+func Stime(low, high int) error                   { _, err := result(renvoSyscallRR(25, low, high)); return err }
+func Alarm(seconds int) (int, error)              { return result(renvoSyscallRR(27, seconds, 0)) }
+func Fstat(fd int, data *Stat_t) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 30)
+	_, err := result(renvoSyscallRRB(28, fd, 0, raw))
+	if err == nil { decodeStat(raw, data) }
+	return err
+}
+func Pause() error                                { _, err := result(renvoSyscallRR(29, 0, 0)); return err }
+func Utime(path string, times *Utimbuf) error {
+	if times == nil { return Errno(14) }
+	raw := make([]byte, 8)
+	put32(raw, 0, times.Actime)
+	put32(raw, 4, times.Modtime)
+	_, err := result(renvoSyscallRRBB(30, 0, 0, bytePtrFromString(path), raw))
+	return err
+}
+func Stty(fd int, data *Sgttyb) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 6)
+	raw[0], raw[1], raw[2], raw[3] = data.Ispeed, data.Ospeed, data.Erase, data.Kill
+	put16(raw, 4, uint16(data.Flags))
+	_, err := result(renvoSyscallRRB(31, fd, 0, raw))
+	return err
+}
+func Gtty(fd int, data *Sgttyb) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 6)
+	_, err := result(renvoSyscallRRB(32, fd, 0, raw))
+	if err == nil {
+		data.Ispeed, data.Ospeed, data.Erase, data.Kill = raw[0], raw[1], raw[2], raw[3]
+		data.Flags = int16(get16(raw, 4))
+	}
+	return err
+}
+func Access(path string, mode int) error          { _, err := result(renvoSyscallRRBI(33, 0, 0, bytePtrFromString(path), mode)); return err }
+func Nice(increment int) (int, error)             { return result(renvoSyscallRR(34, increment, 0)) }
+func Ftime(data *Timeb) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 10)
+	_, err := result(renvoSyscallRRB(35, 0, 0, raw))
+	if err == nil {
+		data.Time = get32(raw, 0)
+		data.Millitm = get16(raw, 4)
+		data.Timezone = int16(get16(raw, 6))
+		data.Dstflag = int16(get16(raw, 8))
+	}
+	return err
+}
+func Sync()                                       { renvoSyscallRR(36, 0, 0) }
+func Kill(pid, signal int) error                  { _, err := result(renvoSyscallRRI(37, pid, 0, signal)); return err }
+func Dup(oldfd int) (int, error)                  { return result(renvoSyscallRR(41, oldfd, 0)) }
+func Dup2(oldfd, newfd int) (int, error)          { return result(renvoSyscallRR(41, oldfd, newfd|0100)) }
+func Times(data *Tms) error {
+	if data == nil { return Errno(14) }
+	raw := make([]byte, 16)
+	_, err := result(renvoSyscallRRB(43, 0, 0, raw))
+	if err == nil {
+		data.Utime = get32(raw, 0)
+		data.Stime = get32(raw, 4)
+		data.CUtime = get32(raw, 8)
+		data.CStime = get32(raw, 12)
+	}
+	return err
+}
+func Setgid(gid int) error                        { _, err := result(renvoSyscallRR(46, gid, 0)); return err }
+func Getgid() int                                 { value, _ := result(renvoSyscallRR(47, 0, 0)); return value }
+func Acct(path string) error                      { _, err := result(renvoSyscallRRB(51, 0, 0, bytePtrFromString(path))); return err }
+func Umask(mask int) int                          { value, _ := result(renvoSyscallRRI(60, 0, 0, mask)); return value }
+func Chroot(path string) error                    { _, err := result(renvoSyscallRRB(61, 0, 0, bytePtrFromString(path))); return err }
+@endstdlib
+
+@stdlib "os/path_cstring_renvo.go"
+//go:build renvo && !wasi && !wasip1
+
+package os
+
+// Construct the terminator explicitly. Keeping this target adapter in the RBE
+// avoids depending on string-concatenation storage immediately at the V7
+// kernel boundary and guarantees that the byte after the path is addressable.
+func renvoPathCString(path string) string {
+	data := make([]byte, len(path)+1)
+	for i := 0; i < len(path); i++ {
+		data[i] = path[i]
+	}
+	return string(data)
+}
+@endstdlib
+
+@stdlib "os/readdir_posix_renvo.go"
+//go:build renvo && unixv7 && pdp11
+
+package os
+
+import "syscall"
+
+func v7NameLess(left, right string) bool {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] < right[i] {
+			return true
+		}
+		if left[i] > right[i] {
+			return false
+		}
+	}
+	return len(left) < len(right)
+}
+
+func v7JoinPath(prefix, child string) string {
+	data := make([]byte, len(prefix)+len(child))
+	for i := 0; i < len(prefix); i++ {
+		data[i] = prefix[i]
+	}
+	for i := 0; i < len(child); i++ {
+		data[len(prefix)+i] = child[i]
+	}
+	return string(data)
+}
+
+// V7 directories are ordinary files containing fixed 16-byte records: a
+// two-byte inode followed by a fourteen-byte NUL-padded name.
+func ReadDir(name string) ([]DirEntry, error) {
+	fd := open(renvoPathCString(name), O_RDONLY)
+	if fd < 0 {
+		return nil, errIO()
+	}
+	buf := make([]byte, 512)
+	var out []DirEntry
+	prefix := name
+	if len(prefix) == 0 {
+		prefix = "."
+	}
+	if prefix[len(prefix)-1] != '/' {
+		prefix += "/"
+	}
+	for {
+		n := read(fd, buf, -1)
+		if n < 0 {
+			close(fd)
+			return nil, errIO()
+		}
+		if n == 0 {
+			break
+		}
+		for pos := 0; pos+16 <= n; pos += 16 {
+			if buf[pos] == 0 && buf[pos+1] == 0 {
+				continue
+			}
+			end := pos + 2
+			for end < pos+16 && buf[end] != 0 {
+				end++
+			}
+			if dirNameIsDot(buf, pos+2, end) {
+				continue
+			}
+			nameBytes := make([]byte, end-(pos+2))
+			for i := 0; i < len(nameBytes); i++ {
+				nameBytes[i] = buf[pos+2+i]
+			}
+			child := string(nameBytes)
+			var info syscall.Stat_t
+			isDir := syscall.Stat(v7JoinPath(prefix, child), &info) == nil && info.Mode&0xf000 == 0x4000
+			out = append(out, DirEntry{})
+			last := len(out) - 1
+			out[last].name = child
+			out[last].isDir = isDir
+		}
+	}
+	close(fd)
+	// Keep aggregate struct copies out of the 16-bit target adapter: move the
+	// string and flag fields independently while retaining os.ReadDir's sort
+	// guarantee.
+	for i := 1; i < len(out); i++ {
+		name := out[i].name
+		isDir := out[i].isDir
+		j := i - 1
+		for j >= 0 && v7NameLess(name, out[j].name) {
+			out[j+1].name = out[j].name
+			out[j+1].isDir = out[j].isDir
+			j--
+		}
+		out[j+1].name = name
+		out[j+1].isDir = isDir
+	}
+	return out, nil
+}
+@endstdlib
+
+@stdlib "os/open_flags_other_renvo.go"
+//go:build renvo && !darwin && !freebsd && !openbsd && !netbsd
+
+package os
+
+// V7 has separate open(2) and creat(2) calls. These private high bits let the
+// RBE runtime translate the portable os package's create/truncate requests
+// without colliding with V7's native 0..2 open modes.
+const O_CREATE = 0x0100
+const O_TRUNC = 0x0200
+@endstdlib

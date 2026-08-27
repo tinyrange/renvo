@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8b506fb3cc9ad93fdc0af1cd01d1961b22555a29d1d6585306f04b85862b9f07"
+const CompilerSourceDigest = "9ce59f7afd5c751a6159f531e0c8a7019c76fb7f4f659ce21d3416253e7ad5e7"
 
 // source: backend/compiler_common_impl.go
 
@@ -24131,7 +24131,7 @@ callee := renvoExprIdentCode(p, ep, e.left)
 
 
 if callee == renvoIdentSyscall && e.argCount == 4 ||
-renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
+renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
 return renvoEmitArbitrarySyscall(g, ep, idx)
 }
 if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&
@@ -30859,7 +30859,7 @@ callee := renvoExprIdentCode(p, ep, e.left)
 
 
 if callee == renvoIdentSyscall && e.argCount == 4 ||
-renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
+renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
 return renvoEmitArbitrarySyscall(g, ep, idx)
 }
 if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&
@@ -36311,7 +36311,8 @@ return "", "", 0, false
 // source: backend/compiler_target_impl.go
 
 func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-return g.c.renvoNativeIntSize == 4 && g.c.renvoTargetArch != renvoArchWasm32 && kind == renvoTypeStruct
+return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
+(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {

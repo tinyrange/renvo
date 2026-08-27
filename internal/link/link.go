@@ -1417,6 +1417,13 @@ func coreCompilerIntrinsicAlias(importPath string, name string) string {
 	if (importPath == "os" || importPath == "renvo.dev/std/os") && name == "syscall" {
 		return "renvo_runtime_Syscall"
 	}
+	if (importPath == "syscall" || importPath == "renvo.dev/std/syscall") &&
+		functionValueHasPrefix(name, "renvoSyscall") {
+		// RBE-supplied syscall packages use distinct typed declarations so
+		// string, slice, and scalar arguments retain their source types. Every
+		// declaration lowers through the same target-defined syscall contract.
+		return "renvo_runtime_Syscall_" + name
+	}
 	return ""
 }
 
