@@ -209,7 +209,7 @@ different target during the same invocation:
 //renvo:compile -t linux/386 helperMain
 var helperELF []byte
 
-//renvo:compile -t pc-longmode/amd64 longModeMain
+//renvo:compile -t freestanding/amd64 longModeMain
 var longModeEntry uintptr
 ```
 
@@ -229,7 +229,7 @@ then compiles the parent. One external RTG definition may therefore export all
 targets involved in a multi-stage image.
 
 The `examples/bios-longmode` program demonstrates a `bios/8086` parent building
-page tables and transferring to an embedded `pc-longmode/amd64` child.
+page tables and transferring to an embedded `freestanding/amd64` child.
 
 ## Targets and output policy
 

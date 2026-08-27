@@ -2,7 +2,7 @@
 
 This example is one source package with two compiler entrypoints. The ordinary
 `main` is a 16-bit `bios/8086` program. The `longModeMain` directive creates a
-second unit for `pc-longmode/amd64`, embeds its in-place executable image, and
+second unit for `freestanding/amd64`, embeds its in-place executable image, and
 initializes `longModeEntry` to that image's entrypoint. Both units compile
 `sharedMessage` for their own architecture.
 

@@ -53,7 +53,7 @@ func TestPCLongModeAmd64ExternalDefinition(t *testing.T) {
 	}
 	for i := 0; i < len(resolved.Targets); i++ {
 		descriptor := resolved.Targets[i].Descriptor
-		if descriptor.Name != "pc-longmode/amd64" {
+		if descriptor.Name != "freestanding/amd64" {
 			continue
 		}
 		if descriptor.OutputKind != "flat-memory" || descriptor.PointerBits != 64 ||
@@ -62,7 +62,7 @@ func TestPCLongModeAmd64ExternalDefinition(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("definition does not export pc-longmode/amd64")
+	t.Fatal("definition does not export freestanding/amd64")
 }
 
 func containsString(values []string, wanted string) bool {

@@ -212,6 +212,6 @@ func Write(segment, offset uint16, b []byte) { segmentWrite(segment, offset, b) 
 
 // EnterLongMode leaves BIOS real mode, identity maps the first GiB of physical
 // memory, and transfers control to entry as 64-bit code. Entry must be an
-// in-place pc-longmode/amd64 program compiled into this bios/8086 image. The
+// in-place freestanding/amd64 program compiled into this bios/8086 image. The
 // transition disables interrupts and does not return.
 func EnterLongMode(entry uintptr) { enterLongMode(entry) }

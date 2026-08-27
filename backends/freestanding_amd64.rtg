@@ -5,19 +5,19 @@
 # A real-mode parent may embed the complete image and enter byte zero after it
 # establishes long mode and identity maps the containing physical memory.
 go backend {
-	func pcLongModeEntryStart(out *RTGEmitter, stateOffset int) bool {
+	func freestandingAMD64EntryStart(out *RTGEmitter, stateOffset int) bool {
 		_ = stateOffset
 		out.Byte(0xfc) // CLD
 		return true
 	}
 
-	func pcLongModeEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+	func freestandingAMD64Entry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
 		_ = out
 		_ = stateOffset
 		return parameterCount == 0
 	}
 
-	func pcLongModeExit(out *RTGEmitter, status RTGRegister) {
+	func freestandingAMD64Exit(out *RTGEmitter, status RTGRegister) {
 		if status.Code != 0 {
 			out.Byte(0x48)
 			if status.Code >= 8 {
@@ -34,7 +34,7 @@ go backend {
 		out.Bytes2(0xeb, 0xfd)
 	}
 
-	func pcLongModeWrite(out *RTGEmitter) {
+	func freestandingAMD64Write(out *RTGEmitter) {
 		// write arrives as RAX=buffer and RDX=count in the prepared amd64 ABI.
 		loop := out.NewLabel()
 		done := out.NewLabel()
@@ -60,7 +60,7 @@ go backend {
 		out.Bytes2(0x31, 0xc0)
 	}
 
-	func pcLongModeImage(out *RTGEmitter) []byte {
+	func freestandingAMD64Image(out *RTGEmitter) []byte {
 		dataAddress := len(out.Code())
 		bssAddress := dataAddress+len(out.Data())
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
@@ -83,30 +83,30 @@ go backend {
 	}
 }
 
-runtime pc_longmode_x86_64 {
-	emit_entry_start = go pcLongModeEntryStart
-	emit_entry = go pcLongModeEntry
-	emit_exit = go pcLongModeExit
-	operation write { emit = go pcLongModeWrite }
+runtime freestanding_amd64 {
+	emit_entry_start = go freestandingAMD64EntryStart
+	emit_entry = go freestandingAMD64Entry
+	emit_exit = go freestandingAMD64Exit
+	operation write { emit = go freestandingAMD64Write }
 	operation print { use = write args = [stderr, buffer, count] }
 }
 
-format pc_longmode_flat {
+format freestanding_amd64_flat {
 	kind = "flat-memory"
 	byte_order = little
 	address_bits = 64
 	code_offset = 0
-	image = go pcLongModeImage
+	image = go freestandingAMD64Image
 }
 
-target pc-longmode/amd64 {
+target freestanding/amd64 {
 	family = native_v1
-	os = pc-longmode
+	os = freestanding
 	arch = x86_64
 	abi = renvo_x86_64
-	runtime = pc_longmode_x86_64
-	executable = pc_longmode_flat
+	runtime = freestanding_amd64
+	executable = freestanding_amd64_flat
 	arena_default = 4096
-	build_tags = [pc_longmode, amd64]
+	build_tags = [freestanding, amd64]
 	capabilities = [freestanding, executable, heap, in_place_entry]
 }

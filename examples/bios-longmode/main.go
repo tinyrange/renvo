@@ -2,7 +2,7 @@ package main
 
 import "renvo.dev/device/bios"
 
-//renvo:compile -t pc-longmode/amd64 longModeMain
+//renvo:compile -t freestanding/amd64 longModeMain
 var longModeEntry uintptr
 
 // sharedMessage is deliberately reachable from both entrypoints. It is emitted

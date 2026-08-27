@@ -16,4 +16,4 @@ The available external backends are:
 - `ios_arm64.rtg`
 - `msdos.rtg` (`msdos/8086` COM, `msdos/8086-mz` MZ EXE, and the
   `bios/8086` raw boot disk imported from `bios_8086.rtg`, plus the
-  embeddable `pc-longmode/amd64` memory-image target)
+  embeddable `freestanding/amd64` memory-image target)
