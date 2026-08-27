@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "67d7034cfc9b1e3857b03117e26c72b2cbe4fb388ae126a3c18af922fad8d0aa"
+const CompilerSourceDigest = "0c26932fc60afdbf9e79c9eb8d954ee79e923efe5d5e09bd5a67a87ee92c94db"
 
 // source: backend/compiler_common_impl.go
 
@@ -14907,7 +14907,11 @@ return true
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 renvoNonNil(g)
-if renvoFixedTarget == 0 && size >= 64 {
+
+
+
+
+if renvoFixedTarget == 0 && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
 destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 count := renvoAddUnnamedLocal(g, renvoTypeInt)

@@ -14900,7 +14900,11 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 	renvoNonNil(g)
-	if renvoFixedTarget == 0 && size >= 64 {
+	// VM32 executes fixed copies substantially faster when they remain
+	// straight-line bytecode. The bulk loop is primarily a native-code size
+	// optimization, so retain the compact path for the hosted targets without
+	// imposing its loop overhead on the deterministic VM frontend.
+	if renvoFixedTarget == 0 && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 		count := renvoAddUnnamedLocal(g, renvoTypeInt)
