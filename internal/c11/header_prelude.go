@@ -2,6 +2,11 @@
 
 package c11
 
+type HeaderSource struct {
+	Path   string
+	Source []byte
+}
+
 // BuildObjectPrelude keeps only referenced external declarations from the
 // active headers supplied by the C preprocessor.
 func BuildObjectPrelude(path string, src []byte, reader IncludeReader, headers ...HeaderSource) HeaderResult {

@@ -108,17 +108,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		}
 		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
 		if object && !options.CNoStdIncludes {
-			headers := make([]c11.HeaderSource, 0, len(processed.Dependencies))
-			for j := 0; j < len(processed.Dependencies); j++ {
-				src, read := fs.ReadFile(processed.Dependencies[j])
-				if !read {
-					result = sourceFail(result, SourceErrCInclude, processed.Dependencies[j])
-					result.ErrorSourcePath = result.Files[i].Path
-					return result
-				}
-				headers = append(headers, c11.HeaderSource{Path: processed.Dependencies[j], Source: src})
-			}
-			header = c11.BuildObjectPrelude(result.Files[i].Path, processed.Source, reader, headers...)
+			header = cObjectHeaderPrelude(result.Files[i].Path, source, processed, reader, fs)
 			if !header.Ok {
 				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
 				result.ErrorSourcePath = result.Files[i].Path

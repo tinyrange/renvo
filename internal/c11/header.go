@@ -7,11 +7,6 @@ type IncludeReader interface {
 	ReadIncludeNext(from string, name string, angled bool) ([]byte, string, bool)
 }
 
-type HeaderSource struct {
-	Path   string
-	Source []byte
-}
-
 type HeaderResult struct {
 	Prelude      []byte
 	Dependencies []string
