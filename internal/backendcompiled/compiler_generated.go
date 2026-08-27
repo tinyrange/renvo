@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "55de28f3db1685f934da08b8a6636c2264ff3db6a5d4ff63d2efba6c2f21330e"
+const CompilerSourceDigest = "07370fa2f83dff28c465bea4aead795c58a5d6597d8684e58b6665bd5feb5afc"
 
 // source: backend/compiler_common_impl.go
 
@@ -27203,6 +27203,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 renvoAsmInitWithContext(&g.asm, g.c)
 if renvoFixedTarget != 0 {
 g.funcLabels = make([]int, 0, len(meta.funcs))
@@ -32034,7 +32035,6 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 renvoNonNil(prog)
 renvoSetTarget(target)
 context := renvoNewCompileContext(target, renvoCompilerStripSymbols, renvoCompilerWindowsSubsystem == 2, renvoCompilerEmitImage)
-context.optimizeRuntime = len(prog.src) >= renvoLargeProgramSourceThreshold
 prog.c = *context
 if !prog.ok {
 renvoPrintErr("renvo: parse failed\n")
@@ -38246,6 +38246,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
 renvoAsmInitWithContext(&g.asm, g.c)
 g.asm.codeOffset = renvoRTGCodeOffset
 for i := 0; i < len(meta.funcs); i++ {

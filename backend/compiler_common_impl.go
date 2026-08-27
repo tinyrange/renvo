@@ -27196,6 +27196,7 @@ func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 	renvoAsmInitWithContext(&g.asm, g.c)
 	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
@@ -32027,7 +32028,6 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	renvoNonNil(prog)
 	renvoSetTarget(target)
 	context := renvoNewCompileContext(target, renvoCompilerStripSymbols, renvoCompilerWindowsSubsystem == 2, renvoCompilerEmitImage)
-	context.optimizeRuntime = len(prog.src) >= renvoLargeProgramSourceThreshold
 	prog.c = *context
 	if !prog.ok {
 		renvoPrintErr("renvo: parse failed\n")

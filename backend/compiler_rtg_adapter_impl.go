@@ -502,6 +502,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
 	renvoAsmInitWithContext(&g.asm, g.c)
 	g.asm.codeOffset = renvoRTGCodeOffset
 	for i := 0; i < len(meta.funcs); i++ {
