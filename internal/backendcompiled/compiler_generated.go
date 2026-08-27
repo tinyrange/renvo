@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8deeaab11d286d34b04eb5fd4683fa270cad79f782da94b8b324d7c0465dda7c"
+const CompilerSourceDigest = "293f4c2bd541389a7f6b32c773e1eab422d3a9fe3660030dde89a7aaf047f9df"
 
 // source: backend/compiler_common_impl.go
 
@@ -388,22 +388,22 @@ a.relocs = make([]int32, 0, 131072)
 a.absRelocs = make([]int32, 0, 98304)
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else {
-a.code = make([]byte, 0, 2097152)
 
 
 
-a.labelPos = make([]int32, 0, 24576)
-a.relocs = make([]int32, 0, 81920)
 
-
-
-a.absRelocs = make([]int32, 0, 12288)
+a.code = make([]byte, 0, 3670016)
+a.labelPos = make([]int32, 0, 40960)
+a.relocs = make([]int32, 0, 163840)
+a.absRelocs = make([]int32, 0, 32768)
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
 }
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 a.data = make([]byte, 0, 8192)
+} else if renvoFixedTarget == 0 {
+a.data = make([]byte, 0, 131072)
 } else {
 a.data = make([]byte, 0, 65536)
 }
