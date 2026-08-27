@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "07370fa2f83dff28c465bea4aead795c58a5d6597d8684e58b6665bd5feb5afc"
+const CompilerSourceDigest = "07a06a670c4ac7c14039e4b4c3c219160bba8c2ad780b37e654a35c06cd6ce21"
 
 // source: backend/compiler_common_impl.go
 
@@ -390,7 +390,6 @@ a.relocs = make([]int32, 0, 131072)
 a.absRelocs = make([]int32, 0, 98304)
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else {
-if a.c.optimizeRuntime {
 
 
 
@@ -399,19 +398,13 @@ a.code = make([]byte, 0, 3670016)
 a.labelPos = make([]int32, 0, 40960)
 a.relocs = make([]int32, 0, 163840)
 a.absRelocs = make([]int32, 0, 32768)
-} else {
-a.code = make([]byte, 0, 2097152)
-a.labelPos = make([]int32, 0, 24576)
-a.relocs = make([]int32, 0, 81920)
-a.absRelocs = make([]int32, 0, 12288)
-}
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
 }
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 a.data = make([]byte, 0, 8192)
-} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+} else if renvoFixedTarget == 0 {
 a.data = make([]byte, 0, 131072)
 } else {
 a.data = make([]byte, 0, 65536)
@@ -55175,6 +55168,9 @@ return false
 if fn.nameTok < 0 || fn.nameTok >= tokenCount || fn.bodyStart < 0 || fn.bodyEnd >= tokenCount || fn.bodyStart > fn.bodyEnd {
 return false
 }
+if prog.entryFunc < 0 && renvoBytesEqualText(prog.src, fn.nameStart, fn.nameEnd, "appMain") {
+prog.entryFunc = i
+}
 prog.funcs = append(prog.funcs, fn)
 }
 if funcReader.pos != funcReader.end {
@@ -55185,13 +55181,6 @@ entryReader := renvoUnitReader{src: entrypointData, end: len(entrypointData), ok
 prog.entryFunc = renvoUnitReadVar(&entryReader)
 if !entryReader.ok || entryReader.pos != entryReader.end || prog.entryFunc < 0 || prog.entryFunc >= len(prog.funcs) {
 return false
-}
-} else {
-for i := 0; i < len(prog.funcs); i++ {
-if renvoBytesEqualText(prog.src, prog.funcs[i].nameStart, prog.funcs[i].nameEnd, "appMain") {
-prog.entryFunc = i
-break
-}
 }
 }
 if len(foreignData) > 0 && !renvoDecodeForeignPrograms(prog, foreignData) {
@@ -55271,7 +55260,6 @@ count := renvoUnitReadVar(&r)
 if !r.ok {
 return false
 }
-var tail *renvoForeignProgram
 for i := 0; i < count; i++ {
 global := renvoUnitReadVar(&r)
 state := renvoUnitReadVar(&r)
@@ -55284,19 +55272,12 @@ if !r.ok || length <= 0 || r.pos < start || r.pos > r.end ||
 (state != 3 && (state != 4 || entryOffset >= length)) {
 return false
 }
-artifact := r.src[start:end]
 if state == 3 {
 entryOffset = -1
 }
-copyOfArtifact := make([]byte, len(artifact))
-copy(copyOfArtifact, artifact)
-item := &renvoForeignProgram{global: global, artifact: copyOfArtifact, entryOffset: entryOffset}
-if tail == nil {
-prog.foreign = item
-} else {
-tail.next = item
-}
-tail = item
+artifact := make([]byte, length)
+copy(artifact, r.src[start:end])
+prog.foreign = &renvoForeignProgram{next: prog.foreign, global: global, artifact: artifact, entryOffset: entryOffset}
 }
 return r.ok && r.pos == r.end
 }

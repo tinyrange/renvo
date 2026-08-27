@@ -373,6 +373,9 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		if fn.nameTok < 0 || fn.nameTok >= tokenCount || fn.bodyStart < 0 || fn.bodyEnd >= tokenCount || fn.bodyStart > fn.bodyEnd {
 			return false
 		}
+		if prog.entryFunc < 0 && renvoBytesEqualText(prog.src, fn.nameStart, fn.nameEnd, "appMain") {
+			prog.entryFunc = i
+		}
 		prog.funcs = append(prog.funcs, fn)
 	}
 	if funcReader.pos != funcReader.end {
@@ -383,13 +386,6 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		prog.entryFunc = renvoUnitReadVar(&entryReader)
 		if !entryReader.ok || entryReader.pos != entryReader.end || prog.entryFunc < 0 || prog.entryFunc >= len(prog.funcs) {
 			return false
-		}
-	} else {
-		for i := 0; i < len(prog.funcs); i++ {
-			if renvoBytesEqualText(prog.src, prog.funcs[i].nameStart, prog.funcs[i].nameEnd, "appMain") {
-				prog.entryFunc = i
-				break
-			}
 		}
 	}
 	if len(foreignData) > 0 && !renvoDecodeForeignPrograms(prog, foreignData) {
@@ -469,7 +465,6 @@ func renvoDecodeForeignPrograms(prog *renvoProgram, data []byte) bool {
 	if !r.ok {
 		return false
 	}
-	var tail *renvoForeignProgram
 	for i := 0; i < count; i++ {
 		global := renvoUnitReadVar(&r)
 		state := renvoUnitReadVar(&r)
@@ -482,19 +477,12 @@ func renvoDecodeForeignPrograms(prog *renvoProgram, data []byte) bool {
 			(state != 3 && (state != 4 || entryOffset >= length)) {
 			return false
 		}
-		artifact := r.src[start:end]
 		if state == 3 {
 			entryOffset = -1
 		}
-		copyOfArtifact := make([]byte, len(artifact))
-		copy(copyOfArtifact, artifact)
-		item := &renvoForeignProgram{global: global, artifact: copyOfArtifact, entryOffset: entryOffset}
-		if tail == nil {
-			prog.foreign = item
-		} else {
-			tail.next = item
-		}
-		tail = item
+		artifact := make([]byte, length)
+		copy(artifact, r.src[start:end])
+		prog.foreign = &renvoForeignProgram{next: prog.foreign, global: global, artifact: artifact, entryOffset: entryOffset}
 	}
 	return r.ok && r.pos == r.end
 }

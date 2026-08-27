@@ -383,28 +383,21 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		a.absRelocs = make([]int32, 0, 98304)
 		a.symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else {
-		if a.c.optimizeRuntime {
-			// The full frontend currently emits about 3.47 MiB of code, 37,100
-			// labels, 154,300 relative relocations, and 30,200 absolute relocations.
-			// Reserve one measured growth range so arena-backed slices do not retain
-			// their undersized predecessor pages at the self-host peak.
-			a.code = make([]byte, 0, 3670016)
-			a.labelPos = make([]int32, 0, 40960)
-			a.relocs = make([]int32, 0, 163840)
-			a.absRelocs = make([]int32, 0, 32768)
-		} else {
-			a.code = make([]byte, 0, 2097152)
-			a.labelPos = make([]int32, 0, 24576)
-			a.relocs = make([]int32, 0, 81920)
-			a.absRelocs = make([]int32, 0, 12288)
-		}
+		// The full frontend currently emits about 3.47 MiB of code, 37,100
+		// labels, 154,300 relative relocations, and 30,200 absolute relocations.
+		// Reserve one measured growth range so arena-backed slices do not retain
+		// their undersized predecessor pages at the self-host peak.
+		a.code = make([]byte, 0, 3670016)
+		a.labelPos = make([]int32, 0, 40960)
+		a.relocs = make([]int32, 0, 163840)
+		a.absRelocs = make([]int32, 0, 32768)
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
 	}
 	if renvoFixedTarget == renvoTargetWasiWasm32 {
 		a.data = make([]byte, 0, 8192)
-	} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+	} else if renvoFixedTarget == 0 {
 		a.data = make([]byte, 0, 131072)
 	} else {
 		a.data = make([]byte, 0, 65536)
