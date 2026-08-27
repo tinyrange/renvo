@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0c26932fc60afdbf9e79c9eb8d954ee79e923efe5d5e09bd5a67a87ee92c94db"
+const CompilerSourceDigest = "b064f3954375b15afa56b4bb61fc2fb44bdae2261dbee6e1e08b64d4c222bb7d"
 
 // source: backend/compiler_common_impl.go
 
@@ -393,7 +393,7 @@ a.labelPos = make([]int32, 0, 32768)
 a.relocs = make([]int32, 0, 131072)
 a.absRelocs = make([]int32, 0, 98304)
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
-} else {
+} else if a.c.optimizeRuntime {
 
 
 
@@ -405,10 +405,18 @@ a.absRelocs = make([]int32, 0, 32768)
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
+} else {
+codeCapacity = 2097152
+a.labelPos = make([]int32, 0, 24576)
+a.relocs = make([]int32, 0, 81920)
+a.absRelocs = make([]int32, 0, 12288)
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+a.symbols = make([]renvoAsmSymbol, 0, 4096)
+}
 }
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 a.data = make([]byte, 0, 8192)
-} else if renvoFixedTarget == 0 {
+} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 a.data = make([]byte, 0, 131072)
 } else {
 a.data = make([]byte, 0, 65536)
