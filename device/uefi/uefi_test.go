@@ -47,3 +47,23 @@ func TestCallDispatch(t *testing.T) {
 		t.Fatalf("status = %v", status)
 	}
 }
+
+func TestFileOpenEncodesPath(t *testing.T) {
+	t.Cleanup(func() { CallHook = nil })
+	CallHook = func(function uintptr, arguments []uintptr) uintptr {
+		if function != 7 || len(arguments) != 5 {
+			t.Fatalf("open call = %d %#v", function, arguments)
+		}
+		if got := string16((*uint16)(unsafe.Pointer(arguments[2]))); got != "EFI\\Renvo U0001f33f" {
+			t.Fatalf("firmware path = %q", got)
+		}
+		return 0
+	}
+	file := &File{OpenFunction: 7}
+	if _, status := file.Open("EFI\\Renvo U0001f33f", FileModeRead, 0); status != Success {
+		t.Fatalf("Open status = %v", status)
+	}
+	if _, status := file.Open(string(make([]byte, 260)), FileModeRead, 0); status != InvalidParameter {
+		t.Fatalf("oversized Open status = %v", status)
+	}
+}

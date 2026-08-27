@@ -241,7 +241,15 @@ func appendUTF8(out []byte, r rune) []byte {
 }
 
 func utf16z(value string) []uint16 {
-	out := make([]uint16, 0, len(value)+1)
+	out := make([]uint16, len(value)+1)
+	return out[:encodeUTF16Z(out, value)]
+}
+
+// encodeUTF16Z writes the NUL-terminated UTF-16 representation of value into
+// out and returns the number of code units, including the terminator. A zero
+// result means the destination was too small.
+func encodeUTF16Z(out []uint16, value string) int {
+	to := 0
 	for at := 0; at < len(value); {
 		first := value[at]
 		at++
@@ -260,13 +268,26 @@ func utf16z(value string) []uint16 {
 			r = 0xfffd
 		}
 		if r <= 0xffff {
-			out = append(out, uint16(r))
+			if to+1 >= len(out) {
+				return 0
+			}
+			out[to] = uint16(r)
+			to++
 		} else {
+			if to+2 >= len(out) {
+				return 0
+			}
 			r -= 0x10000
-			out = append(out, uint16(0xd800+(r>>10)), uint16(0xdc00+(r&0x3ff)))
+			out[to] = uint16(0xd800 + (r >> 10))
+			out[to+1] = uint16(0xdc00 + (r & 0x3ff))
+			to += 2
 		}
 	}
-	return append(out, 0)
+	if to >= len(out) {
+		return 0
+	}
+	out[to] = 0
+	return to + 1
 }
 
 // Call invokes a firmware function pointer using the UEFI x64 ABI.

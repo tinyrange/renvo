@@ -54,9 +54,16 @@ func OpenVolume() (*File, Status) {
 }
 
 func (f *File) Open(path string, mode, attributes uint64) (*File, Status) {
-	return f.OpenUTF16(utf16z(path), mode, attributes)
+	// Keep the firmware-visible name in this call frame. Besides avoiding an
+	// allocation for the usual short UEFI paths, this guarantees that the
+	// backing store remains live until the firmware Open call returns.
+	var name [260]uint16
+	encoded := encodeUTF16Z(name[:], path)
+	if encoded == 0 {
+		return nil, InvalidParameter
+	}
+	return f.OpenUTF16(name[:encoded], mode, attributes)
 }
-
 // OpenUTF16 opens a path already encoded as NUL-terminated UTF-16.
 func (f *File) OpenUTF16(name []uint16, mode, attributes uint64) (*File, Status) {
 	if f == nil {

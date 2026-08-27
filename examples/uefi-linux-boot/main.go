@@ -7,14 +7,12 @@ import (
 )
 
 func main() {
-	var configPath [260]uint16
-	encodePath(configPath[:], "CONFIG.TXT")
 	volume, status := uefi.OpenVolume()
 	if status.Failed() {
 		fmt.Println("Cannot open boot volume: " + status.Error())
 		return
 	}
-	configFile, status := volume.OpenUTF16(configPath[:], uefi.FileModeRead, 0)
+	configFile, status := volume.Open("CONFIG.TXT", uefi.FileModeRead, 0)
 	if status.Failed() {
 		volume.Close()
 		fmt.Println("Cannot open \\config.txt: " + status.Error())

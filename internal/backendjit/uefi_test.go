@@ -2,6 +2,7 @@ package backendjit
 
 import (
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -40,5 +41,33 @@ func TestUEFIHelloImage(t *testing.T) {
 	if binary.LittleEndian.Uint16(image[optional:]) != 0x20b ||
 		binary.LittleEndian.Uint16(image[optional+68:]) != 10 {
 		t.Fatalf("UEFI optional header is not PE32+ EFI_APPLICATION")
+	}
+}
+
+func TestUEFIUnsignedDivisionUnderConversion(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "backends", "uefi_amd64.rtg")
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.com/division\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("package main\nfunc pages(bytes uint64) uintptr { return uintptr((bytes + 4095) / 4096) }\nfunc main() { if pages(8193) != 3 { panic(\"division\") } }\n")
+	if err := os.WriteFile(filepath.Join(project, "main.go"), source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+		t.TempDir(), backendcompiled.Backend{})
+	result := driver.CompileFromFS([]string{
+		"-backend", definition, "-t", "uefi/amd64", "-s", "-o", "division.efi",
+		".",
+	}, project, filepath.Join(root, "std"), driver.OSFS{}, backend)
+	if !result.Ok {
+		t.Fatalf("UEFI unsigned division compile failed: %#v", result.Diagnostic)
 	}
 }

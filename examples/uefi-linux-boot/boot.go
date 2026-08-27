@@ -41,11 +41,7 @@ const (
 // Success does not return. The volume is consumed and closed after both files
 // have been read; the caller should close every other firmware resource first.
 func BootLinux64(volume *uefi.File, kernelPath, initramfsPath, commandLine string) *LinuxBootError {
-	var kernelName [260]uint16
-	if !encodePath(kernelName[:], kernelPath) {
-		return &LinuxBootError{"kernel path must be ASCII and shorter than 260 characters", uefi.Success}
-	}
-	kernel, status := volume.OpenUTF16(kernelName[:], uefi.FileModeRead, 0)
+	kernel, status := volume.Open(kernelPath, uefi.FileModeRead, 0)
 	if status.Failed() {
 		return &LinuxBootError{"open kernel " + kernelPath, status}
 	}
@@ -105,11 +101,7 @@ func BootLinux64(volume *uefi.File, kernelPath, initramfsPath, commandLine strin
 		return &LinuxBootError{"load kernel payload", status}
 	}
 
-	var initrdName [260]uint16
-	if !encodePath(initrdName[:], initramfsPath) {
-		return &LinuxBootError{"initramfs path must be ASCII and shorter than 260 characters", uefi.Success}
-	}
-	initrd, status := volume.OpenUTF16(initrdName[:], uefi.FileModeRead, 0)
+	initrd, status := volume.Open(initramfsPath, uefi.FileModeRead, 0)
 	if status.Failed() {
 		return &LinuxBootError{"open initramfs " + initramfsPath, status}
 	}
@@ -182,9 +174,10 @@ func BootLinux64(volume *uefi.File, kernelPath, initramfsPath, commandLine strin
 	}
 
 	const mapCapacity = uintptr(65536)
-	mapWorkspace := make([]byte, mapCapacity+32)
-	controlAddress := uintptr(unsafe.Pointer(&mapWorkspace[0]))
-	mapAddress := controlAddress + 32
+	var mapControl [4]uintptr
+	mapBytes := make([]byte, mapCapacity)
+	controlAddress := uintptr(unsafe.Pointer(&mapControl[0]))
+	mapAddress := uintptr(unsafe.Pointer(&mapBytes[0]))
 	memoryMap := uefi.MemoryMap(controlAddress)
 
 	for attempt := 0; attempt < 3; attempt++ {
@@ -231,20 +224,6 @@ func allocateAlignedKernel(size, alignment uintptr) (uint64, uefi.Status) {
 		uefi.FreePages(uint64(aligned+(wantedPages<<12)), suffixPages)
 	}
 	return uint64(aligned), uefi.Success
-}
-
-func encodePath(out []uint16, path string) bool {
-	if len(path)+1 > len(out) {
-		return false
-	}
-	for i := 0; i < len(path); i++ {
-		if path[i] >= 0x80 {
-			return false
-		}
-		out[i] = uint16(path[i])
-	}
-	out[len(path)] = 0
-	return true
 }
 
 func readFileAddressUntilEOF(file *uefi.File, address, capacity uintptr) (uintptr, uefi.Status) {
