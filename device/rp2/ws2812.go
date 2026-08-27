@@ -30,10 +30,10 @@ const (
 	pioPullThreshold24 = uint32(24 << 25)
 	pioSideSetCount1   = uint32(1 << 29)
 	pioSetCount1       = uint32(1 << 26)
-	// RP2 programs currently retain the ROM's 12 MHz system clock. The PIO
+	// ConfigureUSBClock selects the stable 48 MHz USB PLL as clk_sys. The PIO
 	// program consumes ten 8 MHz cycles per bit, producing the WS2812 800 kHz
 	// waveform with the standard T1/T2/T3 timing split.
-	pioClockDiv8MHz = uint32(1<<16 | 128<<8)
+	pioClockDiv8MHz = uint32(6 << 16)
 	ws2812PollLimit = 65536
 )
 
@@ -68,6 +68,10 @@ func (p *ws2812PIO) initialize() {
 		p.power.Set(true)
 		_ = p.power.Configure(gpio.Config{Direction: gpio.Output})
 	}
+	// A flash image initially inherits the ROM's 12 MHz system clock, while a
+	// monitor-loaded image inherits the monitor's 48 MHz clock. Establish the
+	// same known clock in both cases before calculating PIO timing.
+	ConfigureUSBClock()
 	releasePIO0Reset()
 
 	// Stop SM0 while replacing its program and pin routing. PIO0/SM0 is the

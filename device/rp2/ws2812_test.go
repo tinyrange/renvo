@@ -7,8 +7,8 @@ func TestWS2812PIOProgramAndTiming(t *testing.T) {
 	if ws2812Program != want {
 		t.Fatalf("WS2812 PIO program = %#v, want %#v", ws2812Program, want)
 	}
-	if pioClockDiv8MHz != 0x00018000 {
-		t.Fatalf("WS2812 PIO clock divider = %#x, want 1.5", pioClockDiv8MHz)
+	if pioClockDiv8MHz != 0x00060000 {
+		t.Fatalf("WS2812 PIO clock divider = %#x, want 6.0", pioClockDiv8MHz)
 	}
 }
 
