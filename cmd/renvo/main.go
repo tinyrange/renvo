@@ -90,7 +90,7 @@ func buildPreparedBackend(args []string, env []string, bootstrapBackend driver.B
 		}
 	}
 	if input == "" || target == "" || output == "" {
-		fmt.Fprintln(os.Stderr, "usage: renvo backend build <definition.rtg> -t <target> -o <backend.rtgb>")
+		fmt.Fprintln(os.Stderr, "usage: renvo backend build <definition.rtg|definition.rbe> -t <target> -o <backend.rtgb>")
 		return 2
 	}
 	source, err := os.ReadFile(input)

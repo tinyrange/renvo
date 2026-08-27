@@ -1417,6 +1417,12 @@ func coreCompilerIntrinsicAlias(importPath string, name string) string {
 	if (importPath == "os" || importPath == "renvo.dev/std/os") && name == "syscall" {
 		return "renvo_runtime_Syscall"
 	}
+	if (importPath == "syscall" || importPath == "renvo.dev/std/syscall") &&
+		functionValueHasPrefix(name, "renvoSyscall") {
+		// The distinct declarations retain each call argument's source type;
+		// their call sites can share the target-defined syscall intrinsic alias.
+		return "renvo_runtime_Syscall"
+	}
 	return ""
 }
 

@@ -41,6 +41,15 @@ ISA's virtual-package symbols, so target code uses short names such as
 `asmMovRegImm`; generated qualification remains automatic and collision-free.
 The Wasm/VM family remains in [`wasm32.rtg`](wasm32.rtg).
 
+External targets may instead use a single `.rbe` file. An RBE begins with an
+ordinary RTG definition and appends one or more
+`@stdlib "package/file.go"` ... `@endstdlib` sections. Those files overlay the
+standard library only for builds selecting that backend, and are retained in a
+prepared `.rtgb` artifact. This is the appropriate form when a new operating
+system needs both machine/runtime definitions and target-specific Go APIs. See
+[`examples/pdp11v7/pdp11_v7.rbe`](../../examples/pdp11v7/pdp11_v7.rbe) for a
+complete PDP-11 Unix V7 target and syscall package.
+
 Generated Go is checked in so an ordinary `go build` needs no generator:
 
 ```text

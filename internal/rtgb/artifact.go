@@ -4,10 +4,13 @@
 // and atomic publication belong to the host adapter.
 package rtgb
 
-import "renvo.dev/internal/rtg"
+import (
+	"renvo.dev/internal/rbe"
+	"renvo.dev/internal/rtg"
+)
 
 const (
-	Version    = 4
+	Version    = 5
 	HeaderSize = 80
 	MaxPayload = 64 << 20
 	MaxMeta    = 20 << 20
@@ -23,10 +26,14 @@ type Artifact struct {
 	Protocol     int
 	Unit         int
 	Optimization int
+	// Enablement identifies the complete RBE source, including library files.
+	// Definition continues to identify only backend semantics for unit binding.
+	Enablement [32]byte
 	// DefinitionFiles preserve the root and imported RTG sources used to
 	// prepare this artifact. They let a distributed .rtgb compile project
 	// RTGASM without consulting the original source tree.
 	DefinitionFiles []rtg.ImportSource
+	LibraryFiles    []rbe.File
 	Payload         []byte
 }
 
@@ -54,6 +61,12 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	for i := 0; i < len(artifact.DefinitionFiles); i++ {
 		metadata = appendString(metadata, artifact.DefinitionFiles[i].Filename)
 		metadata = appendBytes(metadata, artifact.DefinitionFiles[i].Source)
+	}
+	metadata = appendBytes(metadata, artifact.Enablement[:])
+	metadata = appendVarint(metadata, len(artifact.LibraryFiles))
+	for i := 0; i < len(artifact.LibraryFiles); i++ {
+		metadata = appendString(metadata, artifact.LibraryFiles[i].Path)
+		metadata = appendBytes(metadata, artifact.LibraryFiles[i].Source)
 	}
 	if len(metadata) > MaxMeta {
 		return nil, false
@@ -140,6 +153,21 @@ func Decode(source []byte) (Artifact, bool) {
 			Filename: reader.string(), Source: append([]byte(nil), reader.bytes()...), Ok: true,
 		})
 	}
+	enablement := reader.bytes()
+	if len(enablement) != len(artifact.Enablement) {
+		reader.ok = false
+	} else {
+		copy(artifact.Enablement[:], enablement)
+	}
+	libraryCount := reader.integer()
+	if libraryCount < 0 || libraryCount > 4096 {
+		reader.ok = false
+	}
+	for i := 0; i < libraryCount && reader.ok; i++ {
+		artifact.LibraryFiles = append(artifact.LibraryFiles, rbe.File{
+			Path: reader.string(), Source: append([]byte(nil), reader.bytes()...),
+		})
+	}
 	if !reader.ok || reader.at != len(reader.source) || !validArtifactMetadata(artifact) {
 		return Artifact{}, false
 	}
@@ -163,7 +191,8 @@ func validArtifact(artifact Artifact) bool {
 
 func validArtifactMetadata(artifact Artifact) bool {
 	descriptor := artifact.Descriptor
-	return descriptor.Name != "" && descriptor.Family != "" &&
+	return validLibraryFiles(artifact.LibraryFiles) &&
+		descriptor.Name != "" && descriptor.Family != "" &&
 		descriptor.OS != "" && descriptor.ISA != "" &&
 		descriptor.Version > 0 && descriptor.Version <= 65535 &&
 		descriptor.WordBits > 0 && descriptor.WordBits <= 65535 &&
@@ -177,6 +206,23 @@ func validArtifactMetadata(artifact Artifact) bool {
 		descriptor.OutputKind != "" &&
 		(descriptor.Executable != "" || descriptor.Object != "") &&
 		artifact.Host != ""
+}
+
+func validLibraryFiles(files []rbe.File) bool {
+	if len(files) > 4096 {
+		return false
+	}
+	for i := 0; i < len(files); i++ {
+		if !rbe.ValidLibraryPath(files[i].Path) || len(files[i].Source) > MaxMeta {
+			return false
+		}
+		for j := 0; j < i; j++ {
+			if files[j].Path == files[i].Path {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func appendString(out []byte, value string) []byte {

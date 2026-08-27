@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8b506fb3cc9ad93fdc0af1cd01d1961b22555a29d1d6585306f04b85862b9f07"
+const CompilerSourceDigest = "d0ca64fcba4bace7d47aa8d98ae70c1daaf3efd0f251dfcdfcc7d7b4983d5efe"
 
 // source: backend/compiler_common_impl.go
 
@@ -36311,7 +36311,8 @@ return "", "", 0, false
 // source: backend/compiler_target_impl.go
 
 func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-return g.c.renvoNativeIntSize == 4 && g.c.renvoTargetArch != renvoArchWasm32 && kind == renvoTypeStruct
+return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
+(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {

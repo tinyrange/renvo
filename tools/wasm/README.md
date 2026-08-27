@@ -96,7 +96,7 @@ its size-optimized backend; ESP32-C6 and ESP32-S3 each use a prepared custom
 backend generated from their checked-in RTG definitions. A target change does
 not replace or reload the frontend.
 
-Editable `.rtg` files can also be used directly as project backends. The worker
+Editable `.rtg` and `.rbe` files can also be used directly as project backends. The worker
 loads a Go-built WASI CompilerJIT only when a definition is inspected, compiles
 the selected target into a regular VM32 backend executable, and stores that
 compiler in IndexedDB under its target-definition identity. Builds then run the

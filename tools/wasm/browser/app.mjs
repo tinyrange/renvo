@@ -1404,20 +1404,38 @@ async function loadStandardPackage(importPath, catalog) {
 }
 
 function workspacePayload() {
+  const sources = new Map();
+  for (const [name, source] of stdlibFiles) {
+    sources.set(name, source.slice());
+  }
+  for (const [name, model] of models) {
+    sources.set(name, encoder.encode(model.getValue()));
+  }
+  const definition = selectedTarget?.projectDefinition;
+  if (definition?.endsWith(".rbe")) {
+    const source = models.get(definition)?.getValue();
+    for (const [name, content] of rbeStandardLibrarySources(source || "")) {
+      sources.set(name, encoder.encode(content));
+    }
+  }
   const files = [];
   const transfers = [];
-  for (const [name, model] of models) {
-    const data = encoder.encode(model.getValue());
-    files.push({ name, data });
-    transfers.push(data.buffer);
-  }
-  for (const [name, source] of stdlibFiles) {
-    if (models.has(name)) continue;
-    const data = source.slice();
+  for (const [name, data] of sources) {
     files.push({ name, data });
     transfers.push(data.buffer);
   }
   return { files, transfers };
+}
+
+function rbeStandardLibrarySources(source) {
+  const files = new Map();
+  const section = /^[ \t]*@stdlib[ \t]+"([^"\r\n]+)"[ \t]*\r?\n([\s\S]*?)^[ \t]*@endstdlib[ \t]*(?:\r?\n|$)/gm;
+  for (const match of source.matchAll(section)) {
+    const path = match[1];
+    if (path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) continue;
+    files.set(`std/${path}`, match[2]);
+  }
+  return files;
 }
 
 function languageWorkspacePayload() {
@@ -1824,8 +1842,8 @@ function openFile(name) {
   elements.copyToPlayground.title = `Copy ${name} into the editable project`;
   elements.formatFile.disabled = !editable || !name.endsWith(".go");
   elements.formatFile.title = elements.formatFile.disabled ? "Formatting is currently available for editable Go files" : "Format document with gofmt (Shift+Alt+F)";
-  elements.languageMode.textContent = name.endsWith(".go") ? "Go" : /\.[ch]$/.test(name) ? "C" : name.endsWith(".rtg") ? "RTG" : "Plain Text";
-  elements.useBackend.hidden = !editable || !name.endsWith(".rtg");
+  elements.languageMode.textContent = name.endsWith(".go") ? "Go" : /\.[ch]$/.test(name) ? "C" : isBackendDefinition(name) ? "RTG/RBE" : "Plain Text";
+  elements.useBackend.hidden = !editable || !isBackendDefinition(name);
   document.querySelectorAll(".file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   document.querySelectorAll(".stdlib-file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   renderOutline(model);
@@ -1875,7 +1893,7 @@ function handleModelChange(name, model) {
   saveFiles();
   markBuildStale();
   languageWorkspaceRevision++;
-  if (name.endsWith(".rtg")) {
+  if (isBackendDefinition(name)) {
     for (const target of targetCatalog?.targets || []) {
       if (target.projectBackend) target.backendStale = true;
     }
@@ -1896,12 +1914,16 @@ function createProjectModel(name, value = "") {
   return model;
 }
 
+function isBackendDefinition(name) {
+  return name.endsWith(".rtg") || name.endsWith(".rbe");
+}
+
 function languageForFile(name) {
 	const base = name.split("/").pop();
 	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return MAKEFILE_LANGUAGE_ID;
   if (name.endsWith(".go")) return "go";
   if (name.endsWith(".c") || name.endsWith(".h")) return C_LANGUAGE_ID;
-  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
+  if (isBackendDefinition(name) || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
   if (name.endsWith(".md")) return "markdown";
   if (name.endsWith(".json")) return "json";
   return "plaintext";
@@ -1912,7 +1934,7 @@ function fileIcon(name) {
 	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return ["MK", "make-icon"];
   if (name.endsWith(".go")) return ["Go", "go-icon"];
   if (name.endsWith(".c") || name.endsWith(".h")) return ["C", "c-icon"];
-  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return ["RTG", "rtg-icon"];
+  if (isBackendDefinition(name) || name.endsWith(".rtgasm")) return [name.endsWith(".rbe") ? "RBE" : "RTG", "rtg-icon"];
   if (name.endsWith(".md")) return ["MD", "mod-icon"];
   return [name === "go.mod" ? "M" : "·", "mod-icon"];
 }
@@ -2016,7 +2038,7 @@ function updateNewFileKindFromPath() {
   if (name.endsWith(".go")) elements.newFileKind.value = "go";
   else if (name.endsWith(".c")) elements.newFileKind.value = "c";
   else if (name.endsWith(".h")) elements.newFileKind.value = "h";
-  else if (name.endsWith(".rtg")) elements.newFileKind.value = "rtg";
+  else if (isBackendDefinition(name)) elements.newFileKind.value = "rtg";
   else elements.newFileKind.value = "empty";
   updateNewFileHelp();
 }
@@ -2035,7 +2057,7 @@ function starterSourceForFile(name, kind) {
   if (name.endsWith(".go") || kind === "go") return "package main\n";
   if (name.endsWith(".c") || kind === "c") return "/* Package-level Go functions can be declared here with extern. */\n";
   if (name.endsWith(".h") || kind === "h") return "#pragma once\n";
-  if (name.endsWith(".rtg") || kind === "rtg") return "definition 1\nunit custom\nimplements direct_emitter_v1\n\n# Define or import an architecture, ABI, runtime, format, and target.\n";
+  if (isBackendDefinition(name) || kind === "rtg") return "definition 1\nunit custom\nimplements direct_emitter_v1\n\n# Define or import an architecture, ABI, runtime, format, and target.\n";
   return "";
 }
 
@@ -2053,7 +2075,7 @@ function openFileActionMenu(name, left, top) {
   elements.fileActionMenu.style.top = `${Math.max(4, Math.min(top, innerHeight - 90))}px`;
   elements.fileActionMenu.hidden = false;
   const backend = elements.fileActionMenu.querySelector('[data-file-action="backend"]');
-  if (backend) backend.hidden = !name.endsWith(".rtg");
+  if (backend) backend.hidden = !isBackendDefinition(name);
   elements.fileActionMenu.querySelector("button")?.focus();
 }
 
@@ -2617,7 +2639,7 @@ async function ensureBundledBackendModel(definition) {
 }
 
 async function useProjectBackend(definition) {
-  if (!definition?.endsWith(".rtg") || !models.has(definition)) return;
+  if (!definition || !isBackendDefinition(definition) || !models.has(definition)) return;
   projectBackendRoots.add(definition);
   saveFiles();
   setCompilerStatus("busy", `Reading ${definition}…`);
@@ -2710,7 +2732,7 @@ async function importPreparedBackend(list) {
   try {
     const manifestFile = [...list].find((file) => file.name.endsWith(".json"));
     const wasmFile = [...list].find((file) => file.name.endsWith(".wasm"));
-    const rtgFile = [...list].find((file) => file.name.endsWith(".rtg"));
+    const rtgFile = [...list].find((file) => isBackendDefinition(file.name));
     if (rtgFile && !models.has(rtgFile.name)) {
       createProjectModel(rtgFile.name, await rtgFile.text()); editableBaselines.set(rtgFile.name, models.get(rtgFile.name).getValue()); renderWorkspaceFiles();
     }
@@ -4073,7 +4095,7 @@ async function useExample(entry, fromDialog) {
     const targetDefinition = targetCatalog?.targets.find((candidate) => candidate.name === target);
     const active = entry.item.language === "c" && Object.hasOwn(files, "main.c") ? "main.c" :
       Object.hasOwn(files, "main.go") ? "main.go" : Object.keys(files).find((name) => /\.(?:go|c)$/.test(name)) || Object.keys(files)[0];
-    const backendDefinition = Object.keys(files).find((name) => name.endsWith(".rtg"));
+    const backendDefinition = Object.keys(files).find((name) => isBackendDefinition(name));
     replaceProject({
       name: entry.slug,
       language: entry.item.language || "go",
@@ -4131,7 +4153,7 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     if (!opening) return;
     if (files.childElementCount) {
       if (item.main) await openPackageEntry(item);
-      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      const backendDefinition = item.files.find((file) => isBackendDefinition(file));
       if (item.main && backendDefinition) {
         const definition = `${item.root}/${backendDefinition}`;
         await ensureSourceModel(definition);
@@ -4143,10 +4165,10 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     try {
       await loadStandardPackage(importPath, catalog);
       const prefix = item.root || `std/${importPath}`;
-      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg)$/.test(file))
+      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg|rbe)$/.test(file))
         .map((file) => librarySourceFile(`${prefix}/${file}`, file)));
       if (item.main) await openPackageEntry(item);
-      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      const backendDefinition = item.files.find((file) => isBackendDefinition(file));
       if (item.main && backendDefinition) {
         const definition = `${item.root}/${backendDefinition}`;
         await ensureSourceModel(definition);

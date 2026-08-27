@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 )
 
@@ -23,7 +24,9 @@ func TestArtifactRoundTrip(t *testing.T) {
 		},
 		Host: "linux/amd64", Generator: 1, Kernel: 1, Protocol: 1,
 		Unit: 1, Optimization: 1, Payload: []byte("payload"),
+		LibraryFiles: []rbe.File{{Path: "syscall/v7.go", Source: []byte("package syscall\n")}},
 	}
+	want.Enablement[0] = 9
 	encoded, ok := Encode(want)
 	if !ok {
 		t.Fatal("Encode failed")
@@ -36,8 +39,13 @@ func TestArtifactRoundTrip(t *testing.T) {
 		got.Host != want.Host || got.Generator != want.Generator ||
 		got.Kernel != want.Kernel || got.Protocol != want.Protocol ||
 		got.Unit != want.Unit || got.Optimization != want.Optimization ||
+		got.Enablement != want.Enablement || !reflect.DeepEqual(got.LibraryFiles, want.LibraryFiles) ||
 		!bytes.Equal(got.Payload, want.Payload) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+	want.LibraryFiles[0].Path = "../escape.go"
+	if _, ok := Encode(want); ok {
+		t.Fatal("Encode accepted an unsafe library overlay path")
 	}
 }
 

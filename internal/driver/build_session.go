@@ -47,7 +47,7 @@ func (s *FSBuildSession) Step() bool {
 		return true
 	}
 	if s.stage == 0 {
-		options, binding := resolveFSBuildSessionOptions(s.args, s.workDir, s.fs)
+		options, binding, libraryFiles := resolveFSBuildSessionOptions(s.args, s.workDir, s.fs)
 		s.targetBinding = binding
 		s.result.Options = options
 		if !options.Ok {
@@ -58,6 +58,9 @@ func (s *FSBuildSession) Step() bool {
 		options = resolveCCompilerPaths(s.workDir, options)
 		s.workDir, options = standaloneCSourceContext(s.workDir, options)
 		s.result.Options = options
+		if len(libraryFiles) != 0 {
+			s.fs = backendEnablementFSForBuild(s.fs, s.stdRoot, libraryFiles)
+		}
 		s.fs = sourceFSForOptions(s.fs, s.workDir, options)
 		s.stage = 1
 		return false
