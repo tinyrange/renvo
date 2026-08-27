@@ -23,7 +23,11 @@ const (
 	pioSM0Restart      = uint32(1 << 4)
 	pioSM0ClockRestart = uint32(1 << 8)
 	pioTXFull          = uint32(1 << 16)
+	pioTXEmpty         = uint32(1 << 24)
 	pioTXStall         = uint32(1 << 24)
+	pioRXStall         = uint32(1)
+	pioTXOver          = uint32(1 << 16)
+	pioRXUnder         = uint32(1 << 8)
 	pioAutoPull        = uint32(1 << 17)
 	pioJoinTX          = uint32(1 << 30)
 	pioJoinRX          = uint32(1 << 31)
@@ -73,11 +77,27 @@ func (p *ws2812PIO) initialize() {
 	// same known clock in both cases before calculating PIO timing.
 	ConfigureUSBClock()
 	releasePIO0Reset()
+	releaseGPIOReset()
 
 	// Stop SM0 while replacing its program and pin routing. PIO0/SM0 is the
 	// board-level WS2812 resource; the portable driver owns it for the lifetime
 	// of the strip.
 	mmio.Store32(pioControl, mmio.Load32(pioControl)&^pioSM0Enable)
+	// Match pio_gpio_init: ensure the pad input is enabled, its output is not
+	// disabled, and no stale GPIO override survives a hot reload.
+	mmio.Store32(p.data.pad(), mmio.Load32(p.data.pad())&^padOutputOff|padInput)
+	mmio.Store32(p.data.control(), pioFunction)
+
+	// Match pio_sm_set_consecutive_pindirs. SET pin routing is temporary and is
+	// restored before the WS2812 state-machine configuration is installed.
+	savedPin := mmio.Load32(pioSM0Pin)
+	savedExec := mmio.Load32(pioSM0Exec)
+	mmio.Store32(pioSM0Exec, savedExec&^(1<<17))
+	mmio.Store32(pioSM0Pin, uint32(p.data.number)<<5|pioSetCount1)
+	mmio.Store32(pioSM0Instr, 0xe081) // set pindirs, 1
+	mmio.Store32(pioSM0Pin, savedPin)
+	mmio.Store32(pioSM0Exec, savedExec)
+
 	for index := 0; index < len(ws2812Program); index++ {
 		mmio.Store32(pioInstruction+uintptr(index*4), ws2812Program[index])
 	}
@@ -89,17 +109,16 @@ func (p *ws2812PIO) initialize() {
 	mmio.Store32(pioSM0Shift, pioAutoPull|pioPullThreshold24|pioJoinTX)
 	mmio.Store32(pioSM0Shift, mmio.Load32(pioSM0Shift)^pioJoinRX)
 	mmio.Store32(pioSM0Shift, mmio.Load32(pioSM0Shift)^pioJoinRX)
-	mmio.Store32(pioSM0Pin,
-		uint32(p.data.number)<<5|uint32(p.data.number)<<10|pioSetCount1|pioSideSetCount1)
+	mmio.Store32(pioSM0Pin, uint32(p.data.number)<<10|pioSideSetCount1)
 
-	// FUNCSEL 6 is PIO0 on both RP2040 and RP2350. The immediate SET executes
-	// while stopped so the state machine, rather than SIO, owns output enable.
-	mmio.Store32(p.data.control(), pioFunction)
-	mmio.Store32(pioSM0Instr, 0xe081) // set pindirs, 1
-	mmio.Store32(pioSM0Instr, 0xe000) // set pins, 0
+	// Match pio_sm_init ordering. The restart controls are write triggers; issue
+	// them separately through the atomic SET alias, then set the initial PC and
+	// enable the machine as distinct operations.
+	mmio.Store32(pioFDebug, pioTXStall|pioRXStall|pioTXOver|pioRXUnder)
+	mmio.Store32(pio0Base+0x2000, pioSM0Restart)
+	mmio.Store32(pio0Base+0x2000, pioSM0ClockRestart)
 	mmio.Store32(pioSM0Instr, 0x0000) // jmp 0
-	mmio.Store32(pioFDebug, pioTXStall)
-	mmio.Store32(pioControl, mmio.Load32(pioControl)|pioSM0Restart|pioSM0ClockRestart|pioSM0Enable)
+	mmio.Store32(pioControl, mmio.Load32(pioControl)|pioSM0Enable)
 	p.initialized = true
 }
 
@@ -122,14 +141,13 @@ func (p *ws2812PIO) Transmit(data []byte) bool {
 		word := uint32(data[index])<<24 | uint32(data[index+1])<<16 | uint32(data[index+2])<<8
 		mmio.Store32(pioTXFIFO0, word)
 	}
-	// Clear the old empty-FIFO indication only after publishing the final word.
-	// Clearing it first races the already-stalled OUT instruction, which can
-	// immediately reassert TXSTALL before the FIFO write and make a caller treat
-	// an incomplete frame as finished.
-	mmio.Store32(pioFDebug, pioTXStall)
+	// Wait on the FIFO's live state instead of the edge-triggered TXSTALL debug
+	// latch. Clearing TXSTALL after enqueueing races a short frame: generated
+	// application code may not reach the clear until the final pixel has already
+	// completed, losing the only completion event and timing out forever.
 	finished := false
 	for attempt := 0; attempt < ws2812PollLimit; attempt++ {
-		if mmio.Load32(pioFDebug)&pioTXStall != 0 {
+		if mmio.Load32(pio0Base+0x004)&pioTXEmpty != 0 {
 			finished = true
 			break
 		}
@@ -137,6 +155,9 @@ func (p *ws2812PIO) Transmit(data []byte) bool {
 	if !finished {
 		return false
 	}
-	Clock{}.DelayMicroseconds(80)
+	// An empty TX FIFO can still leave the final 24-bit word in the output shift
+	// register. One 800 kHz RGB pixel takes 30 us; the remaining interval supplies
+	// more than the WS2812 reset/latch minimum as well.
+	Clock{}.DelayMicroseconds(120)
 	return true
 }

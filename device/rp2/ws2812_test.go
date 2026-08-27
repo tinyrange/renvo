@@ -34,4 +34,10 @@ func TestWS2812PIOHotReloadState(t *testing.T) {
 	if ws2812PollLimit <= 0 {
 		t.Fatalf("WS2812 poll limit = %d", ws2812PollLimit)
 	}
+	if pioTXFull != 1<<16 || pioTXEmpty != 1<<24 {
+		t.Fatalf("PIO FIFO state bits = %#x, %#x", pioTXFull, pioTXEmpty)
+	}
+	if pioTXStall|pioRXStall|pioTXOver|pioRXUnder != 0x01010101 {
+		t.Fatalf("PIO FIFO debug mask is incomplete")
+	}
 }
