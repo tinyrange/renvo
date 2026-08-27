@@ -6803,7 +6803,11 @@ func renvoTypeKindIsUnsignedInteger(kind int) bool {
 }
 
 func renvoTypeKindIsWideValue(kind int) bool {
-	return renvoTypeKindIsWideInt(kind) || kind == renvoTypeFloat64
+	// Prepared RTG targets without an IEEE float implementation retain the
+	// legacy one-word scaled representation. Treating their float64 values as
+	// two-word IEEE values routes assignments, composites, calls, and tuple
+	// results through emitters those definitions do not provide.
+	return renvoTypeKindIsWideInt(kind) || kind == renvoTypeFloat64 && renvoPreparedBackendActive == 0
 }
 
 func renvoTypeKindIsScalarValue(kind int) bool {

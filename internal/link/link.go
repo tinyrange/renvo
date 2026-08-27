@@ -1302,6 +1302,13 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			index := symbolOffsets[i] + j
 			name := programs[i].Symbols[j].Name
 			names[index] = name
+			// Method identity includes its receiver. Receiver types are already
+			// package-aliased when needed, and method selectors inside the owning
+			// package intentionally retain the authored method spelling. Aliasing a
+			// colliding "Device.Read" declaration alone would disconnect d.Read().
+			if coreSymbolIsMethod(programs[i], programs[i].Symbols[j]) {
+				continue
+			}
 			directiveSize := -1
 			nameTok := programs[i].Symbols[j].Token
 			if nameTok > 0 && nameTok < len(programs[i].Tokens) && programs[i].Tokens[nameTok-1].KindLine&255 == unit.TokenFunc {
@@ -1348,6 +1355,16 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 		}
 	}
 	return out
+}
+
+func coreSymbolIsMethod(program unit.Program, symbol unit.Symbol) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.NameTok == symbol.Token && fn.ReceiverStart < fn.ReceiverEnd {
+			return true
+		}
+	}
+	return false
 }
 
 func coreMemoryDirectiveSize(program *unit.Program, nameTok int, load bool) int {

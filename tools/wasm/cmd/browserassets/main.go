@@ -32,6 +32,7 @@ type targetAsset struct {
 	Backend           string                  `json:"backend"`
 	BackendFormat     string                  `json:"backendFormat,omitempty"`
 	RTGDefinition     string                  `json:"rtgDefinition,omitempty"`
+	RTGDefinitionName string                  `json:"rtgDefinitionName,omitempty"`
 	RTGImports        []targetDefinitionAsset `json:"rtgImports,omitempty"`
 	CBackend          string                  `json:"cBackend,omitempty"`
 	Output            string                  `json:"output"`
@@ -224,7 +225,8 @@ func main() {
 		tags := append([]string(nil), descriptor.BuildTags...)
 		tags = append(tags, custom.Tags...)
 		catalog.Targets = append(catalog.Targets, targetAsset{
-			Name: descriptor.Name, Label: custom.Label, BackendTarget: descriptor.Name, Backend: custom.Backend, BackendFormat: custom.Format, RTGDefinition: custom.RTGSource, RTGImports: custom.RTGImports,
+			Name: descriptor.Name, Label: custom.Label, BackendTarget: descriptor.Name, Backend: custom.Backend, BackendFormat: custom.Format,
+			RTGDefinition: custom.RTGSource, RTGDefinitionName: packagedDefinitionName(custom.RTGSource), RTGImports: custom.RTGImports,
 			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: tags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
 			Device: custom.Device,
@@ -284,6 +286,10 @@ func main() {
 	if err = buildStandardLibrary(root, *output, boards); err != nil {
 		fail(err)
 	}
+}
+
+func packagedDefinitionName(source string) string {
+	return filepath.ToSlash(filepath.Join(".renvo", filepath.Base(source)))
 }
 
 func targetLabel(name string) string {
@@ -585,6 +591,7 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "device/audio/sam2695"},
 		{Path: "device/ws2812"},
 		{Path: "device/internal/esprmt"},
+		{Path: "internal/arena"},
 	}
 	// The public board package contains all build-tagged adapters and is loaded
 	// for every board target. Wiring packages and examples come from the board

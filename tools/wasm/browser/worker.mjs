@@ -239,12 +239,17 @@ async function runPipeline(request, sharedFiles = null) {
   let backendMilliseconds = 0;
   if (exitCode === 0 && plan.backend) {
     const backendStarted = performance.now();
-    if (request.rtgDefinition) {
+    if (request.rtgDefinition || request.rtgDefinitionName) {
       if (!backendJITURL) throw new Error("RTGASM evaluation is unavailable");
       if (!backendJITModule) backendJITModule = loadModule(backendJITURL, "backend JIT");
-      const definitionName = ".renvo/target.rtg";
+      const definitionName = clean(request.rtgDefinitionName || ".renvo/target.rtg");
       const evaluatedName = ".renvo/evaluated.unit";
-      context.files.set(definitionName, (await loadBytes(request.rtgDefinition, "target definition")).slice());
+      const packagedDefinition = Boolean(request.rtgDefinition);
+      if (packagedDefinition) {
+        context.files.set(definitionName, (await loadBytes(request.rtgDefinition, "target definition")).slice());
+      } else if (!context.files.has(definitionName)) {
+        throw new Error(`target definition is unavailable: ${definitionName}`);
+      }
       for (const imported of request.rtgImports || []) {
         context.files.set(clean(imported.name), (await loadBytes(imported.source, "target definition import")).slice());
       }
@@ -253,7 +258,8 @@ async function runPipeline(request, sharedFiles = null) {
         "-evaluate-unit", plan.temporary, "-o", evaluatedName,
       ]);
       const evaluated = context.files.get(evaluatedName);
-      context.files.delete(definitionName); context.files.delete(evaluatedName);
+      if (packagedDefinition) context.files.delete(definitionName);
+      context.files.delete(evaluatedName);
       for (const imported of request.rtgImports || []) context.files.delete(clean(imported.name));
       if (evaluateExit !== 0 || !evaluated) {
         return pipelineResult(request, files, inputNames, context, plan, started,
