@@ -71,28 +71,32 @@ func resetApplicationCore() {
 	fifoDrain()
 }
 
-func sendAndEcho(command uint32) bool {
-	fifoDrain()
-	fifoPush(command)
-	print(" ")
-	return fifoPop() == command
+func coreLaunchSequence(entry uint32) [6]uint32 {
+	return [6]uint32{0, 0, 1, uint32(reloadStart), stackTop, entry | 1}
 }
 
 func launchApplication(entry uint32) {
 	base, mask := psm()
 	mmio.Store32(base+4+0x3000, mask)
-	// Core 1 drains its mailbox on reset exit and announces readiness with zero.
-	if fifoPop() != 0 {
-		fifoDrain()
+	// Match the ROM handshake used by pico_multicore: two synchronizing zeros,
+	// the launch command, vector table, stack pointer, and Thumb entry point.
+	// Core 1 echoes every word. A mismatch restarts the sequence.
+	commands := coreLaunchSequence(entry)
+	index := 0
+	for index < len(commands) {
+		command := commands[index]
+		if command == 0 {
+			fifoDrain()
+			// Freestanding print emits SEV, waking a ROM core parked in WFE.
+			print(" ")
+		}
+		fifoPush(command)
+		if fifoPop() == command {
+			index++
+		} else {
+			index = 0
+		}
 	}
-	if !sendAndEcho(1) || !sendAndEcho(uint32(reloadStart)) || !sendAndEcho(stackTop) {
-		return
-	}
-	// The ROM echoes each setup word, then consumes the entry point and jumps;
-	// there is deliberately no final echo to wait for.
-	fifoDrain()
-	fifoPush(entry | 1)
-	print(" ")
 }
 
 func reply(usb *rp2.USBDevice, operation byte, status byte) {
