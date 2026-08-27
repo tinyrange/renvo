@@ -109,7 +109,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /function syncBuildScope/);
   assert.match(app, /async function handleExampleAction/);
   assert.match(app, /target: selectedTarget\?\.name \|\| restoredTargetName/);
-  assert.match(app, /\\\.\(\?:go\|c\|h\|rtg\)\$/);
+  assert.match(app, /\\\.\(\?:go\|c\|h\|rtg\|rbe\)\$/);
   assert.doesNotMatch(app, /\b(?:prompt|confirm)\s*\(/);
   assert.doesNotMatch(css, /--mobile-viewport-height/);
   assert.doesNotMatch(app, /--mobile-viewport-height/);

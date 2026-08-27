@@ -24121,10 +24121,10 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)
 		// The linker gives the Renvo os adapter and RBE-supplied typed syscall
-		// declarations reserved aliases. Keep ordinary user functions named
+		// declarations one reserved alias. Keep ordinary user functions named
 		// syscall on the normal call path without compiling adapter stub bodies.
 		if callee == renvoIdentSyscall && e.argCount == 4 ||
-			renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
+			renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
 			return renvoEmitArbitrarySyscall(g, ep, idx)
 		}
 		if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&
@@ -30849,10 +30849,10 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		}
 		callee := renvoExprIdentCode(p, ep, e.left)
 		// The linker gives the Renvo os adapter and RBE-supplied typed syscall
-		// declarations reserved aliases. Keep ordinary user functions named
+		// declarations one reserved alias. Keep ordinary user functions named
 		// syscall on the normal call path without compiling adapter stub bodies.
 		if callee == renvoIdentSyscall && e.argCount == 4 ||
-			renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
+			renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
 			return renvoEmitArbitrarySyscall(g, ep, idx)
 		}
 		if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&

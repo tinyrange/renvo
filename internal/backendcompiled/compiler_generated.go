@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9ce59f7afd5c751a6159f531e0c8a7019c76fb7f4f659ce21d3416253e7ad5e7"
+const CompilerSourceDigest = "d0ca64fcba4bace7d47aa8d98ae70c1daaf3efd0f251dfcdfcc7d7b4983d5efe"
 
 // source: backend/compiler_common_impl.go
 
@@ -24131,7 +24131,7 @@ callee := renvoExprIdentCode(p, ep, e.left)
 
 
 if callee == renvoIdentSyscall && e.argCount == 4 ||
-renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
+renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
 return renvoEmitArbitrarySyscall(g, ep, idx)
 }
 if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&
@@ -30859,7 +30859,7 @@ callee := renvoExprIdentCode(p, ep, e.left)
 
 
 if callee == renvoIdentSyscall && e.argCount == 4 ||
-renvoExprIdentPrefixText(p, ep, e.left, "renvo_runtime_Syscall") {
+renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_Syscall") {
 return renvoEmitArbitrarySyscall(g, ep, idx)
 }
 if renvoConversionTypeFromExpr(g, ep, e.left) == 0 &&
