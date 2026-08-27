@@ -21,7 +21,7 @@ func TestUEFIHelloImage(t *testing.T) {
 	}
 	definition := filepath.Join(root, "backends", "uefi_amd64.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-		t.TempDir(), backendcompiled.Backend{})
+		backendJITTestCacheDir, backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
 		"-backend", definition, "-t", "uefi/amd64", "-s", "-o", "BOOTX64.EFI",
 		filepath.Join(root, "examples", "uefi-hello"),
@@ -62,7 +62,7 @@ func TestUEFIUnsignedDivisionUnderConversion(t *testing.T) {
 		t.Fatal(err)
 	}
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-		t.TempDir(), backendcompiled.Backend{})
+		backendJITTestCacheDir, backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
 		"-backend", definition, "-t", "uefi/amd64", "-s", "-o", "division.efi",
 		".",
