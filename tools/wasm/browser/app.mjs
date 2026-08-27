@@ -1408,6 +1408,9 @@ function workspacePayload() {
   for (const [name, source] of stdlibFiles) {
     sources.set(name, source.slice());
   }
+  for (const file of selectedTarget?.libraryFiles || []) {
+    sources.set(`std/${file.name}`, encoder.encode(file.source));
+  }
   for (const [name, model] of models) {
     sources.set(name, encoder.encode(model.getValue()));
   }

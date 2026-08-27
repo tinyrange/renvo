@@ -21,6 +21,7 @@ import (
 
 	"renvo.dev/internal/backenddef"
 	"renvo.dev/internal/driver"
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/targetinfo"
 )
@@ -44,7 +45,13 @@ type targetAsset struct {
 	Tags              []string                `json:"tags,omitempty"`
 	Definition        string                  `json:"definition,omitempty"`
 	DescriptorVersion int                     `json:"descriptorVersion,omitempty"`
+	LibraryFiles      []targetLibraryAsset    `json:"libraryFiles,omitempty"`
 	Hidden            bool                    `json:"hidden,omitempty"`
+}
+
+type targetLibraryAsset struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 type targetDefinitionAsset struct {
@@ -183,6 +190,7 @@ var customTargets = []customTarget{
 		{Name: "backend/definitions/x86_64.rtg", Source: "backends/definitions/x86_64.rtg"},
 		{Name: "backend/definitions/elf_amd64_primitives.rtg", Source: "backends/definitions/elf_amd64_primitives.rtg"},
 	}, Device: "computer"},
+	{Name: "unixv7/pdp11", Label: "Unix V7 PDP-11 (a.out)", Definition: "examples/pdp11v7/pdp11_v7.rbe", Backend: "backends/unixv7-pdp11.rnvb", Format: "vm32", RTGSource: "examples/pdp11v7/pdp11_v7.rbe", Device: "computer"},
 }
 
 func pc8086DefinitionImports() []targetDefinitionAsset {
@@ -252,8 +260,7 @@ func main() {
 			RTGDefinition: custom.RTGSource, RTGDefinitionName: packagedDefinitionName(custom.RTGSource), RTGImports: custom.RTGImports,
 			Output: outputName(descriptor.Name, descriptor.OutputKind), Tags: tags,
 			Definition: hex.EncodeToString(descriptor.Definition[:]), DescriptorVersion: descriptor.Version,
-			Device: custom.Device,
-			Hidden: custom.Hidden,
+			Device: custom.Device, LibraryFiles: targetLibraryAssets(resolved.LibraryFiles), Hidden: custom.Hidden,
 		})
 	}
 	for _, board := range boards {
@@ -309,6 +316,14 @@ func main() {
 	if err = buildStandardLibrary(root, *output, boards); err != nil {
 		fail(err)
 	}
+}
+
+func targetLibraryAssets(files []rbe.File) []targetLibraryAsset {
+	assets := make([]targetLibraryAsset, len(files))
+	for i := range files {
+		assets[i] = targetLibraryAsset{Name: files[i].Path, Source: string(files[i].Source)}
+	}
+	return assets
 }
 
 func packagedDefinitionName(source string) string {
