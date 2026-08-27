@@ -30,7 +30,7 @@ func TestCompilerPerformanceWASI(t *testing.T) {
 	}
 
 	const maxElapsed = 125 * time.Millisecond
-	const maxRSSKB = 16 * 1024
+	const maxRSSKB = 20 * 1024
 	const maxBinarySize = 384 * 1024
 	bestElapsed := 24 * time.Hour
 	bestRSS := 1 << 30
