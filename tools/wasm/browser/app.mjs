@@ -12,6 +12,7 @@ import { RTG_LANGUAGE_ID, registerRTGLanguage } from "./rtg-language.mjs";
 import { generateBrowserTestProject } from "./test-project.mjs";
 import { deleteProjectSnapshot, loadCurrentProject, loadPreparedBackends, loadProjectSnapshots, saveCurrentProject, savePreparedBackend, saveProjectSnapshot } from "./workspace-store.mjs";
 import { buildReadiness } from "./build-readiness.mjs";
+import { hasDownloadableOutput, targetCapabilities, targetCapabilityHint, targetCapabilityTags } from "./target-capabilities.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -129,6 +130,7 @@ const elements = {
   mobileContext: document.querySelector("#mobile-context"),
   mobileEditorActions: document.querySelector(".mobile-editor-actions"),
   mobileTargetButton: document.querySelector("#mobile-target-button"),
+  mobileDownload: document.querySelector("#mobile-download"),
   mobileRun: document.querySelector("#mobile-run"),
   mobileDeviceBuild: document.querySelector("#mobile-device-build"),
   mobileDeviceRun: document.querySelector("#mobile-device-run"),
@@ -378,7 +380,23 @@ function configureTargets(targets) {
     mobileOption.dataset.target = target.name;
     mobileOption.setAttribute("role", "option");
     mobileOption.setAttribute("aria-selected", "false");
-    mobileOption.textContent = targetDisplayName(target);
+    const mobileLabel = document.createElement("span");
+    mobileLabel.className = "mobile-target-name";
+    mobileLabel.textContent = targetDisplayName(target);
+    const capabilities = document.createElement("span");
+    capabilities.className = "target-capabilities";
+    for (const tag of targetCapabilityTags(target)) {
+      const badge = document.createElement("span");
+      badge.className = "target-capability";
+      badge.dataset.capability = tag.name;
+      badge.textContent = tag.label;
+      capabilities.append(badge);
+    }
+    const selected = document.createElement("span");
+    selected.className = "mobile-target-selected";
+    selected.textContent = "Selected";
+    selected.setAttribute("aria-hidden", "true");
+    mobileOption.append(mobileLabel, capabilities, selected);
     mobileOption.title = target.name;
     mobileOption.addEventListener("click", () => {
       selectTarget(target.name, true);
@@ -556,6 +574,7 @@ function setupShell() {
     if (mobileDeploymentActive) openMobileFlashView(elements.mobileFlashState.textContent);
     else runArtifact();
   });
+  elements.mobileDownload.addEventListener("click", downloadValidatedArtifact);
   elements.mobileDeviceBuild.addEventListener("click", primaryTargetAction);
   elements.mobileDeviceRun.addEventListener("click", secondaryTargetAction);
   elements.mobileTargetButton.addEventListener("click", () => {
@@ -778,6 +797,7 @@ function targetDisplayName(target) {
 }
 
 function downloadValidatedArtifact() {
+  if (!hasDownloadableOutput(selectedTarget)) return;
   const cached = validatedBuild;
   if (!cached || cached.revision !== buildRevision || cached.target.name !== selectedTarget?.name || cached.result.exitCode !== 0) return;
   const artifact = cached.result.files.find((file) => file.name === cached.target.output) || cached.result.files[0];
@@ -2888,6 +2908,8 @@ function setSetupStep(step, state, detail) {
 
 function updateReadyState() {
   const board = selectedTarget?.device === "esp32";
+  const capabilities = targetCapabilities(selectedTarget);
+  const downloadable = hasDownloadableOutput(selectedTarget);
   const jtag = board && elements.flashTransport.value === "webusb" && supportsESPWebUSBJTAG(deviceMachineTarget());
   const deviceAction = jtag ? "JTAG load" : "Flash";
   const primaryLabel = board ? deviceAction : "Download";
@@ -2895,7 +2917,11 @@ function updateReadyState() {
     compilerReady, editorReady: Boolean(monaco), building, state: buildValidationState,
     currentRevision: buildRevision, validatedRevision: buildValidationRevision, readyLabel: primaryLabel,
   });
-  elements.compile.disabled = !readiness.ready || running || runAfterBuild;
+  const downloadReadiness = buildReadiness({
+    compilerReady, editorReady: Boolean(monaco), building, state: buildValidationState,
+    currentRevision: buildRevision, validatedRevision: buildValidationRevision, readyLabel: "Download",
+  });
+  elements.compile.disabled = !readiness.ready || (!board && !downloadable) || running || runAfterBuild;
   elements.compile.title = readiness.title;
   elements.compile.querySelector("span").textContent = running && board ? `${deviceAction}…` : runAfterBuild && board ? "Preparing…" : readiness.label;
   elements.compile.querySelector("path").setAttribute("d", board ? "M8 14V6m-3 3 3-3 3 3M3 3h10" : "M8 2v8m-3-3 3 3 3-3M3 13h10");
@@ -2904,15 +2930,20 @@ function updateReadyState() {
   elements.test.disabled = !compilerReady || !monaco || building || running;
   elements.test.textContent = testBuild ? "Testing…" : "Test";
   elements.targetButton.disabled = building || running;
-  elements.run.disabled = !readiness.ready || (!board && !selectedTarget?.runnable) || running || runAfterBuild;
+  elements.run.disabled = !readiness.ready || (board ? !downloadable : !capabilities.runsInBrowser) || running || runAfterBuild;
   elements.flashTransport.disabled = building || running || runAfterBuild;
   elements.run.title = board ? "Download firmware" : "Run (F5)";
   elements.run.querySelector("span").textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Run pending…" : "Run";
   elements.run.querySelector("path").setAttribute("d", board ? "M8 2v8m-3-3 3 3 3-3M3 13h10" : "m5 3 8 5-8 5V3Z");
+  elements.mobileDownload.disabled = !downloadReadiness.ready || !downloadable || running || runAfterBuild;
+  elements.mobileDownload.textContent = !compilerReady || !monaco ? "Loading…" : downloadReadiness.label;
+  elements.mobileDownload.title = downloadable ? downloadReadiness.title : "This target has no downloadable output";
+  elements.mobileDownload.classList.toggle("primary", !board && !capabilities.runsInBrowser && downloadable);
   elements.mobileRun.disabled = board ? elements.compile.disabled : elements.run.disabled;
   elements.mobileRun.textContent = !compilerReady || !monaco ? "Loading…" : running ? (board ? `${deviceAction}…` : "Running…") :
     runAfterBuild ? "Pending…" : (board ? deviceAction : "Run");
   elements.mobileRun.classList.toggle("deploying", mobileDeploymentActive);
+  elements.mobileRun.classList.toggle("primary", board || capabilities.runsInBrowser);
   if (mobileDeploymentActive) {
     elements.mobileRun.disabled = false;
     elements.mobileRun.textContent = mobileDeploymentLabel || "Working…";
@@ -2920,9 +2951,11 @@ function updateReadyState() {
   }
   elements.mobileDeviceRun.disabled = elements.run.disabled;
   elements.mobileDeviceRun.textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Waiting…" : "Run";
+  elements.mobileDeviceBuild.classList.toggle("primary", board || !capabilities.runsInBrowser);
+  elements.mobileDeviceRun.classList.toggle("primary", !board && capabilities.runsInBrowser);
   if (autoBuildPending && readiness.ready && selectedTarget && !building) {
     autoBuildPending = false;
-    queueMicrotask(selectedTarget.runnable ? runArtifact : primaryTargetAction);
+    queueMicrotask(capabilities.runsInBrowser ? runArtifact : primaryTargetAction);
   }
 }
 
@@ -2992,9 +3025,7 @@ function updateMobileHeader() {
     elements.mobileContext.textContent = projectName;
   }
   if (elements.mobileDeviceTarget) elements.mobileDeviceTarget.textContent = selectedTarget?.label || selectedTarget?.name || "Choose a target";
-  if (elements.mobileDeviceHint) elements.mobileDeviceHint.textContent = selectedTarget?.device === "esp32"
-    ? "Build the project, then flash this board over USB."
-    : "Build and run this target in the browser.";
+  if (elements.mobileDeviceHint) elements.mobileDeviceHint.textContent = targetCapabilityHint(selectedTarget);
   document.querySelector(".mobile-transport-picker").hidden = selectedTarget?.device !== "esp32";
 }
 
