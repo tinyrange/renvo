@@ -16,3 +16,9 @@ The boot sector tries INT 13h extensions three times, then queries the drive
 geometry and uses classic CHS reads when extensions are unavailable. Programs
 can use either `ReadSectors` or `ReadCHS` directly. Run `tools/bios/test-qemu`
 for the opt-in end-to-end smoke test of both boot paths.
+
+`EnterLongMode` is the bridge for multi-target boot loaders. Pass it a
+`uintptr` variable annotated with `//renvo:compile -t pc-longmode/amd64 entry`;
+the compiler embeds that separately compiled program in the BIOS image and the
+bridge builds identity-mapped page tables before transferring to its 64-bit
+entrypoint. See `examples/bios-longmode` for an end-to-end image.

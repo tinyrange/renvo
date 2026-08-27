@@ -44,3 +44,32 @@ func TestBIOS8086ExternalDefinition(t *testing.T) {
 		}
 	}
 }
+
+func TestPCLongModeAmd64ExternalDefinition(t *testing.T) {
+	const filename = "../../backends/msdos.rtg"
+	resolved := Resolve(parseDefinitionFile(t, filename))
+	if !resolved.Ok {
+		t.Fatalf("resolve long-mode backend: %#v", resolved.Diagnostics)
+	}
+	for i := 0; i < len(resolved.Targets); i++ {
+		descriptor := resolved.Targets[i].Descriptor
+		if descriptor.Name != "pc-longmode/amd64" {
+			continue
+		}
+		if descriptor.OutputKind != "flat-memory" || descriptor.PointerBits != 64 ||
+			!containsString(descriptor.Capabilities, "in_place_entry") {
+			t.Fatalf("long-mode descriptor = %#v", descriptor)
+		}
+		return
+	}
+	t.Fatal("definition does not export pc-longmode/amd64")
+}
+
+func containsString(values []string, wanted string) bool {
+	for i := 0; i < len(values); i++ {
+		if values[i] == wanted {
+			return true
+		}
+	}
+	return false
+}

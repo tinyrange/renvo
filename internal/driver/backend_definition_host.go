@@ -120,6 +120,8 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 		return backendBuildOptions{options: options, hasBackend: true}
 	}
 	options.Target = resolved.Descriptor.Name
+	options.BackendDefinition = backendPath
+	options.BackendBuildTags = append(options.BackendBuildTags, resolved.Descriptor.BuildTags...)
 	options.TargetExplicit = targetExplicit
 	options.System = systemPath
 	if options.ArenaSize == 0 {

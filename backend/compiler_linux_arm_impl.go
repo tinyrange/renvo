@@ -657,12 +657,7 @@ func renvoTryCompileScalarProgramArmCached(p *renvoProgram, meta *renvoMeta) ren
 	return renvoFinishScalarProgramArm(g)
 }
 func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := renvoProgramEntryFunction(p, meta)
 	if appIndex < 0 {
 		return nil
 	}

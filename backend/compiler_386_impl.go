@@ -66,12 +66,7 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 			return renvoBeginObjectProgram(p, meta)
 		}
 	}
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := renvoProgramEntryFunction(p, meta)
 	if appIndex < 0 {
 		return nil
 	}

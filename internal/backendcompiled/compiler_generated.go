@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "71aa7eed6ad41be5ba64f18849755cfafa5427b5fd01d117e92d3324f7c3524d"
+const CompilerSourceDigest = "17984d25f178c7334c8a54882cb3cc95245eac95ca84514e9eae45309559229b"
 
 // source: backend/compiler_common_impl.go
 
@@ -1075,6 +1075,20 @@ parsedIntHigh int
 compilerInt32 bool
 c             renvoCompileContext
 c11Semantics  bool
+entryFunc     int
+foreign       []renvoForeignProgram
+}
+
+const renvoForeignProgramBytes = 1
+const renvoForeignProgramEntrypoint = 2
+
+type renvoForeignProgram struct {
+name        []byte
+kind        int
+target      []byte
+artifact    []byte
+entryOffset int
+dataOffset  int
 }
 
 func renvoProgramPackages(p *renvoProgram) []renvoPackageInfo {
@@ -1082,6 +1096,28 @@ if p.packageTable == nil {
 return nil
 }
 return p.packageTable.items
+}
+
+func renvoProgramEntryFunction(p *renvoProgram, meta *renvoMeta) int {
+renvoNonNil(p, meta)
+if p.entryFunc >= 0 && p.entryFunc < len(meta.funcs) {
+return p.entryFunc
+}
+for i := 0; i < len(meta.funcs); i++ {
+if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+return i
+}
+}
+return -1
+}
+
+func renvoFunctionIsProgramEntry(g *renvoLinearGen, fnIndex int) bool {
+renvoNonNil(g)
+if g.prog.entryFunc >= 0 {
+return fnIndex == g.prog.entryFunc
+}
+return fnIndex >= 0 && fnIndex < len(g.meta.funcs) &&
+renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
 }
 
 const renvoExprBad = 0
@@ -1434,6 +1470,7 @@ p.compilerInt32 = int(probe) < 0
 
 func renvoParseProgramInto(src []byte, p *renvoProgram) {
 renvoNonNil(p)
+p.entryFunc = -1
 p.src = src
 p.c11Semantics = renvoSourceHasC11Directive(src)
 renvoSetCompilerIntWidth(p)
@@ -6958,7 +6995,7 @@ callWord := 0
 if renvoTypeUsesHiddenResult(meta, fn.resultType) {
 callWord = renvoBackendHiddenResultWordCount
 }
-entry := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "appMain")
+entry := renvoFunctionIsProgramEntry(g, fnIndex)
 for at := 0; at < fn.paramCount; at++ {
 i := fn.paramCount - 1 - at
 if entry {
@@ -11129,6 +11166,32 @@ if index < 0 {
 return true
 }
 off := s.iotaValue
+foreign := renvoForeignProgramForGlobal(g.prog, g.prog.src, s.nameStart, s.nameEnd)
+if foreign != nil {
+if foreign.dataOffset < 0 || foreign.entryOffset < 0 || foreign.entryOffset > len(foreign.artifact) {
+return false
+}
+if foreign.kind == renvoForeignProgramBytes {
+typ := renvoResolveType(meta, s.typ)
+if typ.kind != renvoTypeSlice || renvoResolveType(meta, typ.elem).kind != renvoTypeByte {
+return false
+}
+renvoAsmPrimaryDataAddr(&g.asm, foreign.dataOffset)
+renvoAsmSecondaryImm(&g.asm, len(foreign.artifact))
+renvoAsmCopySecondaryToTertiary(&g.asm)
+renvoAsmStoreSliceBss(&g.asm, off)
+} else if foreign.kind == renvoForeignProgramEntrypoint {
+if !renvoTypeIsNativeInt(meta, s.typ) {
+return false
+}
+renvoAsmPrimaryDataAddr(&g.asm, foreign.dataOffset+foreign.entryOffset)
+renvoAsmStorePrimaryBss(&g.asm, off)
+} else {
+return false
+}
+s.constValueOK = renvoInitDone
+return true
+}
 skipInitializer := -1
 if renvoFixedTarget == 0 {
 if index < len(g.replRestoreOffsets) && g.replRestoreOffsets[index] >= 0 {
@@ -11164,6 +11227,27 @@ renvoAsmMarkLabel(&g.asm, skipInitializer)
 }
 s.constValueOK = renvoInitDone
 return true
+}
+
+func renvoForeignProgramForGlobal(p *renvoProgram, src []byte, start int, end int) *renvoForeignProgram {
+renvoNonNil(p)
+for i := 0; i < len(p.foreign); i++ {
+item := &p.foreign[i]
+if end-start != len(item.name) {
+continue
+}
+match := true
+for at := 0; at < len(item.name); at++ {
+if renvo_runtime_UnsafeByteAt(src, start+at) != item.name[at] {
+match = false
+break
+}
+}
+if match {
+return item
+}
+}
+return nil
 }
 
 const renvoReplValuePrefix = "renvo_repl_value_"
@@ -27181,6 +27265,9 @@ g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
 renvoAsmInitWithContext(&g.asm, g.c)
+if !renvoAppendForeignProgramData(g) {
+return nil
+}
 if renvoFixedTarget != 0 {
 g.funcLabels = make([]int, 0, len(meta.funcs))
 }
@@ -27189,6 +27276,22 @@ g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
 }
 renvoInitFuncQueue(g, len(meta.funcs))
 return g
+}
+
+func renvoAppendForeignProgramData(g *renvoLinearGen) bool {
+renvoNonNil(g)
+for i := 0; i < len(g.prog.foreign); i++ {
+item := &g.prog.foreign[i]
+if len(item.artifact) == 0 || len(item.name) == 0 {
+return false
+}
+for len(g.asm.data)&15 != 0 {
+g.asm.data = append(g.asm.data, 0)
+}
+item.dataOffset = len(g.asm.data)
+g.asm.data = append(g.asm.data, item.artifact...)
+}
+return true
 }
 
 func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
@@ -27256,7 +27359,7 @@ renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x
 
 
 
-entry := renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
+entry := renvoFunctionIsProgramEntry(g, fnIndex)
 for at := 0; at < fixedWords; at++ {
 word := at
 if entry {
@@ -36528,6 +36631,14 @@ target := renvoParseTargetArg(targetName)
 return target != 0 && renvoRTGTargetHasBuildTag(target, tag)
 }
 
+
+
+
+func RenvoTargetHasCapability(targetName string, capability string) bool {
+target := renvoParseTargetArg(targetName)
+return target != 0 && renvoRTGTargetHasCapability(target, capability)
+}
+
 func RenvoDefaultArenaSize(targetName string) (int, bool) {
 target := renvoParseTargetArg(targetName)
 if target == 0 {
@@ -37696,6 +37807,10 @@ func renvoRTGTargetHasBuildTag(target int, tag string) bool {
 return false
 }
 
+func renvoRTGTargetHasCapability(target int, capability string) bool {
+return false
+}
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 return renvoTargetProfile{}
 }
@@ -38200,12 +38315,7 @@ renvoRTGImageLimit = 0
 if renvoRTGPreparedObject != 0 {
 return renvoTryCompileObjectProgramRTG(p, meta)
 }
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 renvoPrintErr("renvo: prepared backend could not find appMain\n")
 return renvoCompileResult{}
@@ -38216,6 +38326,9 @@ g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
 renvoAsmInitWithContext(&g.asm, g.c)
+if !renvoAppendForeignProgramData(g) {
+return renvoCompileResult{}
+}
 g.asm.codeOffset = renvoRTGCodeOffset
 for i := 0; i < len(meta.funcs); i++ {
 g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
@@ -38637,12 +38750,7 @@ if renvoIsHostedObjectAmd64(meta.c) {
 return renvoBeginObjectProgram(p, meta)
 }
 }
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 return nil
 }
@@ -39942,12 +40050,7 @@ if renvoIsHostedObject386(meta.c) {
 return renvoBeginObjectProgram(p, meta)
 }
 }
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 return nil
 }
@@ -43093,12 +43196,7 @@ result     renvoCompileResult
 }
 
 func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 return nil
 }
@@ -51083,12 +51181,7 @@ return renvoCompileResult{}
 return renvoFinishScalarProgramArm(g)
 }
 func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 return nil
 }
@@ -52091,12 +52184,7 @@ return 1
 }
 
 func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 return renvoCompileResult{}
 }
@@ -52204,12 +52292,7 @@ return true
 }
 
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-appIndex := -1
-for i := 0; i < len(meta.funcs); i++ {
-if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-appIndex = i
-}
-}
+appIndex := renvoProgramEntryFunction(p, meta)
 if appIndex < 0 {
 var result renvoCompileResult
 return result
@@ -54757,45 +54840,47 @@ return out
 // source: backend/compiler_unit_impl.go
 
 const (
-renvoUnitMagic          = "RNVO"
-renvoUnitVersion        = 1
-renvoUnitTagUnit        = 1
-renvoUnitTagPackage     = 2
-renvoUnitTagImportPath  = 3
-renvoUnitTagText        = 7
-renvoUnitTagTokens      = 8
-renvoUnitTagDecls       = 9
-renvoUnitTagFuncs       = 10
-renvoUnitTagIndexes     = 11
-renvoUnitTagComps       = 12
-renvoUnitTagAssigns     = 13
-renvoUnitTagReturns     = 14
-renvoUnitTagCalls       = 15
-renvoUnitTagRefs        = 16
-renvoUnitTagSels        = 17
-renvoUnitTagTypes       = 18
-renvoUnitTagTypeRefs    = 19
-renvoUnitTagLocals      = 20
-renvoUnitTagSigs        = 21
-renvoUnitTagDeclMeta    = 22
-renvoUnitTagImports     = 23
-renvoUnitTagSymbols     = 24
-renvoUnitTagInitOrder   = 25
-renvoUnitTagConsts      = 26
-renvoUnitTagTypeFields  = 27
-renvoUnitTagTypeIfaces  = 28
-renvoUnitTagMethods     = 29
-renvoUnitTagTypeFuncs   = 30
-renvoUnitTagStmts       = 31
-renvoUnitTagPackages    = 32
-renvoUnitTagRTGAssembly = 33
+renvoUnitMagic              = "RNVO"
+renvoUnitVersion            = 1
+renvoUnitTagUnit            = 1
+renvoUnitTagPackage         = 2
+renvoUnitTagImportPath      = 3
+renvoUnitTagText            = 7
+renvoUnitTagTokens          = 8
+renvoUnitTagDecls           = 9
+renvoUnitTagFuncs           = 10
+renvoUnitTagIndexes         = 11
+renvoUnitTagComps           = 12
+renvoUnitTagAssigns         = 13
+renvoUnitTagReturns         = 14
+renvoUnitTagCalls           = 15
+renvoUnitTagRefs            = 16
+renvoUnitTagSels            = 17
+renvoUnitTagTypes           = 18
+renvoUnitTagTypeRefs        = 19
+renvoUnitTagLocals          = 20
+renvoUnitTagSigs            = 21
+renvoUnitTagDeclMeta        = 22
+renvoUnitTagImports         = 23
+renvoUnitTagSymbols         = 24
+renvoUnitTagInitOrder       = 25
+renvoUnitTagConsts          = 26
+renvoUnitTagTypeFields      = 27
+renvoUnitTagTypeIfaces      = 28
+renvoUnitTagMethods         = 29
+renvoUnitTagTypeFuncs       = 30
+renvoUnitTagStmts           = 31
+renvoUnitTagPackages        = 32
+renvoUnitTagRTGAssembly     = 33
+renvoUnitTagEntrypoint      = 34
+renvoUnitTagForeignPrograms = 35
 )
 
 func renvoUnitChildTagIndex(tag int) int {
 if tag >= renvoUnitTagPackage && tag <= renvoUnitTagImportPath {
 return tag - 2
 }
-if tag >= renvoUnitTagText && tag <= renvoUnitTagRTGAssembly {
+if tag >= renvoUnitTagText && tag <= renvoUnitTagForeignPrograms {
 return tag - 5
 }
 return -1
@@ -54993,6 +55078,7 @@ int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
 
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 renvoNonNil(prog)
+prog.entryFunc = -1
 if len(src) < 14 {
 return false
 }
@@ -55019,6 +55105,8 @@ var declData []byte
 var funcData []byte
 var packageData []byte
 var assemblyData []byte
+var entrypointData []byte
+var foreignData []byte
 seenLow := 0
 seenHigh := 0
 pos := rootStart
@@ -55079,6 +55167,12 @@ packageData = src[pos:next]
 }
 if tag == renvoUnitTagRTGAssembly {
 assemblyData = src[pos:next]
+}
+if tag == renvoUnitTagEntrypoint {
+entrypointData = src[pos:next]
+}
+if tag == renvoUnitTagForeignPrograms {
+foreignData = src[pos:next]
 }
 pos = next
 }
@@ -55174,6 +55268,16 @@ prog.funcs = append(prog.funcs, fn)
 if funcReader.pos != funcReader.end {
 return false
 }
+if len(entrypointData) > 0 {
+entryReader := renvoUnitReader{src: entrypointData, end: len(entrypointData), ok: true}
+prog.entryFunc = renvoUnitReadVar(&entryReader)
+if !entryReader.ok || entryReader.pos != entryReader.end || prog.entryFunc < 0 || prog.entryFunc >= len(prog.funcs) {
+return false
+}
+}
+if len(foreignData) > 0 && !renvoDecodeForeignPrograms(prog, foreignData) {
+return false
+}
 if renvoPreparedBackendActive != 0 &&
 !renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 return false
@@ -55239,6 +55343,52 @@ renvo_runtime_ArenaDiscardBytes(src[textEnd:])
 renvoSetCompilerIntWidth(prog)
 prog.ok = true
 return true
+}
+
+func renvoDecodeForeignPrograms(prog *renvoProgram, data []byte) bool {
+renvoNonNil(prog)
+r := renvoUnitReader{src: data, end: len(data), ok: true}
+count := renvoUnitReadVar(&r)
+if !r.ok || count <= 0 {
+return false
+}
+prog.foreign = make([]renvoForeignProgram, 0, count)
+for i := 0; i < count; i++ {
+name := renvoUnitReadBytesCopy(&r)
+kind := renvoUnitReadVar(&r)
+target := renvoUnitReadBytesCopy(&r)
+inPlace := renvoUnitReadVar(&r)
+unresolved := renvoUnitReadBytesCopy(&r)
+artifact := renvoUnitReadBytesCopy(&r)
+entryOffset := renvoUnitReadVar(&r)
+if !r.ok || len(name) == 0 || len(target) == 0 || (inPlace != 0 && inPlace != 1) || len(unresolved) != 0 || len(artifact) == 0 ||
+(kind != renvoForeignProgramBytes && kind != renvoForeignProgramEntrypoint) ||
+(kind == renvoForeignProgramBytes && entryOffset != 0) ||
+(kind == renvoForeignProgramEntrypoint && (inPlace != 1 || entryOffset < 0 || entryOffset >= len(artifact))) {
+return false
+}
+for previous := 0; previous < len(prog.foreign); previous++ {
+if string(prog.foreign[previous].name) == string(name) {
+return false
+}
+}
+prog.foreign = append(prog.foreign, renvoForeignProgram{name: name, kind: kind, target: target,
+artifact: artifact, entryOffset: entryOffset, dataOffset: -1})
+}
+return r.ok && r.pos == r.end
+}
+
+func renvoUnitReadBytesCopy(r *renvoUnitReader) []byte {
+renvoNonNil(r)
+length := renvoUnitReadVar(r)
+if !r.ok || length < 0 || r.pos+length < r.pos || r.pos+length > r.end {
+r.ok = false
+return nil
+}
+out := make([]byte, length)
+copy(out, r.src[r.pos:r.pos+length])
+r.pos += length
+return out
 }
 
 func renvoUnitValidRange(limit int, start int, end int) bool {

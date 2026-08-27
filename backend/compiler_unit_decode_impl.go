@@ -187,6 +187,7 @@ func renvoUnitBindingMatchesTarget(src []byte, target int) bool {
 
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	renvoNonNil(prog)
+	prog.entryFunc = -1
 	if len(src) < 14 {
 		return false
 	}
@@ -213,6 +214,8 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	var funcData []byte
 	var packageData []byte
 	var assemblyData []byte
+	var entrypointData []byte
+	var foreignData []byte
 	seenLow := 0
 	seenHigh := 0
 	pos := rootStart
@@ -273,6 +276,12 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		}
 		if tag == renvoUnitTagRTGAssembly {
 			assemblyData = src[pos:next]
+		}
+		if tag == renvoUnitTagEntrypoint {
+			entrypointData = src[pos:next]
+		}
+		if tag == renvoUnitTagForeignPrograms {
+			foreignData = src[pos:next]
 		}
 		pos = next
 	}
@@ -368,6 +377,16 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if funcReader.pos != funcReader.end {
 		return false
 	}
+	if len(entrypointData) > 0 {
+		entryReader := renvoUnitReader{src: entrypointData, end: len(entrypointData), ok: true}
+		prog.entryFunc = renvoUnitReadVar(&entryReader)
+		if !entryReader.ok || entryReader.pos != entryReader.end || prog.entryFunc < 0 || prog.entryFunc >= len(prog.funcs) {
+			return false
+		}
+	}
+	if len(foreignData) > 0 && !renvoDecodeForeignPrograms(prog, foreignData) {
+		return false
+	}
 	if renvoPreparedBackendActive != 0 &&
 		!renvoDecodeRTGAssemblyTable(prog, assemblyData) {
 		return false
@@ -433,6 +452,52 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	renvoSetCompilerIntWidth(prog)
 	prog.ok = true
 	return true
+}
+
+func renvoDecodeForeignPrograms(prog *renvoProgram, data []byte) bool {
+	renvoNonNil(prog)
+	r := renvoUnitReader{src: data, end: len(data), ok: true}
+	count := renvoUnitReadVar(&r)
+	if !r.ok || count <= 0 {
+		return false
+	}
+	prog.foreign = make([]renvoForeignProgram, 0, count)
+	for i := 0; i < count; i++ {
+		name := renvoUnitReadBytesCopy(&r)
+		kind := renvoUnitReadVar(&r)
+		target := renvoUnitReadBytesCopy(&r)
+		inPlace := renvoUnitReadVar(&r)
+		unresolved := renvoUnitReadBytesCopy(&r)
+		artifact := renvoUnitReadBytesCopy(&r)
+		entryOffset := renvoUnitReadVar(&r)
+		if !r.ok || len(name) == 0 || len(target) == 0 || (inPlace != 0 && inPlace != 1) || len(unresolved) != 0 || len(artifact) == 0 ||
+			(kind != renvoForeignProgramBytes && kind != renvoForeignProgramEntrypoint) ||
+			(kind == renvoForeignProgramBytes && entryOffset != 0) ||
+			(kind == renvoForeignProgramEntrypoint && (inPlace != 1 || entryOffset < 0 || entryOffset >= len(artifact))) {
+			return false
+		}
+		for previous := 0; previous < len(prog.foreign); previous++ {
+			if string(prog.foreign[previous].name) == string(name) {
+				return false
+			}
+		}
+		prog.foreign = append(prog.foreign, renvoForeignProgram{name: name, kind: kind, target: target,
+			artifact: artifact, entryOffset: entryOffset, dataOffset: -1})
+	}
+	return r.ok && r.pos == r.end
+}
+
+func renvoUnitReadBytesCopy(r *renvoUnitReader) []byte {
+	renvoNonNil(r)
+	length := renvoUnitReadVar(r)
+	if !r.ok || length < 0 || r.pos+length < r.pos || r.pos+length > r.end {
+		r.ok = false
+		return nil
+	}
+	out := make([]byte, length)
+	copy(out, r.src[r.pos:r.pos+length])
+	r.pos += length
+	return out
 }
 
 func renvoUnitValidRange(limit int, start int, end int) bool {

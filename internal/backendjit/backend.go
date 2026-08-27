@@ -21,14 +21,15 @@ import (
 )
 
 type Backend struct {
-	path          string
-	backendRoot   string
-	stdRoot       string
-	cacheDir      string
-	bootstrap     driver.Backend
-	runner        Runner
-	prepared      Prepared
-	assemblyCache map[[32]byte][]byte
+	path            string
+	backendRoot     string
+	stdRoot         string
+	cacheDir        string
+	bootstrap       driver.Backend
+	runner          Runner
+	prepared        Prepared
+	preparedTargets map[string]Prepared
+	assemblyCache   map[[32]byte][]byte
 }
 
 func New(path string, backendRoot string, stdRoot string, cacheDir string, bootstrap driver.Backend) *Backend {
@@ -246,6 +247,11 @@ func (b *Backend) prepare(target string) Prepared {
 		if b.prepared.Artifact.Descriptor.Name == target || contains(b.prepared.Artifact.Descriptor.Aliases, target) {
 			return b.prepared
 		}
+	}
+	if prepared, ok := b.preparedTargets[target]; ok {
+		return prepared
+	}
+	if b.path == "" {
 		return prepareFailure("RENVO-RTG-010", "prepared backend target does not match "+target)
 	}
 	source, err := os.ReadFile(b.path)
@@ -253,17 +259,43 @@ func (b *Backend) prepare(target string) Prepared {
 		return prepareFailure("RENVO-RTG-011", "could not read backend "+b.path)
 	}
 	if rtgb.IsArtifact(source) {
-		b.prepared = Load(source)
+		prepared := Load(source)
+		if !prepared.Ok || prepared.Artifact.Descriptor.Name != target && !contains(prepared.Artifact.Descriptor.Aliases, target) {
+			return prepareFailure("RENVO-RTG-010", "prepared backend target does not match "+target)
+		}
+		if !b.prepared.Ok {
+			b.prepared = prepared
+		}
+		b.rememberPreparedTarget(prepared)
+		return prepared
 	} else {
 		workDir, _ := os.Getwd()
-		b.prepared = Prepare(PrepareConfig{
+		prepared := Prepare(PrepareConfig{
 			Definition: source, Filename: b.path, Target: target,
 			ImportLoader: filesystemImportLoader{},
 			BackendRoot:  b.backendRoot, WorkDir: workDir, StdRoot: b.stdRoot,
 			CacheDir: b.cacheDir, Bootstrap: b.bootstrap,
 		})
+		if !prepared.Ok {
+			return prepared
+		}
+		if !b.prepared.Ok {
+			b.prepared = prepared
+		}
+		b.rememberPreparedTarget(prepared)
+		return prepared
 	}
-	return b.prepared
+}
+
+func (b *Backend) rememberPreparedTarget(prepared Prepared) {
+	if b.preparedTargets == nil {
+		b.preparedTargets = make(map[string]Prepared)
+	}
+	descriptor := prepared.Artifact.Descriptor
+	b.preparedTargets[descriptor.Name] = prepared
+	for i := 0; i < len(descriptor.Aliases); i++ {
+		b.preparedTargets[descriptor.Aliases[i]] = prepared
+	}
 }
 
 type filesystemImportLoader struct{}

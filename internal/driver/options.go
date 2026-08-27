@@ -65,6 +65,8 @@ type Options struct {
 	SystemName           string
 	SystemError          string
 	SystemAt             int
+	BackendDefinition    string
+	BackendBuildTags     []string
 	Tags                 []string
 	IncludePaths         []string
 	CCompiler            bool

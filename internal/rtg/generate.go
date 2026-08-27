@@ -299,6 +299,25 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = append(source, "return false\n"...)
 	}
 	source = append(source, "}\n"...)
+	source = append(source, "\nfunc renvoRTGTargetHasCapability(target int, capability string) bool {\n"...)
+	if active {
+		source = append(source, "if target != renvoTargetRTG { return false }\nreturn "...)
+		if len(descriptor.Capabilities) == 0 {
+			source = append(source, "false"...)
+		} else {
+			for i := 0; i < len(descriptor.Capabilities); i++ {
+				if i != 0 {
+					source = append(source, " || "...)
+				}
+				source = append(source, "capability == "...)
+				source = appendQuoted(source, descriptor.Capabilities[i])
+			}
+		}
+		source = append(source, '\n')
+	} else {
+		source = append(source, "return false\n"...)
+	}
+	source = append(source, "}\n"...)
 
 	source = append(source, "\nfunc renvoRTGProfileForTarget(target int) renvoTargetProfile {\n"...)
 	if active {

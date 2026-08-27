@@ -1,0 +1,112 @@
+@import "../backend/definitions/x86_64.rtg"
+
+# A position-independent, directly executable amd64 memory image. Code begins
+# at byte zero, data follows it, and zero-filled writable state follows data.
+# A real-mode parent may embed the complete image and enter byte zero after it
+# establishes long mode and identity maps the containing physical memory.
+go backend {
+	func pcLongModeEntryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		out.Byte(0xfc) // CLD
+		return true
+	}
+
+	func pcLongModeEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return parameterCount == 0
+	}
+
+	func pcLongModeExit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != 0 {
+			out.Byte(0x48)
+			if status.Code >= 8 {
+				out.Byte(0x41)
+			}
+			out.Byte(0x89)
+			out.Byte(byte(0xc0 | (status.Code&7)<<3))
+		}
+		out.Bytes3(0x66, 0xba, 0xf4) // MOV DX,F4h
+		out.Byte(0x00)
+		out.Byte(0xee) // OUT DX,AL (QEMU isa-debug-exit)
+		out.Byte(0xfa)
+		out.Byte(0xf4)
+		out.Bytes2(0xeb, 0xfd)
+	}
+
+	func pcLongModeWrite(out *RTGEmitter) {
+		// write arrives as RAX=buffer and RDX=count in the prepared amd64 ABI.
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Byte(0x51) // PUSH RCX
+		out.Byte(0x52) // PUSH RDX
+		out.Byte(0x56) // PUSH RSI
+		out.Bytes3(0x48, 0x89, 0xc6) // RSI=buffer
+		out.Bytes3(0x48, 0x89, 0xd1) // RCX=count
+		out.Bytes4(0x66, 0xba, 0xe9, 0x00) // DX=QEMU debug console
+		out.Mark(loop)
+		out.Bytes3(0x48, 0x85, 0xc9)
+		out.Bytes2(0x0f, 0x84)
+		out.Rel32(done)
+		out.Byte(0xac) // LODSB
+		out.Byte(0xee) // OUT DX,AL
+		out.Bytes3(0x48, 0xff, 0xc9)
+		out.Byte(0xe9)
+		out.Rel32(loop)
+		out.Mark(done)
+		out.Byte(0x5e)
+		out.Byte(0x5a)
+		out.Byte(0x59)
+		out.Bytes2(0x31, 0xc0)
+	}
+
+	func pcLongModeImage(out *RTGEmitter) []byte {
+		dataAddress := len(out.Code())
+		bssAddress := dataAddress+len(out.Data())
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataAddress, bssAddress)
+			if !ok {
+				return nil
+			}
+			out.PatchUint32(at, target-(at+4))
+		}
+		image := make([]byte, 0, bssAddress+out.BSSSize())
+		image = append(image, out.Code()...)
+		image = append(image, out.Data()...)
+		for len(image) < bssAddress+out.BSSSize() {
+			image = append(image, 0)
+		}
+		return image
+	}
+}
+
+runtime pc_longmode_x86_64 {
+	emit_entry_start = go pcLongModeEntryStart
+	emit_entry = go pcLongModeEntry
+	emit_exit = go pcLongModeExit
+	operation write { emit = go pcLongModeWrite }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format pc_longmode_flat {
+	kind = "flat-memory"
+	byte_order = little
+	address_bits = 64
+	code_offset = 0
+	image = go pcLongModeImage
+}
+
+target pc-longmode/amd64 {
+	family = native_v1
+	os = pc-longmode
+	arch = x86_64
+	abi = renvo_x86_64
+	runtime = pc_longmode_x86_64
+	executable = pc_longmode_flat
+	arena_default = 4096
+	build_tags = [pc_longmode, amd64]
+	capabilities = [freestanding, executable, heap, in_place_entry]
+}

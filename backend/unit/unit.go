@@ -519,6 +519,10 @@ func Marshal(program Program) ([]byte, error) {
 		// optional slot so schema conformance and duplicate-tag validation remain
 		// complete. Compiler-facing codecs carry the actual opaque payload.
 		NewNode(TagRTGAssembly, nil),
+		// These compiler-facing nodes are likewise opaque to the public semantic
+		// codec, but their slots keep the full schema golden exhaustive.
+		NewNode(TagEntrypoint, nil),
+		NewNode(TagForeignPrograms, nil),
 	)
 
 	var out bytes.Buffer

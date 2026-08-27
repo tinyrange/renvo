@@ -12,6 +12,9 @@ func TargetBinding(targetName string) (string, string, int, bool) {
 func TargetHasBuildTag(targetName string, tag string) bool {
 	return renvo.RenvoTargetHasBuildTag(targetName, tag)
 }
+func TargetHasCapability(targetName string, capability string) bool {
+	return renvo.RenvoTargetHasCapability(targetName, capability)
+}
 
 type CompileSession struct{ inner *renvo.RenvoCompileSession }
 

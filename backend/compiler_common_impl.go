@@ -1068,6 +1068,20 @@ type renvoProgram struct {
 	compilerInt32 bool
 	c             renvoCompileContext
 	c11Semantics  bool
+	entryFunc     int
+	foreign       []renvoForeignProgram
+}
+
+const renvoForeignProgramBytes = 1
+const renvoForeignProgramEntrypoint = 2
+
+type renvoForeignProgram struct {
+	name        []byte
+	kind        int
+	target      []byte
+	artifact    []byte
+	entryOffset int
+	dataOffset  int
 }
 
 func renvoProgramPackages(p *renvoProgram) []renvoPackageInfo {
@@ -1075,6 +1089,28 @@ func renvoProgramPackages(p *renvoProgram) []renvoPackageInfo {
 		return nil
 	}
 	return p.packageTable.items
+}
+
+func renvoProgramEntryFunction(p *renvoProgram, meta *renvoMeta) int {
+	renvoNonNil(p, meta)
+	if p.entryFunc >= 0 && p.entryFunc < len(meta.funcs) {
+		return p.entryFunc
+	}
+	for i := 0; i < len(meta.funcs); i++ {
+		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
+			return i
+		}
+	}
+	return -1
+}
+
+func renvoFunctionIsProgramEntry(g *renvoLinearGen, fnIndex int) bool {
+	renvoNonNil(g)
+	if g.prog.entryFunc >= 0 {
+		return fnIndex == g.prog.entryFunc
+	}
+	return fnIndex >= 0 && fnIndex < len(g.meta.funcs) &&
+		renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
 }
 
 const renvoExprBad = 0
@@ -1427,6 +1463,7 @@ func renvoSetCompilerIntWidth(p *renvoProgram) {
 
 func renvoParseProgramInto(src []byte, p *renvoProgram) {
 	renvoNonNil(p)
+	p.entryFunc = -1
 	p.src = src
 	p.c11Semantics = renvoSourceHasC11Directive(src)
 	renvoSetCompilerIntWidth(p)
@@ -6951,7 +6988,7 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 	if renvoTypeUsesHiddenResult(meta, fn.resultType) {
 		callWord = renvoBackendHiddenResultWordCount
 	}
-	entry := renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "appMain")
+	entry := renvoFunctionIsProgramEntry(g, fnIndex)
 	for at := 0; at < fn.paramCount; at++ {
 		i := fn.paramCount - 1 - at
 		if entry {
@@ -11122,6 +11159,32 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 		return true
 	}
 	off := s.iotaValue
+	foreign := renvoForeignProgramForGlobal(g.prog, g.prog.src, s.nameStart, s.nameEnd)
+	if foreign != nil {
+		if foreign.dataOffset < 0 || foreign.entryOffset < 0 || foreign.entryOffset > len(foreign.artifact) {
+			return false
+		}
+		if foreign.kind == renvoForeignProgramBytes {
+			typ := renvoResolveType(meta, s.typ)
+			if typ.kind != renvoTypeSlice || renvoResolveType(meta, typ.elem).kind != renvoTypeByte {
+				return false
+			}
+			renvoAsmPrimaryDataAddr(&g.asm, foreign.dataOffset)
+			renvoAsmSecondaryImm(&g.asm, len(foreign.artifact))
+			renvoAsmCopySecondaryToTertiary(&g.asm)
+			renvoAsmStoreSliceBss(&g.asm, off)
+		} else if foreign.kind == renvoForeignProgramEntrypoint {
+			if !renvoTypeIsNativeInt(meta, s.typ) {
+				return false
+			}
+			renvoAsmPrimaryDataAddr(&g.asm, foreign.dataOffset+foreign.entryOffset)
+			renvoAsmStorePrimaryBss(&g.asm, off)
+		} else {
+			return false
+		}
+		s.constValueOK = renvoInitDone
+		return true
+	}
 	skipInitializer := -1
 	if renvoFixedTarget == 0 {
 		if index < len(g.replRestoreOffsets) && g.replRestoreOffsets[index] >= 0 {
@@ -11157,6 +11220,27 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 	}
 	s.constValueOK = renvoInitDone
 	return true
+}
+
+func renvoForeignProgramForGlobal(p *renvoProgram, src []byte, start int, end int) *renvoForeignProgram {
+	renvoNonNil(p)
+	for i := 0; i < len(p.foreign); i++ {
+		item := &p.foreign[i]
+		if end-start != len(item.name) {
+			continue
+		}
+		match := true
+		for at := 0; at < len(item.name); at++ {
+			if renvo_runtime_UnsafeByteAt(src, start+at) != item.name[at] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return item
+		}
+	}
+	return nil
 }
 
 const renvoReplValuePrefix = "renvo_repl_value_"
@@ -27174,6 +27258,9 @@ func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
 	renvoAsmInitWithContext(&g.asm, g.c)
+	if !renvoAppendForeignProgramData(g) {
+		return nil
+	}
 	if renvoFixedTarget != 0 {
 		g.funcLabels = make([]int, 0, len(meta.funcs))
 	}
@@ -27182,6 +27269,22 @@ func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	return g
+}
+
+func renvoAppendForeignProgramData(g *renvoLinearGen) bool {
+	renvoNonNil(g)
+	for i := 0; i < len(g.prog.foreign); i++ {
+		item := &g.prog.foreign[i]
+		if len(item.artifact) == 0 || len(item.name) == 0 {
+			return false
+		}
+		for len(g.asm.data)&15 != 0 {
+			g.asm.data = append(g.asm.data, 0)
+		}
+		item.dataOffset = len(g.asm.data)
+		g.asm.data = append(g.asm.data, item.artifact...)
+	}
+	return true
 }
 
 func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
@@ -27249,7 +27352,7 @@ func renvo386EmitObjectCABIWrapperBodyMode(g *renvoLinearGen, fnIndex int, wordC
 	// Ordinary Renvo functions bind incoming call words from the final source
 	// parameter toward the first. appMain is the deliberate exception because
 	// its arguments arrive from the operating-system entry contract.
-	entry := renvoBytesEqualText(g.prog.src, g.meta.funcs[fnIndex].nameStart, g.meta.funcs[fnIndex].nameEnd, "appMain")
+	entry := renvoFunctionIsProgramEntry(g, fnIndex)
 	for at := 0; at < fixedWords; at++ {
 		word := at
 		if entry {

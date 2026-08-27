@@ -48,7 +48,9 @@
     {"name":"TypeFuncs","number":30,"role":"child","required":false,"payload":"counted","record":"TypeFuncSig"},
     {"name":"Stmts","number":31,"role":"child","required":false,"payload":"counted","record":"Statement"},
     {"name":"Packages","number":32,"role":"child","required":false,"payload":"counted","record":"PackageInfo"},
-    {"name":"RTGAssembly","number":33,"role":"child","required":false,"payload":"record","record":"RTGAssembly"}
+    {"name":"RTGAssembly","number":33,"role":"child","required":false,"payload":"record","record":"RTGAssembly"},
+    {"name":"Entrypoint","number":34,"role":"child","required":false,"payload":"uvarint function index"},
+    {"name":"ForeignPrograms","number":35,"role":"child","required":false,"payload":"counted","record":"ForeignProgram"}
   ],
   "records": [
     {"name":"Token","fields":[{"name":"kind","encoding":"uvarint"},{"name":"start","encoding":"uvarint delta from previous start"},{"name":"size","encoding":"uvarint"},{"name":"line","encoding":"uvarint delta from previous line"}]},
@@ -80,6 +82,7 @@
     {"name":"PackageInfo","fields":[{"name":"name","encoding":"length-prefixed bytes"},{"name":"import_path","encoding":"length-prefixed bytes"},{"name":"graph_key_a","encoding":"u32"},{"name":"graph_key_b","encoding":"u32"},{"name":"source_key_a","encoding":"u32"},{"name":"source_key_b","encoding":"u32"},{"name":"text","encoding":"byte span: start, length"},{"name":"tokens","encoding":"token span: start, length"},{"name":"decls","encoding":"table span: start, length"},{"name":"funcs","encoding":"table span: start, length"}]},
     {"name":"RTGAssemblySource","fields":[{"name":"path","encoding":"length-prefixed bytes"},{"name":"source","encoding":"length-prefixed bytes"}]},
     {"name":"RTGAssemblyBinding","fields":[{"name":"func_index","encoding":"uvarint"},{"name":"source_index","encoding":"uvarint"},{"name":"entry_index","encoding":"uvarint"},{"name":"evaluated_code","encoding":"length-prefixed bytes"}]},
-    {"name":"RTGAssembly","fields":[{"name":"sources","encoding":"counted RTGAssemblySource"},{"name":"bindings","encoding":"counted RTGAssemblyBinding"}]}
+    {"name":"RTGAssembly","fields":[{"name":"sources","encoding":"counted RTGAssemblySource"},{"name":"bindings","encoding":"counted RTGAssemblyBinding"}]},
+    {"name":"ForeignProgram","fields":[{"name":"name","encoding":"length-prefixed bytes"},{"name":"kind","encoding":"uvarint enum: bytes=1, entrypoint=2"},{"name":"target","encoding":"length-prefixed bytes"},{"name":"in_place_entry","encoding":"uvarint boolean"},{"name":"unit","encoding":"length-prefixed bytes"},{"name":"artifact","encoding":"length-prefixed bytes"},{"name":"entry_offset","encoding":"uvarint"}]}
   ]
 }

@@ -32,6 +32,73 @@ func TestBuildUnitFromDriverOptions(t *testing.T) {
 	}
 }
 
+func TestBuildUnitCarriesTargetBoundForeignProgram(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte(`package main
+
+//renvo:compile -t linux/386 payloadMain
+var payload []byte
+
+func shared() int { return 42 }
+func payloadMain() { print(shared()) }
+func main() { print(len(payload)) }
+`)},
+	}
+	result := BuildUnit([]string{"-emit-unit", "-t", "linux/amd64", "-o", "app.unit", "."}, "/repo/case", "/std", files)
+	if !result.Ok {
+		t.Fatalf("foreign build failed: %#v", result.Diagnostic)
+	}
+	programs, ok := wireunit.ReadForeignPrograms(result.Unit)
+	if !ok || len(programs) != 1 {
+		t.Fatalf("foreign programs = %#v, ok=%v", programs, ok)
+	}
+	if programs[0].Name != "payload" || programs[0].Kind != wireunit.ForeignProgramBytes || programs[0].Target != "linux/386" || len(programs[0].Unit) == 0 {
+		t.Fatalf("foreign program = %#v", programs[0])
+	}
+	binding, ok := wireunit.ReadTargetBinding(programs[0].Unit)
+	if !ok || binding.Target != "linux/386" {
+		t.Fatalf("foreign binding = %#v, ok=%v", binding, ok)
+	}
+}
+
+func TestBuildUnitRejectsInvalidForeignVariableType(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\n//renvo:compile -t linux/386 payloadMain\nvar payload string\nfunc payloadMain() {}\nfunc main() {}\n")},
+	}
+	result := BuildUnit([]string{"-t", "linux/amd64", "-o", "app", "."}, "/repo/case", "/std", files)
+	if result.Ok || result.Diagnostic.Code != "RENVO-FOREIGN-003" || result.Diagnostic.Line != 2 || result.Diagnostic.Column != 1 {
+		t.Fatalf("invalid foreign type = %#v", result)
+	}
+}
+
+func TestBuildUnitRequiresForeignDirectiveNextToDeclaration(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\n//renvo:compile -t linux/386 payloadMain\n\nvar payload []byte\nfunc payloadMain() {}\nfunc main() {}\n")},
+	}
+	result := BuildUnit([]string{"-t", "linux/amd64", "-o", "app", "."}, "/repo/case", "/std", files)
+	if result.Ok || result.Diagnostic.Code != "RENVO-FOREIGN-002" || result.Diagnostic.Line != 2 {
+		t.Fatalf("separated foreign directive = %#v", result)
+	}
+}
+
+func TestCompactPackageUnitCarriesForeignProgram(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\n//renvo:compile -t linux/386 payloadMain\nvar payload []byte\nfunc payloadMain() {}\nfunc main() { print(len(payload)) }\n")},
+	}
+	result := BuildPackageUnitCompact(".", "linux/amd64", nil, "/repo/case", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("compact foreign build = %#v", result)
+	}
+	programs, ok := wireunit.ReadForeignPrograms(result.Unit)
+	if !ok || len(programs) != 1 || programs[0].Target != "linux/386" || len(programs[0].Unit) == 0 {
+		t.Fatalf("compact foreign programs = %#v, ok=%v", programs, ok)
+	}
+}
+
 func TestCompactPackageUnitCarriesFixedTargetBinding(t *testing.T) {
 	files := driverTestFiles()
 	result := BuildPackageUnitCompact("./cmd/app", "wasi/wasm32", nil, "/repo/case", "/std", memorySourceFS{files: files})

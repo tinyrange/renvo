@@ -221,6 +221,55 @@ func HasBuildTag(name string, tag string) bool {
 	return false
 }
 
+func HasCapability(name string, capability string) bool {
+	if name == "linux/amd64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "linkstatic" || capability == "object"
+	}
+	if name == "linux/386" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "linux/aarch64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "linux/arm" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "windows/amd64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "imports" || capability == "linkstatic" || capability == "object" || capability == "windows_gui"
+	}
+	if name == "windows/386" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "windows/arm64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "windows_gui"
+	}
+	if name == "darwin/arm64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "wasi/wasm32" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "browser/wasm32" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "vm/vm32" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "linux-kernel/amd64" {
+		return capability == "freestanding" || capability == "imports" || capability == "kernel_module" || capability == "linkstatic" || capability == "object"
+	}
+	if name == "freebsd/amd64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "openbsd/amd64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	if name == "netbsd/amd64" {
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+	}
+	return false
+}
+
 func DefaultArena(name string) int {
 	if name == "browser/wasm32" {
 		return 134217728

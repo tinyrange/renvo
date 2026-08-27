@@ -948,6 +948,7 @@ abi renvo_8086 {
 }
 
 @import "bios_8086.rtg"
+@import "pc_longmode_amd64.rtg"
 
 runtime msdos {
 	emit_entry_start = go dosEntryStart

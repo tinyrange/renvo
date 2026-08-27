@@ -39,6 +39,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	if result.Error == BuildErrPipeline {
 		return pipelineDiagnostic(result)
 	}
+	if result.Error == BuildErrForeign && result.ForeignDiagnostic.Valid() {
+		return result.ForeignDiagnostic
+	}
 	return Diagnostic{Phase: "compiler", Code: "RENVO-BUG-001", Message: "compiler bug: build returned undeclared error code " + diagnosticIntText(result.Error)}
 }
 

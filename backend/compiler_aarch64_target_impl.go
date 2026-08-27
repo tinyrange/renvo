@@ -457,12 +457,7 @@ type renvoAarch64ProgramSession struct {
 }
 
 func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := renvoProgramEntryFunction(p, meta)
 	if appIndex < 0 {
 		return nil
 	}

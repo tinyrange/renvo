@@ -16,3 +16,4 @@ func segmentLoad8(segment, offset uint16) byte
 func segmentStore8(segment, offset uint16, value byte)
 func segmentWrite(segment, offset uint16, data []byte)
 func bootDrive() byte
+func enterLongMode(entry uintptr)

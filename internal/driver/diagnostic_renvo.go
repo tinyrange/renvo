@@ -113,6 +113,9 @@ func printRenvoDiagnostic(d Diagnostic) {
 
 func diagnosticForBuild(result BuildResult) Diagnostic {
 	d := Diagnostic{Phase: "compiler", Code: "RENVO-BUG-001", Message: "compiler bug: build returned undeclared error code " + diagnosticIntText(result.Error)}
+	if result.Error == BuildErrForeign && result.ForeignDiagnostic.Valid() {
+		return result.ForeignDiagnostic
+	}
 	if result.Error == BuildErrOptions {
 		renvoSetDiagnostic(&d, "options", "RENVO-OPTION-001", "invalid command options")
 		optionError := result.Options.Error

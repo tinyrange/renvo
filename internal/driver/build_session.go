@@ -9,20 +9,21 @@ import (
 // FSBuildSession advances source discovery and the package pipeline in bounded
 // steps. It is used by embedded GUI callers that must return to an event loop.
 type FSBuildSession struct {
-	args          []string
-	workDir       string
-	stdRoot       string
-	moduleCache   string
-	fs            SourceFS
-	compact       bool
-	cached        bool
-	stage         int
-	sourcesStart  int
-	sourcesEnd    int
-	rootArg       string
-	pipeline      *pipeline.Session
-	targetBinding unit.TargetBinding
-	result        BuildResult
+	args            []string
+	workDir         string
+	stdRoot         string
+	moduleCache     string
+	fs              SourceFS
+	compact         bool
+	cached          bool
+	stage           int
+	sourcesStart    int
+	sourcesEnd      int
+	rootArg         string
+	pipeline        *pipeline.Session
+	targetBinding   unit.TargetBinding
+	foreignPrograms []unit.ForeignProgram
+	result          BuildResult
 }
 
 func BeginFSBuildSession(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) *FSBuildSession {
@@ -102,6 +103,13 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
+		foreign := prepareForeignPrograms(options, s.workDir, s.stdRoot, s.moduleCache, sources, s.fs)
+		if !foreign.Ok {
+			s.result = buildForeignFail(s.result, foreign.Diagnostic)
+			s.stage = 4
+			return true
+		}
+		s.foreignPrograms = foreign.Programs
 		if options.Mode == ModeObject {
 			// Object linking rewrites source-token line fields while producing the
 			// compact mapping, so its source arena cannot yet be transient.
@@ -127,6 +135,11 @@ func (s *FSBuildSession) Step() bool {
 			return true
 		}
 		s.result.Unit = built.Link.Data
+		if !bindForeignPrograms(&s.result.Unit, s.foreignPrograms) {
+			s.result = buildForeignFail(s.result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+			s.stage = 4
+			return true
+		}
 		bindBuiltInTarget(&s.result.Unit, s.result.Options)
 		if s.targetBinding.Target != "" {
 			if bound, ok := unit.BindTarget(s.result.Unit, s.targetBinding); ok {

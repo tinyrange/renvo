@@ -15,4 +15,5 @@ assembly {
 	segmentStore8(out:emitter) { bios_8086.biosSegmentStore8(out) }
 	segmentWrite(out:emitter) { bios_8086.biosSegmentWrite(out) }
 	bootDrive(out:emitter) { bios_8086.biosBootDrive(out) }
+	enterLongMode(out:emitter) { bios_8086.biosEnterLongMode(out) }
 }

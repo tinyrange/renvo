@@ -13,25 +13,27 @@ const (
 	BuildErrOptions
 	BuildErrSource
 	BuildErrPipeline
+	BuildErrForeign
 )
 
 type BuildResult struct {
-	Options      Options
-	Sources      SourceResult
-	Pipeline     pipeline.Result
-	Unit         []byte
-	Ok           bool
-	Error        int
-	ErrorArg     string
-	ErrorPath    string
-	ErrorAt      int
-	ErrorPackage int
-	ErrorFile    int
-	ErrorToken   int
-	Diagnostic   Diagnostic
-	CacheKeyA    int
-	CacheKeyB    int
-	CacheHit     bool
+	Options           Options
+	Sources           SourceResult
+	Pipeline          pipeline.Result
+	Unit              []byte
+	Ok                bool
+	Error             int
+	ErrorArg          string
+	ErrorPath         string
+	ErrorAt           int
+	ErrorPackage      int
+	ErrorFile         int
+	ErrorToken        int
+	Diagnostic        Diagnostic
+	ForeignDiagnostic Diagnostic
+	CacheKeyA         int
+	CacheKeyB         int
+	CacheHit          bool
 }
 
 var embeddedBuildCacheValid bool
@@ -64,12 +66,21 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 	if len(options.Files) > 0 {
 		rootArg = load.DirPath(load.JoinPath(workDir, options.Files[0]))
 	}
+	foreignRoot := load.JoinPath(workDir, rootArg)
+	foreignSources := SourceResult{Files: filtered, Root: load.PackageRef{Dir: foreignRoot}, Ok: true}
+	foreign := prepareForeignPrograms(options, workDir, stdRoot, "", foreignSources, nil)
+	if !foreign.Ok {
+		return buildForeignFail(result, foreign.Diagnostic)
+	}
 	built := pipeline.BuildUnit(workDir, stdRoot, rootArg, filtered)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	}
 	bindBuiltInTarget(&result.Unit, options)
 	return result
 }
@@ -95,12 +106,19 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 	if !sources.Ok {
 		return buildFail(result, BuildErrSource, "", sources.ErrorPath, -1, -1, -1, -1)
 	}
+	foreign := prepareForeignPrograms(result.Options, workDir, stdRoot, "", sources, fs)
+	if !foreign.Ok {
+		return buildForeignFail(result, foreign.Diagnostic)
+	}
 	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	}
 	bindBuiltInTarget(&result.Unit, result.Options)
 	return result
 }
@@ -127,6 +145,7 @@ func BuildPackageUnitCompact(packageArg string, target string, tags []string, wo
 // mode distinctions required by object and kernel-module browser builds.
 func BuildPackageUnitCompactMode(packageArg string, target string, tags []string, mode string, workDir string, stdRoot string, fs SourceFS) PackageUnitResult {
 	var result PackageUnitResult
+	options := Options{Package: packageArg, Target: target, Tags: tags, Mode: mode, Ok: true}
 	sources := CollectSourcesForTargetTagsWithModuleCache(workDir, stdRoot, packageArg, target, tags, "", fs)
 	if !sources.Ok {
 		result.Phase = BuildErrSource
@@ -135,6 +154,12 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		failed := BuildResult{Sources: sources, Error: BuildErrSource, ErrorPath: sources.ErrorPath,
 			ErrorAt: -1, ErrorPackage: -1, ErrorFile: -1, ErrorToken: -1}
 		result.Diagnostic = diagnosticForBuild(failed)
+		return result
+	}
+	foreign := prepareForeignPrograms(options, workDir, stdRoot, "", sources, fs)
+	if !foreign.Ok {
+		result.Phase = BuildErrForeign
+		result.Diagnostic = foreign.Diagnostic
 		return result
 	}
 	var built pipeline.Result
@@ -157,7 +182,12 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 		return result
 	}
 	result.Unit = built.Link.Data
-	bindBuiltInTarget(&result.Unit, Options{Target: target, Mode: mode})
+	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+		result.Phase = BuildErrForeign
+		result.Diagnostic = Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"}
+		return result
+	}
+	bindBuiltInTarget(&result.Unit, options)
 	result.Ok = true
 	return result
 }
@@ -249,6 +279,10 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	if len(options.Files) > 0 {
 		rootArg = sources.Root.Dir
 	}
+	foreign := prepareForeignPrograms(options, workDir, stdRoot, moduleCache, sources, fs)
+	if !foreign.Ok {
+		return buildForeignFail(result, foreign.Diagnostic)
+	}
 	var built pipeline.Result
 	if options.Mode == ModeObject && options.EmitUnit {
 		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
@@ -271,6 +305,9 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	}
 	bindBuiltInTarget(&result.Unit, options)
 	result.Sources = SourceResult{}
 	return result
@@ -332,6 +369,10 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 	if len(options.Files) > 0 {
 		rootArg = sources.Root.Dir
 	}
+	foreign := prepareForeignPrograms(options, workDir, stdRoot, moduleCache, sources, fs)
+	if !foreign.Ok {
+		return buildForeignFail(result, foreign.Diagnostic)
+	}
 	var built pipeline.Result
 	if compact && options.Mode == ModeObject {
 		// Object linking temporarily rewrites source-token line fields. Keep the
@@ -356,6 +397,9 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
 	}
 	result.Unit = built.Link.Data
+	if !bindForeignPrograms(&result.Unit, foreign.Programs) {
+		return buildForeignFail(result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+	}
 	bindBuiltInTarget(&result.Unit, options)
 	if compact {
 		result.Sources = SourceResult{}
@@ -377,6 +421,14 @@ func bindBuiltInTarget(data *[]byte, options Options) {
 	targetBinding.Definition = definition
 	targetBinding.DescriptorVersion = version
 	unit.BindUnboundTarget(data, targetBinding)
+}
+
+func bindForeignPrograms(data *[]byte, programs []unit.ForeignProgram) bool {
+	bound, ok := unit.BindForeignPrograms(*data, programs)
+	if ok {
+		*data = bound
+	}
+	return ok
 }
 
 func rememberEmbeddedBuild(result BuildResult) {
@@ -561,4 +613,9 @@ func buildFail(result BuildResult, err int, arg string, path string, at int, pkg
 	result.ErrorToken = tok
 	result.Diagnostic = diagnosticForBuild(result)
 	return result
+}
+
+func buildForeignFail(result BuildResult, diagnostic Diagnostic) BuildResult {
+	result.ForeignDiagnostic = diagnostic
+	return buildFail(result, BuildErrForeign, "", diagnostic.Path, diagnostic.Start, -1, -1, -1)
 }
