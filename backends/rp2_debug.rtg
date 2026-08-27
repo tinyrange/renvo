@@ -23,5 +23,8 @@ target rp2-debug/thumb {
 	executable = rp2_debug_elf
 	build_tags = [rp2, thumb, renvo_hotreload]
 	capabilities = [freestanding, executable, volatile_memory]
-	arena_default = 65536
+	// SRAM 0x20010000..0x20020000 is shared by globals, runtime state, and
+	// the arena. Leave half of that partition for non-arena data; text begins
+	// at 0x20020000.
+	arena_default = 32768
 }

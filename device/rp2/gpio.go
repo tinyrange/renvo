@@ -21,6 +21,17 @@ const (
 	gpioFunction    = uint32(5)
 )
 
+var gpioResetReleased bool
+
+func releaseGPIOReset() {
+	if gpioResetReleased {
+		return
+	}
+	releaseReset(rp2040IOBank0Reset|rp2040PadsBank0Reset,
+		rp2350IOBank0Reset|rp2350PadsBank0Reset)
+	gpioResetReleased = true
+}
+
 func isRP2350() bool { return (mmio.Load32(cpuid)>>4)&0xfff == 0xd21 }
 
 func ioBank0Base() uintptr {
@@ -53,6 +64,7 @@ func (p *Pin) pad() uintptr     { return padsBank0Base() + uintptr(p.number)*4 +
 
 // Configure selects the SIO function and applies direction and pull policy.
 func (p *Pin) Configure(config gpio.Config) error {
+	releaseGPIOReset()
 	ioBase := uintptr(0x40014000)
 	padsBase := uintptr(0x4001c000)
 	if isRP2350() {

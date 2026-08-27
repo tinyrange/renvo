@@ -246,18 +246,19 @@ go backend {
 		source RTGRegister, opcode int) {
 		preserved := source
 		if source.Code == address.Code || source.Code == scratch.Code || source.Code >= 8 {
-			// Address formation owns r3/r4. Preserve the value in one of r0-r2
-			// which is not itself an address input; at most base and index can
-			// exclude two of those three registers.
-			code := 0
-			for (value.Base.Valid && value.Base.Code == code) ||
-				(value.Index.Valid && value.Index.Code == code) {
-				code++
-			}
-			preserved = RTGRegister{Code:code, Valid:true}
+			// Address formation owns r3/r4. Keep the source in otherwise-unmapped
+			// r12 until the address is ready, then move it back to low r3 for the
+			// Thumb-1 store. Using r0-r2 here silently destroyed live RTG values;
+			// in particular, pushing an immediate while r0 held an arena base made
+			// the persistent heap end equal to twice the arena size.
+			preserved = RTGRegister{Code:12, Valid:true}
 			move(out, preserved, source)
 		}
 		base := memoryAddress(out, value)
+		if preserved.Code >= 8 {
+			move(out, scratch, preserved)
+			preserved = scratch
+		}
 		emit16(out, opcode|(base.Code<<3)|preserved.Code)
 	}
 

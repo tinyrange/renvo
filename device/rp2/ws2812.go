@@ -28,11 +28,6 @@ const (
 	pioPullThreshold24 = uint32(24 << 25)
 	pioSideSetCount1   = uint32(1 << 29)
 	pioSetCount1       = uint32(1 << 26)
-	rp2040Resets       = uintptr(0x4000c000)
-	rp2350Resets       = uintptr(0x40020000)
-	rp2040PIO0Reset    = uint32(1 << 10)
-	rp2350PIO0Reset    = uint32(1 << 11)
-
 	// RP2 programs currently retain the ROM's 12 MHz system clock. The PIO
 	// program consumes ten 8 MHz cycles per bit, producing the WS2812 800 kHz
 	// waveform with the standard T1/T2/T3 timing split.
@@ -40,13 +35,7 @@ const (
 )
 
 func releasePIO0Reset() {
-	base, mask := rp2040Resets, rp2040PIO0Reset
-	if isRP2350() {
-		base, mask = rp2350Resets, rp2350PIO0Reset
-	}
-	mmio.Store32(base+0x3000, mask)
-	for mmio.Load32(base+8)&mask == 0 {
-	}
+	releaseReset(rp2040PIO0Reset, rp2350PIO0Reset)
 }
 
 var ws2812Program = [4]uint32{

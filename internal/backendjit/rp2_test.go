@@ -114,4 +114,9 @@ func TestCompiledInBootstrapCompilesRP2DebugELF(t *testing.T) {
 	if text := binary.LittleEndian.Uint32(image[60:64]); text != 0x20020000 {
 		t.Fatalf("text address = %#x, want 0x20020000", text)
 	}
+	dataAddress := binary.LittleEndian.Uint32(image[92:96])
+	dataMemorySize := binary.LittleEndian.Uint32(image[104:108])
+	if end := dataAddress + dataMemorySize; end > 0x20020000 {
+		t.Fatalf("debug data ends at %#x, overlapping text at 0x20020000", end)
+	}
 }

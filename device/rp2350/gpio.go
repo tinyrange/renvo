@@ -25,6 +25,16 @@ const (
 	gpioFunction = uint32(5)
 )
 
+var gpioResetReleased bool
+
+func releaseGPIOReset() {
+	if gpioResetReleased {
+		return
+	}
+	releaseReset(ioBank0Reset | padsBank0Reset)
+	gpioResetReleased = true
+}
+
 // Pin identifies one RP2350 GPIO.
 type Pin struct{ number uint8 }
 
@@ -43,6 +53,7 @@ func (p *Pin) pad() uintptr {
 
 // Configure selects the SIO function and applies direction and pull policy.
 func (p *Pin) Configure(config gpio.Config) error {
+	releaseGPIOReset()
 	pad := mmio.Load32(p.pad()) &^ (padIsolation | padOutputOff | padInput | padPullUp | padPullDown)
 	pad |= padInput
 	if config.Pull == gpio.PullUp {
