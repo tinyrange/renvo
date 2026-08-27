@@ -498,8 +498,29 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		copy(t.out[at+len(declaration):], t.out[at:len(t.out)-len(declaration)])
 		copy(t.out[at:], declaration)
 	}
+	t.out = compactGeneratedCLineBreaks(t.out)
 	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
 }
+
+func compactGeneratedCLineBreaks(source []byte) []byte {
+	lines := 1
+	for i := 0; i < len(source); i++ {
+		if source[i] == '\n' {
+			lines++
+		}
+	}
+	if lines <= generatedCLineSafeLimit {
+		return source
+	}
+	for i := 1; i < len(source); i++ {
+		if source[i] == '\n' && source[i-1] == ';' {
+			source[i] = ' '
+		}
+	}
+	return source
+}
+
+const generatedCLineSafeLimit = 60000
 
 // rememberTranslationUnitFunctionDefinitions records ordinary function
 // definitions before lowering any body. C permits a call through a prototype
@@ -1882,6 +1903,9 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		}
 		if t.take(";") {
 			fieldInfo := t.typeInfo(fieldBase)
+			if fieldInfo.indirect {
+				indirect = true
+			}
 			if fieldInfo.kind != cTypeStruct && fieldInfo.kind != cTypeUnion {
 				return cTypeVoidID, false
 			}
@@ -1929,6 +1953,9 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 				return cTypeVoidID, false
 			}
 			fieldInfo := t.typeInfo(field.typeID)
+			if fieldInfo.indirect {
+				indirect = true
+			}
 			if fieldInfo.size == 0 {
 				indirect = true
 			}
@@ -2059,6 +2086,32 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 		size = maxSize
 	}
 	size = alignC(size, maxAlign)
+	if !union {
+		// Renvo's backend aggregate ABI reserves at least one machine word for
+		// each ordinary Go struct field. Use native fields only when that layout
+		// is also the C layout; otherwise the existing byte carrier and accessors
+		// preserve the C offsets exactly. This matters for adjacent narrow fields
+		// such as `uint32_t size, count` on a 64-bit target.
+		nativeOffset := 0
+		for i := 0; i < len(aggregateFields); i++ {
+			field := aggregateFields[i]
+			if !field.emit {
+				continue
+			}
+			nativeOffset = alignC(nativeOffset, t.pointerSize)
+			if field.offset != nativeOffset {
+				indirect = true
+			}
+			fieldSize := t.typeSize(field.typeID)
+			if fieldSize < t.pointerSize {
+				fieldSize = t.pointerSize
+			}
+			nativeOffset += alignC(fieldSize, t.pointerSize)
+		}
+		if size != alignC(nativeOffset, t.pointerSize) {
+			indirect = true
+		}
+	}
 	fieldStart := len(t.fields)
 	for i := 0; i < len(aggregateFields); i++ {
 		if aggregateFields[i].name != "" {
@@ -3773,6 +3826,7 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				attributes.used = true
 			case "__unused__", "unused", "__no_instrument_function__", "no_instrument_function",
 				"__always_inline__", "always_inline", "__warn_unused_result__", "warn_unused_result", "__pure__", "pure",
+				"__leaf__", "leaf", "__nothrow__", "nothrow",
 				"__noinline__", "noinline",
 				"__const__", "const",
 				"__format__", "format", "__noreturn__", "noreturn", "__malloc__", "malloc",
@@ -11420,13 +11474,17 @@ func (t *translator) switchStatementBody() {
 		t.fail(TranslateErrStatement)
 		return
 	}
-	switchType := t.integerPromotion(t.expressionType(t.tokens[t.pos:close]))
-	if switchValue, constant := t.constantExpression(t.tokens[t.pos:close]); constant {
+	expressionTokens := t.tokens[t.pos:close]
+	switchType := t.integerPromotion(t.expressionType(expressionTokens))
+	blockStart := close + 1
+	hasNestedCases := t.switchHasNestedCases(blockStart)
+	hasLeadingDeclarations := t.switchHasLeadingDeclarations(blockStart)
+	if switchValue, constant := t.constantExpression(expressionTokens); constant && !hasNestedCases && !hasLeadingDeclarations {
 		t.pos = close + 1
 		t.constantSwitchStatementBody(switchValue)
 		return
 	}
-	conditionalCases := t.switchUsesConditionalCases(close + 1)
+	conditionalCases := hasNestedCases || hasLeadingDeclarations || t.switchUsesConditionalCases(blockStart)
 	switchName := ""
 	if conditionalCases {
 		t.typeSerial++
@@ -11436,20 +11494,33 @@ func (t *translator) switchStatementBody() {
 		t.out = append(t.out, ' ')
 		t.emitType(switchType)
 		t.appendText("=")
-		t.convertedExpression(switchType, t.tokens[t.pos:close])
-		t.appendText(";switch ")
+		t.convertedExpression(switchType, expressionTokens)
+		t.out = append(t.out, ';')
 	} else {
 		t.appendText("switch ")
-		t.convertedExpression(switchType, t.tokens[t.pos:close])
+		t.convertedExpression(switchType, expressionTokens)
 	}
 	t.pos = close + 1
 	if !t.take("{") {
 		t.fail(TranslateErrStatement)
 		return
 	}
+	if hasLeadingDeclarations {
+		for t.ok && t.isTypeStart() {
+			t.statement()
+			if t.ok && !t.checkOnly {
+				t.out = append(t.out, '\n')
+			}
+		}
+	}
+	if conditionalCases {
+		t.appendText("switch ")
+	}
 	t.out = append(t.out, '{')
 	haveCase := false
 	terminal := false
+	caseBodyStarted := false
+	var entryValues []int
 	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
 		t.skipDirectives()
 		if t.currentIs("case") || t.currentIs("default") {
@@ -11465,6 +11536,14 @@ func (t *translator) switchStatementBody() {
 					return
 				}
 				caseTokens := t.tokens[t.pos:end]
+				caseValue, caseConstant := t.constantExpression(caseTokens)
+				if caseBodyStarted {
+					entryValues = entryValues[:0]
+				}
+				if caseConstant {
+					entryValues = append(entryValues, caseValue)
+				}
+				caseBodyStarted = false
 				if rangeAt := topLevelToken(t.src, caseTokens, "..."); rangeAt >= 0 {
 					first, firstOK := t.constantExpression(caseTokens[:rangeAt])
 					last, lastOK := t.constantExpression(caseTokens[rangeAt+1:])
@@ -11501,6 +11580,16 @@ func (t *translator) switchStatementBody() {
 					t.appendText("==")
 				}
 				t.convertedExpression(switchType, caseTokens)
+				if values, ok := t.directNestedCaseValues(end + 1); ok {
+					for i := 0; i < len(values); i++ {
+						t.out = append(t.out, ',')
+						if conditionalCases {
+							t.appendText(switchName)
+							t.appendText("==")
+						}
+						t.appendDecimalSigned(values[i])
+					}
+				}
 				t.out = append(t.out, ':')
 				t.pos = end + 1
 			} else {
@@ -11517,6 +11606,19 @@ func (t *translator) switchStatementBody() {
 			t.fail(TranslateErrUnsupported)
 			return
 		}
+		if t.currentIs("{") {
+			if nested, ok := t.directNestedCaseValues(t.pos); ok {
+				if !conditionalCases || len(entryValues) == 0 || !t.nestedSwitchCaseBlock(switchName, entryValues, nested) {
+					t.fail(TranslateErrUnsupported)
+					return
+				}
+				caseBodyStarted = true
+				if !t.checkOnly {
+					t.out = append(t.out, '\n')
+				}
+				continue
+			}
+		}
 		if t.currentIs("break") || t.currentIs("continue") || t.currentIs("return") || t.currentIs("goto") {
 			terminal = true
 		}
@@ -11527,6 +11629,7 @@ func (t *translator) switchStatementBody() {
 		} else {
 			t.statement()
 		}
+		caseBodyStarted = true
 		if t.ok && !t.checkOnly {
 			t.out = append(t.out, '\n')
 		}
@@ -11539,6 +11642,144 @@ func (t *translator) switchStatementBody() {
 	if conditionalCases {
 		t.out = append(t.out, '}')
 	}
+}
+
+func (t *translator) switchHasLeadingDeclarations(open int) bool {
+	if open < 0 || open+1 >= len(t.tokens) || !tokenIs(t.src, t.tokens[open], "{") {
+		return false
+	}
+	old := t.pos
+	t.pos = open + 1
+	result := t.isTypeStart()
+	t.pos = old
+	return result
+}
+
+func (t *translator) switchHasNestedCases(open int) bool {
+	if open < 0 || open >= len(t.tokens) || !tokenIs(t.src, t.tokens[open], "{") {
+		return false
+	}
+	close := matchingToken(t.src, t.tokens, open, "{", "}")
+	depth := 0
+	for i := open + 1; i < close; i++ {
+		if tokenIs(t.src, t.tokens[i], "{") {
+			depth++
+		} else if tokenIs(t.src, t.tokens[i], "}") {
+			depth--
+		} else if depth > 0 && (tokenIs(t.src, t.tokens[i], "case") || tokenIs(t.src, t.tokens[i], "default")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *translator) directNestedCaseValues(open int) ([]int, bool) {
+	if open < 0 || open >= len(t.tokens) || !tokenIs(t.src, t.tokens[open], "{") {
+		return nil, false
+	}
+	close := matchingToken(t.src, t.tokens, open, "{", "}")
+	if close < 0 {
+		return nil, false
+	}
+	depth := 0
+	var values []int
+	for i := open + 1; i < close; i++ {
+		if tokenIs(t.src, t.tokens[i], "{") {
+			depth++
+			continue
+		}
+		if tokenIs(t.src, t.tokens[i], "}") {
+			depth--
+			continue
+		}
+		if depth != 0 || !tokenIs(t.src, t.tokens[i], "case") {
+			continue
+		}
+		colon := topLevelToken(t.src, t.tokens[i+1:close], ":")
+		if colon < 0 {
+			return nil, false
+		}
+		value, ok := t.constantExpression(t.tokens[i+1 : i+1+colon])
+		if !ok {
+			return nil, false
+		}
+		values = append(values, value)
+		i += colon + 1
+	}
+	return values, len(values) > 0
+}
+
+func (t *translator) nestedSwitchCaseBlock(switchName string, entryValues []int, nestedValues []int) bool {
+	if !t.take("{") {
+		return false
+	}
+	objectMark := len(t.objects)
+	labelMark := len(t.localLabels)
+	scope := t.beginScope()
+	t.out = append(t.out, '{')
+	allowed := append([]int{}, entryValues...)
+	guardOpen := false
+	executable := false
+	for t.ok && t.kind() != tokenEOF && !t.currentIs("}") {
+		if t.currentIs("case") {
+			if guardOpen {
+				t.appendText("};")
+				guardOpen = false
+			}
+			t.pos++
+			end := t.findAtDepth(":")
+			if end < 0 || end == t.pos {
+				return false
+			}
+			value, ok := t.constantExpression(t.tokens[t.pos:end])
+			if !ok {
+				return false
+			}
+			allowed = append(allowed, value)
+			t.pos = end + 1
+			executable = true
+			continue
+		}
+		if !executable && t.isTypeStart() {
+			t.statement()
+			if t.ok && !t.checkOnly {
+				t.out = append(t.out, '\n')
+			}
+			continue
+		}
+		executable = true
+		if !guardOpen && len(allowed) < len(entryValues)+len(nestedValues) {
+			t.appendText("if ")
+			for i := 0; i < len(allowed); i++ {
+				if i > 0 {
+					t.appendText("||")
+				}
+				t.appendText(switchName)
+				t.appendText("==")
+				t.appendDecimalSigned(allowed[i])
+			}
+			t.out = append(t.out, '{')
+			guardOpen = true
+		}
+		t.statement()
+		if t.ok && !t.checkOnly {
+			t.out = append(t.out, '\n')
+		}
+	}
+	if guardOpen {
+		t.appendText("};")
+	}
+	if !t.take("}") {
+		t.objects = t.objects[:objectMark]
+		t.localLabels = t.localLabels[:labelMark]
+		t.endScope(scope)
+		return false
+	}
+	t.out = append(t.out, '}')
+	t.objects = t.objects[:objectMark]
+	t.localLabels = t.localLabels[:labelMark]
+	t.endScope(scope)
+	return t.ok
 }
 
 func (t *translator) constantSwitchStatementBody(value int) {
@@ -12287,6 +12528,17 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 			return
 		}
 		assignmentInfo, targetInfo := t.typeInfo(assignmentType), t.typeInfo(typeID)
+		if assignmentInfo.kind == cTypePointer && targetInfo.kind == cTypePointer {
+			t.out = append(t.out, '(')
+			t.emitType(typeID)
+			t.appendText(")(")
+			if t.emitAssignmentValue(initializerTokens) {
+				t.out = append(t.out, ')')
+				return
+			}
+			t.fail(TranslateErrUnsupported)
+			return
+		}
 		if assignmentType != cTypeVoidID &&
 			(assignmentInfo.kind == cTypeInt || assignmentInfo.kind == cTypeUint || assignmentInfo.kind == cTypeBool) &&
 			(targetInfo.kind == cTypeInt || targetInfo.kind == cTypeUint || targetInfo.kind == cTypeBool) {
@@ -12682,8 +12934,24 @@ func (t *translator) emitExpression(tokens []token) {
 		}
 		if close > 1 && close < len(tokens)-1 && binary < 0 && !tokenIs(t.src, tokens[close+1], "{") {
 			if typeID, ok := t.typeFromTokens(tokens[1:close]); ok {
+				operand := t.trimExpressionParens(tokens[close+1:])
+				if typeID != cTypeVoidID && t.simpleMutationAssignment(operand) >= 0 {
+					pointer := t.typeInfo(typeID).kind == cTypePointer
+					if pointer {
+						t.out = append(t.out, '(')
+					}
+					t.emitType(typeID)
+					if pointer {
+						t.out = append(t.out, ')')
+					}
+					t.out = append(t.out, '(')
+					if t.emitAssignmentValue(operand) {
+						t.out = append(t.out, ')')
+						return
+					}
+					return
+				}
 				if typeID == cTypeVoidID {
-					operand := tokens[close+1:]
 					operandType := t.decayedExpressionType(operand)
 					if operandType == cTypeVoidID {
 						t.emitExpression(operand)
@@ -12697,9 +12965,6 @@ func (t *translator) emitExpression(tokens []token) {
 				}
 				pointer := t.typeInfo(typeID).kind == cTypePointer
 				functionPointer := pointer && t.typeInfo(t.typeInfo(typeID).base).kind == cTypeFunction
-				if pointer && t.emitCastedDirectMember(typeID, tokens[close+1:]) {
-					return
-				}
 				if t.object && functionPointer {
 					// A C function pointer is one raw machine word in an ELF object.
 					// Emitting an inline Go func-type conversion is unnecessary and
@@ -13176,6 +13441,17 @@ func (t *translator) emitDirectMemberExpression(tokens []token) bool {
 	if t.emitTransparentUnionParameterMember(tokens) {
 		return true
 	}
+	if len(tokens) > 3 && tokenIs(t.src, tokens[0], "(") {
+		close := matchingToken(t.src, tokens, 0, "(", ")")
+		if close > 1 && close < len(tokens)-1 {
+			if _, cast := t.typeFromTokens(tokens[1:close]); cast {
+				// The postfix selector belongs to the cast operand. A selector on
+				// the cast result is parenthesized as `((T *)value)->field` and is
+				// handled after the outer grouping is emitted.
+				return false
+			}
+		}
+	}
 	if len(tokens) > 1 && (t.unaryArithmetic(tokens[0]) || tokenIs(t.src, tokens[0], "!") ||
 		tokenIs(t.src, tokens[0], "&") || tokenIs(t.src, tokens[0], "*")) {
 		// Postfix member access binds more tightly than every unary operator.
@@ -13359,48 +13635,6 @@ func (t *translator) emitDirectMemberPointer(tokens []token) bool {
 		t.appendText(t.ensureNestedFieldAccessor(aggregateType, field))
 	}
 	t.appendText("()")
-	return t.ok
-}
-
-func (t *translator) emitCastedDirectMember(typeID int, tokens []token) bool {
-	paren, bracket, member := 0, 0, -1
-	for i := 0; i+1 < len(tokens); i++ {
-		switch {
-		case tokenIs(t.src, tokens[i], "("):
-			paren++
-		case tokenIs(t.src, tokens[i], ")"):
-			paren--
-		case tokenIs(t.src, tokens[i], "["):
-			bracket++
-		case tokenIs(t.src, tokens[i], "]"):
-			bracket--
-		case paren == 0 && bracket == 0 && (tokenIs(t.src, tokens[i], "->") || tokenIs(t.src, tokens[i], ".")):
-			member = i
-			i = len(tokens)
-		}
-	}
-	if member <= 0 || member+2 != len(tokens) || tokenKind(tokens[member+1]) != tokenIdent {
-		return false
-	}
-	aggregateType := typeID
-	if tokenIs(t.src, tokens[member], "->") {
-		pointer := t.typeInfo(typeID)
-		if pointer.kind != cTypePointer {
-			return false
-		}
-		aggregateType = pointer.base
-	}
-	aggregate := t.typeInfo(aggregateType)
-	field, ok := t.lookupField(aggregateType, tokenText(t.src, tokens[member+1]))
-	if !ok || aggregate.kind != cTypeStruct || aggregate.indirect || !field.emit || field.bitWidth != 0 {
-		return false
-	}
-	t.appendText("((")
-	t.emitType(typeID)
-	t.appendText(")(")
-	t.emitExpression(tokens[:member])
-	t.appendText(")).")
-	t.appendText(field.goName)
 	return t.ok
 }
 
@@ -15392,7 +15626,7 @@ func (t *translator) emitOmittedConditionalExpression(tokens []token, question i
 }
 
 func (t *translator) commaOperator(tokens []token) int {
-	paren, bracket, brace := 0, 0, 0
+	paren, bracket, brace, conditional := 0, 0, 0, 0
 	for i := len(tokens) - 1; i >= 0; i-- {
 		switch {
 		case tokenIs(t.src, tokens[i], ")"):
@@ -15419,7 +15653,11 @@ func (t *translator) commaOperator(tokens []token) int {
 			brace++
 		case tokenIs(t.src, tokens[i], "{"):
 			brace--
-		case paren == 0 && bracket == 0 && brace == 0 && tokenIs(t.src, tokens[i], ","):
+		case paren == 0 && bracket == 0 && brace == 0 && tokenIs(t.src, tokens[i], ":"):
+			conditional++
+		case paren == 0 && bracket == 0 && brace == 0 && conditional > 0 && tokenIs(t.src, tokens[i], "?"):
+			conditional--
+		case paren == 0 && bracket == 0 && brace == 0 && conditional == 0 && tokenIs(t.src, tokens[i], ","):
 			return i
 		}
 	}
@@ -15747,14 +15985,21 @@ func (t *translator) emitBinaryExpression(tokens []token, at int) {
 		if nested {
 			t.out = append(t.out, ')')
 		}
-	} else if value, constant := t.constantExpression(right); constant && value < 0 {
-		// Keep a folded negative right operand from merging with the binary
-		// operator into a different Go token such as <- or --.
-		t.out = append(t.out, '(')
-		t.convertedExpression(typeID, right)
-		t.out = append(t.out, ')')
 	} else {
+		outer := t.out
+		t.out = nil
 		t.convertedExpression(typeID, right)
+		emitted := t.out
+		t.out = outer
+		if len(emitted) > 0 && emitted[0] == '-' {
+			// Keep a folded negative right operand from merging with the binary
+			// operator into a different Go token such as <- or --.
+			t.out = append(t.out, '(')
+			t.out = append(t.out, emitted...)
+			t.out = append(t.out, ')')
+		} else {
+			t.out = append(t.out, emitted...)
+		}
 	}
 }
 
@@ -17818,7 +18063,9 @@ func (t *translator) memberAccess(tokens []token, start int) (cMemberAccess, boo
 		if aggregate.qualifiers&cQualifierConst != 0 {
 			fieldType = t.qualifiedType(fieldType, cQualifierConst)
 		}
-		if arrow && len(address) == 0 && !cSimpleGoIdentifier(expr) && !t.checkOnly {
+		fieldInfo := t.typeInfo(fieldType)
+		functionPointerField := fieldInfo.kind == cTypePointer && t.typeInfo(fieldInfo.base).kind == cTypeFunction
+		if arrow && len(address) == 0 && !cSimpleGoIdentifier(expr) && !functionPointerField && !t.checkOnly {
 			address = append([]byte{}, expr...)
 		}
 		receiver := append([]byte{}, result.expr...)

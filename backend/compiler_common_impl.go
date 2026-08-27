@@ -11245,6 +11245,9 @@ func renvoLinearInitGlobals(g *renvoLinearGen) bool {
 	}
 	for i := 0; i < len(meta.globals); i++ {
 		if meta.globals[i].kind == renvoTokVar && !renvoLinearInitGlobal(g, i) {
+			renvoPrintErr("renvo: failed global initializer: ")
+			write(2, g.prog.src[meta.globals[i].nameStart:meta.globals[i].nameEnd], -1)
+			renvoPrintErr("\n")
 			return false
 		}
 	}
@@ -28215,6 +28218,13 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	if e.kind == renvoExprCall && e.argCount == 1 {
 		callee := &ep.exprs[e.left]
+		arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+		conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
+		if conversionType != 0 &&
+			renvoResolveType(g.meta, conversionType).kind == renvoTypePointer &&
+			ep.exprs[arg].kind == renvoExprString {
+			return renvoEmitStringValueRegs(g, ep, arg)
+		}
 		unsafePointer := callee.kind == renvoExprIdent &&
 			renvoBytesEqualText(g.prog.src, callee.nameStart, callee.nameEnd, "Pointer") &&
 			renvoFuncInfoFromCall(g, ep, e.left) < 0
@@ -28223,7 +28233,7 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				renvoExprIsIdentText(g.prog, ep, callee.left, "unsafe")
 		}
 		if unsafePointer {
-			return renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+			return renvoEmitIntExpr(g, ep, arg)
 		}
 	}
 	if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 {

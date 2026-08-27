@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0093f4e9e3b3eddaa5b514d0f26b34595fee00746f97be9fdd1bb7b60657cd59"
+const CompilerSourceDigest = "2b0b8bd9e961e01493e605ad060ad6deaf8131a4c472bbcc2649908355a8c1bb"
 
 // source: backend/compiler_common_impl.go
 
@@ -11252,6 +11252,9 @@ renvoLinearAddReplGlobal(g, i, off, size)
 }
 for i := 0; i < len(meta.globals); i++ {
 if meta.globals[i].kind == renvoTokVar && !renvoLinearInitGlobal(g, i) {
+renvoPrintErr("renvo: failed global initializer: ")
+write(2, g.prog.src[meta.globals[i].nameStart:meta.globals[i].nameEnd], -1)
+renvoPrintErr("\n")
 return false
 }
 }
@@ -28222,6 +28225,13 @@ return direct != 0
 }
 if e.kind == renvoExprCall && e.argCount == 1 {
 callee := &ep.exprs[e.left]
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
+if conversionType != 0 &&
+renvoResolveType(g.meta, conversionType).kind == renvoTypePointer &&
+ep.exprs[arg].kind == renvoExprString {
+return renvoEmitStringValueRegs(g, ep, arg)
+}
 unsafePointer := callee.kind == renvoExprIdent &&
 renvoBytesEqualText(g.prog.src, callee.nameStart, callee.nameEnd, "Pointer") &&
 renvoFuncInfoFromCall(g, ep, e.left) < 0
@@ -28230,7 +28240,7 @@ unsafePointer = renvoBytesEqualText(g.prog.src, callee.nameStart, callee.nameEnd
 renvoExprIsIdentText(g.prog, ep, callee.left, "unsafe")
 }
 if unsafePointer {
-return renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+return renvoEmitIntExpr(g, ep, arg)
 }
 }
 if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 {

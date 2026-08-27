@@ -172,8 +172,7 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 				}
 			}
 		}
-		if close < 0 || close+1 >= len(scanned.tokens) ||
-			!tokenIs(src, scanned.tokens[close+1], ";") {
+		if close < 0 || !headerDeclarationEndsAfterDecorations(src, scanned.tokens, close+1) {
 			continue
 		}
 		for j := start; j <= close; j++ {
@@ -186,6 +185,26 @@ func headerDeclarations(src []byte, wanted []string, emitted []string) ([]byte, 
 		names = append(names, name)
 	}
 	return out, names, true
+}
+
+func headerDeclarationEndsAfterDecorations(src []byte, tokens []token, start int) bool {
+	paren := 0
+	for i := start; i < len(tokens); i++ {
+		switch {
+		case tokenIs(src, tokens[i], "("):
+			paren++
+		case tokenIs(src, tokens[i], ")"):
+			if paren == 0 {
+				return false
+			}
+			paren--
+		case paren == 0 && tokenIs(src, tokens[i], ";"):
+			return true
+		case paren == 0 && (tokenIs(src, tokens[i], "{") || tokenIs(src, tokens[i], "}") || tokenIs(src, tokens[i], ",")):
+			return false
+		}
+	}
+	return false
 }
 
 func headerDeclarationDecoration(src []byte, tok token) bool {

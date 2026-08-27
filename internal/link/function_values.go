@@ -16,6 +16,7 @@ type functionValueSignature struct {
 	name        string
 	params      string
 	paramNames  []string
+	paramTypes  []string
 	result      string
 	resultTypes []string
 	zeroType    string
@@ -81,6 +82,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	if len(signatures) == 0 {
 		return true
 	}
+	edits = appendFunctionValueTypeEdits(program, signatures, edits)
 	edits = appendFunctionValuePackageEdits(program, edits)
 	for i := 0; i < len(program.Tokens); i++ {
 		text := functionValueTokenText(program, i)
@@ -89,8 +91,12 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 			if !ok {
 				return false
 			}
+		} else if text == ":" {
+			edits = lowerFunctionValueCompositeField(program, i, signatures, fields, edits)
 		}
 	}
+	edits = lowerFunctionValueArrayComposites(program, signatures, edits)
+	edits = lowerFunctionValueReturns(program, signatures, edits)
 	edits = lowerFunctionValueCallArguments(program, signatures, edits)
 	var closures []functionValueClosure
 	signatures, closures, edits, ok = lowerFunctionValueLiterals(program, signatures, fields, closures, edits)
@@ -100,7 +106,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	for i := 0; i < len(program.Tokens); i++ {
 		text := functionValueTokenText(program, i)
 		if text == "==" || text == "!=" {
-			edits = lowerFunctionValueNilComparison(program, i, fields, edits)
+			edits = lowerFunctionValueComparison(program, i, signatures, fields, edits)
 		}
 	}
 	for i := 0; i < len(program.Tokens); i++ {
@@ -329,17 +335,23 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 				continue
 			}
 			if functionValueTokenEquals(program, typeTok, "func") {
-				name := "__renvo_function_" + functionValueDecimal(len(signatures))
-				sig, end, ok := parseFunctionValueSignature(program, typeTok, name)
+				sig, end, ok := parseFunctionValueSignature(program, typeTok, "")
 				if !ok {
 					return signatures, fields, edits, false
 				}
-				sig.declFuncTok = -1
-				sig.declEndTok = -1
-				sigIndex = len(signatures)
-				signatures = append(signatures, sig)
+				// Anonymous function fields with the same signature are assignment-
+				// compatible. Share one tagged representation so accessors returning
+				// the anonymous type dispatch every implementation of that signature.
+				sigIndex = functionValueSignatureByShape(signatures, sig)
+				if sigIndex < 0 || signatures[sigIndex].declFuncTok >= 0 {
+					sig.name = "__renvo_function_" + functionValueDecimal(len(signatures))
+					sig.declFuncTok = -1
+					sig.declEndTok = -1
+					sigIndex = len(signatures)
+					signatures = append(signatures, sig)
+				}
 				fields = append(fields, functionValueField{owner: owner, name: fieldName, sig: sigIndex})
-				edits = append(edits, functionValueTokenRangeEdit(program, typeTok, end, name))
+				edits = append(edits, functionValueTokenRangeEdit(program, typeTok, end, signatures[sigIndex].name))
 				j = end
 				continue
 			}
@@ -369,6 +381,30 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 			}
 		}
 	}
+	// C translation can introduce a conversion to a function-pointer type, or
+	// an offset accessor returning *func, whose signature does not occur in a
+	// named type or direct struct field. Discover those narrow forms without
+	// treating ordinary function declarations or literals as function values.
+	for funcTok := 0; funcTok+1 < len(program.Tokens); funcTok++ {
+		if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") {
+			continue
+		}
+		candidate, end, valid := parseFunctionValueSignature(program, funcTok, "")
+		conversion := functionValueTokenEquals(program, funcTok-1, "(") &&
+			functionValueTokenEquals(program, end, ")") && functionValueTokenEquals(program, end+1, "(")
+		accessorResult := functionValueTokenEquals(program, funcTok-1, "*") && functionValueTokenInDeclaredSignature(program, funcTok)
+		if !valid || !conversion && !accessorResult {
+			continue
+		}
+		if functionValueSignatureByShape(signatures, candidate) >= 0 {
+			continue
+		}
+		candidate.name = "__renvo_function_" + functionValueDecimal(len(signatures))
+		candidate.declFuncTok = -1
+		candidate.declEndTok = -1
+		signatures = append(signatures, candidate)
+		funcTok = end - 1
+	}
 	return signatures, fields, edits, true
 }
 
@@ -383,12 +419,13 @@ func parseFunctionValueSignature(program *unit.Program, funcTok int, name string
 	if close < 0 {
 		return sig, funcTok, false
 	}
-	params, names, ok := normalizedFunctionValueParams(program, funcTok+2, close)
+	params, names, types, ok := normalizedFunctionValueParams(program, funcTok+2, close)
 	if !ok {
 		return sig, funcTok, false
 	}
 	sig.params = params
 	sig.paramNames = names
+	sig.paramTypes = types
 	end := close + 1
 	if functionValueTokenEquals(program, end, "(") {
 		resultClose := functionValueFindMatchingParen(program, end)
@@ -526,7 +563,7 @@ func functionValueSingleResultType(program *unit.Program, start int, end int) st
 	return functionValueTokensText(program, typeStart, end)
 }
 
-func normalizedFunctionValueParams(program *unit.Program, start int, end int) (string, []string, bool) {
+func normalizedFunctionValueParams(program *unit.Program, start int, end int) (string, []string, []string, bool) {
 	var partStarts []int
 	var partEnds []int
 	partStart := start
@@ -551,6 +588,7 @@ func normalizedFunctionValueParams(program *unit.Program, start int, end int) (s
 	}
 	var out []byte
 	var names []string
+	var types []string
 	for i := 0; i < len(partStarts); i++ {
 		if len(out) > 0 {
 			out = appendFunctionValueString(out, ", ")
@@ -570,8 +608,159 @@ func normalizedFunctionValueParams(program *unit.Program, start int, end int) (s
 		}
 		out = appendFunctionValueString(out, name+" "+typ)
 		names = append(names, name)
+		types = append(types, typ)
 	}
-	return string(out), names, depth == 0
+	return string(out), names, types, depth == 0
+}
+
+func appendFunctionValueTypeEdits(program *unit.Program, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
+	for funcTok := 0; funcTok+1 < len(program.Tokens); funcTok++ {
+		if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") {
+			continue
+		}
+		declaredType := false
+		for i := 0; i < len(signatures); i++ {
+			if signatures[i].declFuncTok == funcTok {
+				declaredType = true
+				break
+			}
+		}
+		if declaredType {
+			continue
+		}
+		candidate, end, ok := parseFunctionValueSignature(program, funcTok, "")
+		arrayElementType := funcTok > 0 && functionValueTokenEquals(program, funcTok-1, "]")
+		declaredSignature := functionValueTokenInDeclaredSignature(program, funcTok)
+		if !ok || functionValueTokenEquals(program, end, "{") && !arrayElementType && !declaredSignature {
+			continue
+		}
+		sigIndex := functionValueSignatureByShape(signatures, candidate)
+		if sigIndex < 0 {
+			continue
+		}
+		conversionStart := funcTok
+		conversionEnd := end
+		if funcTok > 0 && functionValueTokenEquals(program, funcTok-1, "(") &&
+			functionValueTokenEquals(program, end, ")") &&
+			functionValueFindMatchingParen(program, funcTok-1) == end {
+			conversionStart = funcTok - 1
+			conversionEnd = end + 1
+		}
+		if functionValueTokenEquals(program, conversionEnd, "(") {
+			close := functionValueFindMatchingParen(program, conversionEnd)
+			if close > conversionEnd {
+				argument := functionValueTokensText(program, conversionEnd+1, close)
+				replacement := signatures[sigIndex].name + "{kind: int(uintptr(" + argument + "))}"
+				edits = append(edits, functionValueTokenRangeEdit(program, conversionStart, close+1, replacement))
+				funcTok = close
+				continue
+			}
+		}
+		edit := functionValueTokenRangeEdit(program, funcTok, end, signatures[sigIndex].name)
+		duplicate := false
+		for i := 0; i < len(edits); i++ {
+			if edits[i].start == edit.start && edits[i].end == edit.end {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			edits = append(edits, edit)
+		}
+		funcTok = end - 1
+	}
+	return edits
+}
+
+func functionValueTokenInDeclaredSignature(program *unit.Program, token int) bool {
+	for i := 0; i < len(program.Funcs); i++ {
+		fn := program.Funcs[i]
+		if fn.StartTok < token && token < fn.BodyStart {
+			return true
+		}
+	}
+	return false
+}
+
+func lowerFunctionValueArrayComposites(program *unit.Program, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
+	for open := 0; open < len(program.Tokens); open++ {
+		if !functionValueTokenEquals(program, open, "{") {
+			continue
+		}
+		funcTok := -1
+		for candidate := open - 1; candidate >= 0; candidate-- {
+			if functionValueTokenEquals(program, candidate, "{") || functionValueTokenEquals(program, candidate, ";") {
+				break
+			}
+			if functionValueTokenEquals(program, candidate, "func") {
+				funcTok = candidate
+				break
+			}
+		}
+		if funcTok < 1 || !functionValueTokenEquals(program, funcTok-1, "]") {
+			continue
+		}
+		candidate, end, ok := parseFunctionValueSignature(program, funcTok, "")
+		if !ok || end != open {
+			continue
+		}
+		sigIndex := functionValueSignatureByShape(signatures, candidate)
+		if sigIndex < 0 {
+			continue
+		}
+		close := functionValueFindMatchingBrace(program, open)
+		if close < 0 {
+			continue
+		}
+		starts, ends := functionValueCommaParts(program, open+1, close)
+		for i := 0; i < len(starts); i++ {
+			if ends[i] == starts[i]+1 {
+				edits = lowerFunctionValueAt(program, starts[i], starts[i], sigIndex, signatures, edits)
+			}
+		}
+		open = close
+	}
+	return edits
+}
+
+func lowerFunctionValueReturns(program *unit.Program, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
+	for token := 0; token+1 < len(program.Tokens); token++ {
+		if !functionValueTokenEquals(program, token, "return") {
+			continue
+		}
+		fnIndex := functionValueEnclosingFunc(program, token)
+		if fnIndex < 0 {
+			continue
+		}
+		resultType := functionValueDeclaredResultType(program, program.Funcs[fnIndex])
+		sigIndex := functionValueSignatureByName(signatures, functionValueBareType(resultType))
+		if sigIndex < 0 {
+			sigIndex = functionValueSignatureByTypeText(signatures, resultType)
+		}
+		if sigIndex < 0 {
+			continue
+		}
+		rhs := token + 1
+		rhsEnd := rhs + 1
+		if functionValueTokenEquals(program, rhs, "(") {
+			close := functionValueFindMatchingParen(program, rhs)
+			if close > rhs {
+				rhsEnd = close + 1
+			}
+		} else if functionValueTokenEquals(program, rhs+1, "(") {
+			close := functionValueFindMatchingParen(program, rhs+1)
+			if close > rhs {
+				rhsEnd = close + 1
+			}
+		}
+		if ordinaryBuiltinTypeName(functionValueBareType(ordinaryBuiltinExprType(program, token, rhs, rhsEnd))) {
+			replacement := signatures[sigIndex].name + "{kind: int(" + functionValueTokensText(program, rhs, rhsEnd) + ")}"
+			edits = append(edits, functionValueTokenRangeEdit(program, rhs, rhsEnd, replacement))
+			continue
+		}
+		edits = lowerFunctionValueAt(program, token, rhs, sigIndex, signatures, edits)
+	}
+	return edits
 }
 
 func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) ([]functionValueEdit, bool) {
@@ -585,17 +774,53 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		leftType := functionValueEnclosingLocalType(program, op, leftName)
 		sigIndex = functionValueSignatureByName(signatures, functionValueBareType(leftType))
 	}
+	if sigIndex < 0 && op > 0 {
+		// Indirect C structs expose function-pointer fields through an accessor,
+		// so the assignment target is an expression such as (*p.callback()).
+		// Infer its result type just as the call lowering pass does.
+		leftStart := functionValuePrimaryStart(program, op-1)
+		if functionValueTokenEquals(program, op-1, ")") {
+			leftStart = functionValueFindMatchingBackward(program, op-1, "(", ")")
+		}
+		if leftStart >= 0 {
+			leftType := ordinaryBuiltinExprType(program, op, leftStart, op)
+			bareType := functionValueBareType(leftType)
+			sigIndex = functionValueSignatureByName(signatures, bareType)
+			if sigIndex < 0 {
+				sigIndex = functionValueSignatureByTypeText(signatures, bareType)
+			}
+		}
+	}
 	if sigIndex < 0 || op+1 >= len(program.Tokens) {
 		return edits, true
 	}
-	rhs := op + 1
+	return lowerFunctionValueAt(program, op, op+1, sigIndex, signatures, edits), true
+}
+
+func lowerFunctionValueCompositeField(program *unit.Program, colon int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
+	if colon < 1 || colon+1 >= len(program.Tokens) || program.Tokens[colon-1].KindLine&255 != unit.TokenIdent {
+		return edits
+	}
+	fieldName := functionValueTokenText(program, colon-1)
+	fieldIndex := functionValueFieldByOwnerAndName(fields, functionValueCompositeOwner(program, colon-1), fieldName)
+	if fieldIndex < 0 {
+		fieldIndex = functionValueUniqueFieldByName(fields, fieldName)
+	}
+	if fieldIndex < 0 {
+		return edits
+	}
+	return lowerFunctionValueAt(program, colon, colon+1, fields[fieldIndex].sig, signatures, edits)
+}
+
+func lowerFunctionValueAt(program *unit.Program, at int, rhs int, sigIndex int, signatures []functionValueSignature, edits []functionValueEdit) []functionValueEdit {
 	if functionValueTokenEquals(program, rhs, "nil") {
 		edits = append(edits, functionValueTokenEdit(program, rhs, signatures[sigIndex].name+"{}"))
-		return edits, true
+		return edits
 	}
 	if program.Tokens[rhs].KindLine&255 == unit.TokenIdent {
 		name := functionValueTokenText(program, rhs)
-		if functionValueEnclosingLocalType(program, op, name) == "" && functionValueDeclaredDirectFunction(program, name) {
+		if !functionValueTokenEquals(program, rhs+1, "(") &&
+			functionValueEnclosingLocalType(program, at, name) == "" && functionValueDeclaredDirectFunction(program, name) {
 			implIndex := functionValueImplIndex(signatures[sigIndex], "", "", name)
 			if implIndex < 0 {
 				implIndex = len(signatures[sigIndex].impls)
@@ -603,10 +828,10 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 			}
 			replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + "}"
 			edits = append(edits, functionValueTokenEdit(program, rhs, replacement))
-			return edits, true
+			return edits
 		}
 	}
-	return lowerFunctionValueBoundMethod(program, op, rhs, sigIndex, signatures, edits), true
+	return lowerFunctionValueBoundMethod(program, at, rhs, sigIndex, signatures, edits)
 }
 
 func functionValueDeclaredDirectFunction(program *unit.Program, name string) bool {
@@ -679,14 +904,27 @@ func lowerFunctionValueCallArguments(program *unit.Program, signatures []functio
 			continue
 		}
 		for i := 0; i < len(argStarts); i++ {
-			if argEnds[i]-argStarts[i] != 3 {
-				continue
-			}
 			sigIndex := functionValueSignatureByName(signatures, functionValueBareType(paramTypes[i]))
+			if sigIndex < 0 {
+				sigIndex = functionValueSignatureByTypeText(signatures, paramTypes[i])
+			}
 			if sigIndex < 0 {
 				continue
 			}
-			edits = lowerFunctionValueBoundMethod(program, open, argStarts[i], sigIndex, signatures, edits)
+			valueStart := argStarts[i]
+			valueEnd := argEnds[i]
+			for valueEnd-valueStart >= 2 && functionValueTokenEquals(program, valueStart, "(") &&
+				functionValueFindMatchingParen(program, valueStart) == valueEnd-1 {
+				valueStart++
+				valueEnd--
+			}
+			argType := functionValueBareType(ordinaryBuiltinExprType(program, open, valueStart, valueEnd))
+			if ordinaryBuiltinTypeName(argType) {
+				replacement := signatures[sigIndex].name + "{kind: int(" + functionValueTokensText(program, valueStart, valueEnd) + ")}"
+				edits = append(edits, functionValueTokenRangeEdit(program, valueStart, valueEnd, replacement))
+				continue
+			}
+			edits = lowerFunctionValueAt(program, open, valueStart, sigIndex, signatures, edits)
 		}
 	}
 	return edits
@@ -789,31 +1027,114 @@ func functionValueFunctionParamTypes(program *unit.Program, fn unit.Func) []stri
 	return types
 }
 
-func lowerFunctionValueNilComparison(program *unit.Program, op int, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
-	if op+1 >= len(program.Tokens) || !functionValueTokenEquals(program, op+1, "nil") {
+func lowerFunctionValueComparison(program *unit.Program, op int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
+	if op+1 >= len(program.Tokens) {
 		return edits
 	}
 	fieldTok := functionValueSelectorFieldBefore(program, op)
-	if functionValueFieldForSelector(program, fieldTok, fields) < 0 {
+	fieldIndex := functionValueFieldForSelector(program, fieldTok, fields)
+	lhsTok := fieldTok
+	sigIndex := -1
+	lhsExpression := false
+	if fieldIndex >= 0 {
+		sigIndex = fields[fieldIndex].sig
+	} else {
+		lhsTok = functionValuePrimaryTokenBefore(program, op)
+		if lhsTok >= 0 && program.Tokens[lhsTok].KindLine&255 == unit.TokenIdent {
+			typ := functionValueEnclosingLocalType(program, op, functionValueTokenText(program, lhsTok))
+			sigIndex = functionValueSignatureByName(signatures, functionValueBareType(typ))
+			if sigIndex < 0 {
+				sigIndex = functionValueSignatureByTypeText(signatures, typ)
+			}
+		} else if lhsTok >= 0 {
+			lhsStart := functionValuePrimaryStart(program, lhsTok)
+			typ := ordinaryBuiltinExprType(program, op, lhsStart, op)
+			sigIndex = functionValueSignatureByName(signatures, functionValueBareType(typ))
+			if sigIndex < 0 {
+				sigIndex = functionValueSignatureByTypeText(signatures, typ)
+			}
+		}
+	}
+	if sigIndex < 0 && functionValueTokenEquals(program, op-1, ")") {
+		lhsStart := functionValueFindMatchingBackward(program, op-1, "(", ")")
+		if lhsStart >= 0 {
+			typ := ordinaryBuiltinExprType(program, op, lhsStart, op)
+			bareType := functionValueBareType(typ)
+			sigIndex = functionValueSignatureByName(signatures, bareType)
+			if sigIndex < 0 {
+				sigIndex = functionValueSignatureByTypeText(signatures, bareType)
+			}
+			lhsExpression = sigIndex >= 0
+		}
+	}
+	if sigIndex < 0 {
 		return edits
 	}
-	end := program.Tokens[fieldTok].Start + program.Tokens[fieldTok].Size
+	rhsStart := op + 1
+	rhsEnd := rhsStart + 1
+	for functionValueTokenEquals(program, rhsStart, "(") {
+		close := functionValueFindMatchingParen(program, rhsStart)
+		if close < 0 {
+			break
+		}
+		rhsStart++
+		rhsEnd = close
+	}
+	replacement := ""
+	replaceRHS := false
+	if rhsEnd == rhsStart+1 && functionValueTokenEquals(program, rhsStart, "nil") {
+		replacement = "0"
+		replaceRHS = true
+	} else if rhsEnd == rhsStart+1 && program.Tokens[rhsStart].KindLine&255 == unit.TokenIdent {
+		name := functionValueTokenText(program, rhsStart)
+		if !functionValueDeclaredDirectFunction(program, name) {
+			return edits
+		}
+		implIndex := functionValueImplIndex(signatures[sigIndex], "", "", name)
+		if implIndex < 0 {
+			implIndex = len(signatures[sigIndex].impls)
+			signatures[sigIndex].impls = append(signatures[sigIndex].impls, functionValueImpl{function: name})
+		}
+		replacement = functionValueDecimal(implIndex + 1)
+		replaceRHS = true
+	} else if ordinaryBuiltinTypeName(functionValueBareType(ordinaryBuiltinExprType(program, op, rhsStart, rhsEnd))) {
+		// C function-pointer sentinels such as (void(*)(void*))-1 retain
+		// their scalar tag so comparisons remain word-for-word equivalent.
+	} else {
+		return edits
+	}
+	end := program.Tokens[lhsTok].Start + program.Tokens[lhsTok].Size
+	if lhsExpression {
+		end = program.Tokens[op].Start
+	}
 	edits = append(edits, functionValueEdit{start: end, end: end, text: ".kind"})
-	edits = append(edits, functionValueTokenEdit(program, op+1, "0"))
+	if replaceRHS {
+		edits = append(edits, functionValueTokenEdit(program, rhsStart, replacement))
+	}
 	return edits
 }
 
 func lowerFunctionValueCall(program *unit.Program, open int, signatures []functionValueSignature, fields []functionValueField, edits []functionValueEdit) []functionValueEdit {
 	fieldTok := open - 1
-	if fieldTok < 2 || !functionValueTokenEquals(program, fieldTok-1, ".") {
-		return edits
+	fieldIndex := -1
+	if fieldTok >= 2 && functionValueTokenEquals(program, fieldTok-1, ".") {
+		fieldIndex = functionValueFieldForSelector(program, fieldTok, fields)
 	}
-	fieldIndex := functionValueFieldForSelector(program, fieldTok, fields)
-	if fieldIndex < 0 {
-		return edits
-	}
-	calleeStart := functionValueSelectorStart(program, fieldTok)
+	calleeStart := functionValuePrimaryStart(program, fieldTok)
 	if calleeStart < 0 {
+		return edits
+	}
+	sigIndex := -1
+	if fieldIndex >= 0 {
+		sigIndex = fields[fieldIndex].sig
+	} else {
+		calleeType := ordinaryBuiltinExprType(program, open, calleeStart, open)
+		sigIndex = functionValueSignatureByName(signatures, functionValueBareType(calleeType))
+		if sigIndex < 0 {
+			sigIndex = functionValueSignatureByTypeText(signatures, calleeType)
+		}
+	}
+	if sigIndex < 0 {
 		return edits
 	}
 	close := functionValueFindMatchingParen(program, open)
@@ -821,7 +1142,7 @@ func lowerFunctionValueCall(program *unit.Program, open int, signatures []functi
 		return edits
 	}
 	start := program.Tokens[calleeStart].Start
-	edits = append(edits, functionValueEdit{start: start, end: start, text: "__renvo_call_" + functionValueDecimal(fields[fieldIndex].sig) + "(&"})
+	edits = append(edits, functionValueEdit{start: start, end: start, text: "__renvo_call_" + functionValueDecimal(sigIndex) + "(&"})
 	if open+1 == close {
 		edits = append(edits, functionValueTokenEdit(program, open, ""))
 	} else {
@@ -1254,25 +1575,29 @@ func functionValueDeclaredFunctionResultType(program *unit.Program, name string)
 		if fn.ReceiverStart < fn.ReceiverEnd || functionValueTokenText(program, fn.NameTok) != name {
 			continue
 		}
-		open := fn.NameTok + 1
-		if !functionValueTokenEquals(program, open, "(") {
-			continue
-		}
-		close := functionValueFindMatchingParen(program, open)
-		resultStart := close + 1
-		if resultStart >= fn.BodyStart {
-			return ""
-		}
-		if functionValueTokenEquals(program, resultStart, "(") {
-			resultEnd := functionValueFindMatchingParen(program, resultStart)
-			if resultEnd <= resultStart {
-				return ""
-			}
-			return functionValueTokensText(program, resultStart+1, resultEnd)
-		}
-		return functionValueTokensText(program, resultStart, fn.BodyStart)
+		return functionValueDeclaredResultType(program, fn)
 	}
 	return ""
+}
+
+func functionValueDeclaredResultType(program *unit.Program, fn unit.Func) string {
+	open := fn.NameTok + 1
+	if !functionValueTokenEquals(program, open, "(") {
+		return ""
+	}
+	close := functionValueFindMatchingParen(program, open)
+	resultStart := close + 1
+	if resultStart >= fn.BodyStart {
+		return ""
+	}
+	if functionValueTokenEquals(program, resultStart, "(") {
+		resultEnd := functionValueFindMatchingParen(program, resultStart)
+		if resultEnd <= resultStart {
+			return ""
+		}
+		return functionValueTokensText(program, resultStart+1, resultEnd)
+	}
+	return functionValueTokensText(program, resultStart, fn.BodyStart)
 }
 
 func functionValueFunctionParamType(program *unit.Program, fn unit.Func, name string) string {
@@ -1281,7 +1606,7 @@ func functionValueFunctionParamType(program *unit.Program, fn unit.Func, name st
 		return ""
 	}
 	close := functionValueFindMatchingParen(program, open)
-	_, names, ok := normalizedFunctionValueParams(program, open+1, close)
+	_, names, _, ok := normalizedFunctionValueParams(program, open+1, close)
 	if !ok {
 		return ""
 	}
@@ -1639,10 +1964,27 @@ func functionValueReceiverType(program *unit.Program, fn unit.Func) string {
 }
 
 func functionValueSelectorFieldBefore(program *unit.Program, before int) int {
-	if before < 3 || !functionValueTokenEquals(program, before-2, ".") {
+	end := functionValuePrimaryTokenBefore(program, before)
+	if end < 2 || !functionValueTokenEquals(program, end-1, ".") {
 		return -1
 	}
-	return before - 1
+	return end
+}
+
+func functionValuePrimaryTokenBefore(program *unit.Program, before int) int {
+	end := before - 1
+	for end >= 0 && functionValueTokenEquals(program, end, ")") {
+		open := functionValueFindMatchingBackward(program, end, "(", ")")
+		if open < 0 {
+			return -1
+		}
+		if open > 0 && (program.Tokens[open-1].KindLine&255 == unit.TokenIdent ||
+			functionValueTokenEquals(program, open-1, "]") || functionValueTokenEquals(program, open-1, ")")) {
+			return end
+		}
+		end--
+	}
+	return end
 }
 
 func functionValueSelectorStart(program *unit.Program, end int) int {
@@ -1765,12 +2107,18 @@ func functionValueFieldForSelector(program *unit.Program, fieldTok int, fields [
 	if selectorStart < 0 || selectorStart >= fieldTok {
 		return -1
 	}
-	baseType := functionValueEnclosingLocalType(program, fieldTok, functionValueTokenText(program, selectorStart))
+	baseType := ordinaryBuiltinExprType(program, fieldTok, selectorStart, fieldTok-1)
+	pathStart := fieldTok - 1
+	if baseType == "" {
+		baseName := functionValueTokenText(program, selectorStart)
+		pathStart = selectorStart + 1
+		baseType = functionValueEnclosingLocalType(program, fieldTok, baseName)
+	}
 	baseType = functionValueBareType(baseType)
 	if baseType == "" {
 		return functionValueUniqueFieldByName(fields, name)
 	}
-	for i := selectorStart + 1; i < fieldTok-1; {
+	for i := pathStart; i < fieldTok-1; {
 		if functionValueTokenEquals(program, i, "[") {
 			close := functionValueFindMatching(program, i, "[", "]")
 			if close < 0 || close >= fieldTok {
@@ -1961,6 +2309,57 @@ func functionValueSignatureByName(signatures []functionValueSignature, name stri
 		}
 	}
 	return -1
+}
+
+func functionValueSignatureByShape(signatures []functionValueSignature, candidate functionValueSignature) int {
+	for i := 0; i < len(signatures); i++ {
+		sig := signatures[i]
+		if len(sig.paramTypes) != len(candidate.paramTypes) || len(sig.resultTypes) != len(candidate.resultTypes) {
+			continue
+		}
+		equal := true
+		for j := 0; j < len(sig.paramTypes); j++ {
+			if sig.paramTypes[j] != candidate.paramTypes[j] {
+				equal = false
+				break
+			}
+		}
+		for j := 0; equal && j < len(sig.resultTypes); j++ {
+			if sig.resultTypes[j] != candidate.resultTypes[j] {
+				equal = false
+			}
+		}
+		if equal {
+			return i
+		}
+	}
+	return -1
+}
+
+func functionValueSignatureByTypeText(signatures []functionValueSignature, typ string) int {
+	for i := 0; i < len(signatures); i++ {
+		sig := signatures[i]
+		text := "func(" + functionValueJoin(sig.paramTypes, ",") + ")"
+		if len(sig.resultTypes) == 1 {
+			text += sig.resultTypes[0]
+		} else if len(sig.resultTypes) > 1 {
+			text += "(" + functionValueJoin(sig.resultTypes, ",") + ")"
+		}
+		if functionValueCompactTypeText(text) == functionValueCompactTypeText(typ) {
+			return i
+		}
+	}
+	return -1
+}
+
+func functionValueCompactTypeText(value string) string {
+	out := ""
+	for i := 0; i < len(value); i++ {
+		if !functionValueIsSpace(value[i]) {
+			out += value[i : i+1]
+		}
+	}
+	return out
 }
 
 func functionValueImplIndex(sig functionValueSignature, receiverType string, method string, function string) int {

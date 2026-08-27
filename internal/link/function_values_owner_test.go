@@ -92,6 +92,84 @@ func main() {
 	}
 }
 
+func TestFunctionValueFieldDirectFunctionCompositeIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Methods struct {
+	allocate func(int32) *byte
+	release func(*byte)
+}
+type Config struct { methods Methods }
+
+func allocate(size int32) *byte { return nil }
+func release(value *byte) {}
+
+var config = Config{methods: Methods{allocate: allocate, release: release}}
+var allocators [1]func(int32) *byte = [1]func(int32) *byte{allocate}
+func callAllocator() *byte { return allocators[0](1) }
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("allocate: __renvo_function_0{kind: 1}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("release: __renvo_function_1{kind: 1}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("[1]__renvo_function_0{__renvo_function_0{kind: 1}}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&allocators[0], 1)")) {
+		t.Fatalf("direct callbacks in a composite literal were not lowered:\n%s", linked.Program.Text)
+	}
+}
+
+func TestFunctionValueFieldCallThroughParenthesizedPointerIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Callbacks struct { run func(*Callbacks, int) int }
+
+func invoke(callbacks **Callbacks) int {
+	return (*callbacks).run((*callbacks), 41)
+}
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&(*callbacks).run, (*callbacks), 41)")) {
+		t.Fatalf("callback field through a parenthesized pointer was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
+func TestFunctionValueFieldParenthesizedNilComparisonIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Callbacks struct { run func() }
+
+func available(callbacks *Callbacks) bool {
+	return (callbacks.run) != nil
+}
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("(callbacks.run.kind) != 0")) {
+		t.Fatalf("parenthesized callback nil comparison was not lowered:\n%s", linked.Program.Text)
+	}
+}
+
 func TestFunctionValueFieldCallOnTypeSwitchBindingIsLowered(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
@@ -188,5 +266,46 @@ func main() {
 		!bytes.Contains(linked.Program.Text, []byte("fn.receiver0.one()")) ||
 		!bytes.Contains(linked.Program.Text, []byte("fn.receiver0.two()")) {
 		t.Fatalf("same-receiver methods did not share function-value storage:\n%s", linked.Program.Text)
+	}
+}
+
+func TestFunctionValueFieldDirectFunctionComparisonIsLowered(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+type Value struct { destroy func(*byte) }
+func release(value *byte) {}
+
+func matches(value *Value) bool {
+	return value.destroy == (release)
+}
+
+func present(destroy func(*byte)) bool {
+	return (destroy) != nil
+}
+
+func choose(destroy bool) func(*byte) {
+	if destroy { return release }
+	return nil
+}
+
+func identity(destroy func(*byte)) func(*byte) { return destroy }
+func roundtrip(destroy func(*byte)) bool { return identity(destroy) != nil }
+
+func main() {}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	if !bytes.Contains(linked.Program.Text, []byte("value.destroy.kind == (1)")) ||
+		!bytes.Contains(linked.Program.Text, []byte("(destroy.kind) != 0")) ||
+		!bytes.Contains(linked.Program.Text, []byte("return __renvo_function_0{kind: 1}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("return __renvo_function_0{}")) ||
+		!bytes.Contains(linked.Program.Text, []byte("identity(destroy).kind != 0")) ||
+		!bytes.Contains(linked.Program.Text, []byte("release(arg0)")) {
+		t.Fatalf("direct callback comparison was not lowered through its tag:\n%s", linked.Program.Text)
 	}
 }

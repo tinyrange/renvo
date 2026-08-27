@@ -483,10 +483,11 @@ int inspect(void) {
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("type __c_struct_record struct{tag uint8;values [3]int32;tail int64;}"),
+		[]byte("type __c_struct_record struct{__c_align uint64;__c_tail [16]byte};"),
 		[]byte("var value __c_struct_record"),
+		[]byte("func(p *__c_struct_record)__c_ptr_4_values()*[3]int32"),
 		[]byte("__c_array_index_"),
-		[]byte("__c_unsafe.Pointer(&(value.values))"),
+		[]byte("__c_unsafe.Pointer(&((*value.__c_ptr_4_values())))"),
 		[]byte("uintptr(2)))=11"),
 	} {
 		if !bytes.Contains(result.Source, want) {
@@ -636,6 +637,13 @@ func TestTranslateRejectsUnknownGNUAttribute(t *testing.T) {
 	result := TranslateObject("main", []byte(`int value __attribute__((renvo_unknown));`), nil)
 	if result.Ok || result.Error != TranslateErrUnsupported {
 		t.Fatalf("unknown GNU attribute result = %#v, want explicit unsupported error", result)
+	}
+}
+
+func TestTranslateAcceptsLeafAttribute(t *testing.T) {
+	result := TranslateObject("main", []byte(`extern int remove(const char *) __attribute__((__nothrow__, __leaf__));`), nil)
+	if !result.Ok {
+		t.Fatalf("leaf attribute translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 }
 
@@ -2638,7 +2646,7 @@ void restart(unsigned int type) {
 	if !result.Ok {
 		t.Fatalf("far-jump asm lowering failed: %#v", result)
 	}
-	if !bytes.Contains(result.Source, []byte("renvo_runtime_CFarJump32(uintptr(&(header.offset)),uintptr(__c_name_type));")) {
+	if !bytes.Contains(result.Source, []byte("renvo_runtime_CFarJump32(uintptr(&((*header.__c_ptr_0_offset()))),uintptr(__c_name_type));")) {
 		t.Fatalf("far-jump asm did not retain its memory address and RDI operand:\n%s", result.Source)
 	}
 }
@@ -3305,7 +3313,7 @@ size_t name_length(struct earlycon_id *match) {
 	if !result.Ok {
 		t.Fatalf("inline-array strlen lowering failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("renvo_runtime_CStringLength(&(match.name)[0])")) ||
+	if !bytes.Contains(result.Source, []byte("renvo_runtime_CStringLength(&((*match.__c_ptr_0_name()))[0])")) ||
 		bytes.Contains(result.Source, []byte("(*int8)(match.name)")) {
 		t.Fatalf("inline char array did not decay before strlen:\n%s", result.Source)
 	}
@@ -3812,8 +3820,8 @@ void write_msr(unsigned int reg, const struct msr *value) {
 		t.Fatalf("MSR asm lowering failed: %#v", result)
 	}
 	for _, want := range [][]byte{
-		[]byte("renvo_runtime_CReadMSR(reg,&(value.low),&(value.high))"),
-		[]byte("renvo_runtime_CWriteMSR(reg,value.low,value.high)"),
+		[]byte("renvo_runtime_CReadMSR(reg,&((*value.__c_ptr_0_low())),&((*value.__c_ptr_4_high())))"),
+		[]byte("renvo_runtime_CWriteMSR(reg,(*value.__c_ptr_0_low()),(*value.__c_ptr_4_high()))"),
 		[]byte("renvo_runtime_CMemoryBarrier()"),
 	} {
 		if !bytes.Contains(result.Source, want) {
@@ -4405,7 +4413,7 @@ static const struct packed_note note = { { 8, sizeof(""), 256 }, "Linux", "" };
 		t.Fatalf("typeof string-literal array lowering failed: %#v", result)
 	}
 	for _, want := range [][]byte{
-		[]byte("descsz:1"),
+		[]byte("__c_struct_note_header{__c_align:8,__c_tail:[8]byte{1,0,0,0,0,1,0,0}}"),
 		[]byte("[1]int8{0}"),
 		[]byte("=__c_object_aggregate_0_12_20_x"),
 	} {
@@ -4788,8 +4796,7 @@ void set(struct outer *outer) { outer->inner.value = 7; }
 	if !result.Ok {
 		t.Fatalf("nested indirect member translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte(".__c_nested_ptr_")) ||
-		!bytes.Contains(result.Source, []byte("outer.__c_ptr_0_inner()")) {
+	if !bytes.Contains(result.Source, []byte("(*outer.__c_ptr_0_inner().__c_ptr_0_value())=7")) {
 		t.Fatalf("nested indirect member did not preserve an addressable receiver:\n%s", result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -5446,19 +5453,20 @@ int inspect(void) {
 		t.Fatalf("aggregate initializer translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	for _, want := range [][]byte{
-		[]byte("p.nested.y=v1;p.nested.x=v2;p.values[2]=v3;p.values[0]=v4"),
-		[]byte("__c_struct_record{head:1,nested:__c_struct_inner{x:2,y:3},values:[3]int32{4,5,6},tail:7}"),
+		[]byte("(*(*p.__c_ptr_4_nested()).__c_ptr_4_y())=v1;(*(*p.__c_ptr_4_nested()).__c_ptr_0_x())=v2;(*p.__c_ptr_12_values())[2]=v3;(*p.__c_ptr_12_values())[0]=v4"),
+		[]byte("__c_object_aggregate_0_4_12_24_x"),
 		[]byte("var sparse [5]int32=[5]int32{3:9,4:10}"),
 		[]byte("var inferred [4]int32=[4]int32{2:8,3:9}"),
 		[]byte("p[0]=v0;p[0]=v1"),
 		[]byte("func __c_object_union_init_"),
 		[]byte("__c_union_word{__c_align:67305985}"),
 		[]byte("(*p.__c_ptr_0_bytes())=v"),
-		[]byte("__c_bits_5:(17&((uint32(1)<<5)-1))<<3"),
-		[]byte("__c_bits_5:(6&((uint32(1)<<3)-1))"),
-		[]byte("value:2"),
-		[]byte("label:[3]int8{111,107,0},wrapped:44"),
-		[]byte("__c_struct_text{wrapped:45,label:[3]int8{104,105,0}}"),
+		[]byte("__c_struct_packed{__c_align:141,__c_tail:[4]byte{4,0,0,0}}"),
+		[]byte("__c_struct_packed{__c_align:30,__c_tail:[4]byte{2,0,0,0}}"),
+		[]byte("__c_object_aggregate_0_3_x"),
+		[]byte("[3]int8{111,107,0},44"),
+		[]byte("__c_object_aggregate_3_0_x"),
+		[]byte("45,[3]int8{104,105,0}"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("aggregate initializer source is missing %q:\n%s", want, result.Source)
@@ -6530,7 +6538,7 @@ struct page *inspect(void) {
 		t.Fatalf("nested statement-expression member failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	if bytes.Contains(result.Source, []byte("struct tag")) || !bytes.Contains(result.Source, []byte("func __c_statement_expr_")) ||
-		!bytes.Contains(result.Source, []byte(").page")) {
+		!bytes.Contains(result.Source, []byte(").__c_ptr_0_page()")) {
 		t.Fatalf("nested statement-expression member was not semantically lowered:\n%s", result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -7196,6 +7204,129 @@ void dispatch(void) {
 	}
 }
 
+func TestTranslateObjectNestedSwitchCaseSharesBlockDeclarations(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int dispatch(int opcode) {
+	switch (opcode) {
+	case 1: {
+		int value;
+		value = 10;
+	case 2:
+	case 3:
+		value += opcode;
+		return value;
+	}
+	default:
+		return 0;
+	}
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("nested-case translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	for _, want := range [][]byte{
+		[]byte("case __c_switch_"),
+		[]byte("==1,"),
+		[]byte("==2,"),
+		[]byte("==3:"),
+		[]byte("if __c_switch_"),
+	} {
+		if !bytes.Contains(result.Source, want) {
+			t.Fatalf("nested-case source is missing %q:\n%s", want, result.Source)
+		}
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("nested-case source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateObjectSwitchDeclarationBeforeFirstCase(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int dispatch(int opcode) {
+	switch (opcode) {
+		int value;
+	case 1:
+		value = 7;
+		return value;
+	default:
+		return 0;
+	}
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("leading switch declaration failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("var value int32;")) ||
+		!bytes.Contains(result.Source, []byte("switch {case __c_switch_1==1:")) {
+		t.Fatalf("leading switch declaration was not hoisted into switch scope:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("leading-declaration switch does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateNegativeMinimumDoesNotFormGoReceiveOperator(t *testing.T) {
+	result := TranslateObject("main", []byte(`int below(long value) { return value < -9223372036854775807L - 1; }`), nil)
+	if !result.Ok {
+		t.Fatalf("negative minimum translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("value<-")) {
+		t.Fatalf("negative operand formed a Go receive operator:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("negative minimum source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateCastOfAssignmentExpression(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+void *allocate(unsigned long);
+struct cache { void *bulk; };
+char *replace(struct cache *slot) { return slot->bulk = allocate(8); }
+`), nil)
+	if !result.Ok {
+		t.Fatalf("cast assignment translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_assignment_value_")) {
+		t.Fatalf("cast assignment did not preserve the assignment value:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("cast assignment source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestTranslateConditionalTrueArmCommaExpression(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+int choose(int condition, int *value) {
+	return condition ? (*value = 7, 1) : 2;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("conditional comma translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if !bytes.Contains(result.Source, []byte("__c_conditional_")) || !bytes.Contains(result.Source, []byte("__c_comma_")) {
+		t.Fatalf("conditional comma expression lost its nested operators:\n%s", result.Source)
+	}
+	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
+		t.Fatalf("conditional comma source does not parse: error=%d token=%d\n%s", parsed.Error, parsed.ErrorTok, result.Source)
+	}
+}
+
+func TestCompactGeneratedCLineBreaksPreservesComments(t *testing.T) {
+	source := make([]byte, 0, generatedCLineSafeLimit*3+64)
+	for i := 0; i <= generatedCLineSafeLimit; i++ {
+		source = append(source, "x;\n"...)
+	}
+	source = append(source, "// renvo:object function keep\nfunc keep(){}\n"...)
+	compacted := compactGeneratedCLineBreaks(source)
+	if bytes.Contains(compacted, []byte("x;\n")) {
+		t.Fatal("large generated source retained statement-only line breaks")
+	}
+	if !bytes.Contains(compacted, []byte("// renvo:object function keep\nfunc keep")) {
+		t.Fatal("large generated source lost a metadata comment boundary")
+	}
+}
+
 func TestTranslateOptimizedObjectRetainsReachableStaticInlineVariadicFunction(t *testing.T) {
 	result := TranslateObjectWithConfig("main", []byte(`
 static inline int silent(const char *format, ...) { return 0; }
@@ -7352,7 +7483,7 @@ void inspect(struct registers *regs) {
 		t.Fatalf("TranslateObject failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
 	if bytes.Contains(result.Source, []byte("if true")) ||
-		!bytes.Contains(result.Source, []byte("regs.cs")) {
+		!bytes.Contains(result.Source, []byte("(*regs.__c_ptr_0_cs())")) {
 		t.Fatalf("constant logical prefix discarded runtime member comparison:\n%s", result.Source)
 	}
 	if parsed := syntax.ParseFile(result.Source); !parsed.Ok {
@@ -7601,8 +7732,24 @@ int select_value(int choose, struct item *item) { return choose ? item->value : 
 	if !result.Ok {
 		t.Fatalf("captured pointer member translation failed: error=%d at=%d", result.Error, result.ErrorAt)
 	}
-	if !bytes.Contains(result.Source, []byte("(*p1).__c_nested_ptr_")) {
+	if !bytes.Contains(result.Source, []byte("(*(*p1).__c_ptr_0_value())")) {
 		t.Fatalf("captured pointer member did not retain an addressable receiver:\n%s", result.Source)
+	}
+}
+
+func TestTranslateConditionalFunctionPointerMemberCallsDirectly(t *testing.T) {
+	result := TranslateObject("main", []byte(`
+struct callbacks { int (*last_error)(struct callbacks *, int, char *); };
+int get_last_error(struct callbacks *callbacks) {
+	return callbacks->last_error ? callbacks->last_error(callbacks, 0, 0) : 0;
+}
+`), nil)
+	if !result.Ok {
+		t.Fatalf("conditional function-pointer member translation failed: error=%d at=%d", result.Error, result.ErrorAt)
+	}
+	if bytes.Contains(result.Source, []byte("__c_nested_ptr_")) ||
+		!bytes.Contains(result.Source, []byte("(*p0).last_error((*p0),0,nil)")) {
+		t.Fatalf("conditional function-pointer member was routed through a pointer-to-function accessor:\n%s", result.Source)
 	}
 }
 

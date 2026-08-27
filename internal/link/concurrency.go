@@ -849,7 +849,7 @@ func concurrencyGoLiteral(program *unit.Program, start int, end int, context str
 	if bodyClose < 0 || callOpen >= end || !functionValueTokenEquals(program, callOpen, "(") || functionValueFindMatchingParen(program, callOpen) != end-1 {
 		return "", "", "", false
 	}
-	_, paramNames, ok := normalizedFunctionValueParams(program, start+2, paramsClose)
+	_, paramNames, _, ok := normalizedFunctionValueParams(program, start+2, paramsClose)
 	if !ok {
 		return "", "", "", false
 	}

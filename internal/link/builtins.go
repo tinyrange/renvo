@@ -226,6 +226,20 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-") || functionValueTokenEquals(program, start, "^")) && start+1 < end {
 		return ordinaryBuiltinExprType(program, before, start+1, end)
 	}
+	if functionValueTokenEquals(program, start, "*") && start+1 < end {
+		typ := ordinaryBuiltinExprType(program, before, start+1, end)
+		if len(typ) > 0 && typ[0] == '*' {
+			return typ[1:]
+		}
+		return ""
+	}
+	if functionValueTokenEquals(program, start, "&") && start+1 < end {
+		typ := ordinaryBuiltinExprType(program, before, start+1, end)
+		if typ != "" {
+			return "*" + typ
+		}
+		return ""
+	}
 	if program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
 		name := functionValueTokenText(program, start)
 		if name == "make" {
@@ -246,6 +260,14 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 			return name
 		}
 		return functionValueDeclaredFunctionResultType(program, name)
+	}
+	if functionValueTokenEquals(program, end-1, ")") {
+		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
+		if open > start {
+			if fn, ok := functionValueCalledFunction(program, open); ok {
+				return functionValueDeclaredResultType(program, fn)
+			}
+		}
 	}
 	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
 		owner := ordinaryBuiltinExprType(program, before, start, end-2)
