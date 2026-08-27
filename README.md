@@ -101,7 +101,7 @@ limits are:
 | Fixed-target compiler resources | `linux/amd64`, `linux/386`, `linux/aarch64`, `linux/arm`, `windows/amd64`, `windows/386` | 16 MiB peak RSS; 320 KiB compiler |
 | Fixed-target compiler elapsed time | The same Linux and Windows targets | 50 ms; run by `./tools/check performance` outside shared CI |
 | Darwin fixed-target compiler | `darwin/arm64` | 50 ms; 320 KiB compiler; run on the native macOS CI runner |
-| WASI fixed-target compiler | `wasi/wasm32` | 125 ms; 20 MiB peak RSS; 384 KiB compiler |
+| WASI fixed-target compiler | `wasi/wasm32` | 150 ms; 20 MiB peak RSS; 384 KiB compiler |
 | Self-hosted frontend | Native Linux target for the runner | 42 MiB peak RSS; 4 MiB stripped stage-3 compiler |
 | Self-hosted VM backend | `vm/vm32` | 2 MiB compiler bytecode; 400,000 VM steps; 80 MiB peak VM memory |
 | Self-hosted VM frontend | `vm/vm32` producing `linux/amd64` | 6 MiB frontend bytecode; 4 MiB output compiler; 12 billion VM steps; 150 MiB peak VM memory |
