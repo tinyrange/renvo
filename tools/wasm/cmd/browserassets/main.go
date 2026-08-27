@@ -75,6 +75,7 @@ type standardPackage struct {
 	Boards    []boardTarget    `json:"boards,omitempty"`
 	Computers []computerTarget `json:"computers,omitempty"`
 	Language  string           `json:"language,omitempty"`
+	Hidden    bool             `json:"hidden,omitempty"`
 	Docs      *packageDocs     `json:"docs,omitempty"`
 }
 
@@ -544,6 +545,7 @@ type platformPackageSpec struct {
 	Boards    []boardTarget
 	Computers []computerTarget
 	Language  string
+	Hidden    bool
 }
 
 func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
@@ -604,6 +606,7 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "device/audio/sam2695"},
 		{Path: "device/ws2812"},
 		{Path: "device/internal/esprmt"},
+		{Path: "cmd/renvopico-monitor", Hidden: true},
 		{Path: "internal/arena"},
 	}
 	// The public board package contains all build-tagged adapters and is loaded
@@ -644,7 +647,7 @@ func buildPlatformPackages(root string, output string, boards []boardDefinition)
 		}
 		item := standardPackage{
 			Root: spec.Path, Target: spec.Target, ArenaSize: spec.ArenaSize, Board: spec.Board, Boards: spec.Boards,
-			Computers: spec.Computers, Language: spec.Language,
+			Computers: spec.Computers, Language: spec.Language, Hidden: spec.Hidden,
 		}
 		imports := make(map[string]bool)
 		for _, entry := range entries {

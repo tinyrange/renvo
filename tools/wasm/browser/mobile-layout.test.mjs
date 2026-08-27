@@ -58,6 +58,9 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(html, /id="device-permission-dialog"/);
   assert.match(html, /id="device-webusb-status"/);
   assert.match(html, /id="device-webserial-status"/);
+  assert.match(html, /id="pico-monitor-build"/);
+  assert.match(html, /Compile &amp; download monitor/);
+  assert.match(html, /shared RP2040\/RP2350 UF2/);
   assert.match(html, /data-panel="plotter"/);
   assert.match(html, /id="serial-plotter-canvas"/);
   assert.match(html, /id="toggle-plotter-size"/);
@@ -85,6 +88,9 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /chooseESPTransportAvailability/);
   assert.match(app, /function requestDevicePermission/);
   assert.match(app, /renvo\.devicePermissionExplained\.v1/);
+  assert.match(app, /renvo\.devicePermissionExplained\.rp2\.v1/);
+  assert.match(app, /function compilePicoMonitor/);
+  assert.match(app, /\.\/cmd\/renvopico-monitor/);
   assert.match(app, /maybeOpenMobileExamples/);
   assert.match(app, /exampleCatalogPromise = catalogPromise/);
   assert.match(app, /function selectInitialExampleBoard/);

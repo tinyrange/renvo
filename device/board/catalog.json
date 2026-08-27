@@ -30,6 +30,22 @@
     ]
   },
   {
+    "name": "SparkFun Thing Plus RP2040",
+    "target": "sparkfunthingplusrp2040/thumb",
+    "tag": "sparkfunthingplusrp2040",
+    "device": "rp2",
+    "docs": "https://learn.sparkfun.com/tutorials/rp2040-thing-plus-hookup-guide/hardware-overview",
+    "artwork": "pico",
+    "machine": "rp2/thumb",
+    "definition": "backends/rp2.rtg",
+    "backend": "backends/rp2-thumb.wasm",
+    "packages": ["device/rp2"],
+    "examples": [
+      {"path": "examples/device/blink"},
+      {"path": "examples/device/rgb_cycle"}
+    ]
+  },
+  {
     "name": "M5Stack NanoC6",
     "target": "m5nanoc6/riscv32",
     "tag": "m5nanoc6",

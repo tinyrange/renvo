@@ -129,6 +129,8 @@ const elements = {
   devicePermissionAccept: document.querySelector("#device-permission-accept"),
   deviceWebUSBStatus: document.querySelector("#device-webusb-status"),
   picoMonitorInstaller: document.querySelector("#pico-monitor-installer"),
+  picoMonitorBuild: document.querySelector("#pico-monitor-build"),
+  picoMonitorBuildStatus: document.querySelector("#pico-monitor-build-status"),
   deviceWebSerialStatus: document.querySelector("#device-webserial-status"),
   ide: document.querySelector("#ide"),
   mobileStep: document.querySelector("#mobile-step"),
@@ -651,6 +653,7 @@ function setupShell() {
   document.querySelector("#device-permission-close").addEventListener("click", () => elements.devicePermissionDialog.close("cancel"));
   document.querySelector("#device-permission-cancel").addEventListener("click", () => elements.devicePermissionDialog.close("cancel"));
   elements.devicePermissionAccept.addEventListener("click", acceptDevicePermission);
+  elements.picoMonitorBuild.addEventListener("click", compilePicoMonitor);
   elements.devicePermissionDialog.addEventListener("close", finishDevicePermission);
   document.querySelectorAll(".panel-tab").forEach((button) => button.addEventListener("click", () => showPanel(button.dataset.panel)));
   elements.togglePanel.addEventListener("click", togglePanel);
@@ -818,8 +821,11 @@ function downloadValidatedArtifact() {
     setCompilerStatus("error", "Build produced no downloadable output");
     return;
   }
+  downloadArtifact(artifact);
+}
+
+function downloadArtifact(artifact, filename = artifact.name.split("/").pop()) {
   const data = artifact.data;
-  const filename = artifact.name.split("/").pop();
   const type = filename.endsWith(".wasm") ? "application/wasm" : "application/octet-stream";
   const url = createDownloadURL(data, type);
   const link = document.createElement("a");
@@ -831,6 +837,42 @@ function downloadValidatedArtifact() {
   link.remove();
   if (url.startsWith("blob:")) setTimeout(() => releaseDownloadURL(url), 60000);
   setCompilerStatus("ready", `Downloading ${filename}`);
+}
+
+async function compilePicoMonitor() {
+  if (!compilerReady || building || selectedTarget?.device !== "rp2" || !standardCatalogPromise) return;
+  const buildTarget = selectedTarget;
+  building = true;
+  elements.picoMonitorBuild.disabled = true;
+  elements.picoMonitorBuildStatus.textContent = "Loading the Renvo monitor sources…";
+  updateReadyState();
+  try {
+    const catalog = await standardCatalogPromise;
+    await loadStandardPackage("renvo.dev/cmd/renvopico-monitor", catalog);
+    const args = ["-arena-size", "8192", "-o", "renvo-rp2-monitor.uf2", "./cmd/renvopico-monitor"];
+    args.unshift("-t", buildTarget.frontendTarget || buildTarget.name);
+    for (const tag of buildTarget.tags || []) args.unshift("-tags", tag);
+    if (buildTarget.definition) {
+      args.unshift("-target-version", String(buildTarget.descriptorVersion), "-target-definition", buildTarget.definition);
+    }
+    const backend = new URL(buildTarget.backend, catalogUrl).href;
+    const payload = workspacePayload();
+    const id = ++requestID;
+    pendingBuild = { id, revision: buildRevision, target: buildTarget, backend, args, action: "pico-monitor" };
+    elements.picoMonitorBuildStatus.textContent = "Compiling the monitor with Renvo…";
+    setCompilerStatus("busy", "Building Pico monitor…");
+    worker.postMessage({
+      type: "compile", id, args, files: payload.files, backend,
+      backendTarget: buildTarget.backendTarget, backendFormat: buildTarget.backendFormat || "wasm",
+    }, payload.transfers);
+  } catch (error) {
+    building = false;
+    pendingBuild = undefined;
+    elements.picoMonitorBuild.disabled = false;
+    elements.picoMonitorBuildStatus.textContent = `Monitor build failed: ${error.message || error}`;
+    setCompilerStatus("error", "Monitor build failed");
+    updateReadyState();
+  }
 }
 
 function publishValidatedBuild() {
@@ -1037,6 +1079,20 @@ function renderResult(result) {
     : `${result.frontendMilliseconds.toFixed(1)} ms frontend`;
   const summary = `${result.exitCode === 0 ? "Build succeeded" : "Build failed"} · ${result.elapsedMilliseconds.toFixed(1)} ms · ${phases}`;
   const text = [result.stdout, result.stderr].filter(Boolean).join("");
+  if (build.action === "pico-monitor") {
+    const artifact = result.files.find((file) => file.name.endsWith("renvo-rp2-monitor.uf2")) || result.files[0];
+    elements.picoMonitorBuild.disabled = false;
+    if (result.exitCode === 0 && artifact) {
+      backendReady.add(build.backend);
+      downloadArtifact(artifact, "renvo-rp2-monitor.uf2");
+      elements.picoMonitorBuildStatus.textContent = "Monitor downloaded. Copy it to the BOOTSEL USB drive, then reconnect the board normally.";
+    } else {
+      elements.picoMonitorBuildStatus.textContent = `Monitor build failed. ${text || "Open the build output for details."}`;
+      setCompilerStatus("error", "Monitor build failed");
+    }
+    updateReadyState();
+    return;
+  }
   if (build.action === "test") {
     renderTestBuildResult(result, build, summary, text);
     return;
@@ -2433,13 +2489,14 @@ function renderDevicePermission() {
       : "Disconnect the board at any time to end access.";
   }
   elements.devicePermissionAccept.disabled = !available;
-  elements.devicePermissionAccept.textContent = available ? "Select device" : "USB not supported";
+  elements.devicePermissionAccept.textContent = available ? pico ? "Monitor installed — select board" : "Select device" : "USB not supported";
   return available;
 }
 
 function requestDevicePermission() {
   const available = renderDevicePermission();
-  if (available && localStorage.getItem("renvo.devicePermissionExplained.v1") === "yes") return Promise.resolve(true);
+  const storageKey = selectedTarget?.device === "rp2" ? "renvo.devicePermissionExplained.rp2.v1" : "renvo.devicePermissionExplained.v1";
+  if (available && localStorage.getItem(storageKey) === "yes") return Promise.resolve(true);
   if (devicePermissionResolve) return Promise.resolve(false);
   elements.devicePermissionDialog.returnValue = "cancel";
   const result = new Promise((resolve) => { devicePermissionResolve = resolve; });
@@ -2450,7 +2507,8 @@ function requestDevicePermission() {
 
 function acceptDevicePermission() {
   if (elements.devicePermissionAccept.disabled) return;
-  localStorage.setItem("renvo.devicePermissionExplained.v1", "yes");
+  const storageKey = selectedTarget?.device === "rp2" ? "renvo.devicePermissionExplained.rp2.v1" : "renvo.devicePermissionExplained.v1";
+  localStorage.setItem(storageKey, "yes");
   elements.devicePermissionDialog.close("accept");
 }
 
@@ -3410,7 +3468,7 @@ function cleanPath(name) {
 
 function exampleEntries(catalog = standardCatalog) {
   return Object.entries(catalog?.platforms || {})
-    .filter(([, item]) => item.main)
+    .filter(([, item]) => item.main && !item.hidden)
     .map(([importPath, item]) => {
       const boards = item.boards || (item.board ? [{ name: item.board, target: item.target }] : []);
       const computers = (item.computers || []).map((computer) => ({ ...computer, device: "computer" }));
@@ -4101,7 +4159,7 @@ function renderLibraryCatalog(catalog) {
     children.push(cLibraryDirectory(catalog, "include", "Headers"));
     children.push(cLibraryDirectory(catalog, "src", "Implementation"));
   }
-  const platforms = Object.entries(catalog.platforms || {});
+  const platforms = Object.entries(catalog.platforms || {}).filter(([, item]) => !item.hidden);
   const frameworks = platforms.filter(([name, item]) => !name.includes("/examples/m5") && !item.main);
   if (frameworks.length) appendGroup("Frameworks", frameworks);
   elements.stdlibTree.replaceChildren(...children);

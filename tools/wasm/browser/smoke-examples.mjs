@@ -155,7 +155,7 @@ function exampleTargets(item) {
 }
 
 const published = Object.entries(standardCatalog.platforms || {})
-  .filter(([, item]) => item.main)
+  .filter(([, item]) => item.main && !item.hidden)
   .sort(([left], [right]) => left.localeCompare(right));
 let compiled = 0;
 const failures = [];

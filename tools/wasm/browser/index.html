@@ -355,7 +355,19 @@
             <div id="device-webserial-status"><span class="capability-dot"></span><p><strong>WebSerial</strong><small>Checking support…</small></p></div>
           </div>
           <p class="device-permission-note" id="device-permission-note">Disconnect the board at any time to end access.</p>
-          <p id="pico-monitor-installer" hidden>First use? Hold BOOTSEL while connecting the Pico, then copy the <a href="firmware/renvo-rp2-monitor.uf2" download="renvo-rp2-monitor.uf2">Renvo monitor UF2</a> to its USB drive. Reconnect normally and select the Pico here.</p>
+          <section class="pico-monitor-installer" id="pico-monitor-installer" hidden>
+            <div class="pico-monitor-heading"><span>FIRST-TIME SETUP</span><strong>Install the Renvo USB monitor</strong></div>
+            <ol>
+              <li><span>1</span><p><strong>Compile and download</strong>Build the monitor here using Renvo. It produces a shared RP2040/RP2350 UF2.</p></li>
+              <li><span>2</span><p><strong>Open the BOOTSEL drive</strong>Unplug the board, hold BOOTSEL while reconnecting it, then release the button.</p></li>
+              <li><span>3</span><p><strong>Copy and reconnect</strong>Copy <code>renvo-rp2-monitor.uf2</code> to the USB drive, then reconnect normally.</p></li>
+            </ol>
+            <div class="pico-monitor-actions">
+              <button type="button" class="dialog-secondary" id="pico-monitor-build">Compile &amp; download monitor</button>
+              <a href="firmware/renvo-rp2-monitor.uf2" download="renvo-rp2-monitor.uf2">Download bundled copy</a>
+            </div>
+            <p id="pico-monitor-build-status" role="status" aria-live="polite">The monitor is compiled entirely in this browser with the Renvo toolchain.</p>
+          </section>
         </div>
         <footer><button type="button" class="dialog-secondary" id="device-permission-cancel">Cancel</button><button type="button" class="dialog-primary" id="device-permission-accept">Select device</button></footer>
       </div>
