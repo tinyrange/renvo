@@ -83,8 +83,8 @@ func appMain(args []string, env []string) int {
 			stdRoot = item[14:]
 		}
 	}
-	if renvoWasiCObjectCompileRequested(args) {
-		return renvoWasiCCompile(args, workDir, stdRoot)
+	if handled, status := renvoWasiCObjectCompile(args, workDir, stdRoot); handled {
+		return status
 	}
 	output := "a.unit"
 	packageArg := "."
@@ -152,9 +152,16 @@ func appMain(args []string, env []string) int {
 	}
 	var built driver.PackageUnitResult
 	if cCompiler {
-		normalized := driver.NormalizeCCompilerCommand(args)
-		full := driver.BuildFromFSOneShot(normalized[1:], workDir, stdRoot, driver.RenvoFS{})
-		built = driver.PackageUnitResult{Unit: full.Unit, Path: full.ErrorPath, Ok: full.Ok, Phase: full.Error, Diagnostic: full.Diagnostic}
+		if mode != driver.ModeExecutable {
+			print("renvo cc: browser C projects require executable mode\n")
+			return 2
+		}
+		files, ok := renvoWasiCFiles(packageArg, workDir, driver.RenvoFS{})
+		if !ok || len(files) == 0 {
+			print("renvo cc: C project contains no .c source files\n")
+			return 1
+		}
+		built = driver.BuildCExecutableUnitCompact(files, target, tags, workDir, stdRoot, driver.RenvoFS{})
 	} else {
 		built = driver.BuildPackageUnitCompactMode(packageArg, target, tags, mode, workDir, stdRoot, driver.RenvoFS{})
 	}
@@ -179,28 +186,35 @@ func appMain(args []string, env []string) int {
 	return 0
 }
 
-func renvoWasiCCompile(args []string, workDir string, stdRoot string) int {
-	normalized := driver.NormalizeCCompilerCommand(args)
-	built := driver.BuildFromFSOneShot(normalized[1:], workDir, stdRoot, driver.RenvoFS{})
-	if !built.Ok {
-		print(driver.FormatDiagnostic(built.Diagnostic))
-		return 1
-	}
-	if !writeOutput(built.Options.Output, built.Unit) {
-		print("renvo cc: could not write frontend output\n")
-		return 1
-	}
-	return 0
-}
-
-func renvoWasiCObjectCompileRequested(args []string) bool {
-	if len(args) < 2 || args[1] != "cc" {
-		return false
-	}
-	for i := 2; i < len(args); i++ {
-		if args[i] == "-c" || args[i] == "-mode=object" || args[i] == "-mode" && i+1 < len(args) && args[i+1] == "object" {
-			return true
+func renvoWasiCFiles(packageArg string, workDir string, fs driver.SourceFS) ([]string, bool) {
+	if packageArg != "." && packageArg != "./" {
+		if renvoWasiCSourceName(packageArg) {
+			return []string{packageArg}, true
 		}
 	}
-	return false
+	dir := workDir
+	prefix := ""
+	if packageArg != "." && packageArg != "./" {
+		dir = packageArg
+		prefix = packageArg
+	}
+	entries, ok := fs.ReadDir(dir)
+	if !ok {
+		return nil, false
+	}
+	files := make([]string, 0, len(entries))
+	for i := 0; i < len(entries); i++ {
+		if !entries[i].IsDir && renvoWasiCSourceName(entries[i].Name) {
+			name := entries[i].Name
+			if prefix != "" {
+				name = prefix + "/" + name
+			}
+			files = append(files, name)
+		}
+	}
+	return files, true
+}
+
+func renvoWasiCSourceName(name string) bool {
+	return len(name) > 2 && name[len(name)-2:] == ".c"
 }
