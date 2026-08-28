@@ -7,8 +7,8 @@ import (
 func main() {
 	for {
 		board.Clock.DelayMilliseconds(500)
-		board.BlueLED.Set(true)
+		board.LED.Set(true)
 		board.Clock.DelayMilliseconds(500)
-		board.BlueLED.Set(false)
+		board.LED.Set(false)
 	}
 }

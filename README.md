@@ -51,6 +51,8 @@ explicitly.
 | `wasi/wasm32` | WebAssembly module |
 | `browser/wasm32` | Browser HTML containing WebAssembly |
 | `vm/vm32` | Deterministic Renvo bytecode (`RNVB`) |
+| `rp2/thumb` | Shared RP2040/RP2350 Arm UF2 firmware |
+| `rp2-debug/thumb` | RP2 SRAM ELF for resident USB-monitor hot reload |
 
 ### Backend support tiers
 
@@ -80,7 +82,7 @@ The current classification is:
 | --- | --- |
 | **Tier 1** | `linux/amd64`, `linux/386`, `linux/aarch64`, `linux/arm`, `windows/amd64`, `windows/386`, `darwin/arm64`, `wasi/wasm32`, `vm/vm32` |
 | **Tier 2** | `linux-object/amd64`, `llvm/linux-amd64`, `esp32c6/riscv32`, `esp32c6-jtag/riscv32`, `esp32s3/xtensa_lx7` |
-| **Tier 3** | `windows/arm64`, `browser/wasm32`, `freebsd/amd64`, `openbsd/amd64`, `netbsd/amd64`, `linux-kernel/amd64`, `c89/hosted32`, `c89/hosted32-auto`, `c89/freestanding32`, `android/arm64`, `ios/arm64`, `esp32p4/riscv32`, `msdos/8086`, `msdos/8086-mz`, `bios/8086`, `uefi/amd64` |
+| **Tier 3** | `windows/arm64`, `browser/wasm32`, `freebsd/amd64`, `openbsd/amd64`, `netbsd/amd64`, `linux-kernel/amd64`, `c89/hosted32`, `c89/hosted32-auto`, `c89/freestanding32`, `android/arm64`, `ios/arm64`, `esp32p4/riscv32`, `rp2/thumb`, `rp2-debug/thumb`, `rp2350/riscv32`, `msdos/8086`, `msdos/8086-mz`, `bios/8086`, `uefi/amd64` |
 
 New backends start in Tier 3. Promotion to Tier 2 requires a required CI test
 that executes generated code for that target and a commitment to keep the
@@ -282,11 +284,28 @@ func main() {
 }
 ```
 
-The Web IDE offers board choices such as `m5nanoc6/riscv32`,
-`m5atoms3lite/xtensa_lx7`, and `m5tab5/riscv32`. Each choice maps to a shared
-chip backend plus one board build tag. From the CLI, express the same selection
-as `-t esp32c6/riscv32 -tags m5nanoc6`. Only capabilities present on that board
-are declared, so using an unavailable device is a compile-time error.
+The Web IDE offers board choices such as `pico/thumb`, `pico2/thumb`,
+`m5nanoc6/riscv32`, and `m5atoms3lite/xtensa_lx7`. Each choice maps to a shared
+chip backend plus one board build tag. The Pico choices download one `.uf2`
+with family-specific RP2040 and RP2350 boot blocks followed by the same ARMv6-M
+executable payload. For probe-free debugging, install the Renvo-built monitor UF2 once;
+the browser then claims the Pico itself through WebUSB, loads
+`rp2-debug/thumb` applications onto core 1 in SRAM, and rewrites only changed
+words after an edit while the monitor and USB connection remain on core 0.
+The monitor is ordinary Go compiled by Renvo and has no Pico SDK, TinyUSB, GCC,
+or other native build dependency. The experimental `rp2350/riscv32` target
+remains available for RP2350-specific bring-up but cannot run on RP2040.
+
+From the CLI, express a board selection with its machine definition and tag,
+for example:
+
+```sh
+renvo -backend backends/rp2.rtg -t rp2/thumb -tags pico2 -o blink.uf2 ./examples/device/blink
+renvo -backend backends/rp2_debug.rtg -t rp2-debug/thumb -tags pico2 -o blink.elf ./examples/device/blink
+```
+
+Only capabilities present on that board are declared, so using an unavailable
+device is a compile-time error.
 Supported-board metadata and demo membership live in
 `device/board/catalog.json`, not in the RTG machine definitions.
 

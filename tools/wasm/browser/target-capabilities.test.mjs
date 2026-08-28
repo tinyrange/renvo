@@ -24,6 +24,13 @@ test("board firmware advertises flashing without claiming browser execution", ()
   assert.equal(targetCapabilityHint(target), "Flash this board over USB or download firmware.bin.");
 });
 
+test("RP2 firmware advertises monitor loading and UF2 download", () => {
+  const target = { name: "pico/thumb", device: "rp2", output: "app.uf2" };
+  assert.deepEqual(targetCapabilities(target), { runsInBrowser: false, flashable: true });
+  assert.deepEqual(targetCapabilityTags(target).map((tag) => tag.label), ["Flash over USB"]);
+  assert.equal(targetCapabilityHint(target), "Load through the resident USB monitor or download app.uf2.");
+});
+
 test("download availability follows the compiled output rather than a capability tag", () => {
   assert.equal(hasDownloadableOutput({ output: "app.exe" }), true);
   assert.equal(hasDownloadableOutput({}), false);

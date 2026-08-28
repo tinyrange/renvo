@@ -27,6 +27,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(html, /Choose a board or computer/);
   assert.match(html, /id="example-target-filter"/);
   assert.match(html, /id="mobile-setup-progress"/);
+  assert.match(html, /id="deployment-progress"/);
   assert.doesNotMatch(html, /Initializing compiler/);
   for (const step of ["workspace", "catalog", "editor", "compiler"]) {
     assert.match(html, new RegExp(`data-setup-step="${step}"`));
@@ -58,6 +59,9 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(html, /id="device-permission-dialog"/);
   assert.match(html, /id="device-webusb-status"/);
   assert.match(html, /id="device-webserial-status"/);
+  assert.match(html, /id="pico-monitor-build"/);
+  assert.match(html, /Compile &amp; download monitor/);
+  assert.match(html, /shared RP2040\/RP2350 UF2/);
   assert.match(html, /data-panel="plotter"/);
   assert.match(html, /id="serial-plotter-canvas"/);
   assert.match(html, /id="toggle-plotter-size"/);
@@ -68,6 +72,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(css, /\.ide\[data-mobile-view="device"\] \.mobile-target-view/);
   assert.match(css, /\.ide\[data-mobile-view="editor"\] \.workbench/);
   assert.match(css, /\.mobile-flash-view \{[\s\S]*position: fixed/);
+  assert.match(css, /#deployment-progress \{[\s\S]*position: absolute/);
   assert.match(css, /\.workbench\.plotter-expanded \{[\s\S]*grid-template-rows: 38px 0 minmax\(0, 1fr\)/);
   assert.match(app, /showMobileView\("editor"\)/);
   assert.match(app, /copyActiveFileToPlayground/);
@@ -77,7 +82,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /function startMobileDeployment/);
   assert.match(app, /function receiveCompileProgress/);
   assert.match(app, /arenaSize: entry\.item\.arenaSize \|\| ""/);
-  assert.match(app, /Tap to see JTAG load details/);
+  assert.match(app, /Tap to see device load details/);
   assert.match(worker, /type: "compile-progress"/);
   assert.match(worker, /Downloading the board compiler/);
   assert.match(app, /appendSerialText/);
@@ -85,6 +90,9 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /chooseESPTransportAvailability/);
   assert.match(app, /function requestDevicePermission/);
   assert.match(app, /renvo\.devicePermissionExplained\.v1/);
+  assert.match(app, /renvo\.devicePermissionExplained\.rp2\.v1/);
+  assert.match(app, /function compilePicoMonitor/);
+  assert.match(app, /\.\/cmd\/renvopico-monitor/);
   assert.match(app, /maybeOpenMobileExamples/);
   assert.match(app, /exampleCatalogPromise = catalogPromise/);
   assert.match(app, /function selectInitialExampleBoard/);
@@ -95,8 +103,10 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(app, /setSetupStep\("compiler", "active"/);
   assert.doesNotMatch(html, /id="mobile-build"/);
   assert.match(app, /runTests/);
+  assert.match(app, /requestedAvailable \? requestedTarget : restoredAvailable \? restoredTargetName/);
+  assert.match(app, /selectedTarget\.tags.*target\.tags/);
   assert.match(app, /event\.metaKey[\s\S]*event\.key\.toLowerCase\(\) === "s"[\s\S]*saveAndDeploy\(\)/);
-  assert.match(app, /function saveAndDeploy\(\)[\s\S]*selectedTarget\?\.device === "esp32"[\s\S]*runArtifact\(\)/);
+  assert.match(app, /function saveAndDeploy\(\)[\s\S]*isBoardTarget\(selectedTarget\)[\s\S]*runArtifact\(\)/);
   assert.match(app, /openSnapshotDialog/);
   assert.match(app, /function createNewWorkspaceFile[\s\S]*setBuildPackage\("\."\)/);
   assert.match(app, /function createNewProject[\s\S]*initialCFiles/);

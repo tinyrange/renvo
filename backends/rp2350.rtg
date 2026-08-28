@@ -1,0 +1,14 @@
+@import "../backend/definitions/rp2350_common.rtg"
+
+target rp2350/riscv32 {
+	family = native_v1
+	os = rp2350
+	arch = riscv32
+	frontend_arch = riscv32
+	abi = riscv32_internal
+	runtime = rp2350_flash_freestanding
+	executable = rp2350_uf2
+	build_tags = [rp2350, riscv32]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}

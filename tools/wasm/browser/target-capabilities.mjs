@@ -1,7 +1,7 @@
 export function targetCapabilities(target) {
   return {
     runsInBrowser: Boolean(target?.runnable),
-    flashable: target?.device === "esp32",
+    flashable: target?.device === "esp32" || target?.device === "rp2",
   };
 }
 
@@ -21,6 +21,7 @@ export function targetCapabilityHint(target) {
   if (!target) return "Choose where the project will run.";
   const capabilities = targetCapabilities(target);
   const output = target.output || "the compiled file";
+  if (target.device === "rp2") return `Load through the resident USB monitor or download ${output}.`;
   if (capabilities.flashable) return `Flash this board over USB or download ${output}.`;
   if (capabilities.runsInBrowser) {
     return `Run this target in the browser or download ${output}.`;
