@@ -827,7 +827,8 @@ function downloadValidatedArtifact() {
     setCompilerStatus("error", "Build produced no downloadable output");
     return;
   }
-  downloadArtifact(artifact);
+  const filename = artifact.name.split("/").pop();
+  downloadArtifact(artifact, filename);
 }
 
 function downloadArtifact(artifact, filename = artifact.name.split("/").pop()) {
