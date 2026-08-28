@@ -200,6 +200,37 @@ above the machine-code emitter. If the units agree but executables differ, the
 bug is in backend lowering, target emission, image composition, or runtime
 integration.
 
+### Multi-target embedded programs
+
+A Go executable can ask the frontend to compile another entrypoint for a
+different target during the same invocation:
+
+```go
+//renvo:compile -t linux/386 helperMain
+var helperELF []byte
+
+//renvo:compile -t freestanding/amd64 longModeMain
+var longModeEntry uintptr
+```
+
+The directive must immediately precede one uninitialized package variable and
+has the exact form `//renvo:compile -t <target> <entry>`. The entry must be a
+top-level function in the root package. A `[]byte` variable receives the whole
+foreign executable as static program data; treat that slice as immutable. A
+`uintptr` variable receives the address of an in-place executable entrypoint,
+and is accepted only when the target advertises `in_place_entry`.
+
+Each directive creates a separately target-bound child unit. Reachability is
+computed from its selected entrypoint, so a function called by both the native
+entrypoint and a foreign entrypoint is lowered independently for both
+architectures. `-emit-unit` preserves the unresolved child units; a normal
+compile sends every child to its target backend, embeds the resulting artifact,
+then compiles the parent. One external RTG definition may therefore export all
+targets involved in a multi-stage image.
+
+The `examples/bios-longmode` program demonstrates a `bios/8086` parent building
+page tables and transferring to an embedded `freestanding/amd64` child.
+
 ## Targets and output policy
 
 The frontend currently recognizes:

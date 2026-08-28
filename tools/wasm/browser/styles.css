@@ -437,6 +437,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .help-methods { margin: 13px 0 0 18px; }
 .help-methods .help-declaration { padding-top: 12px; }
 .help-empty-doc { color: var(--muted); font-style: italic; }
+.help-examples { display: grid; max-width: 920px; gap: 13px; margin-top: 15px; }
+.help-example { overflow: hidden; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); }
+.help-example h4 { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--bright); font-size: 11px; font-weight: 620; }
+.help-example-doc { margin: 0; padding: 10px 12px 0; color: var(--text); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.help-example-code, .help-example-output { overflow-x: auto; margin: 0; padding: 12px; background: var(--canvas); color: var(--success); font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
+.help-example-output-label { display: block; padding: 7px 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); color: var(--muted); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; }
+.help-example-output { color: var(--text); }
 .panel { grid-row: 3; min-height: 0; overflow: hidden; border-top: 1px solid var(--border); background: var(--editor); }
 .workbench.panel-hidden .panel { display: none; }
 .panel-tabs { display: flex; height: 34px; align-items: stretch; overflow-x: auto; padding-left: 8px; border-bottom: 1px solid var(--border); }

@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const bundleRoot = path.resolve(process.argv[2] || "dist/pages");
+const exampleFilter = process.argv[3] || "";
 const bundleURL = pathToFileURL(bundleRoot + path.sep);
 const standardRoot = new URL("stdlib/", bundleURL);
 
@@ -100,6 +101,14 @@ async function exampleFiles(importPath, item) {
   for (const file of item.files || []) {
     await addFile(files, file, new URL(`module/${item.root}/${file}`, standardRoot));
   }
+  for (const [name, data] of [...files]) {
+    if (!name.endsWith(".rbe")) continue;
+    const source = new TextDecoder().decode(data);
+    const section = /^[ \t]*@stdlib[ \t]+"([^"\r\n]+)"[ \t]*\r?\n([\s\S]*?)^[ \t]*@endstdlib[ \t]*(?:\r?\n|$)/gm;
+    for (const match of source.matchAll(section)) {
+      files.set(`std/${match[1]}`, bytes(new TextEncoder().encode(match[2])));
+    }
+  }
   if ([...files.keys()].some((name) => name.endsWith(".go")) && !files.has("go.mod")) {
     files.set("go.mod", bytes(new TextEncoder().encode(standardCatalog.module)));
   }
@@ -118,7 +127,8 @@ function workerFiles(files) {
 }
 
 async function prepareProjectTargets(files) {
-  const definitions = [...files.keys()].filter((name) => name.endsWith(".rtg") && !name.includes("/"));
+  const definitions = [...files.keys()].filter((name) =>
+    (name.endsWith(".rtg") || name.endsWith(".rbe")) && !name.includes("/"));
   const targets = new Map();
   for (const definition of definitions) {
     const inspected = await request({
@@ -155,7 +165,8 @@ function exampleTargets(item) {
 }
 
 const published = Object.entries(standardCatalog.platforms || {})
-  .filter(([, item]) => item.main && !item.hidden)
+  .filter(([importPath, item]) => item.main && !item.hidden &&
+    (!exampleFilter || importPath.includes(exampleFilter)))
   .sort(([left], [right]) => left.localeCompare(right));
 let compiled = 0;
 let monitorCompiled = 0;
@@ -166,6 +177,10 @@ for (const [importPath, item] of published) {
   for (const targetName of exampleTargets(item)) {
     const target = targetCatalog.targets.find((candidate) => candidate.name === targetName) || projectTargets.get(targetName);
     if (!target) throw new Error(`${importPath} publishes unavailable target ${targetName}`);
+    const targetFiles = new Map(files);
+    for (const library of target.libraryFiles || []) {
+      targetFiles.set(`std/${library.name}`, bytes(new TextEncoder().encode(library.source)));
+    }
     const args = [];
     if (item.language === "c") args.push("cc");
     for (const tag of target.tags || []) args.push("-tags", tag);
@@ -179,7 +194,7 @@ for (const [importPath, item] of published) {
     const backend = backendPath.includes(":") ? backendPath : new URL(backendPath, bundleURL).href;
     const started = performance.now();
     const result = await request({
-      type: "compile", id: ++requestID, args, files: workerFiles(files),
+      type: "compile", id: ++requestID, args, files: workerFiles(targetFiles),
       backend, backendTarget: target.backendTarget || target.name, backendFormat: target.backendFormat || "wasm",
       rtgDefinition: target.rtgDefinition ? new URL(target.rtgDefinition, bundleURL).href : "",
       rtgDefinitionName: target.rtgDefinitionName || target.projectDefinition || "",

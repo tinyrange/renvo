@@ -55,6 +55,16 @@ func TestBuildObjectPreludeAcceptsDefaultExternalLibraryPrototypes(t *testing.T)
 	}
 }
 
+func TestBuildObjectPreludeDropsPostfixHeaderDecorations(t *testing.T) {
+	source := []byte("#include <stdio.h>\nint main(void) { return snprintf(0, 0, \"ok\"); }\n")
+	header := []byte("extern int snprintf(char *s, size_t n, const char *format, ...) __THROWNL __attribute__((__format__(__printf__, 3, 4)));\n")
+	result := BuildObjectPrelude("/tmp/main.c", source, headerTestReader{name: "stdio.h", src: header})
+	want := []byte("extern int snprintf ( char * s , size_t n , const char * format , ... );\n")
+	if !result.Ok || !bytes.Equal(result.Prelude, want) {
+		t.Fatalf("BuildObjectPrelude decorated prototype = %#v, prelude %q", result, result.Prelude)
+	}
+}
+
 func TestBuildObjectPreludeKeepsDeclarationsInsideCXXLinkageGuard(t *testing.T) {
 	source := []byte("#include <api.h>\nint main(void) { return answer(); }\n")
 	header := []byte("#ifdef __cplusplus\nextern \"C\" {\n#endif\nint answer(void);\n#ifdef __cplusplus\n}\n#endif\n")

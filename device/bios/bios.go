@@ -209,3 +209,9 @@ func Out16(port uint16, value uint16)        { portOut16(port, value) }
 func Load8(segment, offset uint16) byte      { return segmentLoad8(segment, offset) }
 func Store8(segment, offset uint16, v byte)  { segmentStore8(segment, offset, v) }
 func Write(segment, offset uint16, b []byte) { segmentWrite(segment, offset, b) }
+
+// EnterLongMode leaves BIOS real mode, identity maps the first GiB of physical
+// memory, and transfers control to entry as 64-bit code. Entry must be an
+// in-place freestanding/amd64 program compiled into this bios/8086 image. The
+// transition disables interrupts and does not return.
+func EnterLongMode(entry uintptr) { enterLongMode(entry) }

@@ -67,8 +67,34 @@ func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
 	if len(program.RTGAssembly) > 0 || len(program.RTGAssemblyFuncs) > 0 {
 		out = appendNode(out, TagRTGAssembly, encodeRTGAssemblyCore(program.RTGAssembly, program.RTGAssemblyFuncs))
 	}
+	if program.Entrypoint > 0 {
+		payload := appendVarint(nil, program.Entrypoint-1)
+		out = appendNode(out, TagEntrypoint, payload)
+	}
+	if len(program.ForeignPrograms) > 0 {
+		out = appendNode(out, TagForeignPrograms, encodeForeignProgramsCore(program.ForeignPrograms))
+	}
 	patchUint32Core(out, rootLength, len(out)-14)
 	return out, true
+}
+
+func encodeForeignProgramsCore(programs []ForeignProgram) []byte {
+	out := appendVarint(nil, len(programs))
+	for i := 0; i < len(programs); i++ {
+		program := programs[i]
+		out = appendVarint(out, program.Global)
+		state := program.Kind
+		payload := program.Unit
+		if len(program.Artifact) > 0 {
+			state += 2
+			payload = program.Artifact
+		}
+		out = appendVarint(out, state)
+		out = appendVarint(out, len(payload))
+		out = append(out, payload...)
+		out = appendVarint(out, program.EntryOffset)
+	}
+	return out
 }
 
 func encodeRTGAssemblyCore(sources []RTGAssemblySource, bindings []RTGAssemblyBinding) []byte {

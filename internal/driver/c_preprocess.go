@@ -183,6 +183,18 @@ func cCommandMacros(options Options) []c11.Macro {
 			c11.Macro{Name: "__PTRDIFF_TYPE__", Value: "int"},
 			c11.Macro{Name: "__INTPTR_TYPE__", Value: "int"},
 			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "unsigned int"},
+			c11.Macro{Name: "__INT64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_LEAST64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_LEAST64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_FAST16_TYPE__", Value: "int"},
+			c11.Macro{Name: "__UINT_FAST16_TYPE__", Value: "unsigned int"},
+			c11.Macro{Name: "__INT_FAST32_TYPE__", Value: "int"},
+			c11.Macro{Name: "__UINT_FAST32_TYPE__", Value: "unsigned int"},
+			c11.Macro{Name: "__INT_FAST64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_FAST64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INTMAX_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINTMAX_TYPE__", Value: "long long unsigned int"},
 		)
 		if options.CCode16 {
 			macros = append(macros, c11.Macro{Name: "__code_model_32__", Value: "1"})
@@ -199,6 +211,18 @@ func cCommandMacros(options Options) []c11.Macro {
 			c11.Macro{Name: "__PTRDIFF_TYPE__", Value: "long long int"},
 			c11.Macro{Name: "__INTPTR_TYPE__", Value: "long long int"},
 			c11.Macro{Name: "__UINTPTR_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_LEAST64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_LEAST64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_FAST16_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_FAST16_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_FAST32_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_FAST32_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INT_FAST64_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINT_FAST64_TYPE__", Value: "long long unsigned int"},
+			c11.Macro{Name: "__INTMAX_TYPE__", Value: "long long int"},
+			c11.Macro{Name: "__UINTMAX_TYPE__", Value: "long long unsigned int"},
 		)
 	}
 	targetMacros := cTargetPredefinedMacros(targetOS, targetISA)

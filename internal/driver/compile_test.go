@@ -6,6 +6,7 @@ import (
 
 	"renvo.dev/backend/unit"
 	"renvo.dev/internal/load"
+	wireunit "renvo.dev/internal/unit"
 )
 
 func TestCompileUnitInvokesBackend(t *testing.T) {
@@ -36,6 +37,25 @@ func TestCompileFromFSInvokesBackend(t *testing.T) {
 	}
 	if backend.target != DefaultTarget || backend.strip {
 		t.Fatalf("backend target/strip = %q/%v", backend.target, backend.strip)
+	}
+}
+
+func TestCompileResolvesForeignUnitBeforeOuterBackend(t *testing.T) {
+	backend := &recordingBackend{binary: []byte("artifact")}
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/main.go", Src: []byte("package main\n//renvo:compile -t linux/386 payloadMain\nvar payload []byte\nfunc payloadMain() { print(42) }\nfunc main() { print(len(payload)) }\n")},
+	}
+	result := CompileUnit([]string{"-t", "linux/amd64", "-o", "app", "."}, "/repo/case", "/std", files, backend)
+	if !result.Ok {
+		t.Fatalf("foreign compile = %#v", result)
+	}
+	if len(backend.targets) != 2 || backend.targets[0] != "linux/386" || backend.targets[1] != "linux/amd64" {
+		t.Fatalf("backend target order = %#v", backend.targets)
+	}
+	programs, ok := wireunit.ReadForeignPrograms(result.Build.Unit)
+	if !ok || len(programs) != 1 || len(programs[0].Unit) != 0 || string(programs[0].Artifact) != "artifact" {
+		t.Fatalf("resolved foreign programs = %#v, ok=%v", programs, ok)
 	}
 }
 
@@ -159,6 +179,7 @@ type recordingBackend struct {
 	strip      bool
 	windowsGUI bool
 	program    unit.Program
+	targets    []string
 }
 
 type recordingOptionsBackend struct {
@@ -181,6 +202,7 @@ func (b *recordingOptionsBackend) CompileUnitWithOptions(data []byte, options Ba
 func (b *recordingBackend) CompileUnit(data []byte, target string, strip bool, windowsGUI bool) BackendResult {
 	b.called = true
 	b.target = target
+	b.targets = append(b.targets, target)
 	b.strip = strip
 	b.windowsGUI = windowsGUI
 	program, err := unit.Unmarshal(data)

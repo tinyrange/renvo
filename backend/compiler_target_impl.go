@@ -1,7 +1,8 @@
 package main
 
 func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-	return g.c.renvoNativeIntSize == 4 && g.c.renvoTargetArch != renvoArchWasm32 && kind == renvoTypeStruct
+	return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
+		(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
@@ -220,6 +221,14 @@ func RenvoTargetBinding(targetName string) (string, string, int, bool) {
 func RenvoTargetHasBuildTag(targetName string, tag string) bool {
 	target := renvoParseTargetArg(targetName)
 	return target != 0 && renvoRTGTargetHasBuildTag(target, tag)
+}
+
+// RenvoTargetHasCapability reports one capability from the selected target
+// descriptor. Multi-target frontends use it to distinguish complete artifacts
+// from images whose entrypoint can execute directly at their embedded address.
+func RenvoTargetHasCapability(targetName string, capability string) bool {
+	target := renvoParseTargetArg(targetName)
+	return target != 0 && renvoRTGTargetHasCapability(target, capability)
 }
 
 func RenvoDefaultArenaSize(targetName string) (int, bool) {

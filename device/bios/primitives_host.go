@@ -2,10 +2,24 @@
 
 package bios
 
+// InterruptHook handles simulated real-mode interrupts in host builds. It is
+// unavailable to Renvo BIOS/8086 programs and is intended for host tests and
+// emulators.
 var InterruptHook func(vector byte, regs *Registers)
+
+// PortInHook supplies simulated port input in host builds. It is unavailable
+// to Renvo BIOS/8086 programs and is intended for host tests and emulators.
 var PortInHook func(port uint16) byte
+
+// PortOutHook observes simulated port output in host builds. It is unavailable
+// to Renvo BIOS/8086 programs and is intended for host tests and emulators.
 var PortOutHook func(port uint16, value uint16, width int)
+
+// BootDriveHook supplies a simulated BIOS boot drive in host builds. It is
+// unavailable to Renvo BIOS/8086 programs and is intended for host tests and
+// emulators.
 var BootDriveHook func() byte
+var EnterLongModeHook func(entry uintptr)
 
 func hostInterrupt(vector byte, regs *Registers) {
 	if InterruptHook != nil {
@@ -43,4 +57,9 @@ func bootDrive() byte {
 		return BootDriveHook()
 	}
 	return 0x80
+}
+func enterLongMode(entry uintptr) {
+	if EnterLongModeHook != nil {
+		EnterLongModeHook(entry)
+	}
 }

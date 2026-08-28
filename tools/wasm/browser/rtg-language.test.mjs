@@ -13,7 +13,7 @@ test("registers RTG syntax and editor behavior", () => {
   } };
   registerRTGLanguage(monaco);
   assert.equal(RTG_LANGUAGE_ID, "renvo-rtg");
-  assert.deepEqual(calls.registration.extensions, [".rtg"]);
+  assert.deepEqual(calls.registration.extensions, [".rtg", ".rbe"]);
   assert.equal(calls.configuration.value.comments.lineComment, "#");
   assert.ok(calls.tokens.value.declarationKeywords.includes("target"));
   assert.ok(calls.tokens.value.blockKeywords.includes("instructions"));
@@ -31,8 +31,11 @@ test("keeps an existing RTG registration", () => {
 
 test("project RTG targets use the browser JIT and VM backend pipeline", async () => {
   const app = await readFile(new URL("./app.mjs", import.meta.url), "utf8");
+  const smoke = await readFile(new URL("./smoke-examples.mjs", import.meta.url), "utf8");
   const worker = await readFile(new URL("./worker.mjs", import.meta.url), "utf8");
-  assert.match(app, /if \(name\.endsWith\("\.rtg"\) \|\| name\.endsWith\("\.rtgasm"\)\) return RTG_LANGUAGE_ID/);
+  assert.match(app, /if \(isBackendDefinition\(name\) \|\| name\.endsWith\("\.rtgasm"\)\) return RTG_LANGUAGE_ID/);
+  assert.match(app, /function rbeStandardLibrarySources\(source\)/);
+  assert.match(app, /files\.set\(`std\/\$\{path\}`/);
   assert.match(app, /type, id, definition, target, files: payload\.files/);
   assert.match(app, /backendFormat: buildTarget\.backendFormat \|\| "wasm"/);
   assert.match(app, /function starterCommand\(\)[\s\S]*selectedTarget\?\.output/);
@@ -49,4 +52,6 @@ test("project RTG targets use the browser JIT and VM backend pipeline", async ()
   assert.match(worker, /fd_sync: \(\) => 0/);
   assert.match(worker, /path_create_directory: .*pathCreateDirectory/);
   assert.match(worker, /path_rename:/);
+  assert.match(smoke, /name\.endsWith\("\.rtg"\) \|\| name\.endsWith\("\.rbe"\)/);
+  assert.match(smoke, /files\.set\(`std\/\$\{match\[1\]\}`/);
 });

@@ -5,6 +5,7 @@
 package backendjit
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/driver"
 	"renvo.dev/internal/load"
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 	"renvo.dev/internal/rtgb"
 	"renvo.dev/internal/unit"
@@ -62,14 +64,18 @@ type Prepared struct {
 }
 
 func Prepare(config PrepareConfig) Prepared {
+	bundle := rbe.Parse(config.Definition)
+	if !bundle.Ok {
+		return Prepared{Diagnostic: driver.Diagnostic{
+			Phase: "rbe", Code: "RENVO-RBE-001", Message: bundle.Message,
+			Path: config.Filename, Start: bundle.Offset,
+		}}
+	}
+	enablement := sha256.Sum256(config.Definition)
 	resolved := rtg.ResolveDefinitions(rtg.ParseImports(
-		config.Definition, config.Filename, config.ImportLoader))
+		bundle.Definition, config.Filename, config.ImportLoader))
 	if !resolved.Ok {
 		return prepareFailure("RENVO-RTG-001", resolved.Diagnostics[0].Message)
-	}
-	generated := rtg.GeneratePreparedBackend(resolved, config.Target)
-	if !generated.Ok {
-		return prepareFailure("RENVO-RTG-002", generated.Diagnostics[0].Message)
 	}
 	host := config.HostTarget
 	if host == "" {
@@ -82,18 +88,34 @@ func Prepare(config PrepareConfig) Prepared {
 	if arenaSize == 0 {
 		arenaSize = preparedBackendArenaSize
 	}
-	key := cacheKeyForArena(generated.Descriptor, host, arenaSize)
+	key := ""
 	cachePath := ""
 	cache := config.Cache
 	if cache == nil && config.CacheDir != "" {
-		cachePath = filepath.Join(config.CacheDir, key+".rtgb")
 		cache = FileCache{Directory: config.CacheDir}
 	}
-	if cache != nil {
+	descriptor, hasDescriptor := resolvedTargetDescriptor(resolved, config.Target)
+	if hasDescriptor {
+		key = cacheKeyForEnablement(descriptor, host, arenaSize, enablement)
+		if config.CacheDir != "" {
+			cachePath = filepath.Join(config.CacheDir, key+".rtgb")
+		}
+	}
+	if cache != nil && key != "" {
 		if source, found := cache.Load(key); found {
-			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, generated.Descriptor, host) {
+			if artifact, ok := rtgb.Decode(source); ok && compatible(artifact, descriptor, host, enablement) {
 				return Prepared{Artifact: artifact, Resolved: resolved, Encoded: source, CachePath: cachePath, CacheHit: true, Ok: true}
 			}
+		}
+	}
+	generated := rtg.GeneratePreparedBackend(resolved, config.Target)
+	if !generated.Ok {
+		return prepareFailure("RENVO-RTG-002", generated.Diagnostics[0].Message)
+	}
+	if key == "" {
+		key = cacheKeyForEnablement(generated.Descriptor, host, arenaSize, enablement)
+		if config.CacheDir != "" {
+			cachePath = filepath.Join(config.CacheDir, key+".rtgb")
 		}
 	}
 	sources, names, err := preparationSources(config.BackendRoot, generated)
@@ -119,7 +141,9 @@ func Prepare(config PrepareConfig) Prepared {
 		Protocol:        ProtocolVersion,
 		Unit:            unit.Version,
 		Optimization:    OptimizationVersion,
+		Enablement:      enablement,
 		DefinitionFiles: rtg.SourceBundle(resolved.Document),
+		LibraryFiles:    bundle.Files,
 		Payload:         compiled.Binary,
 	}
 	encoded, ok := rtgb.Encode(artifact)
@@ -132,6 +156,16 @@ func Prepare(config PrepareConfig) Prepared {
 		}
 	}
 	return Prepared{Artifact: artifact, Resolved: resolved, Encoded: encoded, CachePath: cachePath, Ok: true}
+}
+
+func resolvedTargetDescriptor(resolved rtg.ResolveResult, name string) (rtg.TargetDescriptor, bool) {
+	for i := range resolved.Targets {
+		descriptor := resolved.Targets[i].Descriptor
+		if descriptor.Name == name || contains(descriptor.Aliases, name) {
+			return descriptor, true
+		}
+	}
+	return rtg.TargetDescriptor{}, false
 }
 
 // FileCache is the process-host adapter for content-addressed artifacts.
@@ -217,7 +251,7 @@ func preparationSources(backendRoot string, generated rtg.GenerateResult) ([]loa
 	return sources, names, nil
 }
 
-func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host string) bool {
+func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host string, enablement [32]byte) bool {
 	return artifact.Descriptor.Name == descriptor.Name &&
 		artifact.Descriptor.Definition == descriptor.Definition &&
 		artifact.Descriptor.Version == descriptor.Version &&
@@ -226,7 +260,8 @@ func compatible(artifact rtgb.Artifact, descriptor rtg.TargetDescriptor, host st
 		artifact.Kernel == KernelVersion &&
 		artifact.Protocol == ProtocolVersion &&
 		artifact.Unit == unit.Version &&
-		artifact.Optimization == OptimizationVersion
+		artifact.Optimization == OptimizationVersion &&
+		artifact.Enablement == enablement
 }
 
 func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
@@ -234,7 +269,15 @@ func cacheKey(descriptor rtg.TargetDescriptor, host string) string {
 }
 
 func cacheKeyForArena(descriptor rtg.TargetDescriptor, host string, arenaSize int) string {
-	return rtg.HashText(descriptor.Definition) + "-" + encodedName(descriptor.Name) +
+	return cacheKeyForEnablement(descriptor, host, arenaSize, descriptor.Definition)
+}
+
+func cacheKeyForEnablement(descriptor rtg.TargetDescriptor, host string, arenaSize int, enablement [32]byte) string {
+	identitySource := make([]byte, 0, len(descriptor.Definition)+len(enablement))
+	identitySource = append(identitySource, descriptor.Definition[:]...)
+	identitySource = append(identitySource, enablement[:]...)
+	identity := sha256.Sum256(identitySource)
+	return rtg.HashText(identity) + "-" + encodedName(descriptor.Name) +
 		"-" + encodedName(host) + "-g" + decimal(rtg.GeneratorVersion) +
 		"-k" + decimal(KernelVersion) + "-u" + decimal(unit.Version) +
 		"-p" + decimal(ProtocolVersion) + "-o" + decimal(OptimizationVersion) +

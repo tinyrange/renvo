@@ -1,5 +1,38 @@
 #include <string.h>
 
+void *memchr(const void *value, int ch, size_t n) {
+    const unsigned char *bytes = value;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (bytes[i] == (unsigned char)ch) return (void *)(bytes + i);
+    }
+    return NULL;
+}
+
+size_t strcspn(const char *value, const char *reject) {
+    size_t count = 0;
+    while (value[count] != '\0') {
+        const char *candidate = reject;
+        while (*candidate != '\0') {
+            if (value[count] == *candidate) return count;
+            candidate++;
+        }
+        count++;
+    }
+    return count;
+}
+
+size_t strspn(const char *value, const char *accept) {
+    size_t count = 0;
+    while (value[count] != '\0') {
+        const char *candidate = accept;
+        while (*candidate != '\0' && value[count] != *candidate) candidate++;
+        if (*candidate == '\0') return count;
+        count++;
+    }
+    return count;
+}
+
 void *memcpy(void *restrict dst, const void *restrict src, size_t n) {
     unsigned char *out = dst;
     const unsigned char *in = src;

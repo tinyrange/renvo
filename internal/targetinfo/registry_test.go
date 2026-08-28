@@ -46,6 +46,19 @@ func TestGeneratedRegistryMatchesPolicy(t *testing.T) {
 	}
 }
 
+func TestGeneratedCapabilityLookupMatchesDescriptors(t *testing.T) {
+	for _, descriptor := range All() {
+		for _, capability := range descriptor.Capabilities {
+			if !HasCapability(descriptor.Name, capability) {
+				t.Errorf("%s lost capability %s", descriptor.Name, capability)
+			}
+		}
+		if HasCapability(descriptor.Name, "not_a_capability") {
+			t.Errorf("%s accepted an unknown capability", descriptor.Name)
+		}
+	}
+}
+
 func TestGeneratedRegistryMatchesMachineDefinitions(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "backend", "definitions", "*.rtg"))
 	if err != nil {

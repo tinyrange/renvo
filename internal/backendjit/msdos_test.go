@@ -21,7 +21,7 @@ func TestMSDOSCOMExample(t *testing.T) {
 	}
 	definition := filepath.Join(root, "backends", "msdos.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-		t.TempDir(), backendcompiled.Backend{})
+		backendJITTestCacheDir, backendcompiled.Backend{})
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", "msdos/8086",
@@ -90,7 +90,7 @@ func TestMSDOSImageLimitDiagnostic(t *testing.T) {
 	}
 	backend := New(filepath.Join(root, "backends", "msdos.rtg"),
 		filepath.Join(root, "backend"), filepath.Join(root, "std"),
-		t.TempDir(), backendcompiled.Backend{})
+		backendJITTestCacheDir, backendcompiled.Backend{})
 	result := backend.CompileSourceWithArena([]byte(`package main
 var reserve [30000]byte
 var reserve2 [30000]byte
@@ -111,7 +111,7 @@ func TestMSDOSMZTargetAndDeviceLibrary(t *testing.T) {
 	}
 	definition := filepath.Join(root, "backends", "msdos.rtg")
 	backend := New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-		t.TempDir(), backendcompiled.Backend{})
+		backendJITTestCacheDir, backendcompiled.Backend{})
 	project := t.TempDir()
 	module := "module example.com/dosapp\nrequire renvo.dev v0.0.0\nreplace renvo.dev => " + root + "\n"
 	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte(module), 0o644); err != nil {

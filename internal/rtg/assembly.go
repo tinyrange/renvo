@@ -269,78 +269,113 @@ func assemblyFail(document AssemblyDocument, span Span, code string, message str
 // entry point evaluates one project assembly body. The caller compiles this
 // source with the ordinary backend kernel for vm/vm32.
 func GenerateAssemblyEvaluator(resolved ResolveResult, targetName string, assembly AssemblyDocument, entryIndex int) GenerateResult {
+	return generateAssemblyEvaluators(resolved, targetName, []AssemblyEvaluatorEntry{{
+		Assembly: assembly, EntryIndex: entryIndex,
+	}}, false)
+}
+
+// AssemblyEvaluatorEntry identifies one body for batched evaluation.
+type AssemblyEvaluatorEntry struct {
+	Assembly   AssemblyDocument
+	EntryIndex int
+}
+
+// GenerateAssemblyEvaluators emits one evaluator for several project assembly
+// bodies. Its output is a sequence of uint32-length-prefixed machine-code
+// fragments in entry order, avoiding a compiler preparation for every body.
+func GenerateAssemblyEvaluators(resolved ResolveResult, targetName string, entries []AssemblyEvaluatorEntry) GenerateResult {
+	return generateAssemblyEvaluators(resolved, targetName, entries, true)
+}
+
+func generateAssemblyEvaluators(resolved ResolveResult, targetName string, entries []AssemblyEvaluatorEntry, framed bool) GenerateResult {
 	if !resolved.Ok {
 		return GenerateResult{Diagnostics: resolved.Diagnostics}
 	}
-	if !assembly.Ok || entryIndex < 0 || entryIndex >= len(assembly.Entries) {
+	if len(entries) == 0 {
 		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: assembly.Filename, Span: sourceSpan(assembly.Source, 0, 0),
 			Code: "RTGASM-GENERATE-001", Message: "assembly evaluator entry is invalid",
 		}}}
 	}
+	first := entries[0].Assembly
 	target, ok := lookupResolvedTarget(resolved, targetName)
 	if !ok {
 		return GenerateResult{Diagnostics: []Diagnostic{{
-			Filename: assembly.Filename, Span: sourceSpan(assembly.Source, 0, 0),
+			Filename: first.Filename, Span: sourceSpan(first.Source, 0, 0),
 			Code: "RTGASM-GENERATE-002", Message: "assembly evaluator target is unavailable",
 		}}}
 	}
-	entry := assembly.Entries[entryIndex]
-	for step := 0; step < len(entry.Steps); step++ {
-		child := entry.Steps[step]
-		if len(child.Children) != 0 || len(child.Tokens) == 0 ||
-			child.Tokens[0] != "call" && child.Tokens[0] != "let" &&
-				child.Tokens[0] != "set" && child.Tokens[0] != "var" &&
-				child.Tokens[0] != "increment" && child.Tokens[0] != "decrement" &&
-				child.Tokens[0] != "return" && !sequenceBareCall(child.Tokens) {
-			return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
-				Document{Filename: assembly.Filename, Source: assembly.Source}, child,
-				"RTGASM-GENERATE-003",
-				"assembly body contains an unsupported bounded-sequence step")}}
-		}
-		if child.Tokens[0] != "return" && len(child.Tokens) < 2 {
-			return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
-				Document{Filename: assembly.Filename, Source: assembly.Source}, child,
-				"RTGASM-GENERATE-004", "assembly body step is incomplete")}}
-		}
-		if child.Tokens[0] == "return" && (len(child.Tokens) != 1 || step+1 != len(entry.Steps)) {
-			return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
-				Document{Filename: assembly.Filename, Source: assembly.Source}, child,
-				"RTGASM-GENERATE-005", "assembly return must be empty and final")}}
-		}
-	}
-	steps := make([]Statement, len(entry.Steps))
-	copy(steps, entry.Steps)
-	rewriteVirtualStatements(steps, target.Arch.Package, resolved.Document.packages,
-		"", true, []string{"out"})
+	sequences := make([]architectureSequence, 0, len(entries))
 	var wantedGo []string
 	var wantedSequences []string
 	goNames := embeddedGoFunctionNames(resolved.Document)
-	sequences := architectureSequences(target.Arch)
-	for i := 0; i < len(steps); i++ {
-		for token := 0; token < len(steps[i].Tokens); token++ {
-			name := steps[i].Tokens[token]
-			if stringIndex(goNames, name) >= 0 && stringIndex(wantedGo, name) < 0 {
-				wantedGo = append(wantedGo, name)
+	architectureEntries := architectureSequences(target.Arch)
+	for evaluatorIndex := range entries {
+		assembly := entries[evaluatorIndex].Assembly
+		entryIndex := entries[evaluatorIndex].EntryIndex
+		if !assembly.Ok || entryIndex < 0 || entryIndex >= len(assembly.Entries) {
+			return GenerateResult{Diagnostics: []Diagnostic{{
+				Filename: assembly.Filename, Span: sourceSpan(assembly.Source, 0, 0),
+				Code: "RTGASM-GENERATE-001", Message: "assembly evaluator entry is invalid",
+			}}}
+		}
+		entry := assembly.Entries[entryIndex]
+		for step := 0; step < len(entry.Steps); step++ {
+			child := entry.Steps[step]
+			if len(child.Children) != 0 || len(child.Tokens) == 0 ||
+				child.Tokens[0] != "call" && child.Tokens[0] != "let" &&
+					child.Tokens[0] != "set" && child.Tokens[0] != "var" &&
+					child.Tokens[0] != "increment" && child.Tokens[0] != "decrement" &&
+					child.Tokens[0] != "return" && !sequenceBareCall(child.Tokens) {
+				return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
+					Document{Filename: assembly.Filename, Source: assembly.Source}, child,
+					"RTGASM-GENERATE-003",
+					"assembly body contains an unsupported bounded-sequence step")}}
 			}
-			for sequenceIndex := 0; sequenceIndex < len(sequences); sequenceIndex++ {
-				if sequences[sequenceIndex].Name == name && stringIndex(wantedSequences, name) < 0 {
-					wantedSequences = append(wantedSequences, name)
+			if child.Tokens[0] != "return" && len(child.Tokens) < 2 {
+				return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
+					Document{Filename: assembly.Filename, Source: assembly.Source}, child,
+					"RTGASM-GENERATE-004", "assembly body step is incomplete")}}
+			}
+			if child.Tokens[0] == "return" && (len(child.Tokens) != 1 || step+1 != len(entry.Steps)) {
+				return GenerateResult{Diagnostics: []Diagnostic{statementDiagnostic(
+					Document{Filename: assembly.Filename, Source: assembly.Source}, child,
+					"RTGASM-GENERATE-005", "assembly return must be empty and final")}}
+			}
+		}
+		steps := make([]Statement, len(entry.Steps))
+		copy(steps, entry.Steps)
+		rewriteVirtualStatements(steps, target.Arch.Package, resolved.Document.packages,
+			"", true, []string{"out"})
+		for i := 0; i < len(steps); i++ {
+			for token := 0; token < len(steps[i].Tokens); token++ {
+				name := steps[i].Tokens[token]
+				if stringIndex(goNames, name) >= 0 && stringIndex(wantedGo, name) < 0 {
+					wantedGo = append(wantedGo, name)
+				}
+				for sequenceIndex := 0; sequenceIndex < len(architectureEntries); sequenceIndex++ {
+					if architectureEntries[sequenceIndex].Name == name && stringIndex(wantedSequences, name) < 0 {
+						wantedSequences = append(wantedSequences, name)
+					}
 				}
 			}
 		}
+		name := "renvoRTGASMEntry"
+		if framed {
+			name += decimalText(evaluatorIndex)
+		}
+		sequences = append(sequences, architectureSequence{
+			Name: name, Parameters: []embeddedParameter{{Name: "out", Source: []byte("out *RTGEmitter")}}, Steps: steps,
+		})
 	}
 	generated := generatePreparedBackendWithRoots(resolved, targetName, wantedGo, wantedSequences)
 	if !generated.Ok {
 		return generated
 	}
-	sequence := architectureSequence{
-		Name:       "renvoRTGASMEntry",
-		Parameters: []embeddedParameter{{Name: "out", Source: []byte("out *RTGEmitter")}},
-		Steps:      steps,
+	for i := range sequences {
+		generated.Source = appendAssemblyEvaluatorFunction(generated.Source, resolved.Document, target.Arch, sequences[i])
 	}
-	generated.Source = appendAssemblyEvaluatorFunction(generated.Source, resolved.Document, target.Arch, sequence)
-	generated.Source = append(generated.Source, `
+	if !framed {
+		generated.Source = append(generated.Source, `
 func appMain(args []string, env []string) int {
 	context := renvoNewCompileContext(renvoTargetRTG, true, false, false)
 	var out renvoAsm
@@ -354,6 +389,40 @@ func appMain(args []string, env []string) int {
 	return 0
 }
 `...)
+		return generated
+	}
+	generated.Source = append(generated.Source, "\nfunc appMain(args []string, env []string) int {\n\tcontext := renvoNewCompileContext(renvoTargetRTG, true, false, false)\n\tvar output []byte\n"...)
+	for i := range sequences {
+		index := decimalText(i)
+		generated.Source = append(generated.Source, "\tvar out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, " renvoAsm\n\trenvoAsmInitWithContext(&out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ", context)\n\t"...)
+		generated.Source = append(generated.Source, sequences[i].Name...)
+		generated.Source = append(generated.Source, "(&out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ")\n\trenvoAsmPatch(&out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ")\n\tif renvoRTGUnsupportedOperation != 0 || out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ".patchFailed { return 1 }\n\tlength"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, " := len(out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ".code)\n\toutput = append(output, byte(length"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, "), byte(length"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, " >> 8), byte(length"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, " >> 16), byte(length"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, " >> 24))\n\toutput = append(output, out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ".code...)\n"...)
+	}
+	generated.Source = append(generated.Source, "\twrite(1, output, -1)\n\treturn 0\n}\n"...)
 	return generated
 }
 
@@ -361,7 +430,9 @@ func appendAssemblyEvaluatorFunction(out []byte, document Document, arch Declara
 	names := embeddedGoNames(document)
 	prefix := "rtg" + exportedName(document.Unit)
 	exports := architectureExports(arch)
-	out = append(out, "\nfunc renvoRTGASMEntry(out *renvoAsm) {\n"...)
+	out = append(out, "\nfunc "...)
+	out = append(out, sequence.Name...)
+	out = append(out, "(out *renvoAsm) {\n"...)
 	for step := 0; step < len(sequence.Steps); step++ {
 		tokens := sequence.Steps[step].Tokens
 		if len(tokens) == 0 {

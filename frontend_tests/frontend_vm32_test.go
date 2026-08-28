@@ -150,7 +150,7 @@ func vmFrontendSourceFiles(t *testing.T, root string) []vm.File {
 			return nil
 		}
 		extension := filepath.Ext(path)
-		if extension != ".go" && extension != ".rtg" && filepath.Base(path) != "go.mod" {
+		if extension != ".go" && extension != ".rtg" && extension != ".rbe" && filepath.Base(path) != "go.mod" {
 			return nil
 		}
 		data, err := os.ReadFile(path)

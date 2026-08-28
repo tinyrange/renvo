@@ -1,6 +1,16 @@
 package esp32c6
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
+
+// GPIO returns the pin capability used by the portable gpio and device packages.
+func ExampleGPIO() {
+	statusLED := GPIO(7)
+	fmt.Printf("%T\n", statusLED)
+	// Output: *esp32c6.Pin
+}
 
 func TestGPIORegisterAddresses(t *testing.T) {
 	tests := []struct {

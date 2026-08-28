@@ -124,6 +124,12 @@ func (s *RenvoCommandSession) Step() bool {
 			s.done = true
 			return true
 		}
+		resolved, diagnostic, ok := resolveForeignProgramsEmbedded(s.built.Unit)
+		if !ok {
+			s.fail(diagnostic, s.resetArena, s.mark)
+			return true
+		}
+		s.built.Unit = resolved
 		s.stage = 3
 		return false
 	}

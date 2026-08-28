@@ -9,20 +9,21 @@ import (
 // FSBuildSession advances source discovery and the package pipeline in bounded
 // steps. It is used by embedded GUI callers that must return to an event loop.
 type FSBuildSession struct {
-	args          []string
-	workDir       string
-	stdRoot       string
-	moduleCache   string
-	fs            SourceFS
-	compact       bool
-	cached        bool
-	stage         int
-	sourcesStart  int
-	sourcesEnd    int
-	rootArg       string
-	pipeline      *pipeline.Session
-	targetBinding unit.TargetBinding
-	result        BuildResult
+	args            []string
+	workDir         string
+	stdRoot         string
+	moduleCache     string
+	fs              SourceFS
+	compact         bool
+	cached          bool
+	stage           int
+	sourcesStart    int
+	sourcesEnd      int
+	rootArg         string
+	pipeline        *pipeline.Session
+	targetBinding   unit.TargetBinding
+	foreignPrograms []unit.ForeignProgram
+	result          BuildResult
 }
 
 func BeginFSBuildSession(args []string, workDir string, stdRoot string, moduleCache string, fs SourceFS, compact bool) *FSBuildSession {
@@ -47,7 +48,7 @@ func (s *FSBuildSession) Step() bool {
 		return true
 	}
 	if s.stage == 0 {
-		options, binding := resolveFSBuildSessionOptions(s.args, s.workDir, s.fs)
+		options, binding, libraryFiles := resolveFSBuildSessionOptions(s.args, s.workDir, s.fs)
 		s.targetBinding = binding
 		s.result.Options = options
 		if !options.Ok {
@@ -58,6 +59,9 @@ func (s *FSBuildSession) Step() bool {
 		options = resolveCCompilerPaths(s.workDir, options)
 		s.workDir, options = standaloneCSourceContext(s.workDir, options)
 		s.result.Options = options
+		if len(libraryFiles) != 0 {
+			s.fs = backendEnablementFSForBuild(s.fs, s.stdRoot, libraryFiles)
+		}
 		s.fs = sourceFSForOptions(s.fs, s.workDir, options)
 		s.stage = 1
 		return false
@@ -102,15 +106,24 @@ func (s *FSBuildSession) Step() bool {
 		if len(options.Files) > 0 {
 			s.rootArg = sources.Root.Dir
 		}
+		foreign := new(foreignPreparation)
+		prepareForeignPrograms(&options, s.workDir, s.stdRoot, s.moduleCache, &sources, s.fs, foreign)
+		if !foreign.Ok {
+			setBuildForeignFail(&s.result, foreign.Diagnostic)
+			s.stage = 4
+			return true
+		}
+		s.foreignPrograms = foreign.Programs
 		if options.Mode == ModeObject {
 			// Object linking rewrites source-token line fields while producing the
 			// compact mapping, so its source arena cannot yet be transient.
 			s.pipeline = pipeline.BeginObjectSession(
 				s.workDir, s.stdRoot, s.rootArg, sources.Files, s.cached)
 		} else {
+			compactPipeline := s.compact && len(s.foreignPrograms) == 0
 			s.pipeline = pipeline.BeginSession(
 				s.workDir, s.stdRoot, s.rootArg, sources.Files,
-				s.sourcesStart, s.sourcesEnd, s.compact, s.cached)
+				s.sourcesStart, s.sourcesEnd, compactPipeline, s.cached && compactPipeline)
 		}
 		s.stage = 2
 		return false
@@ -127,6 +140,11 @@ func (s *FSBuildSession) Step() bool {
 			return true
 		}
 		s.result.Unit = built.Link.Data
+		if !bindForeignPrograms(&s.result.Unit, &built.Link.Program, s.foreignPrograms) {
+			setBuildForeignFail(&s.result, Diagnostic{Phase: "foreign", Code: "RENVO-FOREIGN-008", Message: "could not encode foreign units"})
+			s.stage = 4
+			return true
+		}
 		bindBuiltInTarget(&s.result.Unit, s.result.Options)
 		if s.targetBinding.Target != "" {
 			if bound, ok := unit.BindTarget(s.result.Unit, s.targetBinding); ok {

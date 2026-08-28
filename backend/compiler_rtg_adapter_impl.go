@@ -492,12 +492,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	if renvoRTGPreparedObject != 0 {
 		return renvoTryCompileObjectProgramRTG(p, meta)
 	}
-	appIndex := -1
-	for i := 0; i < len(meta.funcs); i++ {
-		if renvoBytesEqualText(meta.prog.src, meta.funcs[i].nameStart, meta.funcs[i].nameEnd, "appMain") {
-			appIndex = i
-		}
-	}
+	appIndex := p.entryFunc
 	if appIndex < 0 {
 		renvoPrintErr("renvo: prepared backend could not find appMain\n")
 		return renvoCompileResult{}
@@ -507,6 +502,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
 	renvoAsmInitWithContext(&g.asm, g.c)
 	g.asm.codeOffset = renvoRTGCodeOffset
 	for i := 0; i < len(meta.funcs); i++ {

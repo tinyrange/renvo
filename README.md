@@ -258,6 +258,10 @@ and `main(int, char **)` are supported. C identifiers do not fall through to
 Go builtins; for example, `print` is not a C output function—include
 `<stdio.h>` and use `printf`, `puts`, or the stream APIs.
 
+For a larger local exercise, [`tools/sqlite-smoke`](tools/sqlite-smoke) builds
+the pinned official SQLite amalgamation and runs queries against an in-memory
+database. It is intentionally a manual smoke test, not a CI support gate.
+
 A native C entrypoint can opt into a narrow Go adapter from the same directory:
 
 ```c
@@ -355,6 +359,33 @@ content-addressed cache entry afterward:
 
 ```sh
 renvo -backend machines.rtg -t acme/amd64 -o app ./cmd/app
+```
+
+An `.rbe` (Renvo Backend Enablement) file extends the same RTG definition with
+target-specific standard-library additions. Each addition names the path it
+overlays below Renvo's standard-library root:
+
+```text
+definition 1
+unit acme
+implements direct_emitter_v1
+...
+
+@stdlib "syscall/syscall_acme_renvo.go"
+//go:build renvo && acme
+package syscall
+...
+@endstdlib
+```
+
+The definition and library additions are hashed, cached, and packaged as one
+unit. Source `.rbe` files and prepared `.rtgb` artifacts therefore carry enough
+information to add a target end to end without patching the frontend or
+installing a separate standard-library tree:
+
+```sh
+renvo -backend machines.rbe -t acme/pdp11 -o app ./cmd/app
+renvo backend build machines.rbe -t acme/pdp11 -o acme-pdp11.rtgb
 ```
 
 Preparation can instead produce a host-specific, single-target artifact that

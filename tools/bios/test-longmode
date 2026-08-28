@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+tool_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$tool_root/../.." && pwd)
+
+qemu=${RENVO_BIOS_QEMU:-qemu-system-x86_64}
+if ! command -v "$qemu" >/dev/null 2>&1; then
+	echo "qemu-system-x86_64 not found; set RENVO_BIOS_QEMU" >&2
+	exit 2
+fi
+
+timeout_command=${RENVO_BIOS_TIMEOUT:-timeout}
+if ! command -v "$timeout_command" >/dev/null 2>&1; then
+	echo "timeout command not found; set RENVO_BIOS_TIMEOUT" >&2
+	exit 2
+fi
+
+temporary=$(mktemp -d)
+trap 'rm -rf "$temporary"' EXIT HUP INT TERM
+image=$temporary/renvo-bios-longmode.img
+debug_log=$temporary/debug.log
+
+if [ -n "${RENVO:-}" ]; then
+	renvo=$RENVO
+else
+	renvo=$temporary/renvo
+	(cd "$repository_root" && go build -o "$renvo" ./cmd/renvo)
+fi
+
+"$renvo" -backend "$repository_root/backends/bios_multistage.rtg" \
+	-t bios/8086 -s -o "$image" "$repository_root/examples/bios-longmode"
+
+set +e
+"$timeout_command" 20s "$qemu" \
+	-machine pc -m 32M -display none -serial none -monitor none -no-reboot \
+	-debugcon "file:$debug_log" -global isa-debugcon.iobase=0xe9 \
+	-drive "format=raw,file=$image,if=ide,index=0" -boot c \
+	-device isa-debug-exit,iobase=0xf4,iosize=0x01
+status=$?
+set -e
+
+if [ "$status" -ne 1 ]; then
+	echo "BIOS long-mode test failed: emulator exit status $status (expected 1)" >&2
+	cat "$debug_log" >&2 || true
+	exit 1
+fi
+if ! grep -q "REAL MODE: shared function" "$debug_log" ||
+	! grep -q "LONG MODE: shared function" "$debug_log"; then
+	echo "BIOS long-mode test failed: transition checkpoints were incomplete" >&2
+	cat "$debug_log" >&2 || true
+	exit 1
+fi
+
+echo "PASS: one package compiled shared code for 8086 and amd64, then entered long mode"

@@ -3,6 +3,7 @@ import { preferredESPTransport, requestESPUSBPort } from "./esp-webusb.mjs";
 import { ESPJTAGHotReloadSession, requestESPUSBJTAG, supportsESPWebUSBJTAG } from "./esp-webusb-jtag.mjs";
 import { formatPicoMonitorInfo, PicoMonitorHotReloadSession, requestPicoMonitor } from "./pico-webusb-monitor.mjs";
 import { installEditorOpener } from "./editor-navigation.mjs";
+import { catalogHelpPages, findAPIHelpReference, helpAnchor, installAPIHelpAction } from "./api-help.mjs";
 import { fetchAsset } from "./asset-fetch.mjs";
 import { cleanLanguagePath, isCLibrarySourcePath, sourceImportPath } from "./language-path.mjs";
 import { SerialPlotter, SerialPlotterView } from "./serial-plotter.mjs";
@@ -479,6 +480,7 @@ async function loadMonaco() {
     openFile,
     get editor() { return editor; },
   });
+  installAPIHelpAction(monaco, editor, openAPIHelpAtCursor);
   editor.onDidChangeCursorPosition(({ position }) => {
     elements.cursorStatus.textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
   });
@@ -1490,20 +1492,41 @@ async function loadStandardPackage(importPath, catalog) {
 }
 
 function workspacePayload() {
+  const sources = new Map();
+  for (const [name, source] of stdlibFiles) {
+    sources.set(name, source.slice());
+  }
+  for (const file of selectedTarget?.libraryFiles || []) {
+    sources.set(`std/${file.name}`, encoder.encode(file.source));
+  }
+  for (const [name, model] of models) {
+    sources.set(name, encoder.encode(model.getValue()));
+  }
+  const definition = selectedTarget?.projectDefinition;
+  if (definition?.endsWith(".rbe")) {
+    const source = models.get(definition)?.getValue();
+    for (const [name, content] of rbeStandardLibrarySources(source || "")) {
+      sources.set(name, encoder.encode(content));
+    }
+  }
   const files = [];
   const transfers = [];
-  for (const [name, model] of models) {
-    const data = encoder.encode(model.getValue());
-    files.push({ name, data });
-    transfers.push(data.buffer);
-  }
-  for (const [name, source] of stdlibFiles) {
-    if (models.has(name)) continue;
-    const data = source.slice();
+  for (const [name, data] of sources) {
     files.push({ name, data });
     transfers.push(data.buffer);
   }
   return { files, transfers };
+}
+
+function rbeStandardLibrarySources(source) {
+  const files = new Map();
+  const section = /^[ \t]*@stdlib[ \t]+"([^"\r\n]+)"[ \t]*\r?\n([\s\S]*?)^[ \t]*@endstdlib[ \t]*(?:\r?\n|$)/gm;
+  for (const match of source.matchAll(section)) {
+    const path = match[1];
+    if (path.startsWith("/") || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) continue;
+    files.set(`std/${path}`, match[2]);
+  }
+  return files;
 }
 
 function languageWorkspacePayload() {
@@ -1910,8 +1933,8 @@ function openFile(name) {
   elements.copyToPlayground.title = `Copy ${name} into the editable project`;
   elements.formatFile.disabled = !editable || !name.endsWith(".go");
   elements.formatFile.title = elements.formatFile.disabled ? "Formatting is currently available for editable Go files" : "Format document with gofmt (Shift+Alt+F)";
-  elements.languageMode.textContent = name.endsWith(".go") ? "Go" : /\.[ch]$/.test(name) ? "C" : name.endsWith(".rtg") ? "RTG" : "Plain Text";
-  elements.useBackend.hidden = !editable || !name.endsWith(".rtg");
+  elements.languageMode.textContent = name.endsWith(".go") ? "Go" : /\.[ch]$/.test(name) ? "C" : isBackendDefinition(name) ? "RTG/RBE" : "Plain Text";
+  elements.useBackend.hidden = !editable || !isBackendDefinition(name);
   document.querySelectorAll(".file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   document.querySelectorAll(".stdlib-file").forEach((item) => item.classList.toggle("active", item.dataset.file === name));
   renderOutline(model);
@@ -1961,7 +1984,7 @@ function handleModelChange(name, model) {
   saveFiles();
   markBuildStale();
   languageWorkspaceRevision++;
-  if (name.endsWith(".rtg")) {
+  if (isBackendDefinition(name)) {
     for (const target of targetCatalog?.targets || []) {
       if (target.projectBackend) target.backendStale = true;
     }
@@ -1982,12 +2005,16 @@ function createProjectModel(name, value = "") {
   return model;
 }
 
+function isBackendDefinition(name) {
+  return name.endsWith(".rtg") || name.endsWith(".rbe");
+}
+
 function languageForFile(name) {
 	const base = name.split("/").pop();
 	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return MAKEFILE_LANGUAGE_ID;
   if (name.endsWith(".go")) return "go";
   if (name.endsWith(".c") || name.endsWith(".h")) return C_LANGUAGE_ID;
-  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
+  if (isBackendDefinition(name) || name.endsWith(".rtgasm")) return RTG_LANGUAGE_ID;
   if (name.endsWith(".md")) return "markdown";
   if (name.endsWith(".json")) return "json";
   return "plaintext";
@@ -1998,7 +2025,7 @@ function fileIcon(name) {
 	if (base === "Makefile" || base === "makefile" || name.endsWith(".mk")) return ["MK", "make-icon"];
   if (name.endsWith(".go")) return ["Go", "go-icon"];
   if (name.endsWith(".c") || name.endsWith(".h")) return ["C", "c-icon"];
-  if (name.endsWith(".rtg") || name.endsWith(".rtgasm")) return ["RTG", "rtg-icon"];
+  if (isBackendDefinition(name) || name.endsWith(".rtgasm")) return [name.endsWith(".rbe") ? "RBE" : "RTG", "rtg-icon"];
   if (name.endsWith(".md")) return ["MD", "mod-icon"];
   return [name === "go.mod" ? "M" : "·", "mod-icon"];
 }
@@ -2102,7 +2129,7 @@ function updateNewFileKindFromPath() {
   if (name.endsWith(".go")) elements.newFileKind.value = "go";
   else if (name.endsWith(".c")) elements.newFileKind.value = "c";
   else if (name.endsWith(".h")) elements.newFileKind.value = "h";
-  else if (name.endsWith(".rtg")) elements.newFileKind.value = "rtg";
+  else if (isBackendDefinition(name)) elements.newFileKind.value = "rtg";
   else elements.newFileKind.value = "empty";
   updateNewFileHelp();
 }
@@ -2121,7 +2148,7 @@ function starterSourceForFile(name, kind) {
   if (name.endsWith(".go") || kind === "go") return "package main\n";
   if (name.endsWith(".c") || kind === "c") return "/* Package-level Go functions can be declared here with extern. */\n";
   if (name.endsWith(".h") || kind === "h") return "#pragma once\n";
-  if (name.endsWith(".rtg") || kind === "rtg") return "definition 1\nunit custom\nimplements direct_emitter_v1\n\n# Define or import an architecture, ABI, runtime, format, and target.\n";
+  if (isBackendDefinition(name) || kind === "rtg") return "definition 1\nunit custom\nimplements direct_emitter_v1\n\n# Define or import an architecture, ABI, runtime, format, and target.\n";
   return "";
 }
 
@@ -2139,7 +2166,7 @@ function openFileActionMenu(name, left, top) {
   elements.fileActionMenu.style.top = `${Math.max(4, Math.min(top, innerHeight - 90))}px`;
   elements.fileActionMenu.hidden = false;
   const backend = elements.fileActionMenu.querySelector('[data-file-action="backend"]');
-  if (backend) backend.hidden = !name.endsWith(".rtg");
+  if (backend) backend.hidden = !isBackendDefinition(name);
   elements.fileActionMenu.querySelector("button")?.focus();
 }
 
@@ -2710,7 +2737,7 @@ async function ensureBundledBackendModel(definition) {
 }
 
 async function useProjectBackend(definition) {
-  if (!definition?.endsWith(".rtg") || !models.has(definition)) return;
+  if (!definition || !isBackendDefinition(definition) || !models.has(definition)) return;
   projectBackendRoots.add(definition);
   saveFiles();
   setCompilerStatus("busy", `Reading ${definition}…`);
@@ -2803,7 +2830,7 @@ async function importPreparedBackend(list) {
   try {
     const manifestFile = [...list].find((file) => file.name.endsWith(".json"));
     const wasmFile = [...list].find((file) => file.name.endsWith(".wasm"));
-    const rtgFile = [...list].find((file) => file.name.endsWith(".rtg"));
+    const rtgFile = [...list].find((file) => isBackendDefinition(file.name));
     if (rtgFile && !models.has(rtgFile.name)) {
       createProjectModel(rtgFile.name, await rtgFile.text()); editableBaselines.set(rtgFile.name, models.get(rtgFile.name).getValue()); renderWorkspaceFiles();
     }
@@ -3761,14 +3788,15 @@ function renderExampleBrowser() {
   }));
 }
 
-const viewParameterNames = ["help", "source", "example", "file"];
+const viewParameterNames = ["help", "source", "example", "file", "symbol"];
 
-function setViewDeepLink(kind = "", value = "", file = "") {
+function setViewDeepLink(kind = "", value = "", detail = "") {
   if (!deepLinksReady || applyingDeepLink) return;
   const url = new URL(location.href);
   for (const name of viewParameterNames) url.searchParams.delete(name);
   if (kind && value) url.searchParams.set(kind, value);
-  if (kind === "example" && file) url.searchParams.set("file", file);
+  if (kind === "example" && detail) url.searchParams.set("file", detail);
+  if (kind === "help" && detail) url.searchParams.set("symbol", detail);
   if (url.href !== location.href) history.pushState({ renvoView: true }, "", url);
 }
 
@@ -3791,7 +3819,7 @@ async function restoreDeepLink() {
     const example = current.get("example");
     const source = current.get("source");
     if (help) {
-      if (helpDocument(help)) openHelpPage(help);
+      if (helpDocument(help)) openHelpPage(help, current.get("symbol") || "");
       else elements.languageStatus.textContent = `Documentation not found: ${help}`;
       return;
     }
@@ -3821,15 +3849,7 @@ function helpTab(importPath) { return `help:${importPath}`; }
 function helpImportPath(name) { return name.slice("help:".length); }
 
 function helpDocuments(catalog = standardCatalog) {
-  const documents = [];
-  if (catalog?.builtins) documents.push(catalog.builtins);
-  for (const [importPath, item] of Object.entries(catalog?.packages || {})) {
-    if (item.docs) documents.push({ ...item.docs, importPath });
-  }
-  for (const [importPath, item] of Object.entries(catalog?.platforms || {})) {
-    if (item.docs && !item.main) documents.push({ ...item.docs, importPath });
-  }
-  return documents.sort((left, right) => left.importPath.localeCompare(right.importPath));
+  return catalogHelpPages(catalog);
 }
 
 function helpDocument(importPath) {
@@ -3873,7 +3893,7 @@ function renderHelpCatalog(catalog = standardCatalog, query = "") {
   });
 }
 
-function openHelpPage(importPath) {
+function openHelpPage(importPath, anchor = "") {
   const page = helpDocument(importPath);
   if (!page) return;
   activeHelp = helpTab(importPath);
@@ -3890,12 +3910,27 @@ function openHelpPage(importPath) {
   elements.cursorStatus.textContent = importPath;
   renderHelpPage(page);
   renderEditorTabs();
-  setViewDeepLink("help", importPath);
+  setViewDeepLink("help", importPath, anchor);
+  if (anchor) queueMicrotask(() => elements.helpView.querySelector(`#${anchor}`)?.scrollIntoView());
   if (isPhoneWorkspace()) showMobileView("editor");
 }
 
-function helpAnchor(section, name) {
-  return `doc-${section}-${name}`.toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+async function openAPIHelpAtCursor(model, position) {
+  if (!standardCatalog) return;
+  const word = model.getWordAtPosition(position)?.word || "";
+  const records = await requestLanguage("definition", model, byteOffset(model, position));
+  const definition = records.find((item) => item[0] === "L");
+  let reference;
+  if (definition) {
+    const location = await languageLocation(definition);
+    reference = findAPIHelpReference(standardCatalog, definition[1], location?.range?.startLineNumber || 0, word);
+  }
+  if (!reference) reference = findAPIHelpReference(standardCatalog, fileName(model), position.lineNumber, word);
+  if (!reference) {
+    elements.languageStatus.textContent = `No API documentation found for ${word || "this symbol"}`;
+    return;
+  }
+  openHelpPage(reference.importPath, reference.anchor);
 }
 
 function renderHelpPage(page) {
@@ -3912,6 +3947,10 @@ function renderHelpPage(page) {
   const overview = document.createElement("p"); overview.className = "help-overview";
   overview.textContent = page.doc || "This package has no overview documentation yet.";
   const nodes = [breadcrumb, title, path, overview];
+  if (page.examples?.length) {
+    const examplesTitle = document.createElement("h2"); examplesTitle.textContent = "Examples";
+    nodes.push(examplesTitle, renderHelpExamples(page.examples));
+  }
   const sections = [
     ["Constants", page.constants || []], ["Variables", page.variables || []],
     ["Functions", page.functions || []], ["Types", page.types || []],
@@ -3922,11 +3961,11 @@ function renderHelpPage(page) {
     for (const [section, entries] of sections) for (const entry of entries) {
       const item = document.createElement("li"); const link = document.createElement("a");
       link.href = `#${helpAnchor(section, entry.name)}`; link.textContent = helpIndexLabel(section, entry); item.append(link); index.append(item);
-      link.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(link.getAttribute("href"))?.scrollIntoView(); });
+      link.addEventListener("click", (event) => { event.preventDefault(); openHelpPage(page.importPath, link.getAttribute("href").slice(1)); });
       for (const method of entry.methods || []) {
         const methodItem = document.createElement("li"); const methodLink = document.createElement("a");
         methodLink.href = `#${helpAnchor("method", `${entry.name}-${method.name}`)}`; methodLink.textContent = method.signature.split("\n")[0];
-        methodLink.addEventListener("click", (event) => { event.preventDefault(); elements.helpView.querySelector(methodLink.getAttribute("href"))?.scrollIntoView(); });
+        methodLink.addEventListener("click", (event) => { event.preventDefault(); openHelpPage(page.importPath, methodLink.getAttribute("href").slice(1)); });
         methodItem.append(methodLink); index.append(methodItem);
       }
     }
@@ -3968,7 +4007,32 @@ function renderHelpDeclaration(page, entry, id) {
   colorizeHelpSignature(signature, entry.signature);
   const docs = document.createElement("p"); docs.className = `help-doc${entry.doc ? "" : " help-empty-doc"}`;
   docs.textContent = entry.doc || "No documentation is available for this declaration.";
-  declaration.append(headingRow, signature, docs); return declaration;
+  declaration.append(headingRow, signature, docs);
+  if (entry.examples?.length) declaration.append(renderHelpExamples(entry.examples));
+  return declaration;
+}
+
+function renderHelpExamples(examples) {
+  const container = document.createElement("div"); container.className = "help-examples";
+  for (const example of examples) {
+    const article = document.createElement("article"); article.className = "help-example";
+    const title = document.createElement("h4");
+    title.textContent = example.name ? `Example (${example.name.replaceAll("_", " ")})` : "Example";
+    article.append(title);
+    if (example.doc) {
+      const docs = document.createElement("p"); docs.className = "help-example-doc"; docs.textContent = example.doc; article.append(docs);
+    }
+    const code = document.createElement("pre"); code.className = "help-example-code";
+    colorizeHelpSignature(code, example.code); article.append(code);
+    if (example.output) {
+      const outputLabel = document.createElement("strong"); outputLabel.className = "help-example-output-label";
+      outputLabel.textContent = example.unordered ? "Unordered output" : "Output";
+      const output = document.createElement("pre"); output.className = "help-example-output"; output.textContent = example.output;
+      article.append(outputLabel, output);
+    }
+    container.append(article);
+  }
+  return container;
 }
 
 async function openHelpSource(page, entry) {
@@ -4000,18 +4064,32 @@ function colorizeHelpSignature(element, source) {
 
 function helpPageText(page) {
   const output = [`# package ${page.name}`, "", `Import path: ${page.importPath}`, "", page.doc || "No package overview."];
+  appendHelpExamplesText(output, page.examples, "## Examples");
   const sections = [["Constants", page.constants], ["Variables", page.variables], ["Functions", page.functions], ["Types", page.types]];
   for (const [title, entries] of sections) {
     if (!entries?.length) continue;
     output.push("", `## ${title}`);
     for (const entry of entries) {
       output.push("", `### ${entry.name}`, "", "```go", entry.signature, "```", "", entry.doc || "No documentation is available for this declaration.");
+      appendHelpExamplesText(output, entry.examples, "#### Examples");
       for (const method of entry.methods || []) {
         output.push("", `#### ${method.name}`, "", "```go", method.signature, "```", "", method.doc || "No documentation is available for this declaration.");
+        appendHelpExamplesText(output, method.examples, "##### Examples");
       }
     }
   }
   return `${output.join("\n").trim()}\n`;
+}
+
+function appendHelpExamplesText(output, examples, heading) {
+  if (!examples?.length) return;
+  output.push("", heading);
+  for (const example of examples) {
+    output.push("", example.name ? `Example (${example.name.replaceAll("_", " ")})` : "Example");
+    if (example.doc) output.push("", example.doc);
+    output.push("", "```go", example.code, "```");
+    if (example.output) output.push("", example.unordered ? "Unordered output:" : "Output:", "", "```text", example.output, "```");
+  }
 }
 
 async function copyActiveHelpPage() {
@@ -4142,7 +4220,7 @@ async function useExample(entry, fromDialog) {
     const targetDefinition = targetCatalog?.targets.find((candidate) => candidate.name === target);
     const active = entry.item.language === "c" && Object.hasOwn(files, "main.c") ? "main.c" :
       Object.hasOwn(files, "main.go") ? "main.go" : Object.keys(files).find((name) => /\.(?:go|c)$/.test(name)) || Object.keys(files)[0];
-    const backendDefinition = Object.keys(files).find((name) => name.endsWith(".rtg"));
+    const backendDefinition = Object.keys(files).find((name) => isBackendDefinition(name));
     replaceProject({
       name: entry.slug,
       language: entry.item.language || "go",
@@ -4200,7 +4278,7 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     if (!opening) return;
     if (files.childElementCount) {
       if (item.main) await openPackageEntry(item);
-      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      const backendDefinition = item.files.find((file) => isBackendDefinition(file));
       if (item.main && backendDefinition) {
         const definition = `${item.root}/${backendDefinition}`;
         await ensureSourceModel(definition);
@@ -4212,10 +4290,10 @@ function libraryPackage(catalog, importPath, item, label = importPath.replace(/^
     try {
       await loadStandardPackage(importPath, catalog);
       const prefix = item.root || `std/${importPath}`;
-      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg)$/.test(file))
+      files.replaceChildren(...item.files.filter((file) => /\.(?:go|c|h|rtg|rbe)$/.test(file))
         .map((file) => librarySourceFile(`${prefix}/${file}`, file)));
       if (item.main) await openPackageEntry(item);
-      const backendDefinition = item.files.find((file) => file.endsWith(".rtg"));
+      const backendDefinition = item.files.find((file) => isBackendDefinition(file));
       if (item.main && backendDefinition) {
         const definition = `${item.root}/${backendDefinition}`;
         await ensureSourceModel(definition);
