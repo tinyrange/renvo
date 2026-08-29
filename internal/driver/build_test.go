@@ -3,6 +3,7 @@ package driver
 import (
 	"bytes"
 	"strings"
+	"sync"
 	"testing"
 
 	"renvo.dev/backend/unit"
@@ -11,6 +12,39 @@ import (
 	"renvo.dev/internal/pipeline"
 	wireunit "renvo.dev/internal/unit"
 )
+
+func TestConcurrentFrontendBuildsAreIndependent(t *testing.T) {
+	args := []string{"-t", "linux/amd64", "-s", "-emit-unit", "-o", "app.unit", "./cmd/app"}
+	files := driverTestFiles()
+	baseline := BuildUnit(args, "/repo/case", "/std", files)
+	if !baseline.Ok {
+		t.Fatalf("serial frontend build failed: %#v", baseline.Diagnostic)
+	}
+	const workers = 8
+	const iterations = 4
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			for iteration := 0; iteration < iterations; iteration++ {
+				built := BuildUnit(args, "/repo/case", "/std", files)
+				if !built.Ok {
+					t.Errorf("parallel frontend build failed: %#v", built.Diagnostic)
+					return
+				}
+				if !bytes.Equal(built.Unit, baseline.Unit) {
+					t.Error("parallel frontend unit differs from serial baseline")
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+}
 
 func TestBuildUnitFromDriverOptions(t *testing.T) {
 	result := BuildUnit([]string{"-t", "linux/386", "-s", "-o", "app", "./cmd/app"}, "/repo/case", "/std", driverTestFiles())

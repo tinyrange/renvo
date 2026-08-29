@@ -21,6 +21,10 @@ import (
 )
 
 type Backend struct {
+	// Preparation and evaluated-assembly caches belong to this backend instance.
+	// Calls through one instance are serialized; separate instances can execute
+	// their independently mapped prepared compilers concurrently.
+	mu              sync.Mutex
 	path            string
 	backendRoot     string
 	stdRoot         string
@@ -58,10 +62,8 @@ type Runner interface {
 
 type ProcessRunner struct{}
 
-// Native prepared compiler images execute in this process and therefore share
-// its low-level runtime state. Keep their complete request lifetimes isolated;
-// concurrent test and IDE requests otherwise race while opening protocol files.
-var processRunnerMu sync.Mutex
+// Run maps a fresh copy of the prepared image and allocates a private compiler
+// stack for every request, so it has no process-global compiler state to lock.
 
 func (b *Backend) SupportsRTGAssembly() bool { return true }
 
@@ -83,6 +85,8 @@ func (b *Backend) CompileUnitWithOptions(source []byte, options driver.BackendCo
 // through the prepared compiler. Unlike CompileUnit, it intentionally bypasses
 // frontend checking, linking, and pruning.
 func (b *Backend) CompileSourceWithArena(source []byte, target string, strip bool, arenaSize int) driver.BackendResult {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	prepared := b.prepare(target)
 	if !prepared.Ok {
 		return driver.BackendResult{Diagnostic: prepared.Diagnostic}
@@ -102,6 +106,8 @@ func (b *Backend) CompileSourceWithArena(source []byte, target string, strip boo
 }
 
 func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) driver.BackendResult {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	prepared := b.prepare(options.Target)
 	if !prepared.Ok {
 		return driver.BackendResult{Diagnostic: prepared.Diagnostic}
@@ -341,8 +347,6 @@ func (filesystemImportLoader) LoadImport(
 }
 
 func (ProcessRunner) Run(artifact rtgb.Artifact, request Request) driver.BackendResult {
-	processRunnerMu.Lock()
-	defer processRunnerMu.Unlock()
 	if request.Protocol != ProtocolVersion || artifact.Protocol != ProtocolVersion ||
 		artifact.Unit != unit.Version || artifact.Optimization != OptimizationVersion {
 		return driver.BackendResult{Diagnostic: driver.Diagnostic{

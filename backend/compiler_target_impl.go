@@ -457,7 +457,7 @@ func (s *RenvoCompileSession) Step() bool {
 	}
 	if s.stage == 1 {
 		if s.target == renvoTargetLinuxKernelAmd64 && !s.context.objectFile {
-			if !renvoPrepareKernelMetadata() {
+			if !renvoPrepareKernelMetadata(s.context) {
 				s.done = true
 				return true
 			}
@@ -519,11 +519,14 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	}
 	if !prog.c.objectFile && (target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
 		renvoRTGPreparedKernelModule != 0) {
-		if !renvoPrepareKernelMetadata() {
+		if !renvoPrepareKernelMetadata(&prog.c) {
 			return result
 		}
 		if target == renvoTargetLinuxKernelAmd64 {
-			renvoCaptureKernelCompileContext(&prog.c)
+			prog.c.renvoTarget = renvoTargetLinuxKernelAmd64
+			prog.c.renvoTargetOS = renvoOSLinux
+			prog.c.renvoTargetArch = renvoArchAmd64
+			prog.c.renvoNativeIntSize = 8
 		} else {
 			renvoPopulateKernelCompileContext(&prog.c)
 		}
@@ -640,6 +643,9 @@ func renvoPopulateKernelCompileContext(context *renvoCompileContext) {
 		context.kernel = new(renvoKernelCompileContext)
 		context.kernel.kernelModuleName = renvoKernelModuleName
 		context.kernel.kernelLicense = renvoKernelLicense
+	}
+	if len(context.kernel.kernelBTF) != 0 && len(context.kernel.kernelSymvers) != 0 {
+		return
 	}
 	context.kernel.kernelModuleSize = renvoKernelModuleSize
 	context.kernel.kernelNameOff = renvoKernelModuleNameOff

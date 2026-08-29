@@ -110,6 +110,22 @@ func BenchmarkFrontendUnitForJITBackend(b *testing.B) {
 	b.ReportMetric(float64(unitBytes), "unit-B")
 }
 
+func BenchmarkFrontendUnitForJITBackendParallel(b *testing.B) {
+	fixture := newJITBenchmarkFixture(b, false)
+	args := fixture.compileArgs(true, false)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			built := driver.BuildFromFSWithBackend(args, fixture.root, filepath.Join(fixture.root, "std"), driver.OSFS{})
+			if !built.Ok {
+				b.Errorf("frontend build failed: %#v", built.Diagnostic)
+				return
+			}
+		}
+	})
+}
+
 func BenchmarkPreparedBackendCompile(b *testing.B) {
 	fixture := newJITBenchmarkFixture(b, true)
 	runner := ProcessRunner{}
@@ -134,6 +150,22 @@ func BenchmarkPreparedBackendCompile(b *testing.B) {
 	b.ReportMetric(float64(len(fixture.prepared.Artifact.Payload)), "image-B")
 	b.ReportMetric(float64(len(fixture.unit)), "unit-B")
 	b.ReportMetric(float64(outputBytes), "output-B")
+}
+
+func BenchmarkPreparedBackendCompileParallel(b *testing.B) {
+	fixture := newJITBenchmarkFixture(b, true)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		backend := &Backend{prepared: fixture.prepared, runner: ProcessRunner{}}
+		for pb.Next() {
+			result := backend.CompileUnit(fixture.unit, fixture.target, true, false)
+			if !result.Ok {
+				b.Errorf("prepared backend execution failed: %#v", result.Diagnostic)
+				return
+			}
+		}
+	})
 }
 
 func BenchmarkLinkedImageLoadAndRun(b *testing.B) {
