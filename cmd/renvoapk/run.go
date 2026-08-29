@@ -9,6 +9,7 @@ import (
 
 func run(args []string) int {
 	sharedObjectPath := ""
+	dexPath := ""
 	configPath := ""
 	outputPath := ""
 	for i := 0; i < len(args); i++ {
@@ -17,6 +18,11 @@ func run(args []string) int {
 			i++
 			if i < len(args) {
 				sharedObjectPath = args[i]
+			}
+		case "-dex":
+			i++
+			if i < len(args) {
+				dexPath = args[i]
 			}
 		case "-config":
 			i++
@@ -37,13 +43,17 @@ func run(args []string) int {
 			return 2
 		}
 	}
-	if sharedObjectPath == "" || configPath == "" || outputPath == "" {
+	if (sharedObjectPath == "") == (dexPath == "") || configPath == "" || outputPath == "" {
 		usage()
 		return 2
 	}
-	sharedObject, err := os.ReadFile(sharedObjectPath)
+	payloadPath := sharedObjectPath
+	if dexPath != "" {
+		payloadPath = dexPath
+	}
+	payload, err := os.ReadFile(payloadPath)
 	if err != nil {
-		fmt.Println("renvoapk: could not read shared object: " + err.Error())
+		fmt.Println("renvoapk: could not read payload: " + err.Error())
 		return 1
 	}
 	configSource, err := os.ReadFile(configPath)
@@ -56,7 +66,12 @@ func run(args []string) int {
 		fmt.Println("renvoapk: invalid config: " + err.Error())
 		return 1
 	}
-	result, err := apk.Build(sharedObject, config)
+	var result []byte
+	if dexPath != "" {
+		result, err = apk.BuildDEX(payload, config)
+	} else {
+		result, err = apk.Build(payload, config)
+	}
 	if err != nil {
 		fmt.Println("renvoapk: packaging failed: " + err.Error())
 		return 1
@@ -70,5 +85,5 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Println("usage: renvoapk -so librenvo.so -config app.conf -o app.apk")
+	fmt.Println("usage: renvoapk (-so librenvo.so | -dex classes.dex) -config app.conf -o app.apk")
 }

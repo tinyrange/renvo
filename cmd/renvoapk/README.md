@@ -1,8 +1,9 @@
 # renvoapk
 
-`renvoapk` turns the Android CompilerJIT `librenvo.so` into an installable
-NativeActivity APK. The tool is itself compiled with Renvo and does not invoke
-Gradle, AAPT, the Android SDK, or the NDK.
+`renvoapk` turns either the Android CompilerJIT `librenvo.so` or a
+JVM-backend-generated `classes.dex` into an installable APK. The tool is itself
+compiled with Renvo and does not invoke Gradle, AAPT, D8, the Android SDK, or
+the NDK.
 
 It generates:
 
@@ -19,6 +20,18 @@ go run ./cmd/renvo -t linux/amd64 -s \
 
 sandbox/renvoapk \
   -so path/to/librenvo.so \
+  -config path/to/app.conf \
+  -o path/to/app.apk
+```
+
+For the Java-backed Android target, emit DEX directly and select `-dex` instead:
+
+```sh
+go run ./cmd/renvo -backend backends/jvm.rbe \
+  -t android/vm32 -s -o classes.dex path/to/program
+
+sandbox/renvoapk \
+  -dex classes.dex \
   -config path/to/app.conf \
   -o path/to/app.apk
 ```
