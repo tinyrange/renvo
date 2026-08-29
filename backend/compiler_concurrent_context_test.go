@@ -107,3 +107,76 @@ func appMain() int {
 		t.Fatal("host compilation mutated legacy target or strip globals")
 	}
 }
+
+func TestConcurrentKernelCompilesOwnMetadata(t *testing.T) {
+	const workers = 4
+	source := []byte("package main\nvar count int\nvar stamp uint64\n// renvo:linkstatic kernel,ktime_get_ns\nfunc kernelKtimeGetNS() uint64 { return 0 }\n// renvo:linkstatic kernel,for_each_kernel_tracepoint\nfunc kernelForEach(callback func(uintptr, uintptr), data uintptr) {}\nfunc callback(tp uintptr, data uintptr) {}\nfunc bump() { count++ }\nfunc appMain() { kernelForEach(callback, 0); stamp = kernelKtimeGetNS(); for i := 0; i < 3; i++ { bump() }; if count == 3 && stamp >= 0 { print(\"100% PASS\\n\") } }\nfunc moduleExit() { kernelForEach(callback, 0); print(\"EXIT\\n\") }\n")
+	baselines := make([][]byte, workers)
+	for i := 0; i < workers; i++ {
+		var ok bool
+		baselines[i], ok = compileConcurrentKernel(source, fmt.Sprintf("module%d.ko", i), "GPL")
+		if !ok {
+			t.Fatalf("serial kernel compilation %d failed", i)
+		}
+	}
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			output, ok := compileConcurrentKernel(source, fmt.Sprintf("module%d.ko", index), "GPL")
+			if !ok || !bytes.Equal(output, baselines[index]) {
+				t.Errorf("parallel kernel compilation %d differs from its serial baseline", index)
+			}
+		}(i)
+	}
+	for i := 0; i < workers; i++ {
+		start <- struct{}{}
+	}
+	wait.Wait()
+}
+
+func compileConcurrentKernel(source []byte, outputPath string, license string) ([]byte, bool) {
+	context := renvoNewCompileContext(renvoTargetLinuxKernelAmd64, true, false, false)
+	renvoConfigureCompileContext(context, "linux/kernel-amd64", outputPath, license)
+	context.kernel.kernelRelease = "6.18.0-test"
+	context.kernel.kernelVersion = "Linux version 6.18.0-test SMP PREEMPT"
+	context.kernel.kernelBTF = testConcurrentKernelBTF()
+	context.kernel.kernelSymvers = []byte("0xb1976aeb\tmodule_layout\tvmlinux\tEXPORT_SYMBOL\n0x92997ed8\t_printk\tvmlinux\tEXPORT_SYMBOL\n0x11223344\tktime_get_ns\tvmlinux\tEXPORT_SYMBOL_GPL\n0x55667788\tfor_each_kernel_tracepoint\tvmlinux\tEXPORT_SYMBOL_GPL\n")
+	context.kernel.kernelModuleSize = 128
+	context.kernel.kernelNameOff = 16
+	context.kernel.kernelInitOff = 32
+	context.kernel.kernelExitOff = 64
+	program := renvoParseProgramWithContext(source, context)
+	result := renvoCompileParsedProgramArena(&program, renvoTargetLinuxKernelAmd64, 4096)
+	return result.data, result.ok
+}
+
+// Keep this fixture in the architecture-neutral concurrency test: the kernel
+// backend can be exercised from any host architecture.
+func testConcurrentKernelBTF() []byte {
+	var types []byte
+	types = renvoAppend32(types, 1)
+	types = renvoAppend32(types, 4<<24|3)
+	types = renvoAppend32(types, 128)
+	for _, member := range []struct {
+		name int
+		off  int
+	}{{8, 16}, {13, 32}, {18, 64}} {
+		types = renvoAppend32(types, member.name)
+		types = renvoAppend32(types, 0)
+		types = renvoAppend32(types, member.off*8)
+	}
+	strings := []byte("\x00module\x00name\x00init\x00exit\x00")
+	var out []byte
+	out = append(out, 0x9f, 0xeb, 1, 0)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, len(types))
+	out = renvoAppend32(out, len(types))
+	out = renvoAppend32(out, len(strings))
+	out = append(out, types...)
+	return append(out, strings...)
+}

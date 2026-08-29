@@ -158,30 +158,40 @@ func renvoKernelTrimLine(data []byte) string {
 	return string(data[:end])
 }
 
-func renvoPrepareKernelMetadata() bool {
-	if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 || renvoKernelRelease == "" {
+func renvoPrepareKernelMetadata(context *renvoCompileContext) bool {
+	renvoNonNil(context)
+	if context.kernel == nil {
+		context.kernel = new(renvoKernelCompileContext)
+		context.kernel.kernelNameOff = -1
+		context.kernel.kernelInitOff = -1
+		context.kernel.kernelExitOff = -1
+		context.kernel.kernelModuleName = renvoKernelModuleName
+		context.kernel.kernelLicense = renvoKernelLicense
+	}
+	kernel := context.kernel
+	if len(kernel.kernelBTF) == 0 || len(kernel.kernelSymvers) == 0 || kernel.kernelRelease == "" {
 		release := renvoKernelReadFile("/proc/sys/kernel/osrelease")
 		if len(release) == 0 {
 			return false
 		}
-		renvoKernelRelease = renvoKernelTrimLine(release)
-		renvoKernelVersion = renvoKernelTrimLine(renvoKernelReadFile("/proc/version"))
-		renvoKernelBTF = renvoKernelReadFile("/sys/kernel/btf/vmlinux")
-		symversPath := "/lib/modules/" + renvoKernelRelease + "/build/Module.symvers"
-		renvoKernelSymvers = renvoKernelReadFile(symversPath)
+		kernel.kernelRelease = renvoKernelTrimLine(release)
+		kernel.kernelVersion = renvoKernelTrimLine(renvoKernelReadFile("/proc/version"))
+		kernel.kernelBTF = renvoKernelReadFile("/sys/kernel/btf/vmlinux")
+		symversPath := "/lib/modules/" + kernel.kernelRelease + "/build/Module.symvers"
+		kernel.kernelSymvers = renvoKernelReadFile(symversPath)
 	}
-	if len(renvoKernelBTF) == 0 || len(renvoKernelSymvers) == 0 {
+	if len(kernel.kernelBTF) == 0 || len(kernel.kernelSymvers) == 0 {
 		return false
 	}
-	if renvoKernelModuleSize <= 0 {
-		size, nameOff, initOff, exitOff, ok := renvoAmd64KernelBTFModuleLayout(renvoKernelBTF)
+	if kernel.kernelModuleSize <= 0 {
+		size, nameOff, initOff, exitOff, ok := renvoAmd64KernelBTFModuleLayout(kernel.kernelBTF)
 		if !ok || size <= 0 || nameOff < 0 || initOff < 0 {
 			return false
 		}
-		renvoKernelModuleSize = size
-		renvoKernelModuleNameOff = nameOff
-		renvoKernelModuleInitOff = initOff
-		renvoKernelModuleExitOff = exitOff
+		kernel.kernelModuleSize = size
+		kernel.kernelNameOff = nameOff
+		kernel.kernelInitOff = initOff
+		kernel.kernelExitOff = exitOff
 	}
 	// CONFIG_MODVERSIONS=n kernels do not publish module_layout in
 	// Module.symvers. BTF plus vermagic still provide the required layout and

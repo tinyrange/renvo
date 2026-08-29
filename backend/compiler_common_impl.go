@@ -417,7 +417,8 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 		a.symbolName = make([]byte, 0, 16384)
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackendActive != 0 {
+	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+		renvoFixedTarget == 0 && targetIsKernelModule(a.c) || renvoPreparedBackendActive != 0 {
 		a.kernelImportNames = make([]byte, 0, 1024)
 		a.kernelImportOffsets = make([]int, 0, 128)
 	}
@@ -674,7 +675,7 @@ func renvoAsmPatch(a *renvoAsm) {
 	}
 	renvoAsmSetDataOffsets(a)
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive != 0 && targetIsKernelModule(a.c) {
+		renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
 		return
 	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
@@ -32070,7 +32071,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		return 1
 	}
 	if targetIsKernelModule(context) && !context.objectFile {
-		if !renvoPrepareKernelMetadata() {
+		if !renvoPrepareKernelMetadata(context) {
 			renvoPrintErr("renvo: kernel metadata unavailable\n")
 			return 1
 		}

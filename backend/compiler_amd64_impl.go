@@ -9,12 +9,6 @@ const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengt
 const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-	if (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64) &&
-		!renvoPrepareKernelMetadata() {
-		renvoPrintErr("renvo: kernel metadata unavailable\n")
-		return 1
-	}
 	src := renvoMakeByteScratch(786432)
 	for i := 0; i < len(input); i++ {
 		src = renvoReadAll(input[i], src)
@@ -24,6 +18,10 @@ func renvoCompileAmd64(input []int, output int, arenaSize int) int {
 	prog = renvoParseProgram(src)
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64 {
+		if !renvoPrepareKernelMetadata(&prog.c) {
+			renvoPrintErr("renvo: kernel metadata unavailable\n")
+			return 1
+		}
 		renvoCaptureKernelCompileContext(&prog.c)
 	}
 	if !prog.ok {
