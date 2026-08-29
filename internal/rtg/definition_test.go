@@ -32,6 +32,34 @@ var nativeArchitectureProjections = map[string]string{
 	"x86_64":  "../../backend/definitions/x86_64_algorithms.rtg",
 }
 
+var nativeCompilerIntegrations = map[string]struct{ definition, output string }{
+	"aarch64": {"../../backend/definitions/aarch64_compiler.rtg", "../../backend/compiler_aarch64_target_impl.go"},
+	"x86_32":  {"../../backend/definitions/x86_32_compiler.rtg", "../../backend/compiler_386_impl.go"},
+	"x86_64":  {"../../backend/definitions/x86_64_compiler.rtg", "../../backend/compiler_amd64_impl.go"},
+}
+
+func TestNativeCompilerIntegrationsAreGeneratedFromRTG(t *testing.T) {
+	for arch, integration := range nativeCompilerIntegrations {
+		t.Run(arch, func(t *testing.T) {
+			resolved := ResolveArchitectureDefinition(parseDefinitionFile(t, integration.definition))
+			if !resolved.Ok {
+				t.Fatalf("resolve compiler integration: %#v", resolved.Diagnostics)
+			}
+			generated := GenerateCheckedInCompilerIntegration(resolved, arch, "main")
+			if !generated.Ok {
+				t.Fatalf("generate compiler integration: %#v", generated.Diagnostics)
+			}
+			checkedIn, err := os.ReadFile(integration.output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(generated.Source, checkedIn) {
+				t.Fatalf("checked-in %s compiler integration is stale; run go generate ./backend/definitions", arch)
+			}
+		})
+	}
+}
+
 func TestNativeDefinitionEmbeddedGoMetrics(t *testing.T) {
 	type authoredDeclaration struct {
 		bytes int
@@ -730,7 +758,7 @@ func TestCheckedInNativeTargetProjectionOwnsDefinitionSemantics(t *testing.T) {
 	}
 }
 
-func TestCheckedInWindows386RejectsStaleCompactRuntime(t *testing.T) {
+func TestCheckedInWindows386DefinitionChangesInvalidateProjection(t *testing.T) {
 	const filename = "../../backend/definitions/windows_386.rtg"
 	original, err := os.ReadFile(filename)
 	if err != nil {
@@ -747,10 +775,40 @@ func TestCheckedInWindows386RejectsStaleCompactRuntime(t *testing.T) {
 		t.Fatalf("modified definition did not resolve: %#v", resolved.Diagnostics)
 	}
 	generated := GenerateCheckedInTargetProjection(resolved, "windows/386", "main")
-	if generated.Ok || len(generated.Diagnostics) == 0 ||
-		!strings.Contains(generated.Diagnostics[0].Message, "compact runtime templates are stale") {
-		t.Fatalf("modified compact runtime generation = ok %v, diagnostics %#v",
-			generated.Ok, generated.Diagnostics)
+	if !generated.Ok {
+		t.Fatalf("modified runtime generation failed: %#v", generated.Diagnostics)
+	}
+	baseline := GenerateCheckedInTargetProjection(
+		resolveNativeTarget(t, "windows/386"), "windows/386", "main")
+	if !baseline.Ok {
+		t.Fatalf("baseline runtime generation failed: %#v", baseline.Diagnostics)
+	}
+	if bytes.Equal(generated.Source, baseline.Source) {
+		t.Fatal("modified RTG runtime did not invalidate the checked-in projection")
+	}
+}
+
+func TestWindows386CompilerIntegrationChangesTargetIdentity(t *testing.T) {
+	const filename = "../../backend/definitions/windows_386.rtg"
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Replace(original,
+		[]byte("base+107, 1"), []byte("base+106, 1"), 1)
+	if bytes.Equal(modified, original) {
+		t.Fatal("Windows/386 compiler integration mutation did not change the fixture")
+	}
+	base := ResolveDefinitions(ParseImports(
+		original, filename, testFilesystemImportLoader{}))
+	changed := ResolveDefinitions(ParseImports(
+		modified, filename, testFilesystemImportLoader{}))
+	if !base.Ok || !changed.Ok {
+		t.Fatalf("resolve Windows/386 identities: base=%#v changed=%#v",
+			base.Diagnostics, changed.Diagnostics)
+	}
+	if base.Targets[0].Descriptor.Definition == changed.Targets[0].Descriptor.Definition {
+		t.Fatal("compiler integration behavior did not change the target identity")
 	}
 }
 
@@ -828,6 +886,10 @@ func TestWindows386RuntimeIOUsesBoundedSequences(t *testing.T) {
 		if strings.Contains(string(source), opaque) {
 			t.Fatalf("Windows/386 runtime I/O retained opaque %s", opaque)
 		}
+	}
+	if !strings.Contains(string(source), "go compiler {") ||
+		!strings.Contains(string(source), "func renvoWin386EmitRuntimeReadWrite") {
+		t.Fatal("Windows/386 compact fixed-compiler integration is not owned by its RTG definition")
 	}
 	resolved := resolveNativeTarget(t, "windows/386")
 	sequences := architectureSequences(resolved.Targets[0].Arch)

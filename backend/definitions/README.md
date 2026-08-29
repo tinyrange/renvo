@@ -21,6 +21,7 @@ backend/definitions/
 ├── riscv32.rtg               shared RV32IM used by external board targets
 ├── elf_amd64.rtg              shared AMD64 ELF formats
 ├── *_algorithms.rtg            closed shared-ISA generation roots
+├── *_compiler.rtg              compiler-private generated integration roots
 ├── linux_amd64.rtg            complete target entrypoint
 ├── windows_amd64.rtg
 ├── linux_kernel_amd64.rtg
@@ -117,11 +118,22 @@ analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
 
-Use `go backend` for these portable hooks. A closed `*_algorithms.rtg` root may
-also use `go compiler` for ordinary Go copied only into its checked-in compiler
-projection. Compiler blocks may refer to private compiler types, are excluded
-from prepared external backends and target semantic identities, and should be
-reserved for integration code that cannot use the typed `RTGEmitter` surface.
+Use `go backend` for these portable hooks. A closed checked-in RTG root may also
+use `go compiler` for ordinary Go copied only into a checked-in compiler
+projection. The x86-32, x86-64, and AArch64 compiler roots use this boundary so
+their compiler-private lowering remains RTG-owned without exposing private
+compiler types to prepared external backends. Architecture-only compiler roots
+have no target identity. A compiler block placed in a target entrypoint is
+included in that target's identity even though its source is excluded from
+prepared output, preventing a fixed-compiler behavior change from retaining a
+stale prepared cache identity. Reserve compiler blocks for integration code
+that cannot use the typed `RTGEmitter` surface.
+
+Windows/386 also keeps its compact fixed-compiler runtime implementation in a
+`go compiler` block beside the authoritative bounded runtime sequences. This is
+a measured resource adapter: prepared definitions use the sequences, both paths
+are covered end to end, and no target-specific byte template or semantic hash is
+hidden in the Go generator.
 
 `TestNativeDefinitionEmbeddedGoMetrics` deduplicates shared declarations across
 every native entrypoint and reports semantic Go bytes and declaration counts as

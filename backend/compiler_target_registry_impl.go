@@ -67,7 +67,7 @@ func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 		return "windows/amd64", "\brl\x8fX\xa0\vOFa\xb4n¬\xa7\x1dSd\xc4\xc7\n`ޚp\x19Gh\x05\xa2\x95D", 3, true
 	}
 	if target == renvoTargetWindows386 {
-		return "windows/386", "q\xf3\v\xf8\x94iN\x98\x11S\xbe\\g\xbe\xda\x18T\xe2\x0ev坘dϴí\xf8d\xf0\xed", 3, true
+		return "windows/386", "\x81v\xd2]\xa1\x01\xd3\x1fk\x8b\v\xeb\x8c3`\xdd\x12\xe7\x1d`*x\x81r\x9e=\x86\x9b\xed:\x83\xa5", 3, true
 	}
 	if target == renvoTargetWasiWasm32 {
 		return "wasi/wasm32", "\xaa\x04J\xab}#\x99\nD\x93~\xd0\x12\r\xb2\xdfQ\xcd\xd5[(\r\xda_\xfe\x97\x8f\x88N\x8f\x1al", 3, true

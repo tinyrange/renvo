@@ -80,12 +80,17 @@ complexity analyzer.
 package clauses, compiler directives, undefined symbols, and incompatible hook
 signatures are rejected.
 
-Closed checked-in architecture roots may also contain `go compiler` blocks.
-These blocks are copied only into the ordinary compiler-facing architecture
-projection and may refer to private compiler implementation types. They are
-not portable backend hooks, are not included in prepared external backends,
-and do not contribute target runtime semantics. Use them only for integration
-code that cannot live behind the typed `RTGEmitter` contract.
+Closed checked-in RTG roots may also contain `go compiler` blocks. These blocks
+are copied only into ordinary compiler-facing projections and may refer to
+private compiler implementation types. They are not portable backend hooks and
+are not included in prepared external backends. Architecture-only roots have
+no target identity; a compiler block in a target entrypoint is included in that
+target's identity so fixed-compiler behavior cannot retain a stale prepared
+cache key. The x86-32, x86-64, and
+AArch64 roots use separately generated compiler-integration projections, so no
+independently authored architecture lowering remains in their checked-in Go
+files. Use compiler blocks only for integration code that cannot live behind
+the typed `RTGEmitter` contract.
 
 Generation starts from one target or architecture and emits only transitively
 reachable declarations. An opaque hook is appropriate when an encoder or
@@ -134,9 +139,10 @@ and production target projections now derive the supported native targets'
 runtime numbers, entry contracts, relocation rules, and executable packaging
 from their `.rtg` entrypoints. Private symbols use a separate built-in
 namespace so prepared definitions can coexist in the same self-hosted compiler
-source bundle. Windows/386 uses compact literal runtime templates to stay
-inside the compiler resource gates; generation pins those templates to a
-canonical identity of the reachable definition semantics and rejects drift.
+source bundle. Windows/386 keeps its measured compact fixed-compiler runtime in
+the same RTG entrypoint as the bounded sequences used by prepared definitions.
+The generator contains no Windows/386 runtime byte snapshot or semantic hash;
+stale generated output and built-in/prepared end-to-end behavior are tested.
 External definitions use the target-neutral prepared adapter and take runtime,
 relocation, and format semantics from the selected definition.
 

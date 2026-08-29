@@ -46,178 +46,17 @@ func generateCheckedInWindows386Projection(
 		return checkedInTargetProjectionFailure(document, target.Runtime,
 			"windows/386 requires a complete five-buffer literal entry template")
 	}
-	allRoots := checkedInWindows386SequenceRoots(target.Runtime)
-	for _, root := range allRoots {
-		if root == "" {
-			return checkedInTargetProjectionFailure(document, target.Runtime,
-				"windows/386 runtime is missing a required operation sequence")
-		}
-	}
-	identity := HashText(checkedInWindows386RuntimeIdentity(document, target.Arch, allRoots))
-	if identity != checkedInWindows386RuntimeIdentityText {
-		return checkedInTargetProjectionFailure(document, target.Runtime,
-			"windows/386 compact runtime templates are stale for definition semantics "+identity)
-	}
 	manifest := []string{document.Unit + " " + HashText(document.Hash)}
 	source := generateHeaderPackage(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
-	source = appendCheckedInWindows386Runtime(source)
+	source = appendCompilerGoBlocks(source, document)
+	source = append(source, "\nfunc compileWindows386(input []int, output int) int {\n\treturn compileWindows386Arena(input, output, 0)\n}\n\nfunc compileWindows386Arena(input []int, output int, arenaSize int) int {\n\trenvoSetTarget(renvoTargetWindows386)\n\treturn renvoCompile386(input, output, arenaSize)\n}\n"...)
 	source = appendCheckedInWindows386Entry(source, template)
 	source = append(source, checkedInWindows386ImageSource...)
 	return GenerateResult{
 		Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true,
 	}
 }
-
-const checkedInWindows386RuntimeIdentityText = "ca163c6559929832aee6d96dff7e696a75def9a68bf1ce37834df41b04f2227e"
-
-func checkedInWindows386RuntimeIdentity(
-	document Document, arch Declaration, roots []string,
-) [32]byte {
-	goRoots, sequenceRoots := resolveArchitectureSequenceProjection(
-		document, arch, nil, roots)
-	var canonical []byte
-	canonical = appendFramed(canonical, "windows-386-compact-runtime")
-	sequences := targetSemanticSequences(arch, sequenceRoots)
-	for i := 0; i < len(sequences); i++ {
-		canonical = appendFramed(canonical, sequences[i].name)
-		canonical = appendFramedBytes(canonical, sequences[i].body)
-	}
-	parts := reachableEmbeddedGoParts(document, goRoots, nil)
-	for i := 0; i < len(parts); i++ {
-		parts[i].source = canonicalTokenStream(parts[i].source)
-	}
-	for i := 1; i < len(parts); i++ {
-		value := parts[i]
-		at := i
-		for at > 0 && embeddedGoPartLess(value, parts[at-1]) {
-			parts[at] = parts[at-1]
-			at--
-		}
-		parts[at] = value
-	}
-	for i := 0; i < len(parts); i++ {
-		canonical = appendFramed(canonical, parts[i].name)
-		canonical = appendFramedBytes(canonical, parts[i].source)
-	}
-	return sha256Bytes(canonical)
-}
-
-func checkedInWindows386SequenceRoots(runtime Declaration) []string {
-	var roots []string
-	for _, field := range []string{"emit_exit", "emit_static_call"} {
-		algorithm, _ := architectureGoHook(runtime, field)
-		roots = append(roots, algorithm)
-	}
-	for _, operation := range []string{"open", "close", "chmod", "read", "write", "read_at", "write_at"} {
-		algorithm, _ := runtimeOperationHook(runtime, operation)
-		roots = append(roots, algorithm)
-	}
-	return roots
-}
-
-func appendCheckedInWindows386Runtime(source []byte) []byte {
-	source = append(source, checkedInWindows386OperationsSource...)
-	source = append(source, checkedInWindows386ReadWriteSource...)
-	source = append(source, `
-
-func compileWindows386(input []int, output int) int {
-	return compileWindows386Arena(input, output, 0)
-}
-
-func compileWindows386Arena(input []int, output int, arenaSize int) int {
-	renvoSetTarget(renvoTargetWindows386)
-	return renvoCompile386(input, output, arenaSize)
-}
-`...)
-	return source
-}
-
-const checkedInWindows386OperationsSource = `
-
-func renvoWin386CallImport(a *renvoAsm, importID int) {
-	base := len(a.code)
-	renvoAsmEmitText(a, "\xff\x15\x00\x00\x00\x00")
-	renvoAsmAddWinImportReloc(a, base+2, importID)
-}
-
-func renvoWin386EmitRuntimeOpen(a *renvoAsm) {
-	base := len(a.code)
-	renvoAsmEmitText(a, "\xba\x00\x00\x00\x80\xa8\x02\x0f\x84\x0a\x00\x00\x00\xba\x00\x00\x00\xc0\xe9\x0d\x00\x00\x00\xa8\x01\x0f\x84\x05\x00\x00\x00\xba\x00\x00\x00\x40\xb9\x03\x00\x00\x00\xa8\x40\x0f\x84\x1a\x00\x00\x00\xb9\x04\x00\x00\x00\xa9\x00\x02\x00\x00\x0f\x84\x1a\x00\x00\x00\xb9\x02\x00\x00\x00\xe9\x10\x00\x00\x00\xa9\x00\x02\x00\x00\x0f\x84\x05\x00\x00\x00\xb9\x05\x00\x00\x00\x6a\x00\x68\x80\x00\x00\x00\x51\x6a\x00\x6a\x03\x52\x53\xff\x15\x00\x00\x00\x00")
-	renvoAsmAddWinImportReloc(a, base+107, 1)
-}
-
-func renvoWin386EmitRuntimeClose(a *renvoAsm) {
-	base := len(a.code)
-	renvoAsmEmitText(a, "\x53\xff\x15\x00\x00\x00\x00\x85\xc0\x0f\x84\x07\x00\x00\x00\x31\xc0\xe9\x05\x00\x00\x00\xb8\xff\xff\xff\xff")
-	renvoAsmAddWinImportReloc(a, base+3, 2)
-}
-
-func renvoWin386EmitRuntimeChmod(a *renvoAsm) {
-	base := len(a.code)
-	renvoAsmEmitText(a, "\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xb9\xff\xff\xff\xff\x39\xc8\x0f\x84\x07\x00\x00\x00\x31\xc0\xe9\x05\x00\x00\x00\xb8\xff\xff\xff\xff")
-	renvoAsmAddWinImportReloc(a, base+9, 5)
-}
-
-func renvoWin386EmitExit(a *renvoAsm) {
-	base := len(a.code)
-	renvoAsmEmitText(a, "\x50\xff\x15\x00\x00\x00\x00")
-	renvoAsmAddWinImportReloc(a, base+3, 8)
-}
-`
-
-const checkedInWindows386ReadWriteSource = `
-
-func renvoWin386EmitRuntimeReadWrite(g *renvoLinearGen, isWrite bool) {
-	a := &g.asm
-	label := g.winReadLabel
-	if isWrite {
-		label = g.winWriteLabel
-	}
-	if isWrite && g.winWriteEmitted || !isWrite && g.winReadEmitted {
-		renvoAsmCallLabel(a, label)
-		return
-	}
-	label = renvoAsmNewLabel(a)
-	if isWrite {
-		g.winWriteEmitted = true
-		g.winWriteLabel = label
-	} else {
-		g.winReadEmitted = true
-		g.winReadLabel = label
-	}
-	countOff := renvoAlignValue(a.bssSize, 4)
-	a.bssSize = countOff + 16
-	base := len(a.code)
-	relocs := ""
-	if isWrite {
-		renvoAsmEmitText(a, "\xe9\xc4\x00\x00\x00\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-		relocs = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
-	} else {
-		renvoAsmEmitText(a, "\xe9\xac\x00\x00\x00\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-		relocs = "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
-	}
-	for i := 0; i < len(relocs); i += 2 {
-		at := base + int(relocs[i])
-		kind := int(relocs[i+1])
-		if kind < 2 {
-			renvoAsmAddAbsReloc(a, at, countOff+(kind<<3), renvoAbsBssReloc)
-		} else {
-			renvoAsmAddWinImportReloc(a, at, kind-2)
-		}
-	}
-	a.labelPos[label] = int32(base + 5)
-	renvoAsmCallLabel(a, label)
-}
-
-func renvoWin386EmitRuntimeReadAt(g *renvoLinearGen) {
-	renvoWin386EmitRuntimeReadWrite(g, false)
-}
-
-func renvoWin386EmitRuntimeWriteAt(g *renvoLinearGen) {
-	renvoWin386EmitRuntimeReadWrite(g, true)
-}
-`
 
 func appendCheckedInWindows386Entry(source []byte, template runtimeEntryTemplate) []byte {
 	bssSymbols := []string{
@@ -395,10 +234,34 @@ func rewriteCheckedInX8632EmitterMethods(source []byte) []byte {
 		"out.NewLabel()", "renvoAsmNewLabel(out)",
 		"out.Mark(", "renvoAsmMarkLabel(out, ",
 		"rtgBuiltinJump(out,", "renvoAsmJmpLabel(out, ",
+		"rtgBuiltinCall(out,", "renvo386TargetCall(out,",
+		"rtgBuiltinMove(out,", "renvo386TargetMove(out,",
+		"rtgBuiltinTest(out,", "renvo386TargetTest(out,",
+		"rtgBuiltinEAX", "0",
+		"rtgBuiltinECX", "1",
+		"rtgBuiltinEDX", "2",
+		"rtgBuiltinEBX", "3",
+		"rtgBuiltinESP", "4",
+		"rtgBuiltinEBP", "5",
+		"rtgBuiltinESI", "6",
+		"rtgBuiltinEDI", "7",
+		"renvo386RTGEmitModRM", "renvo386TargetEmitModRM",
+		"renvo386RTGEncodeBinary", "renvo386TargetEncodeBinary",
+		"renvo386RTGEncodeRelative", "renvo386TargetEncodeRelative",
+		"renvo386RTGMoveImmediate", "renvo386TargetMoveImmediate",
+		"renvo386RTGRegisterLowBits", "renvo386TargetRegisterLowBits",
 	}
 	for i := 0; i < len(replacements); i += 2 {
 		source = bytes.ReplaceAll(source, []byte(replacements[i]), []byte(replacements[i+1]))
 	}
+	for i := 0; i < 8; i++ {
+		compact := "RTGRegister{Code:" + decimalFrame(i) + ",Valid:true}"
+		spaced := "RTGRegister{Code: " + decimalFrame(i) + ", Valid: true}"
+		source = bytes.ReplaceAll(source, []byte(compact), []byte(decimalFrame(i)))
+		source = bytes.ReplaceAll(source, []byte(spaced), []byte(decimalFrame(i)))
+	}
+	source = bytes.ReplaceAll(source, []byte("RTGRegister"), []byte("int"))
+	source = bytes.ReplaceAll(source, []byte(".Code"), nil)
 	return rewriteCheckedInX8632JumpConditions(source)
 }
 

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "38f3524d2c5c1046b9a949e12867f888e61fd9b54d9392509096601500ce60ee"
+const CompilerSourceDigest = "72ed5ec5a4c5a2984eabf06b50e4ccb4a52bcf5966de9e07c779dc7a0efc0323"
 
 // source: backend/compiler_common_impl.go
 
@@ -36639,7 +36639,7 @@ if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\brl\x8fX\xa0\vOFa\xb4n¬\xa7\x1dSd\xc4\xc7\n`ޚp\x19Gh\x05\xa2\x95D", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "q\xf3\v\xf8\x94iN\x98\x11S\xbe\\g\xbe\xda\x18T\xe2\x0ev坘dϴí\xf8d\xf0\xed", 3, true
+return "windows/386", "\x81v\xd2]\xa1\x01\xd3\x1fk\x8b\v\xeb\x8c3`\xdd\x12\xe7\x1d`*x\x81r\x9e=\x86\x9b\xed:\x83\xa5", 3, true
 }
 if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\xaa\x04J\xab}#\x99\nD\x93~\xd0\x12\r\xb2\xdfQ\xcd\xd5[(\r\xda_\xfe\x97\x8f\x88N\x8f\x1al", 3, true
@@ -38954,6 +38954,7 @@ return 1
 
 // source: backend/compiler_amd64_impl.go
 
+
 const renvoAmd64ELFCodeOffset = 0xb0
 const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
 const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
@@ -40259,6 +40260,7 @@ renvoPut32At(out.code, at, target+addend-(at+4))
 }
 
 // source: backend/compiler_386_impl.go
+
 
 const renvo386ELFCodeOffset = 0x74
 
@@ -43119,6 +43121,7 @@ renvoPut32At(out.code, at, (insn&0xff00001f)|(((displacement/4)&0x7ffff)<<5))
 }
 
 // source: backend/compiler_aarch64_target_impl.go
+
 
 const renvoAarch64RegRax = 0
 const renvoAarch64RegRdx = 1
@@ -50722,7 +50725,6 @@ return out
 // source: backend/compiler_windows_386_impl.go
 
 
-
 func renvoWin386CallImport(a *renvoAsm, importID int) {
 base := len(a.code)
 renvoAsmEmitText(a, "\xff\x15\x00\x00\x00\x00")
@@ -50803,7 +50805,6 @@ renvoWin386EmitRuntimeReadWrite(g, false)
 func renvoWin386EmitRuntimeWriteAt(g *renvoLinearGen) {
 renvoWin386EmitRuntimeReadWrite(g, true)
 }
-
 
 func compileWindows386(input []int, output int) int {
 return compileWindows386Arena(input, output, 0)

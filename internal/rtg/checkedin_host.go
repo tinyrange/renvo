@@ -581,6 +581,49 @@ func appendCompilerGoBlocks(source []byte, document Document) []byte {
 	return source
 }
 
+// GenerateCheckedInCompilerIntegration emits compiler-private lowering owned by
+// a closed RTG architecture root. Keeping this output separate from the
+// portable architecture algorithms preserves the existing fixed-compiler
+// source layout without leaving an independently authored Go implementation.
+func GenerateCheckedInCompilerIntegration(
+	resolved ResolveResult, archName string, packageName string,
+) GenerateResult {
+	if !resolved.Ok {
+		diagnostics := make([]Diagnostic, len(resolved.Diagnostics))
+		copy(diagnostics, resolved.Diagnostics)
+		return GenerateResult{Diagnostics: diagnostics}
+	}
+	if _, ok := resolved.Document.Declaration(DeclArch, archName); !ok {
+		return GenerateResult{Diagnostics: []Diagnostic{{
+			Filename: resolved.Document.Filename,
+			Span:     sourceSpan(resolved.Document.Source, 0, 0),
+			Code:     "RTG-GENERATE-004",
+			Message:  "definition does not declare architecture " + archName,
+		}}}
+	}
+	hasCompiler := false
+	for i := 0; i < len(resolved.Document.Declarations); i++ {
+		declaration := resolved.Document.Declarations[i]
+		if declaration.Kind == DeclGo && declaration.Name == "compiler" {
+			hasCompiler = true
+			break
+		}
+	}
+	if !hasCompiler {
+		return GenerateResult{Diagnostics: []Diagnostic{{
+			Filename: resolved.Document.Filename,
+			Span:     sourceSpan(resolved.Document.Source, 0, 0),
+			Code:     "RTG-GENERATE-007",
+			Message:  "definition has no compiler integration block",
+		}}}
+	}
+	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
+	source := generateHeaderPackage(
+		manifest, "compiler-integration/"+archName, packageName)
+	source = appendCompilerGoBlocks(source, resolved.Document)
+	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
+}
+
 // GenerateCheckedInArchitectureContract emits the complete typed semantic
 // contract as ordinary production Go. It is compiled by normal Go-module and
 // release builds, but omitted from fixed Renvo source manifests so source-level

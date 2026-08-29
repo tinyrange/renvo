@@ -68,6 +68,19 @@ func targetSemanticIdentity(document Document, target ResolvedTarget) [32]byte {
 		canonical = appendFramed(canonical, parts[i].name)
 		canonical = appendFramedBytes(canonical, parts[i].source)
 	}
+	// Compiler blocks normally live in architecture-only roots and therefore
+	// never participate in a target identity. When a target entrypoint owns one
+	// (currently the measured Windows/386 fixed-compiler adapter), include it so
+	// changing built-in behavior cannot retain a prepared-backend cache identity.
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo || declaration.Name != "compiler" {
+			continue
+		}
+		canonical = appendFramed(canonical, "go compiler")
+		canonical = appendFramed(canonical, semanticVirtualPackage(document, declaration))
+		canonical = appendFramedBytes(canonical, canonicalTokenStream(declaration.GoSource))
+	}
 	return sha256Bytes(canonical)
 }
 

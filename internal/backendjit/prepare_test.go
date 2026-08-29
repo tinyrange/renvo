@@ -550,6 +550,15 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
 			t.Parallel()
+			builtIn := driver.CompileFromFS([]string{
+				"-t", test.target,
+				"-s",
+				"-o", "builtin.exe",
+				filepath.Join(root, "internal", "backendjit", "testdata", "windows_runtime.go"),
+			}, root, filepath.Join(root, "std"), driver.OSFS{}, backendcompiled.Backend{})
+			if !builtIn.Ok {
+				t.Fatalf("built-in Windows compile failed: %#v", builtIn.Diagnostic)
+			}
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -572,6 +581,11 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 			}
 			if !bytes.Contains(result.Binary, []byte("DefinitionStaticImport\x00")) {
 				t.Fatal("custom PE output is missing its definition-owned static import")
+			}
+			if test.target == "windows/386" &&
+				(!bytes.Contains(builtIn.Binary, []byte("DefinitionStaticImport\x00")) ||
+					!bytes.Contains(result.Binary, []byte("DefinitionStaticImport\x00"))) {
+				t.Fatal("Windows/386 built-in/prepared parity fixture omitted its shared static import")
 			}
 		})
 	}
