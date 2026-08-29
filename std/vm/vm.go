@@ -122,6 +122,7 @@ const (
 	opLoadMemPushReg   = 51
 	opLoadStackPop     = 52
 	opMovRegImmPop     = 53
+	opMovRegRegPop     = 54
 )
 
 const (
@@ -335,7 +336,7 @@ func validateCode(code []byte, routines []routine) bool {
 
 func validOperands(code []byte, pc int) bool {
 	op := int(code[pc])
-	if op < opExit || op > opShrUnsignedRegReg && (op < opBinaryRegImm || op > opMovRegImmPop) {
+	if op < opExit || op > opShrUnsignedRegReg && (op < opBinaryRegImm || op > opMovRegRegPop) {
 		return false
 	}
 	if op == opBinaryRegImm {
@@ -346,6 +347,9 @@ func validOperands(code []byte, pc int) bool {
 	}
 	if op == opLoadStackPushReg || op == opLoadStackPop || op == opMovRegImmPop {
 		return int(code[pc+1]) < regCount && int(code[pc+6]) < regCount
+	}
+	if op == opMovRegRegPop {
+		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount && int(code[pc+3]) < regCount
 	}
 	if op == opPushRegMovImm {
 		return int(code[pc+1]) < regCount && int(code[pc+2]) < regCount
@@ -412,6 +416,8 @@ func nextInstruction(code []byte, pc int) int {
 		size = 7
 	} else if op == opLoadMemPushReg {
 		size = 9
+	} else if op == opMovRegRegPop {
+		size = 5
 	} else if op == opMovRegImm || op == opLoadStack || op == opStoreStack || op == opLeaStack ||
 		op == opAddRegImm || op == opMulRegImm || op == opCmpRegImm || op == opJCond {
 		size = 6
@@ -521,6 +527,10 @@ func (m *machine) step() bool {
 	if op == opMovRegImmPop {
 		m.regs[int(code[pc+1])] = int32(read32(code, pc+2))
 		return m.popReg(int(code[pc+6]))
+	}
+	if op == opMovRegRegPop {
+		m.regs[int(code[pc+1])] = m.regs[int(code[pc+2])]
+		return m.popReg(int(code[pc+3]))
 	}
 	if op == opLoadStack || op == opStoreStack || op == opLeaStack {
 		reg := int(code[pc+1])

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "5948c021bc45804868e9fcf62967f0a6bf7c1aa9d1dbc64bf47c23f4561a9f11"
+const CompilerSourceDigest = "bf10a84c19a924facde4bda99e0e09d7487c67e4d5e207d94a4a4eb6b977965b"
 
 // source: backend/compiler_common_impl.go
 
@@ -36642,10 +36642,10 @@ if target == renvoTargetWindows386 {
 return "windows/386", "q\xf3\v\xf8\x94iN\x98\x11S\xbe\\g\xbe\xda\x18T\xe2\x0ev坘dϴí\xf8d\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xaa\x04J\xab}#\x99\nD\x93~\xd0\x12\r\xb2\xdfQ\xcd\xd5[(\r\xda_\xfe\x97\x8f\x88N\x8f\x1al", 3, true
+return "wasi/wasm32", "\xb0,K\x0fT\x1elz=Q4\xe0\xfdzjCGڬ\x92\xaa\xc3\xda\xc0\xd6'NM\xda-\xa0A", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xb1\x9c\x9d\xb1\x0e\xb0\xf8R2\xd2sv\xd1\x02l\xa7o\x83/t\"\x91&\xbf\xd25\xf7]\xaa\x98\n\x17", 3, true
+return "darwin/arm64", "*\xfbl\xa3\x1eŹ\xc4\\\x12!~J\a\xc1Ӎ\xbeO\xb1\xe4\x13(טр\xce@\x05F\"", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", ":\x03\x91\xe9,\xa4\x02\a\x05u\x89uI0\x9dC\xab\x8b\xf2\xc7/\xd0HlĴ\xbd\x19\xfa$\xbd\xf2", 3, true
@@ -36654,7 +36654,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xd14\xe6\x10E\x15\x88\xc6\xc5F\x15D\x8d\x86RNo{Ke\x00\xa6\x7f\x8f\xdct\x17(\x95\xdb\xea\xc7", 3, true
+return "vm/vm32", "\n\xf8\x00\x19\x9d\a\xb2\x92R\x81\xe6&=\xfd\xcfO7x\x92\xfe\xea\x9bwYx\xb9\x86f-C\x9br", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "Gc\x90\xde\xec\xff樒\xa0\x12;\xa1k\x11\x1dkt-\vj\xf5\x15U2J\aH7\xc8\xf1\x8a", 3, true
@@ -37507,6 +37507,10 @@ return out.data
 
 func (out *renvoAsm) SetData(value []byte) {
 out.data = value
+}
+
+func (out *renvoAsm) SetDataOffset(value int) {
+out.dataOffset = value
 }
 
 func (out *renvoAsm) BSSSize() int {
@@ -45173,7 +45177,8 @@ const renvoWasm32OpPushRegMovImm = 50
 const renvoWasm32OpLoadMemPushReg = 51
 const renvoWasm32OpLoadStackPop = 52
 const renvoWasm32OpMovRegImmPop = 53
-const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07"
+const renvoWasm32OpMovRegRegPop = 54
+const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05"
 const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
@@ -45555,13 +45560,30 @@ return
 }
 positive := a.lastPrimaryLoad - 2
 if a.lastPrimaryLoad > 0 && positive/32 == end {
-if end >= 6 && int(a.code[end-6]) == renvoWasm32OpLoadStack {
+markerReg := positive % 32
+if end >= 6 && int(a.code[end-6]) == renvoWasm32OpLoadStack &&
+int(a.code[end-5]) == markerReg {
 dst := int(a.code[end-5])
 offset := renvoGet32At(a.code, end-4)
 a.code = a.code[:end-6]
 a.code = append(a.code, byte(renvoWasm32OpLoadStackPop), byte(dst))
 a.code = renvoAppend32(a.code, offset)
 a.code = append(a.code, byte(reg))
+a.lastPrimaryLoad = 0
+return
+}
+
+
+
+if end >= 8 && int(a.code[end-8]) == renvoWasm32OpLoadMem &&
+int(a.code[end-7]) == markerReg {
+a.lastPrimaryLoad = 0
+} else if end >= 3 && int(a.code[end-3]) == renvoWasm32OpMovRegReg &&
+int(a.code[end-2]) == markerReg {
+dst := int(a.code[end-2])
+src := int(a.code[end-1])
+a.code = a.code[:end-3]
+a.code = append(a.code, byte(renvoWasm32OpMovRegRegPop), byte(dst), byte(src), byte(reg), 0)
 a.lastPrimaryLoad = 0
 return
 }
@@ -46621,7 +46643,7 @@ renvoWasmBr(out, loopDepth)
 }
 return
 }
-if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
 if op == renvoWasm32OpPushRegLoadStack {
 rtgWasm32Wasm32PackageRenvoWasm32AppendPushReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+1)))
 rtgWasm32Wasm32PackageRenvoWasm32AppendLoadStackReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
@@ -46640,10 +46662,14 @@ rtgWasm32Wasm32PackageRenvoWasm32AppendPushReg(out, int(renvo_runtime_UnsafeByte
 } else if op == renvoWasm32OpLoadStackPop {
 rtgWasm32Wasm32PackageRenvoWasm32AppendLoadStackReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+1)), renvoWasm32GetS32(code, pc+2))
 rtgWasm32Wasm32PackageRenvoWasm32AppendPopReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+6)))
-} else {
+} else if op == renvoWasm32OpMovRegImmPop {
 renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+2))
 renvoWasm32RegSet(out, int(renvo_runtime_UnsafeByteAt(code, pc+1)))
 rtgWasm32Wasm32PackageRenvoWasm32AppendPopReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+6)))
+} else {
+renvoWasm32RegGet(out, int(renvo_runtime_UnsafeByteAt(code, pc+2)))
+renvoWasm32RegSet(out, int(renvo_runtime_UnsafeByteAt(code, pc+1)))
+rtgWasm32Wasm32PackageRenvoWasm32AppendPopReg(out, int(renvo_runtime_UnsafeByteAt(code, pc+3)))
 }
 if loopDepth >= 0 {
 renvoWasm32SetPc(out, nextIndex)
@@ -47722,7 +47748,7 @@ end := renvoWasm32BlockEnd(starts, block, len(pcs))
 stack = stack[:0]
 for i := starts[block]; i < end; i++ {
 op := int(renvo_runtime_UnsafeByteAt(code, pcs[i]))
-if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
 
 
 stack = stack[:0]
@@ -54936,6 +54962,7 @@ renvoAarch64AsmEmit(out, 0xd61f0200)
 out.Patch()
 dataFileOff := renvoAlignValue(
 rtgBuiltinDarwinAarch64PackageMachCodeOffset+len(out.code), rtgBuiltinDarwinAarch64PackageMachPageSize)
+out.dataOffset = dataFileOff
 data := out.data
 data = rtgBuiltinDarwinAarch64PackageMachAppendUntil(data, renvoAlignValue(len(data), 8))
 for i := 0; i < count; i++ {

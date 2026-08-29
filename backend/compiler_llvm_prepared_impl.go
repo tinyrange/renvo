@@ -182,6 +182,10 @@ func (out *renvoAsm) SetData(value []byte) {
 	out.data = value
 }
 
+func (out *renvoAsm) SetDataOffset(value int) {
+	out.dataOffset = value
+}
+
 func (out *renvoAsm) BSSSize() int {
 	return out.bssSize
 }

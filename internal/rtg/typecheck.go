@@ -92,6 +92,7 @@ func (out *RTGEmitter) Code() []byte { return nil }
 func (out *RTGEmitter) SetCode(value []byte) {}
 func (out *RTGEmitter) Data() []byte { return nil }
 func (out *RTGEmitter) SetData(value []byte) {}
+func (out *RTGEmitter) SetDataOffset(value int) {}
 func (out *RTGEmitter) BSSSize() int { return 0 }
 func (out *RTGEmitter) RejectImageSize(memory bool, needed int, limit int) {}
 func (out *RTGEmitter) WasmLocalSlots() []int32 { return nil }

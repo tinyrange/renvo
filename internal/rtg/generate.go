@@ -650,6 +650,10 @@ func (out *renvoAsm) SetData(value []byte) {
 	out.data = value
 }
 
+func (out *renvoAsm) SetDataOffset(value int) {
+	out.dataOffset = value
+}
+
 func (out *renvoAsm) BSSSize() int {
 	return out.bssSize
 }
@@ -1224,6 +1228,10 @@ func (out *RTGEmitter) Data() []byte {
 
 func (out *RTGEmitter) SetData(value []byte) {
 	out.asm.data = value
+}
+
+func (out *RTGEmitter) SetDataOffset(value int) {
+	out.asm.dataOffset = value
 }
 
 func (out *RTGEmitter) BSSSize() int {
@@ -2236,7 +2244,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
-		method != "Data" && method != "SetData" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
+		method != "Data" && method != "SetData" && method != "SetDataOffset" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
 		method != "WindowsSubsystem" && method != "StaticImportCount" &&
 		method != "StaticImportDLL" && method != "StaticImportName" &&
 		method != "StaticCallParameterCount" && method != "StaticCallParameterKind" &&
@@ -2324,6 +2332,11 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method == "SetData" && len(arguments) == 1 {
 		replacement = append(replacement, receiver...)
 		replacement = append(replacement, ".data = "...)
+		return append(replacement, arguments[0]...), end, true
+	}
+	if method == "SetDataOffset" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".dataOffset = "...)
 		return append(replacement, arguments[0]...), end, true
 	}
 	if method == "BSSSize" && len(arguments) == 0 {

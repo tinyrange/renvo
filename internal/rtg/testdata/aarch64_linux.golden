@@ -226,6 +226,10 @@ func (out *RTGEmitter) SetData(value []byte) {
 	out.asm.data = value
 }
 
+func (out *RTGEmitter) SetDataOffset(value int) {
+	out.asm.dataOffset = value
+}
+
 func (out *RTGEmitter) BSSSize() int {
 	return out.asm.bssSize
 }

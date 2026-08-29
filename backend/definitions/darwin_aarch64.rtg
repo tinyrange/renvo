@@ -243,6 +243,7 @@ go backend {
 		out.Patch()
 		dataFileOff := RTGAlignValue(
 			machCodeOffset+out.Len(), machPageSize)
+		out.SetDataOffset(dataFileOff)
 		data := out.Data()
 		data = machAppendUntil(data, RTGAlignValue(len(data), 8))
 		for i := 0; i < count; i++ {
