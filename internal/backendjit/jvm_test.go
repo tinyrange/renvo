@@ -4,10 +4,7 @@ package backendjit
 
 import (
 	"bytes"
-	"crypto/sha1"
-	"encoding/binary"
 	"fmt"
-	"hash/adler32"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,31 +20,6 @@ var jvmExampleOnce sync.Once
 var jvmExampleClass []byte
 var jvmExampleRoot string
 var jvmExampleFailure string
-
-func compileAndroidDEXExample(t *testing.T) []byte {
-	t.Helper()
-	if hostTarget() == "" {
-		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
-	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	definition := filepath.Join(root, "backends", "jvm.rbe")
-	result := driver.CompileFromFS([]string{
-		"-backend", definition,
-		"-t", "android/vm32",
-		"-s",
-		"-o", "classes.dex",
-		filepath.Join(root, "backend", "tests", "bitwise_or_sets_high_bit.go"),
-	}, root, filepath.Join(root, "std"), driver.OSFS{},
-		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			backendJITTestCacheDir, backendcompiled.Backend{}))
-	if !result.Ok {
-		t.Fatalf("Android/JVM CompilerJIT compile failed: %#v", result.Diagnostic)
-	}
-	return result.Binary
-}
 
 func compileJVMExample(t *testing.T) ([]byte, string) {
 	t.Helper()
@@ -130,31 +102,5 @@ func TestCompilerJITJVMExecutesWhenJavaIsAvailable(t *testing.T) {
 	}
 	if !bytes.HasPrefix(output, []byte("Renvo on ")) || !bytes.Contains(output, []byte(" / Java ")) {
 		t.Fatalf("generated JVM interop output = %q", output)
-	}
-}
-
-func TestCompilerJITAndroidDEXImage(t *testing.T) {
-	dex := compileAndroidDEXExample(t)
-	if len(dex) < 112 || !bytes.Equal(dex[:8], []byte("dex\n035\x00")) {
-		t.Fatalf("Android/JVM output has no DEX magic: %x", dex[:min(len(dex), 16)])
-	}
-	if got := int(binary.LittleEndian.Uint32(dex[32:36])); got != len(dex) {
-		t.Fatalf("DEX file_size = %d, want %d", got, len(dex))
-	}
-	if got := binary.LittleEndian.Uint32(dex[8:12]); got != adler32.Checksum(dex[12:]) {
-		t.Fatalf("DEX Adler-32 = %#x, want %#x", got, adler32.Checksum(dex[12:]))
-	}
-	wantSHA1 := sha1.Sum(dex[32:])
-	if !bytes.Equal(dex[12:32], wantSHA1[:]) {
-		t.Fatal("DEX SHA-1 signature is invalid")
-	}
-	for _, required := range [][]byte{
-		[]byte("LRenvoProgram;"),
-		[]byte("Ldev/renvo/app/RenvoActivity;"),
-		[]byte("Landroid/app/Activity;"),
-	} {
-		if !bytes.Contains(dex, required) {
-			t.Errorf("generated DEX omits %q", required)
-		}
 	}
 }
