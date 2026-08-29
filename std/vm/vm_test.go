@@ -35,8 +35,7 @@ func TestRunFusedStackInstructions(t *testing.T) {
 		opPushRegLoadStack, regRax, regRdx, 4, 0, 0, 0,
 		opLoadStackPushReg, regRax, 4, 0, 0, 0, regRdx,
 		opPushRegMovImm, regRax, regRdx, 9, 0, 0, 0,
-		opMovRegReg, regRax, regRdx,
-		opPopReg, regRcx,
+		opMovRegRegPop, regRax, regRdx, regRcx, 0,
 		opLoadStackPop, regRdx, 4, 0, 0, 0, regRcx,
 		opMovRegImmPop, regRdx, 11, 0, 0, 0, regRcx,
 		opLeaStack, regR10, 4, 0, 0, 0,
@@ -45,7 +44,7 @@ func TestRunFusedStackInstructions(t *testing.T) {
 		opExit,
 	}
 	result := Run(testProgram(code, nil, 0), Limits{Steps: 20, Memory: 1024})
-	if result.Trap != TrapNone || result.ExitCode != 9 || result.Steps != 13 {
+	if result.Trap != TrapNone || result.ExitCode != 9 || result.Steps != 12 {
 		t.Fatalf("result = %+v", result)
 	}
 }

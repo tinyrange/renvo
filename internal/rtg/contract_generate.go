@@ -1003,7 +1003,25 @@ func appendPreparedRuntimeOperationAdapter(
 			out = append(out, numberRegister...)
 			out = append(out, ", "...)
 			out = appendDecimalFrame(out, number)
-			out = append(out, ")\n\t\trenvoRTGDirectHostSyscall(out)\n"...)
+			out = append(out, ")\n"...)
+			if target.Descriptor.OS == "openbsd" {
+				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, len(out.code))\n"...)
+				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, "...)
+				out = appendDecimalFrame(out, number)
+				out = append(out, ")\n"...)
+			}
+			out = append(out, "\t\trenvoRTGDirectHostSyscall(out)\n"...)
+			if resultOK && targetRuntimeSyscallField(target.Runtime, "error") == "carry" {
+				out = append(out, "\t\tsyscallOK := out.NewLabel()\n"...)
+				out = append(out, "\t\trenvoRTGDirectJumpCondition(out, renvoRTGConditionFromSetcc(147), syscallOK)\n"...)
+				out = append(out, "\t\trenvoRTGDirectMove(out, renvoRTGScratch, "...)
+				out = append(out, resultRegister...)
+				out = append(out, ")\n\t\trenvoRTGDirectMoveImmediate(out, "...)
+				out = append(out, resultRegister...)
+				out = append(out, ", 0)\n\t\trenvoRTGDirectSubtract(out, "...)
+				out = append(out, resultRegister...)
+				out = append(out, ", renvoRTGScratch)\n\t\tout.Mark(syscallOK)\n"...)
+			}
 			if resultOK {
 				out = append(out, "\t\trenvoRTGDirectMove(out, renvoRTGPrimary, "...)
 				out = append(out, resultRegister...)
@@ -1129,6 +1147,12 @@ func runtimeOperationInteger(runtime Declaration, operation string, field string
 	return 0, false
 }
 
+// RuntimeOperationInteger exposes one resolved runtime field to generators
+// which project target metadata outside the RTG package.
+func RuntimeOperationInteger(runtime Declaration, operation string, field string) (int, bool) {
+	return runtimeOperationInteger(runtime, operation, field)
+}
+
 func runtimeOperationList(
 	runtime Declaration, operation string, field string,
 ) []string {
@@ -1139,9 +1163,18 @@ func runtimeOperationList(
 			continue
 		}
 		for j := 0; j < len(statement.Children); j++ {
-			left, _, assignment := statementAssignment(statement.Children[j])
-			if assignment && len(left) == 1 && left[0] == field {
-				return statementListValues(statement.Children[j])
+			tokens := statement.Children[j].Tokens
+			for at := 0; at+2 < len(tokens); at++ {
+				if tokens[at] != field || tokens[at+1] != "=" || tokens[at+2] != "[" {
+					continue
+				}
+				var values []string
+				for at += 3; at < len(tokens) && tokens[at] != "]"; at++ {
+					if tokens[at] != "," {
+						values = append(values, valueName(tokens[at]))
+					}
+				}
+				return values
 			}
 		}
 	}
@@ -1335,6 +1368,20 @@ func targetRuntimeRegisterList(runtime Declaration, field string) []string {
 		}
 	}
 	return nil
+}
+
+func targetRuntimeSyscallField(runtime Declaration, field string) string {
+	block, ok := declarationBlock(runtime, "syscall")
+	if !ok {
+		return ""
+	}
+	for i := 0; i < len(block.Children); i++ {
+		left, right, assignment := statementAssignment(block.Children[i])
+		if assignment && len(left) == 1 && left[0] == field && len(right) == 1 {
+			return valueName(right[0])
+		}
+	}
+	return ""
 }
 
 func decimalText(value int) string {

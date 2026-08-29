@@ -182,6 +182,10 @@ func (out *renvoAsm) SetData(value []byte) {
 	out.data = value
 }
 
+func (out *renvoAsm) SetDataOffset(value int) {
+	out.dataOffset = value
+}
+
 func (out *renvoAsm) BSSSize() int {
 	return out.bssSize
 }
@@ -211,12 +215,28 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallParameterCount() int {
+	return out.staticCallParamCount
+}
+
+func (out *renvoAsm) StaticCallParameterKind(index int) int {
+	return int(out.staticCallParamKinds[index])
+}
+
+func (out *renvoAsm) StaticCallResultFloatRegister() int {
+	return out.staticCallResultFloat
+}
+
 func (out *renvoAsm) DynamicImport(library string, name string) int {
 	for i := 0; i < len(out.darwinImports); i++ {
 		if out.darwinImports[i].dylib == library && out.darwinImports[i].name == name {
 			out.darwinImports[i].used = true
 			return i
 		}
+	}
+	if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetDarwinArm64 {
+		library = renvo_runtime_ArenaPersistString(library)
+		name = renvo_runtime_ArenaPersistString(name)
 	}
 	label := renvoAsmNewLabel(out)
 	out.darwinImports = append(out.darwinImports,

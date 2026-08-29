@@ -318,8 +318,9 @@ go backend {
 	const renvoWasm32OpLoadMemPushReg = 51
 	const renvoWasm32OpLoadStackPop = 52
 	const renvoWasm32OpMovRegImmPop = 53
+	const renvoWasm32OpMovRegRegPop = 54
 
-	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07"
+	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05"
 	const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 	const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
@@ -434,13 +435,30 @@ go backend {
 			}
 			positive := a.PrimaryLoad() - 2
 			if a.PrimaryLoad() > 0 && positive/32 == end {
-				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack {
+				markerReg := positive % 32
+				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack &&
+					int(a.Code()[end-5]) == markerReg {
 					dst := int(a.Code()[end-5])
 					offset := RTGGet32At(a.Code(), end-4)
 					a.SetCode(a.Code()[:end-6])
 					a.SetCode(append(a.Code(), byte(renvoWasm32OpLoadStackPop), byte(dst)))
 					a.SetCode(RTGAppend32(a.Code(), offset))
 					a.SetCode(append(a.Code(), byte(reg)))
+					a.SetPrimaryLoad(0)
+					return
+				}
+				// LoadMem uses the same primary-load marker. Its displacement can
+				// end in bytes that resemble a MovRegReg, so reject that longer
+				// form before considering the three-byte move below.
+				if end >= 8 && int(a.Code()[end-8]) == renvoWasm32OpLoadMem &&
+					int(a.Code()[end-7]) == markerReg {
+					a.SetPrimaryLoad(0)
+				} else if end >= 3 && int(a.Code()[end-3]) == renvoWasm32OpMovRegReg &&
+					int(a.Code()[end-2]) == markerReg {
+					dst := int(a.Code()[end-2])
+					src := int(a.Code()[end-1])
+					a.SetCode(a.Code()[:end-3])
+					a.SetCode(append(a.Code(), byte(renvoWasm32OpMovRegRegPop), byte(dst), byte(src), byte(reg), 0))
 					a.SetPrimaryLoad(0)
 					return
 				}
@@ -1701,7 +1719,7 @@ go backend {
 			}
 			return
 		}
-		if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+		if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
 			if op == renvoWasm32OpPushRegLoadStack {
 				renvoWasm32AppendPushReg(out, int(RTGByteAt(code, pc+1)))
 				renvoWasm32AppendLoadStackReg(out, int(RTGByteAt(code, pc+2)), renvoWasm32GetS32(code, pc+3))
@@ -1720,10 +1738,14 @@ go backend {
 			} else if op == renvoWasm32OpLoadStackPop {
 				renvoWasm32AppendLoadStackReg(out, int(RTGByteAt(code, pc+1)), renvoWasm32GetS32(code, pc+2))
 				renvoWasm32AppendPopReg(out, int(RTGByteAt(code, pc+6)))
-			} else {
+			} else if op == renvoWasm32OpMovRegImmPop {
 				renvoWasmAppendI32Const(out, renvoWasm32GetS32(code, pc+2))
 				renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
 				renvoWasm32AppendPopReg(out, int(RTGByteAt(code, pc+6)))
+			} else {
+				renvoWasm32RegGet(out, int(RTGByteAt(code, pc+2)))
+				renvoWasm32RegSet(out, int(RTGByteAt(code, pc+1)))
+				renvoWasm32AppendPopReg(out, int(RTGByteAt(code, pc+3)))
 			}
 			if loopDepth >= 0 {
 				renvoWasm32SetPc(out, nextIndex)
@@ -3351,7 +3373,7 @@ go backend {
 			stack = stack[:0]
 			for i := starts[block]; i < end; i++ {
 				op := int(RTGByteAt(code, pcs[i]))
-				if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegImmPop {
+				if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
 					// Fused instructions retain their physical VM stack effects. Do
 					// not match local-stack substitutions across one of them.
 					stack = stack[:0]
@@ -3809,6 +3831,7 @@ arch vm32 {
 		renvoWasm32OpLoadMemPushReg = go renvoWasm32OpLoadMemPushReg
 		renvoWasm32OpLoadStackPop = go renvoWasm32OpLoadStackPop
 		renvoWasm32OpMovRegImmPop = go renvoWasm32OpMovRegImmPop
+		renvoWasm32OpMovRegRegPop = go renvoWasm32OpMovRegRegPop
 		renvoWasm32OpXorRegReg = go renvoWasm32OpXorRegReg
 		renvoWasm32Patch = go renvoWasm32Patch
 		renvoWasm32PcInList = go renvoWasm32PcInList

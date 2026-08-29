@@ -909,7 +909,10 @@ arch arm {
 			return at
 		}
 		hostSyscall(out:emitter) {
-			asmSyscall(out)
+			# Direct runtimes already place the syscall number and arguments in
+			# their declared registers. The legacy compiler helper translates
+			# Renvo's pseudo-register convention and would overwrite r7 here.
+			asmEmit(out, 0xef000000)
 		}
 		move(out:emitter, destination:register, source:register) {
 			asmMovRegReg(out, destination.Code, source.Code)

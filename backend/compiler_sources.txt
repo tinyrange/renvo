@@ -11,7 +11,6 @@ compiler_target_registry_impl.go
 compiler_target_impl.go
 compiler_rtg_generated_impl.go
 compiler_rtg_adapter_impl.go
-compiler_rtg_inactive_impl.go
 compiler_amd64_impl.go
 compiler_amd64_target_impl.go
 compiler_386_impl.go
@@ -33,9 +32,10 @@ compiler_linux_kernel_amd64_impl.go
 compiler_linux_386_impl.go
 compiler_windows_386_impl.go
 compiler_linux_aarch64_impl.go
-compiler_windows_arm64_impl.go
+compiler_windows_arm64_target_impl.go
 compiler_linux_arm_impl.go
 compiler_wasi_wasm32_impl.go
 compiler_darwin_arm64_impl.go
+compiler_darwin_arm64_target_impl.go
 compiler_unit_impl.go
 compiler_unit_decode_impl.go

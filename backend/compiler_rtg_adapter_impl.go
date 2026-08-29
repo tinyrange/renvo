@@ -1,5 +1,3 @@
-//go:build !renvo || renvo_prepared || renvo_jvm_prepared
-
 package main
 
 type renvoRTGAssemblySource struct {
@@ -588,6 +586,9 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	}
 	renvoAsmPatch(&g.asm)
 	data := renvoRTGImage(&g.asm)
+	if renvoFixedTarget == 0 && g.asm.c.emitImage {
+		data = renvoAppendReplLinkTable(data, &g.asm)
+	}
 	renvoRTGValidateRelocations(&g.asm)
 	if renvoRTGUnsupportedOperation != 0 {
 		renvoRTGReportFailure(g)

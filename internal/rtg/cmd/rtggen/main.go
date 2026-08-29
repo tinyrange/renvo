@@ -19,33 +19,31 @@ func main() {
 	arch := flag.String("arch", "", "architecture for checked-in architecture generation")
 	statefulEmitter := flag.Bool("stateful-emitter", false, "keep the stateful RTG emitter in architecture output")
 	algorithms := flag.Bool("algorithms", false, "emit the pruned checked-in algorithm projection")
+	compilerIntegration := flag.Bool("compiler-integration", false, "emit RTG-owned compiler-private lowering")
 	contract := flag.Bool("contract", false, "emit the checked-in semantic contract projection")
 	targetProjection := flag.Bool("target-projection", false, "emit a checked-in production target projection")
 	prepared := flag.Bool("prepared", false, "emit a prepared custom backend for compiler package main")
 	kernel := flag.Bool("kernel", false, "generate the shared checked-in architecture kernel")
-	inactiveKernel := flag.Bool("inactive-kernel", false, "generate the self-hosted inactive architecture kernel")
 	packageName := flag.String("package", "backend", "generated Go package")
 	buildTag := flag.String("build-tag", "", "prepend one Go build tag to generated source")
 	output := flag.String("o", "", "generated Go output")
 	check := flag.Bool("check", false, "fail if the output is stale")
 	flag.Parse()
-	if *output == "" || flag.NArg() == 0 && !*kernel && !*inactiveKernel {
+	if *output == "" || flag.NArg() == 0 && !*kernel {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
 		os.Exit(2)
 	}
-	if *kernel || *inactiveKernel {
-		if *target != "" || *arch != "" || *statefulEmitter || *targetProjection || flag.NArg() != 0 {
+	if *kernel {
+		if *target != "" || *arch != "" || *statefulEmitter || *compilerIntegration ||
+			*targetProjection || flag.NArg() != 0 {
 			fail("kernel generation does not accept definitions, -t, or -arch")
 		}
-		if *kernel && *inactiveKernel {
-			fail("-kernel and -inactive-kernel are mutually exclusive")
-		}
 		generated := rtg.GenerateArchitectureKernel(*packageName)
-		if *inactiveKernel {
-			generated = rtg.GenerateInactiveArchitectureKernel(*packageName)
-		}
 		writeGenerated(*output, *check, generated)
 		return
+	}
+	if *compilerIntegration && *arch == "" {
+		fail("compiler integration generation requires -arch")
 	}
 	var definitions []rtg.ResolveResult
 	for _, path := range flag.Args() {
@@ -75,12 +73,19 @@ func main() {
 		if *target != "" || *prepared || *targetProjection || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}
-		if *algorithms && *contract || *algorithms && *statefulEmitter ||
-			*contract && *statefulEmitter {
-			fail("-algorithms, -contract, and -stateful-emitter are mutually exclusive")
+		modeCount := 0
+		for _, enabled := range []bool{*algorithms, *compilerIntegration, *contract, *statefulEmitter} {
+			if enabled {
+				modeCount++
+			}
+		}
+		if modeCount > 1 {
+			fail("architecture generation modes are mutually exclusive")
 		}
 		if *algorithms {
 			generated = rtg.GenerateCheckedInArchitectureAlgorithms(definitions[0], *arch, *packageName)
+		} else if *compilerIntegration {
+			generated = rtg.GenerateCheckedInCompilerIntegration(definitions[0], *arch, *packageName)
 		} else if *contract {
 			generated = rtg.GenerateCheckedInArchitectureContract(definitions[0], *arch, *packageName)
 		} else if *statefulEmitter {
@@ -89,7 +94,7 @@ func main() {
 			generated = rtg.GenerateArchitectureBackend(definitions[0], *arch, *packageName)
 		}
 	} else if *targetProjection {
-		if *target == "" || *prepared || *statefulEmitter || *algorithms || *contract ||
+		if *target == "" || *prepared || *statefulEmitter || *algorithms || *compilerIntegration || *contract ||
 			len(definitions) != 1 {
 			fail("target projection requires one definition, -t, and no other generation mode")
 		}

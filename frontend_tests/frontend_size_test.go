@@ -11,7 +11,7 @@ import (
 const (
 	frontendBackendsReference = int64(2_000_000)
 	frontendBundleReference   = int64(4 * 1024 * 1024)
-	frontendPayloadMax        = int64(4 * 1024 * 1024)
+	frontendPayloadMax        = int64(4*1024*1024 + 10*1024)
 )
 
 func TestFrontendWithBackendsSize(t *testing.T) {

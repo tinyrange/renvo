@@ -1,6 +1,23 @@
 # Shared 32-bit x86 machine facts, encoder, direct-emitter bindings, and Renvo
 # internal convention. Target entrypoints own platform ABIs and composition.
 go backend {
+	func abiPushRegister(out *RTGEmitter, source RTGRegister) {
+		out.AppendByte(int(0x50 | registerLowBits(source)))
+	}
+
+	func abiPushImmediate(out *RTGEmitter, value int) {
+		if RTGInt8Fits(value) {
+			out.Bytes2(0x6a, value)
+		} else {
+			out.Byte(0x68)
+			out.Int32(value)
+		}
+	}
+
+	func abiPopRegister(out *RTGEmitter, destination RTGRegister) {
+		out.AppendByte(int(0x58 | registerLowBits(destination)))
+	}
+
 	func asmSecondaryDisp(a *RTGEmitter, disp int) {
 		if disp == 0 {
 			a.Int8(0x02)
@@ -350,6 +367,54 @@ go backend {
 		out.SetByteAt(at+1, byte(frame))
 		out.SetByteAt(at+2, byte(frame>>8))
 	}
+
+	// Target projections use compact integer register codes. Keeping this small
+	// adapter in the shared ISA projection avoids pulling prepared RTG register
+	// state into fixed built-in compilers.
+	func targetEmitModRM(out *RTGEmitter, mode byte, reg byte, rm byte) {
+		out.Int8(int(mode<<6 | (reg&7)<<3 | rm&7))
+	}
+
+	func targetRegisterLowBits(reg int) byte {
+		return byte(reg & 7)
+	}
+
+	func targetEncodeBinary(out *RTGEmitter, opcode byte, destination int, source int) {
+		out.Int8(int(opcode))
+		targetEmitModRM(out, 3, targetRegisterLowBits(source), targetRegisterLowBits(destination))
+	}
+
+	func targetEncodeRelative(out *RTGEmitter, opcode byte, label int) {
+		out.Int8(int(opcode))
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, label)
+	}
+
+	func targetMoveImmediate(out *RTGEmitter, destination int, value int64) {
+		if value == 0 {
+			targetEncodeBinary(out, 0x31, destination, destination)
+			return
+		}
+		out.Int8(int(0xb8 + targetRegisterLowBits(destination)))
+		out.Int32(int(value))
+	}
+
+	func targetMove(out *RTGEmitter, destination int, source int) {
+		targetEncodeBinary(out, 0x89, destination, source)
+	}
+
+	func targetTest(out *RTGEmitter, destination int, source int) {
+		targetEncodeBinary(out, 0x85, destination, source)
+	}
+
+	func targetCall(out *RTGEmitter, label int) {
+		targetEncodeRelative(out, 0xe8, label)
+	}
+
+	func targetJump(out *RTGEmitter, label int) {
+		targetEncodeRelative(out, 0xe9, label)
+	}
 }
 
 arch x86_32 {
@@ -467,6 +532,21 @@ arch x86_32 {
 		copy_bytes = sequence copyBytes
 	}
 	exports {
+		renvo386RTGEmitModRM = sequence emitModRM
+		renvo386RTGEncodeBinary = sequence encodeBinary
+		renvo386RTGEncodeRelative = sequence encodeRelative
+		renvo386RTGRegisterLowBits = sequence registerLowBits
+		renvo386RTGMoveImmediate = go moveImmediate
+		renvo386TargetEmitModRM = go targetEmitModRM
+		renvo386TargetEncodeBinary = go targetEncodeBinary
+		renvo386TargetEncodeRelative = go targetEncodeRelative
+		renvo386TargetRegisterLowBits = go targetRegisterLowBits
+		renvo386TargetMove = go targetMove
+		renvo386TargetTest = go targetTest
+		renvo386TargetCall = go targetCall
+		renvo386TargetJump = go targetJump
+		renvo386TargetMoveImmediate = go targetMoveImmediate
+		renvo386RTGJumpCondition = sequence jumpCondition
 		renvo386AsmSecondaryDisp = go asmSecondaryDisp
 		renvo386AsmMovRaxImm = go asmMovRaxImm
 		renvo386AsmMovRaxImm64 = sequence asmMovRaxImm64
@@ -639,7 +719,9 @@ arch x86_32 {
 		jumpCondition(out:emitter, condition:condition, label:label) {
 			out.Byte(0x0f)
 			out.AppendByte(int(condition.JumpOpcode))
-			out.Rel32(label)
+			let at = out.Len()
+			out.Int32(0)
+			out.RelocAt(at, label)
 		}
 		multiply(out:emitter, destination:register, source:register) {
 			out.Bytes2(0x0f, 0xaf)
@@ -647,7 +729,9 @@ arch x86_32 {
 		}
 		encodeRelative(out:emitter, opcode:byte, label:label) {
 			out.AppendByte(int(opcode))
-			out.Rel32(label)
+			let at = out.Len()
+			out.Int32(0)
+			out.RelocAt(at, label)
 		}
 		setCondition(out:emitter, condition:condition, destination:register) {
 			out.Byte(0x0f)
@@ -673,6 +757,9 @@ abi renvo_x86_32 {
 	arch = x86_32
 	frame_start = sequence frameStart
 	frame_finish = go frameFinish
+	push_register = go abiPushRegister
+	push_immediate = go abiPushImmediate
+	pop_register = go abiPopRegister
 	call_words = [ebx, esi, edx, ecx, eax, edi]
 	overflow_stride = 4
 	scalar_result = eax

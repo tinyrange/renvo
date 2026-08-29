@@ -24,13 +24,13 @@ func objcMsgFloat0(object, selector int) float64 { return 0 }
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
 func objcMsgPointX(object, selector int) float64 { return 0 }
 
-// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend,result-float64=1
 func objcMsgPointY(object, selector int) float64 { return 0 }
 
-// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend,result-float64=2
 func objcMsgRectWidth(object, selector int) float64 { return 0 }
 
-// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend,result-float64=3
 func objcMsgRectHeight(object, selector int) float64 { return 0 }
 
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
@@ -63,12 +63,12 @@ func objcMsgPointer3(object, selector int, value *byte, length, options int) int
 // renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
 func objcMsgInts(object, selector int, value []int32) int { return 0 }
 
-// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend,float64=60
 func objcMsgRect(object, selector, x, y, width, height, style, backing int) int {
 	return 0
 }
 
-// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend
+// renvo:linkstatic /usr/lib/libobjc.A.dylib,objc_msgSend,float64=12
 func objcMsgSize(object, selector, width, height int) int { return 0 }
 
 // renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glViewport
@@ -83,7 +83,7 @@ func glLoadIdentity() {}
 // renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glDrawBuffer
 func glDrawBuffer(mode int) {}
 
-// renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glOrtho
+// renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glOrtho,float64=63
 func glOrtho(left, right, bottom, top, near, far int) {}
 
 // renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glRasterPos2i
@@ -92,7 +92,7 @@ func glRasterPos2i(x, y int) {}
 // renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glPixelStorei
 func glPixelStorei(name, value int) {}
 
-// renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glPixelZoom
+// renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glPixelZoom,float32=3
 func glPixelZoom(x, y int) {}
 
 // renvo:linkstatic /System/Library/Frameworks/OpenGL.framework/OpenGL,glDrawPixels

@@ -69,13 +69,22 @@ func TestBackendLinkedImageAcrossExecutableTargets(t *testing.T) {
 					}
 				}
 			case "darwin/arm64":
-				_, memorySize, _, imports, libraries, layoutOK := linkedimage.DarwinLayout(image.Native)
+				_, memorySize, segments, imports, libraries, layoutOK := linkedimage.DarwinLayout(image.Native)
 				if !layoutOK || memorySize == 0 || len(imports) == 0 || len(libraries) == 0 {
 					t.Fatalf("DarwinLayout = memory %d, imports %#v, libraries %#v, ok %v", memorySize, imports, libraries, layoutOK)
 				}
 				symbols, symbolsOK := linkedimage.PersistentSymbols(image.Native, memorySize)
 				if !symbolsOK || len(symbols) != 1 {
 					t.Fatalf("PersistentSymbols = %#v, %v", symbols, symbolsOK)
+				}
+				bssStart := 0
+				for _, segment := range segments {
+					if segment.Permissions&2 != 0 {
+						bssStart = segment.Address + segment.FileSize
+					}
+				}
+				if bssStart == 0 || symbols[0].Address < bssStart || symbols[0].RestoreAddress < bssStart {
+					t.Fatalf("persistent symbol %#v precedes Darwin BSS at %#x", symbols[0], bssStart)
 				}
 			}
 		})

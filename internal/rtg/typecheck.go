@@ -92,6 +92,7 @@ func (out *RTGEmitter) Code() []byte { return nil }
 func (out *RTGEmitter) SetCode(value []byte) {}
 func (out *RTGEmitter) Data() []byte { return nil }
 func (out *RTGEmitter) SetData(value []byte) {}
+func (out *RTGEmitter) SetDataOffset(value int) {}
 func (out *RTGEmitter) BSSSize() int { return 0 }
 func (out *RTGEmitter) RejectImageSize(memory bool, needed int, limit int) {}
 func (out *RTGEmitter) WasmLocalSlots() []int32 { return nil }
@@ -100,6 +101,9 @@ func (out *RTGEmitter) WindowsSubsystem() int { return 0 }
 func (out *RTGEmitter) StaticImportCount() int { return 0 }
 func (out *RTGEmitter) StaticImportDLL(index int) string { return "" }
 func (out *RTGEmitter) StaticImportName(index int) string { return "" }
+func (out *RTGEmitter) StaticCallParameterCount() int { return 0 }
+func (out *RTGEmitter) StaticCallParameterKind(index int) int { return 0 }
+func (out *RTGEmitter) StaticCallResultFloatRegister() int { return -1 }
 func (out *RTGEmitter) DynamicImport(library string, name string) int { return 0 }
 func (out *RTGEmitter) DynamicImportCount() int { return 0 }
 func (out *RTGEmitter) DynamicImportLibrary(index int) string { return "" }
@@ -168,6 +172,7 @@ func RTGAlignValue(value int, alignment int) int { return 0 }
 func RTGAlign8(value int) int { return 0 }
 func RTGMakeIntScratch(capacity int) []int { return nil }
 func RTGMakeByteBuffer(length int) []byte { return nil }
+func RTGSHA256(data []byte, digest []byte) bool { return false }
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }
@@ -185,7 +190,7 @@ func validateEmbeddedGoTypes(document Document) (Diagnostic, bool) {
 	}
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo {
+		if declaration.Kind != DeclGo || declaration.Name != "backend" {
 			continue
 		}
 		source = append(source, '\n')

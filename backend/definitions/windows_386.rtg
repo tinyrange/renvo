@@ -59,9 +59,6 @@ extend arch x86_32 {
 			out.Mark(done)
 		}
 		windowsRuntimeOpen(out:emitter) {
-			let eax = record_register(Code:0, Valid:true)
-			let esi = record_register(Code:6, Valid:true)
-			move(out, eax, esi)
 			windowsTranslateCreateFileFlags(out)
 			out.Bytes2(0x6a, 0)
 			out.AppendByte(0x68)
@@ -265,6 +262,8 @@ extend arch x86_32 {
 		}
 	}
 }
+
+
 
 abi win32 {
 	internal = renvo_x86_32

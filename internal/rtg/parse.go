@@ -274,13 +274,14 @@ func (p *documentParser) parseGo() {
 	}
 	startToken := p.at
 	p.at++
-	if p.kind() != TokenIdent || p.text(p.at) != "backend" {
-		p.failAt(p.at, "RTG-GO-001", "expected go backend block")
+	if p.kind() != TokenIdent || p.text(p.at) != "backend" && p.text(p.at) != "compiler" {
+		p.failAt(p.at, "RTG-GO-001", "expected go backend or go compiler block")
 		return
 	}
+	mode := p.text(p.at)
 	p.at++
 	if !p.operator(p.at, "{") {
-		p.failAt(p.at, "RTG-GO-002", "expected { after go backend")
+		p.failAt(p.at, "RTG-GO-002", "expected { after go "+mode)
 		return
 	}
 	open := p.at
@@ -295,7 +296,7 @@ func (p *documentParser) parseGo() {
 	copy(body, p.document.Source[bodyStart:bodyEnd])
 	declaration := Declaration{
 		Kind:      DeclGo,
-		Name:      "backend",
+		Name:      mode,
 		Start:     p.document.Tokens[startToken].Start,
 		End:       p.document.Tokens[close].End,
 		BodyStart: bodyStart,

@@ -105,6 +105,33 @@ func TestVM32FoldsCommonStackPairs(t *testing.T) {
 			},
 			want: []byte{renvoWasm32OpMovRegImmPop, renvoWasm32RegRdx, 9, 0, 0, 0, renvoWasm32RegRcx},
 		},
+		{
+			name: "register-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpMovRegRegPop, renvoWasm32RegRdx, renvoWasm32RegRax, renvoWasm32RegRcx, 0},
+		},
+		{
+			name: "stack-load-tail-resembles-register-move",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRax, 0x400)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpLoadStackPop, renvoWasm32RegRax, 0, 4, 0, 0, renvoWasm32RegRcx},
+		},
+		{
+			name: "memory-load-tail-resembles-register-move",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, 0x40000, 0)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{
+				renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, 0, 0, 4, 0, 0,
+				renvoWasm32OpPopReg, renvoWasm32RegRcx,
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -184,6 +211,15 @@ func TestWasm32DirectEmissionKeepsVMFusionsDisabled(t *testing.T) {
 				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
 			},
 			want: []byte{renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 9, 0, 0, 0,
+				renvoWasm32OpPopReg, renvoWasm32RegRcx},
+		},
+		{
+			name: "register-pop",
+			emit: func(a *renvoAsm) {
+				renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
+				renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+			},
+			want: []byte{renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax,
 				renvoWasm32OpPopReg, renvoWasm32RegRcx},
 		},
 	}

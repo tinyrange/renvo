@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"debug/elf"
 	"debug/pe"
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +26,7 @@ import (
 func TestExcludedFamily(t *testing.T) {
 	excluded := excludedFamily(rtg.TargetDescriptor{Family: rtg.BackendFamilyNativeV1, ISA: "amd64"})
 	for _, name := range []string{
-		"compiler_rtg_generated_impl.go", "compiler_rtg_inactive_impl.go",
+		"compiler_rtg_generated_impl.go",
 	} {
 		if !excluded[name] {
 			t.Errorf("%s was not excluded", name)
@@ -549,6 +550,15 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
 			t.Parallel()
+			builtIn := driver.CompileFromFS([]string{
+				"-t", test.target,
+				"-s",
+				"-o", "builtin.exe",
+				filepath.Join(root, "internal", "backendjit", "testdata", "windows_runtime.go"),
+			}, root, filepath.Join(root, "std"), driver.OSFS{}, backendcompiled.Backend{})
+			if !builtIn.Ok {
+				t.Fatalf("built-in Windows compile failed: %#v", builtIn.Diagnostic)
+			}
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -571,6 +581,11 @@ func TestCompiledInBootstrapUsesDefinitionOwnedPEImages(t *testing.T) {
 			}
 			if !bytes.Contains(result.Binary, []byte("DefinitionStaticImport\x00")) {
 				t.Fatal("custom PE output is missing its definition-owned static import")
+			}
+			if test.target == "windows/386" &&
+				(!bytes.Contains(builtIn.Binary, []byte("DefinitionStaticImport\x00")) ||
+					!bytes.Contains(result.Binary, []byte("DefinitionStaticImport\x00"))) {
+				t.Fatal("Windows/386 built-in/prepared parity fixture omitted its shared static import")
 			}
 		})
 	}
@@ -793,6 +808,38 @@ func TestCompiledInBootstrapUsesDefinitionOwnedMachOImage(t *testing.T) {
 			}
 		})
 	}
+	metadata := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "example/darwin-arm64",
+		"-s",
+		"-o", "app",
+		filepath.Join(root, "internal", "backendjit", "testdata", "darwin_linkstatic_metadata.go"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{}, prepared)
+	if !metadata.Ok {
+		t.Fatalf("custom Darwin ABI-metadata compile failed: %#v", metadata.Diagnostic)
+	}
+	for _, instruction := range [][]byte{
+		{0x00, 0x02, 0x62, 0x9e}, // SCVTF d0, x16.
+		{0x40, 0x00, 0x66, 0x9e}, // FMOV x0, d2.
+		{0x00, 0x02, 0x22, 0x9e}, // SCVTF s0, w16.
+	} {
+		if !bytes.Contains(metadata.Binary, instruction) {
+			t.Fatalf("custom Darwin output omitted ABI metadata instruction % x", instruction)
+		}
+	}
+	mixed := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "example/darwin-arm64",
+		"-s",
+		"-o", "app",
+		filepath.Join(root, "backend", "tests", "darwin_linkstatic_mixed_many.go"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{}, prepared)
+	if !mixed.Ok {
+		t.Fatalf("custom Darwin mixed-register compile failed: %#v", mixed.Diagnostic)
+	}
+	if !bytes.Contains(mixed.Binary, []byte{0x00, 0x02, 0x62, 0x9e}) {
+		t.Fatal("custom Darwin mixed-register call used the integer-only stack ABI")
+	}
 }
 
 func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
@@ -813,7 +860,6 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.custom, func(t *testing.T) {
-			t.Parallel()
 			definition := copyNativeDefinition(t, root,
 				"target "+test.target+" {", "target "+test.custom+" {")
 			result := driver.CompileFromFS([]string{
@@ -831,6 +877,121 @@ func TestCompiledInBootstrapUses32BitDefinitions(t *testing.T) {
 			if !bytes.HasPrefix(result.Binary, []byte{0x7f, 'E', 'L', 'F'}) ||
 				len(result.Binary) < 20 || result.Binary[18] != test.machine {
 				t.Fatalf("custom output header = % x", result.Binary[:minInt(20, len(result.Binary))])
+			}
+			emulator := "qemu-i386"
+			if test.target == "linux/arm" {
+				emulator = "qemu-arm"
+			}
+			if _, err := exec.LookPath(emulator); err != nil {
+				t.Logf("%s unavailable; custom runtime execution not checked", emulator)
+				return
+			}
+			executable := filepath.Join(t.TempDir(), "custom-32-bit-output")
+			if err := os.WriteFile(executable, result.Binary, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			output, err := exec.Command(emulator, executable).CombinedOutput()
+			if err != nil {
+				t.Fatalf("execute custom %s output: %v\n%s", test.target, err, output)
+			}
+			if string(output) != "PASS\n" {
+				t.Fatalf("custom %s output = %q, want PASS", test.target, output)
+			}
+		})
+	}
+}
+
+func TestBSDAmd64BuiltInProjectionMatchesPreparedDefinitionBehavior(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdRoot := filepath.Join(root, "std")
+	source := filepath.Join(root, "internal", "backendjit", "testdata", "semantic_runtime.go")
+	cases := []struct {
+		target string
+		custom string
+		typeID elf.Type
+		osabi  byte
+		note   []byte
+		loads  int
+	}{
+		{"freebsd/amd64", "equivalence/freebsd-amd64", elf.ET_DYN, 9, nil, 2},
+		{"netbsd/amd64", "equivalence/netbsd-amd64", elf.ET_EXEC, 0, []byte("NetBSD"), 2},
+		{"openbsd/amd64", "equivalence/openbsd-amd64", elf.ET_DYN, 0, []byte("OpenBSD"), 3},
+	}
+	for _, test := range cases {
+		t.Run(test.target, func(t *testing.T) {
+			builtIn := driver.CompileFromFS([]string{
+				"-t", test.target, "-s", "-o", "app", source,
+			}, root, stdRoot, driver.OSFS{}, backendcompiled.Backend{})
+			if !builtIn.Ok {
+				t.Fatalf("built-in compile failed: %#v", builtIn.Diagnostic)
+			}
+			definition := copyNativeDefinition(t, root,
+				"target "+test.target+" {", "target "+test.custom+" {")
+			prepared := driver.CompileFromFS([]string{
+				"-backend", definition, "-t", test.custom, "-s", "-o", "app", source,
+			}, root, stdRoot, driver.OSFS{},
+				New(definition, filepath.Join(root, "backend"), stdRoot,
+					t.TempDir(), backendcompiled.Backend{}))
+			if !prepared.Ok {
+				t.Fatalf("prepared compile failed: %#v", prepared.Diagnostic)
+			}
+			for _, image := range []struct {
+				name string
+				data []byte
+			}{{"built-in", builtIn.Binary}, {"prepared", prepared.Binary}} {
+				parsed, err := elf.NewFile(bytes.NewReader(image.data))
+				if err != nil {
+					t.Fatalf("parse %s output: %v", image.name, err)
+				}
+				if parsed.Type != test.typeID || parsed.Machine != elf.EM_X86_64 ||
+					len(image.data) < 8 || image.data[7] != test.osabi {
+					t.Fatalf("%s contract = type %v, machine %v, osabi %d",
+						image.name, parsed.Type, parsed.Machine, image.data[7])
+				}
+				loads := 0
+				hasSyscalls := false
+				var syscallNumbers []uint32
+				for _, program := range parsed.Progs {
+					if program.Type == elf.PT_LOAD {
+						loads++
+					}
+					if uint32(program.Type) == 0x65a3dbe9 {
+						hasSyscalls = program.Filesz >= 8 &&
+							int(program.Off+program.Filesz) <= len(image.data)
+						if hasSyscalls {
+							table := image.data[program.Off : program.Off+program.Filesz]
+							hasSyscalls = false
+							for at := 0; at+8 <= len(table); at += 8 {
+								number := binary.LittleEndian.Uint32(table[at+4 : at+8])
+								syscallNumbers = append(syscallNumbers, number)
+								if number == 4 {
+									hasSyscalls = true
+									break
+								}
+							}
+						}
+					}
+				}
+				if loads != test.loads {
+					t.Fatalf("%s PT_LOAD count = %d, want %d", image.name, loads, test.loads)
+				}
+				if len(test.note) != 0 && !bytes.Contains(image.data, test.note) {
+					t.Fatalf("%s output omitted %s identity note", image.name, test.note)
+				}
+				if test.target == "openbsd/amd64" && !hasSyscalls {
+					tail := image.data
+					if len(tail) > 32 {
+						tail = tail[len(tail)-32:]
+					}
+					t.Fatalf("%s output omitted the OpenBSD write syscall table entry; got %v, size %d, tail % x",
+						image.name, syscallNumbers, len(image.data), tail)
+				}
 			}
 		})
 	}

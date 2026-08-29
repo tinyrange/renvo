@@ -5,6 +5,13 @@ implements direct_emitter_v1
 @import "elf_amd64.rtg"
 
 runtime openbsd_x86_64 {
+	entry sequence x86_64.processStackEntry {
+		max_parameters = 2
+		bss args 32768 16
+		bss environment 32768 16
+		bss environmentLength 8 8
+	}
+
 	entry process_stack {
 		argc = word(rsp, 0)
 		argv = words(rsp + 8, argc)
@@ -32,13 +39,27 @@ runtime openbsd_x86_64 {
 	operation exit { number = 1 args = [status] noreturn = true }
 }
 
+format elf64_x86_64_openbsd {
+	kind = elf
+	code_offset = 432
+	image = elf_executable
+	image_variant = openbsd
+	patch_absolute = relative32_le
+	patch_pc_bias = 4
+	byte_order = little
+	address_bits = 64
+	file_alignment = 0x1000
+	machine = 62
+	flags = 0
+}
+
 target openbsd/amd64 {
 	family = native_v1
 	os = openbsd
 	arch = x86_64
 	abi = sysv_x86_64
 	runtime = openbsd_x86_64
-	executable = elf64_x86_64
+	executable = elf64_x86_64_openbsd
 	build_tags = ["openbsd", "unix", "amd64"]
 	capabilities = [hosted, executable, filesystem, heap, argv, environment]
 }

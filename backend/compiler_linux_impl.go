@@ -5,38 +5,107 @@ func compileLinuxTarget(input []int, output int, target int) int {
 }
 
 func renvoLinuxSysWriteSeq(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysWriteSeq
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysWriteSeq
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysWriteSeq
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysWriteSeq
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysWriteSeq
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysWriteSeq
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysWriteSeq
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 64
+		return renvoLinuxAarch64SysWriteSeq
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 4
+		return renvoLinuxArmSysWriteSeq
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 4
+		return renvoLinux386SysWriteSeq
 	}
-	return 1
+	return renvoLinuxAmd64SysWriteSeq
 }
 
 func renvoLinuxSysReadSeq(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysReadSeq
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysReadSeq
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysReadSeq
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysReadSeq
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysReadSeq
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysReadSeq
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysReadSeq
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 63
+		return renvoLinuxAarch64SysReadSeq
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 3
+		return renvoLinuxArmSysReadSeq
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 3
+		return renvoLinux386SysReadSeq
 	}
-	return 0
+	return renvoLinuxAmd64SysReadSeq
 }
 
 func renvoLinuxSysReadAt(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysReadAt
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysReadAt
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysReadAt
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysReadAt
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysReadAt
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 {
+			return renvoFreeBSDAmd64SysReadAt
+		}
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 {
+			return renvoOpenBSDAmd64SysReadAt
+		}
+		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoNetBSDAmd64SysReadAt
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 {
 		if renvoTargetOS == renvoOSFreeBSD {
 			return renvoFreeBSDAmd64SysReadAt
@@ -47,77 +116,200 @@ func renvoLinuxSysReadAt(renvoTargetOS int, renvoTargetArch int) int {
 		if renvoTargetOS == renvoOSNetBSD {
 			return renvoNetBSDAmd64SysReadAt
 		}
-		return 17
+		return renvoLinuxAmd64SysReadAt
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 67
+		return renvoLinuxAarch64SysReadAt
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 180
+		return renvoLinuxArmSysReadAt
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 180
+		return renvoLinux386SysReadAt
 	}
-	return 17
+	return renvoLinuxAmd64SysReadAt
 }
 
 func renvoLinuxSysWriteAt(renvoTargetOS int, renvoTargetArch int) int {
-	return renvoLinuxSysReadAt(renvoTargetOS, renvoTargetArch) + 1
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysWriteAt
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 {
+			return renvoFreeBSDAmd64SysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 {
+			return renvoOpenBSDAmd64SysWriteAt
+		}
+		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoNetBSDAmd64SysWriteAt
+		}
+		return 0
+	}
+	if renvoTargetArch == renvoArchAmd64 {
+		if renvoTargetOS == renvoOSFreeBSD {
+			return renvoFreeBSDAmd64SysWriteAt
+		}
+		if renvoTargetOS == renvoOSOpenBSD {
+			return renvoOpenBSDAmd64SysWriteAt
+		}
+		if renvoTargetOS == renvoOSNetBSD {
+			return renvoNetBSDAmd64SysWriteAt
+		}
+		return renvoLinuxAmd64SysWriteAt
+	}
+	if renvoTargetArch == renvoArchAarch64 {
+		return renvoLinuxAarch64SysWriteAt
+	}
+	if renvoTargetArch == renvoArchArm {
+		return renvoLinuxArmSysWriteAt
+	}
+	if renvoTargetArch == renvoArch386 {
+		return renvoLinux386SysWriteAt
+	}
+	return renvoLinuxAmd64SysWriteAt
 }
 
 func renvoLinuxSysOpen(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysOpen
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysOpen
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysOpen
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysOpen
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysOpen
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysOpen
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysOpen
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 56
+		return renvoLinuxAarch64SysOpen
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 5
+		return renvoLinuxArmSysOpen
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 5
+		return renvoLinux386SysOpen
 	}
-	return 2
+	return renvoLinuxAmd64SysOpen
 }
 
 func renvoLinuxSysClose(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysClose
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysClose
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysClose
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysClose
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysClose
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysClose
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysClose
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 57
+		return renvoLinuxAarch64SysClose
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 6
+		return renvoLinuxArmSysClose
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 6
+		return renvoLinux386SysClose
 	}
-	return 3
+	return renvoLinuxAmd64SysClose
 }
 
 func renvoLinuxSysFchmod(renvoTargetOS int, renvoTargetArch int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysFchmod
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysFchmod
+		}
+		if renvoFixedTarget == renvoTargetLinux386 {
+			return renvoLinux386SysFchmod
+		}
+		if renvoFixedTarget == renvoTargetLinuxAarch64 {
+			return renvoLinuxAarch64SysFchmod
+		}
+		if renvoFixedTarget == renvoTargetLinuxArm {
+			return renvoLinuxArmSysFchmod
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysFchmod
+		}
+		return 0
+	}
 	if renvoTargetArch == renvoArchAmd64 && targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysFchmod
 	}
 	if renvoTargetArch == renvoArchAarch64 {
-		return 52
+		return renvoLinuxAarch64SysFchmod
 	}
 	if renvoTargetArch == renvoArchArm {
-		return 94
+		return renvoLinuxArmSysFchmod
 	}
 	if renvoTargetArch == renvoArch386 {
-		return 94
+		return renvoLinux386SysFchmod
 	}
-	return 91
+	return renvoLinuxAmd64SysFchmod
 }
 
 func renvoHostedAmd64SysExit(renvoTargetOS int) int {
+	if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
+		return renvoResolvedLinuxAmd64SysExit
+	}
+	if renvoFixedTarget != 0 && renvoFixedTarget != renvoTargetWasiWasm32 && renvoFixedTarget != renvoTargetVM32 {
+		if renvoFixedTarget == renvoTargetLinuxAmd64 {
+			return renvoLinuxAmd64SysExit
+		}
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 || renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == renvoTargetNetBSDAmd64 {
+			return renvoBSDAmd64SysExit
+		}
+		return 0
+	}
 	if targetIsBSD(renvoTargetOS) {
 		return renvoBSDAmd64SysExit
 	}
-	return 60
+	return renvoLinuxAmd64SysExit
 }
 
 func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {

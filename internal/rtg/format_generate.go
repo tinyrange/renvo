@@ -119,6 +119,10 @@ func appendDeclarativeFormatImage(out []byte, document Document, target Resolved
 	if declarativeFormatImage(format) != "elf_executable" {
 		return out
 	}
+	if generated, ok := appendDeclarativeBSDFormatImage(
+		out, document, target, nativeEmitter); ok {
+		return generated
+	}
 	bits, _ := integerField(document, format, "address_bits")
 	machine, _ := integerField(document, format, "machine")
 	flags, _ := integerField(document, format, "flags")
@@ -155,7 +159,10 @@ func appendDeclarativeFormatImage(out []byte, document Document, target Resolved
 	out = append(out, "(a, codeOffset, dataOffset, bssOffset)\n"...)
 	out = append(out, "\tcode := a.Code()\n\tdata := a.Data()\n\tvar result []byte\n"...)
 	if bits == 64 {
-		out = append(out, "\tresult = append(result, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)\n"...)
+		osabi := formatIntegerDefault(document, format, "osabi", 0)
+		out = append(out, "\tresult = append(result, 0x7f, 'E', 'L', 'F', 2, 1, 1, "...)
+		out = appendDecimalFrame(out, osabi)
+		out = append(out, ", 0, 0, 0, 0, 0, 0, 0, 0)\n"...)
 	} else {
 		out = append(out, "\tresult = append(result, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)\n"...)
 	}
@@ -189,6 +196,177 @@ func appendDeclarativeFormatImage(out []byte, document Document, target Resolved
 	out = append(out, "\tresult = append(result, code...)\n\tresult = append(result, data...)\n\treturn result\n}\n"...)
 	return out
 }
+
+func appendDeclarativeBSDFormatImage(
+	out []byte, document Document, target ResolvedTarget, nativeEmitter bool,
+) ([]byte, bool) {
+	variant, found := fieldValue(document, target.Executable, "image_variant")
+	if !found {
+		return out, false
+	}
+	variant = valueName(variant)
+	if variant != "netbsd" && variant != "openbsd" {
+		return out, false
+	}
+	format := target.Executable
+	codeOffset, _ := integerField(document, format, "code_offset")
+	alignment, _ := integerField(document, format, "file_alignment")
+	patch, _ := architectureGoHook(format, "patch_absolute")
+	patchName := "rtg" + exportedName(document.Unit) + exportedName(patch)
+	if declarativeFormatAbsoluteRelocations(format) != "" {
+		patchName = declarativeFormatAbsoluteRelocationName(document, format)
+		out = appendDeclarativeAbsoluteRelocationPatcher(
+			out, document, format, nativeEmitter)
+	}
+	prefix := "rtg" + exportedName(document.Unit) + exportedName(format.Name)
+	emitter := "RTGEmitter"
+	syscalls := "a.asm.openbsdSyscalls"
+	if nativeEmitter {
+		emitter = "renvoAsm"
+		syscalls = "a.openbsdSyscalls"
+	}
+	template := declarativeBSDExecutableHelpers + declarativeNetBSDExecutableSource
+	if variant == "openbsd" {
+		template = declarativeBSDExecutableHelpers + declarativeOpenBSDExecutableSource
+	}
+	replacements := []string{
+		"BSDPREFIX", prefix,
+		"BSDEMITTER", emitter,
+		"BSDPATCH", patchName,
+		"BSDCODEOFFSET", decimalFrame(codeOffset),
+		"BSDALIGNMENT", decimalFrame(alignment),
+		"BSDSYSCALLS", syscalls,
+	}
+	if variant == "netbsd" {
+		base, _ := integerField(document, format, "image_base")
+		replacements = append(replacements, "BSDIMAGEBASE", decimalFrame(base))
+	}
+	for i := 0; i < len(replacements); i += 2 {
+		template = strings.ReplaceAll(template, replacements[i], replacements[i+1])
+	}
+	out = append(out, "\n// Generated directly from the declarative BSD ELF executable format.\n"...)
+	return append(out, template...), true
+}
+
+const declarativeBSDExecutableHelpers = `
+func BSDPREFIXAppend16(out []byte, value int) []byte {
+	return append(out, byte(value), byte(value>>8))
+}
+
+func BSDPREFIXAppend32(out []byte, value int) []byte {
+	return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+}
+
+func BSDPREFIXAppend64(out []byte, value int) []byte {
+	out = BSDPREFIXAppend32(out, value)
+	return BSDPREFIXAppend32(out, 0)
+}
+
+func BSDPREFIXUntil(out []byte, size int) []byte {
+	for len(out) < size { out = append(out, 0) }
+	return out
+}
+
+func BSDPREFIXProgram(out []byte, kind int, flags int, offset int, address int,
+	fileSize int, memorySize int, alignment int) []byte {
+	out = BSDPREFIXAppend32(out, kind)
+	out = BSDPREFIXAppend32(out, flags)
+	out = BSDPREFIXAppend64(out, offset)
+	out = BSDPREFIXAppend64(out, address)
+	out = BSDPREFIXAppend64(out, address)
+	out = BSDPREFIXAppend64(out, fileSize)
+	out = BSDPREFIXAppend64(out, memorySize)
+	return BSDPREFIXAppend64(out, alignment)
+}
+`
+
+const declarativeNetBSDExecutableSource = `
+func BSDPREFIXImage(a *BSDEMITTER) []byte {
+	codeOffset := BSDCODEOFFSET
+	dataOffset := codeOffset + len(a.Code())
+	fileSize := dataOffset + len(a.Data())
+	bssOffset := (fileSize + BSDALIGNMENT - 1) & -BSDALIGNMENT
+	BSDPATCH(a, codeOffset, dataOffset, bssOffset)
+	code := a.Code()
+	data := a.Data()
+	var result []byte
+	result = append(result, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	result = BSDPREFIXAppend16(result, 2)
+	result = BSDPREFIXAppend16(result, 62)
+	result = BSDPREFIXAppend32(result, 1)
+	result = BSDPREFIXAppend64(result, BSDIMAGEBASE+codeOffset)
+	result = BSDPREFIXAppend64(result, 64)
+	result = BSDPREFIXAppend64(result, 0)
+	result = BSDPREFIXAppend32(result, 0)
+	result = BSDPREFIXAppend16(result, 64)
+	result = BSDPREFIXAppend16(result, 56)
+	result = BSDPREFIXAppend16(result, 3)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXProgram(result, 1, 5, 0, BSDIMAGEBASE, fileSize, fileSize, BSDALIGNMENT)
+	result = BSDPREFIXProgram(result, 1, 6, bssOffset, BSDIMAGEBASE+bssOffset, 0, a.BSSSize(), BSDALIGNMENT)
+	result = BSDPREFIXProgram(result, 4, 4, 232, BSDIMAGEBASE+232, 24, 24, 4)
+	result = BSDPREFIXAppend32(result, 7)
+	result = BSDPREFIXAppend32(result, 4)
+	result = BSDPREFIXAppend32(result, 1)
+	result = append(result, 'N', 'e', 't', 'B', 'S', 'D', 0, 0)
+	result = BSDPREFIXAppend32(result, 1100000000)
+	result = BSDPREFIXUntil(result, codeOffset)
+	result = append(result, code...)
+	result = append(result, data...)
+	return result
+}
+`
+
+const declarativeOpenBSDExecutableSource = `
+func BSDPREFIXImage(a *BSDEMITTER) []byte {
+	codeOffset := BSDCODEOFFSET
+	dataOffset := codeOffset + len(a.Code())
+	fileSize := dataOffset + len(a.Data())
+	bssOffset := (fileSize + BSDALIGNMENT - 1) & -BSDALIGNMENT
+	BSDPATCH(a, codeOffset, dataOffset, bssOffset)
+	code := a.Code()
+	data := a.Data()
+	syscalls := BSDSYSCALLS
+	syscallTableOffset := fileSize
+	syscallTableSize := len(syscalls) / 2 * 8
+	var result []byte
+	result = append(result, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	result = BSDPREFIXAppend16(result, 3)
+	result = BSDPREFIXAppend16(result, 62)
+	result = BSDPREFIXAppend32(result, 1)
+	result = BSDPREFIXAppend64(result, codeOffset)
+	result = BSDPREFIXAppend64(result, 64)
+	result = BSDPREFIXAppend64(result, 0)
+	result = BSDPREFIXAppend32(result, 0)
+	result = BSDPREFIXAppend16(result, 64)
+	result = BSDPREFIXAppend16(result, 56)
+	result = BSDPREFIXAppend16(result, 6)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXAppend16(result, 0)
+	result = BSDPREFIXProgram(result, 6, 4, 64, 64, 336, 336, 8)
+	result = BSDPREFIXProgram(result, 1, 5, 0, 0, dataOffset, dataOffset, BSDALIGNMENT)
+	result = BSDPREFIXProgram(result, 1, 4, dataOffset, dataOffset, len(data), len(data), BSDALIGNMENT)
+	result = BSDPREFIXProgram(result, 1, 6, bssOffset, bssOffset, 0, a.BSSSize(), BSDALIGNMENT)
+	result = BSDPREFIXProgram(result, 4, 4, 400, 400, 24, 24, 4)
+	result = BSDPREFIXProgram(result, 0x65a3dbe9, 4, syscallTableOffset, 0, syscallTableSize, syscallTableSize, 4)
+	result = BSDPREFIXAppend32(result, 8)
+	result = BSDPREFIXAppend32(result, 4)
+	result = BSDPREFIXAppend32(result, 1)
+	result = append(result, 'O', 'p', 'e', 'n', 'B', 'S', 'D', 0)
+	result = BSDPREFIXAppend32(result, 0)
+	result = BSDPREFIXUntil(result, codeOffset)
+	result = append(result, code...)
+	result = append(result, data...)
+	for i := 0; i+1 < len(syscalls); i += 2 {
+		result = BSDPREFIXAppend32(result, codeOffset+syscalls[i])
+		result = BSDPREFIXAppend32(result, syscalls[i+1])
+	}
+	return result
+}
+`
 
 func appendDeclarativeAbsoluteRelocationPatcher(out []byte, document Document,
 	format Declaration, nativeEmitter bool) []byte {

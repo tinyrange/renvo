@@ -21,6 +21,7 @@ backend/definitions/
 ├── riscv32.rtg               shared RV32IM used by external board targets
 ├── elf_amd64.rtg              shared AMD64 ELF formats
 ├── *_algorithms.rtg            closed shared-ISA generation roots
+├── *_compiler.rtg              compiler-private generated integration roots
 ├── linux_amd64.rtg            complete target entrypoint
 ├── windows_amd64.rtg
 ├── linux_kernel_amd64.rtg
@@ -59,15 +60,15 @@ go generate ./internal/backendcompiled
 ```
 
 The first command emits each production architecture projection from its
-matching `*_algorithms.rtg` root and the authoritative Linux/amd64 production
-target projection from `linux_amd64.rtg`. Architecture roots import only their
-shared ISA fragment; target projections use a separate built-in namespace and
-call those shared algorithms directly rather than using the prepared-backend
-adapter. The second command resolves target descriptors and writes the registry
-and the non-enforcing source-volume report. Architecture-only roots are
-validated by generation but intentionally contribute no registry target. The
-third refreshes the ordinary-Go compiled backend and the source bundle used to
-prepare external definitions.
+matching `*_algorithms.rtg` root and the authoritative production target
+projections from their target entrypoints. Architecture roots import only
+their shared ISA fragment; target projections use a separate built-in
+namespace and call those shared algorithms directly rather than using the
+prepared-backend adapter. The second command resolves target descriptors and
+writes the registry and the non-enforcing source-volume report.
+Architecture-only roots are validated by generation but intentionally
+contribute no registry target. The third refreshes the ordinary-Go compiled
+backend and the source bundle used to prepare external definitions.
 
 ## Adding a native architecture
 
@@ -116,6 +117,23 @@ checks hook signatures but does not attempt complexity or termination
 analysis. Before adding a hook, check whether a table row, an existing form, a
 bounded sequence, or a shared format constructor states the difference more
 directly.
+
+Use `go backend` for these portable hooks. A closed checked-in RTG root may also
+use `go compiler` for ordinary Go copied only into a checked-in compiler
+projection. The x86-32, x86-64, and AArch64 compiler roots use this boundary so
+their compiler-private lowering remains RTG-owned without exposing private
+compiler types to prepared external backends. Architecture-only compiler roots
+have no target identity. A compiler block placed in a target entrypoint is
+included in that target's identity even though its source is excluded from
+prepared output, preventing a fixed-compiler behavior change from retaining a
+stale prepared cache identity. Reserve compiler blocks for integration code
+that cannot use the typed `RTGEmitter` surface.
+
+Windows/386 uses the same bounded runtime sequences for prepared and fixed
+compilers. Its checked-in projection adds only the compiler-facing names and
+runtime-helper cache state needed by the shared compiler. The resulting fixed
+compiler is intentionally allowed a narrow 324 KiB size budget so those
+readable sequences do not need a second compact byte-template implementation.
 
 `TestNativeDefinitionEmbeddedGoMetrics` deduplicates shared declarations across
 every native entrypoint and reports semantic Go bytes and declaration counts as

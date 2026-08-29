@@ -38,7 +38,7 @@ func applyVirtualPackages(document *Document) {
 	// helpers whether its import appears before or after it in the entrypoint.
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind == DeclGo {
+		if declaration.Kind == DeclGo && declaration.Name == "backend" {
 			addVirtualGoSymbols(document, declaration)
 		} else if declaration.Kind == DeclArch {
 			addVirtualArchitectureStatementSymbols(document, declaration)
@@ -67,7 +67,7 @@ func applyVirtualPackages(document *Document) {
 	}
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := &document.Declarations[i]
-		if declaration.Kind == DeclGo {
+		if declaration.Kind == DeclGo && declaration.Name == "backend" {
 			declaration.GoSource = rewriteVirtualSource(
 				declaration.GoSource, declaration.Package, document.packages)
 		}

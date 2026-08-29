@@ -144,34 +144,37 @@ type renvoDarwinStaticImport struct {
 }
 
 type renvoAsm struct {
-	code                []byte
-	labelPos            []int32
-	relocs              []int32
-	absRelocs           []int32
-	symbols             []renvoAsmSymbol
-	symbolName          []byte
-	staticImports       []renvoStaticImport
-	darwinImports       []renvoDarwinStaticImport
-	darwinImportLabels  []int
-	darwinImportUsed    []bool
-	openbsdSyscalls     []int
-	kernelImportNames   []byte
-	kernelImportOffsets []int
-	data                []byte
-	objectStrings       *renvoObjectStrings
-	bssSize             int
-	codeOffset          int
-	dataOffset          int
-	bssOffset           int
-	lastPrimaryStoreEnd int
-	lastPrimaryStoreOff int
-	lastPrimaryLoad     int
-	replSymbols         []renvoReplSymbol
-	wasmLocalSlots      []int32
-	c                   *renvoCompileContext
-	patchFailed         bool
-	syscallNumber       int
-	syscallNumberKnown  bool
+	code                  []byte
+	labelPos              []int32
+	relocs                []int32
+	absRelocs             []int32
+	symbols               []renvoAsmSymbol
+	symbolName            []byte
+	staticImports         []renvoStaticImport
+	darwinImports         []renvoDarwinStaticImport
+	darwinImportLabels    []int
+	darwinImportUsed      []bool
+	openbsdSyscalls       []int
+	kernelImportNames     []byte
+	kernelImportOffsets   []int
+	data                  []byte
+	objectStrings         *renvoObjectStrings
+	bssSize               int
+	codeOffset            int
+	dataOffset            int
+	bssOffset             int
+	lastPrimaryStoreEnd   int
+	lastPrimaryStoreOff   int
+	lastPrimaryLoad       int
+	replSymbols           []renvoReplSymbol
+	wasmLocalSlots        []int32
+	c                     *renvoCompileContext
+	patchFailed           bool
+	syscallNumber         int
+	syscallNumberKnown    bool
+	staticCallParamCount  int
+	staticCallParamKinds  [16]byte
+	staticCallResultFloat int
 	// Relocatable-object bookkeeping stays after the hot executable-image
 	// fields so adding object support does not widen every core field access in
 	// fixed-target compilers.
@@ -421,6 +424,9 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		renvoFixedTarget == 0 && targetIsKernelModule(a.c) || renvoPreparedBackendActive != 0 {
 		a.kernelImportNames = make([]byte, 0, 1024)
 		a.kernelImportOffsets = make([]int, 0, 128)
+	}
+	if renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoPreparedBackendActive != 0 {
+		a.openbsdSyscalls = make([]int, 0, 128)
 	}
 	if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 		a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
@@ -5872,7 +5878,10 @@ func renvoParseLinkStaticDirective(p *renvoProgram, pos int) renvoLinkStaticDire
 	for methodStart < end && renvo_runtime_UnsafeByteAt(src, methodStart) <= ' ' {
 		methodStart++
 	}
-	methodEnd := end
+	methodEnd := methodStart
+	for methodEnd < end && renvo_runtime_UnsafeByteAt(src, methodEnd) != ',' {
+		methodEnd++
+	}
 	for methodEnd > methodStart && renvo_runtime_UnsafeByteAt(src, methodEnd-1) <= ' ' {
 		methodEnd--
 	}

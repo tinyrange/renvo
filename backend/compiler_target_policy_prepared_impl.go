@@ -22,6 +22,15 @@ const renvoTargetFreeBSDAmd64 = 12
 const renvoTargetOpenBSDAmd64 = 13
 const renvoTargetNetBSDAmd64 = 14
 
+const renvoResolvedLinuxAmd64SysReadSeq = 0
+const renvoResolvedLinuxAmd64SysWriteSeq = 1
+const renvoResolvedLinuxAmd64SysReadAt = 17
+const renvoResolvedLinuxAmd64SysWriteAt = 18
+const renvoResolvedLinuxAmd64SysOpen = 2
+const renvoResolvedLinuxAmd64SysClose = 3
+const renvoResolvedLinuxAmd64SysFchmod = 91
+const renvoResolvedLinuxAmd64SysExit = 60
+
 const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"

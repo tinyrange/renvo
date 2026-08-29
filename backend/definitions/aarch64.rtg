@@ -461,6 +461,15 @@ go backend {
 		asmEmit(out, 0xf84107e0|destination.Code)
 	}
 
+	func aapcs64UnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		asmMovRegReg(out, scratch.Code, primary.Code)
+		asmEmit(out, 0x9ac00840)
+		if remainder {
+			asmEmit(out, 0x9b098800)
+		}
+		return true
+	}
+
 	func aapcs64StoreParamWord(out *RTGEmitter, word int, offset int) {
 		if word < 6 {
 			asmStoreRegStack(out, word, offset)
@@ -1099,8 +1108,10 @@ abi aapcs64 {
 	push_register = go aapcs64PushRegister
 	push_immediate = go aapcs64PushImmediate
 	pop_register = go aapcs64PopRegister
+	unsigned_divide = go aapcs64UnsignedDivide
 	store_param_word = go aapcs64StoreParamWord
 	call_word_count = go aapcs64CallWordCount
+	call_words = [x3, x4, x1, x2, x5, x6]
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16

@@ -51,7 +51,7 @@ stage_backend() {
     if [ "$mode" != go ] && [ "$name" = "renvo_main.go" ]; then
       continue
     fi
-    if [ "$mode" != builtin ] && { [ "$name" = "compiler_rtg_generated_impl.go" ] || [ "$name" = "compiler_rtg_inactive_impl.go" ]; }; then
+    if [ "$mode" != builtin ] && [ "$name" = "compiler_rtg_generated_impl.go" ]; then
       continue
     fi
     target=$destination/$name
