@@ -18,69 +18,77 @@ go backend {
 	const crossbar2SFR = 0xe3
 
 	func entry(out *RTGEmitter, stateOffset int) bool {
-		mcs51.writeSFRImmediate(out,watchdogControlSFR,0xde)
-		mcs51.writeSFRImmediate(out,watchdogControlSFR,0xad)
-		mcs51.writeSFRImmediate(out,port0ModeSFR,1)
-		mcs51.writeSFRImmediate(out,port0SFR,1)
-		mcs51.writeSFRImmediate(out,crossbar0SFR,1)
-		mcs51.writeSFRImmediate(out,crossbar2SFR,0x40)
-		mcs51.dataCopyEntry(out,dataAddress)
-		mcs51.moveImmediate(out,mcs51.stack,softwareStackTop)
-		mcs51.move(out,mcs51.frame,mcs51.stack)
+		mcs51.writeSFRImmediate(out, watchdogControlSFR, 0xde)
+		mcs51.writeSFRImmediate(out, watchdogControlSFR, 0xad)
+		mcs51.writeSFRImmediate(out, port0ModeSFR, 1)
+		mcs51.writeSFRImmediate(out, port0SFR, 1)
+		mcs51.writeSFRImmediate(out, crossbar0SFR, 1)
+		mcs51.writeSFRImmediate(out, crossbar2SFR, 0x40)
+		mcs51.dataCopyEntry(out, dataAddress)
+		mcs51.moveImmediate(out, mcs51.stack, softwareStackTop)
+		mcs51.move(out, mcs51.frame, mcs51.stack)
 		return true
 	}
 
 	func write(out *RTGEmitter) {
-		zero:=RTGRegister{Code:0,Valid:true}
-		mcs51.moveImmediate(out,zero,0)
-		mcs51.move(out,mcs51.copySource,mcs51.secondary)
-		mcs51.move(out,mcs51.copyCount,mcs51.tertiary)
-		loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop)
-		mcs51.compare(out,mcs51.copyCount,zero);mcs51.jumpCondition(out,mcs51.eq,done)
-		mcs51.loadU8(out,mcs51.scratch,RTGAddress{Base:mcs51.copySource})
-		mcs51.writeSFR(out,uartTransmitSFR,mcs51.scratch)
-		mcs51.increment(out,mcs51.copySource);mcs51.decrement(out,mcs51.copyCount)
-		mcs51.jump(out,loop);out.Mark(done);mcs51.move(out,mcs51.primary,zero)
+		zero := RTGRegister{Code: 0, Valid: true}
+		mcs51.moveImmediate(out, zero, 0)
+		mcs51.move(out, mcs51.copySource, mcs51.secondary)
+		mcs51.move(out, mcs51.copyCount, mcs51.tertiary)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		mcs51.compare(out, mcs51.copyCount, zero)
+		mcs51.jumpCondition(out, mcs51.eq, done)
+		mcs51.loadU8(out, mcs51.scratch, RTGAddress{Base: mcs51.copySource})
+		mcs51.writeSFR(out, uartTransmitSFR, mcs51.scratch)
+		mcs51.increment(out, mcs51.copySource)
+		mcs51.decrement(out, mcs51.copyCount)
+		mcs51.jump(out, loop)
+		out.Mark(done)
+		mcs51.move(out, mcs51.primary, zero)
 	}
 
-	func exit(out *RTGEmitter,status RTGRegister) {
-		loop:=out.NewLabel();out.Mark(loop);mcs51.jump(out,loop)
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		mcs51.jump(out, loop)
 	}
 
 	func image(out *RTGEmitter) []byte {
-		mcs51.patchAbsolute(out,dataAddress)
-		dataOffset:=len(out.Code())
-		mcs51.patchDataCopy(out,dataOffset,len(out.Data()))
-		program:=append([]byte{},out.Code()...)
-		program=append(program,out.Data()...)
+		mcs51.patchAbsolute(out, dataAddress)
+		dataOffset := len(out.Code())
+		mcs51.patchDataCopy(out, dataOffset, len(out.Data()))
+		program := append([]byte{}, out.Code()...)
+		program = append(program, out.Data()...)
 		return intel_hex.Image(program)
 	}
 }
 
 runtime remu_efm8bb52f32g_runtime {
-	emit_entry_start=go entry
-	emit_exit=go exit
-	operation write { emit=go write }
-	operation print { use=write args=[stderr,buffer,count] }
+	emit_entry_start = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation print { use = write args = [stderr, buffer, count] }
 }
 format remu_efm8bb52f32g_hex {
-	kind=intel_hex
-	byte_order=little
-	address_bits=16
-	code_offset=0
-	image=go image
+	kind = intel_hex
+	byte_order = little
+	address_bits = 16
+	code_offset = 0
+	image = go image
 }
 target experimental/efm8bb52f32g {
-	family=native_v1
-	os=efm8bb52f32g
-	arch=mcs51_16
-	frontend_arch=mcs51
-	abi=mcs51_internal
-	runtime=remu_efm8bb52f32g_runtime
-	executable=remu_efm8bb52f32g_hex
-	build_tags=[efm8bb52f32g,mcs51,tiny]
-	capabilities=[freestanding,executable,volatile_memory]
-	arena_default=512
+	family = native_v1
+	os = efm8bb52f32g
+	arch = mcs51_16
+	frontend_arch = mcs51
+	abi = mcs51_internal
+	runtime = remu_efm8bb52f32g_runtime
+	executable = remu_efm8bb52f32g_hex
+	build_tags = [efm8bb52f32g, mcs51, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 512
 }
 
 @stdlib "device/remu/target_efm8bb52f32g.go"
@@ -90,10 +98,10 @@ target experimental/efm8bb52f32g {
 // renvo_emu target.
 package remu
 
-const Target="efm8bb52f32g"
-const FlashStart uintptr=0
-const FlashSize uintptr=32*1024
-const RAMStart uintptr=0x0200
-const RAMSize uintptr=1792
-const GPIOCount=29
+const Target = "efm8bb52f32g"
+const FlashStart uintptr = 0
+const FlashSize uintptr = 32 * 1024
+const RAMStart uintptr = 0x0200
+const RAMSize uintptr = 1792
+const GPIOCount = 29
 @endstdlib

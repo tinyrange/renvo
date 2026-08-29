@@ -391,7 +391,7 @@ go backend {
 	func patchLabels(out *RTGEmitter, textAddress int) {
 		for index := 0; index < out.RelocationCount(); index++ {
 			at := out.RelocationOffset(index)
-			target := textAddress+out.LabelPosition(out.RelocationLabel(index))
+			target := textAddress + out.LabelPosition(out.RelocationLabel(index))
 			out.SetByteAt(at, byte(target))
 			out.SetByteAt(at+1, byte(target>>8))
 		}
@@ -419,20 +419,20 @@ go backend {
 		return at
 	}
 	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
-		size := (stackUsed+1)&-2
+		size := (stackUsed + 1) & -2
 		out.SetByteAt(at+2, byte(size))
 		out.SetByteAt(at+3, byte(size>>8))
 	}
 	func frameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
 		loadWord(out, destination,
-			RTGAddress{Base: frame, Displacement: -(offset+2)})
+			RTGAddress{Base: frame, Displacement: -(offset + 2)})
 	}
 	func frameStore(out *RTGEmitter, offset int, source RTGRegister) {
-		storeWord(out, RTGAddress{Base: frame, Displacement: -(offset+2)}, source)
+		storeWord(out, RTGAddress{Base: frame, Displacement: -(offset + 2)}, source)
 	}
 	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
 		emitAddress(out, destination,
-			RTGAddress{Base: frame, Displacement: -(offset+2)})
+			RTGAddress{Base: frame, Displacement: -(offset + 2)})
 	}
 }
 

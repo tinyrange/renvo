@@ -18,86 +18,97 @@ go backend {
 		avr8.moveImmediate(out, avr8.stack, softwareStackTop)
 		avr8.move(out, avr8.frame, avr8.stack)
 		avr8.moveImmediate(out, avr8.scratch, hardwareStackTop&255)
-		avr8.storeU8(out, RTGAddress{Displacement:stackPointerLow}, avr8.scratch)
+		avr8.storeU8(out, RTGAddress{Displacement: stackPointerLow}, avr8.scratch)
 		avr8.moveImmediate(out, avr8.scratch, hardwareStackTop>>8)
-		avr8.storeU8(out, RTGAddress{Displacement:stackPointerHigh}, avr8.scratch)
+		avr8.storeU8(out, RTGAddress{Displacement: stackPointerHigh}, avr8.scratch)
 		avr8.moveImmediate(out, avr8.scratch, 1<<5)
-		avr8.storeU8(out, RTGAddress{Displacement:uartControl}, avr8.scratch)
+		avr8.storeU8(out, RTGAddress{Displacement: uartControl}, avr8.scratch)
 		return true
 	}
 
 	func write(out *RTGEmitter) {
-		zero := RTGRegister{Code:0, Valid:true}
+		zero := RTGRegister{Code: 0, Valid: true}
 		avr8.moveImmediate(out, zero, 0)
 		avr8.move(out, avr8.copySource, avr8.secondary)
 		avr8.move(out, avr8.copyCount, avr8.tertiary)
-		loop:=out.NewLabel(); done:=out.NewLabel(); out.Mark(loop)
-		avr8.compare(out,avr8.copyCount,zero); avr8.jumpCondition(out,avr8.eq,done)
-		avr8.loadU8(out,avr8.scratch,RTGAddress{Base:avr8.copySource})
-		avr8.storeU8(out,RTGAddress{Displacement:uartTransmit},avr8.scratch)
-		avr8.increment(out,avr8.copySource); avr8.decrement(out,avr8.copyCount)
-		avr8.jump(out,loop); out.Mark(done); avr8.move(out,avr8.primary,zero)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		avr8.compare(out, avr8.copyCount, zero)
+		avr8.jumpCondition(out, avr8.eq, done)
+		avr8.loadU8(out, avr8.scratch, RTGAddress{Base: avr8.copySource})
+		avr8.storeU8(out, RTGAddress{Displacement: uartTransmit}, avr8.scratch)
+		avr8.increment(out, avr8.copySource)
+		avr8.decrement(out, avr8.copyCount)
+		avr8.jump(out, loop)
+		out.Mark(done)
+		avr8.move(out, avr8.primary, zero)
 	}
 
 	func exit(out *RTGEmitter, status RTGRegister) {
-		loop:=out.NewLabel(); out.Mark(loop); avr8.jump(out,loop)
+		loop := out.NewLabel()
+		out.Mark(loop)
+		avr8.jump(out, loop)
 	}
 
 	func image(out *RTGEmitter) []byte {
-		const codeOffset=0x100
+		const codeOffset = 0x100
 		avr8.patchLabels(out)
-		avr8.patchAbsolute(out,dataAddress)
-		code:=out.Code(); data:=out.Data()
-		dataOffset:=RTGAlignValue(codeOffset+len(code),2)
-		bssAddress:=RTGAlignValue(dataAddress+len(data),2)
-		dataMemorySize:=bssAddress-dataAddress+RTGAlignValue(out.BSSSize(),2)
+		avr8.patchAbsolute(out, dataAddress)
+		code := out.Code()
+		data := out.Data()
+		dataOffset := RTGAlignValue(codeOffset+len(code), 2)
+		bssAddress := RTGAlignValue(dataAddress+len(data), 2)
+		dataMemorySize := bssAddress - dataAddress + RTGAlignValue(out.BSSSize(), 2)
 		var result []byte
-		result=append(result,0x7f,'E','L','F',1,1,1,0,0,0,0,0,0,0,0,0)
-		result=image32.append16(result,2)
-		result=image32.append16(result,83)
-		result=image32.append32(result,1)
-		result=image32.append32(result,0)
-		result=image32.append32(result,52)
-		result=image32.append32(result,0)
-		result=image32.append32(result,5)
-		result=image32.append16(result,52)
-		result=image32.append16(result,32)
-		result=image32.append16(result,2)
-		result=image32.append16(result,0)
-		result=image32.append16(result,0)
-		result=image32.append16(result,0)
-		result=image32.programHeader(result,codeOffset,0,len(code),len(code),5,2)
-		result=image32.programHeader(result,dataOffset,0x800000+dataAddress,len(data),dataMemorySize,6,1)
-		result=image32.appendUntil(result,codeOffset); result=append(result,code...)
-		result=image32.appendUntil(result,dataOffset); return append(result,data...)
+		result = append(result, 0x7f, 'E', 'L', 'F', 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+		result = image32.append16(result, 2)
+		result = image32.append16(result, 83)
+		result = image32.append32(result, 1)
+		result = image32.append32(result, 0)
+		result = image32.append32(result, 52)
+		result = image32.append32(result, 0)
+		result = image32.append32(result, 5)
+		result = image32.append16(result, 52)
+		result = image32.append16(result, 32)
+		result = image32.append16(result, 2)
+		result = image32.append16(result, 0)
+		result = image32.append16(result, 0)
+		result = image32.append16(result, 0)
+		result = image32.programHeader(result, codeOffset, 0, len(code), len(code), 5, 2)
+		result = image32.programHeader(result, dataOffset, 0x800000+dataAddress, len(data), dataMemorySize, 6, 1)
+		result = image32.appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = image32.appendUntil(result, dataOffset)
+		return append(result, data...)
 	}
 }
 
 runtime remu_atmega328pb_runtime {
-	emit_entry_start=go entry
-	emit_exit=go exit
-	operation write { emit=go write }
-	operation print { use=write args=[stderr,buffer,count] }
+	emit_entry_start = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation print { use = write args = [stderr, buffer, count] }
 }
 format remu_atmega328pb_elf {
-	kind=elf
-	byte_order=little
-	address_bits=16
-	machine=83
-	code_offset=0x100
-	image=go image
+	kind = elf
+	byte_order = little
+	address_bits = 16
+	machine = 83
+	code_offset = 0x100
+	image = go image
 }
 target experimental/atmega328pb {
-	family=native_v1
-	os=atmega328pb
-	arch=avr16
-	frontend_arch=avr
-	abi=avr_internal
-	runtime=remu_atmega328pb_runtime
-	executable=remu_atmega328pb_elf
-	build_tags=[atmega328pb,avr,tiny]
-	capabilities=[freestanding,executable,volatile_memory]
-	arena_default=512
+	family = native_v1
+	os = atmega328pb
+	arch = avr16
+	frontend_arch = avr
+	abi = avr_internal
+	runtime = remu_atmega328pb_runtime
+	executable = remu_atmega328pb_elf
+	build_tags = [atmega328pb, avr, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 512
 }
 
 @stdlib "device/remu/target_atmega328pb.go"
@@ -107,10 +118,10 @@ target experimental/atmega328pb {
 // renvo_emu target.
 package remu
 
-const Target="atmega328pb"
-const FlashStart uintptr=0
-const FlashSize uintptr=32*1024
-const RAMStart uintptr=0x0100
-const RAMSize uintptr=2*1024
-const GPIOCount=27
+const Target = "atmega328pb"
+const FlashStart uintptr = 0
+const FlashSize uintptr = 32 * 1024
+const RAMStart uintptr = 0x0100
+const RAMSize uintptr = 2 * 1024
+const GPIOCount = 27
 @endstdlib

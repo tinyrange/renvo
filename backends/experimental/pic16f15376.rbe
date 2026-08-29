@@ -6,53 +6,102 @@ implements direct_emitter_v1
 @import "intel_hex.rtg"
 
 go backend {
-	const dataAddress=0x0200
-	const softwareStackTop=0x07ef
-	const uartTransmit=0x011a
-	const uartReceiveStatus=0x011d
-	const uartTransmitStatus=0x011e
-	func entry(out *RTGEmitter,stateOffset int)bool{pic16e.dataCopyEntry(out,dataAddress);pic16e.moveImmediate(out,pic16e.stack,softwareStackTop);pic16e.move(out,pic16e.frame,pic16e.stack);pic16e.moveImmediate(out,pic16e.scratch,0x80);pic16e.storeU8(out,RTGAddress{Displacement:uartReceiveStatus},pic16e.scratch);pic16e.moveImmediate(out,pic16e.scratch,0x24);pic16e.storeU8(out,RTGAddress{Displacement:uartTransmitStatus},pic16e.scratch);pic16e.clearWatchdog(out);return true}
-	func write(out *RTGEmitter){zero:=RTGRegister{Code:0,Valid:true};pic16e.moveImmediate(out,zero,0);pic16e.move(out,pic16e.copySource,pic16e.secondary);pic16e.move(out,pic16e.copyCount,pic16e.tertiary);loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);pic16e.compare(out,pic16e.copyCount,zero);pic16e.jumpCondition(out,pic16e.eq,done);pic16e.loadU8(out,pic16e.scratch,RTGAddress{Base:pic16e.copySource});pic16e.storeU8(out,RTGAddress{Displacement:uartTransmit},pic16e.scratch);pic16e.increment(out,pic16e.copySource);pic16e.decrement(out,pic16e.copyCount);pic16e.clearWatchdog(out);pic16e.jump(out,loop);out.Mark(done);pic16e.move(out,pic16e.primary,zero)}
-	func exit(out *RTGEmitter,status RTGRegister){loop:=out.NewLabel();out.Mark(loop);pic16e.clearWatchdog(out);pic16e.jump(out,loop)}
-	func image(out *RTGEmitter)[]byte{pic16e.patchAbsolute(out,dataAddress);sourceWord:=len(out.Code())/2;pic16e.patchDataCopy(out,sourceWord,len(out.Data()));program:=append([]byte{},out.Code()...);for _,value:=range out.Data(){program=append(program,value,0)};return intel_hex.Image(program)}
+	const dataAddress = 0x0200
+	const softwareStackTop = 0x07ef
+	const uartTransmit = 0x011a
+	const uartReceiveStatus = 0x011d
+	const uartTransmitStatus = 0x011e
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		pic16e.dataCopyEntry(out, dataAddress)
+		pic16e.moveImmediate(out, pic16e.stack, softwareStackTop)
+		pic16e.move(out, pic16e.frame, pic16e.stack)
+		pic16e.moveImmediate(out, pic16e.scratch, 0x80)
+		pic16e.storeU8(out, RTGAddress{Displacement: uartReceiveStatus}, pic16e.scratch)
+		pic16e.moveImmediate(out, pic16e.scratch, 0x24)
+		pic16e.storeU8(out, RTGAddress{Displacement: uartTransmitStatus}, pic16e.scratch)
+		pic16e.clearWatchdog(out)
+		return true
+	}
+
+	func write(out *RTGEmitter) {
+		zero := RTGRegister{Code: 0, Valid: true}
+		pic16e.moveImmediate(out, zero, 0)
+		pic16e.move(out, pic16e.copySource, pic16e.secondary)
+		pic16e.move(out, pic16e.copyCount, pic16e.tertiary)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		pic16e.compare(out, pic16e.copyCount, zero)
+		pic16e.jumpCondition(out, pic16e.eq, done)
+		pic16e.loadU8(out, pic16e.scratch, RTGAddress{Base: pic16e.copySource})
+		pic16e.storeU8(out, RTGAddress{Displacement: uartTransmit}, pic16e.scratch)
+		pic16e.increment(out, pic16e.copySource)
+		pic16e.decrement(out, pic16e.copyCount)
+		pic16e.clearWatchdog(out)
+		pic16e.jump(out, loop)
+		out.Mark(done)
+		pic16e.move(out, pic16e.primary, zero)
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		pic16e.clearWatchdog(out)
+		pic16e.jump(out, loop)
+	}
+
+	func image(out *RTGEmitter) []byte {
+		pic16e.patchAbsolute(out, dataAddress)
+		sourceWord := len(out.Code()) / 2
+		pic16e.patchDataCopy(out, sourceWord, len(out.Data()))
+		program := append([]byte{}, out.Code()...)
+		for _, value := range out.Data() {
+			program = append(program, value, 0)
+		}
+		return intel_hex.Image(program)
+	}
 }
 
 runtime remu_pic16f15376_runtime {
-	emit_entry_start=go entry
-	emit_exit=go exit
-	operation write { emit=go write }
-	operation print { use=write args=[stderr,buffer,count] }
+	emit_entry_start = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation print { use = write args = [stderr, buffer, count] }
 }
 format remu_pic16f15376_hex {
-	kind=intel_hex
-	byte_order=little
-	address_bits=16
-	code_offset=0
-	image=go image
+	kind = intel_hex
+	byte_order = little
+	address_bits = 16
+	code_offset = 0
+	image = go image
 }
 target experimental/pic16f15376 {
-	family=native_v1
-	os=pic16f15376
-	arch=pic16e_16
-	frontend_arch=pic16
-	abi=pic16e_internal
-	runtime=remu_pic16f15376_runtime
-	executable=remu_pic16f15376_hex
-	build_tags=[pic16f15376,pic16,tiny]
-	capabilities=[freestanding,executable,volatile_memory]
-	arena_default=512
+	family = native_v1
+	os = pic16f15376
+	arch = pic16e_16
+	frontend_arch = pic16
+	abi = pic16e_internal
+	runtime = remu_pic16f15376_runtime
+	executable = remu_pic16f15376_hex
+	build_tags = [pic16f15376, pic16, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 512
 }
 
 @stdlib "device/remu/target_pic16f15376.go"
 //go:build renvo && pic16f15376
 
-// Package remu exposes the direct-load memory contract of the selected renvo_emu target.
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
 package remu
-const Target="pic16f15376"
-const FlashStart uintptr=0
+
+const Target = "pic16f15376"
+const FlashStart uintptr = 0
+
 // PIC16 program memory is word addressed; each address contains one 14-bit word.
-const FlashSize uintptr=16*1024
-const RAMStart uintptr=0x0200
-const RAMSize uintptr=1536
-const GPIOCount=36
+const FlashSize uintptr = 16 * 1024
+const RAMStart uintptr = 0x0200
+const RAMSize uintptr = 1536
+const GPIOCount = 36
 @endstdlib
