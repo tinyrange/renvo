@@ -497,6 +497,7 @@ go backend {
 		}
 	}
 }
+
 arch aarch64 {
 	alias = "aarch64"
 	endian = little
@@ -742,10 +743,10 @@ arch aarch64 {
 			asmAddRegReg(a, secondary.Code, secondary.Code, tertiary.Code)
 		}
 		asmAddRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a, 0x8b000000|(right<<16)|(left<<5)|dst)
+			asmEmit(a, 0x8b000000 |(right << 16) |(left << 5) | dst)
 		}
 		asmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
-			asmEmit(a, 0x8b000000|(right<<16)|(shift<<10)|(left<<5)|dst)
+			asmEmit(a, 0x8b000000 |(right << 16) |(shift << 10) |(left << 5) | dst)
 		}
 		asmBoolNotRax(a:emitter) {
 			asmCmpRaxImm8(a, 0)
@@ -755,10 +756,10 @@ arch aarch64 {
 			asmCmpRegImm(a, primary.Code, imm)
 		}
 		asmCmpRegReg(a:emitter, left:int, right:int) {
-			asmEmit(a, 0xeb00001f|(right<<16)|(left<<5))
+			asmEmit(a, 0xeb00001f |(right << 16) |(left << 5))
 		}
 		asmCsetRax(a:emitter, cond:int) {
-			asmEmit(a, 0x9a9f07e0|((cond^1)<<12))
+			asmEmit(a, 0x9a9f07e0 |((cond ^ 1) << 12))
 		}
 		asmDecMemRdx(a:emitter) {
 			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 8)
@@ -770,7 +771,7 @@ arch aarch64 {
 		}
 		asmImulRcxImm(a:emitter, imm:int) {
 			asmMovRegImm(a, scratch.Code, imm)
-			asmEmit(a, 0x9b007c00|(scratch.Code<<16)|(tertiary.Code<<5)|tertiary.Code)
+			asmEmit(a, 0x9b007c00 |(scratch.Code << 16) |(tertiary.Code << 5) | tertiary.Code)
 		}
 		asmIncMemRdx(a:emitter) {
 			asmLoadRegMem(a, scratch.Code, secondary.Code, 0, 8)
@@ -864,7 +865,7 @@ arch aarch64 {
 			asmMovRegReg(a, x4.Code, primary.Code)
 		}
 		asmMulRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a, 0x9b007c00|(right<<16)|(left<<5)|dst)
+			asmEmit(a, 0x9b007c00 |(right << 16) |(left << 5) | dst)
 		}
 		asmNegRax(a:emitter) {
 			asmSubRegReg(a, primary.Code, zero.Code, primary.Code)
@@ -882,7 +883,7 @@ arch aarch64 {
 			asmPopReg(a, secondary.Code)
 		}
 		asmPopReg(a:emitter, reg:int) {
-			asmEmit(a, 0xf84107e0|reg)
+			asmEmit(a, 0xf84107e0 | reg)
 		}
 		asmPopRsi(a:emitter) {
 			asmPopReg(a, x4.Code)
@@ -901,19 +902,19 @@ arch aarch64 {
 			asmPushReg(a, secondary.Code)
 		}
 		asmPushReg(a:emitter, reg:int) {
-			asmEmit(a, 0xf81f0fe0|reg)
+			asmEmit(a, 0xf81f0fe0 | reg)
 		}
 		asmRet(a:emitter) {
 			asmEmit(a, 0xd65f03c0)
 		}
 		asmSarRaxImm(a:emitter, imm:int) {
-			asmEmit(a, 0x9340fc00|(imm<<16))
+			asmEmit(a, 0x9340fc00 |(imm << 16))
 		}
 		asmShlRaxImm(a:emitter, imm:int) {
-			asmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10))
+			asmEmit(a, 0xd3400000 |((64 - imm) << 16) |((63 - imm) << 10))
 		}
 		asmShlRcxImm(a:emitter, imm:int) {
-			asmEmit(a, 0xd3400000|((64-imm)<<16)|((63-imm)<<10)|(tertiary.Code<<5)|tertiary.Code)
+			asmEmit(a, 0xd3400000 |((64 - imm) << 16) |((63 - imm) << 10) |(tertiary.Code << 5) | tertiary.Code)
 		}
 		asmStoreAlMemRdxRcx1(a:emitter) {
 			asmAddRegRegShift(a, address.Code, secondary.Code, tertiary.Code, 0)
@@ -938,14 +939,14 @@ arch aarch64 {
 		}
 		asmStoreSliceStack(a:emitter, offset:int) {
 			asmStoreRegStack(a, primary.Code, offset)
-			asmStoreRegStack(a, secondary.Code, offset-8)
-			asmStoreRegStack(a, tertiary.Code, offset-16)
+			asmStoreRegStack(a, secondary.Code, offset - 8)
+			asmStoreRegStack(a, tertiary.Code, offset - 16)
 		}
 		asmSubRaxRcx(a:emitter) {
 			asmSubRegReg(a, primary.Code, primary.Code, tertiary.Code)
 		}
 		asmSubRegReg(a:emitter, dst:int, left:int, right:int) {
-			asmEmit(a, 0xcb000000|(right<<16)|(left<<5)|dst)
+			asmEmit(a, 0xcb000000 |(right << 16) |(left << 5) | dst)
 		}
 		asmSyscall(a:emitter) {
 			asmMovRegReg(a, system.Code, primary.Code)
@@ -958,7 +959,7 @@ arch aarch64 {
 		}
 		asmBCondLabel(a:emitter, label:int, cond:int) {
 			let at = a.Len()
-			asmEmit(a, 0x54000000|cond)
+			asmEmit(a, 0x54000000 | cond)
 			a.RelocAt(at, label)
 		}
 		asmCallLabel(a:emitter, label:int) {
@@ -979,9 +980,9 @@ arch aarch64 {
 		asmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
 			let at = a.Len()
 			asmMovRegImm(a, reg, 0)
-			asmEmit(a, 0xf2800000|(1<<21)|reg)
-			asmEmit(a, 0xf2800000|(2<<21)|reg)
-			asmEmit(a, 0xf2800000|(3<<21)|reg)
+			asmEmit(a, 0xf2800000 |(1 << 21) | reg)
+			asmEmit(a, 0xf2800000 |(2 << 21) | reg)
+			asmEmit(a, 0xf2800000 |(3 << 21) | reg)
 			a.AbsoluteReloc(at, off, kind)
 		}
 		copyBytes(out:emitter) {
@@ -995,11 +996,11 @@ arch aarch64 {
 			let done = out.NewLabel()
 			compare(out, destination, source)
 			jumpCondition(out, record_condition(Code:9), forward)
-			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1, ))
+			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1,))
 			compare(out, destination, scratch)
 			jumpCondition(out, record_condition(Code:2), forward)
-			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1, ))
-			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1, ))
+			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1,))
+			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1,))
 			out.Mark(backwardLoop)
 			compare(out, count, zero)
 			jumpCondition(out, record_condition(Code:0), done)
@@ -1042,24 +1043,24 @@ arch aarch64 {
 			asmMovRegImm(out, destination.Code, int(value))
 		}
 		setCondition(out:emitter, condition:condition, destination:register) {
-			asmEmit(out, 0x9a9f07e0|((condition.Code^1)<<12)|destination.Code)
+			asmEmit(out, 0x9a9f07e0 |((condition.Code ^ 1) << 12) | destination.Code)
 		}
 		shiftLeftImmediate(out:emitter, operand:register, value:byte) {
-			let shift = int(value)&63
-			asmEmit(out, 0xd3400000|((64-shift)<<16)|((63-shift)<<10)|(operand.Code<<5)|operand.Code)
+			let shift = int(value) & 63
+			asmEmit(out, 0xd3400000 |((64 - shift) << 16) |((63 - shift) << 10) |(operand.Code << 5) | operand.Code)
 		}
 		shiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
-			asmEmit(out, 0x9340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+			asmEmit(out, 0x9340fc00 |((int(value) & 63) << 16) |(operand.Code << 5) | operand.Code)
 		}
 		shiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
-			asmEmit(out, 0xd340fc00|((int(value)&63)<<16)|(operand.Code<<5)|operand.Code)
+			asmEmit(out, 0xd340fc00 |((int(value) & 63) << 16) |(operand.Code << 5) | operand.Code)
 		}
 		emitADR(out:emitter, destination:register, address:address) {
 			let at = out.Len()
 			# Executable absolute relocation patchers replace this whole slot
 			# with ADRP, ADD, NOP, NOP. Reserve all four instructions so the
 			# patch cannot overwrite the operations which follow the address.
-			asmEmit(out, 0x90000000|destination.Code)
+			asmEmit(out, 0x90000000 | destination.Code)
 			asmEmit(out, 0xd503201f)
 			asmEmit(out, 0xd503201f)
 			asmEmit(out, 0xd503201f)
@@ -1098,7 +1099,7 @@ arch aarch64 {
 		storeU8(out:emitter, address:address, source:register) {
 			storeWidth(out, address, source, 1)
 		}
-}
+	}
 }
 
 abi aapcs64 {

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bf10a84c19a924facde4bda99e0e09d7487c67e4d5e207d94a4a4eb6b977965b"
+const CompilerSourceDigest = "77bb16c4580e7aa66688d4a7a0f0210cdd69f51aca9746fd05339b33faa260f7"
 
 // source: backend/compiler_common_impl.go
 
@@ -41587,15 +41587,15 @@ return g.streqLabel
 
 
 type rtgX86Code16X8616PackageCode16ModRMResult struct {
-at int
+at  int
 reg int
-ok bool
+ok  bool
 }
 type rtgX86Code16X8616PackageCode16RewriteResult struct {
-code []byte
+code      []byte
 positions []int
-failure int
-ok bool
+failure   int
+ok        bool
 }
 func rtgX86Code16X8616PackageCode16ModRMEnd(code []byte, at int, address32 bool) rtgX86Code16X8616PackageCode16ModRMResult {
 if at >= len(code) {
@@ -41686,7 +41686,11 @@ second := int(code[input])
 input++
 if second >= 0x80 && second <= 0x8f {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if second >= 0x90 && second <= 0x9f {
 hasModRM = true
 } else if second >= 0x40 && second <= 0x4f ||
@@ -41724,7 +41728,11 @@ operandDefault = low == 1 || low == 3
 immediate = 1
 } else if low == 5 {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0x06 || opcode == 0x07 || opcode == 0x0e ||
 opcode == 0x16 || opcode == 0x17 || opcode == 0x1e || opcode == 0x1f {
 operandDefault = true
@@ -41733,11 +41741,19 @@ operandDefault = true
 operandDefault = true
 } else if opcode == 0x68 {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0x69 {
 hasModRM = true
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0x6a {
 operandDefault = true
 immediate = 1
@@ -41756,7 +41772,11 @@ if opcode == 0x80 || opcode == 0x82 {
 immediate = 1
 } else if opcode == 0x81 {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0x83 {
 operandDefault = true
 immediate = 1
@@ -41770,7 +41790,11 @@ operandDefault = true
 } else if opcode >= 0xa0 && opcode <= 0xa3 {
 addressDefault = true
 operandDefault = opcode == 0xa1 || opcode == 0xa3
-if address32 { immediate = 4 } else { immediate = 2 }
+if address32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode >= 0xa4 && opcode <= 0xaf {
 if opcode != 0xa8 && opcode != 0xa9 {
 addressDefault = true
@@ -41781,13 +41805,21 @@ operandDefault = true
 if opcode == 0xa8 {
 immediate = 1
 } else if opcode == 0xa9 {
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 }
 } else if opcode >= 0xb0 && opcode <= 0xb7 {
 immediate = 1
 } else if opcode >= 0xb8 && opcode <= 0xbf {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0xc0 || opcode == 0xc1 {
 hasModRM = true
 operandDefault = opcode == 0xc1
@@ -41797,11 +41829,19 @@ operandDefault = true
 immediate = 2
 } else if opcode == 0xc3 || opcode == 0xc8 || opcode == 0xc9 {
 operandDefault = true
-if opcode == 0xc8 { immediate = 3 }
+if opcode == 0xc8 {
+immediate = 3
+}
 } else if opcode == 0xc6 || opcode == 0xc7 {
 hasModRM = true
 operandDefault = opcode == 0xc7
-if opcode == 0xc6 { immediate = 1 } else if operand32 { immediate = 4 } else { immediate = 2 }
+if opcode == 0xc6 {
+immediate = 1
+} else if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0xcc || opcode == 0xce || opcode == 0xcf || opcode == 0xf4 || opcode == 0xf5 || opcode >= 0xf8 && opcode <= 0xfd {
 
 } else if opcode == 0xcd {
@@ -41816,10 +41856,18 @@ addressDefault = true
 immediate = 1
 } else if opcode == 0xe8 || opcode == 0xe9 {
 operandDefault = true
-if operand32 { immediate = 4 } else { immediate = 2 }
+if operand32 {
+immediate = 4
+} else {
+immediate = 2
+}
 } else if opcode == 0xea {
 operandDefault = true
-if operand32 { immediate = 6 } else { immediate = 4 }
+if operand32 {
+immediate = 6
+} else {
+immediate = 4
+}
 } else if opcode == 0xeb || opcode == 0xe4 || opcode == 0xe5 || opcode == 0xe6 || opcode == 0xe7 {
 immediate = 1
 operandDefault = opcode == 0xe5 || opcode == 0xe7
@@ -41879,10 +41927,14 @@ outputStart := len(result)
 mapping[start] = outputStart
 for i := start; i < opcodeAt; i++ {
 if code[i] == 0x66 || code[i] == 0x67 {
-if mapping[i] < 0 { mapping[i] = outputStart }
+if mapping[i] < 0 {
+mapping[i] = outputStart
+}
 continue
 }
-if mapping[i] < 0 { mapping[i] = len(result) }
+if mapping[i] < 0 {
+mapping[i] = len(result)
+}
 result = append(result, code[i])
 }
 if addressDefault && address32 {
@@ -41892,7 +41944,9 @@ if operandDefault && operand32 {
 result = append(result, 0x66)
 }
 for i := opcodeAt; i < input; i++ {
-if mapping[i] < 0 { mapping[i] = len(result) }
+if mapping[i] < 0 {
+mapping[i] = len(result)
+}
 result = append(result, code[i])
 }
 mapping[input] = len(result)
@@ -41901,12 +41955,16 @@ return rtgX86Code16X8616PackageCode16RewriteResult{code: result, positions: mapp
 }
 func renvo386RewriteCode16(code []byte) []byte {
 result := rtgX86Code16X8616PackageCode16Rewrite(code)
-if !result.ok { return nil }
+if !result.ok {
+return nil
+}
 return result.code
 }
 func renvo386Code16Positions(code []byte) []int {
 result := rtgX86Code16X8616PackageCode16Rewrite(code)
-if !result.ok { return nil }
+if !result.ok {
+return nil
+}
 return result.positions
 }
 func renvo386Code16FailureOffset(code []byte) int {
@@ -46356,7 +46414,7 @@ return
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 for i := 0; i+1 < len(a.relocs); i += 2 {
 at := int(renvo_runtime_UnsafeInt32At(a.relocs,i))
-label := int(renvo_runtime_UnsafeInt32At(a.relocs,i+1))
+label := int(renvo_runtime_UnsafeInt32At(a.relocs,i + 1))
 target := renvoAsmLabelPosition(a,label)
 if target >= 0 {
 renvoPut32At(a.code, at, target)
@@ -46364,8 +46422,8 @@ renvoPut32At(a.code, at, target)
 }
 for i := 0; i+2 < len(a.absRelocs); i += 3 {
 at := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i))
-off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+1))
-kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+2))
+off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i + 1))
+kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i + 2))
 target := dataBase + off
 if kind == 1 {
 target = bssBase + off

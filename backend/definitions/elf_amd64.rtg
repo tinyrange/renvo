@@ -21,120 +21,120 @@ go backend {
 		   the original minimal layout. ObjectImage implements its generalized
 		   Kbuild-compatible successor. */
 		/*
-		emitter.Patch()
-		code := emitter.Code()
-		data := emitter.Data()
-		exportCount := emitter.SymbolCount()
-		importCount := emitter.ExternalImportCount()
-		relocationCount := emitter.AbsoluteRelocationCount()
+			emitter.Patch()
+			code := emitter.Code()
+			data := emitter.Data()
+			exportCount := emitter.SymbolCount()
+			importCount := emitter.ExternalImportCount()
+			relocationCount := emitter.AbsoluteRelocationCount()
 
-		stringSize := 1
-		for i := 0; i < exportCount; i++ {
-			stringSize += emitter.SymbolNameLength(i)+1
-		}
-		for i := 0; i < importCount; i++ {
-			stringSize += len(emitter.ExternalImportName(i))+1
-		}
-		sectionNames := []byte("\x00.text\x00.rela.text\x00.data\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00.note.GNU-stack\x00")
-		textOffset := 64
-		relocationOffset := RTGAlignValue(textOffset+len(code), 8)
-		dataOffset := RTGAlignValue(relocationOffset+relocationCount*24, 8)
-		bssOffset := dataOffset+len(data)
-		symbolOffset := RTGAlignValue(bssOffset, 8)
-		symbolSize := (4+exportCount+importCount)*24
-		stringOffset := symbolOffset+symbolSize
-		sectionStringOffset := stringOffset+stringSize
-		sectionOffset := RTGAlignValue(sectionStringOffset+len(sectionNames), 8)
+			stringSize := 1
+			for i := 0; i < exportCount; i++ {
+				stringSize += emitter.SymbolNameLength(i)+1
+			}
+			for i := 0; i < importCount; i++ {
+				stringSize += len(emitter.ExternalImportName(i))+1
+			}
+			sectionNames := []byte("\x00.text\x00.rela.text\x00.data\x00.bss\x00.symtab\x00.strtab\x00.shstrtab\x00.note.GNU-stack\x00")
+			textOffset := 64
+			relocationOffset := RTGAlignValue(textOffset+len(code), 8)
+			dataOffset := RTGAlignValue(relocationOffset+relocationCount*24, 8)
+			bssOffset := dataOffset+len(data)
+			symbolOffset := RTGAlignValue(bssOffset, 8)
+			symbolSize := (4+exportCount+importCount)*24
+			stringOffset := symbolOffset+symbolSize
+			sectionStringOffset := stringOffset+stringSize
+			sectionOffset := RTGAlignValue(sectionStringOffset+len(sectionNames), 8)
 
-		image := make([]byte, 64)
-		image = elfObjectUntil(image, textOffset)
-		image = append(image, code...)
-		image = elfObjectUntil(image, relocationOffset)
-		for i := 0; i < relocationCount; i++ {
-			at := emitter.AbsoluteRelocationOffset(i)
-			addend := emitter.AbsoluteRelocationAddend(i)
-			kind := emitter.AbsoluteRelocationKind(i)
-			symbol := 2
-			if kind == RTGRelocationAbsoluteBSS {
-				symbol = 3
-			} else if kind == RTGRelocationAbsoluteBSSEnd {
-				symbol = 3
-				alignment := addend
-				if alignment <= 0 {
-					alignment = 1
-				}
-				addend = RTGAlignValue(emitter.BSSSize(), alignment)
-			} else if kind == RTGRelocationImport {
-				if addend < 0 || addend >= importCount {
+			image := make([]byte, 64)
+			image = elfObjectUntil(image, textOffset)
+			image = append(image, code...)
+			image = elfObjectUntil(image, relocationOffset)
+			for i := 0; i < relocationCount; i++ {
+				at := emitter.AbsoluteRelocationOffset(i)
+				addend := emitter.AbsoluteRelocationAddend(i)
+				kind := emitter.AbsoluteRelocationKind(i)
+				symbol := 2
+				if kind == RTGRelocationAbsoluteBSS {
+					symbol = 3
+				} else if kind == RTGRelocationAbsoluteBSSEnd {
+					symbol = 3
+					alignment := addend
+					if alignment <= 0 {
+						alignment = 1
+					}
+					addend = RTGAlignValue(emitter.BSSSize(), alignment)
+				} else if kind == RTGRelocationImport {
+					if addend < 0 || addend >= importCount {
+						return nil
+					}
+					symbol = 4+exportCount+addend
+					image = elf_amd64_primitives.kernelAppendRelocation(
+						image, at, symbol, 4, -4)
+					continue
+				} else if kind != RTGRelocationAbsoluteData {
 					return nil
 				}
-				symbol = 4+exportCount+addend
 				image = elf_amd64_primitives.kernelAppendRelocation(
-					image, at, symbol, 4, -4)
-				continue
-			} else if kind != RTGRelocationAbsoluteData {
-				return nil
+					image, at, symbol, 2, addend-4)
 			}
-			image = elf_amd64_primitives.kernelAppendRelocation(
-				image, at, symbol, 2, addend-4)
-		}
-		image = elfObjectUntil(image, dataOffset)
-		image = append(image, data...)
-		image = elfObjectUntil(image, symbolOffset)
-		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 0, 0, 0, 0)
-		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 1, 0, 0)
-		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 3, 0, 0)
-		image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 4, 0, 0)
-		nameOffset := 1
-		for i := 0; i < exportCount; i++ {
-			position := emitter.SymbolPC(i)
-			if position < 0 {
-				return nil
+			image = elfObjectUntil(image, dataOffset)
+			image = append(image, data...)
+			image = elfObjectUntil(image, symbolOffset)
+			image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 0, 0, 0, 0)
+			image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 1, 0, 0)
+			image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 3, 0, 0)
+			image = elf_amd64_primitives.kernelAppendSymbol(image, 0, 3, 4, 0, 0)
+			nameOffset := 1
+			for i := 0; i < exportCount; i++ {
+				position := emitter.SymbolPC(i)
+				if position < 0 {
+					return nil
+				}
+				image = elf_amd64_primitives.kernelAppendSymbol(
+					image, nameOffset, 18, 1, position, 0)
+				nameOffset += emitter.SymbolNameLength(i)+1
 			}
-			image = elf_amd64_primitives.kernelAppendSymbol(
-				image, nameOffset, 18, 1, position, 0)
-			nameOffset += emitter.SymbolNameLength(i)+1
-		}
-		for i := 0; i < importCount; i++ {
-			image = elf_amd64_primitives.kernelAppendSymbol(
-				image, nameOffset, 16, 0, 0, 0)
-			nameOffset += len(emitter.ExternalImportName(i))+1
-		}
-		image = append(image, 0)
-		for i := 0; i < exportCount; i++ {
-			for j := 0; j < emitter.SymbolNameLength(i); j++ {
-				image = append(image, emitter.SymbolNameByte(i, j))
+			for i := 0; i < importCount; i++ {
+				image = elf_amd64_primitives.kernelAppendSymbol(
+					image, nameOffset, 16, 0, 0, 0)
+				nameOffset += len(emitter.ExternalImportName(i))+1
 			}
 			image = append(image, 0)
-		}
-		for i := 0; i < importCount; i++ {
-			image = elfObjectString(image, emitter.ExternalImportName(i))
-		}
-		image = append(image, sectionNames...)
-		image = elfObjectUntil(image, sectionOffset)
-		image = elf_amd64_primitives.kernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 7, 4, 64, relocationOffset, relocationCount*24, 5, 1, 8, 24)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 18, 1, 3, dataOffset, len(data), 0, 0, 8, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 24, 8, 3, bssOffset, emitter.BSSSize(), 0, 0, 8, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 29, 2, 0, symbolOffset, symbolSize, 6, 4, 8, 24)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 37, 3, 0, stringOffset, stringSize, 0, 0, 1, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 45, 3, 0, sectionStringOffset, len(sectionNames), 0, 0, 1, 0)
-		image = elf_amd64_primitives.kernelAppendSection(
-			image, 55, 1, 0, bssOffset, 0, 0, 0, 1, 0)
-		header := elf_amd64_primitives.kernelAppendELFHeader(
-			[]byte{}, sectionOffset, 9, 7)
-		for i := 0; i < len(header); i++ {
-			image[i] = header[i]
-		}
-		return image */
+			for i := 0; i < exportCount; i++ {
+				for j := 0; j < emitter.SymbolNameLength(i); j++ {
+					image = append(image, emitter.SymbolNameByte(i, j))
+				}
+				image = append(image, 0)
+			}
+			for i := 0; i < importCount; i++ {
+				image = elfObjectString(image, emitter.ExternalImportName(i))
+			}
+			image = append(image, sectionNames...)
+			image = elfObjectUntil(image, sectionOffset)
+			image = elf_amd64_primitives.kernelAppendSection(image, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 1, 1, 6, textOffset, len(code), 0, 0, 16, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 7, 4, 64, relocationOffset, relocationCount*24, 5, 1, 8, 24)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 18, 1, 3, dataOffset, len(data), 0, 0, 8, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 24, 8, 3, bssOffset, emitter.BSSSize(), 0, 0, 8, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 29, 2, 0, symbolOffset, symbolSize, 6, 4, 8, 24)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 37, 3, 0, stringOffset, stringSize, 0, 0, 1, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 45, 3, 0, sectionStringOffset, len(sectionNames), 0, 0, 1, 0)
+			image = elf_amd64_primitives.kernelAppendSection(
+				image, 55, 1, 0, bssOffset, 0, 0, 0, 1, 0)
+			header := elf_amd64_primitives.kernelAppendELFHeader(
+				[]byte{}, sectionOffset, 9, 7)
+			for i := 0; i < len(header); i++ {
+				image[i] = header[i]
+			}
+			return image */
 	}
 }
 
@@ -188,10 +188,10 @@ format elf64_x86_64 {
 	}
 
 	sections when !stripped {
-		text progbits alloc|execute align=16
-		data progbits alloc|write align=8
-		bss nobits alloc|write align=8
-		symtab symtab entry_size=24 link=strtab
+		text progbits alloc | execute align = 16
+		data progbits alloc | write align = 8
+		bss nobits alloc | write align = 8
+		symtab symtab entry_size = 24 link = strtab
 		strtab strtab
 		shstrtab strtab
 	}
@@ -218,17 +218,37 @@ format elf64_object_x86_64 {
 	append_symbol = sequence elf_amd64_primitives.kernelAppendSymbol
 
 	sections {
-		text progbits alloc|execute align=16
-		rela_text rela entry_size=24 link=symtab info=text
-		data progbits alloc|write align=8
-		bss nobits alloc|write align=8
-		symtab symtab entry_size=24 link=strtab
+		text progbits alloc | execute align = 16
+		rela_text rela entry_size = 24 link = symtab info = text
+		data progbits alloc | write align = 8
+		bss nobits alloc | write align = 8
+		symtab symtab entry_size = 24 link = strtab
 		strtab strtab
 		shstrtab strtab
 	}
 
-	relocation label { number = 2 kind = pc_relative width = 32 addend = -4 }
-	relocation data { number = 2 kind = pc_relative width = 32 addend = -4 }
-	relocation bss { number = 2 kind = pc_relative width = 32 addend = -4 }
-	relocation abs64 { number = 1 kind = absolute width = 64 addend = 0 }
+	relocation label {
+		number = 2
+		kind = pc_relative
+		width = 32
+		addend = -4
+	}
+	relocation data {
+		number = 2
+		kind = pc_relative
+		width = 32
+		addend = -4
+	}
+	relocation bss {
+		number = 2
+		kind = pc_relative
+		width = 32
+		addend = -4
+	}
+	relocation abs64 {
+		number = 1
+		kind = absolute
+		width = 64
+		addend = 0
+	}
 }

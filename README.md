@@ -344,14 +344,20 @@ normal `go build ./cmd/renvo` therefore needs neither the definitions nor a
 checkout-local backend at runtime. Native targets share one `native_v1`
 catalog; Wasm and VM32 use the separate `structured32` family. See
 [`backend/definitions/README.md`](backend/definitions/README.md) for the schema
-and architecture workflow. After changing an included definition, refresh the
-checked-in layers:
+and architecture workflow. After changing an included definition, format it
+and refresh the checked-in layers:
 
 ```sh
+go run ./cmd/renvofmt -w path/to/backend.rtg
 go generate ./backend/definitions
 go generate ./internal/targetinfo
 go generate ./internal/backendcompiled
 ```
+
+`renvofmt` validates RTG imports and embedded Go while applying `gofmt` rules
+to `go backend`, `go compiler`, and RBE `@stdlib` bodies. It applies the same
+tab indentation and canonical token spacing to the surrounding RTG metadata.
+Run `./tools/check format` to verify every tracked `.rtg` and `.rbe` file.
 
 A custom definition is prepared with the compiled-in host backend and executed
 by the host command. Passing source prepares it on first use and reuses a

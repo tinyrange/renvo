@@ -211,11 +211,11 @@ go backend {
 		right RTGRegister, displacement int,
 	) {
 		value := displacement
-		instruction := 0x63|(funct3<<12)|(left.Code<<15)|(right.Code<<20)
-		instruction |= ((value>>12)&1)<<31
-		instruction |= ((value>>5)&0x3f)<<25
-		instruction |= ((value>>1)&0xf)<<8
-		instruction |= ((value>>11)&1)<<7
+		instruction := 0x63 | (funct3 << 12) | (left.Code << 15) | (right.Code << 20)
+		instruction |= ((value >> 12) & 1) << 31
+		instruction |= ((value >> 5) & 0x3f) << 25
+		instruction |= ((value >> 1) & 0xf) << 8
+		instruction |= ((value >> 11) & 1) << 7
 		emit(out, instruction)
 	}
 
@@ -329,10 +329,10 @@ go backend {
 			instruction := RTGGet32At(out.Code(), at)
 			if instruction&0x7f == 0x6f {
 				instruction &= 0x00000fff
-				instruction |= ((delta>>20)&1)<<31
-				instruction |= ((delta>>1)&0x3ff)<<21
-				instruction |= ((delta>>11)&1)<<20
-				instruction |= ((delta>>12)&0xff)<<12
+				instruction |= ((delta >> 20) & 1) << 31
+				instruction |= ((delta >> 1) & 0x3ff) << 21
+				instruction |= ((delta >> 11) & 1) << 20
+				instruction |= ((delta >> 12) & 0xff) << 12
 				out.PatchUint32(at, instruction)
 			} else if instruction&0x7f == 0x17 {
 				// AUIPC/ADDI pair used by emitAddress.
@@ -477,16 +477,16 @@ arch riscv32 {
 			let done = out.NewLabel()
 			compare(out, copyDestination, copySource)
 			jumpCondition(out, ult, forward)
-			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1, ))
+			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1,))
 			compare(out, copyDestination, scratch)
 			jumpCondition(out, uge, forward)
-			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1, ))
-			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1, ))
+			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1,))
+			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1,))
 			out.Mark(backwardLoop)
 			compare(out, copyCount, zero)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			decrement(out, copySource)
 			decrement(out, copyDestination)
 			decrement(out, copyCount)
@@ -495,8 +495,8 @@ arch riscv32 {
 			out.Mark(forwardLoop)
 			compare(out, copyCount, zero)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			increment(out, copySource)
 			increment(out, copyDestination)
 			decrement(out, copyCount)

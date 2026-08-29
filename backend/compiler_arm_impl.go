@@ -688,7 +688,7 @@ func renvoArmAsmVFPIntToFloatStack(a *renvoAsm, offset int, intSize int, floatSi
 		renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
 		renvoArmAsmLoadRegStack(a, renvoArmRegRdx, offset-4)
 		renvoAsmEmitText(a, "\x10\x0a\x00\xee\x10\x1a\x01\xee\x40\x0b\xb8\xee") // vmov s0, r0; vmov s2, r1; vcvt.f64.u32 d0, s0
-		highConvert := 0xeeb81bc1      // vcvt.f64.s32 d1, s2
+		highConvert := 0xeeb81bc1                                               // vcvt.f64.s32 d1, s2
 		if !signed {
 			highConvert = 0xeeb81b41 // vcvt.f64.u32 d1, s2
 		}
@@ -704,7 +704,7 @@ func renvoArmAsmVFPIntToFloatStack(a *renvoAsm, offset int, intSize int, floatSi
 	}
 	renvoArmAsmLoadRegStack(a, renvoArmRegRax, offset)
 	renvoArmAsmEmit(a, 0xee000a10) // vmov s0, r0
-	op := 0xeeb80bc0 // vcvt.f64.s32 d0, s0
+	op := 0xeeb80bc0               // vcvt.f64.s32 d0, s0
 	if floatSize == 4 {
 		op = 0xeeb80ac0 // vcvt.f32.s32 s0, s0
 	}

@@ -35,10 +35,10 @@ go backend {
 	func uefiEntryStart(out *RTGEmitter, stateOffset int) bool {
 		_ = stateOffset
 		// Preserve every Microsoft x64 nonvolatile register for the firmware.
-		out.Byte(0x53) // RBX
-		out.Byte(0x55) // RBP
-		out.Byte(0x57) // RDI
-		out.Byte(0x56) // RSI
+		out.Byte(0x53)         // RBX
+		out.Byte(0x55)         // RBP
+		out.Byte(0x57)         // RDI
+		out.Byte(0x56)         // RSI
 		out.Bytes2(0x41, 0x54) // R12
 		out.Bytes2(0x41, 0x55) // R13
 		out.Bytes2(0x41, 0x56) // R14
@@ -194,8 +194,8 @@ go backend {
 			out.Bytes3(0x48, 0x89, 0xca) // RDX=RCX (a1)
 			out.Bytes3(0x4c, 0x89, 0xd1) // RCX=R10 (a0)
 		}
-		out.Bytes2(0x41, 0x54) // preserve R12
-		out.Bytes3(0x49, 0x89, 0xe4) // MOV R12,RSP
+		out.Bytes2(0x41, 0x54)             // preserve R12
+		out.Bytes3(0x49, 0x89, 0xe4)       // MOV R12,RSP
 		out.Bytes4(0x48, 0x83, 0xe4, 0xf0) // AND RSP,-16
 		out.Bytes4(0x48, 0x83, 0xec, 0x30)
 		if count == 5 {
@@ -240,8 +240,8 @@ go backend {
 		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
 		data := out.Data()
 		dataRaw := RTGAlignValue(len(data), 0x200)
-		dataSize := len(data)+out.BSSSize()
-		bssRVA := dataRVA+len(data)
+		dataSize := len(data) + out.BSSSize()
+		bssRVA := dataRVA + len(data)
 		uefiPatchRelocations(out, dataRVA, bssRVA)
 
 		header := make([]byte, 0x200)
@@ -253,7 +253,7 @@ go backend {
 		uefiPut16(header, pe+6, 2)
 		uefiPut16(header, pe+20, 0xf0)
 		uefiPut16(header, pe+22, 0x22)
-		opt := pe+24
+		opt := pe + 24
 		uefiPut16(header, opt, 0x20b)
 		uefiPut32(header, opt+4, textRaw)
 		uefiPut32(header, opt+8, dataRaw)
@@ -266,7 +266,7 @@ go backend {
 		uefiPut16(header, opt+48, 2)
 		uefiPut32(header, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
 		uefiPut32(header, opt+60, 0x200)
-		uefiPut16(header, opt+68, 10) // EFI application
+		uefiPut16(header, opt+68, 10)    // EFI application
 		uefiPut16(header, opt+70, 0x100) // NX compatible
 		uefiPut64(header, opt+72, 0x100000)
 		uefiPut64(header, opt+80, 0x1000)

@@ -306,7 +306,7 @@ go backend {
 	}
 
 	type androidImportLayout struct {
-		got []int
+		got       []int
 		libraries []string
 	}
 

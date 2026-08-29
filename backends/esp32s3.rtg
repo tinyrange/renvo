@@ -31,6 +31,7 @@ go backend {
 	const rtcUSBConfig = 0x60008120
 	const usbSerialStartOfFrame = 1 << 1
 	const usbSerialProbeIterations = 65536
+
 	// Target-private relocation resolved after the complete program has been
 	// emitted, when the final BSS size is known.
 	const relocationAbsoluteBSSEnd = 3
@@ -193,7 +194,7 @@ go backend {
 			'.', 'd', 'a', 't', 'a', 0,
 			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0,
 			'.', 'i', 'r', 'a', 'm', '.', 't', 'e', 'x', 't', 0}
-		sectionNamesOffset := descriptorOffset+len(descriptor)
+		sectionNamesOffset := descriptorOffset + len(descriptor)
 		sectionHeadersOffset := RTGAlignValue(sectionNamesOffset+len(sectionNames), 4)
 
 		var result []byte

@@ -38,11 +38,11 @@ go backend {
 		// write arrives as RAX=buffer and RDX=count in the prepared amd64 ABI.
 		loop := out.NewLabel()
 		done := out.NewLabel()
-		out.Byte(0x51) // PUSH RCX
-		out.Byte(0x52) // PUSH RDX
-		out.Byte(0x56) // PUSH RSI
-		out.Bytes3(0x48, 0x89, 0xc6) // RSI=buffer
-		out.Bytes3(0x48, 0x89, 0xd1) // RCX=count
+		out.Byte(0x51)                     // PUSH RCX
+		out.Byte(0x52)                     // PUSH RDX
+		out.Byte(0x56)                     // PUSH RSI
+		out.Bytes3(0x48, 0x89, 0xc6)       // RSI=buffer
+		out.Bytes3(0x48, 0x89, 0xd1)       // RCX=count
 		out.Bytes4(0x66, 0xba, 0xe9, 0x00) // DX=QEMU debug console
 		out.Mark(loop)
 		out.Bytes3(0x48, 0x85, 0xc9)
@@ -62,7 +62,7 @@ go backend {
 
 	func freestandingAMD64Image(out *RTGEmitter) []byte {
 		dataAddress := len(out.Code())
-		bssAddress := dataAddress+len(out.Data())
+		bssAddress := dataAddress + len(out.Data())
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
 			target, ok := RTGResolveAbsoluteRelocation(out,

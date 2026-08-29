@@ -13,6 +13,7 @@ go backend {
 	const elfCodeOffset = 0x100
 	const elfPageSize = 0x1000
 	const uf2FamilyRP2350Riscv = 0xe48bff5a
+
 	var flashDataAddressPatch int
 	var flashDataSizePatch int
 
@@ -163,7 +164,7 @@ go backend {
 			riscv32.copyCount.Code, len(data))
 		code = out.Code()
 
-		binary := picobinHeader(flashBase+flashCodeOffset)
+		binary := picobinHeader(flashBase + flashCodeOffset)
 		binary = appendUntil(binary, flashCodeOffset)
 		binary = append(binary, code...)
 		binary = appendUntil(binary, dataOffset)
@@ -172,7 +173,7 @@ go backend {
 		blocks := len(binary) / 256
 		var result []byte
 		for block := 0; block < blocks; block++ {
-			payload := binary[block*256:(block+1)*256]
+			payload := binary[block*256 : (block+1)*256]
 			result = appendUF2Block(result,
 				flashBase+block*256, block, blocks, payload)
 		}
@@ -199,7 +200,7 @@ go backend {
 		patchAbsolute(out, bssAddress)
 		code := out.Code()
 		dataOffset := RTGAlignValue(elfCodeOffset+len(code), elfPageSize)
-		dataMemorySize := bssAddress-dataAddress+RTGAlignValue(out.BSSSize(), 4)
+		dataMemorySize := bssAddress - dataAddress + RTGAlignValue(out.BSSSize(), 4)
 		var result []byte
 		result = append(result,
 			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,

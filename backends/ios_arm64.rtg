@@ -93,14 +93,14 @@ go backend {
 			aarch64.asmPopReg(out, 1)
 			for i := 0; i < 4; i++ {
 				aarch64.asmPopReg(out, 16)
-				out.Uint32(0x9e620000|(16<<5)|i)
+				out.Uint32(0x9e620000 | (16 << 5) | i)
 			}
 		} else if sizeCall {
 			aarch64.asmPopReg(out, 0)
 			aarch64.asmPopReg(out, 1)
 			for i := 0; i < 2; i++ {
 				aarch64.asmPopReg(out, 16)
-				out.Uint32(0x9e620000|(16<<5)|i)
+				out.Uint32(0x9e620000 | (16 << 5) | i)
 			}
 		} else {
 			for i := 0; i < registerWords; i++ {
@@ -162,7 +162,7 @@ go backend {
 				resultFloat = 3
 			}
 			if resultFloat >= 0 {
-				out.Uint32(0x9e780000|(resultFloat<<5))
+				out.Uint32(0x9e780000 | (resultFloat << 5))
 			}
 		}
 		aarch64.asmMovRegReg(out, 10, 0)

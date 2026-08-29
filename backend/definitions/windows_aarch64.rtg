@@ -110,7 +110,7 @@ extend arch aarch64 {
 		}
 		windowsTestRegImmediate(out:emitter, register:int, immediate:int) {
 			asmMovRegImm(out, 15, immediate)
-			asmEmit(out, 0xea00001f|(15<<16)|(register<<5))
+			asmEmit(out, 0xea00001f |(15 << 16) |(register << 5))
 		}
 		windowsTranslateCreateFileFlags(out:emitter) {
 			let notReadWrite = out.NewLabel()

@@ -469,10 +469,10 @@ go backend {
 	func unsignedDivide(out *RTGEmitter, remainder bool) bool {
 		// DIV consumes RDX:RAX, so preserve RBX while it holds the divisor,
 		// move the Renvo dividend from RCX to RAX, and clear the high half.
-		out.Byte(0x53) // PUSH RBX
+		out.Byte(0x53)               // PUSH RBX
 		out.Bytes3(0x48, 0x89, 0xc3) // MOV RBX, RAX
 		out.Bytes3(0x48, 0x89, 0xc8) // MOV RAX, RCX
-		out.Bytes2(0x31, 0xd2) // XOR EDX, EDX
+		out.Bytes2(0x31, 0xd2)       // XOR EDX, EDX
 		out.Bytes3(0x48, 0xf7, 0xf3) // DIV RBX
 		if remainder {
 			out.Bytes3(0x48, 0x89, 0xd0) // MOV RAX, RDX
@@ -490,165 +490,166 @@ go backend {
 		out.SetByteAt(at+2, byte(frame>>8))
 	}
 }
+
 arch x86_64 {
-    alias = "amd64"
-    endian = little
-    word_bits = 64
-    pointer_bits = 64
-    instruction_alignment = 1
-    stack_word_bytes = 8
-    stack_alignment = 16
-    unaligned_memory = true
-    patch_relocations = relative32_le
+	alias = "amd64"
+	endian = little
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 1
+	stack_word_bytes = 8
+	stack_alignment = 16
+	unaligned_memory = true
+	patch_relocations = relative32_le
 
-    # List position is the architectural register number. The x86 encoder
-    # derives registerLowBits, REX bits, byte-register names, RSP/R12 SIB rules, and
-    # RBP/R13 displacement rules from this single list.
-    registers gpr64 = [
-        rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
-        r8, r9, r10, r11, r12, r13, r14, r15
-    ]
+	# List position is the architectural register number. The x86 encoder
+	# derives registerLowBits, REX bits, byte-register names, RSP/R12 SIB rules, and
+	# RBP/R13 displacement rules from this single list.
+	registers gpr64 = [
+		rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi,
+		r8, r9, r10, r11, r12, r13, r14, r15
+	]
 
-    locations {
-        primary = rax
-        secondary = rdx
-        tertiary = rcx
-        scratch = r10
-        division_scratch = rbx
-        copy_destination = rdi
-        copy_source = rsi
-        copy_count = rcx
-        stack = rsp
-        frame = rbp
-    }
+	locations {
+		primary = rax
+		secondary = rdx
+		tertiary = rcx
+		scratch = r10
+		division_scratch = rbx
+		copy_destination = rdi
+		copy_source = rsi
+		copy_count = rcx
+		stack = rsp
+		frame = rbp
+	}
 
-    # One row supplies both SETcc and near Jcc. Unsigned conditions no longer
-    # need separate hand-written lowering functions.
-    conditions {
-        eq  0x94 0x84
-        ne  0x95 0x85
-        slt 0x9c 0x8c
-        sge 0x9d 0x8d
-        sle 0x9e 0x8e
-        sgt 0x9f 0x8f
-        ult 0x92 0x82
-        uge 0x93 0x83
-        ule 0x96 0x86
-        ugt 0x97 0x87
-    }
+	# One row supplies both SETcc and near Jcc. Unsigned conditions no longer
+	# need separate hand-written lowering functions.
+	conditions {
+		eq 0x94 0x84
+		ne 0x95 0x85
+		slt 0x9c 0x8c
+		sge 0x9d 0x8d
+		sle 0x9e 0x8e
+		sgt 0x9f 0x8f
+		ult 0x92 0x82
+		uge 0x93 0x83
+		ule 0x96 0x86
+		ugt 0x97 0x87
+	}
 
-    # Width and extension policy is stated once per source-language scalar.
-    scalars {
-        zero_extend { bool:1 byte:1 uint16:2 uint32:4 }
-        sign_extend { int8:1 int16:2 int32:4 }
-        native { int:8 int64:8 uint64:8 pointer:8 }
-    }
+	# Width and extension policy is stated once per source-language scalar.
+	scalars {
+		zero_extend { bool:1 byte:1 uint16:2 uint32:4 }
+		sign_extend { int8:1 int16:2 int32:4 }
+		native { int:8 int64:8 uint64:8 pointer:8 }
+	}
 
-    forms {
-        rr_rm = go encodeRegisterToRM
-        rr = go encodeRegisterPair
-        rm_r = go encodeMemoryToRegister
-        r_rm = go encodeRegisterToMemory
-        encodeGroup = go encodeGroup
-        group_imm8 = go encodeGroupImmediate8
-        opcode_reg = go emitOpcodeRegister
-        encodeRelative = go encodeRelative
-        set_condition = sequence setCondition
-        jump_condition = sequence jumpCondition
-        fixed = bytes
-    }
+	forms {
+		rr_rm = go encodeRegisterToRM
+		rr = go encodeRegisterPair
+		rm_r = go encodeMemoryToRegister
+		r_rm = go encodeRegisterToMemory
+		encodeGroup = go encodeGroup
+		group_imm8 = go encodeGroupImmediate8
+		opcode_reg = go emitOpcodeRegister
+		encodeRelative = go encodeRelative
+		set_condition = sequence setCondition
+		jump_condition = sequence jumpCondition
+		fixed = bytes
+	}
 
-    instructions {
-        mov64 rr_rm 0x89
-        load64 rm_r 0x8b
-        lea64 rm_r 0x8d
-        load_i32 rm_r 0x63
-        load_u32 rm_r 0x8b width=32
-        load_i16 rm_r 0x0fbf
-        load_u16 rm_r 0x0fb7
-        load_i8 rm_r 0x0fbe
-        load_u8 rm_r 0x0fb6
-        store64 r_rm 0x89
-        store32 r_rm 0x89 width=32
-        store16 r_rm 0x89 width=16
-        store8 r_rm 0x88 width=8
+	instructions {
+		mov64 rr_rm 0x89
+		load64 rm_r 0x8b
+		lea64 rm_r 0x8d
+		load_i32 rm_r 0x63
+		load_u32 rm_r 0x8b width = 32
+		load_i16 rm_r 0x0fbf
+		load_u16 rm_r 0x0fb7
+		load_i8 rm_r 0x0fbe
+		load_u8 rm_r 0x0fb6
+		store64 r_rm 0x89
+		store32 r_rm 0x89 width = 32
+		store16 r_rm 0x89 width = 16
+		store8 r_rm 0x88 width = 8
 
-        add64 rr_rm 0x01
-        sub64 rr_rm 0x29
-        and64 rr_rm 0x21
-        or64 rr_rm 0x09
-        xor64 rr_rm 0x31
-        cmp64 rr_rm 0x39
-        test64 rr_rm 0x85
-        imul64 rr 0x0faf
-        xchg64 rr_rm 0x87
+		add64 rr_rm 0x01
+		sub64 rr_rm 0x29
+		and64 rr_rm 0x21
+		or64 rr_rm 0x09
+		xor64 rr_rm 0x31
+		cmp64 rr_rm 0x39
+		test64 rr_rm 0x85
+		imul64 rr 0x0faf
+		xchg64 rr_rm 0x87
 
-        inc64 encodeGroup 0xff /0
-        dec64 encodeGroup 0xff /1
-        shl_imm64 group_imm8 0xc1 /4
-        shr_imm64 group_imm8 0xc1 /5
-        sar_imm64 group_imm8 0xc1 /7
-        shl_cl64 encodeGroup 0xd3 /4
-        shr_cl64 encodeGroup 0xd3 /5
-        sar_cl64 encodeGroup 0xd3 /7
-        call_reg encodeGroup 0xff /2 width=64
+		inc64 encodeGroup 0xff/0
+		dec64 encodeGroup 0xff/1
+		shl_imm64 group_imm8 0xc1/4
+		shr_imm64 group_imm8 0xc1/5
+		sar_imm64 group_imm8 0xc1/7
+		shl_cl64 encodeGroup 0xd3/4
+		shr_cl64 encodeGroup 0xd3/5
+		sar_cl64 encodeGroup 0xd3/7
+		call_reg encodeGroup 0xff/2 width = 64
 
-        push_reg opcode_reg 0x50
-        pop_reg opcode_reg 0x58
-        setcc set_condition
-        jcc_rel32 jump_condition relocation=rel32
-        call_rel32 encodeRelative 0xe8 relocation=rel32
-        jump_rel32 encodeRelative 0xe9 relocation=rel32
+		push_reg opcode_reg 0x50
+		pop_reg opcode_reg 0x58
+		setcc set_condition
+		jcc_rel32 jump_condition relocation = rel32
+		call_rel32 encodeRelative 0xe8 relocation = rel32
+		jump_rel32 encodeRelative 0xe9 relocation = rel32
 
-        ret fixed [0xc3]
-        leave fixed [0xc9]
-        syscall fixed [0x0f, 0x05]
-    }
+		ret fixed [0xc3]
+		leave fixed [0xc9]
+		syscall fixed [0x0f, 0x05]
+	}
 
-    bind {
-        move = mov64
-        address = lea64
-        load.native = load64
-        load.i32 = load_i32
-        load.u32 = load_u32
-        load.i16 = load_i16
-        load.u16 = load_u16
-        load.i8 = load_i8
-        load.u8 = load_u8
-        store.native = store64
-        store.u32 = store32
-        store.u16 = store16
-        store.u8 = store8
-        add = add64
-        subtract = sub64
-        multiply = imul64
-        bit_and = and64
-        bit_or = or64
-        bit_xor = xor64
-        compare = cmp64
-        test = test64
-        increment = inc64
-        decrement = dec64
-        shift_left_immediate = shl_imm64
-        shift_right_unsigned_immediate = shr_imm64
-        shift_right_signed_immediate = sar_imm64
-        call = call_rel32
-        call_indirect = call_reg
-        jump = jump_rel32
-        jump_condition = jcc_rel32
-        set_condition = setcc
-        return = ret
-        leave = leave
-        host_syscall = syscall
-        move_immediate = go moveImmediate
-        variable_shift = go variableShift
-        signed_divide = go signedDivide
-        copy_bytes = sequence copyBytes
-    }
+	bind {
+		move = mov64
+		address = lea64
+		load.native = load64
+		load.i32 = load_i32
+		load.u32 = load_u32
+		load.i16 = load_i16
+		load.u16 = load_u16
+		load.i8 = load_i8
+		load.u8 = load_u8
+		store.native = store64
+		store.u32 = store32
+		store.u16 = store16
+		store.u8 = store8
+		add = add64
+		subtract = sub64
+		multiply = imul64
+		bit_and = and64
+		bit_or = or64
+		bit_xor = xor64
+		compare = cmp64
+		test = test64
+		increment = inc64
+		decrement = dec64
+		shift_left_immediate = shl_imm64
+		shift_right_unsigned_immediate = shr_imm64
+		shift_right_signed_immediate = sar_imm64
+		call = call_rel32
+		call_indirect = call_reg
+		jump = jump_rel32
+		jump_condition = jcc_rel32
+		set_condition = setcc
+		return = ret
+		leave = leave
+		host_syscall = syscall
+		move_immediate = go moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
+	}
 
-    # Target-neutral lowering consumes these stable, generated exports; their
-    # architecture-specific implementations remain owned by this definition.
-    exports {
+	# Target-neutral lowering consumes these stable, generated exports; their
+	# architecture-specific implementations remain owned by this definition.
+	exports {
 		renvoElfAmd64Append32 = go elf_amd64_primitives.nativeAppend32
 		renvoElfAmd64Append64 = go elf_amd64_primitives.nativeAppend64
 		renvoElfAmd64Append16 = sequence elf_amd64_primitives.kernelAppend16
@@ -657,52 +658,52 @@ arch x86_64 {
 		renvoElfAmd64AppendSection = sequence elf_amd64_primitives.kernelAppendSection
 		renvoElfAmd64AppendSymbol = sequence elf_amd64_primitives.kernelAppendSymbol
 		renvoAmd64AsmSecondaryDisp = go asmSecondaryDisp
-        renvoAmd64AsmMovRaxImm = go asmMovRaxImm
-        renvoAmd64AsmMovR10BssAddr = sequence asmMovR10BssAddr
-        renvoAmd64AsmLoadRaxBss = sequence asmLoadRaxBss
-        renvoAmd64AsmStoreRaxBss = sequence asmStoreRaxBss
-        renvoAmd64AsmMovRdiRax = go asmMovRdiRax
-        renvoAmd64AsmMovRsiRax = go asmMovRsiRax
-        renvoAmd64RewritePrimaryLoad = go rewritePrimaryLoad
-        renvoAmd64RewritePrimaryLoadCompare = go rewritePrimaryLoadCompare
-        renvoAmd64AsmMovR8Rax = sequence asmMovR8Rax
-        renvoAmd64AsmMovR9Rax = sequence asmMovR9Rax
-        renvoAmd64AsmMemDisp = go asmMemDisp
-        renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
-        renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go asmLoadQwordRaxIndexRcxDisp
-        renvoAmd64AsmLoadRaxMemRdxDisp = go asmLoadRaxMemRdxDisp
-        renvoAmd64AsmLoadRaxMemRdxDispSize = go asmLoadRaxMemRdxDispSize
-        renvoAmd64AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
-        renvoAmd64AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
-        renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
-        renvoAmd64AsmStoreRaxMemRdxDisp = go asmStoreRaxMemRdxDisp
-        renvoAmd64AsmStoreRaxMemRdxDispSize = go asmStoreRaxMemRdxDispSize
-        renvoAmd64CodeEnds = go codeEnds
-        renvoAmd64AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
-        renvoAmd64AsmIncMemRdx = sequence asmIncMemRdx
-        renvoAmd64AsmDecMemRdx = sequence asmDecMemRdx
-        renvoAmd64AsmCmpRaxImm8 = go asmCmpRaxImm8
-        renvoAmd64AsmCmpRaxImm8Discard = go asmCmpRaxImm8Discard
-        renvoAmd64AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
-        renvoAmd64AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
-    }
+		renvoAmd64AsmMovRaxImm = go asmMovRaxImm
+		renvoAmd64AsmMovR10BssAddr = sequence asmMovR10BssAddr
+		renvoAmd64AsmLoadRaxBss = sequence asmLoadRaxBss
+		renvoAmd64AsmStoreRaxBss = sequence asmStoreRaxBss
+		renvoAmd64AsmMovRdiRax = go asmMovRdiRax
+		renvoAmd64AsmMovRsiRax = go asmMovRsiRax
+		renvoAmd64RewritePrimaryLoad = go rewritePrimaryLoad
+		renvoAmd64RewritePrimaryLoadCompare = go rewritePrimaryLoadCompare
+		renvoAmd64AsmMovR8Rax = sequence asmMovR8Rax
+		renvoAmd64AsmMovR9Rax = sequence asmMovR9Rax
+		renvoAmd64AsmMemDisp = go asmMemDisp
+		renvoAmd64AsmLoadQwordRaxIndexRcx8 = sequence asmLoadQwordRaxIndexRcx8
+		renvoAmd64AsmLoadQwordRaxIndexRcxDisp = go asmLoadQwordRaxIndexRcxDisp
+		renvoAmd64AsmLoadRaxMemRdxDisp = go asmLoadRaxMemRdxDisp
+		renvoAmd64AsmLoadRaxMemRdxDispSize = go asmLoadRaxMemRdxDispSize
+		renvoAmd64AsmLoadByteRaxIndexRcx = sequence asmLoadByteRaxIndexRcx
+		renvoAmd64AsmLoadRaxIndexRcxSize = go asmLoadRaxIndexRcxSize
+		renvoAmd64AsmStoreRaxMemRdxRcx8 = sequence asmStoreRaxMemRdxRcx8
+		renvoAmd64AsmStoreRaxMemRdxDisp = go asmStoreRaxMemRdxDisp
+		renvoAmd64AsmStoreRaxMemRdxDispSize = go asmStoreRaxMemRdxDispSize
+		renvoAmd64CodeEnds = go codeEnds
+		renvoAmd64AsmNormalizeRaxForKind = go asmNormalizeRaxForKind
+		renvoAmd64AsmIncMemRdx = sequence asmIncMemRdx
+		renvoAmd64AsmDecMemRdx = sequence asmDecMemRdx
+		renvoAmd64AsmCmpRaxImm8 = go asmCmpRaxImm8
+		renvoAmd64AsmCmpRaxImm8Discard = go asmCmpRaxImm8Discard
+		renvoAmd64AsmDivLeftRcxRightRax = go asmDivLeftRcxRightRax
+		renvoAmd64AsmCmpRcxRaxSet = sequence asmCmpRcxRaxSet
+	}
 
-    relocation rel32 {
-        width = 4
-        signed = true
-        relative_to = field_end
-        kinds = [label, data, bss, import]
-    }
+	relocation rel32 {
+		width = 4
+		signed = true
+		relative_to = field_end
+		kinds = [label, data, bss, import]
+	}
 
-    frame {
-        base = rbp
-        stack = rsp
-        alignment = 16
-        maximum = 65520
-        prologue = [0xc8, frame_size:u16le, 0x00]
-        epilogue = [leave, ret]
-        overflow_arguments = rbp + 16
-    }
+	frame {
+		base = rbp
+		stack = rsp
+		alignment = 16
+		maximum = 65520
+		prologue = [0xc8, frame_size:u16le, 0x00]
+		epilogue = [leave, ret]
+		overflow_arguments = rbp + 16
+	}
 
 	sequences {
 		asmCmpRcxRaxSet(a:emitter, setcc:int) {
@@ -737,7 +738,7 @@ arch x86_64 {
 			let at = a.Len()
 			a.Int32(0)
 			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
-			a.SetPrimaryLoad(a.Len()*8+5)
+			a.SetPrimaryLoad(a.Len() * 8 + 5)
 		}
 		asmMovR10BssAddr(a:emitter, bssOff:int) {
 			a.Uint24(0x158d4c)
@@ -788,36 +789,36 @@ arch x86_64 {
 			modRM(out, 3, 0, registerLowBits(destination))
 		}
 		registerHighBit(reg:register) -> byte {
-			return byte(reg.Code>>3)&1
+			return byte(reg.Code >> 3) & 1
 		}
 		registerLowBits(reg:register) -> byte {
-			return byte(reg.Code&7)
+			return byte(reg.Code & 7)
 		}
 		modRM(out:emitter, mode:byte, reg:byte, rm:byte) {
-			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+			out.AppendByte(int(mode << 6 |(reg & 7) << 3 | rm & 7))
 		}
-}
+	}
 }
 
 abi renvo_x86_64 {
-    arch = x86_64
-    frame_start = sequence frameStart
-    frame_finish = go frameFinish
+	arch = x86_64
+	frame_start = sequence frameStart
+	frame_finish = go frameFinish
 	unsigned_divide = go unsignedDivide
-    call_words = [rdi, rsi, rdx, rcx, r8, r9]
-    overflow_stride = 8
-    scalar_result = rax
-    string_result = [rax, rdx]
-    slice_result = [rax, rdx, rcx]
-    hidden_result_word = 0
+	call_words = [rdi, rsi, rdx, rcx, r8, r9]
+	overflow_stride = 8
+	scalar_result = rax
+	string_result = [rax, rdx]
+	slice_result = [rax, rdx, rcx]
+	hidden_result_word = 0
 }
 
 abi sysv_x86_64 {
-    internal = renvo_x86_64
-    arguments = [rdi, rsi, rdx, rcx, r8, r9]
-    result = [rax, rdx]
-    caller_saved = [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11]
-    callee_saved = [rbx, rbp, r12, r13, r14, r15]
-    stack_alignment = 16
-    red_zone = unused
+	internal = renvo_x86_64
+	arguments = [rdi, rsi, rdx, rcx, r8, r9]
+	result = [rax, rdx]
+	caller_saved = [rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11]
+	callee_saved = [rbx, rbp, r12, r13, r14, r15]
+	stack_alignment = 16
+	red_zone = unused
 }

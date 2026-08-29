@@ -30,7 +30,7 @@ go backend {
 			digits = append(digits, byte('0'+value%10))
 			value /= 10
 		}
-		for i := len(digits)-1; i >= 0; i-- {
+		for i := len(digits) - 1; i >= 0; i-- {
 			out.Byte(digits[i])
 		}
 	}
@@ -49,7 +49,7 @@ go backend {
 			digits = append(digits, byte('0'+value%10))
 			value /= 10
 		}
-		for i := len(digits)-1; i >= 0; i-- {
+		for i := len(digits) - 1; i >= 0; i-- {
 			out.Byte(digits[i])
 		}
 	}
@@ -197,7 +197,7 @@ go backend {
 		if value < 0 {
 			value = 0
 		}
-		end := at+width
+		end := at + width
 		if value == 0 {
 			out.SetByteAt(end-1, '0')
 			return
@@ -220,7 +220,7 @@ go backend {
 		out.Text("\n")
 		llvmFrameFirst = append(llvmFrameFirst, first)
 		llvmFrameSecond = append(llvmFrameSecond, second)
-		return len(llvmFrameFirst)-1
+		return len(llvmFrameFirst) - 1
 	}
 
 	func llvmFrameFinish(out *RTGEmitter, patch int, stackUsed int) {
@@ -359,7 +359,7 @@ go backend {
 	}
 
 	func llvmCallArguments(out *RTGEmitter, wordCount int) {
-		extra := wordCount-6
+		extra := wordCount - 6
 		if extra < 0 {
 			extra = 0
 		}
@@ -405,7 +405,7 @@ go backend {
 		llvmCallArguments(out, wordCount)
 		values := make([]int, 10)
 		for i := 0; i < len(values); i++ {
-			values[i] = llvmLoadRegister(out, RTGRegister{Code:i, Valid:true})
+			values[i] = llvmLoadRegister(out, RTGRegister{Code: i, Valid: true})
 		}
 		result := llvmNewTemp()
 		out.Text("  ")
@@ -418,7 +418,9 @@ go backend {
 		}
 		out.Text("(")
 		for i := 0; i < len(values); i++ {
-			if i != 0 { out.Text(", ") }
+			if i != 0 {
+				out.Text(", ")
+			}
 			out.Text("i64 ")
 			llvmTemp(out, values[i])
 		}
@@ -459,8 +461,12 @@ go backend {
 			{Code: 5, Valid: true}, {Code: 6, Valid: true},
 		}
 		limit := wordCount
-		if limit > len(registers) { limit = len(registers) }
-		for i := 0; i < limit; i++ { llvmPopRegister(out, registers[i]) }
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		for i := 0; i < limit; i++ {
+			llvmPopRegister(out, registers[i])
+		}
 		llvmEmitCall(out, label, wordCount, -1)
 	}
 
@@ -503,7 +509,9 @@ go backend {
 		if address.Index.Valid {
 			index := llvmLoadRegister(out, address.Index)
 			scale := address.Scale
-			if scale == 0 { scale = 1 }
+			if scale == 0 {
+				scale = 1
+			}
 			if scale != 1 {
 				scaled := llvmNewTemp()
 				out.Text("  ")
@@ -515,7 +523,9 @@ go backend {
 				out.Text("\n")
 				index = scaled
 			}
-			if value < 0 { value = index } else {
+			if value < 0 {
+				value = index
+			} else {
 				sum := llvmNewTemp()
 				out.Text("  ")
 				llvmTemp(out, sum)
@@ -574,7 +584,11 @@ go backend {
 			wide = llvmNewTemp()
 			out.Text("  ")
 			llvmTemp(out, wide)
-			if signed { out.Text(" = sext i") } else { out.Text(" = zext i") }
+			if signed {
+				out.Text(" = sext i")
+			} else {
+				out.Text(" = zext i")
+			}
 			llvmInt(out, bits)
 			out.Text(" ")
 			llvmTemp(out, value)
@@ -613,17 +627,19 @@ go backend {
 		out.Text(", align 1\n")
 	}
 
-	func llvmLoadNative(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 64, false) }
-	func llvmLoadI32(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 32, true) }
-	func llvmLoadU32(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 32, false) }
-	func llvmLoadI16(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 16, true) }
-	func llvmLoadU16(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 16, false) }
-	func llvmLoadI8(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 8, true) }
-	func llvmLoadU8(out *RTGEmitter, d RTGRegister, a RTGAddress) { llvmLoadWidth(out, d, a, 8, false) }
+	func llvmLoadNative(out *RTGEmitter, d RTGRegister, a RTGAddress) {
+		llvmLoadWidth(out, d, a, 64, false)
+	}
+	func llvmLoadI32(out *RTGEmitter, d RTGRegister, a RTGAddress)     { llvmLoadWidth(out, d, a, 32, true) }
+	func llvmLoadU32(out *RTGEmitter, d RTGRegister, a RTGAddress)     { llvmLoadWidth(out, d, a, 32, false) }
+	func llvmLoadI16(out *RTGEmitter, d RTGRegister, a RTGAddress)     { llvmLoadWidth(out, d, a, 16, true) }
+	func llvmLoadU16(out *RTGEmitter, d RTGRegister, a RTGAddress)     { llvmLoadWidth(out, d, a, 16, false) }
+	func llvmLoadI8(out *RTGEmitter, d RTGRegister, a RTGAddress)      { llvmLoadWidth(out, d, a, 8, true) }
+	func llvmLoadU8(out *RTGEmitter, d RTGRegister, a RTGAddress)      { llvmLoadWidth(out, d, a, 8, false) }
 	func llvmStoreNative(out *RTGEmitter, a RTGAddress, s RTGRegister) { llvmStoreWidth(out, a, s, 64) }
-	func llvmStoreU32(out *RTGEmitter, a RTGAddress, s RTGRegister) { llvmStoreWidth(out, a, s, 32) }
-	func llvmStoreU16(out *RTGEmitter, a RTGAddress, s RTGRegister) { llvmStoreWidth(out, a, s, 16) }
-	func llvmStoreU8(out *RTGEmitter, a RTGAddress, s RTGRegister) { llvmStoreWidth(out, a, s, 8) }
+	func llvmStoreU32(out *RTGEmitter, a RTGAddress, s RTGRegister)    { llvmStoreWidth(out, a, s, 32) }
+	func llvmStoreU16(out *RTGEmitter, a RTGAddress, s RTGRegister)    { llvmStoreWidth(out, a, s, 16) }
+	func llvmStoreU8(out *RTGEmitter, a RTGAddress, s RTGRegister)     { llvmStoreWidth(out, a, s, 8) }
 
 	func llvmBinary(out *RTGEmitter, operation string, destination RTGRegister, source RTGRegister) {
 		left := llvmLoadRegister(out, destination)
@@ -641,12 +657,12 @@ go backend {
 		llvmStoreTemp(out, destination, result)
 	}
 
-	func llvmAdd(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "add", d, s) }
+	func llvmAdd(out *RTGEmitter, d RTGRegister, s RTGRegister)      { llvmBinary(out, "add", d, s) }
 	func llvmSubtract(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "sub", d, s) }
 	func llvmMultiply(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "mul", d, s) }
-	func llvmBitAnd(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "and", d, s) }
-	func llvmBitOr(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "or", d, s) }
-	func llvmBitXor(out *RTGEmitter, d RTGRegister, s RTGRegister) { llvmBinary(out, "xor", d, s) }
+	func llvmBitAnd(out *RTGEmitter, d RTGRegister, s RTGRegister)   { llvmBinary(out, "and", d, s) }
+	func llvmBitOr(out *RTGEmitter, d RTGRegister, s RTGRegister)    { llvmBinary(out, "or", d, s) }
+	func llvmBitXor(out *RTGEmitter, d RTGRegister, s RTGRegister)   { llvmBinary(out, "xor", d, s) }
 
 	func llvmCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
 		l := llvmLoadRegister(out, left)
@@ -717,9 +733,15 @@ go backend {
 		out.Text("\n")
 		llvmStoreTemp(out, operand, result)
 	}
-	func llvmShiftLeftImmediate(out *RTGEmitter, r RTGRegister, v byte) { llvmShiftImmediate(out, "shl", r, v, false) }
-	func llvmShiftRightUnsignedImmediate(out *RTGEmitter, r RTGRegister, v byte) { llvmShiftImmediate(out, "lshr", r, v, false) }
-	func llvmShiftRightSignedImmediate(out *RTGEmitter, r RTGRegister, v byte) { llvmShiftImmediate(out, "ashr", r, v, true) }
+	func llvmShiftLeftImmediate(out *RTGEmitter, r RTGRegister, v byte) {
+		llvmShiftImmediate(out, "shl", r, v, false)
+	}
+	func llvmShiftRightUnsignedImmediate(out *RTGEmitter, r RTGRegister, v byte) {
+		llvmShiftImmediate(out, "lshr", r, v, false)
+	}
+	func llvmShiftRightSignedImmediate(out *RTGEmitter, r RTGRegister, v byte) {
+		llvmShiftImmediate(out, "ashr", r, v, true)
+	}
 
 	func llvmCondition(out *RTGEmitter, condition RTGCondition) int {
 		left := llvmNewTemp()
@@ -734,7 +756,9 @@ go backend {
 		out.Text(" = icmp ")
 		predicates := []string{"eq", "ne", "slt", "sle", "sgt", "sge", "ult", "uge", "ule", "ugt"}
 		predicate := "eq"
-		if condition.Code >= 0 && condition.Code < len(predicates) { predicate = predicates[condition.Code] }
+		if condition.Code >= 0 && condition.Code < len(predicates) {
+			predicate = predicates[condition.Code]
+		}
 		out.Text(predicate)
 		out.Text(" i64 ")
 		llvmTemp(out, left)
@@ -829,7 +853,13 @@ go backend {
 		llvmTemp(out, amount)
 		out.Text(", 63\n  ")
 		llvmTemp(out, shifted)
-		if direction == RTGShiftLeft { out.Text(" = shl i64 ") } else if signed { out.Text(" = ashr i64 ") } else { out.Text(" = lshr i64 ") }
+		if direction == RTGShiftLeft {
+			out.Text(" = shl i64 ")
+		} else if signed {
+			out.Text(" = ashr i64 ")
+		} else {
+			out.Text(" = lshr i64 ")
+		}
 		llvmTemp(out, value)
 		out.Text(", ")
 		llvmTemp(out, safe)
@@ -865,7 +895,11 @@ go backend {
 		result := llvmNewTemp()
 		out.Text("  ")
 		llvmTemp(out, result)
-		if remainder { out.Text(" = srem i64 ") } else { out.Text(" = sdiv i64 ") }
+		if remainder {
+			out.Text(" = srem i64 ")
+		} else {
+			out.Text(" = sdiv i64 ")
+		}
 		llvmTemp(out, left)
 		out.Text(", ")
 		llvmTemp(out, right)
@@ -898,9 +932,11 @@ go backend {
 
 	func llvmHostSyscall(out *RTGEmitter) {
 		number := llvmLoadRegister(out, RTGRegister{Code: 0, Valid: true})
-		arguments := []RTGRegister{{Code:3,Valid:true},{Code:4,Valid:true},{Code:1,Valid:true},{Code:2,Valid:true},{Code:5,Valid:true},{Code:6,Valid:true}}
+		arguments := []RTGRegister{{Code: 3, Valid: true}, {Code: 4, Valid: true}, {Code: 1, Valid: true}, {Code: 2, Valid: true}, {Code: 5, Valid: true}, {Code: 6, Valid: true}}
 		values := make([]int, len(arguments))
-		for i := 0; i < len(arguments); i++ { values[i] = llvmLoadRegister(out, arguments[i]) }
+		for i := 0; i < len(arguments); i++ {
+			values[i] = llvmLoadRegister(out, arguments[i])
+		}
 		result := llvmNewTemp()
 		out.Text("  ")
 		llvmTemp(out, result)
@@ -937,22 +973,26 @@ go backend {
 		out.Text(", i64 ")
 		llvmTemp(out, envLenValue)
 		out.Text(")\n")
-		llvmStoreTemp(out, RTGRegister{Code:0, Valid:true}, result)
+		llvmStoreTemp(out, RTGRegister{Code: 0, Valid: true}, result)
 		return true
 	}
 
 	func llvmUnsignedDivide(out *RTGEmitter, remainder bool) bool {
-		left := llvmLoadRegister(out, RTGRegister{Code:2, Valid:true})
-		right := llvmLoadRegister(out, RTGRegister{Code:0, Valid:true})
+		left := llvmLoadRegister(out, RTGRegister{Code: 2, Valid: true})
+		right := llvmLoadRegister(out, RTGRegister{Code: 0, Valid: true})
 		result := llvmNewTemp()
 		out.Text("  ")
 		llvmTemp(out, result)
-		if remainder { out.Text(" = urem i64 ") } else { out.Text(" = udiv i64 ") }
+		if remainder {
+			out.Text(" = urem i64 ")
+		} else {
+			out.Text(" = udiv i64 ")
+		}
 		llvmTemp(out, left)
 		out.Text(", ")
 		llvmTemp(out, right)
 		out.Text("\n")
-		llvmStoreTemp(out, RTGRegister{Code:0, Valid:true}, result)
+		llvmStoreTemp(out, RTGRegister{Code: 0, Valid: true}, result)
 		return true
 	}
 
@@ -972,8 +1012,12 @@ go backend {
 
 	func llvmEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
 		_ = stateOffset
-		if parameterCount < 0 || parameterCount > 2 { return false }
-		if parameterCount == 0 { return true }
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount == 0 {
+			return true
+		}
 		argc := llvmNewTemp()
 		storage := llvmNewTemp()
 		out.Text("  ")
@@ -983,14 +1027,39 @@ go backend {
 		out.Text(" = call ptr @renvo_make_strings(i64 ")
 		llvmTemp(out, argc)
 		out.Text(", ptr %host_argv)\n")
-		storageInt := llvmNewTemp(); out.Text("  "); llvmTemp(out,storageInt); out.Text(" = ptrtoint ptr "); llvmTemp(out,storage); out.Text(" to i64\n  store i64 "); llvmTemp(out,storageInt); out.Text(", ptr %r3, align 8\n  store i64 "); llvmTemp(out,argc); out.Text(", ptr %r4, align 8\n  store i64 "); llvmTemp(out,argc); out.Text(", ptr %r1, align 8\n")
+		storageInt := llvmNewTemp()
+		out.Text("  ")
+		llvmTemp(out, storageInt)
+		out.Text(" = ptrtoint ptr ")
+		llvmTemp(out, storage)
+		out.Text(" to i64\n  store i64 ")
+		llvmTemp(out, storageInt)
+		out.Text(", ptr %r3, align 8\n  store i64 ")
+		llvmTemp(out, argc)
+		out.Text(", ptr %r4, align 8\n  store i64 ")
+		llvmTemp(out, argc)
+		out.Text(", ptr %r1, align 8\n")
 		if parameterCount > 1 {
 			envc := llvmNewTemp()
 			envStorage := llvmNewTemp()
 			envStorageInt := llvmNewTemp()
-			out.Text("  "); llvmTemp(out, envc); out.Text(" = call i64 @renvo_count_strings(ptr %host_envp)\n  ")
-			llvmTemp(out, envStorage); out.Text(" = call ptr @renvo_make_strings(i64 "); llvmTemp(out, envc); out.Text(", ptr %host_envp)\n  ")
-			llvmTemp(out, envStorageInt); out.Text(" = ptrtoint ptr "); llvmTemp(out, envStorage); out.Text(" to i64\n  store i64 "); llvmTemp(out, envStorageInt); out.Text(", ptr %r2, align 8\n  store i64 "); llvmTemp(out, envc); out.Text(", ptr %r5, align 8\n  store i64 "); llvmTemp(out, envc); out.Text(", ptr %r6, align 8\n")
+			out.Text("  ")
+			llvmTemp(out, envc)
+			out.Text(" = call i64 @renvo_count_strings(ptr %host_envp)\n  ")
+			llvmTemp(out, envStorage)
+			out.Text(" = call ptr @renvo_make_strings(i64 ")
+			llvmTemp(out, envc)
+			out.Text(", ptr %host_envp)\n  ")
+			llvmTemp(out, envStorageInt)
+			out.Text(" = ptrtoint ptr ")
+			llvmTemp(out, envStorage)
+			out.Text(" to i64\n  store i64 ")
+			llvmTemp(out, envStorageInt)
+			out.Text(", ptr %r2, align 8\n  store i64 ")
+			llvmTemp(out, envc)
+			out.Text(", ptr %r5, align 8\n  store i64 ")
+			llvmTemp(out, envc)
+			out.Text(", ptr %r6, align 8\n")
 		}
 		return true
 	}
@@ -1011,27 +1080,43 @@ go backend {
 	}
 
 	func llvmStaticCall(out *RTGEmitter, importID int, wordCount int) {
-		for i := 0; i < wordCount; i++ { llvmPopRegister(out, RTGRegister{Code:7,Valid:true}) }
+		for i := 0; i < wordCount; i++ {
+			llvmPopRegister(out, RTGRegister{Code: 7, Valid: true})
+		}
 		_ = importID
-		llvmStoreImmediate(out, RTGRegister{Code:0,Valid:true}, -1)
+		llvmStoreImmediate(out, RTGRegister{Code: 0, Valid: true}, -1)
 	}
 
 	func llvmAppendText(out []byte, value string) []byte {
-		for i := 0; i < len(value); i++ { out = append(out, value[i]) }
+		for i := 0; i < len(value); i++ {
+			out = append(out, value[i])
+		}
 		return out
 	}
 	func llvmAppendInt(out []byte, value int) []byte {
-		if value == 0 { return append(out, '0') }
-		if value < 0 { out = append(out, '-'); value = -value }
+		if value == 0 {
+			return append(out, '0')
+		}
+		if value < 0 {
+			out = append(out, '-')
+			value = -value
+		}
 		var digits []byte
-		for value > 0 { digits = append(digits, byte('0'+value%10)); value /= 10 }
-		for i := len(digits)-1; i >= 0; i-- { out = append(out, digits[i]) }
+		for value > 0 {
+			digits = append(digits, byte('0'+value%10))
+			value /= 10
+		}
+		for i := len(digits) - 1; i >= 0; i-- {
+			out = append(out, digits[i])
+		}
 		return out
 	}
 	func llvmHex(value byte) byte {
 		value &= 15
-		if value < 10 { return '0'+value }
-		return 'A'+value-10
+		if value < 10 {
+			return '0' + value
+		}
+		return 'A' + value - 10
 	}
 	func llvmImage(out *RTGEmitter) []byte {
 		// LLVM accepts top-level declarations and target metadata after function
@@ -1040,14 +1125,20 @@ go backend {
 		result := out.Code()
 		result = append(result, '\n')
 		data := out.Data()
-		if len(data) == 0 { data = []byte{0} }
+		if len(data) == 0 {
+			data = []byte{0}
+		}
 		result = llvmAppendText(result, "@renvo_data = private constant [")
 		result = llvmAppendInt(result, len(data))
 		result = llvmAppendText(result, " x i8] c\"")
-		for i := 0; i < len(data); i++ { result = append(result, '\\', llvmHex(data[i]>>4), llvmHex(data[i])) }
+		for i := 0; i < len(data); i++ {
+			result = append(result, '\\', llvmHex(data[i]>>4), llvmHex(data[i]))
+		}
 		result = llvmAppendText(result, "\", align 16\n@renvo_bss = internal global [")
 		bss := out.BSSSize()
-		if bss < 1 { bss = 1 }
+		if bss < 1 {
+			bss = 1
+		}
 		result = llvmAppendInt(result, bss)
 		result = llvmAppendText(result, " x i8] zeroinitializer, align 16\n@renvo_bss_end_offset = internal constant i64 ")
 		result = llvmAppendInt(result, bss)
@@ -1168,15 +1259,15 @@ runtime llvm_linux {
 		result = rax
 		instruction = host_syscall
 	}
-	operation read { number=0 args=[fd,buffer,count] }
-	operation write { number=1 args=[fd,buffer,count] }
-	operation open { number=2 args=[path,flags,mode] }
-	operation close { number=3 args=[fd] }
-	operation read_at { number=17 args=[fd,buffer,count,offset] }
-	operation write_at { number=18 args=[fd,buffer,count,offset] }
-	operation chmod { number=91 args=[fd,mode] }
-	operation print { use=write args=[stderr,buffer,count] }
-	operation exit { number=60 args=[status] noreturn=true }
+	operation read { number = 0 args = [fd, buffer, count] }
+	operation write { number = 1 args = [fd, buffer, count] }
+	operation open { number = 2 args = [path, flags, mode] }
+	operation close { number = 3 args = [fd] }
+	operation read_at { number = 17 args = [fd, buffer, count, offset] }
+	operation write_at { number = 18 args = [fd, buffer, count, offset] }
+	operation chmod { number = 91 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 60 args = [status] noreturn = true }
 }
 
 format llvm_ir_object {
