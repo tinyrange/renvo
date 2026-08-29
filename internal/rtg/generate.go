@@ -107,7 +107,7 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 // executable. The host and prepared topologies use the full implementations.
 func GenerateInactiveArchitectureKernel(packageName string) GenerateResult {
 	ensureDirectEmitterV1()
-	source := []byte("//go:build renvo && !renvo_prepared\n\n")
+	source := []byte("//go:build renvo && !renvo_prepared && !renvo_jvm_prepared\n\n")
 	source = append(source, generateHeaderPackage(nil, "inactive-architecture-kernel", packageName)...)
 	source = appendNativeRegisterAPI(source)
 	source = appendNativeArchitectureAPI(source)
@@ -248,6 +248,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
+	source = append(source, "\nconst renvoRTGPreparedIEEEFloat = "...)
+	if active && stringIndex(descriptor.Capabilities, "ieee_float") >= 0 {
+		source = append(source, '1')
+	} else {
+		source = append(source, '0')
+	}
 	source = append(source, '\n')
 	source = append(source, "\nfunc renvoRTGParseTargetArg(name string) int {\n"...)
 	if active {
@@ -338,7 +344,13 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = append(source, "\np.backendSlotSize = renvoBackendValueSlotSize\np.addressModel = renvoAddressModelFlat\n"...)
 		source = append(source, "p.runtimeCaps = "...)
 		source = appendDecimalFrame(source, preparedRuntimeCapabilities(descriptor.RuntimeOps))
-		source = append(source, "\np.heapModel = renvoHeapNone\np.oomModel = renvoOOMResult\np.interruptModel = renvoInterruptNone\np.floatModel = renvoFloatScaledInteger\nreturn p\n"...)
+		source = append(source, "\np.heapModel = renvoHeapNone\np.oomModel = renvoOOMResult\np.interruptModel = renvoInterruptNone\np.floatModel = "...)
+		if stringIndex(descriptor.Capabilities, "ieee_float") >= 0 {
+			source = append(source, "renvoFloatIEEESoft"...)
+		} else {
+			source = append(source, "renvoFloatScaledInteger"...)
+		}
+		source = append(source, "\nreturn p\n"...)
 	} else {
 		source = append(source, "return renvoTargetProfile{}\n"...)
 	}

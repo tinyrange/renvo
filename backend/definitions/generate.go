@@ -17,3 +17,4 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch arm -package main -o ../compiler_arm_impl.go arm_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch vm32 -package main -o ../compiler_wasm32_impl.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -contract -arch vm32 -package main -o ../rtg_vm32_contract_generated.go wasm32.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -prepared -build-tag renvo_jvm_prepared -t jvm/vm32 -o ../compiler_jvm_prepared_impl.go ../../backends/jvm.rbe

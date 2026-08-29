@@ -1,4 +1,4 @@
-//go:build renvo_prepared
+//go:build renvo_prepared || renvo_jvm_prepared
 
 // Code generated from compiler_target_policy_impl.go; DO NOT EDIT.
 

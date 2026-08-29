@@ -9,7 +9,7 @@ type sample struct {
 
 func main() {
 	var value int
-	if unsafe.Sizeof(value) == 8 && unsafe.Sizeof(&value) == 8 && unsafe.Sizeof([2]byte{}) == 2 && unsafe.Sizeof(sample{}) == 16 {
+	if unsafe.Sizeof(value) == expectedIntSize && unsafe.Sizeof(&value) == expectedPointerSize && unsafe.Sizeof([2]byte{}) == 2 && unsafe.Sizeof(sample{}) == expectedSampleSize {
 		print("PASS\n")
 		return
 	}
