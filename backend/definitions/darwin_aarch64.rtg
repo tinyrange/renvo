@@ -502,6 +502,10 @@ go backend {
 	}
 
 	func machSHA256(data []byte) []byte {
+		hardware := make([]byte, 32)
+		if RTGSHA256(data, hardware) {
+			return hardware
+		}
 		messageSize := len(data) + 1 + 8
 		messageSize = RTGAlignValue(messageSize, 64)
 		message := make([]byte, messageSize)

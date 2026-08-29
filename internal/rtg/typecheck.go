@@ -171,6 +171,7 @@ func RTGAlignValue(value int, alignment int) int { return 0 }
 func RTGAlign8(value int) int { return 0 }
 func RTGMakeIntScratch(capacity int) []int { return nil }
 func RTGMakeByteBuffer(length int) []byte { return nil }
+func RTGSHA256(data []byte, digest []byte) bool { return false }
 
 func RTGSignedFits(value int64, bits int) bool { return false }
 func RTGUnsignedFits(value uint64, bits int) bool { return false }

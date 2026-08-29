@@ -2682,6 +2682,9 @@ func nativeEmitterFunction(name string) string {
 	if name == "RTGMakeByteBuffer" {
 		return "renvoMakeByteBuffer"
 	}
+	if name == "RTGSHA256" {
+		return "renvoRTGSHA256"
+	}
 	if name == "RTGNewLabel" {
 		return "renvoRTGNewLabel"
 	}

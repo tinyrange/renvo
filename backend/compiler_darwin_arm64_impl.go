@@ -3,6 +3,10 @@ package main
 // renvo:linkstatic /usr/lib/system/libcommonCrypto.dylib,CC_SHA256
 func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int { return 0 }
 
+func renvoRTGSHA256(data []byte, digest []byte) bool {
+	return renvoDarwinCCSHA256(data, len(data), digest) != 0
+}
+
 func renvo_runtime_ArenaPersistString(value string) string { return value }
 
 const renvoDarwinImportRead = 4

@@ -857,6 +857,17 @@ func TestCheckedInRemainingNativeTargetProjectionOutput(t *testing.T) {
 	}
 }
 
+func TestDarwinAArch64ProjectionUsesPlatformSHA256(t *testing.T) {
+	generated := GenerateCheckedInTargetProjection(
+		resolveNativeTarget(t, "darwin/arm64"), "darwin/arm64", "main")
+	if !generated.Ok {
+		t.Fatalf("generate Darwin target projection: %#v", generated.Diagnostics)
+	}
+	if !bytes.Contains(generated.Source, []byte("if renvoRTGSHA256(data, hardware)")) {
+		t.Fatal("Darwin target projection omitted the platform SHA-256 fast path")
+	}
+}
+
 func TestCheckedInWindowsProjectionsCacheRuntimeIOHelpers(t *testing.T) {
 	for _, target := range []string{"windows/386", "windows/arm64"} {
 		generated := GenerateCheckedInTargetProjection(

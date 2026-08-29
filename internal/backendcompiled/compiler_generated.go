@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f14ca5c2e1627dad4e93d4f258e0b95d0de439879fbc8a748c3f507bc5681754"
+const CompilerSourceDigest = "5948c021bc45804868e9fcf62967f0a6bf7c1aa9d1dbc64bf47c23f4561a9f11"
 
 // source: backend/compiler_common_impl.go
 
@@ -36645,7 +36645,7 @@ if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\xaa\x04J\xab}#\x99\nD\x93~\xd0\x12\r\xb2\xdfQ\xcd\xd5[(\r\xda_\xfe\x97\x8f\x88N\x8f\x1al", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xce\x1d\xb8g\x1c\xc0\xfb\xe8L\xdc\xed\f\xe47\xee\xf9j\x88nD\x8d\x92N۩\xfb\x97\xc0\"b\xc7S", 3, true
+return "darwin/arm64", "\xb1\x9c\x9d\xb1\x0e\xb0\xf8R2\xd2sv\xd1\x02l\xa7o\x83/t\"\x91&\xbf\xd25\xf7]\xaa\x98\n\x17", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", ":\x03\x91\xe9,\xa4\x02\a\x05u\x89uI0\x9dC\xab\x8b\xf2\xc7/\xd0HlĴ\xbd\x19\xfa$\xbd\xf2", 3, true
@@ -54666,6 +54666,10 @@ return g.streqLabel
 
 func renvoDarwinCCSHA256(data []byte, length int, digest []byte) int { return 0 }
 
+func renvoRTGSHA256(data []byte, digest []byte) bool {
+return renvoDarwinCCSHA256(data, len(data), digest) != 0
+}
+
 func renvo_runtime_ArenaPersistString(value string) string { return value }
 
 const renvoDarwinImportRead = 4
@@ -55184,6 +55188,10 @@ values[6] = (values[6] + g) & 0xffffffff
 values[7] = (values[7] + h) & 0xffffffff
 }
 func rtgBuiltinDarwinAarch64PackageMachSHA256(data []byte) []byte {
+hardware := make([]byte, 32)
+if renvoRTGSHA256(data, hardware) {
+return hardware
+}
 messageSize := len(data) + 1 + 8
 messageSize = renvoAlignValue(messageSize, 64)
 message := make([]byte, messageSize)
