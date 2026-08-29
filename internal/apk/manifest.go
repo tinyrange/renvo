@@ -30,7 +30,7 @@ func (pool *manifestPool) add(value string) int {
 	return len(pool.values) - 1
 }
 
-func buildManifest(config Config) []byte {
+func buildManifest(config Config, dex bool) []byte {
 	pool := new(manifestPool)
 	resourceNames := []string{
 		"versionCode", "versionName", "minSdkVersion", "targetSdkVersion",
@@ -59,9 +59,17 @@ func buildManifest(config Config) []byte {
 	packageValue := pool.add(config.Package)
 	versionValue := pool.add(config.VersionName)
 	labelValue := pool.add(config.Name)
-	nativeActivityValue := pool.add("android.app.NativeActivity")
-	libMetadataName := pool.add("android.app.lib_name")
-	libMetadataValue := pool.add("renvo")
+	activityClass := "android.app.NativeActivity"
+	if dex {
+		activityClass = "dev.renvo.app.RenvoActivity"
+	}
+	activityValue := pool.add(activityClass)
+	libMetadataName := 0
+	libMetadataValue := 0
+	if !dex {
+		libMetadataName = pool.add("android.app.lib_name")
+		libMetadataValue = pool.add("renvo")
+	}
 	mainActionValue := pool.add("android.intent.action.MAIN")
 	launcherCategoryValue := pool.add("android.intent.category.LAUNCHER")
 
@@ -79,12 +87,12 @@ func buildManifest(config Config) []byte {
 	body = manifestEndElement(body, usesSDKName)
 	body = manifestStartElement(body, applicationName, []manifestAttribute{
 		manifestStringAttribute(androidNamespace, 4, labelValue),
-		manifestBooleanAttribute(androidNamespace, 5, false),
+		manifestBooleanAttribute(androidNamespace, 5, dex),
 		manifestBooleanAttribute(androidNamespace, 6, true),
 		manifestReferenceAttribute(androidNamespace, 9, 0x01030007),
 	})
 	activityAttributes := []manifestAttribute{
-		manifestStringAttribute(androidNamespace, 7, nativeActivityValue),
+		manifestStringAttribute(androidNamespace, 7, activityValue),
 		manifestStringAttribute(androidNamespace, 4, labelValue),
 		manifestBooleanAttribute(androidNamespace, 8, true),
 	}
@@ -94,11 +102,13 @@ func buildManifest(config Config) []byte {
 		activityAttributes = append(activityAttributes, manifestIntegerAttribute(androidNamespace, 11, 0))
 	}
 	body = manifestStartElement(body, activityName, activityAttributes)
-	body = manifestStartElement(body, metadataName, []manifestAttribute{
-		manifestStringAttribute(androidNamespace, 7, libMetadataName),
-		manifestStringAttribute(androidNamespace, 10, libMetadataValue),
-	})
-	body = manifestEndElement(body, metadataName)
+	if !dex {
+		body = manifestStartElement(body, metadataName, []manifestAttribute{
+			manifestStringAttribute(androidNamespace, 7, libMetadataName),
+			manifestStringAttribute(androidNamespace, 10, libMetadataValue),
+		})
+		body = manifestEndElement(body, metadataName)
+	}
 	body = manifestStartElement(body, intentFilterName, nil)
 	body = manifestStartElement(body, actionName, []manifestAttribute{
 		manifestStringAttribute(androidNamespace, 7, mainActionValue),

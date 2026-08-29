@@ -4,39 +4,55 @@ package backendjit
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/driver"
 )
 
+var jvmExampleOnce sync.Once
+var jvmExampleClass []byte
+var jvmExampleRoot string
+var jvmExampleFailure string
+
 func compileJVMExample(t *testing.T) ([]byte, string) {
 	t.Helper()
 	if hostTarget() == "" {
 		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
+	jvmExampleOnce.Do(func() {
+		root, err := filepath.Abs("../..")
+		if err != nil {
+			jvmExampleFailure = err.Error()
+			return
+		}
+		definition := filepath.Join(root, "backends", "jvm.rbe")
+		result := driver.CompileFromFS([]string{
+			"-backend", definition,
+			"-t", "jvm/vm32",
+			"-s",
+			"-o", "RenvoProgram.class",
+			filepath.Join(root, "examples", "jvm"),
+		}, root, filepath.Join(root, "std"), driver.OSFS{},
+			New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+				backendJITTestCacheDir, backendcompiled.Backend{}))
+		if !result.Ok {
+			jvmExampleFailure = fmt.Sprintf("%#v", result.Diagnostic)
+			return
+		}
+		jvmExampleClass = result.Binary
+		jvmExampleRoot = root
+	})
+	if jvmExampleFailure != "" {
+		t.Fatalf("JVM CompilerJIT compile failed: %s", jvmExampleFailure)
 	}
-	definition := filepath.Join(root, "backends", "jvm.rbe")
-	result := driver.CompileFromFS([]string{
-		"-backend", definition,
-		"-t", "jvm/vm32",
-		"-s",
-		"-o", "RenvoProgram.class",
-		filepath.Join(root, "examples", "jvm"),
-	}, root, filepath.Join(root, "std"), driver.OSFS{},
-		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			backendJITTestCacheDir, backendcompiled.Backend{}))
-	if !result.Ok {
-		t.Fatalf("JVM CompilerJIT compile failed: %#v", result.Diagnostic)
-	}
-	return result.Binary, root
+	return jvmExampleClass, jvmExampleRoot
 }
 
 func TestCompilerJITJVMClassfileAndInterop(t *testing.T) {

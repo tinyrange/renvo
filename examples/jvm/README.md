@@ -38,7 +38,30 @@ The runtime supports ordinary computation, heap allocation, direct and
 indirect calls, process arguments, environment variables, standard streams,
 and the file operations needed by the Renvo compiler. It does not yet provide
 threads, Java object handles, constructors, fields, instance-method wrappers,
-callbacks, exports, JAR writing, or Android packaging.
+callbacks, exports, or JAR writing.
+
+## Android DEX and APK
+
+The same RBE contains an `android/vm32` target that translates its Java 5
+class model directly to DEX 035. It does not invoke D8, javac, Gradle, or the
+Android SDK:
+
+```sh
+go run ./cmd/renvo \
+  -backend backends/jvm.rbe \
+  -t android/vm32 -s \
+  -o classes.dex \
+  path/to/program
+
+go run ./cmd/renvoapk \
+  -dex classes.dex \
+  -config app.conf \
+  -o app.apk
+```
+
+The DEX includes `dev.renvo.app.RenvoActivity`, a small Activity adapter that
+enters `RenvoProgram.run`. `renvoapk` supplies the binary manifest, ZIP32
+container, and APK Signature Scheme v2 development signature.
 
 ## Self-hosting
 
