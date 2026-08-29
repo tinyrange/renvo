@@ -1,5 +1,5 @@
 system "renvo-frontend-linux-amd64" {
     target = "linux/amd64"
-    binary = 4100KiB
+    binary = 4106KiB
     arena = 160MiB
 }
