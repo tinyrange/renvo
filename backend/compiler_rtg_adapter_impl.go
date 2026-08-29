@@ -1,4 +1,4 @@
-//go:build !renvo || renvo_prepared
+//go:build !renvo || renvo_prepared || renvo_jvm_prepared
 
 package main
 

@@ -1,0 +1,3636 @@
+definition 1
+unit jvm
+implements direct_emitter_v1
+
+# Direct JVM classfile backend. The ordinary backend lowering feeds its
+# direct_emitter_v1 bindings; the image writer constructs a self-contained
+# Java 5 classfile without javac. Renvo pointers remain 32-bit linear-memory
+# offsets; Java references cross the explicit RBE-provided interop boundary.
+go backend {
+	const jvmOpExit = 1
+	const jvmOpFrame = 2
+	const jvmOpMoveImmediate = 3
+	const jvmOpMove = 4
+	const jvmOpPushRegister = 5
+	const jvmOpPushImmediate = 6
+	const jvmOpPopRegister = 7
+	const jvmOpLoadFrame = 8
+	const jvmOpStoreFrame = 9
+	const jvmOpAddressFrame = 10
+	const jvmOpLoadMemory = 11
+	const jvmOpStoreMemory = 12
+	const jvmOpLoadIndex = 13
+	const jvmOpStoreIndex = 14
+	const jvmOpAdd = 15
+	const jvmOpSubtract = 16
+	const jvmOpMultiply = 17
+	const jvmOpDivide = 18
+	const jvmOpRemainder = 19
+	const jvmOpAnd = 20
+	const jvmOpOr = 21
+	const jvmOpXor = 22
+	const jvmOpShiftLeft = 23
+	const jvmOpShiftRightSigned = 24
+	const jvmOpShiftRightUnsigned = 25
+	const jvmOpIncrement = 26
+	const jvmOpCompare = 27
+	const jvmOpSetCondition = 28
+	const jvmOpJump = 29
+	const jvmOpJumpCondition = 30
+	const jvmOpCall = 31
+	const jvmOpReturn = 32
+	const jvmOpSyscall = 33
+	const jvmOpCopyBytes = 34
+	const jvmOpAddress = 35
+	const jvmOpWrite = 36
+	const jvmOpCallIndirect = 37
+	const jvmOpOpen = 38
+	const jvmOpClose = 39
+	const jvmOpRead = 40
+	const jvmOpChmod = 41
+	const jvmOpReadAt = 42
+	const jvmOpWriteAt = 43
+	const jvmOpBuildArgsEnv = 44
+	const jvmOpDecrement = 45
+	const jvmOpHostSyscall = 46
+	const jvmHostArgsBytes = 65536
+
+	const jvmDataBase = 256
+	const jvmStackBytes = 1048576
+
+	func jvmEmitRegister(out *RTGEmitter, operation int, register int) {
+		out.Int8(operation)
+		out.Int8(register)
+	}
+
+	func jvmEmitRegisters(
+		out *RTGEmitter, operation int, destination int, source int,
+	) {
+		out.Int8(operation)
+		out.Int8(destination)
+		out.Int8(source)
+	}
+
+	func jvmEmitRegisterImmediate(
+		out *RTGEmitter, operation int, register int, value int,
+	) {
+		out.Int8(operation)
+		out.Int8(register)
+		out.Int32(value)
+	}
+
+	func jvmMove(
+		out *RTGEmitter, destination RTGRegister, source RTGRegister,
+	) {
+		jvmEmitRegisters(out, jvmOpMove, destination.Code, source.Code)
+	}
+
+	func jvmAddress(
+		out *RTGEmitter, destination RTGRegister, address RTGAddress,
+	) {
+		if RTGAddressValid(address) {
+			jvmEmitRegisterImmediate(
+				out, jvmOpMoveImmediate, destination.Code, address.Addend)
+			RTGAddressRelocAt(out, address, out.Len()-4)
+			return
+		}
+		out.Int8(jvmOpAddress)
+		out.Int8(destination.Code)
+		if address.Base.Valid {
+			out.Int8(address.Base.Code)
+		} else {
+			out.Int8(255)
+		}
+		if address.Index.Valid {
+			out.Int8(address.Index.Code)
+		} else {
+			out.Int8(255)
+		}
+		scale := address.Scale
+		if scale == 0 {
+			scale = 1
+		}
+		out.Int32(scale)
+		out.Int32(address.Displacement)
+	}
+
+	func jvmLoadWidth(
+		out *RTGEmitter, destination RTGRegister,
+		address RTGAddress, size int,
+	) {
+		if RTGAddressValid(address) {
+			jvmAddress(out, jvmvm32Scratch, address)
+			address = RTGAddress{Base: jvmvm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			out.Int8(jvmOpLoadIndex)
+			out.Int8(destination.Code)
+			out.Int8(address.Base.Code)
+			out.Int8(address.Index.Code)
+			out.Int8(scale)
+			out.Int32(address.Displacement)
+			out.Int8(size)
+			return
+		}
+		out.Int8(jvmOpLoadMemory)
+		out.Int8(destination.Code)
+		out.Int8(address.Base.Code)
+		out.Int32(address.Displacement)
+		out.Int8(size)
+	}
+
+	func jvmLoadNative(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 4)
+	}
+	func jvmLoadI32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 4)
+	}
+	func jvmLoadU32(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 4)
+	}
+	func jvmLoadI16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 18)
+	}
+	func jvmLoadU16(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 2)
+	}
+	func jvmLoadI8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 17)
+	}
+	func jvmLoadU8(out *RTGEmitter, destination RTGRegister, address RTGAddress) {
+		jvmLoadWidth(out, destination, address, 1)
+	}
+
+	func jvmStoreWidth(
+		out *RTGEmitter, address RTGAddress,
+		source RTGRegister, size int,
+	) {
+		if RTGAddressValid(address) {
+			jvmAddress(out, jvmvm32Scratch, address)
+			address = RTGAddress{Base: jvmvm32Scratch}
+		}
+		if address.Index.Valid {
+			scale := address.Scale
+			if scale == 0 {
+				scale = 1
+			}
+			out.Int8(jvmOpStoreIndex)
+			out.Int8(source.Code)
+			out.Int8(address.Base.Code)
+			out.Int8(address.Index.Code)
+			out.Int8(scale)
+			out.Int32(address.Displacement)
+			out.Int8(size)
+			return
+		}
+		out.Int8(jvmOpStoreMemory)
+		out.Int8(source.Code)
+		out.Int8(address.Base.Code)
+		out.Int32(address.Displacement)
+		out.Int8(size)
+	}
+
+	func jvmStoreNative(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		jvmStoreWidth(out, address, source, 4)
+	}
+	func jvmStoreU32(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		jvmStoreWidth(out, address, source, 4)
+	}
+	func jvmStoreU16(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		jvmStoreWidth(out, address, source, 2)
+	}
+	func jvmStoreU8(out *RTGEmitter, address RTGAddress, source RTGRegister) {
+		jvmStoreWidth(out, address, source, 1)
+	}
+
+	func jvmBinary(out *RTGEmitter, operation int, destination RTGRegister, source RTGRegister) {
+		jvmEmitRegisters(out, operation, destination.Code, source.Code)
+	}
+	func jvmAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpAdd, destination, source)
+	}
+	func jvmSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpSubtract, destination, source)
+	}
+	func jvmMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpMultiply, destination, source)
+	}
+	func jvmBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpAnd, destination, source)
+	}
+	func jvmBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpOr, destination, source)
+	}
+	func jvmBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		jvmBinary(out, jvmOpXor, destination, source)
+	}
+	func jvmCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		jvmBinary(out, jvmOpCompare, left, right)
+	}
+	func jvmTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		jvmMove(out, jvmvm32Scratch, left)
+		jvmBinary(out, jvmOpAnd, jvmvm32Scratch, right)
+		jvmEmitRegisterImmediate(out, jvmOpMoveImmediate, jvmvm32Primary.Code, 0)
+		jvmBinary(out, jvmOpCompare, jvmvm32Scratch, jvmvm32Primary)
+	}
+	func jvmIncrement(out *RTGEmitter, operand RTGRegister) {
+		jvmEmitRegister(out, jvmOpIncrement, operand.Code)
+	}
+	func jvmDecrement(out *RTGEmitter, operand RTGRegister) {
+		jvmEmitRegister(out, jvmOpDecrement, operand.Code)
+	}
+
+	func jvmShiftImmediate(
+		out *RTGEmitter, operation int, operand RTGRegister, value byte,
+	) {
+		jvmEmitRegisterImmediate(
+			out, jvmOpMoveImmediate, jvmvm32Scratch.Code, int(value))
+		jvmBinary(out, operation, operand, jvmvm32Scratch)
+	}
+	func jvmShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		jvmShiftImmediate(out, jvmOpShiftLeft, operand, value)
+	}
+	func jvmShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		jvmShiftImmediate(out, jvmOpShiftRightUnsigned, operand, value)
+	}
+	func jvmShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		jvmShiftImmediate(out, jvmOpShiftRightSigned, operand, value)
+	}
+
+	func jvmCall(out *RTGEmitter, label RTGLabel) {
+		out.Int8(jvmOpCall)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+		out.Int32(0)
+	}
+	func jvmCallIndirectWordCount(
+		out *RTGEmitter, target RTGRegister, wordCount int,
+	) {
+		out.Int8(jvmOpCallIndirect)
+		out.Int8(target.Code)
+		out.Int32(wordCount)
+	}
+	func jvmCallIndirect(out *RTGEmitter, target RTGRegister) {
+		jvmCallIndirectWordCount(out, target, 0)
+	}
+	func jvmJump(out *RTGEmitter, label RTGLabel) {
+		out.Int8(jvmOpJump)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func jvmJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		out.Int8(jvmOpJumpCondition)
+		out.Int8(condition.Code)
+		at := out.Len()
+		out.Int32(0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func jvmSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		out.Int8(jvmOpSetCondition)
+		out.Int8(condition.Code)
+		out.Int8(destination.Code)
+	}
+	func jvmReturn(out *RTGEmitter) {
+		out.Int8(jvmOpReturn)
+	}
+	func jvmLeave(out *RTGEmitter) {
+	}
+	func jvmHostSyscall(out *RTGEmitter) {
+		out.Int8(jvmOpHostSyscall)
+	}
+	func jvmWrite(out *RTGEmitter) {
+		out.Int8(jvmOpWrite)
+	}
+	func jvmOpen(out *RTGEmitter) {
+		out.Int8(jvmOpOpen)
+	}
+	func jvmClose(out *RTGEmitter) {
+		out.Int8(jvmOpClose)
+	}
+	func jvmRead(out *RTGEmitter) {
+		out.Int8(jvmOpRead)
+	}
+	func jvmChmod(out *RTGEmitter) {
+		out.Int8(jvmOpChmod)
+	}
+	func jvmReadAt(out *RTGEmitter) {
+		out.Int8(jvmOpReadAt)
+	}
+	func jvmWriteAt(out *RTGEmitter) {
+		out.Int8(jvmOpWriteAt)
+	}
+	func jvmStaticCall(out *RTGEmitter, importID int, wordCount int) {
+		for i := 0; i < wordCount; i++ {
+			jvmPopRegister(out, jvmvm32Scratch)
+		}
+		result := -1
+		if importID >= 0 && importID < out.StaticImportCount() &&
+			out.StaticImportName(importID) == "CC_SHA256" {
+			// The backend already contains its defined-operation SHA-256 fallback.
+			// Returning zero selects it when ISO JVM cannot provide CommonCrypto.
+			result = 0
+		}
+		jvmMoveImmediate(out, jvmvm32Primary, int64(result))
+	}
+	func jvmMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		jvmEmitRegisterImmediate(out, jvmOpMoveImmediate, destination.Code, int(value))
+	}
+	func jvmVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		jvmMove(out, jvmvm32Scratch, jvmvm32Primary)
+		jvmMove(out, jvmvm32Primary, jvmvm32Tertiary)
+		operation := jvmOpShiftRightUnsigned
+		if direction == RTGShiftLeft {
+			operation = jvmOpShiftLeft
+		} else if signed {
+			operation = jvmOpShiftRightSigned
+		}
+		jvmBinary(out, operation, jvmvm32Primary, jvmvm32Scratch)
+	}
+	func jvmSignedDivide(out *RTGEmitter, remainder bool) {
+		operation := jvmOpDivide
+		if remainder {
+			operation = jvmOpRemainder
+		}
+		jvmMove(out, jvmvm32Scratch, jvmvm32Primary)
+		jvmMove(out, jvmvm32Primary, jvmvm32Tertiary)
+		jvmBinary(out, operation, jvmvm32Primary, jvmvm32Scratch)
+	}
+	func jvmCopyBytes(out *RTGEmitter) {
+		out.Int8(jvmOpCopyBytes)
+	}
+
+	func jvmPatchRelocations(out *RTGEmitter) {
+		dataBase := jvmDataBase
+		bssBase := RTGAlignValue(dataBase+len(out.Data()), 8)
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i)
+			target := out.LabelPosition(out.RelocationLabel(i))
+			if target >= 0 {
+				RTGPut32At(out.Code(), at, target+RTGGet32At(out.Code(), at))
+			}
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataBase, bssBase)
+			if resolved {
+				RTGPut32At(out.Code(), at, target)
+			}
+		}
+	}
+
+	func jvmFrameStart(out *RTGEmitter) int {
+		out.Int8(jvmOpFrame)
+		at := out.Len()
+		out.Int32(0)
+		return at
+	}
+	func jvmFrameFinish(out *RTGEmitter, framePatch int, stackUsed int) {
+		out.PatchUint32(framePatch, RTGAlignValue(stackUsed, 8))
+	}
+	func jvmPushRegister(out *RTGEmitter, source RTGRegister) {
+		jvmEmitRegister(out, jvmOpPushRegister, source.Code)
+	}
+	func jvmPushImmediate(out *RTGEmitter, value int) {
+		out.Int8(jvmOpPushImmediate)
+		out.Int32(value)
+	}
+	func jvmPopRegister(out *RTGEmitter, destination RTGRegister) {
+		jvmEmitRegister(out, jvmOpPopRegister, destination.Code)
+	}
+	func jvmLoadFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		jvmEmitRegisterImmediate(out, jvmOpLoadFrame, destination.Code, offset)
+	}
+	func jvmStoreFrame(out *RTGEmitter, offset int, source RTGRegister) {
+		jvmEmitRegisterImmediate(out, jvmOpStoreFrame, source.Code, offset)
+	}
+	func jvmAddressFrame(out *RTGEmitter, destination RTGRegister, offset int) {
+		jvmEmitRegisterImmediate(out, jvmOpAddressFrame, destination.Code, offset)
+	}
+	func jvmStoreParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{
+			{Code: 3, Valid: true}, {Code: 4, Valid: true},
+			{Code: 1, Valid: true}, {Code: 2, Valid: true},
+			{Code: 5, Valid: true}, {Code: 6, Valid: true},
+		}
+		register := jvmvm32Primary
+		if word >= 0 && word < len(registers) {
+			register = registers[word]
+		} else {
+			jvmPopRegister(out, register)
+		}
+		jvmStoreFrame(out, offset, register)
+	}
+	func jvmCallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		registers := []RTGRegister{
+			{Code: 3, Valid: true}, {Code: 4, Valid: true},
+			{Code: 1, Valid: true}, {Code: 2, Valid: true},
+			{Code: 5, Valid: true}, {Code: 6, Valid: true},
+		}
+		limit := wordCount
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		for i := 0; i < limit; i++ {
+			jvmPopRegister(out, registers[i])
+		}
+		jvmEmitRegisterImmediate(
+			out, jvmOpMoveImmediate, jvmvm32Scratch.Code, 0)
+		at := out.Len()-4
+		out.RelocAt(at, RTGLabelIndex(label))
+		jvmCallIndirectWordCount(out, jvmvm32Scratch, wordCount)
+	}
+	func jvmHostedEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount > 0 {
+			argsOffset := out.ReserveBSS(jvmHostArgsBytes, 16)
+			out.Int8(jvmOpBuildArgsEnv)
+			at := out.Len()
+			out.Int32(argsOffset)
+			out.AbsoluteReloc(at, argsOffset, RTGRelocationAbsoluteBSS)
+			out.Int8(parameterCount)
+		}
+		return true
+	}
+	func jvmFreestandingEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return parameterCount >= 0 && parameterCount <= 2
+	}
+	func jvmExit(out *RTGEmitter, status RTGRegister) {
+		if status.Code != jvmvm32Primary.Code {
+			jvmMove(out, jvmvm32Primary, status)
+		}
+		out.Int8(jvmOpExit)
+	}
+
+
+	type jvmConstantPool struct {
+		entries [][]byte
+		keys []string
+	}
+
+	type jvmMethod struct {
+		access int
+		name string
+		descriptor string
+		maxStack int
+		maxLocals int
+		code []byte
+		exceptionStart []int
+		exceptionEnd []int
+		exceptionHandler []int
+		exceptionClass []int
+	}
+
+	type jvmAssembler struct {
+		code []byte
+		labels []int
+		fixAt []int
+		fixBase []int
+		fixLabel []int
+		fixWide []bool
+	}
+
+	func jvmBE16(out []byte, value int) []byte {
+		return append(out, byte(value>>8), byte(value))
+	}
+
+	func jvmBE32(out []byte, value int) []byte {
+		return append(out, byte(value>>24), byte(value>>16),
+			byte(value>>8), byte(value))
+	}
+
+	func jvmPoolFind(pool *jvmConstantPool, key string) int {
+		for i := 0; i < len(pool.keys); i++ {
+			if pool.keys[i] == key {
+				return i+1
+			}
+		}
+		return 0
+	}
+
+	func jvmPoolAdd(pool *jvmConstantPool, key string, entry []byte) int {
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		pool.keys = append(pool.keys, key)
+		pool.entries = append(pool.entries, entry)
+		return len(pool.entries)
+	}
+
+	func jvmPoolUTF8(pool *jvmConstantPool, value string) int {
+		key := "U"+value
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{1}
+		entry = jvmBE16(entry, len(value))
+		for i := 0; i < len(value); i++ {
+			entry = append(entry, value[i])
+		}
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolClass(pool *jvmConstantPool, name string) int {
+		key := "C"+name
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{7}
+		entry = jvmBE16(entry, jvmPoolUTF8(pool, name))
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolString(pool *jvmConstantPool, value string) int {
+		key := "S"+value
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{8}
+		entry = jvmBE16(entry, jvmPoolUTF8(pool, value))
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolByteString(pool *jvmConstantPool, value []byte) int {
+		raw := string(value)
+		key := "B"+raw
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		utfKey := "b"+raw
+		utfIndex := jvmPoolFind(pool, utfKey)
+		if utfIndex == 0 {
+			encoded := make([]byte, 0, len(value)*2)
+			for i := 0; i < len(value); i++ {
+				ch := int(value[i])
+				if ch == 0 {
+					encoded = append(encoded, 0xc0, 0x80)
+				} else if ch < 0x80 {
+					encoded = append(encoded, byte(ch))
+				} else {
+					encoded = append(encoded, byte(0xc0|(ch>>6)), byte(0x80|(ch&63)))
+				}
+			}
+			entry := []byte{1}
+			entry = jvmBE16(entry, len(encoded))
+			entry = append(entry, encoded...)
+			utfIndex = jvmPoolAdd(pool, utfKey, entry)
+		}
+		entry := []byte{8}
+		entry = jvmBE16(entry, utfIndex)
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolInteger(pool *jvmConstantPool, value int) int {
+		key := "I"+jvmDecimalText(value)
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{3}
+		entry = jvmBE32(entry, value)
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolNameType(
+		pool *jvmConstantPool, name string, descriptor string,
+	) int {
+		key := "N"+name+":"+descriptor
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{12}
+		entry = jvmBE16(entry, jvmPoolUTF8(pool, name))
+		entry = jvmBE16(entry, jvmPoolUTF8(pool, descriptor))
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolMember(
+		pool *jvmConstantPool, tag byte, owner string,
+		name string, descriptor string,
+	) int {
+		key := string([]byte{tag})+owner+"."+name+descriptor
+		if found := jvmPoolFind(pool, key); found != 0 {
+			return found
+		}
+		entry := []byte{tag}
+		entry = jvmBE16(entry, jvmPoolClass(pool, owner))
+		entry = jvmBE16(entry, jvmPoolNameType(pool, name, descriptor))
+		return jvmPoolAdd(pool, key, entry)
+	}
+
+	func jvmPoolField(
+		pool *jvmConstantPool, owner string, name string, descriptor string,
+	) int {
+		return jvmPoolMember(pool, 9, owner, name, descriptor)
+	}
+
+	func jvmPoolMethod(
+		pool *jvmConstantPool, owner string, name string, descriptor string,
+	) int {
+		return jvmPoolMember(pool, 10, owner, name, descriptor)
+	}
+
+	func jvmPoolInterfaceMethod(
+		pool *jvmConstantPool, owner string, name string, descriptor string,
+	) int {
+		return jvmPoolMember(pool, 11, owner, name, descriptor)
+	}
+
+	func jvmDecimalText(value int) string {
+		if value == 0 {
+			return "0"
+		}
+		negative := value < 0
+		if negative {
+			value = -value
+		}
+		var digits []byte
+		for value > 0 {
+			digits = append(digits, byte('0'+value%10))
+			value /= 10
+		}
+		var result []byte
+		if negative {
+			result = append(result, '-')
+		}
+		for i := len(digits)-1; i >= 0; i-- {
+			result = append(result, digits[i])
+		}
+		return string(result)
+	}
+
+	func jvmAsmNewLabel(asm *jvmAssembler) int {
+		asm.labels = append(asm.labels, -1)
+		return len(asm.labels)-1
+	}
+
+	func jvmAsmMark(asm *jvmAssembler, label int) {
+		asm.labels[label] = len(asm.code)
+	}
+
+	func jvmAsmU1(asm *jvmAssembler, value int) {
+		asm.code = append(asm.code, byte(value))
+	}
+
+	func jvmAsmU2(asm *jvmAssembler, value int) {
+		asm.code = jvmBE16(asm.code, value)
+	}
+
+	func jvmAsmBranch(asm *jvmAssembler, opcode int, label int) {
+		base := len(asm.code)
+		jvmAsmU1(asm, opcode)
+		at := len(asm.code)
+		jvmAsmU2(asm, 0)
+		asm.fixAt = append(asm.fixAt, at)
+		asm.fixBase = append(asm.fixBase, base)
+		asm.fixLabel = append(asm.fixLabel, label)
+		asm.fixWide = append(asm.fixWide, false)
+	}
+
+	func jvmAsmGoto(asm *jvmAssembler, label int) {
+		base := len(asm.code)
+		jvmAsmU1(asm, 0xc8)
+		at := len(asm.code)
+		asm.code = jvmBE32(asm.code, 0)
+		asm.fixAt = append(asm.fixAt, at)
+		asm.fixBase = append(asm.fixBase, base)
+		asm.fixLabel = append(asm.fixLabel, label)
+		asm.fixWide = append(asm.fixWide, true)
+	}
+
+	func jvmAsmPatch(asm *jvmAssembler) []byte {
+		for i := 0; i < len(asm.fixAt); i++ {
+			target := asm.labels[asm.fixLabel[i]]
+			delta := target-asm.fixBase[i]
+			at := asm.fixAt[i]
+			if asm.fixWide[i] {
+				asm.code[at] = byte(delta>>24)
+				asm.code[at+1] = byte(delta>>16)
+				asm.code[at+2] = byte(delta>>8)
+				asm.code[at+3] = byte(delta)
+			} else {
+				asm.code[at] = byte(delta>>8)
+				asm.code[at+1] = byte(delta)
+			}
+		}
+		return asm.code
+	}
+
+	func jvmAsmLocal(asm *jvmAssembler, opcode int, local int) {
+		if local >= 0 && local <= 3 &&
+			(opcode == 0x15 || opcode == 0x36 || opcode == 0x19 || opcode == 0x3a) {
+			base := 0x1a
+			if opcode == 0x36 { base = 0x3b }
+			if opcode == 0x19 { base = 0x2a }
+			if opcode == 0x3a { base = 0x4b }
+			jvmAsmU1(asm, base+local)
+			return
+		}
+		jvmAsmU1(asm, opcode)
+		jvmAsmU1(asm, local)
+	}
+
+	func jvmAsmInt(asm *jvmAssembler, pool *jvmConstantPool, value int) {
+		if value >= -1 && value <= 5 {
+			jvmAsmU1(asm, 3+value)
+			return
+		}
+		if value >= -128 && value <= 127 {
+			jvmAsmU1(asm, 0x10)
+			jvmAsmU1(asm, value)
+			return
+		}
+		if value >= -32768 && value <= 32767 {
+			jvmAsmU1(asm, 0x11)
+			jvmAsmU2(asm, value)
+			return
+		}
+		index := jvmPoolInteger(pool, value)
+		if index <= 255 {
+			jvmAsmU1(asm, 0x12)
+			jvmAsmU1(asm, index)
+		} else {
+			jvmAsmU1(asm, 0x13)
+			jvmAsmU2(asm, index)
+		}
+	}
+
+	func jvmAsmMember(asm *jvmAssembler, opcode int, index int) {
+		jvmAsmU1(asm, opcode)
+		jvmAsmU2(asm, index)
+	}
+
+	func jvmAsmTableSwitch(
+		asm *jvmAssembler, low int, labels []int, defaultLabel int,
+	) {
+		base := len(asm.code)
+		jvmAsmU1(asm, 0xaa)
+		for len(asm.code)%4 != 0 {
+			jvmAsmU1(asm, 0)
+		}
+		at := len(asm.code)
+		asm.code = jvmBE32(asm.code, 0)
+		asm.fixAt = append(asm.fixAt, at)
+		asm.fixBase = append(asm.fixBase, base)
+		asm.fixLabel = append(asm.fixLabel, defaultLabel)
+		asm.fixWide = append(asm.fixWide, true)
+		asm.code = jvmBE32(asm.code, low)
+		asm.code = jvmBE32(asm.code, low+len(labels)-1)
+		for i := 0; i < len(labels); i++ {
+			at = len(asm.code)
+			asm.code = jvmBE32(asm.code, 0)
+			asm.fixAt = append(asm.fixAt, at)
+			asm.fixBase = append(asm.fixBase, base)
+			asm.fixLabel = append(asm.fixLabel, labels[i])
+			asm.fixWide = append(asm.fixWide, true)
+		}
+	}
+
+	func jvmAsmGetStatic(
+		asm *jvmAssembler, pool *jvmConstantPool, name string, descriptor string,
+	) {
+		jvmAsmMember(asm, 0xb2,
+			jvmPoolField(pool, "RenvoProgram", name, descriptor))
+	}
+
+	func jvmAsmPutStatic(
+		asm *jvmAssembler, pool *jvmConstantPool, name string, descriptor string,
+	) {
+		jvmAsmMember(asm, 0xb3,
+			jvmPoolField(pool, "RenvoProgram", name, descriptor))
+	}
+
+	func jvmAsmInvokeStatic(
+		asm *jvmAssembler, pool *jvmConstantPool,
+		owner string, name string, descriptor string,
+	) {
+		jvmAsmMember(asm, 0xb8, jvmPoolMethod(pool, owner, name, descriptor))
+	}
+
+	func jvmAsmInvokeVirtual(
+		asm *jvmAssembler, pool *jvmConstantPool,
+		owner string, name string, descriptor string,
+	) {
+		jvmAsmMember(asm, 0xb6, jvmPoolMethod(pool, owner, name, descriptor))
+	}
+
+	func jvmAsmInvokeInterface(
+		asm *jvmAssembler, pool *jvmConstantPool,
+		owner string, name string, descriptor string, words int,
+	) {
+		jvmAsmMember(asm, 0xb9,
+			jvmPoolInterfaceMethod(pool, owner, name, descriptor))
+		jvmAsmU1(asm, words)
+		jvmAsmU1(asm, 0)
+	}
+
+	func jvmAsmRLoadConst(
+		asm *jvmAssembler, pool *jvmConstantPool, index int,
+	) {
+		jvmAsmGetStatic(asm, pool, "R", "[I")
+		jvmAsmInt(asm, pool, index)
+		jvmAsmU1(asm, 0x2e)
+	}
+
+	func jvmAsmRStoreConstPrefix(
+		asm *jvmAssembler, pool *jvmConstantPool, index int,
+	) {
+		jvmAsmGetStatic(asm, pool, "R", "[I")
+		jvmAsmInt(asm, pool, index)
+	}
+
+	func jvmMakeConstructor(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmMember(&asm, 0xb7,
+			jvmPoolMethod(pool, "java/lang/Object", "<init>", "()V"))
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 1, name: "<init>", descriptor: "()V",
+			maxStack: 1, maxLocals: 1, code: asm.code}
+	}
+
+	func jvmMakeU8(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmGetStatic(&asm, pool, "C", "[B")
+		jvmAsmGetStatic(&asm, pool, "PC", "I")
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmPutStatic(&asm, pool, "PC", "I")
+		jvmAsmU1(&asm, 0x33)
+		jvmAsmInt(&asm, pool, 255)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "u8", descriptor: "()I",
+			maxStack: 4, maxLocals: 0, code: asm.code}
+	}
+
+	func jvmMakeI32(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		for i := 0; i < 4; i++ {
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "u8", "()I")
+			if i > 0 {
+				jvmAsmInt(&asm, pool, i*8)
+				jvmAsmU1(&asm, 0x78)
+				jvmAsmU1(&asm, 0x80)
+			}
+		}
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "i32", descriptor: "()I",
+			maxStack: 3, maxLocals: 0, code: asm.code}
+	}
+
+	func jvmMakeLoad(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		bad := jvmAsmNewLabel(&asm)
+		done1 := jvmAsmNewLabel(&asm)
+		done2 := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmBranch(&asm, 0x9b, bad)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa3, bad)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x33)
+		jvmAsmInt(&asm, pool, 255)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmBranch(&asm, 0x9f, done1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x33)
+		jvmAsmInt(&asm, pool, 255)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmU1(&asm, 0x78)
+		jvmAsmU1(&asm, 0x80)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 2)
+		jvmAsmBranch(&asm, 0x9f, done2)
+		for i := 2; i < 4; i++ {
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmGetStatic(&asm, pool, "M", "[B")
+			jvmAsmLocal(&asm, 0x15, 0)
+			jvmAsmInt(&asm, pool, i)
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmU1(&asm, 0x33)
+			jvmAsmInt(&asm, pool, 255)
+			jvmAsmU1(&asm, 0x7e)
+			jvmAsmInt(&asm, pool, i*8)
+			jvmAsmU1(&asm, 0x78)
+			jvmAsmU1(&asm, 0x80)
+			jvmAsmLocal(&asm, 0x36, 2)
+		}
+		jvmAsmMark(&asm, done2)
+		jvmAsmMark(&asm, done1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, bad)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "load", descriptor: "(II)I",
+			maxStack: 5, maxLocals: 3, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeStore(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		bad := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmBranch(&asm, 0x9b, bad)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa3, bad)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 3)
+		loop := jvmAsmNewLabel(&asm)
+		jvmAsmMark(&asm, loop)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmBranch(&asm, 0xa2, done)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmU1(&asm, 0x68)
+		jvmAsmU1(&asm, 0x7c)
+		jvmAsmU1(&asm, 0x54)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, bad)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "store", descriptor: "(III)Z",
+			maxStack: 6, maxLocals: 4, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeLoadLong(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmU1(&asm, 0x85)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x79)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmU1(&asm, 0x85)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x79)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x7d)
+		jvmAsmU1(&asm, 0x81)
+		jvmAsmU1(&asm, 0xad)
+		return jvmMethod{access: 0x000a, name: "loadLong", descriptor: "(I)J",
+			maxStack: 6, maxLocals: 1, code: asm.code}
+	}
+
+	func jvmMakeStoreLong(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x16, 1)
+		jvmAsmU1(&asm, 0x88)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x16, 1)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x7d)
+		jvmAsmU1(&asm, 0x88)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "storeLong", descriptor: "(IJ)V",
+			maxStack: 5, maxLocals: 3, code: asm.code}
+	}
+
+	func jvmAsmLoadFloat(
+		asm *jvmAssembler, pool *jvmConstantPool, addressLocal int, wide bool,
+	) {
+		jvmAsmLocal(asm, 0x15, addressLocal)
+		if wide {
+			jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "loadLong", "(I)J")
+			jvmAsmInvokeStatic(asm, pool, "java/lang/Double", "longBitsToDouble", "(J)D")
+		} else {
+			jvmAsmInt(asm, pool, 4)
+			jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "load", "(II)I")
+			jvmAsmInvokeStatic(asm, pool, "java/lang/Float", "intBitsToFloat", "(I)F")
+		}
+	}
+
+	func jvmAsmStoreFloat(
+		asm *jvmAssembler, pool *jvmConstantPool, addressLocal int, wide bool,
+	) {
+		if wide {
+			jvmAsmInvokeStatic(asm, pool, "java/lang/Double", "doubleToRawLongBits", "(D)J")
+			jvmAsmLocal(asm, 0x37, 5)
+			jvmAsmLocal(asm, 0x15, addressLocal)
+			jvmAsmLocal(asm, 0x16, 5)
+			jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "storeLong", "(IJ)V")
+		} else {
+			jvmAsmInvokeStatic(asm, pool, "java/lang/Float", "floatToRawIntBits", "(F)I")
+			jvmAsmLocal(asm, 0x36, 5)
+			jvmAsmLocal(asm, 0x15, addressLocal)
+			jvmAsmInt(asm, pool, 4)
+			jvmAsmLocal(asm, 0x15, 5)
+			jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "store", "(III)Z")
+			jvmAsmU1(asm, 0x57)
+		}
+	}
+
+	func jvmAsmFloatBinaryCase(
+		asm *jvmAssembler, pool *jvmConstantPool,
+		label int, opcode int, wide bool, done int,
+	) {
+		jvmAsmMark(asm, label)
+		jvmAsmLoadFloat(asm, pool, 1, wide)
+		jvmAsmLoadFloat(asm, pool, 2, wide)
+		jvmAsmU1(asm, opcode)
+		jvmAsmStoreFloat(asm, pool, 0, wide)
+		jvmAsmGoto(asm, done)
+	}
+
+	func jvmAsmFloatBinaryDispatch(
+		asm *jvmAssembler, pool *jvmConstantPool, wide bool, done int,
+	) {
+		add := jvmAsmNewLabel(asm)
+		sub := jvmAsmNewLabel(asm)
+		mul := jvmAsmNewLabel(asm)
+		div := jvmAsmNewLabel(asm)
+		jvmAsmLocal(asm, 0x15, 3)
+		jvmAsmInt(asm, pool, int('+'))
+		jvmAsmBranch(asm, 0x9f, add)
+		jvmAsmLocal(asm, 0x15, 3)
+		jvmAsmInt(asm, pool, int('-'))
+		jvmAsmBranch(asm, 0x9f, sub)
+		jvmAsmLocal(asm, 0x15, 3)
+		jvmAsmInt(asm, pool, int('*'))
+		jvmAsmBranch(asm, 0x9f, mul)
+		jvmAsmLocal(asm, 0x15, 3)
+		jvmAsmInt(asm, pool, int('/'))
+		jvmAsmBranch(asm, 0x9f, div)
+		jvmAsmGoto(asm, done)
+		base := 0x62
+		if wide { base = 0x63 }
+		jvmAsmFloatBinaryCase(asm, pool, add, base, wide, done)
+		jvmAsmFloatBinaryCase(asm, pool, sub, base+4, wide, done)
+		jvmAsmFloatBinaryCase(asm, pool, mul, base+8, wide, done)
+		jvmAsmFloatBinaryCase(asm, pool, div, base+12, wide, done)
+	}
+
+	func jvmMakeFloatBinary(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		wide := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wide)
+		jvmAsmFloatBinaryDispatch(&asm, pool, false, done)
+		jvmAsmMark(&asm, wide)
+		jvmAsmFloatBinaryDispatch(&asm, pool, true, done)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "floatBinary", descriptor: "(IIIII)V",
+			maxStack: 6, maxLocals: 7, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmAsmFloatCompareValue(
+		asm *jvmAssembler, pool *jvmConstantPool, wide bool,
+	) {
+		greater := jvmAsmNewLabel(asm)
+		after := jvmAsmNewLabel(asm)
+		jvmAsmLocal(asm, 0x15, 2)
+		jvmAsmInt(asm, pool, 255)
+		jvmAsmU1(asm, 0x7e)
+		jvmAsmInt(asm, pool, int('>'))
+		jvmAsmBranch(asm, 0x9f, greater)
+		jvmAsmLoadFloat(asm, pool, 0, wide)
+		jvmAsmLoadFloat(asm, pool, 1, wide)
+		jvmAsmU1(asm, 0x96+2*boolInt(wide))
+		jvmAsmGoto(asm, after)
+		jvmAsmMark(asm, greater)
+		jvmAsmLoadFloat(asm, pool, 0, wide)
+		jvmAsmLoadFloat(asm, pool, 1, wide)
+		jvmAsmU1(asm, 0x95+2*boolInt(wide))
+		jvmAsmMark(asm, after)
+		jvmAsmLocal(asm, 0x36, 4)
+	}
+
+	func boolInt(value bool) int {
+		if value { return 1 }
+		return 0
+	}
+
+	func jvmAsmFloatCompareReturn(
+		asm *jvmAssembler, pool *jvmConstantPool, predicate int, opcode int,
+	) {
+		next := jvmAsmNewLabel(asm)
+		jvmAsmLocal(asm, 0x15, 2)
+		jvmAsmInt(asm, pool, predicate)
+		jvmAsmBranch(asm, 0xa0, next)
+		jvmAsmLocal(asm, 0x15, 4)
+		jvmAsmU1(asm, 0x03)
+		jvmEmitBooleanResult(asm, opcode)
+		jvmAsmMark(asm, next)
+	}
+
+	func jvmMakeFloatCompare(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		wide := jvmAsmNewLabel(&asm)
+		after := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wide)
+		jvmAsmFloatCompareValue(&asm, pool, false)
+		jvmAsmGoto(&asm, after)
+		jvmAsmMark(&asm, wide)
+		jvmAsmFloatCompareValue(&asm, pool, true)
+		jvmAsmMark(&asm, after)
+		jvmAsmFloatCompareReturn(&asm, pool, int('=')|int('=')<<8, 0x9f)
+		jvmAsmFloatCompareReturn(&asm, pool, int('!')|int('=')<<8, 0xa0)
+		jvmAsmFloatCompareReturn(&asm, pool, int('<'), 0xa1)
+		jvmAsmFloatCompareReturn(&asm, pool, int('<')|int('=')<<8, 0xa4)
+		jvmAsmFloatCompareReturn(&asm, pool, int('>'), 0xa3)
+		jvmAsmFloatCompareReturn(&asm, pool, int('>')|int('=')<<8, 0xa2)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "floatCompare", descriptor: "(IIII)I",
+			maxStack: 5, maxLocals: 5, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeFloatConvert(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		sourceWide := jvmAsmNewLabel(&asm)
+		floatToFloat := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, sourceWide)
+		jvmAsmLoadFloat(&asm, pool, 1, false)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmBranch(&asm, 0x9f, floatToFloat)
+		jvmAsmU1(&asm, 0x8d)
+		jvmAsmStoreFloat(&asm, pool, 0, true)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatToFloat)
+		jvmAsmStoreFloat(&asm, pool, 0, false)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, sourceWide)
+		jvmAsmLoadFloat(&asm, pool, 1, true)
+		wideToWide := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideToWide)
+		jvmAsmU1(&asm, 0x90)
+		jvmAsmStoreFloat(&asm, pool, 0, false)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, wideToWide)
+		jvmAsmStoreFloat(&asm, pool, 0, true)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "floatConvert", descriptor: "(IIII)V",
+			maxStack: 6, maxLocals: 7, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmAsmStoreConvertedFloat(
+		asm *jvmAssembler, pool *jvmConstantPool, wide bool,
+	) {
+		jvmAsmStoreFloat(asm, pool, 0, wide)
+		jvmAsmU1(asm, 0xb1)
+	}
+
+	func jvmMakeIntToFloat(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		wideInt := jvmAsmNewLabel(&asm)
+		unsignedInt := jvmAsmNewLabel(&asm)
+		intReady := jvmAsmNewLabel(&asm)
+		unsignedLong := jvmAsmNewLabel(&asm)
+		longReady := jvmAsmNewLabel(&asm)
+		wideFloatFromInt := jvmAsmNewLabel(&asm)
+		wideFloatFromLong := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideInt)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmBranch(&asm, 0x99, unsignedInt)
+		jvmAsmU1(&asm, 0x85)
+		jvmAsmGoto(&asm, intReady)
+		jvmAsmMark(&asm, unsignedInt)
+		jvmAsmU1(&asm, 0x85)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x79)
+		jvmAsmInt(&asm, pool, 32)
+		jvmAsmU1(&asm, 0x7d)
+		jvmAsmMark(&asm, intReady)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideFloatFromInt)
+		jvmAsmU1(&asm, 0x89)
+		jvmAsmStoreConvertedFloat(&asm, pool, false)
+		jvmAsmMark(&asm, wideFloatFromInt)
+		jvmAsmU1(&asm, 0x8a)
+		jvmAsmStoreConvertedFloat(&asm, pool, true)
+
+		jvmAsmMark(&asm, wideInt)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "loadLong", "(I)J")
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmBranch(&asm, 0x99, unsignedLong)
+		jvmAsmGoto(&asm, longReady)
+		jvmAsmMark(&asm, unsignedLong)
+		jvmAsmU1(&asm, 0x5c)
+		jvmAsmU1(&asm, 0x0a)
+		jvmAsmU1(&asm, 0x7f)
+		jvmAsmLocal(&asm, 0x37, 4)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x7d)
+		jvmAsmLocal(&asm, 0x16, 4)
+		jvmAsmU1(&asm, 0x81)
+		jvmAsmMark(&asm, longReady)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideFloatFromLong)
+		jvmAsmU1(&asm, 0x89)
+		jvmAsmLocal(&asm, 0x15, 3)
+		longFloatReady := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0x9a, longFloatReady)
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmU1(&asm, 0x62)
+		jvmAsmMark(&asm, longFloatReady)
+		jvmAsmStoreConvertedFloat(&asm, pool, false)
+		jvmAsmMark(&asm, wideFloatFromLong)
+		jvmAsmU1(&asm, 0x8a)
+		jvmAsmLocal(&asm, 0x15, 3)
+		longDoubleReady := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0x9a, longDoubleReady)
+		jvmAsmU1(&asm, 0x5c)
+		jvmAsmU1(&asm, 0x63)
+		jvmAsmMark(&asm, longDoubleReady)
+		jvmAsmStoreConvertedFloat(&asm, pool, true)
+		return jvmMethod{access: 0x000a, name: "intToFloat", descriptor: "(IIII)V",
+			maxStack: 8, maxLocals: 7, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeFloatToInt(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		wideFloat := jvmAsmNewLabel(&asm)
+		wideIntFromFloat := jvmAsmNewLabel(&asm)
+		wideIntFromDouble := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideFloat)
+		jvmAsmLoadFloat(&asm, pool, 1, false)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideIntFromFloat)
+		jvmAsmU1(&asm, 0x8b)
+		jvmAsmLocal(&asm, 0x36, 5)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		jvmAsmMark(&asm, wideIntFromFloat)
+		jvmAsmU1(&asm, 0x8c)
+		jvmAsmLocal(&asm, 0x37, 5)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x16, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "storeLong", "(IJ)V")
+		jvmAsmU1(&asm, 0xb1)
+		jvmAsmMark(&asm, wideFloat)
+		jvmAsmLoadFloat(&asm, pool, 1, true)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wideIntFromDouble)
+		jvmAsmU1(&asm, 0x8e)
+		jvmAsmLocal(&asm, 0x36, 5)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		jvmAsmMark(&asm, wideIntFromDouble)
+		jvmAsmU1(&asm, 0x8f)
+		jvmAsmLocal(&asm, 0x37, 5)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x16, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "storeLong", "(IJ)V")
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "floatToInt", descriptor: "(IIIII)V",
+			maxStack: 6, maxLocals: 7, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeFloatNegate(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		wide := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0x9f, wide)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmInt(&asm, pool, -2147483648)
+		jvmAsmU1(&asm, 0x82)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		jvmAsmMark(&asm, wide)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmInt(&asm, pool, -2147483648)
+		jvmAsmU1(&asm, 0x82)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "floatNegate", descriptor: "(II)V",
+			maxStack: 6, maxLocals: 2, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmEmitBooleanResult(
+		asm *jvmAssembler, opcode int,
+	) {
+		truth := jvmAsmNewLabel(asm)
+		done := jvmAsmNewLabel(asm)
+		jvmAsmBranch(asm, opcode, truth)
+		jvmAsmU1(asm, 0x03)
+		jvmAsmGoto(asm, done)
+		jvmAsmMark(asm, truth)
+		jvmAsmU1(asm, 0x04)
+		jvmAsmMark(asm, done)
+		jvmAsmU1(asm, 0xac)
+	}
+
+	func jvmMakeCondition(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		labels := make([]int, 10)
+		for i := 0; i < len(labels); i++ { labels[i] = jvmAsmNewLabel(&asm) }
+		invalid := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmTableSwitch(&asm, 0, labels, invalid)
+		ops := []int{0x9f, 0xa0, 0xa1, 0xa4, 0xa3, 0xa2}
+		for i := 0; i < 6; i++ {
+			jvmAsmMark(&asm, labels[i])
+			jvmAsmLocal(&asm, 0x15, 0)
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmEmitBooleanResult(&asm, ops[i])
+		}
+		unsignedOps := []int{0xa1, 0xa2, 0xa4, 0xa3}
+		for i := 0; i < 4; i++ {
+			jvmAsmMark(&asm, labels[6+i])
+			jvmAsmLocal(&asm, 0x15, 0)
+			jvmAsmInt(&asm, pool, -2147483647-1)
+			jvmAsmU1(&asm, 0x82)
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmInt(&asm, pool, -2147483647-1)
+			jvmAsmU1(&asm, 0x82)
+			jvmEmitBooleanResult(&asm, unsignedOps[i])
+		}
+		jvmAsmMark(&asm, invalid)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "condition", descriptor: "(III)Z",
+			maxStack: 4, maxLocals: 3, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeBinary(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		labels := make([]int, 11)
+		for i := 0; i < len(labels); i++ { labels[i] = jvmAsmNewLabel(&asm) }
+		invalid := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmTableSwitch(&asm, 15, labels, invalid)
+		binaryOps := []int{0x60, 0x64, 0x68, 0x6c, 0x70, 0x7e, 0x80, 0x82}
+		for i := 0; i < len(binaryOps); i++ {
+			jvmAsmMark(&asm, labels[i])
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmU1(&asm, binaryOps[i])
+			jvmAsmU1(&asm, 0xac)
+		}
+		for i := 8; i < 11; i++ {
+			large := jvmAsmNewLabel(&asm)
+			jvmAsmMark(&asm, labels[i])
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmInt(&asm, pool, 32)
+			jvmAsmBranch(&asm, 0xa2, large)
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmLocal(&asm, 0x15, 2)
+			opcode := 0x78
+			if i == 9 { opcode = 0x7a }
+			if i == 10 { opcode = 0x7c }
+			jvmAsmU1(&asm, opcode)
+			jvmAsmU1(&asm, 0xac)
+			jvmAsmMark(&asm, large)
+			if i != 9 {
+				jvmAsmU1(&asm, 0x03)
+				jvmAsmU1(&asm, 0xac)
+			} else {
+				negative := jvmAsmNewLabel(&asm)
+				jvmAsmLocal(&asm, 0x15, 1)
+				jvmAsmBranch(&asm, 0x9b, negative)
+				jvmAsmU1(&asm, 0x03)
+				jvmAsmU1(&asm, 0xac)
+				jvmAsmMark(&asm, negative)
+				jvmAsmU1(&asm, 0x02)
+				jvmAsmU1(&asm, 0xac)
+			}
+		}
+		jvmAsmMark(&asm, invalid)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "binary", descriptor: "(III)I",
+			maxStack: 2, maxLocals: 3, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmEmitFrameStore(
+		asm *jvmAssembler, pool *jvmConstantPool,
+		arrayName string, fieldName string,
+	) {
+		jvmAsmGetStatic(asm, pool, arrayName, "[I")
+		jvmAsmGetStatic(asm, pool, "CS", "I")
+		jvmAsmGetStatic(asm, pool, fieldName, "I")
+		jvmAsmU1(asm, 0x4f)
+	}
+
+	func jvmMakeCall(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmEmitFrameStore(&asm, pool, "CPC", "PC")
+		jvmEmitFrameStore(&asm, pool, "CFP", "FP")
+		jvmEmitFrameStore(&asm, pool, "CSP", "SP")
+		jvmEmitFrameStore(&asm, pool, "CFS", "FS")
+		jvmAsmGetStatic(&asm, pool, "CDROP", "[I")
+		jvmAsmGetStatic(&asm, pool, "CS", "I")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 6)
+		small := jvmAsmNewLabel(&asm)
+		dropDone := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0xa4, small)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 6)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x68)
+		jvmAsmGoto(&asm, dropDone)
+		jvmAsmMark(&asm, small)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmMark(&asm, dropDone)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "CS", "I")
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmPutStatic(&asm, pool, "CS", "I")
+		jvmAsmGetStatic(&asm, pool, "FP", "I")
+		jvmAsmGetStatic(&asm, pool, "FS", "I")
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmPutStatic(&asm, pool, "FP", "I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmPutStatic(&asm, pool, "PC", "I")
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "call", descriptor: "(II)V",
+			maxStack: 4, maxLocals: 2, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeReturn(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		empty := jvmAsmNewLabel(&asm)
+		jvmAsmGetStatic(&asm, pool, "CS", "I")
+		jvmAsmBranch(&asm, 0x99, empty)
+		jvmAsmGetStatic(&asm, pool, "CS", "I")
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmPutStatic(&asm, pool, "CS", "I")
+		jvmAsmLocal(&asm, 0x36, 0)
+		jvmAsmGetStatic(&asm, pool, "CPC", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmPutStatic(&asm, pool, "PC", "I")
+		jvmAsmGetStatic(&asm, pool, "CFP", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmPutStatic(&asm, pool, "FP", "I")
+		jvmAsmGetStatic(&asm, pool, "CFS", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmPutStatic(&asm, pool, "FS", "I")
+		jvmAsmGetStatic(&asm, pool, "CSP", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmGetStatic(&asm, pool, "CDROP", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmPutStatic(&asm, pool, "SP", "I")
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, empty)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "ret", descriptor: "()Z",
+			maxStack: 3, maxLocals: 1, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeLoadCode(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		one := jvmAsmNewLabel(&asm)
+		two := jvmAsmNewLabel(&asm)
+		loaded := jvmAsmNewLabel(&asm)
+		signed8 := jvmAsmNewLabel(&asm)
+		signed16 := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 17)
+		jvmAsmBranch(&asm, 0x9f, one)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 18)
+		jvmAsmBranch(&asm, 0x9f, two)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmBranch(&asm, 0x9f, one)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 2)
+		jvmAsmBranch(&asm, 0x9f, two)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmGoto(&asm, loaded)
+		jvmAsmMark(&asm, one)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmGoto(&asm, loaded)
+		jvmAsmMark(&asm, two)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmMark(&asm, loaded)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 17)
+		jvmAsmBranch(&asm, 0x9f, signed8)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 18)
+		jvmAsmBranch(&asm, 0x9f, signed16)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, signed8)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x91)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, signed16)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x93)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "loadCode", descriptor: "(II)I",
+			maxStack: 2, maxLocals: 3, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeWrite(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		stdout := jvmAsmNewLabel(&asm)
+		streamReady := jvmAsmNewLabel(&asm)
+		file := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0x4f)
+		tryStart := len(asm.code)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmBranch(&asm, 0x9f, stdout)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmInt(&asm, pool, 2)
+		jvmAsmBranch(&asm, 0xa0, file)
+		jvmAsmMember(&asm, 0xb2,
+			jvmPoolField(pool, "java/lang/System", "err", "Ljava/io/PrintStream;"))
+		jvmAsmGoto(&asm, streamReady)
+		jvmAsmMark(&asm, stdout)
+		jvmAsmMember(&asm, 0xb2,
+			jvmPoolField(pool, "java/lang/System", "out", "Ljava/io/PrintStream;"))
+		jvmAsmMark(&asm, streamReady)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/PrintStream", "write", "([BII)V")
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, file)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileWrite", "(III)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xb1)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0xb1)
+		method := jvmMethod{access: 0x000a, name: "write", descriptor: "()V",
+			maxStack: 8, maxLocals: 0, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeStringAt(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmMember(&asm, 0xbb, jvmPoolClass(pool, "java/lang/String"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmMember(&asm, 0xb7, jvmPoolMethod(pool, "java/lang/String", "<init>",
+			"([BIILjava/lang/String;)V"))
+		jvmAsmU1(&asm, 0xb0)
+		return jvmMethod{access: 0x000a, name: "stringAt", descriptor: "(II)Ljava/lang/String;",
+			maxStack: 6, maxLocals: 2, code: asm.code}
+	}
+
+	func jvmMakePathAt(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		loop := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 1)
+		jvmAsmMark(&asm, loop)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x33)
+		jvmAsmBranch(&asm, 0x99, done)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 1)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmMember(&asm, 0xbb, jvmPoolClass(pool, "java/lang/String"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmMember(&asm, 0xb7, jvmPoolMethod(pool, "java/lang/String", "<init>",
+			"([BIILjava/lang/String;)V"))
+		jvmAsmU1(&asm, 0xb0)
+		return jvmMethod{access: 0x000a, name: "pathAt", descriptor: "(I)Ljava/lang/String;",
+			maxStack: 6, maxLocals: 2, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeFileOpen(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		missing := jvmAsmNewLabel(&asm)
+		create := jvmAsmNewLabel(&asm)
+		haveFile := jvmAsmNewLabel(&asm)
+		directory := jvmAsmNewLabel(&asm)
+		readOnly := jvmAsmNewLabel(&asm)
+		modeReady := jvmAsmNewLabel(&asm)
+		noTruncate := jvmAsmNewLabel(&asm)
+		find := jvmAsmNewLabel(&asm)
+		found := jvmAsmNewLabel(&asm)
+		failed := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "pathAt", "(I)Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x3a, 0)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x36, 1)
+		jvmAsmMember(&asm, 0xbb, jvmPoolClass(pool, "java/io/File"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmMember(&asm, 0xb7, jvmPoolMethod(pool, "java/io/File", "<init>",
+			"(Ljava/lang/String;)V"))
+		jvmAsmLocal(&asm, 0x3a, 2)
+		jvmAsmLocal(&asm, 0x19, 2)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/File", "exists", "()Z")
+		jvmAsmBranch(&asm, 0x99, missing)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 192)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmInt(&asm, pool, 192)
+		jvmAsmBranch(&asm, 0x9f, failed)
+		jvmAsmGoto(&asm, haveFile)
+		jvmAsmMark(&asm, missing)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 64)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmBranch(&asm, 0x9a, create)
+		jvmAsmGoto(&asm, failed)
+		jvmAsmMark(&asm, create)
+		jvmAsmMark(&asm, haveFile)
+		jvmAsmLocal(&asm, 0x19, 2)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/File", "isDirectory", "()Z")
+		jvmAsmBranch(&asm, 0x9a, directory)
+		jvmAsmMember(&asm, 0xbb, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmLocal(&asm, 0x19, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmBranch(&asm, 0x99, readOnly)
+		jvmAsmLdcString(&asm, pool, "rw")
+		jvmAsmGoto(&asm, modeReady)
+		jvmAsmMark(&asm, readOnly)
+		jvmAsmLdcString(&asm, pool, "r")
+		jvmAsmMark(&asm, modeReady)
+		jvmAsmMember(&asm, 0xb7, jvmPoolMethod(pool, "java/io/RandomAccessFile", "<init>",
+			"(Ljava/io/File;Ljava/lang/String;)V"))
+		jvmAsmLocal(&asm, 0x3a, 3)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInt(&asm, pool, 512)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmBranch(&asm, 0x99, noTruncate)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmU1(&asm, 0x09)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "setLength", "(J)V")
+		jvmAsmMark(&asm, noTruncate)
+		jvmAsmGoto(&asm, find)
+		jvmAsmMark(&asm, directory)
+		jvmAsmLocal(&asm, 0x19, 2)
+		jvmAsmLocal(&asm, 0x3a, 3)
+		jvmAsmMark(&asm, find)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmLocal(&asm, 0x36, 4)
+		findLoop := jvmAsmNewLabel(&asm)
+		jvmAsmMark(&asm, findLoop)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmBranch(&asm, 0xc6, found)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 4)
+		jvmAsmGoto(&asm, findLoop)
+		jvmAsmMark(&asm, found)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmGetStatic(&asm, pool, "FO", "[I")
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "fileOpen", descriptor: "()I",
+			maxStack: 5, maxLocals: 5, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeFileClose(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		failed := jvmAsmNewLabel(&asm)
+		notFile := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 1)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmMember(&asm, 0xc1, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmBranch(&asm, 0x99, notFile)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmMember(&asm, 0xc0, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "close", "()V")
+		jvmAsmMark(&asm, notFile)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x01)
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "fileClose", descriptor: "(I)I",
+			maxStack: 3, maxLocals: 2, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeFileRead(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		stdin := jvmAsmNewLabel(&asm)
+		failed := jvmAsmNewLabel(&asm)
+		read := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmBranch(&asm, 0x99, stdin)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 3)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc1, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmBranch(&asm, 0x99, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc0, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "read", "([BII)I")
+		jvmAsmGoto(&asm, read)
+		jvmAsmMark(&asm, stdin)
+		jvmAsmMember(&asm, 0xb2,
+			jvmPoolField(pool, "java/lang/System", "in", "Ljava/io/InputStream;"))
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/InputStream", "read", "([BII)I")
+		jvmAsmMark(&asm, read)
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmBranch(&asm, 0x9c, done)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "fileRead", descriptor: "(III)I",
+			maxStack: 4, maxLocals: 4, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeFileWrite(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		failed := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 3)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc1, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmBranch(&asm, 0x99, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc0, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "write", "([BII)V")
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "fileWrite", descriptor: "(III)I",
+			maxStack: 4, maxLocals: 4, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeFileChmod(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		failed := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "fileChmod", descriptor: "(II)I",
+			maxStack: 2, maxLocals: 2, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeFileAt(pool *jvmConstantPool, write bool) jvmMethod {
+		var asm jvmAssembler
+		failed := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 4)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmMember(&asm, 0xc1, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmBranch(&asm, 0x99, failed)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmMember(&asm, 0xc0, jvmPoolClass(pool, "java/io/RandomAccessFile"))
+		jvmAsmLocal(&asm, 0x3a, 4)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "getFilePointer", "()J")
+		jvmAsmLocal(&asm, 0x37, 5)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x85)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "seek", "(J)V")
+		if write {
+			jvmAsmLocal(&asm, 0x15, 0)
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileWrite", "(III)I")
+		} else {
+			jvmAsmLocal(&asm, 0x15, 0)
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileRead", "(III)I")
+		}
+		jvmAsmLocal(&asm, 0x36, 7)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmLocal(&asm, 0x16, 5)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/RandomAccessFile", "seek", "(J)V")
+		jvmAsmLocal(&asm, 0x15, 7)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		name := "fileReadAt"
+		if write { name = "fileWriteAt" }
+		method := jvmMethod{access: 0x000a, name: name, descriptor: "(IIII)I",
+			maxStack: 4, maxLocals: 8, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeFileGetdents(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		failed := jvmAsmNewLabel(&asm)
+		loop := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		zeroLoop := jvmAsmNewLabel(&asm)
+		zeroDone := jvmAsmNewLabel(&asm)
+		regular := jvmAsmNewLabel(&asm)
+		typeReady := jvmAsmNewLabel(&asm)
+		tryStart := len(asm.code)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x06)
+		jvmAsmBranch(&asm, 0xa1, failed)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, failed)
+		jvmAsmGetStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 3)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc1, jvmPoolClass(pool, "java/io/File"))
+		jvmAsmBranch(&asm, 0x99, failed)
+		jvmAsmLocal(&asm, 0x19, 3)
+		jvmAsmMember(&asm, 0xc0, jvmPoolClass(pool, "java/io/File"))
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/File", "listFiles", "()[Ljava/io/File;")
+		jvmAsmLocal(&asm, 0x3a, 4)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmBranch(&asm, 0xc6, failed)
+		jvmAsmGetStatic(&asm, pool, "FO", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x2e)
+		jvmAsmLocal(&asm, 0x36, 5)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 6)
+		jvmAsmMark(&asm, loop)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, done)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/File", "getName", "()Ljava/lang/String;")
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "getBytes",
+			"(Ljava/lang/String;)[B")
+		jvmAsmLocal(&asm, 0x3a, 7)
+		jvmAsmLocal(&asm, 0x19, 7)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmInt(&asm, pool, 27)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, -8)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmLocal(&asm, 0x36, 8)
+		jvmAsmLocal(&asm, 0x15, 8)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x15, 6)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmBranch(&asm, 0xa3, done)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 6)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 9)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 10)
+		jvmAsmMark(&asm, zeroLoop)
+		jvmAsmLocal(&asm, 0x15, 10)
+		jvmAsmLocal(&asm, 0x15, 8)
+		jvmAsmBranch(&asm, 0xa2, zeroDone)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 9)
+		jvmAsmLocal(&asm, 0x15, 10)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0x54)
+		jvmAsmLocal(&asm, 0x15, 10)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 10)
+		jvmAsmGoto(&asm, zeroLoop)
+		jvmAsmMark(&asm, zeroDone)
+		for byteAt := 0; byteAt < 2; byteAt++ {
+			jvmAsmGetStatic(&asm, pool, "M", "[B")
+			jvmAsmLocal(&asm, 0x15, 9)
+			jvmAsmInt(&asm, pool, 16+byteAt)
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmLocal(&asm, 0x15, 8)
+			if byteAt != 0 {
+				jvmAsmInt(&asm, pool, 8)
+				jvmAsmU1(&asm, 0x7c)
+			}
+			jvmAsmU1(&asm, 0x54)
+		}
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 9)
+		jvmAsmInt(&asm, pool, 18)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x19, 4)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmInvokeVirtual(&asm, pool, "java/io/File", "isDirectory", "()Z")
+		jvmAsmBranch(&asm, 0x99, regular)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmGoto(&asm, typeReady)
+		jvmAsmMark(&asm, regular)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmMark(&asm, typeReady)
+		jvmAsmU1(&asm, 0x54)
+		jvmAsmLocal(&asm, 0x19, 7)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 9)
+		jvmAsmInt(&asm, pool, 19)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x19, 7)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy",
+			"(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmAsmLocal(&asm, 0x15, 6)
+		jvmAsmLocal(&asm, 0x15, 8)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 6)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 5)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmGetStatic(&asm, pool, "FO", "[I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmLocal(&asm, 0x15, 6)
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmMark(&asm, failed)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "fileGetdents", descriptor: "(III)I",
+			maxStack: 5, maxLocals: 11, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeSyscall(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		unsupported := jvmAsmNewLabel(&asm)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 217)
+		jvmAsmBranch(&asm, 0xa0, unsupported)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileGetdents", "(III)I")
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, unsupported)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "syscall", descriptor: "()I",
+			maxStack: 4, maxLocals: 0, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeRead16(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmU1(&asm, 0x78)
+		jvmAsmU1(&asm, 0x80)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "read16", descriptor: "(I)I",
+			maxStack: 3, maxLocals: 1, code: asm.code}
+	}
+
+	func jvmMakeCopyOut(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/Math", "min", "(II)I")
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy",
+			"(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "copyOut", descriptor: "([BII)I",
+			maxStack: 5, maxLocals: 4, code: asm.code}
+	}
+
+	func jvmMakeArguments(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmMember(&asm, 0xbd, jvmPoolClass(pool, "java/lang/String"))
+		jvmAsmLocal(&asm, 0x3a, 1)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLdcString(&asm, pool, "RenvoProgram")
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy",
+			"(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmU1(&asm, 0xb0)
+		return jvmMethod{access: 0x000a, name: "arguments",
+			descriptor: "([Ljava/lang/String;)[Ljava/lang/String;",
+			maxStack: 5, maxLocals: 2, code: asm.code}
+	}
+
+	func jvmMakeEnvironment(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		loop := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "getenv", "()Ljava/util/Map;")
+		jvmAsmInvokeInterface(&asm, pool, "java/util/Map", "entrySet", "()Ljava/util/Set;", 1)
+		jvmAsmInvokeInterface(&asm, pool, "java/util/Set", "toArray", "()[Ljava/lang/Object;", 1)
+		jvmAsmLocal(&asm, 0x3a, 0)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmMember(&asm, 0xbd, jvmPoolClass(pool, "java/lang/String"))
+		jvmAsmLocal(&asm, 0x3a, 1)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmMark(&asm, loop)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmBranch(&asm, 0xa2, done)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/String", "valueOf",
+			"(Ljava/lang/Object;)Ljava/lang/String;")
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmU1(&asm, 0xb0)
+		return jvmMethod{access: 0x000a, name: "environment",
+			descriptor: "()[Ljava/lang/String;", maxStack: 4,
+			maxLocals: 3, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeBuildStrings(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		loop := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 16)
+		jvmAsmU1(&asm, 0x68)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, 7)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInt(&asm, pool, -8)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 4)
+		jvmAsmMark(&asm, loop)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmBranch(&asm, 0xa2, done)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x32)
+		jvmAsmLocal(&asm, 0x3a, 5)
+		jvmAsmLocal(&asm, 0x19, 5)
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "getBytes",
+			"(Ljava/lang/String;)[B")
+		jvmAsmLocal(&asm, 0x3a, 6)
+		for field := 0; field < 4; field++ {
+			jvmAsmLocal(&asm, 0x15, 1)
+			jvmAsmLocal(&asm, 0x15, 4)
+			jvmAsmInt(&asm, pool, 16)
+			jvmAsmU1(&asm, 0x68)
+			jvmAsmU1(&asm, 0x60)
+			if field != 0 {
+				jvmAsmInt(&asm, pool, field*4)
+				jvmAsmU1(&asm, 0x60)
+			}
+			jvmAsmInt(&asm, pool, 4)
+			if field == 0 {
+				jvmAsmLocal(&asm, 0x15, 3)
+			} else if field == 2 {
+				jvmAsmLocal(&asm, 0x19, 6)
+				jvmAsmU1(&asm, 0xbe)
+			} else {
+				jvmAsmU1(&asm, 0x03)
+			}
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+			jvmAsmU1(&asm, 0x57)
+		}
+		jvmAsmLocal(&asm, 0x19, 6)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmLocal(&asm, 0x19, 6)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy",
+			"(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmLocal(&asm, 0x19, 6)
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 4)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x000a, name: "buildStrings",
+			descriptor: "([Ljava/lang/String;I)I", maxStack: 6,
+			maxLocals: 7, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmMakeBuildArgsEnv(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmGetStatic(&asm, pool, "A", "[Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "buildStrings",
+			"([Ljava/lang/String;I)I")
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmGetStatic(&asm, pool, "E", "[Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 32768)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "buildStrings",
+			"([Ljava/lang/String;I)I")
+		jvmAsmLocal(&asm, 0x36, 3)
+		for i := 0; i < 6; i++ {
+			jvmAsmGetStatic(&asm, pool, "R", "[I")
+			jvmAsmInt(&asm, pool, i)
+			if i == 1 || i == 4 {
+				jvmAsmLocal(&asm, 0x15, 2)
+			} else if i == 3 {
+				jvmAsmLocal(&asm, 0x15, 0)
+			} else if i == 2 {
+				jvmAsmLocal(&asm, 0x15, 0)
+				jvmAsmInt(&asm, pool, 32768)
+				jvmAsmU1(&asm, 0x60)
+			} else if i == 5 {
+				jvmAsmLocal(&asm, 0x15, 3)
+			} else {
+				jvmAsmU1(&asm, 0x03)
+			}
+			jvmAsmU1(&asm, 0x4f)
+		}
+		// rdx (word 2) is the argument slice capacity, while rcx begins the
+		// environment slice. Correct the compact loop's register ordering.
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 2)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 32768)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 3)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 5)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGetStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 6)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "buildArgsEnv",
+			descriptor: "(II)V", maxStack: 5, maxLocals: 4, code: asm.code}
+	}
+
+	func jvmMakeReflectString(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		tryStart := len(asm.code)
+		// Three little-endian u16 lengths prefix UTF-8 class, method, and argument.
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "read16", "(I)I")
+		jvmAsmLocal(&asm, 0x36, 4)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmU1(&asm, 0x05)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "read16", "(I)I")
+		jvmAsmLocal(&asm, 0x36, 5)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "read16", "(I)I")
+		jvmAsmLocal(&asm, 0x36, 6)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 6)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "stringAt", "(II)Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x3a, 7)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 6)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "stringAt", "(II)Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x3a, 8)
+		jvmAsmLocal(&asm, 0x15, 0)
+		jvmAsmInt(&asm, pool, 6)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 6)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "stringAt", "(II)Ljava/lang/String;")
+		jvmAsmLocal(&asm, 0x3a, 9)
+		jvmAsmLocal(&asm, 0x19, 7)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/Class", "forName",
+			"(Ljava/lang/String;)Ljava/lang/Class;")
+		jvmAsmLocal(&asm, 0x3a, 10)
+		jvmAsmLocal(&asm, 0x19, 10)
+		jvmAsmLocal(&asm, 0x19, 8)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmMember(&asm, 0xbd, jvmPoolClass(pool, "java/lang/Class"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLdcClass(&asm, pool, "java/lang/String")
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/Class", "getMethod",
+			"(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;")
+		jvmAsmLocal(&asm, 0x3a, 11)
+		jvmAsmLocal(&asm, 0x19, 11)
+		jvmAsmU1(&asm, 0x01)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmMember(&asm, 0xbd, jvmPoolClass(pool, "java/lang/Object"))
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x19, 9)
+		jvmAsmU1(&asm, 0x53)
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/reflect/Method", "invoke",
+			"(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/String", "valueOf",
+			"(Ljava/lang/Object;)Ljava/lang/String;")
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "getBytes",
+			"(Ljava/lang/String;)[B")
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "copyOut", "([BII)I")
+		jvmAsmU1(&asm, 0xac)
+		tryEnd := len(asm.code)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0x02)
+		jvmAsmU1(&asm, 0xac)
+		method := jvmMethod{access: 0x000a, name: "reflectString", descriptor: "(IIII)I",
+			maxStack: 7, maxLocals: 12, code: asm.code}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmMakeHost(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		property := jvmAsmNewLabel(&asm)
+		reflectCall := jvmAsmNewLabel(&asm)
+		floatBinary := jvmAsmNewLabel(&asm)
+		floatCompare := jvmAsmNewLabel(&asm)
+		floatConvert := jvmAsmNewLabel(&asm)
+		intToFloat := jvmAsmNewLabel(&asm)
+		floatToInt := jvmAsmNewLabel(&asm)
+		floatNegate := jvmAsmNewLabel(&asm)
+		failed := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4a01)
+		jvmAsmBranch(&asm, 0x9f, property)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4a02)
+		jvmAsmBranch(&asm, 0x9f, reflectCall)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b01)
+		jvmAsmBranch(&asm, 0x9f, floatBinary)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b02)
+		jvmAsmBranch(&asm, 0x9f, floatCompare)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b03)
+		jvmAsmBranch(&asm, 0x9f, floatConvert)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b04)
+		jvmAsmBranch(&asm, 0x9f, intToFloat)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b05)
+		jvmAsmBranch(&asm, 0x9f, floatToInt)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 0x4b06)
+		jvmAsmBranch(&asm, 0x9f, floatNegate)
+		jvmAsmGoto(&asm, failed)
+		jvmAsmMark(&asm, property)
+		tryStart := len(asm.code)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "stringAt", "(II)Ljava/lang/String;")
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "getProperty",
+			"(Ljava/lang/String;)Ljava/lang/String;")
+		jvmAsmU1(&asm, 0x59)
+		propertyPresent := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0xc7, propertyPresent)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmU1(&asm, 0x58)
+		jvmAsmGoto(&asm, failed)
+		jvmAsmMark(&asm, propertyPresent)
+		jvmAsmLdcString(&asm, pool, "UTF-8")
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "getBytes",
+			"(Ljava/lang/String;)[B")
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "copyOut", "([BII)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGoto(&asm, done)
+		tryEnd := len(asm.code)
+		jvmAsmMark(&asm, reflectCall)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "reflectString", "(IIII)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatBinary)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmRLoadConst(&asm, pool, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "floatBinary", "(IIIII)V")
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatCompare)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "floatCompare", "(IIII)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatConvert)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "floatConvert", "(IIII)V")
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, intToFloat)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "intToFloat", "(IIII)V")
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatToInt)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmRLoadConst(&asm, pool, 2)
+		jvmAsmRLoadConst(&asm, pool, 5)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "floatToInt", "(IIIII)V")
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, floatNegate)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "floatNegate", "(II)V")
+		jvmAsmGoto(&asm, done)
+		jvmAsmMark(&asm, failed)
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "syscall", "()I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xb1)
+		handler := len(asm.code)
+		jvmAsmU1(&asm, 0x57)
+		jvmAsmGoto(&asm, failed)
+		method := jvmMethod{access: 0x000a, name: "host", descriptor: "()V",
+			maxStack: 7, maxLocals: 0, code: jvmAsmPatch(&asm)}
+		method.exceptionStart = []int{tryStart}
+		method.exceptionEnd = []int{tryEnd}
+		method.exceptionHandler = []int{handler}
+		method.exceptionClass = []int{0}
+		return method
+	}
+
+	func jvmRunNextLocal(
+		asm *jvmAssembler, pool *jvmConstantPool, local int,
+	) {
+		jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "u8", "()I")
+		jvmAsmLocal(asm, 0x36, local)
+	}
+
+	func jvmRunI32Local(
+		asm *jvmAssembler, pool *jvmConstantPool, local int,
+	) {
+		jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "i32", "()I")
+		jvmAsmLocal(asm, 0x36, local)
+	}
+
+	func jvmRunRLoadLocal(
+		asm *jvmAssembler, pool *jvmConstantPool, local int,
+	) {
+		jvmAsmGetStatic(asm, pool, "R", "[I")
+		jvmAsmLocal(asm, 0x15, local)
+		jvmAsmU1(asm, 0x2e)
+	}
+
+	func jvmRunRStoreLocalPrefix(
+		asm *jvmAssembler, pool *jvmConstantPool, local int,
+	) {
+		jvmAsmGetStatic(asm, pool, "R", "[I")
+		jvmAsmLocal(asm, 0x15, local)
+	}
+
+	func jvmRunContinue(asm *jvmAssembler, loop int) {
+		jvmAsmGoto(asm, loop)
+	}
+
+	func jvmMakeRun(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		loop := jvmAsmNewLabel(&asm)
+		invalid := jvmAsmNewLabel(&asm)
+		labels := make([]int, 46)
+		for i := 0; i < len(labels); i++ { labels[i] = jvmAsmNewLabel(&asm) }
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "arguments",
+			"([Ljava/lang/String;)[Ljava/lang/String;")
+		jvmAsmPutStatic(&asm, pool, "A", "[Ljava/lang/String;")
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "environment",
+			"()[Ljava/lang/String;")
+		jvmAsmPutStatic(&asm, pool, "E", "[Ljava/lang/String;")
+		jvmAsmMark(&asm, loop)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "u8", "()I")
+		jvmAsmTableSwitch(&asm, 1, labels, invalid)
+
+		// exit
+		jvmAsmMark(&asm, labels[0])
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 255)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmU1(&asm, 0xac)
+
+		// frame, move-immediate, move
+		jvmAsmMark(&asm, labels[1])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+		jvmAsmPutStatic(&asm, pool, "FS", "I")
+		jvmRunContinue(&asm, loop)
+		jvmAsmMark(&asm, labels[2])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+		jvmAsmMark(&asm, labels[3])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunNextLocal(&asm, pool, 2)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		jvmRunRLoadLocal(&asm, pool, 2)
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		// push register / immediate and pop register.
+		for op := 5; op <= 6; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmAsmGetStatic(&asm, pool, "SP", "I")
+			jvmAsmInt(&asm, pool, 4)
+			if op == 5 {
+				jvmRunNextLocal(&asm, pool, 1)
+				jvmRunRLoadLocal(&asm, pool, 1)
+			} else {
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+			}
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+			jvmAsmU1(&asm, 0x57)
+			jvmAsmGetStatic(&asm, pool, "SP", "I")
+			jvmAsmInt(&asm, pool, 4)
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmPutStatic(&asm, pool, "SP", "I")
+			jvmRunContinue(&asm, loop)
+		}
+		jvmAsmMark(&asm, labels[6])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmAsmGetStatic(&asm, pool, "SP", "I")
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmU1(&asm, 0x59)
+		jvmAsmPutStatic(&asm, pool, "SP", "I")
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		// frame load/store/address.
+		for op := 8; op <= 10; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmRunNextLocal(&asm, pool, 1)
+			jvmRunI32Local(&asm, pool, 2)
+			jvmAsmGetStatic(&asm, pool, "FP", "I")
+			jvmAsmLocal(&asm, 0x15, 2)
+			jvmAsmU1(&asm, 0x64)
+			jvmAsmLocal(&asm, 0x36, 3)
+			if op == 8 {
+				jvmRunRStoreLocalPrefix(&asm, pool, 1)
+				jvmAsmLocal(&asm, 0x15, 3)
+				jvmAsmInt(&asm, pool, 4)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "load", "(II)I")
+				jvmAsmU1(&asm, 0x4f)
+			} else if op == 9 {
+				jvmAsmLocal(&asm, 0x15, 3)
+				jvmAsmInt(&asm, pool, 4)
+				jvmRunRLoadLocal(&asm, pool, 1)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+				jvmAsmU1(&asm, 0x57)
+			} else {
+				jvmRunRStoreLocalPrefix(&asm, pool, 1)
+				jvmAsmLocal(&asm, 0x15, 3)
+				jvmAsmU1(&asm, 0x4f)
+			}
+			jvmRunContinue(&asm, loop)
+		}
+
+		// memory load/store.
+		for op := 11; op <= 12; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmRunNextLocal(&asm, pool, 1)
+			jvmRunNextLocal(&asm, pool, 2)
+			jvmRunRLoadLocal(&asm, pool, 2)
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmLocal(&asm, 0x36, 3)
+			jvmRunNextLocal(&asm, pool, 4)
+			if op == 11 {
+				jvmRunRStoreLocalPrefix(&asm, pool, 1)
+				jvmAsmLocal(&asm, 0x15, 3)
+				jvmAsmLocal(&asm, 0x15, 4)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "loadCode", "(II)I")
+				jvmAsmU1(&asm, 0x4f)
+			} else {
+				jvmAsmLocal(&asm, 0x15, 3)
+				jvmAsmLocal(&asm, 0x15, 4)
+				jvmRunRLoadLocal(&asm, pool, 1)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+				jvmAsmU1(&asm, 0x57)
+			}
+			jvmRunContinue(&asm, loop)
+		}
+
+		// indexed memory load/store.
+		for op := 13; op <= 14; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmRunNextLocal(&asm, pool, 1)
+			jvmRunNextLocal(&asm, pool, 2)
+			jvmRunNextLocal(&asm, pool, 3)
+			jvmRunNextLocal(&asm, pool, 4)
+			jvmRunRLoadLocal(&asm, pool, 2)
+			jvmRunRLoadLocal(&asm, pool, 3)
+			jvmAsmLocal(&asm, 0x15, 4)
+			jvmAsmU1(&asm, 0x68)
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+			jvmAsmU1(&asm, 0x60)
+			jvmAsmLocal(&asm, 0x36, 5)
+			jvmRunNextLocal(&asm, pool, 4)
+			if op == 13 {
+				jvmRunRStoreLocalPrefix(&asm, pool, 1)
+				jvmAsmLocal(&asm, 0x15, 5)
+				jvmAsmLocal(&asm, 0x15, 4)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "loadCode", "(II)I")
+				jvmAsmU1(&asm, 0x4f)
+			} else {
+				jvmAsmLocal(&asm, 0x15, 5)
+				jvmAsmLocal(&asm, 0x15, 4)
+				jvmRunRLoadLocal(&asm, pool, 1)
+				jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "store", "(III)Z")
+				jvmAsmU1(&asm, 0x57)
+			}
+			jvmRunContinue(&asm, loop)
+		}
+
+		// arithmetic and bitwise operations.
+		for op := 15; op <= 25; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmRunNextLocal(&asm, pool, 1)
+			jvmRunNextLocal(&asm, pool, 2)
+			jvmRunRStoreLocalPrefix(&asm, pool, 1)
+			jvmAsmInt(&asm, pool, op)
+			jvmRunRLoadLocal(&asm, pool, 1)
+			jvmRunRLoadLocal(&asm, pool, 2)
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "binary", "(III)I")
+			jvmAsmU1(&asm, 0x4f)
+			jvmRunContinue(&asm, loop)
+		}
+
+		jvmAsmMark(&asm, labels[25])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		jvmRunRLoadLocal(&asm, pool, 1)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[26])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunNextLocal(&asm, pool, 2)
+		jvmRunRLoadLocal(&asm, pool, 1)
+		jvmAsmPutStatic(&asm, pool, "FL", "I")
+		jvmRunRLoadLocal(&asm, pool, 2)
+		jvmAsmPutStatic(&asm, pool, "FR", "I")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[27])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunNextLocal(&asm, pool, 2)
+		jvmRunRStoreLocalPrefix(&asm, pool, 2)
+		jvmAsmGetStatic(&asm, pool, "FL", "I")
+		jvmAsmGetStatic(&asm, pool, "FR", "I")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "condition", "(III)Z")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[28])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+		jvmAsmPutStatic(&asm, pool, "PC", "I")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[29])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunI32Local(&asm, pool, 2)
+		jvmAsmGetStatic(&asm, pool, "FL", "I")
+		jvmAsmGetStatic(&asm, pool, "FR", "I")
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "condition", "(III)Z")
+		notTaken := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0x99, notTaken)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmPutStatic(&asm, pool, "PC", "I")
+		jvmAsmMark(&asm, notTaken)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[30])
+		jvmRunI32Local(&asm, pool, 1)
+		jvmRunI32Local(&asm, pool, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "call", "(II)V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[31])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "ret", "()Z")
+		returned := jvmAsmNewLabel(&asm)
+		jvmAsmBranch(&asm, 0x9a, returned)
+		jvmAsmRLoadConst(&asm, pool, 0)
+		jvmAsmInt(&asm, pool, 255)
+		jvmAsmU1(&asm, 0x7e)
+		jvmAsmU1(&asm, 0xac)
+		jvmAsmMark(&asm, returned)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[32])
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "syscall", "()I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[33])
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy", "(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[34])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunNextLocal(&asm, pool, 2)
+		jvmRunNextLocal(&asm, pool, 3)
+		jvmRunI32Local(&asm, pool, 4)
+		jvmRunI32Local(&asm, pool, 5)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		baseMissing := jvmAsmNewLabel(&asm)
+		baseDone := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0xa2, baseMissing)
+		jvmRunRLoadLocal(&asm, pool, 2)
+		jvmAsmGoto(&asm, baseDone)
+		jvmAsmMark(&asm, baseMissing)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmMark(&asm, baseDone)
+		indexMissing := jvmAsmNewLabel(&asm)
+		indexDone := jvmAsmNewLabel(&asm)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmBranch(&asm, 0xa2, indexMissing)
+		jvmRunRLoadLocal(&asm, pool, 3)
+		jvmAsmGoto(&asm, indexDone)
+		jvmAsmMark(&asm, indexMissing)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmMark(&asm, indexDone)
+		jvmAsmLocal(&asm, 0x15, 4)
+		jvmAsmU1(&asm, 0x68)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x15, 5)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[35])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "write", "()V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[36])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunI32Local(&asm, pool, 2)
+		jvmRunRLoadLocal(&asm, pool, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "call", "(II)V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[37])
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileOpen", "()I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[38])
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileClose", "(I)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[39])
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmRLoadConst(&asm, pool, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileRead", "(III)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[40])
+		jvmAsmRStoreConstPrefix(&asm, pool, 0)
+		jvmAsmRLoadConst(&asm, pool, 3)
+		jvmAsmRLoadConst(&asm, pool, 4)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "fileChmod", "(II)I")
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		for op := 42; op <= 43; op++ {
+			jvmAsmMark(&asm, labels[op-1])
+			jvmAsmRStoreConstPrefix(&asm, pool, 0)
+			jvmAsmRLoadConst(&asm, pool, 3)
+			jvmAsmRLoadConst(&asm, pool, 4)
+			jvmAsmRLoadConst(&asm, pool, 1)
+			jvmAsmRLoadConst(&asm, pool, 2)
+			name := "fileReadAt"
+			if op == 43 { name = "fileWriteAt" }
+			jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", name, "(IIII)I")
+			jvmAsmU1(&asm, 0x4f)
+			jvmRunContinue(&asm, loop)
+		}
+
+		jvmAsmMark(&asm, labels[43])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "i32", "()I")
+		jvmAsmLocal(&asm, 0x36, 1)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "u8", "()I")
+		jvmAsmLocal(&asm, 0x36, 2)
+		jvmAsmLocal(&asm, 0x15, 1)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "buildArgsEnv", "(II)V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[44])
+		jvmRunNextLocal(&asm, pool, 1)
+		jvmRunRStoreLocalPrefix(&asm, pool, 1)
+		jvmRunRLoadLocal(&asm, pool, 1)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x64)
+		jvmAsmU1(&asm, 0x4f)
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, labels[45])
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "host", "()V")
+		jvmRunContinue(&asm, loop)
+
+		jvmAsmMark(&asm, invalid)
+		jvmAsmInt(&asm, pool, 126)
+		jvmAsmU1(&asm, 0xac)
+		return jvmMethod{access: 0x0009, name: "run",
+			descriptor: "([Ljava/lang/String;)I", maxStack: 8,
+			maxLocals: 6, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmAsmLdcString(
+		asm *jvmAssembler, pool *jvmConstantPool, value string,
+	) {
+		index := jvmPoolString(pool, value)
+		if index <= 255 {
+			jvmAsmU1(asm, 0x12)
+			jvmAsmU1(asm, index)
+		} else {
+			jvmAsmU1(asm, 0x13)
+			jvmAsmU2(asm, index)
+		}
+	}
+
+	func jvmAsmLdcClass(
+		asm *jvmAssembler, pool *jvmConstantPool, name string,
+	) {
+		index := jvmPoolClass(pool, name)
+		if index <= 255 {
+			jvmAsmU1(asm, 0x12)
+			jvmAsmU1(asm, index)
+		} else {
+			jvmAsmU1(asm, 0x13)
+			jvmAsmU2(asm, index)
+		}
+	}
+
+	func jvmAsmLdcByteString(
+		asm *jvmAssembler, pool *jvmConstantPool, value []byte,
+	) {
+		index := jvmPoolByteString(pool, value)
+		if index <= 255 {
+			jvmAsmU1(asm, 0x12)
+			jvmAsmU1(asm, index)
+		} else {
+			jvmAsmU1(asm, 0x13)
+			jvmAsmU2(asm, index)
+		}
+	}
+
+	func jvmMakeCopyChars(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		loop := jvmAsmNewLabel(&asm)
+		done := jvmAsmNewLabel(&asm)
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmMark(&asm, loop)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "length", "()I")
+		jvmAsmBranch(&asm, 0xa2, done)
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmLocal(&asm, 0x15, 2)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x19, 1)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmInvokeVirtual(&asm, pool, "java/lang/String", "charAt", "(I)C")
+		jvmAsmU1(&asm, 0x91)
+		jvmAsmU1(&asm, 0x54)
+		jvmAsmLocal(&asm, 0x15, 3)
+		jvmAsmU1(&asm, 0x04)
+		jvmAsmU1(&asm, 0x60)
+		jvmAsmLocal(&asm, 0x36, 3)
+		jvmAsmGoto(&asm, loop)
+		jvmAsmMark(&asm, done)
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x000a, name: "copyChars",
+			descriptor: "([BLjava/lang/String;I)V", maxStack: 5,
+			maxLocals: 4, code: jvmAsmPatch(&asm)}
+	}
+
+	func jvmEmitDecodedBytes(
+		asm *jvmAssembler, pool *jvmConstantPool, data []byte,
+	) {
+		chunkSize := 24000
+		jvmAsmInt(asm, pool, len(data))
+		jvmAsmU1(asm, 0xbc)
+		jvmAsmU1(asm, 8)
+		count := (len(data)+chunkSize-1)/chunkSize
+		for i := 0; i < count; i++ {
+			start := i*chunkSize
+			end := start+chunkSize
+			if end > len(data) { end = len(data) }
+			jvmAsmU1(asm, 0x59)
+			jvmAsmLdcByteString(asm, pool, data[start:end])
+			jvmAsmInt(asm, pool, start)
+			jvmAsmInvokeStatic(asm, pool, "RenvoProgram", "copyChars",
+				"([BLjava/lang/String;I)V")
+		}
+	}
+
+	func jvmMakeClassInit(
+		pool *jvmConstantPool, code []byte, data []byte,
+		dataBase int, bssBase int, bssSize int,
+	) jvmMethod {
+		var asm jvmAssembler
+		jvmEmitDecodedBytes(&asm, pool, code)
+		jvmAsmPutStatic(&asm, pool, "C", "[B")
+		jvmEmitDecodedBytes(&asm, pool, data)
+		jvmAsmPutStatic(&asm, pool, "D", "[B")
+		memorySize := bssBase+bssSize+jvmStackBytes
+		jvmAsmInt(&asm, pool, memorySize)
+		jvmAsmU1(&asm, 0xbc)
+		jvmAsmU1(&asm, 8)
+		jvmAsmPutStatic(&asm, pool, "M", "[B")
+		jvmAsmGetStatic(&asm, pool, "D", "[B")
+		jvmAsmU1(&asm, 0x03)
+		jvmAsmGetStatic(&asm, pool, "M", "[B")
+		jvmAsmInt(&asm, pool, dataBase)
+		jvmAsmGetStatic(&asm, pool, "D", "[B")
+		jvmAsmU1(&asm, 0xbe)
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "arraycopy",
+			"(Ljava/lang/Object;ILjava/lang/Object;II)V")
+		jvmAsmInt(&asm, pool, 8)
+		jvmAsmU1(&asm, 0xbc)
+		jvmAsmU1(&asm, 10)
+		jvmAsmPutStatic(&asm, pool, "R", "[I")
+		jvmAsmInt(&asm, pool, 256)
+		jvmAsmMember(&asm, 0xbd, jvmPoolClass(pool, "java/lang/Object"))
+		jvmAsmPutStatic(&asm, pool, "F", "[Ljava/lang/Object;")
+		jvmAsmInt(&asm, pool, 256)
+		jvmAsmU1(&asm, 0xbc)
+		jvmAsmU1(&asm, 10)
+		jvmAsmPutStatic(&asm, pool, "FO", "[I")
+		frameArrays := []string{"CPC", "CFP", "CSP", "CFS", "CDROP"}
+		for i := 0; i < len(frameArrays); i++ {
+			jvmAsmInt(&asm, pool, 65536)
+			jvmAsmU1(&asm, 0xbc)
+			jvmAsmU1(&asm, 10)
+			jvmAsmPutStatic(&asm, pool, frameArrays[i], "[I")
+		}
+		jvmAsmInt(&asm, pool, bssBase+bssSize)
+		jvmAsmPutStatic(&asm, pool, "SP", "I")
+		jvmAsmInt(&asm, pool, memorySize)
+		jvmAsmPutStatic(&asm, pool, "FP", "I")
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x0008, name: "<clinit>", descriptor: "()V",
+			maxStack: 6, maxLocals: 0, code: asm.code}
+	}
+
+	func jvmMakeMain(pool *jvmConstantPool) jvmMethod {
+		var asm jvmAssembler
+		jvmAsmLocal(&asm, 0x19, 0)
+		jvmAsmInvokeStatic(&asm, pool, "RenvoProgram", "run",
+			"([Ljava/lang/String;)I")
+		jvmAsmInvokeStatic(&asm, pool, "java/lang/System", "exit", "(I)V")
+		jvmAsmU1(&asm, 0xb1)
+		return jvmMethod{access: 0x0009, name: "main",
+			descriptor: "([Ljava/lang/String;)V", maxStack: 1,
+			maxLocals: 1, code: asm.code}
+	}
+
+	func jvmFieldBytes(
+		pool *jvmConstantPool, name string, descriptor string,
+	) []byte {
+		var result []byte
+		result = jvmBE16(result, 0x000a)
+		result = jvmBE16(result, jvmPoolUTF8(pool, name))
+		result = jvmBE16(result, jvmPoolUTF8(pool, descriptor))
+		return jvmBE16(result, 0)
+	}
+
+	func jvmBuildClass(out *RTGEmitter) []byte {
+		code := out.Code()
+		data := out.Data()
+		dataBase := jvmDataBase
+		bssBase := RTGAlignValue(dataBase+len(data), 8)
+		var pool jvmConstantPool
+		thisClass := jvmPoolClass(&pool, "RenvoProgram")
+		superClass := jvmPoolClass(&pool, "java/lang/Object")
+		fieldNames := []string{"C", "D", "M", "R", "A", "E", "F", "FO", "PC", "SP", "FP", "FS", "FL", "FR", "CS", "CPC", "CFP", "CSP", "CFS", "CDROP"}
+		fieldTypes := []string{"[B", "[B", "[B", "[I", "[Ljava/lang/String;", "[Ljava/lang/String;", "[Ljava/lang/Object;", "[I", "I", "I", "I", "I", "I", "I", "I", "[I", "[I", "[I", "[I", "[I"}
+		fieldBytes := make([][]byte, len(fieldNames))
+		for i := 0; i < len(fieldNames); i++ {
+			fieldBytes[i] = jvmFieldBytes(&pool, fieldNames[i], fieldTypes[i])
+		}
+		methods := []jvmMethod{
+			jvmMakeConstructor(&pool),
+			jvmMakeCopyChars(&pool),
+			jvmMakeArguments(&pool),
+			jvmMakeEnvironment(&pool),
+			jvmMakeU8(&pool),
+			jvmMakeI32(&pool),
+			jvmMakeLoad(&pool),
+			jvmMakeStore(&pool),
+			jvmMakeLoadLong(&pool),
+			jvmMakeStoreLong(&pool),
+			jvmMakeFloatBinary(&pool),
+			jvmMakeFloatCompare(&pool),
+			jvmMakeFloatConvert(&pool),
+			jvmMakeIntToFloat(&pool),
+			jvmMakeFloatToInt(&pool),
+			jvmMakeFloatNegate(&pool),
+			jvmMakeLoadCode(&pool),
+			jvmMakeCondition(&pool),
+			jvmMakeBinary(&pool),
+			jvmMakeCall(&pool),
+			jvmMakeReturn(&pool),
+			jvmMakeWrite(&pool),
+			jvmMakeStringAt(&pool),
+			jvmMakePathAt(&pool),
+			jvmMakeFileOpen(&pool),
+			jvmMakeFileClose(&pool),
+			jvmMakeFileRead(&pool),
+			jvmMakeFileWrite(&pool),
+			jvmMakeFileChmod(&pool),
+			jvmMakeFileAt(&pool, false),
+			jvmMakeFileAt(&pool, true),
+			jvmMakeFileGetdents(&pool),
+			jvmMakeSyscall(&pool),
+			jvmMakeRead16(&pool),
+			jvmMakeCopyOut(&pool),
+			jvmMakeBuildStrings(&pool),
+			jvmMakeBuildArgsEnv(&pool),
+			jvmMakeReflectString(&pool),
+			jvmMakeHost(&pool),
+			jvmMakeClassInit(&pool, code, data, dataBase, bssBase, out.BSSSize()),
+			jvmMakeRun(&pool),
+			jvmMakeMain(&pool),
+		}
+		methodBytes := make([][]byte, len(methods))
+		for i := 0; i < len(methods); i++ {
+			methodBytes[i] = jvmClassMethodBytes(&pool, methods[i])
+		}
+		var result []byte
+		result = append(result, 0xca, 0xfe, 0xba, 0xbe)
+		result = jvmBE16(result, 0)
+		result = jvmBE16(result, 49)
+		result = jvmBE16(result, len(pool.entries)+1)
+		for i := 0; i < len(pool.entries); i++ {
+			result = append(result, pool.entries[i]...)
+		}
+		result = jvmBE16(result, 0x0031)
+		result = jvmBE16(result, thisClass)
+		result = jvmBE16(result, superClass)
+		result = jvmBE16(result, 0)
+		result = jvmBE16(result, len(fieldBytes))
+		for i := 0; i < len(fieldBytes); i++ {
+			result = append(result, fieldBytes[i]...)
+		}
+		result = jvmBE16(result, len(methodBytes))
+		for i := 0; i < len(methodBytes); i++ {
+			result = append(result, methodBytes[i]...)
+		}
+		return jvmBE16(result, 0)
+	}
+
+	func jvmClassMethodBytes(
+		pool *jvmConstantPool, method jvmMethod,
+	) []byte {
+		var result []byte
+		result = jvmBE16(result, method.access)
+		result = jvmBE16(result, jvmPoolUTF8(pool, method.name))
+		result = jvmBE16(result, jvmPoolUTF8(pool, method.descriptor))
+		result = jvmBE16(result, 1)
+		result = jvmBE16(result, jvmPoolUTF8(pool, "Code"))
+		exceptionBytes := len(method.exceptionStart)*8
+		result = jvmBE32(result, 12+len(method.code)+exceptionBytes)
+		result = jvmBE16(result, method.maxStack)
+		result = jvmBE16(result, method.maxLocals)
+		result = jvmBE32(result, len(method.code))
+		result = append(result, method.code...)
+		result = jvmBE16(result, len(method.exceptionStart))
+		for i := 0; i < len(method.exceptionStart); i++ {
+			result = jvmBE16(result, method.exceptionStart[i])
+			result = jvmBE16(result, method.exceptionEnd[i])
+			result = jvmBE16(result, method.exceptionHandler[i])
+			result = jvmBE16(result, method.exceptionClass[i])
+		}
+		result = jvmBE16(result, 0)
+		return result
+	}
+
+	func jvmImage(out *RTGEmitter) []byte {
+		return jvmBuildClass(out)
+	}
+}
+
+arch jvmvm32 {
+	alias = jvmvm32
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	stack_word_bytes = 4
+	stack_alignment = 8
+	unaligned_memory = true
+	patch_relocations = go jvmPatchRelocations
+	registers virtual = [rax, rdx, rcx, rdi, rsi, r8, r9, r10]
+	locations {
+		primary = rax
+		secondary = rdx
+		tertiary = rcx
+		scratch = r10
+		copy_destination = rdi
+		copy_source = rsi
+		copy_count = rdx
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		slt = 2
+		sle = 3
+		sgt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go jvmMove
+		address = go jvmAddress
+		load.native = go jvmLoadNative
+		load.i32 = go jvmLoadI32
+		load.u32 = go jvmLoadU32
+		load.i16 = go jvmLoadI16
+		load.u16 = go jvmLoadU16
+		load.i8 = go jvmLoadI8
+		load.u8 = go jvmLoadU8
+		store.native = go jvmStoreNative
+		store.u32 = go jvmStoreU32
+		store.u16 = go jvmStoreU16
+		store.u8 = go jvmStoreU8
+		add = go jvmAdd
+		subtract = go jvmSubtract
+		multiply = go jvmMultiply
+		bit_and = go jvmBitAnd
+		bit_or = go jvmBitOr
+		bit_xor = go jvmBitXor
+		compare = go jvmCompare
+		test = go jvmTest
+		increment = go jvmIncrement
+		decrement = go jvmDecrement
+		shift_left_immediate = go jvmShiftLeftImmediate
+		shift_right_unsigned_immediate = go jvmShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go jvmShiftRightSignedImmediate
+		call = go jvmCall
+		call_indirect = go jvmCallIndirect
+		jump = go jvmJump
+		jump_condition = go jvmJumpCondition
+		set_condition = go jvmSetCondition
+		return = go jvmReturn
+		leave = go jvmLeave
+		host_syscall = go jvmHostSyscall
+		move_immediate = go jvmMoveImmediate
+		variable_shift = go jvmVariableShift
+		signed_divide = go jvmSignedDivide
+		copy_bytes = go jvmCopyBytes
+	}
+}
+
+abi jvm_internal {
+	arch = jvmvm32
+	frame_start = go jvmFrameStart
+	frame_finish = go jvmFrameFinish
+	push_register = go jvmPushRegister
+	push_immediate = go jvmPushImmediate
+	pop_register = go jvmPopRegister
+	frame_load = go jvmLoadFrame
+	frame_store = go jvmStoreFrame
+	frame_address = go jvmAddressFrame
+	store_param_word = go jvmStoreParamWord
+	call_word_count = go jvmCallWordCount
+	call_words = [rdi, rsi, rdx, rcx, r8, r9]
+	result = [primary, secondary, tertiary]
+	stack_alignment = 8
+}
+
+runtime jvm_hosted {
+	emit_entry = go jvmHostedEntry
+	emit_exit = go jvmExit
+	emit_static_call = go jvmStaticCall
+	syscall {
+		number = rax
+		arguments = [rdi, rsi, rdx, rcx, r8, r9]
+		result = rax
+		instruction = host_syscall
+	}
+	operation write { emit = go jvmWrite }
+	operation open { emit = go jvmOpen }
+	operation close { emit = go jvmClose }
+	operation read { emit = go jvmRead }
+	operation chmod { emit = go jvmChmod }
+	operation read_at { emit = go jvmReadAt }
+	operation write_at { emit = go jvmWriteAt }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format jvm_classfile {
+	# Renvo linear memory is little-endian. The image hook writes the JVM's
+	# independently big-endian classfile structures explicitly.
+	byte_order = little
+	address_bits = 32
+	kind = "jvm-class"
+	code_offset = 0
+	image = go jvmImage
+}
+
+target jvm/vm32 {
+	family = structured32
+	os = jvm
+	arch = jvmvm32
+	frontend_arch = vm32
+	max_align = 8
+	abi = jvm_internal
+	runtime = jvm_hosted
+	executable = jvm_classfile
+	arena_default = 16777216
+	build_tags = [jvm, vm, vm32, renvo_jvm_prepared]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment, ieee_float]
+}
+
+@stdlib "syscall/syscall_jvm_vm32_renvo.go"
+//go:build renvo && jvm && vm32
+
+package syscall
+
+// renvoSyscallJVM is recognized by the linker as the JVM host-call boundary.
+func renvoSyscallJVM(number int, first string, firstLen int, output []byte, outputLen int) int {
+	return 0
+}
+
+func JVMCall(number int, first string, output []byte) int {
+	return renvoSyscallJVM(number, first, len(first), output, len(output))
+}
+@endstdlib
+
+@stdlib "java/java_jvm_vm32_renvo.go"
+//go:build renvo && jvm && vm32
+
+// Package java exposes the explicit Java boundary supplied by the JVM RBE.
+// This v1 surface copies strings and does not expose JVM references.
+package java
+
+import "syscall"
+
+const (
+	hostSystemProperty = 0x4a01
+	hostCallStaticString = 0x4a02
+)
+
+func GetProperty(name string) (string, bool) {
+	buffer := make([]byte, 4096)
+	n := syscall.JVMCall(hostSystemProperty, name, buffer)
+	if n < 0 || n > len(buffer) {
+		return "", false
+	}
+	return string(buffer[:n]), true
+}
+
+// CallStaticString invokes a public static Java method with exactly one
+// java.lang.String parameter. The result is converted with String.valueOf.
+func CallStaticString(className, methodName, argument string) (string, bool) {
+	request := make([]byte, 6+len(className)+len(methodName)+len(argument))
+	put16(request, 0, len(className))
+	put16(request, 2, len(methodName))
+	put16(request, 4, len(argument))
+	at := 6
+	at = copyText(request, at, className)
+	at = copyText(request, at, methodName)
+	copyText(request, at, argument)
+	buffer := make([]byte, 4096)
+	n := syscall.JVMCall(hostCallStaticString, string(request), buffer)
+	if n < 0 || n > len(buffer) {
+		return "", false
+	}
+	return string(buffer[:n]), true
+}
+
+func put16(data []byte, at, value int) {
+	data[at] = byte(value)
+	data[at+1] = byte(value >> 8)
+}
+
+func copyText(data []byte, at int, value string) int {
+	for i := 0; i < len(value); i++ {
+		data[at+i] = value[i]
+	}
+	return at + len(value)
+}
+@endstdlib

@@ -175,7 +175,7 @@ func specializePreparationSource(name string, source []byte) ([]byte, error) {
 	if name != "compiler_target_policy_impl.go" {
 		return source, nil
 	}
-	const ordinaryTag = "//go:build !renvo_prepared\n"
+	const ordinaryTag = "//go:build !renvo_prepared && !renvo_jvm_prepared\n"
 	if !bytes.HasPrefix(source, []byte(ordinaryTag)) {
 		return nil, fmt.Errorf("%s does not declare the ordinary preparation build tag", name)
 	}
@@ -215,7 +215,7 @@ func specializePreparationSource(name string, source []byte) ([]byte, error) {
 	if start < 0 || end <= start {
 		return nil, fmt.Errorf("%s does not declare the preparation const %s", name, identifier)
 	}
-	preparedTag := "//go:build renvo_prepared\n\n// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.\n"
+	preparedTag := "//go:build renvo_prepared || renvo_jvm_prepared\n\n// Code generated from compiler_target_policy_impl.go; DO NOT EDIT.\n"
 	prepared := make([]byte, 0, len(source)+len(preparedTag)-len(ordinaryTag)-end+start+1)
 	prepared = append(prepared, preparedTag...)
 	prepared = append(prepared, source[len(ordinaryTag):start]...)

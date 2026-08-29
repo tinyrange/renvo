@@ -7,12 +7,12 @@ import (
 )
 
 func TestSpecializePreparationSource(t *testing.T) {
-	source := []byte("//go:build !renvo_prepared\n\npackage main\n\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n")
+	source := []byte("//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\n\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n")
 	prepared, err := specializePreparationSource("compiler_target_policy_impl.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.HasPrefix(prepared, []byte("//go:build renvo_prepared\n")) ||
+	if !bytes.HasPrefix(prepared, []byte("//go:build renvo_prepared || renvo_jvm_prepared\n")) ||
 		!bytes.Contains(prepared, []byte("const renvoPreparedBackendActive = 1")) {
 		t.Fatalf("prepared source = %q", prepared)
 	}
@@ -30,11 +30,11 @@ func TestSpecializePreparationSourceRejectsInvalidSetting(t *testing.T) {
 		source string
 	}{
 		{"missing tag", "package main\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
-		{"missing", "//go:build !renvo_prepared\n\npackage main\n"},
-		{"variable", "//go:build !renvo_prepared\n\npackage main\nvar renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
-		{"multiple names", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive, other = 0, 0\nconst renvoRTGStructuredFunctions = 0\n"},
-		{"duplicate", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
-		{"missing structured mode", "//go:build !renvo_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\n"},
+		{"missing", "//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\n"},
+		{"variable", "//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\nvar renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"multiple names", "//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\nconst renvoPreparedBackendActive, other = 0, 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"duplicate", "//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\nconst renvoPreparedBackendActive = 0\nconst renvoRTGStructuredFunctions = 0\n"},
+		{"missing structured mode", "//go:build !renvo_prepared && !renvo_jvm_prepared\n\npackage main\nconst renvoPreparedBackendActive = 0\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

@@ -1040,7 +1040,6 @@ func appMain() int {
 	print("FAIL\n")
 	return 1
 }
-
 `)},
 	})
 	linked := LinkBuildCore(result)
@@ -1053,6 +1052,28 @@ func appMain() int {
 		!bytes.Contains(decoded.Text, []byte(`__renvo_map_0_ref`)) ||
 		!bytes.Contains(decoded.Text, []byte(`__renvo_map_0_get`)) {
 		t.Fatalf("linked text did not lower map semantics:\\n%s", string(decoded.Text))
+	}
+}
+
+func TestLinkBuildCoreTypesCompoundAssignmentMapKey(t *testing.T) {
+	result := buildFromFiles(t, []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+
+func appMain() int {
+	values := map[float64]int64{2: 0}
+	values[2] += -1
+	return int(values[2])
+}
+`)},
+	})
+	linked := LinkBuildCore(result)
+	if !linked.Ok {
+		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
+	}
+	key := bytes.Index(linked.Program.Text, []byte(`var __renvo_map_key_`))
+	if key < 0 || !bytes.Contains(linked.Program.Text[key:], []byte(` float64 = 2;`)) {
+		t.Fatalf("map key temporary lost its assignment type:\n%s", linked.Program.Text)
 	}
 }
 

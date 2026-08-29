@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"renvo.dev/internal/rbe"
 	"renvo.dev/internal/rtg"
 )
 
@@ -52,6 +53,11 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
+		bundle := rbe.Parse(source)
+		if !bundle.Ok {
+			fail(fmt.Sprintf("%s:%d: %s", path, bundle.Offset, bundle.Message))
+		}
+		source = bundle.Definition
 		parsed := rtg.ParseImports(source, path, filesystemImportLoader{})
 		var resolved rtg.ResolveResult
 		if *arch != "" {

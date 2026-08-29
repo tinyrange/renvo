@@ -258,7 +258,8 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 			old := "__renvo_map_old_" + name
 			value := "__renvo_map_value_" + name
 			valueType := specs[targetSpecs[0]].value
-			replacement := "if true {" + target + " := " + base + ";" + keyName + " := " + key + ";" + old + " := " + specs[targetSpecs[0]].get + "(" + target + "," + keyName + ");var " + value + " " + valueType + " = " + rhs + ";" + specs[targetSpecs[0]].set + "(" + target + "," + keyName + "," + old + compound + value + ");}"
+			keyType := specs[targetSpecs[0]].key
+			replacement := "if true {" + target + " := " + base + ";var " + keyName + " " + keyType + " = " + key + ";" + old + " := " + specs[targetSpecs[0]].get + "(" + target + "," + keyName + ");var " + value + " " + valueType + " = " + rhs + ";" + specs[targetSpecs[0]].set + "(" + target + "," + keyName + "," + old + compound + value + ");}"
 			edits = append(edits, functionValueTokenRangeEdit(program, start, end, replacement))
 			mapLowerCover(covered, start, end)
 			assign = end - 1
@@ -271,7 +272,7 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 				base := mapLowerReadText(program, specs, leftStarts[i], open)
 				key := mapLowerReadText(program, specs, open+1, leftEnds[i]-1)
 				replacement += "__renvo_map_target_" + name + "_" + functionValueDecimal(i) + " := " + base + ";"
-				replacement += "__renvo_map_key_" + name + "_" + functionValueDecimal(i) + " := " + key + ";"
+				replacement += "var __renvo_map_key_" + name + "_" + functionValueDecimal(i) + " " + specs[targetSpecs[i]].key + " = " + key + ";"
 			} else if compactMapLowerType(functionValueTokensText(program, leftStarts[i], leftEnds[i])) != "_" {
 				replacement += "__renvo_map_address_" + name + "_" + functionValueDecimal(i) + " := &(" + functionValueTokensText(program, leftStarts[i], leftEnds[i]) + ");"
 			}

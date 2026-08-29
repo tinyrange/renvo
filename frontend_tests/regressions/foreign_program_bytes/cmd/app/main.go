@@ -1,3 +1,5 @@
+//go:build !jvm
+
 package main
 
 //renvo:compile -t linux/386 payloadMain
