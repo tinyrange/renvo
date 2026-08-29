@@ -1,0 +1,138 @@
+definition 1
+unit remu_msp430fr2433
+implements direct_emitter_v1
+
+@import "msp430x.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0xc100
+	const dataAddress = 0x2000
+	const stackTop = 0x3000
+	const watchdogControl = 0x01cc
+	const uartControl = 0x0500
+	const uartTransmit = 0x050e
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		msp430x.moveImmediate(out, msp430x.stack, stackTop)
+		msp430x.move(out, msp430x.frame, msp430x.stack)
+		msp430x.moveImmediate(out, msp430x.scratch, 0x5a80)
+		msp430x.storeU16(out, RTGAddress{Displacement: watchdogControl},
+			msp430x.scratch)
+		msp430x.moveImmediate(out, msp430x.scratch, 0)
+		msp430x.storeU16(out, RTGAddress{Displacement: uartControl},
+			msp430x.scratch)
+		return true
+	}
+
+	func write(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		msp430x.move(out, msp430x.copySource, msp430x.secondary)
+		msp430x.move(out, msp430x.copyCount, msp430x.tertiary)
+		out.Mark(loop)
+		msp430x.compare(out, msp430x.copyCount, msp430x.r3)
+		msp430x.jumpCondition(out, msp430x.eq, done)
+		msp430x.loadU8(out, msp430x.scratch,
+			RTGAddress{Base: msp430x.copySource})
+		msp430x.storeU16(out, RTGAddress{Displacement: uartTransmit},
+			msp430x.scratch)
+		msp430x.increment(out, msp430x.copySource)
+		msp430x.decrement(out, msp430x.copyCount)
+		msp430x.jump(out, loop)
+		out.Mark(done)
+		msp430x.move(out, msp430x.primary, msp430x.r3)
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		loop := out.NewLabel()
+		out.Mark(loop)
+		msp430x.jump(out, loop)
+	}
+
+	func image(out *RTGEmitter) []byte {
+		const codeOffset = 0x100
+		msp430x.patchLabels(out, textAddress)
+		msp430x.patchAbsolute(out, dataAddress)
+		code := out.Code()
+		data := out.Data()
+		dataOffset := RTGAlignValue(codeOffset+len(code), 2)
+		vectorOffset := RTGAlignValue(dataOffset+len(data), 2)
+		bssAddress := RTGAlignValue(dataAddress+len(data), 2)
+		dataMemorySize := bssAddress-dataAddress+
+			RTGAlignValue(out.BSSSize(), 2)
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0)
+		result = image32.append16(result, 2)
+		result = image32.append16(result, 105)
+		result = image32.append32(result, 1)
+		result = image32.append32(result, textAddress)
+		result = image32.append32(result, 52)
+		result = image32.append32(result, 0)
+		result = image32.append32(result, 0)
+		result = image32.append16(result, 52)
+		result = image32.append16(result, 32)
+		result = image32.append16(result, 3)
+		result = image32.append16(result, 0)
+		result = image32.append16(result, 0)
+		result = image32.append16(result, 0)
+		result = image32.programHeader(result, codeOffset, textAddress,
+			len(code), len(code), 5, 2)
+		result = image32.programHeader(result, dataOffset, dataAddress,
+			len(data), dataMemorySize, 6, 2)
+		result = image32.programHeader(result, vectorOffset, 0xfffe,
+			2, 2, 4, 2)
+		result = image32.appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = image32.appendUntil(result, dataOffset)
+		result = append(result, data...)
+		result = image32.appendUntil(result, vectorOffset)
+		return image32.append16(result, textAddress)
+	}
+}
+
+runtime remu_msp430fr2433_runtime {
+	emit_entry_start = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_msp430fr2433_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 16
+	machine = 105
+	code_offset = 0x100
+	image = go image
+}
+target experimental/msp430fr2433 {
+	family = native_v1
+	os = msp430fr2433
+	arch = msp430x16
+	frontend_arch = msp430x
+	abi = msp430_internal
+	runtime = remu_msp430fr2433_runtime
+	executable = remu_msp430fr2433_elf
+	build_tags = [msp430fr2433, msp430, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 512
+}
+
+@stdlib "device/remu/target_msp430fr2433.go"
+//go:build renvo && msp430fr2433
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "msp430fr2433"
+const FlashStart uintptr = 0xc000
+const FlashSize uintptr = 16 * 1024
+const RAMStart uintptr = 0x2000
+const RAMSize uintptr = 4 * 1024
+const InfoFlashStart uintptr = 0x1800
+const InfoFlashSize uintptr = 512
+const GPIOCount = 19
+@endstdlib

@@ -1,0 +1,28 @@
+# Deterministic 16-byte Intel HEX writer shared by byte-addressed experimental
+# targets. PIC16 supplies its own word-address adaptation before calling this.
+go backend {
+	func digit(value int) byte {
+		value &= 15
+		if value < 10 { return byte('0'+value) }
+		return byte('A'+value-10)
+	}
+	func hexByte(out []byte, value int) []byte {
+		return append(out,digit(value>>4),digit(value))
+	}
+	func record(out []byte, address int, kind int, data []byte) []byte {
+		out=append(out,':')
+		out=hexByte(out,len(data)); out=hexByte(out,address>>8); out=hexByte(out,address)
+		out=hexByte(out,kind)
+		sum:=len(data)+(address>>8)+(address&255)+kind
+		for _,value:=range data { out=hexByte(out,int(value)); sum+=int(value) }
+		out=hexByte(out,-sum); return append(out,'\n')
+	}
+	func Image(data []byte) []byte {
+		var result []byte
+		for address:=0; address<len(data); address+=16 {
+			end:=address+16; if end>len(data) { end=len(data) }
+			result=record(result,address,0,data[address:end])
+		}
+		return record(result,0,1,nil)
+	}
+}

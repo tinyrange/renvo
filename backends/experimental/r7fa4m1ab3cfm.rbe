@@ -1,0 +1,66 @@
+definition 1
+unit remu_r7fa4m1ab3cfm
+implements direct_emitter_v1
+
+@import "thumb_mcu.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0x00000000
+	const dataAddress = 0x20000000
+	const stackTop = 0x20008000
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		return thumb_mcu.entry(out, stackTop)
+	}
+	func image(out *RTGEmitter) []byte {
+		thumb_mcu.patchAbsolute(out, dataAddress, textAddress+0x100)
+		return image32.ELF(out, 40, 0x05000000,
+			textAddress, dataAddress, true)
+	}
+}
+
+runtime remu_r7fa4m1ab3cfm_runtime {
+	emit_entry_start = go entry
+	emit_exit = go thumb_mcu.exit
+	operation write { emit = go thumb_mcu.write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_r7fa4m1ab3cfm_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 40
+	code_offset = 0x100
+	image = go image
+}
+target experimental/r7fa4m1ab3cfm {
+	family = native_v1
+	os = r7fa4m1ab3cfm
+	arch = thumb
+	frontend_arch = thumb
+	abi = thumb_internal
+	runtime = remu_r7fa4m1ab3cfm_runtime
+	executable = remu_r7fa4m1ab3cfm_elf
+	aliases = [experimental/ra4m1]
+	build_tags = [r7fa4m1ab3cfm, ra4m1, arm, thumb, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 8192
+}
+
+@stdlib "device/remu/target_r7fa4m1ab3cfm.go"
+//go:build renvo && r7fa4m1ab3cfm
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "r7fa4m1ab3cfm"
+const FlashStart uintptr = 0x00000000
+const FlashSize uintptr = 256 * 1024
+const RAMStart uintptr = 0x20000000
+const RAMSize uintptr = 32 * 1024
+const DataFlashStart uintptr = 0x40100000
+const DataFlashSize uintptr = 8 * 1024
+const GPIOCount = 49
+@endstdlib

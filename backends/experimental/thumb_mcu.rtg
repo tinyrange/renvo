@@ -1,0 +1,61 @@
+@import "../../backend/definitions/thumb.rtg"
+
+# Cortex-M direct-load support shared by the RP2040, SAM D21, STM32L4, and
+# RA4M1 emulator targets.
+go backend {
+	const testUART = 0xffff0100
+	const testExit = 0xfffffff0
+
+	func entry(out *RTGEmitter, stackTop int) bool {
+		thumb.moveImmediate(out, thumb.stack, int64(stackTop))
+		thumb.move(out, thumb.frame, thumb.stack)
+		return true
+	}
+
+	func write(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		thumb.move(out, thumb.copySource, thumb.secondary)
+		thumb.move(out, thumb.copyCount, thumb.tertiary)
+		out.Mark(loop)
+		thumb.moveImmediate(out, thumb.primary, 0)
+		thumb.compare(out, thumb.copyCount, thumb.primary)
+		thumb.jumpCondition(out, thumb.eq, done)
+		thumb.loadU8(out, thumb.scratch,
+			RTGAddress{Base: thumb.copySource})
+		thumb.storeU8(out, RTGAddress{Displacement: testUART},
+			thumb.scratch)
+		thumb.increment(out, thumb.copySource)
+		thumb.decrement(out, thumb.copyCount)
+		thumb.jump(out, loop)
+		out.Mark(done)
+		thumb.moveImmediate(out, thumb.primary, 0)
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		thumb.storeU32(out, RTGAddress{Displacement: testExit}, status)
+		loop := out.NewLabel()
+		out.Mark(loop)
+		thumb.jump(out, loop)
+	}
+
+	func patchAbsolute(
+		out *RTGEmitter, dataAddress int, textAddress int,
+	) {
+		bssAddress := RTGAlignValue(dataAddress+len(out.Data()), 8)
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(index),
+				out.AbsoluteRelocationAddend(index),
+				dataAddress, bssAddress)
+			if !resolved {
+				continue
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 24) & 7
+			thumb.patchImmediateFixed(out, at+2, register,
+				target-(textAddress+at+4))
+		}
+	}
+}

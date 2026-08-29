@@ -1,0 +1,314 @@
+# 8051/EFM8 emitter. Renvo values are 16-bit and live in fixed XRAM slots;
+# short direct-RAM temporaries keep the classic accumulator ISA manageable.
+go backend {
+	const t0=0x20
+	const t1=0x22
+	const t2=0x24
+	const sourcePointer=0x30
+	const destinationPointer=0x32
+	const copyLength=0x34
+	const copyByte=0x36
+	var dataSourcePatch int
+	var dataSizePatch int
+
+	func byte1(out *RTGEmitter,value int) { out.Byte(byte(value)) }
+	func regSlot(value RTGRegister) int { return 0x100+value.Code*2 }
+	func movDPTR(out *RTGEmitter,value int) int {
+		byte1(out,0x90); at:=out.Len(); byte1(out,value>>8); byte1(out,value); return at
+	}
+	func loadReg(out *RTGEmitter,value RTGRegister,direct int) {
+		movDPTR(out,regSlot(value)); byte1(out,0xe0); byte1(out,0xf5); byte1(out,direct)
+		byte1(out,0xa3); byte1(out,0xe0); byte1(out,0xf5); byte1(out,direct+1)
+	}
+	func storeReg(out *RTGEmitter,value RTGRegister,direct int) {
+		movDPTR(out,regSlot(value)); byte1(out,0xe5); byte1(out,direct); byte1(out,0xf0)
+		byte1(out,0xa3); byte1(out,0xe5); byte1(out,direct+1); byte1(out,0xf0)
+	}
+	func directImmediate(out *RTGEmitter,direct int,value int) {
+		byte1(out,0x75); byte1(out,direct); byte1(out,value)
+		byte1(out,0x75); byte1(out,direct+1); byte1(out,value>>8)
+	}
+	func immediateReg(out *RTGEmitter,destination RTGRegister,value int) int {
+		at:=movDPTR(out,value)
+		byte1(out,0xe5); byte1(out,0x82); byte1(out,0xf5); byte1(out,t0)
+		byte1(out,0xe5); byte1(out,0x83); byte1(out,0xf5); byte1(out,t0+1)
+		storeReg(out,destination,t0); return at
+	}
+	func move(out *RTGEmitter,destination RTGRegister,source RTGRegister) {
+		if destination.Code!=source.Code { loadReg(out,source,t0); storeReg(out,destination,t0) }
+	}
+	func moveImmediate(out *RTGEmitter,destination RTGRegister,value int64) { immediateReg(out,destination,int(value)) }
+
+	func binary(out *RTGEmitter,destination RTGRegister,source RTGRegister,opcode int) {
+		loadReg(out,destination,t0); loadReg(out,source,t1)
+		byte1(out,0xe5); byte1(out,t0); byte1(out,opcode); byte1(out,t1); byte1(out,0xf5); byte1(out,t0)
+		byte1(out,0xe5); byte1(out,t0+1); byte1(out,opcode); byte1(out,t1+1); byte1(out,0xf5); byte1(out,t0+1)
+		storeReg(out,destination,t0)
+	}
+	func add(out *RTGEmitter,destination RTGRegister,source RTGRegister) {
+		loadReg(out,destination,t0); loadReg(out,source,t1)
+		byte1(out,0xe5); byte1(out,t0); byte1(out,0x25); byte1(out,t1); byte1(out,0xf5); byte1(out,t0)
+		byte1(out,0xe5); byte1(out,t0+1); byte1(out,0x35); byte1(out,t1+1); byte1(out,0xf5); byte1(out,t0+1)
+		storeReg(out,destination,t0)
+	}
+	func subtract(out *RTGEmitter,destination RTGRegister,source RTGRegister) {
+		loadReg(out,destination,t0); loadReg(out,source,t1); byte1(out,0xc3)
+		byte1(out,0xe5); byte1(out,t0); byte1(out,0x95); byte1(out,t1); byte1(out,0xf5); byte1(out,t0)
+		byte1(out,0xe5); byte1(out,t0+1); byte1(out,0x95); byte1(out,t1+1); byte1(out,0xf5); byte1(out,t0+1)
+		storeReg(out,destination,t0)
+	}
+	func bitAnd(out *RTGEmitter,destination RTGRegister,source RTGRegister) { binary(out,destination,source,0x55) }
+	func bitOr(out *RTGEmitter,destination RTGRegister,source RTGRegister) { binary(out,destination,source,0x45) }
+	func bitXor(out *RTGEmitter,destination RTGRegister,source RTGRegister) { binary(out,destination,source,0x65) }
+	func increment(out *RTGEmitter,operand RTGRegister) {
+		loadReg(out,operand,t0); byte1(out,0x05); byte1(out,t0); skip:=out.NewLabel()
+		byte1(out,0xe5); byte1(out,t0); branch(out,0x70,skip); byte1(out,0x05); byte1(out,t0+1); out.Mark(skip)
+		storeReg(out,operand,t0)
+	}
+	func decrement(out *RTGEmitter,operand RTGRegister) {
+		loadReg(out,operand,t0); byte1(out,0xe5); byte1(out,t0); skip:=out.NewLabel()
+		branch(out,0x70,skip); byte1(out,0x15); byte1(out,t0+1); out.Mark(skip); byte1(out,0x15); byte1(out,t0)
+		storeReg(out,operand,t0)
+	}
+	func shiftLeftImmediate(out *RTGEmitter,operand RTGRegister,value byte) {
+		loadReg(out,operand,t0)
+		for index:=0;index<int(value);index++ {
+			byte1(out,0xe5);byte1(out,t0);byte1(out,0x25);byte1(out,t0);byte1(out,0xf5);byte1(out,t0)
+			byte1(out,0xe5);byte1(out,t0+1);byte1(out,0x35);byte1(out,t0+1);byte1(out,0xf5);byte1(out,t0+1)
+		}
+		storeReg(out,operand,t0)
+	}
+	func shiftRight(out *RTGEmitter,operand RTGRegister,value byte,signed bool) {
+		loadReg(out,operand,t0)
+		for index:=0;index<int(value);index++ {
+			if signed { byte1(out,0xa2);byte1(out,0xe7) } else { byte1(out,0xc3) }
+			byte1(out,0xe5);byte1(out,t0+1);byte1(out,0x13);byte1(out,0xf5);byte1(out,t0+1)
+			byte1(out,0xe5);byte1(out,t0);byte1(out,0x13);byte1(out,0xf5);byte1(out,t0)
+		}
+		storeReg(out,operand,t0)
+	}
+	func shiftRightUnsignedImmediate(out *RTGEmitter,operand RTGRegister,value byte) { shiftRight(out,operand,value,false) }
+	func shiftRightSignedImmediate(out *RTGEmitter,operand RTGRegister,value byte) { shiftRight(out,operand,value,true) }
+
+	func emitAddress(out *RTGEmitter,destination RTGRegister,value RTGAddress) {
+		if RTGAddressValid(value) { at:=immediateReg(out,destination,value.Addend);RTGAddressRelocAt(out,value,at);return }
+		if !value.Base.Valid&&!value.Index.Valid { moveImmediate(out,destination,int64(value.Displacement));return }
+		if value.Base.Valid { move(out,destination,value.Base) } else { moveImmediate(out,destination,0) }
+		if value.Index.Valid { move(out,scratch,value.Index);shiftLeftImmediate(out,scratch,byte(RTGLog2(value.Scale)));add(out,destination,scratch) }
+		if value.Displacement!=0 { moveImmediate(out,scratch,int64(value.Displacement));add(out,destination,scratch) }
+	}
+	func regToDPTR(out *RTGEmitter,value RTGRegister) {
+		loadReg(out,value,t0)
+		byte1(out,0x85);byte1(out,t0);byte1(out,0x82);byte1(out,0x85);byte1(out,t0+1);byte1(out,0x83)
+	}
+	func addressToDPTR(out *RTGEmitter,value RTGAddress) {
+		emitAddress(out,address,value);regToDPTR(out,address)
+	}
+	func loadWord(out *RTGEmitter,destination RTGRegister,value RTGAddress) {
+		addressToDPTR(out,value);byte1(out,0xe0);byte1(out,0xf5);byte1(out,t1);byte1(out,0xa3);byte1(out,0xe0);byte1(out,0xf5);byte1(out,t1+1);storeReg(out,destination,t1)
+	}
+	func loadByte(out *RTGEmitter,destination RTGRegister,value RTGAddress,signed bool) {
+		addressToDPTR(out,value);byte1(out,0xe0);byte1(out,0xf5);byte1(out,t1);directImmediate(out,t1+1,0)
+		if signed { positive:=out.NewLabel();byte1(out,0xe5);byte1(out,t1);byte1(out,0x30);byte1(out,0xe7);byte1(out,3);directImmediate(out,t1+1,255);out.Mark(positive) }
+		storeReg(out,destination,t1)
+	}
+	func storeWord(out *RTGEmitter,value RTGAddress,source RTGRegister) {
+		emitAddress(out,address,value);loadReg(out,source,t1);regToDPTR(out,address);byte1(out,0xe5);byte1(out,t1);byte1(out,0xf0);byte1(out,0xa3);byte1(out,0xe5);byte1(out,t1+1);byte1(out,0xf0)
+	}
+	func storeByte(out *RTGEmitter,value RTGAddress,source RTGRegister) {
+		emitAddress(out,address,value);loadReg(out,source,t1);regToDPTR(out,address);byte1(out,0xe5);byte1(out,t1);byte1(out,0xf0)
+	}
+	func writeSFR(out *RTGEmitter,address int,source RTGRegister) {
+		loadReg(out,source,t1);byte1(out,0xe5);byte1(out,t1);byte1(out,0xf5);byte1(out,address)
+	}
+	func writeSFRImmediate(out *RTGEmitter,address int,value int) {
+		byte1(out,0x75);byte1(out,address);byte1(out,value)
+	}
+	func loadNative(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI32(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadU32(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI16(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadU16(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI8(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadByte(out,destination,value,true)}
+	func loadU8(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadByte(out,destination,value,false)}
+	func storeNative(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU32(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU16(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU8(out *RTGEmitter,value RTGAddress,source RTGRegister){storeByte(out,value,source)}
+
+	func absolute(out *RTGEmitter,opcode int,label RTGLabel) { byte1(out,opcode);at:=out.Len();byte1(out,0);byte1(out,0);out.RelocAt(at,RTGLabelIndex(label)) }
+	func jump(out *RTGEmitter,label RTGLabel){absolute(out,0x02,label)}
+	func branch(out *RTGEmitter,opcode int,label RTGLabel) {
+		byte1(out,opcode);at:=out.Len();byte1(out,0);out.RelocAt(at,RTGLabelIndex(label))
+	}
+	func conditionBytes(out *RTGEmitter,signed bool) {
+		loadReg(out,compareLeft,t0);loadReg(out,compareRight,t1);byte1(out,0xc3)
+		byte1(out,0xe5);byte1(out,t0);byte1(out,0x95);byte1(out,t1)
+		byte1(out,0xe5);byte1(out,t0+1)
+		if signed { byte1(out,0x64);byte1(out,0x80);byte1(out,0xf5);byte1(out,t2);byte1(out,0xe5);byte1(out,t1+1);byte1(out,0x64);byte1(out,0x80);byte1(out,0xf5);byte1(out,t2+1);byte1(out,0xe5);byte1(out,t2);byte1(out,0x95);byte1(out,t2+1) } else { byte1(out,0x95);byte1(out,t1+1) }
+	}
+	func equalityBytes(out *RTGEmitter) {
+		loadReg(out,compareLeft,t0);loadReg(out,compareRight,t1);byte1(out,0xe5);byte1(out,t0);byte1(out,0x65);byte1(out,t1);byte1(out,0xf5);byte1(out,t2);byte1(out,0xe5);byte1(out,t0+1);byte1(out,0x65);byte1(out,t1+1);byte1(out,0x45);byte1(out,t2)
+	}
+	func branchAbsolute(out *RTGEmitter,opcode int,label RTGLabel){byte1(out,opcode);byte1(out,3);skip:=out.NewLabel();jump(out,label);out.Mark(skip)}
+	func jumpCondition(out *RTGEmitter,condition RTGCondition,label RTGLabel) {
+		code:=condition.Code
+		if code==0||code==1 { equalityBytes(out);if code==0{branchAbsolute(out,0x70,label)}else{branchAbsolute(out,0x60,label)};return }
+		if code==2 { jumpCondition(out,eq,label);jumpCondition(out,slt,label);return }
+		if code==8 { jumpCondition(out,eq,label);jumpCondition(out,ult,label);return }
+		if code==3||code==9 { skip:=out.NewLabel();jumpCondition(out,eq,skip);if code==3{jumpCondition(out,slt,skip)}else{jumpCondition(out,ult,skip)};jump(out,label);out.Mark(skip);return }
+		conditionBytes(out,code==4||code==5)
+		if code==4||code==6 { branchAbsolute(out,0x50,label) } else { branchAbsolute(out,0x40,label) }
+	}
+	func compare(out *RTGEmitter,left RTGRegister,right RTGRegister){move(out,compareLeft,left);move(out,compareRight,right)}
+	func test(out *RTGEmitter,left RTGRegister,right RTGRegister){move(out,compareLeft,left);move(out,scratch,left);bitAnd(out,scratch,right);move(out,compareLeft,scratch);moveImmediate(out,compareRight,0)}
+	func setCondition(out *RTGEmitter,condition RTGCondition,destination RTGRegister){yes:=out.NewLabel();done:=out.NewLabel();jumpCondition(out,condition,yes);moveImmediate(out,destination,0);jump(out,done);out.Mark(yes);moveImmediate(out,destination,1);out.Mark(done)}
+	func call(out *RTGEmitter,label RTGLabel){absolute(out,0x12,label)}
+	func callIndirect(out *RTGEmitter,operand RTGRegister){loadReg(out,operand,t0);byte1(out,0x85);byte1(out,t0);byte1(out,0x82);byte1(out,0x85);byte1(out,t0+1);byte1(out,0x83);byte1(out,0xe4);byte1(out,0x73)}
+	func ret(out *RTGEmitter){byte1(out,0x22)}
+	func leave(out *RTGEmitter){move(out,stack,frame);loadWord(out,frame,RTGAddress{Base:stack});moveImmediate(out,scratch,2);add(out,stack,scratch)}
+	func hostSyscall(out *RTGEmitter){byte1(out,0xa5)}
+
+	func multiply(out *RTGEmitter,destination RTGRegister,source RTGRegister){
+		loadReg(out,destination,t0);loadReg(out,source,t1)
+		byte1(out,0xe5);byte1(out,t0);byte1(out,0x85);byte1(out,t1);byte1(out,0xf0);byte1(out,0xa4)
+		byte1(out,0xf5);byte1(out,t2);byte1(out,0xe5);byte1(out,0xf0);byte1(out,0xf5);byte1(out,t2+1)
+		byte1(out,0xe5);byte1(out,t0);byte1(out,0x85);byte1(out,t1+1);byte1(out,0xf0);byte1(out,0xa4);byte1(out,0x25);byte1(out,t2+1);byte1(out,0xf5);byte1(out,t2+1)
+		byte1(out,0xe5);byte1(out,t0+1);byte1(out,0x85);byte1(out,t1);byte1(out,0xf0);byte1(out,0xa4);byte1(out,0x25);byte1(out,t2+1);byte1(out,0xf5);byte1(out,t2+1)
+		storeReg(out,destination,t2)
+	}
+	func variableShift(out *RTGEmitter,direction RTGShiftDirection,signed bool){move(out,copyCount,primary);move(out,primary,tertiary);loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);moveImmediate(out,scratch,0);compare(out,copyCount,scratch);jumpCondition(out,eq,done);if direction==RTGShiftLeft{shiftLeftImmediate(out,primary,1)}else if signed{shiftRightSignedImmediate(out,primary,1)}else{shiftRightUnsignedImmediate(out,primary,1)};decrement(out,copyCount);jump(out,loop);out.Mark(done)}
+	func signedDivide(out *RTGEmitter,wantRemainder bool){
+		// Compact repeated-subtraction fallback. It is slow for large quotients,
+		// but preserves the complete operation contract on this experimental core.
+		zero:=scratch;moveImmediate(out,zero,0);byZero:=out.NewLabel();loop:=out.NewLabel();done:=out.NewLabel();compare(out,primary,zero);jumpCondition(out,eq,byZero);move(out,compareRight,primary);move(out,scratch,tertiary);moveImmediate(out,compareLeft,0);out.Mark(loop);compare(out,scratch,compareRight);jumpCondition(out,ult,done);subtract(out,scratch,compareRight);increment(out,compareLeft);jump(out,loop);out.Mark(done);if wantRemainder{move(out,primary,scratch)}else{move(out,primary,compareLeft)};returnLabel:=out.NewLabel();jump(out,returnLabel);out.Mark(byZero);if wantRemainder{move(out,primary,tertiary)}else{moveImmediate(out,primary,-1)};out.Mark(returnLabel)
+	}
+
+	func patchRelocations(out *RTGEmitter){
+		for index:=0;index<out.RelocationCount();index++{at:=out.RelocationOffset(index);target:=out.LabelPosition(out.RelocationLabel(index));if out.ByteAt(at-1)==0x02||out.ByteAt(at-1)==0x12{out.SetByteAt(at,byte(target>>8));out.SetByteAt(at+1,byte(target))}else{delta:=target-(at+1);out.SetByteAt(at,byte(delta))}}
+	}
+	func patchAbsolute(out *RTGEmitter,dataAddress int){bssAddress:=RTGAlignValue(dataAddress+len(out.Data()),2);for index:=0;index<out.AbsoluteRelocationCount();index++{at:=out.AbsoluteRelocationOffset(index);target,resolved:=RTGResolveAbsoluteRelocation(out,out.AbsoluteRelocationKind(index),out.AbsoluteRelocationAddend(index),dataAddress,bssAddress);if resolved{out.SetByteAt(at,byte(target>>8));out.SetByteAt(at+1,byte(target))}}}
+	func frameStart(out *RTGEmitter)int{moveImmediate(out,scratch,2);subtract(out,stack,scratch);storeWord(out,RTGAddress{Base:stack},frame);move(out,frame,stack);at:=out.Len();moveImmediate(out,scratch,0);subtract(out,stack,scratch);return at}
+	func frameFinish(out *RTGEmitter,at int,stackUsed int){size:=(stackUsed+1)&-2;out.SetByteAt(at,byte(size>>8));out.SetByteAt(at+1,byte(size))}
+	func frameLoad(out *RTGEmitter,destination RTGRegister,offset int){loadWord(out,destination,RTGAddress{Base:frame,Displacement:-(offset+2)})}
+	func frameStore(out *RTGEmitter,offset int,source RTGRegister){storeWord(out,RTGAddress{Base:frame,Displacement:-(offset+2)},source)}
+	func frameAddress(out *RTGEmitter,destination RTGRegister,offset int){emitAddress(out,destination,RTGAddress{Base:frame,Displacement:-(offset+2)})}
+	func dataCopyEntry(out *RTGEmitter,dataAddress int) {
+		byte1(out,0x75);byte1(out,0x81);byte1(out,0x7f)
+		dataSourcePatch=movDPTR(out,0);byte1(out,0x85);byte1(out,0x82);byte1(out,sourcePointer);byte1(out,0x85);byte1(out,0x83);byte1(out,sourcePointer+1)
+		dataSizePatch=out.Len();directImmediate(out,copyLength,0);directImmediate(out,destinationPointer,dataAddress)
+		loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);byte1(out,0xe5);byte1(out,copyLength);byte1(out,0x45);byte1(out,copyLength+1);branch(out,0x60,done)
+		byte1(out,0x85);byte1(out,sourcePointer);byte1(out,0x82);byte1(out,0x85);byte1(out,sourcePointer+1);byte1(out,0x83);byte1(out,0xe4);byte1(out,0x93);byte1(out,0xf5);byte1(out,copyByte);byte1(out,0x05);byte1(out,sourcePointer);incSource:=out.NewLabel();byte1(out,0xe5);byte1(out,sourcePointer);branch(out,0x70,incSource);byte1(out,0x05);byte1(out,sourcePointer+1);out.Mark(incSource)
+		byte1(out,0x85);byte1(out,destinationPointer);byte1(out,0x82);byte1(out,0x85);byte1(out,destinationPointer+1);byte1(out,0x83);byte1(out,0xe5);byte1(out,copyByte);byte1(out,0xf0);byte1(out,0x05);byte1(out,destinationPointer);incDest:=out.NewLabel();byte1(out,0xe5);byte1(out,destinationPointer);branch(out,0x70,incDest);byte1(out,0x05);byte1(out,destinationPointer+1);out.Mark(incDest)
+		byte1(out,0xe5);byte1(out,copyLength);nonzero:=out.NewLabel();branch(out,0x70,nonzero);byte1(out,0x15);byte1(out,copyLength+1);out.Mark(nonzero);byte1(out,0x15);byte1(out,copyLength);jump(out,loop);out.Mark(done)
+	}
+	func patchDataCopy(out *RTGEmitter,source int,size int){out.SetByteAt(dataSourcePatch,byte(source>>8));out.SetByteAt(dataSourcePatch+1,byte(source));out.SetByteAt(dataSizePatch+2,byte(size));out.SetByteAt(dataSizePatch+5,byte(size>>8))}
+}
+
+arch mcs51_16 {
+	alias="mcs51"
+	endian=little
+	word_bits=16
+	pointer_bits=16
+	instruction_alignment=1
+	stack_word_bytes=2
+	stack_alignment=2
+	patch_relocations=go patchRelocations
+	registers virtual=[v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15]
+	locations {
+		primary=v0
+		secondary=v1
+		tertiary=v2
+		scratch=v3
+		address=v4
+		compareLeft=v5
+		compareRight=v6
+		copy_destination=v7
+		copy_source=v8
+		copy_count=v9
+		stack=v10
+		frame=v11
+		link=v12
+	}
+	conditions {
+		eq=0
+		ne=1
+		sle=2
+		sgt=3
+		slt=4
+		sge=5
+		ult=6
+		uge=7
+		ule=8
+		ugt=9
+	}
+	bind {
+		move=go move
+		address=go emitAddress
+		load.native=go loadNative
+		load.i32=go loadI32
+		load.u32=go loadU32
+		load.i16=go loadI16
+		load.u16=go loadU16
+		load.i8=go loadI8
+		load.u8=go loadU8
+		store.native=go storeNative
+		store.u32=go storeU32
+		store.u16=go storeU16
+		store.u8=go storeU8
+		add=go add
+		subtract=go subtract
+		multiply=go multiply
+		bit_and=go bitAnd
+		bit_or=go bitOr
+		bit_xor=go bitXor
+		compare=go compare
+		test=go test
+		increment=go increment
+		decrement=go decrement
+		shift_left_immediate=go shiftLeftImmediate
+		shift_right_unsigned_immediate=go shiftRightUnsignedImmediate
+		shift_right_signed_immediate=go shiftRightSignedImmediate
+		call=go call
+		call_indirect=go callIndirect
+		jump=go jump
+		jump_condition=go jumpCondition
+		set_condition=go setCondition
+		return=go ret
+		leave=go leave
+		host_syscall=go hostSyscall
+		move_immediate=go moveImmediate
+		variable_shift=go variableShift
+		signed_divide=go signedDivide
+		copy_bytes=sequence copyBytes
+	}
+	sequences { copyBytes(out:emitter){let loop=out.NewLabel()
+		let done=out.NewLabel()
+		let zero=record_register(Code:13,Valid:true,)
+		moveImmediate(out,zero,0)
+		out.Mark(loop)
+		compare(out,copyCount,zero)
+		jumpCondition(out,eq,done)
+		loadU8(out,scratch,record_address(Base:copySource,))
+		storeU8(out,record_address(Base:copyDestination,),scratch)
+		increment(out,copySource)
+		increment(out,copyDestination)
+		decrement(out,copyCount)
+		jump(out,loop)
+		out.Mark(done) } }
+}
+
+abi mcs51_internal {
+	arch=mcs51_16
+	arguments=[v0,v1,v2,v3,v4,v5]
+	call_words=[v0,v1,v2,v3,v4,v5]
+	result=[v0,v1]
+	stack_alignment=2
+	return_address=stack_word
+	frame_pointer=v11
+	frame_start=go frameStart
+	frame_finish=go frameFinish
+	frame_load=go frameLoad
+	frame_store=go frameStore
+	frame_address=go frameAddress
+}

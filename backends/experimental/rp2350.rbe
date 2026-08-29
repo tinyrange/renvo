@@ -1,0 +1,63 @@
+definition 1
+unit remu_rp2350
+implements direct_emitter_v1
+
+@import "riscv_mcu.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0x10000000
+	const dataAddress = 0x20000000
+	const stackTop = 0x20082000
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		return riscv_mcu.entry(out, stackTop)
+	}
+	func image(out *RTGEmitter) []byte {
+		riscv_mcu.patchAbsolute(out, dataAddress)
+		return image32.ELF(out, 243, 0,
+			textAddress, dataAddress, false)
+	}
+}
+
+runtime remu_rp2350_runtime {
+	emit_entry_start = go entry
+	emit_exit = go riscv_mcu.exit
+	operation write { emit = go riscv_mcu.write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_rp2350_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go image
+}
+target experimental/rp2350 {
+	family = native_v1
+	os = rp2350
+	arch = riscv32
+	frontend_arch = riscv32
+	abi = riscv32_internal
+	runtime = remu_rp2350_runtime
+	executable = remu_rp2350_elf
+	build_tags = [rp2350, riscv32, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}
+
+@stdlib "device/remu/target_rp2350.go"
+//go:build renvo && rp2350
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "rp2350"
+const FlashStart uintptr = 0x10000000
+const FlashSize uintptr = 16 * 1024 * 1024
+const RAMStart uintptr = 0x20000000
+const RAMSize uintptr = 520 * 1024
+const GPIOCount = 48
+@endstdlib

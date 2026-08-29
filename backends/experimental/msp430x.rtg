@@ -1,0 +1,548 @@
+# MSP430 CPUX-compatible 16-bit emitter. It deliberately uses only base MSP430
+# instructions so the output runs on the FR2433 CPUXv2 core without extension
+# words or large-model assumptions.
+go backend {
+	func word(out *RTGEmitter, value int) {
+		out.Uint16(value)
+	}
+
+	func double(out *RTGEmitter, opcode int, source RTGRegister,
+		destination RTGRegister) {
+		word(out, (opcode<<12)|(source.Code<<8)|destination.Code)
+	}
+
+	func immediate(out *RTGEmitter, opcode int,
+		destination RTGRegister, value int) int {
+		word(out, (opcode<<12)|(3<<4)|destination.Code)
+		at := out.Len()
+		word(out, value)
+		return at
+	}
+
+	func move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			double(out, 4, source, destination)
+		}
+	}
+
+	func moveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate(out, 4, destination, int(value))
+	}
+
+	func add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		double(out, 5, source, destination)
+	}
+	func subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		double(out, 8, source, destination)
+	}
+	func bitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		double(out, 15, source, destination)
+	}
+	func bitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		double(out, 13, source, destination)
+	}
+	func bitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		double(out, 14, source, destination)
+	}
+	func compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		// CMP source,destination computes destination-source.
+		double(out, 9, right, left)
+	}
+	func test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		double(out, 11, right, left)
+	}
+	func increment(out *RTGEmitter, operand RTGRegister) {
+		immediate(out, 5, operand, 1)
+	}
+	func decrement(out *RTGEmitter, operand RTGRegister) {
+		immediate(out, 8, operand, 1)
+	}
+
+	func shiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for index := 0; index < int(value); index++ {
+			double(out, 5, operand, operand)
+		}
+	}
+	func shiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for index := 0; index < int(value); index++ {
+			word(out, 0x1100|operand.Code) // RRA
+		}
+	}
+	func shiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		for index := 0; index < int(value); index++ {
+			word(out, 0xc312)              // BIC #1,SR
+			word(out, 0x1000|operand.Code) // RRC
+		}
+	}
+
+	func emitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := immediate(out, 4, destination, value.Addend)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		if !value.Base.Valid && !value.Index.Valid {
+			moveImmediate(out, destination, int64(value.Displacement))
+			return
+		}
+		if value.Base.Valid {
+			move(out, destination, value.Base)
+		} else {
+			moveImmediate(out, destination, 0)
+		}
+		if value.Index.Valid {
+			move(out, scratch, value.Index)
+			shiftLeftImmediate(out, scratch, byte(RTGLog2(value.Scale)))
+			add(out, destination, scratch)
+		}
+		if value.Displacement != 0 {
+			immediate(out, 5, destination, value.Displacement)
+		}
+	}
+
+	func materialize(out *RTGEmitter, value RTGAddress) RTGRegister {
+		emitAddress(out, address, value)
+		return address
+	}
+
+	func loadWord(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		base := materialize(out, value)
+		word(out, 0x4000|(base.Code<<8)|(2<<4)|destination.Code)
+	}
+	func loadByte(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress, signed bool) {
+		base := materialize(out, value)
+		word(out, 0x4040|(base.Code<<8)|(2<<4)|destination.Code)
+		if signed {
+			word(out, 0x1180|destination.Code) // SXT
+		}
+	}
+	func storeWord(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		preserved := source
+		if source.Code == address.Code || source.Code == scratch.Code {
+			preserved = compareLeft
+			move(out, preserved, source)
+		}
+		base := materialize(out, value)
+		word(out, 0x4080|(preserved.Code<<8)|base.Code)
+		word(out, 0)
+	}
+	func storeByte(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		preserved := source
+		if source.Code == address.Code || source.Code == scratch.Code {
+			preserved = compareLeft
+			move(out, preserved, source)
+		}
+		base := materialize(out, value)
+		word(out, 0x40c0|(preserved.Code<<8)|base.Code)
+		word(out, 0)
+	}
+
+	func loadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWord(out, destination, value)
+	}
+	func loadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWord(out, destination, value)
+	}
+	func loadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWord(out, destination, value)
+	}
+	func loadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWord(out, destination, value)
+	}
+	func loadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWord(out, destination, value)
+	}
+	func loadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadByte(out, destination, value, true)
+	}
+	func loadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadByte(out, destination, value, false)
+	}
+	func storeNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWord(out, value, source)
+	}
+	func storeU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWord(out, value, source)
+	}
+	func storeU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWord(out, value, source)
+	}
+	func storeU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeByte(out, value, source)
+	}
+
+	func jumpAbsolute(out *RTGEmitter, label RTGLabel) {
+		word(out, 0x4030) // MOV #address,PC
+		at := out.Len()
+		word(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+
+	func conditionalAbsolute(out *RTGEmitter, condition int, label RTGLabel) {
+		// Invert the short condition over the two-word absolute branch.
+		inverse := 0
+		if condition == 0 {
+			inverse = 1
+		} else if condition == 1 {
+			inverse = 0
+		} else if condition == 2 {
+			inverse = 3
+		} else if condition == 3 {
+			inverse = 2
+		} else if condition == 5 {
+			inverse = 6
+		} else {
+			inverse = 5
+		}
+		word(out, 0x2000|(inverse<<10)|2)
+		jumpAbsolute(out, label)
+	}
+
+	func jump(out *RTGEmitter, label RTGLabel) {
+		jumpAbsolute(out, label)
+	}
+
+	func jumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		code := condition.Code
+		if code == 0 { // eq
+			conditionalAbsolute(out, 1, label)
+		} else if code == 1 { // ne
+			conditionalAbsolute(out, 0, label)
+		} else if code == 4 { // slt
+			conditionalAbsolute(out, 6, label)
+		} else if code == 5 { // sge
+			conditionalAbsolute(out, 5, label)
+		} else if code == 6 { // ult / JNC
+			conditionalAbsolute(out, 2, label)
+		} else if code == 7 { // uge / JC
+			conditionalAbsolute(out, 3, label)
+		} else {
+			skip := out.NewLabel()
+			if code == 2 { // sle: slt || eq
+				jumpCondition(out, eq, label)
+				jumpCondition(out, slt, label)
+				return
+			}
+			if code == 8 { // ule: ult || eq
+				jumpCondition(out, eq, label)
+				jumpCondition(out, ult, label)
+				return
+			}
+			if code == 3 { // sgt: !(slt || eq)
+				jumpCondition(out, eq, skip)
+				jumpCondition(out, slt, skip)
+			} else { // ugt: !(ult || eq)
+				jumpCondition(out, eq, skip)
+				jumpCondition(out, ult, skip)
+			}
+			jump(out, label)
+			out.Mark(skip)
+		}
+	}
+
+	func setCondition(out *RTGEmitter, condition RTGCondition,
+		destination RTGRegister) {
+		isTrue := out.NewLabel()
+		done := out.NewLabel()
+		jumpCondition(out, condition, isTrue)
+		moveImmediate(out, destination, 0)
+		jump(out, done)
+		out.Mark(isTrue)
+		moveImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+
+	func call(out *RTGEmitter, label RTGLabel) {
+		word(out, 0x12b0) // CALL #address
+		at := out.Len()
+		word(out, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+	func callIndirect(out *RTGEmitter, operand RTGRegister) {
+		word(out, 0x1280|operand.Code)
+	}
+	func ret(out *RTGEmitter) {
+		word(out, 0x4130) // MOV @SP+,PC
+	}
+	func leave(out *RTGEmitter) {
+		move(out, stack, frame)
+		word(out, 0x4130|frame.Code) // MOV @SP+,frame
+	}
+	func hostSyscall(out *RTGEmitter) {
+		word(out, 0x3fff) // JMP $
+	}
+
+	func multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		move(out, compareLeft, destination)
+		move(out, compareRight, source)
+		moveImmediate(out, destination, 0)
+		moveImmediate(out, copyCount, 16)
+		loop := out.NewLabel()
+		skip := out.NewLabel()
+		out.Mark(loop)
+		move(out, scratch, compareRight)
+		moveImmediate(out, address, 1)
+		bitAnd(out, scratch, address)
+		compare(out, scratch, r3)
+		jumpCondition(out, eq, skip)
+		add(out, destination, compareLeft)
+		out.Mark(skip)
+		shiftLeftImmediate(out, compareLeft, 1)
+		shiftRightUnsignedImmediate(out, compareRight, 1)
+		decrement(out, copyCount)
+		compare(out, copyCount, r3)
+		jumpCondition(out, ne, loop)
+	}
+
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		move(out, copyCount, primary)
+		move(out, primary, tertiary)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		compare(out, copyCount, r3)
+		jumpCondition(out, eq, done)
+		if direction == RTGShiftLeft {
+			shiftLeftImmediate(out, primary, 1)
+		} else if signed {
+			shiftRightSignedImmediate(out, primary, 1)
+		} else {
+			shiftRightUnsignedImmediate(out, primary, 1)
+		}
+		decrement(out, copyCount)
+		jump(out, loop)
+		out.Mark(done)
+	}
+
+	func signedDivide(out *RTGEmitter, wantRemainder bool) {
+		divideByZero := out.NewLabel()
+		dividendPositive := out.NewLabel()
+		divisorPositive := out.NewLabel()
+		loop := out.NewLabel()
+		noSubtract := out.NewLabel()
+		positiveResult := out.NewLabel()
+		done := out.NewLabel()
+		compare(out, primary, r3)
+		jumpCondition(out, eq, divideByZero)
+		move(out, copyDestination, r3)
+		move(out, copySource, r3)
+		compare(out, tertiary, r3)
+		jumpCondition(out, sge, dividendPositive)
+		moveImmediate(out, copyDestination, 1)
+		moveImmediate(out, copySource, 1)
+		move(out, scratch, r3)
+		subtract(out, scratch, tertiary)
+		move(out, tertiary, scratch)
+		out.Mark(dividendPositive)
+		compare(out, primary, r3)
+		jumpCondition(out, sge, divisorPositive)
+		moveImmediate(out, scratch, 1)
+		bitXor(out, copyDestination, scratch)
+		move(out, scratch, r3)
+		subtract(out, scratch, primary)
+		move(out, primary, scratch)
+		out.Mark(divisorPositive)
+		move(out, compareLeft, r3)
+		move(out, scratch, r3)
+		moveImmediate(out, compareRight, 16)
+		out.Mark(loop)
+		shiftLeftImmediate(out, scratch, 1)
+		move(out, address, tertiary)
+		shiftRightUnsignedImmediate(out, address, 15)
+		bitOr(out, scratch, address)
+		shiftLeftImmediate(out, tertiary, 1)
+		shiftLeftImmediate(out, compareLeft, 1)
+		compare(out, scratch, primary)
+		jumpCondition(out, ult, noSubtract)
+		subtract(out, scratch, primary)
+		increment(out, compareLeft)
+		out.Mark(noSubtract)
+		decrement(out, compareRight)
+		compare(out, compareRight, r3)
+		jumpCondition(out, ne, loop)
+		if wantRemainder {
+			move(out, primary, scratch)
+			move(out, address, copySource)
+		} else {
+			move(out, primary, compareLeft)
+			move(out, address, copyDestination)
+		}
+		compare(out, address, r3)
+		jumpCondition(out, eq, positiveResult)
+		move(out, scratch, r3)
+		subtract(out, scratch, primary)
+		move(out, primary, scratch)
+		out.Mark(positiveResult)
+		jump(out, done)
+		out.Mark(divideByZero)
+		if wantRemainder {
+			move(out, primary, tertiary)
+		} else {
+			moveImmediate(out, primary, -1)
+		}
+		out.Mark(done)
+	}
+
+	func patchRelocations(out *RTGEmitter) {
+		// Target images add their final FRAM base while constructing the ELF.
+	}
+
+	func patchLabels(out *RTGEmitter, textAddress int) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := textAddress+out.LabelPosition(out.RelocationLabel(index))
+			out.SetByteAt(at, byte(target))
+			out.SetByteAt(at+1, byte(target>>8))
+		}
+	}
+
+	func patchAbsolute(out *RTGEmitter, dataAddress int) {
+		bssAddress := RTGAlignValue(dataAddress+len(out.Data()), 2)
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(index),
+				out.AbsoluteRelocationAddend(index), dataAddress, bssAddress)
+			if resolved {
+				out.SetByteAt(at, byte(target))
+				out.SetByteAt(at+1, byte(target>>8))
+			}
+		}
+	}
+
+	func frameStart(out *RTGEmitter) int {
+		word(out, 0x1200|frame.Code) // PUSH frame
+		move(out, frame, stack)
+		at := out.Len()
+		immediate(out, 8, stack, 0)
+		return at
+	}
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		size := (stackUsed+1)&-2
+		out.SetByteAt(at+2, byte(size))
+		out.SetByteAt(at+3, byte(size>>8))
+	}
+	func frameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		loadWord(out, destination,
+			RTGAddress{Base: frame, Displacement: -(offset+2)})
+	}
+	func frameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		storeWord(out, RTGAddress{Base: frame, Displacement: -(offset+2)}, source)
+	}
+	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitAddress(out, destination,
+			RTGAddress{Base: frame, Displacement: -(offset+2)})
+	}
+}
+
+arch msp430x16 {
+	alias = "msp430x"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 2
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go patchRelocations
+	registers integer = [r0, r1, r2, r3, r4, r5, r6, r7,
+		r8, r9, r10, r11, r12, r13, r14, r15]
+	locations {
+		primary = r12
+		secondary = r13
+		tertiary = r14
+		scratch = r11
+		address = r10
+		compareLeft = r9
+		compareRight = r8
+		copy_destination = r7
+		copy_source = r6
+		copy_count = r5
+		stack = r1
+		frame = r4
+		link = r15
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go move
+		address = go emitAddress
+		load.native = go loadNative
+		load.i32 = go loadI32
+		load.u32 = go loadU32
+		load.i16 = go loadI16
+		load.u16 = go loadU16
+		load.i8 = go loadI8
+		load.u8 = go loadU8
+		store.native = go storeNative
+		store.u32 = go storeU32
+		store.u16 = go storeU16
+		store.u8 = go storeU8
+		add = go add
+		subtract = go subtract
+		multiply = go multiply
+		bit_and = go bitAnd
+		bit_or = go bitOr
+		bit_xor = go bitXor
+		compare = go compare
+		test = go test
+		increment = go increment
+		decrement = go decrement
+		shift_left_immediate = go shiftLeftImmediate
+		shift_right_unsigned_immediate = go shiftRightUnsignedImmediate
+		shift_right_signed_immediate = go shiftRightSignedImmediate
+		call = go call
+		call_indirect = go callIndirect
+		jump = go jump
+		jump_condition = go jumpCondition
+		set_condition = go setCondition
+		return = go ret
+		leave = go leave
+		host_syscall = go hostSyscall
+		move_immediate = go moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let loop = out.NewLabel()
+			let done = out.NewLabel()
+			out.Mark(loop)
+			compare(out, copyCount, r3)
+			jumpCondition(out, eq, done)
+			loadU8(out, scratch, record_address(Base:copySource, ))
+			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			increment(out, copySource)
+			increment(out, copyDestination)
+			decrement(out, copyCount)
+			jump(out, loop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi msp430_internal {
+	arch = msp430x16
+	arguments = [r12, r13, r14, r15, r10, r11]
+	call_words = [r12, r13, r14, r15, r10, r11]
+	result = [r12, r13]
+	stack_alignment = 2
+	return_address = stack_word
+	frame_pointer = r4
+	frame_start = go frameStart
+	frame_finish = go frameFinish
+	frame_load = go frameLoad
+	frame_store = go frameStore
+	frame_address = go frameAddress
+}

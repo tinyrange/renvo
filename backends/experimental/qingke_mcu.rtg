@@ -1,0 +1,61 @@
+@import "qingke_v2.rtg"
+
+# RV32 direct-load support shared by emulator targets with the full integer
+# register file (ESP32-C6 and RP2350 Hazard3).
+go backend {
+	const testUART = 0xffff0100
+	const testExit = 0xfffffff0
+
+	func entry(out *RTGEmitter, stackTop int) bool {
+		qingke_v2.moveImmediate(out, qingke_v2.stack, int64(stackTop))
+		qingke_v2.move(out, qingke_v2.frame, qingke_v2.stack)
+		return true
+	}
+
+	func write(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		qingke_v2.move(out, qingke_v2.copySource, qingke_v2.secondary)
+		qingke_v2.move(out, qingke_v2.copyCount, qingke_v2.tertiary)
+		out.Mark(loop)
+		qingke_v2.compare(out, qingke_v2.copyCount, qingke_v2.zero)
+		qingke_v2.jumpCondition(out, qingke_v2.eq, done)
+		qingke_v2.loadU8(out, qingke_v2.scratch,
+			RTGAddress{Base: qingke_v2.copySource})
+		qingke_v2.storeU8(out, RTGAddress{Displacement: testUART},
+			qingke_v2.scratch)
+		qingke_v2.increment(out, qingke_v2.copySource)
+		qingke_v2.decrement(out, qingke_v2.copyCount)
+		qingke_v2.jump(out, loop)
+		out.Mark(done)
+		qingke_v2.move(out, qingke_v2.primary, qingke_v2.zero)
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		qingke_v2.storeU32(out, RTGAddress{Displacement: testExit}, status)
+		loop := out.NewLabel()
+		out.Mark(loop)
+		qingke_v2.jump(out, loop)
+	}
+
+	func patchAbsolute(out *RTGEmitter, dataAddress int) {
+		bssAddress := RTGAlignValue(dataAddress+len(out.Data()), 8)
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(index),
+				out.AbsoluteRelocationAddend(index),
+				dataAddress, bssAddress)
+			if !resolved {
+				continue
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 7) & 31
+			hi := (target + 0x800) >> 12
+			lo := target - (hi << 12)
+			out.PatchUint32(at, 0x37|(register<<7)|(hi<<12))
+			out.PatchUint32(at+4,
+				0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+		}
+	}
+}

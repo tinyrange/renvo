@@ -1,0 +1,79 @@
+# Shared ELF32 image construction for renvo_emu direct-load targets. The
+# caller patches architecture-specific absolute relocations before invoking
+# image32.ELF, and supplies the exact memory map from renvo_emu's target
+# manifest.
+go backend {
+	func append16(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8))
+	}
+
+	func append32(out []byte, value int) []byte {
+		return append(out, byte(value), byte(value>>8),
+			byte(value>>16), byte(value>>24))
+	}
+
+	func appendUntil(out []byte, size int) []byte {
+		for len(out) < size {
+			out = append(out, 0)
+		}
+		return out
+	}
+
+	func programHeader(
+		out []byte, offset int, address int, fileSize int,
+		memorySize int, flags int, alignment int,
+	) []byte {
+		out = append32(out, 1)
+		out = append32(out, offset)
+		out = append32(out, address)
+		out = append32(out, address)
+		out = append32(out, fileSize)
+		out = append32(out, memorySize)
+		out = append32(out, flags)
+		return append32(out, alignment)
+	}
+
+	func ELF(
+		out *RTGEmitter, machine int, flags int, textAddress int,
+		dataAddress int, thumbEntry bool,
+	) []byte {
+		const codeOffset = 0x100
+		const pageSize = 0x100
+		code := out.Code()
+		data := out.Data()
+		dataOffset := RTGAlignValue(codeOffset+len(code), pageSize)
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		dataMemorySize := bssAddress-dataAddress+
+			RTGAlignValue(out.BSSSize(), 4)
+
+		entry := textAddress+codeOffset
+		if thumbEntry {
+			entry++
+		}
+		var result []byte
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0)
+		result = append16(result, 2)
+		result = append16(result, machine)
+		result = append32(result, 1)
+		result = append32(result, entry)
+		result = append32(result, 52)
+		result = append32(result, 0)
+		result = append32(result, flags)
+		result = append16(result, 52)
+		result = append16(result, 32)
+		result = append16(result, 2)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = programHeader(result, 0, textAddress,
+			codeOffset+len(code), codeOffset+len(code), 5, pageSize)
+		result = programHeader(result, dataOffset, dataAddress,
+			len(data), dataMemorySize, 6, pageSize)
+		result = appendUntil(result, codeOffset)
+		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		return append(result, data...)
+	}
+}

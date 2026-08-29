@@ -1,0 +1,58 @@
+@import "../../backend/definitions/xtensa_lx7.rtg"
+
+# Xtensa LX7 direct-load support for the emulator's ESP32-S3 model.
+go backend {
+	const testUART = 0xffff0100
+	const testExit = 0xfffffff0
+
+	func entry(out *RTGEmitter, stackTop int) bool {
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.stack, int64(stackTop))
+		xtensa_lx7.move(out, xtensa_lx7.frame, xtensa_lx7.stack)
+		return true
+	}
+
+	func write(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		xtensa_lx7.move(out, xtensa_lx7.copySource, xtensa_lx7.secondary)
+		xtensa_lx7.move(out, xtensa_lx7.copyCount, xtensa_lx7.tertiary)
+		out.Mark(loop)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+		xtensa_lx7.compare(out, xtensa_lx7.copyCount, xtensa_lx7.primary)
+		xtensa_lx7.jumpCondition(out, xtensa_lx7.eq, done)
+		xtensa_lx7.loadU8(out, xtensa_lx7.scratch,
+			RTGAddress{Base: xtensa_lx7.copySource})
+		xtensa_lx7.storeU8(out, RTGAddress{Displacement: testUART},
+			xtensa_lx7.scratch)
+		xtensa_lx7.increment(out, xtensa_lx7.copySource)
+		xtensa_lx7.decrement(out, xtensa_lx7.copyCount)
+		xtensa_lx7.jump(out, loop)
+		out.Mark(done)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.primary, 0)
+	}
+
+	func exit(out *RTGEmitter, status RTGRegister) {
+		xtensa_lx7.storeU32(out, RTGAddress{Displacement: testExit}, status)
+		loop := out.NewLabel()
+		out.Mark(loop)
+		xtensa_lx7.jump(out, loop)
+	}
+
+	func patchAbsolute(out *RTGEmitter, dataAddress int) {
+		bssAddress := RTGAlignValue(dataAddress+len(out.Data()), 8)
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(index),
+				out.AbsoluteRelocationAddend(index),
+				dataAddress, bssAddress)
+			if !resolved {
+				continue
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			register := (instruction >> 4) & 15
+			xtensa_lx7.patchFixedImmediate(out, at,
+				RTGRegister{Code: register, Valid: true}, int64(target))
+		}
+	}
+}
