@@ -465,6 +465,12 @@ func renvoRTGAddressRelocAt(out *renvoAsm, address renvoRTGAddress, at int) {
 	}
 }
 
+func renvoRTGLabelRelocAt(out *renvoAsm, label int, at int) {
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
 func renvoRTGDataAddress(offset int) renvoRTGAddress {
 	return renvoRTGAddress{Kind: 1, Addend: offset}
 }

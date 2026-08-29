@@ -182,6 +182,15 @@ func (out *RTGEmitter) RelocAt(at int, label int) {
 	}
 }
 
+// RTGLabelRelocAt records a label relocation at an explicit byte offset. It is
+// the width-independent counterpart to Reloc, whose compatibility behavior
+// targets the historical four-byte relocation field.
+func RTGLabelRelocAt(out *RTGEmitter, label RTGLabel, at int) {
+	if label.Valid {
+		out.RelocAt(at, label.Code)
+	}
+}
+
 func (out *RTGEmitter) PrimaryLoad() int {
 	return out.asm.lastPrimaryLoad
 }
