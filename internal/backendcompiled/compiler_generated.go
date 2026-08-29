@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "72ed5ec5a4c5a2984eabf06b50e4ccb4a52bcf5966de9e07c779dc7a0efc0323"
+const CompilerSourceDigest = "1e6f9ae2eab6fe14466723a1b9f0c1793b448752edc05a749c9e8325f7ed25fd"
 
 // source: backend/compiler_common_impl.go
 
@@ -36639,7 +36639,7 @@ if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\brl\x8fX\xa0\vOFa\xb4n¬\xa7\x1dSd\xc4\xc7\n`ޚp\x19Gh\x05\xa2\x95D", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "\x81v\xd2]\xa1\x01\xd3\x1fk\x8b\v\xeb\x8c3`\xdd\x12\xe7\x1d`*x\x81r\x9e=\x86\x9b\xed:\x83\xa5", 3, true
+return "windows/386", "q\xf3\v\xf8\x94iN\x98\x11S\xbe\\g\xbe\xda\x18T\xe2\x0ev坘dϴí\xf8d\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\xaa\x04J\xab}#\x99\nD\x93~\xd0\x12\r\xb2\xdfQ\xcd\xd5[(\r\xda_\xfe\x97\x8f\x88N\x8f\x1al", 3, true
@@ -50725,85 +50725,294 @@ return out
 // source: backend/compiler_windows_386_impl.go
 
 
+func renvoW386ExitSequence(out *renvoAsm, status int) {
+out.code = append(out.code, byte(0x50+status))
+renvoAsmEmit2(out, 0xff,0x15)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,8,2)
+}
+
+func renvoW386CallImportSequence(out *renvoAsm, importID int, wordCount int) {
+renvoAsmEmit2(out, 0xff,0x15)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,importID,2)
+}
+
+func renvoW386CallImport(out *renvoAsm, importID int) {
+renvoAsmEmit2(out, 0xff,0x15)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,importID,2)
+}
+
+func renvoWin386EmitRuntimeChmod(out *renvoAsm) {
+eax:=0
+ecx:=1
+failed:=renvoAsmNewLabel(out)
+done:=renvoAsmNewLabel(out)
+renvoAsmEmit2(out, 0x6a,1)
+renvoAsmEmit2(out, 0x6a,0)
+renvoAsmEmit2(out, 0x6a,0)
+out.code = append(out.code, byte(0x53))
+renvoW386CallImport(out,5)
+renvo386TargetMoveImmediate(out,ecx,-1)
+renvo386TargetEncodeBinary(out,0x39,eax,ecx)
+renvo386AsmJccLabel(out,0x84,failed)
+renvo386TargetMoveImmediate(out,eax,0)
+renvo386TargetEncodeRelative(out,0xe9,done)
+renvoAsmMarkLabel(out, failed)
+renvo386TargetMoveImmediate(out,eax,-1)
+renvoAsmMarkLabel(out, done)
+}
+
+func renvoWin386EmitRuntimeClose(out *renvoAsm) {
+eax:=0
+failed:=renvoAsmNewLabel(out)
+done:=renvoAsmNewLabel(out)
+out.code = append(out.code, byte(0x53))
+renvoW386CallImport(out,2)
+renvo386TargetTest(out,eax,eax)
+renvo386AsmJccLabel(out,0x84,failed)
+renvo386TargetMoveImmediate(out,eax,0)
+renvo386TargetEncodeRelative(out,0xe9,done)
+renvoAsmMarkLabel(out, failed)
+renvo386TargetMoveImmediate(out,eax,-1)
+renvoAsmMarkLabel(out, done)
+}
+
+func renvoWin386EmitRuntimeOpen(out *renvoAsm) {
+renvoW386TranslateCreateFileFlags(out)
+renvoAsmEmit2(out, 0x6a,0)
+out.code = append(out.code, byte(0x68))
+renvoAsmEmit32(out, 0x80)
+out.code = append(out.code, byte(0x51))
+renvoAsmEmit2(out, 0x6a,0)
+renvoAsmEmit2(out, 0x6a,3)
+out.code = append(out.code, byte(0x52))
+out.code = append(out.code, byte(0x53))
+renvoW386CallImport(out,1)
+}
+
+func renvoW386TranslateCreateFileFlags(out *renvoAsm) {
+edx:=2
+ecx:=1
+notReadWrite:=renvoAsmNewLabel(out)
+accessDone:=renvoAsmNewLabel(out)
+noCreate:=renvoAsmNewLabel(out)
+createDone:=renvoAsmNewLabel(out)
+renvo386TargetMoveImmediate(out,edx,-2147483648)
+renvoAsmEmit2(out, 0xa8,2)
+renvo386AsmJccLabel(out,0x84,notReadWrite)
+renvo386TargetMoveImmediate(out,edx,-1073741824)
+renvo386TargetEncodeRelative(out,0xe9,accessDone)
+renvoAsmMarkLabel(out, notReadWrite)
+renvoAsmEmit2(out, 0xa8,1)
+renvo386AsmJccLabel(out,0x84,accessDone)
+renvo386TargetMoveImmediate(out,edx,0x40000000)
+renvoAsmMarkLabel(out, accessDone)
+renvo386TargetMoveImmediate(out,ecx,3)
+renvoAsmEmit2(out, 0xa8,64)
+renvo386AsmJccLabel(out,0x84,noCreate)
+renvo386TargetMoveImmediate(out,ecx,4)
+out.code = append(out.code, byte(0xa9))
+renvoAsmEmit32(out, 512)
+renvo386AsmJccLabel(out,0x84,createDone)
+renvo386TargetMoveImmediate(out,ecx,2)
+renvo386TargetEncodeRelative(out,0xe9,createDone)
+renvoAsmMarkLabel(out, noCreate)
+out.code = append(out.code, byte(0xa9))
+renvoAsmEmit32(out, 512)
+renvo386AsmJccLabel(out,0x84,createDone)
+renvo386TargetMoveImmediate(out,ecx,5)
+renvoAsmMarkLabel(out, createDone)
+}
+
+func renvoW386CompareImmediate(out *renvoAsm, register int, value int) {
+renvoAsmEmit8(out, 0x83)
+renvo386TargetEmitModRM(out,3,7,renvo386TargetRegisterLowBits(register))
+out.code = append(out.code, byte(int(value)))
+}
+
+func renvoW386PushRegister(out *renvoAsm, register int) {
+out.code = append(out.code, byte(0x50+register))
+}
+
+func renvoW386PopRegister(out *renvoAsm, register int) {
+out.code = append(out.code, byte(0x58+register))
+}
+
+func renvoW386PushImmediate(out *renvoAsm, value int) {
+renvoAsmEmit8(out, 0x6a)
+out.code = append(out.code, byte(int(value)))
+}
+
+func renvoW386PushBSSAddress(out *renvoAsm, offset int) {
+renvoAsmEmit8(out, 0x68)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,offset,1)
+}
+
+func renvoW386StoreEAXBSS(out *renvoAsm, offset int) {
+renvoAsmEmit8(out, 0xa3)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,offset,1)
+}
+
+func renvoW386LoadEAXBSS(out *renvoAsm, offset int) {
+renvoAsmEmit8(out, 0xa1)
+at:=len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at,offset,1)
+}
+
+func renvoW386GetStandardHandle(out *renvoAsm, identifier int) {
+renvoW386PushImmediate(out,identifier)
+renvoW386CallImport(out,6)
+renvo386TargetMove(out,3,0)
+}
+
+func renvoW386ReadHandle(out *renvoAsm) {
+ready:=renvoAsmNewLabel(out)
+renvoW386CompareImmediate(out,3,0)
+renvo386AsmJccLabel(out,0x85,ready)
+renvoW386GetStandardHandle(out,-10)
+renvoAsmMarkLabel(out, ready)
+}
+
+func renvoW386WriteHandle(out *renvoAsm) {
+standardError:=renvoAsmNewLabel(out)
+ready:=renvoAsmNewLabel(out)
+renvoW386CompareImmediate(out,3,1)
+renvo386AsmJccLabel(out,0x85,standardError)
+renvoW386GetStandardHandle(out,-11)
+renvoAsmJmpLabel(out, ready)
+renvoAsmMarkLabel(out, standardError)
+renvoW386CompareImmediate(out,3,2)
+renvo386AsmJccLabel(out,0x85,ready)
+renvoW386GetStandardHandle(out,-12)
+renvoAsmMarkLabel(out, ready)
+}
+
+func renvoW386ReadWriteCall(out *renvoAsm, importID int, countOffset int) {
+renvoW386PushImmediate(out,0)
+renvoW386PushBSSAddress(out,countOffset)
+renvoW386PushRegister(out,2)
+renvoW386PushRegister(out,6)
+renvoW386PushRegister(out,3)
+renvoW386CallImport(out,importID)
+}
+
+func renvoW386RestorePosition(out *renvoAsm, countOffset int) {
+renvoW386PushImmediate(out,0)
+renvoW386PushImmediate(out,0)
+renvoW386LoadEAXBSS(out,countOffset+8)
+renvoW386PushRegister(out,0)
+renvoW386PushRegister(out,3)
+renvoW386CallImport(out,5)
+}
+
+func renvoW386RuntimeIOBody(out *renvoAsm, importID int, countOffset int) {
+sequential:=renvoAsmNewLabel(out)
+positionalFailed:=renvoAsmNewLabel(out)
+restore:=renvoAsmNewLabel(out)
+sequentialFailed:=renvoAsmNewLabel(out)
+renvoW386CompareImmediate(out,1,0)
+renvo386AsmJccLabel(out,0x8c,sequential)
+renvoW386PushRegister(out,1)
+renvoW386PushRegister(out,2)
+renvoW386PushImmediate(out,1)
+renvoW386PushImmediate(out,0)
+renvoW386PushImmediate(out,0)
+renvoW386PushRegister(out,3)
+renvoW386CallImport(out,5)
+renvoW386StoreEAXBSS(out,countOffset+8)
+renvoW386PopRegister(out,2)
+renvoW386PopRegister(out,1)
+renvoW386PushRegister(out,1)
+renvoW386PushRegister(out,2)
+renvoW386PushImmediate(out,0)
+renvoW386PushImmediate(out,0)
+renvoW386PushRegister(out,1)
+renvoW386PushRegister(out,3)
+renvoW386CallImport(out,5)
+renvoW386PopRegister(out,2)
+renvoW386PopRegister(out,1)
+renvoW386ReadWriteCall(out,importID,countOffset)
+renvoW386CompareImmediate(out,0,0)
+renvo386AsmJccLabel(out,0x84,positionalFailed)
+renvoW386LoadEAXBSS(out,countOffset)
+renvoAsmJmpLabel(out, restore)
+renvoAsmMarkLabel(out, positionalFailed)
+renvo386TargetMoveImmediate(out,0,-1)
+renvoAsmMarkLabel(out, restore)
+renvoW386StoreEAXBSS(out,countOffset)
+renvoW386RestorePosition(out,countOffset)
+renvoW386LoadEAXBSS(out,countOffset)
+renvoAsmEmit8(out, 0xc3)
+renvoAsmMarkLabel(out, sequential)
+renvoW386ReadWriteCall(out,importID,countOffset)
+renvoW386CompareImmediate(out,0,0)
+renvo386AsmJccLabel(out,0x84,sequentialFailed)
+renvoW386LoadEAXBSS(out,countOffset)
+renvoAsmEmit8(out, 0xc3)
+renvoAsmMarkLabel(out, sequentialFailed)
+renvo386TargetMoveImmediate(out,0,-1)
+renvoAsmEmit8(out, 0xc3)
+}
+
+func renvoW386ReadAtSequence(out *renvoAsm) {
+helper:=renvoAsmNewLabel(out)
+after:=renvoAsmNewLabel(out)
+countOffset:=renvoW386ReserveBSS(out,16,4)
+renvoAsmJmpLabel(out, after)
+renvoAsmMarkLabel(out, helper)
+renvoW386ReadHandle(out)
+renvoW386RuntimeIOBody(out,3,countOffset)
+renvoAsmMarkLabel(out, after)
+renvo386TargetCall(out,helper)
+}
+
+func renvoW386WriteAtSequence(out *renvoAsm) {
+helper:=renvoAsmNewLabel(out)
+after:=renvoAsmNewLabel(out)
+countOffset:=renvoW386ReserveBSS(out,16,4)
+renvoAsmJmpLabel(out, after)
+renvoAsmMarkLabel(out, helper)
+renvoW386WriteHandle(out)
+renvoW386RuntimeIOBody(out,4,countOffset)
+renvoAsmMarkLabel(out, after)
+renvo386TargetCall(out,helper)
+}
+
+
+func renvoW386ReserveBSS(a *renvoAsm, size int, alignment int) int {
+offset := renvoAlignValue(a.bssSize, alignment)
+a.bssSize = offset + size
+return offset
+}
+
+func renvoWin386EmitExit(a *renvoAsm) { renvoW386ExitSequence(a, 0) }
+
 func renvoWin386CallImport(a *renvoAsm, importID int) {
-base := len(a.code)
-renvoAsmEmitText(a, "\xff\x15\x00\x00\x00\x00")
-renvoAsmAddWinImportReloc(a, base+2, importID)
-}
-
-func renvoWin386EmitRuntimeOpen(a *renvoAsm) {
-base := len(a.code)
-renvoAsmEmitText(a, "\xba\x00\x00\x00\x80\xa8\x02\x0f\x84\x0a\x00\x00\x00\xba\x00\x00\x00\xc0\xe9\x0d\x00\x00\x00\xa8\x01\x0f\x84\x05\x00\x00\x00\xba\x00\x00\x00\x40\xb9\x03\x00\x00\x00\xa8\x40\x0f\x84\x1a\x00\x00\x00\xb9\x04\x00\x00\x00\xa9\x00\x02\x00\x00\x0f\x84\x1a\x00\x00\x00\xb9\x02\x00\x00\x00\xe9\x10\x00\x00\x00\xa9\x00\x02\x00\x00\x0f\x84\x05\x00\x00\x00\xb9\x05\x00\x00\x00\x6a\x00\x68\x80\x00\x00\x00\x51\x6a\x00\x6a\x03\x52\x53\xff\x15\x00\x00\x00\x00")
-renvoAsmAddWinImportReloc(a, base+107, 1)
-}
-
-func renvoWin386EmitRuntimeClose(a *renvoAsm) {
-base := len(a.code)
-renvoAsmEmitText(a, "\x53\xff\x15\x00\x00\x00\x00\x85\xc0\x0f\x84\x07\x00\x00\x00\x31\xc0\xe9\x05\x00\x00\x00\xb8\xff\xff\xff\xff")
-renvoAsmAddWinImportReloc(a, base+3, 2)
-}
-
-func renvoWin386EmitRuntimeChmod(a *renvoAsm) {
-base := len(a.code)
-renvoAsmEmitText(a, "\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xb9\xff\xff\xff\xff\x39\xc8\x0f\x84\x07\x00\x00\x00\x31\xc0\xe9\x05\x00\x00\x00\xb8\xff\xff\xff\xff")
-renvoAsmAddWinImportReloc(a, base+9, 5)
-}
-
-func renvoWin386EmitExit(a *renvoAsm) {
-base := len(a.code)
-renvoAsmEmitText(a, "\x50\xff\x15\x00\x00\x00\x00")
-renvoAsmAddWinImportReloc(a, base+3, 8)
-}
-
-
-func renvoWin386EmitRuntimeReadWrite(g *renvoLinearGen, isWrite bool) {
-a := &g.asm
-label := g.winReadLabel
-if isWrite {
-label = g.winWriteLabel
-}
-if isWrite && g.winWriteEmitted || !isWrite && g.winReadEmitted {
-renvoAsmCallLabel(a, label)
-return
-}
-label = renvoAsmNewLabel(a)
-if isWrite {
-g.winWriteEmitted = true
-g.winWriteLabel = label
-} else {
-g.winReadEmitted = true
-g.winReadLabel = label
-}
-countOff := renvoAlignValue(a.bssSize, 4)
-a.bssSize = countOff + 16
-base := len(a.code)
-relocs := ""
-if isWrite {
-renvoAsmEmitText(a, "\xe9\xc4\x00\x00\x00\x83\xfb\x01\x0f\x84\x0e\x00\x00\x00\x83\xfb\x02\x0f\x84\x14\x00\x00\x00\xe9\x19\x00\x00\x00\x6a\xf5\xff\x15\x00\x00\x00\x00\x89\xc3\xe9\x0a\x00\x00\x00\x6a\xf4\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-relocs = "\x20\x08\x2f\x08\x49\x07\x4e\x01\x5e\x07\x67\x00\x70\x06\x7e\x00\x8a\x00\x93\x06\xa1\x00\xae\x00\xb7\x01\xbf\x07\xc4\x00"
-} else {
-renvoAsmEmitText(a, "\xe9\xac\x00\x00\x00\x83\xfb\x00\x0f\x84\x05\x00\x00\x00\xe9\x0a\x00\x00\x00\x6a\xf6\xff\x15\x00\x00\x00\x00\x89\xc3\x83\xf9\x00\x0f\x8c\x49\x00\x00\x00\x51\x52\x6a\x01\x6a\x00\x6a\x00\x53\xff\x15\x00\x00\x00\x00\xa3\x00\x00\x00\x00\x5a\x59\x51\x52\x6a\x00\x6a\x00\x51\x53\xff\x15\x00\x00\x00\x00\x5a\x59\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x2d\x00\x00\x00\xa1\x00\x00\x00\x00\xe9\x26\x00\x00\x00\x6a\x00\x68\x00\x00\x00\x00\x52\x56\x53\xff\x15\x00\x00\x00\x00\x83\xf8\x00\x0f\x84\x06\x00\x00\x00\xa1\x00\x00\x00\x00\xc3\x6a\xff\x58\xc3\x6a\xff\x58\xa3\x00\x00\x00\x00\x6a\x00\x6a\x00\xa1\x00\x00\x00\x00\x50\x53\xff\x15\x00\x00\x00\x00\xa1\x00\x00\x00\x00\xc3")
-relocs = "\x17\x08\x31\x07\x36\x01\x46\x07\x4f\x00\x58\x05\x66\x00\x72\x00\x7b\x05\x89\x00\x96\x00\x9f\x01\xa7\x07\xac\x00"
-}
-for i := 0; i < len(relocs); i += 2 {
-at := base + int(relocs[i])
-kind := int(relocs[i+1])
-if kind < 2 {
-renvoAsmAddAbsReloc(a, at, countOff+(kind<<3), renvoAbsBssReloc)
-} else {
-renvoAsmAddWinImportReloc(a, at, kind-2)
-}
-}
-a.labelPos[label] = int32(base + 5)
-renvoAsmCallLabel(a, label)
+renvoW386CallImportSequence(a, importID, 0)
 }
 
 func renvoWin386EmitRuntimeReadAt(g *renvoLinearGen) {
-renvoWin386EmitRuntimeReadWrite(g, false)
+if g.winReadEmitted { renvoAsmCallLabel(&g.asm, g.winReadLabel); return }
+g.winReadEmitted = true
+g.winReadLabel = len(g.asm.labelPos)
+renvoW386ReadAtSequence(&g.asm)
 }
 
 func renvoWin386EmitRuntimeWriteAt(g *renvoLinearGen) {
-renvoWin386EmitRuntimeReadWrite(g, true)
+if g.winWriteEmitted { renvoAsmCallLabel(&g.asm, g.winWriteLabel); return }
+g.winWriteEmitted = true
+g.winWriteLabel = len(g.asm.labelPos)
+renvoW386WriteAtSequence(&g.asm)
 }
 
 func compileWindows386(input []int, output int) int {

@@ -129,11 +129,11 @@ prepared output, preventing a fixed-compiler behavior change from retaining a
 stale prepared cache identity. Reserve compiler blocks for integration code
 that cannot use the typed `RTGEmitter` surface.
 
-Windows/386 also keeps its compact fixed-compiler runtime implementation in a
-`go compiler` block beside the authoritative bounded runtime sequences. This is
-a measured resource adapter: prepared definitions use the sequences, both paths
-are covered end to end, and no target-specific byte template or semantic hash is
-hidden in the Go generator.
+Windows/386 uses the same bounded runtime sequences for prepared and fixed
+compilers. Its checked-in projection adds only the compiler-facing names and
+runtime-helper cache state needed by the shared compiler. The resulting fixed
+compiler is intentionally allowed a narrow 324 KiB size budget so those
+readable sequences do not need a second compact byte-template implementation.
 
 `TestNativeDefinitionEmbeddedGoMetrics` deduplicates shared declarations across
 every native entrypoint and reports semantic Go bytes and declaration counts as

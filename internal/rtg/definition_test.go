@@ -788,16 +788,16 @@ func TestCheckedInWindows386DefinitionChangesInvalidateProjection(t *testing.T) 
 	}
 }
 
-func TestWindows386CompilerIntegrationChangesTargetIdentity(t *testing.T) {
+func TestWindows386RuntimeSequenceChangesTargetIdentity(t *testing.T) {
 	const filename = "../../backend/definitions/windows_386.rtg"
 	original, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatal(err)
 	}
 	modified := bytes.Replace(original,
-		[]byte("base+107, 1"), []byte("base+106, 1"), 1)
+		[]byte("out.Bytes2(0x6a, 1)"), []byte("out.Bytes2(0x6a, 2)"), 1)
 	if bytes.Equal(modified, original) {
-		t.Fatal("Windows/386 compiler integration mutation did not change the fixture")
+		t.Fatal("Windows/386 runtime sequence mutation did not change the fixture")
 	}
 	base := ResolveDefinitions(ParseImports(
 		original, filename, testFilesystemImportLoader{}))
@@ -808,7 +808,7 @@ func TestWindows386CompilerIntegrationChangesTargetIdentity(t *testing.T) {
 			base.Diagnostics, changed.Diagnostics)
 	}
 	if base.Targets[0].Descriptor.Definition == changed.Targets[0].Descriptor.Definition {
-		t.Fatal("compiler integration behavior did not change the target identity")
+		t.Fatal("runtime sequence behavior did not change the target identity")
 	}
 }
 
@@ -882,14 +882,13 @@ func TestWindows386RuntimeIOUsesBoundedSequences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, opaque := range []string{"io_template", "read_code", "write_code"} {
-		if strings.Contains(string(source), opaque) {
-			t.Fatalf("Windows/386 runtime I/O retained opaque %s", opaque)
+	for _, forbidden := range []string{
+		"go compiler {", "io_template", "read_code", "write_code",
+		"renvoAsmEmitText(a, \"\\xe9",
+	} {
+		if strings.Contains(string(source), forbidden) {
+			t.Fatalf("Windows/386 retained duplicated or opaque runtime implementation %q", forbidden)
 		}
-	}
-	if !strings.Contains(string(source), "go compiler {") ||
-		!strings.Contains(string(source), "func renvoWin386EmitRuntimeReadWrite") {
-		t.Fatal("Windows/386 compact fixed-compiler integration is not owned by its RTG definition")
 	}
 	resolved := resolveNativeTarget(t, "windows/386")
 	sequences := architectureSequences(resolved.Targets[0].Arch)

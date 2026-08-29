@@ -139,10 +139,11 @@ and production target projections now derive the supported native targets'
 runtime numbers, entry contracts, relocation rules, and executable packaging
 from their `.rtg` entrypoints. Private symbols use a separate built-in
 namespace so prepared definitions can coexist in the same self-hosted compiler
-source bundle. Windows/386 keeps its measured compact fixed-compiler runtime in
-the same RTG entrypoint as the bounded sequences used by prepared definitions.
-The generator contains no Windows/386 runtime byte snapshot or semantic hash;
-stale generated output and built-in/prepared end-to-end behavior are tested.
+source bundle. Windows/386 now generates both prepared and fixed runtime
+lowering directly from the same bounded sequences. Its fixed projection adds
+only compiler-facing names and helper-cache state; there is no parallel byte
+template or compiler-only runtime implementation. Stale generated output and
+built-in/prepared end-to-end behavior are tested.
 External definitions use the target-neutral prepared adapter and take runtime,
 relocation, and format semantics from the selected definition.
 

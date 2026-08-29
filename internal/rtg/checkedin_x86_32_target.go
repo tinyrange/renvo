@@ -49,7 +49,27 @@ func generateCheckedInWindows386Projection(
 	manifest := []string{document.Unit + " " + HashText(document.Hash)}
 	source := generateHeaderPackage(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
-	source = appendCompilerGoBlocks(source, document)
+	projection := document
+	projection.Unit = "builtin"
+	roots := checkedInWindows386SequenceRoots(target.Runtime)
+	if len(roots) != 7 {
+		return checkedInTargetProjectionFailure(document, target.Runtime,
+			"windows/386 runtime is missing a required operation sequence")
+	}
+	goRoots, sequences := resolveArchitectureSequenceProjection(
+		projection, target.Arch, roots, nil)
+	exports := architectureExports(target.Arch)
+	excluded := make([]string, 0, len(exports))
+	for i := 0; i < len(exports); i++ {
+		excluded = append(excluded, exports[i].Local)
+	}
+	source = appendReachableEmbeddedGoExcluding(
+		source, projection, goRoots, true, exports, excluded)
+	source = appendArchitectureSequences(
+		source, projection, target.Arch, true, false, true, sequences)
+	source = rewriteCheckedInX8632EmitterMethods(source)
+	source = rewriteCheckedInWindows386SequenceNames(source)
+	source = append(source, checkedInWindows386SequenceAdapters...)
 	source = append(source, "\nfunc compileWindows386(input []int, output int) int {\n\treturn compileWindows386Arena(input, output, 0)\n}\n\nfunc compileWindows386Arena(input []int, output int, arenaSize int) int {\n\trenvoSetTarget(renvoTargetWindows386)\n\treturn renvoCompile386(input, output, arenaSize)\n}\n"...)
 	source = appendCheckedInWindows386Entry(source, template)
 	source = append(source, checkedInWindows386ImageSource...)
@@ -57,6 +77,69 @@ func generateCheckedInWindows386Projection(
 		Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true,
 	}
 }
+
+func checkedInWindows386SequenceRoots(runtime Declaration) []string {
+	var roots []string
+	for _, field := range []string{"emit_exit", "emit_static_call"} {
+		if algorithm, found := architectureGoHook(runtime, field); found {
+			roots = append(roots, algorithm)
+		}
+	}
+	for _, operation := range []string{"open", "close", "chmod", "read_at", "write_at"} {
+		if algorithm, found := runtimeOperationHook(runtime, operation); found {
+			roots = append(roots, algorithm)
+		}
+	}
+	return roots
+}
+
+func rewriteCheckedInWindows386SequenceNames(source []byte) []byte {
+	source = bytes.ReplaceAll(source,
+		[]byte("rtgBuiltinWindows386PackageWindows"), []byte("renvoW386"))
+	replacements := []string{
+		"renvoW386Exit", "renvoW386ExitSequence",
+		"renvoW386StaticCall", "renvoW386CallImportSequence",
+		"renvoW386RuntimeOpen", "renvoWin386EmitRuntimeOpen",
+		"renvoW386RuntimeClose", "renvoWin386EmitRuntimeClose",
+		"renvoW386RuntimeChmod", "renvoWin386EmitRuntimeChmod",
+		"renvoW386ReadAt", "renvoW386ReadAtSequence",
+		"renvoW386WriteAt", "renvoW386WriteAtSequence",
+		"out.ReserveBSS(", "renvoW386ReserveBSS(out,",
+	}
+	for i := 0; i < len(replacements); i += 2 {
+		source = bytes.ReplaceAll(source, []byte(replacements[i]), []byte(replacements[i+1]))
+	}
+	return source
+}
+
+const checkedInWindows386SequenceAdapters = `
+
+func renvoW386ReserveBSS(a *renvoAsm, size int, alignment int) int {
+	offset := renvoAlignValue(a.bssSize, alignment)
+	a.bssSize = offset + size
+	return offset
+}
+
+func renvoWin386EmitExit(a *renvoAsm) { renvoW386ExitSequence(a, 0) }
+
+func renvoWin386CallImport(a *renvoAsm, importID int) {
+	renvoW386CallImportSequence(a, importID, 0)
+}
+
+func renvoWin386EmitRuntimeReadAt(g *renvoLinearGen) {
+	if g.winReadEmitted { renvoAsmCallLabel(&g.asm, g.winReadLabel); return }
+	g.winReadEmitted = true
+	g.winReadLabel = len(g.asm.labelPos)
+	renvoW386ReadAtSequence(&g.asm)
+}
+
+func renvoWin386EmitRuntimeWriteAt(g *renvoLinearGen) {
+	if g.winWriteEmitted { renvoAsmCallLabel(&g.asm, g.winWriteLabel); return }
+	g.winWriteEmitted = true
+	g.winWriteLabel = len(g.asm.labelPos)
+	renvoW386WriteAtSequence(&g.asm)
+}
+`
 
 func appendCheckedInWindows386Entry(source []byte, template runtimeEntryTemplate) []byte {
 	bssSymbols := []string{
