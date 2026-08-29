@@ -1,0 +1,64 @@
+definition 1
+unit remu_ch32v006
+implements direct_emitter_v1
+
+@import "qingke_mcu.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0x00000000
+	const dataAddress = 0x20000000
+	const stackTop = 0x20002000
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		return qingke_mcu.entry(out, stackTop)
+	}
+	func image(out *RTGEmitter) []byte {
+		qingke_mcu.patchAbsolute(out, dataAddress)
+		return image32.ELF(out, 243, 8,
+			textAddress, dataAddress, false)
+	}
+}
+
+runtime remu_ch32v006_runtime {
+	emit_entry_start = go entry
+	emit_exit = go qingke_mcu.exit
+	operation write { emit = go qingke_mcu.write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_ch32v006_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	flags = 8
+	code_offset = 0x100
+	image = go image
+}
+target experimental/ch32v006 {
+	family = native_v1
+	os = ch32v006
+	arch = qingke_v2
+	frontend_arch = riscv32
+	abi = qingke_internal
+	runtime = remu_ch32v006_runtime
+	executable = remu_ch32v006_elf
+	build_tags = [ch32v006, riscv32, rv32e, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 2048
+}
+
+@stdlib "device/remu/target_ch32v006.go"
+//go:build renvo && ch32v006
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "ch32v006"
+const FlashStart uintptr = 0x00000000
+const FlashSize uintptr = 64 * 1024
+const RAMStart uintptr = 0x20000000
+const RAMSize uintptr = 8 * 1024
+const GPIOCount = 24
+@endstdlib

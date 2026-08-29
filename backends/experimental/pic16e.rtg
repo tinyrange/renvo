@@ -1,0 +1,216 @@
+# Enhanced mid-range PIC16 emitter. Code is stored as little-endian 14-bit
+# words while Renvo's logical values use 16-bit pairs in bank-zero RAM.
+go backend {
+	const t0=0x40
+	const t1=0x42
+	const t2=0x44
+	var dataSourcePatch int
+	var dataSizePatch int
+
+	func word(out *RTGEmitter,value int){out.Byte(byte(value));out.Byte(byte(value>>8))}
+	func regSlot(value RTGRegister)int{return 0x20+value.Code*2}
+	func movlw(out *RTGEmitter,value int)int{at:=out.Len();word(out,0x3000|(value&255));return at}
+	func movwf(out *RTGEmitter,file int){word(out,0x0080|(file&0x7f))}
+	func movf(out *RTGEmitter,file int){word(out,0x0800|(file&0x7f))}
+	func clrf(out *RTGEmitter,file int){word(out,0x0180|(file&0x7f))}
+	func loadReg(out *RTGEmitter,value RTGRegister,direct int){movf(out,regSlot(value));movwf(out,direct);movf(out,regSlot(value)+1);movwf(out,direct+1)}
+	func storeReg(out *RTGEmitter,value RTGRegister,direct int){movf(out,direct);movwf(out,regSlot(value));movf(out,direct+1);movwf(out,regSlot(value)+1)}
+	func immediateReg(out *RTGEmitter,destination RTGRegister,value int)int{at:=movlw(out,value);movwf(out,regSlot(destination));movlw(out,value>>8);movwf(out,regSlot(destination)+1);return at}
+	func moveImmediate(out *RTGEmitter,destination RTGRegister,value int64){immediateReg(out,destination,int(value))}
+	func move(out *RTGEmitter,destination RTGRegister,source RTGRegister){if destination.Code!=source.Code{loadReg(out,source,t0);storeReg(out,destination,t0)}}
+	func binary(out *RTGEmitter,destination RTGRegister,source RTGRegister,opcode int){movf(out,regSlot(source));word(out,opcode|0x80|regSlot(destination));movf(out,regSlot(source)+1);word(out,opcode|0x80|regSlot(destination)+1)}
+	func add(out *RTGEmitter,destination RTGRegister,source RTGRegister){movf(out,regSlot(source));word(out,0x0780|regSlot(destination));movf(out,regSlot(source)+1);word(out,0x3d80|regSlot(destination)+1)}
+	func subtract(out *RTGEmitter,destination RTGRegister,source RTGRegister){movf(out,regSlot(source));word(out,0x0280|regSlot(destination));movf(out,regSlot(source)+1);word(out,0x3b80|regSlot(destination)+1)}
+	func bitAnd(out *RTGEmitter,destination RTGRegister,source RTGRegister){binary(out,destination,source,0x0500)}
+	func bitOr(out *RTGEmitter,destination RTGRegister,source RTGRegister){binary(out,destination,source,0x0400)}
+	func bitXor(out *RTGEmitter,destination RTGRegister,source RTGRegister){binary(out,destination,source,0x0600)}
+	func increment(out *RTGEmitter,operand RTGRegister){word(out,0x0a80|regSlot(operand));word(out,0x1800|(2<<7)|3);word(out,0x0a80|regSlot(operand)+1)}
+	func decrement(out *RTGEmitter,operand RTGRegister){movf(out,regSlot(operand));word(out,0x1800|(2<<7)|3);word(out,0x0380|regSlot(operand)+1);word(out,0x0380|regSlot(operand))}
+	func shiftLeftImmediate(out *RTGEmitter,operand RTGRegister,value byte){for index:=0;index<int(value);index++{word(out,0x1003);word(out,0x0d80|regSlot(operand));word(out,0x0d80|regSlot(operand)+1)}}
+	func shiftRight(out *RTGEmitter,operand RTGRegister,value byte,signed bool){for index:=0;index<int(value);index++{word(out,0x1003);if signed{word(out,0x1800|(7<<7)|regSlot(operand)+1);word(out,0x1403)};word(out,0x0c80|regSlot(operand)+1);word(out,0x0c80|regSlot(operand))}}
+	func shiftRightUnsignedImmediate(out *RTGEmitter,operand RTGRegister,value byte){shiftRight(out,operand,value,false)}
+	func shiftRightSignedImmediate(out *RTGEmitter,operand RTGRegister,value byte){shiftRight(out,operand,value,true)}
+
+	func emitAddress(out *RTGEmitter,destination RTGRegister,value RTGAddress){
+		if RTGAddressValid(value){at:=immediateReg(out,destination,value.Addend);RTGAddressRelocAt(out,value,at);return}
+		if !value.Base.Valid&&!value.Index.Valid{moveImmediate(out,destination,int64(value.Displacement));return}
+		if value.Base.Valid{move(out,destination,value.Base)}else{moveImmediate(out,destination,0)}
+		if value.Index.Valid{move(out,scratch,value.Index);shiftLeftImmediate(out,scratch,byte(RTGLog2(value.Scale)));add(out,destination,scratch)}
+		if value.Displacement!=0{moveImmediate(out,scratch,int64(value.Displacement));add(out,destination,scratch)}
+	}
+	func regToFSR(out *RTGEmitter,value RTGRegister){movf(out,regSlot(value));movwf(out,4);movf(out,regSlot(value)+1);movwf(out,5)}
+	func addressToFSR(out *RTGEmitter,value RTGAddress){emitAddress(out,address,value);regToFSR(out,address)}
+	func loadWord(out *RTGEmitter,destination RTGRegister,value RTGAddress){addressToFSR(out,value);movf(out,0);movwf(out,t0);word(out,0x3101);movf(out,0);movwf(out,t0+1);storeReg(out,destination,t0)}
+	func loadByte(out *RTGEmitter,destination RTGRegister,value RTGAddress,signed bool){addressToFSR(out,value);movf(out,0);movwf(out,t0);clrf(out,t0+1);if signed{word(out,0x1800|(7<<7)|t0);word(out,0x30ff);word(out,0x0080|t0+1)};storeReg(out,destination,t0)}
+	func storeWord(out *RTGEmitter,value RTGAddress,source RTGRegister){emitAddress(out,address,value);loadReg(out,source,t0);regToFSR(out,address);movf(out,t0);movwf(out,0);word(out,0x3101);movf(out,t0+1);movwf(out,0)}
+	func storeByte(out *RTGEmitter,value RTGAddress,source RTGRegister){emitAddress(out,address,value);loadReg(out,source,t0);regToFSR(out,address);movf(out,t0);movwf(out,0)}
+	func loadNative(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI32(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadU32(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI16(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadU16(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadWord(out,destination,value)}
+	func loadI8(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadByte(out,destination,value,true)}
+	func loadU8(out *RTGEmitter,destination RTGRegister,value RTGAddress){loadByte(out,destination,value,false)}
+	func storeNative(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU32(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU16(out *RTGEmitter,value RTGAddress,source RTGRegister){storeWord(out,value,source)}
+	func storeU8(out *RTGEmitter,value RTGAddress,source RTGRegister){storeByte(out,value,source)}
+
+	func absolute(out *RTGEmitter,opcode int,label RTGLabel){at:=out.Len();word(out,0x3180);word(out,opcode);out.RelocAt(at,RTGLabelIndex(label))}
+	func jump(out *RTGEmitter,label RTGLabel){absolute(out,0x2800,label)}
+	func call(out *RTGEmitter,label RTGLabel){absolute(out,0x2000,label)}
+	func skipAbsolute(out *RTGEmitter,testOpcode int,label RTGLabel){word(out,testOpcode);word(out,0x3202);absolute(out,0x2800,label)}
+	func compare(out *RTGEmitter,left RTGRegister,right RTGRegister){
+		movf(out,regSlot(right));word(out,0x0200|regSlot(left));movwf(out,t0)
+		movf(out,regSlot(right)+1);word(out,0x3b00|regSlot(left)+1);movwf(out,t1)
+		clrf(out,t2+1);word(out,0x1800|(0<<7)|3);word(out,0x0a80|t2+1)
+		movf(out,t0);word(out,0x0400|t1);movwf(out,t2)
+	}
+	func jumpCondition(out *RTGEmitter,condition RTGCondition,label RTGLabel){code:=condition.Code
+		if code==0{movf(out,t2);skipAbsolute(out,0x1c00|(2<<7)|3,label);return}
+		if code==1{movf(out,t2);skipAbsolute(out,0x1800|(2<<7)|3,label);return}
+		if code==2||code==8{jumpCondition(out,eq,label);jumpCondition(out,ult,label);return}
+		if code==3||code==9{skip:=out.NewLabel();jumpCondition(out,eq,skip);if code==3{jumpCondition(out,slt,skip)}else{jumpCondition(out,ult,skip)};jump(out,label);out.Mark(skip);return}
+		movf(out,t2+1);if code==4||code==6{skipAbsolute(out,0x1800|(2<<7)|3,label)}else{skipAbsolute(out,0x1c00|(2<<7)|3,label)}
+	}
+	func test(out *RTGEmitter,left RTGRegister,right RTGRegister){move(out,scratch,left);bitAnd(out,scratch,right);moveImmediate(out,address,0);compare(out,scratch,address)}
+	func setCondition(out *RTGEmitter,condition RTGCondition,destination RTGRegister){yes:=out.NewLabel();done:=out.NewLabel();jumpCondition(out,condition,yes);moveImmediate(out,destination,0);jump(out,done);out.Mark(yes);moveImmediate(out,destination,1);out.Mark(done)}
+	func callIndirect(out *RTGEmitter,operand RTGRegister){loadReg(out,operand,t0);movf(out,t0+1);movwf(out,10);movf(out,t0);word(out,0x000a)}
+	func ret(out *RTGEmitter){word(out,0x0008)}
+	func leave(out *RTGEmitter){move(out,stack,frame);loadWord(out,frame,RTGAddress{Base:stack});moveImmediate(out,scratch,2);add(out,stack,scratch)}
+	func hostSyscall(out *RTGEmitter){word(out,0x0000)}
+	func clearWatchdog(out *RTGEmitter){word(out,0x0064)}
+
+	func multiply(out *RTGEmitter,destination RTGRegister,source RTGRegister){move(out,copyDestination,destination);move(out,copySource,source);moveImmediate(out,destination,0);loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);moveImmediate(out,scratch,0);compare(out,copySource,scratch);jumpCondition(out,eq,done);add(out,destination,copyDestination);decrement(out,copySource);jump(out,loop);out.Mark(done)}
+	func variableShift(out *RTGEmitter,direction RTGShiftDirection,signed bool){move(out,copyCount,primary);move(out,primary,tertiary);loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);moveImmediate(out,scratch,0);compare(out,copyCount,scratch);jumpCondition(out,eq,done);if direction==RTGShiftLeft{shiftLeftImmediate(out,primary,1)}else if signed{shiftRightSignedImmediate(out,primary,1)}else{shiftRightUnsignedImmediate(out,primary,1)};decrement(out,copyCount);jump(out,loop);out.Mark(done)}
+	func signedDivide(out *RTGEmitter,wantRemainder bool){zero:=scratch;moveImmediate(out,zero,0);byZero:=out.NewLabel();loop:=out.NewLabel();done:=out.NewLabel();compare(out,primary,zero);jumpCondition(out,eq,byZero);move(out,compareRight,primary);move(out,scratch,tertiary);moveImmediate(out,compareLeft,0);out.Mark(loop);compare(out,scratch,compareRight);jumpCondition(out,ult,done);subtract(out,scratch,compareRight);increment(out,compareLeft);jump(out,loop);out.Mark(done);if wantRemainder{move(out,primary,scratch)}else{move(out,primary,compareLeft)};finish:=out.NewLabel();jump(out,finish);out.Mark(byZero);if wantRemainder{move(out,primary,tertiary)}else{moveImmediate(out,primary,-1)};out.Mark(finish)}
+
+	func patchRelocations(out *RTGEmitter){for index:=0;index<out.RelocationCount();index++{at:=out.RelocationOffset(index);target:=out.LabelPosition(out.RelocationLabel(index))/2;opcode:=int(out.ByteAt(at+3))<<8|int(out.ByteAt(at+2));out.SetByteAt(at,byte(0x80|((target>>8)&0x7f)));out.SetByteAt(at+1,0x31);out.SetByteAt(at+2,byte(target));out.SetByteAt(at+3,byte(((opcode&0x3800)|(target&0x700))>>8))}}
+	func patchAbsolute(out *RTGEmitter,dataAddress int){bssAddress:=RTGAlignValue(dataAddress+len(out.Data()),2);for index:=0;index<out.AbsoluteRelocationCount();index++{at:=out.AbsoluteRelocationOffset(index);target,resolved:=RTGResolveAbsoluteRelocation(out,out.AbsoluteRelocationKind(index),out.AbsoluteRelocationAddend(index),dataAddress,bssAddress);if resolved{out.SetByteAt(at,byte(target));out.SetByteAt(at+4,byte(target>>8))}}}
+	func frameStart(out *RTGEmitter)int{moveImmediate(out,scratch,2);subtract(out,stack,scratch);storeWord(out,RTGAddress{Base:stack},frame);move(out,frame,stack);at:=out.Len();moveImmediate(out,scratch,0);subtract(out,stack,scratch);return at}
+	func frameFinish(out *RTGEmitter,at int,stackUsed int){size:=(stackUsed+1)&-2;out.SetByteAt(at,byte(size));out.SetByteAt(at+4,byte(size>>8))}
+	func frameLoad(out *RTGEmitter,destination RTGRegister,offset int){loadWord(out,destination,RTGAddress{Base:frame,Displacement:-(offset+2)})}
+	func frameStore(out *RTGEmitter,offset int,source RTGRegister){storeWord(out,RTGAddress{Base:frame,Displacement:-(offset+2)},source)}
+	func frameAddress(out *RTGEmitter,destination RTGRegister,offset int){emitAddress(out,destination,RTGAddress{Base:frame,Displacement:-(offset+2)})}
+	func dataCopyEntry(out *RTGEmitter,dataAddress int){
+		dataSourcePatch=out.Len();movlw(out,0);movwf(out,4);movlw(out,0);movwf(out,5)
+		movlw(out,dataAddress);movwf(out,6);movlw(out,dataAddress>>8);movwf(out,7)
+		dataSizePatch=out.Len();movlw(out,0);movwf(out,t0);movlw(out,0);movwf(out,t0+1)
+		loop:=out.NewLabel();done:=out.NewLabel();out.Mark(loop);movf(out,t0);word(out,0x0400|t0+1);skipAbsolute(out,0x1c00|(2<<7)|3,done)
+		movf(out,0);movwf(out,1);word(out,0x3101);word(out,0x3141)
+		movf(out,t0);word(out,0x1800|(2<<7)|3);word(out,0x0380|t0+1);word(out,0x0380|t0);jump(out,loop);out.Mark(done)
+	}
+	func patchDataCopy(out *RTGEmitter,sourceWord int,size int){source:=0x8000|sourceWord;out.SetByteAt(dataSourcePatch,byte(source));out.SetByteAt(dataSourcePatch+4,byte(source>>8));out.SetByteAt(dataSizePatch,byte(size));out.SetByteAt(dataSizePatch+4,byte(size>>8))}
+}
+
+arch pic16e_16 {
+	alias="pic16"
+	endian=little
+	word_bits=16
+	pointer_bits=16
+	instruction_alignment=2
+	stack_word_bytes=2
+	stack_alignment=2
+	patch_relocations=go patchRelocations
+	registers virtual=[v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15]
+	locations {
+		primary=v0
+		secondary=v1
+		tertiary=v2
+		scratch=v3
+		address=v4
+		compareLeft=v5
+		compareRight=v6
+		copy_destination=v7
+		copy_source=v8
+		copy_count=v9
+		stack=v10
+		frame=v11
+		link=v12
+	}
+	conditions {
+		eq=0
+		ne=1
+		sle=2
+		sgt=3
+		slt=4
+		sge=5
+		ult=6
+		uge=7
+		ule=8
+		ugt=9
+	}
+	bind {
+		move=go move
+		address=go emitAddress
+		load.native=go loadNative
+		load.i32=go loadI32
+		load.u32=go loadU32
+		load.i16=go loadI16
+		load.u16=go loadU16
+		load.i8=go loadI8
+		load.u8=go loadU8
+		store.native=go storeNative
+		store.u32=go storeU32
+		store.u16=go storeU16
+		store.u8=go storeU8
+		add=go add
+		subtract=go subtract
+		multiply=go multiply
+		bit_and=go bitAnd
+		bit_or=go bitOr
+		bit_xor=go bitXor
+		compare=go compare
+		test=go test
+		increment=go increment
+		decrement=go decrement
+		shift_left_immediate=go shiftLeftImmediate
+		shift_right_unsigned_immediate=go shiftRightUnsignedImmediate
+		shift_right_signed_immediate=go shiftRightSignedImmediate
+		call=go call
+		call_indirect=go callIndirect
+		jump=go jump
+		jump_condition=go jumpCondition
+		set_condition=go setCondition
+		return=go ret
+		leave=go leave
+		host_syscall=go hostSyscall
+		move_immediate=go moveImmediate
+		variable_shift=go variableShift
+		signed_divide=go signedDivide
+		copy_bytes=sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter){
+			let loop=out.NewLabel()
+			let done=out.NewLabel()
+			let zero=record_register(Code:13,Valid:true,)
+			moveImmediate(out,zero,0)
+			out.Mark(loop)
+			compare(out,copyCount,zero)
+			jumpCondition(out,eq,done)
+			loadU8(out,scratch,record_address(Base:copySource,))
+			storeU8(out,record_address(Base:copyDestination,),scratch)
+			increment(out,copySource)
+			increment(out,copyDestination)
+			decrement(out,copyCount)
+			jump(out,loop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi pic16e_internal {
+	arch=pic16e_16
+	arguments=[v0,v1,v2,v3,v4,v5]
+	call_words=[v0,v1,v2,v3,v4,v5]
+	result=[v0,v1]
+	stack_alignment=2
+	return_address=stack_word
+	frame_pointer=v11
+	frame_start=go frameStart
+	frame_finish=go frameFinish
+	frame_load=go frameLoad
+	frame_store=go frameStore
+	frame_address=go frameAddress
+}

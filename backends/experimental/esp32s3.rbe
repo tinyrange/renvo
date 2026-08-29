@@ -1,0 +1,63 @@
+definition 1
+unit remu_esp32s3
+implements direct_emitter_v1
+
+@import "xtensa_mcu.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0x42000000
+	const dataAddress = 0x3fc94000
+	const stackTop = 0x3fcff000
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		return xtensa_mcu.entry(out, stackTop)
+	}
+	func image(out *RTGEmitter) []byte {
+		xtensa_mcu.patchAbsolute(out, dataAddress)
+		return image32.ELF(out, 94, 0,
+			textAddress, dataAddress, false)
+	}
+}
+
+runtime remu_esp32s3_runtime {
+	emit_entry_start = go entry
+	emit_exit = go xtensa_mcu.exit
+	operation write { emit = go xtensa_mcu.write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_esp32s3_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 94
+	code_offset = 0x100
+	image = go image
+}
+target experimental/esp32s3 {
+	family = native_v1
+	os = esp32s3
+	arch = xtensa_lx7
+	frontend_arch = riscv32
+	abi = xtensa_call0
+	runtime = remu_esp32s3_runtime
+	executable = remu_esp32s3_elf
+	build_tags = [esp32s3, xtensa_lx7, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 65536
+}
+
+@stdlib "device/remu/target_esp32s3.go"
+//go:build renvo && esp32s3
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "esp32s3"
+const FlashStart uintptr = 0x42000000
+const FlashSize uintptr = 16 * 1024 * 1024
+const RAMStart uintptr = 0x3fc88000
+const RAMSize uintptr = 480 * 1024
+const GPIOCount = 49
+@endstdlib

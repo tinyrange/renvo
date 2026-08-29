@@ -1,0 +1,63 @@
+definition 1
+unit remu_atsamd21e18
+implements direct_emitter_v1
+
+@import "thumb_mcu.rtg"
+@import "image32.rtg"
+
+go backend {
+	const textAddress = 0x00000000
+	const dataAddress = 0x20000000
+	const stackTop = 0x20008000
+
+	func entry(out *RTGEmitter, stateOffset int) bool {
+		return thumb_mcu.entry(out, stackTop)
+	}
+	func image(out *RTGEmitter) []byte {
+		thumb_mcu.patchAbsolute(out, dataAddress, textAddress+0x100)
+		return image32.ELF(out, 40, 0x05000000,
+			textAddress, dataAddress, true)
+	}
+}
+
+runtime remu_atsamd21e18_runtime {
+	emit_entry_start = go entry
+	emit_exit = go thumb_mcu.exit
+	operation write { emit = go thumb_mcu.write }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+format remu_atsamd21e18_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 40
+	code_offset = 0x100
+	image = go image
+}
+target experimental/atsamd21e18 {
+	family = native_v1
+	os = atsamd21e18
+	arch = thumb
+	frontend_arch = thumb
+	abi = thumb_internal
+	runtime = remu_atsamd21e18_runtime
+	executable = remu_atsamd21e18_elf
+	build_tags = [atsamd21e18, arm, thumb, tiny]
+	capabilities = [freestanding, executable, volatile_memory]
+	arena_default = 8192
+}
+
+@stdlib "device/remu/target_atsamd21e18.go"
+//go:build renvo && atsamd21e18
+
+// Package remu exposes the direct-load memory contract of the selected
+// renvo_emu target.
+package remu
+
+const Target = "atsamd21e18"
+const FlashStart uintptr = 0x00000000
+const FlashSize uintptr = 256 * 1024
+const RAMStart uintptr = 0x20000000
+const RAMSize uintptr = 32 * 1024
+const GPIOCount = 26
+@endstdlib
