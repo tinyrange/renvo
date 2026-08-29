@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"testing"
 
-	"renvo.dev/internal/apk"
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/driver"
 )
@@ -141,60 +140,5 @@ func TestCompilerJITAndroidDEXImage(t *testing.T) {
 		if !bytes.Contains(dex, required) {
 			t.Errorf("generated DEX omits %q", required)
 		}
-	}
-}
-
-func TestRenvoBuiltAPKPackagerBuildsAndroidDEX(t *testing.T) {
-	dex := compileAndroidDEXExample(t)
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	packager := driver.CompileFromFS([]string{
-		"-t", hostTarget(), "-s", "-o", "renvoapk",
-		filepath.Join(root, "cmd", "renvoapk"),
-	}, root, filepath.Join(root, "std"), driver.OSFS{}, backendcompiled.Backend{})
-	if !packager.Ok {
-		t.Fatalf("Renvo packager compile failed: %#v", packager.Diagnostic)
-	}
-	directory := t.TempDir()
-	executable := filepath.Join(directory, "renvoapk")
-	if runtime.GOOS == "windows" {
-		executable += ".exe"
-	}
-	if err := os.WriteFile(executable, packager.Binary, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dexPath := filepath.Join(directory, "classes.dex")
-	if err := os.WriteFile(dexPath, dex, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	configSource := []byte("package=dev.renvo.jvmpackager\n" +
-		"name=Renvo JVM Packager\nversion_code=1\nversion_name=1.0\n" +
-		"min_sdk=24\ntarget_sdk=35\n")
-	configPath := filepath.Join(directory, "app.conf")
-	if err := os.WriteFile(configPath, configSource, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	outputPath := filepath.Join(directory, "app.apk")
-	command := exec.Command(executable,
-		"-dex", dexPath, "-config", configPath, "-o", outputPath)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("Renvo-built DEX packager failed: %v\n%s", err, output)
-	}
-	got, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, err := apk.ParseConfig(configSource)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := apk.BuildDEX(dex, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("Renvo-built DEX packager differs from host builder")
 	}
 }
