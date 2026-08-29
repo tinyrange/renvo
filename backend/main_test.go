@@ -433,7 +433,7 @@ func performanceTargetEntry(t *testing.T, targetName string) (string, string, []
 	case "wasi/wasm32":
 		return "renvoTargetWasiWasm32", "renvoTryCompileScalarProgramWasm32", []string{"@amd64-common", "compiler_wasm32_impl.go", "compiler_wasi_wasm32_impl.go"}
 	case "darwin/arm64":
-		return "renvoTargetDarwinArm64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_aarch64_impl.go", "compiler_aarch64_target_impl.go", "compiler_darwin_arm64_impl.go"}
+		return "renvoTargetDarwinArm64", "renvoTryCompileScalarProgramAarch64", []string{"@amd64-common", "compiler_rtg_generated_impl.go", "compiler_aarch64_impl.go", "compiler_aarch64_target_impl.go", "compiler_darwin_arm64_impl.go", "compiler_darwin_arm64_target_impl.go"}
 	default:
 		t.Fatalf("unsupported performance target %s", targetName)
 		return "", "", nil
