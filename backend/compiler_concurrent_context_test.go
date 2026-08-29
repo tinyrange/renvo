@@ -143,7 +143,7 @@ func compileConcurrentKernel(source []byte, outputPath string, license string) (
 	renvoConfigureCompileContext(context, "linux/kernel-amd64", outputPath, license)
 	context.kernel.kernelRelease = "6.18.0-test"
 	context.kernel.kernelVersion = "Linux version 6.18.0-test SMP PREEMPT"
-	context.kernel.kernelBTF = testKernelBTF()
+	context.kernel.kernelBTF = testConcurrentKernelBTF()
 	context.kernel.kernelSymvers = []byte("0xb1976aeb\tmodule_layout\tvmlinux\tEXPORT_SYMBOL\n0x92997ed8\t_printk\tvmlinux\tEXPORT_SYMBOL\n0x11223344\tktime_get_ns\tvmlinux\tEXPORT_SYMBOL_GPL\n0x55667788\tfor_each_kernel_tracepoint\tvmlinux\tEXPORT_SYMBOL_GPL\n")
 	context.kernel.kernelModuleSize = 128
 	context.kernel.kernelNameOff = 16
@@ -152,4 +152,31 @@ func compileConcurrentKernel(source []byte, outputPath string, license string) (
 	program := renvoParseProgramWithContext(source, context)
 	result := renvoCompileParsedProgramArena(&program, renvoTargetLinuxKernelAmd64, 4096)
 	return result.data, result.ok
+}
+
+// Keep this fixture in the architecture-neutral concurrency test: the kernel
+// backend can be exercised from any host architecture.
+func testConcurrentKernelBTF() []byte {
+	var types []byte
+	types = renvoAppend32(types, 1)
+	types = renvoAppend32(types, 4<<24|3)
+	types = renvoAppend32(types, 128)
+	for _, member := range []struct {
+		name int
+		off  int
+	}{{8, 16}, {13, 32}, {18, 64}} {
+		types = renvoAppend32(types, member.name)
+		types = renvoAppend32(types, 0)
+		types = renvoAppend32(types, member.off*8)
+	}
+	strings := []byte("\x00module\x00name\x00init\x00exit\x00")
+	var out []byte
+	out = append(out, 0x9f, 0xeb, 1, 0)
+	out = renvoAppend32(out, 24)
+	out = renvoAppend32(out, 0)
+	out = renvoAppend32(out, len(types))
+	out = renvoAppend32(out, len(types))
+	out = renvoAppend32(out, len(strings))
+	out = append(out, types...)
+	return append(out, strings...)
 }
