@@ -174,6 +174,19 @@ func TestAArch64DefinitionVerticalSlice(t *testing.T) {
 		t.Fatalf("darwin/arm64 entry state bytes = %d, %v; want 24, true",
 			stateBytes, ok)
 	}
+	prepared := GeneratePreparedBackend(darwinResolved, "darwin/arm64")
+	if !prepared.Ok {
+		t.Fatalf("generate prepared darwin/arm64: %#v", prepared.Diagnostics)
+	}
+	for _, mapping := range []string{
+		"var renvoRTGCallWord0 = rtgNativeX3",
+		"var renvoRTGCallWord1 = rtgNativeX4",
+		"var renvoRTGCallWord2 = rtgNativeX1",
+	} {
+		if !containsText(string(prepared.Source), mapping) {
+			t.Errorf("prepared darwin/arm64 omitted internal call-word mapping %q", mapping)
+		}
+	}
 	for _, target := range []string{"linux/aarch64", "darwin/arm64", "windows/arm64"} {
 		resolved := resolveNativeTarget(t, target)
 		generated := GenerateFixedBackend(resolved, target)

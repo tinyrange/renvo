@@ -1111,6 +1111,7 @@ abi aapcs64 {
 	unsigned_divide = go aapcs64UnsignedDivide
 	store_param_word = go aapcs64StoreParamWord
 	call_word_count = go aapcs64CallWordCount
+	call_words = [x3, x4, x1, x2, x5, x6]
 	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
 	result = [x0, x1]
 	stack_alignment = 16
