@@ -79,6 +79,7 @@ func (out *RTGEmitter) Text(value string) {}
 func (out *RTGEmitter) PatchUint32(at int, value int) {}
 func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {}
 func (out *RTGEmitter) RelocAt(at int, label int) {}
+func RTGLabelRelocAt(out *RTGEmitter, label RTGLabel, at int) {}
 func (out *RTGEmitter) PrimaryLoad() int { return 0 }
 func (out *RTGEmitter) SetPrimaryLoad(value int) {}
 func (out *RTGEmitter) OptimizeRuntime() bool { return false }
