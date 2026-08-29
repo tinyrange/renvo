@@ -15,6 +15,8 @@ import (
 	"renvo.dev/internal/driver"
 )
 
+var mobileBackends = make(map[string]*Backend)
+
 func compileMobileTarget(
 	t *testing.T, definitionName string, target string, output string,
 ) []byte {
@@ -36,15 +38,20 @@ func compileMobileProgram(
 		t.Fatal(err)
 	}
 	definition := filepath.Join(root, "backends", definitionName)
+	backend := mobileBackends[definition]
+	if backend == nil {
+		backend = New(definition, filepath.Join(root, "backend"),
+			filepath.Join(root, "std"), backendJITTestCacheDir,
+			backendcompiled.Backend{})
+		mobileBackends[definition] = backend
+	}
 	result := driver.CompileFromFS([]string{
 		"-backend", definition,
 		"-t", target,
 		"-s",
 		"-o", output,
 		filepath.Join(root, program),
-	}, root, filepath.Join(root, "std"), driver.OSFS{},
-		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
-			backendJITTestCacheDir, backendcompiled.Backend{}))
+	}, root, filepath.Join(root, "std"), driver.OSFS{}, backend)
 	if !result.Ok {
 		t.Fatalf("%s custom backend compile failed: %#v", target, result.Diagnostic)
 	}
