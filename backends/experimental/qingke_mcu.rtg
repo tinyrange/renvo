@@ -1,7 +1,7 @@
 @import "qingke_v2.rtg"
 
-# RV32 direct-load support shared by emulator targets with the full integer
-# register file (ESP32-C6 and RP2350 Hazard3).
+# QingKe V2 RV32E direct-load support shared by the CH32V003 and CH32V006
+# emulator targets.
 go backend {
 	const testUART = 0xffff0100
 	const testExit = 0xfffffff0

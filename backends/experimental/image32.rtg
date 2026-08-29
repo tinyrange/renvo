@@ -43,10 +43,10 @@ go backend {
 		data := out.Data()
 		dataOffset := RTGAlignValue(codeOffset+len(code), pageSize)
 		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
-		dataMemorySize := bssAddress-dataAddress+
+		dataMemorySize := bssAddress - dataAddress +
 			RTGAlignValue(out.BSSSize(), 4)
 
-		entry := textAddress+codeOffset
+		entry := textAddress + codeOffset
 		if thumbEntry {
 			entry++
 		}

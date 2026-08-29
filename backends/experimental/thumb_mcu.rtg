@@ -1,7 +1,7 @@
 @import "../../backend/definitions/thumb.rtg"
 
-# Cortex-M direct-load support shared by the RP2040, SAM D21, STM32L4, and
-# RA4M1 emulator targets.
+# Cortex-M direct-load support shared by the SAM D21, STM32L4, and RA4M1
+# emulator targets.
 go backend {
 	const testUART = 0xffff0100
 	const testExit = 0xfffffff0

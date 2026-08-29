@@ -59,7 +59,7 @@ go backend {
 		dataOffset := RTGAlignValue(codeOffset+len(code), 2)
 		vectorOffset := RTGAlignValue(dataOffset+len(data), 2)
 		bssAddress := RTGAlignValue(dataAddress+len(data), 2)
-		dataMemorySize := bssAddress-dataAddress+
+		dataMemorySize := bssAddress - dataAddress +
 			RTGAlignValue(out.BSSSize(), 2)
 		var result []byte
 		result = append(result,

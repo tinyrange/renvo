@@ -231,11 +231,11 @@ go backend {
 		right RTGRegister, displacement int,
 	) {
 		value := displacement
-		instruction := 0x63|(funct3<<12)|(left.Code<<15)|(right.Code<<20)
-		instruction |= ((value>>12)&1)<<31
-		instruction |= ((value>>5)&0x3f)<<25
-		instruction |= ((value>>1)&0xf)<<8
-		instruction |= ((value>>11)&1)<<7
+		instruction := 0x63 | (funct3 << 12) | (left.Code << 15) | (right.Code << 20)
+		instruction |= ((value >> 12) & 1) << 31
+		instruction |= ((value >> 5) & 0x3f) << 25
+		instruction |= ((value >> 1) & 0xf) << 8
+		instruction |= ((value >> 11) & 1) << 7
 		emit(out, instruction)
 	}
 
@@ -417,10 +417,10 @@ go backend {
 			instruction := RTGGet32At(out.Code(), at)
 			if instruction&0x7f == 0x6f {
 				instruction &= 0x00000fff
-				instruction |= ((delta>>20)&1)<<31
-				instruction |= ((delta>>1)&0x3ff)<<21
-				instruction |= ((delta>>11)&1)<<20
-				instruction |= ((delta>>12)&0xff)<<12
+				instruction |= ((delta >> 20) & 1) << 31
+				instruction |= ((delta >> 1) & 0x3ff) << 21
+				instruction |= ((delta >> 11) & 1) << 20
+				instruction |= ((delta >> 12) & 0xff) << 12
 				out.PatchUint32(at, instruction)
 			} else if instruction&0x7f == 0x17 {
 				// AUIPC/ADDI pair used by emitAddress.
