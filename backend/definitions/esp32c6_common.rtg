@@ -6,6 +6,7 @@ implements direct_emitter_v1
 
 go backend {
 	const textAddress = 0x42000000
+
 	// Hot-reload code occupies SRAM above OpenOCD's conventional 0x24000-byte
 	// work area. Data, BSS, and the 64 KiB arena remain below it; the stack grows
 	// down from the top of HP SRAM.
@@ -13,6 +14,7 @@ go backend {
 	const dataAddress = 0x40800000
 	const codeOffset = 0x100
 	const pageSize = 0x1000
+
 	// The final 256 bytes are reserved for the interrupt refill mailbox. Keeping
 	// the stack below it gives both flash and JTAG images one stable address.
 	const interruptRefillMailbox = 0x4087ff00
@@ -158,21 +160,21 @@ go backend {
 		// copy one mailbox-selected half-buffer, acknowledge the RMT threshold,
 		// and return without involving the Go ABI or allocator.
 		riscv32.emit(out, 0xfd010113) // addi sp, sp, -48
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:0}, riscv32.scratch)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:4}, riscv32.primary)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:8}, riscv32.secondary)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:12}, riscv32.tertiary)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:16}, riscv32.copyDestination)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:20}, riscv32.copySource)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:24}, riscv32.copyCount)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:28}, riscv32.compareLeft)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.stack, Displacement:32}, riscv32.compareRight)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 0}, riscv32.scratch)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 4}, riscv32.primary)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 8}, riscv32.secondary)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 12}, riscv32.tertiary)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 16}, riscv32.copyDestination)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 20}, riscv32.copySource)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 24}, riscv32.copyCount)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 28}, riscv32.compareLeft)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.stack, Displacement: 32}, riscv32.compareRight)
 
 		riscv32.moveImmediate(out, riscv32.scratch, int64(interruptRefillMailbox))
-		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.scratch})
-		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base:riscv32.scratch, Displacement:4})
-		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.scratch, Displacement:8})
-		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base:riscv32.scratch, Displacement:12})
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base: riscv32.scratch})
+		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base: riscv32.scratch, Displacement: 4})
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base: riscv32.scratch, Displacement: 8})
+		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base: riscv32.scratch, Displacement: 12})
 		riscv32.move(out, riscv32.copyCount, riscv32.copySource)
 		riscv32.shiftRightUnsignedImmediate(out, riscv32.copyCount, 2)
 
@@ -181,42 +183,42 @@ go backend {
 		out.Mark(copyLoop)
 		riscv32.compare(out, riscv32.copyCount, riscv32.zero)
 		riscv32.jumpCondition(out, riscv32.eq, copyDone)
-		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.secondary})
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.copyDestination}, riscv32.primary)
-		riscv32.emitAddress(out, riscv32.secondary, RTGAddress{Base:riscv32.secondary, Displacement:4})
-		riscv32.emitAddress(out, riscv32.copyDestination, RTGAddress{Base:riscv32.copyDestination, Displacement:4})
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base: riscv32.secondary})
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.copyDestination}, riscv32.primary)
+		riscv32.emitAddress(out, riscv32.secondary, RTGAddress{Base: riscv32.secondary, Displacement: 4})
+		riscv32.emitAddress(out, riscv32.copyDestination, RTGAddress{Base: riscv32.copyDestination, Displacement: 4})
 		riscv32.decrement(out, riscv32.copyCount)
 		riscv32.jump(out, copyLoop)
 
 		out.Mark(copyDone)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.scratch}, riscv32.secondary)
-		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.scratch, Displacement:8})
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.scratch}, riscv32.secondary)
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base: riscv32.scratch, Displacement: 8})
 		riscv32.bitXor(out, riscv32.copyDestination, riscv32.copySource)
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.scratch, Displacement:8}, riscv32.copyDestination)
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.scratch, Displacement: 8}, riscv32.copyDestination)
 
 		acknowledge := out.NewLabel()
 		riscv32.compare(out, riscv32.secondary, riscv32.tertiary)
 		riscv32.jumpCondition(out, riscv32.ne, acknowledge)
 		// The final copied half contains reset and EOF. Disable further threshold
 		// interrupts before acknowledging this one, as ESP-IDF does after EOF.
-		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.scratch, Displacement:20})
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.primary}, riscv32.zero)
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base: riscv32.scratch, Displacement: 20})
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.primary}, riscv32.zero)
 
 		out.Mark(acknowledge)
-		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.scratch, Displacement:16})
-		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.scratch, Displacement:24})
-		riscv32.storeU32(out, RTGAddress{Base:riscv32.primary}, riscv32.secondary)
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base: riscv32.scratch, Displacement: 16})
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base: riscv32.scratch, Displacement: 24})
+		riscv32.storeU32(out, RTGAddress{Base: riscv32.primary}, riscv32.secondary)
 		riscv32.emit(out, 0x0ff0000f) // fence iorw, iorw
 
-		riscv32.loadU32(out, riscv32.scratch, RTGAddress{Base:riscv32.stack, Displacement:0})
-		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base:riscv32.stack, Displacement:4})
-		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base:riscv32.stack, Displacement:8})
-		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base:riscv32.stack, Displacement:12})
-		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base:riscv32.stack, Displacement:16})
-		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base:riscv32.stack, Displacement:20})
-		riscv32.loadU32(out, riscv32.copyCount, RTGAddress{Base:riscv32.stack, Displacement:24})
-		riscv32.loadU32(out, riscv32.compareLeft, RTGAddress{Base:riscv32.stack, Displacement:28})
-		riscv32.loadU32(out, riscv32.compareRight, RTGAddress{Base:riscv32.stack, Displacement:32})
+		riscv32.loadU32(out, riscv32.scratch, RTGAddress{Base: riscv32.stack, Displacement: 0})
+		riscv32.loadU32(out, riscv32.primary, RTGAddress{Base: riscv32.stack, Displacement: 4})
+		riscv32.loadU32(out, riscv32.secondary, RTGAddress{Base: riscv32.stack, Displacement: 8})
+		riscv32.loadU32(out, riscv32.tertiary, RTGAddress{Base: riscv32.stack, Displacement: 12})
+		riscv32.loadU32(out, riscv32.copyDestination, RTGAddress{Base: riscv32.stack, Displacement: 16})
+		riscv32.loadU32(out, riscv32.copySource, RTGAddress{Base: riscv32.stack, Displacement: 20})
+		riscv32.loadU32(out, riscv32.copyCount, RTGAddress{Base: riscv32.stack, Displacement: 24})
+		riscv32.loadU32(out, riscv32.compareLeft, RTGAddress{Base: riscv32.stack, Displacement: 28})
+		riscv32.loadU32(out, riscv32.compareRight, RTGAddress{Base: riscv32.stack, Displacement: 32})
 		riscv32.emit(out, 0x03010113) // addi sp, sp, 48
 		riscv32.emit(out, 0x30200073) // mret
 
@@ -242,7 +244,7 @@ go backend {
 			'.', 't', 'e', 'x', 't', 0,
 			'.', 'd', 'a', 't', 'a', 0,
 			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0}
-		sectionNamesOffset := descriptorOffset+len(descriptor)
+		sectionNamesOffset := descriptorOffset + len(descriptor)
 		sectionHeadersOffset := RTGAlignValue(
 			sectionNamesOffset+len(sectionNames), 4)
 
@@ -320,7 +322,7 @@ go backend {
 		vectorDelta := out.Len() - vectorStart
 		riscv32.emit(out, 0x00000297) // auipc t0, 0
 		riscv32.emitAddress(out, riscv32.scratch,
-			RTGAddress{Base:riscv32.scratch, Displacement:-vectorDelta})
+			RTGAddress{Base: riscv32.scratch, Displacement: -vectorDelta})
 		riscv32.moveImmediate(out, riscv32.primary, 1)
 		riscv32.bitOr(out, riscv32.scratch, riscv32.primary)
 		riscv32.emit(out, 0x30529073) // csrw mtvec, t0

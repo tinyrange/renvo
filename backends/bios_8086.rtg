@@ -50,10 +50,10 @@ go backend {
 		out.Byte(0x0e)
 		out.Byte(0x07) // ES=CS
 		out.Byte(0x0e)
-		out.Byte(0x17) // SS=CS
+		out.Byte(0x17)               // SS=CS
 		out.Bytes3(0xbc, 0xfe, 0xff) // SP=FFFEh
-		out.Byte(0xfb) // STI
-		out.Byte(0xfc) // CLD
+		out.Byte(0xfb)               // STI
+		out.Byte(0xfc)               // CLD
 
 		// A raw BIOS does not zero memory for us. Clear BSS and the arena before
 		// any generated Go initialization observes them.
@@ -99,11 +99,11 @@ go backend {
 		// intentionally the ordinary print path; LF is expanded to CRLF.
 		loop := out.NewLabel()
 		done := out.NewLabel()
-		out.Byte(0x53) // PUSH BX
-		out.Byte(0x55) // PUSH BP: some legacy INT 10h implementations corrupt BP
-		out.Byte(0x56) // PUSH SI
-		out.Byte(0x57) // PUSH DI
-		out.Byte(0x51) // preserve count for the result
+		out.Byte(0x53)         // PUSH BX
+		out.Byte(0x55)         // PUSH BP: some legacy INT 10h implementations corrupt BP
+		out.Byte(0x56)         // PUSH SI
+		out.Byte(0x57)         // PUSH DI
+		out.Byte(0x51)         // preserve count for the result
 		out.Bytes2(0x89, 0xd6) // SI=buffer
 		out.Bytes2(0x89, 0xcf) // DI=count
 		out.Mark(loop)
@@ -158,7 +158,7 @@ go backend {
 		out.Byte(byte(vector))
 		out.Byte(0x9c)
 		out.Byte(0x50)
-		out.Bytes2(0x89, 0xe5) // BP=SP
+		out.Bytes2(0x89, 0xe5)       // BP=SP
 		out.Bytes3(0x8b, 0x6e, 0x04) // recover saved register-block pointer
 		out.Byte(0x58)
 		out.Bytes3(0x8f, 0x46, 0x0c)
@@ -241,12 +241,12 @@ go backend {
 		// The second-stage image runs at physical 10000h with near pointers. Save
 		// the complete physical address of the embedded amd64 entrypoint where the
 		// fixed long-mode trampoline can load it.
-		out.Byte(0xfa) // CLI: firmware interrupts are invalid after the transition
+		out.Byte(0xfa)                     // CLI: firmware interrupts are invalid after the transition
 		out.Bytes4(0x66, 0x0f, 0xb7, 0xc0) // MOVZX EAX,AX
-		out.Bytes2(0x66, 0x05) // ADD EAX,10000h
+		out.Bytes2(0x66, 0x05)             // ADD EAX,10000h
 		out.Uint32(0x10000)
-		out.Bytes3(0xba, 0x00, 0x73) // MOV DX,7300h
-		out.Bytes2(0x8e, 0xc2) // MOV ES,DX
+		out.Bytes3(0xba, 0x00, 0x73)       // MOV DX,7300h
+		out.Bytes2(0x8e, 0xc2)             // MOV ES,DX
 		out.Bytes4(0x26, 0x66, 0xa3, 0xf0) // MOV ES:[0FF0h],EAX
 		out.Byte(0x0f)
 
@@ -255,13 +255,13 @@ go backend {
 		out.Bytes3(0xba, 0x00, 0x74)
 		out.Bytes2(0x8e, 0xc2) // ES=7400h
 		for offset, value := range []int{
-			0x66, 0xb8, 0x10, 0x00,             // MOV AX,10h
-			0x8e, 0xd8,                         // MOV DS,AX
-			0x8e, 0xc0,                         // MOV ES,AX
-			0x8e, 0xd0,                         // MOV SS,AX
+			0x66, 0xb8, 0x10, 0x00, // MOV AX,10h
+			0x8e, 0xd8, // MOV DS,AX
+			0x8e, 0xc0, // MOV ES,AX
+			0x8e, 0xd0, // MOV SS,AX
 			0x48, 0xbc, 0x00, 0xf0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, // RSP=7F000h
 			0x48, 0xa1, 0xf0, 0x3f, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, // RAX=[73FF0h]
-			0xff, 0xe0,                         // JMP RAX
+			0xff, 0xe0, // JMP RAX
 		} {
 			biosStoreESByte(out, offset, value)
 		}
@@ -269,8 +269,8 @@ go backend {
 		// Clear and populate PML4, PDPT, and PD pages at 70000h. The PD uses
 		// 2 MiB leaves, identity mapping the first GiB without a fourth table.
 		out.Bytes3(0xba, 0x00, 0x70)
-		out.Bytes2(0x8e, 0xc2) // ES=7000h
-		out.Bytes2(0x31, 0xff) // XOR DI,DI
+		out.Bytes2(0x8e, 0xc2)       // ES=7000h
+		out.Bytes2(0x31, 0xff)       // XOR DI,DI
 		out.Bytes3(0xb9, 0x00, 0x18) // CX=3000h/2
 		out.Bytes2(0x31, 0xc0)
 		out.Bytes2(0xf3, 0xab) // REP STOSW
@@ -307,12 +307,12 @@ go backend {
 		// enter IA-32e mode. The immediate far jump lands in the fixed trampoline.
 		out.Bytes2(0xe4, 0x92) // IN AL,92h
 		out.Bytes2(0x0c, 0x02)
-		out.Bytes2(0xe6, 0x92) // OUT 92h,AL
+		out.Bytes2(0xe6, 0x92)             // OUT 92h,AL
 		out.Bytes4(0x26, 0x0f, 0x01, 0x16) // LGDT ES:[0018h]
 		out.Uint16(0x0018)
-		out.Bytes3(0x0f, 0x20, 0xe0) // MOV EAX,CR4
+		out.Bytes3(0x0f, 0x20, 0xe0)       // MOV EAX,CR4
 		out.Bytes4(0x66, 0x83, 0xc8, 0x20) // OR EAX,PAE
-		out.Bytes3(0x0f, 0x22, 0xe0) // MOV CR4,EAX
+		out.Bytes3(0x0f, 0x22, 0xe0)       // MOV CR4,EAX
 		out.Bytes2(0x66, 0xb8)
 		out.Uint32(0x70000)
 		out.Bytes3(0x0f, 0x22, 0xd8) // MOV CR3,EAX
@@ -320,12 +320,12 @@ go backend {
 		out.Uint32(0xc0000080) // IA32_EFER
 		out.Bytes2(0x0f, 0x32) // RDMSR
 		out.Bytes2(0x66, 0x0d)
-		out.Uint32(0x100) // LME
-		out.Bytes2(0x0f, 0x30) // WRMSR
+		out.Uint32(0x100)            // LME
+		out.Bytes2(0x0f, 0x30)       // WRMSR
 		out.Bytes3(0x0f, 0x20, 0xc0) // MOV EAX,CR0
 		out.Bytes2(0x66, 0x0d)
-		out.Uint32(0x80000001) // PG|PE
-		out.Bytes3(0x0f, 0x22, 0xc0) // MOV CR0,EAX
+		out.Uint32(0x80000001)             // PG|PE
+		out.Bytes3(0x0f, 0x22, 0xc0)       // MOV CR0,EAX
 		out.Bytes4(0x66, 0xea, 0x00, 0x40) // JMP 0008:00074000h
 		out.Bytes4(0x07, 0x00, 0x08, 0x00)
 	}
@@ -333,105 +333,105 @@ go backend {
 	func biosBootSector(sectors int) []byte {
 		boot := make([]byte, 512)
 		at := 0
-		at = biosBootEmit(boot, at, []byte{0xfa}) // CLI
-		at = biosBootEmit(boot, at, []byte{0x31, 0xc0}) // XOR AX,AX
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xd8}) // MOV DS,AX
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xd0}) // MOV SS,AX
-		at = biosBootEmit(boot, at, []byte{0xbc, 0x00, 0x7c}) // MOV SP,7C00h
-		at = biosBootEmit(boot, at, []byte{0xfb}) // STI
+		at = biosBootEmit(boot, at, []byte{0xfa})                                // CLI
+		at = biosBootEmit(boot, at, []byte{0x31, 0xc0})                          // XOR AX,AX
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xd8})                          // MOV DS,AX
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xd0})                          // MOV SS,AX
+		at = biosBootEmit(boot, at, []byte{0xbc, 0x00, 0x7c})                    // MOV SP,7C00h
+		at = biosBootEmit(boot, at, []byte{0xfb})                                // STI
 		at = biosBootAbsolute(boot, at, []byte{0x88, 0x16}, biosBootDriveOffset) // MOV [bootDrive],DL
 
 		at = biosBootAbsolute(boot, at, []byte{0xc6, 0x06}, biosRetryCountOffset) // MOV byte [retryCount],3
 		at = biosBootEmit(boot, at, []byte{0x03})
 		eddRetry := at
 		at = biosBootAbsolute(boot, at, []byte{0x8a, 0x16}, biosBootDriveOffset) // MOV DL,[bootDrive]
-		at = biosBootEmit(boot, at, []byte{0xbe}) // MOV SI,dap
+		at = biosBootEmit(boot, at, []byte{0xbe})                                // MOV SI,dap
 		biosPut16(boot, at, biosBootOrigin+biosDAPOffset)
 		at += 2
 		at = biosBootEmit(boot, at, []byte{0xb4, 0x42}) // MOV AH,42h: EDD extended read
 		at = biosBootEmit(boot, at, []byte{0xcd, 0x13}) // INT 13h
 		at = biosBootEmit(boot, at, []byte{0x73, 0x00}) // JNC loaded
 		eddLoadedFixup := at - 1
-		at = biosBootEmit(boot, at, []byte{0x31, 0xc0}) // XOR AX,AX: reset disk
-		at = biosBootEmit(boot, at, []byte{0xcd, 0x13}) // INT 13h
+		at = biosBootEmit(boot, at, []byte{0x31, 0xc0})                           // XOR AX,AX: reset disk
+		at = biosBootEmit(boot, at, []byte{0xcd, 0x13})                           // INT 13h
 		at = biosBootAbsolute(boot, at, []byte{0xfe, 0x0e}, biosRetryCountOffset) // DEC byte [retryCount]
-		at = biosBootEmit(boot, at, []byte{0x75, 0x00}) // JNZ eddRetry
+		at = biosBootEmit(boot, at, []byte{0x75, 0x00})                           // JNZ eddRetry
 		biosBootRel8(boot, at-1, eddRetry)
 
 		// EDD is optional even on hard disks. Ask the firmware for its legacy
 		// geometry so the fallback is not tied to one floppy layout.
 		at = biosBootAbsolute(boot, at, []byte{0x8a, 0x16}, biosBootDriveOffset) // MOV DL,[bootDrive]
-		at = biosBootEmit(boot, at, []byte{0xb4, 0x08}) // MOV AH,08h: drive parameters
-		at = biosBootEmit(boot, at, []byte{0xcd, 0x13}) // INT 13h
-		at = biosBootEmit(boot, at, []byte{0x72, 0x00}) // JC error
+		at = biosBootEmit(boot, at, []byte{0xb4, 0x08})                          // MOV AH,08h: drive parameters
+		at = biosBootEmit(boot, at, []byte{0xcd, 0x13})                          // INT 13h
+		at = biosBootEmit(boot, at, []byte{0x72, 0x00})                          // JC error
 		geometryErrorFixup := at - 1
-		at = biosBootEmit(boot, at, []byte{0x88, 0xc8}) // MOV AL,CL
-		at = biosBootEmit(boot, at, []byte{0x30, 0xe4}) // XOR AH,AH
-		at = biosBootEmit(boot, at, []byte{0x24, 0x3f}) // AND AL,3Fh: sectors per track
+		at = biosBootEmit(boot, at, []byte{0x88, 0xc8})                          // MOV AL,CL
+		at = biosBootEmit(boot, at, []byte{0x30, 0xe4})                          // XOR AH,AH
+		at = biosBootEmit(boot, at, []byte{0x24, 0x3f})                          // AND AL,3Fh: sectors per track
 		at = biosBootAbsolute(boot, at, []byte{0xa3}, biosSectorsPerTrackOffset) // MOV [sectorsPerTrack],AX
-		at = biosBootEmit(boot, at, []byte{0x31, 0xc0}) // XOR AX,AX
-		at = biosBootEmit(boot, at, []byte{0x88, 0xf0}) // MOV AL,DH: maximum head
-		at = biosBootEmit(boot, at, []byte{0x40}) // INC AX: head count
-		at = biosBootAbsolute(boot, at, []byte{0xa3}, biosHeadCountOffset) // MOV [headCount],AX
+		at = biosBootEmit(boot, at, []byte{0x31, 0xc0})                          // XOR AX,AX
+		at = biosBootEmit(boot, at, []byte{0x88, 0xf0})                          // MOV AL,DH: maximum head
+		at = biosBootEmit(boot, at, []byte{0x40})                                // INC AX: head count
+		at = biosBootAbsolute(boot, at, []byte{0xa3}, biosHeadCountOffset)       // MOV [headCount],AX
 
 		at = biosBootEmit(boot, at, []byte{0xb8, 0x00, 0x10}) // MOV AX,1000h
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xc0}) // MOV ES,AX
-		at = biosBootEmit(boot, at, []byte{0x31, 0xdb}) // XOR BX,BX: destination offset
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xc0})       // MOV ES,AX
+		at = biosBootEmit(boot, at, []byte{0x31, 0xdb})       // XOR BX,BX: destination offset
 		at = biosBootEmit(boot, at, []byte{0xbe, 0x01, 0x00}) // MOV SI,1: first stage-two LBA
 		chsNext := at
 		at = biosBootAbsolute(boot, at, []byte{0xc6, 0x06}, biosRetryCountOffset) // MOV byte [retryCount],3
 		at = biosBootEmit(boot, at, []byte{0x03})
 		chsRetry := at
-		at = biosBootEmit(boot, at, []byte{0x89, 0xf0}) // MOV AX,SI
-		at = biosBootEmit(boot, at, []byte{0x31, 0xd2}) // XOR DX,DX
+		at = biosBootEmit(boot, at, []byte{0x89, 0xf0})                                // MOV AX,SI
+		at = biosBootEmit(boot, at, []byte{0x31, 0xd2})                                // XOR DX,DX
 		at = biosBootAbsolute(boot, at, []byte{0x8b, 0x0e}, biosSectorsPerTrackOffset) // MOV CX,[sectorsPerTrack]
-		at = biosBootEmit(boot, at, []byte{0xf7, 0xf1}) // DIV CX
-		at = biosBootEmit(boot, at, []byte{0x42}) // INC DX: sectors are one-based
-		at = biosBootEmit(boot, at, []byte{0x89, 0xd5}) // MOV BP,DX: sector
-		at = biosBootEmit(boot, at, []byte{0x31, 0xd2}) // XOR DX,DX
-		at = biosBootAbsolute(boot, at, []byte{0x8b, 0x0e}, biosHeadCountOffset) // MOV CX,[headCount]
-		at = biosBootEmit(boot, at, []byte{0xf7, 0xf1}) // DIV CX: AX=cylinder, DX=head
-		at = biosBootEmit(boot, at, []byte{0x88, 0xd6}) // MOV DH,DL
-		at = biosBootEmit(boot, at, []byte{0x50}) // PUSH AX
-		at = biosBootEmit(boot, at, []byte{0x89, 0xe8}) // MOV AX,BP
-		at = biosBootEmit(boot, at, []byte{0x88, 0xc1}) // MOV CL,AL: sector
-		at = biosBootEmit(boot, at, []byte{0x58}) // POP AX
-		at = biosBootEmit(boot, at, []byte{0x88, 0xc5}) // MOV CH,AL: cylinder
-		at = biosBootAbsolute(boot, at, []byte{0x8a, 0x16}, biosBootDriveOffset) // MOV DL,[bootDrive]
-		at = biosBootEmit(boot, at, []byte{0xb8, 0x01, 0x02}) // MOV AX,0201h: read one CHS sector
-		at = biosBootEmit(boot, at, []byte{0xcd, 0x13}) // INT 13h
-		at = biosBootEmit(boot, at, []byte{0x73, 0x00}) // JNC chsLoaded
+		at = biosBootEmit(boot, at, []byte{0xf7, 0xf1})                                // DIV CX
+		at = biosBootEmit(boot, at, []byte{0x42})                                      // INC DX: sectors are one-based
+		at = biosBootEmit(boot, at, []byte{0x89, 0xd5})                                // MOV BP,DX: sector
+		at = biosBootEmit(boot, at, []byte{0x31, 0xd2})                                // XOR DX,DX
+		at = biosBootAbsolute(boot, at, []byte{0x8b, 0x0e}, biosHeadCountOffset)       // MOV CX,[headCount]
+		at = biosBootEmit(boot, at, []byte{0xf7, 0xf1})                                // DIV CX: AX=cylinder, DX=head
+		at = biosBootEmit(boot, at, []byte{0x88, 0xd6})                                // MOV DH,DL
+		at = biosBootEmit(boot, at, []byte{0x50})                                      // PUSH AX
+		at = biosBootEmit(boot, at, []byte{0x89, 0xe8})                                // MOV AX,BP
+		at = biosBootEmit(boot, at, []byte{0x88, 0xc1})                                // MOV CL,AL: sector
+		at = biosBootEmit(boot, at, []byte{0x58})                                      // POP AX
+		at = biosBootEmit(boot, at, []byte{0x88, 0xc5})                                // MOV CH,AL: cylinder
+		at = biosBootAbsolute(boot, at, []byte{0x8a, 0x16}, biosBootDriveOffset)       // MOV DL,[bootDrive]
+		at = biosBootEmit(boot, at, []byte{0xb8, 0x01, 0x02})                          // MOV AX,0201h: read one CHS sector
+		at = biosBootEmit(boot, at, []byte{0xcd, 0x13})                                // INT 13h
+		at = biosBootEmit(boot, at, []byte{0x73, 0x00})                                // JNC chsLoaded
 		chsLoadedFixup := at - 1
-		at = biosBootEmit(boot, at, []byte{0x31, 0xc0}) // XOR AX,AX: reset disk
-		at = biosBootEmit(boot, at, []byte{0xcd, 0x13}) // INT 13h
+		at = biosBootEmit(boot, at, []byte{0x31, 0xc0})                           // XOR AX,AX: reset disk
+		at = biosBootEmit(boot, at, []byte{0xcd, 0x13})                           // INT 13h
 		at = biosBootAbsolute(boot, at, []byte{0xfe, 0x0e}, biosRetryCountOffset) // DEC byte [retryCount]
-		at = biosBootEmit(boot, at, []byte{0x75, 0x00}) // JNZ chsRetry
+		at = biosBootEmit(boot, at, []byte{0x75, 0x00})                           // JNZ chsRetry
 		biosBootRel8(boot, at-1, chsRetry)
 		at = biosBootEmit(boot, at, []byte{0xeb, 0x00}) // JMP error
 		chsErrorFixup := at - 1
 		chsLoaded := at
-		at = biosBootEmit(boot, at, []byte{0x81, 0xc3, 0x00, 0x02}) // ADD BX,512
-		at = biosBootEmit(boot, at, []byte{0x46}) // INC SI
+		at = biosBootEmit(boot, at, []byte{0x81, 0xc3, 0x00, 0x02})                     // ADD BX,512
+		at = biosBootEmit(boot, at, []byte{0x46})                                       // INC SI
 		at = biosBootAbsolute(boot, at, []byte{0xff, 0x0e}, biosRemainingSectorsOffset) // DEC word [remainingSectors]
-		at = biosBootEmit(boot, at, []byte{0x75, 0x00}) // JNZ chsNext
+		at = biosBootEmit(boot, at, []byte{0x75, 0x00})                                 // JNZ chsNext
 		biosBootRel8(boot, at-1, chsNext)
 		biosBootRel8(boot, chsLoadedFixup, chsLoaded)
 
 		loaded := at
-		at = biosBootEmit(boot, at, []byte{0xb8, 0x00, 0x10}) // MOV AX,1000h
-		at = biosBootEmit(boot, at, []byte{0xfa}) // CLI
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xd8}) // MOV DS,AX
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xc0}) // MOV ES,AX
-		at = biosBootEmit(boot, at, []byte{0x8e, 0xd0}) // MOV SS,AX
-		at = biosBootEmit(boot, at, []byte{0xbc, 0xfe, 0xff}) // MOV SP,FFFEh
-		at = biosBootEmit(boot, at, []byte{0xfb}) // STI
+		at = biosBootEmit(boot, at, []byte{0xb8, 0x00, 0x10})             // MOV AX,1000h
+		at = biosBootEmit(boot, at, []byte{0xfa})                         // CLI
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xd8})                   // MOV DS,AX
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xc0})                   // MOV ES,AX
+		at = biosBootEmit(boot, at, []byte{0x8e, 0xd0})                   // MOV SS,AX
+		at = biosBootEmit(boot, at, []byte{0xbc, 0xfe, 0xff})             // MOV SP,FFFEh
+		at = biosBootEmit(boot, at, []byte{0xfb})                         // STI
 		at = biosBootEmit(boot, at, []byte{0xea, 0x00, 0x01, 0x00, 0x10}) // JMP 1000h:0100h
 
 		error := at
-		at = biosBootEmit(boot, at, []byte{0xb4, 0x0e}) // MOV AH,0Eh
-		at = biosBootEmit(boot, at, []byte{0xb0, 0x45}) // MOV AL,'E'
-		at = biosBootEmit(boot, at, []byte{0xbb, 0x07, 0x00}) // MOV BX,7
-		at = biosBootEmit(boot, at, []byte{0xcd, 0x10}) // INT 10h: visible boot error
+		at = biosBootEmit(boot, at, []byte{0xb4, 0x0e})             // MOV AH,0Eh
+		at = biosBootEmit(boot, at, []byte{0xb0, 0x45})             // MOV AL,'E'
+		at = biosBootEmit(boot, at, []byte{0xbb, 0x07, 0x00})       // MOV BX,7
+		at = biosBootEmit(boot, at, []byte{0xcd, 0x10})             // INT 10h: visible boot error
 		at = biosBootEmit(boot, at, []byte{0xfa, 0xf4, 0xeb, 0xfd}) // CLI; HLT; JMP HLT
 		_ = at
 		biosBootRel8(boot, eddLoadedFixup, loaded)
@@ -441,9 +441,9 @@ go backend {
 		boot[biosDAPOffset] = 0x10 // EDD disk address packet size
 		biosPut16(boot, biosDAPOffset+2, sectors)
 		biosPut16(boot, biosRemainingSectorsOffset, sectors)
-		biosPut16(boot, biosDAPOffset+4, 0) // destination offset
+		biosPut16(boot, biosDAPOffset+4, 0)      // destination offset
 		biosPut16(boot, biosDAPOffset+6, 0x1000) // destination segment
-		boot[biosDAPOffset+8] = 1 // starting LBA; upper seven bytes remain zero
+		boot[biosDAPOffset+8] = 1                // starting LBA; upper seven bytes remain zero
 		biosPut16(boot, 510, 0xaa55)
 		return boot
 	}
@@ -452,12 +452,12 @@ go backend {
 		module := make([]byte, 0x100, 0x100+len(out.Code())+len(out.Data()))
 		module = append(module, out.Code()...)
 		module = append(module, out.Data()...)
-		memorySize := len(module)+out.BSSSize()
+		memorySize := len(module) + out.BSSSize()
 		if memorySize > 0xf000 {
 			out.RejectImageSize(true, memorySize, 0xf000)
 			return nil
 		}
-		sectors := (len(module)+511)/512
+		sectors := (len(module) + 511) / 512
 		if sectors <= 0 || sectors > 127 {
 			out.RejectImageSize(false, len(module), 127*512)
 			return nil

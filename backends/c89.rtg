@@ -442,7 +442,7 @@ go backend {
 		}
 		c89EmitRegisterImmediate(
 			out, c89OpMoveImmediate, c89vm32Scratch.Code, 0)
-		at := out.Len()-4
+		at := out.Len() - 4
 		out.RelocAt(at, RTGLabelIndex(label))
 		c89CallIndirectWordCount(out, c89vm32Scratch, wordCount)
 	}
@@ -492,7 +492,7 @@ go backend {
 			digits = append(digits, byte('0'+value%10))
 			value /= 10
 		}
-		for i := len(digits)-1; i >= 0; i-- {
+		for i := len(digits) - 1; i >= 0; i-- {
 			out = append(out, digits[i])
 		}
 		return out
@@ -521,7 +521,7 @@ go backend {
 		code := out.Code()
 		data := out.Data()
 		bssBase := RTGAlignValue(c89DataBase+len(data), 8)
-		memorySize := bssBase+out.BSSSize()+c89StackBytes
+		memorySize := bssBase + out.BSSSize() + c89StackBytes
 		var result []byte
 		result = c89Text(result, "#include <limits.h>\n")
 		if hosted {

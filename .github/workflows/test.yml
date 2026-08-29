@@ -15,6 +15,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  format:
+    name: RTG and RBE formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Validate syntax and formatting
+        run: ./tools/check format
+
   preflight:
     name: Generated source and package preflight
     runs-on: ubuntu-latest
@@ -298,6 +316,7 @@ jobs:
     name: Required
     if: ${{ always() }}
     needs:
+      - format
       - preflight
       - backend-amd64
       - backend-arm64
@@ -315,11 +334,13 @@ jobs:
         run: |
           if [[ '${{ github.event_name }}' == pull_request ]]; then
             results=(
+              '${{ needs.format.result }}'
               '${{ needs.preflight.result }}'
               '${{ needs.performance.result }}'
             )
           else
             results=(
+              '${{ needs.format.result }}'
               '${{ needs.preflight.result }}'
               '${{ needs.backend-amd64.result }}'
               '${{ needs.backend-arm64.result }}'

@@ -7,7 +7,7 @@ implements direct_emitter_v1
 extend arch x86_32 {
 	sequences {
 		windowsExit(out:emitter, status:register) {
-			out.AppendByte(0x50+status.Code)
+			out.AppendByte(0x50 + status.Code)
 			out.Bytes2(0xff, 0x15)
 			let at = out.Len()
 			out.Int32(0)
@@ -109,10 +109,10 @@ extend arch x86_32 {
 			out.AppendByte(int(value))
 		}
 		windowsPushRegister(out:emitter, register:register) {
-			out.AppendByte(0x50+register.Code)
+			out.AppendByte(0x50 + register.Code)
 		}
 		windowsPopRegister(out:emitter, register:register) {
-			out.AppendByte(0x58+register.Code)
+			out.AppendByte(0x58 + register.Code)
 		}
 		windowsPushImmediate(out:emitter, value:int) {
 			out.Byte(0x6a)
@@ -172,7 +172,7 @@ extend arch x86_32 {
 		windowsRestorePosition(out:emitter, countOffset:int) {
 			windowsPushImmediate(out, 0)
 			windowsPushImmediate(out, 0)
-			windowsLoadEAXBSS(out, countOffset+8)
+			windowsLoadEAXBSS(out, countOffset + 8)
 			windowsPushRegister(out, eax)
 			windowsPushRegister(out, ebx)
 			windowsCallImport(out, 5)
@@ -194,7 +194,7 @@ extend arch x86_32 {
 			windowsPushImmediate(out, 0)
 			windowsPushRegister(out, ebx)
 			windowsCallImport(out, 5)
-			windowsStoreEAXBSS(out, countOffset+8)
+			windowsStoreEAXBSS(out, countOffset + 8)
 			windowsPopRegister(out, edx)
 			windowsPopRegister(out, ecx)
 			windowsPushRegister(out, ecx)
@@ -262,8 +262,6 @@ extend arch x86_32 {
 		}
 	}
 }
-
-
 
 abi win32 {
 	internal = renvo_x86_32

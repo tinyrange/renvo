@@ -1254,7 +1254,7 @@ func renvoWasm32AppendCond(out *renvoWasmBuffer, cond int) {
 func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 	for i := 0; i+1 < len(a.relocs); i += 2 {
 		at := int(renvo_runtime_UnsafeInt32At(a.relocs,i))
-		label := int(renvo_runtime_UnsafeInt32At(a.relocs,i+1))
+		label := int(renvo_runtime_UnsafeInt32At(a.relocs,i + 1))
 		target := renvoAsmLabelPosition(a,label)
 		if target >= 0 {
 			renvoPut32At(a.code, at, target)
@@ -1262,8 +1262,8 @@ func renvoWasm32Patch(a *renvoAsm, dataBase int, bssBase int) {
 	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
 		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i))
-		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+1))
-		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i+2))
+		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i + 1))
+		kind := int(renvo_runtime_UnsafeInt32At(a.absRelocs,i + 2))
 		target := dataBase + off
 		if kind == 1 {
 			target = bssBase + off
@@ -2277,7 +2277,7 @@ func renvoWasm32AppendCodeSectionDirect(out *renvoWasmBuffer, a *renvoAsm, instr
 		startIndex := renvoWasm32PcLowerBound(instrPcs, startPc)
 		endIndex := renvoWasm32PcLowerBound(instrPcs, endPc)
 		routineInstrPcs := instrPcs[startIndex:endIndex]
-	renvoWasm32AppendDirectRoutine(out, a.code, routineInstrPcs, routinePcs, symbolPcs, rtgWasm32Wasm32PackageRenvoWasm32DirectLocalsForRoutine(a, startPc))
+		renvoWasm32AppendDirectRoutine(out, a.code, routineInstrPcs, routinePcs, symbolPcs, rtgWasm32Wasm32PackageRenvoWasm32DirectLocalsForRoutine(a, startPc))
 	}
 	if browserStepRoutine >= 0 {
 		stepLenAt := out.length
@@ -2660,9 +2660,9 @@ func rtgWasm32Wasm32PackageRenvoWasm32LocalStackMap(code []byte, pcs []int, star
 				if extra > len(stack) {
 					stack = stack[:0]
 				} else {
-				base := len(stack) - extra
-				if extra > 0 {
-					locals[i] = 1
+					base := len(stack) - extra
+					if extra > 0 {
+						locals[i] = 1
 					}
 					for depth := 0; depth < extra; depth++ {
 						locals[stack[base+depth]] = depth + 1

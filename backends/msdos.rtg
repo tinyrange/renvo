@@ -17,8 +17,8 @@ go backend {
 	// data structures out of assembly while these fragments remain ordinary
 	// target-owned 8086 emission.
 	func emitDOSInterruptBridgeMode(out *RTGEmitter, vector int, loadES bool) {
-		out.Byte(0x55) // PUSH BP
-		out.Byte(0x06) // PUSH ES
+		out.Byte(0x55)         // PUSH BP
+		out.Byte(0x06)         // PUSH ES
 		out.Bytes2(0x89, 0xc5) // MOV BP,AX (Registers pointer; SS=DS)
 		out.Bytes3(0x8b, 0x46, 0x00)
 		out.Bytes3(0x8b, 0x5e, 0x02)
@@ -31,7 +31,7 @@ go backend {
 		}
 		out.Byte(0xcd)
 		out.Byte(byte(vector))
-		out.Byte(0x9c) // PUSHF
+		out.Byte(0x9c)               // PUSHF
 		out.Bytes3(0x8f, 0x46, 0x0c) // POP [BP+Flags]
 		out.Bytes3(0x89, 0x46, 0x00)
 		out.Bytes3(0x89, 0x5e, 0x02)
@@ -54,7 +54,7 @@ go backend {
 	func emitDOSPortIn8(out *RTGEmitter) {
 		out.Bytes2(0x89, 0xc2) // MOV DX,AX
 		out.Bytes2(0x31, 0xc0) // XOR AX,AX
-		out.Byte(0xec) // IN AL,DX
+		out.Byte(0xec)         // IN AL,DX
 		emitReturn(out)
 	}
 	func emitDOSPortOut8(out *RTGEmitter) {
@@ -68,7 +68,7 @@ go backend {
 		emitReturn(out)
 	}
 	func emitDOSSegmentLoad8(out *RTGEmitter) {
-		out.Byte(0x1e) // PUSH DS
+		out.Byte(0x1e)         // PUSH DS
 		out.Bytes2(0x8e, 0xda) // MOV DS,DX (segment)
 		out.Bytes2(0x89, 0xc3) // MOV BX,AX (offset)
 		out.Bytes2(0x31, 0xc0)
@@ -77,9 +77,9 @@ go backend {
 		emitReturn(out)
 	}
 	func emitDOSSegmentStore8(out *RTGEmitter) {
-		out.Byte(0x06) // PUSH ES
-		out.Bytes2(0x8e, 0xc1) // MOV ES,CX (segment)
-		out.Bytes2(0x89, 0xd3) // MOV BX,DX
+		out.Byte(0x06)               // PUSH ES
+		out.Bytes2(0x8e, 0xc1)       // MOV ES,CX (segment)
+		out.Bytes2(0x89, 0xd3)       // MOV BX,DX
 		out.Bytes3(0x26, 0x88, 0x07) // MOV ES:[BX],AL
 		out.Byte(0x07)
 		emitReturn(out)
@@ -115,7 +115,7 @@ go backend {
 
 	func emitModRM(out *RTGEmitter, opcode int, mod int, reg int, rm int) {
 		out.Byte(byte(opcode))
-		out.Byte(byte((mod<<6)|(reg<<3)|rm))
+		out.Byte(byte((mod << 6) | (reg << 3) | rm))
 	}
 
 	func emitRegister(out *RTGEmitter, opcode int, destination RTGRegister, source RTGRegister) {
@@ -337,15 +337,33 @@ go backend {
 	}
 
 	func inverseBranch(condition RTGCondition) int {
-		if condition.Code == 0 { return 0x75 }
-		if condition.Code == 1 { return 0x74 }
-		if condition.Code == 2 { return 0x7f }
-		if condition.Code == 3 { return 0x7e }
-		if condition.Code == 4 { return 0x7d }
-		if condition.Code == 5 { return 0x7c }
-		if condition.Code == 6 { return 0x73 }
-		if condition.Code == 7 { return 0x72 }
-		if condition.Code == 8 { return 0x77 }
+		if condition.Code == 0 {
+			return 0x75
+		}
+		if condition.Code == 1 {
+			return 0x74
+		}
+		if condition.Code == 2 {
+			return 0x7f
+		}
+		if condition.Code == 3 {
+			return 0x7e
+		}
+		if condition.Code == 4 {
+			return 0x7d
+		}
+		if condition.Code == 5 {
+			return 0x7c
+		}
+		if condition.Code == 6 {
+			return 0x73
+		}
+		if condition.Code == 7 {
+			return 0x72
+		}
+		if condition.Code == 8 {
+			return 0x77
+		}
 		return 0x76
 	}
 	func emitJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
@@ -589,8 +607,8 @@ go backend {
 		// remains a valid near pointer in both COM and MZ executables.
 		emitAddress(out, di, RTGBSSAddress(tailOffset))
 		emitLoadWidth(out, ax, RTGBSSAddress(dosPSPSegmentOffset), 2, false)
-		out.Byte(0x1e) // PUSH DS
-		out.Byte(0x06) // PUSH ES
+		out.Byte(0x1e)         // PUSH DS
+		out.Byte(0x06)         // PUSH ES
 		out.Bytes2(0x8e, 0xd8) // DS=PSP
 		out.Byte(0x0e)
 		out.Byte(0x07) // ES=CS
@@ -720,7 +738,7 @@ go backend {
 		out.Byte(0x21)
 		dosNegateError(out)
 	}
-	func dosReadAt(out *RTGEmitter) { dosReadWriteAt(out, false) }
+	func dosReadAt(out *RTGEmitter)  { dosReadWriteAt(out, false) }
 	func dosWriteAt(out *RTGEmitter) { dosReadWriteAt(out, true) }
 	func dosOpen(out *RTGEmitter) {
 		// AX=ASCIIZ path, DX=Renvo flags. DOS separates open and create, so try
@@ -839,11 +857,11 @@ go backend {
 		header = mzAppendWord(header, 0xffff)
 		header = mzAppendWord(header, 0) // SS, relative to load module
 		header = mzAppendWord(header, stackTop)
-		header = mzAppendWord(header, 0) // checksum
+		header = mzAppendWord(header, 0)     // checksum
 		header = mzAppendWord(header, 0x100) // IP
-		header = mzAppendWord(header, 0) // CS
-		header = mzAppendWord(header, 0x1c) // relocation table
-		header = mzAppendWord(header, 0) // overlay
+		header = mzAppendWord(header, 0)     // CS
+		header = mzAppendWord(header, 0x1c)  // relocation table
+		header = mzAppendWord(header, 0)     // overlay
 		header = mzAppendWord(header, 0)
 		header = mzAppendWord(header, 0) // reserved header words
 		header = append(header, module...)

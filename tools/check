@@ -26,6 +26,19 @@ check_generated() {
 		go test -count=1 ./internal/rtg ./internal/backendcompiled
 }
 
+check_format() {
+	local sources=()
+	while IFS= read -r source; do
+		sources+=("$source")
+	done < <(git ls-files -- '*.rtg' '*.rbe')
+	if ((${#sources[@]} == 0)); then
+		printf 'no tracked RTG or RBE sources found\n' >&2
+		return 1
+	fi
+	run_check "RTG and RBE syntax and formatting" \
+		go run ./cmd/renvofmt -check "${sources[@]}"
+}
+
 check_tracked_packages() {
 	local package_patterns=(
 		./internal/... ./std/... ./cmd/...
@@ -188,6 +201,7 @@ usage() {
 Usage: ./tools/check MODE [CORPUS_FILTER]
 
 Modes:
+  format       Validate and verify formatting of every tracked RTG/RBE source.
   generated    Verify checked-in generated source is current.
   packages     Run the tracked Go package and bundled-build suites.
   preflight    Run the development checks (hard budget: 60 seconds).
@@ -228,6 +242,9 @@ if [[ -n "$filter" && "$mode" != "backend" && "$mode" != "frontend" ]]; then
 fi
 
 case "$mode" in
+	format)
+		check_format
+		;;
 	generated)
 		check_generated
 		;;

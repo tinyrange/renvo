@@ -17,6 +17,7 @@ go backend {
 	const elfPageSize = 0x1000
 	const uf2FamilyRP2040 = 0xe48bff56
 	const uf2FamilyRP2350ArmS = 0xe48bff59
+
 	var flashDataAddressPatch int
 	var flashDataSizePatch int
 
@@ -38,7 +39,7 @@ go backend {
 	func reverseBits(value int, count int) int {
 		result := 0
 		for index := 0; index < count; index++ {
-			result = (result<<1)|(value&1)
+			result = (result << 1) | (value & 1)
 			value >>= 1
 		}
 		return result
@@ -52,7 +53,7 @@ go backend {
 			crc ^= reverseBits(int(value), 8)
 			for bit := 0; bit < 8; bit++ {
 				if crc&1 != 0 {
-					crc = (crc>>1)^0xedb88320
+					crc = (crc >> 1) ^ 0xedb88320
 				} else {
 					crc >>= 1
 				}
@@ -218,9 +219,9 @@ go backend {
 	}
 
 	func appendUF2Family(out []byte, binary []byte, family int) []byte {
-		blocks := len(binary)/256
+		blocks := len(binary) / 256
 		for block := 0; block < blocks; block++ {
-			payload := binary[block*256:(block+1)*256]
+			payload := binary[block*256 : (block+1)*256]
 			out = appendUF2Block(out, flashBase+block*256,
 				block, blocks, family, payload)
 		}
@@ -272,7 +273,7 @@ go backend {
 		patchAbsolute(out, debugDataAddress, bssAddress, debugTextAddress+elfCodeOffset)
 		code := out.Code()
 		dataOffset := RTGAlignValue(elfCodeOffset+len(code), elfPageSize)
-		dataMemorySize := bssAddress-debugDataAddress+RTGAlignValue(out.BSSSize(), 4)
+		dataMemorySize := bssAddress - debugDataAddress + RTGAlignValue(out.BSSSize(), 4)
 		var result []byte
 		result = append(result,
 			0x7f, 'E', 'L', 'F', 1, 1, 1, 0,

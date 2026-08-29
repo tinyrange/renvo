@@ -15,7 +15,7 @@ go backend {
 extend arch x86_64 {
 	sequences {
 		kernelAppend16(out:bytes, value:int) -> bytes {
-			return append(out, byte(value), byte(value>>8))
+			return append(out, byte(value), byte(value >> 8))
 		}
 		kernelAppendELFHeader(out:bytes, sectionOffset:int, sectionCount:int, namesIndex:int) -> bytes {
 			set out = append(out, 0x7f, 'E', 'L', 'F', 2, 1, 1, 0)
@@ -37,7 +37,7 @@ extend arch x86_64 {
 		}
 		kernelAppendRelocation(out:bytes, offset:int, symbol:int, kind:int, addend:int) -> bytes {
 			set out = nativeAppend64(out, offset)
-			set out = nativeAppend64(out, symbol<<32|kind)
+			set out = nativeAppend64(out, symbol << 32 | kind)
 			set out = nativeAppend64(out, addend)
 			return out
 		}

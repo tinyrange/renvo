@@ -437,8 +437,8 @@ arch x86_32 {
 		frame = ebp
 	}
 	conditions {
-		eq  0x94 0x84
-		ne  0x95 0x85
+		eq 0x94 0x84
+		ne 0x95 0x85
 		slt 0x9c 0x8c
 		sge 0x9d 0x8d
 		sle 0x9e 0x8e
@@ -467,10 +467,10 @@ arch x86_32 {
 		load_u16 load 0x0fb7
 		load_i8 load 0x0fbe
 		load_u8 load 0x0fb6
-		store_native store 0 size=4
-		store_u32 store 0 size=4
-		store_u16 store 0 size=2
-		store_u8 store 0 size=1
+		store_native store 0 size = 4
+		store_u32 store 0 size = 4
+		store_u16 store 0 size = 2
+		store_u8 store 0 size = 1
 		add encodeBinary 0x01
 		subtract encodeBinary 0x29
 		bit_and encodeBinary 0x21
@@ -478,13 +478,13 @@ arch x86_32 {
 		bit_xor encodeBinary 0x31
 		compare encodeBinary 0x39
 		test encodeBinary 0x85
-		increment encodeGroup 0xff /0
-		decrement encodeGroup 0xff /1
-		shift_left_immediate shift 0xc1 /4
-		shift_right_unsigned_immediate shift 0xc1 /5
-		shift_right_signed_immediate shift 0xc1 /7
+		increment encodeGroup 0xff/0
+		decrement encodeGroup 0xff/1
+		shift_left_immediate shift 0xc1/4
+		shift_right_unsigned_immediate shift 0xc1/5
+		shift_right_signed_immediate shift 0xc1/7
 		call encodeRelative 0xe8
-		call_indirect encodeGroup 0xff /2
+		call_indirect encodeGroup 0xff/2
 		jump encodeRelative 0xe9
 		jump_cond jump_condition 0
 		return fixed [0xc3]
@@ -677,8 +677,8 @@ arch x86_32 {
 		asmMovRegPCRel(a:emitter, reg:int, off:int, kind:int) {
 			a.Int8(0xe8)
 			a.Int32(0)
-			a.Int8(0x58|reg)
-			a.Bytes2(0x81, 0xc0|reg)
+			a.Int8(0x58 | reg)
+			a.Bytes2(0x81, 0xc0 | reg)
 			let at = a.Len()
 			a.Int32(0)
 			a.AbsoluteReloc(at, off, kind)
@@ -696,11 +696,11 @@ arch x86_32 {
 			let done = out.NewLabel()
 			compare(out, destination, source)
 			jumpCondition(out, record_condition(JumpOpcode:0x86), forward)
-			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1, ))
+			emitAddress(out, scratch, record_address(Base:source, Index:count, Scale:1,))
 			compare(out, destination, scratch)
 			jumpCondition(out, record_condition(JumpOpcode:0x83), forward)
-			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1, ))
-			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1, ))
+			emitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1,))
+			emitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1,))
 			out.Bytes4(0xfd, 0xf3, 0xa4, 0xfc)
 			jump(out, done)
 			out.Mark(forward)
@@ -745,12 +745,12 @@ arch x86_32 {
 			out.AppendByte(int(value))
 		}
 		registerLowBits(reg:register) -> byte {
-			return byte(reg.Code&7)
+			return byte(reg.Code & 7)
 		}
 		emitModRM(out:emitter, mode:byte, reg:byte, rm:byte) {
-			out.AppendByte(int(mode<<6|(reg&7)<<3|rm&7))
+			out.AppendByte(int(mode << 6 |(reg & 7) << 3 | rm & 7))
 		}
-}
+	}
 }
 
 abi renvo_x86_32 {

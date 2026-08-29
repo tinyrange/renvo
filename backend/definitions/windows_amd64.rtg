@@ -215,7 +215,7 @@ extend arch x86_64 {
 		windowsCallImport(out:emitter, importID:int) {
 			let base = out.Len()
 			out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x20\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-			out.AbsoluteReloc(base+15, importID, RTGRelocationImport)
+			out.AbsoluteReloc(base + 15, importID, RTGRelocationImport)
 		}
 		windowsRuntimeChmod(out:emitter) {
 			let failed = out.NewLabel()
@@ -252,7 +252,7 @@ extend arch x86_64 {
 			encodeRegisterToRM(out, 0x89, record_register(Code:1, Valid:true), record_register(Code:11, Valid:true), 64)
 			let base = out.Len()
 			out.Text("\x41\x54\x49\x89\xe4\x48\x83\xe4\xf0\x48\x83\xec\x40\x44\x89\x54\x24\x20\xc7\x44\x24\x28\x80\x00\x00\x00\x48\xc7\x44\x24\x30\x00\x00\x00\x00\xff\x15\x00\x00\x00\x00\x49\x89\xc3\x4c\x89\xe4\x41\x5c\x4c\x89\xd8")
-			out.AbsoluteReloc(base+37, 1, RTGRelocationImport)
+			out.AbsoluteReloc(base + 37, 1, RTGRelocationImport)
 		}
 		windowsTranslateCreateFileFlags(out:emitter) {
 			let notReadWrite = out.NewLabel()
@@ -362,7 +362,7 @@ format pe64_x86_64 {
 		library = "KERNEL32.dll"
 		names = target.runtime.imports
 
-		descriptor size=20 {
+		descriptor size = 20 {
 			u32 original_first_thunk = rva(import_lookup_table)
 			u32 timestamp = 0
 			u32 forwarder_chain = 0
@@ -409,7 +409,7 @@ format coff64_object_x86_64 {
 	address_bits = 64
 	machine = 0x8664
 	sections = [text, data, bss]
-	symbol_table entry_size=18 {
+	symbol_table entry_size = 18 {
 		name = inline_8_or_string_offset
 		value = section_offset
 		section = section_index
@@ -426,10 +426,26 @@ format coff64_object_x86_64 {
 		}
 	}
 
-	relocation label { number = 0x0004 kind = rel32 addend = -4 }
-	relocation data { number = 0x0004 kind = rel32 addend = -4 }
-	relocation bss { number = 0x0004 kind = rel32 addend = -4 }
-	relocation abs64 { number = 0x0001 kind = absolute width = 64 }
+	relocation label {
+		number = 0x0004
+		kind = rel32
+		addend = -4
+	}
+	relocation data {
+		number = 0x0004
+		kind = rel32
+		addend = -4
+	}
+	relocation bss {
+		number = 0x0004
+		kind = rel32
+		addend = -4
+	}
+	relocation abs64 {
+		number = 0x0001
+		kind = absolute
+		width = 64
+	}
 }
 
 abi windows_x86_64 {

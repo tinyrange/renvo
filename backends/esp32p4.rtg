@@ -447,11 +447,11 @@ go backend {
 		code := out.Code()
 		data := out.Data()
 		dataOffset := RTGAlignValue(codeOffset+len(code), 8)
-		mappedDataAddress := textAddress+dataOffset
+		mappedDataAddress := textAddress + dataOffset
 		patchAbsolute(out, mappedDataAddress, bssAddress)
 		code = out.Code()
 
-		mappedFileSize := dataOffset+len(data)
+		mappedFileSize := dataOffset + len(data)
 		if textAddress+mappedFileSize > textLimit {
 			panic("ESP32-P4 code and immutable data exceed the flash-mapped window")
 		}
@@ -460,14 +460,14 @@ go backend {
 		}
 		descriptor := appDescriptor()
 		descriptorOffset := RTGAlignValue(mappedFileSize, 4)
-		internalDataOffset := descriptorOffset+len(descriptor)
+		internalDataOffset := descriptorOffset + len(descriptor)
 		internalData := make([]byte, 256)
 		sectionNames := []byte{0,
 			'.', 'f', 'l', 'a', 's', 'h', '.', 'a', 'p', 'p', 'd', 'e', 's', 'c', 0,
 			'.', 't', 'e', 'x', 't', 0,
 			'.', 'd', 'a', 't', 'a', 0,
 			'.', 's', 'h', 's', 't', 'r', 't', 'a', 'b', 0}
-		sectionNamesOffset := internalDataOffset+len(internalData)
+		sectionNamesOffset := internalDataOffset + len(internalData)
 		sectionHeadersOffset := RTGAlignValue(
 			sectionNamesOffset+len(sectionNames), 4)
 

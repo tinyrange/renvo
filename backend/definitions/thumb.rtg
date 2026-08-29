@@ -36,13 +36,13 @@ go backend {
 	func patchImmediateFixed(out *RTGEmitter, at int, register int, value int) {
 		out.PatchUint32(at,
 			(0x2000|(register<<8)|((value>>24)&255))|
-			((0x0000|(8<<6)|(register<<3)|register)<<16))
+				((0x0000|(8<<6)|(register<<3)|register)<<16))
 		out.PatchUint32(at+4,
 			(0x3000|(register<<8)|((value>>16)&255))|
-			((0x0000|(8<<6)|(register<<3)|register)<<16))
+				((0x0000|(8<<6)|(register<<3)|register)<<16))
 		out.PatchUint32(at+8,
 			(0x3000|(register<<8)|((value>>8)&255))|
-			((0x0000|(8<<6)|(register<<3)|register)<<16))
+				((0x0000|(8<<6)|(register<<3)|register)<<16))
 		out.PatchUint32(at+12,
 			(0x3000|(register<<8)|(value&255))|(0x46c0<<16))
 	}
@@ -251,7 +251,7 @@ go backend {
 			// Thumb-1 store. Using r0-r2 here silently destroyed live RTG values;
 			// in particular, pushing an immediate while r0 held an arena base made
 			// the persistent heap end equal to twice the arena size.
-			preserved = RTGRegister{Code:12, Valid:true}
+			preserved = RTGRegister{Code: 12, Valid: true}
 			move(out, preserved, source)
 		}
 		base := memoryAddress(out, value)
@@ -377,7 +377,7 @@ go backend {
 		moveImmediate(out, address, 0)
 		moveImmediate(out, secondary, 32)
 		loopAt := out.Len()
-		shiftLeftImmediate(out, tertiary, 1) // carry = next dividend bit
+		shiftLeftImmediate(out, tertiary, 1)               // carry = next dividend bit
 		emit16(out, 0x4140|(address.Code<<3)|address.Code) // adcs r4, r4
 		shiftLeftImmediate(out, scratch, 1)
 		compare(out, address, primary)
@@ -386,7 +386,7 @@ go backend {
 		subtract(out, address, primary)
 		increment(out, scratch)
 		decrement(out, secondary)
-		delta := loopAt-(out.Len()+4)
+		delta := loopAt - (out.Len() + 4)
 		emit16(out, 0xd100|((delta>>1)&255)) // bne loopAt
 		if remainder {
 			move(out, primary, address)
@@ -442,19 +442,19 @@ go backend {
 			target := out.LabelPosition(out.RelocationLabel(index))
 			instruction := RTGGet32At(out.Code(), at)
 			if instruction == 0xf800f000 {
-				delta := target-(at+4)
+				delta := target - (at + 4)
 				s := (delta >> 24) & 1
 				i1 := (delta >> 23) & 1
 				i2 := (delta >> 22) & 1
 				j1 := (i1 ^ s ^ 1) & 1
 				j2 := (i2 ^ s ^ 1) & 1
-				first := 0xf000|(s<<10)|((delta>>12)&0x3ff)
-				second := 0xd000|(j1<<13)|(j2<<11)|((delta>>1)&0x7ff)
+				first := 0xf000 | (s << 10) | ((delta >> 12) & 0x3ff)
+				second := 0xd000 | (j1 << 13) | (j2 << 11) | ((delta >> 1) & 0x7ff)
 				out.PatchUint32(at, first|(second<<16))
 			} else {
 				// Both address materialization and long jumps start with MOV Rd, PC.
 				register := (instruction >> 24) & 7
-				delta := target-(at+4)
+				delta := target - (at + 4)
 				// Long jumps and materialized function pointers are consumed by
 				// BX/BLX, so every code address carries the Thumb state bit.
 				delta++
@@ -489,7 +489,7 @@ go backend {
 			return
 		}
 		loadNative(out, primary, RTGAddress{
-			Base:frame, Displacement:32+(word-6)*4,
+			Base: frame, Displacement: 32 + (word-6)*4,
 		})
 		frameStore(out, offset, primary)
 	}
@@ -503,15 +503,15 @@ go backend {
 
 	func frameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
 		loadNative(out, destination,
-			RTGAddress{Base: frame, Displacement: -(offset+8)})
+			RTGAddress{Base: frame, Displacement: -(offset + 8)})
 	}
 	func frameStore(out *RTGEmitter, offset int, source RTGRegister) {
 		storeNative(out,
-			RTGAddress{Base: frame, Displacement: -(offset+8)}, source)
+			RTGAddress{Base: frame, Displacement: -(offset + 8)}, source)
 	}
 	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
 		emitAddress(out, destination,
-			RTGAddress{Base: frame, Displacement: -(offset+8)})
+			RTGAddress{Base: frame, Displacement: -(offset + 8)})
 	}
 }
 
@@ -602,17 +602,17 @@ arch thumb {
 			let done = out.NewLabel()
 			compare(out, copyDestination, copySource)
 			jumpCondition(out, ult, forward)
-			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1, ))
+			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1,))
 			compare(out, copyDestination, scratch)
 			jumpCondition(out, uge, forward)
-			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1, ))
-			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1, ))
+			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1,))
+			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1,))
 			out.Mark(backwardLoop)
 			moveImmediate(out, scratch, 0)
 			compare(out, copyCount, scratch)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			decrement(out, copySource)
 			decrement(out, copyDestination)
 			decrement(out, copyCount)
@@ -622,8 +622,8 @@ arch thumb {
 			moveImmediate(out, scratch, 0)
 			compare(out, copyCount, scratch)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			increment(out, copySource)
 			increment(out, copyDestination)
 			decrement(out, copyCount)

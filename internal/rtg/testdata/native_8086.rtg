@@ -73,8 +73,8 @@ arch intel_8086 {
 		load16 load16 0x008b
 		store16 store16 0x0089
 		add16 rr16 0x0001
-		call16 call_near relocation=near16
-		branch8 branch_short range=8 relocation=relative8
+		call16 call_near relocation = near16
+		branch8 branch_short range = 8 relocation = relative8
 	}
 	bind {
 		move = move16

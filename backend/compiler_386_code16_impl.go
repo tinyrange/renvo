@@ -6,15 +6,15 @@ package main
 
 
 type rtgX86Code16X8616PackageCode16ModRMResult struct {
-	at int
+	at  int
 	reg int
-	ok bool
+	ok  bool
 }
 type rtgX86Code16X8616PackageCode16RewriteResult struct {
-	code []byte
+	code      []byte
 	positions []int
-	failure int
-	ok bool
+	failure   int
+	ok        bool
 }
 func rtgX86Code16X8616PackageCode16ModRMEnd(code []byte, at int, address32 bool) rtgX86Code16X8616PackageCode16ModRMResult {
 	if at >= len(code) {
@@ -105,7 +105,11 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			input++
 			if second >= 0x80 && second <= 0x8f {
 				operandDefault = true
-				if operand32 { immediate = 4 } else { immediate = 2 }
+				if operand32 {
+					immediate = 4
+				} else {
+					immediate = 2
+				}
 			} else if second >= 0x90 && second <= 0x9f {
 				hasModRM = true
 			} else if second >= 0x40 && second <= 0x4f ||
@@ -143,7 +147,11 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 				immediate = 1
 			} else if low == 5 {
 				operandDefault = true
-				if operand32 { immediate = 4 } else { immediate = 2 }
+				if operand32 {
+					immediate = 4
+				} else {
+					immediate = 2
+				}
 			} else if opcode == 0x06 || opcode == 0x07 || opcode == 0x0e ||
 				opcode == 0x16 || opcode == 0x17 || opcode == 0x1e || opcode == 0x1f {
 				operandDefault = true
@@ -152,11 +160,19 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			operandDefault = true
 		} else if opcode == 0x68 {
 			operandDefault = true
-			if operand32 { immediate = 4 } else { immediate = 2 }
+			if operand32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode == 0x69 {
 			hasModRM = true
 			operandDefault = true
-			if operand32 { immediate = 4 } else { immediate = 2 }
+			if operand32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode == 0x6a {
 			operandDefault = true
 			immediate = 1
@@ -175,7 +191,11 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 				immediate = 1
 			} else if opcode == 0x81 {
 				operandDefault = true
-				if operand32 { immediate = 4 } else { immediate = 2 }
+				if operand32 {
+					immediate = 4
+				} else {
+					immediate = 2
+				}
 			} else if opcode == 0x83 {
 				operandDefault = true
 				immediate = 1
@@ -189,7 +209,11 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 		} else if opcode >= 0xa0 && opcode <= 0xa3 {
 			addressDefault = true
 			operandDefault = opcode == 0xa1 || opcode == 0xa3
-			if address32 { immediate = 4 } else { immediate = 2 }
+			if address32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode >= 0xa4 && opcode <= 0xaf {
 			if opcode != 0xa8 && opcode != 0xa9 {
 				addressDefault = true
@@ -200,13 +224,21 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			if opcode == 0xa8 {
 				immediate = 1
 			} else if opcode == 0xa9 {
-				if operand32 { immediate = 4 } else { immediate = 2 }
+				if operand32 {
+					immediate = 4
+				} else {
+					immediate = 2
+				}
 			}
 		} else if opcode >= 0xb0 && opcode <= 0xb7 {
 			immediate = 1
 		} else if opcode >= 0xb8 && opcode <= 0xbf {
 			operandDefault = true
-			if operand32 { immediate = 4 } else { immediate = 2 }
+			if operand32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode == 0xc0 || opcode == 0xc1 {
 			hasModRM = true
 			operandDefault = opcode == 0xc1
@@ -216,11 +248,19 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			immediate = 2
 		} else if opcode == 0xc3 || opcode == 0xc8 || opcode == 0xc9 {
 			operandDefault = true
-			if opcode == 0xc8 { immediate = 3 }
+			if opcode == 0xc8 {
+				immediate = 3
+			}
 		} else if opcode == 0xc6 || opcode == 0xc7 {
 			hasModRM = true
 			operandDefault = opcode == 0xc7
-			if opcode == 0xc6 { immediate = 1 } else if operand32 { immediate = 4 } else { immediate = 2 }
+			if opcode == 0xc6 {
+				immediate = 1
+			} else if operand32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode == 0xcc || opcode == 0xce || opcode == 0xcf || opcode == 0xf4 || opcode == 0xf5 || opcode >= 0xf8 && opcode <= 0xfd {
 			// Fixed-size control instructions.
 		} else if opcode == 0xcd {
@@ -235,10 +275,18 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			immediate = 1
 		} else if opcode == 0xe8 || opcode == 0xe9 {
 			operandDefault = true
-			if operand32 { immediate = 4 } else { immediate = 2 }
+			if operand32 {
+				immediate = 4
+			} else {
+				immediate = 2
+			}
 		} else if opcode == 0xea {
 			operandDefault = true
-			if operand32 { immediate = 6 } else { immediate = 4 }
+			if operand32 {
+				immediate = 6
+			} else {
+				immediate = 4
+			}
 		} else if opcode == 0xeb || opcode == 0xe4 || opcode == 0xe5 || opcode == 0xe6 || opcode == 0xe7 {
 			immediate = 1
 			operandDefault = opcode == 0xe5 || opcode == 0xe7
@@ -298,10 +346,14 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 		mapping[start] = outputStart
 		for i := start; i < opcodeAt; i++ {
 			if code[i] == 0x66 || code[i] == 0x67 {
-				if mapping[i] < 0 { mapping[i] = outputStart }
+				if mapping[i] < 0 {
+					mapping[i] = outputStart
+				}
 				continue
 			}
-			if mapping[i] < 0 { mapping[i] = len(result) }
+			if mapping[i] < 0 {
+				mapping[i] = len(result)
+			}
 			result = append(result, code[i])
 		}
 		if addressDefault && address32 {
@@ -311,7 +363,9 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 			result = append(result, 0x66)
 		}
 		for i := opcodeAt; i < input; i++ {
-			if mapping[i] < 0 { mapping[i] = len(result) }
+			if mapping[i] < 0 {
+				mapping[i] = len(result)
+			}
 			result = append(result, code[i])
 		}
 		mapping[input] = len(result)
@@ -320,12 +374,16 @@ func rtgX86Code16X8616PackageCode16Rewrite(code []byte) rtgX86Code16X8616Package
 }
 func renvo386RewriteCode16(code []byte) []byte {
 	result := rtgX86Code16X8616PackageCode16Rewrite(code)
-	if !result.ok { return nil }
+	if !result.ok {
+		return nil
+	}
 	return result.code
 }
 func renvo386Code16Positions(code []byte) []int {
 	result := rtgX86Code16X8616PackageCode16Rewrite(code)
-	if !result.ok { return nil }
+	if !result.ok {
+		return nil
+	}
 	return result.positions
 }
 func renvo386Code16FailureOffset(code []byte) int {

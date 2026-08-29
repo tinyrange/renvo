@@ -70,17 +70,17 @@ go backend {
 				byte(instruction>>16))
 		}
 		top := digits[3]
-		appendInstruction(((top&0xff)<<16)|(((top>>8)&15)<<8)|
-			(destination.Code<<4)|0xa002)
+		appendInstruction(((top & 0xff) << 16) | (((top >> 8) & 15) << 8) |
+			(destination.Code << 4) | 0xa002)
 		for index := 2; index >= 0; index-- {
 			encoded := (32 - 8) & 31
-			appendInstruction(0x010000|(destination.Code<<12)|
-				(destination.Code<<8)|((encoded&15)<<4)|((encoded>>4)<<20))
+			appendInstruction(0x010000 | (destination.Code << 12) |
+				(destination.Code << 8) | ((encoded & 15) << 4) | ((encoded >> 4) << 20))
 			digit := digits[index]
-			appendInstruction(((digit&0xff)<<16)|(destination.Code<<8)|
-				(destination.Code<<4)|0xc002)
+			appendInstruction(((digit & 0xff) << 16) | (destination.Code << 8) |
+				(destination.Code << 4) | 0xc002)
 		}
-		appendInstruction((destination.Code<<8)|(destination.Code<<4)|0xc002)
+		appendInstruction((destination.Code << 8) | (destination.Code << 4) | 0xc002)
 		return result
 	}
 
@@ -489,7 +489,7 @@ go backend {
 					// The relaxed slot's long fallback starts immediately after J.
 					delta = -1
 				}
-				patched := 6|((delta&0x3ffff)<<6)
+				patched := 6 | ((delta & 0x3ffff) << 6)
 				out.PatchUint32(at, (RTGGet32At(out.Code(), at)&0xff000000)|patched)
 			} else if instruction&0x3f == 5 {
 				base := (at & -4) + 4
@@ -497,7 +497,7 @@ go backend {
 				if delta&3 != 0 || delta < -524288 || delta > 524284 {
 					panic("Xtensa CALL0 target is unaligned or out of range")
 				}
-				patched := 5|(((delta>>2)&0x3ffff)<<6)
+				patched := 5 | (((delta >> 2) & 0x3ffff) << 6)
 				out.PatchUint32(at, (RTGGet32At(out.Code(), at)&0xff000000)|patched)
 			} else if instruction&0xf == 2 && (instruction>>12)&15 == 10 {
 				// Code-address materialization follows an aligned CALL0 landing
@@ -659,17 +659,17 @@ arch xtensa_lx7 {
 			let done = out.NewLabel()
 			compare(out, copyDestination, copySource)
 			jumpCondition(out, ult, forward)
-			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1, ))
+			emitAddress(out, scratch, record_address(Base:copySource, Index:copyCount, Scale:1,))
 			compare(out, copyDestination, scratch)
 			jumpCondition(out, uge, forward)
-			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1, ))
-			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1, ))
+			emitAddress(out, copySource, record_address(Base:copySource, Index:copyCount, Scale:1, Displacement:-1,))
+			emitAddress(out, copyDestination, record_address(Base:copyDestination, Index:copyCount, Scale:1, Displacement:-1,))
 			out.Mark(backwardLoop)
 			moveImmediate(out, scratch, 0)
 			compare(out, copyCount, scratch)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			decrement(out, copySource)
 			decrement(out, copyDestination)
 			decrement(out, copyCount)
@@ -679,8 +679,8 @@ arch xtensa_lx7 {
 			moveImmediate(out, scratch, 0)
 			compare(out, copyCount, scratch)
 			jumpCondition(out, eq, done)
-			loadU8(out, scratch, record_address(Base:copySource, ))
-			storeU8(out, record_address(Base:copyDestination, ), scratch)
+			loadU8(out, scratch, record_address(Base:copySource,))
+			storeU8(out, record_address(Base:copyDestination,), scratch)
 			increment(out, copySource)
 			increment(out, copyDestination)
 			decrement(out, copyCount)

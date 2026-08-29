@@ -613,22 +613,22 @@ extend arch aarch64 {
 		}
 		machImage(out:emitter) -> bytes {
 			let imports = machPrepareImports(out)
-			let dataFileOff = RTGAlignValue(machCodeOffset+out.Len(), machPageSize)
+			let dataFileOff = RTGAlignValue(machCodeOffset + out.Len(), machPageSize)
 			let bind = machBuildBindData(out, imports.got)
 			let symtab = machBuildSymbolTable(out)
 			let strtab = machBuildStringTable(out)
 			let undefinedCount = out.DynamicImportCount()
 			let textFileSize = dataFileOff
 			let dataFileSize = len(out.Data())
-			let dataVMSize = RTGAlignValue(dataFileSize+out.BSSSize(), machPageSize)
-			let linkeditOff = dataFileOff+dataFileSize
+			let dataVMSize = RTGAlignValue(dataFileSize + out.BSSSize(), machPageSize)
+			let linkeditOff = dataFileOff + dataFileSize
 			let bindOff = linkeditOff
-			let symOff = RTGAlignValue(bindOff+len(bind), 8)
-			let strOff = symOff+len(symtab)
-			let sigOff = RTGAlignValue(strOff+len(strtab), 16)
+			let symOff = RTGAlignValue(bindOff + len(bind), 8)
+			let strOff = symOff + len(symtab)
+			let sigOff = RTGAlignValue(strOff + len(strtab), 16)
 			let sigSize = machCodeSignatureSize(sigOff, "renvo")
-			let linkeditSize = sigOff+sigSize-linkeditOff
-			let image = machHeader(out, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1+undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize, )
+			let linkeditSize = sigOff + sigSize - linkeditOff
+			let image = machHeader(out, textFileSize, dataFileOff, dataFileSize, dataVMSize, linkeditOff, linkeditSize, bindOff, len(bind), symOff, 1 + undefinedCount, strOff, len(strtab), undefinedCount, sigOff, sigSize,)
 			set image = append(image, out.Code()...)
 			set image = machAppendUntil(image, dataFileOff)
 			set image = append(image, out.Data()...)
@@ -646,31 +646,31 @@ extend arch aarch64 {
 			asmCallLabel(out, out.DynamicImportLabel(index))
 		}
 		machAppend16(out:bytes, value:int) -> bytes {
-			return append(out, byte(value), byte(value>>8))
+			return append(out, byte(value), byte(value >> 8))
 		}
 		machAppend32(out:bytes, value:int) -> bytes {
-			return append(out, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+			return append(out, byte(value), byte(value >> 8), byte(value >> 16), byte(value >> 24))
 		}
 		machAppend64(out:bytes, value:int) -> bytes {
 			set out = machAppend32(out, value)
-			return machAppend32(out, value>>32)
+			return machAppend32(out, value >> 32)
 		}
 		machAppendBE32(out:bytes, value:int) -> bytes {
-			set out = append(out, byte(value>>24))
-			set out = append(out, byte(value>>16))
-			set out = append(out, byte(value>>8))
+			set out = append(out, byte(value >> 24))
+			set out = append(out, byte(value >> 16))
+			set out = append(out, byte(value >> 8))
 			return append(out, byte(value))
 		}
 		machAppendBE64(out:bytes, value:int) -> bytes {
-			set out = machAppendBE32(out, value>>32)
+			set out = machAppendBE32(out, value >> 32)
 			return machAppendBE32(out, value)
 		}
 		machAppendDataSegment(out:bytes, dataFileOff:int, dataFileSize:int, bssSize:int) -> bytes {
-			let vmSize = RTGAlignValue(dataFileSize+bssSize, machPageSize)
+			let vmSize = RTGAlignValue(dataFileSize + bssSize, machPageSize)
 			set out = machAppend32(out, 0x19)
 			set out = machAppend32(out, 232)
 			set out = machAppendName16(out, "__DATA")
-			set out = machAppend64(out, machImageBase+dataFileOff)
+			set out = machAppend64(out, machImageBase + dataFileOff)
 			set out = machAppend64(out, vmSize)
 			set out = machAppend64(out, dataFileOff)
 			set out = machAppend64(out, dataFileSize)
@@ -678,8 +678,8 @@ extend arch aarch64 {
 			set out = machAppend32(out, 3)
 			set out = machAppend32(out, 2)
 			set out = machAppend32(out, 0)
-			set out = machAppendSection64(out, "__data", "__DATA", machImageBase+dataFileOff, dataFileSize, dataFileOff, 3, 0, )
-			return machAppendSection64(out, "__bss", "__DATA", machImageBase+dataFileOff+dataFileSize, bssSize, 0, 3, 1, )
+			set out = machAppendSection64(out, "__data", "__DATA", machImageBase + dataFileOff, dataFileSize, dataFileOff, 3, 0,)
+			return machAppendSection64(out, "__bss", "__DATA", machImageBase + dataFileOff + dataFileSize, bssSize, 0, 3, 1,)
 		}
 		machAppendDylibCommand(out:bytes, path:string) -> bytes {
 			let start = len(out)
@@ -691,7 +691,7 @@ extend arch aarch64 {
 			set out = machAppend32(out, 0x00010000)
 			set out = machAppend32(out, 0x00010000)
 			set out = machAppendStringZ(out, path)
-			return machAppendUntil(out, start+size)
+			return machAppendUntil(out, start + size)
 		}
 		machAppendSection64(out:bytes, section:string, segment:string, addr:int, size:int, offset:int, align:int, flags:int) -> bytes {
 			set out = machAppendName16(out, section)
@@ -732,26 +732,26 @@ extend arch aarch64 {
 			set out = machAppend32(out, 5)
 			set out = machAppend32(out, 1)
 			set out = machAppend32(out, 0)
-			return machAppendSection64(out, "__text", "__TEXT", machImageBase+machCodeOffset, codeSize, machCodeOffset, 2, 0x80000400, )
+			return machAppendSection64(out, "__text", "__TEXT", machImageBase + machCodeOffset, codeSize, machCodeOffset, 2, 0x80000400,)
 		}
 		machCodeSignatureSize(codeLimit:int, identifier:string) -> int {
-			let slots = (codeLimit+16383)/16384
-			let codeDirectorySize = 88+len(identifier)+1+slots*32
-			return 20+codeDirectorySize
+			let slots =(codeLimit + 16383)/16384
+			let codeDirectorySize = 88 + len(identifier) + 1 + slots * 32
+			return 20 + codeDirectorySize
 		}
 		machDylibCommandSize(path:string) -> int {
-			return RTGAlignValue(24+len(path)+1, 8)
+			return RTGAlignValue(24 + len(path) + 1, 8)
 		}
 		machPatchADRP(out:emitter, at:int, pc:int, target:int) {
-			let delta = (target>>12)-(pc>>12)
-			let imm = delta&0x1fffff
+			let delta =(target >> 12) -(pc >> 12)
+			let imm = delta & 0x1fffff
 			let insn = 0x90000010
-			set insn = insn|((imm&3)<<29)
-			set insn = insn|(((imm>>2)&0x7ffff)<<5)
+			set insn = insn |((imm & 3) << 29)
+			set insn = insn |(((imm >> 2) & 0x7ffff) << 5)
 			out.PatchUint32(at, insn)
 		}
 		machSHA256Constants() -> ints {
-			return record_ints(0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2, )
+			return record_ints(0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,)
 		}
 		darwinRead(out:emitter) {
 			asmMovRegReg(out, x0.Code, x3.Code)
@@ -861,16 +861,16 @@ extend arch aarch64 {
 			asmLoadRegMem(out, x14.Code, x9.Code, 8, 8)
 			asmLoadRegMem(out, x15.Code, x9.Code, 16, 8)
 			emitBoundedCountedCStringTable(
-				out, x14.Code, x13.Code, argsOffset,
-				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
+			out, x14.Code, x13.Code, argsOffset,
+			x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
 			)
 			asmMovRegReg(out, x13.Code, x11.Code)
 			emitBoundedTerminatedCStringTable(
-				out, x15.Code, environmentOffset,
-				x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
+			out, x15.Code, environmentOffset,
+			x10.Code, x11.Code, x12.Code, x0.Code, x9.Code,
 			)
 			bindEntryCollections(
-				out, argsOffset, x13.Code, environmentOffset, x11.Code,
+			out, argsOffset, x13.Code, environmentOffset, x11.Code,
 			)
 		}
 	}
