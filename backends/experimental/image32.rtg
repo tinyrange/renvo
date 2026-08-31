@@ -12,6 +12,30 @@ go backend {
 			byte(value>>16), byte(value>>24))
 	}
 
+	func put16(out []byte, at int, value int) {
+		out[at] = byte(value)
+		out[at+1] = byte(value>>8)
+	}
+
+	func put32(out []byte, at int, value int) {
+		put16(out, at, value)
+		put16(out, at+2, value>>16)
+	}
+
+	func programHeaderAt(
+		out []byte, at int, offset int, address int, fileSize int,
+		memorySize int, flags int, alignment int,
+	) {
+		put32(out, at+0, 1)
+		put32(out, at+4, offset)
+		put32(out, at+8, address)
+		put32(out, at+12, address)
+		put32(out, at+16, fileSize)
+		put32(out, at+20, memorySize)
+		put32(out, at+24, flags)
+		put32(out, at+28, alignment)
+	}
+
 	func appendUntil(out []byte, size int) []byte {
 		for len(out) < size {
 			out = append(out, 0)
@@ -73,6 +97,55 @@ go backend {
 			len(data), dataMemorySize, 6, pageSize)
 		result = appendUntil(result, codeOffset)
 		result = append(result, code...)
+		result = appendUntil(result, dataOffset)
+		return append(result, data...)
+	}
+
+	// ELFInPlace uses prefix and suffix storage reserved by the prepared
+	// compiler's persistent code buffer. It avoids allocating a second complete
+	// image while self-hosting on memory-constrained targets.
+	func ELFInPlace(
+		out *RTGEmitter, machine int, flags int, textAddress int,
+		dataAddress int, thumbEntry bool,
+	) []byte {
+		const codeOffset = 0x100
+		const pageSize = 0x100
+		codeLen := len(out.Code())
+		data := out.Data()
+		dataOffset := RTGAlignValue(codeOffset+codeLen, pageSize)
+		bssAddress := RTGAlignValue(dataAddress+len(data), 8)
+		dataMemorySize := bssAddress-dataAddress+
+			RTGAlignValue(out.BSSSize(), 4)
+
+		entry := textAddress+codeOffset
+		if thumbEntry {
+			entry++
+		}
+		out.PrependCode(codeOffset)
+		result := out.Code()
+		for i := 0; i < codeOffset; i++ {
+			result[i] = 0
+		}
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		result[5] = 1
+		result[6] = 1
+		put16(result, 16, 2)
+		put16(result, 18, machine)
+		put32(result, 20, 1)
+		put32(result, 24, entry)
+		put32(result, 28, 52)
+		put32(result, 36, flags)
+		put16(result, 40, 52)
+		put16(result, 42, 32)
+		put16(result, 44, 2)
+		programHeaderAt(result, 52, 0, textAddress,
+			codeOffset+codeLen, codeOffset+codeLen, 5, pageSize)
+		programHeaderAt(result, 84, dataOffset, dataAddress,
+			len(data), dataMemorySize, 6, pageSize)
 		result = appendUntil(result, dataOffset)
 		return append(result, data...)
 	}

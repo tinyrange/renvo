@@ -197,7 +197,13 @@ go backend {
 		out.Reloc(label)
 	}
 	func call(out *RTGEmitter, label RTGLabel) {
-		emitJAL(out, link, label)
+		// JAL only reaches +/-1 MiB, which is insufficient for compiler-sized
+		// programs. AUIPC/JALR covers the full 32-bit PC-relative range while
+		// leaving compact intra-function jumps on JAL.
+		at := out.Len()
+		encodeU(out, 0x17, scratch, 0)
+		encodeI(out, 0x67, 0, link, scratch, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
 	}
 	func callIndirect(out *RTGEmitter, operand RTGRegister) {
 		encodeI(out, 0x67, 0, link, operand, 0)
@@ -335,13 +341,15 @@ go backend {
 				instruction |= ((delta >> 12) & 0xff) << 12
 				out.PatchUint32(at, instruction)
 			} else if instruction&0x7f == 0x17 {
-				// AUIPC/ADDI pair used by emitAddress.
+				// AUIPC followed by ADDI (emitAddress) or JALR (far call).
 				register := (instruction >> 7) & 31
 				hi := (delta + 0x800) >> 12
 				lo := delta - (hi << 12)
 				out.PatchUint32(at, 0x17|(register<<7)|(hi<<12))
-				out.PatchUint32(at+4,
-					0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+				second := RTGGet32At(out.Code(), at+4)
+				second &= 0x000fffff
+				second |= (lo&0xfff)<<20
+				out.PatchUint32(at+4, second)
 			}
 		}
 	}
