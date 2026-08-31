@@ -214,6 +214,10 @@ func (out *RTGEmitter) Code() []byte {
 	return out.asm.code
 }
 
+func (out *RTGEmitter) PrependCode(prefix int) {
+	out.asm.code = renvo_runtime_ArenaPrependBytes(out.asm.code, prefix)
+}
+
 func (out *RTGEmitter) SetCode(value []byte) {
 	out.asm.code = value
 }

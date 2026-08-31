@@ -1349,6 +1349,107 @@ func renvoEmitRuntimeArenaPersistSlice(g *renvoLinearGen, ep *renvoExprParse, id
 	return true
 }
 
+func renvoEmitRuntimeArenaMakeSlice(g *renvoLinearGen, ep *renvoExprParse, idx int, elemSize int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.argCount != 1 || elemSize <= 0 {
+		return false
+	}
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	a := &g.asm
+	capacityOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	byteSizeOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	renvoAsmStorePrimaryStack(a, capacityOff)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmMulTertiaryImm(a, elemSize)
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmStorePrimaryStack(a, byteSizeOff)
+	renvoEmitPersistentAllocToPrimary(g, byteSizeOff)
+	renvoAsmLoadTertiaryStack(a, capacityOff)
+	renvoAsmSecondaryImm(a, 0)
+	return true
+}
+
+func renvoEmitRuntimeArenaMakeBytesWithPadding(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.argCount != 3 {
+		return false
+	}
+	a := &g.asm
+	capacityOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	prefixOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	suffixOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	totalOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	renvoAsmStorePrimaryStack(a, capacityOff)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	renvoAsmStorePrimaryStack(a, prefixOff)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2)) {
+		return false
+	}
+	renvoAsmStorePrimaryStack(a, suffixOff)
+	renvoAsmLoadPrimaryStack(a, capacityOff)
+	renvoAsmLoadTertiaryStack(a, prefixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmLoadTertiaryStack(a, suffixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, totalOff)
+	renvoEmitPersistentAllocToPrimary(g, totalOff)
+	renvoAsmLoadTertiaryStack(a, prefixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, totalOff)
+	renvoAsmLoadPrimaryStack(a, capacityOff)
+	renvoAsmLoadTertiaryStack(a, suffixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmLoadPrimaryStack(a, totalOff)
+	renvoAsmSecondaryImm(a, 0)
+	return true
+}
+
+func renvoEmitRuntimeArenaPrependBytes(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.argCount != 2 || !renvoEmitSliceValueRegs(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	a := &g.asm
+	pointerOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	lengthOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	capacityOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	prefixOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+	renvoAsmStorePrimarySecondaryStack(a, pointerOff, lengthOff)
+	renvoAsmPushTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmStorePrimaryStack(a, capacityOff)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	renvoAsmStorePrimaryStack(a, prefixOff)
+	renvoAsmLoadPrimaryStack(a, pointerOff)
+	renvoAsmLoadTertiaryStack(a, prefixOff)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, pointerOff)
+	renvoAsmLoadPrimaryStack(a, lengthOff)
+	renvoAsmLoadTertiaryStack(a, prefixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, lengthOff)
+	renvoAsmLoadPrimaryStack(a, capacityOff)
+	renvoAsmLoadTertiaryStack(a, prefixOff)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, capacityOff)
+	renvoAsmLoadPrimarySecondaryStack(a, pointerOff, lengthOff)
+	renvoAsmLoadTertiaryStack(a, capacityOff)
+	return true
+}
+
 func renvoEmitCopyBytesToPersistent(g *renvoLinearGen, srcOff int, lenOff int, destOff int) {
 	renvoNonNil(g)
 	renvoEmitCopyBytes(g, srcOff, destOff, lenOff)

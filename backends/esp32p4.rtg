@@ -3,6 +3,7 @@ unit esp32p4
 implements direct_emitter_v1
 
 @import "../backend/definitions/riscv32.rtg"
+@import "experimental/image32.rtg"
 
 go backend {
 	const textAddress = 0x40000000
@@ -28,6 +29,26 @@ go backend {
 	const usbSerialProbeIterations = 65536
 	const displayInterruptAddress = 0x40000140
 	const displayMailbox = 0x4ff40080
+	const compilerTextAddress = 0x40000000
+	const compilerTextLimit = 0x41000000
+	const compilerDataAddress = 0x48000000
+	const compilerDataLimit = 0x4a000000
+	const compilerStackTop = 0x4ffbf000
+	const compilerHostCommand = 0xffff1000
+	const compilerHostArg0 = compilerHostCommand + 4
+	const compilerHostArg1 = compilerHostCommand + 8
+	const compilerHostResult = compilerHostCommand + 12
+	const compilerHostData = compilerHostCommand + 16
+	const compilerHostArg2 = compilerHostCommand + 20
+	const compilerHostPathReset = 1
+	const compilerHostOpenCommand = 2
+	const compilerHostCloseCommand = 3
+	const compilerHostReadCommand = 4
+	const compilerHostWriteCommand = 5
+	const compilerHostChmodCommand = 6
+	const compilerHostReadAtCommand = 7
+	const compilerHostWriteAtCommand = 8
+	const compilerTestExit = 0xfffffff0
 
 	func append16(out []byte, value int) []byte {
 		return append(out, byte(value), byte(value>>8))
@@ -625,6 +646,218 @@ go backend {
 		out.Mark(disabled)
 		riscv32.move(out, riscv32.primary, riscv32.copyCount)
 	}
+
+	func compilerHostEntryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		riscv32.moveImmediate(out, riscv32.stack, int64(compilerStackTop))
+		riscv32.move(out, riscv32.frame, riscv32.stack)
+		// compiler-host is an ELF direct-load target. PT_LOAD guarantees that
+		// memory beyond p_filesz is zeroed, avoiding an interpreted 31.75 MiB
+		// startup loop while retaining ordinary ELF BSS semantics.
+		return true
+	}
+
+	func compilerHostString(out *RTGEmitter, descriptor int, text string) {
+		data := out.Data()
+		offset := len(data)
+		data = append(data, []byte(text)...)
+		data = append(data, 0)
+		out.SetData(data)
+		riscv32.emitAddress(out, riscv32.scratch, RTGDataAddress(offset))
+		riscv32.storeU32(out, RTGBSSAddress(descriptor), riscv32.scratch)
+		riscv32.moveImmediate(out, riscv32.scratch, int64(len(text)))
+		riscv32.storeU32(out, RTGBSSAddress(descriptor+8), riscv32.scratch)
+	}
+
+	func compilerHostEntry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		_ = stateOffset
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount == 0 {
+			return true
+		}
+		args := out.ReserveBSS(5*16, 16)
+		environment := out.ReserveBSS(16, 16)
+		compilerHostString(out, args+0*16, "renvo")
+		compilerHostString(out, args+1*16, "-s")
+		compilerHostString(out, args+2*16, "-o")
+		compilerHostString(out, args+3*16, "output")
+		compilerHostString(out, args+4*16, "input.unit")
+		compilerHostString(out, environment, "PWD=.")
+		riscv32.emitAddress(out, riscv32.primary, RTGBSSAddress(args))
+		riscv32.moveImmediate(out, riscv32.secondary, 5)
+		if parameterCount == 2 {
+			riscv32.emitAddress(out, riscv32.tertiary,
+				RTGBSSAddress(environment))
+			riscv32.moveImmediate(out, riscv32.copyDestination, 1)
+		}
+		return true
+	}
+
+	func compilerHostIssue(out *RTGEmitter, command int64) {
+		riscv32.moveImmediate(out, riscv32.scratch, command)
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostCommand},
+			riscv32.scratch)
+	}
+
+	func compilerHostUnavailable(out *RTGEmitter) {
+		riscv32.moveImmediate(out, riscv32.primary, -1)
+	}
+
+	func compilerHostOpen(out *RTGEmitter) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.move(out, riscv32.copySource, riscv32.primary)
+		riscv32.move(out, riscv32.copyCount, riscv32.secondary)
+		compilerHostIssue(out, compilerHostPathReset)
+		out.Mark(loop)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Base: riscv32.copySource})
+		riscv32.compare(out, riscv32.scratch, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.storeU8(out, RTGAddress{Displacement: compilerHostData},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.copySource)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg0},
+			riscv32.copyCount)
+		compilerHostIssue(out, compilerHostOpenCommand)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: compilerHostResult})
+	}
+
+	func compilerHostClose(out *RTGEmitter) {
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg0},
+			riscv32.primary)
+		compilerHostIssue(out, compilerHostCloseCommand)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: compilerHostResult})
+	}
+
+	func compilerHostRead(out *RTGEmitter) {
+		compilerHostReadOperation(out, false)
+	}
+
+	func compilerHostReadAt(out *RTGEmitter) {
+		compilerHostReadOperation(out, true)
+	}
+
+	func compilerHostReadOperation(out *RTGEmitter, at bool) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg0},
+			riscv32.primary)
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg1},
+			riscv32.tertiary)
+		riscv32.move(out, riscv32.copySource, riscv32.secondary)
+		if at {
+			riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg2},
+				riscv32.copyDestination)
+			compilerHostIssue(out, compilerHostReadAtCommand)
+		} else {
+			compilerHostIssue(out, compilerHostReadCommand)
+		}
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: compilerHostResult})
+		riscv32.move(out, riscv32.copyCount, riscv32.primary)
+		riscv32.compare(out, riscv32.primary, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.slt, done)
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.copyCount, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Displacement: compilerHostData})
+		riscv32.storeU8(out, RTGAddress{Base: riscv32.copySource},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.copySource)
+		riscv32.decrement(out, riscv32.copyCount)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+	}
+
+	func compilerHostWrite(out *RTGEmitter) {
+		compilerHostWriteOperation(out, false)
+	}
+
+	func compilerHostWriteAt(out *RTGEmitter) {
+		compilerHostWriteOperation(out, true)
+	}
+
+	func compilerHostWriteOperation(out *RTGEmitter, at bool) {
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg0},
+			riscv32.primary)
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg1},
+			riscv32.tertiary)
+		riscv32.move(out, riscv32.copySource, riscv32.secondary)
+		riscv32.move(out, riscv32.copyCount, riscv32.tertiary)
+		if at {
+			riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg2},
+				riscv32.copyDestination)
+			compilerHostIssue(out, compilerHostWriteAtCommand)
+		} else {
+			compilerHostIssue(out, compilerHostWriteCommand)
+		}
+		out.Mark(loop)
+		riscv32.compare(out, riscv32.copyCount, riscv32.zero)
+		riscv32.jumpCondition(out, riscv32.eq, done)
+		riscv32.loadU8(out, riscv32.scratch,
+			RTGAddress{Base: riscv32.copySource})
+		riscv32.storeU8(out, RTGAddress{Displacement: compilerHostData},
+			riscv32.scratch)
+		riscv32.increment(out, riscv32.copySource)
+		riscv32.decrement(out, riscv32.copyCount)
+		riscv32.jump(out, loop)
+		out.Mark(done)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: compilerHostResult})
+	}
+
+	func compilerHostChmod(out *RTGEmitter) {
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg0},
+			riscv32.primary)
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerHostArg1},
+			riscv32.secondary)
+		compilerHostIssue(out, compilerHostChmodCommand)
+		riscv32.loadU32(out, riscv32.primary,
+			RTGAddress{Displacement: compilerHostResult})
+	}
+
+	func compilerHostExit(out *RTGEmitter, status RTGRegister) {
+		riscv32.storeU32(out, RTGAddress{Displacement: compilerTestExit}, status)
+		loop := out.NewLabel()
+		out.Mark(loop)
+		riscv32.jump(out, loop)
+	}
+
+	func compilerHostStaticCall(out *RTGEmitter, importID int, wordCount int) {
+		_ = importID
+		for i := 0; i < wordCount; i++ {
+			riscv32.loadNative(out, riscv32.scratch,
+				RTGAddress{Base: riscv32.stack})
+			riscv32.emitAddress(out, riscv32.stack,
+				RTGAddress{Base: riscv32.stack, Displacement: 4})
+		}
+		riscv32.move(out, riscv32.primary, riscv32.zero)
+	}
+
+	func compilerHostImage(out *RTGEmitter) []byte {
+		bssAddress := RTGAlignValue(compilerDataAddress+len(out.Data()), 8)
+		dataEnd := bssAddress+RTGAlignValue(out.BSSSize(), 4)
+		codeEnd := compilerTextAddress+0x100+len(out.Code())
+		if codeEnd > compilerTextLimit {
+			panic("ESP32-P4 compiler code exceeds the 16 MiB XIP window")
+		}
+		if dataEnd > compilerDataLimit {
+			panic("ESP32-P4 compiler data and arena exceed 32 MiB PSRAM")
+		}
+		patchAbsolute(out, compilerDataAddress, bssAddress)
+		return image32.ELFInPlace(out, 243, 0, compilerTextAddress,
+			compilerDataAddress, false)
+	}
 }
 
 runtime esp32p4_freestanding {
@@ -657,4 +890,41 @@ target esp32p4/riscv32 {
 	build_tags = [esp32p4, riscv32, tiny]
 	capabilities = [freestanding, executable, volatile_memory]
 	arena_default = 65536
+}
+
+runtime esp32p4_compiler_host {
+	emit_entry_start = go compilerHostEntryStart
+	emit_entry = go compilerHostEntry
+	emit_exit = go compilerHostExit
+	emit_static_call = go compilerHostStaticCall
+	operation open { emit = go compilerHostOpen }
+	operation close { emit = go compilerHostClose }
+	operation read { emit = go compilerHostRead }
+	operation read_at { emit = go compilerHostReadAt }
+	operation write { emit = go compilerHostWrite }
+	operation write_at { emit = go compilerHostWriteAt }
+	operation chmod { emit = go compilerHostChmod }
+	operation print { use = write args = [stderr, buffer, count] }
+}
+
+format esp32p4_compiler_elf {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	machine = 243
+	code_offset = 0x100
+	image = go compilerHostImage
+}
+
+target esp32p4/compiler-host {
+	family = native_v1
+	os = esp32p4
+	arch = riscv32
+	frontend_arch = riscv32
+	abi = riscv32_internal
+	runtime = esp32p4_compiler_host
+	executable = esp32p4_compiler_elf
+	build_tags = [esp32p4, riscv32, tiny, renvo_compiler_host]
+	capabilities = [freestanding, executable, filesystem, argv, environment, volatile_memory]
+	arena_default = 33292288
 }

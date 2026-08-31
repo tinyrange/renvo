@@ -63,6 +63,18 @@ func renvo_runtime_ArenaDiscardDecls(value []renvoDecl) {}
 
 func renvo_runtime_ArenaDiscardFuncs(value []renvoFuncDecl) {}
 
+func renvo_runtime_ArenaMakeBytesWithPadding(capacity int, prefix int, suffix int) []byte {
+	backing := make([]byte, prefix, prefix+capacity+suffix)
+	return backing[prefix:prefix]
+}
+
+func renvo_runtime_ArenaMakeInt32s(capacity int) []int32 { return make([]int32, 0, capacity) }
+
+func renvo_runtime_ArenaPrependBytes(value []byte, prefix int) []byte {
+	out := make([]byte, prefix, prefix+cap(value))
+	return append(out, value...)
+}
+
 // These internal intrinsics are only used after compiler code has established
 // the corresponding index invariant. Host builds retain Go's checked access;
 // self-hosted builds lower the calls to an explicitly unsafe load.
@@ -360,10 +372,15 @@ func renvoAsmInit(a *renvoAsm) {
 func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	renvoNonNil(a, context)
 	a.c = context
-	// Keep the mutually exclusive code reserves behind one runtime capacity.
+	// Keep mutually exclusive reserves behind runtime capacities.
 	// Constant-capacity makes cause the self-host backend to materialize every
 	// branch as a separate static ring, including branches for other targets.
 	codeCapacity := 0
+	labelCapacity := 0
+	relocCapacity := 0
+	absRelocCapacity := 0
+	symbolCapacity := 0
+	dataCapacity := 0
 	a.symbols = nil
 	a.symbolName = nil
 	a.staticImports = nil
@@ -371,52 +388,79 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget != 0 {
 		if renvoFixedTarget == renvoTargetWasiWasm32 {
 			codeCapacity = 655360
-			a.labelPos = make([]int32, 0, 8192)
-			a.relocs = make([]int32, 0, 32768)
-			a.absRelocs = make([]int32, 0, 4096)
+			labelCapacity = 8192
+			relocCapacity = 32768
+			absRelocCapacity = 4096
 		} else {
 			codeCapacity = 2097152
-			a.labelPos = make([]int32, 0, 32768)
-			a.relocs = make([]int32, 0, 65536)
-			a.absRelocs = make([]int32, 0, 49152)
+			labelCapacity = 32768
+			relocCapacity = 65536
+			absRelocCapacity = 49152
 		}
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-			a.symbols = make([]renvoAsmSymbol, 0, 1024)
+			symbolCapacity = 1024
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
 		codeCapacity = 655360
-		a.labelPos = make([]int32, 0, 32768)
-		a.relocs = make([]int32, 0, 131072)
-		a.absRelocs = make([]int32, 0, 98304)
-		a.symbols = make([]renvoAsmSymbol, 0, 2048)
+		labelCapacity = 32768
+		relocCapacity = 131072
+		absRelocCapacity = 98304
+		symbolCapacity = 2048
+	} else if renvoPreparedBackendActive != 0 && a.c.renvoTargetArch == renvoArchRTG && renvoRTGPreparedIntBits == 32 && a.c.optimizeRuntime {
+		// RV32 instructions are uniformly four bytes and the prepared backend
+		// compiler is itself a large input. Allocate its measured output from the
+		// persistent end of the arena so it neither becomes static BSS nor leaves
+		// an undersized predecessor in transient storage after slice growth. The
+		// table reserves include a small margin over the backend compiler's 51,472
+		// labels, 175,864 relative and 233,262 absolute relocation words.
+		codeCapacity = -8192000
+		labelCapacity = -53248
+		relocCapacity = -180224
+		absRelocCapacity = -235520
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			symbolCapacity = 4096
+		}
 	} else if a.c.optimizeRuntime {
 		// The full frontend currently emits about 3.47 MiB of code, 37,100
 		// labels, 154,300 relative relocations, and 30,200 absolute relocations.
 		// Reserve one measured growth range so arena-backed slices do not retain
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
-		a.labelPos = make([]int32, 0, 40960)
-		a.relocs = make([]int32, 0, 163840)
-		a.absRelocs = make([]int32, 0, 32768)
+		labelCapacity = 40960
+		relocCapacity = 163840
+		absRelocCapacity = 32768
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-			a.symbols = make([]renvoAsmSymbol, 0, 4096)
+			symbolCapacity = 4096
 		}
 	} else {
 		codeCapacity = 2097152
-		a.labelPos = make([]int32, 0, 24576)
-		a.relocs = make([]int32, 0, 81920)
-		a.absRelocs = make([]int32, 0, 12288)
+		labelCapacity = 24576
+		relocCapacity = 81920
+		absRelocCapacity = 12288
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-			a.symbols = make([]renvoAsmSymbol, 0, 4096)
+			symbolCapacity = 4096
 		}
 	}
 	if renvoFixedTarget == renvoTargetWasiWasm32 {
-		a.data = make([]byte, 0, 8192)
+		dataCapacity = 8192
 	} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
-		a.data = make([]byte, 0, 131072)
+		dataCapacity = 131072
 	} else {
-		a.data = make([]byte, 0, 65536)
+		dataCapacity = 65536
 	}
+	if labelCapacity < 0 {
+		a.labelPos = renvo_runtime_ArenaMakeInt32s(-labelCapacity)
+		a.relocs = renvo_runtime_ArenaMakeInt32s(-relocCapacity)
+		a.absRelocs = renvo_runtime_ArenaMakeInt32s(-absRelocCapacity)
+	} else {
+		a.labelPos = make([]int32, 0, labelCapacity)
+		a.relocs = make([]int32, 0, relocCapacity)
+		a.absRelocs = make([]int32, 0, absRelocCapacity)
+	}
+	if symbolCapacity > 0 {
+		a.symbols = make([]renvoAsmSymbol, 0, symbolCapacity)
+	}
+	a.data = make([]byte, 0, dataCapacity)
 	if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 		a.symbolName = make([]byte, 0, 16384)
 	}
@@ -431,7 +475,11 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 		a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 	}
-	a.code = make([]byte, 0, codeCapacity)
+	if codeCapacity < 0 {
+		a.code = renvo_runtime_ArenaMakeBytesWithPadding(-codeCapacity, 256, 32768)
+	} else {
+		a.code = make([]byte, 0, codeCapacity)
+	}
 	a.bssSize = 0
 	a.codeOffset = 0
 	a.dataOffset = 0
@@ -14079,6 +14127,9 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 		if fnIndex >= 0 && fnIndex < len(meta.funcs) {
 			fn := &meta.funcs[fnIndex]
 			if renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistBytes") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaMakeBytesWithPadding") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaMakeInt32s") ||
+				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPrependBytes") ||
 				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckNameRefs") ||
 				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckSelectorRefs") ||
 				renvoBytesEqualText(p.src, fn.nameStart, fn.nameEnd, "renvo_runtime_ArenaPersistCheckTypeRefs") ||
@@ -18392,6 +18443,15 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	if intrinsic == 8 {
 		return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
 	}
+	if intrinsic == 9 {
+		return renvoEmitRuntimeArenaMakeBytesWithPadding(g, ep, idx)
+	}
+	if intrinsic == 10 {
+		return renvoEmitRuntimeArenaMakeSlice(g, ep, idx, 4)
+	}
+	if intrinsic == 11 {
+		return renvoEmitRuntimeArenaPrependBytes(g, ep, idx)
+	}
 	if intrinsic == 12 {
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
@@ -18506,7 +18566,7 @@ func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 // Compiler-private intrinsics live in the reserved renvo_runtime namespace.
 // A bounded name hash mixed with an independent byte checksum keeps their
 // dispatch table compact while making accidental aliases impractical.
-const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16"
+const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16\x83\x38\x32\x76\x09\x37\x5e\x35\x78\x0a\xe9\xa3\xd5\x3d\x0b"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 	hash1 := 5381
@@ -32341,12 +32401,19 @@ func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) i
 		prog := renvoParseProgram(src)
 		return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 	}
-	header := make([]byte, 4)
+	header := make([]byte, 14)
 	n := read(input[0], header, 0)
-	if n != 4 || header[0] != 'R' || header[1] != 'N' || header[2] != 'V' || header[3] != 'O' {
+	if n != len(header) || header[0] != 'R' || header[1] != 'N' || header[2] != 'V' || header[3] != 'O' {
 		return -1
 	}
+	// Positional reads leave the stream cursor at byte zero. Use the unit's
+	// framed length to avoid retaining every predecessor of a growing read-all
+	// buffer; the decoder deliberately keeps the final buffer as program text.
+	unitCapacity := renvoUnitRead32(header, 10) + 14
 	var unit []byte
+	if unitCapacity >= 14 && unitCapacity <= 67108864 {
+		unit = make([]byte, 0, unitCapacity)
+	}
 	unit = renvoReadAll(input[0], unit)
 	prog, isUnit, ok := renvoDecodeUnitProgram(unit)
 	if !isUnit {

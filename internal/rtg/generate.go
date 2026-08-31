@@ -1218,6 +1218,10 @@ func (out *RTGEmitter) Code() []byte {
 	return out.asm.code
 }
 
+func (out *RTGEmitter) PrependCode(prefix int) {
+	out.asm.code = renvo_runtime_ArenaPrependBytes(out.asm.code, prefix)
+}
+
 func (out *RTGEmitter) SetCode(value []byte) {
 	out.asm.code = value
 }
@@ -2243,7 +2247,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	names []string, prefix string, document *Document, exports []embeddedExport) ([]byte, int, bool) {
 	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
-		method != "Truncate" && method != "Code" && method != "SetCode" &&
+		method != "Truncate" && method != "Code" && method != "PrependCode" && method != "SetCode" &&
 		method != "Data" && method != "SetData" && method != "SetDataOffset" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
 		method != "WindowsSubsystem" && method != "StaticImportCount" &&
 		method != "StaticImportDLL" && method != "StaticImportName" &&
@@ -2319,6 +2323,14 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 	if method == "Code" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".code"...), end, true
+	}
+	if method == "PrependCode" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code = renvo_runtime_ArenaPrependBytes("...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".code, "...)
+		replacement = append(replacement, arguments[0]...)
+		return append(replacement, ')'), end, true
 	}
 	if method == "SetCode" && len(arguments) == 1 {
 		replacement = append(replacement, receiver...)

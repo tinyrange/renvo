@@ -89,6 +89,7 @@ func (out *RTGEmitter) AddByteAt(at int, value byte) {}
 func (out *RTGEmitter) AppendByte(value int) {}
 func (out *RTGEmitter) Truncate(size int) {}
 func (out *RTGEmitter) Code() []byte { return nil }
+func (out *RTGEmitter) PrependCode(prefix int) {}
 func (out *RTGEmitter) SetCode(value []byte) {}
 func (out *RTGEmitter) Data() []byte { return nil }
 func (out *RTGEmitter) SetData(value []byte) {}
