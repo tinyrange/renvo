@@ -87,6 +87,55 @@ Its software-I2C controller bounds every clock-stretch wait and attempts bus
 recovery during initialization; every partial power-sequence failure attempts
 the complete shutdown path before returning an error.
 
+## Phase 3 display oracle
+
+The `display_oracle` owns the panel through the board package and uses the
+reusable `device/display/ssd1677` protocol driver. It configures SPI2 mode 0 at
+20 MHz on GPIO14/GPIO15, keeps chip select and data/command on GPIO16/GPIO17,
+and bounds every SPI completion wait and GPIO18 BUSY poll. It uses only the
+SSD1677's built-in OTP waveforms; no custom LUT is uploaded.
+
+The oracle performs one full monochrome baseline refresh, ten differential
+partial refreshes, an automatically promoted recovery full refresh, and one
+full four-gray refresh. It then asserts display reset and removes the display
+and touch rails. The final retained image is four equal quadrants: white,
+light gray, dark gray, and black.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -s -o sandbox/m5papermonolite-display-oracle.elf \
+  ./examples/m5papermonolite/display_oracle
+sandbox/renvoflash sandbox/m5papermonolite-display-oracle.elf /dev/cu.usbmodem101
+```
+
+A complete successful run prints one full-mono pass, ten partial passes, and
+then recovery, four-gray, and shutdown passes. The panel can remain unchanged
+after shutdown because e-paper retains its optical state without power.
+
+The controller-native packed surface is 800x480 pixels, or 48,000 bytes per
+1-bit plane; its axes are rotated relative to the visible 480x800 panel. The
+current ESP32-S3 target uses internal RAM and a 128 KiB default managed arena.
+The oracle therefore allocates one static monochrome plane and streams each
+four-gray plane through a 100-byte packed row instead of keeping the official
+demo's three simultaneous planes. The driver also accepts two resident packed
+planes on targets with enough memory. Richer graphics should keep using a
+packed/streamed surface, or wait for explicit 8 MiB octal-PSRAM support rather
+than assuming ordinary allocations land in PSRAM.
+
+Partial refresh is rejected until a successful full monochrome refresh has
+established both controller RAM planes. Four-gray output and panel power-off
+invalidate that baseline. After ten partial updates, the next request is
+automatically changed to a full refresh to limit ghosting and DC imbalance.
+All public refresh operations finish in SSD1677 Deep Sleep Mode 1; callers must
+use `board.Display.Shutdown` when RAM retention is no longer needed.
+
+The board contains 16 MiB SPI flash and 8 MiB octal PSRAM, but this bring-up
+uses neither factory data partitions nor PSRAM. The later touch driver must
+normalize the FT6336G's documented active area of X=5..475 and Y=5..795; the
+unused edge coordinates should not be treated as valid panel positions.
+
 ## Restore the factory application
 
 Keep the verified whole-flash backup outside version control. The factory

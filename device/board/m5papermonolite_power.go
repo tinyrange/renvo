@@ -120,6 +120,23 @@ func (p *PowerDevice) EnableDisplayAndTouch() error {
 	return nil
 }
 
+// ResetDisplay applies the SSD1677 hardware reset pulse while its power domain
+// is active. It never changes touch or display power enables.
+func (p *PowerDevice) ResetDisplay() error {
+	if !p.active {
+		return ErrPowerInactive
+	}
+	if err := p.expander.SetOutput(m5ioe1.Pin5, false); err != nil {
+		return err
+	}
+	p.delay.DelayMilliseconds(10)
+	if err := p.expander.SetOutput(m5ioe1.Pin5, true); err != nil {
+		return err
+	}
+	p.delay.DelayMilliseconds(10)
+	return p.verify(m5ioe1.Pin5, true)
+}
+
 // DisableDisplayAndTouch asserts both resets before removing touch and EPD
 // power. Every step is attempted even after an I2C error, and EPD chip select
 // remains inactive. No SSD1677 command is issued by this Phase 2 operation.
@@ -205,3 +222,6 @@ func (e powerError) Error() string { return string(e) }
 // ErrPowerLatch reports that a display or touch power latch did not retain the
 // requested level.
 const ErrPowerLatch powerError = "PaperMono-Lite power latch verification failed"
+
+// ErrPowerInactive reports a reset request made with the EPD rail disabled.
+const ErrPowerInactive powerError = "PaperMono-Lite display power is inactive"

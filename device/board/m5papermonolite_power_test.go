@@ -221,6 +221,32 @@ func TestPowerLatchMismatchRollsBack(t *testing.T) {
 	}
 }
 
+func TestDisplayResetRequiresPowerAndVerifiesReleasedLatch(t *testing.T) {
+	expander := &fakePowerIOExpander{}
+	delay := &fakePowerDelay{}
+	power := newPowerDevice(&fakePowerPMIC{}, expander, &fakePowerPin{}, delay)
+	if err := power.ResetDisplay(); err != ErrPowerInactive {
+		t.Fatalf("inactive ResetDisplay() error = %v", err)
+	}
+	if err := power.EnableDisplayAndTouch(); err != nil {
+		t.Fatal(err)
+	}
+	expander.actions = nil
+	delay.delays = nil
+	if err := power.ResetDisplay(); err != nil {
+		t.Fatal(err)
+	}
+	want := []powerAction{
+		{operation: 's', pin: m5ioe1.Pin5},
+		{operation: 's', pin: m5ioe1.Pin5, level: true},
+		{operation: 'r', pin: m5ioe1.Pin5},
+	}
+	assertPowerActions(t, expander.actions, want)
+	if len(delay.delays) != 2 || delay.delays[0] != 10 || delay.delays[1] != 10 {
+		t.Fatalf("reset delays = %v", delay.delays)
+	}
+}
+
 func assertPowerActions(t *testing.T, got, want []powerAction) {
 	t.Helper()
 	if len(got) != len(want) {

@@ -73,3 +73,31 @@ func TestCompiledInBootstrapCompilesPaperMonoPowerOracle(t *testing.T) {
 		t.Fatal("ELF omitted the Phase 2 power oracle")
 	}
 }
+
+func TestCompiledInBootstrapCompilesPaperMonoDisplayOracle(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "backends", "esp32s3.rtg")
+	result := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "esp32s3/xtensa_lx7", "-tags", "m5papermonolite",
+		"-s", "-o", "display-oracle.elf",
+		filepath.Join(root, "examples", "m5papermonolite", "display_oracle"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{},
+		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+			backendJITTestCacheDir, backendcompiled.Backend{}))
+	if !result.Ok {
+		t.Fatalf("PaperMono-Lite display oracle compile failed: %#v", result.Diagnostic)
+	}
+	if len(result.Binary) < 52 || !bytes.Equal(result.Binary[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("display oracle output is not ELF32: % x", result.Binary[:minInt(4, len(result.Binary))])
+	}
+	if !bytes.Contains(result.Binary, []byte("RENVO PAPERMONO-LITE PHASE3 FOUR GRAY PASS\n")) {
+		t.Fatal("ELF omitted the Phase 3 display oracle")
+	}
+}
