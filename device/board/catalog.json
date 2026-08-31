@@ -99,6 +99,18 @@
     "examples": [{"path": "examples/device/forms_menu"}]
   },
   {
+    "name": "M5Stack PaperMono-Lite",
+    "target": "m5papermonolite/xtensa_lx7",
+    "tag": "m5papermonolite",
+    "docs": "https://docs.m5stack.com/en/core/PaperMono-Lite",
+    "artwork": "papermonolite",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3"],
+    "examples": [{"path": "examples/m5papermonolite/oracle"}]
+  },
+  {
     "name": "M5Stack Cardputer Adv",
     "target": "m5cardputeradv/xtensa_lx7",
     "tag": "m5cardputeradv",

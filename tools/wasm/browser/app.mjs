@@ -3563,6 +3563,12 @@ const boardArtworkPaths = {
     <rect x="61" y="17" width="38" height="55" rx="7" class="board-screen"/>
     <path d="M68 57l9-13 8 8 8-14" class="board-graph"/><circle cx="80" cy="82" r="5" class="board-button"/>
     <rect x="106" y="69" width="12" height="15" rx="3" class="board-metal"/>`,
+  papermonolite: `
+    <rect x="48" y="4" width="64" height="92" rx="9" class="board-shell"/>
+    <rect x="55" y="11" width="50" height="70" rx="3" class="board-screen"/>
+    <path d="M63 24h34M63 32h25M63 43h34M63 51h30M63 62h34M63 70h21" class="board-graph"/>
+    <circle cx="62" cy="88" r="4" class="board-button"/><circle cx="80" cy="88" r="4" class="board-button"/>
+    <rect x="112" y="69" width="11" height="16" rx="3" class="board-metal"/>`,
   cardputeradv: `
     <rect x="14" y="18" width="132" height="66" rx="10" class="board-shell"/>
     <rect x="22" y="25" width="46" height="23" rx="3" class="board-screen"/>
