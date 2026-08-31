@@ -771,6 +771,24 @@ func (f *Form) InvalidRectAt(index int) (graphics.Rect, bool) {
 	return f.invalid[index], true
 }
 
+// ReserveInvalidRects ensures both alternating paint queues can retain at
+// least capacity rectangles without allocating. Embedded applications can
+// call this before taking an arena mark when frame-time storage is reclaimed
+// after each presentation.
+func (f *Form) ReserveInvalidRects(capacity int) {
+	if f == nil || capacity <= 0 {
+		return
+	}
+	if cap(f.invalid) < capacity {
+		invalid := make([]graphics.Rect, len(f.invalid), capacity)
+		copy(invalid, f.invalid)
+		f.invalid = invalid
+	}
+	if cap(f.invalidSpare) < capacity {
+		f.invalidSpare = make([]graphics.Rect, 0, capacity)
+	}
+}
+
 // Paint redraws only invalidated regions. Each region is clipped independently
 // and all intersecting controls are painted in z-order so moved or overlapping
 // controls leave correct pixels behind.

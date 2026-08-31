@@ -8,7 +8,9 @@ const (
 	registerMode      = byte(0x03)
 	registerOutput    = byte(0x05)
 	registerDrive     = byte(0x13)
+	registerPWM1Duty  = byte(0x1b)
 	registerI2CConfig = byte(0x23)
+	registerPWMFreq   = byte(0x25)
 )
 
 // Pin identifies one of the M5IOE1 pins using the number printed in M5Stack
@@ -55,6 +57,11 @@ func (d *Device) read(register byte) (byte, error) {
 
 func (d *Device) write(register, value byte) error {
 	data := [2]byte{register, value}
+	return d.bus.Tx(Address, data[:], nil)
+}
+
+func (d *Device) write16(register byte, value uint16) error {
+	data := [3]byte{register, byte(value), byte(value >> 8)}
 	return d.bus.Tx(Address, data[:], nil)
 }
 
@@ -108,6 +115,45 @@ func (d *Device) ConfigureOutput(pin Pin, level bool) error {
 	return d.update(register, mask, mask)
 }
 
+// ConfigurePWM prepares one of the expander's fixed PWM pins as a push-pull
+// output and programs the frequency shared by all four PWM channels.
+func (d *Device) ConfigurePWM(pin Pin, frequency uint16) error {
+	if pin != Pin8 && pin != Pin9 {
+		return ErrInvalidPWMPin
+	}
+	if frequency == 0 {
+		return ErrInvalidPWMFrequency
+	}
+	// The expander retains state across application resets. Disable the channel
+	// before changing GPIO mode so a stale duty cannot flash the LED.
+	if err := d.SetPWMDuty(pin, 0); err != nil {
+		return err
+	}
+	if err := d.ConfigureOutput(pin, false); err != nil {
+		return err
+	}
+	return d.write16(registerPWMFreq, frequency)
+}
+
+// SetPWMDuty sets a configured fixed PWM pin's 12-bit duty. Zero disables the
+// channel; nonzero values use normal polarity. Pin8 is PWM2 and Pin9 is PWM1.
+func (d *Device) SetPWMDuty(pin Pin, duty uint16) error {
+	register := registerPWM1Duty
+	if pin == Pin8 {
+		register += 2
+	} else if pin != Pin9 {
+		return ErrInvalidPWMPin
+	}
+	if duty > 0x0fff {
+		return ErrInvalidPWMDuty
+	}
+	value := duty
+	if duty != 0 {
+		value |= 0x8000
+	}
+	return d.write16(register, value)
+}
+
 // SetOutput changes the persistent output latch of a configured pin.
 func (d *Device) SetOutput(pin Pin, level bool) error {
 	register, mask, err := pinRegister(registerOutput, pin)
@@ -148,3 +194,9 @@ func (e deviceError) Error() string { return string(e) }
 
 // ErrInvalidPin reports a pin outside the documented IO1..IO14 range.
 const ErrInvalidPin deviceError = "M5IOE1 pin must be between 1 and 14"
+
+const (
+	ErrInvalidPWMPin       deviceError = "M5IOE1 PWM pin must be pin 8 or 9"
+	ErrInvalidPWMFrequency deviceError = "M5IOE1 PWM frequency must be nonzero"
+	ErrInvalidPWMDuty      deviceError = "M5IOE1 PWM duty must fit in 12 bits"
+)

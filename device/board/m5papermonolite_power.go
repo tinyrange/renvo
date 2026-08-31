@@ -26,6 +26,7 @@ type powerPMIC interface {
 	Initialize() error
 	ConfigurePWM(m5pm1.Pin, uint16) error
 	SetPWMDuty(m5pm1.Pin, uint16) error
+	SetLEDEnabled(bool) error
 }
 
 type powerIOExpander interface {
@@ -34,6 +35,8 @@ type powerIOExpander interface {
 	ConfigureOutput(m5ioe1.Pin, bool) error
 	SetOutput(m5ioe1.Pin, bool) error
 	Output(m5ioe1.Pin) (bool, error)
+	ConfigurePWM(m5ioe1.Pin, uint16) error
+	SetPWMDuty(m5ioe1.Pin, uint16) error
 }
 
 type powerOutputPin interface {
@@ -60,6 +63,7 @@ type PowerDevice struct {
 	prepared             bool
 	active               bool
 	frontLightConfigured bool
+	rgbConfigured        bool
 }
 
 func newPowerDevice(pmic powerPMIC, expander powerIOExpander, chipSelect powerOutputPin, delay powerDelay) *PowerDevice {
@@ -156,6 +160,29 @@ func (p *PowerDevice) SetFrontLight(brightness uint8) error {
 	}
 	squared := uint32(brightness) * uint32(brightness)
 	return p.pmic.SetPWMDuty(m5pm1.Pin3, uint16(squared>>4))
+}
+
+// SetRGB sets the side indicator's red, green, and blue components. Green and
+// blue use the M5IOE1's 12-bit PWM channels. The board wires red to M5PM1's
+// binary LED_EN output, so any nonzero red value turns that channel fully on.
+func (p *PowerDevice) SetRGB(red, green, blue uint8) error {
+	if err := p.prepare(); err != nil {
+		return err
+	}
+	if !p.rgbConfigured {
+		if err := p.expander.ConfigurePWM(m5ioe1.Pin8, 5000); err != nil {
+			return err
+		}
+		if err := p.expander.ConfigurePWM(m5ioe1.Pin9, 5000); err != nil {
+			return err
+		}
+		p.rgbConfigured = true
+	}
+	var first error
+	first = retainFirst(first, p.pmic.SetLEDEnabled(red != 0))
+	first = retainFirst(first, p.expander.SetPWMDuty(m5ioe1.Pin8, uint16(uint32(green)*0x0fff/255)))
+	first = retainFirst(first, p.expander.SetPWMDuty(m5ioe1.Pin9, uint16(uint32(blue)*0x0fff/255)))
+	return first
 }
 
 // DisableDisplayAndTouch asserts both resets before removing touch and EPD

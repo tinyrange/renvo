@@ -5,16 +5,18 @@ import (
 	"renvo.dev/device/display/ssd1677"
 	"renvo.dev/examples/device/fontcache"
 	"renvo.dev/forms"
+	"renvo.dev/internal/arena"
 	"renvo.dev/std/graphics"
-	"renvo.dev/std/strconv"
 )
 
 const (
 	screenWidth      = 480
 	screenHeight     = 800
 	buttonDebounceMS = 20
+	settingsHoldMS   = 700
 	frontLight       = 160
 	readerLineHeight = 38
+	maximumPointers  = 64
 )
 
 var frame ssd1677.Monochrome
@@ -110,6 +112,14 @@ var bookPages = []readerPage{
 	},
 }
 
+var pageStatuses = []string{
+	"upper: back   lower: next   1 / 5",
+	"upper: back   lower: next   2 / 5",
+	"upper: back   lower: next   3 / 5",
+	"upper: back   lower: next   4 / 5",
+	"upper: back   lower: next   5 / 5",
+}
+
 type buttonDebouncer struct {
 	initialized bool
 	raw         bool
@@ -138,14 +148,40 @@ func (button *buttonDebouncer) update(pressed bool, now uint32) bool {
 }
 
 type reader struct {
-	form        forms.Form
-	title       *forms.Label
-	chapter     *forms.Label
-	body        *pageView
-	status      *forms.StatusBar
-	page        int
-	pendingPage int
-	up, down    buttonDebouncer
+	form              forms.Form
+	title             *forms.Label
+	chapter           *forms.Label
+	body              *pageView
+	status            *forms.StatusBar
+	brightness        *forms.Slider
+	red, green, blue  *forms.Slider
+	font              *graphics.Font
+	page              int
+	pendingPage       int
+	settings          bool
+	requestedView     int
+	brightnessValue   int
+	redValue          int
+	greenValue        int
+	blueValue         int
+	appliedBrightness int
+	appliedRed        int
+	appliedGreen      int
+	appliedBlue       int
+	up, down          buttonDebouncer
+	upPressedAt       uint32
+	upHeld            bool
+
+	events                         [maximumPointers]pointerEvent
+	eventCount                     int
+	sampledX, sampledY             int
+	sampledPressed, dispatchedDown bool
+	dispatchedX, dispatchedY       int
+}
+
+type pointerEvent struct {
+	x, y    int
+	pressed bool
 }
 
 type pageView struct {
@@ -194,15 +230,29 @@ func readerTheme() forms.Theme {
 	}
 }
 
-func (reader *reader) initialize(font *graphics.Font) {
-	reader.page = -1
+func newReaderLabel(font *graphics.Font, text string, bounds graphics.Rect) *forms.Label {
+	label := forms.NewLabel()
+	label.SetBounds(bounds)
+	label.SetFont(font)
+	label.SetText(text)
+	return label
+}
+
+func (reader *reader) initialize(font *graphics.Font, page int) {
+	reader.font = font
+	reader.requestedView = -1
 	reader.form.Initialize(screenWidth, screenHeight)
 	reader.form.ApplyTheme(readerTheme())
+	if reader.settings {
+		reader.initializeSettings(font)
+	} else {
+		reader.initializePage(font, page)
+	}
+	reader.form.ReserveInvalidRects(16)
+}
 
-	reader.title = forms.NewLabel()
-	reader.title.SetBounds(graphics.R(16, 18, 448, 38))
-	reader.title.SetFont(font)
-	reader.title.SetText("RENVO READER")
+func (reader *reader) initializePage(font *graphics.Font, page int) {
+	reader.title = newReaderLabel(font, "RENVO READER", graphics.R(16, 18, 448, 38))
 	reader.form.Add(&reader.title.Control)
 
 	rule := forms.NewPanel()
@@ -210,9 +260,7 @@ func (reader *reader) initialize(font *graphics.Font) {
 	rule.SetBackground(graphics.Black)
 	reader.form.Add(&rule.Control)
 
-	reader.chapter = forms.NewLabel()
-	reader.chapter.SetBounds(graphics.R(16, 82, 448, 38))
-	reader.chapter.SetFont(font)
+	reader.chapter = newReaderLabel(font, "", graphics.R(16, 82, 448, 38))
 	reader.form.Add(&reader.chapter.Control)
 
 	reader.body = newPageView(font)
@@ -223,7 +271,49 @@ func (reader *reader) initialize(font *graphics.Font) {
 	reader.status.SetBounds(graphics.R(0, 750, screenWidth, 50))
 	reader.status.SetFont(font)
 	reader.form.Add(&reader.status.Control)
-	reader.setPage(0)
+	reader.page = -1
+	reader.setPage(page)
+}
+
+func (reader *reader) initializeSettings(font *graphics.Font) {
+	settingsTitle := newReaderLabel(font, "READER SETTINGS", graphics.R(16, 18, 448, 38))
+	reader.form.Add(&settingsTitle.Control)
+	settingsRule := forms.NewPanel()
+	settingsRule.SetBounds(graphics.R(16, 68, 448, 1))
+	settingsRule.SetBackground(graphics.Black)
+	reader.form.Add(&settingsRule.Control)
+
+	labels := []*forms.Label{
+		newReaderLabel(font, "Front light", graphics.R(16, 110, 448, 38)),
+		newReaderLabel(font, "Red - on / off", graphics.R(16, 245, 448, 38)),
+		newReaderLabel(font, "Green", graphics.R(16, 380, 448, 38)),
+		newReaderLabel(font, "Blue", graphics.R(16, 515, 448, 38)),
+	}
+	for _, label := range labels {
+		reader.form.Add(&label.Control)
+	}
+
+	reader.brightness = forms.NewSlider()
+	reader.red = forms.NewSlider()
+	reader.green = forms.NewSlider()
+	reader.blue = forms.NewSlider()
+	sliders := []*forms.Slider{reader.brightness, reader.red, reader.green, reader.blue}
+	positions := []graphics.Scalar{155, 290, 425, 560}
+	for index, slider := range sliders {
+		slider.SetBounds(graphics.R(16, positions[index], 448, 64))
+		slider.SetRange(0, 255)
+		reader.form.Add(&slider.Control)
+	}
+	reader.brightness.SetValue(reader.brightnessValue)
+	reader.red.SetValue(reader.redValue)
+	reader.green.SetValue(reader.greenValue)
+	reader.blue.SetValue(reader.blueValue)
+
+	settingsStatus := forms.NewStatusBar()
+	settingsStatus.SetBounds(graphics.R(0, 750, screenWidth, 50))
+	settingsStatus.SetFont(font)
+	settingsStatus.SetText("hold upper: close   drag to change")
+	reader.form.Add(&settingsStatus.Control)
 }
 
 func (reader *reader) setPage(page int) bool {
@@ -246,8 +336,89 @@ func (reader *reader) setPage(page int) bool {
 }
 
 func pageStatus(page int) string {
-	return "upper: back   lower: next   " +
-		strconv.Itoa(page+1) + " / " + strconv.Itoa(len(bookPages))
+	if page < 0 {
+		page = 0
+	}
+	if page >= len(pageStatuses) {
+		page = len(pageStatuses) - 1
+	}
+	return pageStatuses[page]
+}
+
+func (reader *reader) showSettings(show bool) {
+	requested := 0
+	if show {
+		requested = 1
+	}
+	if reader.settings == show || reader.requestedView == requested {
+		return
+	}
+	reader.requestedView = requested
+}
+
+func (reader *reader) syncSettingsValues() {
+	if !reader.settings || reader.brightness == nil {
+		return
+	}
+	reader.brightnessValue = reader.brightness.Value()
+	reader.redValue = reader.red.Value()
+	reader.greenValue = reader.green.Value()
+	reader.blueValue = reader.blue.Value()
+}
+
+func (r *reader) rebuildRequestedView(lowMark, highMark int) bool {
+	if r.requestedView < 0 || r.touchActive() {
+		return false
+	}
+	r.syncSettingsValues()
+	show := r.requestedView == 1
+	font, page, pendingPage := r.font, r.page, r.pendingPage
+	brightness, red := r.brightnessValue, r.redValue
+	green, blue := r.greenValue, r.blueValue
+	appliedBrightness, appliedRed := r.appliedBrightness, r.appliedRed
+	appliedGreen, appliedBlue := r.appliedGreen, r.appliedBlue
+	up, down := r.up, r.down
+	upPressedAt, upHeld := r.upPressedAt, r.upHeld
+	arena.Reset(lowMark)
+	arena.PersistReset(highMark)
+	*r = reader{
+		settings: show, page: page, pendingPage: pendingPage,
+		brightnessValue: brightness, redValue: red, greenValue: green, blueValue: blue,
+		appliedBrightness: appliedBrightness, appliedRed: appliedRed,
+		appliedGreen: appliedGreen, appliedBlue: appliedBlue,
+		up: up, down: down, upPressedAt: upPressedAt, upHeld: upHeld,
+	}
+	r.initialize(font, page)
+	if show {
+		print("PAPERMONO READER SETTINGS OPEN\n")
+	} else {
+		print("PAPERMONO READER SETTINGS CLOSED\n")
+	}
+	return true
+}
+
+func (reader *reader) applySettings() error {
+	reader.syncSettingsValues()
+	brightness := reader.brightnessValue
+	red, green, blue := reader.redValue, reader.greenValue, reader.blueValue
+	if brightness == reader.appliedBrightness && red == reader.appliedRed &&
+		green == reader.appliedGreen && blue == reader.appliedBlue {
+		return nil
+	}
+	if brightness != reader.appliedBrightness {
+		if err := board.Power.SetFrontLight(uint8(brightness)); err != nil {
+			return err
+		}
+		reader.appliedBrightness = brightness
+	}
+	if red == reader.appliedRed && green == reader.appliedGreen && blue == reader.appliedBlue {
+		return nil
+	}
+	if err := board.Power.SetRGB(uint8(red), uint8(green), uint8(blue)); err != nil {
+		return err
+	}
+	reader.appliedRed, reader.appliedGreen, reader.appliedBlue = red, green, blue
+	return nil
 }
 
 func (reader *reader) queuePage(delta int) {
@@ -262,10 +433,20 @@ func (reader *reader) queuePage(delta int) {
 }
 
 func (reader *reader) sampleButtonLevels(up, down bool, now uint32) {
-	if reader.up.update(up, now) {
+	wasUp := reader.up.stable
+	reader.up.update(up, now)
+	if !wasUp && reader.up.stable {
+		reader.upPressedAt = now
+		reader.upHeld = false
+	}
+	if reader.up.stable && !reader.upHeld && now-reader.upPressedAt >= settingsHoldMS {
+		reader.upHeld = true
+		reader.showSettings(!reader.settings)
+	}
+	if wasUp && !reader.up.stable && !reader.upHeld && !reader.settings {
 		reader.queuePage(-1)
 	}
-	if reader.down.update(down, now) {
+	if reader.down.update(down, now) && !reader.settings {
 		reader.queuePage(1)
 	}
 }
@@ -283,9 +464,65 @@ func (reader *reader) applyPendingPage() bool {
 	return reader.setPage(target)
 }
 
+func (reader *reader) samplePointer(x, y int, pressed bool) {
+	changed := pressed != reader.sampledPressed
+	if pressed && (x != reader.sampledX || y != reader.sampledY) {
+		changed = true
+	}
+	if !changed {
+		return
+	}
+	if pressed {
+		reader.sampledX, reader.sampledY = x, y
+	}
+	event := pointerEvent{x: reader.sampledX, y: reader.sampledY, pressed: pressed}
+	if reader.eventCount < len(reader.events) {
+		reader.events[reader.eventCount] = event
+		reader.eventCount++
+	} else {
+		reader.events[len(reader.events)-1] = event
+	}
+	reader.sampledPressed = pressed
+}
+
+func (reader *reader) captureTouch() error {
+	point, pressed, err := board.Touch.Read()
+	if err != nil {
+		return err
+	}
+	reader.samplePointer(point.X, point.Y, pressed)
+	return nil
+}
+
+func (reader *reader) dispatchCaptured() {
+	for index := 0; index < reader.eventCount; index++ {
+		event := reader.events[index]
+		if event.pressed && !reader.dispatchedDown {
+			reader.form.Dispatch(graphics.Event{Type: graphics.EventPointerDown,
+				X: graphics.Scalar(event.x), Y: graphics.Scalar(event.y), Button: 1})
+			reader.dispatchedDown = true
+		} else if event.pressed && (event.x != reader.dispatchedX || event.y != reader.dispatchedY) {
+			reader.form.Dispatch(graphics.Event{Type: graphics.EventPointerMove,
+				X: graphics.Scalar(event.x), Y: graphics.Scalar(event.y), Button: 1})
+		} else if !event.pressed && reader.dispatchedDown {
+			reader.form.Dispatch(graphics.Event{Type: graphics.EventPointerUp,
+				X: graphics.Scalar(reader.dispatchedX), Y: graphics.Scalar(reader.dispatchedY), Button: 1})
+			reader.dispatchedDown = false
+		}
+		if event.pressed {
+			reader.dispatchedX, reader.dispatchedY = event.x, event.y
+		}
+	}
+	reader.eventCount = 0
+}
+
+func (reader *reader) touchActive() bool {
+	return reader.sampledPressed || reader.dispatchedDown
+}
+
 func (reader *reader) PollDuringRefresh() error {
 	reader.sampleButtons()
-	return nil
+	return reader.captureTouch()
 }
 
 func fail(message string) {
@@ -315,6 +552,13 @@ func main() {
 	if err := board.Power.SetFrontLight(frontLight); err != nil {
 		fail("RENVO PAPERMONO-LITE READER FRONTLIGHT FAIL\n")
 	}
+	if err := board.Power.SetRGB(0, 0, 0); err != nil {
+		fail("RENVO PAPERMONO-LITE READER RGB FAIL\n")
+	}
+	board.Clock.DelayMilliseconds(300)
+	if _, err := board.Touch.Initialize(); err != nil {
+		fail("RENVO PAPERMONO-LITE READER TOUCH FAIL\n")
+	}
 
 	frame.Fill(true)
 	surface := graphics.NewSurfaceBufferFormatPreserve(
@@ -324,8 +568,10 @@ func main() {
 	}
 	surface.SetAffine(0, -1, 1, 0, 0, ssd1677.Height)
 
-	var app reader
-	app.initialize(font)
+	app := reader{brightnessValue: frontLight, appliedBrightness: frontLight}
+	uiLowMark, uiHighMark := arena.Mark(), arena.PersistMark()
+	app.initialize(font, 0)
+	frameLowMark, frameHighMark := arena.Mark(), arena.PersistMark()
 	app.sampleButtons()
 	if !app.form.Paint(surface) {
 		fail("RENVO PAPERMONO-LITE READER PAINT FAIL\n")
@@ -334,17 +580,35 @@ func main() {
 		fail("RENVO PAPERMONO-LITE READER DISPLAY FAIL\n")
 	}
 	surface.ResetDirty()
+	arena.Reset(frameLowMark)
+	arena.PersistReset(frameHighMark)
 	print("RENVO PAPERMONO-LITE READER READY\n")
 
 	for {
 		app.sampleButtons()
+		if app.rebuildRequestedView(uiLowMark, uiHighMark) {
+			frameLowMark, frameHighMark = arena.Mark(), arena.PersistMark()
+		}
+		if err := app.captureTouch(); err != nil {
+			fail("RENVO PAPERMONO-LITE READER TOUCH READ FAIL\n")
+		}
+		app.dispatchCaptured()
+		if err := app.applySettings(); err != nil {
+			fail("RENVO PAPERMONO-LITE READER SETTINGS FAIL\n")
+		}
 		app.applyPendingPage()
-		if app.form.Paint(surface) {
+		if !app.touchActive() && app.form.InvalidRectCount() != 0 && app.form.Paint(surface) {
 			if err := board.Display.FastMonochrome(frame[:], &app); err != nil {
 				fail("RENVO PAPERMONO-LITE READER PRESENT FAIL\n")
 			}
 			surface.ResetDirty()
+			app.dispatchCaptured()
+			if err := app.applySettings(); err != nil {
+				fail("RENVO PAPERMONO-LITE READER SETTINGS FAIL\n")
+			}
 		}
+		arena.Reset(frameLowMark)
+		arena.PersistReset(frameHighMark)
 		board.Clock.DelayMilliseconds(1)
 	}
 }

@@ -19,6 +19,7 @@ type fakePowerPMIC struct {
 	pwmFrequency    uint16
 	pwmDuty         uint16
 	pwmActions      int
+	ledEnabled      bool
 }
 
 func (p *fakePowerPMIC) Identify() (uint16, error) {
@@ -50,6 +51,11 @@ func (p *fakePowerPMIC) SetPWMDuty(pin m5pm1.Pin, duty uint16) error {
 	return p.err
 }
 
+func (p *fakePowerPMIC) SetLEDEnabled(enabled bool) error {
+	p.ledEnabled = enabled
+	return p.err
+}
+
 type powerAction struct {
 	operation byte
 	pin       m5ioe1.Pin
@@ -65,6 +71,8 @@ type fakePowerIOExpander struct {
 	failLevel       bool
 	failOnce        bool
 	mismatchPin     m5ioe1.Pin
+	pwmConfigured   []m5ioe1.Pin
+	pwmDuty         [15]uint16
 }
 
 func (e *fakePowerIOExpander) Identify() (uint16, error) {
@@ -100,6 +108,19 @@ func (e *fakePowerIOExpander) Output(pin m5ioe1.Pin) (bool, error) {
 		level = !level
 	}
 	return level, nil
+}
+
+func (e *fakePowerIOExpander) ConfigurePWM(pin m5ioe1.Pin, frequency uint16) error {
+	if frequency != 5000 {
+		return errors.New("wrong RGB PWM frequency")
+	}
+	e.pwmConfigured = append(e.pwmConfigured, pin)
+	return nil
+}
+
+func (e *fakePowerIOExpander) SetPWMDuty(pin m5ioe1.Pin, duty uint16) error {
+	e.pwmDuty[pin] = duty
+	return nil
 }
 
 type fakePowerPin struct {
@@ -219,6 +240,30 @@ func TestFrontLightUsesBoardPWMAndTurnsOffAtShutdown(t *testing.T) {
 	}
 	if pmic.pwmDuty != 0 || pmic.pwmActions != 4 {
 		t.Fatalf("shutdown left front light active: %+v", pmic)
+	}
+}
+
+func TestRGBUsesBinaryRedAndPWMGreenBlue(t *testing.T) {
+	pmic := &fakePowerPMIC{}
+	expander := &fakePowerIOExpander{}
+	power := newPowerDevice(pmic, expander, &fakePowerPin{}, &fakePowerDelay{})
+	if err := power.SetRGB(1, 128, 255); err != nil {
+		t.Fatal(err)
+	}
+	if !pmic.ledEnabled {
+		t.Fatal("nonzero red did not enable binary red channel")
+	}
+	if len(expander.pwmConfigured) != 2 || expander.pwmConfigured[0] != m5ioe1.Pin8 || expander.pwmConfigured[1] != m5ioe1.Pin9 {
+		t.Fatalf("RGB PWM configuration = %v", expander.pwmConfigured)
+	}
+	if expander.pwmDuty[m5ioe1.Pin8] != 2055 || expander.pwmDuty[m5ioe1.Pin9] != 4095 {
+		t.Fatalf("RGB PWM duty = green %d blue %d", expander.pwmDuty[m5ioe1.Pin8], expander.pwmDuty[m5ioe1.Pin9])
+	}
+	if err := power.SetRGB(0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if pmic.ledEnabled || len(expander.pwmConfigured) != 2 || expander.pwmDuty[m5ioe1.Pin8] != 0 || expander.pwmDuty[m5ioe1.Pin9] != 0 {
+		t.Fatalf("RGB off state = pmic %+v expander %+v", pmic, expander)
 	}
 }
 

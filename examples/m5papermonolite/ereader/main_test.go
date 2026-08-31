@@ -30,7 +30,7 @@ func TestButtonDebouncerReportsOnlyStablePresses(t *testing.T) {
 func TestReaderPageQueueClampsAndCoalesces(t *testing.T) {
 	font := fontcache.TitleSubset(fontcache.PaperMonoFormsGlyphs)
 	var app reader
-	app.initialize(font)
+	app.initialize(font, 0)
 	app.queuePage(-1)
 	if app.pendingPage != 0 {
 		t.Fatalf("previous from first page queued %d", app.pendingPage)
@@ -53,6 +53,56 @@ func TestReaderPageQueueClampsAndCoalesces(t *testing.T) {
 	app.applyPendingPage()
 	if app.page != 0 {
 		t.Fatalf("backward clamp produced page %d", app.page)
+	}
+}
+
+func TestUpperButtonShortPressGoesBackAndHoldTogglesSettings(t *testing.T) {
+	font := fontcache.TitleSubset(fontcache.PaperMonoFormsGlyphs)
+	var app reader
+	app.initialize(font, 0)
+	app.setPage(2)
+	app.sampleButtonLevels(false, false, 0)
+
+	app.sampleButtonLevels(true, false, 1)
+	app.sampleButtonLevels(true, false, 21)
+	app.sampleButtonLevels(false, false, 100)
+	app.sampleButtonLevels(false, false, 120)
+	if app.pendingPage != -1 || app.settings {
+		t.Fatalf("short upper press produced pending=%d settings=%t", app.pendingPage, app.settings)
+	}
+	app.applyPendingPage()
+
+	app.sampleButtonLevels(true, false, 200)
+	app.sampleButtonLevels(true, false, 220)
+	app.sampleButtonLevels(true, false, 920)
+	if app.requestedView != 1 || app.pendingPage != 0 {
+		t.Fatalf("upper hold produced pending=%d requested=%d", app.pendingPage, app.requestedView)
+	}
+	app.sampleButtonLevels(false, false, 921)
+	app.sampleButtonLevels(false, false, 941)
+	if app.pendingPage != 0 {
+		t.Fatalf("releasing held upper button queued page %d", app.pendingPage)
+	}
+	if !app.rebuildRequestedView(0, 0) || !app.settings || app.brightness == nil {
+		t.Fatal("requested settings view was not rebuilt")
+	}
+	app.showSettings(false)
+	if !app.rebuildRequestedView(0, 0) || app.settings || app.page != 1 || app.body == nil {
+		t.Fatalf("reader view was not restored at page %d", app.page)
+	}
+}
+
+func TestSettingsSlidersQueueHardwareValues(t *testing.T) {
+	font := fontcache.TitleSubset(fontcache.PaperMonoFormsGlyphs)
+	app := reader{settings: true, brightnessValue: frontLight}
+	app.initialize(font, 0)
+	app.brightness.SetValue(42)
+	app.red.SetValue(255)
+	app.green.SetValue(128)
+	app.blue.SetValue(64)
+	if app.brightness.Value() != 42 || app.red.Value() != 255 ||
+		app.green.Value() != 128 || app.blue.Value() != 64 {
+		t.Fatal("settings sliders did not retain their values")
 	}
 }
 
@@ -80,6 +130,12 @@ func TestReaderPagesFitAndPaintRotatedMonochrome(t *testing.T) {
 	}
 	assertText("reader title", "RENVO READER")
 	assertText("reader status", pageStatus(len(bookPages)-1))
+	for _, text := range []string{
+		"READER SETTINGS", "Front light", "Red - on / off", "Green", "Blue",
+		"hold upper: close   drag to change",
+	} {
+		assertText("reader settings", text)
+	}
 	for pageIndex, page := range bookPages {
 		if graphics.Scalar(len(page.lines))*readerLineHeight > 570 {
 			t.Fatalf("page %d has %d lines and exceeds the body height", pageIndex, len(page.lines))
@@ -100,7 +156,7 @@ func TestReaderPagesFitAndPaintRotatedMonochrome(t *testing.T) {
 		ssd1677.Width, ssd1677.Height, graphics.PixelMono1, pixels[:])
 	surface.SetAffine(0, -1, 1, 0, 0, ssd1677.Height)
 	var app reader
-	app.initialize(font)
+	app.initialize(font, 0)
 	for page := 0; page < len(bookPages); page++ {
 		app.setPage(page)
 		if !app.form.Paint(surface) {

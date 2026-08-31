@@ -129,3 +129,45 @@ func TestConfigureOutputStopsAtFirstBusError(t *testing.T) {
 		t.Fatalf("failure performed %d transactions, want 2", bus.index)
 	}
 }
+
+func TestConfigureAndSetPWMUsesPaperMonoRGBChannels(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{write: []byte{0x1d, 0x00, 0x00}},
+		{write: []byte{0x05}, read: []byte{0xff}},
+		{write: []byte{0x05, 0x7f}},
+		{write: []byte{0x13}, read: []byte{0xff}},
+		{write: []byte{0x13, 0x7f}},
+		{write: []byte{0x03}, read: []byte{0x00}},
+		{write: []byte{0x03, 0x80}},
+		{write: []byte{0x25, 0x88, 0x13}},
+		{write: []byte{0x1d, 0x00, 0x88}},
+		{write: []byte{0x1b, 0x00, 0x00}},
+	}}
+	device := New(bus)
+	if err := device.ConfigurePWM(Pin8, 5000); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.SetPWMDuty(Pin8, 2048); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.SetPWMDuty(Pin9, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPWMRejectsInvalidArgumentsWithoutBusAccess(t *testing.T) {
+	bus := &fakeBus{}
+	device := New(bus)
+	if err := device.ConfigurePWM(Pin7, 5000); err != ErrInvalidPWMPin {
+		t.Fatalf("ConfigurePWM(Pin7) error = %v", err)
+	}
+	if err := device.ConfigurePWM(Pin8, 0); err != ErrInvalidPWMFrequency {
+		t.Fatalf("ConfigurePWM(0 Hz) error = %v", err)
+	}
+	if err := device.SetPWMDuty(Pin9, 4096); err != ErrInvalidPWMDuty {
+		t.Fatalf("SetPWMDuty(4096) error = %v", err)
+	}
+	if bus.index != 0 {
+		t.Fatalf("invalid PWM arguments performed %d transactions", bus.index)
+	}
+}

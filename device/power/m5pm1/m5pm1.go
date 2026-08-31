@@ -5,6 +5,7 @@ const Address = uint16(0x6e)
 
 const (
 	registerDeviceID     = byte(0x00)
+	registerPowerConfig  = byte(0x06)
 	registerI2CConfig    = byte(0x09)
 	registerWatchdog     = byte(0x0a)
 	registerGPIOMode     = byte(0x10)
@@ -178,6 +179,16 @@ func (d *Device) SetPWMDuty(pin Pin, duty uint16) error {
 		register += 2
 	}
 	return d.write16(register, duty|control)
+}
+
+// SetLEDEnabled controls the dedicated LED_EN push-pull output. PaperMono-Lite
+// connects the red channel of its side RGB indicator to this binary output.
+func (d *Device) SetLEDEnabled(enabled bool) error {
+	value := byte(0)
+	if enabled {
+		value = 1 << 4
+	}
+	return d.update(registerPowerConfig, 1<<4, value)
 }
 
 func validPWMPin(pin Pin) bool { return pin == Pin3 || pin == Pin4 }

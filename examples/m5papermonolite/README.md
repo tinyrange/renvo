@@ -243,11 +243,19 @@ with the driver's automatic recovery full refresh after ten partial updates.
 
 The `ereader` example is a small five-page Forms application using the same
 rotated packed monochrome framebuffer and cached 26-pixel font. The upper side
-button (Button A on GPIO2) moves to the previous page and the lower side button
-(Button B on GPIO3) moves to the next page. Both inputs are debounced for 20 ms
-and remain sampled while a fast SSD1677 update is busy, so a short press during
-a page turn is queued rather than lost. Page changes use bounded differential
-updates and retain the normal automatic full-refresh recovery limit.
+button (Button A on GPIO2) moves to the previous page when released and the
+lower side button (Button B on GPIO3) moves to the next page. Holding the upper
+button for 700 ms opens or closes a Forms settings view. Its four touch sliders
+control front-light brightness and the side indicator's red, green, and blue
+channels. Green and blue use the M5IOE1's 5 kHz PWM outputs; the board connects
+red to M5PM1's binary `LED_EN` output, so every nonzero red setting is fully on.
+
+Both inputs are debounced for 20 ms and remain sampled while a fast SSD1677
+update is busy, so a short press during a page turn is queued rather than lost.
+Touch is also sampled during refresh. Slider hardware output follows a drag
+immediately, while the slower e-paper redraw waits for finger-up. Page changes
+use bounded differential updates and retain the normal automatic full-refresh
+recovery limit.
 
 ```sh
 sandbox/renvo \
@@ -260,9 +268,14 @@ sandbox/renvoflash sandbox/m5papermonolite-ereader.elf /dev/cu.usbmodem101
 ```
 
 Successful startup reaches `RENVO PAPERMONO-LITE READER READY`. Serial output
-also reports the displayed page number. The sample text is compiled into the
-application; loading books from removable storage is intentionally left for a
-later storage/filesystem layer.
+also reports the displayed page number and settings-view transitions. The
+reader checks Forms' dirty count before constructing a canvas interface so an
+idle loop does not consume arena storage. Reader and settings control trees are
+rebuilt on demand from saved scalar state, and repaint-time allocations are
+reset after every presentation; repeated idling, page turns, and view switches
+therefore remain within the fixed internal-DRAM arena. The sample text is
+compiled into the application; loading books from removable storage is
+intentionally left for a later storage/filesystem layer.
 
 ## Restore the factory application
 

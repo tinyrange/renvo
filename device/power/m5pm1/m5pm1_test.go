@@ -227,3 +227,19 @@ func TestPWMRejectsInvalidArgumentsWithoutBusAccess(t *testing.T) {
 		t.Fatalf("invalid arguments performed %d transactions", bus.index)
 	}
 }
+
+func TestSetLEDEnabledPreservesOtherPowerBits(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{write: []byte{0x06}, read: []byte{0x0f}},
+		{write: []byte{0x06, 0x1f}},
+		{write: []byte{0x06}, read: []byte{0x1f}},
+		{write: []byte{0x06, 0x0f}},
+	}}
+	device := New(bus)
+	if err := device.SetLEDEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.SetLEDEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+}
