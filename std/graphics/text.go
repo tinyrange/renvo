@@ -40,6 +40,8 @@ type RasterGlyph struct {
 	Codepoint                         int
 	Mask                              *Image
 	MaskPixels                        []byte
+	MaskSource                        *string
+	MaskOffset                        int
 	MaskWidth, MaskHeight, MaskStride int
 	XOffset, YOffset, Advance         Scalar
 }
@@ -50,6 +52,8 @@ type fontGlyph struct {
 	index       int
 	mask        *Image
 	maskPixels  []byte
+	maskSource  *string
+	maskOffset  int
 	maskWidth   int
 	maskHeight  int
 	maskStride  int
@@ -105,6 +109,7 @@ func (font *Font) AddRasterGlyph(glyph RasterGlyph) {
 	font.glyphs = append(font.glyphs, fontGlyph{
 		codepoint: glyph.Codepoint, rasterScale: 1, index: glyph.Codepoint,
 		mask: glyph.Mask, maskPixels: glyph.MaskPixels,
+		maskSource: glyph.MaskSource, maskOffset: glyph.MaskOffset,
 		maskWidth: glyph.MaskWidth, maskHeight: glyph.MaskHeight, maskStride: stride,
 		xOffset: glyph.XOffset, yOffset: glyph.YOffset, advance: glyph.Advance,
 	})
@@ -610,6 +615,14 @@ func (s *Surface) drawFontGlyph(glyph *fontGlyph, x, y Scalar, color Color) {
 		s.drawPositionedGlyph(glyph.mask, x, y, glyph.xOffset, glyph.yOffset, color)
 		return
 	}
+	if glyph.maskSource != nil && glyph.maskWidth > 0 && glyph.maskHeight > 0 &&
+		glyph.maskStride >= glyph.maskWidth && glyph.maskOffset >= 0 &&
+		glyph.maskOffset+glyph.maskStride*glyph.maskHeight <= len(*glyph.maskSource) {
+		data := *glyph.maskSource
+		s.drawPositionedGlyphData(data[glyph.maskOffset:], glyph.maskWidth, glyph.maskHeight,
+			glyph.maskStride, x, y, glyph.xOffset, glyph.yOffset, color)
+		return
+	}
 	if glyph.maskWidth <= 0 || glyph.maskHeight <= 0 || glyph.maskStride < glyph.maskWidth ||
 		len(glyph.maskPixels) < glyph.maskStride*glyph.maskHeight {
 		return
@@ -622,6 +635,92 @@ func (s *Surface) drawFontGlyph(glyph *fontGlyph, x, y Scalar, color Color) {
 		Pixels: glyph.maskPixels, Format: PixelA8,
 	}
 	s.drawPositionedGlyph(&mask, x, y, glyph.xOffset, glyph.yOffset, color)
+}
+
+func (s *Surface) drawPositionedGlyphData(data string, width, height, stride int,
+	x, y, xOffset, yOffset Scalar, color Color) {
+	if s.deviceScale == 1 && s.transformA == 0 && s.transformB == -1 &&
+		s.transformC == 1 && s.transformD == 0 {
+		// Quarter-turn display surfaces are common on portrait panels whose
+		// controller RAM is landscape. Map glyph pixels with integers so exact
+		// rotations do not pay for (or depend on) a floating-point inverse affine
+		// operation for every covered pixel.
+		logicalX := scalarFloor(x + xOffset + 0.5)
+		logicalY := scalarFloor(y + yOffset + 0.5)
+		translateX := scalarFloor(s.transformTX)
+		translateY := scalarFloor(s.transformTY)
+		for maskY := 0; maskY < height; maskY++ {
+			for maskX := 0; maskX < width; maskX++ {
+				alpha := byte(data[maskY*stride+maskX])
+				if alpha != 0 {
+					s.putPixel(translateX+logicalY+maskY,
+						translateY-logicalX-maskX-1, Color{
+							R: byte((int(color.R)*int(alpha) + 127) / 255),
+							G: byte((int(color.G)*int(alpha) + 127) / 255),
+							B: byte((int(color.B)*int(alpha) + 127) / 255),
+							A: byte((int(color.A)*int(alpha) + 127) / 255),
+						})
+				}
+			}
+		}
+		return
+	}
+	if s.transformB == 0 && s.transformC == 0 && s.transformA == s.transformD {
+		origin := s.transformPoint(Point{X: x, Y: y})
+		drawX := scalarFloor(origin.X + xOffset + 0.5)
+		drawY := scalarFloor(origin.Y + yOffset + 0.5)
+		for maskY := 0; maskY < height; maskY++ {
+			for maskX := 0; maskX < width; maskX++ {
+				alpha := byte(data[maskY*stride+maskX])
+				if alpha != 0 {
+					s.putPixel(drawX+maskX, drawY+maskY, Color{
+						R: byte((int(color.R)*int(alpha) + 127) / 255),
+						G: byte((int(color.G)*int(alpha) + 127) / 255),
+						B: byte((int(color.B)*int(alpha) + 127) / 255),
+						A: byte((int(color.A)*int(alpha) + 127) / 255),
+					})
+				}
+			}
+		}
+		return
+	}
+	destination := R(x+xOffset, y+yOffset, Scalar(width), Scalar(height))
+	a := Point{X: destination.MinX, Y: destination.MinY}
+	b := Point{X: destination.MaxX, Y: destination.MinY}
+	c := Point{X: destination.MaxX, Y: destination.MaxY}
+	d := Point{X: destination.MinX, Y: destination.MaxY}
+	s.transformPointInPlace(&a)
+	s.transformPointInPlace(&b)
+	s.transformPointInPlace(&c)
+	s.transformPointInPlace(&d)
+	minX, maxX, minY, maxY := pointBounds4(a, b, c, d)
+	determinant := s.transformA*s.transformD - s.transformB*s.transformC
+	if determinant == 0 {
+		return
+	}
+	for outputY := scalarFloor(minY); outputY < scalarCeil(maxY); outputY++ {
+		for outputX := scalarFloor(minX); outputX < scalarCeil(maxX); outputX++ {
+			sx := (Scalar(outputX)+0.5)/s.deviceScale - s.transformTX
+			sy := (Scalar(outputY)+0.5)/s.deviceScale - s.transformTY
+			localX := (s.transformD*sx - s.transformC*sy) / determinant
+			localY := (-s.transformB*sx + s.transformA*sy) / determinant
+			u := (localX - destination.MinX) / destination.Width()
+			v := (localY - destination.MinY) / destination.Height()
+			if u < 0 || u >= 1 || v < 0 || v >= 1 {
+				continue
+			}
+			maskX, maskY := scalarFloor(u*Scalar(width)), scalarFloor(v*Scalar(height))
+			alpha := byte(data[maskY*stride+maskX])
+			if alpha != 0 {
+				s.putPixel(outputX, outputY, Color{
+					R: byte((int(color.R)*int(alpha) + 127) / 255),
+					G: byte((int(color.G)*int(alpha) + 127) / 255),
+					B: byte((int(color.B)*int(alpha) + 127) / 255),
+					A: byte((int(color.A)*int(alpha) + 127) / 255),
+				})
+			}
+		}
+	}
 }
 
 func blendRGB565Channel(source, destination, alpha int) int {
@@ -718,7 +817,7 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 				continue
 			}
 			x += font.kern(previous, glyph.index)
-			if glyph.mask != nil || len(glyph.maskPixels) != 0 {
+			if glyph.mask != nil || len(glyph.maskPixels) != 0 || glyph.maskSource != nil {
 				// Glyph bitmaps are rasterized without a subpixel shift, so place
 				// them on the corresponding nearest pixel and composite the A8 mask
 				// directly. A 1:1 glyph upload does not require affine resampling.
@@ -775,7 +874,7 @@ func (s *Surface) DrawTextBytes(font *Font, baseline Point, text []byte, color C
 				continue
 			}
 			x += font.kern(previous, glyph.index)
-			if glyph.mask != nil || len(glyph.maskPixels) != 0 {
+			if glyph.mask != nil || len(glyph.maskPixels) != 0 || glyph.maskSource != nil {
 				s.drawFontGlyph(glyph, x, y, color)
 			}
 			x += glyph.advance

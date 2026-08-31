@@ -16,7 +16,7 @@ var titleFont *graphics.Font
 // Title returns the PaperMono Forms showcase's 26-pixel cached glyph subset.
 func Title() *graphics.Font {
 	if titleFont == nil {
-		titleFont = load(titleCache, "")
+		titleFont = load(&titleCache, "")
 	}
 	return titleFont
 }
@@ -24,7 +24,7 @@ func Title() *graphics.Font {
 // TitleSubset loads only requested descriptors from the PaperMono Forms glyph
 // set. Glyph A8 masks continue to alias embedded data rather than consuming
 // the PaperMono-Lite's managed arena.
-func TitleSubset(characters string) *graphics.Font { return load(titleCache, characters) }
+func TitleSubset(characters string) *graphics.Font { return load(&titleCache, characters) }
 
 // Body shares the 26-pixel PaperMono cache so the constrained build embeds a
 // single glyph data set.

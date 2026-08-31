@@ -18,11 +18,11 @@ var bodyFont *graphics.Font
 // Body returns the shared 18-pixel cached font.
 func Body() *graphics.Font {
 	if bodyFont == nil {
-		bodyFont = load(bodyCache, "")
+		bodyFont = load(&bodyCache, "")
 	}
 	return bodyFont
 }
 
 // BodySubset loads the 18-pixel cache while retaining only the requested
 // ASCII glyphs. A question-mark fallback and space metrics are always kept.
-func BodySubset(characters string) *graphics.Font { return load(bodyCache, characters) }
+func BodySubset(characters string) *graphics.Font { return load(&bodyCache, characters) }
