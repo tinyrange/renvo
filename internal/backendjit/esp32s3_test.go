@@ -185,3 +185,31 @@ func TestCompiledInBootstrapCompilesPaperMonoFormsDemo(t *testing.T) {
 		t.Fatal("ELF omitted the Forms demo startup marker")
 	}
 }
+
+func TestCompiledInBootstrapCompilesPaperMonoEReader(t *testing.T) {
+	if hostTarget() == "" {
+		t.Skipf("no in-process prepared backend for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(root, "backends", "esp32s3.rtg")
+	result := driver.CompileFromFS([]string{
+		"-backend", definition,
+		"-t", "esp32s3/xtensa_lx7", "-tags", "m5papermonolite",
+		"-arena-size", "90112", "-s", "-o", "ereader.elf",
+		filepath.Join(root, "examples", "m5papermonolite", "ereader"),
+	}, root, filepath.Join(root, "std"), driver.OSFS{},
+		New(definition, filepath.Join(root, "backend"), filepath.Join(root, "std"),
+			backendJITTestCacheDir, backendcompiled.Backend{}))
+	if !result.Ok {
+		t.Fatalf("PaperMono-Lite e-reader compile failed: %#v", result.Diagnostic)
+	}
+	if len(result.Binary) < 52 || !bytes.Equal(result.Binary[:4], []byte{0x7f, 'E', 'L', 'F'}) {
+		t.Fatalf("e-reader output is not ELF32: % x", result.Binary[:minInt(4, len(result.Binary))])
+	}
+	if !bytes.Contains(result.Binary, []byte("RENVO PAPERMONO-LITE READER READY")) {
+		t.Fatal("ELF omitted the e-reader startup marker")
+	}
+}

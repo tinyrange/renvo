@@ -239,6 +239,31 @@ Successful startup reaches `RENVO PAPERMONO-LITE FORMS READY` after the first
 full refresh. Routine interaction uses bounded fast differential refreshes,
 with the driver's automatic recovery full refresh after ten partial updates.
 
+## Forms e-reader
+
+The `ereader` example is a small five-page Forms application using the same
+rotated packed monochrome framebuffer and cached 26-pixel font. The upper side
+button (Button A on GPIO2) moves to the previous page and the lower side button
+(Button B on GPIO3) moves to the next page. Both inputs are debounced for 20 ms
+and remain sampled while a fast SSD1677 update is busy, so a short press during
+a page turn is queued rather than lost. Page changes use bounded differential
+updates and retain the normal automatic full-refresh recovery limit.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -arena-size 90112 \
+  -s -o sandbox/m5papermonolite-ereader.elf \
+  ./examples/m5papermonolite/ereader
+sandbox/renvoflash sandbox/m5papermonolite-ereader.elf /dev/cu.usbmodem101
+```
+
+Successful startup reaches `RENVO PAPERMONO-LITE READER READY`. Serial output
+also reports the displayed page number. The sample text is compiled into the
+application; loading books from removable storage is intentionally left for a
+later storage/filesystem layer.
+
 ## Restore the factory application
 
 Keep the verified whole-flash backup outside version control. The factory
