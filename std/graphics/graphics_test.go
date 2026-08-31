@@ -44,34 +44,6 @@ func TestMono1SurfaceUsesPackedCallerStorageAndThresholdsSourceOver(t *testing.T
 	}
 }
 
-func TestMono1SurfaceCanDitherPartialCoverageWithoutChangingOpaquePixels(t *testing.T) {
-	var pixels [4]byte
-	surface := NewSurfaceBufferFormat(4, 4, PixelMono1, pixels[:])
-	surface.Clear(White)
-	surface.SetMonochromeDithering(true)
-	for y := 0; y < 4; y++ {
-		for x := 0; x < 4; x++ {
-			surface.writePixel(x, y, RGBA(0, 0, 0, 128))
-		}
-	}
-	black := 0
-	for y := 0; y < 4; y++ {
-		for x := 0; x < 4; x++ {
-			if !surface.monoPixel(x, y) {
-				black++
-			}
-		}
-	}
-	if black != 8 {
-		t.Fatalf("half coverage produced %d black pixels, want 8", black)
-	}
-	surface.writePixel(0, 0, Black)
-	surface.writePixel(1, 0, White)
-	if surface.monoPixel(0, 0) || !surface.monoPixel(1, 0) {
-		t.Fatal("dithering changed opaque black or white")
-	}
-}
-
 func TestMono1SurfaceRotatesRasterFontIntoNativeFramebuffer(t *testing.T) {
 	var pixels [4]byte
 	surface := NewSurfaceBufferFormat(8, 4, PixelMono1, pixels[:])

@@ -37,7 +37,6 @@ type Surface struct {
 	transformTX        Scalar
 	transformTY        Scalar
 	deviceScale        Scalar
-	monochromeDither   bool
 	transforms         []Mat2x3
 	transformComplex   bool
 	transformComplexes []bool
@@ -263,7 +262,6 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 	}
 	s.damageDepth = 0
 	s.deviceScale = 1.0
-	s.monochromeDither = false
 	s.ResetTransform()
 	s.clips = nil
 	s.transforms = nil
@@ -427,12 +425,6 @@ func pixelRectContains(outer, inner pixelRect) bool {
 }
 
 func (s *Surface) SetBlendMode(mode BlendMode) { s.blend = mode }
-
-// SetMonochromeDithering enables ordered coverage dithering when partially
-// transparent pixels are composited into a packed one-bit surface. Opaque
-// black and white drawing is unchanged.
-func (s *Surface) SetMonochromeDithering(enabled bool) { s.monochromeDither = enabled }
-
 func (s *Surface) SetTransform(m *Mat2x3) {
 	if m == nil {
 		s.ResetTransform()
@@ -659,11 +651,7 @@ func (s *Surface) writePixel(x, y int, c Color) {
 		if s.blend != BlendCopy && c.A != 255 && s.monoPixel(x, y) {
 			gray += (255*int(255-c.A) + 127) / 255
 		}
-		threshold := 128
-		if s.monochromeDither && c.A != 0 && c.A != 255 {
-			threshold = monochromeDitherThreshold(x, y)
-		}
-		s.writeMonoPixel(x, y, gray >= threshold)
+		s.writeMonoPixel(x, y, gray >= 128)
 		return
 	}
 	if s.Format == PixelRGB565 {
@@ -698,45 +686,6 @@ func (s *Surface) writePixel(x, y int, c Color) {
 	s.Pixels[o+1] = byte(int(c.G) + (int(s.Pixels[o+1])*inv+127)/255)
 	s.Pixels[o+2] = byte(int(c.B) + (int(s.Pixels[o+2])*inv+127)/255)
 	s.Pixels[o+3] = byte(int(c.A) + (int(s.Pixels[o+3])*inv+127)/255)
-}
-
-func monochromeDitherThreshold(x, y int) int {
-	// A 4x4 Bayer matrix expressed as thresholds centered in each of its 16
-	// coverage buckets. Coordinate anchoring keeps repeated paints stable.
-	switch (y&3)*4 + x&3 {
-	case 0:
-		return 8
-	case 1:
-		return 136
-	case 2:
-		return 40
-	case 3:
-		return 168
-	case 4:
-		return 200
-	case 5:
-		return 72
-	case 6:
-		return 232
-	case 7:
-		return 104
-	case 8:
-		return 56
-	case 9:
-		return 184
-	case 10:
-		return 24
-	case 11:
-		return 152
-	case 12:
-		return 248
-	case 13:
-		return 120
-	case 14:
-		return 216
-	default:
-		return 88
-	}
 }
 
 func (s *Surface) monoPixel(x, y int) bool {

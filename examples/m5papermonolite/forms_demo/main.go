@@ -74,6 +74,7 @@ func monochromeTheme() forms.Theme {
 		Border:        graphics.Black,
 		Hover:         graphics.Black,
 		Selection:     graphics.Black,
+		SelectionText: graphics.White,
 		Accent:        graphics.Black,
 		AccentText:    graphics.White,
 		Disabled:      graphics.Black,
@@ -509,7 +510,6 @@ func main() {
 	}
 	// Logical portrait edges map to native panel edges as (x,y)->(y,480-x).
 	surface.SetAffine(0, -1, 1, 0, 0, ssd1677.Height)
-	surface.SetMonochromeDithering(true)
 	var demo showcase
 	demo.uiLowMark, demo.uiHighMark = arena.Mark(), arena.PersistMark()
 	demo.initialize(bodyFont, titleFont, pageInputs)

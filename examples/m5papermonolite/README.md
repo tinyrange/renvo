@@ -212,8 +212,8 @@ into one packed 48,000-byte monochrome framebuffer and loads an 11 KiB,
 The bootloader places that static data in internal DRAM, but the glyph masks
 alias it directly and consume no managed-arena copy. The font remains covered
 by `std/graphics/gofont/LICENSE`. Its original A8 coverage is converted with a
-stable 4x4 ordered dither at glyph edges instead of being reduced to a coarse
-binary mask during cache generation.
+stable half-coverage threshold at final one-bit rendering time instead of being
+reduced to a coarse binary mask during cache generation.
 
 Only the active tab's controls are retained. Changing tabs resets the two
 managed arena regions and rebuilds the requested page, keeping the demo within
