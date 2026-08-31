@@ -18,7 +18,12 @@ const (
 	commandSoftReset        = byte(0x12)
 	commandDeepSleep        = byte(0x10)
 	commandMasterActivation = byte(0x20)
+	commandUpdateControl1   = byte(0x21)
 	commandUpdateControl    = byte(0x22)
+	commandWriteLUT         = byte(0x32)
+	commandGateVoltage      = byte(0x03)
+	commandSourceVoltage    = byte(0x04)
+	commandWriteVCOM        = byte(0x2c)
 	commandWriteRAM1        = byte(0x24)
 	commandWriteRAM2        = byte(0x26)
 	commandDataEntryMode    = byte(0x11)
@@ -27,6 +32,31 @@ const (
 	commandRAMXCounter      = byte(0x4e)
 	commandRAMYCounter      = byte(0x4f)
 )
+
+// fastDifferentialLUT is M5Stack/M5GFX's two-clause BSD (FreeBSD variant)
+// short Mode 2 monochrome waveform for the PaperMono SSD1677 panel:
+// https://github.com/m5stack/M5GFX/blob/master/src/lgfx/v1/panel/Panel_SSD1677.cpp
+// RAM 1 holds the next image and RAM 2 the previous image, selecting hold,
+// black-to-white, and white-to-black transition groups.
+var fastDifferentialLUT = [110]byte{
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x6a, 0xa0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x95, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x02, 0x02, 0x02, 0x02, 0x00,
+	0x01, 0x01, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00,
+	0x8f, 0x8f, 0x8f, 0x8f, 0x8f,
+	0x17, 0x46, 0xa8, 0x32, 0x30,
+}
 
 // Transport is the board-owned synchronous SSD1677 bus. Begin selects the
 // controller and sends one command byte; Data may be called repeatedly before
@@ -43,13 +73,20 @@ type Transport interface {
 
 // GrayPlaneSource fills one packed 100-byte row at a time. It permits full
 // four-gray refresh without keeping two complete 48,000-byte planes resident.
-// Plane is zero for RAM 1 and one for RAM 2; row is in controller-native order.
+// Plane is zero for RAM 1 and one for RAM 2; row is in panel-native order.
 type GrayPlaneSource interface {
 	FillGrayRow(plane, row int, destination []byte) error
 }
 
-// Monochrome is one packed 1-bit controller-native framebuffer. Bits are MSB
-// first; one means white and zero means black.
+// RefreshPoller performs bounded application work while an e-paper waveform is
+// active. Implementations must not mutate the framebuffer being presented.
+type RefreshPoller interface {
+	PollDuringRefresh() error
+}
+
+// Monochrome is one packed 1-bit panel-native framebuffer. Bits are MSB first;
+// one means white and zero means black. The transfer path reverses the SSD1677
+// gate counter so row zero remains the visible top of the native surface.
 type Monochrome [FrameSize]byte
 
 // Fill sets every pixel to white or black.
@@ -120,6 +157,7 @@ type Device struct {
 	busyTimeout    uint32
 	baseline       bool
 	partialRefresh uint8
+	fastActive     bool
 }
 
 // New returns a protocol driver with a 15-second BUSY timeout, matching the
@@ -150,16 +188,22 @@ func (device *Device) PartialRefreshes() int { return int(device.partialRefresh)
 func (device *Device) InvalidateBaseline() {
 	device.baseline = false
 	device.partialRefresh = 0
+	device.fastActive = false
 }
 
 // FullMonochrome writes a packed frame and applies the controller's OTP Mode 1
 // waveform. Both RAM planes receive the final image, establishing a baseline.
 func (device *Device) FullMonochrome(frame []byte) error {
+	return device.fullMonochrome(frame, nil)
+}
+
+func (device *Device) fullMonochrome(frame []byte, poller RefreshPoller) error {
 	if len(frame) != FrameSize {
 		return ErrFrameSize
 	}
 	device.baseline = false
 	device.partialRefresh = 0
+	device.fastActive = false
 	if err := device.resetAndInitializeMonochrome(); err != nil {
 		return err
 	}
@@ -172,7 +216,7 @@ func (device *Device) FullMonochrome(frame []byte) error {
 	if err := device.command(commandMasterActivation, nil); err != nil {
 		return err
 	}
-	if err := device.waitReady(); err != nil {
+	if err := device.waitReadyWithPoller(poller); err != nil {
 		return err
 	}
 	if err := device.command(commandUpdateControl, []byte{0x14}); err != nil {
@@ -187,7 +231,7 @@ func (device *Device) FullMonochrome(frame []byte) error {
 	if err := device.command(commandMasterActivation, nil); err != nil {
 		return err
 	}
-	if err := device.waitReady(); err != nil {
+	if err := device.waitReadyWithPoller(poller); err != nil {
 		return err
 	}
 	if err := device.deepSleep(); err != nil {
@@ -211,6 +255,7 @@ func (device *Device) PartialMonochrome(frame []byte) error {
 	if device.partialRefresh >= partialRefreshLimit {
 		return device.FullMonochrome(frame)
 	}
+	device.fastActive = false
 	if err := device.transport.Reset(); err != nil {
 		return err
 	}
@@ -220,7 +265,7 @@ func (device *Device) PartialMonochrome(frame []byte) error {
 	if err := device.command(0x3c, []byte{0x80}); err != nil {
 		return err
 	}
-	if err := device.setRAMWindow(0, 0, Width, Height, false); err != nil {
+	if err := device.setRAMWindow(0, 0, Width, Height); err != nil {
 		return err
 	}
 	if err := device.writeRAM(commandWriteRAM1, frame, false); err != nil {
@@ -243,6 +288,72 @@ func (device *Device) PartialMonochrome(frame []byte) error {
 		device.baseline = false
 		return err
 	}
+	device.partialRefresh++
+	return nil
+}
+
+// FastMonochrome applies M5Stack's short differential waveform without putting
+// the controller back into deep sleep. Both complete transition planes are
+// transferred because the SSD1677 advances its internal Mode 2 RAM face on
+// every activation. RAM 2 is synchronized to frame for the next request. A
+// successful full refresh baseline is required; the eleventh differential
+// request is promoted to a recovery full refresh.
+func (device *Device) FastMonochrome(frame []byte, poller RefreshPoller) error {
+	if len(frame) != FrameSize {
+		return ErrFrameSize
+	}
+	if !device.baseline {
+		return ErrNoBaseline
+	}
+	if device.partialRefresh >= partialRefreshLimit {
+		return device.fullMonochrome(frame, poller)
+	}
+	wasActive := device.fastActive
+	if !wasActive {
+		// Hardware reset exits deep sleep while retaining the two RAM planes
+		// established by FullMonochrome. A software reset here would discard the
+		// differential baseline; this is the wake sequence used by M5Stack's OTP
+		// partial-refresh example.
+		if err := device.transport.Reset(); err != nil {
+			return device.invalidateAfterFastError(err)
+		}
+		if err := device.waitReady(); err != nil {
+			return device.invalidateAfterFastError(err)
+		}
+		if err := device.command(0x3c, []byte{0x80}); err != nil {
+			return device.invalidateAfterFastError(err)
+		}
+	} else if err := device.waitReady(); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	if err := device.writeRAM(commandWriteRAM1, frame, false); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	if err := device.writeFastDifferentialLUT(); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	if err := device.command(commandUpdateControl1, []byte{0x00}); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	update := byte(0x0c)
+	if !wasActive {
+		update |= 0xc0
+	}
+	if err := device.command(commandUpdateControl, []byte{update}); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	if err := device.command(commandMasterActivation, nil); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	if err := device.waitReadyWithPoller(poller); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	// Preserve the new optical state as the previous plane for the next live
+	// update without retaining a second 48 KiB application framebuffer.
+	if err := device.writeRAM(commandWriteRAM2, frame, false); err != nil {
+		return device.invalidateAfterFastError(err)
+	}
+	device.fastActive = true
 	device.partialRefresh++
 	return nil
 }
@@ -284,6 +395,7 @@ func (device *Device) FullGrayStream(source GrayPlaneSource) error {
 func (device *Device) initializeGray() error {
 	device.baseline = false
 	device.partialRefresh = 0
+	device.fastActive = false
 	if err := device.transport.Reset(); err != nil {
 		return err
 	}
@@ -296,7 +408,7 @@ func (device *Device) initializeGray() error {
 	if err := device.command(0x01, []byte{0xdf, 0x01, 0x02}); err != nil {
 		return err
 	}
-	if err := device.setRAMWindow(0, 0, Width, Height, true); err != nil {
+	if err := device.setRAMWindow(0, 0, Width, Height); err != nil {
 		return err
 	}
 	if err := device.command(0x3c, []byte{0x01}); err != nil {
@@ -325,6 +437,9 @@ func (device *Device) finishGray() error {
 }
 
 func (device *Device) writeGrayPlane(command byte, source GrayPlaneSource, plane int) error {
+	if err := device.setRAMWindow(0, 0, Width, Height); err != nil {
+		return err
+	}
 	if err := device.transport.Begin(command); err != nil {
 		return err
 	}
@@ -364,7 +479,7 @@ func (device *Device) resetAndInitializeMonochrome() error {
 	if err := device.command(0x21, []byte{0x00}); err != nil {
 		return err
 	}
-	return device.setRAMWindow(0, 0, Width, Height, false)
+	return device.setRAMWindow(0, 0, Width, Height)
 }
 
 func (device *Device) softwareReset() error {
@@ -383,15 +498,45 @@ func (device *Device) deepSleep() error {
 		return err
 	}
 	device.transport.DelayMilliseconds(100)
+	device.fastActive = false
 	return nil
 }
 
+func (device *Device) writeFastDifferentialLUT() error {
+	if err := device.command(commandWriteLUT, fastDifferentialLUT[:105]); err != nil {
+		return err
+	}
+	if err := device.command(commandGateVoltage, fastDifferentialLUT[105:106]); err != nil {
+		return err
+	}
+	if err := device.command(commandSourceVoltage, fastDifferentialLUT[106:109]); err != nil {
+		return err
+	}
+	return device.command(commandWriteVCOM, fastDifferentialLUT[109:])
+}
+
+func (device *Device) invalidateAfterFastError(err error) error {
+	device.baseline = false
+	device.partialRefresh = 0
+	device.fastActive = false
+	return err
+}
+
 func (device *Device) waitReady() error {
+	return device.waitReadyWithPoller(nil)
+}
+
+func (device *Device) waitReadyWithPoller(poller RefreshPoller) error {
 	device.transport.DelayMilliseconds(1)
 	started := device.transport.Milliseconds()
 	for device.transport.Busy() {
 		if device.transport.Milliseconds()-started >= device.busyTimeout {
 			return ErrTimeout
+		}
+		if poller != nil {
+			if err := poller.PollDuringRefresh(); err != nil {
+				return err
+			}
 		}
 		device.transport.DelayMilliseconds(1)
 	}
@@ -412,6 +557,9 @@ func (device *Device) command(command byte, data []byte) error {
 }
 
 func (device *Device) writeRAM(command byte, frame []byte, invert bool) error {
+	if err := device.setRAMWindow(0, 0, Width, Height); err != nil {
+		return err
+	}
 	if err := device.transport.Begin(command); err != nil {
 		return err
 	}
@@ -440,28 +588,25 @@ func (device *Device) writeRAM(command byte, frame []byte, invert bool) error {
 	return device.transport.End()
 }
 
-func (device *Device) setRAMWindow(x, y, width, height int, gray bool) error {
+func (device *Device) setRAMWindow(x, y, width, height int) error {
 	xEnd := x + width - 1
 	yEnd := y + height - 1
-	entryMode := byte(0x03)
-	xStart, xFinish := x, xEnd
-	if gray {
-		entryMode = 0x02
-		xStart, xFinish = xEnd, x
-	}
-	if err := device.command(commandDataEntryMode, []byte{entryMode}); err != nil {
+	// The PaperMono panel's gates are wired in reverse order. Keep framebuffer
+	// rows in visible top-to-bottom order by incrementing X while decrementing
+	// the controller Y counter, matching M5Stack's SSD1677 panel driver.
+	if err := device.command(commandDataEntryMode, []byte{0x01}); err != nil {
 		return err
 	}
-	if err := device.command(commandRAMXRange, little16(xStart, xFinish)); err != nil {
+	if err := device.command(commandRAMXRange, little16(x, xEnd)); err != nil {
 		return err
 	}
-	if err := device.command(commandRAMYRange, little16(y, yEnd)); err != nil {
+	if err := device.command(commandRAMYRange, little16(yEnd, y)); err != nil {
 		return err
 	}
-	if err := device.command(commandRAMXCounter, little16(xStart)); err != nil {
+	if err := device.command(commandRAMXCounter, little16(x)); err != nil {
 		return err
 	}
-	return device.command(commandRAMYCounter, little16(y))
+	return device.command(commandRAMYCounter, little16(yEnd))
 }
 
 func little16(values ...int) []byte {

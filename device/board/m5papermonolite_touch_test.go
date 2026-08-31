@@ -77,7 +77,7 @@ func TestTouchscreenInitializesPowerInterruptAndControllerOnce(t *testing.T) {
 	}
 }
 
-func TestTouchscreenReadsOnlyWhileInterruptIsLow(t *testing.T) {
+func TestTouchscreenPollsCoordinatesIndependentOfInterruptLevel(t *testing.T) {
 	controller := &fakeTouchController{identity: ft6336g.Identity{Vendor: 1}}
 	controller.report.Count = 1
 	controller.report.Points[0] = ft6336g.Point{X: 12, Y: 34}
@@ -86,16 +86,13 @@ func TestTouchscreenReadsOnlyWhileInterruptIsLow(t *testing.T) {
 	if _, err := touch.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	if _, pressed, err := touch.Read(); err != nil || pressed {
-		t.Fatalf("released Read = %v, %v", pressed, err)
-	}
-	if controller.readCalls != 0 {
-		t.Fatalf("released read touched I2C %d times", controller.readCalls)
-	}
-	interrupt.high = false
 	point, pressed, err := touch.Read()
 	if err != nil || !pressed || point.X != 12 || point.Y != 34 || controller.readCalls != 1 {
 		t.Fatalf("pressed Read = %+v, %v, %v calls=%d", point, pressed, err, controller.readCalls)
+	}
+	controller.report.Count = 0
+	if _, pressed, err := touch.Read(); err != nil || pressed || controller.readCalls != 2 {
+		t.Fatalf("released Read = %v, %v calls=%d", pressed, err, controller.readCalls)
 	}
 }
 

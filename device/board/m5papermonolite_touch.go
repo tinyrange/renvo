@@ -5,11 +5,15 @@ package board
 import (
 	"renvo.dev/device/esp32s3"
 	"renvo.dev/device/gpio"
+	"renvo.dev/device/i2c"
 	"renvo.dev/device/input/ft6336g"
 )
 
 var touchInterruptPin = esp32s3.GPIO(4)
-var paperTouchController = ft6336g.New(internalI2CBus.Device(ft6336g.Address))
+var touchI2CController = i2c.NewBitBang(esp32s3.GPIO(47), esp32s3.GPIO(48), &Clock, 400000)
+var touchI2CPort = i2c.DefinePort(&touchI2CController, &Clock)
+var touchI2CBus = i2c.New(touchI2CPort)
+var paperTouchController = ft6336g.New(touchI2CBus.Device(ft6336g.Address))
 
 type touchController interface {
 	Initialize() (ft6336g.Identity, error)
@@ -67,14 +71,12 @@ func (touch *Touchscreen) Initialize() (ft6336g.Identity, error) {
 // Pending reports the active-low GPIO4 touch interrupt level.
 func (touch *Touchscreen) Pending() bool { return !touch.interrupt.Get() }
 
-// Read returns the first normalized contact. A high interrupt level is treated
-// as a release without issuing an unnecessary I2C transaction.
+// Read polls the controller and returns the first normalized contact. The
+// FT6336G is configured in polling mode, so GPIO4 is only an activity hint and
+// must not gate coordinate reads while a contact is moving.
 func (touch *Touchscreen) Read() (point ft6336g.Point, pressed bool, err error) {
 	if !touch.ready {
 		return point, false, ErrTouchNotInitialized
-	}
-	if !touch.Pending() {
-		return point, false, nil
 	}
 	report, err := touch.controller.Read()
 	if err != nil {

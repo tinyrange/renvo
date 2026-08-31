@@ -112,7 +112,8 @@
       {"path": "examples/m5papermonolite/oracle"},
       {"path": "examples/m5papermonolite/power_oracle"},
       {"path": "examples/m5papermonolite/display_oracle"},
-      {"path": "examples/m5papermonolite/touch_oracle"}
+      {"path": "examples/m5papermonolite/touch_oracle"},
+      {"path": "examples/m5papermonolite/touch_trails"}
     ]
   },
   {

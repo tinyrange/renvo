@@ -24,6 +24,16 @@ type fakeTransport struct {
 	endCalls     int
 }
 
+type fakeRefreshPoller struct {
+	calls int
+	err   error
+}
+
+func (poller *fakeRefreshPoller) PollDuringRefresh() error {
+	poller.calls++
+	return poller.err
+}
+
 func (transport *fakeTransport) Reset() error {
 	transport.resets++
 	return nil
@@ -126,7 +136,9 @@ func TestFullMonochromeInitializationWindowsAndRefresh(t *testing.T) {
 		t.Fatalf("state baseline=%v partial=%d resets=%d", device.HasBaseline(), device.PartialRefreshes(), transport.resets)
 	}
 	assertTransaction(t, transport.transactions, commandRAMXRange, []byte{0x00, 0x00, 0x1f, 0x03})
-	assertTransaction(t, transport.transactions, commandRAMYRange, []byte{0x00, 0x00, 0xdf, 0x01})
+	assertTransaction(t, transport.transactions, commandDataEntryMode, []byte{0x01})
+	assertTransaction(t, transport.transactions, commandRAMYRange, []byte{0xdf, 0x01, 0x00, 0x00})
+	assertTransaction(t, transport.transactions, commandRAMYCounter, []byte{0xdf, 0x01})
 	updates := transactionsFor(transport.transactions, commandUpdateControl)
 	if len(updates) != 2 || updates[0].first[0] != 0xf8 || updates[1].first[0] != 0x14 {
 		t.Fatalf("update controls = %+v", updates)
@@ -176,7 +188,85 @@ func TestPartialRequiresBaselineAndRecoversAfterTenUpdates(t *testing.T) {
 	}
 }
 
-func TestFullGrayUsesDecreasingXWindowAndInvalidatesBaseline(t *testing.T) {
+func TestFastMonochromeWritesNextAndSynchronizesPreviousPlane(t *testing.T) {
+	transport := &fakeTransport{}
+	device := New(transport)
+	previous := make([]byte, FrameSize)
+	previous[0] = 0x12
+	previous[FrameSize-1] = 0x56
+	if err := device.FullMonochrome(previous); err != nil {
+		t.Fatal(err)
+	}
+	transport.transactions = nil
+	next := make([]byte, FrameSize)
+	next[0] = 0x34
+	next[FrameSize-1] = 0x78
+	if err := device.FastMonochrome(next, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !device.fastActive || device.PartialRefreshes() != 1 || !device.HasBaseline() {
+		t.Fatalf("fast=%v partial=%d baseline=%v", device.fastActive, device.PartialRefreshes(), device.HasBaseline())
+	}
+	ram1 := transactionsFor(transport.transactions, commandWriteRAM1)
+	ram2 := transactionsFor(transport.transactions, commandWriteRAM2)
+	if len(ram1) != 1 || ram1[0].length != FrameSize || ram1[0].first[0] != 0x34 || ram1[0].last != 0x78 {
+		t.Fatalf("next RAM plane = %+v", ram1)
+	}
+	if len(ram2) != 1 || ram2[0].length != FrameSize || ram2[0].first[0] != 0x34 || ram2[0].last != 0x78 {
+		t.Fatalf("synchronized previous RAM plane = %+v", ram2)
+	}
+	lut := transactionsFor(transport.transactions, commandWriteLUT)
+	if len(lut) != 1 || lut[0].length != 105 || lut[0].first[0] != fastDifferentialLUT[0] || lut[0].last != fastDifferentialLUT[104] {
+		t.Fatalf("fast LUT write = %+v", lut)
+	}
+	assertTransaction(t, transport.transactions, commandGateVoltage, fastDifferentialLUT[105:106])
+	assertTransaction(t, transport.transactions, commandSourceVoltage, fastDifferentialLUT[106:109])
+	assertTransaction(t, transport.transactions, commandWriteVCOM, fastDifferentialLUT[109:])
+	assertTransaction(t, transport.transactions, commandUpdateControl, []byte{0xcc})
+	if transport.transactions[len(transport.transactions)-1].command == commandDeepSleep {
+		t.Fatal("fast refresh entered deep sleep")
+	}
+
+	resets := transport.resets
+	transport.transactions = nil
+	if err := device.FastMonochrome(previous, nil); err != nil {
+		t.Fatal(err)
+	}
+	if transport.resets != resets {
+		t.Fatalf("active fast refresh reset controller %d -> %d", resets, transport.resets)
+	}
+	assertTransaction(t, transport.transactions, commandUpdateControl, []byte{0x0c})
+}
+
+func TestFastMonochromeRequiresBaseline(t *testing.T) {
+	device := New(&fakeTransport{})
+	frame := make([]byte, FrameSize)
+	if err := device.FastMonochrome(frame, nil); err != ErrNoBaseline {
+		t.Fatalf("FastMonochrome error = %v", err)
+	}
+}
+
+func TestRefreshPollerRunsWhileWaveformIsBusy(t *testing.T) {
+	transport := &fakeTransport{}
+	device := New(transport)
+	frame := make([]byte, FrameSize)
+	poller := &fakeRefreshPoller{}
+	if err := device.fullMonochrome(frame, poller); err != nil {
+		t.Fatal(err)
+	}
+	if poller.calls < 2 {
+		t.Fatalf("full refresh poll calls = %d", poller.calls)
+	}
+	poller.calls = 0
+	if err := device.FastMonochrome(frame, poller); err != nil {
+		t.Fatal(err)
+	}
+	if poller.calls == 0 {
+		t.Fatal("fast refresh did not poll while busy")
+	}
+}
+
+func TestFullGrayUsesReversedGateWindowAndInvalidatesBaseline(t *testing.T) {
 	transport := &fakeTransport{}
 	device := New(transport)
 	plane1 := make([]byte, FrameSize)
@@ -191,8 +281,9 @@ func TestFullGrayUsesDecreasingXWindowAndInvalidatesBaseline(t *testing.T) {
 	if device.HasBaseline() {
 		t.Fatal("gray refresh retained monochrome baseline")
 	}
-	assertTransaction(t, transport.transactions, commandDataEntryMode, []byte{0x02})
-	assertTransaction(t, transport.transactions, commandRAMXRange, []byte{0x1f, 0x03, 0x00, 0x00})
+	assertTransaction(t, transport.transactions, commandDataEntryMode, []byte{0x01})
+	assertTransaction(t, transport.transactions, commandRAMXRange, []byte{0x00, 0x00, 0x1f, 0x03})
+	assertTransaction(t, transport.transactions, commandRAMYRange, []byte{0xdf, 0x01, 0x00, 0x00})
 	assertTransaction(t, transport.transactions, commandUpdateControl, []byte{0xd7})
 	if got := transactionsFor(transport.transactions, commandWriteRAM1); len(got) != 1 || got[0].length != FrameSize {
 		t.Fatalf("gray RAM1 writes = %+v", got)

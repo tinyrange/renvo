@@ -25,6 +25,7 @@ func (transport *fakeDisplayTransport) deactivate() { transport.deactivateCalls+
 type fakeDisplayProtocol struct {
 	fullCalls       int
 	partialCalls    int
+	fastCalls       int
 	grayCalls       int
 	invalidateCalls int
 	err             error
@@ -37,6 +38,11 @@ func (protocol *fakeDisplayProtocol) FullMonochrome([]byte) error {
 
 func (protocol *fakeDisplayProtocol) PartialMonochrome([]byte) error {
 	protocol.partialCalls++
+	return protocol.err
+}
+
+func (protocol *fakeDisplayProtocol) FastMonochrome([]byte, ssd1677.RefreshPoller) error {
+	protocol.fastCalls++
 	return protocol.err
 }
 
@@ -79,8 +85,11 @@ func TestPaperDisplayEnablesOnceAndShutsDown(t *testing.T) {
 	if err := display.PartialMonochrome(nil); err != nil {
 		t.Fatal(err)
 	}
-	if power.enableCalls != 1 || transport.initializeCalls != 1 || protocol.fullCalls != 1 || protocol.partialCalls != 1 {
-		t.Fatalf("enable=%d init=%d full=%d partial=%d", power.enableCalls, transport.initializeCalls, protocol.fullCalls, protocol.partialCalls)
+	if err := display.FastMonochrome(nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if power.enableCalls != 1 || transport.initializeCalls != 1 || protocol.fullCalls != 1 || protocol.partialCalls != 1 || protocol.fastCalls != 1 {
+		t.Fatalf("enable=%d init=%d full=%d partial=%d fast=%d", power.enableCalls, transport.initializeCalls, protocol.fullCalls, protocol.partialCalls, protocol.fastCalls)
 	}
 	if err := display.Shutdown(); err != nil {
 		t.Fatal(err)

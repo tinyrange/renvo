@@ -163,6 +163,45 @@ in Deep Sleep Mode 1 between updates. Any initialization, touch-read, or refresh
 failure attempts a complete display/touch shutdown before stopping. Button A
 and Button B transitions are also reported without changing the boxes.
 
+## Touch trails
+
+The `touch_trails` example provides a free-form monochrome drawing surface with
+a two-pixel brush.
+It polls the FT6336G continuously over a dedicated 400 kHz software-I2C view,
+connects touch points while a finger is down, and presents live updates with
+the SSD1677's short differential monochrome waveform. Sampling runs at a 1 ms
+loop cadence and continues inside the panel's synchronous BUSY wait. Touches
+captured during a waveform are queued without mutating the in-flight frame,
+then joined and presented immediately after controller RAM 2 is synchronized.
+Serial movement logs are throttled to 20 ms so they do not dominate touch
+sampling. Each presentation also reports its measured duration. Press Button A
+to clear the drawing and establish a fresh full-refresh baseline.
+
+On the bring-up unit, the optimized 20 MHz SPI FIFO path reduced steady-state
+full-plane differential presentation from about 2.12 seconds to 307–308 ms. A
+recovery full refresh remains intentionally visible at roughly 4.74 seconds
+after every ten differential updates.
+
+Fast presentation keeps the SSD1677 active and synchronizes its second RAM
+plane after each update, avoiding a second 48 KiB application framebuffer. It
+admits at most ten differential updates before the driver automatically
+performs a recovery full refresh. The display/touch rails remain explicitly
+owned by the application and are still removed on any failure.
+
+An asymmetric `L` marker at logical coordinate `(12,12)` must appear at the
+physical top-left. The SSD1677 gate lines are wired in reverse order, so the
+driver transfers panel-native rows with a decreasing controller Y counter;
+this keeps the portrait image aligned with the FT6336G coordinates.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -s -o sandbox/m5papermonolite-touch-trails.elf \
+  ./examples/m5papermonolite/touch_trails
+sandbox/renvoflash sandbox/m5papermonolite-touch-trails.elf /dev/cu.usbmodem101
+```
+
 ## Restore the factory application
 
 Keep the verified whole-flash backup outside version control. The factory

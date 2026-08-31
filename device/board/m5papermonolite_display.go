@@ -132,6 +132,14 @@ func (transport *paperEPDTransport) deactivate() {
 }
 
 func (transport *paperEPDTransport) wait(mask uint32) bool {
+	// Normal FIFO updates complete in microseconds. Avoid reading the slower
+	// millisecond clock on that hot path, while retaining the existing bounded
+	// timeout if the peripheral does not settle promptly.
+	for attempt := 0; attempt < 256; attempt++ {
+		if mmio.Load32(spi2Command)&mask == 0 {
+			return true
+		}
+	}
 	started := Clock.Milliseconds()
 	for mmio.Load32(spi2Command)&mask != 0 {
 		if Clock.Milliseconds()-started >= spiWaitTimeoutMS {
@@ -147,16 +155,24 @@ func (transport *paperEPDTransport) write(data []byte) error {
 		if count > 64 {
 			count = 64
 		}
-		for offset := 0; offset < count; offset += 4 {
-			word := uint32(0)
-			wordLength := count - offset
-			if wordLength > 4 {
-				wordLength = 4
+		offset := 0
+		for offset+4 <= count {
+			word := uint32(data[offset]) |
+				uint32(data[offset+1])<<8 |
+				uint32(data[offset+2])<<16 |
+				uint32(data[offset+3])<<24
+			mmio.Store32(spi2Data+uintptr(offset), word)
+			offset += 4
+		}
+		if offset < count {
+			word := uint32(data[offset])
+			if offset+1 < count {
+				word |= uint32(data[offset+1]) << 8
 			}
-			for byteOffset := 0; byteOffset < wordLength; byteOffset++ {
-				word |= uint32(data[offset+byteOffset]) << uint(byteOffset*8)
+			if offset+2 < count {
+				word |= uint32(data[offset+2]) << 16
 			}
-			spi2StoreWord(offset/4, word)
+			mmio.Store32(spi2Data+uintptr(offset), word)
 		}
 		mmio.Store32(spi2DataLength, uint32(count*8-1))
 		mmio.Store32(spi2Command, spi2Update)
@@ -174,46 +190,10 @@ func (transport *paperEPDTransport) write(data []byte) error {
 	return nil
 }
 
-func spi2StoreWord(index int, value uint32) {
-	switch index {
-	case 0:
-		mmio.Store32(spi2Data+0x00, value)
-	case 1:
-		mmio.Store32(spi2Data+0x04, value)
-	case 2:
-		mmio.Store32(spi2Data+0x08, value)
-	case 3:
-		mmio.Store32(spi2Data+0x0c, value)
-	case 4:
-		mmio.Store32(spi2Data+0x10, value)
-	case 5:
-		mmio.Store32(spi2Data+0x14, value)
-	case 6:
-		mmio.Store32(spi2Data+0x18, value)
-	case 7:
-		mmio.Store32(spi2Data+0x1c, value)
-	case 8:
-		mmio.Store32(spi2Data+0x20, value)
-	case 9:
-		mmio.Store32(spi2Data+0x24, value)
-	case 10:
-		mmio.Store32(spi2Data+0x28, value)
-	case 11:
-		mmio.Store32(spi2Data+0x2c, value)
-	case 12:
-		mmio.Store32(spi2Data+0x30, value)
-	case 13:
-		mmio.Store32(spi2Data+0x34, value)
-	case 14:
-		mmio.Store32(spi2Data+0x38, value)
-	default:
-		mmio.Store32(spi2Data+0x3c, value)
-	}
-}
-
 type displayProtocol interface {
 	FullMonochrome(frame []byte) error
 	PartialMonochrome(frame []byte) error
+	FastMonochrome(frame []byte, poller ssd1677.RefreshPoller) error
 	FullGray(plane1, plane2 []byte) error
 	FullGrayStream(source ssd1677.GrayPlaneSource) error
 	InvalidateBaseline()
@@ -282,6 +262,20 @@ func (display *PaperDisplay) PartialMonochrome(frame []byte) error {
 		return err
 	}
 	if err := display.protocol.PartialMonochrome(frame); err != nil {
+		return display.fail(err)
+	}
+	return nil
+}
+
+// FastMonochrome performs a bounded live differential update. It keeps the
+// controller active between updates; the protocol automatically promotes every
+// eleventh request to a recovery full refresh. Shutdown still removes the
+// display and touch power domains.
+func (display *PaperDisplay) FastMonochrome(frame []byte, poller ssd1677.RefreshPoller) error {
+	if err := display.Enable(); err != nil {
+		return err
+	}
+	if err := display.protocol.FastMonochrome(frame, poller); err != nil {
 		return display.fail(err)
 	}
 	return nil
