@@ -108,7 +108,10 @@
     "definition": "backends/esp32s3.rtg",
     "backend": "backends/esp32s3-xtensa_lx7.wasm",
     "packages": ["device/esp32s3"],
-    "examples": [{"path": "examples/m5papermonolite/oracle"}]
+    "examples": [
+      {"path": "examples/m5papermonolite/oracle"},
+      {"path": "examples/m5papermonolite/power_oracle"}
+    ]
   },
   {
     "name": "M5Stack Cardputer Adv",

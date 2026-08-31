@@ -46,6 +46,47 @@ After reset, the application emits exactly one line:
 RENVO PAPERMONO-LITE PASS
 ```
 
+## Phase 2 power and button oracle
+
+The separate `power_oracle` keeps the one-line startup oracle stable. It first
+performs a read-only identity check for the M5PM1 at `0x6e` and M5IOE1 at
+`0x4f` over the shared 100 kHz software-I2C bus on GPIO47/GPIO48. It then:
+
+1. establishes a known shutdown state in case expander latches survived a
+   battery shutdown;
+2. drives EPD chip select inactive before applying display power;
+3. holds the EPD and touch controllers in reset while enabling their rails;
+4. releases both resets after the documented delay and verifies all four
+   output latches;
+5. asserts reset, removes both rails, and verifies the shutdown latches.
+
+No SPI command, framebuffer data, or refresh request is sent, and the microSD
+power output remains untouched. Build and flash it through the same
+application-only path:
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -s -o sandbox/m5papermonolite-power-oracle.elf \
+  ./examples/m5papermonolite/power_oracle
+sandbox/renvoflash sandbox/m5papermonolite-power-oracle.elf /dev/cu.usbmodem101
+```
+
+Successful startup prints:
+
+```text
+RENVO PAPERMONO-LITE PHASE2 IDENTIFY PASS
+RENVO PAPERMONO-LITE PHASE2 POWER PASS
+RENVO PAPERMONO-LITE BUTTONS READY
+```
+
+The application leaves the display and touch rails off, then reports
+`BUTTON A DOWN`/`UP` and `BUTTON B DOWN`/`UP` transitions with 10 ms polling.
+Its software-I2C controller bounds every clock-stretch wait and attempts bus
+recovery during initialization; every partial power-sequence failure attempts
+the complete shutdown path before returning an error.
+
 ## Restore the factory application
 
 Keep the verified whole-flash backup outside version control. The factory
