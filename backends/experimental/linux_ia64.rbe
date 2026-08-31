@@ -1,0 +1,996 @@
+definition 1
+unit linux_ia64
+implements direct_emitter_v1
+
+# A deliberately conservative Intel Itanium backend. Every useful instruction
+# gets its own stopped bundle; this wastes space and instruction-level
+# parallelism, but makes dependency and template legality obvious while the
+# experimental target is being brought up.
+go backend {
+	const nopSlot = uint64(0x08000000)
+
+	func put64(out *RTGEmitter, at int, value uint64) {
+		for i := 0; i < 8; i++ {
+			out.SetByteAt(at+i, byte(value>>uint(i*8)))
+		}
+	}
+
+	func get64(data []byte, at int) uint64 {
+		value := uint64(0)
+		for i := 0; i < 8; i++ {
+			value |= uint64(data[at+i]) << uint(i*8)
+		}
+		return value
+	}
+
+	func writeBundleAt(
+		out *RTGEmitter, at int, template int,
+		slot0 uint64, slot1 uint64, slot2 uint64,
+	) {
+		lo := uint64(template) | (slot0 << 5) | ((slot1 & 0x3ffff) << 46)
+		hi := (slot1 >> 18) | (slot2 << 23)
+		put64(out, at, lo)
+		put64(out, at+8, hi)
+	}
+
+	func emitBundle(
+		out *RTGEmitter, template int,
+		slot0 uint64, slot1 uint64, slot2 uint64,
+	) int {
+		at := out.Len()
+		RTGUint64(out, 0)
+		RTGUint64(out, 0)
+		writeBundleAt(out, at, template, slot0, slot1, slot2)
+		return at
+	}
+
+	func emitA(out *RTGEmitter, instruction uint64) {
+		emitBundle(out, 0x01, nopSlot, instruction, nopSlot)
+	}
+
+	func emitI(out *RTGEmitter, instruction uint64) {
+		emitBundle(out, 0x01, nopSlot, instruction, nopSlot)
+	}
+
+	func emitM(out *RTGEmitter, instruction uint64) {
+		emitBundle(out, 0x01, instruction, nopSlot, nopSlot)
+	}
+
+	func emitB(out *RTGEmitter, instruction uint64) int {
+		return emitBundle(out, 0x11, nopSlot, nopSlot, instruction)
+	}
+
+	func aOperands(destination RTGRegister, left RTGRegister, right RTGRegister) uint64 {
+		return uint64(destination.Code<<6 | left.Code<<13 | right.Code<<20)
+	}
+
+	func encodeAdds(
+		out *RTGEmitter, destination RTGRegister, immediate int, source RTGRegister,
+	) {
+		value := uint64(immediate) & 0x3fff
+		instruction := uint64(8)<<37 | uint64(2)<<34 |
+			uint64(destination.Code<<6) | uint64(source.Code<<20)
+		instruction |= (value & 0x7f) << 13
+		instruction |= ((value >> 7) & 0x3f) << 27
+		instruction |= ((value >> 13) & 1) << 36
+		emitA(out, instruction)
+	}
+
+	func movlInstruction(destination RTGRegister, value uint64) (uint64, uint64) {
+		extension := (value >> 22) & ((uint64(1) << 41) - 1)
+		instruction := uint64(6)<<37 | uint64(destination.Code<<6)
+		instruction |= (value & 0x7f) << 13
+		instruction |= ((value >> 7) & 0x1ff) << 27
+		instruction |= ((value >> 16) & 0x1f) << 22
+		instruction |= ((value >> 21) & 1) << 21
+		instruction |= ((value >> 63) & 1) << 36
+		return extension, instruction
+	}
+
+	func emitMovl(out *RTGEmitter, destination RTGRegister, value uint64) int {
+		extension, instruction := movlInstruction(destination, value)
+		return emitBundle(out, 0x05, nopSlot, extension, instruction)
+	}
+
+	func patchMovl(out *RTGEmitter, at int, destination RTGRegister, value uint64) {
+		extension, instruction := movlInstruction(destination, value)
+		writeBundleAt(out, at, 0x05, nopSlot, extension, instruction)
+	}
+
+	func move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			encodeAdds(out, destination, 0, source)
+		}
+	}
+
+	func moveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		if value >= -8192 && value <= 8191 {
+			encodeAdds(out, destination, int(value), r0)
+			return
+		}
+		emitMovl(out, destination, uint64(value))
+	}
+
+	func addRegisters(
+		out *RTGEmitter, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		emitA(out, uint64(8)<<37|aOperands(destination, left, right))
+	}
+
+	func subtractRegisters(
+		out *RTGEmitter, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		emitA(out, uint64(8)<<37|uint64(1)<<29|uint64(1)<<27|
+			aOperands(destination, left, right))
+	}
+
+	func andRegisters(
+		out *RTGEmitter, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		emitA(out, uint64(8)<<37|uint64(3)<<29|
+			aOperands(destination, left, right))
+	}
+
+	func orRegisters(
+		out *RTGEmitter, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		emitA(out, uint64(8)<<37|uint64(3)<<29|uint64(2)<<27|
+			aOperands(destination, left, right))
+	}
+
+	func xorRegisters(
+		out *RTGEmitter, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		emitA(out, uint64(8)<<37|uint64(3)<<29|uint64(3)<<27|
+			aOperands(destination, left, right))
+	}
+
+	func add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		addRegisters(out, destination, destination, source)
+	}
+
+	func subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		subtractRegisters(out, destination, destination, source)
+	}
+
+	func bitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		andRegisters(out, destination, destination, source)
+	}
+
+	func bitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		orRegisters(out, destination, destination, source)
+	}
+
+	func bitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xorRegisters(out, destination, destination, source)
+	}
+
+	func variableShiftRegisters(
+		out *RTGEmitter, destination RTGRegister, value RTGRegister,
+		count RTGRegister, right bool, signed bool,
+	) {
+		instruction := uint64(7)<<37 | uint64(1)<<36 | uint64(1)<<33 |
+			uint64(destination.Code<<6)
+		if right {
+			instruction |= uint64(count.Code<<13 | value.Code<<20)
+			if signed {
+				instruction |= uint64(2) << 28
+			}
+		} else {
+			instruction |= uint64(1)<<30 |
+				uint64(value.Code<<13|count.Code<<20)
+		}
+		emitI(out, instruction)
+	}
+
+	func shiftImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte, right bool, signed bool,
+	) {
+		moveImmediate(out, r22, int64(value&63))
+		variableShiftRegisters(out, operand, operand, r22, right, signed)
+	}
+
+	func shiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, false, false)
+	}
+
+	func shiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, true, false)
+	}
+
+	func shiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shiftImmediate(out, operand, value, true, true)
+	}
+
+	func addImmediate(out *RTGEmitter, destination RTGRegister, immediate int) {
+		if immediate >= -8192 && immediate <= 8191 {
+			encodeAdds(out, destination, immediate, destination)
+			return
+		}
+		moveImmediate(out, r22, int64(immediate))
+		addRegisters(out, destination, destination, r22)
+	}
+
+	func emitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := emitMovl(out, destination, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		if value.Base.Valid {
+			move(out, destination, value.Base)
+		} else {
+			moveImmediate(out, destination, 0)
+		}
+		if value.Index.Valid {
+			index := r31
+			if destination.Code == r31.Code {
+				index = r29
+			}
+			move(out, index, value.Index)
+			if value.Scale > 1 {
+				shiftLeftImmediate(out, index, byte(RTGLog2(value.Scale)))
+			}
+			addRegisters(out, destination, destination, index)
+		}
+		addImmediate(out, destination, value.Displacement)
+	}
+
+	func loadWidth(
+		out *RTGEmitter, destination RTGRegister, value RTGAddress,
+		width int, signed bool,
+	) {
+		emitAddress(out, r30, value)
+		instruction := uint64(4)<<37 | uint64(width)<<30 |
+			uint64(destination.Code<<6|r30.Code<<20)
+		emitM(out, instruction)
+		if signed && width < 3 {
+			x6 := 0x14 + width
+			emitI(out, uint64(x6)<<27|
+				uint64(destination.Code<<6|destination.Code<<20))
+		}
+	}
+
+	func storeWidth(
+		out *RTGEmitter, value RTGAddress, source RTGRegister, width int,
+	) {
+		emitAddress(out, r30, value)
+		instruction := uint64(4)<<37 | uint64(0x30+width)<<30 |
+			uint64(source.Code<<13|r30.Code<<20)
+		emitM(out, instruction)
+	}
+
+	func loadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 3, false)
+	}
+	func loadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 2, true)
+	}
+	func loadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 2, false)
+	}
+	func loadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 1, true)
+	}
+	func loadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 1, false)
+	}
+	func loadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0, true)
+	}
+	func loadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		loadWidth(out, destination, value, 0, false)
+	}
+	func storeNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 3)
+	}
+	func storeU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 2)
+	}
+	func storeU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 1)
+	}
+	func storeU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		storeWidth(out, value, source, 0)
+	}
+
+	func predicateCompare(
+		out *RTGEmitter, condition RTGCondition,
+		left RTGRegister, right RTGRegister,
+	) {
+		code := condition.Code
+		major := 14
+		truePredicate := 6
+		falsePredicate := 7
+		if code == 1 || code == 2 || code == 5 || code == 7 || code == 8 {
+			truePredicate = 7
+			falsePredicate = 6
+		}
+		if code == 2 || code == 3 || code == 8 || code == 9 {
+			temporary := left
+			left = right
+			right = temporary
+		}
+		if code >= 2 && code <= 5 {
+			major = 12
+		} else if code >= 6 {
+			major = 13
+		}
+		instruction := uint64(major)<<37 |
+			uint64(truePredicate<<6|falsePredicate<<27) |
+			uint64(left.Code<<13|right.Code<<20)
+		emitA(out, instruction)
+	}
+
+	func compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		move(out, r16, left)
+		move(out, r17, right)
+	}
+
+	func test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		andRegisters(out, r16, left, right)
+		moveImmediate(out, r17, 0)
+	}
+
+	func directBranch(out *RTGEmitter, base uint64, predicate int, label RTGLabel) {
+		at := emitB(out, base|uint64(predicate))
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+
+	func jump(out *RTGEmitter, label RTGLabel) {
+		directBranch(out, uint64(4)<<37|uint64(1)<<12, 0, label)
+	}
+
+	func jumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		predicateCompare(out, condition, r16, r17)
+		directBranch(out, uint64(4)<<37|uint64(1)<<12, 6, label)
+	}
+
+	func branchRegisters(
+		out *RTGEmitter, condition RTGCondition,
+		left RTGRegister, right RTGRegister, label RTGLabel,
+	) {
+		predicateCompare(out, condition, left, right)
+		directBranch(out, uint64(4)<<37|uint64(1)<<12, 6, label)
+	}
+
+	func setCondition(
+		out *RTGEmitter, condition RTGCondition, destination RTGRegister,
+	) {
+		predicateCompare(out, condition, r16, r17)
+		moveImmediate(out, destination, 0)
+		instruction := uint64(8)<<37 | uint64(2)<<34 |
+			uint64(destination.Code<<6) | uint64(1)<<13 | uint64(6)
+		emitA(out, instruction)
+	}
+
+	func call(out *RTGEmitter, label RTGLabel) {
+		directBranch(out, uint64(5)<<37|uint64(1)<<12, 0, label)
+	}
+
+	func callIndirect(out *RTGEmitter, operand RTGRegister) {
+		// Internal Renvo function values are raw bundle addresses, not the
+		// function descriptors used by the platform C ABI.
+		emitI(out, uint64(7)<<33|uint64(1)<<20|
+			uint64(6)<<6|uint64(operand.Code<<13))
+		emitB(out, uint64(1)<<37|uint64(1)<<32|uint64(1)<<12|uint64(6)<<13)
+	}
+
+	func ret(out *RTGEmitter) {
+		emitB(out, uint64(0x21)<<27|uint64(4)<<6|uint64(1)<<12)
+	}
+
+	func increment(out *RTGEmitter, operand RTGRegister) {
+		encodeAdds(out, operand, 1, operand)
+	}
+
+	func decrement(out *RTGEmitter, operand RTGRegister) {
+		encodeAdds(out, operand, -1, operand)
+	}
+
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		variableShiftRegisters(out, r8, r10, r8, direction == RTGShiftRight, signed)
+	}
+
+	func multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		move(out, r24, destination)
+		move(out, r25, source)
+		moveImmediate(out, destination, 0)
+		moveImmediate(out, r31, 1)
+		loop := out.NewLabel()
+		skip := out.NewLabel()
+		done := out.NewLabel()
+		out.Mark(loop)
+		branchRegisters(out, eq, r24, r0, done)
+		andRegisters(out, r26, r24, r31)
+		branchRegisters(out, eq, r26, r0, skip)
+		addRegisters(out, destination, destination, r25)
+		out.Mark(skip)
+		shiftLeftImmediate(out, r25, 1)
+		shiftRightUnsignedImmediate(out, r24, 1)
+		jump(out, loop)
+		out.Mark(done)
+	}
+
+	func unsignedDivideCore(out *RTGEmitter) {
+		divideByZero := out.NewLabel()
+		loop := out.NewLabel()
+		noSubtract := out.NewLabel()
+		done := out.NewLabel()
+		branchRegisters(out, eq, r24, r0, divideByZero)
+		moveImmediate(out, r26, 0)
+		moveImmediate(out, r27, 0)
+		moveImmediate(out, r28, 64)
+		out.Mark(loop)
+		shiftLeftImmediate(out, r27, 1)
+		move(out, r31, r25)
+		shiftRightUnsignedImmediate(out, r31, 63)
+		orRegisters(out, r27, r27, r31)
+		shiftLeftImmediate(out, r25, 1)
+		shiftLeftImmediate(out, r26, 1)
+		branchRegisters(out, ult, r27, r24, noSubtract)
+		subtractRegisters(out, r27, r27, r24)
+		increment(out, r26)
+		out.Mark(noSubtract)
+		decrement(out, r28)
+		branchRegisters(out, ne, r28, r0, loop)
+		jump(out, done)
+		out.Mark(divideByZero)
+		moveImmediate(out, r26, -1)
+		move(out, r27, r25)
+		out.Mark(done)
+	}
+
+	func signedDivide(out *RTGEmitter, remainder bool) {
+		dividendPositive := out.NewLabel()
+		divisorPositive := out.NewLabel()
+		positiveResult := out.NewLabel()
+		done := out.NewLabel()
+		move(out, r24, r8)
+		move(out, r25, r10)
+		moveImmediate(out, r29, 0)
+		moveImmediate(out, r30, 0)
+		branchRegisters(out, sge, r25, r0, dividendPositive)
+		moveImmediate(out, r29, 1)
+		moveImmediate(out, r30, 1)
+		subtractRegisters(out, r25, r0, r25)
+		out.Mark(dividendPositive)
+		branchRegisters(out, sge, r24, r0, divisorPositive)
+		moveImmediate(out, r31, 1)
+		xorRegisters(out, r29, r29, r31)
+		subtractRegisters(out, r24, r0, r24)
+		out.Mark(divisorPositive)
+		unsignedDivideCore(out)
+		if remainder {
+			move(out, r8, r27)
+			branchRegisters(out, eq, r30, r0, positiveResult)
+		} else {
+			move(out, r8, r26)
+			branchRegisters(out, eq, r29, r0, positiveResult)
+		}
+		subtractRegisters(out, r8, r0, r8)
+		out.Mark(positiveResult)
+		jump(out, done)
+		out.Mark(done)
+	}
+
+	func unsignedDivide(out *RTGEmitter, remainder bool) bool {
+		move(out, r24, r8)
+		move(out, r25, r10)
+		unsignedDivideCore(out)
+		if remainder {
+			move(out, r8, r27)
+		} else {
+			move(out, r8, r26)
+		}
+		return true
+	}
+
+	func copyBytes(out *RTGEmitter) {
+		forward := out.NewLabel()
+		backwardLoop := out.NewLabel()
+		forwardLoop := out.NewLabel()
+		done := out.NewLabel()
+		branchRegisters(out, ult, r18, r19, forward)
+		emitAddress(out, r31, RTGAddress{Base: r19, Index: r20, Scale: 1})
+		branchRegisters(out, uge, r18, r31, forward)
+		emitAddress(out, r19, RTGAddress{Base: r19, Index: r20, Scale: 1, Displacement: -1})
+		emitAddress(out, r18, RTGAddress{Base: r18, Index: r20, Scale: 1, Displacement: -1})
+		out.Mark(backwardLoop)
+		branchRegisters(out, eq, r20, r0, done)
+		loadU8(out, r11, RTGAddress{Base: r19})
+		storeU8(out, RTGAddress{Base: r18}, r11)
+		decrement(out, r19)
+		decrement(out, r18)
+		decrement(out, r20)
+		jump(out, backwardLoop)
+		out.Mark(forward)
+		out.Mark(forwardLoop)
+		branchRegisters(out, eq, r20, r0, done)
+		loadU8(out, r11, RTGAddress{Base: r19})
+		storeU8(out, RTGAddress{Base: r18}, r11)
+		increment(out, r19)
+		increment(out, r18)
+		decrement(out, r20)
+		jump(out, forwardLoop)
+		out.Mark(done)
+	}
+
+	func emitAlloc(out *RTGEmitter, destination RTGRegister) {
+		instruction := uint64(1)<<37 | uint64(6)<<33 |
+			uint64(destination.Code<<6) | uint64(8)<<13
+		emitM(out, instruction)
+	}
+
+	func moveFromB0(out *RTGEmitter, destination RTGRegister) {
+		emitI(out, uint64(0x31)<<27|uint64(destination.Code<<6))
+	}
+
+	func moveToB0(out *RTGEmitter, source RTGRegister) {
+		emitI(out, uint64(7)<<33|uint64(1)<<20|uint64(source.Code<<13))
+	}
+
+	func restorePFS(out *RTGEmitter, source RTGRegister) {
+		emitI(out, uint64(0x2a)<<27|uint64(64)<<20|uint64(source.Code<<13))
+	}
+
+	func frameStart(out *RTGEmitter) int {
+		// r4 is preserved by both the platform calling convention and Linux
+		// syscalls. Scratch registers such as r21 cannot hold a live frame
+		// pointer across break 0x100000.
+		emitAlloc(out, r23)
+		move(out, r24, r4)
+		moveFromB0(out, r25)
+		addImmediate(out, r12, -32)
+		move(out, r4, r12)
+		storeNative(out, RTGAddress{Base: r4}, r24)
+		storeNative(out, RTGAddress{Base: r4, Displacement: 8}, r25)
+		storeNative(out, RTGAddress{Base: r4, Displacement: 16}, r23)
+		at := emitMovl(out, r26, 0)
+		subtractRegisters(out, r12, r12, r26)
+		return at
+	}
+
+	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := RTGAlignValue(stackUsed+8, 16)
+		patchMovl(out, at, r26, uint64(frameSize))
+	}
+
+	func frameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		loadNative(out, destination,
+			RTGAddress{Base: r4, Displacement: -(offset + 8)})
+	}
+
+	func frameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		storeNative(out,
+			RTGAddress{Base: r4, Displacement: -(offset + 8)}, source)
+	}
+
+	func frameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		emitAddress(out, destination,
+			RTGAddress{Base: r4, Displacement: -(offset + 8)})
+	}
+
+	func leave(out *RTGEmitter) {
+		move(out, r12, r4)
+		loadNative(out, r24, RTGAddress{Base: r4})
+		loadNative(out, r25, RTGAddress{Base: r4, Displacement: 8})
+		loadNative(out, r23, RTGAddress{Base: r4, Displacement: 16})
+		addImmediate(out, r12, 32)
+		moveToB0(out, r25)
+		restorePFS(out, r23)
+		move(out, r4, r24)
+	}
+
+	func pushRegister(out *RTGEmitter, source RTGRegister) {
+		addImmediate(out, r12, -16)
+		storeNative(out, RTGAddress{Base: r12}, source)
+	}
+
+	func pushImmediate(out *RTGEmitter, value int) {
+		moveImmediate(out, r31, int64(value))
+		pushRegister(out, r31)
+	}
+
+	func popRegister(out *RTGEmitter, destination RTGRegister) {
+		loadNative(out, destination, RTGAddress{Base: r12})
+		addImmediate(out, r12, 16)
+	}
+
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{r8, r9, r10, r11, r14, r16}
+		if word >= 0 && word < len(registers) {
+			frameStore(out, offset, registers[word])
+			return
+		}
+		loadNative(out, r31, RTGAddress{
+			Base: r4, Displacement: 32 + (word-len(registers))*16,
+		})
+		frameStore(out, offset, r31)
+	}
+
+	func callWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		registers := []RTGRegister{r8, r9, r10, r11, r14, r16}
+		limit := wordCount
+		if limit > len(registers) {
+			limit = len(registers)
+		}
+		for i := 0; i < limit; i++ {
+			popRegister(out, registers[i])
+		}
+		call(out, label)
+		if wordCount > len(registers) {
+			addImmediate(out, r12, (wordCount-len(registers))*16)
+		}
+	}
+
+	func hostSyscall(out *RTGEmitter) {
+		// Linux/IA-64 uses break 0x100000. r10 is zero on success and -1 on
+		// failure; turn the positive errno in r8 into Renvo's negative form.
+		emitI(out, uint64(1)<<36)
+		done := out.NewLabel()
+		branchRegisters(out, eq, r10, r0, done)
+		subtractRegisters(out, r8, r0, r8)
+		out.Mark(done)
+	}
+
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		// Linux leaves a 16-byte scratch area below argc. Preserve that initial
+		// stack pointer before runtime initialization begins using the stack.
+		storeNative(out, RTGBSSAddress(stateOffset), r12)
+		// The kernel supplies at least four stacked output registers. Allocate a
+		// fresh frame with all six syscall argument registers before any runtime
+		// initialization can issue a syscall.
+		emitAlloc(out, r23)
+		return true
+	}
+
+	func entry(out *RTGEmitter, parameterCount int, stateOffset int) bool {
+		if parameterCount < 0 || parameterCount > 2 {
+			return false
+		}
+		if parameterCount == 0 {
+			return true
+		}
+
+		// Materialize bounded compact-unit []string descriptors. The pointed-to
+		// strings remain in Linux's initial stack for the process lifetime.
+		argsOffset := out.ReserveBSS(2048*16, 16)
+		environmentOffset := -1
+		if parameterCount == 2 {
+			environmentOffset = out.ReserveBSS(2048*16, 16)
+		}
+
+		loadNative(out, r24, RTGBSSAddress(stateOffset))
+		loadNative(out, r25, RTGAddress{Base: r24, Displacement: 16})
+		// envp follows argc, argv[argc], and argv's terminating null pointer.
+		emitAddress(out, r28, RTGAddress{
+			Base: r24, Index: r25, Scale: 8, Displacement: 32,
+		})
+		addImmediate(out, r24, 24)
+		moveImmediate(out, r31, 2048)
+		argcReady := out.NewLabel()
+		branchRegisters(out, ule, r25, r31, argcReady)
+		move(out, r25, r31)
+		out.Mark(argcReady)
+		emitAddress(out, r26, RTGBSSAddress(argsOffset))
+		move(out, r27, r25)
+
+		argsLoop := out.NewLabel()
+		argsDone := out.NewLabel()
+		out.Mark(argsLoop)
+		branchRegisters(out, eq, r27, r0, argsDone)
+		loadNative(out, r29, RTGAddress{Base: r24})
+		storeNative(out, RTGAddress{Base: r26}, r29)
+		moveImmediate(out, r31, 0)
+		argumentScan := out.NewLabel()
+		argumentScanDone := out.NewLabel()
+		out.Mark(argumentScan)
+		loadU8(out, r11, RTGAddress{Base: r29})
+		branchRegisters(out, eq, r11, r0, argumentScanDone)
+		increment(out, r29)
+		increment(out, r31)
+		jump(out, argumentScan)
+		out.Mark(argumentScanDone)
+		storeNative(out, RTGAddress{Base: r26, Displacement: 8}, r31)
+		addImmediate(out, r24, 8)
+		addImmediate(out, r26, 16)
+		decrement(out, r27)
+		jump(out, argsLoop)
+		out.Mark(argsDone)
+		emitAddress(out, r8, RTGBSSAddress(argsOffset))
+		move(out, r9, r25)
+		move(out, r10, r25)
+		if parameterCount == 1 {
+			return true
+		}
+
+		move(out, r24, r28)
+		emitAddress(out, r26, RTGBSSAddress(environmentOffset))
+		moveImmediate(out, r25, 0)
+		moveImmediate(out, r31, 2048)
+		environmentLoop := out.NewLabel()
+		environmentDone := out.NewLabel()
+		out.Mark(environmentLoop)
+		branchRegisters(out, uge, r25, r31, environmentDone)
+		loadNative(out, r29, RTGAddress{Base: r24})
+		branchRegisters(out, eq, r29, r0, environmentDone)
+		storeNative(out, RTGAddress{Base: r26}, r29)
+		moveImmediate(out, r27, 0)
+		environmentScan := out.NewLabel()
+		environmentScanDone := out.NewLabel()
+		out.Mark(environmentScan)
+		loadU8(out, r11, RTGAddress{Base: r29})
+		branchRegisters(out, eq, r11, r0, environmentScanDone)
+		increment(out, r29)
+		increment(out, r27)
+		jump(out, environmentScan)
+		out.Mark(environmentScanDone)
+		storeNative(out, RTGAddress{Base: r26, Displacement: 8}, r27)
+		addImmediate(out, r24, 8)
+		addImmediate(out, r26, 16)
+		increment(out, r25)
+		jump(out, environmentLoop)
+		out.Mark(environmentDone)
+		emitAddress(out, r11, RTGBSSAddress(environmentOffset))
+		move(out, r14, r25)
+		move(out, r16, r25)
+		return true
+	}
+
+	func patchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := out.LabelPosition(out.RelocationLabel(index))
+			delta := target - at
+			if delta&15 != 0 || delta < -(1<<24) || delta >= 1<<24 {
+				panic("IA-64 branch target is unaligned or out of range")
+			}
+			value := delta >> 4
+			hi := get64(out.Code(), at+8)
+			slot := (hi >> 23) & ((uint64(1) << 41) - 1)
+			slot &= ^((uint64(0xfffff) << 13) | (uint64(1) << 36))
+			slot |= uint64(value&0xfffff) << 13
+			slot |= uint64((value>>20)&1) << 36
+			hi = (nopSlot >> 18) | (slot << 23)
+			put64(out, at+8, hi)
+		}
+	}
+
+	func patchAbsolute(
+		out *RTGEmitter, codeOffset int, dataOffset int, bssOffset int,
+	) {
+		_ = codeOffset
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(index),
+				out.AbsoluteRelocationAddend(index), dataOffset, bssOffset)
+			if resolved {
+				instruction := (get64(out.Code(), at+8) >> 23) &
+					((uint64(1) << 41) - 1)
+				destination := RTGRegister{Code: int((instruction >> 6) & 127), Valid: true}
+				patchMovl(out, at, destination, uint64(target))
+			}
+		}
+	}
+
+	func append16(data []byte, value int) []byte {
+		return append(data, byte(value), byte(value>>8))
+	}
+
+	func append32(data []byte, value int) []byte {
+		return append(data, byte(value), byte(value>>8), byte(value>>16), byte(value>>24))
+	}
+
+	func append64(data []byte, value int) []byte {
+		data = append32(data, value)
+		return append32(data, value>>32)
+	}
+
+	func appendProgramHeader(
+		data []byte, flags int, offset int, address int,
+		fileSize int, memorySize int,
+	) []byte {
+		data = append32(data, 1)
+		data = append32(data, flags)
+		data = append64(data, offset)
+		data = append64(data, address)
+		data = append64(data, address)
+		data = append64(data, fileSize)
+		data = append64(data, memorySize)
+		return append64(data, 0x10000)
+	}
+
+	func image(out *RTGEmitter) []byte {
+		const textBase = 0x4000000000000000
+		const dataBase = 0x6000000000000000
+		const codeOffset = 176
+		dataOffset := codeOffset + len(out.Code())
+		fileSize := dataOffset + len(out.Data())
+		bssOffset := RTGAlignValue(fileSize, 0x10000)
+		patchAbsolute(out, codeOffset, textBase+dataOffset, dataBase+bssOffset)
+
+		result := make([]byte, 0, fileSize)
+		result = append(result,
+			0x7f, 'E', 'L', 'F', 2, 1, 1, 0,
+			0, 0, 0, 0, 0, 0, 0, 0)
+		result = append16(result, 2)
+		result = append16(result, 50)
+		result = append32(result, 1)
+		result = append64(result, textBase+codeOffset)
+		result = append64(result, 64)
+		result = append64(result, 0)
+		result = append32(result, 0x10)
+		result = append16(result, 64)
+		result = append16(result, 56)
+		result = append16(result, 2)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = append16(result, 0)
+		result = appendProgramHeader(result, 5, 0, textBase, fileSize, fileSize)
+		result = appendProgramHeader(result, 6, bssOffset,
+			dataBase+bssOffset, 0, out.BSSSize())
+		result = append(result, out.Code()...)
+		result = append(result, out.Data()...)
+		return result
+	}
+}
+
+arch ia64 {
+	alias = "ia64"
+	endian = little
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 16
+	stack_word_bytes = 16
+	stack_alignment = 16
+	unaligned_memory = false
+	patch_relocations = go patchRelocations
+
+	registers integer = [
+		r0, r1, r2, r3, r4, r5, r6, r7,
+		r8, r9, r10, r11, r12, r13, r14, r15,
+		r16, r17, r18, r19, r20, r21, r22, r23,
+		r24, r25, r26, r27, r28, r29, r30, r31,
+		r32, r33, r34, r35, r36, r37
+	]
+	locations {
+		primary = r8
+		secondary = r9
+		tertiary = r10
+		scratch = r11
+		address = r14
+		compareLeft = r16
+		compareRight = r17
+		copy_destination = r18
+		copy_source = r19
+		copy_count = r20
+		stack = r12
+		frame = r4
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go move
+		address = go emitAddress
+		load.native = go loadNative
+		load.i32 = go loadI32
+		load.u32 = go loadU32
+		load.i16 = go loadI16
+		load.u16 = go loadU16
+		load.i8 = go loadI8
+		load.u8 = go loadU8
+		store.native = go storeNative
+		store.u32 = go storeU32
+		store.u16 = go storeU16
+		store.u8 = go storeU8
+		add = go add
+		subtract = go subtract
+		multiply = go multiply
+		bit_and = go bitAnd
+		bit_or = go bitOr
+		bit_xor = go bitXor
+		compare = go compare
+		test = go test
+		increment = go increment
+		decrement = go decrement
+		shift_left_immediate = go shiftLeftImmediate
+		shift_right_unsigned_immediate = go shiftRightUnsignedImmediate
+		shift_right_signed_immediate = go shiftRightSignedImmediate
+		call = go call
+		call_indirect = go callIndirect
+		jump = go jump
+		jump_condition = go jumpCondition
+		set_condition = go setCondition
+		return = go ret
+		leave = go leave
+		host_syscall = go hostSyscall
+		move_immediate = go moveImmediate
+		variable_shift = go variableShift
+		signed_divide = go signedDivide
+		copy_bytes = go copyBytes
+	}
+}
+
+abi renvo_ia64 {
+	arch = ia64
+	frame_start = go frameStart
+	frame_finish = go frameFinish
+	push_register = go pushRegister
+	push_immediate = go pushImmediate
+	pop_register = go popRegister
+	frame_load = go frameLoad
+	frame_store = go frameStore
+	frame_address = go frameAddress
+	store_param_word = go storeParamWord
+	call_word_count = go callWordCount
+	unsigned_divide = go unsignedDivide
+	call_words = [r8, r9, r10, r11, r14, r16]
+	overflow_stride = 16
+	scalar_result = r8
+	string_result = [r8, r9]
+	slice_result = [r8, r9, r10]
+	stack_alignment = 16
+}
+
+runtime linux_ia64 {
+	entry_state_bytes = 8
+	emit_entry_start = go entryStart
+	emit_entry = go entry
+	syscall {
+		number = r15
+		arguments = [r32, r33, r34, r35, r36, r37]
+		result = r8
+		instruction = host_syscall
+	}
+	operation read { number = 1026 args = [fd, buffer, count] }
+	operation write { number = 1027 args = [fd, buffer, count] }
+	operation open { number = 1028 args = [path, flags, mode] }
+	operation close { number = 1029 args = [fd] }
+	operation chmod { number = 1099 args = [fd, mode] }
+	operation read_at { number = 1148 args = [fd, buffer, count, offset] }
+	operation write_at { number = 1149 args = [fd, buffer, count, offset] }
+	operation print { use = write args = [stdout, buffer, count] }
+	operation exit { number = 1025 args = [status] noreturn = true }
+}
+
+format elf64_ia64 {
+	kind = elf
+	byte_order = little
+	address_bits = 64
+	machine = 50
+	flags = 0x10
+	code_offset = 176
+	file_alignment = 0x10000
+	image = go image
+	patch_absolute = go patchAbsolute
+}
+
+target experimental/linux-ia64 {
+	family = native_v1
+	os = linux
+	arch = ia64
+	abi = renvo_ia64
+	runtime = linux_ia64
+	executable = elf64_ia64
+	max_align = 16
+	arena_default = 65536
+	build_tags = [linux, unix, ia64]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+}
