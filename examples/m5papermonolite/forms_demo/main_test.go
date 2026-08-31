@@ -141,3 +141,89 @@ func TestShowcasePaintsDirectlyIntoRotatedMonochromeFrame(t *testing.T) {
 		t.Fatalf("monochrome paint bytes black=%d white=%d", black, white)
 	}
 }
+
+func touch(demo *showcase, x, y int) {
+	demo.samplePointer(x, y, true)
+	demo.dispatchCaptured()
+	demo.samplePointer(x, y, false)
+	demo.dispatchCaptured()
+}
+
+func TestTouchBridgeRoutesTapsAndDragsToFormsControls(t *testing.T) {
+	font := fontcache.TitleSubset(fontcache.PaperMonoFormsGlyphs)
+	if font == nil {
+		t.Fatal("cached font failed to load")
+	}
+
+	var inputs showcase
+	inputs.initialize(font, font, pageInputs)
+	touch(&inputs, 80, 378)
+	if inputs.check.Checked() {
+		t.Fatal("touch did not toggle the checkbox")
+	}
+	touch(&inputs, 200, 504)
+	if inputs.progress.Value() != 45 {
+		t.Fatalf("button touch set progress to %d, want 45", inputs.progress.Value())
+	}
+	touch(&inputs, 300, 112)
+	if inputs.requestedPage != pageMotion {
+		t.Fatalf("tab touch requested page %d, want %d", inputs.requestedPage, pageMotion)
+	}
+
+	var lists showcase
+	lists.initialize(font, font, pageLists)
+	touch(&lists, 80, 266)
+	if lists.list.SelectedIndex() != 1 {
+		t.Fatalf("list touch selected row %d, want 1", lists.list.SelectedIndex())
+	}
+
+	var motion showcase
+	motion.initialize(font, font, pageMotion)
+	motion.samplePointer(180, 212, true)
+	motion.dispatchCaptured()
+	if !motion.touchActive() {
+		t.Fatal("touch bridge did not retain the active drag")
+	}
+	motion.samplePointer(410, 212, true)
+	motion.dispatchCaptured()
+	motion.samplePointer(410, 212, false)
+	motion.dispatchCaptured()
+	if motion.slider.Value() < 80 {
+		t.Fatalf("slider drag produced %d, want at least 80", motion.slider.Value())
+	}
+	beforeStep := motion.number.Value()
+	touch(&motion, 450, 294)
+	if motion.number.Value() != beforeStep+5 || motion.slider.Value() != motion.number.Value() {
+		t.Fatalf("stepper touch produced number=%d slider=%d from %d", motion.number.Value(), motion.slider.Value(), beforeStep)
+	}
+	motion.samplePointer(238, 500, true)
+	motion.dispatchCaptured()
+	motion.samplePointer(310, 500, true)
+	motion.dispatchCaptured()
+	motion.samplePointer(310, 500, false)
+	motion.dispatchCaptured()
+	if motion.split.SplitterDistance() < 280 {
+		t.Fatalf("splitter drag produced distance %d, want at least 280", motion.split.SplitterDistance())
+	}
+	if motion.dispatchedDown || motion.eventCount != 0 {
+		t.Fatal("touch bridge retained a pressed or queued event after release")
+	}
+}
+
+func TestTouchQueuePreservesReleaseWhenMoveSamplesOverflow(t *testing.T) {
+	font := fontcache.TitleSubset(fontcache.PaperMonoFormsGlyphs)
+	var demo showcase
+	demo.initialize(font, font, pageMotion)
+	demo.samplePointer(40, 212, true)
+	for x := 41; x < 200; x++ {
+		demo.samplePointer(x, 212, true)
+	}
+	demo.samplePointer(200, 212, false)
+	if demo.eventCount != maximumQueuedPointers {
+		t.Fatalf("queued events = %d, want %d", demo.eventCount, maximumQueuedPointers)
+	}
+	demo.dispatchCaptured()
+	if demo.dispatchedDown || demo.sampledPressed || demo.eventCount != 0 {
+		t.Fatal("overflowed touch queue lost its final release")
+	}
+}

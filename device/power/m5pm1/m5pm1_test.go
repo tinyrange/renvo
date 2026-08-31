@@ -14,6 +14,11 @@ type transaction struct {
 type fakeBus struct {
 	transactions []transaction
 	index        int
+	delays       []uint32
+}
+
+func (b *fakeBus) DelayMilliseconds(milliseconds uint32) {
+	b.delays = append(b.delays, milliseconds)
 }
 
 func (b *fakeBus) Tx(address uint16, write, read []byte) error {
@@ -45,13 +50,22 @@ func sameBytes(left, right []byte) bool {
 }
 
 func TestIdentifyIsReadOnlyAndValidatesExactID(t *testing.T) {
-	bus := &fakeBus{transactions: []transaction{{write: []byte{0x00}, read: []byte{0x50, 0x20}}}}
+	bus := &fakeBus{transactions: []transaction{
+		{err: errors.New("sleeping")},
+		{write: []byte{0x00}, read: []byte{0x50, 0x20}},
+	}}
 	id, err := New(bus).Identify()
-	if err != nil || id != 0x2050 || bus.index != 1 {
+	if err != nil || id != 0x2050 || bus.index != 2 {
 		t.Fatalf("Identify() = %#x, %v after %d transactions", id, err, bus.index)
 	}
+	if len(bus.delays) != 1 || bus.delays[0] != 10 {
+		t.Fatalf("wake delays = %v, want [10]", bus.delays)
+	}
 
-	bus = &fakeBus{transactions: []transaction{{write: []byte{0x00}, read: []byte{0x50, 0x21}}}}
+	bus = &fakeBus{transactions: []transaction{
+		{},
+		{write: []byte{0x00}, read: []byte{0x50, 0x21}},
+	}}
 	id, err = New(bus).Identify()
 	if id != 0x2150 || err != ErrDeviceID {
 		t.Fatalf("wrong Identify() = %#x, %v", id, err)
@@ -60,15 +74,36 @@ func TestIdentifyIsReadOnlyAndValidatesExactID(t *testing.T) {
 
 func TestInitializeMakesOnlyCommunicationSafetyWrites(t *testing.T) {
 	bus := &fakeBus{transactions: []transaction{
+		{},
 		{write: []byte{0x00}, read: []byte{0x50, 0x20}},
 		{write: []byte{0x09, 0x00}},
 		{write: []byte{0x0a, 0x00}},
 	}}
-	if err := New(bus).Initialize(); err != nil {
+	device := New(bus)
+	if err := device.Initialize(); err != nil {
 		t.Fatal(err)
 	}
 	if bus.index != len(bus.transactions) {
 		t.Fatalf("performed %d transactions, want %d", bus.index, len(bus.transactions))
+	}
+}
+
+func TestIdentifyAlwaysPerformsWakeHandshake(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{},
+		{write: []byte{0x00}, read: []byte{0x50, 0x20}},
+		{},
+		{write: []byte{0x00}, read: []byte{0x50, 0x20}},
+	}}
+	device := New(bus)
+	if _, err := device.Identify(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := device.Identify(); err != nil {
+		t.Fatal(err)
+	}
+	if bus.index != 4 || len(bus.delays) != 2 || bus.delays[0] != 10 || bus.delays[1] != 10 {
+		t.Fatalf("transactions = %d, delays = %v", bus.index, bus.delays)
 	}
 }
 

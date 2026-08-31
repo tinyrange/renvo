@@ -30,6 +30,7 @@ const (
 // Bus is the minimal I2C capability required by the controller.
 type Bus interface {
 	Tx(address uint16, write, read []byte) error
+	DelayMilliseconds(milliseconds uint32)
 }
 
 // Device is one M5PM1 attached to a bus.
@@ -66,9 +67,19 @@ func (d *Device) update(register, mask, value byte) error {
 	return d.write(register, current&^mask|value&mask)
 }
 
+func (d *Device) wake() {
+	// M5PM1 can sleep between I2C sessions. A START wakes it through SDA's
+	// falling edge, but the address phase is allowed to NAK while it wakes.
+	// Complete that throwaway transaction and give the controller its specified
+	// wake interval before attempting a register read.
+	_ = d.bus.Tx(Address, nil, nil)
+	d.bus.DelayMilliseconds(10)
+}
+
 // Identify reads and validates the fixed M5PM1 device ID without changing any
 // register. The returned ID is meaningful even when ErrDeviceID is returned.
 func (d *Device) Identify() (uint16, error) {
+	d.wake()
 	data := [2]byte{}
 	if err := d.bus.Tx(Address, []byte{registerDeviceID}, data[:]); err != nil {
 		return 0, err

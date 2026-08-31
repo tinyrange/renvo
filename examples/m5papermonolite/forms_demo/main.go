@@ -7,13 +7,13 @@ import (
 	"renvo.dev/forms"
 	"renvo.dev/internal/arena"
 	"renvo.dev/std/graphics"
-	"renvo.dev/std/strconv"
 )
 
 const (
 	screenWidth           = 480
 	screenHeight          = 800
 	maximumQueuedPointers = 64
+	frontLightIdle        = 192
 )
 
 const (
@@ -100,7 +100,12 @@ func setPageVisible(controls []*forms.Control, visible bool) {
 	}
 }
 
-func (demo *showcase) setStatus(text string) { demo.status.SetText(text) }
+func (demo *showcase) setStatus(text string) {
+	if demo.status.Text() == text {
+		return
+	}
+	demo.status.SetText(text)
+}
 
 func (demo *showcase) showSelectedPage() {
 	selected := demo.tabs.SelectedIndex()
@@ -192,8 +197,8 @@ func (demo *showcase) advanceProgress() {
 	demo.setStatus("Button advanced progress")
 }
 
-func (demo *showcase) comboChanged() { demo.setStatus("Combo: " + demo.combo.SelectedItem()) }
-func (demo *showcase) listChanged()  { demo.setStatus("List: " + demo.list.SelectedItem()) }
+func (demo *showcase) comboChanged() { demo.setStatus("Combo selection changed") }
+func (demo *showcase) listChanged()  { demo.setStatus("List selection changed") }
 
 func (demo *showcase) sliderChanged() {
 	if demo.syncing {
@@ -205,7 +210,7 @@ func (demo *showcase) sliderChanged() {
 	}
 	demo.number.SetValue(demo.slider.Value())
 	demo.syncing = false
-	demo.setStatus("Slider: " + strconv.Itoa(demo.slider.Value()))
+	demo.setStatus("Slider adjusted")
 }
 
 func (demo *showcase) numberChanged() {
@@ -218,7 +223,7 @@ func (demo *showcase) numberChanged() {
 		demo.progress.SetValue(demo.number.Value())
 	}
 	demo.syncing = false
-	demo.setStatus("Stepper: " + strconv.Itoa(demo.number.Value()))
+	demo.setStatus("Stepper adjusted")
 }
 
 func (demo *showcase) splitChanged() { demo.setStatus("Split divider moved") }
@@ -416,20 +421,16 @@ func (demo *showcase) initialize(bodyFont, titleFont *graphics.Font, page int) {
 	demo.showSelectedPage()
 }
 
-func (demo *showcase) capture() error {
-	point, pressed, err := board.Touch.Read()
-	if err != nil {
-		return err
-	}
+func (demo *showcase) samplePointer(x, y int, pressed bool) {
 	changed := pressed != demo.sampledPressed
-	if pressed && (point.X != demo.sampledX || point.Y != demo.sampledY) {
+	if pressed && (x != demo.sampledX || y != demo.sampledY) {
 		changed = true
 	}
 	if !changed {
-		return nil
+		return
 	}
 	if pressed {
-		demo.sampledX, demo.sampledY = point.X, point.Y
+		demo.sampledX, demo.sampledY = x, y
 	}
 	event := pointerEvent{x: demo.sampledX, y: demo.sampledY, pressed: pressed}
 	if demo.eventCount < len(demo.events) {
@@ -439,10 +440,22 @@ func (demo *showcase) capture() error {
 		demo.events[len(demo.events)-1] = event
 	}
 	demo.sampledPressed = pressed
+}
+
+func (demo *showcase) capture() error {
+	point, pressed, err := board.Touch.Read()
+	if err != nil {
+		return err
+	}
+	demo.samplePointer(point.X, point.Y, pressed)
 	return nil
 }
 
 func (demo *showcase) PollDuringRefresh() error { return demo.capture() }
+
+func (demo *showcase) touchActive() bool {
+	return demo.sampledPressed || demo.dispatchedDown
+}
 
 func (demo *showcase) dispatchCaptured() {
 	for index := 0; index < demo.eventCount; index++ {
@@ -486,9 +499,11 @@ func main() {
 		fail("RENVO PAPERMONO-LITE FORMS BOARD FAIL\n")
 	}
 	if err := board.Display.Enable(); err != nil {
-		fail("RENVO PAPERMONO-LITE FORMS POWER FAIL\n")
+		print("RENVO PAPERMONO-LITE FORMS POWER FAIL: ", err.Error(), "\n")
+		for {
+		}
 	}
-	if err := board.Power.SetFrontLight(192); err != nil {
+	if err := board.Power.SetFrontLight(frontLightIdle); err != nil {
 		fail("RENVO PAPERMONO-LITE FORMS FRONTLIGHT FAIL\n")
 	}
 	print("PAPERMONO FORMS FRONTLIGHT READY\n")
@@ -530,8 +545,16 @@ func main() {
 		}
 		demo.dispatchCaptured()
 		demo.rebuildRequestedPage()
+		// A short e-paper tap otherwise spends one refresh showing a transient
+		// pressed state and a second refresh showing the action. Keep collecting
+		// and dispatching touch samples while the finger is down, then paint the
+		// final state once on release. Drag controls still receive every move and
+		// retain their final value.
+		if demo.touchActive() {
+			board.Clock.DelayMilliseconds(1)
+			continue
+		}
 		if demo.form.Paint(surface) {
-			started := board.Clock.Milliseconds()
 			if demo.requestFull {
 				demo.requestFull = false
 				if err := board.Display.FullMonochrome(frame[:]); err != nil {
@@ -540,7 +563,6 @@ func main() {
 			} else if err := board.Display.FastMonochrome(frame[:], &demo); err != nil {
 				fail("RENVO PAPERMONO-LITE FORMS PRESENT FAIL\n")
 			}
-			print("PAPERMONO FORMS PRESENT MS=", board.Clock.Milliseconds()-started, "\n")
 			surface.ResetDirty()
 			demo.dispatchCaptured()
 			demo.rebuildRequestedPage()

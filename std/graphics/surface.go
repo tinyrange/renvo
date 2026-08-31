@@ -491,6 +491,11 @@ func (s *Surface) transformIsIdentity() bool {
 	return s.deviceScale == 1.0 && s.transformA == 1.0 && s.transformB == 0.0 && s.transformC == 0.0 && s.transformD == 1.0 && s.transformTX == 0.0 && s.transformTY == 0.0
 }
 
+func (s *Surface) transformIsPortraitQuarterTurn() bool {
+	return s.deviceScale == 1.0 && s.transformA == 0.0 && s.transformB == -1.0 &&
+		s.transformC == 1.0 && s.transformD == 0.0
+}
+
 func (s *Surface) transformPoint(p Point) Point {
 	s.transformPointInPlace(&p)
 	return p
@@ -796,6 +801,19 @@ func (s *Surface) FillRect(r Rect, color Color) {
 		}, color)
 		return
 	}
+	if s.transformIsPortraitQuarterTurn() {
+		// Portrait e-paper canvases commonly rotate an axis-aligned logical UI
+		// onto landscape controller RAM. The result is still an axis-aligned
+		// native rectangle, so avoid testing four floating-point edges for every
+		// covered pixel.
+		s.fillPixelRect(pixelRect{
+			minX: scalarCeil(s.transformTX + r.MinY - 0.5),
+			minY: scalarCeil(s.transformTY - r.MaxX - 0.5),
+			maxX: scalarFloor(s.transformTX+r.MaxY-0.5) + 1,
+			maxY: scalarFloor(s.transformTY-r.MinX-0.5) + 1,
+		}, color)
+		return
+	}
 	a := Point{X: r.MinX, Y: r.MinY}
 	b := Point{X: r.MaxX, Y: r.MinY}
 	c := Point{X: r.MaxX, Y: r.MaxY}
@@ -939,6 +957,13 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 		return
 	}
 	half := width * s.deviceScale / 2.0
+	if a != b && (a.X == b.X || a.Y == b.Y) {
+		// A quarter turn keeps UI borders axis-aligned. Fill the long body as a
+		// rectangle and inspect only the small round end caps instead of running
+		// the floating-point capsule test over every pixel along the line.
+		s.drawAxisAlignedLine(a, b, half, color)
+		return
+	}
 	minX, maxX := a.X, b.X
 	minY, maxY := a.Y, b.Y
 	if minX > maxX {
@@ -969,6 +994,56 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 			}
 			if inside {
 				s.putPixel(x, y, color)
+			}
+		}
+	}
+}
+
+func (s *Surface) drawAxisAlignedLine(a, b Point, half Scalar, color Color) {
+	half2 := half * half
+	if a.Y == b.Y {
+		minX, maxX := a.X, b.X
+		if minX > maxX {
+			minX, maxX = maxX, minX
+		}
+		s.fillPixelRect(pixelRect{
+			minX: scalarCeil(minX - 0.5),
+			minY: scalarCeil(a.Y - half - 0.5),
+			maxX: scalarFloor(maxX-0.5) + 1,
+			maxY: scalarFloor(a.Y+half-0.5) + 1,
+		}, color)
+		for _, endX := range []Scalar{minX, maxX} {
+			for y := scalarFloor(a.Y - half); y < scalarCeil(a.Y+half); y++ {
+				for x := scalarFloor(endX - half); x < scalarCeil(endX+half); x++ {
+					dx := Scalar(x) + 0.5 - endX
+					dy := Scalar(y) + 0.5 - a.Y
+					if dx*dx+dy*dy <= half2 {
+						s.putPixel(x, y, color)
+					}
+				}
+			}
+		}
+		return
+	}
+
+	minY, maxY := a.Y, b.Y
+	if minY > maxY {
+		minY, maxY = maxY, minY
+	}
+	s.fillPixelRect(pixelRect{
+		minX: scalarCeil(a.X - half - 0.5),
+		minY: scalarCeil(minY - 0.5),
+		maxX: scalarFloor(a.X+half-0.5) + 1,
+		maxY: scalarFloor(maxY-0.5) + 1,
+	}, color)
+	for _, endY := range []Scalar{minY, maxY} {
+		for y := scalarFloor(endY - half); y < scalarCeil(endY+half); y++ {
+			for x := scalarFloor(a.X - half); x < scalarCeil(a.X+half); x++ {
+				dx := Scalar(x) + 0.5 - a.X
+				dy := Scalar(y) + 0.5 - endY
+				if dx*dx+dy*dy <= half2 {
+					s.putPixel(x, y, color)
+				}
 			}
 		}
 	}
