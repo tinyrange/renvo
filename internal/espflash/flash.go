@@ -11,13 +11,18 @@ import (
 )
 
 const (
-	flashOffset   = 0x10000
-	flashBlock    = 0x400
-	flashBatch    = 128
-	checksumMagic = 0xef
-	backupChunk   = 64
-	backupBuffer  = 64 * 1024
-	backupBatch   = 32
+	flashOffset = 0x10000
+	flashBlock  = 0x400
+	flashBatch  = 128
+	// Large application writes can occasionally leave the ESP ROM busy for
+	// longer than 50 ms after FLASH_DATA, especially near erase boundaries.
+	// Keep the operation bounded while tolerating that normal latency.
+	flashWriteEmptyLimit    = 500
+	serialMonitorEmptyLimit = 50
+	checksumMagic           = 0xef
+	backupChunk             = 64
+	backupBuffer            = 64 * 1024
+	backupBatch             = 32
 )
 
 type flashError struct{ text string }
@@ -189,6 +194,9 @@ func backupFlash(path string, portName string) error {
 		return err
 	}
 	print("ROM loader connected (" + chip.name + ")\n")
+	if err = loader.disableFlashWatchdogs(chip); err != nil {
+		return err
+	}
 	if len(security) >= 20 {
 		flags := u32(security, 0)
 		crypt := security[4]
@@ -302,8 +310,23 @@ func flashFile(path string, portName string) error {
 		return fail("connected " + connected.name + " does not match " + chip.name)
 	}
 	print("ROM loader connected (" + chip.name + ")\n")
+	if err = loader.disableFlashWatchdogs(chip); err != nil {
+		return err
+	}
 	if _, err = loader.command(0x0d, words([]uint32{0}), 0, 30); err != nil {
 		return err
+	}
+	flashID, flashSize, err := loader.detectFlashSize(chip)
+	if err != nil {
+		return err
+	}
+	print("Flash JEDEC ID 0x" + hex(flashID) + ", detected " + decimal(flashSize/(1024*1024)) + " MiB\n")
+	if len(image) > flashSize-flashOffset {
+		return fail("application image exceeds detected flash capacity")
+	}
+	flashParameters := words([]uint32{0, uint32(flashSize), 64 * 1024, 4 * 1024, 256, 0xffff})
+	if _, err = loader.command(0x0b, flashParameters, 0, 30); err != nil {
+		return fail("configure flash geometry: " + err.Error())
 	}
 	blocks := (len(image) + flashBlock - 1) / flashBlock
 	written := 0
@@ -338,7 +361,7 @@ func flashFile(path string, portName string) error {
 			}
 			payload := words([]uint32{flashBlock, uint32(sequence), 0, 0})
 			payload = append(payload, block...)
-			if _, err = loader.command(0x03, payload, uint32(checksum), 50); err != nil {
+			if _, err = loader.command(0x03, payload, uint32(checksum), flashWriteEmptyLimit); err != nil {
 				return fail("write block " + decimal(blockIndex+1) + "/" + decimal(blocks) + ": " + err.Error())
 			}
 			written++
@@ -381,7 +404,7 @@ func flashFile(path string, portName string) error {
 	}
 	buffer := make([]byte, 4096)
 	empty := 0
-	for empty < 10 {
+	for empty < serialMonitorEmptyLimit {
 		n := port.read(buffer)
 		if n < 0 {
 			return fail("serial monitor read failed")
@@ -390,11 +413,38 @@ func flashFile(path string, portName string) error {
 			empty++
 			// Host serial descriptors are nonblocking, so an empty read returns
 			// immediately rather than honoring VTIME. Keep the monitor window
-			// open for approximately one second after USB re-enumeration.
+			// open for approximately five seconds after USB re-enumeration.
 			sleep(100)
 		} else {
 			empty = 0
 			print(string(buffer[:n]))
+		}
+	}
+	return nil
+}
+
+func (loader *loader) disableFlashWatchdogs(chip target) error {
+	if chip.chipID != 9 {
+		return nil
+	}
+	// The ESP32-S3 ROM downloader inherits watchdog state from the second-stage
+	// bootloader. Small images finish before its roughly ten-second deadline;
+	// larger application-only writes otherwise lose native USB midway through
+	// the transfer. This is the same bounded disable sequence used by the Renvo
+	// ESP32-S3 startup, expressed through the ROM register-write command.
+	writes := []uint32{
+		0x6001f064, 0x50d83aa1,
+		0x6001f048, 0,
+		0x60020064, 0x50d83aa1,
+		0x60020048, 0,
+		0x600080b0, 0x50d83aa1,
+		0x60008098, 0,
+		0x600080b8, 0x8f1d312a,
+		0x600080b4, 1 << 30,
+	}
+	for index := 0; index < len(writes); index += 2 {
+		if err := loader.writeRegister(writes[index], writes[index+1]); err != nil {
+			return fail("disable ESP32-S3 flash watchdogs: " + err.Error())
 		}
 	}
 	return nil
@@ -1169,7 +1219,7 @@ func (loader *loader) nextFrame() ([]byte, bool, error) {
 		if loader.bufferOffset == loader.bufferLength {
 			n := loader.port.read(loader.buffer)
 			if n < 0 {
-				return nil, false, fail("serial read failed")
+				return nil, false, fail("serial read failed (host error " + decimal(hostError(n)) + ")")
 			}
 			if n == 0 {
 				return nil, hadData, nil
