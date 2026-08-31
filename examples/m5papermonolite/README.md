@@ -132,9 +132,36 @@ All public refresh operations finish in SSD1677 Deep Sleep Mode 1; callers must
 use `board.Display.Shutdown` when RAM retention is no longer needed.
 
 The board contains 16 MiB SPI flash and 8 MiB octal PSRAM, but this bring-up
-uses neither factory data partitions nor PSRAM. The later touch driver must
-normalize the FT6336G's documented active area of X=5..475 and Y=5..795; the
-unused edge coordinates should not be treated as valid panel positions.
+uses neither factory data partitions nor PSRAM. The touch driver normalizes
+the FT6336G's documented active area of X=5..475 and Y=5..795; the unused edge
+coordinates are not treated as valid panel positions.
+
+## Phase 4 four-box touch oracle
+
+The `touch_oracle` renders four outlined boxes in the visible 480x800 portrait
+space. Tapping a box toggles only its interior between white and black and logs
+the normalized coordinate over USB serial. GPIO4 is configured as the
+FT6336G's active-low interrupt, and touch reports are read from address `0x38`
+over the existing bounded shared I2C bus. Raw coordinates in the documented
+X=5..475 and Y=5..795 active area are normalized to all 480x800 visible pixels;
+reports outside that area are ignored.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -s -o sandbox/m5papermonolite-touch-oracle.elf \
+  ./examples/m5papermonolite/touch_oracle
+sandbox/renvoflash sandbox/m5papermonolite-touch-oracle.elf /dev/cu.usbmodem101
+```
+
+Startup performs one full monochrome refresh to establish the explicit partial
+baseline. Each touch then uses `PartialMonochrome`; after ten differential
+updates the next tap is automatically promoted to a recovery full refresh.
+The touch and display rails remain on for interaction, while the SSD1677 stays
+in Deep Sleep Mode 1 between updates. Any initialization, touch-read, or refresh
+failure attempts a complete display/touch shutdown before stopping. Button A
+and Button B transitions are also reported without changing the boxes.
 
 ## Restore the factory application
 
