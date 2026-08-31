@@ -130,3 +130,65 @@ func TestConfigureOutputStopsAtFirstBusError(t *testing.T) {
 		t.Fatalf("failure performed %d transactions, want 2", bus.index)
 	}
 }
+
+func TestConfigurePWMDisablesChannelBeforeSelectingPinFunction(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{write: []byte{0x30, 0x00, 0x00}},
+		{write: []byte{0x13}, read: []byte{0xff}},
+		{write: []byte{0x13, 0xf7}},
+		{write: []byte{0x16}, read: []byte{0x00}},
+		{write: []byte{0x16, 0xc0}},
+		{write: []byte{0x34, 0x88, 0x13}},
+	}}
+	if err := New(bus).ConfigurePWM(Pin3, 5000); err != nil {
+		t.Fatal(err)
+	}
+	if bus.index != len(bus.transactions) {
+		t.Fatalf("performed %d transactions, want %d", bus.index, len(bus.transactions))
+	}
+}
+
+func TestConfigurePWMUsesPWM1ForPin4(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{write: []byte{0x32, 0x00, 0x00}},
+		{write: []byte{0x13}, read: []byte{0x10}},
+		{write: []byte{0x13, 0x00}},
+		{write: []byte{0x17}, read: []byte{0x00}},
+		{write: []byte{0x17, 0x03}},
+		{write: []byte{0x34, 0xe8, 0x03}},
+	}}
+	if err := New(bus).ConfigurePWM(Pin4, 1000); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetPWMDutyUsesNormalPolarityAndDisableEncoding(t *testing.T) {
+	bus := &fakeBus{transactions: []transaction{
+		{write: []byte{0x30, 0x00, 0x14}},
+		{write: []byte{0x30, 0x00, 0x00}},
+	}}
+	device := New(bus)
+	if err := device.SetPWMDuty(Pin3, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.SetPWMDuty(Pin3, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPWMRejectsInvalidArgumentsWithoutBusAccess(t *testing.T) {
+	bus := &fakeBus{}
+	device := New(bus)
+	if err := device.ConfigurePWM(Pin2, 5000); err != ErrInvalidPWMPin {
+		t.Fatalf("ConfigurePWM(Pin2) error = %v", err)
+	}
+	if err := device.ConfigurePWM(Pin3, 0); err != ErrInvalidPWMFrequency {
+		t.Fatalf("ConfigurePWM(0 Hz) error = %v", err)
+	}
+	if err := device.SetPWMDuty(Pin4, 4096); err != ErrInvalidPWMDuty {
+		t.Fatalf("SetPWMDuty(4096) error = %v", err)
+	}
+	if bus.index != 0 {
+		t.Fatalf("invalid arguments performed %d transactions", bus.index)
+	}
+}

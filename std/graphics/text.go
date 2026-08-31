@@ -37,11 +37,11 @@ type Glyph struct {
 // targets to use antialiased fonts without parsing or rasterizing outlines at
 // runtime.
 type RasterGlyph struct {
-	Codepoint int
-	Mask      *Image
-	XOffset   Scalar
-	YOffset   Scalar
-	Advance   Scalar
+	Codepoint                         int
+	Mask                              *Image
+	MaskPixels                        []byte
+	MaskWidth, MaskHeight, MaskStride int
+	XOffset, YOffset, Advance         Scalar
 }
 
 type fontGlyph struct {
@@ -49,6 +49,10 @@ type fontGlyph struct {
 	rasterScale int
 	index       int
 	mask        *Image
+	maskPixels  []byte
+	maskWidth   int
+	maskHeight  int
+	maskStride  int
 	xOffset     Scalar
 	yOffset     Scalar
 	advance     Scalar
@@ -64,23 +68,46 @@ func NewBuiltinFont(scale int) *Font {
 // NewRasterFont creates a font from pre-rasterized glyph masks. The masks are
 // retained by reference and the small glyph metadata table is copied.
 func NewRasterFont(metrics FontMetrics, glyphs []RasterGlyph) *Font {
-	font := &Font{Metrics: metrics, raster: true, rasterDense: len(glyphs) > 0}
-	if len(glyphs) > 0 {
-		font.rasterFirst = glyphs[0].Codepoint
-	}
-	font.glyphs = make([]fontGlyph, len(glyphs))
+	font := NewRasterFontCapacity(metrics, len(glyphs))
 	for i := 0; i < len(glyphs); i++ {
-		glyph := glyphs[i]
-		if glyph.Codepoint != font.rasterFirst+i {
-			font.rasterDense = false
-		}
-		font.glyphs[i] = fontGlyph{
-			codepoint: glyph.Codepoint, rasterScale: 1, index: glyph.Codepoint,
-			mask: glyph.Mask, xOffset: glyph.XOffset, yOffset: glyph.YOffset,
-			advance: glyph.Advance,
-		}
+		font.AddRasterGlyph(glyphs[i])
 	}
 	return font
+}
+
+// NewRasterFontCapacity creates an empty pre-rasterized font and reserves its
+// glyph metadata. AddRasterGlyph can then populate it without a temporary
+// RasterGlyph slice, which matters for monotonic small-target allocators.
+func NewRasterFontCapacity(metrics FontMetrics, capacity int) *Font {
+	if capacity < 0 {
+		capacity = 0
+	}
+	return &Font{Metrics: metrics, raster: true, glyphs: make([]fontGlyph, 0, capacity)}
+}
+
+// AddRasterGlyph appends one glyph to a font made by NewRasterFontCapacity.
+// Glyphs should be added in ascending codepoint order.
+func (font *Font) AddRasterGlyph(glyph RasterGlyph) {
+	if font == nil || !font.raster {
+		return
+	}
+	index := len(font.glyphs)
+	if index == 0 {
+		font.rasterFirst = glyph.Codepoint
+		font.rasterDense = true
+	} else if glyph.Codepoint != font.rasterFirst+index {
+		font.rasterDense = false
+	}
+	stride := glyph.MaskStride
+	if stride == 0 {
+		stride = glyph.MaskWidth
+	}
+	font.glyphs = append(font.glyphs, fontGlyph{
+		codepoint: glyph.Codepoint, rasterScale: 1, index: glyph.Codepoint,
+		mask: glyph.Mask, maskPixels: glyph.MaskPixels,
+		maskWidth: glyph.MaskWidth, maskHeight: glyph.MaskHeight, maskStride: stride,
+		xOffset: glyph.XOffset, yOffset: glyph.YOffset, advance: glyph.Advance,
+	})
 }
 
 func (font *Font) usesRasterGlyphs() bool {
@@ -562,6 +589,41 @@ func (s *Surface) drawGlyphMask(mask *Image, x, y int, color Color) {
 	}
 }
 
+func (s *Surface) drawPositionedGlyph(mask *Image, x, y, xOffset, yOffset Scalar, color Color) {
+	if mask == nil {
+		return
+	}
+	if s.transformB != 0 || s.transformC != 0 || s.transformA != s.transformD {
+		s.DrawImage(mask, R(0, 0, Scalar(mask.Width), Scalar(mask.Height)),
+			R(x+xOffset, y+yOffset, Scalar(mask.Width), Scalar(mask.Height)),
+			SamplingNearest, color)
+		return
+	}
+	origin := s.transformPoint(Point{X: x, Y: y})
+	drawX := scalarFloor(origin.X + xOffset + 0.5)
+	drawY := scalarFloor(origin.Y + yOffset + 0.5)
+	s.drawGlyphMask(mask, drawX, drawY, color)
+}
+
+func (s *Surface) drawFontGlyph(glyph *fontGlyph, x, y Scalar, color Color) {
+	if glyph.mask != nil {
+		s.drawPositionedGlyph(glyph.mask, x, y, glyph.xOffset, glyph.yOffset, color)
+		return
+	}
+	if glyph.maskWidth <= 0 || glyph.maskHeight <= 0 || glyph.maskStride < glyph.maskWidth ||
+		len(glyph.maskPixels) < glyph.maskStride*glyph.maskHeight {
+		return
+	}
+	// Keep cached glyphs compact: a general-purpose Surface is much larger than
+	// its immutable A8 dimensions and byte view. Materialize that view on the
+	// stack only while drawing the glyph.
+	mask := Surface{
+		Width: glyph.maskWidth, Height: glyph.maskHeight, Stride: glyph.maskStride,
+		Pixels: glyph.maskPixels, Format: PixelA8,
+	}
+	s.drawPositionedGlyph(&mask, x, y, glyph.xOffset, glyph.yOffset, color)
+}
+
 func blendRGB565Channel(source, destination, alpha int) int {
 	return (source*alpha + destination*(255-alpha) + 127) / 255
 }
@@ -656,14 +718,11 @@ func (s *Surface) DrawText(font *Font, baseline Point, text string, color Color)
 				continue
 			}
 			x += font.kern(previous, glyph.index)
-			if glyph.mask != nil {
+			if glyph.mask != nil || len(glyph.maskPixels) != 0 {
 				// Glyph bitmaps are rasterized without a subpixel shift, so place
 				// them on the corresponding nearest pixel and composite the A8 mask
 				// directly. A 1:1 glyph upload does not require affine resampling.
-				origin := s.transformPoint(Point{X: x, Y: y})
-				drawX := scalarFloor(origin.X + glyph.xOffset + 0.5)
-				drawY := scalarFloor(origin.Y + glyph.yOffset + 0.5)
-				s.drawGlyphMask(glyph.mask, drawX, drawY, color)
+				s.drawFontGlyph(glyph, x, y, color)
 			}
 			x += glyph.advance
 			previous = glyph.index
@@ -716,11 +775,8 @@ func (s *Surface) DrawTextBytes(font *Font, baseline Point, text []byte, color C
 				continue
 			}
 			x += font.kern(previous, glyph.index)
-			if glyph.mask != nil {
-				origin := s.transformPoint(Point{X: x, Y: y})
-				drawX := scalarFloor(origin.X + glyph.xOffset + 0.5)
-				drawY := scalarFloor(origin.Y + glyph.yOffset + 0.5)
-				s.drawGlyphMask(glyph.mask, drawX, drawY, color)
+			if glyph.mask != nil || len(glyph.maskPixels) != 0 {
+				s.drawFontGlyph(glyph, x, y, color)
 			}
 			x += glyph.advance
 			previous = glyph.index

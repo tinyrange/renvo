@@ -24,6 +24,8 @@ var Power = newPowerDevice(paperPMIC, paperIOExpander, epdChipSelect, &Clock)
 type powerPMIC interface {
 	Identify() (uint16, error)
 	Initialize() error
+	ConfigurePWM(m5pm1.Pin, uint16) error
+	SetPWMDuty(m5pm1.Pin, uint16) error
 }
 
 type powerIOExpander interface {
@@ -51,12 +53,13 @@ type PowerIdentity struct {
 
 // PowerDevice sequences the PaperMono-Lite display and touch domains.
 type PowerDevice struct {
-	pmic       powerPMIC
-	expander   powerIOExpander
-	chipSelect powerOutputPin
-	delay      powerDelay
-	prepared   bool
-	active     bool
+	pmic                 powerPMIC
+	expander             powerIOExpander
+	chipSelect           powerOutputPin
+	delay                powerDelay
+	prepared             bool
+	active               bool
+	frontLightConfigured bool
 }
 
 func newPowerDevice(pmic powerPMIC, expander powerIOExpander, chipSelect powerOutputPin, delay powerDelay) *PowerDevice {
@@ -137,6 +140,24 @@ func (p *PowerDevice) ResetDisplay() error {
 	return p.verify(m5ioe1.Pin5, true)
 }
 
+// SetFrontLight sets the integrated front light from off (0) to full (255).
+// PaperMono-Lite connects BL_FB to M5PM1 GPIO3/PWM0. The squared brightness
+// curve matches M5Stack's board support and gives useful resolution at the dim
+// end of the range.
+func (p *PowerDevice) SetFrontLight(brightness uint8) error {
+	if err := p.prepare(); err != nil {
+		return err
+	}
+	if !p.frontLightConfigured {
+		if err := p.pmic.ConfigurePWM(m5pm1.Pin3, 5000); err != nil {
+			return err
+		}
+		p.frontLightConfigured = true
+	}
+	squared := uint32(brightness) * uint32(brightness)
+	return p.pmic.SetPWMDuty(m5pm1.Pin3, uint16(squared>>4))
+}
+
 // DisableDisplayAndTouch asserts both resets before removing touch and EPD
 // power. Every step is attempted even after an I2C error, and EPD chip select
 // remains inactive. No SSD1677 command is issued by this Phase 2 operation.
@@ -152,6 +173,9 @@ func (p *PowerDevice) DisableDisplayAndTouch() error {
 		first = p.configureInactive()
 	}
 	p.chipSelect.Set(true)
+	if p.frontLightConfigured {
+		first = retainFirst(first, p.pmic.SetPWMDuty(m5pm1.Pin3, 0))
+	}
 	first = retainFirst(first, p.expander.SetOutput(m5ioe1.Pin5, false))
 	first = retainFirst(first, p.expander.SetOutput(m5ioe1.Pin6, false))
 	p.delay.DelayMilliseconds(2)

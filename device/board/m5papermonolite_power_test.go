@@ -8,12 +8,17 @@ import (
 
 	"renvo.dev/device/gpio"
 	"renvo.dev/device/ioexpander/m5ioe1"
+	"renvo.dev/device/power/m5pm1"
 )
 
 type fakePowerPMIC struct {
 	identityCalls   int
 	initializeCalls int
 	err             error
+	pwmConfigured   bool
+	pwmFrequency    uint16
+	pwmDuty         uint16
+	pwmActions      int
 }
 
 func (p *fakePowerPMIC) Identify() (uint16, error) {
@@ -23,6 +28,25 @@ func (p *fakePowerPMIC) Identify() (uint16, error) {
 
 func (p *fakePowerPMIC) Initialize() error {
 	p.initializeCalls++
+	return p.err
+}
+
+func (p *fakePowerPMIC) ConfigurePWM(pin m5pm1.Pin, frequency uint16) error {
+	if pin != m5pm1.Pin3 {
+		return errors.New("wrong front-light pin")
+	}
+	p.pwmActions++
+	p.pwmConfigured = true
+	p.pwmFrequency = frequency
+	return p.err
+}
+
+func (p *fakePowerPMIC) SetPWMDuty(pin m5pm1.Pin, duty uint16) error {
+	if pin != m5pm1.Pin3 {
+		return errors.New("wrong front-light pin")
+	}
+	p.pwmActions++
+	p.pwmDuty = duty
 	return p.err
 }
 
@@ -172,6 +196,29 @@ func TestPowerEnableAndDisableSequence(t *testing.T) {
 	assertPowerActions(t, expander.actions, wantDisable)
 	if len(delay.delays) != 3 || delay.delays[2] != 2 {
 		t.Fatalf("all delays = %v", delay.delays)
+	}
+}
+
+func TestFrontLightUsesBoardPWMAndTurnsOffAtShutdown(t *testing.T) {
+	pmic := &fakePowerPMIC{}
+	power := newPowerDevice(pmic, &fakePowerIOExpander{}, &fakePowerPin{}, &fakePowerDelay{})
+	if err := power.SetFrontLight(192); err != nil {
+		t.Fatal(err)
+	}
+	if !pmic.pwmConfigured || pmic.pwmFrequency != 5000 || pmic.pwmDuty != 2304 {
+		t.Fatalf("front light state = %+v", pmic)
+	}
+	if err := power.SetFrontLight(128); err != nil {
+		t.Fatal(err)
+	}
+	if pmic.pwmActions != 3 || pmic.pwmDuty != 1024 {
+		t.Fatalf("second brightness reconfigured PWM: %+v", pmic)
+	}
+	if err := power.DisableDisplayAndTouch(); err != nil {
+		t.Fatal(err)
+	}
+	if pmic.pwmDuty != 0 || pmic.pwmActions != 4 {
+		t.Fatalf("shutdown left front light active: %+v", pmic)
 	}
 }
 

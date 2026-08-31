@@ -11,6 +11,8 @@ const (
 	registerGPIOOutput   = byte(0x11)
 	registerGPIODrive    = byte(0x13)
 	registerGPIOFunction = byte(0x16)
+	registerPWM0Duty     = byte(0x30)
+	registerPWMFrequency = byte(0x34)
 	deviceID             = uint16(0x2050)
 )
 
@@ -48,6 +50,11 @@ func (d *Device) read(register byte) (byte, error) {
 
 func (d *Device) write(register, value byte) error {
 	data := [2]byte{register, value}
+	return d.bus.Tx(Address, data[:], nil)
+}
+
+func (d *Device) write16(register byte, value uint16) error {
+	data := [3]byte{register, byte(value), byte(value >> 8)}
 	return d.bus.Tx(Address, data[:], nil)
 }
 
@@ -117,6 +124,60 @@ func (d *Device) ConfigureOutput(pin Pin, level bool) error {
 	return d.update(registerGPIOMode, mask, mask)
 }
 
+// ConfigurePWM assigns GPIO3 to PWM0 or GPIO4 to PWM1 and sets their shared
+// counter frequency. The channel is disabled before its pin function changes,
+// so persistent M5PM1 state cannot momentarily drive an unknown duty cycle.
+func (d *Device) ConfigurePWM(pin Pin, frequency uint16) error {
+	if !validPWMPin(pin) {
+		return ErrInvalidPWMPin
+	}
+	if frequency == 0 {
+		return ErrInvalidPWMFrequency
+	}
+	if err := d.SetPWMDuty(pin, 0); err != nil {
+		return err
+	}
+	mask := byte(1 << uint8(pin))
+	if err := d.update(registerGPIODrive, mask, 0); err != nil {
+		return err
+	}
+	functionRegister, shift := pwmFunction(pin)
+	functionMask := byte(3 << shift)
+	if err := d.update(functionRegister, functionMask, functionMask); err != nil {
+		return err
+	}
+	return d.write16(registerPWMFrequency, frequency)
+}
+
+// SetPWMDuty sets a configured PWM channel's 12-bit duty cycle. Zero disables
+// the channel; nonzero values use normal (non-inverted) polarity.
+func (d *Device) SetPWMDuty(pin Pin, duty uint16) error {
+	if !validPWMPin(pin) {
+		return ErrInvalidPWMPin
+	}
+	if duty > 0x0fff {
+		return ErrInvalidPWMDuty
+	}
+	control := uint16(0)
+	if duty != 0 {
+		control = 0x1000
+	}
+	register := registerPWM0Duty
+	if pin == Pin4 {
+		register += 2
+	}
+	return d.write16(register, duty|control)
+}
+
+func validPWMPin(pin Pin) bool { return pin == Pin3 || pin == Pin4 }
+
+func pwmFunction(pin Pin) (byte, uint8) {
+	if pin == Pin3 {
+		return registerGPIOFunction, 6
+	}
+	return registerGPIOFunction + 1, 0
+}
+
 func validPin(pin Pin) bool { return pin <= Pin4 }
 
 type deviceError string
@@ -128,4 +189,10 @@ const (
 	ErrDeviceID deviceError = "unexpected M5PM1 device ID"
 	// ErrInvalidPin reports a pin outside the M5PM1 GPIO0..GPIO4 range.
 	ErrInvalidPin deviceError = "M5PM1 GPIO must be between 0 and 4"
+	// ErrInvalidPWMPin reports a pin that has no M5PM1 PWM channel.
+	ErrInvalidPWMPin deviceError = "M5PM1 PWM is available only on GPIO3 and GPIO4"
+	// ErrInvalidPWMFrequency reports a zero PWM counter frequency.
+	ErrInvalidPWMFrequency deviceError = "M5PM1 PWM frequency must be nonzero"
+	// ErrInvalidPWMDuty reports a value outside the PWM counter's 12-bit range.
+	ErrInvalidPWMDuty deviceError = "M5PM1 PWM duty must be between 0 and 4095"
 )

@@ -3,12 +3,108 @@ package graphics
 import "testing"
 
 func pixel(s *Surface, x, y int) Color {
+	if s.Format == PixelMono1 {
+		if s.monoPixel(x, y) {
+			return White
+		}
+		return Black
+	}
+	if s.Format == PixelA8 {
+		alpha := s.Pixels[y*s.Stride+x]
+		return Color{R: alpha, G: alpha, B: alpha, A: alpha}
+	}
 	if s.Format == PixelRGB565 {
 		o := y*s.Stride + x*2
 		return decodeRGB565(s.Pixels[o], s.Pixels[o+1])
 	}
 	o := y*s.Stride + x*4
 	return Color{s.Pixels[o], s.Pixels[o+1], s.Pixels[o+2], s.Pixels[o+3]}
+}
+
+func TestMono1SurfaceUsesPackedCallerStorageAndThresholdsSourceOver(t *testing.T) {
+	pixels := make([]byte, 4)
+	if NewSurfaceBufferFormat(9, 2, PixelMono1, pixels[:3]) != nil {
+		t.Fatal("short monochrome surface buffer was accepted")
+	}
+	surface := NewSurfaceBufferFormat(9, 2, PixelMono1, pixels)
+	if surface == nil || surface.Stride != 2 || len(surface.Pixels) != 4 || &surface.Pixels[0] != &pixels[0] {
+		t.Fatalf("monochrome surface = %#v", surface)
+	}
+	surface.FillRect(R(1, 0, 8, 2), White)
+	if pixels[0] != 0x7f || pixels[1] != 0x80 || pixels[2] != 0x7f || pixels[3] != 0x80 {
+		t.Fatalf("packed white rectangle = % x", pixels)
+	}
+	surface.FillRect(R(1, 0, 1, 1), RGBA(0, 0, 0, 127))
+	if !surface.monoPixel(1, 0) {
+		t.Fatal("sub-threshold black coverage cleared a white pixel")
+	}
+	surface.FillRect(R(1, 0, 1, 1), RGBA(0, 0, 0, 128))
+	if surface.monoPixel(1, 0) {
+		t.Fatal("half-covered black glyph did not cross the monochrome threshold")
+	}
+}
+
+func TestMono1SurfaceCanDitherPartialCoverageWithoutChangingOpaquePixels(t *testing.T) {
+	var pixels [4]byte
+	surface := NewSurfaceBufferFormat(4, 4, PixelMono1, pixels[:])
+	surface.Clear(White)
+	surface.SetMonochromeDithering(true)
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			surface.writePixel(x, y, RGBA(0, 0, 0, 128))
+		}
+	}
+	black := 0
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			if !surface.monoPixel(x, y) {
+				black++
+			}
+		}
+	}
+	if black != 8 {
+		t.Fatalf("half coverage produced %d black pixels, want 8", black)
+	}
+	surface.writePixel(0, 0, Black)
+	surface.writePixel(1, 0, White)
+	if surface.monoPixel(0, 0) || !surface.monoPixel(1, 0) {
+		t.Fatal("dithering changed opaque black or white")
+	}
+}
+
+func TestMono1SurfaceRotatesRasterFontIntoNativeFramebuffer(t *testing.T) {
+	var pixels [4]byte
+	surface := NewSurfaceBufferFormat(8, 4, PixelMono1, pixels[:])
+	surface.SetAffine(0, -1, 1, 0, 0, 4)
+	mask := NewMask(1, 1, []byte{255})
+	font := NewRasterFont(FontMetrics{Ascent: 1}, []RasterGlyph{{
+		Codepoint: 'A', Mask: mask, YOffset: -1, Advance: 1,
+	}})
+	surface.DrawText(font, Point{X: 1, Y: 2}, "A", White)
+	if !surface.monoPixel(1, 2) {
+		t.Fatalf("rotated glyph bytes = % x", pixels)
+	}
+	for y := 0; y < surface.Height; y++ {
+		for x := 0; x < surface.Width; x++ {
+			if (x != 1 || y != 2) && surface.monoPixel(x, y) {
+				t.Fatalf("rotated glyph also covered %d,%d", x, y)
+			}
+		}
+	}
+}
+
+func TestMono1SurfaceRotatesCompactRasterGlyphIntoNativeFramebuffer(t *testing.T) {
+	var pixels [4]byte
+	surface := NewSurfaceBufferFormat(8, 4, PixelMono1, pixels[:])
+	surface.SetAffine(0, -1, 1, 0, 0, 4)
+	font := NewRasterFont(FontMetrics{Ascent: 1}, []RasterGlyph{{
+		Codepoint: 'A', MaskPixels: []byte{255}, MaskWidth: 1, MaskHeight: 1,
+		MaskStride: 1, YOffset: -1, Advance: 1,
+	}})
+	surface.DrawText(font, Point{X: 1, Y: 2}, "A", White)
+	if !surface.monoPixel(1, 2) {
+		t.Fatalf("rotated compact glyph bytes = % x", pixels)
+	}
 }
 
 func TestPremultipliedColorAndSourceOver(t *testing.T) {

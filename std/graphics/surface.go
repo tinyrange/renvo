@@ -37,6 +37,7 @@ type Surface struct {
 	transformTX        Scalar
 	transformTY        Scalar
 	deviceScale        Scalar
+	monochromeDither   bool
 	transforms         []Mat2x3
 	transformComplex   bool
 	transformComplexes []bool
@@ -90,6 +91,21 @@ func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
 	}
 	if maxY > s.Height {
 		maxY = s.Height
+	}
+	if s.Format == PixelMono1 {
+		width := maxX - minX
+		sourceStride := (width + 7) / 8
+		if sourceStride*(maxY-minY) > len(pixels) {
+			return
+		}
+		for y := minY; y < maxY; y++ {
+			for x := minX; x < maxX; x++ {
+				s.writeMonoPixel(x, y, pixels[(y-minY)*sourceStride+(x-minX)/8]&(0x80>>uint((x-minX)&7)) != 0)
+			}
+		}
+		s.revision++
+		s.markDirtyRect(pixelRect{minX: minX, minY: minY, maxX: maxX, maxY: maxY})
+		return
 	}
 	pixelSize := pixelFormatBytes(s.Format)
 	i := 0
@@ -174,8 +190,7 @@ func NewSurfaceBufferFormatPreserve(width, height int, format PixelFormat, pixel
 }
 
 func newSurfaceBufferFormat(width, height int, format PixelFormat, pixels []byte, clear bool) *Surface {
-	pixelSize := pixelFormatBytes(format)
-	if width < 0 || height < 0 || pixelSize == 0 || len(pixels) < width*height*pixelSize {
+	if width < 0 || height < 0 || !pixelFormatValid(format) || len(pixels) < pixelFormatStride(width, format)*height {
 		return nil
 	}
 	s := allocSurface()
@@ -197,6 +212,17 @@ func pixelFormatBytes(format PixelFormat) int {
 	return 0
 }
 
+func pixelFormatValid(format PixelFormat) bool {
+	return format == PixelRGBA8 || format == PixelA8 || format == PixelRGB565 || format == PixelMono1
+}
+
+func pixelFormatStride(width int, format PixelFormat) int {
+	if format == PixelMono1 {
+		return (width + 7) / 8
+	}
+	return width * pixelFormatBytes(format)
+}
+
 func (s *Surface) resetFormat(width, height int, format PixelFormat) {
 	s.resetFormatStorage(width, height, format, true)
 }
@@ -210,12 +236,10 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 	}
 	s.Width = width
 	s.Height = height
-	pixelSize := pixelFormatBytes(format)
-	if pixelSize == 0 {
+	if !pixelFormatValid(format) {
 		format = PixelRGBA8
-		pixelSize = 4
 	}
-	s.Stride = width * pixelSize
+	s.Stride = pixelFormatStride(width, format)
 	pixelBytes := s.Stride * height
 	if pixelBytes <= cap(s.Pixels) {
 		s.Pixels = s.Pixels[:pixelBytes]
@@ -239,6 +263,7 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 	}
 	s.damageDepth = 0
 	s.deviceScale = 1.0
+	s.monochromeDither = false
 	s.ResetTransform()
 	s.clips = nil
 	s.transforms = nil
@@ -402,6 +427,12 @@ func pixelRectContains(outer, inner pixelRect) bool {
 }
 
 func (s *Surface) SetBlendMode(mode BlendMode) { s.blend = mode }
+
+// SetMonochromeDithering enables ordered coverage dithering when partially
+// transparent pixels are composited into a packed one-bit surface. Opaque
+// black and white drawing is unchanged.
+func (s *Surface) SetMonochromeDithering(enabled bool) { s.monochromeDither = enabled }
+
 func (s *Surface) SetTransform(m *Mat2x3) {
 	if m == nil {
 		s.ResetTransform()
@@ -623,6 +654,18 @@ func (s *Surface) putPixel(x, y int, c Color) {
 // writePixel writes a known-clipped pixel without updating damage. Batched
 // rasterizers mark their bounds once and use this path for every covered pixel.
 func (s *Surface) writePixel(x, y int, c Color) {
+	if s.Format == PixelMono1 {
+		gray := (77*int(c.R) + 150*int(c.G) + 29*int(c.B) + 128) >> 8
+		if s.blend != BlendCopy && c.A != 255 && s.monoPixel(x, y) {
+			gray += (255*int(255-c.A) + 127) / 255
+		}
+		threshold := 128
+		if s.monochromeDither && c.A != 0 && c.A != 255 {
+			threshold = monochromeDitherThreshold(x, y)
+		}
+		s.writeMonoPixel(x, y, gray >= threshold)
+		return
+	}
 	if s.Format == PixelRGB565 {
 		o := y*s.Stride + x*2
 		if s.blend != BlendCopy && c.A != 255 {
@@ -655,6 +698,59 @@ func (s *Surface) writePixel(x, y int, c Color) {
 	s.Pixels[o+1] = byte(int(c.G) + (int(s.Pixels[o+1])*inv+127)/255)
 	s.Pixels[o+2] = byte(int(c.B) + (int(s.Pixels[o+2])*inv+127)/255)
 	s.Pixels[o+3] = byte(int(c.A) + (int(s.Pixels[o+3])*inv+127)/255)
+}
+
+func monochromeDitherThreshold(x, y int) int {
+	// A 4x4 Bayer matrix expressed as thresholds centered in each of its 16
+	// coverage buckets. Coordinate anchoring keeps repeated paints stable.
+	switch (y&3)*4 + x&3 {
+	case 0:
+		return 8
+	case 1:
+		return 136
+	case 2:
+		return 40
+	case 3:
+		return 168
+	case 4:
+		return 200
+	case 5:
+		return 72
+	case 6:
+		return 232
+	case 7:
+		return 104
+	case 8:
+		return 56
+	case 9:
+		return 184
+	case 10:
+		return 24
+	case 11:
+		return 152
+	case 12:
+		return 248
+	case 13:
+		return 120
+	case 14:
+		return 216
+	default:
+		return 88
+	}
+}
+
+func (s *Surface) monoPixel(x, y int) bool {
+	return s.Pixels[y*s.Stride+x/8]&(0x80>>uint(x&7)) != 0
+}
+
+func (s *Surface) writeMonoPixel(x, y int, white bool) {
+	o := y*s.Stride + x/8
+	mask := byte(0x80 >> uint(x&7))
+	if white {
+		s.Pixels[o] |= mask
+	} else {
+		s.Pixels[o] &^= mask
+	}
 }
 
 func encodeRGB565(color Color) uint16 {
@@ -786,6 +882,31 @@ func (s *Surface) fillPixelRect(region pixelRect, color Color) {
 		return
 	}
 	if s.blend == BlendSourceOver && color.A == 0 {
+		return
+	}
+	if s.Format == PixelMono1 && (s.blend == BlendCopy || color.A == 255) {
+		s.markDirtyRect(region)
+		gray := (77*int(color.R) + 150*int(color.G) + 29*int(color.B) + 128) >> 8
+		white := gray >= 128
+		for y := region.minY; y < region.maxY; y++ {
+			x := region.minX
+			for x < region.maxX && x&7 != 0 {
+				s.writeMonoPixel(x, y, white)
+				x++
+			}
+			value := byte(0)
+			if white {
+				value = 0xff
+			}
+			for x+8 <= region.maxX {
+				s.Pixels[y*s.Stride+x/8] = value
+				x += 8
+			}
+			for x < region.maxX {
+				s.writeMonoPixel(x, y, white)
+				x++
+			}
+		}
 		return
 	}
 	if s.Format == PixelRGB565 && (s.blend == BlendCopy || color.A == 255) {
@@ -983,6 +1104,12 @@ func (image *Surface) imagePixel(x, y int) Color {
 	if image.Format == PixelRGB565 {
 		o := y*image.Stride + x*2
 		return decodeRGB565(image.Pixels[o], image.Pixels[o+1])
+	}
+	if image.Format == PixelMono1 {
+		if image.monoPixel(x, y) {
+			return White
+		}
+		return Black
 	}
 	o := y*image.Stride + x*4
 	return Color{image.Pixels[o], image.Pixels[o+1], image.Pixels[o+2], image.Pixels[o+3]}

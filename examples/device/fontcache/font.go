@@ -1,23 +1,16 @@
-// Package fontcache provides the cached Go Regular fonts used by Tab5 demos.
+// Package fontcache provides cached Go Regular fonts used by device demos.
 package fontcache
 
 import (
-	_ "embed"
-
 	"renvo.dev/std/graphics"
 )
 
+// PaperMonoFormsGlyphs is the complete printable set used by the constrained
+// PaperMono-Lite Forms showcase cache.
+const PaperMonoFormsGlyphs = " ,-./0123456789:;?ABCDEFGILMNOPRSTUVabcdefghiklmnopqrstuvwxy"
+
 // These caches are generated from std/graphics/gofont/Go-Regular.ttf and
 // remain covered by std/graphics/gofont/LICENSE.
-//
-//go:generate go run ../forms_demo/font_cache_generate.go
-
-//go:embed Go-Regular-18.rgf
-var bodyCache string
-
-//go:embed Go-Regular-26.rgf
-var titleCache string
-
 func uint16At(data string, at int) int {
 	return int(data[at]) | int(data[at+1])<<8
 }
@@ -31,7 +24,16 @@ func scalarAt(data string, at int) graphics.Scalar {
 	return graphics.Scalar(int32(uint32At(data, at))) / 65536
 }
 
-func load(data string) *graphics.Font {
+func containsCodepoint(characters string, codepoint int) bool {
+	for at := 0; at < len(characters); at++ {
+		if int(characters[at]) == codepoint {
+			return true
+		}
+	}
+	return false
+}
+
+func load(data, characters string) *graphics.Font {
 	if len(data) < 18 || data[:4] != "RGF1" {
 		return nil
 	}
@@ -41,7 +43,11 @@ func load(data string) *graphics.Font {
 		LineGap: scalarAt(data, 12),
 	}
 	count, at := uint16At(data, 16), 18
-	glyphs := make([]graphics.RasterGlyph, count)
+	capacity := count
+	if characters != "" && len(characters) < capacity {
+		capacity = len(characters)
+	}
+	font := graphics.NewRasterFontCapacity(metrics, capacity)
 	for index := 0; index < count; index++ {
 		if at+20 > len(data) {
 			return nil
@@ -55,28 +61,21 @@ func load(data string) *graphics.Font {
 		if size < 0 || at+size > len(data) {
 			return nil
 		}
-		var mask *graphics.Image
-		if size > 0 {
-			pixels := make([]byte, size)
-			for pixel := range pixels {
-				pixels[pixel] = data[at+pixel]
+		if characters == "" || codepoint == ' ' || codepoint == '?' || containsCodepoint(characters, codepoint) {
+			var pixels []byte
+			if size > 0 {
+				pixels = staticBytes(data[at : at+size])
 			}
-			mask = graphics.NewSurfaceBufferFormatPreserve(width, height, graphics.PixelA8, pixels)
-		}
-		glyphs[index] = graphics.RasterGlyph{
-			Codepoint: codepoint, Mask: mask, XOffset: xOffset,
-			YOffset: yOffset, Advance: advance,
+			font.AddRasterGlyph(graphics.RasterGlyph{
+				Codepoint: codepoint, MaskPixels: pixels, MaskWidth: width,
+				MaskHeight: height, MaskStride: width, XOffset: xOffset,
+				YOffset: yOffset, Advance: advance,
+			})
 		}
 		at += size
 	}
 	if at != len(data) {
 		return nil
 	}
-	return graphics.NewRasterFont(metrics, glyphs)
+	return font
 }
-
-// Body returns the 18-pixel cached font.
-func Body() *graphics.Font { return load(bodyCache) }
-
-// Title returns the 26-pixel cached font.
-func Title() *graphics.Font { return load(titleCache) }

@@ -1,4 +1,4 @@
-# M5Stack PaperMono-Lite bring-up oracle
+# M5Stack PaperMono-Lite examples
 
 This Phase 1 oracle verifies the existing ESP32-S3 startup, application-only
 flash, USB serial, and PaperMono-Lite board selection. Board initialization
@@ -201,6 +201,43 @@ sandbox/renvo \
   ./examples/m5papermonolite/touch_trails
 sandbox/renvoflash sandbox/m5papermonolite-touch-trails.elf /dev/cu.usbmodem101
 ```
+
+## Monochrome Forms showcase
+
+The `forms_demo` example exercises the existing Forms framework with text
+inputs, text areas, checkboxes, radio buttons, progress bars, combo boxes,
+lists, sliders, number inputs, splitters, tabs, and buttons. It paints directly
+into one packed 48,000-byte monochrome framebuffer and loads an 11 KiB,
+26-pixel TrueType-derived Go Regular glyph subset from embedded program data.
+The bootloader places that static data in internal DRAM, but the glyph masks
+alias it directly and consume no managed-arena copy. The font remains covered
+by `std/graphics/gofont/LICENSE`. Its original A8 coverage is converted with a
+stable 4x4 ordered dither at glyph edges instead of being reduced to a coarse
+binary mask during cache generation.
+
+Only the active tab's controls are retained. Changing tabs resets the two
+managed arena regions and rebuilds the requested page, keeping the demo within
+internal RAM without treating the board's currently unmapped octal PSRAM as
+ordinary memory. The 90,112-byte arena below is deliberately smaller than the
+default and leaves room for the static framebuffer and runtime state.
+
+The demo explicitly enables the integrated front light at 192/255 through
+M5PM1 GPIO3/PWM0. It uses M5Stack's 5 kHz PWM frequency and squared brightness
+curve; display shutdown disables the PWM channel again.
+
+```sh
+sandbox/renvo \
+  -backend backends/esp32s3.rtg \
+  -t esp32s3/xtensa_lx7 -tags m5papermonolite \
+  -arena-size 90112 \
+  -s -o sandbox/m5papermonolite-forms-demo.elf \
+  ./examples/m5papermonolite/forms_demo
+sandbox/renvoflash sandbox/m5papermonolite-forms-demo.elf /dev/cu.usbmodem101
+```
+
+Successful startup reaches `RENVO PAPERMONO-LITE FORMS READY` after the first
+full refresh. Routine interaction uses bounded fast differential refreshes,
+with the driver's automatic recovery full refresh after ten partial updates.
 
 ## Restore the factory application
 
