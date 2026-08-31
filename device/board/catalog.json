@@ -95,7 +95,7 @@
     "machine": "esp32s3/xtensa_lx7",
     "definition": "backends/esp32s3.rtg",
     "backend": "backends/esp32s3-xtensa_lx7.wasm",
-    "packages": ["device/esp32s3"],
+    "packages": ["device/esp32s3", "device/power/m5pm1"],
     "examples": [{"path": "examples/device/forms_menu"}]
   },
   {
@@ -107,7 +107,7 @@
     "machine": "esp32s3/xtensa_lx7",
     "definition": "backends/esp32s3.rtg",
     "backend": "backends/esp32s3-xtensa_lx7.wasm",
-    "packages": ["device/esp32s3"],
+    "packages": ["device/esp32s3", "device/power/m5pm1", "device/ioexpander/m5ioe1"],
     "examples": [
       {"path": "examples/m5papermonolite/oracle"},
       {"path": "examples/m5papermonolite/power_oracle"}
