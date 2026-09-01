@@ -936,6 +936,12 @@ func renvoRTGAddressRelocAt(out *renvoAsm, address renvoRTGAddress, at int) {
 	}
 }
 
+func renvoRTGLabelRelocAt(out *renvoAsm, label int, at int) {
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
 func renvoRTGDataAddress(offset int) renvoRTGAddress {
 	return renvoRTGAddress{Kind: 1, Addend: offset}
 }
@@ -1183,6 +1189,15 @@ func (out *RTGEmitter) AbsoluteReloc(at int, offset int, kind int) {
 func (out *RTGEmitter) RelocAt(at int, label int) {
 	if label >= 0 {
 		renvoAsmAddReloc(out.asm, at, label)
+	}
+}
+
+// RTGLabelRelocAt records a label relocation at an explicit byte offset. It is
+// the width-independent counterpart to Reloc, whose compatibility behavior
+// targets the historical four-byte relocation field.
+func RTGLabelRelocAt(out *RTGEmitter, label RTGLabel, at int) {
+	if label.Valid {
+		out.RelocAt(at, label.Code)
 	}
 }
 
@@ -2658,6 +2673,9 @@ func nativeEmitterFunction(name string) string {
 	}
 	if name == "RTGAddressRelocAt" {
 		return "renvoRTGAddressRelocAt"
+	}
+	if name == "RTGLabelRelocAt" {
+		return "renvoRTGLabelRelocAt"
 	}
 	if name == "RTGInt8Fits" {
 		return "renvoAsmImmFits8Signed"

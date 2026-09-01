@@ -23773,34 +23773,7 @@ func renvoEmitWideStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int
 		return false
 	}
 	if e.kind == renvoExprIndex {
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		t := renvoResolveType(meta, leftType)
-		if t.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, t.elem)
-		if elem.kind != renvoTypeString {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitSlicePtrLen(g, ep, e.left) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoAsmShlTertiaryImm(a, 4)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmLoadQwordPrimaryIndexTertiaryDisp(a, 0)
-		renvoAsmAddSecondaryTertiary(a)
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGDirectLoadNative(a, renvoRTGSecondary,
-				renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, 8, 1))
-		} else {
-			renvoAsmMemDisp(a, 8, 0x8b48, 0x52, 0x92)
-		}
-		return true
+		return renvoEmitIndexedStringValueRegs(g, ep, idx)
 	}
 	if e.kind == renvoExprSelector {
 		valueType := renvoInferParsedExprType(g, ep, idx)
@@ -25328,6 +25301,40 @@ func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 	}
 	return renvoGenericEmitStringValueRegs(g, ep, idx)
 }
+
+func renvoEmitIndexedStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.kind != renvoExprIndex {
+		return false
+	}
+	container := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+	renvoNonNil(container)
+	if container.kind == renvoTypePointer {
+		container = renvoResolveType(g.meta, container.elem)
+		renvoNonNil(container)
+	}
+	if container.kind != renvoTypeArray && container.kind != renvoTypeSlice {
+		return false
+	}
+	elem := renvoResolveType(g.meta, container.elem)
+	renvoNonNil(elem)
+	if elem.kind != renvoTypeString || !renvoEmitIndexAddressPrimary(g, ep, idx) {
+		return false
+	}
+
+	// Index-address lowering performs the ordinary array/slice bounds check and
+	// leaves the element address in primary. A string occupies two backend value
+	// slots: data pointer followed by byte length.
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
+	renvoAsmPushPrimary(&g.asm)
+	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, renvoBackendValueSlotSize)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmPopPrimary(&g.asm)
+	return true
+}
+
 func renvoGenericEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	meta := g.meta
@@ -25375,43 +25382,7 @@ func renvoGenericEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx 
 		return false
 	}
 	if e.kind == renvoExprIndex {
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		t := renvoResolveType(meta, leftType)
-		renvoNonNil(t)
-		if t.kind != renvoTypeSlice {
-			return false
-		}
-		elem := renvoResolveType(meta, t.elem)
-		renvoNonNil(elem)
-		if elem.kind != renvoTypeString {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, e.right) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitSlicePtrLen(g, ep, e.left) {
-			return false
-		}
-		renvoAsmPopTertiary(a)
-		renvoAsmShlTertiaryImm(a, 4)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmLoadQwordPrimaryIndexTertiaryDisp(a, 0)
-		renvoAsmAddSecondaryTertiary(a)
-		if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoAsmPushPrimary(a)
-			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoAsmPopPrimary(a)
-		} else {
-			if renvoPreparedBackendActive != 0 {
-				renvoRTGDirectLoadNative(a, renvoRTGSecondary,
-					renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, 8, 1))
-			} else {
-				renvoAsmMemDisp(a, 8, 0x8b48, 0x52, 0x92)
-			}
-		}
-		return true
+		return renvoEmitIndexedStringValueRegs(g, ep, idx)
 	}
 	if e.kind == renvoExprSelector {
 		valueType := renvoInferParsedExprType(g, ep, idx)
