@@ -126,6 +126,40 @@ function workerFiles(files) {
   return [...files].map(([name, data]) => ({ name, data: data.slice(0) }));
 }
 
+async function compileStarterCObject() {
+  const target = targetCatalog.targets.find((candidate) => candidate.name === "linux/amd64");
+  if (!target?.cBackend) throw new Error("browser bundle has no Linux C backend");
+  const files = new Map([["main.c", bytes(new TextEncoder().encode(`#include <stdio.h>
+int main(void) {
+    printf("Hello from Renvo C!\\n");
+    return 0;
+}
+`))]]);
+  for (const file of standardCatalog.libc || []) {
+    await addFile(files, `libc/${file}`, new URL(`libc/${file}`, standardRoot));
+  }
+  const args = ["cc"];
+  for (const tag of target.tags || []) args.push("-tags", tag);
+  args.push("-t", target.name, "-s", "-c", "main.c", "-o", "main.o");
+  const result = await request({
+    type: "compile", id: ++requestID, args, files: workerFiles(files),
+    backend: new URL(target.cBackend, bundleURL).href,
+    backendTarget: target.backendTarget || target.name, backendFormat: target.backendFormat || "wasm",
+  }, "result");
+  if (result.exitCode !== 0) {
+    const diagnostic = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+    throw new Error(`starter C object failed:\n${diagnostic}`);
+  }
+  const artifact = result.files.find((file) => file.name === "main.o");
+  if (!artifact || artifact.data.byteLength === 0) throw new Error("starter C object produced no main.o");
+  const header = new Uint8Array(artifact.data, 0, Math.min(18, artifact.data.byteLength));
+  if (header.length < 18 || header[0] !== 0x7f || header[1] !== 0x45 || header[2] !== 0x4c || header[3] !== 0x46 ||
+      new DataView(header.buffer, header.byteOffset, header.byteLength).getUint16(16, true) !== 1) {
+    throw new Error("starter C object is not an ELF relocatable object");
+  }
+  process.stdout.write("PASS starter C object (linux/amd64)\n");
+}
+
 async function prepareProjectTargets(files) {
   const definitions = [...files.keys()].filter((name) =>
     (name.endsWith(".rtg") || name.endsWith(".rbe")) && !name.includes("/"));
@@ -171,6 +205,7 @@ const published = Object.entries(standardCatalog.platforms || {})
 let compiled = 0;
 let monitorCompiled = 0;
 const failures = [];
+await compileStarterCObject();
 for (const [importPath, item] of published) {
   const files = await exampleFiles(importPath, item);
   const projectTargets = await prepareProjectTargets(files);
