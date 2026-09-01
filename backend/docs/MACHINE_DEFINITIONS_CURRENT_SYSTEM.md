@@ -4,6 +4,9 @@ This document describes the implemented machine-definition system. The
 backend-author workflow is in
 [`../definitions/README.md`](../definitions/README.md).
 
+The remaining target-specific frontend and definition-compiler branches are
+tracked in the [frontend target-assumption index](frontend-target-assumptions.md).
+
 ## Current source authority
 
 - Every `backend/definitions/<os>_<arch>.rtg` native file is an independent
