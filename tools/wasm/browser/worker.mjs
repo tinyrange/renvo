@@ -414,6 +414,7 @@ function pipelineArguments(args, files, backendTarget) {
       if (args[i] === "-emit-unit") emitUnit = true;
       if (args[i] === "-emit-image") emitImage = true;
       if (args[i] === "-windows-gui") windowsGUI = true;
+      if (args[0] === "cc" && args[i] === "-c") mode = "object";
       if (args[i] === "-mode" && i + 1 < args.length) mode = args[i+1];
       if (args[i].startsWith("-mode=")) mode = args[i].slice("-mode=".length);
       if (args[i] === "-module-license" && i + 1 < args.length) moduleLicense = args[i+1];
