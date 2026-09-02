@@ -18,6 +18,12 @@ async function readJSON(url) {
 
 const targetCatalog = await readJSON(new URL("targets.json", bundleURL));
 const standardCatalog = await readJSON(new URL("catalog.json", standardRoot));
+let workerURL = new URL("worker.mjs", bundleURL);
+try { await readFile(fileURLToPath(workerURL)); }
+catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+  workerURL = new URL("browser/worker.mjs", bundleURL);
+}
 
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
@@ -49,7 +55,7 @@ globalThis.self = {
   },
 };
 
-await import(new URL("worker.mjs", bundleURL));
+await import(workerURL);
 if (!messageHandler) throw new Error("browser worker did not install its message handler");
 
 function request(message, responseType) {
@@ -67,9 +73,10 @@ const ready = await request({
   type: "init",
   compiler: new URL(targetCatalog.compiler, bundleURL).href,
   linker: new URL(targetCatalog.linker, bundleURL).href,
-  languageService: "",
+  languageService: new URL(targetCatalog.languageService, bundleURL).href,
   backendJIT: new URL(targetCatalog.backendJIT, bundleURL).href,
   vmBackend: new URL(targetCatalog.vmBackend, bundleURL).href,
+  terminalCompiler: new URL(targetCatalog.terminalCompiler, bundleURL).href,
   formatter: "",
 }, "ready");
 if (ready.type !== "ready") throw new Error("browser compiler did not become ready");
@@ -94,6 +101,32 @@ async function addPackage(files, importPath, loading = new Set()) {
     await addFile(files, `${prefix}/${file}`, new URL(`${root}/${file}`, standardRoot));
   }
   for (const dependency of item.imports || []) await addPackage(files, dependency, loading);
+}
+
+async function checkParsedImportContext() {
+  const source = `package main
+
+import "os"
+
+func main() {
+	os.WriteFile("hello.txt", []byte("Hello, World"), os.
+}
+`;
+  const files = new Map([
+    ["main.go", bytes(new TextEncoder().encode(source))],
+    ["go.mod", bytes(new TextEncoder().encode("module renvo.dev\n\ngo 1.20\n"))],
+  ]);
+  const result = await request({
+    type: "imports", id: ++requestID, files: workerFiles(files), workspaceRevision: 1,
+    target: "wasi/wasm32", tags: ["wasi", "wasip1", "wasm", "wasm32"], file: "main.go",
+    offset: new TextEncoder().encode(source.slice(0, source.indexOf("os.\n") + 3)).length,
+    language: "go", packageAt: ".",
+  }, "language-result");
+  if (!result.output.split("\n").includes("I\t\tos") || result.output.split("\n").some((line) => line.startsWith("P\t")) ||
+      !result.output.split("\n").includes("Q\tos\t\t" + String(source.indexOf("os.\n") + 3))) {
+    throw new Error(`parsed import context confused call strings with imports: ${JSON.stringify(result.output)}`);
+  }
+  process.stdout.write("PASS parser-owned import context after string arguments\n");
 }
 
 async function exampleFiles(importPath, item) {
@@ -160,6 +193,82 @@ int main(void) {
   process.stdout.write("PASS starter C object (linux/amd64)\n");
 }
 
+async function compileMacOSArtifact() {
+  const target = targetCatalog.targets.find((candidate) => candidate.name === "darwin/arm64");
+  if (!target?.backend) throw new Error("browser bundle has no macOS backend");
+  const files = new Map([
+    ["main.go", bytes(new TextEncoder().encode('package main\n\nfunc main() { print("PASS\\n") }\n'))],
+    ["go.mod", bytes(new TextEncoder().encode("module renvo.dev\n\ngo 1.20\n"))],
+  ]);
+  const args = [];
+  for (const tag of target.tags || []) args.push("-tags", tag);
+  args.push("-t", target.name, "-s", "-o", target.output, ".");
+  const result = await request({
+    type: "compile", id: ++requestID, args, files: workerFiles(files),
+    backend: new URL(target.backend, bundleURL).href,
+    backendTarget: target.backendTarget || target.name,
+    backendFormat: target.backendFormat || "wasm",
+  }, "result");
+  if (result.exitCode !== 0) throw new Error(result.stderr || "macOS browser build failed");
+  const artifact = result.files.find((file) => file.name === target.output);
+  const magic = artifact && new Uint8Array(artifact.data, 0, Math.min(4, artifact.data.byteLength));
+  if (!magic || magic.length < 4 || magic[0] !== 0xcf || magic[1] !== 0xfa || magic[2] !== 0xed || magic[3] !== 0xfe) {
+    throw new Error("macOS browser build did not produce an arm64 Mach-O executable");
+  }
+  process.stdout.write("PASS native artifact (darwin/arm64)\n");
+}
+
+async function compileTerminalCLIArtifact() {
+  if (!targetCatalog.terminalCompiler) throw new Error("browser bundle has no full terminal compiler");
+  const encoder = new TextEncoder();
+  const files = new Map([
+    ["main.go", bytes(encoder.encode(`package main
+
+import "os"
+
+func main() {
+	if os.WriteFile("hello.txt", []byte("Hello, World"), os.ModePerm) != nil {
+		print("FAIL\\n")
+		return
+	}
+	print("PASS\\n")
+}
+`))],
+    ["go.mod", bytes(encoder.encode("module renvo.dev\n\ngo 1.20\n"))],
+    ["Makefile", bytes(encoder.encode("all: terminal-app\nterminal-app: main.go go.mod\n\trenvo -t darwin/arm64 -s -o terminal-app .\n"))],
+  ]);
+  const workspaceNames = [...files.keys()];
+  await addPackage(files, "os");
+  const internalNames = [...files.keys()].filter((name) => !workspaceNames.includes(name));
+  const help = await request({ type: "terminal", id: ++requestID, args: ["--help"], files: workerFiles(files), workspaceNames, internalNames }, "result");
+  if (help.exitCode !== 0 || !help.stdout.includes("renvo make") || !help.stdout.includes("-backend")) {
+    throw new Error(help.stderr || "full terminal Renvo help is incomplete");
+  }
+  const made = await request({ type: "terminal", id: ++requestID, args: ["make"], files: workerFiles(files), workspaceNames, internalNames }, "result");
+  const artifact = made.files.find((file) => file.name === "terminal-app");
+  const magic = artifact && new Uint8Array(artifact.data, 0, Math.min(4, artifact.data.byteLength));
+  if (made.exitCode !== 0 || !made.filesystemComplete || !magic || magic[0] !== 0xcf || magic[1] !== 0xfa || magic[2] !== 0xed || magic[3] !== 0xfe) {
+    throw new Error(made.stderr || "terminal Renvo make did not retain its Mach-O output");
+  }
+  const compiled = await request({
+    type: "terminal", id: ++requestID, args: ["-t", "wasi/wasm32", "-s", "-o", "app.wasm", "."],
+    files: workerFiles(files), workspaceNames, internalNames,
+  }, "result");
+  const app = compiled.files.find((file) => file.name === "app.wasm");
+  if (compiled.exitCode !== 0 || !app) throw new Error(compiled.stderr || "terminal Renvo did not produce a WASI app");
+  const runFiles = new Map(files); runFiles.set("app.wasm", app.data.slice(0));
+  const ran = await request({
+    type: "terminal-run", id: ++requestID, name: "app.wasm", args: [], files: workerFiles(runFiles),
+    workspaceNames, internalNames, directories: [],
+  }, "terminal-run-result");
+  if (ran.exitCode !== 0 || ran.stdout !== "PASS\n" || !ran.filesystemComplete) {
+    throw new Error(ran.stderr || `terminal WASI run returned ${JSON.stringify(ran.stdout)}`);
+  }
+  const written = ran.files.find((file) => file.name === "hello.txt");
+  if (!written || new TextDecoder().decode(written.data) !== "Hello, World") throw new Error("terminal WASI run did not retain os.WriteFile output");
+  process.stdout.write("PASS full terminal CLI, virtual output filesystem, and WASI execution\n");
+}
+
 async function prepareProjectTargets(files) {
   const definitions = [...files.keys()].filter((name) =>
     (name.endsWith(".rtg") || name.endsWith(".rbe")) && !name.includes("/"));
@@ -205,7 +314,10 @@ const published = Object.entries(standardCatalog.platforms || {})
 let compiled = 0;
 let monitorCompiled = 0;
 const failures = [];
+await checkParsedImportContext();
 await compileStarterCObject();
+await compileMacOSArtifact();
+await compileTerminalCLIArtifact();
 for (const [importPath, item] of published) {
   const files = await exampleFiles(importPath, item);
   const projectTargets = await prepareProjectTargets(files);

@@ -30,6 +30,18 @@ func TestFileOperations(t *testing.T) {
 	}
 }
 
+func TestFileModeMatchesGoDefaults(t *testing.T) {
+	if ModePerm != 0o777 || FileMode(0o764).Perm() != 0o764 {
+		t.Fatalf("permission modes = ModePerm %#o Perm %#o", ModePerm, FileMode(0o764).Perm())
+	}
+	if !ModeDir.IsDir() || ModeDir.IsRegular() || !FileMode(0o644).IsRegular() {
+		t.Fatalf("file type helpers do not match Go os.FileMode")
+	}
+	if got := (ModeDir | 0o755).String(); got != "drwxr-xr-x" {
+		t.Fatalf("directory mode string = %q", got)
+	}
+}
+
 func TestFileSeek(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seek.txt")
 	file, err := OpenFile(path, O_CREATE|O_TRUNC|O_RDWR, 0o644)

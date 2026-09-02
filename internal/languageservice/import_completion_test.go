@@ -36,6 +36,41 @@ func main() { println("fmt`), len(`package main
 func main() { println("fmt`)); got.Ok {
 		t.Fatalf("ordinary string was treated as an import: %#v", got)
 	}
+	call := `package main
+import "os"
+func main() { os.WriteFile("hello.txt", []byte("Hello, World"), os.`
+	if got := ImportPathAt([]byte(call), len(call)); got.Ok {
+		t.Fatalf("string arguments made selector look like an import: %#v", got)
+	}
+}
+
+func TestParseImportsUsesFrontendDeclarationsDespiteLaterSyntaxError(t *testing.T) {
+	source := []byte(`package main
+import (
+	host "os"
+	_ "embed"
+)
+func main() { host.WriteFile("hello.txt", nil, host.
+`)
+	got := ParseImports(source)
+	if len(got) != 2 || got[0].Name != "host" || got[0].Path != "os" || got[1].Name != "_" || got[1].Path != "embed" {
+		t.Fatalf("parsed imports = %#v", got)
+	}
+}
+
+func TestSelectorAtUsesFrontendTokensAfterStringArguments(t *testing.T) {
+	source := []byte(`package main
+import "os"
+func main() { os.WriteFile("hello.txt", []byte("Hello, World"), os.`)
+	got := SelectorAt(source, len(source))
+	if !got.Ok || got.Base != "os" || got.Prefix != "" || got.ReplaceStart != len(source) {
+		t.Fatalf("selector context = %#v", got)
+	}
+	stringSource := []byte(`package main
+var value = "os.`)
+	if got := SelectorAt(stringSource, len(stringSource)); got.Ok {
+		t.Fatalf("string contents became selector context: %#v", got)
+	}
 }
 
 func TestCompleteStandardImportPathsUsesBundledSourceLayout(t *testing.T) {

@@ -7,8 +7,6 @@ import (
 	stdos "os"
 )
 
-type FileMode int
-
 const (
 	O_RDONLY = stdos.O_RDONLY
 	O_WRONLY = stdos.O_WRONLY

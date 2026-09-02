@@ -7,8 +7,10 @@ let formatterModule;
 let formatterURL;
 let backendJITURL;
 let vmBackendURL;
+let terminalCompilerURL;
 let backendJITModule;
 let vmBackendModule;
+let terminalCompilerModule;
 let compilerError;
 const backendModules = new Map();
 const backendPrograms = new Map();
@@ -25,6 +27,7 @@ self.addEventListener("message", async (event) => {
     try {
       backendJITURL = request.backendJIT || "";
       vmBackendURL = request.vmBackend || "";
+      terminalCompilerURL = request.terminalCompiler || "";
       formatterURL = request.formatter || "";
       self.postMessage({ type: "init-progress", message: "Downloading the compiler and code checks…" });
       [frontendModule, linkerModule, languageServiceModule] = await Promise.all([
@@ -37,6 +40,70 @@ self.addEventListener("message", async (event) => {
       compilerError = error;
       throw error;
     }
+    return;
+  }
+  if (request.type === "terminal") {
+    const started = performance.now();
+    try {
+      if (!terminalCompilerURL) throw new Error("the full Renvo terminal compiler is unavailable");
+      if (!terminalCompilerModule) terminalCompilerModule = loadModule(terminalCompilerURL, "Renvo terminal compiler");
+      const files = new Map(request.files.map((file) => [clean(file.name), new Uint8Array(file.data)]));
+      const context = newContext(files, request.stdin || "", request.directories || []);
+      const exitCode = await runModule(await terminalCompilerModule, context, ["renvo", ...(request.args || [])]);
+      const workspaceNames = new Set(request.workspaceNames || []);
+      const internalNames = new Set(request.internalNames || []);
+      const outputs = [];
+      for (const [name, data] of files) {
+        if (workspaceNames.has(name) || internalNames.has(name) || name.startsWith(".renvo/")) continue;
+        const copy = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+        outputs.push({ name, data: copy });
+      }
+      outputs.sort((left, right) => left.name.localeCompare(right.name));
+      const elapsedMilliseconds = performance.now() - started;
+      self.postMessage({
+        type: "result", id: request.id, exitCode,
+        stdout: decodeParts(context.stdout), stderr: decodeParts(context.stderr), files: outputs,
+        filesystemComplete: true,
+        elapsedMilliseconds, frontendMilliseconds: elapsedMilliseconds, backendMilliseconds: 0,
+        linearMemoryBytes: context.maxLinearMemoryBytes,
+      }, outputs.map((file) => file.data));
+    } catch (error) {
+      self.postMessage({
+        type: "result", id: request.id, exitCode: 1, stdout: "", stderr: String(error), files: [],
+        elapsedMilliseconds: performance.now() - started, frontendMilliseconds: 0,
+        backendMilliseconds: 0, linearMemoryBytes: 0,
+      });
+    }
+    return;
+  }
+  if (request.type === "terminal-run") {
+    const started = performance.now();
+    const files = new Map((request.files || []).map((file) => [clean(file.name), new Uint8Array(file.data)]));
+    const context = newContext(files, request.stdin || "", request.directories || []);
+    let exitCode = 1;
+    try {
+      const name = clean(request.name || "");
+      const program = files.get(name);
+      if (!program) throw new Error(`${name}: No such file`);
+      const module = await WebAssembly.compile(program);
+      exitCode = await runModule(module, context, [name, ...(request.args || [])]);
+    } catch (error) {
+      context.stderr.push(encoder.encode(String(error) + "\n"));
+    }
+    const workspaceNames = new Set(request.workspaceNames || []);
+    const internalNames = new Set(request.internalNames || []);
+    const outputs = [];
+    for (const [name, data] of files) {
+      if (workspaceNames.has(name) || internalNames.has(name) || name.startsWith(".renvo/")) continue;
+      outputs.push({ name, data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) });
+    }
+    outputs.sort((left, right) => left.name.localeCompare(right.name));
+    self.postMessage({
+      type: "terminal-run-result", id: request.id, exitCode,
+      stdout: decodeParts(context.stdout), stderr: decodeParts(context.stderr), files: outputs,
+      filesystemComplete: true, elapsedMilliseconds: performance.now() - started,
+      linearMemoryBytes: context.maxLinearMemoryBytes,
+    }, outputs.map((file) => file.data));
     return;
   }
   if (request.type === "backend-inspect" || request.type === "backend-prepare") {
@@ -121,7 +188,7 @@ self.addEventListener("message", async (event) => {
     }
     return;
   }
-  if (request.type === "analyze" || request.type === "complete" || request.type === "signature" ||
+  if (request.type === "analyze" || request.type === "complete" || request.type === "signature" || request.type === "imports" ||
       request.type === "definition" || request.type === "references" || request.type === "hover") {
     if (!languageServiceModule) {
       self.postMessage({ type: "language-result", id: request.id, mode: request.type, output: "", error: "language service is unavailable" });
@@ -171,9 +238,15 @@ async function loadInitModule(url, name) {
   return module;
 }
 
-function newContext(files, stdin = "") {
+function newContext(files, stdin = "", directories = []) {
+  const knownDirectories = new Set(["."]);
+  for (const directory of directories) knownDirectories.add(clean(directory));
+  for (const name of files.keys()) {
+    const parts = name.split("/");
+    for (let index = 1; index < parts.length; index++) knownDirectories.add(parts.slice(0, index).join("/"));
+  }
   return {
-    memory: null, maxLinearMemoryBytes: 0, files, directories: new Set(["."]), fds: new Map(), nextFd: 4,
+    memory: null, maxLinearMemoryBytes: 0, files, directories: knownDirectories, fds: new Map(), nextFd: 4,
     stdout: [], stderr: [], stdin: encoder.encode(stdin), stdinOffset: 0,
   };
 }
@@ -407,6 +480,10 @@ function pipelineArguments(args, files, backendTarget) {
       output = args[++i];
       frontend.push("-o", output);
       outputAt = frontend.length - 1;
+    } else if (args[i].startsWith("-o=")) {
+      output = args[i].slice(3);
+      frontend.push("-o", output);
+      outputAt = frontend.length - 1;
     } else if (args[i] === "-arena-size" && i + 1 < args.length) {
       arenaSize = args[++i];
     } else {
@@ -459,6 +536,7 @@ function wasiImports(context, args) {
     path_create_directory: (fd, pathAt, pathLength) => pathCreateDirectory(context, fd, pathAt, pathLength),
     path_remove_directory: (fd, pathAt, pathLength) => pathRemoveDirectory(context, fd, pathAt, pathLength),
     path_unlink_file: (fd, pathAt, pathLength) => pathUnlinkFile(context, fd, pathAt, pathLength),
+    path_readlink: () => 44,
     path_rename: (oldFD, oldAt, oldLength, newFD, newAt, newLength) =>
       pathRename(context, oldFD, oldAt, oldLength, newFD, newAt, newLength),
     args_sizes_get: (countAt, sizeAt) => writeStringSizes(context, args, countAt, sizeAt),

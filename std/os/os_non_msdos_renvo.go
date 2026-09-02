@@ -5,8 +5,6 @@ package os
 const O_RDONLY = 0
 const O_RDWR = 2
 
-type FileMode int
-
 var Args []string
 var Stdin = &File{fd: 0}
 var Stdout = &File{fd: 1}

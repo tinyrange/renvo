@@ -38,7 +38,7 @@ func analysisInt(text string) (int, bool) {
 func analysisParse(args []string) (analysisOptions, bool) {
 	options := analysisOptions{mode: "analyze", target: "wasi/wasm32", file: "main.go", packageAt: "."}
 	for i := 1; i < len(args); i++ {
-		if args[i] == "analyze" || args[i] == "complete" || args[i] == "signature" || args[i] == "definition" || args[i] == "references" || args[i] == "hover" {
+		if args[i] == "analyze" || args[i] == "complete" || args[i] == "signature" || args[i] == "definition" || args[i] == "references" || args[i] == "hover" || args[i] == "imports" {
 			options.mode = args[i]
 			continue
 		}
@@ -149,6 +149,25 @@ func analysisKeywordCompletions(files []load.SourceFile, path string, offset int
 	items := check.CompleteKeywords(source, offset)
 	for i := 0; i < len(items); i++ {
 		analysisCompletion(items[i])
+	}
+}
+
+func analysisImports(source []byte, offset int) {
+	imports := languageservice.ParseImports(source)
+	for i := 0; i < len(imports); i++ {
+		analysisLine("I", imports[i].Name, imports[i].Path)
+	}
+	context := languageservice.ImportPathAt(source, offset)
+	if context.Ok {
+		closed := "0"
+		if context.Closed {
+			closed = "1"
+		}
+		analysisLine("P", context.Prefix, analysisDecimal(context.ReplaceStart), string([]byte{context.Quote}), closed)
+	}
+	selector := languageservice.SelectorAt(source, offset)
+	if selector.Ok {
+		analysisLine("Q", selector.Base, selector.Prefix, analysisDecimal(selector.ReplaceStart))
 	}
 }
 
@@ -513,6 +532,15 @@ func appMain(args []string, env []string) int {
 	if !ok {
 		analysisLine("E", "invalid analysis request")
 		return 2
+	}
+	if options.mode == "imports" {
+		source, found := (driver.RenvoFS{}).ReadFile(load.JoinPath(workDir, options.file))
+		if !found {
+			analysisLine("E", "source file is unavailable")
+			return 0
+		}
+		analysisImports(source, options.offset)
+		return 0
 	}
 	sources := driver.CollectSourcesForTargetTags(workDir, stdRoot, options.packageAt,
 		options.target, options.tags, driver.RenvoFS{})
