@@ -45,7 +45,8 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(html, /id="open-editor-tabs"/);
   assert.match(html, /id="format-file"/);
   assert.match(html, /data-panel="tests"/);
-  assert.match(html, /data-panel="preview"/);
+  assert.match(html, /id="preview-pane"/);
+  assert.match(css, /\.preview-pane \{[^}]*grid-column: 2;/);
   assert.match(html, /id="mobile-target-view"/);
   assert.match(html, /id="mobile-device-build"/);
   assert.match(html, /id="mobile-device-output"/);
@@ -86,6 +87,7 @@ test("phone workspace exposes the project, editor, and device flow", async () =>
   assert.match(worker, /type: "compile-progress"/);
   assert.match(worker, /Downloading the board compiler/);
   assert.match(app, /appendSerialText/);
+  assert.match(html, /<strong>Serial monitor<\/strong><span>Application output from the board<\/span>/);
   assert.match(app, /setPlotterExpanded/);
   assert.match(app, /chooseESPTransportAvailability/);
   assert.match(app, /function requestDevicePermission/);

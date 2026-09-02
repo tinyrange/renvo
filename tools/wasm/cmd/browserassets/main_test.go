@@ -166,6 +166,23 @@ func TestPackageDocumentationIncludesOverviewAndDeclarations(t *testing.T) {
 	}
 }
 
+func TestPackageDocumentationIncludesTypedConstants(t *testing.T) {
+	docs, err := buildPackageDocs(filepath.Join("..", "..", "..", "..", "std", "os"), "os")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, declaration := range docs.Constants {
+		if declaration.Name == "ModePerm" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("os docs omit typed ModePerm constant: %#v", docs.Constants)
+	}
+}
+
 func TestExternalDocumentationExamplesUseConsumerFacingAPIs(t *testing.T) {
 	docs, err := buildPackageDocs(filepath.Join("..", "..", "..", "..", "device", "dos"), "renvo.dev/device/dos")
 	if err != nil {

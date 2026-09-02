@@ -39,6 +39,11 @@ env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
 env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
   -o "$output/renvo-vm-backend.wasm" ./cmd/renvowasivmbackend
 
+# The terminal exposes the complete Renvo CLI lazily. It intentionally remains
+# separate from the compact editor validation frontend above.
+env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
+  -o "$output/renvo-shell.wasm" ./cmd/renvo
+
 backend_files=$(go list -f '{{range .GoFiles}}backend/{{.}} {{end}}' ./backend)
 
 stage_backend() {
@@ -61,17 +66,12 @@ stage_backend() {
   printf '%s' "$staged"
 }
 
-native_source_dir=$build_dir/browser-native-backend
-native_sources=$(stage_backend "$native_source_dir" builtin)
-# shellcheck disable=SC2086 # repository-owned staged paths contain no spaces.
-"$native" \
-  -system systems/backend-wasi-wasm32.rtg \
-  -s -o "$output/backends/native.wasm" $native_sources
-
-# Pure C canonical units currently need the full backend surface. Ordinary Go
-# projects keep using the substantially smaller self-hosted module above.
+# The browser backend must remain retargetable at runtime. Compiling it through
+# a fixed WASI system specializes renvoFixedTarget to wasi/wasm32 and silently
+# turns desktop outputs into WebAssembly, so use Go's WASI host for this shared
+# multi-target compiler.
 env GOOS=wasip1 GOARCH=wasm go build -trimpath -ldflags='-s -w' \
-  -o "$output/backends/native-c.wasm" ./backend
+  -o "$output/backends/native.wasm" ./backend
 
 build_custom_backend() {
   target_name=$1
@@ -140,6 +140,12 @@ cp tools/wasm/browser/index.html tools/wasm/browser/styles.css \
 	tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/target-capabilities.mjs \
+	tools/wasm/browser/command-arguments.mjs \
+	tools/wasm/browser/quick-open.mjs \
+	tools/wasm/browser/virtual-file.mjs \
+	tools/wasm/browser/catalog-completion.mjs \
+	tools/wasm/browser/terminal-completion.mjs \
+	tools/wasm/browser/flash-command.mjs \
 	tools/wasm/browser/api-help.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \
@@ -162,6 +168,12 @@ if [ "$layout" = pages ]; then
     tools/wasm/browser/app.mjs tools/wasm/browser/worker.mjs \
 	tools/wasm/browser/build-readiness.mjs \
 	tools/wasm/browser/target-capabilities.mjs \
+	tools/wasm/browser/command-arguments.mjs \
+	tools/wasm/browser/quick-open.mjs \
+	tools/wasm/browser/virtual-file.mjs \
+	tools/wasm/browser/catalog-completion.mjs \
+	tools/wasm/browser/terminal-completion.mjs \
+	tools/wasm/browser/flash-command.mjs \
 	tools/wasm/browser/api-help.mjs \
 	tools/wasm/browser/editor-navigation.mjs \
 	tools/wasm/browser/language-path.mjs \

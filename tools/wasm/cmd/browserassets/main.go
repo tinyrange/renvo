@@ -60,16 +60,17 @@ type targetDefinitionAsset struct {
 }
 
 type targetCatalog struct {
-	Compiler        string        `json:"compiler"`
-	Linker          string        `json:"linker"`
-	LanguageService string        `json:"languageService"`
-	Formatter       string        `json:"formatter"`
-	BackendJIT      string        `json:"backendJIT"`
-	VMBackend       string        `json:"vmBackend"`
-	BrowserPrefix   string        `json:"browserPrefix"`
-	BrowserSuffix   string        `json:"browserSuffix"`
-	Stdlib          string        `json:"stdlib"`
-	Targets         []targetAsset `json:"targets"`
+	Compiler         string        `json:"compiler"`
+	Linker           string        `json:"linker"`
+	LanguageService  string        `json:"languageService"`
+	Formatter        string        `json:"formatter"`
+	BackendJIT       string        `json:"backendJIT"`
+	VMBackend        string        `json:"vmBackend"`
+	TerminalCompiler string        `json:"terminalCompiler"`
+	BrowserPrefix    string        `json:"browserPrefix"`
+	BrowserSuffix    string        `json:"browserSuffix"`
+	Stdlib           string        `json:"stdlib"`
+	Targets          []targetAsset `json:"targets"`
 }
 
 type standardPackage struct {
@@ -229,7 +230,7 @@ func main() {
 	}
 	catalog := targetCatalog{
 		Compiler: "renvo.wasm", Linker: "renvo-linker.wasm", LanguageService: "renvo-language-service.wasm", Formatter: "renvo-format.wasm",
-		BackendJIT: "renvo-backend-jit.wasm", VMBackend: "renvo-vm-backend.wasm",
+		BackendJIT: "renvo-backend-jit.wasm", VMBackend: "renvo-vm-backend.wasm", TerminalCompiler: "renvo-shell.wasm",
 		BrowserPrefix: "browser-host-prefix.html", BrowserSuffix: "browser-host-suffix.html",
 		Stdlib: "stdlib/catalog.json",
 	}
@@ -243,7 +244,7 @@ func main() {
 		}
 		catalog.Targets = append(catalog.Targets, targetAsset{
 			Name: descriptor.Name, Label: targetLabel(descriptor.Name), BackendTarget: descriptor.Backend,
-			Backend: backend, CBackend: "backends/native-c.wasm", Output: outputName(descriptor.Name, descriptor.Image),
+			Backend: backend, CBackend: "backends/native.wasm", Output: outputName(descriptor.Name, descriptor.Image),
 			Runnable: descriptor.Backend == "wasi/wasm32", Tags: descriptor.Tags,
 		})
 	}
@@ -286,7 +287,7 @@ func main() {
 			DescriptorVersion: descriptor.Version, Device: boardDevice(board), Docs: board.Docs, Artwork: board.Artwork,
 		})
 	}
-	for _, asset := range []*string{&catalog.Compiler, &catalog.Linker, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend} {
+	for _, asset := range []*string{&catalog.Compiler, &catalog.Linker, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend, &catalog.TerminalCompiler} {
 		if *asset, err = versionAsset(*output, *asset); err != nil {
 			fail(err)
 		}
@@ -815,6 +816,12 @@ func buildPackageDocs(dir string, importPath string) (*packageDocs, error) {
 		}
 	}
 	for _, typ := range pkg.Types {
+		if err = appendValues(&result.Constants, typ.Consts); err != nil {
+			return nil, fmt.Errorf("document constants for %s.%s: %w", importPath, typ.Name, err)
+		}
+		if err = appendValues(&result.Variables, typ.Vars); err != nil {
+			return nil, fmt.Errorf("document variables for %s.%s: %w", importPath, typ.Name, err)
+		}
 		for _, function := range typ.Funcs {
 			if err = appendFunction(function); err != nil {
 				return nil, err

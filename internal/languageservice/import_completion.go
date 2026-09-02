@@ -16,6 +16,77 @@ type ImportPathContext struct {
 	Ok           bool
 }
 
+// ParsedImport is an import declaration accepted by the Renvo Go parser.
+type ParsedImport struct {
+	Name string
+	Path string
+}
+
+// SelectorContext describes a package-style selector at the caret.
+type SelectorContext struct {
+	Base         string
+	Prefix       string
+	ReplaceStart int
+	Ok           bool
+}
+
+// ParseImports returns imports from the frontend parse, including imports
+// retained before a later syntax error in an actively edited file.
+func ParseImports(source []byte) []ParsedImport {
+	file := syntax.ParseFile(source)
+	imports := make([]ParsedImport, 0, len(file.Imports))
+	for i := 0; i < len(file.Imports); i++ {
+		declaration := file.Imports[i]
+		if declaration.PathTok < 0 || declaration.PathTok >= len(file.Tokens) {
+			continue
+		}
+		path, ok := syntax.StringLiteralValue(file.Src, file.Tokens[declaration.PathTok])
+		if !ok {
+			continue
+		}
+		name := ""
+		if declaration.NameTok >= 0 && declaration.NameTok < len(file.Tokens) {
+			name = string(syntax.TokenText(file.Src, file.Tokens[declaration.NameTok]))
+		}
+		imports = append(imports, ParsedImport{Name: name, Path: path})
+	}
+	return imports
+}
+
+// SelectorAt returns selector context from the frontend token stream. It is
+// intentionally usable while the surrounding expression is incomplete.
+func SelectorAt(source []byte, caret int) SelectorContext {
+	if caret < 0 {
+		caret = 0
+	}
+	if caret > len(source) {
+		caret = len(source)
+	}
+	tokens := syntax.Scan(source[:caret])
+	last := len(tokens) - 1
+	for last >= 0 && tokens[last].KindLine&255 == syntax.TokenEOF {
+		last--
+	}
+	if last < 1 {
+		return SelectorContext{}
+	}
+	prefix := ""
+	replaceStart := caret
+	if tokens[last].KindLine&255 == syntax.TokenIdent && syntax.TokenEnd(tokens[last]) == caret {
+		prefix = string(syntax.TokenText(source, tokens[last]))
+		replaceStart = syntax.TokenStart(tokens[last])
+		last--
+	}
+	if last < 1 || string(syntax.TokenText(source, tokens[last])) != "." || syntax.TokenEnd(tokens[last]) != replaceStart {
+		return SelectorContext{}
+	}
+	baseToken := tokens[last-1]
+	if baseToken.KindLine&255 != syntax.TokenIdent || syntax.TokenEnd(baseToken) != syntax.TokenStart(tokens[last]) {
+		return SelectorContext{}
+	}
+	return SelectorContext{Base: string(syntax.TokenText(source, baseToken)), Prefix: prefix, ReplaceStart: replaceStart, Ok: true}
+}
+
 // ImportPathAt finds an import path string at caret. It supports both direct
 // and grouped imports, including aliases.
 func ImportPathAt(source []byte, caret int) ImportPathContext {
@@ -25,63 +96,11 @@ func ImportPathAt(source []byte, caret int) ImportPathContext {
 	if caret > len(source) {
 		caret = len(source)
 	}
-	quote := byte(0)
-	quoteAt := -1
-	escaped := false
-	lineComment := false
-	blockComment := false
-	for i := 0; i < caret; i++ {
-		ch := source[i]
-		next := byte(0)
-		if i+1 < caret {
-			next = source[i+1]
-		}
-		if lineComment {
-			if ch == '\n' {
-				lineComment = false
-			}
-			continue
-		}
-		if blockComment {
-			if ch == '*' && next == '/' {
-				blockComment = false
-				i++
-			}
-			continue
-		}
-		if quote != 0 {
-			if quote == '`' {
-				if ch == '`' {
-					quote = 0
-					quoteAt = -1
-				}
-				continue
-			}
-			if escaped {
-				escaped = false
-			} else if ch == '\\' {
-				escaped = true
-			} else if ch == quote {
-				quote = 0
-				quoteAt = -1
-			}
-			continue
-		}
-		if ch == '/' && next == '/' {
-			lineComment = true
-			i++
-		} else if ch == '/' && next == '*' {
-			blockComment = true
-			i++
-		} else if ch == '"' || ch == '`' {
-			quote = ch
-			quoteAt = i
-		}
-	}
-	if quoteAt < 0 || !importQuoteAt(source, quoteAt) {
+	quote, quoteAt, ok := parsedImportQuoteAt(source, caret)
+	if !ok {
 		return ImportPathContext{}
 	}
-	closed := importQuoteClosed(source, caret, quote)
+	closed := parsedImportQuoteClosed(source, quoteAt, caret)
 	return ImportPathContext{
 		Prefix:       string(source[quoteAt+1 : caret]),
 		ReplaceStart: quoteAt + 1,
@@ -91,64 +110,34 @@ func ImportPathAt(source []byte, caret int) ImportPathContext {
 	}
 }
 
-func importQuoteAt(source []byte, quoteAt int) bool {
-	tokens := syntax.Scan(source[:quoteAt])
-	var indexes []int
-	for i := 0; i < len(tokens); i++ {
-		if tokens[i].KindLine&255 != syntax.TokenEOF {
-			indexes = append(indexes, i)
+func parsedImportQuoteAt(source []byte, caret int) (byte, int, bool) {
+	for _, quote := range []byte{'"', '`'} {
+		for _, prefix := range [][]byte{nil, []byte("package repl\n")} {
+			probe := make([]byte, 0, len(prefix)+caret+4)
+			probe = append(probe, prefix...)
+			probe = append(probe, source[:caret]...)
+			probe = append(probe, quote, '\n', ')', '\n')
+			file := syntax.ParseFile(probe)
+			for i := 0; i < len(file.Imports); i++ {
+				pathTok := file.Imports[i].PathTok
+				if pathTok < 0 || pathTok >= len(file.Tokens) {
+					continue
+				}
+				token := file.Tokens[pathTok]
+				if syntax.TokenEnd(token) == len(prefix)+caret+1 && probe[syntax.TokenStart(token)] == quote {
+					return quote, syntax.TokenStart(token) - len(prefix), true
+				}
+			}
 		}
 	}
-	if len(indexes) == 0 {
-		return false
-	}
-	last := indexes[len(indexes)-1]
-	if tokens[last].KindLine&255 == syntax.TokenImport {
-		return true
-	}
-	if len(indexes) >= 2 && tokens[indexes[len(indexes)-2]].KindLine&255 == syntax.TokenImport {
-		return true
-	}
-	depth := 0
-	for i := len(indexes) - 1; i >= 0; i-- {
-		at := indexes[i]
-		text := syntax.TokenText(source, tokens[at])
-		if len(text) != 1 {
-			continue
-		}
-		if text[0] == ')' {
-			depth++
-			continue
-		}
-		if text[0] != '(' {
-			continue
-		}
-		if depth > 0 {
-			depth--
-			continue
-		}
-		return i > 0 && tokens[indexes[i-1]].KindLine&255 == syntax.TokenImport
-	}
-	return false
+	return 0, -1, false
 }
 
-func importQuoteClosed(source []byte, caret int, quote byte) bool {
-	escaped := false
-	for i := caret; i < len(source); i++ {
-		ch := source[i]
-		if quote != '`' && ch == '\n' {
-			return false
-		}
-		if quote != '`' && escaped {
-			escaped = false
-			continue
-		}
-		if quote != '`' && ch == '\\' {
-			escaped = true
-			continue
-		}
-		if ch == quote {
-			return true
+func parsedImportQuoteClosed(source []byte, quoteAt int, caret int) bool {
+	tokens := syntax.Scan(source)
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].KindLine&255 == syntax.TokenString && syntax.TokenStart(tokens[i]) == quoteAt {
+			return syntax.TokenEnd(tokens[i]) > caret
 		}
 	}
 	return false

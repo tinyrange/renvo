@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
   <title>Renvo</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,11 +14,8 @@
       <button class="brand" id="toggle-sidebar" type="button" aria-label="Toggle project sidebar" aria-expanded="true" title="Toggle project sidebar">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg>
       </button>
-      <div class="project-title"><strong id="project-name">playground</strong></div>
-      <label class="command-input" title="Compiler arguments">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5M10 13h3"/></svg>
-        <input id="command" value="-s -o app.wasm ." spellcheck="false" aria-label="Compiler arguments">
-      </label>
+      <div class="project-title"><strong id="project-name">Renvo</strong></div>
+      <input id="command" value="-s -o app.wasm ." type="hidden">
       <div class="command-actions">
         <div class="target-control">
           <div class="target-destination">
@@ -26,7 +24,10 @@
                 <span id="target-label">WebAssembly (WASI)</span>
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
               </button>
-              <div class="target-menu" id="target-menu" role="listbox" aria-label="Build target" hidden></div>
+              <div class="target-menu" id="target-menu" hidden>
+                <label class="target-search"><span>Filter targets</span><input id="target-search" type="search" placeholder="Search targets…" autocomplete="off" spellcheck="false"></label>
+                <div class="target-options" id="target-options" role="listbox" aria-label="Build target"></div>
+              </div>
             </div>
             <select id="flash-transport" aria-label="Board connection" title="Board connection" hidden>
               <option value="webserial">WebSerial</option>
@@ -80,7 +81,6 @@
         <button type="button" role="menuitem" data-project-action="new"><span>＋</span><span>New project…</span></button>
         <div class="menu-separator" role="separator"></div>
         <button type="button" role="menuitem" data-project-action="import"><span>⇧</span><span>Import files or ZIP…</span></button>
-        <button type="button" role="menuitem" data-project-action="directory"><span>▣</span><span>Import folder…</span></button>
         <div class="menu-separator" role="separator"></div>
         <button type="button" role="menuitem" data-project-action="rename"><span>✎</span><span>Rename project…</span></button>
         <button type="button" role="menuitem" data-project-action="export"><span>⇩</span><span>Export project ZIP</span></button>
@@ -90,12 +90,14 @@
         <button type="button" class="danger" role="menuitem" data-project-action="reset"><span>↺</span><span>Reset project…</span></button>
       </div>
       <div class="file-action-menu" id="file-action-menu" role="menu" aria-label="File actions" hidden>
+        <button type="button" role="menuitem" data-file-action="new-file">New File…</button>
+        <button type="button" role="menuitem" data-file-action="new-folder">New Folder…</button>
+        <div class="menu-separator file-target-actions" role="separator"></div>
         <button type="button" role="menuitem" data-file-action="backend">Use as project backend…</button>
-        <button type="button" role="menuitem" data-file-action="rename">Rename…</button>
-        <button type="button" class="danger" role="menuitem" data-file-action="delete">Delete…</button>
+        <button class="file-target-actions" type="button" role="menuitem" data-file-action="rename">Rename…</button>
+        <button class="file-target-actions danger" type="button" role="menuitem" data-file-action="delete">Delete…</button>
       </div>
       <input id="project-file-input" type="file" accept=".zip,.go,.c,.h,.rtg,.rbe,.mod,.txt,.json" multiple hidden>
-      <input id="project-directory-input" type="file" webkitdirectory multiple hidden>
       <input id="backend-file-input" type="file" accept=".json,.wasm,.rtg,.rbe" multiple hidden>
       <div class="file-tree" id="file-tree" role="tree"></div>
       <div class="section-title utility-heading collapsed" id="examples-heading"><span class="chevron">›</span><span>EXAMPLES</span><span id="sidebar-example-count" class="utility-meta"></span></div>
@@ -114,9 +116,13 @@
         <label><input id="emit-unit" type="checkbox"> Emit canonical unit</label>
         <label><input id="emit-image" type="checkbox"> Emit linked image</label>
         <label><input id="windows-gui" type="checkbox"> Windows GUI subsystem</label>
+        <label><span>Run arguments</span><input id="run-args" placeholder="Optional arguments"></label>
+        <label class="run-stdin-setting"><span>Run stdin</span><textarea id="run-stdin" spellcheck="false" placeholder="Optional standard input"></textarea></label>
         <button id="import-backend" type="button">Import prepared backend…</button>
       </div>
     </aside>
+    <div class="workspace-resizer sidebar-resizer" id="sidebar-resizer" role="separator" aria-label="Resize project sidebar"
+      aria-orientation="vertical" aria-valuemin="180" aria-valuemax="520" tabindex="0"></div>
 
     <section class="mobile-target-view" id="mobile-target-view" aria-label="Build and device">
       <div class="mobile-view-intro">
@@ -136,14 +142,32 @@
         </div>
       </div>
       <div class="mobile-device-console">
-        <div><strong>Output</strong><span>Build, flash, and serial log</span></div>
+        <div><strong>Serial monitor</strong><span>Application output from the board</span></div>
         <pre id="mobile-device-output">Nothing to show yet.</pre>
       </div>
       <div class="mobile-target-label">CHOOSE A TARGET</div>
+      <label class="mobile-target-search"><span>Filter targets</span><input id="mobile-target-search" type="search" placeholder="Search targets…" autocomplete="off" spellcheck="false"></label>
       <div class="mobile-target-list" id="mobile-target-list" role="listbox" aria-label="Build target"></div>
     </section>
 
     <main class="workbench">
+      <section class="start-screen" id="start-screen" aria-label="Welcome to Renvo">
+        <div class="start-card">
+          <div class="start-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h8.5a5.5 5.5 0 0 1 0 11H9l6 5H9l-4-4v-5h8.5a1.5 1.5 0 0 0 0-3H5V4Z"/></svg></div>
+          <p class="start-kicker">RENVO WEB IDE</p>
+          <h1>Build small. Target anything.</h1>
+          <p class="start-copy">Create a project, open an example, or continue the workspace saved in this browser.</p>
+          <div class="start-primary-actions">
+            <button type="button" class="start-primary" data-start-action="continue">Continue <span id="start-project-name">playground</span></button>
+            <button type="button" data-start-action="examples">Browse examples</button>
+          </div>
+          <div class="start-grid">
+            <button type="button" data-start-action="new-go"><strong>New Go project</strong><span>Start with a minimal main package</span></button>
+            <button type="button" data-start-action="new-c"><strong>New C project</strong><span>Use Renvo’s C frontend</span></button>
+            <button type="button" data-start-action="snapshots"><strong>Project snapshots</strong><span>Restore a saved workspace</span></button>
+          </div>
+        </div>
+      </section>
       <div class="editor-tabs" role="tablist" aria-label="Open editors">
         <div class="open-editor-tabs" id="open-editor-tabs"></div>
         <div class="editor-toolbar">
@@ -160,17 +184,32 @@
       <div class="editor-host" id="editor" aria-label="Code editor">
         <div class="editor-loading"><span class="spinner"></span><span>Loading editor…</span></div>
       </div>
+      <article class="hex-view" id="hex-view" aria-label="Binary hex viewer" hidden>
+        <header>
+          <div><strong id="hex-title">Binary output</strong><span id="hex-meta"></span></div>
+          <div class="hex-actions">
+            <button id="hex-previous" type="button" title="Previous page">←</button>
+            <span id="hex-page"></span>
+            <button id="hex-next" type="button" title="Next page">→</button>
+            <button id="hex-download" type="button">Download</button>
+          </div>
+        </header>
+        <div class="hex-heading">OFFSET&nbsp;&nbsp;00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F&nbsp;&nbsp;ASCII</div>
+        <pre id="hex-output"></pre>
+      </article>
       <article class="help-view" id="help-view" aria-label="Documentation" hidden></article>
 
+      <div class="workspace-resizer panel-resizer" id="panel-resizer" role="separator" aria-label="Resize bottom panel"
+        aria-orientation="horizontal" aria-valuemin="100" tabindex="0"></div>
       <section class="panel" id="panel" aria-label="Build panel">
         <div class="panel-tabs" role="tablist">
           <button class="panel-tab active" data-panel="output" role="tab" aria-selected="true">Output</button>
           <button class="panel-tab" data-panel="problems" role="tab" aria-selected="false">Problems <span id="problem-count">0</span></button>
           <button class="panel-tab" data-panel="terminal" role="tab" aria-selected="false">Terminal</button>
+          <button class="panel-tab" data-panel="serial" role="tab" aria-selected="false">Serial</button>
           <button class="panel-tab" data-panel="plotter" role="tab" aria-selected="false">Plotter</button>
           <button class="panel-tab" data-panel="tests" role="tab" aria-selected="false">Tests</button>
           <button class="panel-tab" data-panel="search" role="tab" aria-selected="false">Search</button>
-          <button class="panel-tab" data-panel="preview" role="tab" aria-selected="false">Preview</button>
           <div class="panel-actions">
             <button id="toggle-plotter-size" title="Expand plotter over editor" aria-pressed="false" hidden>Expand</button>
             <button id="clear-output" title="Clear output">Clear</button>
@@ -181,14 +220,10 @@
           <pre class="panel-view active" id="output" data-panel-view="output" aria-live="polite"></pre>
           <div class="panel-view problems" data-panel-view="problems" id="problems"><div class="empty-state">No problems detected.</div></div>
           <div class="panel-view terminal" data-panel-view="terminal" id="terminal">
-            <div class="terminal-options">
-              <label>COMMAND <input id="terminal-command" spellcheck="false" value="renvo make" placeholder="renvo make [target]"></label>
-              <button id="terminal-command-run" type="button">Run command</button>
-              <label>ARGS <input id="run-args" spellcheck="false" placeholder="command-line arguments"></label>
-              <label>STDIN <textarea id="run-stdin" spellcheck="false" placeholder="optional input"></textarea></label>
-            </div>
-            <pre id="terminal-output" aria-live="polite">Run renvo make here, or build a WASI target and press Run.</pre>
+            <div id="terminal-host" aria-label="Renvo terminal"></div>
+            <pre id="terminal-output" aria-live="polite">Loading terminal…</pre>
           </div>
+          <pre class="panel-view" id="serial-output" data-panel-view="serial" aria-live="polite">Serial monitor waiting for application output…</pre>
           <div class="panel-view plotter" data-panel-view="plotter" id="plotter">
             <div id="plotter-legend" aria-live="polite"></div>
             <canvas id="serial-plotter-canvas" aria-label="Live serial data plot"></canvas>
@@ -198,9 +233,12 @@
             <form class="search-form" id="search-form"><input id="search-query" aria-label="Search project files" placeholder="Search project files"><button type="submit">Search</button></form>
             <div id="search-matches"><div class="empty-state">Search the project with Ctrl+Shift+F.</div></div>
           </div>
-          <div class="panel-view preview" id="preview" data-panel-view="preview"><div class="empty-state">Build and run browser/wasm32 to preview the application.</div></div>
         </div>
       </section>
+      <aside class="preview-pane" id="preview-pane" aria-label="Application preview" hidden>
+        <header><div><strong>Preview</strong><span>browser/wasm32</span></div><button id="close-preview" type="button" aria-label="Close preview">×</button></header>
+        <div class="preview" id="preview"><div class="empty-state">Build and run browser/wasm32 to preview the application.</div></div>
+      </aside>
     </main>
 
     <footer class="status-bar">
@@ -245,6 +283,19 @@
           <summary>Activity log</summary>
           <pre id="mobile-flash-output" aria-live="polite"></pre>
         </details>
+      </div>
+    </section>
+
+    <section class="quick-open" id="quick-open" role="dialog" aria-label="Quick open" hidden>
+      <div class="quick-open-surface">
+        <label class="quick-open-field">
+          <span id="quick-open-mode" aria-hidden="true">⌕</span>
+          <input id="quick-open-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+            aria-label="Search files" aria-controls="quick-open-results" aria-autocomplete="list">
+          <kbd id="quick-open-shortcut">Ctrl P</kbd>
+        </label>
+        <div class="quick-open-hint" id="quick-open-hint">Type a filename · &gt; commands · @ symbols · # project definitions · : line</div>
+        <div class="quick-open-results" id="quick-open-results" role="listbox" aria-label="Quick open results"></div>
       </div>
     </section>
 
@@ -298,12 +349,20 @@
 
     <dialog class="ide-dialog snapshot-dialog" id="snapshot-dialog">
       <div class="dialog-body">
-        <header><div><h2>Snapshots</h2><p>Save a local copy of the project or restore an earlier one.</p></div><button type="button" id="snapshot-dialog-close" aria-label="Close">×</button></header>
-        <form class="snapshot-create" id="snapshot-create-form">
-          <input id="snapshot-name" value="Snapshot" aria-label="Snapshot name" autocomplete="off">
-          <button type="submit" class="dialog-primary">Save snapshot</button>
-        </form>
-        <div class="snapshot-list" id="snapshot-list"></div>
+        <header class="snapshot-header"><div><span class="snapshot-kicker">LOCAL HISTORY</span><h2>Project snapshots</h2><p>Capture the whole virtual workspace before a risky change. Snapshots stay in this browser.</p></div><button type="button" id="snapshot-dialog-close" aria-label="Close">×</button></header>
+        <div class="snapshot-layout">
+          <aside class="snapshot-create-card">
+            <span class="snapshot-card-icon">◷</span>
+            <h3>Save current workspace</h3>
+            <p>Includes project files, open editors, target, and build settings.</p>
+            <form class="snapshot-create" id="snapshot-create-form">
+              <label for="snapshot-name">Snapshot name</label>
+              <input id="snapshot-name" value="Snapshot" autocomplete="off">
+              <button type="submit" class="dialog-primary">Create snapshot</button>
+            </form>
+          </aside>
+          <section class="snapshot-history"><div class="snapshot-history-heading"><strong>Saved snapshots</strong><span>Newest first</span></div><div class="snapshot-list" id="snapshot-list"></div></section>
+        </div>
       </div>
     </dialog>
 

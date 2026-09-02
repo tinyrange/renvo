@@ -16,6 +16,12 @@ import { generateBrowserTestProject } from "./test-project.mjs";
 import { deleteProjectSnapshot, loadCurrentProject, loadPreparedBackends, loadProjectSnapshots, saveCurrentProject, savePreparedBackend, saveProjectSnapshot } from "./workspace-store.mjs";
 import { buildReadiness } from "./build-readiness.mjs";
 import { hasDownloadableOutput, targetCapabilities, targetCapabilityHint, targetCapabilityTags } from "./target-capabilities.mjs";
+import { outputArgument, replaceOutput, splitArguments, terminalRenvoArguments } from "./command-arguments.mjs";
+import { catalogFileItems, filterQuickOpenItems, quickOpenQuery } from "./quick-open.mjs";
+import { describeFile, formatHexPage, isTextData } from "./virtual-file.mjs";
+import { catalogSelectorCompletions } from "./catalog-completion.mjs";
+import { terminalCompletionChoices } from "./terminal-completion.mjs";
+import { flashCommand, parseFlashArguments } from "./flash-command.mjs";
 
 const MONACO_VERSION = "0.56.0";
 const encoder = new TextEncoder();
@@ -42,11 +48,13 @@ const elements = {
   targetButton: document.querySelector("#target-button"),
   targetLabel: document.querySelector("#target-label"),
   targetMenu: document.querySelector("#target-menu"),
+  targetSearch: document.querySelector("#target-search"),
+  targetOptions: document.querySelector("#target-options"),
   runArgs: document.querySelector("#run-args"),
   runStdin: document.querySelector("#run-stdin"),
-  terminalCommand: document.querySelector("#terminal-command"),
-  terminalCommandRun: document.querySelector("#terminal-command-run"),
+  terminalHost: document.querySelector("#terminal-host"),
   terminalOutput: document.querySelector("#terminal-output"),
+  serialOutput: document.querySelector("#serial-output"),
   plotterLegend: document.querySelector("#plotter-legend"),
   plotterCanvas: document.querySelector("#serial-plotter-canvas"),
   togglePlotterSize: document.querySelector("#toggle-plotter-size"),
@@ -66,6 +74,9 @@ const elements = {
   searchQuery: document.querySelector("#search-query"),
   searchMatches: document.querySelector("#search-matches"),
   preview: document.querySelector("#preview"),
+  previewPane: document.querySelector("#preview-pane"),
+  startScreen: document.querySelector("#start-screen"),
+  startProjectName: document.querySelector("#start-project-name"),
   workbench: document.querySelector(".workbench"),
   editorHost: document.querySelector("#editor"),
   helpView: document.querySelector("#help-view"),
@@ -86,7 +97,6 @@ const elements = {
   projectActionMenu: document.querySelector("#project-action-menu"),
   fileActionMenu: document.querySelector("#file-action-menu"),
   projectFileInput: document.querySelector("#project-file-input"),
-  projectDirectoryInput: document.querySelector("#project-directory-input"),
   backendFileInput: document.querySelector("#backend-file-input"),
   buildMode: document.querySelector("#build-mode"),
   arenaSize: document.querySelector("#arena-size"),
@@ -148,6 +158,7 @@ const elements = {
   mobileTransportStatus: document.querySelector("#mobile-transport-status"),
   mobileDeviceOutput: document.querySelector("#mobile-device-output"),
   mobileTargetList: document.querySelector("#mobile-target-list"),
+  mobileTargetSearch: document.querySelector("#mobile-target-search"),
   mobileFlashView: document.querySelector("#mobile-flash-view"),
   mobileFlashState: document.querySelector("#mobile-flash-state"),
   mobileFlashProgress: document.querySelector("#mobile-flash-progress"),
@@ -156,6 +167,22 @@ const elements = {
   copyToPlayground: document.querySelector("#copy-to-playground"),
   formatFile: document.querySelector("#format-file"),
   useBackend: document.querySelector("#use-backend"),
+  sidebarResizer: document.querySelector("#sidebar-resizer"),
+  panelResizer: document.querySelector("#panel-resizer"),
+  hexView: document.querySelector("#hex-view"),
+  hexTitle: document.querySelector("#hex-title"),
+  hexMeta: document.querySelector("#hex-meta"),
+  hexPage: document.querySelector("#hex-page"),
+  hexOutput: document.querySelector("#hex-output"),
+  hexPrevious: document.querySelector("#hex-previous"),
+  hexNext: document.querySelector("#hex-next"),
+  hexDownload: document.querySelector("#hex-download"),
+  quickOpen: document.querySelector("#quick-open"),
+  quickOpenInput: document.querySelector("#quick-open-input"),
+  quickOpenMode: document.querySelector("#quick-open-mode"),
+  quickOpenHint: document.querySelector("#quick-open-hint"),
+  quickOpenResults: document.querySelector("#quick-open-results"),
+  quickOpenShortcut: document.querySelector("#quick-open-shortcut"),
 };
 const phoneWorkspace = matchMedia("(max-width: 680px)");
 
@@ -181,6 +208,7 @@ let fileValues = { ...initialFiles };
 const editableFiles = new Set(Object.keys(fileValues));
 const editableBaselines = new Map(Object.entries(fileValues));
 const models = new Map();
+const generatedFiles = new Map();
 const openFiles = [];
 const stdlibFiles = new Map();
 const examplePreviewFiles = new Map();
@@ -199,6 +227,8 @@ let editor;
 let activeFile = "main.go";
 let lastWorkspaceFile = "main.go";
 let activeHelp = "";
+let activeBinary = "";
+let activeBinaryOffset = 0;
 let deepLinksReady = false;
 let applyingDeepLink = false;
 let compilerReady = false;
@@ -242,6 +272,23 @@ let testRunning = false;
 let previewURL;
 let browserHostParts;
 let fileMenuTarget = "";
+let fileMenuKind = "root";
+const workspaceFolders = new Set();
+const collapsedFolders = new Set();
+let xtermTerminal;
+let terminalFitAddon;
+let terminalLine = "";
+let terminalCursor = 0;
+let terminalHistory = [];
+let terminalHistoryIndex = 0;
+let terminalHistoryDraft = "";
+let terminalBusy = false;
+let terminalBuildResolve;
+let terminalRunResolve;
+let terminalFlashResolve;
+let terminalFlashActive = false;
+let terminalFlashProgress = "";
+let terminalSubmitPending = false;
 let textDialogResolve;
 let confirmDialogResolve;
 let devicePermissionResolve;
@@ -250,6 +297,9 @@ let mobileDeploymentLabel = "";
 let mobileDeploymentStep = "";
 let deploymentProgressTimer;
 let cLibraryPromise;
+let quickOpenItems = [];
+let quickOpenIndex = 0;
+const parsedImportCache = new Map();
 const customBackendURLs = new Map();
 const cachedBackendRecords = new Map();
 const projectBackendRoots = new Set();
@@ -303,10 +353,11 @@ async function boot() {
   const formatter = catalog.formatter ? new URL(catalog.formatter, catalogUrl).href : "";
   const backendJIT = catalog.backendJIT ? new URL(catalog.backendJIT, catalogUrl).href : "";
   const vmBackend = catalog.vmBackend ? new URL(catalog.vmBackend, catalogUrl).href : "";
+  const terminalCompiler = catalog.terminalCompiler ? new URL(catalog.terminalCompiler, catalogUrl).href : "";
   const compiler = compilerURLOverride || new URL(catalog.compiler || "renvo.wasm", catalogUrl).href;
   const linker = new URL(catalog.linker || "renvo-linker.wasm", catalogUrl).href;
   setSetupStep("compiler", "active", "Downloading the compiler…");
-  await initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend);
+  await initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend, terminalCompiler);
   setSetupStep("compiler", "done", "Compiler ready. Choose an example to continue.");
   prefetchTargetBackend(selectedTarget);
   prefetchExampleBoard();
@@ -345,7 +396,7 @@ async function loadTargetCatalog() {
     elements.output.textContent = `Target catalog unavailable (${error.message}); using the WASI backend from the URL.\n`;
     return { languageService: "", targets: [{
       name: "wasi/wasm32", backendTarget: "wasi/wasm32", backend: fallbackBackendUrl,
-      cBackend: new URL(parameters.get("cbackend") || "backends/native-c.wasm", bundleRoot).href,
+      cBackend: new URL(parameters.get("cbackend") || "backends/native.wasm", bundleRoot).href,
       output: "app.wasm", runnable: true, tags: ["wasi", "wasip1", "wasm", "wasm32"],
     }] };
   }
@@ -367,10 +418,12 @@ function configureTargets(targets) {
       group = nextGroup;
       const heading = document.createElement("div");
       heading.className = "target-group";
+      heading.dataset.targetGroup = group;
       heading.textContent = group;
       entries.push(heading);
       const mobileHeading = document.createElement("div");
       mobileHeading.className = "mobile-target-group";
+      mobileHeading.dataset.targetGroup = group;
       mobileHeading.textContent = group;
       mobileEntries.push(mobileHeading);
     }
@@ -379,6 +432,8 @@ function configureTargets(targets) {
     option.className = "target-option";
     option.id = `target-option-${index}`;
     option.dataset.target = target.name;
+    option.dataset.targetGroup = group;
+    option.dataset.search = `${targetDisplayName(target)} ${target.name} ${(target.tags || []).join(" ")}`.toLowerCase();
     option.dataset.index = String(index);
     option.setAttribute("role", "option");
     option.setAttribute("aria-selected", "false");
@@ -389,6 +444,8 @@ function configureTargets(targets) {
     mobileOption.type = "button";
     mobileOption.className = "mobile-target-option";
     mobileOption.dataset.target = target.name;
+    mobileOption.dataset.targetGroup = group;
+    mobileOption.dataset.search = option.dataset.search;
     mobileOption.setAttribute("role", "option");
     mobileOption.setAttribute("aria-selected", "false");
     const mobileLabel = document.createElement("span");
@@ -415,15 +472,31 @@ function configureTargets(targets) {
     });
     mobileEntries.push(mobileOption);
   }
-  elements.targetMenu.replaceChildren(...entries);
+  elements.targetOptions.replaceChildren(...entries);
   elements.mobileTargetList.replaceChildren(...mobileEntries);
+  filterTargetList(elements.targetOptions, "");
+  filterTargetList(elements.mobileTargetList, "");
   const requestedTarget = parameters.get("target");
   const requestedAvailable = requestedTarget && visibleTargets.some((target) => target.name === requestedTarget);
   const restoredAvailable = restoredTargetName && visibleTargets.some((target) => target.name === restoredTargetName);
   const requested = requestedAvailable ? requestedTarget : restoredAvailable ? restoredTargetName : selectedTarget?.name;
   const initial = visibleTargets.some((target) => target.name === requested) ? requested :
     visibleTargets.some((target) => target.name === "wasi/wasm32") ? "wasi/wasm32" : visibleTargets[0].name;
-  selectTarget(initial, false);
+  const initialTarget = visibleTargets.find((target) => target.name === initial);
+  const currentOutput = outputArgument(elements.command.value);
+  const knownOutput = visibleTargets.some((target) => target.output === currentOutput);
+  selectTarget(initial, Boolean(currentOutput && knownOutput && currentOutput !== initialTarget.output));
+}
+
+function filterTargetList(container, query) {
+  const search = query.trim().toLowerCase();
+  for (const option of container.querySelectorAll("[data-target]")) {
+    option.hidden = Boolean(search) && !option.dataset.search.includes(search);
+  }
+  for (const heading of container.querySelectorAll("[data-target-group]")) {
+    heading.hidden = !Array.from(container.querySelectorAll(`[data-target-group="${CSS.escape(heading.dataset.targetGroup)}"][data-target]`))
+      .some((option) => !option.hidden);
+  }
 }
 
 function targetGroup(target) {
@@ -472,6 +545,7 @@ async function loadMonaco() {
     bracketPairColorization: { enabled: true }, lightbulb: { enabled: "off" },
     quickSuggestions: { other: true, comments: false, strings: false },
     suggestOnTriggerCharacters: true, wordBasedSuggestions: "off",
+    tabCompletion: "on", suggestSelection: "first", acceptSuggestionOnEnter: "on",
     hover: { enabled: true, delay: 80, sticky: true },
   });
   installEditorOpener(monaco, {
@@ -491,12 +565,13 @@ async function loadMonaco() {
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, searchProject);
   elements.editorHost.querySelector(".editor-loading")?.remove();
   openFile(activeFile);
+  elements.startScreen.dataset.ready = "true";
   configureEditorForViewport();
   updateReadyState();
-  if (!isPhoneWorkspace()) editor.focus();
+  if (!isPhoneWorkspace() && elements.startScreen.hidden) editor.focus();
 }
 
-function initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend) {
+function initializeCompiler(compiler, linker, languageService, formatter, backendJIT, vmBackend, terminalCompiler) {
   return new Promise((resolve, reject) => {
     const onReady = (event) => {
       if (event.data.type !== "ready") return;
@@ -509,7 +584,7 @@ function initializeCompiler(compiler, linker, languageService, formatter, backen
     };
     worker.addEventListener("message", onReady);
     worker.addEventListener("error", reject, { once: true });
-    worker.postMessage({ type: "init", compiler, linker, languageService, formatter, backendJIT, vmBackend });
+    worker.postMessage({ type: "init", compiler, linker, languageService, formatter, backendJIT, vmBackend, terminalCompiler });
   });
 }
 
@@ -547,6 +622,7 @@ worker.addEventListener("message", (event) => {
   if (event.data.type === "result") renderResult(event.data);
   else if (event.data.type === "validation-result") receiveBuildValidation(event.data);
   else if (event.data.type === "run-result") renderRunResult(event.data);
+  else if (event.data.type === "terminal-run-result") receiveTerminalRunResult(event.data);
   else if (event.data.type === "language-result") receiveLanguageResult(event.data);
   else if (event.data.type === "format-result") receiveFormatResult(event.data);
   else if (event.data.type === "backend-result") receiveBackendResult(event.data);
@@ -558,11 +634,30 @@ worker.addEventListener("message", (event) => {
 worker.addEventListener("error", (event) => showFatalError(new Error(event.message)));
 
 function setupShell() {
+  installWorkspaceResizers();
+  elements.hexPrevious.addEventListener("click", () => moveHexPage(-1));
+  elements.hexNext.addEventListener("click", () => moveHexPage(1));
+  elements.hexDownload.addEventListener("click", () => {
+    const data = generatedFiles.get(activeBinary);
+    if (data) downloadArtifact({ name: activeBinary, data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) });
+  });
+  elements.quickOpenInput.addEventListener("input", renderQuickOpen);
+  elements.quickOpenInput.addEventListener("keydown", handleQuickOpenKeydown);
+  elements.quickOpenResults.addEventListener("pointermove", (event) => {
+    const item = event.target.closest(".quick-open-item");
+    if (item) selectQuickOpenIndex(Number(item.dataset.index));
+  });
+  elements.quickOpenResults.addEventListener("click", (event) => {
+    const item = event.target.closest(".quick-open-item");
+    if (item) activateQuickOpenItem(Number(item.dataset.index));
+  });
+  elements.quickOpen.addEventListener("pointerdown", (event) => {
+    if (event.target === elements.quickOpen) closeQuickOpen();
+  });
+  window.addEventListener("keydown", handleQuickOpenShortcut, true);
   elements.compile.addEventListener("click", primaryTargetAction);
   elements.run.addEventListener("click", secondaryTargetAction);
   elements.test.addEventListener("click", runTests);
-  elements.terminalCommandRun.addEventListener("click", runTerminalCommand);
-  elements.terminalCommand.addEventListener("keydown", (event) => { if (event.key === "Enter") runTerminalCommand(); });
   document.querySelector("#new-file").addEventListener("click", createWorkspaceFile);
   document.querySelector("#browse-examples").addEventListener("click", openExampleBrowser);
   elements.toggleSidebar.addEventListener("click", toggleSidebar);
@@ -581,7 +676,6 @@ function setupShell() {
   document.querySelector("#help-heading").addEventListener("click", toggleHelp);
   document.querySelector("#library-heading").addEventListener("click", toggleLibrary);
   elements.projectFileInput.addEventListener("change", () => importProjectFiles(elements.projectFileInput.files));
-  elements.projectDirectoryInput.addEventListener("change", () => importProjectFiles(elements.projectDirectoryInput.files, true));
   elements.backendFileInput.addEventListener("change", () => importPreparedBackend(elements.backendFileInput.files));
   for (const control of [elements.buildMode, elements.arenaSize, elements.emitUnit, elements.emitImage, elements.windowsGUI]) {
     control.addEventListener("change", markBuildStale);
@@ -609,7 +703,11 @@ function setupShell() {
   document.querySelectorAll(".mobile-nav button").forEach((button) => button.addEventListener("click", () => {
     showMobileView(button.dataset.mobileView);
   }));
-  new MutationObserver(syncMobileFlashOutput).observe(elements.terminalOutput, {
+  const mobileOutputObserver = new MutationObserver(syncMobileFlashOutput);
+  mobileOutputObserver.observe(elements.terminalOutput, {
+    childList: true, subtree: true, characterData: true,
+  });
+  mobileOutputObserver.observe(elements.serialOutput, {
     childList: true, subtree: true, characterData: true,
   });
   phoneWorkspace.addEventListener?.("change", configureMobileWorkspace);
@@ -627,12 +725,26 @@ function setupShell() {
     const option = event.target.closest(".target-option");
     if (option) setFocusedTarget(Number(option.dataset.index));
   });
+  elements.targetSearch.addEventListener("input", () => {
+    filterTargetList(elements.targetOptions, elements.targetSearch.value);
+    setFocusedTarget(0);
+  });
+  elements.targetSearch.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeTargetMenu(); elements.targetButton.focus(); return; }
+    if (event.key === "Enter") { event.preventDefault(); chooseTargetOption(visibleTargetOptions()[focusedTargetIndex]); return; }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    setFocusedTarget(focusedTargetIndex + (event.key === "ArrowDown" ? 1 : -1), true);
+  });
+  elements.mobileTargetSearch.addEventListener("input", () => filterTargetList(elements.mobileTargetList, elements.mobileTargetSearch.value));
   document.addEventListener("pointerdown", (event) => {
     if (!elements.targetPicker.contains(event.target)) closeTargetMenu();
   });
   elements.command.addEventListener("input", () => { syncBuildRootFromCommand(); markBuildStale(); saveFiles(); });
   elements.command.addEventListener("keydown", (event) => { if (event.key === "Enter") primaryTargetAction(); });
   elements.fileTree.addEventListener("contextmenu", handleWorkspaceFileMenu);
+  elements.startScreen.addEventListener("click", handleStartAction);
+  document.querySelector("#close-preview").addEventListener("click", closePreviewPane);
   document.addEventListener("pointerdown", (event) => {
     if (!elements.projectActionMenu.contains(event.target) && event.target !== elements.projectMenuButton) closeProjectActionMenu();
     if (!elements.fileActionMenu.contains(event.target)) closeFileActionMenu();
@@ -690,6 +802,7 @@ function setupShell() {
     else if (espPort) espPort.close().catch(() => {});
   });
   syncBuildScope();
+  initializeTerminal();
 }
 
 function selectTarget(name, updateCommand) {
@@ -714,7 +827,7 @@ function selectTarget(name, updateCommand) {
   elements.run.title = board ? "Build, flash, and run on the connected ESP board (F5)" : "Run console app (F5)";
   elements.runArgs.closest("label").hidden = board;
   elements.runStdin.closest("label").hidden = board;
-  for (const option of elements.targetMenu.querySelectorAll(".target-option")) {
+  for (const option of elements.targetOptions.querySelectorAll(".target-option")) {
     option.setAttribute("aria-selected", String(option.dataset.target === selectedTarget.name));
   }
   for (const option of elements.mobileTargetList.querySelectorAll(".mobile-target-option")) {
@@ -740,9 +853,12 @@ function toggleTargetMenu(force) {
   elements.targetMenu.hidden = false;
   elements.targetPicker.classList.add("open");
   elements.targetButton.setAttribute("aria-expanded", "true");
-  const index = Array.from(elements.targetMenu.querySelectorAll(".target-option"))
+  elements.targetSearch.value = "";
+  filterTargetList(elements.targetOptions, "");
+  const index = visibleTargetOptions()
     .findIndex((option) => option.dataset.target === selectedTarget?.name);
   setFocusedTarget(index < 0 ? 0 : index, true);
+  queueMicrotask(() => { elements.targetSearch.focus(); elements.targetSearch.select(); });
 }
 
 function closeTargetMenu() {
@@ -753,7 +869,7 @@ function closeTargetMenu() {
 }
 
 function setFocusedTarget(index, reveal = false) {
-  const options = elements.targetMenu.querySelectorAll(".target-option");
+  const options = visibleTargetOptions();
   if (!options.length) return;
   focusedTargetIndex = (index + options.length) % options.length;
   for (let i = 0; i < options.length; i++) options[i].classList.toggle("focused", i === focusedTargetIndex);
@@ -762,7 +878,12 @@ function setFocusedTarget(index, reveal = false) {
   if (reveal) option.scrollIntoView({ block: "nearest" });
 }
 
+function visibleTargetOptions() {
+  return Array.from(elements.targetOptions.querySelectorAll(".target-option:not([hidden])"));
+}
+
 function chooseTargetOption(option) {
+  if (!option) return;
   selectTarget(option.dataset.target, true);
   closeTargetMenu();
   elements.targetButton.focus();
@@ -780,26 +901,31 @@ function handleTargetKeydown(event) {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     if (elements.targetMenu.hidden) toggleTargetMenu(true);
-    else chooseTargetOption(elements.targetMenu.querySelectorAll(".target-option")[focusedTargetIndex]);
+    else chooseTargetOption(visibleTargetOptions()[focusedTargetIndex]);
     return;
   }
   if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
   event.preventDefault();
   if (elements.targetMenu.hidden) toggleTargetMenu(true);
-  const count = elements.targetMenu.querySelectorAll(".target-option").length;
+  const count = visibleTargetOptions().length;
+  if (!count) return;
   if (event.key === "Home") setFocusedTarget(0, true);
   else if (event.key === "End") setFocusedTarget(count - 1, true);
   else setFocusedTarget(focusedTargetIndex + (event.key === "ArrowDown" ? 1 : -1), true);
 }
 
 function primaryTargetAction() {
-  if (isBoardTarget(selectedTarget)) return runArtifact();
+  if (isBoardTarget(selectedTarget)) return submitTerminalCommand(flashCommand(elements.flashTransport.value));
   return downloadValidatedArtifact();
 }
 
 function secondaryTargetAction() {
   if (isBoardTarget(selectedTarget)) return downloadValidatedArtifact();
   return runArtifact();
+}
+
+function isWASITarget(target = selectedTarget) {
+  return target?.name === "wasi/wasm32";
 }
 
 function targetDisplayName(target) {
@@ -843,7 +969,8 @@ function downloadArtifact(artifact, filename = artifact.name.split("/").pop()) {
   link.click();
   link.remove();
   if (url.startsWith("blob:")) setTimeout(() => releaseDownloadURL(url), 60000);
-  setCompilerStatus("ready", `Downloading ${filename}`);
+  setCompilerStatus("ready", "Ready");
+  elements.languageStatus.textContent = `Download started · ${filename}`;
 }
 
 async function compilePicoMonitor() {
@@ -889,7 +1016,7 @@ function publishValidatedBuild() {
   clearMarkers();
   lastRunnableArtifact = undefined;
   elements.output.textContent = `$ renvo ${cached.args.join(" ")}\n`;
-  showPanel("output");
+  showPanel(terminalFlashActive ? "terminal" : "output");
   pendingBuild = {
     id: cached.result.id,
     revision: cached.revision,
@@ -919,8 +1046,15 @@ async function compileTarget(buildTarget) {
       selectedTarget = buildTarget;
       setCompilerStatus("ready", "Compiler ready");
     } catch (error) {
+      runAfterBuild = false;
       renderProblems(parseDiagnostics(error.message || String(error)));
-      showPanel("problems");
+      if (terminalFlashActive) {
+        appendTerminalActivity(`Firmware build failed: ${error.message || error}\n`);
+        showPanel("terminal");
+        finishTerminalFlashCommand();
+      } else {
+        showPanel("problems");
+      }
       setCompilerStatus("error", "Backend preparation failed");
       return;
     } finally {
@@ -937,7 +1071,13 @@ async function compileTarget(buildTarget) {
     runAfterBuild = false;
     updateReadyState();
     renderProblems([{ message: error.message, file: "", line: 0, column: 0 }]);
-    showPanel("problems");
+    if (terminalFlashActive) {
+      appendTerminalActivity(`Firmware build failed: ${error.message || error}\n`);
+      showPanel("terminal");
+      finishTerminalFlashCommand();
+    } else {
+      showPanel("problems");
+    }
     return;
   }
   saveFiles();
@@ -952,7 +1092,7 @@ async function compileTarget(buildTarget) {
   const loading = !backendReady.has(backend);
   setCompilerStatus("busy", loading ? `Loading ${buildTarget.name} backend…` : "Building…");
   elements.output.textContent = `$ renvo ${args.join(" ")}\n`;
-  showPanel("output");
+  showPanel(terminalFlashActive ? "terminal" : "output");
   try {
     if (mobileDeploymentActive && runAfterBuild) {
       setMobileDeployStep("check", "active", "Loading the libraries used by this example…");
@@ -976,11 +1116,18 @@ async function compileTarget(buildTarget) {
     setCompilerStatus("error", "Build failed");
     elements.output.textContent += `${error.message}\n`;
     if (mobileDeploymentActive) failMobileDeployment(mobileDeploymentStep || "check", error.message || String(error));
+    if (terminalFlashActive) {
+      appendTerminalActivity(`Firmware build failed: ${error.message || error}\n`);
+      showPanel("terminal");
+      finishTerminalFlashCommand();
+    }
   }
 }
 
 function receiveCompileProgress(message) {
-  if (pendingBuild?.id !== message.id || !runAfterBuild || !mobileDeploymentActive) return;
+  if (pendingBuild?.id !== message.id || !runAfterBuild) return;
+  if (terminalFlashActive) writeFlashProgress(message.message);
+  if (!mobileDeploymentActive) return;
   if (message.phase === "check") {
     setMobileDeployStep("check", "active", message.message);
   } else if (message.phase === "firmware") {
@@ -1104,20 +1251,34 @@ function renderResult(result) {
     renderTestBuildResult(result, build, summary, text);
     return;
   }
-  const buildOutput = build.action === "terminal" ? elements.terminalOutput : elements.output;
-  buildOutput.textContent += `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
+  const report = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
+  const shouldRun = runAfterBuild;
+  const flashBuild = terminalFlashActive && shouldRun && build.action !== "terminal";
+  runAfterBuild = false;
+  if (build.action === "terminal") {
+    if (result.filesystemComplete) syncGeneratedFiles(result.files);
+    if (text) writeTerminal(`${text}${text.endsWith("\n") ? "" : "\n"}`);
+  }
+  else elements.output.textContent += report;
+  if (flashBuild) {
+    if (text) appendTerminalActivity(`${text}${text.endsWith("\n") ? "" : "\n"}`);
+    appendTerminalActivity(result.exitCode === 0
+      ? `Firmware build complete in ${formatElapsed(result.elapsedMilliseconds)}.\n`
+      : `Firmware build failed after ${formatElapsed(result.elapsedMilliseconds)}.\n`);
+  }
   elements.memoryStatus.textContent = `${(result.linearMemoryBytes / 1048576).toFixed(1)} MiB`;
-  setCompilerStatus(result.exitCode === 0 ? "ready" : "error", result.exitCode === 0 ? "Build succeeded" : "Build failed");
+  setCompilerStatus(build.action === "terminal" ? "ready" : result.exitCode === 0 ? "ready" : "error",
+    build.action === "terminal" ? "Ready" : result.exitCode === 0 ? "Build succeeded" : "Build failed");
   const diagnosticText = result.exitCode === 0 ? "" : [result.stderr, result.stdout].filter(Boolean).join("\n");
   const problems = parseDiagnostics(diagnosticText);
   renderProblems(problems);
-  if (build.revision === buildRevision && build.target?.name === selectedTarget?.name) {
+  if (build.action !== "terminal" && build.revision === buildRevision && build.target?.name === selectedTarget?.name) {
     buildValidationRevision = build.revision;
     buildValidationState = result.exitCode === 0 ? "success" : "failure";
     validatedBuild = result.exitCode === 0 ? { ...build, result } : undefined;
   }
-  if (result.exitCode === 0) {
-    backendReady.add(build.backend);
+  if (result.exitCode === 0 && build.action !== "terminal") {
+    if (build.backend) backendReady.add(build.backend);
     const artifact = result.files.find((file) => file.name === build.target.output) || result.files[0];
     if ((build.target.runnable || isBoardTarget(build.target)) && artifact) {
       lastRunnableArtifact = {
@@ -1127,11 +1288,13 @@ function renderResult(result) {
       };
     }
   }
-  const shouldRun = runAfterBuild;
-  runAfterBuild = false;
   updateReadyState();
-  if (result.exitCode !== 0) showPanel(build.action === "terminal" ? "terminal" : problems.length ? "problems" : "output");
-  if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
+  if (build.action === "terminal") { terminalBuildResolve?.(result); terminalBuildResolve = undefined; }
+  if (result.exitCode !== 0) showPanel(build.action === "terminal" || flashBuild ? "terminal" : problems.length ? "problems" : "output");
+  if (result.exitCode !== 0 && flashBuild) {
+    if (mobileDeploymentActive) failMobileDeployment(mobileDeploymentStep || "firmware", "The firmware build failed. Open the activity log for the compiler message.");
+    finishTerminalFlashCommand();
+  } else if (result.exitCode !== 0 && shouldRun && isPhoneWorkspace()) {
     elements.terminalOutput.textContent = `${text}${text && !text.endsWith("\n") ? "\n" : ""}${summary}\n`;
     failMobileDeployment(mobileDeploymentStep || "firmware", "The firmware build failed. Open the activity log for the compiler message.");
   }
@@ -1144,30 +1307,366 @@ function renderResult(result) {
   }
 }
 
-async function runTerminalCommand() {
-  if (!compilerReady || building || !selectedTarget) return;
-  let args;
+async function initializeTerminal() {
   try {
-    args = splitArguments(elements.terminalCommand.value.trim());
-    if (args[0] === "renvo") args.shift();
-    if (args[0] !== "make") throw new Error("The Web IDE terminal currently runs renvo make commands.");
+    const [{ Terminal }, { FitAddon }] = await Promise.all([
+      import("https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm"),
+      import("https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/+esm"),
+    ]);
+    xtermTerminal = new Terminal({ cursorBlink: true, convertEol: true, fontSize: 12, lineHeight: 1.25,
+      fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace", scrollback: 3000,
+      theme: { background: "#140512", foreground: "#d8cae2", cursor: "#dccde8", selectionBackground: "#68445f88", blue: "#9db5d8", green: "#afc29d", red: "#e36388" } });
+    terminalFitAddon = new FitAddon(); xtermTerminal.loadAddon(terminalFitAddon); xtermTerminal.open(elements.terminalHost);
+    elements.terminalOutput.hidden = true;
+    xtermTerminal.writeln("Renvo virtual workspace — type 'help' for commands.");
+    terminalPrompt();
+    xtermTerminal.onData(handleTerminalData);
+    xtermTerminal.attachCustomKeyEventHandler((event) => {
+      if (event.key !== "Tab" || event.ctrlKey || event.metaKey || event.altKey) return true;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.type === "keydown") completeTerminalInput();
+      return false;
+    });
+    window.addEventListener("resize", () => requestAnimationFrame(() => terminalFitAddon?.fit()));
   } catch (error) {
-    elements.terminalOutput.textContent = `${error.message || error}\n`; showPanel("terminal"); return;
+    elements.terminalOutput.textContent = `Terminal unavailable: ${error.message || error}`;
   }
+}
+
+function terminalPrompt() { writeTerminal("\x1b[38;5;108mrenvo:/workspace$\x1b[0m "); }
+function writeTerminal(text) {
+  if (xtermTerminal) xtermTerminal.write(String(text).replace(/\r?\n/g, "\r\n"));
+  else elements.terminalOutput.textContent += text;
+}
+
+function appendTerminalActivity(text) {
+  elements.terminalOutput.textContent += text;
+  if (xtermTerminal) writeTerminal(text);
+}
+
+function writeFlashProgress(text) {
+  if (!terminalFlashActive || !text || terminalFlashProgress === text) return;
+  terminalFlashProgress = text;
+  appendTerminalActivity(`${text}\n`);
+}
+
+function submitTerminalCommand(line) {
+  if (terminalBusy || terminalSubmitPending) return;
+  terminalSubmitPending = true;
+  showPanel("terminal");
+  requestAnimationFrame(() => {
+    terminalFitAddon?.fit();
+    renderTerminalInput();
+    replaceTerminalLine(line);
+    terminalSubmitPending = false;
+    handleTerminalData("\r");
+  });
+}
+
+function replaceTerminalLine(value) {
+  const oldLength = terminalLine.length;
+  const oldCursor = terminalCursor;
+  if (xtermTerminal) {
+    if (oldCursor > 0) xtermTerminal.write(`\x1b[${oldCursor}D`);
+    xtermTerminal.write(value);
+    if (oldLength > value.length) xtermTerminal.write(" ".repeat(oldLength - value.length));
+    const renderedLength = Math.max(oldLength, value.length);
+    if (renderedLength > value.length) xtermTerminal.write(`\x1b[${renderedLength - value.length}D`);
+  }
+  terminalLine = value;
+  terminalCursor = value.length;
+}
+
+function handleTerminalData(data) {
+  if (terminalBusy) return;
+  if (data === "\r") {
+    const line = terminalLine; terminalLine = ""; terminalCursor = 0; writeTerminal("\n");
+    if (line.trim()) { terminalHistory.push(line); terminalHistory = terminalHistory.slice(-100); }
+    terminalHistoryIndex = terminalHistory.length; terminalHistoryDraft = ""; terminalBusy = true;
+    executeTerminalLine(line).catch((error) => writeTerminal(`${error.message || error}\n`)).finally(() => { terminalBusy = false; terminalPrompt(); });
+  } else if (data === "\u007f") {
+    if (terminalCursor > 0) {
+      const wasAtEnd = terminalCursor === terminalLine.length;
+      terminalLine = terminalLine.slice(0, terminalCursor - 1) + terminalLine.slice(terminalCursor);
+      terminalCursor--;
+      if (wasAtEnd) xtermTerminal.write("\b \b"); else renderTerminalInput();
+    }
+  } else if (data === "\u001b[3~") {
+    if (terminalCursor < terminalLine.length) {
+      terminalLine = terminalLine.slice(0, terminalCursor) + terminalLine.slice(terminalCursor + 1);
+      renderTerminalInput();
+    }
+  } else if (data === "\u0003") { terminalLine = ""; terminalCursor = 0; writeTerminal("^C\n"); terminalPrompt(); }
+  else if (data === "\u001b[A" || data === "\u001b[B") {
+    if (terminalHistoryIndex === terminalHistory.length) terminalHistoryDraft = terminalLine;
+    terminalHistoryIndex = Math.max(0, Math.min(terminalHistory.length, terminalHistoryIndex + (data === "\u001b[A" ? -1 : 1)));
+    replaceTerminalLine(terminalHistoryIndex === terminalHistory.length ? terminalHistoryDraft : terminalHistory[terminalHistoryIndex] || "");
+  } else if (data === "\u001b[D") {
+    if (terminalCursor > 0) { terminalCursor--; xtermTerminal.write("\x1b[D"); }
+  } else if (data === "\u001b[C") {
+    if (terminalCursor < terminalLine.length) { terminalCursor++; xtermTerminal.write("\x1b[C"); }
+  } else if (data === "\u001b[H" || data === "\u001b[1~" || data === "\u0001") {
+    terminalCursor = 0; renderTerminalInput();
+  } else if (data === "\u001b[F" || data === "\u001b[4~" || data === "\u0005") {
+    terminalCursor = terminalLine.length; renderTerminalInput();
+  } else if (data === "\u0015") {
+    terminalLine = terminalLine.slice(terminalCursor); terminalCursor = 0; renderTerminalInput();
+  } else if (data === "\u000b") {
+    terminalLine = terminalLine.slice(0, terminalCursor); renderTerminalInput();
+  } else if (data === "\u0017") {
+    const before = terminalLine.slice(0, terminalCursor);
+    const start = before.search(/\S+\s*$/);
+    if (start >= 0) { terminalLine = terminalLine.slice(0, start) + terminalLine.slice(terminalCursor); terminalCursor = start; renderTerminalInput(); }
+  } else if (data === "\u000c") {
+    xtermTerminal?.clear(); renderTerminalInput();
+  } else if (data === "\t") {
+    completeTerminalInput();
+  } else if (!data.startsWith("\u001b") && [...data].every((character) => character >= " ")) {
+    const wasAtEnd = terminalCursor === terminalLine.length;
+    terminalLine = terminalLine.slice(0, terminalCursor) + data + terminalLine.slice(terminalCursor);
+    terminalCursor += data.length;
+    if (wasAtEnd) xtermTerminal.write(data); else renderTerminalInput();
+  }
+}
+
+function renderTerminalInput() {
+  if (!xtermTerminal) return;
+  xtermTerminal.write("\x1b[2K\r");
+  terminalPrompt();
+  xtermTerminal.write(terminalLine);
+  const back = terminalLine.length - terminalCursor;
+  if (back > 0) xtermTerminal.write(`\x1b[${back}D`);
+}
+
+function completeTerminalInput() {
+  const before = terminalLine.slice(0, terminalCursor);
+  const files = [...virtualFileNames()];
+  const { prefix, candidates } = terminalCompletionChoices(before, files, [...workspaceFolders], targetCatalog?.targets?.map((target) => target.name) || []);
+  if (candidates.length === 1) {
+    const value = candidates[0] + (candidates[0].endsWith("/") ? "" : " ");
+    terminalLine = terminalLine.slice(0, terminalCursor - prefix.length) + value + terminalLine.slice(terminalCursor);
+    terminalCursor += value.length - prefix.length;
+    renderTerminalInput();
+  } else if (candidates.length > 1) {
+    const common = longestCommonPrefix(candidates);
+    if (common.length > prefix.length) {
+      terminalLine = terminalLine.slice(0, terminalCursor - prefix.length) + common + terminalLine.slice(terminalCursor);
+      terminalCursor += common.length - prefix.length;
+      renderTerminalInput();
+    } else {
+      writeTerminal(`\n${candidates.join("  ")}\n`);
+      renderTerminalInput();
+    }
+  }
+}
+
+function longestCommonPrefix(values) {
+  if (!values.length) return "";
+  let prefix = values[0];
+  for (let index = 1; index < values.length; index++) while (prefix && !values[index].startsWith(prefix)) prefix = prefix.slice(0, -1);
+  return prefix;
+}
+
+async function executeTerminalLine(line) {
+  const args = splitArguments(line.trim());
+  if (!args.length) return;
+  const command = args.shift();
+  if (command === "clear") { xtermTerminal?.clear(); return; }
+  if (command === "help") { writeTerminal("Shell commands: help, clear, pwd, ls [path], cat <file>, file <file>, stat <file>, touch <file>, mkdir <folder>, cp <from> <to>, mv <from> <to>, rm <file>, run [app.wasm] [args], flash [--transport webusb|webserial], renvo [options]\nRun with no file builds the current WASI project, keeps its output in the virtual filesystem, and executes it. The full Renvo CLI defaults to wasi/wasm32. WASI programs can also be launched as ./app.wasm.\nLine editing: arrows, Home/End, Delete, Ctrl+A/E/U/K/W/L, history, and Tab completion.\n"); return; }
+  if (command === "pwd") { writeTerminal("/workspace\n"); return; }
+  if (command === "ls") {
+    const prefix = args[0] ? `${normalizeProjectPath(args[0]).replace(/\/$/, "")}/` : "";
+    const names = new Set();
+    for (const folder of workspaceFolders) if (folder.startsWith(prefix)) names.add(folder.slice(prefix.length).split("/")[0] + "/");
+    for (const file of virtualFileNames()) if (file.startsWith(prefix)) names.add(file.slice(prefix.length).split("/")[0] + (file.slice(prefix.length).includes("/") ? "/" : ""));
+    writeTerminal(`${[...names].sort().join("  ")}\n`); return;
+  }
+  if (command === "cat") {
+    const name = normalizeProjectPath(args[0] || ""), data = virtualFileBytes(name);
+    if (!data) throw new Error(`cat: ${name}: No such file`);
+    if (!isTextFileData(data)) { writeTerminal(`cat: ${name}: binary file (${data.byteLength} bytes)\n`); return; }
+    const value = decoder.decode(data); writeTerminal(`${value}${value.endsWith("\n") ? "" : "\n"}`); return;
+  }
+  if (command === "file") {
+    if (!args.length) throw new Error("file: missing file operand");
+    for (const operand of args) {
+      const name = normalizeProjectPath(operand), data = virtualFileBytes(name);
+      if (!data) writeTerminal(`${name}: cannot open: No such file\n`);
+      else writeTerminal(`${name}: ${describeFile(name, data)}\n`);
+    }
+    return;
+  }
+  if (command === "stat") {
+    const name = normalizeProjectPath(args[0] || ""), data = virtualFileBytes(name);
+    if (!data) throw new Error(`stat: ${name}: No such file`);
+    writeTerminal(`${name}  ${data.byteLength} bytes  ${editableFiles.has(name) ? "workspace source" : "generated output"}\n`); return;
+  }
+  if (command === "mkdir") { const name = normalizeProjectPath(args[0] || ""); workspaceFolders.add(name); renderWorkspaceFiles(); saveFiles(); return; }
+  if (command === "touch") { const name = normalizeProjectPath(args[0] || ""); if (!models.has(name)) { generatedFiles.delete(name); createProjectModel(name, ""); renderWorkspaceFiles(); saveFiles(); markBuildStale(); } return; }
+  if (command === "cp" || command === "mv") {
+    const source = normalizeProjectPath(args[0] || ""), destination = normalizeProjectPath(args[1] || ""), data = virtualFileBytes(source);
+    if (!data) throw new Error(`${command}: ${source}: No such file`);
+    writeVirtualFile(destination, data, editableFiles.has(source));
+    if (command === "mv") removeVirtualFile(source);
+    finishTerminalFilesystemChange(); return;
+  }
+  if (command === "rm") {
+    const name = normalizeProjectPath(args[0] || "");
+    if (!virtualFileBytes(name)) throw new Error(`rm: ${name}: No such file`);
+    removeVirtualFile(name); finishTerminalFilesystemChange(); return;
+  }
+  if (command === "run") {
+    if (!args.length) {
+      await runCurrentWASIProject();
+      return;
+    }
+    const name = normalizeProjectPath(args.shift() || "");
+    await runTerminalWASI(name, args);
+    return;
+  }
+  if (command === "flash") {
+    await executeFlashCommand(args);
+    return;
+  }
+  if (command.endsWith(".wasm") || command.startsWith("./")) {
+    const name = normalizeProjectPath(command), data = virtualFileBytes(name);
+    if (data && data[0] === 0 && data[1] === 0x61 && data[2] === 0x73 && data[3] === 0x6d) {
+      await runTerminalWASI(name, args);
+      return;
+    }
+  }
+  if (command === "renvo") { await runTerminalArguments(args); return; }
+  throw new Error(`${command}: command not found`);
+}
+
+function virtualFileNames() { return new Set([...editableFiles, ...generatedFiles.keys()]); }
+
+function virtualFileBytes(name) {
+  const model = models.get(name);
+  return model ? encoder.encode(model.getValue()) : generatedFiles.get(name);
+}
+
+function isTextFileData(data) {
+  return isTextData(data);
+}
+
+function writeVirtualFile(name, data, editable = false) {
+  if (editable || isTextFileData(data) && /\.(?:go|c|h|mod|sum|md|txt|json|rtg|rbe|rtgasm|mk|d)$/i.test(name)) {
+    generatedFiles.delete(name);
+    const value = decoder.decode(data);
+    if (models.has(name)) models.get(name).setValue(value);
+    else createProjectModel(name, value);
+  } else {
+    generatedFiles.set(name, data.slice());
+  }
+}
+
+function removeVirtualFile(name) {
+  if (generatedFiles.delete(name)) {
+    const at = openFiles.indexOf(name);
+    if (at >= 0) openFiles.splice(at, 1);
+    if (activeBinary === name) { activeBinary = ""; openFile(lastWorkspaceFile); }
+    return;
+  }
+  if (editableFiles.has(name)) removeWorkspaceFile(name);
+}
+
+function finishTerminalFilesystemChange() {
+  if (!editableFiles.size) { createProjectModel("main.go", initialFiles["main.go"]); activeFile = "main.go"; }
+  renderWorkspaceFiles(); renderEditorTabs(); saveFiles(); markBuildStale(); scheduleAnalysis(20);
+}
+
+function syncGeneratedFiles(files) {
+  generatedFiles.clear();
+  for (const file of files || []) generatedFiles.set(file.name, new Uint8Array(file.data));
+  for (let index = openFiles.length - 1; index >= 0; index--) {
+    const name = openFiles[index];
+    if (!models.has(name) && !isHelpTab(name) && !generatedFiles.has(name)) openFiles.splice(index, 1);
+  }
+  if (activeBinary && generatedFiles.has(activeBinary)) renderHexView();
+  else if (activeBinary) { activeBinary = ""; openFile(lastWorkspaceFile); }
+  renderWorkspaceFiles();
+  renderEditorTabs();
+  saveFiles();
+}
+
+async function runTerminalArguments(inputArgs) {
+  if (!compilerReady) throw new Error("renvo: compiler is still starting");
+  if (building || !selectedTarget) throw new Error("renvo: another build is already running");
+  const args = terminalRenvoArguments(inputArgs);
   saveFiles(); building = true; updateReadyState(); clearMarkers(); showPanel("terminal");
-  elements.terminalOutput.textContent = `$ renvo ${args.join(" ")}\n`;
+  setCompilerStatus("busy", "Running terminal command…");
   try {
     await ensureWorkspaceDependencies();
-    const payload = workspacePayload(), id = ++requestID;
-    const backendPath = selectedTarget.cBackend || selectedTarget.backend;
-    const backend = new URL(backendPath, catalogUrl).href;
-    pendingBuild = { id, revision: buildRevision, target: selectedTarget, backend, args, action: "terminal" };
-    worker.postMessage({ type: "compile", id, args, files: payload.files, backend,
-      backendTarget: selectedTarget.backendTarget, backendFormat: selectedTarget.backendFormat || "wasm" }, payload.transfers);
+    if ((args[0] === "cc" || args[0] === "make") && standardCatalogPromise) {
+      await loadCLibrary(await standardCatalogPromise);
+    }
+    const payload = workspacePayload(true), id = ++requestID;
+    pendingBuild = { id, revision: buildRevision, target: selectedTarget, backend: "", args, action: "terminal" };
+    const completion = new Promise((resolve) => { terminalBuildResolve = resolve; });
+    worker.postMessage({
+      type: "terminal", id, args, files: payload.files, stdin: elements.runStdin.value,
+      directories: [...workspaceFolders], workspaceNames: payload.workspaceNames, internalNames: payload.internalNames,
+    }, payload.transfers);
+    return await completion;
   } catch (error) {
-    building = false; pendingBuild = undefined; updateReadyState();
-    elements.terminalOutput.textContent += `${error.message || error}\n`;
+    building = false; pendingBuild = undefined; terminalBuildResolve = undefined; updateReadyState(); throw error;
   }
+}
+
+function receiveTerminalRunResult(result) {
+  terminalRunResolve?.(result);
+  terminalRunResolve = undefined;
+}
+
+async function runTerminalWASI(name, args = []) {
+  const data = virtualFileBytes(name);
+  if (!data) throw new Error(`${name || "run"}: No such file`);
+  if (data[0] !== 0 || data[1] !== 0x61 || data[2] !== 0x73 || data[3] !== 0x6d) throw new Error(`${name}: not a WebAssembly module`);
+  if (running || building) throw new Error(`${name}: another build or program is running`);
+  running = true;
+  updateReadyState();
+  setCompilerStatus("busy", `Running ${name}…`);
+  try {
+    const payload = workspacePayload(true), id = ++requestID;
+    const completion = new Promise((resolve) => { terminalRunResolve = resolve; });
+    worker.postMessage({
+      type: "terminal-run", id, name, args, files: payload.files, stdin: elements.runStdin.value,
+      directories: [...workspaceFolders], workspaceNames: payload.workspaceNames, internalNames: payload.internalNames,
+    }, payload.transfers);
+    const result = await completion;
+    if (result.filesystemComplete) syncGeneratedFiles(result.files);
+    const text = [result.stdout, result.stderr].filter(Boolean).join("");
+    if (text) writeTerminal(`${text}${text.endsWith("\n") ? "" : "\n"}`);
+    if (result.exitCode !== 0) writeTerminal(`Process exited with status ${result.exitCode}\n`);
+    elements.memoryStatus.textContent = `${(result.linearMemoryBytes / 1048576).toFixed(1)} MiB`;
+    setCompilerStatus(result.exitCode === 0 ? "ready" : "error", result.exitCode === 0 ? "Ready" : `${name} exited ${result.exitCode}`);
+  } finally {
+    running = false;
+    terminalRunResolve = undefined;
+    updateReadyState();
+  }
+}
+
+function terminalDisplayArgument(value) {
+  return /^[A-Za-z0-9_./:=+-]+$/.test(value) ? value : JSON.stringify(value);
+}
+
+function writeTerminalStage(label, command) {
+  writeTerminal(`\x1b[38;5;108m${label.padEnd(5)}\x1b[0m │ ${command}\n`);
+}
+
+async function runCurrentWASIProject() {
+  if (!isWASITarget()) throw new Error("run: select the wasi/wasm32 target to build and run the current project");
+  const buildArgs = controlledArguments(splitArguments(elements.command.value), selectedTarget);
+  const output = normalizeProjectPath(outputArgument(buildArgs) || selectedTarget.output || "app.wasm");
+  writeTerminalStage("build", `renvo ${buildArgs.map(terminalDisplayArgument).join(" ")}`);
+  const result = await runTerminalArguments(buildArgs);
+  if (!result || result.exitCode !== 0) return;
+  const args = splitArguments(elements.runArgs.value);
+  writeTerminalStage("run", `./${output}${args.length ? ` ${args.map(terminalDisplayArgument).join(" ")}` : ""}`);
+  await runTerminalWASI(output, args);
 }
 
 function renderTestBuildResult(result, build, summary, text) {
@@ -1188,7 +1687,50 @@ function renderTestBuildResult(result, build, summary, text) {
   worker.postMessage({ type: "run", purpose: "test", id: ++requestID, name: "tests.wasm", data, args: [], stdin: "" }, [data]);
 }
 
+function finishTerminalFlashCommand() {
+  const resolve = terminalFlashResolve;
+  terminalFlashResolve = undefined;
+  terminalFlashActive = false;
+  terminalFlashProgress = "";
+  resolve?.();
+}
+
+async function executeFlashCommand(args) {
+  const options = parseFlashArguments(args);
+  if (options.help) {
+    writeTerminal("usage: flash [--transport webusb|webserial]\nBuilds the selected board target, asks for a device when needed, and streams load progress here.\n");
+    return;
+  }
+  if (!isBoardTarget(selectedTarget)) throw new Error("flash: the selected target is not a board");
+  if (options.transport) {
+    updateFlashTransportChoices();
+    const option = elements.flashTransport.querySelector(`option[value="${options.transport}"]`);
+    if (!option || option.disabled) throw new Error(`flash: ${options.transport} is unavailable for ${selectedTarget.label || selectedTarget.name}`);
+    if (elements.flashTransport.value !== options.transport) {
+      elements.flashTransport.value = options.transport;
+      await changeFlashTransport();
+    }
+  }
+  const command = flashCommand(elements.flashTransport.value);
+  elements.terminalOutput.textContent = `$ ${command}\n`;
+  terminalFlashActive = true;
+  terminalFlashProgress = "";
+  writeFlashProgress(`Target: ${selectedTarget.label || selectedTarget.name}`);
+  writeFlashProgress(`Transport: ${elements.flashTransport.value === "webusb" ? "WebUSB" : "WebSerial"}`);
+  const completion = new Promise((resolve) => { terminalFlashResolve = resolve; });
+  try {
+    const resumesAfterBuild = await runArtifactWithMode(false);
+    if (resumesAfterBuild) await completion;
+    else finishTerminalFlashCommand();
+  } catch (error) {
+    finishTerminalFlashCommand();
+    throw error;
+  }
+}
+
 function runArtifact() {
+  if (isBoardTarget(selectedTarget)) return submitTerminalCommand(flashCommand(elements.flashTransport.value));
+  if (isWASITarget()) return submitTerminalCommand("run");
   return runArtifactWithMode(false);
 }
 
@@ -1217,12 +1759,14 @@ async function runArtifactWithMode(resumeAfterBuild) {
   const reusableESPPort = espPortTransport === "webusb" && espPort?.canReopen?.();
   if (board && !resumeAfterBuild && !activeESPPort && !reusableESPPort) {
     if (!await requestDevicePermission()) {
+      appendTerminalActivity("Flash cancelled before USB device selection.\n");
       if (isPhoneWorkspace()) showMobileView("device");
       return;
     }
     const plannedJTAG = isHotReloadDeployment();
     startMobileDeployment(plannedJTAG);
     setMobileDeployStep("usb", "active", "Choose your board in the browser's USB picker.");
+    writeFlashProgress("Waiting for a board in the browser device picker…");
     try {
       const previousSession = espSession;
       const previousPort = espPort;
@@ -1245,8 +1789,9 @@ async function runArtifactWithMode(resumeAfterBuild) {
       espPort = nextPort;
       espPortTransport = transport;
       setMobileDeployStep("usb", "done", "USB device selected.");
+      writeFlashProgress("USB device selected.");
     } catch (error) {
-      elements.terminalOutput.textContent = `${error.message || error}\n`;
+      appendTerminalActivity(`${error.message || error}\n`);
       failMobileDeployment("usb", "USB device selection failed.");
       showPanel("terminal");
       return;
@@ -1255,9 +1800,10 @@ async function runArtifactWithMode(resumeAfterBuild) {
     const plannedJTAG = isHotReloadDeployment();
     startMobileDeployment(plannedJTAG);
     setMobileDeployStep("usb", "done", "Using the connected USB device.");
+    writeFlashProgress("Using the connected USB device.");
   }
   if (board && !espPort) {
-    elements.terminalOutput.textContent = "The selected board or debug probe disconnected before loading. Click Flash & Run again.\n";
+    appendTerminalActivity("The selected board or debug probe disconnected before loading. Run flash again.\n");
     failMobileDeployment("usb", "The USB device disconnected before the load started.");
     showPanel("terminal");
     return;
@@ -1266,7 +1812,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
   try {
     args = splitArguments(elements.runArgs.value);
   } catch (error) {
-    elements.terminalOutput.textContent = `${error.message}\n`;
+    appendTerminalActivity(`${error.message}\n`);
     showPanel("terminal");
     return;
   }
@@ -1274,7 +1820,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
   try {
     deploymentTarget = deploymentBuildTarget();
   } catch (error) {
-    elements.terminalOutput.textContent = `${error.message || error}\n`;
+    appendTerminalActivity(`${error.message || error}\n`);
     failMobileDeployment("firmware", error.message || String(error));
     showPanel("terminal");
     return;
@@ -1284,16 +1830,26 @@ async function runArtifactWithMode(resumeAfterBuild) {
   if (building || stale) {
     runAfterBuild = true;
     if (board) setMobileDeployStep("check", "active", "Loading project libraries…");
+    if (board) writeFlashProgress(building ? "Waiting for the active firmware build…" : "Building firmware…");
     updateReadyState();
-    if (!building) compileTarget(deploymentTarget);
-    return;
+    if (!building) {
+      await compileTarget(deploymentTarget);
+      if (!building && !pendingBuild && runAfterBuild) {
+        runAfterBuild = false;
+        appendTerminalActivity("Firmware build is not ready. Resolve the current project diagnostics, then run flash again.\n");
+        if (mobileDeploymentActive) failMobileDeployment("check", "The project is not ready to build.");
+        finishTerminalFlashCommand();
+        updateReadyState();
+      }
+    }
+    return true;
   }
   if (selectedTarget.name === "browser/wasm32") {
     running = true; updateReadyState();
     try {
       await showBrowserPreview(lastRunnableArtifact.data);
       elements.terminalOutput.textContent = "$ app.html\nBrowser application launched in Preview.\n";
-      showPanel("preview");
+      openPreviewPane();
     } catch (error) {
       elements.terminalOutput.textContent = `${error.message || error}\n`; showPanel("terminal");
     } finally { running = false; updateReadyState(); }
@@ -1313,14 +1869,20 @@ async function runArtifactWithMode(resumeAfterBuild) {
     const transportName = espPortTransport === "webusb" ? "WebUSB" : "WebSerial";
     serialPlotter.clear();
     plotterAutoShown = false;
-    elements.terminalOutput.textContent = `$ ${picoMonitor ? "monitor-load" : jtag ? "jtag-load" : "flash"} --transport ${transportName} ${lastRunnableArtifact.target}${identity}\n`;
-    elements.terminalOutput.textContent += `Build: ${formatElapsed(lastRunnableArtifact.buildMilliseconds)}\n`;
+    appendTerminalActivity(`Connection: ${transportName}${identity}\nFirmware: ${lastRunnableArtifact.target}\n`);
+    appendTerminalActivity(`Build: ${formatElapsed(lastRunnableArtifact.buildMilliseconds)}\n`);
     const flashStarted = performance.now();
     try {
+      let reportedProgress = -1;
       const progress = (value) => {
         const verb = hotReload ? "Loading" : "Flashing";
-        elements.compile.querySelector("span").textContent = `${verb} ${Math.round(value * 100)}%`;
-        setMobileDeployStep("load", "active", `${verb} firmware, ${Math.round(value * 100)}%.`, value);
+        const percent = Math.round(value * 100);
+        elements.compile.querySelector("span").textContent = `${verb} ${percent}%`;
+        setMobileDeployStep("load", "active", `${verb} firmware, ${percent}%.`, value);
+        if (percent === 100 || reportedProgress < 0 || percent >= reportedProgress + 5) {
+          reportedProgress = percent;
+          writeFlashProgress(`${verb} firmware: ${percent}%`);
+        }
       };
       let report;
       if (hotReload) {
@@ -1330,7 +1892,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
         report = await espSession.update(lastRunnableArtifact.data);
       } else {
         if (!espSession) espSession = new ESPWebSerial(espPort, {
-          log: (message) => { elements.terminalOutput.textContent += `${message}\n`; },
+          log: (message) => appendTerminalActivity(`${message}\n`),
           serial: appendSerialText,
           progress,
         });
@@ -1340,15 +1902,15 @@ async function runArtifactWithMode(resumeAfterBuild) {
       if (hotReload) {
         const change = report.unchanged ? "no changed words" : `${report.bytesWritten} bytes in ${report.patchCount} patches`;
         if (picoMonitor && report.monitorInfo) {
-          elements.terminalOutput.textContent += `Monitor handshake: ${formatPicoMonitorInfo(report.monitorInfo)}\n`;
+          appendTerminalActivity(`Monitor handshake: ${formatPicoMonitorInfo(report.monitorInfo)}\n`);
         }
-        elements.terminalOutput.textContent += `${picoMonitor ? "Monitor" : "JTAG"} load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
-        elements.terminalOutput.textContent += "Running from SRAM. Press Flash after an edit to load the changes.\n";
+        appendTerminalActivity(`${picoMonitor ? "Monitor" : "JTAG"} load: ${change} · ${formatElapsed(flashMilliseconds)} · Build + load: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`);
+        appendTerminalActivity("Running from SRAM. Run flash after an edit to load the changes.\n");
         setMobileDeployStep("load", "done", `Firmware loaded over ${picoMonitor ? "the Pico monitor" : "JTAG"}.`);
         setMobileDeployStep("run", "done", "Running from SRAM. Hot reload is ready.");
         finishMobileDeployment(`${picoMonitor ? "Monitor" : "JTAG"} load complete`);
       } else {
-        elements.terminalOutput.textContent += `Flash: ${formatElapsed(flashMilliseconds)} · Build + flash: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`;
+        appendTerminalActivity(`Flash: ${formatElapsed(flashMilliseconds)} · Build + flash: ${formatElapsed(lastRunnableArtifact.buildMilliseconds + flashMilliseconds)}\n`);
         setMobileDeployStep("load", "done", "Firmware flashed.");
         setMobileDeployStep("run", "done", "Running. Serial is connected.");
         finishMobileDeployment("Flash complete");
@@ -1356,7 +1918,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     } catch (error) {
       const flashMilliseconds = performance.now() - flashStarted;
       const failedAction = picoMonitor ? "Monitor load" : jtag ? "JTAG load" : "Flash";
-      elements.terminalOutput.textContent += `${failedAction} failed after ${formatElapsed(flashMilliseconds)}: ${error.message || error}\n`;
+      appendTerminalActivity(`${failedAction} failed after ${formatElapsed(flashMilliseconds)}: ${error.message || error}\n`);
       failMobileDeployment("load", `${failedAction} failed: ${error.message || error}`);
       const failedSession = espSession;
       espSession = undefined;
@@ -1369,6 +1931,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
     } finally {
       running = false;
       updateReadyState();
+      finishTerminalFlashCommand();
     }
     return;
   }
@@ -1389,6 +1952,18 @@ async function showBrowserPreview(data) {
   iframe.sandbox = "allow-scripts allow-downloads";
   iframe.src = previewURL;
   elements.preview.replaceChildren(iframe);
+}
+
+function openPreviewPane() {
+  elements.previewPane.hidden = false;
+  elements.workbench.classList.add("preview-open");
+  requestAnimationFrame(() => editor?.layout());
+}
+
+function closePreviewPane() {
+  elements.previewPane.hidden = true;
+  elements.workbench.classList.remove("preview-open");
+  requestAnimationFrame(() => editor?.layout());
 }
 
 async function packageBrowserArtifact(data) {
@@ -1431,9 +2006,8 @@ async function ensureWorkspaceDependencies() {
     await Promise.all([loadCLibrary(catalog), loadStandardPackage("unsafe", catalog)]);
   }
   const imports = new Set();
-  for (const model of models.values()) {
-    if (model.uri.path.endsWith(".go")) for (const name of scanImports(model.getValue())) imports.add(name);
-  }
+  const parsed = await Promise.all([...models.values()].filter((model) => model.uri.path.endsWith(".go")).map((model) => parsedImportsForModel(model)));
+  for (const result of parsed) for (const item of result.imports) imports.add(item.importPath);
   await Promise.all(Array.from(imports, (name) => loadStandardPackage(name, catalog)));
 }
 
@@ -1492,16 +2066,22 @@ async function loadStandardPackage(importPath, catalog) {
   }
 }
 
-function workspacePayload() {
+function workspacePayload(includeGenerated = false) {
   const sources = new Map();
+  const internalNames = new Set();
   for (const [name, source] of stdlibFiles) {
     sources.set(name, source.slice());
+    internalNames.add(name);
   }
   for (const file of selectedTarget?.libraryFiles || []) {
-    sources.set(`std/${file.name}`, encoder.encode(file.source));
+    const name = `std/${file.name}`;
+    sources.set(name, encoder.encode(file.source));
+    internalNames.add(name);
   }
+  if (includeGenerated) for (const [name, data] of generatedFiles) sources.set(name, data.slice());
   for (const [name, model] of models) {
     sources.set(name, encoder.encode(model.getValue()));
+    internalNames.delete(name);
   }
   const definition = selectedTarget?.projectDefinition;
   if (definition?.endsWith(".rbe")) {
@@ -1516,7 +2096,7 @@ function workspacePayload() {
     files.push({ name, data });
     transfers.push(data.buffer);
   }
-  return { files, transfers };
+  return { files, transfers, workspaceNames: [...models.keys()], internalNames: [...internalNames] };
 }
 
 function rbeStandardLibrarySources(source) {
@@ -1556,24 +2136,37 @@ function installLanguageProviders() {
           detail: "C header", insertText: name, range: includeContext.range,
         })) };
       }
-      const importContext = importContextAt(model, position);
-      if (importContext) {
+      const parsed = model.getLanguageId() === "go" ? await parsedImportsForModel(model, byteOffset(model, position), true) : { imports: [] };
+      if (parsed.context) {
         const catalog = standardCatalogPromise ? await standardCatalogPromise : { packages: {} };
         const imports = [...Object.keys(catalog.packages || {}), ...Object.keys(catalog.platforms || {})];
-        const suggestions = imports.filter((name) => name.startsWith(importContext.prefix)).map((name) => ({
+        const suggestions = imports.filter((name) => name.startsWith(parsed.context.prefix)).map((name) => ({
           label: name, kind: monaco.languages.CompletionItemKind.Module,
           detail: "Renvo standard library", insertText: name,
-          range: importContext.range,
+          range: new monaco.Range(position.lineNumber, position.column - parsed.context.prefix.length, position.lineNumber, position.column),
         }));
         return { suggestions };
       }
       const suggestions = new Map();
+      const catalogCompletion = catalogSelectorCompletions(standardCatalog, parsed.selector, parsed.imports);
       const result = await requestLanguage("complete", model, byteOffset(model, position));
       for (const record of result.filter((record) => record[0] === "C")) {
         suggestions.set(record[1], {
           label: record[1], detail: record[4] || record[2],
           kind: completionKind(Number(record[3])), insertText: record[1],
           documentation: record[5] || undefined,
+        });
+      }
+      if (catalogCompletion) {
+        const kinds = monaco.languages.CompletionItemKind;
+        const range = new monaco.Range(position.lineNumber, position.column - catalogCompletion.prefix.length, position.lineNumber, position.column);
+        for (const item of catalogCompletion.items) if (!suggestions.has(item.name)) suggestions.set(item.name, {
+          label: item.name,
+          detail: item.signature || `${catalogCompletion.importPath} ${item.kind}`,
+          kind: ({ constant: kinds.Constant, variable: kinds.Variable, function: kinds.Function, type: kinds.Class })[item.kind] || kinds.Text,
+          insertText: item.name,
+          documentation: item.doc || undefined,
+          range,
         });
       }
       return { suggestions: Array.from(suggestions.values()) };
@@ -1679,9 +2272,9 @@ function sameLanguageLocation(location, record) {
     location.range.endLineNumber === end.lineNumber && location.range.endColumn === end.column;
 }
 
-async function requestLanguage(mode, model, offset) {
+async function requestLanguage(mode, model, offset, dependencies = true) {
 	if (!compilerReady || !targetCatalog?.languageService || !selectedTarget) return [];
-  await ensureWorkspaceDependencies();
+  if (dependencies) await ensureWorkspaceDependencies();
   const id = ++requestID;
   const payload = languageWorkspacePayload();
   const result = new Promise((resolve) => languageRequests.set(id, resolve));
@@ -1691,6 +2284,31 @@ async function requestLanguage(mode, model, offset) {
 		language: activeBuildLanguage(),
     packageAt: languagePackageForModel(model),
   }, payload.transfers);
+  return result;
+}
+
+function parsedImportName(name, importPath) {
+  if (name === "." || name === "_") return "";
+  return name || importPath.split("/").pop() || "";
+}
+
+async function parsedImportsForModel(model, offset = 0, includeContext = false) {
+  const name = fileName(model);
+  const version = model.getVersionId();
+  const cached = parsedImportCache.get(name);
+  if (!includeContext && cached?.version === version) return cached;
+  const records = await requestLanguage("imports", model, offset, false);
+  const imports = records.filter((record) => record[0] === "I" && record[2]).map((record) => ({
+    name: parsedImportName(record[1], record[2]), importPath: record[2],
+  }));
+  const contextRecord = records.find((record) => record[0] === "P");
+  const selectorRecord = records.find((record) => record[0] === "Q");
+  const result = {
+    version, imports,
+    context: contextRecord ? { prefix: contextRecord[1], replaceStart: Number(contextRecord[2]), quote: contextRecord[3], closed: contextRecord[4] === "1" } : undefined,
+    selector: selectorRecord ? { base: selectorRecord[1], prefix: selectorRecord[2], replaceStart: Number(selectorRecord[3]) } : undefined,
+  };
+  parsedImportCache.set(name, { version, imports });
   return result;
 }
 
@@ -1846,25 +2464,6 @@ function parseProtocol(text) {
   });
 }
 
-function importContextAt(model, position) {
-  const offset = model.getOffsetAt(position);
-  const source = model.getValue();
-  const before = source.slice(0, offset);
-  const match = /(["`])([^"`\n]*)$/.exec(before);
-  if (!match) return null;
-  const quoteAt = offset - match[2].length - 1;
-  const prefixSource = before.slice(0, quoteAt);
-  const line = prefixSource.slice(prefixSource.lastIndexOf("\n") + 1);
-  const importAt = prefixSource.lastIndexOf("import");
-  const openAt = prefixSource.lastIndexOf("(");
-  const closeAt = prefixSource.lastIndexOf(")");
-  if (!/\bimport\s*(?:\w+\s*)?$/.test(line) && !(openAt > closeAt && importAt >= 0 && importAt < openAt)) return null;
-  return {
-    prefix: match[2],
-    range: new monaco.Range(position.lineNumber, position.column - match[2].length, position.lineNumber, position.column),
-  };
-}
-
 function cIncludeContextAt(model, position) {
   if (model.getLanguageId() !== C_LANGUAGE_ID) return null;
   const offset = model.getOffsetAt(position);
@@ -1902,24 +2501,15 @@ function targetCatalogSourcePlatforms() {
   return standardCatalog?.platforms || {};
 }
 
-function scanImports(source) {
-  const imports = [];
-  const direct = /\bimport\s+(?:[._A-Za-z][\w]*\s+)?["`]([^"`]+)["`]/g;
-  const grouped = /\bimport\s*\(([\s\S]*?)\)/g;
-  for (const match of source.matchAll(direct)) imports.push(match[1]);
-  for (const group of source.matchAll(grouped)) {
-    for (const match of group[1].matchAll(/(?:^|\s)(?:[._A-Za-z][\w]*\s+)?["`]([^"`]+)["`]/g)) imports.push(match[1]);
-  }
-  return imports;
-}
-
 function openFile(name) {
   const model = models.get(name);
   if (!model || !editor) return;
   activeHelp = "";
+  activeBinary = "";
   activeFile = name;
   if (!openFiles.includes(name)) openFiles.push(name);
   elements.helpView.hidden = true;
+  elements.hexView.hidden = true;
   elements.editorHost.hidden = false;
   elements.copyHelpPage.hidden = true;
   document.querySelector("#search-project").hidden = false;
@@ -1945,6 +2535,52 @@ function openFile(name) {
   if (!isPhoneWorkspace()) editor.focus();
 }
 
+const hexPageSize = 4096;
+
+function openBinaryFile(name) {
+  const data = generatedFiles.get(name);
+  if (!data) return;
+  closeStartScreen();
+  activeHelp = "";
+  activeBinary = name;
+  activeBinaryOffset = 0;
+  if (!openFiles.includes(name)) openFiles.push(name);
+  elements.editorHost.hidden = true;
+  elements.helpView.hidden = true;
+  elements.hexView.hidden = false;
+  elements.copyHelpPage.hidden = true;
+  elements.copyToPlayground.hidden = true;
+  elements.useBackend.hidden = true;
+  elements.formatFile.hidden = true;
+  document.querySelector("#search-project").hidden = false;
+  elements.languageMode.textContent = "Binary";
+  renderHexView();
+  renderEditorTabs();
+  renderWorkspaceFiles();
+  if (isPhoneWorkspace()) showMobileView("editor");
+}
+
+function renderHexView() {
+  const data = generatedFiles.get(activeBinary);
+  if (!data) return;
+  const pages = Math.max(1, Math.ceil(data.byteLength / hexPageSize));
+  const page = Math.max(0, Math.min(pages - 1, Math.floor(activeBinaryOffset / hexPageSize)));
+  activeBinaryOffset = page * hexPageSize;
+  elements.hexTitle.textContent = activeBinary;
+  elements.hexMeta.textContent = `${describeFile(activeBinary, data)} · read-only`;
+  elements.hexPage.textContent = `${page + 1} / ${pages}`;
+  elements.hexPrevious.disabled = page === 0;
+  elements.hexNext.disabled = page === pages - 1;
+  elements.hexOutput.textContent = formatHexPage(data, activeBinaryOffset, hexPageSize);
+  elements.hexOutput.scrollTop = 0;
+  elements.hexOutput.scrollLeft = 0;
+}
+
+function moveHexPage(direction) {
+  activeBinaryOffset += direction * hexPageSize;
+  renderHexView();
+}
+
 function isEditableFile(name) {
   return editableFiles.has(name);
 }
@@ -1953,6 +2589,7 @@ function installWorkspaceFileButton(button) {
   if (button.dataset.installed) return;
   button.dataset.installed = "true";
   button.addEventListener("click", () => {
+    closeStartScreen();
     openFile(button.dataset.file);
     setBuildPackage(".");
     if (!isPhoneWorkspace() && matchMedia("(max-width: 820px)").matches) {
@@ -1961,6 +2598,273 @@ function installWorkspaceFileButton(button) {
     }
     if (isPhoneWorkspace()) showMobileView("editor");
   });
+}
+
+function closeStartScreen() {
+  elements.startScreen.hidden = true;
+  editor?.layout();
+}
+
+function handleStartAction(event) {
+  const button = event.target.closest("[data-start-action]");
+  if (!button || !monaco) return;
+  const action = button.dataset.startAction;
+  if (action === "continue") closeStartScreen();
+  else if (action === "examples") { closeStartScreen(); openExampleBrowser(); }
+  else if (action === "snapshots") openSnapshotDialog();
+  else if (action === "new-go" || action === "new-c") {
+    const c = action === "new-c";
+    closeStartScreen();
+    replaceProject({ name: c ? "c-project" : "renvo-project", language: c ? "c" : "go", files: c ? initialCFiles : initialFiles,
+      activeFile: c ? "main.c" : "main.go", openFiles: [c ? "main.c" : "main.go"], command: starterCommand() });
+  }
+}
+
+function handleQuickOpenShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if ((event.code === "Backquote" || key === "`") && !event.shiftKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeQuickOpen();
+    closeStartScreen();
+    const terminalOpen = !elements.workbench.classList.contains("panel-hidden") && document.querySelector('.panel-tab[data-panel="terminal"]')?.classList.contains("active");
+    if (terminalOpen) togglePanel(); else showPanel("terminal");
+    return;
+  }
+  let value;
+  if (key === "p") value = event.shiftKey ? ">" : "";
+  else if (key === "o" && event.shiftKey) value = "@";
+  else if (key === "g" && !event.shiftKey) value = ":";
+  else if (key === "t" && !event.shiftKey) value = "#";
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
+  openQuickOpen(value);
+}
+
+function openCommandPalette() {
+  openQuickOpen(">");
+}
+
+function openQuickOpen(value = "") {
+  closeTargetMenu();
+  closeProjectActionMenu();
+  closeFileActionMenu();
+  elements.quickOpen.hidden = false;
+  elements.quickOpenInput.value = value;
+  elements.quickOpenShortcut.textContent = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ P" : "Ctrl P";
+  quickOpenIndex = 0;
+  renderQuickOpen();
+  queueMicrotask(() => {
+    elements.quickOpenInput.focus();
+    elements.quickOpenInput.setSelectionRange(value.length, value.length);
+  });
+}
+
+function closeQuickOpen() {
+  if (elements.quickOpen.hidden) return;
+  elements.quickOpen.hidden = true;
+  elements.quickOpenInput.removeAttribute("aria-activedescendant");
+}
+
+function handleQuickOpenKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeQuickOpen();
+    editor?.focus();
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    selectQuickOpenIndex(quickOpenIndex + (event.key === "ArrowDown" ? 1 : -1), true);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    activateQuickOpenItem(quickOpenIndex);
+  }
+}
+
+function renderQuickOpen() {
+  const { mode, query } = quickOpenQuery(elements.quickOpenInput.value);
+  const presentation = {
+    files: ["⌕", "Search project, sample, and standard-library files · > commands · @ symbols · # project definitions · : line"],
+    commands: [">", "Commands from Renvo and Monaco"],
+    symbols: ["@", `Symbols in ${activeFile || "the current file"}`],
+    definitions: ["#", "Definitions in editable project files only"],
+    line: [":", "Go to a line and optional column, for example :42:7"],
+    help: ["?", "Quick-open prefixes and keyboard shortcuts"],
+  }[mode];
+  elements.quickOpenMode.textContent = presentation[0];
+  elements.quickOpenHint.textContent = presentation[1];
+  elements.quickOpenInput.setAttribute("aria-label", presentation[1]);
+  let items;
+  if (mode === "commands") items = quickOpenCommandItems();
+  else if (mode === "symbols") items = quickOpenSymbolItems(activeFile ? [activeFile] : []);
+  else if (mode === "definitions") items = quickOpenSymbolItems([...editableFiles].sort());
+  else if (mode === "line") items = quickOpenLineItems(query);
+  else if (mode === "help") items = quickOpenHelpItems();
+  else items = quickOpenFileItems();
+  quickOpenItems = mode === "line" ? items : filterQuickOpenItems(items, query);
+  quickOpenIndex = Math.min(quickOpenIndex, Math.max(0, quickOpenItems.length - 1));
+  if (!quickOpenItems.length) {
+    const empty = document.createElement("div");
+    empty.className = "quick-open-empty";
+    empty.textContent = mode === "line" && query ? "Enter a valid line number" : query ? `No ${quickOpenNoun(mode)} match “${query}”` : `No ${quickOpenNoun(mode)} available`;
+    elements.quickOpenResults.replaceChildren(empty);
+    elements.quickOpenInput.removeAttribute("aria-activedescendant");
+    return;
+  }
+  elements.quickOpenResults.replaceChildren(...quickOpenItems.map((item, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = `quick-open-item-${index}`;
+    button.className = "quick-open-item";
+    button.dataset.index = String(index);
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(index === quickOpenIndex));
+    const icon = document.createElement("span"); icon.className = "quick-open-item-icon"; icon.textContent = item.icon || "·";
+    const main = document.createElement("span"); main.className = "quick-open-item-main";
+    const label = document.createElement("strong"); label.textContent = item.label;
+    main.append(label);
+    if (item.description) main.append(Object.assign(document.createElement("small"), { textContent: item.description }));
+    const detail = document.createElement("span"); detail.className = "quick-open-item-detail"; detail.textContent = item.detail || "";
+    button.append(icon, main, detail);
+    return button;
+  }));
+  selectQuickOpenIndex(quickOpenIndex);
+}
+
+function quickOpenNoun(mode) {
+  return { files: "files", commands: "commands", symbols: "symbols", definitions: "project definitions", line: "locations", help: "shortcuts" }[mode];
+}
+
+function selectQuickOpenIndex(index, reveal = false) {
+  if (!quickOpenItems.length) return;
+  quickOpenIndex = (index + quickOpenItems.length) % quickOpenItems.length;
+  for (const [position, item] of [...elements.quickOpenResults.querySelectorAll(".quick-open-item")].entries()) {
+    item.setAttribute("aria-selected", String(position === quickOpenIndex));
+  }
+  const selected = elements.quickOpenResults.querySelector(`[data-index="${quickOpenIndex}"]`);
+  elements.quickOpenInput.setAttribute("aria-activedescendant", selected?.id || "");
+  if (reveal) selected?.scrollIntoView({ block: "nearest" });
+}
+
+function activateQuickOpenItem(index) {
+  const item = quickOpenItems[index];
+  if (!item) return;
+  if (item.input !== undefined) {
+    elements.quickOpenInput.value = item.input;
+    quickOpenIndex = 0;
+    renderQuickOpen();
+    elements.quickOpenInput.focus();
+    return;
+  }
+  closeQuickOpen();
+  queueMicrotask(() => Promise.resolve(item.run?.()).catch((error) => showProjectError(error)));
+}
+
+function quickOpenCommandItems() {
+  const revealEditor = (action) => () => {
+    closeStartScreen();
+    if (isPhoneWorkspace()) showMobileView("editor");
+    return action();
+  };
+  const commands = [
+    { label: "Renvo: Go to File…", description: "Search project, samples, and standard library", detail: "Ctrl+P", icon: "⌕", input: "" },
+    { label: "Renvo: New File…", detail: "Project", icon: "+", run: revealEditor(() => createWorkspaceFile()) },
+    { label: "Renvo: Browse Samples…", detail: "Samples", icon: "EX", run: openExampleBrowser },
+    { label: "Renvo: Change Build Target…", detail: selectedTarget?.name || "Target", icon: "◎", run: () => toggleTargetMenu(true) },
+    { label: "Renvo: Download Build", detail: selectedTarget?.name || "Build", icon: "↓", run: revealEditor(primaryTargetAction) },
+    { label: "Renvo: Run", detail: selectedTarget?.name || "Build", icon: "▶", run: revealEditor(secondaryTargetAction) },
+    { label: "Renvo: Test Project", detail: "Project", icon: "✓", run: revealEditor(runTests) },
+    { label: "Renvo: Show Terminal", detail: "Panel", icon: ">_", run: revealEditor(() => showPanel("terminal")) },
+    { label: "Renvo: Search Project Text", detail: "Ctrl+Shift+F", icon: "⌕", run: revealEditor(searchProject) },
+    { label: "Renvo: Format Current File", detail: "Shift+Alt+F", icon: "{}", run: revealEditor(formatActiveFile) },
+    { label: "Renvo: Project Snapshots…", detail: "Local history", icon: "◷", run: openSnapshotDialog },
+  ];
+  if (!editor) return commands;
+  for (const action of editor.getSupportedActions()) {
+    if (typeof action.isSupported === "function" && !action.isSupported()) continue;
+    commands.push({
+      label: action.label || action.alias || action.id,
+      description: action.alias && action.alias !== action.label ? action.alias : "Monaco editor command",
+      detail: action.id,
+      icon: ">",
+      run: revealEditor(() => { editor.focus(); return action.run(); }),
+    });
+  }
+  return commands;
+}
+
+function quickOpenFileItems() {
+  const items = [];
+  for (const name of [...editableFiles].sort()) items.push({
+    label: name, description: "Editable project file", detail: "Project", icon: fileIcon(name)[0],
+    run: () => revealQuickOpenFile(name),
+  });
+  for (const [name, data] of [...generatedFiles].sort(([left], [right]) => left.localeCompare(right))) items.push({
+    label: name, description: `${describeFile(name, data)} · open hex viewer`, detail: "Output", icon: "OUT",
+    run: () => openBinaryFile(name),
+  });
+  for (const item of catalogFileItems(standardCatalog)) items.push({
+    label: item.path, description: item.source, detail: item.importPath || item.source, icon: fileIcon(item.path)[0],
+    run: () => revealQuickOpenFile(item.path),
+  });
+  return items;
+}
+
+async function revealQuickOpenFile(name, line = 1, column = 1) {
+  let model = models.get(name);
+  if (!model) model = await ensureSourceModel(name);
+  if (!model) throw new Error(`${name} is not available in the browser bundle`);
+  closeStartScreen();
+  openFile(name);
+  if (isPhoneWorkspace()) showMobileView("editor");
+  const position = {
+    lineNumber: Math.max(1, Math.min(line, model.getLineCount())),
+    column: Math.max(1, Math.min(column, model.getLineMaxColumn(Math.max(1, Math.min(line, model.getLineCount()))))),
+  };
+  editor.setPosition(position);
+  editor.revealPositionInCenter(position);
+  editor.focus();
+}
+
+function quickOpenSymbolItems(names) {
+  const items = [];
+  for (const name of names) {
+    const model = models.get(name);
+    if (!model) continue;
+    for (const symbol of outlineItems(model)) items.push({
+      label: symbol.name,
+      description: `${symbol.kind} · ${name}:${symbol.line}`,
+      detail: name,
+      icon: symbol.kind === "func" ? "ƒ" : symbol.kind.slice(0, 2).toUpperCase(),
+      run: () => revealQuickOpenFile(name, symbol.line, symbol.column),
+    });
+  }
+  return items;
+}
+
+function quickOpenLineItems(query) {
+  const match = /^(\d+)(?::(\d+))?$/.exec(query);
+  if (!match || !models.get(activeFile)) return [];
+  const line = Number(match[1]);
+  const column = Number(match[2] || 1);
+  if (line < 1 || column < 1) return [];
+  return [{ label: `Go to line ${line}, column ${column}`, description: activeFile, detail: `:${line}:${column}`, icon: ":", run: () => revealQuickOpenFile(activeFile, line, column) }];
+}
+
+function quickOpenHelpItems() {
+  return [
+    { label: "Files", description: "Project, samples, and standard library", detail: "Ctrl+P", icon: "⌕", input: "" },
+    { label: "Commands", description: "Renvo and Monaco actions", detail: "Ctrl+Shift+P", icon: ">", input: ">" },
+    { label: "Symbols in current file", description: "Functions, types, variables, and constants", detail: "Ctrl+Shift+O", icon: "@", input: "@" },
+    { label: "Definitions in project", description: "Editable files only; no library download", detail: "Ctrl+T", icon: "#", input: "#" },
+    { label: "Go to line", description: "Use :line or :line:column", detail: "Ctrl+G", icon: ":", input: ":" },
+  ];
 }
 
 async function copyActiveFileToPlayground() {
@@ -2028,43 +2932,75 @@ function fileIcon(name) {
   if (name.endsWith(".c") || name.endsWith(".h")) return ["C", "c-icon"];
   if (isBackendDefinition(name) || name.endsWith(".rtgasm")) return [name.endsWith(".rbe") ? "RBE" : "RTG", "rtg-icon"];
   if (name.endsWith(".md")) return ["MD", "mod-icon"];
+  if (generatedFiles.has(name)) return ["OUT", "bin-icon"];
   return [name === "go.mod" ? "M" : "·", "mod-icon"];
 }
 
 function renderWorkspaceFiles() {
-  const entries = [...editableFiles].sort((left, right) => left.localeCompare(right));
+  const entries = [...virtualFileNames()].sort((left, right) => left.localeCompare(right));
   elements.projectFileCount.textContent = String(entries.length);
-  elements.fileTree.replaceChildren(...entries.map((name) => {
+  const folders = new Set(workspaceFolders);
+  for (const name of entries) {
+    const parts = name.split("/");
+    for (let index = 1; index < parts.length; index++) folders.add(parts.slice(0, index).join("/"));
+  }
+  const rows = [];
+  for (const name of [...folders].sort((left, right) => left.localeCompare(right))) {
+    const parts = name.split("/");
+    const parents = parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/"));
+    if (parents.some((parent) => collapsedFolders.has(parent))) continue;
+    const row = document.createElement("div");
+    row.className = "folder-row"; row.dataset.folder = name; row.setAttribute("role", "treeitem");
+    row.style.setProperty("--tree-depth", String(name.split("/").length - 1));
+    const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "folder";
+    toggle.innerHTML = `<span class="folder-chevron">${collapsedFolders.has(name) ? "›" : "⌄"}</span><span class="folder-icon">▱</span><span></span>`;
+    toggle.lastElementChild.textContent = name.split("/").pop();
+    toggle.addEventListener("click", () => { collapsedFolders.has(name) ? collapsedFolders.delete(name) : collapsedFolders.add(name); renderWorkspaceFiles(); });
+    const actions = document.createElement("button"); actions.type = "button"; actions.className = "file-more"; actions.textContent = "•••";
+    actions.addEventListener("click", (event) => { event.stopPropagation(); const bounds = actions.getBoundingClientRect(); openFileActionMenu(name, bounds.right - 190, bounds.bottom + 2, "folder"); });
+    row.append(toggle, actions); rows.push(row);
+  }
+  for (const name of entries) {
+    const parents = name.split("/").slice(0, -1).map((_, index, parts) => parts.slice(0, index + 1).join("/"));
+    if (parents.some((parent) => collapsedFolders.has(parent))) continue;
     const row = document.createElement("div");
     row.className = "file-row"; row.dataset.file = name; row.setAttribute("role", "none");
+    row.style.setProperty("--tree-depth", String(name.split("/").length - 1));
     const button = document.createElement("button");
     button.type = "button"; button.className = "file"; button.dataset.file = name; button.setAttribute("role", "treeitem");
+    const generated = generatedFiles.has(name) && !editableFiles.has(name);
+    button.classList.toggle("generated", generated);
     const [text, className] = fileIcon(name);
     const icon = document.createElement("span"); icon.className = className; icon.textContent = text;
-    const label = document.createElement("span"); label.textContent = name;
+    const label = document.createElement("span"); label.textContent = name.split("/").pop();
     const dirty = document.createElement("span"); dirty.className = "dirty"; dirty.setAttribute("aria-label", "Modified");
     button.append(icon, label, dirty);
-    button.classList.toggle("active", name === activeFile);
-    button.classList.toggle("modified", models.get(name)?.getValue() !== editableBaselines.get(name));
-    installWorkspaceFileButton(button);
+    button.classList.toggle("active", !generated && name === activeFile);
+    button.classList.toggle("modified", !generated && models.get(name)?.getValue() !== editableBaselines.get(name));
+    if (generated) {
+      button.classList.toggle("active", name === activeBinary);
+      button.title = `${name} · ${describeFile(name, generatedFiles.get(name))}`;
+      button.addEventListener("click", () => openBinaryFile(name));
+    } else installWorkspaceFileButton(button);
     const actions = document.createElement("button");
     actions.type = "button"; actions.className = "file-more"; actions.textContent = "•••";
     actions.setAttribute("aria-label", `Actions for ${name}`); actions.title = `Actions for ${name}`;
     actions.addEventListener("click", (event) => {
       event.stopPropagation();
       const bounds = actions.getBoundingClientRect();
-      openFileActionMenu(name, bounds.right - 190, bounds.bottom + 2);
+      openFileActionMenu(name, bounds.right - 190, bounds.bottom + 2, generated ? "generated" : "file");
     });
     row.append(button, actions);
-    return row;
-  }));
+    rows.push(row);
+  }
+  elements.fileTree.replaceChildren(...rows);
 }
 
 function renderEditorTabs() {
-  elements.openEditorTabs.replaceChildren(...openFiles.filter((name) => models.has(name) || isHelpTab(name)).map((name) => {
+  elements.openEditorTabs.replaceChildren(...openFiles.filter((name) => models.has(name) || generatedFiles.has(name) || isHelpTab(name)).map((name) => {
     const tab = document.createElement("button");
     tab.type = "button"; tab.className = "editor-tab"; tab.dataset.file = name; tab.setAttribute("role", "tab");
-    const active = isHelpTab(name) ? name === activeHelp : !activeHelp && name === activeFile;
+    const active = isHelpTab(name) ? name === activeHelp : generatedFiles.has(name) ? name === activeBinary : !activeHelp && !activeBinary && name === activeFile;
     tab.setAttribute("aria-selected", String(active)); tab.classList.toggle("active", active); tab.title = isHelpTab(name) ? helpImportPath(name) : name;
     const [text, className] = isHelpTab(name) ? ["?", "help-icon"] : fileIcon(name);
     const icon = document.createElement("span"); icon.className = className; icon.textContent = text;
@@ -2072,7 +3008,7 @@ function renderEditorTabs() {
     const close = document.createElement("span"); close.className = "tab-close"; close.textContent = "×"; close.title = `Close ${name}`;
     close.addEventListener("click", (event) => { event.stopPropagation(); closeEditorTab(name); });
     tab.append(icon, label, close);
-    tab.addEventListener("click", () => isHelpTab(name) ? openHelpPage(helpImportPath(name)) : openFile(name));
+    tab.addEventListener("click", () => isHelpTab(name) ? openHelpPage(helpImportPath(name)) : generatedFiles.has(name) ? openBinaryFile(name) : openFile(name));
     tab.addEventListener("auxclick", (event) => { if (event.button === 1) closeEditorTab(name); });
     return tab;
   }));
@@ -2082,17 +3018,18 @@ function closeEditorTab(name) {
   const at = openFiles.indexOf(name);
   if (at < 0) return;
   openFiles.splice(at, 1);
-  if (activeHelp === name || !activeHelp && activeFile === name) {
+  if (activeHelp === name || activeBinary === name || !activeHelp && !activeBinary && activeFile === name) {
     const next = openFiles[Math.min(at, openFiles.length - 1)] || [...editableFiles][0];
     if (isHelpTab(next)) openHelpPage(helpImportPath(next));
+    else if (generatedFiles.has(next)) openBinaryFile(next);
     else if (next) openFile(next);
   }
   renderEditorTabs();
 }
 
-function createWorkspaceFile() {
+function createWorkspaceFile(folder = "") {
   elements.newFileKind.value = "go";
-  elements.newFilePath.value = "new.go";
+  elements.newFilePath.value = `${folder ? `${folder}/` : ""}new.go`;
   elements.newFileError.textContent = "";
   updateNewFileHelp();
   elements.newFileDialog.showModal();
@@ -2154,40 +3091,97 @@ function starterSourceForFile(name, kind) {
 }
 
 function handleWorkspaceFileMenu(event) {
-  const button = event.target.closest(".file-row") || event.target.closest(".file");
-  if (!button) return;
   event.preventDefault();
-  openFileActionMenu(button.dataset.file, event.clientX, event.clientY);
+  const file = event.target.closest(".file-row")?.dataset.file;
+  const folder = event.target.closest(".folder-row")?.dataset.folder;
+  openFileActionMenu(file || folder || "", event.clientX, event.clientY, file ? generatedFiles.has(file) && !editableFiles.has(file) ? "generated" : "file" : folder ? "folder" : "root");
 }
 
-function openFileActionMenu(name, left, top) {
+function openFileActionMenu(name, left, top, kind = "file") {
   fileMenuTarget = name;
-  elements.fileActionMenu.setAttribute("aria-label", `Actions for ${fileMenuTarget}`);
+  fileMenuKind = kind;
+  elements.fileActionMenu.setAttribute("aria-label", name ? `Actions for ${name}` : "Explorer actions");
   elements.fileActionMenu.style.left = `${Math.max(4, Math.min(left, innerWidth - 200))}px`;
   elements.fileActionMenu.style.top = `${Math.max(4, Math.min(top, innerHeight - 90))}px`;
   elements.fileActionMenu.hidden = false;
   const backend = elements.fileActionMenu.querySelector('[data-file-action="backend"]');
-  if (backend) backend.hidden = !isBackendDefinition(name);
+  if (backend) backend.hidden = kind !== "file" || !isBackendDefinition(name);
+  for (const item of elements.fileActionMenu.querySelectorAll(".file-target-actions")) item.hidden = kind === "root";
   elements.fileActionMenu.querySelector("button")?.focus();
 }
 
 async function handleFileAction(event) {
   const button = event.target.closest("[data-file-action]");
-  if (!button || !fileMenuTarget) return;
+  if (!button) return;
   const name = fileMenuTarget;
+  const kind = fileMenuKind;
   closeFileActionMenu();
-  if (button.dataset.fileAction === "backend") await useProjectBackend(name);
-  else if (button.dataset.fileAction === "rename") await renameWorkspaceFile(name);
-  else if (button.dataset.fileAction === "delete") await deleteWorkspaceFile(name);
+  if (button.dataset.fileAction === "new-file") createWorkspaceFile(kind === "folder" ? name : "");
+  else if (button.dataset.fileAction === "new-folder") await createWorkspaceFolder(kind === "folder" ? name : "");
+  else if (button.dataset.fileAction === "backend") await useProjectBackend(name);
+  else if (button.dataset.fileAction === "rename") await (kind === "folder" ? renameWorkspaceFolder(name) : kind === "generated" ? renameGeneratedFile(name) : renameWorkspaceFile(name));
+  else if (button.dataset.fileAction === "delete") await (kind === "folder" ? deleteWorkspaceFolder(name) : kind === "generated" ? deleteGeneratedFile(name) : deleteWorkspaceFile(name));
 }
 
 function closeFileActionMenu() {
   elements.fileActionMenu.hidden = true;
   fileMenuTarget = "";
+  fileMenuKind = "root";
 }
 
-async function renameWorkspaceFile(oldName) {
+async function createWorkspaceFolder(parent = "") {
+  const folder = await requestText({ title: "New Folder", label: "Folder path", value: `${parent ? `${parent}/` : ""}new-folder`, accept: "Create",
+    validate: (value) => normalizeProjectPath(value) });
+  if (!folder) return;
+  workspaceFolders.add(folder); collapsedFolders.delete(folder); renderWorkspaceFiles(); saveFiles();
+}
+
+async function renameWorkspaceFolder(oldName) {
+  const name = await requestText({ title: "Rename Folder", label: "Folder path", value: oldName, accept: "Rename", validate: (value) => normalizeProjectPath(value) });
+  if (!name || name === oldName) return;
+  const prefix = `${oldName}/`, nextPrefix = `${name}/`;
+  for (const file of [...editableFiles].filter((item) => item.startsWith(prefix))) await renameWorkspaceFile(file, nextPrefix + file.slice(prefix.length), false);
+  for (const file of [...generatedFiles.keys()].filter((item) => item.startsWith(prefix))) {
+    const next = nextPrefix + file.slice(prefix.length);
+    const data = generatedFiles.get(file); generatedFiles.delete(file); generatedFiles.set(next, data);
+    const at = openFiles.indexOf(file); if (at >= 0) openFiles[at] = next;
+    if (activeBinary === file) activeBinary = next;
+  }
+  for (const folder of [...workspaceFolders]) if (folder === oldName || folder.startsWith(prefix)) { workspaceFolders.delete(folder); workspaceFolders.add(name + folder.slice(oldName.length)); }
+  renderWorkspaceFiles(); renderEditorTabs(); activeBinary ? openBinaryFile(activeBinary) : openFile(activeFile); saveFiles(); markBuildStale(); scheduleAnalysis(20);
+}
+
+async function deleteWorkspaceFolder(name) {
+  const files = [...virtualFileNames()].filter((item) => item.startsWith(`${name}/`));
+  if (!await requestConfirmation({ title: "Delete folder?", message: `${name} and ${files.length} file${files.length === 1 ? "" : "s"} will be removed from this browser project.`, accept: "Delete" })) return;
+  for (const file of files) editableFiles.has(file) ? removeWorkspaceFile(file) : removeVirtualFile(file);
+  for (const folder of [...workspaceFolders]) if (folder === name || folder.startsWith(`${name}/`)) workspaceFolders.delete(folder);
+  finishWorkspaceMutation();
+}
+
+async function renameGeneratedFile(oldName) {
   const name = await requestText({
+    title: "Rename output file", label: "Path", value: oldName, accept: "Rename",
+    validate: (value) => {
+      const normalized = normalizeProjectPath(value);
+      if (normalized !== oldName && virtualFileNames().has(normalized)) throw new Error(`${normalized} already exists.`);
+      return normalized;
+    },
+  });
+  if (!name || name === oldName) return;
+  const data = generatedFiles.get(oldName); generatedFiles.delete(oldName); generatedFiles.set(name, data);
+  const at = openFiles.indexOf(oldName); if (at >= 0) openFiles[at] = name;
+  if (activeBinary === oldName) { activeBinary = name; renderHexView(); }
+  renderWorkspaceFiles(); renderEditorTabs(); saveFiles();
+}
+
+async function deleteGeneratedFile(name) {
+  if (!await requestConfirmation({ title: "Delete output file?", message: `${name} will be removed from the virtual workspace.`, accept: "Delete" })) return;
+  removeVirtualFile(name); renderWorkspaceFiles(); renderEditorTabs(); saveFiles();
+}
+
+async function renameWorkspaceFile(oldName, requestedName = "", finish = true) {
+  const name = requestedName || await requestText({
     title: "Rename project file", label: "Path", value: oldName, accept: "Rename",
     validate: (value) => {
       const normalized = normalizeProjectPath(value);
@@ -2208,12 +3202,16 @@ async function renameWorkspaceFile(oldName) {
   for (const target of targetCatalog?.targets || []) {
     if (target.projectDefinition === oldName) target.projectDefinition = name;
   }
-  renderWorkspaceFiles(); renderEditorTabs(); if (wasActive) openFile(name);
-  saveFiles(); markBuildStale(); scheduleAnalysis(20);
+  if (finish) { renderWorkspaceFiles(); renderEditorTabs(); if (wasActive) openFile(name); saveFiles(); markBuildStale(); scheduleAnalysis(20); }
 }
 
 async function deleteWorkspaceFile(name) {
   if (!await requestConfirmation({ title: "Delete file?", message: `${name} will be removed from this browser project.`, accept: "Delete" })) return;
+  removeWorkspaceFile(name);
+  finishWorkspaceMutation();
+}
+
+function removeWorkspaceFile(name) {
   const model = models.get(name);
   projectBackendRoots.delete(name);
   if (targetCatalog) {
@@ -2226,18 +3224,21 @@ async function deleteWorkspaceFile(name) {
   }
   editableFiles.delete(name); models.delete(name); editableBaselines.delete(name); model?.dispose();
   const at = openFiles.indexOf(name); if (at >= 0) openFiles.splice(at, 1);
-  if (!editableFiles.size) createProjectModel("main.go", initialFiles["main.go"]);
-  if (activeFile === name) activeFile = [...editableFiles][0];
+  if (activeFile === name) activeFile = [...editableFiles][0] || "";
+}
+
+function finishWorkspaceMutation() {
+  if (!editableFiles.size) { createProjectModel("main.go", initialFiles["main.go"]); activeFile = "main.go"; }
   renderWorkspaceFiles(); renderEditorTabs(); openFile(activeFile); saveFiles(); markBuildStale(); scheduleAnalysis(20);
 }
 
-async function importProjectFiles(list, directory = false) {
+async function importProjectFiles(list) {
   if (!list?.length) return;
   try {
     const imported = {};
     for (const file of list) {
       if (file.name.toLowerCase().endsWith(".zip")) Object.assign(imported, decodeProjectZip(await file.arrayBuffer()));
-      else imported[normalizeProjectPath(directory && file.webkitRelativePath ? file.webkitRelativePath.split("/").slice(1).join("/") : file.name)] = await file.text();
+      else imported[normalizeProjectPath(file.name)] = await file.text();
     }
     for (const [name, source] of Object.entries(imported)) {
       if (models.has(name) && !await requestConfirmation({ title: "Replace file?", message: `${name} already exists in this project.`, accept: "Replace" })) continue;
@@ -2248,11 +3249,24 @@ async function importProjectFiles(list, directory = false) {
     setBuildPackage(".");
     renderWorkspaceFiles(); openFile(Object.keys(imported)[0]); saveFiles(); markBuildStale(); scheduleAnalysis(20);
   } catch (error) { showProjectError(error); }
-  elements.projectFileInput.value = ""; elements.projectDirectoryInput.value = "";
+  elements.projectFileInput.value = "";
 }
 
 function projectFiles() {
   return Object.fromEntries([...editableFiles].sort().map((name) => [name, models.get(name)?.getValue() ?? fileValues[name] ?? ""]));
+}
+
+function projectArtifacts() {
+  return Object.fromEntries([...generatedFiles].sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, data]) => [name, data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)]));
+}
+
+function restoreProjectArtifacts(artifacts) {
+  generatedFiles.clear();
+  for (const [name, data] of Object.entries(artifacts || {})) {
+    if (data instanceof ArrayBuffer) generatedFiles.set(name, new Uint8Array(data));
+    else if (ArrayBuffer.isView(data)) generatedFiles.set(name, new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)));
+  }
 }
 
 function exportProject() {
@@ -2286,7 +3300,6 @@ async function handleProjectAction(event) {
       const name = await requestText({ title: "Rename project", label: "Project name", value: projectName, accept: "Rename", validate: (value) => value.trim() || "playground" });
       if (name) { projectName = name; syncProjectName(); saveFiles(); }
     } else if (action === "export") exportProject();
-    else if (action === "directory") elements.projectDirectoryInput.click();
     else if (action === "share") await shareProject();
     else if (action === "snapshots") await openSnapshotDialog();
     else if (action === "reset" && await requestConfirmation({ title: "Reset project?", message: "All current project files will be replaced with the starter project. Save a snapshot first if you may need them again.", accept: "Reset project" })) resetProject();
@@ -2332,19 +3345,25 @@ async function openSnapshotDialog() {
 async function renderSnapshots() {
   const snapshots = await loadProjectSnapshots();
   if (!snapshots.length) {
-    const empty = document.createElement("div"); empty.className = "snapshot-empty"; empty.textContent = "No snapshots yet.";
+    const empty = document.createElement("div"); empty.className = "snapshot-empty";
+    empty.innerHTML = "<span>◷</span><strong>No snapshots yet</strong><p>Create one before experimenting with a large change.</p>";
     elements.snapshotList.replaceChildren(empty);
     return;
   }
   elements.snapshotList.replaceChildren(...snapshots.map((snapshot) => {
     const row = document.createElement("div"); row.className = "snapshot-item"; row.dataset.snapshot = snapshot.id;
+    const icon = document.createElement("span"); icon.className = "snapshot-item-icon"; icon.textContent = "◷";
     const details = document.createElement("div");
     const name = document.createElement("strong"); name.textContent = snapshot.label || "Snapshot";
-    const date = document.createElement("small"); date.textContent = `${new Date(snapshot.savedAt).toLocaleString()} · ${Object.keys(snapshot.files || {}).length} files`;
-    details.append(name, date);
+    const date = document.createElement("small"); date.textContent = new Date(snapshot.savedAt).toLocaleString();
+    const metadata = document.createElement("span"); metadata.className = "snapshot-metadata";
+    const fileCount = Object.keys(snapshot.files || {}).length + Object.keys(snapshot.artifacts || {}).length;
+    metadata.textContent = `${fileCount} files · ${snapshot.target || "default target"}`;
+    details.append(name, date, metadata);
+    const actions = document.createElement("div"); actions.className = "snapshot-actions";
     const restore = document.createElement("button"); restore.type = "button"; restore.dataset.snapshotAction = "restore"; restore.textContent = "Restore";
-    const remove = document.createElement("button"); remove.type = "button"; remove.dataset.snapshotAction = "delete"; remove.className = "danger"; remove.textContent = "Delete";
-    row.append(details, restore, remove); return row;
+    const remove = document.createElement("button"); remove.type = "button"; remove.dataset.snapshotAction = "delete"; remove.className = "danger"; remove.setAttribute("aria-label", `Delete ${snapshot.label || "snapshot"}`); remove.textContent = "×";
+    actions.append(restore, remove); row.append(icon, details, actions); return row;
   }));
 }
 
@@ -2391,6 +3410,9 @@ function resetProject() {
 function replaceProject(project) {
   for (const model of models.values()) model.dispose();
   editableFiles.clear(); editableBaselines.clear(); models.clear(); openFiles.length = 0;
+  workspaceFolders.clear(); collapsedFolders.clear();
+  restoreProjectArtifacts(project.artifacts);
+  for (const folder of project.folders || []) if (typeof folder === "string") workspaceFolders.add(folder);
   projectBackendRoots.clear();
   for (const name of project.backendRoots || []) if (typeof name === "string") projectBackendRoots.add(name);
   projectLanguage = project.language === "c" || !project.language && inferProjectLanguage(project.files) === "c" ? "c" : "go";
@@ -2412,9 +3434,10 @@ function replaceProject(project) {
 }
 
 function syncProjectName() {
-  elements.projectName.textContent = projectName;
+  elements.projectName.textContent = "Renvo";
   elements.sidebarProjectName.textContent = projectName;
-  document.title = `${projectName} | Renvo`;
+  elements.startProjectName.textContent = projectName;
+  document.title = `${projectName} — Renvo`;
   updateMobileHeader();
 }
 
@@ -2980,7 +4003,8 @@ function showPanel(name) {
   });
   document.querySelectorAll(".panel-view").forEach((view) => view.classList.toggle("active", view.dataset.panelView === name));
   elements.togglePlotterSize.hidden = name !== "plotter" || isPhoneWorkspace();
-  elements.clearOutput.hidden = !["output", "terminal", "plotter", "tests", "search"].includes(name);
+  elements.clearOutput.hidden = !["output", "terminal", "serial", "plotter", "tests", "search"].includes(name);
+  if (name === "terminal") requestAnimationFrame(() => { terminalFitAddon?.fit(); xtermTerminal?.focus(); });
 }
 
 function togglePlotterSize() {
@@ -2997,7 +4021,9 @@ function setPlotterExpanded(expanded) {
 }
 
 function appendSerialText(text) {
-  elements.terminalOutput.textContent += text;
+  if (elements.serialOutput.textContent === "Serial monitor waiting for application output…") elements.serialOutput.textContent = "";
+  elements.serialOutput.textContent += text;
+  elements.serialOutput.scrollTop = elements.serialOutput.scrollHeight;
   if (serialPlotter.push(text) && !plotterAutoShown) {
     plotterAutoShown = true;
     showPanel("plotter");
@@ -3006,7 +4032,8 @@ function appendSerialText(text) {
 
 function clearActivePanel() {
   const active = document.querySelector(".panel-tab.active")?.dataset.panel;
-  if (active === "terminal") elements.terminalOutput.textContent = "";
+  if (active === "terminal") { xtermTerminal?.clear(); elements.terminalOutput.textContent = ""; }
+  else if (active === "serial") elements.serialOutput.textContent = "Serial monitor waiting for application output…";
   else if (active === "plotter") serialPlotter.clear();
   else if (active === "tests") elements.testsOutput.textContent = "Add a _test.go file, then press Test.";
   else if (active === "search") {
@@ -3019,6 +4046,72 @@ function togglePanel() {
   if (!elements.workbench.classList.contains("panel-hidden")) setPlotterExpanded(false);
   elements.workbench.classList.toggle("panel-hidden");
   elements.togglePanel.setAttribute("aria-pressed", String(!elements.workbench.classList.contains("panel-hidden")));
+}
+
+function installWorkspaceResizers() {
+  const restore = (key, property, minimum, maximum) => {
+    try {
+      const value = Number(localStorage.getItem(key));
+      if (Number.isFinite(value) && value >= minimum && value <= maximum) document.documentElement.style.setProperty(property, `${value}px`);
+    } catch {}
+  };
+  restore("renvo.webIDE.sidebarWidth", "--sidebar-width", 180, 520);
+  restore("renvo.webIDE.panelHeight", "--panel-height", 100, 800);
+  const resize = (element, options) => {
+    const apply = (value, persist = false) => {
+      const maximum = options.maximum();
+      const next = Math.round(Math.max(options.minimum, Math.min(maximum, value)));
+      document.documentElement.style.setProperty(options.property, `${next}px`);
+      element.setAttribute("aria-valuenow", String(next));
+      element.setAttribute("aria-valuemax", String(Math.round(maximum)));
+      if (persist) try { localStorage.setItem(options.storage, String(next)); } catch {}
+      requestAnimationFrame(() => { editor?.layout(); terminalFitAddon?.fit(); });
+      return next;
+    };
+    element.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || options.disabled()) return;
+      event.preventDefault();
+      element.setPointerCapture(event.pointerId);
+      element.classList.add("dragging");
+      document.body.classList.add(options.bodyClass);
+      apply(options.value(event));
+    });
+    element.addEventListener("pointermove", (event) => {
+      if (!element.hasPointerCapture(event.pointerId)) return;
+      apply(options.value(event));
+    });
+    const finish = (event) => {
+      if (!element.hasPointerCapture(event.pointerId)) return;
+      const value = apply(options.value(event), true);
+      element.releasePointerCapture(event.pointerId);
+      element.classList.remove("dragging");
+      document.body.classList.remove(options.bodyClass);
+      element.setAttribute("aria-valuetext", `${value} pixels`);
+    };
+    element.addEventListener("pointerup", finish);
+    element.addEventListener("pointercancel", finish);
+    element.addEventListener("dblclick", () => apply(options.defaultValue, true));
+    element.addEventListener("keydown", (event) => {
+      const direction = options.horizontal
+        ? event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0
+        : event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+      if (!direction) return;
+      event.preventDefault();
+      const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(options.property)) || options.defaultValue;
+      apply(current + direction * (event.shiftKey ? 40 : 10), true);
+    });
+  };
+  resize(elements.sidebarResizer, {
+    property: "--sidebar-width", storage: "renvo.webIDE.sidebarWidth", minimum: 180, defaultValue: 264,
+    maximum: () => Math.min(520, innerWidth * .62), value: (event) => event.clientX,
+    disabled: () => matchMedia("(max-width: 820px)").matches, bodyClass: "resizing-sidebar", horizontal: true,
+  });
+  resize(elements.panelResizer, {
+    property: "--panel-height", storage: "renvo.webIDE.panelHeight", minimum: 100, defaultValue: 190,
+    maximum: () => Math.max(100, elements.workbench.getBoundingClientRect().height - 120),
+    value: (event) => elements.workbench.getBoundingClientRect().bottom - event.clientY,
+    disabled: () => isPhoneWorkspace(), bodyClass: "resizing-panel", horizontal: false,
+  });
 }
 
 function toggleSidebar() {
@@ -3094,11 +4187,18 @@ function updateReadyState() {
   elements.test.disabled = !compilerReady || !monaco || building || running;
   elements.test.textContent = testBuild ? "Testing…" : "Test";
   elements.targetButton.disabled = building || running;
-  elements.run.disabled = !readiness.ready || (board ? !downloadable : !capabilities.runsInBrowser) || running || runAfterBuild;
+  elements.run.disabled = isWASITarget()
+    ? !compilerReady || !monaco || building || running || runAfterBuild
+    : !readiness.ready || (board ? !downloadable : !capabilities.runsInBrowser) || running || runAfterBuild;
   elements.flashTransport.disabled = building || running || runAfterBuild;
-  elements.run.title = board ? "Download firmware" : "Run (F5)";
-  elements.run.querySelector("span").textContent = board ? "Download" : running ? "Running…" : runAfterBuild ? "Run pending…" : "Run";
+  elements.run.title = board ? "Download firmware" : isWASITarget() ? "Build and run the WASI project (F5 or Ctrl+S)" : "Run (F5)";
+  elements.run.querySelector("span").textContent = board ? "Download" : isWASITarget() && building ? "Building…" : running ? "Running…" : runAfterBuild ? "Run pending…" : "Run";
   elements.run.querySelector("path").setAttribute("d", board ? "M8 2v8m-3-3 3 3 3-3M3 13h10" : "m5 3 8 5-8 5V3Z");
+  const runIsPrimary = !board && capabilities.runsInBrowser;
+  elements.run.classList.toggle("primary-action", runIsPrimary);
+  elements.run.classList.toggle("secondary-action", !runIsPrimary);
+  elements.compile.classList.toggle("primary-action", !runIsPrimary);
+  elements.compile.classList.toggle("secondary-action", runIsPrimary);
   elements.mobileDownload.disabled = !downloadReadiness.ready || !downloadable || running || runAfterBuild;
   elements.mobileDownload.textContent = !compilerReady || !monaco ? "Loading…" : downloadReadiness.label;
   elements.mobileDownload.title = downloadable ? downloadReadiness.title : "This target has no downloadable output";
@@ -3222,7 +4322,7 @@ function startMobileDeployment(jtag) {
   }
   const loadName = document.querySelector('[data-deploy-step="load"] strong');
   if (loadName) loadName.textContent = monitor ? "Monitor load" : jtag ? "JTAG load" : "Flash board";
-  elements.terminalOutput.textContent = `$ ${monitor ? "monitor-load" : jtag ? "jtag-load" : "flash"} ${selectedTarget?.label || selectedTarget?.name || "board"}\n`;
+  if (!terminalFlashActive) elements.terminalOutput.textContent = `$ ${flashCommand(elements.flashTransport.value)}\n`;
   document.querySelector(".mobile-flash-log").open = false;
   updateReadyState();
 }
@@ -3283,7 +4383,8 @@ function closeMobileFlashView() {
 function syncMobileFlashOutput() {
   elements.mobileFlashOutput.textContent = elements.terminalOutput.textContent;
   elements.mobileFlashOutput.scrollTop = elements.mobileFlashOutput.scrollHeight;
-  elements.mobileDeviceOutput.textContent = elements.terminalOutput.textContent || "Nothing to show yet.";
+  const serial = elements.serialOutput.textContent;
+  elements.mobileDeviceOutput.textContent = serial === "Serial monitor waiting for application output…" ? "Nothing to show yet." : serial || "Nothing to show yet.";
 }
 
 function configureFlashTransports() {
@@ -3421,11 +4522,11 @@ function saveFiles() {
 
 function saveAndDeploy() {
   saveFiles();
-  if (isBoardTarget(selectedTarget)) runArtifact();
+  if (isBoardTarget(selectedTarget) || isWASITarget()) runArtifact();
 }
 
 function currentProject() {
-  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", arenaSize: elements.arenaSize?.value || "", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
+  return { name: projectName, language: projectLanguage, buildLanguage: activeBuildRoot === "." ? "" : externalBuildLanguage, files: projectFiles(), artifacts: projectArtifacts(), folders: [...workspaceFolders], activeFile, openFiles: [...openFiles], command: elements.command?.value || "-s -o app.wasm .", arenaSize: elements.arenaSize?.value || "", target: selectedTarget?.name || restoredTargetName, backendRoots: [...projectBackendRoots] };
 }
 
 async function restoreProject() {
@@ -3445,8 +4546,11 @@ async function restoreProject() {
   const fallbackFiles = projectLanguage === "c" ? initialCFiles : initialFiles;
   fileValues = project?.files && Object.keys(project.files).length ? { ...project.files } : { ...fallbackFiles };
   editableFiles.clear(); editableBaselines.clear();
+  restoreProjectArtifacts(project?.artifacts);
   for (const [name, source] of Object.entries(fileValues)) { editableFiles.add(name); editableBaselines.set(name, source); }
   projectName = project?.name || "playground";
+  workspaceFolders.clear();
+  for (const folder of project?.folders || []) if (typeof folder === "string") workspaceFolders.add(folder);
   restoredTargetName = project?.target || "";
   projectBackendRoots.clear();
   for (const name of project?.backendRoots || []) if (typeof name === "string") projectBackendRoots.add(name);
@@ -3476,21 +4580,6 @@ function createDownloadURL(data, type) {
 
 function releaseDownloadURL(url) { if (url.startsWith("blob:")) URL.revokeObjectURL(url); }
 
-function splitArguments(text) {
-  const args = []; let value = ""; let quote = ""; let escaped = false; let active = false;
-  for (const character of text) {
-    if (escaped) { value += character; escaped = false; active = true; }
-    else if (character === "\\" && quote !== "'") { escaped = true; active = true; }
-    else if (quote) { if (character === quote) quote = ""; else value += character; active = true; }
-    else if (character === "'" || character === '"') { quote = character; active = true; }
-    else if (/\s/.test(character)) { if (active) { args.push(value); value = ""; active = false; } }
-    else { value += character; active = true; }
-  }
-  if (escaped || quote) throw new Error("Unterminated quote or escape in arguments.");
-  if (active) args.push(value);
-  return args;
-}
-
 function syncBuildRootFromCommand() {
   try {
     const args = splitArguments(elements.command.value);
@@ -3500,13 +4589,6 @@ function syncBuildRootFromCommand() {
     activeBuildRoot = ".";
   }
   syncBuildScope();
-}
-
-function replaceOutput(command, output) {
-  const args = splitArguments(command); const at = args.indexOf("-o");
-  if (at >= 0 && at + 1 < args.length) args[at + 1] = output;
-  else args.unshift("-o", output);
-  return args.join(" ");
 }
 
 function cleanPath(name) {
@@ -3898,8 +4980,10 @@ function openHelpPage(importPath, anchor = "") {
   const page = helpDocument(importPath);
   if (!page) return;
   activeHelp = helpTab(importPath);
+  activeBinary = "";
   if (!openFiles.includes(activeHelp)) openFiles.push(activeHelp);
   elements.editorHost.hidden = true;
+  elements.hexView.hidden = true;
   elements.helpView.hidden = false;
   elements.copyHelpPage.hidden = false;
   elements.copyToPlayground.hidden = true;
