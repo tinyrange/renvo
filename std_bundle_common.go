@@ -132,6 +132,9 @@ func bundledStdHostOnly(data []byte) bool {
 	for end < len(data) && data[end] != '\n' {
 		end++
 	}
+	if end > 0 && data[end-1] == '\r' {
+		end--
+	}
 	const constraint = "//go:build !renvo"
 	if end != len(constraint) {
 		return false
