@@ -2,17 +2,33 @@ name: Release
 
 on:
   workflow_dispatch:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-release:
-    name: Build release compilers
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            artifact: renvo-linux-amd64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            artifact: renvo-windows-amd64.exe
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+            artifact: renvo-darwin-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
     steps:
@@ -25,111 +41,115 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Build backend compilers
+      - name: Build fully bundled compiler
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          ARTIFACT: ${{ matrix.artifact }}
         run: |
-          set -eux
+          set -euxo pipefail
           mkdir -p dist
-          mapfile -t compiler_names < backend/compiler_sources.txt
-          compiler_files=()
-          for name in "${compiler_names[@]}"; do
-            compiler_files+=("backend/$name")
-          done
-          go build -o dist/renvo-backend-stage0 \
-            backend/renvo_main.go \
-            "${compiler_files[@]}"
-          ./dist/renvo-backend-stage0 -t linux/amd64 -s -o dist/renvo-backend-stage1 \
-            "${compiler_files[@]}"
-          chmod +x dist/renvo-backend-stage1
-          ./dist/renvo-backend-stage1 -t linux/amd64 -s -o dist/renvo-backend-linux-amd64 \
-            "${compiler_files[@]}"
-          ./dist/renvo-backend-stage1 -t linux/aarch64 -s -o dist/renvo-backend-linux-arm64 \
-            "${compiler_files[@]}"
-          chmod +x dist/renvo-backend-linux-amd64 dist/renvo-backend-linux-arm64
+          go build -trimpath -tags renvo_bundle -ldflags="-s -w" \
+            -o "dist/$ARTIFACT" ./cmd/renvo
 
-      - name: Build frontend compilers
+      - name: Verify complete bundled library
+        shell: bash
         run: |
-          set -eux
-          go build -tags renvo_bundle -o dist/renvo-bootstrap ./cmd/renvobootstrap
-          ./dist/renvo-bootstrap -bootstrap-backend "$PWD/dist/renvo-backend-linux-amd64" \
-            -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64-stage1 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/amd64 -s -o dist/renvo-linux-amd64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/386 -s -o dist/renvo-linux-386 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/aarch64 -s -o dist/renvo-linux-arm64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t linux/arm -s -o dist/renvo-linux-arm ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/amd64 -s -o dist/renvo-windows-amd64.exe ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/386 -s -o dist/renvo-windows-386.exe ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t windows/arm64 -s -o dist/renvo-windows-arm64.exe ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t darwin/arm64 -s -o dist/renvo-darwin-arm64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t freebsd/amd64 -arena-size 67108864 -s -o dist/renvo-freebsd-amd64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t openbsd/amd64 -arena-size 67108864 -s -o dist/renvo-openbsd-amd64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t netbsd/amd64 -arena-size 67108864 -s -o dist/renvo-netbsd-amd64 ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t wasi/wasm32 -s -o dist/renvo-wasi-wasm32.wasm ./cmd/renvo
-          ./dist/renvo-linux-amd64-stage1 -tags renvo_bundle -t vm/vm32 -s -o dist/renvo-vm32.rnvb ./cmd/renvo
-          chmod +x \
-            dist/renvo-linux-amd64 \
-            dist/renvo-linux-386 \
-            dist/renvo-linux-arm64 \
-            dist/renvo-linux-arm \
-            dist/renvo-darwin-arm64 \
-            dist/renvo-freebsd-amd64 \
-            dist/renvo-openbsd-amd64 \
-            dist/renvo-netbsd-amd64
+          go test -count=1 -tags renvo_bundle \
+            -run '^TestBundled(StandardLibraryFS|OptionalModuleCache|DeviceModuleCompilesOffline|FormsModuleCompilesOffline|RuntimeModuleCompilesConcurrencyOffline|StandardLibraryMatchesRepository)$' \
+            ./internal/driver
 
-      - name: Check release frontend help
+      - name: Verify bundled standard library and supported backends
+        shell: bash
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
         run: |
-          set -eux
-          ./dist/renvo-linux-amd64 > dist/renvo-help.txt
+          set -euxo pipefail
+          compiler="$(pwd)/dist/$ARTIFACT"
+          if [[ "$ARTIFACT" != *.exe ]]; then
+            chmod +x "$compiler"
+          fi
+          "$compiler" > dist/renvo-help.txt
           grep -F "Usage: renvo" dist/renvo-help.txt
-          grep -F "windows/amd64" dist/renvo-help.txt
-          grep -F "windows/arm64" dist/renvo-help.txt
-          grep -F "darwin/arm64" dist/renvo-help.txt
-          grep -F "freebsd/amd64" dist/renvo-help.txt
-          grep -F "openbsd/amd64" dist/renvo-help.txt
-          grep -F "netbsd/amd64" dist/renvo-help.txt
-          grep -F "wasi/wasm32" dist/renvo-help.txt
-          grep -F "vm/vm32" dist/renvo-help.txt
+
+          # The release executable must be usable without a checkout for the
+          # standard library and the complete built-in Tier 1 target set.
+          smoke_dir="$RUNNER_TEMP/renvo-release-smoke"
+          mkdir -p "$smoke_dir/project"
+          cp tools/wasm/testdata/tiny.go "$smoke_dir/project/main.go"
+          cp go.mod "$smoke_dir/project/go.mod"
+          (
+            cd "$smoke_dir/project"
+            for target in \
+              linux/amd64 linux/386 linux/aarch64 linux/arm \
+              windows/amd64 windows/386 darwin/arm64 wasi/wasm32 vm/vm32
+            do
+              "$compiler" -t "$target" -s \
+                -o "$smoke_dir/$(printf '%s' "$target" | tr / -)" main.go
+            done
+          )
+
+          # Tier 2 definitions are intentionally retargetable inputs. Verify
+          # that every distributed compiler can prepare and run all of them.
+          "$compiler" -backend backends/linux_amd64_object.rtg \
+            -t linux-object/amd64 -s -o "$smoke_dir/linux-object.o" tools/wasm/testdata/tiny.go
+          "$compiler" -backend backends/llvm_amd64.rtg \
+            -t llvm/linux-amd64 -s -o "$smoke_dir/linux.ll" tools/wasm/testdata/tiny.go
+          "$compiler" -backend backends/esp32c6.rtg \
+            -t esp32c6/riscv32 -s -o "$smoke_dir/esp32c6.elf" tools/wasm/testdata/tiny.go
+          "$compiler" -backend backends/esp32c6_jtag.rtg \
+            -t esp32c6-jtag/riscv32 -s -o "$smoke_dir/esp32c6-jtag.elf" tools/wasm/testdata/tiny.go
+          "$compiler" -backend backends/esp32s3.rtg \
+            -t esp32s3/xtensa_lx7 -s -o "$smoke_dir/esp32s3.elf" tools/wasm/testdata/tiny.go
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: renvo-release-binaries
-          path: |
-            dist/renvo-backend-linux-amd64
-            dist/renvo-backend-linux-arm64
-            dist/renvo-linux-amd64
-            dist/renvo-linux-386
-            dist/renvo-linux-arm64
-            dist/renvo-linux-arm
-            dist/renvo-windows-amd64.exe
-            dist/renvo-windows-386.exe
-            dist/renvo-windows-arm64.exe
-            dist/renvo-darwin-arm64
-            dist/renvo-freebsd-amd64
-            dist/renvo-openbsd-amd64
-            dist/renvo-netbsd-amd64
-            dist/renvo-wasi-wasm32.wasm
-            dist/renvo-vm32.rnvb
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
           if-no-files-found: error
 
-      - name: Upload release assets
-        if: github.event_name == 'release'
+  publish-release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: renvo-*
+          path: dist
+          merge-multiple: true
+
+      - name: Stage draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$GITHUB_REF_NAME" \
-            dist/renvo-backend-linux-amd64 \
-            dist/renvo-backend-linux-arm64 \
+          set -euxo pipefail
+          notes="docs/releases/$GITHUB_REF_NAME.md"
+          test -f "$notes"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "${GITHUB_REF_NAME#v}" --notes-file "$notes"
+          fi
+          gh release upload "$GITHUB_REF_NAME" --clobber \
             dist/renvo-linux-amd64 \
-            dist/renvo-linux-386 \
-            dist/renvo-linux-arm64 \
-            dist/renvo-linux-arm \
             dist/renvo-windows-amd64.exe \
-            dist/renvo-windows-386.exe \
-            dist/renvo-windows-arm64.exe \
-            dist/renvo-darwin-arm64 \
-            dist/renvo-freebsd-amd64 \
-            dist/renvo-openbsd-amd64 \
-            dist/renvo-netbsd-amd64 \
-            dist/renvo-wasi-wasm32.wasm \
-            dist/renvo-vm32.rnvb \
-            --clobber
+            dist/renvo-darwin-arm64
+
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest

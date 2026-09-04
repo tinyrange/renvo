@@ -90,6 +90,9 @@ func TestCompilerJITJVMExecutesWhenJavaIsAvailable(t *testing.T) {
 	if err != nil {
 		t.Skip("java is not installed")
 	}
+	if output, err := exec.Command(java, "-version").CombinedOutput(); err != nil {
+		t.Skipf("java launcher is present but no JVM is available: %v\n%s", err, output)
+	}
 	class, _ := compileJVMExample(t)
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "RenvoProgram.class"), class, 0o600); err != nil {

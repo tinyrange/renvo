@@ -17,7 +17,7 @@
     "os_id": 1,
     "isa_id": 2,
     "advertised": true,
-    "release_artifact": "renvo-linux-386"
+    "release_artifact": ""
   },
   {
     "name": "linux/aarch64",
@@ -27,7 +27,7 @@
     "os_id": 1,
     "isa_id": 3,
     "advertised": true,
-    "release_artifact": "renvo-linux-arm64"
+    "release_artifact": ""
   },
   {
     "name": "linux/arm",
@@ -37,7 +37,7 @@
     "os_id": 1,
     "isa_id": 4,
     "advertised": true,
-    "release_artifact": "renvo-linux-arm"
+    "release_artifact": ""
   },
   {
     "name": "windows/amd64",
@@ -58,7 +58,7 @@
     "os_id": 2,
     "isa_id": 2,
     "advertised": true,
-    "release_artifact": "renvo-windows-386.exe",
+    "release_artifact": "",
     "ide": true
   },
   {
@@ -69,7 +69,7 @@
     "os_id": 2,
     "isa_id": 3,
     "advertised": true,
-    "release_artifact": "renvo-windows-arm64.exe",
+    "release_artifact": "",
     "ide": true
   },
   {
@@ -91,7 +91,7 @@
     "os_id": 4,
     "isa_id": 5,
     "advertised": true,
-    "release_artifact": "renvo-wasi-wasm32.wasm"
+    "release_artifact": ""
   },
   {
     "name": "browser/wasm32",
@@ -109,7 +109,7 @@
     "os_id": 5,
     "isa_id": 5,
     "advertised": true,
-    "release_artifact": "renvo-vm32.rnvb"
+    "release_artifact": ""
   },
   {
     "name": "linux-kernel/amd64",
@@ -128,7 +128,7 @@
     "os_id": 7,
     "isa_id": 1,
     "advertised": true,
-    "release_artifact": "renvo-freebsd-amd64"
+    "release_artifact": ""
   },
   {
     "name": "openbsd/amd64",
@@ -138,7 +138,7 @@
     "os_id": 8,
     "isa_id": 1,
     "advertised": true,
-    "release_artifact": "renvo-openbsd-amd64"
+    "release_artifact": ""
   },
   {
     "name": "netbsd/amd64",
@@ -148,6 +148,6 @@
     "os_id": 9,
     "isa_id": 1,
     "advertised": true,
-    "release_artifact": "renvo-netbsd-amd64"
+    "release_artifact": ""
   }
 ]

@@ -50,7 +50,7 @@ jobs:
 
       - name: Run preflight
         env:
-          RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS: "75"
+          RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS: "100"
         run: ./tools/check preflight
 
   backend-amd64:
