@@ -169,22 +169,31 @@ func TestRegistryResultsAreImmutableCopies(t *testing.T) {
 	}
 }
 
-func TestReleaseWorkflowContainsRegistryArtifacts(t *testing.T) {
+func TestReleaseWorkflowContainsCoreHostArtifacts(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	workflow := string(data)
+	wantArtifacts := map[string]bool{
+		"renvo-linux-amd64":       true,
+		"renvo-windows-amd64.exe": true,
+		"renvo-darwin-arm64":      true,
+	}
 	for _, descriptor := range All() {
 		if descriptor.ReleaseArtifact == "" {
 			continue
 		}
-		if !strings.Contains(workflow, "-t "+descriptor.Name+" ") {
-			t.Errorf("release workflow does not build %s", descriptor.Name)
+		if !wantArtifacts[descriptor.ReleaseArtifact] {
+			t.Errorf("target registry contains non-core release artifact %s", descriptor.ReleaseArtifact)
 		}
+		delete(wantArtifacts, descriptor.ReleaseArtifact)
 		if !strings.Contains(workflow, "dist/"+descriptor.ReleaseArtifact) {
 			t.Errorf("release workflow does not publish %s", descriptor.ReleaseArtifact)
 		}
+	}
+	for artifact := range wantArtifacts {
+		t.Errorf("target registry does not identify core release artifact %s", artifact)
 	}
 }
 

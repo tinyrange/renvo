@@ -99,10 +99,11 @@ A standalone compiler contains:
 - an in-process backend;
 - the target writers needed for all supported outputs.
 
-The release workflow bootstraps the compiler rather than publishing a Go-built
-stage0. It builds a Renvo backend stage1, uses a self-hosted frontend to build
-the release frontends, checks the release help text, and uploads raw binaries
-rather than archive wrappers.
+The release workflow builds fully bundled Go-hosted compilers on native Linux,
+Windows, and macOS runners. Each artifact embeds the standard library and
+built-in targets while retaining dynamic RTG/RBE preparation for Tier 2
+backends. The workflow verifies those capabilities, stages a draft release,
+uploads every raw binary, and publishes only after all three artifacts exist.
 
 ## Everyday command-line use
 

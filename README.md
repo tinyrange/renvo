@@ -168,8 +168,7 @@ scope and growth boundary.
 ## Build and try it
 
 A Go-built bootstrap uses a sibling standalone backend during development.
-The `renvo` artifacts themselves are built by Renvo and always contain the
-backend in-process:
+Self-hosted `renvo` artifacts contain the backend in-process:
 
 ```sh
 go build -o renvo-backend ./backend
@@ -178,6 +177,11 @@ go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
 ./renvo-bootstrap \
   -t linux/amd64 -o hello ./path/to/hello-package
 ```
+
+GitHub releases instead provide fully bundled Go-hosted compilers for Linux
+amd64, Windows amd64, and macOS arm64. Those distributions embed the standard
+library and built-in backends, and retain dynamic RTG/RBE backend preparation
+for supported retargetable definitions.
 
 A package can mix the two source languages through an explicit cgo-style
 boundary without invoking a host C toolchain:
