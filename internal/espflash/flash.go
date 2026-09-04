@@ -11,13 +11,18 @@ import (
 )
 
 const (
-	flashOffset   = 0x10000
-	flashBlock    = 0x400
-	flashBatch    = 128
-	checksumMagic = 0xef
-	backupChunk   = 64
-	backupBuffer  = 64 * 1024
-	backupBatch   = 32
+	flashOffset = 0x10000
+	flashBlock  = 0x400
+	flashBatch  = 128
+	// Large application writes can occasionally leave the ESP ROM busy for
+	// longer than 50 ms after FLASH_DATA, especially near erase boundaries.
+	// Keep the operation bounded while tolerating that normal latency.
+	flashWriteEmptyLimit    = 500
+	serialMonitorEmptyLimit = 50
+	checksumMagic           = 0xef
+	backupChunk             = 64
+	backupBuffer            = 64 * 1024
+	backupBatch             = 32
 )
 
 type flashError struct{ text string }
@@ -37,7 +42,7 @@ type target struct {
 	chipID      uint16
 	flashConfig byte
 	magic       uint32
-	flashSize   int
+	spiBase     uint32
 }
 
 // Image identifies a converted ESP application image.
@@ -65,12 +70,12 @@ func Backup(path string, port string) error { return backupFlash(path, port) }
 func DetectSerialPort() (string, error) { return detectPort() }
 
 var targets = []target{
-	{name: "esp32c6/riscv32", machine: 243, chipID: 13, flashConfig: 0x20, magic: 0x2ce0806f, flashSize: 4 * 1024 * 1024},
-	{name: "esp32s3/xtensa_lx7", machine: 94, chipID: 9, flashConfig: 0x3f, magic: 0x09, flashSize: 8 * 1024 * 1024},
+	{name: "esp32c6/riscv32", machine: 243, chipID: 13, flashConfig: 0x20, magic: 0x2ce0806f, spiBase: 0x60003000},
+	{name: "esp32s3/xtensa_lx7", machine: 94, chipID: 9, flashConfig: 0x3f, magic: 0x09, spiBase: 0x60002000},
 	// ESP32-P4 shares ELF machine 243 with ESP32-C6. P4 application binaries
 	// are accepted by chip ID, but ELF conversion remains C6 until a P4 board
 	// target can supply an unambiguous image target.
-	{name: "esp32p4/riscv32", machine: 243, chipID: 18, flashConfig: 0x4f, flashSize: 16 * 1024 * 1024},
+	{name: "esp32p4/riscv32", machine: 243, chipID: 18, flashConfig: 0x4f, spiBase: 0x5008d000},
 }
 
 // Run executes the renvoflash command. It is exported so the Renvo frontend
@@ -189,6 +194,9 @@ func backupFlash(path string, portName string) error {
 		return err
 	}
 	print("ROM loader connected (" + chip.name + ")\n")
+	if err = loader.disableFlashWatchdogs(chip); err != nil {
+		return err
+	}
 	if len(security) >= 20 {
 		flags := u32(security, 0)
 		crypt := security[4]
@@ -203,11 +211,16 @@ func backupFlash(path string, portName string) error {
 	if _, err = loader.command(0x0d, words([]uint32{0}), 0, 30); err != nil {
 		return err
 	}
-	flashParameters := words([]uint32{0, uint32(chip.flashSize), 64 * 1024, 4 * 1024, 256, 0xffff})
+	flashID, flashSize, err := loader.detectFlashSize(chip)
+	if err != nil {
+		return err
+	}
+	print("Flash JEDEC ID 0x" + hex(flashID) + ", detected " + decimal(flashSize/(1024*1024)) + " MiB\n")
+	flashParameters := words([]uint32{0, uint32(flashSize), 64 * 1024, 4 * 1024, 256, 0xffff})
 	if _, err = loader.command(0x0b, flashParameters, 0, 30); err != nil {
 		return fail("configure flash geometry: " + err.Error())
 	}
-	digestPayload := words([]uint32{0, uint32(chip.flashSize), 0, 0})
+	digestPayload := words([]uint32{0, uint32(flashSize), 0, 0})
 	digest, digestErr := loader.commandData(0x13, digestPayload, 0, 30000)
 	if digestErr != nil {
 		return fail("device digest failed: " + digestErr.Error())
@@ -226,15 +239,15 @@ func backupFlash(path string, portName string) error {
 			print("Backup is incomplete; do not use it for restore\n")
 		}
 	}()
-	print("Reading " + decimal(chip.flashSize) + " bytes to " + path + "\n")
+	print("Reading " + decimal(flashSize) + " bytes to " + path + "\n")
 	payload := make([]byte, 8)
 	block := make([]byte, backupChunk)
 	buffer := make([]byte, 0, backupBuffer)
 	batchData := make([]byte, backupBatch*backupChunk)
-	for batchOffset := 0; batchOffset < chip.flashSize; batchOffset += backupChunk * backupBatch {
+	for batchOffset := 0; batchOffset < flashSize; batchOffset += backupChunk * backupBatch {
 		batchCount := backupBatch
-		if batchOffset+batchCount*backupChunk > chip.flashSize {
-			batchCount = (chip.flashSize - batchOffset) / backupChunk
+		if batchOffset+batchCount*backupChunk > flashSize {
+			batchCount = (flashSize - batchOffset) / backupChunk
 		}
 		for i := 0; i < batchCount; i++ {
 			put32(payload, 0, batchOffset+i*backupChunk)
@@ -257,8 +270,8 @@ func backupFlash(path string, portName string) error {
 				buffer = buffer[:0]
 			}
 			read := offset + backupChunk
-			if read%(1024*1024) == 0 || read == chip.flashSize {
-				print("Read " + decimal(read/(1024*1024)) + "/" + decimal(chip.flashSize/(1024*1024)) + " MiB\n")
+			if read%(1024*1024) == 0 || read == flashSize {
+				print("Read " + decimal(read/(1024*1024)) + "/" + decimal(flashSize/(1024*1024)) + " MiB\n")
 			}
 		}
 	}
@@ -297,8 +310,23 @@ func flashFile(path string, portName string) error {
 		return fail("connected " + connected.name + " does not match " + chip.name)
 	}
 	print("ROM loader connected (" + chip.name + ")\n")
+	if err = loader.disableFlashWatchdogs(chip); err != nil {
+		return err
+	}
 	if _, err = loader.command(0x0d, words([]uint32{0}), 0, 30); err != nil {
 		return err
+	}
+	flashID, flashSize, err := loader.detectFlashSize(chip)
+	if err != nil {
+		return err
+	}
+	print("Flash JEDEC ID 0x" + hex(flashID) + ", detected " + decimal(flashSize/(1024*1024)) + " MiB\n")
+	if len(image) > flashSize-flashOffset {
+		return fail("application image exceeds detected flash capacity")
+	}
+	flashParameters := words([]uint32{0, uint32(flashSize), 64 * 1024, 4 * 1024, 256, 0xffff})
+	if _, err = loader.command(0x0b, flashParameters, 0, 30); err != nil {
+		return fail("configure flash geometry: " + err.Error())
 	}
 	blocks := (len(image) + flashBlock - 1) / flashBlock
 	written := 0
@@ -333,7 +361,7 @@ func flashFile(path string, portName string) error {
 			}
 			payload := words([]uint32{flashBlock, uint32(sequence), 0, 0})
 			payload = append(payload, block...)
-			if _, err = loader.command(0x03, payload, uint32(checksum), 50); err != nil {
+			if _, err = loader.command(0x03, payload, uint32(checksum), flashWriteEmptyLimit); err != nil {
 				return fail("write block " + decimal(blockIndex+1) + "/" + decimal(blocks) + ": " + err.Error())
 			}
 			written++
@@ -376,16 +404,47 @@ func flashFile(path string, portName string) error {
 	}
 	buffer := make([]byte, 4096)
 	empty := 0
-	for empty < 10 {
+	for empty < serialMonitorEmptyLimit {
 		n := port.read(buffer)
 		if n < 0 {
 			return fail("serial monitor read failed")
 		}
 		if n == 0 {
 			empty++
+			// Host serial descriptors are nonblocking, so an empty read returns
+			// immediately rather than honoring VTIME. Keep the monitor window
+			// open for approximately five seconds after USB re-enumeration.
+			sleep(100)
 		} else {
 			empty = 0
 			print(string(buffer[:n]))
+		}
+	}
+	return nil
+}
+
+func (loader *loader) disableFlashWatchdogs(chip target) error {
+	if chip.chipID != 9 {
+		return nil
+	}
+	// The ESP32-S3 ROM downloader inherits watchdog state from the second-stage
+	// bootloader. Small images finish before its roughly ten-second deadline;
+	// larger application-only writes otherwise lose native USB midway through
+	// the transfer. This is the same bounded disable sequence used by the Renvo
+	// ESP32-S3 startup, expressed through the ROM register-write command.
+	writes := []uint32{
+		0x6001f064, 0x50d83aa1,
+		0x6001f048, 0,
+		0x60020064, 0x50d83aa1,
+		0x60020048, 0,
+		0x600080b0, 0x50d83aa1,
+		0x60008098, 0,
+		0x600080b8, 0x8f1d312a,
+		0x600080b4, 1 << 30,
+	}
+	for index := 0; index < len(writes); index += 2 {
+		if err := loader.writeRegister(writes[index], writes[index+1]); err != nil {
+			return fail("disable ESP32-S3 flash watchdogs: " + err.Error())
 		}
 	}
 	return nil
@@ -740,6 +799,143 @@ func (loader *loader) identify() (target, []byte, error) {
 	return target{}, nil, fail("unsupported connected ESP chip magic 0x" + hex(magic))
 }
 
+// flashSizeFromJEDECID decodes the capacity byte returned by the SPI NOR RDID
+// command. Most chips encode the byte-address capacity as a base-two exponent.
+// Adesto parts use their older device-code convention instead. Keep the
+// accepted range deliberately narrow: every currently supported Renvo board is
+// between 256 KiB and 32 MiB, and guessing beyond a recognized capacity would
+// make a supposedly whole-flash backup unsafe.
+func flashSizeFromJEDECID(id uint32) (int, bool) {
+	manufacturer := byte(id)
+	if manufacturer == 0 || manufacturer == 0xff {
+		return 0, false
+	}
+	if manufacturer == 0x1f {
+		code := int(byte(id>>8) & 0x1f)
+		if code < 4 || code > 9 {
+			return 0, false
+		}
+		return 1 << uint(code+15), true
+	}
+	code := int(byte(id >> 16))
+	if code >= 0x32 && code <= 0x39 {
+		code -= 0x20
+	}
+	if code < 0x12 || code > 0x19 {
+		return 0, false
+	}
+	return 1 << uint(code), true
+}
+
+func (loader *loader) readRegister(address uint32) (uint32, error) {
+	return loader.command(0x0a, words([]uint32{address}), 0, 1000)
+}
+
+func (loader *loader) writeRegister(address uint32, value uint32) error {
+	_, err := loader.command(0x09,
+		words([]uint32{address, value, 0xffffffff, 0}), 0, 1000)
+	return err
+}
+
+// runSPIFlashReadCommand uses the ROM loader's register access operations to
+// issue one read-only command through the SPI1 memory controller. The register
+// sequence matches Espressif esptool's run_spiflash_command path. Restore the
+// controller's user configuration before returning, including on command or
+// polling failure.
+func (loader *loader) runSPIFlashReadCommand(chip target, command byte, readBits int) (uint32, error) {
+	if chip.spiBase == 0 || readBits <= 0 || readBits > 32 {
+		return 0, fail("invalid SPI flash read command")
+	}
+	const (
+		spiCommandUser = uint32(1 << 18)
+		spiUserCommand = uint32(1 << 31)
+		spiUserMISO    = uint32(1 << 28)
+	)
+	commandRegister := chip.spiBase
+	userRegister := chip.spiBase + 0x18
+	user2Register := chip.spiBase + 0x20
+	misoLengthRegister := chip.spiBase + 0x28
+	dataRegister := chip.spiBase + 0x58
+
+	oldUser, err := loader.readRegister(userRegister)
+	if err != nil {
+		return 0, fail("read SPI user register: " + err.Error())
+	}
+	oldUser2, err := loader.readRegister(user2Register)
+	if err != nil {
+		return 0, fail("read SPI command register: " + err.Error())
+	}
+	oldMISOLength, err := loader.readRegister(misoLengthRegister)
+	if err != nil {
+		return 0, fail("read SPI MISO length register: " + err.Error())
+	}
+
+	var operationErr error
+	if operationErr == nil {
+		operationErr = loader.writeRegister(misoLengthRegister, uint32(readBits-1))
+	}
+	if operationErr == nil {
+		operationErr = loader.writeRegister(userRegister, spiUserCommand|spiUserMISO)
+	}
+	if operationErr == nil {
+		operationErr = loader.writeRegister(user2Register, uint32(7<<28)|uint32(command))
+	}
+	if operationErr == nil {
+		operationErr = loader.writeRegister(dataRegister, 0)
+	}
+	if operationErr == nil {
+		operationErr = loader.writeRegister(commandRegister, spiCommandUser)
+	}
+
+	done := false
+	for attempt := 0; operationErr == nil && attempt < 10; attempt++ {
+		state, readErr := loader.readRegister(commandRegister)
+		if readErr != nil {
+			operationErr = readErr
+		} else if state&spiCommandUser == 0 {
+			done = true
+			break
+		}
+	}
+	if operationErr == nil && !done {
+		operationErr = fail("SPI flash command did not complete")
+	}
+	result := uint32(0)
+	if operationErr == nil {
+		result, operationErr = loader.readRegister(dataRegister)
+	}
+
+	restoreUserErr := loader.writeRegister(userRegister, oldUser)
+	restoreUser2Err := loader.writeRegister(user2Register, oldUser2)
+	restoreMISOLengthErr := loader.writeRegister(misoLengthRegister, oldMISOLength)
+	if operationErr != nil {
+		return 0, fail("read SPI flash ID: " + operationErr.Error())
+	}
+	if restoreUserErr != nil {
+		return 0, fail("restore SPI user register: " + restoreUserErr.Error())
+	}
+	if restoreUser2Err != nil {
+		return 0, fail("restore SPI command register: " + restoreUser2Err.Error())
+	}
+	if restoreMISOLengthErr != nil {
+		return 0, fail("restore SPI MISO length register: " + restoreMISOLengthErr.Error())
+	}
+	return result, nil
+}
+
+func (loader *loader) detectFlashSize(chip target) (uint32, int, error) {
+	id, err := loader.runSPIFlashReadCommand(chip, 0x9f, 24)
+	if err != nil {
+		return 0, 0, err
+	}
+	id &= 0xffffff
+	size, ok := flashSizeFromJEDECID(id)
+	if !ok {
+		return id, 0, fail("unsupported SPI flash JEDEC ID 0x" + hex(id) + "; refusing an incomplete backup")
+	}
+	return id, size, nil
+}
+
 func (loader *loader) connect() error {
 	var last error
 	print("Entering ROM download mode\n")
@@ -1023,7 +1219,7 @@ func (loader *loader) nextFrame() ([]byte, bool, error) {
 		if loader.bufferOffset == loader.bufferLength {
 			n := loader.port.read(loader.buffer)
 			if n < 0 {
-				return nil, false, fail("serial read failed")
+				return nil, false, fail("serial read failed (host error " + decimal(hostError(n)) + ")")
 			}
 			if n == 0 {
 				return nil, hadData, nil

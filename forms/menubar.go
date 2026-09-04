@@ -735,7 +735,11 @@ func (bar *MenuBar) paint(surface graphics.Canvas) {
 		} else if i == bar.hoverMenu {
 			surface.FillRect(itemBounds, theme.Hover)
 		}
-		bar.drawText(surface, itemBounds.MinX+menuBarHorizontalPadding, centeredBaseline(bar.font, itemBounds), bar.menus[i].text, controlForeground(&bar.Control))
+		foreground := controlForeground(&bar.Control)
+		if i == bar.openMenu {
+			foreground = theme.SelectionText
+		}
+		bar.drawText(surface, itemBounds.MinX+menuBarHorizontalPadding, centeredBaseline(bar.font, itemBounds), bar.menus[i].text, foreground)
 	}
 	if bar.openMenu < 0 || bar.openMenu >= len(bar.menus) {
 		return
@@ -759,6 +763,8 @@ func (bar *MenuBar) paint(surface graphics.Canvas) {
 		color := theme.Text
 		if !item.enabled {
 			color = theme.Disabled
+		} else if i == bar.selectedItem {
+			color = theme.SelectionText
 		}
 		baseline := centeredBaseline(bar.font, row)
 		textX := row.MinX + menuItemHorizontalPadding

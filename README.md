@@ -285,8 +285,9 @@ func main() {
 ```
 
 The Web IDE offers board choices such as `pico/thumb`, `pico2/thumb`,
-`m5nanoc6/riscv32`, and `m5atoms3lite/xtensa_lx7`. Each choice maps to a shared
-chip backend plus one board build tag. The Pico choices download one `.uf2`
+`m5nanoc6/riscv32`, `m5atoms3lite/xtensa_lx7`, and
+`m5papermonolite/xtensa_lx7`. Each choice maps to a shared chip backend plus one
+board build tag. The Pico choices download one `.uf2`
 with family-specific RP2040 and RP2350 boot blocks followed by the same ARMv6-M
 executable payload. For probe-free debugging, install the Renvo-built monitor UF2 once;
 the browser then claims the Pico itself through WebUSB, loads

@@ -95,8 +95,26 @@
     "machine": "esp32s3/xtensa_lx7",
     "definition": "backends/esp32s3.rtg",
     "backend": "backends/esp32s3-xtensa_lx7.wasm",
-    "packages": ["device/esp32s3"],
+    "packages": ["device/esp32s3", "device/power/m5pm1"],
     "examples": [{"path": "examples/device/forms_menu"}]
+  },
+  {
+    "name": "M5Stack PaperMono-Lite",
+    "target": "m5papermonolite/xtensa_lx7",
+    "tag": "m5papermonolite",
+    "docs": "https://docs.m5stack.com/en/core/PaperMono-Lite",
+    "artwork": "papermonolite",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3", "device/power/m5pm1", "device/ioexpander/m5ioe1", "device/display/ssd1677", "device/input/ft6336g"],
+    "examples": [
+      {"path": "examples/m5papermonolite/oracle"},
+      {"path": "examples/m5papermonolite/power_oracle"},
+      {"path": "examples/m5papermonolite/display_oracle"},
+      {"path": "examples/m5papermonolite/touch_oracle"},
+      {"path": "examples/m5papermonolite/touch_trails"}
+    ]
   },
   {
     "name": "M5Stack Cardputer Adv",
