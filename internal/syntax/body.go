@@ -188,6 +188,9 @@ func parseStmt(body Body, file *File, start int, limit int) (int, Body) {
 		end := findStmtEnd(file, start+1, limit)
 		stmt := newStmt(StmtGoto, start, end)
 		stmt.ExprStart, stmt.ExprEnd = trimSpan(file, start+1, end)
+		if stmt.ExprEnd-stmt.ExprStart != 1 || file.Tokens[stmt.ExprStart].KindLine&255 != TokenIdent {
+			return start, bodyFail(body, BodyErrStmt, start)
+		}
 		body = appendStmtExpr(body, file, stmt)
 		return end, body
 	}
@@ -385,7 +388,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 }
 
 func findStmtEnd(file *File, start int, limit int) int {
-	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) {
+	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) && !lineContinues(file, start-1, start) {
 		return start
 	}
 	i := start
@@ -655,7 +658,7 @@ func lineContinues(file *File, prev int, next int) bool {
 	if prev < 0 || next < 0 || prev >= len(file.Tokens) || next >= len(file.Tokens) {
 		return false
 	}
-	if isBinaryOp(file, prev) || tokCharIs(file.Tokens, prev, ',') || tokCharIs(file.Tokens, prev, '.') {
+	if isBinaryOp(file, prev) || tokenIsAssign(file, file.Tokens[prev]) || tokCharIs(file.Tokens, prev, ',') || tokCharIs(file.Tokens, prev, '.') {
 		return true
 	}
 	if tokCharIs(file.Tokens, next, '.') || tokCharIs(file.Tokens, next, ',') {

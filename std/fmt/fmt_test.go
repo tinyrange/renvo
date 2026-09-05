@@ -2,6 +2,20 @@ package fmt
 
 import "testing"
 
+func TestPrintlnSpacing(t *testing.T) {
+	if got := Sprintln("a", 1, "b"); got != "a 1 b\n" {
+		t.Fatalf("Sprintln = %q", got)
+	}
+	if got := Sprintln(); got != "\n" {
+		t.Fatalf("empty Sprintln = %q", got)
+	}
+	var out sink
+	n, err := Fprintln(&out, "a", 1, "b")
+	if n != 6 || err != nil || string(out.data) != "a 1 b\n" {
+		t.Fatalf("Fprintln = %d, %v, %q", n, err, out.data)
+	}
+}
+
 func TestErrorf(t *testing.T) {
 	err := Errorf("failed %s: %d", "item", 7)
 	if got := err.Error(); got != "failed item: 7" {

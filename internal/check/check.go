@@ -41,6 +41,9 @@ const (
 	CheckErrReturnType
 	CheckErrCallArity
 	CheckErrTypeAssertion
+	CheckErrInitSignature
+	CheckErrMissingReturn
+	CheckErrMapKey
 )
 
 const (
@@ -309,13 +312,17 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			signatureStart := arena.Mark()
 			signature := buildFuncSignature(file, fn)
 			arity := len(signature.Params)
+			if name == "init" && fn.ReceiverStart < 0 && (arity != 0 || len(signature.Results) != 0) {
+				arena.Reset(signatureStart)
+				return info, false, CheckErrInitSignature, fileIndex, fn.NameTok
+			}
 			if arity > 0 && signature.Params[arity-1].Variadic {
 				arity = -arity - 1
 			}
 			arena.Reset(signatureStart)
 			if fn.ReceiverStart >= 0 {
 				receiver := receiverTypeName(file, fn)
-				if receiver == "" {
+				if receiver == "" || !packageDeclaresReceiverType(pkg, receiver) {
 					return info, false, CheckErrMethod, fileIndex, fn.NameTok
 				}
 				name = receiver + "." + name
@@ -362,6 +369,23 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		}
 	}
 	return info, true, CheckOK, -1, -1
+}
+
+func packageDeclaresReceiverType(pkg load.Package, name string) bool {
+	for i := 0; i < len(pkg.Files); i++ {
+		file := pkg.Files[i].File
+		for j := 0; j < len(file.Decls); j++ {
+			decl := file.Decls[j]
+			if decl.Kind == syntax.TokenType && tokenString(&file, decl.NameTok) == name {
+				start := decl.NameTok + 1
+				if tokCharIs(&file, start, '=') {
+					start++
+				}
+				return !tokCharIs(&file, start, '*') && file.Tokens[start].KindLine&255 != syntax.TokenInterface
+			}
+		}
+	}
+	return false
 }
 
 func CheckRootMain(pkg load.Package) (int, int, int) {
