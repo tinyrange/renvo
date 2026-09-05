@@ -32,8 +32,8 @@ func main() {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&first.Click)")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_1(&second.Click, 2)")) {
+	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(first.Click)")) ||
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_1(second.Click, 2)")) {
 		t.Fatalf("same-named callback fields were not independently lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -60,7 +60,7 @@ func main() { invoke([]*Item{{}}, 0); print("PASS\n") }
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("items[index].Click.kind != 0")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&items[index].Click)")) {
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(items[index].Click)")) {
 		t.Fatalf("indexed callback field was not lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -119,7 +119,7 @@ func main() {}
 	if !bytes.Contains(linked.Program.Text, []byte("allocate: __renvo_function_0{kind: 1}")) ||
 		!bytes.Contains(linked.Program.Text, []byte("release: __renvo_function_1{kind: 1}")) ||
 		!bytes.Contains(linked.Program.Text, []byte("[1]__renvo_function_0{__renvo_function_0{kind: 1}}")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&allocators[0], 1)")) {
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(allocators[0], 1)")) {
 		t.Fatalf("direct callbacks in a composite literal were not lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -142,7 +142,7 @@ func main() {}
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&(*callbacks).run, (*callbacks), 41)")) {
+	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0((*callbacks).run, (*callbacks), 41)")) {
 		t.Fatalf("callback field through a parenthesized pointer was not lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -198,7 +198,7 @@ func main() {}
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&fn.fn, fn, args, kwargs)")) {
+	if !bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(fn.fn, fn, args, kwargs)")) {
 		t.Fatalf("callback field on a type-switch binding was not lowered:\n%s", linked.Program.Text)
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("arg1 Tuple, arg2 []Tuple")) {

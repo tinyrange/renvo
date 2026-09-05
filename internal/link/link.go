@@ -116,6 +116,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	ensureCoreProgramSymbols(programs)
 	symbolOffsets := corePackageSymbolOffsets(programs)
 	aliases := corePackageSymbolAliases(programs, root, symbolOffsets)
+	defaultHandler := coreDefaultHandlerNames(programs, aliases, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
 	if transient {
@@ -200,7 +201,8 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
-	if !lowerConcurrencyCore(&program, transient) {
+	concurrencyNeeded := len(program.ConcurrencySites) > 0
+	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerIntegerRangesCore(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -209,12 +211,20 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	functionValuesOK := false
+	if !lowerInterfaceMethodExpressions(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
 	if object {
 		functionValuesOK = lowerObjectFunctionValuesCore(&program, transient)
 	} else {
 		functionValuesOK = lowerFunctionValuesCore(&program, transient)
 	}
 	if !functionValuesOK {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerUnicodeIdentifiers(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -1090,7 +1100,7 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 			continue
 		}
 		for tok := 0; tok+2 < len(program.Tokens); tok++ {
-			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
+			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof") || coreTokenTextEquals(program, tok+2, "Alignof")) {
 				markCoreRedirectToken(actions, tok, tok+2)
 				markCoreRedirectToken(actions, tok+1, tok+2)
 			}
@@ -1331,6 +1341,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 				out[index] = alias
 			} else if directiveSize >= 0 {
 				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
+			} else if corePredeclaredAliasNeeded(name) {
+				out[index] = coreSymbolAliasName(i, name)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
@@ -1506,7 +1518,7 @@ func coreSymbolAliasName(pkg int, name string) string {
 	out = append(out, '_')
 	for i := 0; i < len(name); i++ {
 		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 128 {
 			out = append(out, c)
 		} else {
 			out = append(out, '_')

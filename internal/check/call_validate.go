@@ -80,7 +80,15 @@ func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, cal
 	if variadic {
 		valid = got >= want-1
 	}
-	if valid || got == 1 && want > 1 {
+	if close >= open+3 && tokenTextIs(caller, close-2, "...") {
+		// An expanded slice occupies the variadic parameter itself; it cannot
+		// be mixed with additional individual variadic arguments.
+		valid = variadic && got == want
+		if !valid {
+			return calleeTok
+		}
+	}
+	if valid || got == 1 && want > 1 && definiteCallExpression(*caller, open+1, close-1) {
 		return -1
 	}
 	return calleeTok

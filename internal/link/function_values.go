@@ -291,6 +291,11 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 				}
 			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
 				name = "clear"
+			} else if token.Size == 6 && functionValueTokenEquals(program, i, "string") && functionValueTokenEquals(program, i+1, "(") {
+				close := functionValueFindMatchingParen(program, i+1)
+				if close > i+2 && mapLowerIntegerKey(ordinaryUnderlyingType(program, ordinaryBuiltinExprType(program, i, i+2, close), 0)) {
+					name = "string"
+				}
 			}
 		}
 		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
@@ -424,10 +429,17 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 }
 
 func parseFunctionValueSignature(program *unit.Program, funcTok int, name string) (functionValueSignature, int, bool) {
+	if !functionValueTokenEquals(program, funcTok, "func") {
+		return functionValueSignature{}, funcTok, false
+	}
+	return parseFunctionValueCallableSignature(program, funcTok, name)
+}
+
+func parseFunctionValueCallableSignature(program *unit.Program, funcTok int, name string) (functionValueSignature, int, bool) {
 	var sig functionValueSignature
 	sig.name = name
 	sig.declFuncTok = funcTok
-	if !functionValueTokenEquals(program, funcTok, "func") || !functionValueTokenEquals(program, funcTok+1, "(") {
+	if !functionValueTokenEquals(program, funcTok+1, "(") {
 		return sig, funcTok, false
 	}
 	close := functionValueFindMatchingParen(program, funcTok+1)
@@ -1182,7 +1194,9 @@ func lowerFunctionValueCall(program *unit.Program, open int, signatures []functi
 		return edits
 	}
 	start := program.Tokens[calleeStart].Start
-	edits = append(edits, functionValueEdit{start: start, end: start, text: "__renvo_call_" + functionValueDecimal(sigIndex) + "(&"})
+	// A function value need not be addressable (for example, a map lookup or
+	// returned struct field). Snapshot it before evaluating the call arguments.
+	edits = append(edits, functionValueEdit{start: start, end: start, text: "__renvo_call_" + functionValueDecimal(sigIndex) + "("})
 	if open+1 == close {
 		edits = append(edits, functionValueTokenEdit(program, open, ""))
 	} else {
@@ -1224,7 +1238,7 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 		if sig.declFuncTok < 0 {
 			out = out + "type " + sig.name + " " + functionValueStructText(sig) + "\n"
 		}
-		out = out + "func __renvo_call_" + functionValueDecimal(i) + "(fn *" + sig.name
+		out = out + "func __renvo_call_" + functionValueDecimal(i) + "(fn " + sig.name
 		if sig.params != "" {
 			out = out + ", " + sig.params
 		}
@@ -1256,6 +1270,10 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 			}
 			out = out + " }\n"
 		}
+		// The zero representation is a nil function, not a no-op returning the
+		// result type's zero value. Retain the unreachable return below for the
+		// compact backend's structural return handling.
+		out = out + "panic(\"call of nil function\")\n"
 		if sig.result != "" {
 			if len(sig.resultTypes) > 1 {
 				var names []string
@@ -1330,9 +1348,6 @@ func lowerFunctionValueLiterals(program *unit.Program, signatures []functionValu
 			continue
 		}
 		captures, captureTypes := functionValueCaptures(program, funcTok, signatureEnd, bodyClose, literalSig.paramNames)
-		if len(captures) == 0 {
-			return signatures, closures, edits, false
-		}
 		closureIndex := len(closures)
 		envName := "__renvo_closure_env_" + functionValueDecimal(closureIndex)
 		funcName := "__renvo_closure_" + functionValueDecimal(closureIndex)
@@ -1348,7 +1363,7 @@ func lowerFunctionValueLiterals(program *unit.Program, signatures []functionValu
 			if i > 0 {
 				init = init + ", "
 			}
-			init = init + captures[i] + ": " + captures[i]
+			init = init + captures[i] + ": &" + captures[i]
 		}
 		init = init + "}"
 		replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", " + closureField + ": " + init + "}"
@@ -1414,7 +1429,7 @@ func functionValueCaptures(program *unit.Program, literalStart int, bodyOpen int
 			continue
 		}
 		names = append(names, name)
-		types = append(types, typ)
+		types = append(types, "*"+typ)
 	}
 	return names, types
 }
@@ -1462,6 +1477,38 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 				return typ
 			}
 			rhs := i + 2
+			if functionValueTokenEquals(program, rhs, "range") {
+				end := concurrencyTopLevelToken(program, rhs+1, before, "{")
+				typeEnd := functionValueTypeEnd(program, rhs+1)
+				if typeEnd > rhs+1 && functionValueTokenEquals(program, typeEnd, "{") {
+					end = functionValueFindMatchingBrace(program, typeEnd) + 1
+				}
+				if end > rhs+1 {
+					typ := ordinaryUnderlyingType(program, ordinaryBuiltinExprType(program, rhs, rhs+1, end), 0)
+					if functionValueTokenEquals(program, i-1, ",") {
+						if typ == "string" {
+							return "rune"
+						}
+						if len(typ) > 2 && typ[0] == '[' {
+							for at := 1; at < len(typ); at++ {
+								if typ[at] == ']' {
+									return typ[at+1:]
+								}
+							}
+						}
+					} else if typ == "string" || len(typ) > 0 && typ[0] == '[' {
+						return "int"
+					}
+				}
+			}
+			if (functionValueTokenEquals(program, rhs, "-") || functionValueTokenEquals(program, rhs, "+")) && rhs+1 < before {
+				if program.Tokens[rhs+1].KindLine&255 == unit.TokenNumber {
+					return "int"
+				}
+				if program.Tokens[rhs+1].KindLine&255 == unit.TokenFloat {
+					return "float64"
+				}
+			}
 			if functionValueTokenEquals(program, rhs, "&") && rhs+1 < before && program.Tokens[rhs+1].KindLine&255 == unit.TokenIdent {
 				return "*" + functionValueTokenText(program, rhs+1)
 			}
@@ -1483,6 +1530,9 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 					callName = functionValueTokenText(program, rhs+2)
 				}
 				if callName != "" {
+					if ordinaryBuiltinTypeName(callName) {
+						return callName
+					}
 					if callName == "make" {
 						open := rhs + 1
 						close := functionValueFindMatchingParen(program, open)
@@ -1677,7 +1727,7 @@ func functionValueClosureBody(program *unit.Program, bodyOpen int, bodyClose int
 			continue
 		}
 		tok := program.Tokens[i]
-		edits = append(edits, functionValueEdit{start: tok.Start - start, end: tok.Start + tok.Size - start, text: "env." + name})
+		edits = append(edits, functionValueEdit{start: tok.Start - start, end: tok.Start + tok.Size - start, text: "(*env." + name + ")"})
 	}
 	out, ok := applyFunctionValueEdits(src, edits)
 	if !ok {

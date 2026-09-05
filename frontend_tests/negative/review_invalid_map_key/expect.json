@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-036",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 24,
+  "message": "map key type is not comparable"
+}

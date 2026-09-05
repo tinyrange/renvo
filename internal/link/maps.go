@@ -935,6 +935,10 @@ func mapLowerGeneratedText(specs []mapLowerSpec, literals []mapLowerLiteral, mak
 		value := mapLowerGeneratedType(specs, spec.value)
 		representation := mapLowerRepresentation(spec)
 		out += "type " + spec.entry + " struct { key " + key + "; value " + value + " }\n"
+		if mapLowerIntegerKey(key) {
+			out += mapLowerIntegerStorage(spec, key, value, representation)
+			continue
+		}
 		out += "type " + spec.storage + " struct { entries []" + spec.entry + " }\n"
 		out += "func " + spec.find + "(mapping " + representation + ", key " + key + ") int { if key != key { return -1 }; if mapping == nil { return -1 }; entries := mapping[0].entries; for index := 0; index < len(entries); index++ { if entries[index].key == key { return index } }; return -1 }\n"
 		out += "func " + spec.get + "(mapping " + representation + ", key " + key + ") " + value + " { index := " + spec.find + "(mapping,key); if index < 0 { var zero " + value + "; return zero }; return mapping[0].entries[index].value }\n"
@@ -970,6 +974,36 @@ func mapLowerGeneratedText(specs []mapLowerSpec, literals []mapLowerLiteral, mak
 		}
 		out += "return mapping }\n"
 	}
+	return out
+}
+
+func mapLowerIntegerKey(key string) bool {
+	return key == "int" || key == "uint" || key == "uintptr" || key == "byte" || key == "rune" ||
+		key == "int8" || key == "int16" || key == "int32" || key == "int64" ||
+		key == "uint8" || key == "uint16" || key == "uint32" || key == "uint64"
+}
+
+// Keep the dense entries used by map range, with a separate hash index. Bucket
+// links are entry indices plus one, so zero is an empty chain. Rehashing grows
+// geometrically; deletion repairs the moved last entry's link in its bucket.
+func mapLowerIntegerStorage(spec mapLowerSpec, key string, value string, representation string) string {
+	hash := spec.storage + "_hash"
+	rehash := spec.storage + "_rehash"
+	unlink := spec.storage + "_unlink"
+	out := "type " + spec.storage + " struct { entries []" + spec.entry + "; buckets []int; next []int }\n"
+	out += "func " + hash + "(key " + key + ", size int) int { value := uint64(key); value = (value ^ (value >> 30))*uint64(0xbf58476d1ce4e5b9); value = (value ^ (value >> 27))*uint64(0x94d049bb133111eb); value = value ^ (value >> 31); return int(value & uint64(size-1)) }\n"
+	out += "func " + rehash + "(mapping " + representation + ", size int) { buckets := make([]int,size); entries := mapping[0].entries; next := mapping[0].next; for index := 0; index < len(entries); index++ { bucket := " + hash + "(entries[index].key,size); next[index] = buckets[bucket]; buckets[bucket] = index+1 }; mapping[0].buckets = buckets }\n"
+	out += "func " + spec.find + "(mapping " + representation + ", key " + key + ") int { if mapping == nil { return -1 }; buckets := mapping[0].buckets; if len(buckets) == 0 { return -1 }; index := buckets[" + hash + "(key,len(buckets))]; for index != 0 { if mapping[0].entries[index-1].key == key { return index-1 }; index = mapping[0].next[index-1] }; return -1 }\n"
+	out += "func " + spec.get + "(mapping " + representation + ", key " + key + ") " + value + " { index := " + spec.find + "(mapping,key); if index < 0 { var zero " + value + "; return zero }; return mapping[0].entries[index].value }\n"
+	out += "func " + spec.lookup + "(mapping " + representation + ", key " + key + ") (" + value + ",bool) { index := " + spec.find + "(mapping,key); if index < 0 { var zero " + value + "; return zero,false }; return mapping[0].entries[index].value,true }\n"
+	out += "func " + spec.ref + "(mapping " + representation + ", key " + key + ") *" + value + " { if mapping == nil { panic(\"assignment to entry in nil map\") }; index := " + spec.find + "(mapping,key); if index >= 0 { return &mapping[0].entries[index].value }; count := len(mapping[0].entries); size := len(mapping[0].buckets); if size == 0 { " + rehash + "(mapping,8) } else if count >= size { " + rehash + "(mapping,size*2) }; var added " + spec.entry + "; added.key = key; mapping[0].entries = append(mapping[0].entries,added); bucket := " + hash + "(key,len(mapping[0].buckets)); mapping[0].next = append(mapping[0].next,mapping[0].buckets[bucket]); mapping[0].buckets[bucket] = count+1; return &mapping[0].entries[count].value }\n"
+	out += "func " + spec.set + "(mapping " + representation + ", key " + key + ", value " + value + ") { *" + spec.ref + "(mapping,key) = value }\n"
+	out += "func " + unlink + "(mapping " + representation + ", index int, replacement int) { bucket := " + hash + "(mapping[0].entries[index].key,len(mapping[0].buckets)); link := mapping[0].buckets[bucket]; if link == index+1 { mapping[0].buckets[bucket] = replacement; return }; for link != 0 { if mapping[0].next[link-1] == index+1 { mapping[0].next[link-1] = replacement; return }; link = mapping[0].next[link-1] } }\n"
+	out += "func " + spec.remove + "(mapping " + representation + ", key " + key + ") { index := " + spec.find + "(mapping,key); if index < 0 { return }; last := len(mapping[0].entries)-1; " + unlink + "(mapping,index,mapping[0].next[index]); if index != last { " + unlink + "(mapping,last,index+1); mapping[0].entries[index] = mapping[0].entries[last]; mapping[0].next[index] = mapping[0].next[last] }; var zero " + spec.entry + "; mapping[0].entries[last] = zero; mapping[0].entries = mapping[0].entries[:last]; mapping[0].next = mapping[0].next[:last] }\n"
+	out += "func " + spec.length + "(mapping " + representation + ") int { if mapping == nil { return 0 }; return len(mapping[0].entries) }\n"
+	out += "func " + spec.entries + "(mapping " + representation + ") []" + spec.entry + " { if mapping == nil { return nil }; return mapping[0].entries }\n"
+	out += "func " + spec.storage + "_clear(mapping " + representation + ") { if mapping != nil { mapping[0].entries = nil; mapping[0].next = nil; mapping[0].buckets = nil } }\n"
+	out += "func " + spec.makeValue + "(hint int) " + representation + " { if hint < 0 { panic(\"make map: negative size\") }; mapping := make(" + representation + ",1); mapping[0] = &" + spec.storage + "{}; return mapping }\n"
 	return out
 }
 

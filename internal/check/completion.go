@@ -952,7 +952,7 @@ func completionIdentifierByte(value byte) bool {
 }
 
 func completionExported(name string) bool {
-	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+	return syntax.IdentifierExported([]byte(name), 0)
 }
 
 func completionLower(value byte) byte {

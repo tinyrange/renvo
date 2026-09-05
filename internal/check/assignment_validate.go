@@ -111,6 +111,10 @@ func excludedFileFeature(file syntax.File) (int, int) {
 }
 
 func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
+	return invalidDefiniteChannelOperationWithShadow(file, fn, false)
+}
+
+func invalidDefiniteChannelOperationWithShadow(file syntax.File, fn syntax.FuncDecl, closeShadowed bool) int {
 	var channels []definiteChannelBinding
 	maybeChannelOperation := false
 	for i := 0; i < len(file.Decls); i++ {
@@ -241,6 +245,9 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 			}
 		}
 		if tokenTextIs(&file, i, "close") && i+1 < fn.BodyEnd && tokCharIs(&file, i+1, '(') {
+			if closeShadowed {
+				continue
+			}
 			if i > fn.BodyStart+1 && tokCharIs(&file, i-1, '.') {
 				continue
 			}
