@@ -12,8 +12,14 @@ func Scan(src []byte) []Token {
 
 func scanTokens(src []byte) ([]Token, bool) {
 	tokens := make([]Token, 0, scanTokenCapacity(src))
+	if !validSourceEncoding(src) {
+		return tokens, false
+	}
 	ok := true
 	i := 0
+	if len(src) >= 3 && src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {
+		i = 3
+	}
 	line := 1
 	for i < len(src) {
 		if line > TokenLineLimit {
@@ -55,11 +61,23 @@ func scanTokens(src []byte) ([]Token, bool) {
 			i += 2
 			continue
 		}
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 128 && unicodeIdentifierWidth(src, i, true) > 0 {
 			start := i
-			i++
+			if c >= 128 {
+				i += unicodeIdentifierWidth(src, i, true)
+			} else {
+				i++
+			}
 			for i < len(src) {
 				part := src[i]
+				if part >= 128 {
+					width := unicodeIdentifierWidth(src, i, false)
+					if width == 0 {
+						break
+					}
+					i += width
+					continue
+				}
 				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
 					break
 				}
@@ -73,9 +91,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
-		if c >= '0' && c <= '9' {
+		if c >= '0' && c <= '9' || c == '.' && i+1 < len(src) && src[i+1] >= '0' && src[i+1] <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
+			if i-start > 10000 {
+				ok = false
+				break
+			}
 			tokens = append(tokens, Token{KindLine: TokenNumber | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
@@ -144,6 +166,10 @@ func scanTokens(src []byte) ([]Token, bool) {
 			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
+		if c >= 128 {
+			ok = false
+			break
+		}
 		start := i
 		i++
 		if i < len(src) {
@@ -179,6 +205,47 @@ func scanTokens(src []byte) ([]Token, bool) {
 	}
 	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})
 	return tokens, ok
+}
+
+// Validate the entire source, including comments and raw string literals.
+// Escaped arbitrary bytes in interpreted strings remain valid source text.
+func validSourceEncoding(src []byte) bool {
+	for i := 0; i < len(src); {
+		c := src[i]
+		if c == 0 {
+			return false
+		}
+		if c < 0x80 {
+			i++
+			continue
+		}
+		n := 0
+		value := 0
+		minimum := 0
+		if c >= 0xc2 && c <= 0xdf {
+			n, value, minimum = 2, int(c&31), 0x80
+		} else if c >= 0xe0 && c <= 0xef {
+			n, value, minimum = 3, int(c&15), 0x800
+		} else if c >= 0xf0 && c <= 0xf4 {
+			n, value, minimum = 4, int(c&7), 0x10000
+		} else {
+			return false
+		}
+		if i+n > len(src) {
+			return false
+		}
+		for j := 1; j < n; j++ {
+			if src[i+j] < 0x80 || src[i+j] > 0xbf {
+				return false
+			}
+			value = value<<6 | int(src[i+j]&63)
+		}
+		if value < minimum || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff || value == 0xfeff && i != 0 {
+			return false
+		}
+		i += n
+	}
+	return true
 }
 
 func (s *Scanner) Scan(src []byte) {

@@ -967,7 +967,7 @@ func main() {
 	if !bytes.Contains(linked.Program.Text, []byte("menu.Control.dismiss = Handler{kind: 1")) {
 		t.Fatalf("explicit callback assignment was not lowered:\n%s", linked.Program.Text)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("menu.dismiss()")) || bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&menu.dismiss)")) {
+	if !bytes.Contains(linked.Program.Text, []byte("menu.dismiss()")) || bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(menu.dismiss)")) {
 		t.Fatalf("direct method lost selector precedence over promoted field:\n%s", linked.Program.Text)
 	}
 }

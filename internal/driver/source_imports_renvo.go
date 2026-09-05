@@ -207,7 +207,7 @@ func renvoImportTextIs(src []byte, start int, end int, text string) bool {
 }
 
 func renvoImportIdentStart(c byte) bool {
-	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 128
 }
 
 func renvoImportIdentPart(c byte) bool {

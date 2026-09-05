@@ -8,9 +8,24 @@ import "renvo.dev/internal/syntax"
 // valid unless a preceding declaration gives the callee a definite literal
 // value.
 func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
+	if code, tok := invalidBranchTarget(file, body); code != CheckOK {
+		return code, tok
+	}
+	if tok := invalidDuplicateSwitchCase(file, body); tok >= 0 {
+		return CheckErrDuplicate, tok
+	}
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if stmt.Kind == syntax.StmtIf {
+			start, end := stripOuterParens(file, stmt.ExprStart, stmt.ExprEnd)
+			if end-start == 1 {
+				kind := definiteLiteralKind(file, start)
+				if kind != "" && kind != "bool" {
+					return CheckErrOperand, start
+				}
+			}
+		}
 		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrGoroutine, stmt.ExprStart
 		}
@@ -248,6 +263,13 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 
 func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	// An assignable expression cannot end in an operator. In particular this
+	// rejects a malformed compound assignment such as x + %= y, whose tokens
+	// otherwise look like an assignment to the incomplete expression x +.
+	if end > start && file.Tokens[end-1].KindLine&255 == syntax.TokenOperator &&
+		!tokCharIs(&file, end-1, ')') && !tokCharIs(&file, end-1, ']') {
+		return true
+	}
 	if end-start != 1 {
 		return false
 	}

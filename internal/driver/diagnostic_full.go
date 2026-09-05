@@ -413,6 +413,12 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
+		case check.CheckErrInitSignature:
+			code, message = "RENVO-CHECK-034", "func init must have no receiver, parameters, or results"
+		case check.CheckErrMissingReturn:
+			code, message = "RENVO-CHECK-035", "missing return"
+		case check.CheckErrMapKey:
+			code, message = "RENVO-CHECK-036", "map key type is not comparable"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)

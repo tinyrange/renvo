@@ -56,26 +56,27 @@ type SourceResult struct {
 }
 
 type sourceCollector struct {
-	fs            SourceFS
-	module        load.Module
-	config        *load.ModuleConfig
-	modules       []load.Module
-	stdRoot       string
-	moduleCache   string
-	target        string
-	tags          []string
-	files         []load.SourceFile
-	loaded        []string
-	loading       []string
-	resolved      []load.ModuleVersion
-	ok            bool
-	restart       bool
-	err           int
-	errPath       string
-	errSourcePath string
-	errOffset     int
-	explicitRoot  string
-	explicitFiles []string
+	fs              SourceFS
+	module          load.Module
+	config          *load.ModuleConfig
+	modules         []load.Module
+	stdRoot         string
+	moduleCache     string
+	target          string
+	tags            []string
+	files           []load.SourceFile
+	loaded          []string
+	loading         []string
+	resolved        []load.ModuleVersion
+	ok              bool
+	restart         bool
+	err             int
+	errPath         string
+	errSourcePath   string
+	errOffset       int
+	explicitRoot    string
+	explicitFiles   []string
+	implicitRuntime bool
 }
 
 func CollectSources(workDir string, stdRoot string, arg string, fs SourceFS) SourceResult {
@@ -105,6 +106,7 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	result := SourceResult{Ok: true, Error: SourceOK}
 	workDir = load.CleanPath(workDir)
 	stdRoot = load.CleanPath(stdRoot)
+	fs = concurrencySourceFS{base: fs, stdRoot: stdRoot, moduleRoot: load.JoinPath(stdRoot, "__renvo_runtime_module")}
 	if moduleCache != "" {
 		moduleCache = load.CleanPath(moduleCache)
 	}
@@ -268,6 +270,13 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			}
 		}
 		if goSource {
+			if expanded, needed := sourceConcurrencyImport(src); needed {
+				src = expanded
+				if _, required := longestModuleRequirement(c.config.Requires, "renvo.dev/x/runtime/serial"); !required && c.module.Path != "renvo.dev" {
+					c.config.Requires = append(c.config.Requires, load.ModuleVersion{Path: "renvo.dev", Version: "v0.0.0"})
+					c.implicitRuntime = true
+				}
+			}
 			expanded, embedOK, embedOffset, embedPath := expandSourceEmbeds(c.fs, path, owner.Root, src)
 			if !embedOK {
 				c.files = append(c.files, load.SourceFile{Path: path, Src: src, ArenaStart: arenaStart, ArenaEnd: arena.Mark()})
@@ -434,6 +443,17 @@ func (c *sourceCollector) resolveDependency(importPath string) load.PackageRef {
 		return unsupportedPackage(importPath)
 	}
 	root := ""
+	// Unbundled development compilers find the runtime alongside their standard
+	// library source tree. Explicit dependency selections still take precedence.
+	if c.implicitRuntime && requirement.Path == "renvo.dev" {
+		candidate := load.JoinPath(c.stdRoot, "__renvo_runtime_module")
+		if manifest, readable := c.fs.ReadFile(load.JoinPath(candidate, "go.mod")); readable {
+			module := load.ParseModuleConfig(candidate, manifest, &load.ModuleConfig{})
+			if module.Ok && module.Path == "renvo.dev" {
+				root = candidate
+			}
+		}
+	}
 	moduleSourceRequired := true
 	replacement, replaced := findModuleReplacement(c.config, requirement)
 	localReplacement := replaced && replacement.Local

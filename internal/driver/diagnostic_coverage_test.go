@@ -128,7 +128,7 @@ func TestEveryLinkerErrorHasSpecificDiagnostic(t *testing.T) {
 }
 
 func TestEveryCheckerErrorHasSpecificDiagnostic(t *testing.T) {
-	for detail := check.CheckErrGraph; detail <= check.CheckErrTypeAssertion; detail++ {
+	for detail := check.CheckErrGraph; detail <= check.CheckErrMapKey; detail++ {
 		result := BuildResult{
 			Error: BuildErrPipeline,
 			Pipeline: pipeline.Result{
