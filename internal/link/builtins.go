@@ -8,13 +8,14 @@ import (
 
 func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 	stringLess := ""
+	runeString := ""
 	generated := ""
 	generatedCount := 0
 	for {
 		changed := false
 		for i := len(program.Tokens) - 2; i >= 0; i-- {
 			name := functionValueTokenText(program, i)
-			if (name != "min" && name != "max" && name != "clear") || !functionValueTokenEquals(program, i+1, "(") || ordinaryBuiltinShadowed(program, i, name) {
+			if (name != "min" && name != "max" && name != "clear" && name != "string") || !functionValueTokenEquals(program, i+1, "(") || ordinaryBuiltinShadowed(program, i, name) {
 				continue
 			}
 			close := functionValueFindMatchingParen(program, i+1)
@@ -23,7 +24,32 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			}
 			starts, ends := ordinaryBuiltinArguments(program, i+2, close)
 			replacement := ""
-			if name == "clear" {
+			if name == "string" {
+				if len(starts) != 1 || !mapLowerIntegerKey(ordinaryUnderlyingType(program, ordinaryBuiltinExprType(program, i, starts[0], ends[0]), 0)) {
+					continue
+				}
+				constant := ordinaryConstantValue(program, starts[0], ends[0], 0)
+				if constant.ok && constant.kind == 1 {
+					value := int64(0)
+					if constant.number.negative || constant.number.scale < 0 {
+						value = 0xfffd
+					} else {
+						for j := 0; j < len(constant.number.digits) && value <= 0x10ffff; j++ {
+							value = value*10 + int64(constant.number.digits[j]-'0')
+						}
+						for j := 0; j < constant.number.scale && value <= 0x10ffff; j++ {
+							value *= 10
+						}
+					}
+					replacement = string(appendCoreQuotedString(nil, ordinaryRuneString(value)))
+				} else {
+					if runeString == "" {
+						runeString = ordinaryBuiltinGeneratedName(program, "__renvo_builtin_rune_string")
+						generated += "func " + runeString + "(value int64) string { " + ordinaryRuneStringBody + " }\n"
+					}
+					replacement = runeString + "(int64(" + functionValueTokensText(program, starts[0], ends[0]) + "))"
+				}
+			} else if name == "clear" {
 				if len(starts) != 1 {
 					return false
 				}
@@ -106,6 +132,24 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		arena.DiscardBytes(program.Text)
 	}
 	return reparseFunctionValueProgram(program, text, nil, originalLength, generatedStart)
+}
+
+const ordinaryRuneStringBody = "if value < 0 || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff { value = 0xfffd }; if value < 0x80 { return string([]byte{byte(value)}) }; if value < 0x800 { return string([]byte{byte(0xc0 | value>>6),byte(0x80 | value&63)}) }; if value < 0x10000 { return string([]byte{byte(0xe0 | value>>12),byte(0x80 | value>>6&63),byte(0x80 | value&63)}) }; return string([]byte{byte(0xf0 | value>>18),byte(0x80 | value>>12&63),byte(0x80 | value>>6&63),byte(0x80 | value&63)})"
+
+func ordinaryRuneString(value int64) string {
+	if value < 0 || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff {
+		value = 0xfffd
+	}
+	if value < 0x80 {
+		return string([]byte{byte(value)})
+	}
+	if value < 0x800 {
+		return string([]byte{byte(0xc0 | value>>6), byte(0x80 | value&63)})
+	}
+	if value < 0x10000 {
+		return string([]byte{byte(0xe0 | value>>12), byte(0x80 | value>>6&63), byte(0x80 | value&63)})
+	}
+	return string([]byte{byte(0xf0 | value>>18), byte(0x80 | value>>12&63), byte(0x80 | value>>6&63), byte(0x80 | value&63)})
 }
 
 func ordinaryBuiltinArguments(program *unit.Program, start int, close int) ([]int, []int) {
@@ -222,6 +266,12 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 			return typ
 		}
 		return ordinaryGlobalType(program, name)
+	}
+	if functionValueTokenEquals(program, end-1, "}") {
+		typeEnd := functionValueTypeEnd(program, start)
+		if typeEnd > start && functionValueTokenEquals(program, typeEnd, "{") && functionValueFindMatchingBrace(program, typeEnd) == end-1 {
+			return functionValueTokensText(program, start, typeEnd)
+		}
 	}
 	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-") || functionValueTokenEquals(program, start, "^")) && start+1 < end {
 		return ordinaryBuiltinExprType(program, before, start+1, end)

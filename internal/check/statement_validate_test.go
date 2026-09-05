@@ -14,6 +14,9 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 	}{
 		{name: "non-function call", body: "x := 1; x()", want: CheckErrCall},
 		{name: "assignment target", body: "1 = 2", want: CheckErrAssignTarget},
+		{name: "malformed compound assignment", body: "x := 1; y := 2; x+%=y", want: CheckErrAssignTarget},
+		{name: "integer condition", body: "if 1 {}", want: CheckErrOperand},
+		{name: "string condition", body: "if (\"x\") {}", want: CheckErrOperand},
 		{name: "assignment count", body: "a, b := 1; _, _ = a, b", want: CheckErrAssignCount},
 		{name: "bare break", body: "break", want: CheckErrBreak},
 		{name: "bare continue", body: "continue", want: CheckErrContinue},

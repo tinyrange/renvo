@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-030",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 18,
+  "message": "invalid operation for operand types"
+}

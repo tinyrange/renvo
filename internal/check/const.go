@@ -95,6 +95,11 @@ func parseConstInt(file syntax.File, tok int) (int, bool) {
 		if digit < 0 || digit >= base {
 			return 0, false
 		}
+		// Unknown is safer than a truncated constant: callers use these values
+		// to reject source, so wrapping can reject valid indexes or cases.
+		if value > (int(^uint(0)>>1)-digit)/base {
+			return 0, false
+		}
 		value = value*base + digit
 	}
 	return value, true
