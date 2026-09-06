@@ -1,8 +1,8 @@
 //go:build ignore
 
 // Command font_cache_generate rasterizes the repository's Go Regular TrueType
-// font on the host. The Tab5 consumes the resulting A8 glyph masks directly,
-// avoiding outline parsing and rasterization on its RV32IM core.
+// font on the host. Device examples consume the resulting A8 glyph masks
+// directly, avoiding outline parsing and rasterization on the target CPU.
 package main
 
 import (
@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 
+	"renvo.dev/examples/device/fontcache"
 	"renvo.dev/std/graphics"
 	"renvo.dev/std/graphics/gofont"
 )
@@ -22,7 +23,19 @@ func appendFixed(buffer *bytes.Buffer, value graphics.Scalar) {
 	binary.Write(buffer, binary.LittleEndian, int32(math.Round(float64(value)*65536)))
 }
 
-func generate(pixelHeight graphics.Scalar, output string) {
+func includes(characters string, codepoint int) bool {
+	if characters == "" {
+		return true
+	}
+	for index := 0; index < len(characters); index++ {
+		if int(characters[index]) == codepoint {
+			return true
+		}
+	}
+	return false
+}
+
+func generate(pixelHeight graphics.Scalar, output, characters string) {
 	font := gofont.New(pixelHeight)
 	if font == nil {
 		panic("failed to load Go Regular")
@@ -32,12 +45,21 @@ func generate(pixelHeight graphics.Scalar, output string) {
 	appendFixed(&buffer, font.Metrics.Ascent)
 	appendFixed(&buffer, font.Metrics.Descent)
 	appendFixed(&buffer, font.Metrics.LineGap)
-	binary.Write(&buffer, binary.LittleEndian, uint16(lastGlyph-firstGlyph+1))
+	count := 0
+	for codepoint := firstGlyph; codepoint <= lastGlyph; codepoint++ {
+		if includes(characters, codepoint) {
+			count++
+		}
+	}
+	binary.Write(&buffer, binary.LittleEndian, uint16(count))
 
 	const canvasSize = 64
 	const originX = 8
 	baseline := graphics.Scalar(8) + font.Metrics.Ascent
 	for codepoint := firstGlyph; codepoint <= lastGlyph; codepoint++ {
+		if !includes(characters, codepoint) {
+			continue
+		}
 		canvas := graphics.NewImageFormat(canvasSize, canvasSize, graphics.PixelA8, nil)
 		canvas.DrawText(font, graphics.Point{X: originX, Y: baseline}, string(rune(codepoint)), graphics.RGBA(255, 255, 255, 255))
 		minX, minY, maxX, maxY := canvasSize, canvasSize, 0, 0
@@ -73,11 +95,7 @@ func generate(pixelHeight graphics.Scalar, output string) {
 		binary.Write(&buffer, binary.LittleEndian, uint16(height))
 		for y := minY; y < maxY; y++ {
 			for x := minX; x < maxX; x++ {
-				coverage := byte(0)
-				if canvas.Pixels[y*canvas.Stride+x] >= 96 {
-					coverage = 255
-				}
-				buffer.WriteByte(coverage)
+				buffer.WriteByte(canvas.Pixels[y*canvas.Stride+x])
 			}
 		}
 	}
@@ -87,6 +105,7 @@ func generate(pixelHeight graphics.Scalar, output string) {
 }
 
 func main() {
-	generate(18, "Go-Regular-18.rgf")
-	generate(26, "Go-Regular-26.rgf")
+	generate(18, "Go-Regular-18.rgf", "")
+	generate(26, "Go-Regular-26.rgf", "")
+	generate(26, "Go-Regular-26-PaperMono-Forms.rgf", fontcache.PaperMonoFormsGlyphs)
 }

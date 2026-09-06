@@ -15,6 +15,7 @@ type Theme struct {
 	Border        graphics.Color
 	Hover         graphics.Color
 	Selection     graphics.Color
+	SelectionText graphics.Color
 	Accent        graphics.Color
 	AccentText    graphics.Color
 	Disabled      graphics.Color
@@ -31,6 +32,7 @@ func LightTheme() Theme {
 		Border:        graphics.RGBA(190, 198, 209, 255),
 		Hover:         graphics.RGBA(229, 239, 251, 255),
 		Selection:     graphics.RGBA(207, 228, 252, 255),
+		SelectionText: graphics.RGBA(30, 35, 43, 255),
 		Accent:        graphics.RGBA(25, 118, 210, 255),
 		AccentText:    graphics.RGBA(255, 255, 255, 255),
 		Disabled:      graphics.RGBA(128, 137, 149, 255),
@@ -48,6 +50,7 @@ func DarkTheme() Theme {
 		Border:        graphics.RGBA(76, 84, 98, 255),
 		Hover:         graphics.RGBA(48, 61, 78, 255),
 		Selection:     graphics.RGBA(39, 73, 108, 255),
+		SelectionText: graphics.RGBA(232, 235, 240, 255),
 		Accent:        graphics.RGBA(65, 145, 230, 255),
 		AccentText:    graphics.RGBA(255, 255, 255, 255),
 		Disabled:      graphics.RGBA(108, 116, 130, 255),

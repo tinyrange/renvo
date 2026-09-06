@@ -109,6 +109,22 @@ func TestInvalidRectAccessorsDoNotCopyDamage(t *testing.T) {
 	}
 }
 
+func TestReserveInvalidRectsPreservesQueuedDamage(t *testing.T) {
+	var form Form
+	form.Initialize(100, 80)
+	form.ReserveInvalidRects(4)
+	if form.InvalidRectCount() != 1 {
+		t.Fatalf("reserve changed invalid count to %d", form.InvalidRectCount())
+	}
+	dirty, ok := form.InvalidRectAt(0)
+	if !ok || dirty != graphics.R(0, 0, 100, 80) {
+		t.Fatalf("reserve changed queued damage to %#v, %v", dirty, ok)
+	}
+	if cap(form.invalid) < 4 || cap(form.invalidSpare) < 4 {
+		t.Fatalf("reserve capacities = %d/%d", cap(form.invalid), cap(form.invalidSpare))
+	}
+}
+
 func TestPaintClipsControlsToInvalidRegions(t *testing.T) {
 	var form Form
 	form.Initialize(20, 10)

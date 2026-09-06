@@ -91,6 +91,21 @@ func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
 	if maxY > s.Height {
 		maxY = s.Height
 	}
+	if s.Format == PixelMono1 {
+		width := maxX - minX
+		sourceStride := (width + 7) / 8
+		if sourceStride*(maxY-minY) > len(pixels) {
+			return
+		}
+		for y := minY; y < maxY; y++ {
+			for x := minX; x < maxX; x++ {
+				s.writeMonoPixel(x, y, pixels[(y-minY)*sourceStride+(x-minX)/8]&(0x80>>uint((x-minX)&7)) != 0)
+			}
+		}
+		s.revision++
+		s.markDirtyRect(pixelRect{minX: minX, minY: minY, maxX: maxX, maxY: maxY})
+		return
+	}
 	pixelSize := pixelFormatBytes(s.Format)
 	i := 0
 	for y := minY; y < maxY; y++ {
@@ -174,8 +189,7 @@ func NewSurfaceBufferFormatPreserve(width, height int, format PixelFormat, pixel
 }
 
 func newSurfaceBufferFormat(width, height int, format PixelFormat, pixels []byte, clear bool) *Surface {
-	pixelSize := pixelFormatBytes(format)
-	if width < 0 || height < 0 || pixelSize == 0 || len(pixels) < width*height*pixelSize {
+	if width < 0 || height < 0 || !pixelFormatValid(format) || len(pixels) < pixelFormatStride(width, format)*height {
 		return nil
 	}
 	s := allocSurface()
@@ -197,6 +211,17 @@ func pixelFormatBytes(format PixelFormat) int {
 	return 0
 }
 
+func pixelFormatValid(format PixelFormat) bool {
+	return format == PixelRGBA8 || format == PixelA8 || format == PixelRGB565 || format == PixelMono1
+}
+
+func pixelFormatStride(width int, format PixelFormat) int {
+	if format == PixelMono1 {
+		return (width + 7) / 8
+	}
+	return width * pixelFormatBytes(format)
+}
+
 func (s *Surface) resetFormat(width, height int, format PixelFormat) {
 	s.resetFormatStorage(width, height, format, true)
 }
@@ -210,12 +235,10 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 	}
 	s.Width = width
 	s.Height = height
-	pixelSize := pixelFormatBytes(format)
-	if pixelSize == 0 {
+	if !pixelFormatValid(format) {
 		format = PixelRGBA8
-		pixelSize = 4
 	}
-	s.Stride = width * pixelSize
+	s.Stride = pixelFormatStride(width, format)
 	pixelBytes := s.Stride * height
 	if pixelBytes <= cap(s.Pixels) {
 		s.Pixels = s.Pixels[:pixelBytes]
@@ -468,6 +491,11 @@ func (s *Surface) transformIsIdentity() bool {
 	return s.deviceScale == 1.0 && s.transformA == 1.0 && s.transformB == 0.0 && s.transformC == 0.0 && s.transformD == 1.0 && s.transformTX == 0.0 && s.transformTY == 0.0
 }
 
+func (s *Surface) transformIsPortraitQuarterTurn() bool {
+	return s.deviceScale == 1.0 && s.transformA == 0.0 && s.transformB == -1.0 &&
+		s.transformC == 1.0 && s.transformD == 0.0
+}
+
 func (s *Surface) transformPoint(p Point) Point {
 	s.transformPointInPlace(&p)
 	return p
@@ -623,6 +651,14 @@ func (s *Surface) putPixel(x, y int, c Color) {
 // writePixel writes a known-clipped pixel without updating damage. Batched
 // rasterizers mark their bounds once and use this path for every covered pixel.
 func (s *Surface) writePixel(x, y int, c Color) {
+	if s.Format == PixelMono1 {
+		gray := (77*int(c.R) + 150*int(c.G) + 29*int(c.B) + 128) >> 8
+		if s.blend != BlendCopy && c.A != 255 && s.monoPixel(x, y) {
+			gray += (255*int(255-c.A) + 127) / 255
+		}
+		s.writeMonoPixel(x, y, gray >= 128)
+		return
+	}
 	if s.Format == PixelRGB565 {
 		o := y*s.Stride + x*2
 		if s.blend != BlendCopy && c.A != 255 {
@@ -655,6 +691,20 @@ func (s *Surface) writePixel(x, y int, c Color) {
 	s.Pixels[o+1] = byte(int(c.G) + (int(s.Pixels[o+1])*inv+127)/255)
 	s.Pixels[o+2] = byte(int(c.B) + (int(s.Pixels[o+2])*inv+127)/255)
 	s.Pixels[o+3] = byte(int(c.A) + (int(s.Pixels[o+3])*inv+127)/255)
+}
+
+func (s *Surface) monoPixel(x, y int) bool {
+	return s.Pixels[y*s.Stride+x/8]&(0x80>>uint(x&7)) != 0
+}
+
+func (s *Surface) writeMonoPixel(x, y int, white bool) {
+	o := y*s.Stride + x/8
+	mask := byte(0x80 >> uint(x&7))
+	if white {
+		s.Pixels[o] |= mask
+	} else {
+		s.Pixels[o] &^= mask
+	}
 }
 
 func encodeRGB565(color Color) uint16 {
@@ -751,6 +801,19 @@ func (s *Surface) FillRect(r Rect, color Color) {
 		}, color)
 		return
 	}
+	if s.transformIsPortraitQuarterTurn() {
+		// Portrait e-paper canvases commonly rotate an axis-aligned logical UI
+		// onto landscape controller RAM. The result is still an axis-aligned
+		// native rectangle, so avoid testing four floating-point edges for every
+		// covered pixel.
+		s.fillPixelRect(pixelRect{
+			minX: scalarCeil(s.transformTX + r.MinY - 0.5),
+			minY: scalarCeil(s.transformTY - r.MaxX - 0.5),
+			maxX: scalarFloor(s.transformTX+r.MaxY-0.5) + 1,
+			maxY: scalarFloor(s.transformTY-r.MinX-0.5) + 1,
+		}, color)
+		return
+	}
 	a := Point{X: r.MinX, Y: r.MinY}
 	b := Point{X: r.MaxX, Y: r.MinY}
 	c := Point{X: r.MaxX, Y: r.MaxY}
@@ -786,6 +849,31 @@ func (s *Surface) fillPixelRect(region pixelRect, color Color) {
 		return
 	}
 	if s.blend == BlendSourceOver && color.A == 0 {
+		return
+	}
+	if s.Format == PixelMono1 && (s.blend == BlendCopy || color.A == 255) {
+		s.markDirtyRect(region)
+		gray := (77*int(color.R) + 150*int(color.G) + 29*int(color.B) + 128) >> 8
+		white := gray >= 128
+		for y := region.minY; y < region.maxY; y++ {
+			x := region.minX
+			for x < region.maxX && x&7 != 0 {
+				s.writeMonoPixel(x, y, white)
+				x++
+			}
+			value := byte(0)
+			if white {
+				value = 0xff
+			}
+			for x+8 <= region.maxX {
+				s.Pixels[y*s.Stride+x/8] = value
+				x += 8
+			}
+			for x < region.maxX {
+				s.writeMonoPixel(x, y, white)
+				x++
+			}
+		}
 		return
 	}
 	if s.Format == PixelRGB565 && (s.blend == BlendCopy || color.A == 255) {
@@ -869,6 +957,13 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 		return
 	}
 	half := width * s.deviceScale / 2.0
+	if a != b && (a.X == b.X || a.Y == b.Y) {
+		// A quarter turn keeps UI borders axis-aligned. Fill the long body as a
+		// rectangle and inspect only the small round end caps instead of running
+		// the floating-point capsule test over every pixel along the line.
+		s.drawAxisAlignedLine(a, b, half, color)
+		return
+	}
 	minX, maxX := a.X, b.X
 	minY, maxY := a.Y, b.Y
 	if minX > maxX {
@@ -899,6 +994,56 @@ func (s *Surface) DrawLine(a, b Point, width Scalar, color Color) {
 			}
 			if inside {
 				s.putPixel(x, y, color)
+			}
+		}
+	}
+}
+
+func (s *Surface) drawAxisAlignedLine(a, b Point, half Scalar, color Color) {
+	half2 := half * half
+	if a.Y == b.Y {
+		minX, maxX := a.X, b.X
+		if minX > maxX {
+			minX, maxX = maxX, minX
+		}
+		s.fillPixelRect(pixelRect{
+			minX: scalarCeil(minX - 0.5),
+			minY: scalarCeil(a.Y - half - 0.5),
+			maxX: scalarFloor(maxX-0.5) + 1,
+			maxY: scalarFloor(a.Y+half-0.5) + 1,
+		}, color)
+		for _, endX := range []Scalar{minX, maxX} {
+			for y := scalarFloor(a.Y - half); y < scalarCeil(a.Y+half); y++ {
+				for x := scalarFloor(endX - half); x < scalarCeil(endX+half); x++ {
+					dx := Scalar(x) + 0.5 - endX
+					dy := Scalar(y) + 0.5 - a.Y
+					if dx*dx+dy*dy <= half2 {
+						s.putPixel(x, y, color)
+					}
+				}
+			}
+		}
+		return
+	}
+
+	minY, maxY := a.Y, b.Y
+	if minY > maxY {
+		minY, maxY = maxY, minY
+	}
+	s.fillPixelRect(pixelRect{
+		minX: scalarCeil(a.X - half - 0.5),
+		minY: scalarCeil(minY - 0.5),
+		maxX: scalarFloor(a.X+half-0.5) + 1,
+		maxY: scalarFloor(maxY-0.5) + 1,
+	}, color)
+	for _, endY := range []Scalar{minY, maxY} {
+		for y := scalarFloor(endY - half); y < scalarCeil(endY+half); y++ {
+			for x := scalarFloor(a.X - half); x < scalarCeil(a.X+half); x++ {
+				dx := Scalar(x) + 0.5 - a.X
+				dy := Scalar(y) + 0.5 - endY
+				if dx*dx+dy*dy <= half2 {
+					s.putPixel(x, y, color)
+				}
 			}
 		}
 	}
@@ -983,6 +1128,12 @@ func (image *Surface) imagePixel(x, y int) Color {
 	if image.Format == PixelRGB565 {
 		o := y*image.Stride + x*2
 		return decodeRGB565(image.Pixels[o], image.Pixels[o+1])
+	}
+	if image.Format == PixelMono1 {
+		if image.monoPixel(x, y) {
+			return White
+		}
+		return Black
 	}
 	o := y*image.Stride + x*4
 	return Color{image.Pixels[o], image.Pixels[o+1], image.Pixels[o+2], image.Pixels[o+3]}

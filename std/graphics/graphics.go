@@ -69,6 +69,9 @@ const (
 	// intended for memory-constrained software render targets and scanout
 	// buffers; source-over rendering treats the destination as opaque.
 	PixelRGB565
+	// PixelMono1 stores opaque monochrome pixels packed MSB first. One is white
+	// and zero is black; each row starts at a byte boundary.
+	PixelMono1
 )
 
 // Mat2x3 is an affine matrix. TransformPoint computes

@@ -16,6 +16,7 @@ go backend {
 	const iramEntryAddress = 0x40374100
 	const iramStartupSize = 0x600
 	const romConfigureInstructionCache = 0x40001a1c
+	const romUpdateCPUFrequency = 0x40001a4c
 	const instructionCacheSize = 0x4000
 	const instructionCacheWays = 8
 	const instructionCacheLineSize = 32
@@ -152,6 +153,19 @@ go backend {
 		writeRegister(out, rtcControl+0xb4, 1<<30)
 	}
 
+	func configureCPUClock(out *RTGEmitter) {
+		// The second-stage bootloader hands applications a 480 MHz BBPLL but
+		// leaves the CPU on its conservative 80 MHz divider. Select 160 MHz, which
+		// is supported without the regulator-bias transition required by 240 MHz,
+		// then keep the ROM's ticks-per-microsecond calibration in sync.
+		updateRegister(out, 0x600c0010, 1, 3)
+		xtensa_lx7.memoryWait(out)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.a10, 160)
+		xtensa_lx7.moveImmediate(out, xtensa_lx7.scratch,
+			romUpdateCPUFrequency)
+		xtensa_lx7.callWindowedIndirect(out, xtensa_lx7.scratch)
+	}
+
 	func clearBSS(out *RTGEmitter) {
 		loop := out.NewLabel()
 		done := out.NewLabel()
@@ -261,6 +275,7 @@ go backend {
 		xtensa_lx7.move(out, xtensa_lx7.frame, xtensa_lx7.stack)
 		clearBSS(out)
 		usbSerialInitialize(out)
+		configureCPUClock(out)
 		// The second-stage bootloader validates and installs the image's IROM MMU
 		// mapping before entering this IRAM bootstrap. Preserve that mapping and
 		// cache state: rewriting either here races the cache machinery that this

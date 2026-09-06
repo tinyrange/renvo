@@ -11,8 +11,11 @@ command invokes no external flashing or debug tool.
 
 It can also make a read-only, whole-flash backup of an ESP32-C6, ESP32-S3, or
 ESP32-P4. Before reading, backup mode refuses secure-download mode and flash
-encryption, configures the detected flash geometry, and calculates a device-side
-MD5. The printed digest must match the host file's MD5 before the backup is used.
+encryption, reads the SPI NOR JEDEC ID to detect the physical flash capacity,
+configures that detected geometry, and calculates a device-side MD5. It refuses
+unknown or unsupported capacity codes instead of falling back to a board-size
+guess. The printed digest must match the host file's MD5 before the backup is
+used.
 
 ```sh
 sandbox/renvo -o sandbox/renvoflash ./cmd/renvoflash
