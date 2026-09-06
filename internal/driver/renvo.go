@@ -320,7 +320,7 @@ func renvoStdRoot(args []string, env []string) string {
 
 func renvoModuleCache(env []string) string {
 	value := renvoEnvValue(env, "RENVO_MODCACHE")
-	if value == "" && renvoBundledStdEnabled {
+	if value == "" && renvoBundledExtrasEnabled {
 		return "/modules"
 	}
 	return value

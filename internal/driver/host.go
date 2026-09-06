@@ -56,6 +56,9 @@ func (OSFS) PathExists(path string) bool {
 	if _, ok := bundledStdReadFile(path); ok {
 		return true
 	}
+	if _, ok := bundledStdReadDir(path); ok {
+		return true
+	}
 	_, err := os.Stat(path)
 	return err == nil
 }
@@ -85,7 +88,7 @@ func StdRootFromEnv(env []string) string {
 
 func ModuleCacheFromEnv(env []string) string {
 	root := EnvValue(env, ModuleCacheEnv)
-	if root == "" && renvoBundledStdEnabled {
+	if root == "" && renvoBundledExtrasEnabled {
 		return "/modules"
 	}
 	return root

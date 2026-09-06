@@ -581,7 +581,10 @@ func sourceModuleLicense(src []byte) (string, bool, bool, bool) {
 }
 
 func embeddedBuildImmutableSource(path string) bool {
-	if !renvoBundledStdEnabled {
+	// Keep default builds hashing caller-provided sources, including custom
+	// SourceFS files under /std and /modules. The full bundle retains its
+	// existing immutable-source optimization.
+	if !renvoBundledExtrasEnabled {
 		return false
 	}
 	return embeddedBuildPathPrefix(path, "/std/") || embeddedBuildPathPrefix(path, "/modules/")

@@ -1,5 +1,3 @@
-//go:build renvo_bundle
-
 package driver
 
 import (
@@ -9,7 +7,10 @@ import (
 type bundledSourceFS struct{}
 
 func (b *bundledSourceFS) PathExists(path string) bool {
-	_, ok := renvo.BundledStdReadFile(path)
+	if _, ok := renvo.BundledStdReadFile(path); ok {
+		return true
+	}
+	_, ok := renvo.BundledStdReadDir(path)
 	return ok
 }
 
@@ -26,7 +27,6 @@ func (b *bundledSourceFS) ReadDir(path string) ([]DirEntry, bool) {
 }
 
 func (b *bundledSourceFS) ReadFile(path string) ([]byte, bool) {
-	// Implement the logic to read a file from the bundled source filesystem.
 	return renvo.BundledStdReadFile(path)
 }
 

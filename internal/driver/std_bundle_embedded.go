@@ -1,10 +1,9 @@
-//go:build renvo_bundle
-
 package driver
 
 import stdbundle "renvo.dev"
 
 const renvoBundledStdEnabled = true
+const renvoBundledExtrasEnabled = stdbundle.BundledExtrasEnabled
 
 func bundledStdReadFile(path string) ([]byte, bool) {
 	return stdbundle.BundledStdReadFile(path)
