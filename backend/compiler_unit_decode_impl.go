@@ -174,15 +174,43 @@ func renvoUnitBindingMatchesTarget(src []byte, target int) bool {
 	hashData := hashHeader + 6
 	versionHeader := hashData + 32
 	versionData := versionHeader + 6
-	return int(src[bindingStart])|int(src[bindingStart+1])<<8 == 4 &&
-		renvoUnitRead32(src, bindingStart+2) == len(expectedTarget) &&
-		string(src[targetData:hashHeader]) == expectedTarget &&
-		int(src[hashHeader])|int(src[hashHeader+1])<<8 == 5 &&
-		renvoUnitRead32(src, hashHeader+2) == 32 &&
-		string(src[hashData:versionHeader]) == expectedDefinition &&
-		int(src[versionHeader])|int(src[versionHeader+1])<<8 == 6 &&
-		renvoUnitRead32(src, versionHeader+2) == 2 &&
-		int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
+	if int(src[bindingStart])|int(src[bindingStart+1])<<8 != 4 {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if renvoUnitRead32(src, bindingStart+2) != len(expectedTarget) {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if !renvoBytesEqualText(src, targetData, hashHeader, expectedTarget) {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if int(src[hashHeader])|int(src[hashHeader+1])<<8 != 5 {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if renvoUnitRead32(src, hashHeader+2) != 32 {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if !renvoBytesEqualText(src, hashData, versionHeader, expectedDefinition) {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if int(src[versionHeader])|int(src[versionHeader+1])<<8 != 6 {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if renvoUnitRead32(src, versionHeader+2) != 2 {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	if int(src[versionData])|int(src[versionData+1])<<8 != expectedVersion {
+		print("renvo: unit binding field mismatch\n")
+		return false
+	}
+	return true
 }
 
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {

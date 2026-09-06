@@ -67,6 +67,16 @@ func main() {
 	must(os.WriteFile(filepath.Join(root, "backend", "docs", "machine-definitions.generated.md"), documentationSource(descriptors), 0o644))
 }
 
+func quotedDefinition(definition [32]byte) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for _, value := range definition {
+		fmt.Fprintf(&out, "\\x%02x", value)
+	}
+	out.WriteByte('"')
+	return out.String()
+}
+
 func documentationSource(descriptors []sourceDescriptor) []byte {
 	var out bytes.Buffer
 	out.WriteString("# Built-in machine definitions\n\n")
@@ -350,8 +360,8 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		for _, alias := range descriptor.Aliases {
 			fmt.Fprintf(&out, " || name == %q", alias)
 		}
-		fmt.Fprintf(&out, " { return %q, %q, %d, true }\n",
-			descriptor.Name, string(descriptor.Definition[:]), descriptor.Descriptor)
+		fmt.Fprintf(&out, " { return %q, %s, %d, true }\n",
+			descriptor.Name, quotedDefinition(descriptor.Definition), descriptor.Descriptor)
 	}
 	out.WriteString("return \"\", \"\", 0, false\n}\n\n")
 	out.WriteString("func IsAdvertised(name string) bool { return ")
@@ -484,8 +494,8 @@ func backendSource(descriptors []sourceDescriptor) []byte {
 	out.WriteString("return renvoRTGParseTargetArg(target)\n}\n")
 	out.WriteString("\nfunc renvoBuiltInTargetBinding(target int) (string, string, int, bool) {\n")
 	for _, descriptor := range backend {
-		fmt.Fprintf(&out, "if target == %s { return %q, %q, %d, true }\n",
-			descriptor.Constant, descriptor.Name, string(descriptor.Definition[:]), descriptor.Descriptor)
+		fmt.Fprintf(&out, "if target == %s { return %q, %s, %d, true }\n",
+			descriptor.Constant, descriptor.Name, quotedDefinition(descriptor.Definition), descriptor.Descriptor)
 	}
 	out.WriteString("return \"\", \"\", 0, false\n}\n")
 	return out.Bytes()

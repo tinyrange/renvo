@@ -2088,7 +2088,8 @@ func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
 		ch := renvo_runtime_UnsafeByteAt(src, i)
 		if ch == '\\' && quote == '"' && i+1 < end {
 			i++
-			if renvo_runtime_UnsafeByteAt(src, i) == 'x' && i+2 < end {
+			escape := renvo_runtime_UnsafeByteAt(src, i)
+			if escape == 'x' && i+2 < end {
 				hi := renvoHexDigitValue(renvo_runtime_UnsafeByteAt(src, i+1))
 				lo := renvoHexDigitValue(renvo_runtime_UnsafeByteAt(src, i+2))
 				if hi >= 0 && lo >= 0 {
@@ -2097,7 +2098,7 @@ func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
 					continue
 				}
 			}
-			if renvo_runtime_UnsafeByteAt(src, i) == 'n' {
+			if escape == 'n' {
 				out = append(out, '\n')
 			} else if renvo_runtime_UnsafeByteAt(src, i) == 't' {
 				out = append(out, '\t')
@@ -2105,6 +2106,12 @@ func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
 				out = append(out, '\r')
 			} else if renvo_runtime_UnsafeByteAt(src, i) == 'b' {
 				out = append(out, '\b')
+			} else if escape == 'a' {
+				out = append(out, '\a')
+			} else if escape == 'f' {
+				out = append(out, '\f')
+			} else if escape == 'v' {
+				out = append(out, '\v')
 			} else if renvo_runtime_UnsafeByteAt(src, i) == '"' {
 				out = append(out, '"')
 			} else if renvo_runtime_UnsafeByteAt(src, i) == '\\' {
@@ -18392,6 +18399,18 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	if intrinsic == 8 {
 		return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
 	}
+	if intrinsic == 23 {
+		e := &ep.exprs[idx]
+		if e.argCount != 1 {
+			return false
+		}
+		argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+		sliceType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
+		if sliceType.kind != renvoTypeSlice {
+			return false
+		}
+		return renvoEmitSliceValueRegs(g, ep, argIndex)
+	}
 	if intrinsic == 12 {
 		return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 	}
@@ -18506,7 +18525,7 @@ func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 // Compiler-private intrinsics live in the reserved renvo_runtime namespace.
 // A bounded name hash mixed with an independent byte checksum keeps their
 // dispatch table compact while making accidental aliases impractical.
-const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16"
+const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16\x51\x35\x60\x42\x17"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 	hash1 := 5381

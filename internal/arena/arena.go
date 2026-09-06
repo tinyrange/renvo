@@ -12,6 +12,8 @@ func renvo_runtime_ArenaPersistString(value string) string { return value }
 
 func renvo_runtime_ArenaPersistBytes(value []byte) []byte { return value }
 
+func renvo_runtime_ArenaBytesStart(value []byte) int { return 0 }
+
 func renvo_runtime_ArenaDiscard(start int, end int) {}
 
 func renvo_runtime_ArenaDiscardBytes(value []byte) {}
@@ -38,12 +40,12 @@ func PersistString(value string) string { return renvo_runtime_ArenaPersistStrin
 
 func PersistBytes(value []byte) []byte { return renvo_runtime_ArenaPersistBytes(value) }
 
-// PersistLastBytes persists the most recent low-arena byte allocation. It uses
-// the ordinary copy when both allocations fit; otherwise it transfers arena
-// ownership in place. Callers must pass the low-arena mark that may be restored
-// and must not retain any other allocation made after that mark. Reserving a
-// few alignment bytes below the slice keeps promotion valid for every native
-// word size.
+// PersistLastBytes persists a final low-arena byte result. It uses the ordinary
+// copy when both allocations fit; otherwise it transfers the arena suffix that
+// begins at the result in place. Callers must pass the low-arena mark that may
+// be restored and must not retain any other allocation made after that mark.
+// Reserving a few alignment bytes below the slice keeps promotion valid for
+// every native word size.
 func PersistLastBytes(value []byte, lowMark int) []byte {
 	end := renvo_runtime_ArenaMark()
 	if end == 0 || len(value) == 0 {
@@ -53,7 +55,7 @@ func PersistLastBytes(value []byte, lowMark int) []byte {
 	if persistEnd-end >= len(value) {
 		return renvo_runtime_ArenaPersistBytes(value)
 	}
-	start := end - cap(value)
+	start := renvo_runtime_ArenaBytesStart(value)
 	start -= start % 16
 	if start < lowMark {
 		return renvo_runtime_ArenaPersistBytes(value)

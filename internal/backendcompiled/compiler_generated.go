@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0a62208b7338476f487c76d103e8e953442351f20909b341b4c15301141d5fbb"
+const CompilerSourceDigest = "0d6e69985fe8c8d8dc67e390e214d75db678ca07ce1a6ff5f4fb01b56c731edf"
 
 // source: backend/compiler_common_impl.go
 
@@ -2095,7 +2095,8 @@ for i < end {
 ch := renvo_runtime_UnsafeByteAt(src, i)
 if ch == '\\' && quote == '"' && i+1 < end {
 i++
-if renvo_runtime_UnsafeByteAt(src, i) == 'x' && i+2 < end {
+escape := renvo_runtime_UnsafeByteAt(src, i)
+if escape == 'x' && i+2 < end {
 hi := renvoHexDigitValue(renvo_runtime_UnsafeByteAt(src, i+1))
 lo := renvoHexDigitValue(renvo_runtime_UnsafeByteAt(src, i+2))
 if hi >= 0 && lo >= 0 {
@@ -2104,7 +2105,7 @@ i += 3
 continue
 }
 }
-if renvo_runtime_UnsafeByteAt(src, i) == 'n' {
+if escape == 'n' {
 out = append(out, '\n')
 } else if renvo_runtime_UnsafeByteAt(src, i) == 't' {
 out = append(out, '\t')
@@ -2112,6 +2113,12 @@ out = append(out, '\t')
 out = append(out, '\r')
 } else if renvo_runtime_UnsafeByteAt(src, i) == 'b' {
 out = append(out, '\b')
+} else if escape == 'a' {
+out = append(out, '\a')
+} else if escape == 'f' {
+out = append(out, '\f')
+} else if escape == 'v' {
+out = append(out, '\v')
 } else if renvo_runtime_UnsafeByteAt(src, i) == '"' {
 out = append(out, '"')
 } else if renvo_runtime_UnsafeByteAt(src, i) == '\\' {
@@ -18399,6 +18406,18 @@ return renvoEmitRuntimeArenaPersistBytes(g, ep, idx)
 if intrinsic == 8 {
 return renvoEmitRuntimeArenaPersistSlice(g, ep, idx)
 }
+if intrinsic == 23 {
+e := &ep.exprs[idx]
+if e.argCount != 1 {
+return false
+}
+argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+sliceType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, argIndex))
+if sliceType.kind != renvoTypeSlice {
+return false
+}
+return renvoEmitSliceValueRegs(g, ep, argIndex)
+}
 if intrinsic == 12 {
 return renvoEmitRuntimeArenaDiscard(g, ep, idx)
 }
@@ -18513,7 +18532,7 @@ return true
 
 
 
-const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16"
+const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16\x51\x35\x60\x42\x17"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
 hash1 := 5381
@@ -36595,46 +36614,46 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "wӷUA65\v\xa9_\xf6\xe3\x86g\xd6UJp\x1cþ\x18\x1f\xb3\xe9\"7T\u0380#/", 3, true
+return "linux/amd64", "\x77\xd3\xb7\x55\x41\x36\x35\x0b\xa9\x5f\xf6\xe3\x86\x67\xd6\x55\x4a\x70\x1c\xc3\xbe\x18\x1f\xb3\xe9\x22\x37\x54\xce\x80\x23\x2f", 3, true
 }
 if target == renvoTargetLinux386 {
-return "linux/386", "t\x9cx\xa5\x14\x03\xd8\x17#}L\xb1\v\x9f\x0eIr\x1b\x94\x12\x11=\x04\x00\x93\xc0|\xeac\x81\xcf\xd8", 3, true
+return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "&\n\x90-,Q\xf9 jϹi\x1c\xe3\x1aaq/\xfe$}U%\x01\x91\x0f|\xfb`\x86\xcb\xc5", 3, true
+return "linux/aarch64", "\x26\x0a\x90\x2d\x2c\x51\xf9\x20\x6a\xcf\xb9\x69\x1c\xe3\x1a\x61\x71\x2f\xfe\x24\x7d\x55\x25\x01\x91\x0f\x7c\xfb\x60\x86\xcb\xc5", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "@l\xe0\x00\x18\xa6R9~\x94\xf7m\x19\xa8\xb68\x9f\xfb/,\xe59Z\b*\xb2N\x19\xe2\xe6\x16\x8b", 3, true
+return "linux/arm", "\x40\x6c\xe0\x00\x18\xa6\x52\x39\x7e\x94\xf7\x6d\x19\xa8\xb6\x38\x9f\xfb\x2f\x2c\xe5\x39\x5a\x08\x2a\xb2\x4e\x19\xe2\xe6\x16\x8b", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\brl\x8fX\xa0\vOFa\xb4n¬\xa7\x1dSd\xc4\xc7\n`ޚp\x19Gh\x05\xa2\x95D", 3, true
+return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
 }
 if target == renvoTargetWindows386 {
-return "windows/386", "q\xf3\v\xf8\x94iN\x98\x11S\xbe\\g\xbe\xda\x18T\xe2\x0ev坘dϴí\xf8d\xf0\xed", 3, true
+return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xb0,K\x0fT\x1elz=Q4\xe0\xfdzjCGڬ\x92\xaa\xc3\xda\xc0\xd6'NM\xda-\xa0A", 3, true
+return "wasi/wasm32", "\xb0\x2c\x4b\x0f\x54\x1e\x6c\x7a\x3d\x51\x34\xe0\xfd\x7a\x6a\x43\x47\xda\xac\x92\xaa\xc3\xda\xc0\xd6\x27\x4e\x4d\xda\x2d\xa0\x41", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "*\xfbl\xa3\x1eŹ\xc4\\\x12!~J\a\xc1Ӎ\xbeO\xb1\xe4\x13(טр\xce@\x05F\"", 3, true
+return "darwin/arm64", "\x2a\xfb\x6c\xa3\x1e\xc5\xb9\xc4\x5c\x12\x21\x7e\x4a\x07\xc1\xd3\x8d\xbe\x4f\xb1\xe4\x13\x28\xd7\x98\xd1\x80\xce\x40\x05\x46\x22", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", ":\x03\x91\xe9,\xa4\x02\a\x05u\x89uI0\x9dC\xab\x8b\xf2\xc7/\xd0HlĴ\xbd\x19\xfa$\xbd\xf2", 3, true
+return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\x8d\r\xe8\xa0ת>\xa4C6N\xde8X\xdb\xc0\x81>+\xa5\xdb\xcc3K\xb1\x9a\xaf\xb1\x85~\x18j", 3, true
+return "windows/arm64", "\x8d\x0d\xe8\xa0\xd7\xaa\x3e\xa4\x43\x36\x4e\xde\x38\x58\xdb\xc0\x81\x3e\x2b\xa5\xdb\xcc\x33\x4b\xb1\x9a\xaf\xb1\x85\x7e\x18\x6a", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\n\xf8\x00\x19\x9d\a\xb2\x92R\x81\xe6&=\xfd\xcfO7x\x92\xfe\xea\x9bwYx\xb9\x86f-C\x9br", 3, true
+return "vm/vm32", "\x0a\xf8\x00\x19\x9d\x07\xb2\x92\x52\x81\xe6\x26\x3d\xfd\xcf\x4f\x37\x78\x92\xfe\xea\x9b\x77\x59\x78\xb9\x86\x66\x2d\x43\x9b\x72", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "Gc\x90\xde\xec\xff樒\xa0\x12;\xa1k\x11\x1dkt-\vj\xf5\x15U2J\aH7\xc8\xf1\x8a", 3, true
+return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "AF\xb94콵q\x01\xe2J\x98\xb2G\x84\xcdot\x97\xbf\xf3)\xf5\tGE\x90\xac\x0e\xd27\x9e", 3, true
+return "openbsd/amd64", "\x41\x46\xb9\x34\xec\xbd\xb5\x71\x01\xe2\x4a\x98\xb2\x47\x84\xcd\x6f\x74\x97\xbf\xf3\x29\xf5\x09\x47\x45\x90\xac\x0e\xd2\x37\x9e", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "\x04:܊\xef\x8c\x15n1\xbf])̆\xda\xf9i\x03\xebb\xcc?ݩ\x12\x9d\xe7\xf2\xe0O2\x13", 3, true
+return "netbsd/amd64", "\x04\x3a\xdc\x8a\xef\x8c\x15\x6e\x31\xbf\x5d\x29\xcc\x86\xda\xf9\x69\x03\xeb\x62\xcc\x3f\xdd\xa9\x12\x9d\xe7\xf2\xe0\x4f\x32\x13", 3, true
 }
 return "", "", 0, false
 }
@@ -37763,6 +37782,12 @@ return
 }
 if address.TargetValid {
 renvoAsmAddReloc(out, at, address.Target)
+}
+}
+
+func renvoRTGLabelRelocAt(out *renvoAsm, label int, at int) {
+if label >= 0 {
+renvoAsmAddReloc(out, at, label)
 }
 }
 
@@ -55944,15 +55969,43 @@ hashHeader := targetData + len(expectedTarget)
 hashData := hashHeader + 6
 versionHeader := hashData + 32
 versionData := versionHeader + 6
-return int(src[bindingStart])|int(src[bindingStart+1])<<8 == 4 &&
-renvoUnitRead32(src, bindingStart+2) == len(expectedTarget) &&
-string(src[targetData:hashHeader]) == expectedTarget &&
-int(src[hashHeader])|int(src[hashHeader+1])<<8 == 5 &&
-renvoUnitRead32(src, hashHeader+2) == 32 &&
-string(src[hashData:versionHeader]) == expectedDefinition &&
-int(src[versionHeader])|int(src[versionHeader+1])<<8 == 6 &&
-renvoUnitRead32(src, versionHeader+2) == 2 &&
-int(src[versionData])|int(src[versionData+1])<<8 == expectedVersion
+if int(src[bindingStart])|int(src[bindingStart+1])<<8 != 4 {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if renvoUnitRead32(src, bindingStart+2) != len(expectedTarget) {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if !renvoBytesEqualText(src, targetData, hashHeader, expectedTarget) {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if int(src[hashHeader])|int(src[hashHeader+1])<<8 != 5 {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if renvoUnitRead32(src, hashHeader+2) != 32 {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if !renvoBytesEqualText(src, hashData, versionHeader, expectedDefinition) {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if int(src[versionHeader])|int(src[versionHeader+1])<<8 != 6 {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if renvoUnitRead32(src, versionHeader+2) != 2 {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+if int(src[versionData])|int(src[versionData+1])<<8 != expectedVersion {
+print("renvo: unit binding field mismatch\n")
+return false
+}
+return true
 }
 
 func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {

@@ -384,12 +384,9 @@ func renvoPathExists(path string) bool {
 }
 
 func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
-	if data, bundled := bundledStdReadFile(path); bundled {
-		return data, true
-	}
 	fd := open(renvoPathCString(path), 0)
 	if fd < 0 {
-		return nil, false
+		return bundledStdReadFile(path)
 	}
 	// Most compiler source files fit in 32 KiB. Starting there avoids repeated
 	// arena copies while loading a package, and the transient build releases the
@@ -426,12 +423,9 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 }
 
 func (fs RenvoFS) ReadDir(path string) ([]DirEntry, bool) {
-	if entries, bundled := bundledStdReadDir(path); bundled {
-		return entries, true
-	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return nil, false
+		return bundledStdReadDir(path)
 	}
 	out := make([]DirEntry, 0, len(entries))
 	for i := 0; i < len(entries); i++ {
