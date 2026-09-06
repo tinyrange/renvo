@@ -30,12 +30,9 @@ type HostResult struct {
 }
 
 func (OSFS) ReadDir(path string) ([]DirEntry, bool) {
-	if entries, ok := bundledStdReadDir(path); ok {
-		return entries, true
-	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return nil, false
+		return bundledStdReadDir(path)
 	}
 	out := make([]DirEntry, 0, len(entries))
 	for i := 0; i < len(entries); i++ {
@@ -45,15 +42,18 @@ func (OSFS) ReadDir(path string) ([]DirEntry, bool) {
 }
 
 func (OSFS) ReadFile(path string) ([]byte, bool) {
-	if data, ok := bundledStdReadFile(path); ok {
+	data, err := os.ReadFile(path)
+	if err == nil {
 		return data, true
 	}
-	data, err := os.ReadFile(path)
-	return data, err == nil
+	return bundledStdReadFile(path)
 }
 
 func (OSFS) PathExists(path string) bool {
 	if _, ok := bundledStdReadFile(path); ok {
+		return true
+	}
+	if _, ok := bundledStdReadDir(path); ok {
 		return true
 	}
 	_, err := os.Stat(path)
@@ -85,7 +85,7 @@ func StdRootFromEnv(env []string) string {
 
 func ModuleCacheFromEnv(env []string) string {
 	root := EnvValue(env, ModuleCacheEnv)
-	if root == "" && renvoBundledStdEnabled {
+	if root == "" && renvoBundledExtrasEnabled {
 		return "/modules"
 	}
 	return root

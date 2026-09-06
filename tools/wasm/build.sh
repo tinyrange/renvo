@@ -34,7 +34,7 @@ env GOOS="$host_os" GOARCH="$host_arch" go build -o "$backend" ./backend
 env GOOS="$host_os" GOARCH="$host_arch" go build -tags renvo_bundle -o "$bootstrap" ./cmd/renvobootstrap
 "$bootstrap" \
   -tags renvo_bundle \
-  -t "$host_target" -arena-size 134217728 \
+  -t "$host_target" -arena-size 268435456 \
   -s -o "$native" ./cmd/renvo
 "$native" \
   -tags renvo_wasi_frontend,renvo_wasi_c_object \

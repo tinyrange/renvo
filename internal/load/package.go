@@ -552,7 +552,7 @@ func isGoSourceFile(path string) bool {
 
 func isCSourceFile(path string) bool {
 	base := BasePath(path)
-	return stringHasSuffix(base, ".c") && !stringHasSuffix(base, "_test.c")
+	return (stringHasSuffix(base, ".c") && !stringHasSuffix(base, "_test.c")) || stringHasSuffix(base, ".i")
 }
 
 func isRTGAsmSourceFile(path string) bool {

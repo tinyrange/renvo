@@ -79,7 +79,8 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		dataModel = c11.DataModelLLP64
 	}
 	for i := 0; i < len(result.Files); i++ {
-		if !optionArgIsCFile(result.Files[i].Path) {
+		preprocessed := optionArgIsPreprocessedCFile(result.Files[i].Path)
+		if !optionArgIsCFile(result.Files[i].Path) && !preprocessed {
 			continue
 		}
 		if firstC < 0 {
@@ -87,12 +88,15 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		}
 		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
 		source := result.Files[i].Src
-		processed := c11.Preprocess(c11.PreprocessConfig{
-			Path: result.Files[i].Path, Source: source, Reader: reader,
-			Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
-			ForcedIncludes: options.CForcedInclude, EmitIncludes: executable || options.CNoStdIncludes, EmitQuotedIncludes: true,
-			SuppressForcedIncludes: object && !options.CNoStdIncludes,
-		})
+		processed := c11.PreprocessResult{Ok: true, Source: source}
+		if !preprocessed {
+			processed = c11.Preprocess(c11.PreprocessConfig{
+				Path: result.Files[i].Path, Source: source, Reader: reader,
+				Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
+				ForcedIncludes: options.CForcedInclude, EmitIncludes: executable || options.CNoStdIncludes, EmitQuotedIncludes: true,
+				SuppressForcedIncludes: object && !options.CNoStdIncludes,
+			})
+		}
 		if !processed.Ok {
 			errorKind := SourceErrCPreprocess
 			if processed.Error == c11.PreprocessErrInclude {
@@ -107,7 +111,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 			return result
 		}
 		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
-		if object && !options.CNoStdIncludes {
+		if object && !options.CNoStdIncludes && !preprocessed {
 			header = cObjectHeaderPrelude(result.Files[i].Path, source, processed, reader, fs)
 			if !header.Ok {
 				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)

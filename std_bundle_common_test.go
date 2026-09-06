@@ -1,5 +1,3 @@
-//go:build renvo_bundle
-
 package renvo
 
 import "testing"

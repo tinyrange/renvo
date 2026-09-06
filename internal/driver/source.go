@@ -230,7 +230,7 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 		}
 		sortDirEntries(entries)
 		for i := 0; i < len(entries); i++ {
-			if !entries[i].IsDir && isFrontendSourceName(entries[i].Name) {
+			if !entries[i].IsDir && isFrontendSourceName(entries[i].Name) && !optionArgIsPreprocessedCFile(entries[i].Name) {
 				paths = append(paths, load.JoinPath(ref.Dir, entries[i].Name))
 			}
 		}
@@ -852,12 +852,15 @@ func isRTGAsmSourceName(name string) bool {
 }
 
 func isFrontendSourceName(name string) bool {
-	return isGoSourceName(name) || isCSourceName(name) || isRTGAsmSourceName(name)
+	return isGoSourceName(name) || isCSourceName(name) || optionArgIsPreprocessedCFile(name) || isRTGAsmSourceName(name)
 }
 
 func frontendFilenameEnabledWithTags(name string, target string, tags []string) bool {
 	if isGoSourceName(name) {
 		return sourceFilenameEnabledWithTags(name, target, tags)
+	}
+	if optionArgIsPreprocessedCFile(name) {
+		return sourceFilenameEnabledWithExtension(name, ".i", target, tags)
 	}
 	if isCSourceName(name) {
 		return sourceFilenameEnabledWithExtension(name, ".c", target, tags)

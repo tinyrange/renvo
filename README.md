@@ -172,11 +172,26 @@ Self-hosted `renvo` artifacts contain the backend in-process:
 
 ```sh
 go build -o renvo-backend ./backend
-go build -tags renvo_bundle -o renvo-bootstrap ./cmd/renvobootstrap
+go build -o renvo-bootstrap ./cmd/renvobootstrap
 
 ./renvo-bootstrap \
   -t linux/amd64 -o hello ./path/to/hello-package
 ```
+
+Every compiler build and `renvo.dev/driver` embeds the minimal `std/` source
+tree, including standard-library assets. Use `-tags renvo_bundle` to also
+embed Forms, device, runtime modules, and libc sources; only that full bundle
+provides the built-in `/modules` cache.
+
+The public `renvo.dev/driver` package supports embedding without command-line
+processes. `Compile` accepts a source filesystem and Go inputs;
+`CompileCommand` accepts compiler arguments (including `cc`) and returns
+diagnostics plus a map of generated files in memory. It handles C
+preprocessing, compilation, and the built-in ELF object linker.
+`PlanMake` exposes the same dependency planner used by `renvo make`, allowing
+an embedding application to run recipes against its own virtual filesystem
+and retain intermediate outputs there. No host paths or output writes are
+required by these APIs.
 
 GitHub releases instead provide fully bundled Go-hosted compilers for Linux
 amd64, Windows amd64, and macOS arm64. Those distributions embed the standard
@@ -533,7 +548,7 @@ repository checkout, adjacent data files, or backend process.
 Useful development overrides are:
 
 - `RENVO_STDROOT`: standard-library source tree; defaults to the embedded copy
-  in bundled builds.
+  in every build.
 - `RENVO_MODCACHE`: read-only, pre-populated module cache for offline
   dependencies.
 

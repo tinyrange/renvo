@@ -164,8 +164,7 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 
 func packageUsesC11(pkg load.Package) bool {
 	for i := 0; i < len(pkg.Files); i++ {
-		path := pkg.Files[i].Path
-		if len(path) >= 2 && path[len(path)-2] == '.' && path[len(path)-1] == 'c' {
+		if pkg.Files[i].C {
 			return true
 		}
 	}

@@ -1,11 +1,6 @@
-//go:build renvo_bundle && renvo
+//go:build renvo
 
 package renvo
-
-import "embed"
-
-//go:embed std forms device x libc
-var bundledStdFiles embed.FS
 
 func bundledStdRawReadFile(path string) ([]byte, bool) {
 	return bundledStdFiles.ReadFileOK(path)

@@ -1,5 +1,3 @@
-//go:build renvo_bundle
-
 package renvo
 
 type StdEntry struct {
@@ -97,6 +95,12 @@ func bundledStdDirHasFile(path string, includeAssets bool) bool {
 func bundledSourceName(path string) (string, bool) {
 	for len(path) > 0 && path[0] == '/' {
 		path = path[1:]
+	}
+	if !BundledExtrasEnabled {
+		if path == "std" || bundledHasPrefix(path, "std/") {
+			return path, true
+		}
+		return "", false
 	}
 	const module = "modules/renvo.dev@v0.0.0"
 	if path == module {

@@ -41,6 +41,7 @@ check_format() {
 
 check_tracked_packages() {
 	local package_patterns=(
+		. ./driver
 		./internal/... ./std/... ./cmd/...
 		./backend/unit ./backend/target ./backend/bringup
 		./backend/omnibus/... ./backend/cmd/...
@@ -64,7 +65,7 @@ check_tracked_packages() {
 
 check_bundled_packages() {
 	run_check "bundled driver and bootstrap" \
-		go test -count=1 -tags renvo_bundle ./internal/driver ./cmd/renvobootstrap
+		go test -count=1 -tags renvo_bundle . ./driver ./internal/driver ./cmd/renvobootstrap
 }
 
 check_packages() {
