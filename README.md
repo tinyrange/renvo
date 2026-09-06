@@ -183,6 +183,16 @@ tree, including standard-library assets. Use `-tags renvo_bundle` to also
 embed Forms, device, runtime modules, and libc sources; only that full bundle
 provides the built-in `/modules` cache.
 
+The public `renvo.dev/driver` package supports embedding without command-line
+processes. `Compile` accepts a source filesystem and Go inputs;
+`CompileCommand` accepts compiler arguments (including `cc`) and returns
+diagnostics plus a map of generated files in memory. It handles C
+preprocessing, compilation, and the built-in ELF object linker.
+`PlanMake` exposes the same dependency planner used by `renvo make`, allowing
+an embedding application to run recipes against its own virtual filesystem
+and retain intermediate outputs there. No host paths or output writes are
+required by these APIs.
+
 GitHub releases instead provide fully bundled Go-hosted compilers for Linux
 amd64, Windows amd64, and macOS arm64. Those distributions embed the standard
 library and built-in backends, and retain dynamic RTG/RBE backend preparation

@@ -82,7 +82,7 @@ func PreprocessCCommandWithInput(args []string, workDir string, fs SourceFS, inp
 	if !hasOutput {
 		ordinary = append(ordinary, "-o", "-")
 	}
-	options := ParseOptions(ordinary)
+	options := parseOptions(ordinary, true, false)
 	result := CPreprocessCommandResult{Output: options.Output, Ok: options.Ok, Option: options.ErrorArg}
 	if !options.Ok {
 		return result

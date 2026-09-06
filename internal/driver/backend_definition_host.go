@@ -117,7 +117,7 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 	if !targetExplicit {
 		clean = append(clean, "-t", resolved.Descriptor.Name)
 	}
-	options := parseOptions(clean, false)
+	options := parseOptions(clean, false, true)
 	if !options.Ok {
 		return backendBuildOptions{options: options, hasBackend: true}
 	}

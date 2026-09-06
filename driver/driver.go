@@ -2,6 +2,7 @@ package driver
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"renvo.dev/internal/backendcompiled"
@@ -29,7 +30,9 @@ func formatArguments(request *Request) []string {
 	args := make([]string, 0, len(request.Input)+4)
 	args = append(args, "-o", "output.bin")
 	args = append(args, "-t", request.Target)
-	args = append(args, "-arena-size", fmt.Sprintf("%d", request.ArenaSize))
+	if request.ArenaSize != 0 {
+		args = append(args, "-arena-size", fmt.Sprintf("%d", request.ArenaSize))
+	}
 	args = append(args, request.Input...)
 	return args
 }
@@ -41,17 +44,17 @@ type overlayFS struct {
 
 // PathExists implements [driver.SourceFS].
 func (o *overlayFS) PathExists(path string) bool {
-	if ok := strings.HasPrefix(path, "std/"); ok {
+	if isStdPath(path) {
 		return o.std.PathExists(path)
 	}
 
 	// Check if the path exists in the base filesystem.
-	return o.base.PathExists(path)
+	return o.base.PathExists(path) || o.std != nil && o.std.PathExists(path)
 }
 
 // ReadDir implements [driver.SourceFS].
 func (o *overlayFS) ReadDir(path string) ([]driver.DirEntry, bool) {
-	if ok := strings.HasPrefix(path, "std/"); ok {
+	if isStdPath(path) {
 		if o.std == nil {
 			return nil, false
 		}
@@ -60,12 +63,18 @@ func (o *overlayFS) ReadDir(path string) ([]driver.DirEntry, bool) {
 	}
 
 	// Read the directory from the base filesystem.
-	return o.base.ReadDir(path)
+	if entries, ok := o.base.ReadDir(path); ok {
+		return entries, true
+	}
+	if o.std != nil {
+		return o.std.ReadDir(path)
+	}
+	return nil, false
 }
 
 // ReadFile implements [driver.SourceFS].
 func (o *overlayFS) ReadFile(path string) ([]byte, bool) {
-	if ok := strings.HasPrefix(path, "std/"); ok {
+	if isStdPath(path) {
 		if o.std == nil {
 			return nil, false
 		}
@@ -74,11 +83,20 @@ func (o *overlayFS) ReadFile(path string) ([]byte, bool) {
 	}
 
 	if path == "go.mod" {
+		if data, ok := o.base.ReadFile(path); ok {
+			return data, true
+		}
 		return []byte("module main\n"), true
 	}
 
 	// Read the file from the base filesystem.
-	return o.base.ReadFile(path)
+	if data, ok := o.base.ReadFile(path); ok {
+		return data, true
+	}
+	if o.std != nil {
+		return o.std.ReadFile(path)
+	}
+	return nil, false
 }
 
 var (
@@ -86,6 +104,9 @@ var (
 )
 
 func Compile(request *Request) (*Result, error) {
+	if request == nil || request.Filesystem == nil {
+		return nil, fmt.Errorf("source filesystem must be specified")
+	}
 	if request.Target == "" {
 		return nil, fmt.Errorf("target must be specified")
 	}
@@ -93,9 +114,20 @@ func Compile(request *Request) (*Result, error) {
 		return nil, fmt.Errorf("at least one input file must be specified")
 	}
 
+	local := *request
+	local.Input = append([]string(nil), request.Input...)
+	workDir := "."
+	if len(local.Input) == 1 {
+		name := path.Clean(local.Input[0])
+		if _, ok := request.Filesystem.ReadDir(name); ok {
+			workDir, local.Input[0] = name, "."
+		} else {
+			workDir, local.Input[0] = path.Dir(name), path.Base(name)
+		}
+	}
 	result := driver.CompileFromFSWithModuleCache(
-		formatArguments(request),
-		".",
+		formatArguments(&local),
+		workDir,
 		"std/",
 		".",
 		&overlayFS{
@@ -110,4 +142,9 @@ func Compile(request *Request) (*Result, error) {
 		Diagnostic: result.Diagnostic,
 		Binary:     result.Binary,
 	}, nil
+}
+
+func isStdPath(name string) bool {
+	name = strings.TrimPrefix(path.Clean(name), "/")
+	return name == "std" || strings.HasPrefix(name, "std/")
 }

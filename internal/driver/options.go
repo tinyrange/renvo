@@ -305,13 +305,15 @@ func cCompilerOptionIndex(options string, arg string, prefix bool) (int, int) {
 }
 
 func ParseOptions(args []string) Options {
-	return parseOptions(args, true)
+	return parseOptions(args, true, true)
 }
 
 // parseOptions separates command-line syntax from release-target membership.
 // External backend definitions resolve their descriptor before this function
 // is called and therefore do not need to masquerade as an advertised target.
-func parseOptions(args []string, requireAdvertisedTarget bool) Options {
+// Preprocessing uses object-style single-file options without emitting an
+// object, so its targets need not be supported by the object writer.
+func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarget bool) Options {
 	options := Options{
 		Target:        DefaultTarget,
 		Mode:          ModeExecutable,
@@ -627,7 +629,7 @@ func parseOptions(args []string, requireAdvertisedTarget bool) Options {
 		if options.Mode == ModeKernelModule && options.Target != "linux/amd64" {
 			return parseFail(options, ParseErrModeRequiresLinuxAmd64, options.Target, modeAt)
 		}
-		if options.Mode == ModeObject && options.Target != "linux/amd64" && options.Target != "linux/386" {
+		if requireObjectTarget && options.Mode == ModeObject && options.Target != "linux/amd64" && options.Target != "linux/386" {
 			return parseFail(options, ParseErrObjectRequiresLinuxAmd64, options.Target, modeAt)
 		}
 	}
