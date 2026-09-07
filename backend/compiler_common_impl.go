@@ -14054,6 +14054,19 @@ func renvoEmitSliceReturnValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx in
 	if !renvoEmitSliceValueRegs(g, ep, idx) {
 		return false
 	}
+	// An address-taken arena allocation must retain its backing address when
+	// returning a view (for example a DMA-aligned subslice). Do not propagate
+	// this return-only decision into assignment allocation/constant facts.
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprSlice && renvoTypeIsSlice(g.meta, renvoInferParsedExprType(g, ep, e.left)) {
+		base := &ep.exprs[e.left]
+		if base.kind == renvoExprIdent {
+			local := renvoFindLocalIndex(g, base.nameStart, base.nameEnd)
+			if local >= 0 && !renvoLocalIsCurrentFuncParam(g, local) && g.locals[local].constValid != 0 && renvoLocalNameAddressTaken(g, base.nameStart, base.nameEnd) {
+				return true
+			}
+		}
+	}
 	if renvoReturnedSliceCanReuseDescriptor(g, ep, idx) {
 		return true
 	}
@@ -21265,6 +21278,9 @@ func renvoEmitIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
+		// Size-only loads sign-extend halfwords. Restore the parsed element's
+		// signedness before its value reaches comparisons or wider arithmetic.
+		renvoAsmNormalizePrimaryForKind(a, elem.kind)
 		return true
 	}
 	return false
@@ -30566,6 +30582,28 @@ func renvo32IEEENegateStack(g *renvoLinearGen, offset int, size int) {
 }
 
 func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+	if renvoPreparedBackendActive != 0 && renvoRTGPreparedIEEEFloat == 0 {
+		// Fixed-point prepared targets represent scalar floats in a native word.
+		// Interface equality also visits float metadata, even in integer-only
+		// programs; it must not fall through to the fixed x86 x87 encoder.
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+		condition := 0x94
+		if c0 == '!' {
+			condition = 0x95
+		} else if c0 == '<' {
+			condition = 0x9c
+			if c1 == '=' {
+				condition = 0x9e
+			}
+		} else if c0 == '>' {
+			condition = 0x9f
+			if c1 == '=' {
+				condition = 0x9d
+			}
+		}
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, condition)
+		return true
+	}
 	size := 8
 	if kind == renvoTypeFloat32 {
 		size = 4

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0d6e69985fe8c8d8dc67e390e214d75db678ca07ce1a6ff5f4fb01b56c731edf"
+const CompilerSourceDigest = "56b38472f4e0f7ab1f72527447a1fd8f16f670ea8bf056087c3622c48498e90c"
 
 // source: backend/compiler_common_impl.go
 
@@ -14061,6 +14061,19 @@ renvoNonNil(g, ep)
 if !renvoEmitSliceValueRegs(g, ep, idx) {
 return false
 }
+
+
+
+e := &ep.exprs[idx]
+if e.kind == renvoExprSlice && renvoTypeIsSlice(g.meta, renvoInferParsedExprType(g, ep, e.left)) {
+base := &ep.exprs[e.left]
+if base.kind == renvoExprIdent {
+local := renvoFindLocalIndex(g, base.nameStart, base.nameEnd)
+if local >= 0 && !renvoLocalIsCurrentFuncParam(g, local) && g.locals[local].constValid != 0 && renvoLocalNameAddressTaken(g, base.nameStart, base.nameEnd) {
+return true
+}
+}
+}
 if renvoReturnedSliceCanReuseDescriptor(g, ep, idx) {
 return true
 }
@@ -14285,7 +14298,11 @@ elemSize := renvoTypeSize(meta, arrayType.elem)
 if elemSize < 1 {
 elemSize = 8
 }
-baseOff := renvoAddUnnamedLocal(g, baseType)
+
+
+
+
+baseOff := renvoAddUnnamedLocal(g, renvoInferParsedExprType(g, ep, idx))
 lowOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 highOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 maxOff := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -21268,6 +21285,9 @@ return false
 }
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
+
+
+renvoAsmNormalizePrimaryForKind(a, elem.kind)
 return true
 }
 return false
@@ -30569,6 +30589,28 @@ renvoAsmStorePrimaryStack(&g.asm, highOffset)
 }
 
 func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+if renvoPreparedBackendActive != 0 && renvoRTGPreparedIEEEFloat == 0 {
+
+
+
+renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+condition := 0x94
+if c0 == '!' {
+condition = 0x95
+} else if c0 == '<' {
+condition = 0x9c
+if c1 == '=' {
+condition = 0x9e
+}
+} else if c0 == '>' {
+condition = 0x9f
+if c1 == '=' {
+condition = 0x9d
+}
+}
+renvoAsmCmpTertiaryPrimarySet(&g.asm, condition)
+return true
+}
 size := 8
 if kind == renvoTypeFloat32 {
 size = 4
