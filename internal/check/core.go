@@ -80,6 +80,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if decl.TypeEnd-decl.TypeStart == 1 && decl.ValueEnd > decl.ValueStart && literalIntegerOverflows(file, decl.ValueStart, decl.ValueEnd, tokenString(&file, decl.TypeStart)) {
 				return info, false, CheckErrType, fileIndex, decl.ValueStart
 			}
+			for tok := decl.ValueStart; tok >= 0 && tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenOperator && (invalidLiteralUnary(file, tok, decl.ValueEnd) || invalidLiteralOrdering(file, tok, decl.ValueStart, decl.ValueEnd)) {
+					return info, false, CheckErrOperand, fileIndex, tok
+				}
+			}
 		}
 	}
 	sortDecls(info.Decls)

@@ -45,6 +45,9 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 		if invalidLiteralUnary(file, i, fn.BodyEnd) {
 			return CheckErrOperand, i
 		}
+		if invalidLiteralOrdering(file, i, fn.BodyStart+1, fn.BodyEnd-1) {
+			return CheckErrOperand, i
+		}
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
 			leftToken := file.Tokens[i-1]
 			rightToken := file.Tokens[i+1]
