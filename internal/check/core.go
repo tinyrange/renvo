@@ -576,7 +576,7 @@ func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, bas
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len")
+	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {

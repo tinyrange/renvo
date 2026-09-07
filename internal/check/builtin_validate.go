@@ -27,9 +27,17 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
-		if name == "len" {
+		if name == "len" || name == "cap" {
 			if len(args) != 1 {
 				return CheckErrBuiltinArity, callee
+			}
+			if name == "cap" {
+				if tokenTextIs(file, close-2, "...") {
+					return CheckErrBuiltinArity, callee
+				}
+				if invalidCapacityLiteral(*file, args[0]) {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
 			}
 			continue
 		}
