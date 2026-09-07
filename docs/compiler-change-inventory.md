@@ -2,6 +2,13 @@
 
 This is a review inventory, not a new completion checklist. No keep/remove decisions have been made.
 
+Rebase note (2026-09-08): the combined branch was subsequently rebased onto
+main at `295f1361`, preserving the #467 merge (now `1209de92`). The original
+commit IDs and manifest below describe the pre-rebase review snapshot. The
+only source conflict was overlapping slice-descriptor storage fixes; main's
+inferred-slice-type implementation was retained and embedded backend sources
+were regenerated. The saved local stash and `local/` were left untouched.
+
 ## Snapshot and boundaries
 
 - Audit branch before integration: `f6890e564326d8d1674ece2c3882f044d05b2a85`.
@@ -1384,4 +1391,3 @@ Net additions/deletions are against 4862e9fc at integration commit 9db8e5f8. Ori
 | `std_bundle_default_test.go` | #460 + #467 | 32 | 2 |
 | `std_bundle_files_full.go` | #460 | 2 | 2 |
 | `std_bundle_files_minimal.go` | #460 | 3 | 3 |
-
