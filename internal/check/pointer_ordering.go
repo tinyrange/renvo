@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidPointerOrdering(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
+func invalidResolvedOrdering(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
 	file := pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	var scope CoreScope
@@ -31,6 +31,9 @@ func invalidPointerOrdering(pkg load.Package, info PackageInfo, fileIndex int, f
 		}
 		left := literalOrderingBoundary(file, op-1, fn.BodyStart+1, -1) + 1
 		right := literalOrderingBoundary(file, op+1, fn.BodyEnd-1, 1)
+		if definiteStructExpr(pkg, info, fileIndex, scope, bindings, left, op, op, 0) || definiteStructExpr(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) {
+			return op
+		}
 		if definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, left, op, op, 0) > 0 || definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) > 0 {
 			return op
 		}
