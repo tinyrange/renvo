@@ -29,6 +29,23 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
+		if name == "copy" || name == "delete" {
+			if len(args) != 2 || tokenTextIs(file, close-2, "...") {
+				return CheckErrBuiltinArity, callee
+			}
+			if numericBuiltinInNestedFunction(*file, fn, callee) {
+				continue
+			}
+			if !numericReady {
+				body := syntax.ParseFuncBodyStatements(*file, fn)
+				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericReady = true
+			}
+			if tok := invalidCopyDeleteOperands(*pkg, *info, fileIndex, scope, numericBindings, name, callee, args); tok >= 0 {
+				return CheckErrBuiltinOperand, tok
+			}
+			continue
+		}
 		if name == "real" || name == "imag" || name == "complex" {
 			if numericBuiltinInNestedFunction(*file, fn, callee) {
 				continue

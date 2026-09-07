@@ -1468,7 +1468,9 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 			return functionValueTokensText(program, start+1, end)
 		}
 	}
-	for i := before - 3; i > fn.BodyStart; i-- {
+	// A named-type declaration can end just two tokens before its first use
+	// (var value NamedType followed by a call). Do not skip that declaration.
+	for i := before - 1; i > fn.BodyStart; i-- {
 		if !functionValueTokenEquals(program, i, name) {
 			continue
 		}
