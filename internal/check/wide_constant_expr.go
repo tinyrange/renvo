@@ -143,19 +143,18 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		return wideIntegerLiteral(tokenString(&file, start))
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent {
+		if context.iotaKnown && tokenTextIs(&file, start, "iota") && LookupPackageSymbol(*context.info, "iota") < 0 {
+			return wideSmall(context.iotaValue)
+		}
 		index := LookupDecl(*context.info, tokenString(&file, start))
 		if index < 0 {
 			return wideConstant{}
 		}
 		decl := context.info.Decls[index]
-		if decl.Kind != SymbolConst || decl.TypeEnd > decl.TypeStart {
+		if decl.Kind != SymbolConst {
 			return wideConstant{}
 		}
-		context.fileIndex = decl.File
-		values := splitExprList(context.pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
-		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
-			return wideConstantExpr(context, values[decl.ValueIndex].StartTok, values[decl.ValueIndex].EndTok, depth+1)
-		}
+		return wideDeclaredConstant(context, decl, depth+1)
 	}
 	return wideConstant{}
 }

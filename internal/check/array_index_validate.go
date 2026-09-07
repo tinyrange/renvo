@@ -6,6 +6,8 @@ import (
 )
 
 type constantIndexContext struct {
+	iotaValue int
+	iotaKnown bool
 	pkg       *load.Package
 	info      *PackageInfo
 	fileIndex int
