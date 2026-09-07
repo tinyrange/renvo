@@ -3166,6 +3166,16 @@ func renvoConvertConstInt(renvoNativeIntSize int, value int, kind int) int {
 	return value
 }
 
+// Literal emission needs target-sized words, but constant evaluation can keep
+// both words when the compiler host has a 64-bit int.
+func renvoParseConstIntToken(p *renvoProgram, tok int) int {
+	value := renvoParseIntToken(p, tok)
+	if !p.compilerInt32 && p.c.renvoNativeIntSize == 4 {
+		value = int(uint64(uint32(value)) | uint64(uint32(p.parsedIntHigh))<<32)
+	}
+	return value
+}
+
 func renvoSetConstResult(result *renvoConstResult, value int, ok bool) {
 	result.value = value
 	result.ok = ok
@@ -3183,7 +3193,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 	p := g.prog
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
-		value := renvoParseIntToken(p, e.tok)
+		value := renvoParseConstIntToken(p, e.tok)
 		if p.compilerInt32 && p.parsedIntHigh != value>>31 {
 			renvoSetConstResult(out, 0, false)
 			return
@@ -3380,7 +3390,11 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		}
 		var right renvoConstResult
 		if rightKind == renvoExprInt {
-			value := renvoParseIntToken(p, rightTok)
+			value := renvoParseConstIntToken(p, rightTok)
+			if p.compilerInt32 && p.parsedIntHigh != value>>31 {
+				renvoSetConstResult(out, 0, false)
+				return
+			}
 			right = renvoConstResultOk(value)
 		} else if rightKind == renvoExprChar {
 			value := renvoParseCharToken(p, rightTok)
@@ -3406,7 +3420,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.left) {
 			unsignedKind = renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left)).kind
 		}
-		if !usesFloat && renvoExprHasUnsignedIntType(g, ep, e.right) {
+		if !usesFloat && !renvoTok2Is(p, opTok, '<', '<') && !renvoTok2Is(p, opTok, '>', '>') && renvoExprHasUnsignedIntType(g, ep, e.right) {
 			rightUnsignedKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right)).kind
 			if unsignedKind == 0 || renvoUnsignedKindSize(rightUnsignedKind) > renvoUnsignedKindSize(unsignedKind) {
 				unsignedKind = rightUnsignedKind
@@ -5262,9 +5276,15 @@ func renvoParseConstDecls(m *renvoMeta, p *renvoProgram, start int, end int) {
 			}
 			initStart := prevValues[i*2]
 			initEnd := prevValues[i*2+1]
+			constantExpr := renvoNewExprParse()
+			constantRoot := renvoParseExpressionRoot(constantExpr, p, initStart, initEnd)
 			constType := typ
-			if constType == 0 {
-				constType = renvoInferTopLiteralType(m, p, initStart, initEnd)
+			if constType == 0 && constantRoot >= 0 {
+				var g renvoLinearGen
+				g.c = m.c
+				g.meta = m
+				g.prog = p
+				constType = renvoInferParsedExprType(&g, constantExpr, constantRoot)
 			}
 			if constType == 0 {
 				constType = renvoTypeInt
@@ -5277,7 +5297,7 @@ func renvoParseConstDecls(m *renvoMeta, p *renvoProgram, start int, end int) {
 			sym.initStart = initStart
 			sym.initEnd = initEnd
 			sym.iotaValue = iotaValue
-			constResult := renvoEvalMetaConstExpr(m, p, initStart, initEnd, iotaValue)
+			constResult := renvoEvalMetaParsedConstExpr(m, p, constantExpr, constantRoot, iotaValue)
 			if constResult.ok && (initStart+1 == initEnd || !renvoTypeKindIsFloat(renvoResolveType(m, constType).kind)) {
 				sym.constValue = constResult.value
 				sym.constValueOK = 1
@@ -5310,9 +5330,13 @@ func renvoEvalMetaParsedConstExpr(m *renvoMeta, p *renvoProgram, ep *renvoExprPa
 
 func renvoEvalMetaParsedConstExprInto(m *renvoMeta, p *renvoProgram, ep *renvoExprParse, idx int, iotaValue int, out *renvoConstResult) {
 	renvoNonNil(m, p, ep, out)
+	if idx < 0 || idx >= len(ep.exprs) {
+		renvoSetConstResult(out, 0, false)
+		return
+	}
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
-		value := renvoParseIntToken(p, e.tok)
+		value := renvoParseConstIntToken(p, e.tok)
 		if p.compilerInt32 && p.parsedIntHigh != value>>31 {
 			renvoSetConstResult(out, 0, false)
 			return
@@ -5410,8 +5434,17 @@ func renvoEvalMetaParsedConstExprInto(m *renvoMeta, p *renvoProgram, ep *renvoEx
 			return
 		}
 		var g renvoLinearGen
+		g.c = m.c
+		g.meta = m
 		g.prog = p
-		renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, 0, out)
+		unsignedKind := 0
+		if renvoExprHasUnsignedIntType(&g, ep, e.left) {
+			unsignedKind = renvoResolveType(m, renvoInferParsedExprType(&g, ep, e.left)).kind
+		}
+		if !renvoTok2Is(p, e.tok, '<', '<') && !renvoTok2Is(p, e.tok, '>', '>') && renvoExprHasUnsignedIntType(&g, ep, e.right) {
+			unsignedKind = renvoResolveType(m, renvoInferParsedExprType(&g, ep, e.right)).kind
+		}
+		renvoEvalConstBinaryInto(&g, e.tok, left.value, right.value, unsignedKind, out)
 		return
 	}
 	renvoSetConstResult(out, 0, false)
@@ -6418,8 +6451,14 @@ func renvoBuiltinTypeFromToken(p *renvoProgram, tokIndex int) int {
 	if renvoTokIdentIs(p, tokIndex, "any") || renvoTokIdentIs(p, tokIndex, "error") {
 		return renvoBuiltinTypeInterface
 	}
-	if renvoTokIdentIs(p, tokIndex, "uintptr") {
-		return renvoTypeInt
+	if renvoTokIdentIs(p, tokIndex, "uintptr") || renvoTokIdentIs(p, tokIndex, "uint") {
+		if p.c.renvoNativeIntSize == 8 {
+			return renvoBuiltinTypeUint64
+		}
+		if p.c.renvoNativeIntSize == 2 {
+			return renvoBuiltinTypeUint16
+		}
+		return renvoBuiltinTypeUint32
 	}
 	if renvoBytesEqualText(p.src, int(tok.start), int(tok.end), "float32") {
 		return renvoBuiltinTypeFloat32
@@ -13373,6 +13412,9 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 			return renvoTypeBool
 		}
 		leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
+		if renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>') {
+			return leftTypeIndex
+		}
 		rightTypeIndex := renvoInferParsedExprType(g, ep, e.right)
 		leftType := renvoResolveType(meta, leftTypeIndex)
 		renvoNonNil(leftType)
@@ -28984,9 +29026,9 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 		constant := renvoEvalConstExpr(g, ep, idx)
 		if constant.ok {
 			renvoAsmStoreStackImm(&g.asm, offset, constant.value)
-			high := 0
-			if destKind == renvoTypeInt64 && constant.value < 0 {
-				high = -1
+			high := constant.value >> 32
+			if g.prog.compilerInt32 && destKind != renvoTypeInt64 {
+				high = 0
 			}
 			renvoAsmStoreStackImm(&g.asm, offset-g.c.renvoNativeIntSize, high)
 			return true

@@ -3,18 +3,23 @@ package check
 import "renvo.dev/internal/load"
 import "renvo.dev/internal/syntax"
 
-// unsafe.Add accepts all integer types, not just the int parameter used by its
-// compact runtime implementation. Reject definitely invalid operands before
-// ordinary call lowering can turn a floating-point offset into an integer.
-func invalidUnsafeAddCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, selectors []CoreSelectorRef) (int, int) {
+// Unsafe intrinsics have operand rules beyond their compact runtime signatures.
+// Reject definitely invalid operands before ordinary call lowering can turn a
+// floating-point offset or length into an integer.
+func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, selectors []CoreSelectorRef) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	ready := false
 	for _, selector := range selectors {
-		if selector.BaseIndex < 0 || selector.BaseIndex >= len(info.Imports) || info.Imports[selector.BaseIndex].ImportPath != "unsafe" || !tokenTextIs(file, selector.NameTok, "Add") {
+		if selector.BaseIndex < 0 || selector.BaseIndex >= len(info.Imports) || info.Imports[selector.BaseIndex].ImportPath != "unsafe" {
 			continue
 		}
 		callee := selector.NameTok
+		isString := tokenTextIs(file, callee, "String")
+		isStringData := tokenTextIs(file, callee, "StringData")
+		if !tokenTextIs(file, callee, "Add") && !isString && !isStringData {
+			continue
+		}
 		if !tokCharIs(file, callee+1, '(') {
 			return CheckErrBuiltinOperand, callee
 		}
@@ -23,17 +28,30 @@ func invalidUnsafeAddCalls(pkg *load.Package, info *PackageInfo, fileIndex int, 
 			continue
 		}
 		args := splitExprList(*file, callee+2, close-1)
-		if len(args) != 2 {
+		arity := 2
+		if isStringData {
+			arity = 1
+		}
+		if len(args) != arity {
 			return CheckErrBuiltinArity, callee
 		}
 		if !ready {
 			locals = collectDefiniteLocalTypes(*file, fn)
 			ready = true
 		}
+		if isStringData {
+			typ := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, args[0], callee, 0)
+			start, end := stripOuterParens(*file, args[0].StartTok, args[0].EndTok)
+			if typ != "" && typ != "string" || end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenNumber || file.Tokens[start].KindLine&255 == syntax.TokenChar || tokenTextIs(file, start, "nil")) {
+				return CheckErrBuiltinOperand, start
+			}
+			continue
+		}
 		pointer := args[0]
 		pointerType := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, pointer, callee, 0)
 		pointerStart, pointerEnd := stripOuterParens(*file, pointer.StartTok, pointer.EndTok)
-		if pointerType != "" && pointerType != "unsafe.Pointer" {
+		byteAddress := isString && tokenTextIs(file, pointerStart, "&") && (pointerType == "byte" || pointerType == "uint8")
+		if pointerType != "" && pointerType != "unsafe.Pointer" && !byteAddress {
 			return CheckErrBuiltinOperand, pointer.StartTok
 		}
 		if pointerEnd-pointerStart == 1 && (file.Tokens[pointerStart].KindLine&255 == syntax.TokenNumber || file.Tokens[pointerStart].KindLine&255 == syntax.TokenString || file.Tokens[pointerStart].KindLine&255 == syntax.TokenChar) {
@@ -52,6 +70,9 @@ func invalidUnsafeAddCalls(pkg *load.Package, info *PackageInfo, fileIndex int, 
 			return CheckErrBuiltinOperand, start
 		}
 		if literalIntegerOverflows(*file, start, end, "int64") {
+			return CheckErrBuiltinOperand, start
+		}
+		if isString && literalIntegerOverflows(*file, start, end, "uint64") {
 			return CheckErrBuiltinOperand, start
 		}
 	}

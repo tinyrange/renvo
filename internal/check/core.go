@@ -192,7 +192,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
-			if code, tok := invalidUnsafeAddCalls(&pkg, &info, fileIndex, fn, &signature, out.CoreSelectors); code != CheckOK {
+			if code, tok := invalidUnsafeIntrinsicCalls(&pkg, &info, fileIndex, fn, &signature, out.CoreSelectors); code != CheckOK {
 				return info, false, code, fileIndex, tok
 			}
 			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
