@@ -263,6 +263,11 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 
 func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	// After stripping grouping, a call/conversion result is not assignable.
+	// An explicit dereference of a returned pointer remains a valid target.
+	if end > start && tokCharIs(&file, end-1, ')') && !tokCharIs(&file, start, '*') {
+		return true
+	}
 	// An assignable expression cannot end in an operator. In particular this
 	// rejects a malformed compound assignment such as x + %= y, whose tokens
 	// otherwise look like an assignment to the incomplete expression x +.

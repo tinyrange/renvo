@@ -207,6 +207,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if code, tok := invalidLocalRules(pkg, info, file, fn, body); code != CheckOK {
 				return info, false, code, fileIndex, tok
 			}
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrAssignTarget, fileIndex, tok
+			}
 			literals := buildFuncCompositeExprs(file, body)
 			if len(literals) > 0 {
 				scope, ok, tok := buildFuncScopeCore(file, fn)

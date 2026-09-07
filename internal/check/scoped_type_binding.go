@@ -8,6 +8,7 @@ type scopedTypeBinding struct {
 	name, visible, end   int
 	typeStart, typeEnd   int
 	valueStart, valueEnd int
+	writable            bool
 }
 
 func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax.Body) []scopedTypeBinding {
@@ -22,7 +23,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			fields = signature.Receiver
 		}
 		for _, field := range fields {
-			bindings = append(bindings, scopedTypeBinding{field.NameTok, fn.BodyStart, fn.BodyEnd, field.TypeStart, field.TypeEnd, -1, -1})
+			bindings = append(bindings, scopedTypeBinding{field.NameTok, fn.BodyStart, fn.BodyEnd, field.TypeStart, field.TypeEnd, -1, -1, true})
 		}
 	}
 	for _, stmt := range body.Stmts {
@@ -80,7 +81,7 @@ func appendScopedTypeBindings(bindings []scopedTypeBinding, file syntax.File, st
 		values = splitExprList(file, op+1, end)
 	}
 	for i, name := range names {
-		binding := scopedTypeBinding{name, end, scopeEnd, -1, -1, -1, -1}
+		binding := scopedTypeBinding{name, end, scopeEnd, -1, -1, -1, -1, variable}
 		if variable {
 			binding.typeStart, binding.typeEnd = typeStart, typeEnd
 			if len(values) == len(names) {
