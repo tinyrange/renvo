@@ -123,6 +123,14 @@ defer/panic/recover, arrays and slices, complex values, goroutines, channels,
 `select`, cgo-style explicit C package boundaries, and the builtins needed by
 Renvo itself. Generics remain out of scope.
 
+Release build tags are fixed to Renvo's Go 1.25 baseline: `go1.1` through
+`go1.25` are enabled independently of the host compiler and the module's `go`
+directive. Newer tags are disabled unless explicitly supplied with `-tags`.
+This selection baseline is not a claim of complete Go 1.25 compatibility.
+Module and file language versions are tracked separately; feature-version
+checking is still incomplete, and Go 1.26 expression allocation is not yet
+implemented.
+
 Concurrency is a frontend feature: it lowers to the pluggable
 `renvo.dev/x/runtime` handler API before the compact backend unit. The bundled
 `x/runtime/serial` handler provides cooperative, serialized execution rather

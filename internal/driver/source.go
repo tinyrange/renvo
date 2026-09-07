@@ -1213,6 +1213,9 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 	if tag == "renvo" || tag == "cgo" {
 		return true
 	}
+	if load.HasGoReleaseTag(tag) {
+		return true
+	}
 	return targetinfo.HasBuildTag(target, tag) || renvoBackendTargetHasBuildTag(target, tag)
 }
 
