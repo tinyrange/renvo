@@ -306,6 +306,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-036", "map key type is not comparable")
 			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
+			} else if built.Build.ErrorDetail == check.CheckErrConstantOperation {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
 				renvoSetDiagnostic(&d, "checker", renvoDiagnosticCode("CHECK", built.Build.ErrorDetail), renvoCheckMessage(built.Build.ErrorDetail))
 			} else {

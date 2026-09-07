@@ -83,6 +83,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortDecls(info.Decls)
+	if file, tok := invalidPackageConstantOperations(&pkg, &info); tok >= 0 {
+		return info, false, CheckErrConstantOperation, file, tok
+	}
 	info.DeclOrder = make([]int, len(info.Decls))
 	for i := 0; i < len(info.DeclOrder); i++ {
 		info.DeclOrder[i] = i
