@@ -57,8 +57,9 @@ type ModuleReplace struct {
 // available, read-only source tree. It is populated by source collection and
 // deliberately contains no network location.
 type ModuleDependency struct {
-	Path string
-	Root string
+	Path      string
+	Root      string
+	GoVersion string
 }
 
 type PackageRef struct {

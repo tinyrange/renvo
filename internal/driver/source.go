@@ -510,7 +510,12 @@ func (c *sourceCollector) resolveDependency(importPath string) load.PackageRef {
 				return unsupportedPackage(importPath)
 			}
 		}
-		manifest := []byte(requirement.Path)
+		manifest := []byte("module " + requirement.Path + "\n")
+		if dependency.GoVersion != "" {
+			manifest = append(manifest, "go "...)
+			manifest = append(manifest, dependency.GoVersion...)
+			manifest = append(manifest, '\n')
+		}
 		c.files = append(c.files, load.SourceFile{Path: goModPath, Src: manifest})
 		c.modules = append(c.modules, dependency)
 		c.resolved = append(c.resolved, requirement)
