@@ -29,8 +29,9 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
-		if name == "copy" || name == "delete" {
-			if len(args) != 2 || tokenTextIs(file, close-2, "...") {
+		if name == "copy" || name == "delete" || name == "append" {
+			expanded := tokenTextIs(file, close-2, "...")
+			if name == "append" && (len(args) == 0 || expanded && len(args) != 2) || name != "append" && (len(args) != 2 || expanded) {
 				return CheckErrBuiltinArity, callee
 			}
 			if numericBuiltinInNestedFunction(*file, fn, callee) {
@@ -40,6 +41,12 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				body := syntax.ParseFuncBodyStatements(*file, fn)
 				numericBindings = collectScopedTypeBindings(*file, fn, body)
 				numericReady = true
+			}
+			if name == "append" {
+				if tok := invalidAppendOperands(*pkg, *info, fileIndex, scope, numericBindings, callee, args, expanded); tok >= 0 {
+					return CheckErrBuiltinOperand, tok
+				}
+				continue
 			}
 			if tok := invalidCopyDeleteOperands(*pkg, *info, fileIndex, scope, numericBindings, name, callee, args); tok >= 0 {
 				return CheckErrBuiltinOperand, tok

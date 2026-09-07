@@ -5,6 +5,37 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
+func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, args []ExprSpan, expanded bool) int {
+	file := pkg.Files[fileIndex].File
+	count := 1
+	if expanded {
+		count = 2
+	}
+	for i := 0; i < count; i++ {
+		arg := args[i]
+		end := arg.EndTok
+		if expanded && i == 1 {
+			end-- // exclude the ellipsis, which is not part of the source value
+		}
+		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, end, before, 0)
+		start, finish := stripOuterParens(file, arg.StartTok, end)
+		if i == 1 && finish-start == 1 && tokenTextIs(&file, start, "nil") && value.kind == "other" {
+			continue
+		}
+		if i == 1 && value.kind == "string" {
+			continue // byte-element compatibility remains a separate type check
+		}
+		if value.kind != "" {
+			return arg.StartTok
+		}
+		kind := containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, arg.StartTok, end, before, 0)
+		if kind != 0 && kind != TypeSlice {
+			return arg.StartTok
+		}
+	}
+	return -1
+}
+
 func invalidCopyDeleteOperands(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, name string, before int, args []ExprSpan) int {
 	file := pkg.Files[fileIndex].File
 	count := 2

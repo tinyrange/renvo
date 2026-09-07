@@ -12194,15 +12194,8 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 			renvoClearLocalFlowConstAtOffset(g, offset)
 		}
 	}
-	if stmt.kind == renvoStmtShort {
-		root := &ep.exprs[rootIndex]
-		if root.kind == renvoExprCall && root.argCount >= 2 && renvoExprIdentCode(p, ep, root.left) == renvoIdentAppend {
-			if !renvoEmitSliceValueRegs(g, ep, renvo_runtime_UnsafeIntAt(ep.args, root.firstArg)) {
-				return false
-			}
-			renvoAsmStoreSliceStack(a, offset)
-		}
-	}
+	// Append assignment materializes its source itself. Pre-initializing a
+	// short declaration here would evaluate a source call twice.
 	if renvoEmitAppendAssignGeneral(g, stmt, ep, assignTok) {
 		if globalOffset < 0 && fieldStackOffset < 0 {
 			renvoClearLocalConstAtOffset(g, offset)
@@ -13339,7 +13332,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		if callee == renvoIdentRecover && e.argCount == 0 {
 			return renvoBuiltinTypeInterface
 		}
-		if callee == renvoIdentAppend && e.argCount >= 2 {
+		if callee == renvoIdentAppend && e.argCount >= 1 {
 			return renvoInferParsedExprType(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		if callee == renvoIdentByteSlice && e.argCount == 1 {
@@ -14561,7 +14554,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 		return true
 	}
 	if e.kind == renvoExprIdent {
-		if renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
+		if renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 && renvoFindGlobalType(g, e.nameStart, e.nameEnd) == 0 {
 			renvoAsmPrimaryImm(a, 0)
 			renvoAsmSecondaryImm(a, 0)
 			renvoAsmCopySecondaryToTertiary(a)
@@ -14634,7 +14627,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 		prog := g.prog
 		calleeLeft := e.left
 		callee := renvoExprIdentCode(prog, ep, calleeLeft)
-		if e.argCount >= 2 && callee == renvoIdentAppend {
+		if e.argCount >= 1 && callee == renvoIdentAppend {
 			source := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 			typ := renvoInferParsedExprType(g, ep, source)
 			if !renvoTypeIsSlice(meta, typ) || !renvoEmitSliceValueRegs(g, ep, source) {
@@ -19899,6 +19892,18 @@ func renvoEmitAppendToLocation(g *renvoLinearGen, stmt *renvoStmt, ep *renvoExpr
 			return false
 		}
 		valueIndex := renvo_runtime_UnsafeIntAt(ep.args, root.firstArg+1)
+		value := &ep.exprs[valueIndex]
+		if renvoExprIsNil(g.prog, value) && renvoFindLocalIndex(g, value.nameStart, value.nameEnd) < 0 && renvoFindGlobalType(g, value.nameStart, value.nameEnd) == 0 {
+			// Expanding untyped nil appends no elements. Still evaluate a
+			// memory-backed destination, including its bounds/dereference checks.
+			if loc.mem {
+				if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
+					return false
+				}
+				renvoAsmLoadSliceMemSecondary(&g.asm)
+			}
+			return true
+		}
 		if elem.kind == renvoTypeByte && renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, valueIndex)) {
 			return renvoEmitAppendStringBytesToLocation(g, ep, valueIndex, locEp, loc)
 		}
