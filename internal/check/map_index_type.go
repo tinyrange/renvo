@@ -13,14 +13,22 @@ type mapIndexBinding struct {
 	valueStart, valueEnd int
 }
 
-func invalidMapIndexType(pkg load.Package, info PackageInfo, file syntax.File, fn syntax.FuncDecl, body syntax.Body) int {
+type mapIndexShape struct {
+	key                        string
+	file, valueStart, valueEnd int
+	scope                      CoreScope
+	known                      bool
+}
+
+func invalidMapIndexType(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) (int, int) {
+	file := pkg.Files[fileIndex].File
 	indexes := buildFuncIndexExprs(&file, &body)
 	if len(indexes) == 0 {
-		return -1
+		return CheckOK, -1
 	}
 	scope, ok, _ := buildFuncScopeCore(file, fn)
 	if !ok {
-		return -1
+		return CheckOK, -1
 	}
 	var bindings []mapIndexBinding
 	signature := buildFuncSignature(file, fn)
@@ -78,12 +86,15 @@ func invalidMapIndexType(pkg load.Package, info PackageInfo, file syntax.File, f
 		}
 	}
 	for _, index := range indexes {
-		key := mapIndexExprKey(pkg, info, file, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
-		if mapLiteralPrimitiveMismatch(file, index.IndexStart, index.IndexEnd, key) {
-			return index.IndexStart
+		shape := mapIndexExprShape(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
+		if mapLiteralPrimitiveMismatch(file, index.IndexStart, index.IndexEnd, shape.key) {
+			return CheckErrType, index.IndexStart
+		}
+		if tok := invalidMapElementFieldWrite(pkg, info, file, body, index, shape); tok >= 0 {
+			return CheckErrAssignTarget, tok
 		}
 	}
-	return -1
+	return CheckOK, -1
 }
 
 func appendMapIndexBindings(bindings []mapIndexBinding, file syntax.File, start, end, scopeEnd int, variable, short bool) []mapIndexBinding {
@@ -118,27 +129,38 @@ func appendMapIndexBindings(bindings []mapIndexBinding, file syntax.File, start,
 	return bindings
 }
 
-func mapIndexExprKey(pkg load.Package, info PackageInfo, file syntax.File, scope CoreScope, bindings []mapIndexBinding, start, end, before, depth int) string {
+func mapIndexExprShape(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []mapIndexBinding, start, end, before, depth int) mapIndexShape {
 	if depth > 32 {
-		return ""
+		return mapIndexShape{}
 	}
+	file := pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
-		return ""
+		return mapIndexShape{}
 	}
 	if tokCharIs(&file, end-1, '}') {
-		open := findTypeTopLevelChar(file, start, end, '{')
+		open, braces := -1, 0
+		for tok := end - 1; tok >= start; tok-- {
+			if tokCharIs(&file, tok, '}') {
+				braces++
+			}
+			if tokCharIs(&file, tok, '{') {
+				braces--
+				if braces == 0 {
+					open = tok
+					break
+				}
+			}
+		}
 		if open >= 0 && findTypeMatching(file, open, '{', '}') == end {
-			key, _ := mapLiteralPrimitiveTypes(pkg, info, file, start, open, scope, 0)
-			return key
+			return mapIndexTypeShape(pkg, info, fileIndex, start, open, scope, 0)
 		}
 	}
 	if tokenTextIs(&file, start, "make") && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(info, "make") < 0 {
-		key, _ := mapLiteralPrimitiveTypes(pkg, info, file, start+2, nextTopLevelComma(file, start+2, end-1), scope, 0)
-		return key
+		return mapIndexTypeShape(pkg, info, fileIndex, start+2, nextTopLevelComma(file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
-		return ""
+		return mapIndexShape{}
 	}
 	chosen := -1
 	for i, binding := range bindings {
@@ -149,10 +171,9 @@ func mapIndexExprKey(pkg load.Package, info PackageInfo, file syntax.File, scope
 	if chosen >= 0 {
 		binding := bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
-			key, _ := mapLiteralPrimitiveTypes(pkg, info, file, binding.typeStart, binding.typeEnd, scope, 0)
-			return key
+			return mapIndexTypeShape(pkg, info, fileIndex, binding.typeStart, binding.typeEnd, scope, 0)
 		}
-		return mapIndexExprKey(pkg, info, file, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
+		return mapIndexExprShape(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(&file, start)
 	for _, decl := range info.Decls {
@@ -161,14 +182,33 @@ func mapIndexExprKey(pkg load.Package, info PackageInfo, file syntax.File, scope
 		}
 		declFile := pkg.Files[decl.File].File
 		if decl.TypeEnd > decl.TypeStart {
-			key, _ := mapLiteralPrimitiveTypes(pkg, info, declFile, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
-			return key
+			return mapIndexTypeShape(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
 		}
 		values := splitExprList(declFile, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return mapIndexExprKey(pkg, info, declFile, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return mapIndexExprShape(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
-	return ""
+	return mapIndexShape{}
+}
+
+func mapIndexTypeShape(pkg load.Package, info PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) mapIndexShape {
+	if start < 0 || start >= end || depth > len(info.Types)+1 {
+		return mapIndexShape{}
+	}
+	file := pkg.Files[fileIndex].File
+	if file.Tokens[start].KindLine&255 == syntax.TokenMap {
+		ks, ke, vs, ve := parseMapTypeShape(file, start, end)
+		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, scope, true}
+	}
+	if end-start != 1 || lookupScopeTokenNameCore(scope, &file, start) >= 0 {
+		return mapIndexShape{}
+	}
+	index := LookupType(info, tokenString(&file, start))
+	if index < 0 {
+		return mapIndexShape{}
+	}
+	typ := info.Types[index]
+	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 }
