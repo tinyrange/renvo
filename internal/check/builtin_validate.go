@@ -50,13 +50,21 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		if name == "len" || name == "cap" {
-			if len(args) != 1 {
+			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
 				return CheckErrBuiltinArity, callee
 			}
-			if name == "cap" {
-				if tokenTextIs(file, close-2, "...") {
-					return CheckErrBuiltinArity, callee
+			if !numericBuiltinInNestedFunction(*file, fn, callee) {
+				if !numericReady {
+					body := syntax.ParseFuncBodyStatements(*file, fn)
+					numericBindings = collectScopedTypeBindings(*file, fn, body)
+					numericReady = true
 				}
+				value := numericBuiltinExprValue(*pkg, *info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+				if value.kind == "int" || value.kind == "float" || value.kind == "complex" || value.kind == "bool" || value.kind == "other" || name == "cap" && value.kind == "string" {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
+			}
+			if name == "cap" {
 				if invalidCapacityLiteral(*file, args[0]) {
 					return CheckErrBuiltinOperand, args[0].StartTok
 				}
