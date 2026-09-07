@@ -1,5 +1,21 @@
 package load
 
+func packageModuleGoVersion(module Module, ref PackageRef, dependencies []ModuleDependency) string {
+	if ref.Kind == PackageInModule {
+		return module.GoVersion
+	}
+	if ref.Kind != PackageDependency {
+		return ""
+	}
+	path, version := "", ""
+	for _, dependency := range dependencies {
+		if (ref.ImportPath == dependency.Path || HasImportPrefix(ref.ImportPath, dependency.Path)) && len(dependency.Path) > len(path) {
+			path, version = dependency.Path, dependency.GoVersion
+		}
+	}
+	return version
+}
+
 func goDirectiveLineEnd(src []byte, pos int) bool {
 	for {
 		pos = skipGoModHorizontal(src, pos)

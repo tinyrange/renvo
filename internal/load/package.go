@@ -58,6 +58,7 @@ type AssemblyFile struct {
 
 type Package struct {
 	Ref            PackageRef
+	GoVersion      string
 	Name           string
 	Files          []ParsedFile
 	Assemblies     []AssemblyFile
@@ -130,6 +131,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	if !ref.Ok || ref.Dir == "" {
 		return packageFail(pkg, PackageErrRef, -1, -1)
 	}
+	pkg.GoVersion = packageModuleGoVersion(module, ref, dependencies)
 	selected := selectPackageFiles(ref.Dir, files)
 	if len(selected) == 0 {
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)

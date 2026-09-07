@@ -33,3 +33,39 @@ func TestWorkspaceRetainsGoVersion(t *testing.T) {
 		t.Fatalf("version lost during loading: %#v", workspace)
 	}
 }
+
+func TestPackageGoVersionOwnership(t *testing.T) {
+	module := Module{Path: "example.com/app", GoVersion: "1.26"}
+	dependencies := []ModuleDependency{
+		{Path: "example.com/lib", GoVersion: "1.20"},
+		{Path: "example.com/lib/sub", GoVersion: "1.22"},
+		{Path: "example.com/legacy"},
+	}
+	for _, test := range []struct {
+		kind       int
+		path, want string
+	}{
+		{PackageInModule, "example.com/app/pkg", "1.26"},
+		{PackageDependency, "example.com/lib/pkg", "1.20"},
+		{PackageDependency, "example.com/lib/sub/pkg", "1.22"},
+		{PackageDependency, "example.com/legacy", ""},
+		{PackageStandard, "fmt", ""},
+	} {
+		got := packageModuleGoVersion(module, PackageRef{Kind: test.kind, ImportPath: test.path}, dependencies)
+		if got != test.want {
+			t.Fatalf("%s: %q, want %q", test.path, got, test.want)
+		}
+	}
+}
+
+func TestLegacyDependencyManifest(t *testing.T) {
+	workspace := LoadWorkspace("/repo/app", "/std", ".", []SourceFile{
+		{Path: "/repo/app/go.mod", Src: []byte("module example.com/app\ngo 1.26\n")},
+		{Path: "/repo/app/main.go", Src: []byte("package main\nimport \"example.com/lib\"\nfunc main(){_=lib.Value()}\n")},
+		{Path: "/repo/lib/go.mod", Src: []byte("example.com/lib")},
+		{Path: "/repo/lib/lib.go", Src: []byte("package lib\nfunc Value()int{return 1}\n")},
+	})
+	if !workspace.Ok || len(workspace.Graph.Packages) != 2 || workspace.Graph.Packages[0].GoVersion != "" {
+		t.Fatalf("legacy manifest failed: %#v", workspace)
+	}
+}
