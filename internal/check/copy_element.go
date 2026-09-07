@@ -5,6 +5,19 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
+// copy and append's expanded form both require a source slice with identical
+// element type, or a string source with a byte-slice destination. sourceEnd
+// excludes append's ellipsis; untyped nil stays unresolved and valid there.
+func invalidSliceTransferElements(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, dst, src ExprSpan, sourceEnd int) int {
+	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, dst.StartTok, dst.EndTok, before, 0)
+	source := copySliceElement(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
+	value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
+	if destination != "" && (source != "" && destination != source || value.kind == "string" && destination != "uint8") {
+		return src.StartTok
+	}
+	return -1
+}
+
 // A known element identity is stronger than an underlying scalar kind: copy
 // permits different named slice types, but requires identical element types.
 func copySliceElement(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) string {

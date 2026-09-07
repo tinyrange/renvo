@@ -23,7 +23,7 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 			continue
 		}
 		if i == 1 && value.kind == "string" {
-			continue // byte-element compatibility remains a separate type check
+			continue // element compatibility is checked below
 		}
 		if value.kind != "" {
 			return arg.StartTok
@@ -32,6 +32,9 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 		if kind != 0 && kind != TypeSlice {
 			return arg.StartTok
 		}
+	}
+	if expanded {
+		return invalidSliceTransferElements(pkg, info, fileIndex, scope, bindings, before, args[0], args[1], args[1].EndTok-1)
 	}
 	return -1
 }
@@ -67,12 +70,7 @@ func invalidCopyDeleteOperands(pkg load.Package, info PackageInfo, fileIndex int
 		}
 	}
 	if name == "copy" {
-		destination := copySliceElement(pkg, info, fileIndex, scope, bindings, args[0].StartTok, args[0].EndTok, before, 0)
-		source := copySliceElement(pkg, info, fileIndex, scope, bindings, args[1].StartTok, args[1].EndTok, before, 0)
-		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, args[1].StartTok, args[1].EndTok, before, 0)
-		if destination != "" && (source != "" && destination != source || value.kind == "string" && destination != "uint8") {
-			return args[1].StartTok
-		}
+		return invalidSliceTransferElements(pkg, info, fileIndex, scope, bindings, before, args[0], args[1], args[1].EndTok)
 	}
 	return -1
 }
