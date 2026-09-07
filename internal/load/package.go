@@ -42,6 +42,7 @@ type SourceFile struct {
 
 type ParsedFile struct {
 	Path       string
+	GoVersion  string
 	Src        []byte
 	File       syntax.File
 	C          bool
@@ -318,6 +319,11 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			}
 		}
 		pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+	}
+	for i := range pkg.Files {
+		if !pkg.Files[i].C {
+			pkg.Files[i].GoVersion = effectiveFileGoVersion(pkg, pkg.Files[i].Src)
+		}
 	}
 	return pkg
 }
