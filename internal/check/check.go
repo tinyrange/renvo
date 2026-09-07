@@ -45,6 +45,7 @@ const (
 	CheckErrMissingReturn
 	CheckErrMapKey
 	CheckErrRecursiveType
+	CheckErrConstantOperation
 )
 
 const (
