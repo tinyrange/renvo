@@ -211,6 +211,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				return info, false, CheckErrAssignTarget, fileIndex, tok
 			}
 			literals := buildFuncCompositeExprs(file, body)
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, body, literals); tok >= 0 {
+				return info, false, CheckErrUndefined, fileIndex, tok
+			}
 			if len(literals) > 0 {
 				scope, ok, tok := buildFuncScopeCore(file, fn)
 				if ok {
