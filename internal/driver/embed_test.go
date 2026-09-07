@@ -182,6 +182,23 @@ func TestSourceEmbedArchiveLongMatchRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSourceEmbedArchiveLookAheadRoundTrip(t *testing.T) {
+	// The final abc starts a short match, but its following bc starts a
+	// longer one. Keeping the a literal should retain that longer match.
+	data := []byte("abcXbcdefghijYabcdefghij")
+	archive := buildSourceEmbedArchive([]sourceEmbedFile{{name: "data", data: data}})
+	compressed := compressSourceEmbedArchive(archive)
+	// Greedy matching produces 36 bytes for this archive.
+	if len(compressed) > 35 {
+		t.Fatalf("missed longer next-byte match: %d bytes", len(compressed))
+	}
+	embedded := renvoembed.NewFS(string(compressed), len(archive))
+	got, err := embedded.ReadFile("data")
+	if err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("look-ahead round trip = %q, %v", got, err)
+	}
+}
+
 func TestSourceEmbedPrunesHiddenDirectoriesBeforeWalking(t *testing.T) {
 	fs := embedRejectHiddenReadFS{embedMemorySourceFS{files: []load.SourceFile{
 		{Path: "/repo/app/cmd/app/assets/message.txt", Src: []byte("message")},
