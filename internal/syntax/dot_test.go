@@ -11,7 +11,7 @@ func TestNumericDotBoundaries(t *testing.T) {
 		{"1....", []string{"1.", "..."}},
 		{".1...", []string{".1", "..."}},
 		{".1.2", []string{".1", ".2"}},
-		{"0x1.2.3", []string{"0x1.2", ".3"}},
+		{"0x1.2p3.4", []string{"0x1.2p3", ".4"}},
 		{"0x1.2p3...", []string{"0x1.2p3", "..."}},
 		{"1e2...", []string{"1e2", "..."}},
 		{"1i...", []string{"1i", "..."}},

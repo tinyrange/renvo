@@ -94,7 +94,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 		if c >= '0' && c <= '9' || c == '.' && i+1 < len(src) && src[i+1] >= '0' && src[i+1] <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
-			if i-start > 10000 {
+			if i-start > 10000 || !validNumberLiteral(src, start, i) {
 				ok = false
 				break
 			}
@@ -265,7 +265,7 @@ func scanNumberEnd(src []byte, start int) int {
 		i += 2
 		for i < len(src) {
 			c := src[i]
-			if c == '.' && hex {
+			if c == '.' {
 				if dot {
 					break
 				}
