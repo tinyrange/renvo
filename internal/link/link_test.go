@@ -1119,7 +1119,7 @@ func appMain() int {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte(`int64(-44)`)) {
+	if !bytes.Contains(linked.Program.Text, []byte(` int64 = -44;`)) {
 		t.Fatalf("map value temporary lost its assignment type:\n%s", linked.Program.Text)
 	}
 }

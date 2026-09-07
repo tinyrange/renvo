@@ -313,6 +313,10 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 	}
 	if functionValueTokenEquals(program, end-1, ")") {
 		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
+		if open > start && functionValueTokenEquals(program, open-1, ".") &&
+			!functionValueTokenEquals(program, open+1, "type") && functionValueTypeEnd(program, open+1) == end-1 {
+			return functionValueTokensText(program, open+1, end-1)
+		}
 		if open > start {
 			if fn, ok := functionValueCalledFunction(program, open); ok {
 				return functionValueDeclaredResultType(program, fn)
@@ -454,6 +458,15 @@ func ordinaryGlobalType(program *unit.Program, name string) string {
 			return functionValueTokensText(program, start, end)
 		}
 		if functionValueTokenEquals(program, start, "=") {
+			// A named function used as an initializer is a function value, not
+			// a call. Global literals have already been lifted to this form.
+			if fnIndex := functionValueGlobalInitializerFunction(program, decl); fnIndex >= 0 {
+				fn := program.Funcs[fnIndex]
+				_, sigEnd, ok := parseFunctionValueCallableSignature(program, fn.NameTok, "")
+				if ok {
+					return "func" + functionValueTokensText(program, fn.NameTok+1, sigEnd)
+				}
+			}
 			return ordinaryBuiltinExprType(program, nameTok, start+1, decl.EndTok)
 		}
 	}

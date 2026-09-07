@@ -29,6 +29,7 @@ type PackageSession struct {
 	prepared        []unit.Program
 	symbolOffsets   []int
 	aliases         []string
+	reflection      coreReflectionNames
 	plusReplacement int
 	contextA        int
 	contextB        int
@@ -87,6 +88,7 @@ func (s *PackageSession) Step() bool {
 		ensureCoreProgramSymbols(s.prepared)
 		s.symbolOffsets = corePackageSymbolOffsets(s.prepared)
 		s.aliases = corePackageSymbolAliases(s.prepared, s.build.Root, s.symbolOffsets)
+		s.reflection = reflectionNamesCore(s.prepared, s.aliases, s.symbolOffsets)
 		s.contextA, s.contextB = incrementalArtifactContextHash(s.prepared, s.aliases, s.build.Root)
 		s.plusReplacement = len(s.aliases)
 		s.aliases = append(s.aliases, "+")
@@ -129,7 +131,7 @@ func (s *PackageSession) Step() bool {
 	for i := 0; i < len(s.artifacts); i++ {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
-	if !lowerConcurrencyCore(&program, s.transient) {
+	if !lowerReflectionCore(&program, s.reflection, s.transient) || !lowerConcurrencyCore(&program, s.transient) {
 		s.failUnit()
 		return true
 	}

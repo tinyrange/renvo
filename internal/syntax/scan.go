@@ -11,6 +11,13 @@ func Scan(src []byte) []Token {
 }
 
 func scanTokens(src []byte) ([]Token, bool) {
+	return scanTokensMode(src, false)
+}
+
+// Linked generated text can exceed a single source file's packed line range.
+// Its parser keeps an offset-based line table; source-file admission stays
+// bounded and uses the compact token line representation.
+func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 	tokens := make([]Token, 0, scanTokenCapacity(src))
 	if !validSourceEncoding(src) {
 		return tokens, false
@@ -22,7 +29,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 	}
 	line := 1
 	for i < len(src) {
-		if line > TokenLineLimit {
+		if !linked && line > TokenLineLimit {
 			ok = false
 			break
 		}
@@ -200,7 +207,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 		}
 		tokens = append(tokens, tok)
 	}
-	if line > TokenLineLimit {
+	if !linked && line > TokenLineLimit {
 		ok = false
 	}
 	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})

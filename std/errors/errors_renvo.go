@@ -22,5 +22,18 @@ func Is(err error, target error) bool {
 	if target == nil {
 		return err == nil
 	}
-	return err == target
+	for err != nil {
+		if err == target {
+			return true
+		}
+		if custom, ok := err.(interface{ Is(error) bool }); ok && custom.Is(target) {
+			return true
+		}
+		wrapped, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = wrapped.Unwrap()
+	}
+	return false
 }
