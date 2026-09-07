@@ -924,10 +924,10 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 			if nameTok <= tok {
 				return i
 			}
-			// Scope collection precedes resolution. Prefer declarations already
-			// visible at this source position, but retain the historical fallback
-			// for forward labels and syntactic names in local type declarations.
-			if future < 0 {
+			// Only labels have function-wide scope before their declaration.
+			// A later local must not hide an earlier package/predeclared name
+			// or make an otherwise undefined reference resolve successfully.
+			if future < 0 && scope.Names[i].Kind == NameLabel {
 				future = i
 			}
 		}
