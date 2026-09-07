@@ -143,6 +143,27 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		return wideIntegerLiteral(tokenString(&file, start))
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent {
+		chosen := -1
+		for i, binding := range context.bindings {
+			if binding.visible <= context.before && context.before < binding.end && coreTokensEqual(&file, binding.name, start) && (chosen < 0 || binding.visible > context.bindings[chosen].visible) {
+				chosen = i
+			}
+		}
+		if chosen >= 0 {
+			binding := context.bindings[chosen]
+			if !binding.constant || binding.typeEnd > binding.typeStart {
+				return wideConstant{}
+			}
+			// Resolve the initializer at its declaration, not at the use site.
+			// An omitted expression keeps its template but receives a new iota.
+			context.before = binding.name
+			context.scope = CoreScope{}
+			context.iotaKnown, context.iotaValue = true, binding.iotaValue
+			return wideConstantExpr(context, binding.valueStart, binding.valueEnd, depth+1)
+		}
+		if lookupScopeTokenNameCore(context.scope, &file, start) >= 0 {
+			return wideConstant{}
+		}
 		if context.iotaKnown && tokenTextIs(&file, start, "iota") && LookupPackageSymbol(*context.info, "iota") < 0 {
 			return wideSmall(context.iotaValue)
 		}

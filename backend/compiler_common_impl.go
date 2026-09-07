@@ -11853,6 +11853,19 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 }
 
 func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
+	// A standalone ConstDecl is a one-specification group. Limit its iota
+	// context to emission of that declaration, including all early returns.
+	if renvoTokIsKind(g.prog, stmt.startTok, renvoTokConst) && !renvoTokCharIs(g.prog, stmt.startTok+1, '(') {
+		oldIota, oldValid := g.constEvalIota, g.constEvalIotaValid
+		g.constEvalIota, g.constEvalIotaValid = 0, 1
+		ok := renvoEmitLinearAssignCore(g, stmt)
+		g.constEvalIota, g.constEvalIotaValid = oldIota, oldValid
+		return ok
+	}
+	return renvoEmitLinearAssignCore(g, stmt)
+}
+
+func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 	renvoNonNil(g, stmt)
 	meta := g.meta
 	p := g.prog

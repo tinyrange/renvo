@@ -40,7 +40,7 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
-		if invalidScalarAppendValue(pkg, info, fileIndex, scope, destination, value, file, arg) {
+		if invalidScalarAppendValue(pkg, info, fileIndex, scope, bindings, before, destination, value, file, arg) {
 			return arg.StartTok
 		}
 	}

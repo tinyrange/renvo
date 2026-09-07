@@ -6,6 +6,9 @@ import "renvo.dev/internal/syntax"
 // the receiving specification's ordinal. Count specifications, not names, and
 // include blank declarations without borrowing values from another group.
 func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth int) wideConstant {
+	// Package initializers cannot see bindings at a local use site.
+	context.bindings = nil
+	context.scope = CoreScope{}
 	context.fileIndex = target.File
 	file := context.pkg.Files[target.File].File
 	if target.ValueStart >= 0 && target.TypeEnd <= target.TypeStart {

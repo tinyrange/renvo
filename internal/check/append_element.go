@@ -8,7 +8,7 @@ import (
 // Scalar assignment requires identical types for typed operands, whereas
 // untyped constants may acquire the destination type. Unknown type identities
 // and general constant representability still require broader type checking.
-func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, destination string, source numericBuiltinValue, file syntax.File, arg ExprSpan) bool {
+func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, destination string, source numericBuiltinValue, file syntax.File, arg ExprSpan) bool {
 	underlying := destination
 	if len(destination) > 6 && destination[:6] == "named:" {
 		index := LookupType(info, destination[6:])
@@ -20,7 +20,7 @@ func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int,
 	}
 	want := scalarAppendKind(underlying)
 	if want == "int" {
-		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true}
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true, bindings: bindings, before: before}
 		value := arrayLiteralConstant(context, arg.StartTok, arg.EndTok, scope)
 		if integerConstantOutsideType(value, underlying) {
 			return true

@@ -1,9 +1,6 @@
 package check
 
-import (
-	"renvo.dev/internal/load"
-	"renvo.dev/internal/syntax"
-)
+import "renvo.dev/internal/load"
 
 func invalidArrayLiteralBounds(pkg load.Package, info PackageInfo, fileIndex int, literals []CompositeExpr, scope CoreScope) int {
 	file := pkg.Files[fileIndex].File
@@ -51,13 +48,6 @@ func arrayLiteralLength(pkg load.Package, info PackageInfo, fileIndex, start, en
 }
 
 func arrayLiteralConstant(context constantIndexContext, start, end int, scope CoreScope) wideConstant {
-	file := context.pkg.Files[context.fileIndex].File
-	// The wide evaluator resolves package constants. A local binding must not
-	// accidentally acquire a same-named package constant's value.
-	for tok := start; tok >= 0 && tok < end; tok++ {
-		if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && lookupScopeTokenNameCore(scope, &file, tok) >= 0 {
-			return wideConstant{}
-		}
-	}
+	context.scope = scope
 	return wideConstantExpr(context, start, end, 0)
 }

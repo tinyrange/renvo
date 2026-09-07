@@ -108,9 +108,9 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 			return numericBuiltinTypeValue(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
 		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
-		// Local constants stay untyped; only variable bindings have initializer
-		// spans in the shared binding table.
-		value.typed = true
+		if binding.writable {
+			value.typed = true
+		}
 		return value
 	}
 	name := tokenString(&file, start)

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2536e6eec1d8f4074a54db6d8062c7f729d9757662920da4ef9362cc00db8feb"
+const CompilerSourceDigest = "a83f4aff0ccc95c3a441c475447cf52c9238cdf43ceec9de7901398d041f5135"
 
 // source: backend/compiler_common_impl.go
 
@@ -11860,6 +11860,19 @@ return 0
 }
 
 func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
+
+
+if renvoTokIsKind(g.prog, stmt.startTok, renvoTokConst) && !renvoTokCharIs(g.prog, stmt.startTok+1, '(') {
+oldIota, oldValid := g.constEvalIota, g.constEvalIotaValid
+g.constEvalIota, g.constEvalIotaValid = 0, 1
+ok := renvoEmitLinearAssignCore(g, stmt)
+g.constEvalIota, g.constEvalIotaValid = oldIota, oldValid
+return ok
+}
+return renvoEmitLinearAssignCore(g, stmt)
+}
+
+func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 renvoNonNil(g, stmt)
 meta := g.meta
 p := g.prog

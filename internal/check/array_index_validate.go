@@ -6,6 +6,9 @@ import (
 )
 
 type constantIndexContext struct {
+	bindings  []scopedTypeBinding
+	scope     CoreScope
+	before    int
 	iotaValue int
 	iotaKnown bool
 	pkg       *load.Package
