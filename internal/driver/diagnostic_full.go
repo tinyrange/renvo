@@ -333,6 +333,8 @@ func syntaxErrorDiagnostic(diagnostic Diagnostic, detail int) Diagnostic {
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-006", "invalid function or method declaration"
 	case syntax.ParseErrTopLevel:
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-007", "unexpected statement or expression at package scope"
+	case syntax.ParseErrDot:
+		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-008", "expected identifier or type assertion after dot"
 	default:
 		diagnostic.Phase, diagnostic.Code = "compiler", "RENVO-BUG-004"
 		diagnostic.Message = "compiler bug: parser returned undeclared error code " + diagnosticIntText(detail)
@@ -413,6 +415,22 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
+		case check.CheckErrInitSignature:
+			code, message = "RENVO-CHECK-034", "func init must have no receiver, parameters, or results"
+		case check.CheckErrMissingReturn:
+			code, message = "RENVO-CHECK-035", "missing return"
+		case check.CheckErrMapKey:
+			code, message = "RENVO-CHECK-036", "map key type is not comparable"
+		case check.CheckErrRecursiveType:
+			code, message = "RENVO-CHECK-037", "invalid recursive value type"
+		case check.CheckErrConstantOperation:
+			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
+		case check.CheckErrStructLiteral:
+			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
+		case check.CheckErrArrayLength:
+			code, message = "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int"
+		case check.CheckErrNewVersion:
+			code, message = "RENVO-CHECK-041", "new with an expression requires go1.26 or later"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)

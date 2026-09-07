@@ -13,6 +13,28 @@ type InterfaceEmbed struct {
 	TypeEnd   int
 }
 
+// Explicit method names must be unique within one interface body, even if
+// their signatures agree. Embedded interfaces are separate elements: their
+// shared methods require signature compatibility, not this uniqueness rule.
+func duplicateExplicitInterfaceMethod(file syntax.File) int {
+	for i := 0; i+1 < len(file.Tokens); i++ {
+		if file.Tokens[i].KindLine&255 != syntax.TokenInterface || !tokCharIs(&file, i+1, '{') {
+			continue
+		}
+		close := findTypeMatching(file, i+1, '{', '}')
+		if close <= i+1 {
+			continue
+		}
+		methods, _ := parseInterfaceElements(file, i+2, close-1)
+		for j := 1; j < len(methods); j++ {
+			if methods[j-1].Name == methods[j].Name {
+				return methods[j].NameTok
+			}
+		}
+	}
+	return -1
+}
+
 func LookupInterfaceMethod(methods []InterfaceMethod, name string) int {
 	for i := 0; i < len(methods); i++ {
 		if methods[i].Name == name {

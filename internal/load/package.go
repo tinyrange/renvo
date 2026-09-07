@@ -42,6 +42,7 @@ type SourceFile struct {
 
 type ParsedFile struct {
 	Path       string
+	GoVersion  string
 	Src        []byte
 	File       syntax.File
 	C          bool
@@ -58,6 +59,7 @@ type AssemblyFile struct {
 
 type Package struct {
 	Ref            PackageRef
+	GoVersion      string
 	Name           string
 	Files          []ParsedFile
 	Assemblies     []AssemblyFile
@@ -130,6 +132,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	if !ref.Ok || ref.Dir == "" {
 		return packageFail(pkg, PackageErrRef, -1, -1)
 	}
+	pkg.GoVersion = packageModuleGoVersion(module, ref, dependencies)
 	selected := selectPackageFiles(ref.Dir, files)
 	if len(selected) == 0 {
 		return packageFail(pkg, PackageErrNoFiles, -1, -1)
@@ -316,6 +319,11 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			}
 		}
 		pkg.Files = append(pkg.Files, newParsedFile(source, parsed))
+	}
+	for i := range pkg.Files {
+		if !pkg.Files[i].C {
+			pkg.Files[i].GoVersion = effectiveFileGoVersion(pkg, pkg.Files[i].Src)
+		}
 	}
 	return pkg
 }

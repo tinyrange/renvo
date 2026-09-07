@@ -28,6 +28,7 @@ const (
 type Module struct {
 	Root        string
 	Path        string
+	GoVersion   string
 	Ok          bool
 	Error       int
 	ErrorOffset int
@@ -56,8 +57,9 @@ type ModuleReplace struct {
 // available, read-only source tree. It is populated by source collection and
 // deliberately contains no network location.
 type ModuleDependency struct {
-	Path string
-	Root string
+	Path      string
+	Root      string
+	GoVersion string
 }
 
 type PackageRef struct {
@@ -112,6 +114,12 @@ func ParseModuleConfig(root string, src []byte, config *ModuleConfig) Module {
 				return moduleParseFail(module, ModuleErrPath, start)
 			}
 			module.Path, i = path, next
+		} else if directive == "go" {
+			version, next, ok := parseModulePath(src, i)
+			if !ok || module.GoVersion != "" || !validGoDirectiveVersion(version) || !goDirectiveLineEnd(src, next) {
+				return moduleParseFail(module, ModuleErrDirective, start)
+			}
+			module.GoVersion, i = version, next
 		} else if directive == "require" || directive == "exclude" {
 			path, next, ok := parseModulePath(src, i)
 			if !ok {
@@ -264,9 +272,6 @@ func ResolveImportWithDependencies(module Module, stdRoot string, importPath str
 	if importPath == "" || isRelativeImport(importPath) {
 		return PackageRef{Kind: PackageInvalid, ImportPath: importPath, Ok: false, Error: ResolveErrImport}
 	}
-	if IsStandardImport(importPath) {
-		return PackageRef{Kind: PackageStandard, ImportPath: importPath, Dir: JoinPath(stdRoot, importPath), Ok: true, Error: ResolveOK}
-	}
 	bestPath := ""
 	bestRoot := ""
 	bestKind := PackageUnsupported
@@ -285,6 +290,9 @@ func ResolveImportWithDependencies(module Module, stdRoot string, importPath str
 			dir = JoinPath(bestRoot, importPath[len(bestPath)+1:])
 		}
 		return PackageRef{Kind: bestKind, ImportPath: importPath, Dir: dir, Ok: true, Error: ResolveOK}
+	}
+	if IsStandardImport(importPath) {
+		return PackageRef{Kind: PackageStandard, ImportPath: importPath, Dir: JoinPath(stdRoot, importPath), Ok: true, Error: ResolveOK}
 	}
 	return PackageRef{Kind: PackageUnsupported, ImportPath: importPath, Ok: false, Error: ResolveErrUnsupported}
 }

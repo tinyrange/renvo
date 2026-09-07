@@ -25,7 +25,7 @@ func TestEveryOptionErrorHasSpecificDiagnostic(t *testing.T) {
 }
 
 func TestEveryParserErrorHasSpecificDiagnostic(t *testing.T) {
-	for detail := syntax.ParseErrScan; detail <= syntax.ParseErrTopLevel; detail++ {
+	for detail := syntax.ParseErrScan; detail <= syntax.ParseErrDot; detail++ {
 		diagnostic := syntaxErrorDiagnostic(Diagnostic{}, detail)
 		if !diagnostic.Valid() || strings.HasPrefix(diagnostic.Code, "RENVO-BUG-") || strings.Contains(diagnostic.Message, "syntax is invalid") {
 			t.Errorf("parser error %d has generic diagnostic %#v", detail, diagnostic)
@@ -128,7 +128,7 @@ func TestEveryLinkerErrorHasSpecificDiagnostic(t *testing.T) {
 }
 
 func TestEveryCheckerErrorHasSpecificDiagnostic(t *testing.T) {
-	for detail := check.CheckErrGraph; detail <= check.CheckErrTypeAssertion; detail++ {
+	for detail := check.CheckErrGraph; detail <= check.CheckErrNewVersion; detail++ {
 		result := BuildResult{
 			Error: BuildErrPipeline,
 			Pipeline: pipeline.Result{

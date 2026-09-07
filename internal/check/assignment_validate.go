@@ -37,11 +37,17 @@ func functionMayNeedChannelCheck(file syntax.File, fn syntax.FuncDecl) bool {
 }
 
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, int) {
-	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
+	for i := fn.BodyStart + 1; i+1 < fn.BodyEnd; i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenOperator {
 			continue
 		}
 		operator := file.Src[int(file.Tokens[i].Start)]
+		if invalidLiteralUnary(file, i, fn.BodyEnd) {
+			return CheckErrOperand, i
+		}
+		if invalidLiteralOrdering(file, i, fn.BodyStart+1, fn.BodyEnd-1) {
+			return CheckErrOperand, i
+		}
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
 			leftToken := file.Tokens[i-1]
 			rightToken := file.Tokens[i+1]
@@ -111,6 +117,10 @@ func excludedFileFeature(file syntax.File) (int, int) {
 }
 
 func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
+	return invalidDefiniteChannelOperationWithShadow(file, fn, false)
+}
+
+func invalidDefiniteChannelOperationWithShadow(file syntax.File, fn syntax.FuncDecl, closeShadowed bool) int {
 	var channels []definiteChannelBinding
 	maybeChannelOperation := false
 	for i := 0; i < len(file.Decls); i++ {
@@ -241,6 +251,9 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 			}
 		}
 		if tokenTextIs(&file, i, "close") && i+1 < fn.BodyEnd && tokCharIs(&file, i+1, '(') {
+			if closeShadowed {
+				continue
+			}
 			if i > fn.BodyStart+1 && tokCharIs(&file, i-1, '.') {
 				continue
 			}

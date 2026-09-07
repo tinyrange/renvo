@@ -123,6 +123,16 @@ defer/panic/recover, arrays and slices, complex values, goroutines, channels,
 `select`, cgo-style explicit C package boundaries, and the builtins needed by
 Renvo itself. Generics remain out of scope.
 
+Release build tags are fixed to Renvo's Go 1.25 baseline: `go1.1` through
+`go1.25` are enabled independently of the host compiler and the module's `go`
+directive. Newer tags are disabled unless explicitly supplied with `-tags`.
+This selection baseline is not a claim of complete Go 1.25 compatibility.
+Standard-library files default to that same compiler baseline, independent of
+the importing module; leading version build constraints may adjust individual
+files. Module and file language versions are tracked separately; feature-version
+checking is still incomplete, and Go 1.26 expression allocation is not yet
+implemented.
+
 Concurrency is a frontend feature: it lowers to the pluggable
 `renvo.dev/x/runtime` handler API before the compact backend unit. The bundled
 `x/runtime/serial` handler provides cooperative, serialized execution rather
@@ -250,6 +260,14 @@ renvo cc -c main.c -o main.o
 renvo cc -c database.c -o database.o
 renvo cc main.o database.o -o app
 ```
+
+For Go source, `renvo -t linux/amd64 -c -o main.o main.go` emits object
+roots for exported package functions; explicit `//export` names take
+precedence. A `main` package also exports its generated entrypoint as the C
+`main` symbol, retaining the entrypoint's package-init calls. `-mode=object`
+is equivalent. This is Renvo's object ABI, not the Go toolchain's archive ABI.
+General library initialization, cross-object Go type identity, and the full
+range of Go ABI signatures are not yet established by this object support.
 
 A system C driver remains useful when an object intentionally refers to a host
 library such as libc. Renvo is still the compiler for `hello.c`: it searches installed and `-I`/`-isystem`

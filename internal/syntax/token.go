@@ -59,6 +59,23 @@ func TokenLine(tok Token) int {
 	return tok.KindLine >> TokenOperatorLineShift & TokenLineLimit
 }
 
+func TokenLineAt(file *File, at int) int {
+	if len(file.LineStarts) == 0 {
+		return TokenLine(file.Tokens[at])
+	}
+	offset := TokenStart(file.Tokens[at])
+	lo, hi := 0, len(file.LineStarts)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if file.LineStarts[mid] <= offset {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
+}
+
 func TokenSize(tok Token) int {
 	return int(tok.End - tok.Start)
 }

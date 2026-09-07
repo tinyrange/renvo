@@ -10,6 +10,7 @@ type FuncSignature struct {
 
 type Field struct {
 	Name      string
+	Tag       string
 	NameTok   int
 	TypeStart int
 	TypeEnd   int

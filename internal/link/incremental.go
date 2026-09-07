@@ -24,11 +24,13 @@ type PackageSession struct {
 	build           build.Result
 	transient       bool
 	object          bool
+	goObject        bool
 	stage           int
 	packageNext     int
 	prepared        []unit.Program
 	symbolOffsets   []int
 	aliases         []string
+	reflection      coreReflectionNames
 	plusReplacement int
 	contextA        int
 	contextB        int
@@ -78,6 +80,12 @@ func (s *PackageSession) Step() bool {
 		for i := 0; i < len(s.build.Units); i++ {
 			programs[i] = s.build.Units[i].Program
 		}
+		s.goObject = s.object && !coreProgramsUseC11Semantics(programs)
+		for i := 0; i < len(s.build.Units); i++ {
+			if s.build.Units[i].C11 {
+				s.goObject = false
+			}
+		}
 		var ok bool
 		s.prepared, ok = prepareProgramsCore(programs, s.build.Root)
 		if !ok {
@@ -87,7 +95,16 @@ func (s *PackageSession) Step() bool {
 		ensureCoreProgramSymbols(s.prepared)
 		s.symbolOffsets = corePackageSymbolOffsets(s.prepared)
 		s.aliases = corePackageSymbolAliases(s.prepared, s.build.Root, s.symbolOffsets)
+		s.reflection = reflectionNamesCore(s.prepared, s.aliases, s.symbolOffsets)
 		s.contextA, s.contextB = incrementalArtifactContextHash(s.prepared, s.aliases, s.build.Root)
+		mode := 0
+		if s.object {
+			mode = 1
+		}
+		if s.goObject {
+			mode = 2
+		}
+		s.contextA, s.contextB = incrementalArtifactHashInt(s.contextA, s.contextB, mode)
 		s.plusReplacement = len(s.aliases)
 		s.aliases = append(s.aliases, "+")
 		s.artifacts = make([]unit.Program, len(s.prepared))
@@ -104,7 +121,11 @@ func (s *PackageSession) Step() bool {
 			artifact, hit := loadPackageArtifact(s.build.Units[i], i, s.contextA, s.contextB)
 			if !hit {
 				var ok bool
-				artifact, ok = linkOnePackageArtifactCore(s.prepared[i], s.aliases, s.symbolOffsets, s.plusReplacement)
+				var exports []string
+				if s.goObject && i == s.build.Root {
+					exports = goObjectExportsCore(s.prepared[i])
+				}
+				artifact, ok = linkOnePackageArtifactCoreWithExports(s.prepared[i], s.aliases, s.symbolOffsets, s.plusReplacement, exports)
 				if !ok {
 					s.failUnit()
 					return true
@@ -129,7 +150,7 @@ func (s *PackageSession) Step() bool {
 	for i := 0; i < len(s.artifacts); i++ {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
-	if !lowerConcurrencyCore(&program, s.transient) {
+	if !lowerReflectionCore(&program, s.reflection, s.transient) || !lowerConcurrencyCore(&program, s.transient) {
 		s.failUnit()
 		return true
 	}
@@ -180,6 +201,10 @@ func (s *PackageSession) failUnit() {
 }
 
 func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffsets []int, plusReplacement int) (unit.Program, bool) {
+	return linkOnePackageArtifactCoreWithExports(src, aliases, symbolOffsets, plusReplacement, nil)
+}
+
+func linkOnePackageArtifactCoreWithExports(src unit.Program, aliases []string, symbolOffsets []int, plusReplacement int, exports []string) (unit.Program, bool) {
 	var empty unit.Program
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 {
 		return empty, false
@@ -205,7 +230,8 @@ func linkOnePackageArtifactCore(src unit.Program, aliases []string, symbolOffset
 	artifact.Decls = make([]unit.Decl, 0, len(src.Decls))
 	artifact.Funcs = make([]unit.Func, 0, len(src.Funcs))
 	artifact.ConcurrencySites = make([]unit.ConcurrencySite, 0, len(src.ConcurrencySites))
-	ok, line := appendProgramCore(&artifact, src, actions, finalEOF, 1, aliases, false, false)
+	ok, line := appendProgramCoreWithExports(&artifact, src, actions, finalEOF, 1, aliases, false, false, exports)
+	restoreCoreTokenLines(src.Text, src.Tokens)
 	if !ok {
 		return empty, false
 	}
@@ -308,7 +334,10 @@ func appendPackageArtifactCore(dst *unit.Program, src unit.Program, line int, ha
 		}
 		dst.ConcurrencySites = append(dst.ConcurrencySites, site)
 	}
-	line += countCoreNewlines(src.Text)
+	// Token lines retain source gaps removed with imports and include inserted
+	// export directives. Advance in that same coordinate system, not by counting
+	// newlines in the rewritten text, or EOF can collapse onto the last statement.
+	line += (src.Tokens[localEOF].KindLine >> 8) - 1
 	if hasNext && (len(src.Text) == 0 || src.Text[len(src.Text)-1] != '\n') {
 		dst.Text = append(dst.Text, '\n')
 		line++

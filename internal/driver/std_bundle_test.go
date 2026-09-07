@@ -20,8 +20,13 @@ func TestBundledStandardLibraryFS(t *testing.T) {
 	if !ok {
 		t.Fatal("bundled strings directory missing")
 	}
-	if len(entries) != 1 || entries[0].Name != "strings.go" || entries[0].IsDir {
+	if len(entries) != 3 {
 		t.Fatalf("bundled strings entries = %#v", entries)
+	}
+	for i, name := range []string{"builder.go", "runes.go", "strings.go"} {
+		if entries[i].Name != name || entries[i].IsDir {
+			t.Fatalf("bundled entry %d = %#v", i, entries[i])
+		}
 	}
 	if _, ok := fs.ReadFile("/std/strings/strings_test.go"); ok {
 		t.Fatal("standard library tests were embedded")

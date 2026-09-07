@@ -49,9 +49,9 @@ const renvoOptionMessageBlob = "missing output after -omissing target after -tun
 
 var renvoOptionMessageOffsets = [...]int{0, 0, 23, 46, 64, 64, 88, 106, 126, 144, 182, 182, 218, 236, 268, 291, 330, 368, 411, 452, 491, 541, 577, 577, 577, 611, 654, 695, 728, 754, 795, 829, 861, 914, 914}
 
-const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scope"
+const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scopeexpected identifier or type assertion after dot"
 
-var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225}
+var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225, 272}
 
 const renvoLowerMessageBlob = "invalid checked graph reached the lowererinvalid package index reached the lowererinvalid source token reached the lowererpackage unit construction failedunchecked program reached the lowerer"
 
@@ -77,7 +77,7 @@ func renvoSetDiagnosticDetail(d *Diagnostic, code string, message string) {
 }
 
 func renvoSyntaxErrorDiagnostic(d *Diagnostic, detail int) {
-	if detail > syntax.ParseOK && detail <= syntax.ParseErrTopLevel {
+	if detail > syntax.ParseOK && detail <= syntax.ParseErrDot {
 		number := detail + 1
 		if detail == syntax.ParseErrScan {
 			number = 1
@@ -298,6 +298,22 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-033", "type assertion requires a type; found a composite literal")
+			} else if built.Build.ErrorDetail == check.CheckErrInitSignature {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-034", "func init must have no receiver, parameters, or results")
+			} else if built.Build.ErrorDetail == check.CheckErrMissingReturn {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-035", "missing return")
+			} else if built.Build.ErrorDetail == check.CheckErrMapKey {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-036", "map key type is not comparable")
+			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
+			} else if built.Build.ErrorDetail == check.CheckErrConstantOperation {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
+			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
+			} else if built.Build.ErrorDetail == check.CheckErrArrayLength {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int")
+			} else if built.Build.ErrorDetail == check.CheckErrNewVersion {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-041", "new with an expression requires go1.26 or later")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
 				renvoSetDiagnostic(&d, "checker", renvoDiagnosticCode("CHECK", built.Build.ErrorDetail), renvoCheckMessage(built.Build.ErrorDetail))
 			} else {

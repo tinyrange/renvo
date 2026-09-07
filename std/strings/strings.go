@@ -1,5 +1,28 @@
 package strings
 
+import (
+	"unicode"
+	"unicode/utf8"
+)
+
+func Compare(a, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+func IndexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
 func Contains(s string, substr string) bool {
 	return Index(s, substr) >= 0
 }
@@ -50,13 +73,7 @@ func LastIndex(s string, substr string) int {
 
 func Count(s string, substr string) int {
 	if len(substr) == 0 {
-		count := 1
-		for i := 0; i < len(s); i++ {
-			if s[i]&0xc0 != 0x80 {
-				count++
-			}
-		}
-		return count
+		return utf8.RuneCountInString(s) + 1
 	}
 	count := 0
 	start := 0
@@ -72,15 +89,7 @@ func Count(s string, substr string) int {
 }
 
 func TrimSpace(s string) string {
-	start := 0
-	for start < len(s) && isSpace(s[start]) {
-		start++
-	}
-	end := len(s)
-	for end > start && isSpace(s[end-1]) {
-		end--
-	}
-	return s[start:end]
+	return TrimFunc(s, unicode.IsSpace)
 }
 
 func TrimPrefix(s string, prefix string) string {
@@ -98,10 +107,27 @@ func TrimSuffix(s string, suffix string) string {
 }
 
 func Split(s string, sep string) []string {
+	return SplitN(s, sep, -1)
+}
+
+func SplitN(s, sep string, n int) []string {
+	if n == 0 {
+		return nil
+	}
 	if sep == "" {
-		out := make([]string, 0, len(s))
-		for i := 0; i < len(s); i++ {
-			out = append(out, s[i:i+1])
+		count := utf8.RuneCountInString(s)
+		if n < 0 || n > count {
+			n = count
+		}
+		out := make([]string, 0, n)
+		for i := 0; i < n; i++ {
+			if i == n-1 {
+				out = append(out, s)
+				break
+			}
+			_, size := utf8.DecodeRuneInString(s)
+			out = append(out, s[:size])
+			s = s[size:]
 		}
 		return out
 	}
@@ -109,7 +135,7 @@ func Split(s string, sep string) []string {
 	start := 0
 	for {
 		i := Index(s[start:], sep)
-		if i < 0 {
+		if i < 0 || n > 0 && len(out) == n-1 {
 			out = append(out, s[start:])
 			return out
 		}
@@ -133,26 +159,18 @@ func Join(items []string, sep string) string {
 }
 
 func Fields(s string) []string {
-	var out []string
-	i := 0
-	for i < len(s) {
-		for i < len(s) && isSpace(s[i]) {
-			i++
-		}
-		start := i
-		for i < len(s) && !isSpace(s[i]) {
-			i++
-		}
-		if start < i {
-			out = append(out, s[start:i])
-		}
-	}
-	return out
+	return FieldsFunc(s, unicode.IsSpace)
 }
 
 func Repeat(s string, count int) string {
-	if count <= 0 || len(s) == 0 {
+	if count < 0 {
+		panic("strings: negative Repeat count")
+	}
+	if count == 0 || len(s) == 0 {
 		return ""
+	}
+	if uint(count) > (^uint(0)>>1)/uint(len(s)) {
+		panic("strings: Repeat output length overflow")
 	}
 	var out []byte
 	for i := 0; i < count; i++ {
@@ -162,8 +180,28 @@ func Repeat(s string, count int) string {
 }
 
 func Replace(s string, old string, new string, n int) string {
-	if old == "" || n == 0 {
+	if old == new || n == 0 {
 		return s
+	}
+	if old == "" {
+		var out []byte
+		at, done := 0, 0
+		for {
+			if n < 0 || done < n {
+				out = appendString(out, new)
+				done++
+			} else {
+				out = appendString(out, s[at:])
+				break
+			}
+			if at == len(s) {
+				break
+			}
+			_, width := utf8.DecodeRuneInString(s[at:])
+			out = appendString(out, s[at:at+width])
+			at += width
+		}
+		return string(out)
 	}
 	var out []byte
 	start := 0

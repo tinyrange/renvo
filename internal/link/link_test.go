@@ -967,7 +967,7 @@ func main() {
 	if !bytes.Contains(linked.Program.Text, []byte("menu.Control.dismiss = Handler{kind: 1")) {
 		t.Fatalf("explicit callback assignment was not lowered:\n%s", linked.Program.Text)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("menu.dismiss()")) || bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&menu.dismiss)")) {
+	if !bytes.Contains(linked.Program.Text, []byte("menu.dismiss()")) || bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(menu.dismiss)")) {
 		t.Fatalf("direct method lost selector precedence over promoted field:\n%s", linked.Program.Text)
 	}
 }
@@ -1119,7 +1119,7 @@ func appMain() int {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte(`int64(-44)`)) {
+	if !bytes.Contains(linked.Program.Text, []byte(` int64 = -44;`)) {
 		t.Fatalf("map value temporary lost its assignment type:\n%s", linked.Program.Text)
 	}
 }

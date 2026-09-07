@@ -14,11 +14,15 @@ const (
 	ParseErrDecl
 	ParseErrFunc
 	ParseErrTopLevel
+	ParseErrDot
 )
 
 type File struct {
-	Src         []byte
-	Tokens      []Token
+	Src    []byte
+	Tokens []Token
+	// LineStarts is only populated for generated, linked text. Ordinary source
+	// files keep using the compact line numbers in Tokens.
+	LineStarts  []int
 	PackageName int
 	Imports     []ImportDecl
 	Decls       []TopDecl
@@ -57,8 +61,19 @@ type FuncDecl struct {
 }
 
 func ParseFile(src []byte) File {
+	return parseFileMode(src, false)
+}
+
+// ParseLinkedFile reparses generated text containing already admitted packages.
+// It keeps physical line numbers outside the packed tokens, without relaxing
+// encoding, escape, grammar, or ordinary source-file line-limit validation.
+func ParseLinkedFile(src []byte) File {
+	return parseFileMode(src, true)
+}
+
+func parseFileMode(src []byte, linked bool) File {
 	tokenArenaStart := arena.Mark()
-	tokens, scanOK := parseScanTokens(src)
+	tokens, scanOK := scanTokensMode(src, linked)
 	tokenArenaEnd := arena.Mark()
 	tokenCapacity := cap(tokens)
 	file := File{
@@ -90,8 +105,35 @@ func ParseFile(src []byte) File {
 	if !scanOK {
 		return parseFail(file, ParseErrScan, len(tokens)-1)
 	}
+	if linked {
+		file.LineStarts = append(file.LineStarts, 0)
+		for i := 0; i < len(src); i++ {
+			if src[i] == '\n' {
+				file.LineStarts = append(file.LineStarts, i+1)
+			}
+		}
+	}
 	parseTokens(&file)
+	if file.Ok {
+		validateDots(&file)
+	}
 	return file
+}
+
+func validateDots(file *File) {
+	// Dot punctuation cannot be followed by more dot punctuation. Ellipses
+	// are distinct tokens: 1... scans as 1. . ., not an expanded argument.
+	// Keep incomplete selectors available to editor declaration recovery;
+	// this is not a complete expression grammar validation pass.
+	for tok := 2; tok+1 < len(file.Tokens); tok++ {
+		if tokCharIs(file.Tokens, tok, '.') {
+			next := file.Tokens[tok+1]
+			if next.KindLine&255 == TokenOperator && file.Src[next.Start] == '.' {
+				parseFailInPlace(file, ParseErrDot, tok)
+				return
+			}
+		}
+	}
 }
 
 func parseTokens(file *File) {
@@ -202,7 +244,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 		if grouped && tokCharIs(file.Tokens, next, ')') {
 			break
 		}
-		if TokenLine(file.Tokens[next]) != TokenLine(file.Tokens[pathTok]) {
+		if TokenLineAt(file, next) != TokenLineAt(file, pathTok) {
 			break
 		}
 		return start, false
@@ -363,7 +405,7 @@ func findFuncBody(file *File, start int) (int, int) {
 		if i > start {
 			previous = i - 1
 		}
-		if TokenLine(file.Tokens[i]) > TokenLine(file.Tokens[previous]) {
+		if TokenLineAt(file, i) > TokenLineAt(file, previous) {
 			kind := file.Tokens[i].KindLine & 255
 			if kind == TokenConst || kind == TokenVar || kind == TokenType || kind == TokenImport ||
 				kind == TokenFunc && i+1 < len(file.Tokens) && file.Tokens[i+1].KindLine&255 == TokenIdent {
@@ -379,7 +421,7 @@ func findFuncBody(file *File, start int) (int, int) {
 }
 
 func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
-	line := TokenLine(file.Tokens[start])
+	line := TokenLineAt(file, start)
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -393,7 +435,7 @@ func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
 			if c == ';' {
 				return i, i + 1, true
 			}
-			if i > start && TokenLine(file.Tokens[i]) != line {
+			if i > start && TokenLineAt(file, i) != line {
 				return i, i, true
 			}
 		}

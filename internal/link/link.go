@@ -116,6 +116,9 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	ensureCoreProgramSymbols(programs)
 	symbolOffsets := corePackageSymbolOffsets(programs)
 	aliases := corePackageSymbolAliases(programs, root, symbolOffsets)
+	defaultHandler := coreDefaultHandlerNames(programs, aliases, symbolOffsets)
+	reflection := reflectionNamesCore(programs, aliases, symbolOffsets)
+	errorsAs := errorsAsNamesCore(programs, aliases, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
 	if transient {
@@ -177,7 +180,11 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		var ok bool
 		packageActions := actions[actionOffset : actionOffset+len(programs[i].Tokens)]
 		actionOffset += len(packageActions)
-		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient)
+		var objectExports []string
+		if object && i == root && !c11Semantics {
+			objectExports = goObjectExportsCore(programs[i])
+		}
+		ok, line = appendProgramCoreWithExports(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient, objectExports)
 		if !ok {
 			appendOK = false
 			break
@@ -200,7 +207,16 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
-	if !lowerConcurrencyCore(&program, transient) {
+	if !lowerReflectionCore(&program, reflection, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	concurrencyNeeded := len(program.ConcurrencySites) > 0
+	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerIntegerRangesCore(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerErrorsAsCore(&program, errorsAs, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -209,12 +225,20 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	functionValuesOK := false
+	if !lowerInterfaceMethodExpressions(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
 	if object {
 		functionValuesOK = lowerObjectFunctionValuesCore(&program, transient)
 	} else {
 		functionValuesOK = lowerFunctionValuesCore(&program, transient)
 	}
 	if !functionValuesOK {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerUnicodeIdentifiers(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -581,6 +605,10 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 }
 
 func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool) (bool, int) {
+	return appendProgramCoreWithExports(dst, src, actions, finalEOF, line, aliases, hasNext, transient, nil)
+}
+
+func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool, objectExports []string) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
@@ -636,6 +664,16 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			continue
 		}
 		mappedToken := len(dst.Tokens)
+		if i < len(objectExports) && objectExports[i] != "" {
+			if tokStart > pendingStart {
+				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
+			}
+			dst.Text = appendCoreStringBytes(dst.Text, "\n//export ")
+			dst.Text = appendCoreStringBytes(dst.Text, objectExports[i])
+			dst.Text = append(dst.Text, '\n')
+			pendingStart = tokStart
+			lineBase += 2
+		}
 		line = lineBase + (tok.KindLine >> 8) - 1
 		if line < lineBase {
 			line = lineBase
@@ -1090,7 +1128,7 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 			continue
 		}
 		for tok := 0; tok+2 < len(program.Tokens); tok++ {
-			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
+			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof") || coreTokenTextEquals(program, tok+2, "Alignof")) {
 				markCoreRedirectToken(actions, tok, tok+2)
 				markCoreRedirectToken(actions, tok+1, tok+2)
 			}
@@ -1331,6 +1369,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 				out[index] = alias
 			} else if directiveSize >= 0 {
 				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
+			} else if corePredeclaredAliasNeeded(name) {
+				out[index] = coreSymbolAliasName(i, name)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
@@ -1506,7 +1546,7 @@ func coreSymbolAliasName(pkg int, name string) string {
 	out = append(out, '_')
 	for i := 0; i < len(name); i++ {
 		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 128 {
 			out = append(out, c)
 		} else {
 			out = append(out, '_')

@@ -126,7 +126,36 @@ func shouldSkipIdentRef(file *syntax.File, tok int, end int) bool {
 	if tok+1 < end {
 		next := file.Tokens[tok+1]
 		if next.KindLine&255 == syntax.TokenOperator && next.End-next.Start == 1 && file.Src[int(next.Start)] == ':' {
-			return true
+			return !identEndsCaseExpression(file, tok)
+		}
+	}
+	return false
+}
+
+// A case expression's final identifier is a value reference, unlike a
+// statement label or a keyed struct field. Look back only within the current
+// expression, skipping balanced subexpressions but not enclosing literals.
+func identEndsCaseExpression(file *syntax.File, tok int) bool {
+	depth := 0
+	for i := tok - 1; i >= 0; i-- {
+		if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+			depth++
+			continue
+		}
+		if tokCharIs(file, i, '(') || tokCharIs(file, i, '[') || tokCharIs(file, i, '{') {
+			if depth == 0 {
+				return false
+			}
+			depth--
+			continue
+		}
+		if depth == 0 {
+			if file.Tokens[i].KindLine&255 == syntax.TokenCase {
+				return true
+			}
+			if tokCharIs(file, i, ':') || tokCharIs(file, i, ';') {
+				return false
+			}
 		}
 	}
 	return false

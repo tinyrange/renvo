@@ -71,15 +71,35 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 	info.CoreBodies = make([]CoreFuncBody, 0, countPackageFuncsCore(pkg))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
+		if tok := duplicateExplicitInterfaceMethod(file); tok >= 0 {
+			return info, false, CheckErrDuplicate, fileIndex, tok
+		}
 		for i := 0; i < len(file.Decls); i++ {
 			decl, undefinedTok := buildDeclInfoCore(file, fileIndex, info, checked, file.Decls[i])
 			info.Decls = append(info.Decls, decl)
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
+			if decl.TypeEnd-decl.TypeStart == 1 && decl.ValueEnd > decl.ValueStart && literalIntegerOverflows(file, decl.ValueStart, decl.ValueEnd, tokenString(&file, decl.TypeStart)) {
+				return info, false, CheckErrType, fileIndex, decl.ValueStart
+			}
+			for tok := decl.ValueStart; tok >= 0 && tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenOperator && (invalidLiteralUnary(file, tok, decl.ValueEnd) || invalidLiteralOrdering(file, tok, decl.ValueStart, decl.ValueEnd)) {
+					return info, false, CheckErrOperand, fileIndex, tok
+				}
+			}
 		}
 	}
 	sortDecls(info.Decls)
+	for _, decl := range info.Decls {
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: decl.File}
+		if tok := invalidArrayLengthTypeSpan(context, decl.TypeStart, decl.TypeEnd); tok >= 0 {
+			return info, false, CheckErrArrayLength, decl.File, tok
+		}
+	}
+	if file, tok := invalidPackageConstantOperations(&pkg, &info); tok >= 0 {
+		return info, false, CheckErrConstantOperation, file, tok
+	}
 	info.DeclOrder = make([]int, len(info.Decls))
 	for i := 0; i < len(info.DeclOrder); i++ {
 		info.DeclOrder[i] = i
@@ -97,10 +117,65 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
+	if file, tok := invalidRecursiveValueType(pkg, info); tok >= 0 {
+		return info, false, CheckErrRecursiveType, file, tok
+	}
 	if file, tok := undefinedSimplePackageTypeCore(pkg, info); tok >= 0 {
 		return info, false, CheckErrUndefined, file, tok
 	}
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
+	for _, decl := range info.Decls {
+		if decl.ValueStart < 0 {
+			continue
+		}
+		file := pkg.Files[decl.File].File
+		wantInterface := interfaceNamedType(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+		if wantInterface.known && !wantInterface.pointer && info.Types[wantInterface.index].Kind == TypeInterface {
+			values := splitExprList(file, decl.ValueStart, decl.ValueEnd)
+			if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
+				value := values[decl.ValueIndex]
+				got := interfaceExprType(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, 0)
+				if definiteInterfaceMismatch(pkg, info, wantInterface.index, got) {
+					return info, false, CheckErrType, decl.File, value.StartTok
+				}
+			}
+		}
+		literals := appendExprComposites(nil, file, decl.ValueStart, decl.ValueEnd)
+		var scope CoreScope
+		if len(literals) > 0 {
+			for tok := decl.ValueStart; tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+					fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: decl.ValueStart - 1, BodyEnd: decl.ValueEnd + 1}
+					scope, _, _ = buildFuncScopeCore(file, fn)
+					break
+				}
+			}
+		}
+		if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+			return info, false, CheckErrType, decl.File, tok
+		}
+		if tok := invalidArrayLiteralBounds(pkg, info, decl.File, literals, scope, syntax.FuncDecl{}, nil); tok >= 0 {
+			return info, false, CheckErrArrayIndex, decl.File, tok
+		}
+		if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
+			return info, false, CheckErrStructLiteral, decl.File, tok
+		}
+	}
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := pkg.Files[fileIndex].File
+		if tok := invalidDuplicateMapKey(file); tok >= 0 {
+			return info, false, CheckErrDuplicate, fileIndex, tok
+		}
+		for tok := 0; tok+2 < len(file.Tokens); tok++ {
+			if file.Tokens[tok].KindLine&255 != syntax.TokenMap || !tokCharIs(&file, tok+1, '[') {
+				continue
+			}
+			close := findTypeMatching(file, tok+1, '[', ']')
+			if close > tok+2 && nonComparableTypeSpan(pkg, info, file, tok+2, close-1, 0) {
+				return info, false, CheckErrMapKey, fileIndex, tok + 2
+			}
+		}
+	}
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
@@ -116,9 +191,52 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				arena.Reset(functionArenaStart)
 				return info, false, statementErr, fileIndex, statementTok
 			}
+			if tok := invalidLocalArrayLengths(&pkg, &info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrArrayLength, fileIndex, tok
+			}
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
+			}
+			if code, indexTok := invalidMapIndexType(pkg, info, fileIndex, fn, body); code != CheckOK {
+				return info, false, code, fileIndex, indexTok
+			}
+			if tok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, tok
+			}
+			if tok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrType, fileIndex, tok
+			}
+			if code, tok := invalidLocalRules(pkg, info, file, fn, body); code != CheckOK {
+				return info, false, code, fileIndex, tok
+			}
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrAssignTarget, fileIndex, tok
+			}
+			literals := buildFuncCompositeExprs(file, body)
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, body, literals); tok >= 0 {
+				return info, false, CheckErrUndefined, fileIndex, tok
+			}
+			if len(literals) > 0 {
+				scope, ok, tok := buildFuncScopeCore(file, fn)
+				if ok {
+					bindings := collectScopedTypeBindings(file, fn, body)
+					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, scope, fn, bindings); tok >= 0 {
+						return info, false, CheckErrArrayIndex, fileIndex, tok
+					}
+					if mapTok := invalidMapLiteralTypes(pkg, info, file, literals, scope); mapTok >= 0 {
+						return info, false, CheckErrType, fileIndex, mapTok
+					}
+					tok = invalidStructLiterals(pkg, info, file, literals, scope)
+					if tok >= 0 {
+						return info, false, CheckErrStructLiteral, fileIndex, tok
+					}
+				}
+			}
+			if fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(buildFuncSignature(file, fn).Results) > 0 &&
+				!returnBlockTerminates(file, body, fn.BodyStart+1, fn.BodyEnd-1, LookupPackageSymbol(info, "panic") < 0) {
+				arena.Reset(functionArenaStart)
+				return info, false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
 			}
 			arena.Reset(functionArenaStart)
 			if fn.BodyStart < 0 {
@@ -137,7 +255,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			if functionMayNeedChannelCheck(file, fn) {
 				channelCheckArenaStart := arena.Mark()
-				channelTok := invalidDefiniteChannelOperation(file, fn)
+				channelTok := invalidDefiniteChannelOperationWithShadow(file, fn, LookupPackageSymbol(info, "close") >= 0)
 				arena.Reset(channelCheckArenaStart)
 				if channelTok >= 0 {
 					return info, false, CheckErrChannel, fileIndex, channelTok
@@ -166,10 +284,24 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
-			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
+			if code, tok := invalidUnsafeIntrinsicCalls(&pkg, &info, fileIndex, fn, &signature, out.CoreSelectors); code != CheckOK {
+				return info, false, code, fileIndex, tok
+			}
+			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope, builtinCalls); builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
+			if rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, scope); rangeTok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, rangeTok
+			}
+			if conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, scope); conversionTok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, conversionTok
+			}
 			callCheckArenaStart := arena.Mark()
+			operandTok := invalidCallOperandCount(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
+			arena.Reset(callCheckArenaStart)
+			if operandTok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, operandTok
+			}
 			callTok := invalidDefiniteCallArity(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
 			arena.Reset(callCheckArenaStart)
 			if callTok >= 0 {
@@ -275,7 +407,22 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 		var undefinedTok int
-		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, CoreScope{}, out.ValueStart, out.ValueEnd, nil)
+		var scope CoreScope
+		for tok := out.ValueStart; tok < out.ValueEnd; tok++ {
+			if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+				// Initializer expressions can contain closures just as function
+				// bodies can. Include their parameters and local bindings in the
+				// ordinary reference resolver rather than treating them as globals.
+				fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: out.ValueStart - 1, BodyEnd: out.ValueEnd + 1}
+				var ok bool
+				scope, ok, undefinedTok = buildFuncScopeCore(file, fn)
+				if !ok {
+					return out, undefinedTok
+				}
+				break
+			}
+		}
+		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, &file, fileIndex, &info, checked, scope, out.ValueStart, out.ValueEnd, nil)
 		return out, undefinedTok
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
@@ -308,11 +455,46 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 
 func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int, builtinCalls *[]int) ([]CoreNameRef, []CoreSelectorRef, int) {
 	undefined := -1
+	var aggregateNames []int
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		token := file.Tokens[i]
+		if (token.KindLine&255 == syntax.TokenStruct || token.KindLine&255 == syntax.TokenInterface) && tokCharIs(file, i+1, '{') {
+			close := findTypeMatching(*file, i+1, '{', '}')
+			if close > i+1 && close <= end {
+				if token.KindLine&255 == syntax.TokenStruct {
+					fields := parseStructFields(*file, i+2, close-1)
+					for _, field := range fields {
+						if field.NameTok >= 0 && field.Name != "" {
+							aggregateNames = append(aggregateNames, field.NameTok)
+						}
+					}
+				} else {
+					methods, _ := parseInterfaceElements(*file, i+2, close-1)
+					for _, method := range methods {
+						aggregateNames = append(aggregateNames, method.NameTok)
+						for _, field := range method.Signature.Params {
+							if field.NameTok >= 0 {
+								aggregateNames = append(aggregateNames, field.NameTok)
+							}
+						}
+						for _, field := range method.Signature.Results {
+							if field.NameTok >= 0 {
+								aggregateNames = append(aggregateNames, field.NameTok)
+							}
+						}
+					}
+				}
+			}
+		}
 		blank := token.KindLine&255 == syntax.TokenIdent && token.End-token.Start == 1 && file.Src[int(token.Start)] == '_'
 		scopeIndex := -1
 		skipRef := token.KindLine&255 != syntax.TokenIdent || blank || shouldSkipIdentRef(file, i, end)
+		for _, name := range aggregateNames {
+			if name == i {
+				skipRef = true
+				break
+			}
+		}
 		if !skipRef {
 			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
 		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokenTextIs(file, i+1, ":") {
@@ -343,6 +525,14 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			!(file.Tokens[i+1].End-file.Tokens[i+1].Start == 1 && file.Src[int(file.Tokens[i+1].Start)] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
 			if selector.Symbol >= 0 {
+				if info.Imports[selector.BaseIndex].ImportPath != "C" {
+					if !exportedToken(file, i+1) {
+						return refs, selectors, i + 1
+					}
+					if bad := invalidImportedStructLiteral(file, i+1, checked[selector.BasePackage], selector.Symbol); bad >= 0 {
+						return refs, selectors, bad
+					}
+				}
 				selectors = append(selectors, selector)
 			} else if selector.BasePackage >= 0 && !coreSelectorContinues(file, i+1, end) && !coreUnsafeSelector(info, fileIndex, file, i-1) && undefined < 0 {
 				undefined = i + 1
@@ -350,6 +540,97 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		}
 	}
 	return refs, selectors, undefined
+}
+
+func exportedToken(file *syntax.File, tok int) bool {
+	start := int(file.Tokens[tok].Start)
+	return syntax.IdentifierExported(file.Src, start)
+}
+
+func invalidImportedStructLiteral(file *syntax.File, name int, pkg PackageInfo, symbol int) int {
+	if !tokCharIs(file, name+1, '{') {
+		return -1
+	}
+	// In []pkg.T{...}, [N]pkg.T{...}, or map[K]pkg.T{...}, the
+	// braces initialize the collection, not T's private fields. Pointer
+	// element types may appear between the bracket and package selector.
+	before := name - 3
+	collections := 0
+	for before >= 0 {
+		if tokCharIs(file, before, '*') {
+			before--
+			continue
+		}
+		if !tokCharIs(file, before, ']') {
+			break
+		}
+		depth := 1
+		before--
+		for before >= 0 && depth > 0 {
+			if tokCharIs(file, before, ']') {
+				depth++
+			}
+			if tokCharIs(file, before, '[') {
+				depth--
+			}
+			before--
+		}
+		if before >= 0 && tokenTextIs(file, before, "map") {
+			before--
+		}
+		collections++
+	}
+	typeIndex := LookupType(pkg, pkg.Symbols[symbol].Name)
+	if typeIndex < 0 || pkg.Types[typeIndex].Kind != TypeStruct {
+		return -1
+	}
+	return invalidImportedLiteralElements(file, name+1, pkg.Types[typeIndex], collections)
+}
+
+func invalidImportedLiteralElements(file *syntax.File, open int, typ TypeInfo, collections int) int {
+	close := findTypeMatching(*file, open, '{', '}')
+	if close <= open+1 {
+		return -1
+	}
+	for start := open + 1; start < close-1; {
+		end := nextTopLevelComma(*file, start, close-1)
+		if collections > 0 {
+			// An elided element literal still initializes the imported type.
+			// Skip a collection key, respecting brackets inside key expressions.
+			value := start
+			depth := 0
+			for at := start; at < end; at++ {
+				if depth == 0 && tokCharIs(file, at, ':') {
+					value = at + 1
+					break
+				}
+				if tokCharIs(file, at, '(') || tokCharIs(file, at, '[') || tokCharIs(file, at, '{') {
+					depth++
+				}
+				if tokCharIs(file, at, ')') || tokCharIs(file, at, ']') || tokCharIs(file, at, '}') {
+					depth--
+				}
+			}
+			if tokCharIs(file, value, '{') {
+				if bad := invalidImportedLiteralElements(file, value, typ, collections-1); bad >= 0 {
+					return bad
+				}
+			}
+		} else if start+1 < end && tokCharIs(file, start+1, ':') {
+			if !exportedToken(file, start) {
+				return start
+			}
+		} else {
+			for i := 0; i < len(typ.Fields); i++ {
+				field := typ.Fields[i].Name
+				if len(field) != 0 && !syntax.IdentifierExported([]byte(field), 0) {
+					return start
+				}
+			}
+		}
+		start = end + 1
+	}
+	return -1
 }
 
 func corePredeclaredToken(file *syntax.File, tok int) bool {
@@ -405,7 +686,10 @@ func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, bas
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len")
+	if tokenTextIs(file, tok, "copy") || tokenTextIs(file, tok, "delete") || tokenTextIs(file, tok, "append") || tokenTextIs(file, tok, "new") {
+		return true
+	}
+	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap") || tokenTextIs(file, tok, "make") || tokenTextIs(file, tok, "real") || tokenTextIs(file, tok, "imag") || tokenTextIs(file, tok, "complex")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
@@ -704,10 +988,10 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 			if nameTok <= tok {
 				return i
 			}
-			// Scope collection precedes resolution. Prefer declarations already
-			// visible at this source position, but retain the historical fallback
-			// for forward labels and syntactic names in local type declarations.
-			if future < 0 {
+			// Only labels have function-wide scope before their declaration.
+			// A later local must not hide an earlier package/predeclared name
+			// or make an otherwise undefined reference resolve successfully.
+			if future < 0 && scope.Names[i].Kind == NameLabel {
 				future = i
 			}
 		}

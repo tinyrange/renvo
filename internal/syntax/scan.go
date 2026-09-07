@@ -11,12 +11,25 @@ func Scan(src []byte) []Token {
 }
 
 func scanTokens(src []byte) ([]Token, bool) {
+	return scanTokensMode(src, false)
+}
+
+// Linked generated text can exceed a single source file's packed line range.
+// Its parser keeps an offset-based line table; source-file admission stays
+// bounded and uses the compact token line representation.
+func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 	tokens := make([]Token, 0, scanTokenCapacity(src))
+	if !validSourceEncoding(src) {
+		return tokens, false
+	}
 	ok := true
 	i := 0
+	if len(src) >= 3 && src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {
+		i = 3
+	}
 	line := 1
 	for i < len(src) {
-		if line > TokenLineLimit {
+		if !linked && line > TokenLineLimit {
 			ok = false
 			break
 		}
@@ -55,11 +68,23 @@ func scanTokens(src []byte) ([]Token, bool) {
 			i += 2
 			continue
 		}
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 128 && unicodeIdentifierWidth(src, i, true) > 0 {
 			start := i
-			i++
+			if c >= 128 {
+				i += unicodeIdentifierWidth(src, i, true)
+			} else {
+				i++
+			}
 			for i < len(src) {
 				part := src[i]
+				if part >= 128 {
+					width := unicodeIdentifierWidth(src, i, false)
+					if width == 0 {
+						break
+					}
+					i += width
+					continue
+				}
 				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
 					break
 				}
@@ -73,9 +98,13 @@ func scanTokens(src []byte) ([]Token, bool) {
 			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
-		if c >= '0' && c <= '9' {
+		if c >= '0' && c <= '9' || c == '.' && i+1 < len(src) && src[i+1] >= '0' && src[i+1] <= '9' {
 			start := i
 			i = scanNumberEnd(src, i)
+			if i-start > 10000 || !validNumberLiteral(src, start, i) {
+				ok = false
+				break
+			}
 			tokens = append(tokens, Token{KindLine: TokenNumber | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
 		}
@@ -141,8 +170,17 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
+			tok := Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)}
+			if _, valid := RuneLiteralValue(src, tok); !valid {
+				ok = false
+				break
+			}
+			tokens = append(tokens, tok)
 			continue
+		}
+		if c >= 128 {
+			ok = false
+			break
 		}
 		start := i
 		i++
@@ -158,7 +196,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 			if c == '|' && b == '|' || c == '<' && (b == '<' || b == '-') || c == '>' && b == '>' {
 				two = true
 			}
-			if c == '+' && b == '+' || c == '-' && b == '-' || c == '.' && b == '.' {
+			if c == '+' && b == '+' || c == '-' && b == '-' || c == '.' && b == '.' && i+1 < len(src) && src[i+1] == '.' {
 				two = true
 			}
 			if two {
@@ -174,11 +212,52 @@ func scanTokens(src []byte) ([]Token, bool) {
 		}
 		tokens = append(tokens, tok)
 	}
-	if line > TokenLineLimit {
+	if !linked && line > TokenLineLimit {
 		ok = false
 	}
 	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})
 	return tokens, ok
+}
+
+// Validate the entire source, including comments and raw string literals.
+// Escaped arbitrary bytes in interpreted strings remain valid source text.
+func validSourceEncoding(src []byte) bool {
+	for i := 0; i < len(src); {
+		c := src[i]
+		if c == 0 {
+			return false
+		}
+		if c < 0x80 {
+			i++
+			continue
+		}
+		n := 0
+		value := 0
+		minimum := 0
+		if c >= 0xc2 && c <= 0xdf {
+			n, value, minimum = 2, int(c&31), 0x80
+		} else if c >= 0xe0 && c <= 0xef {
+			n, value, minimum = 3, int(c&15), 0x800
+		} else if c >= 0xf0 && c <= 0xf4 {
+			n, value, minimum = 4, int(c&7), 0x10000
+		} else {
+			return false
+		}
+		if i+n > len(src) {
+			return false
+		}
+		for j := 1; j < n; j++ {
+			if src[i+j] < 0x80 || src[i+j] > 0xbf {
+				return false
+			}
+			value = value<<6 | int(src[i+j]&63)
+		}
+		if value < minimum || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff || value == 0xfeff && i != 0 {
+			return false
+		}
+		i += n
+	}
+	return true
 }
 
 func (s *Scanner) Scan(src []byte) {
@@ -189,10 +268,15 @@ func scanNumberEnd(src []byte, start int) int {
 	i := start
 	if src[i] == '0' && i+1 < len(src) && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B' || src[i+1] == 'o' || src[i+1] == 'O') {
 		hex := src[i+1] == 'x' || src[i+1] == 'X'
+		dot := false
 		i += 2
 		for i < len(src) {
 			c := src[i]
-			if c == '.' && hex {
+			if c == '.' {
+				if dot {
+					break
+				}
+				dot = true
 				i++
 				continue
 			}
@@ -216,7 +300,7 @@ func scanNumberEnd(src []byte, start int) int {
 		for i < len(src) && isDigitOrUnderscore(src[i]) {
 			i++
 		}
-		if i < len(src) && src[i] == '.' {
+		if src[start] != '.' && i < len(src) && src[i] == '.' {
 			i++
 			for i < len(src) && isDigitOrUnderscore(src[i]) {
 				i++
