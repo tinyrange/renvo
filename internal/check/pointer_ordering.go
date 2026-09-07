@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidResolvedOrdering(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
+func invalidResolvedOperatorOperands(pkg load.Package, info PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
 	file := pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	var scope CoreScope
@@ -17,7 +17,8 @@ func invalidResolvedOrdering(pkg load.Package, info PackageInfo, fileIndex int, 
 			op = pointerOrderingNestedFunctionEnd(file, op, fn.BodyEnd-1)
 			continue
 		}
-		if !tokenTextIs(&file, op, "<") && !tokenTextIs(&file, op, "<=") && !tokenTextIs(&file, op, ">") && !tokenTextIs(&file, op, ">=") {
+		shift := tokenTextIs(&file, op, "<<") || tokenTextIs(&file, op, ">>")
+		if !shift && !tokenTextIs(&file, op, "<") && !tokenTextIs(&file, op, "<=") && !tokenTextIs(&file, op, ">") && !tokenTextIs(&file, op, ">=") {
 			continue
 		}
 		if !ready {
@@ -31,6 +32,13 @@ func invalidResolvedOrdering(pkg load.Package, info PackageInfo, fileIndex int, 
 		}
 		left := literalOrderingBoundary(file, op-1, fn.BodyStart+1, -1) + 1
 		right := literalOrderingBoundary(file, op+1, fn.BodyEnd-1, 1)
+		if shift {
+			left, right = shiftOperandBounds(file, left, op, right)
+			if invalidKnownShiftOperand(pkg, info, fileIndex, scope, bindings, left, op, op) || invalidKnownShiftOperand(pkg, info, fileIndex, scope, bindings, op+1, right, op) {
+				return op
+			}
+			continue
+		}
 		if definiteStructExpr(pkg, info, fileIndex, scope, bindings, left, op, op, 0) || definiteStructExpr(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) {
 			return op
 		}
