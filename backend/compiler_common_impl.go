@@ -9119,6 +9119,10 @@ func renvoFunctionLocalCap(fn *renvoFuncDecl) int {
 }
 
 func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
+	return renvoEmitLinearRangeMode(g, start, end, false)
+}
+
+func renvoEmitLinearRangeMode(g *renvoLinearGen, start int, end int, variableGroup bool) bool {
 	renvoNonNil(g)
 	constGroup := g.constEvalIotaValid != 0
 	constGroupRepeatStart := 0
@@ -9166,6 +9170,10 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 				stmt.startTok = constGroupRepeatStart
 				stmt.endTok = constGroupRepeatEnd
 			}
+			stmt.kind = renvoStmtVar
+		} else if variableGroup {
+			// VarSpec entries omit the var keyword, but retain declaration
+			// semantics, including initializer scope and zero initialization.
 			stmt.kind = renvoStmtVar
 		}
 		lastKind = stmt.kind
@@ -11898,6 +11906,9 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 	tokenData := p.toks.data
 	startBase := stmt.startTok * renvoTokenStride
 	startKind := int(tokenData[startBase]) & 255
+	if startKind == renvoTokVar && renvoTokCharIs(p, stmt.startTok+1, '(') {
+		return renvoEmitLinearRangeMode(g, stmt.startTok+2, stmt.endTok-1, true)
+	}
 	if startKind == renvoTokConst && renvoTokCharIs(p, stmt.startTok+1, '(') {
 		g.constEvalIota = 0
 		g.constEvalIotaValid = 1

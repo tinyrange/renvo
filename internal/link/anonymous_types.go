@@ -82,16 +82,46 @@ func anonymousTypeLocalVariable(program *unit.Program, start int) bool {
 	if functionValueEnclosingFunc(program, start) < 0 {
 		return false
 	}
-	// A direct declaration has the shape var name[, name...] Aggregate.
-	// Do not confuse a composite expression, signature, or field declaration
-	// with the native variable-type grammar supported here.
 	name := start - 1
+	// Walk type constructors, not initializer expressions, back to the name
+	// list. Matching brackets keeps identifiers inside array bounds separate.
+	for name >= 0 {
+		if functionValueTokenEquals(program, name, "*") {
+			name--
+			continue
+		}
+		if functionValueTokenEquals(program, name, "]") {
+			open := functionValueFindMatchingBackward(program, name, "[", "]")
+			if open < 0 {
+				return false
+			}
+			name = open - 1
+			if functionValueTokenEquals(program, name, "map") {
+				name--
+			}
+			continue
+		}
+		break
+	}
 	for name >= 0 && program.Tokens[name].KindLine&255 == unit.TokenIdent {
 		if functionValueTokenEquals(program, name-1, "var") {
 			return true
 		}
 		if !functionValueTokenEquals(program, name-1, ",") {
-			break
+			// A grouped VarSpec has no repeated var keyword. Its nearest
+			// containing parenthesis must belong to var, not a call/signature.
+			depth := 0
+			for tok := name - 1; tok >= 0; tok-- {
+				if functionValueTokenEquals(program, tok, ")") {
+					depth++
+				} else if functionValueTokenEquals(program, tok, "(") {
+					if depth == 0 {
+						return functionValueTokenEquals(program, tok-1, "var")
+					}
+					depth--
+				}
+			}
+			return false
 		}
 		name -= 2
 	}

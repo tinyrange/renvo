@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ebbbd67a25ce45b3da7000b5e95c2e301011af751b6b6974b03e933dc521a159"
+const CompilerSourceDigest = "35d99cc6e94f0c030f1d4fa8378b8a8c7a0dec2ce9524658bf268c5128061cc9"
 
 // source: backend/compiler_common_impl.go
 
@@ -9126,6 +9126,10 @@ return localCap
 }
 
 func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
+return renvoEmitLinearRangeMode(g, start, end, false)
+}
+
+func renvoEmitLinearRangeMode(g *renvoLinearGen, start int, end int, variableGroup bool) bool {
 renvoNonNil(g)
 constGroup := g.constEvalIotaValid != 0
 constGroupRepeatStart := 0
@@ -9173,6 +9177,10 @@ renvoCopyTokenData(prog, constGroupRepeatStart*renvoTokenStride, stmt.startTok*r
 stmt.startTok = constGroupRepeatStart
 stmt.endTok = constGroupRepeatEnd
 }
+stmt.kind = renvoStmtVar
+} else if variableGroup {
+
+
 stmt.kind = renvoStmtVar
 }
 lastKind = stmt.kind
@@ -11905,6 +11913,9 @@ a := &g.asm
 tokenData := p.toks.data
 startBase := stmt.startTok * renvoTokenStride
 startKind := int(tokenData[startBase]) & 255
+if startKind == renvoTokVar && renvoTokCharIs(p, stmt.startTok+1, '(') {
+return renvoEmitLinearRangeMode(g, stmt.startTok+2, stmt.endTok-1, true)
+}
 if startKind == renvoTokConst && renvoTokCharIs(p, stmt.startTok+1, '(') {
 g.constEvalIota = 0
 g.constEvalIotaValid = 1
