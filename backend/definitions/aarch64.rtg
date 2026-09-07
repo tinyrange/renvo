@@ -85,6 +85,22 @@ go backend {
 	}
 
 	func asmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
+		// Scaled unsigned offsets avoid materializing an address for distant
+		// fields. Keep the same load width/sign extension as the fallback.
+		if disp > 255 && (size == 1 || size == 2 || size == 4 || size == 8) && disp%size == 0 && disp/size < 4096 {
+			op := 0xf9400000
+			if size == 1 {
+				op = 0x39400000
+			}
+			if size == 2 {
+				op = 0x79800000
+			}
+			if size == 4 {
+				op = 0xb9800000
+			}
+			asmEmit(a, op|((disp/size)<<10)|(base<<5)|dst)
+			return
+		}
 		if disp != 0 && disp >= -256 && disp <= 255 {
 			imm := (disp & 511) << 12
 			if size == 1 {
@@ -119,6 +135,20 @@ go backend {
 	}
 
 	func asmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
+		if disp > 255 && (size == 1 || size == 2 || size == 4 || size == 8) && disp%size == 0 && disp/size < 4096 {
+			op := 0xf9000000
+			if size == 1 {
+				op = 0x39000000
+			}
+			if size == 2 {
+				op = 0x79000000
+			}
+			if size == 4 {
+				op = 0xb9000000
+			}
+			asmEmit(a, op|((disp/size)<<10)|(base<<5)|src)
+			return
+		}
 		if disp != 0 && disp >= -256 && disp <= 255 {
 			imm := (disp & 511) << 12
 			if size == 1 {

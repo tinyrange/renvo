@@ -24075,7 +24075,11 @@ func renvoEmitWideCompareOperand(g *renvoLinearGen, ep *renvoExprParse, idx int,
 	if renvoTypeKindIsFloat(floatKind) {
 		return renvoEmitScalarExprForKind(g, ep, idx, floatKind)
 	}
-	return renvoEmitIntExpr(g, ep, idx)
+	if !renvoEmitIntExpr(g, ep, idx) {
+		return false
+	}
+	renvoNormalizeNativeExprPrimary(g, ep, idx)
+	return true
 }
 
 func renvoEmitWideStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
