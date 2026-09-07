@@ -24,6 +24,12 @@ func invalidMapIndexType(pkg load.Package, info PackageInfo, fileIndex int, fn s
 	}
 	bindings := collectScopedTypeBindings(file, fn, body)
 	for _, index := range indexes {
+		if !numericBuiltinInNestedFunction(file, fn, index.OpenTok) {
+			value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
+			if value.kind != "" && value.kind != "string" || definiteStructExpr(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0) || containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0) == TypeChan {
+				return CheckErrOperand, index.OpenTok
+			}
+		}
 		shape := mapIndexExprShape(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
 		if mapLiteralPrimitiveMismatch(file, index.IndexStart, index.IndexEnd, shape.key) {
 			return CheckErrType, index.IndexStart
