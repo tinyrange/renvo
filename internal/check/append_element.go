@@ -8,7 +8,7 @@ import (
 // Scalar assignment requires identical types for typed operands, whereas
 // untyped constants may acquire the destination type. Unknown type identities
 // and general constant representability still require broader type checking.
-func invalidScalarAppendValue(pkg load.Package, info PackageInfo, destination string, source numericBuiltinValue, file syntax.File, arg ExprSpan) bool {
+func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, destination string, source numericBuiltinValue, file syntax.File, arg ExprSpan) bool {
 	underlying := destination
 	if len(destination) > 6 && destination[:6] == "named:" {
 		index := LookupType(info, destination[6:])
@@ -19,6 +19,13 @@ func invalidScalarAppendValue(pkg load.Package, info PackageInfo, destination st
 		underlying = conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, 0)
 	}
 	want := scalarAppendKind(underlying)
+	if want == "int" {
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true}
+		value := arrayLiteralConstant(context, arg.StartTok, arg.EndTok, scope)
+		if integerConstantOutsideType(value, underlying) {
+			return true
+		}
+	}
 	if want == "" || source.kind == "" {
 		return false
 	}
@@ -42,6 +49,38 @@ func invalidScalarAppendValue(pkg load.Package, info PackageInfo, destination st
 		return want != source.kind
 	}
 	return want == "int" && unsafeAddFractionalDecimal(file, arg.StartTok, arg.EndTok)
+}
+
+// Fixed-width integer bounds are target independent. For machine-sized types,
+// reject values outside every supported target's range (at most 64 bits);
+// narrower target-specific checks remain part of target-aware typing.
+func integerConstantOutsideType(value wideConstant, name string) bool {
+	if !value.ok {
+		return false
+	}
+	bits := 64
+	if name == "int8" || name == "uint8" || name == "byte" {
+		bits = 8
+	}
+	if name == "int16" || name == "uint16" {
+		bits = 16
+	}
+	if name == "int32" || name == "uint32" || name == "rune" {
+		bits = 32
+	}
+	unsigned := name == "byte" || len(name) >= 4 && name[:4] == "uint"
+	if unsigned && value.negative {
+		return true
+	}
+	if !unsigned {
+		bits--
+	}
+	limit := wideShift(wideSmall(1), bits, true)
+	comparison := wideMagnitudeCompare(value, limit)
+	if value.negative {
+		return comparison > 0
+	}
+	return comparison >= 0
 }
 
 func scalarAppendKind(name string) string {
