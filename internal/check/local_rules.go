@@ -42,6 +42,9 @@ func localRuleScopeEnd(body syntax.Body, tok int) int {
 func invalidLocalRules(pkg load.Package, info PackageInfo, file syntax.File, fn syntax.FuncDecl, body syntax.Body) (int, int) {
 	var bindings []localRuleBinding
 	signature := buildFuncSignature(file, fn)
+	if tok := invalidBareReturnShadow(file, fn, body, signature); tok >= 0 {
+		return CheckErrScope, tok
+	}
 	for i := 0; i < len(signature.Params); i++ {
 		field := signature.Params[i]
 		if field.NameTok >= 0 {

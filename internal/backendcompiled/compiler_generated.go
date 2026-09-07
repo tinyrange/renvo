@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f544d41de04e7e667de1e16054c046cb79ffcac14c957363d75098ee2ad31c57"
+const CompilerSourceDigest = "f95f05f3fd79163b4365c04d24d2cc1e5831fe593e959f8bbd86ca65a18c4024"
 
 // source: backend/compiler_common_impl.go
 
@@ -7395,7 +7395,7 @@ return false
 }
 for i := 0; i < fn.resultCount; i++ {
 result := &g.meta.params[fn.firstResult+i]
-offset := renvoFindLocalOffset(g, result.nameStart, result.nameEnd)
+offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
 if offset < 0 {
 return false
 }
@@ -21535,6 +21535,18 @@ if localIndex < 0 {
 return -1
 }
 return g.locals[localIndex].offset
+}
+
+
+
+func renvoFindResultLocalOffset(g *renvoLinearGen, nameStart int, nameEnd int) int {
+for i := 0; i < g.localCount; i++ {
+local := &g.locals[i]
+if local.nameStart == nameStart && local.nameEnd == nameEnd {
+return local.offset
+}
+}
+return -1
 }
 
 func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
