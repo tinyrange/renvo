@@ -6,18 +6,19 @@ import "renvo.dev/internal/syntax"
 // predeclared constant or type. Unknown expressions need ordinary type checking.
 func invalidLiteralUnary(file syntax.File, op int, end int) bool {
 	operator := file.Tokens[op]
-	if operator.End-operator.Start != 1 {
+	receive := tokenTextIs(&file, op, "<-")
+	if operator.End-operator.Start != 1 && !receive {
 		return false
 	}
 	ch := file.Src[int(operator.Start)]
-	if ch != '!' && ch != '*' && ch != '&' && ch != '+' && ch != '-' && ch != '^' {
+	if !receive && ch != '!' && ch != '*' && ch != '&' && ch != '+' && ch != '-' && ch != '^' {
 		return false
 	}
 	if op > 0 {
 		previous := file.Tokens[op-1].KindLine & 255
 		if previous == syntax.TokenIdent || previous == syntax.TokenNumber || previous == syntax.TokenString || previous == syntax.TokenChar ||
 			tokCharIs(&file, op-1, ')') || tokCharIs(&file, op-1, ']') || tokCharIs(&file, op-1, '}') {
-			return false // binary operator
+			return false // binary operator or channel send
 		}
 	}
 	start := op + 1
@@ -51,7 +52,7 @@ func invalidLiteralUnary(file syntax.File, op int, end int) bool {
 	if kind != syntax.TokenNumber && kind != syntax.TokenString && kind != syntax.TokenChar {
 		return false
 	}
-	if ch == '!' || ch == '*' || ch == '&' {
+	if receive || ch == '!' || ch == '*' || ch == '&' {
 		return true
 	}
 	if kind == syntax.TokenString {

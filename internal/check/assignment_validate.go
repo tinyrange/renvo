@@ -37,7 +37,7 @@ func functionMayNeedChannelCheck(file syntax.File, fn syntax.FuncDecl) bool {
 }
 
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, int) {
-	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
+	for i := fn.BodyStart + 1; i+1 < fn.BodyEnd; i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenOperator {
 			continue
 		}
