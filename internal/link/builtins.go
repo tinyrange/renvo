@@ -309,6 +309,9 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		if ordinaryBuiltinTypeName(name) {
 			return name
 		}
+		if functionValueDeclaredType(program, name) && functionValueEnclosingLocalTypeDepthMode(program, before, name, 0, false) == "" {
+			return name
+		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
 	if functionValueTokenEquals(program, end-1, ")") {
