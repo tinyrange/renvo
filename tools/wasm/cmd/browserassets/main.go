@@ -639,6 +639,7 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "device/uart"},
 		{Path: "device/terminal"},
 		{Path: "device/input/tca8418"},
+		{Path: "device/input/tab5keyboard"},
 		{Path: "device/input/st7121"},
 		{Path: "device/display/st7121"},
 		{Path: "device/sensor/sgp30"},

@@ -901,9 +901,9 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 }
 
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
-	// The bundled compiler archive favors this latency bound: deeper searches
-	// save little space but cost more self-host time.
-	const maxCandidates = 32
+	// Bound search work even on adversarial buckets. The best-match boundary
+	// check below avoids rescanning shared prefixes during the deeper search.
+	const maxCandidates = 256
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0
@@ -918,6 +918,12 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 			break
 		}
 		checked++
+		// A candidate must extend the current best match to improve it. Reject
+		// mismatches at that boundary before rescanning an identical prefix.
+		// This keeps the deeper, size-saving search cheap on repetitive source.
+		if bestLength > 0 && pos+bestLength < len(data) && data[candidate+bestLength] != data[pos+bestLength] {
+			continue
+		}
 		if data[candidate] != data[pos] || data[candidate+1] != data[pos+1] || data[candidate+2] != data[pos+2] {
 			continue
 		}

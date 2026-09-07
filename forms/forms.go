@@ -771,6 +771,18 @@ func (f *Form) InvalidRectAt(index int) (graphics.Rect, bool) {
 	return f.invalid[index], true
 }
 
+// RotateSurface changes a software form's orientation using the native buffer
+// layout, resizes/docks its controls, and invalidates the whole logical view.
+// Paint then writes directly in scanout order; no staging image is required.
+func (f *Form) RotateSurface(surface *graphics.Surface, rotation graphics.Rotation) bool {
+	if f == nil || !surface.SetRotation(rotation) {
+		return false
+	}
+	f.Dispatch(graphics.Event{Type: graphics.EventWindowResize, Dirty: graphics.R(0, 0, graphics.Scalar(surface.Width), graphics.Scalar(surface.Height))})
+	f.Invalidate(graphics.R(0, 0, graphics.Scalar(surface.Width), graphics.Scalar(surface.Height)))
+	return true
+}
+
 // Paint redraws only invalidated regions. Each region is clipped independently
 // and all intersecting controls are painted in z-order so moved or overlapping
 // controls leave correct pixels behind.

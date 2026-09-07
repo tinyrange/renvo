@@ -57,10 +57,10 @@ func InitTouch() bool {
 	// Probe only the address before attempting a register transaction. This
 	// distinguishes reset/power failures from pointer/read protocol failures.
 	if !i2cWrite(touchAddress, nil) {
-		print("TAB5 TOUCH ENDPOINT FAIL\n")
+		print("TAB5 TOUCH ENDPOINT FAIL\r\n")
 		return false
 	}
-	print("TAB5 TOUCH ENDPOINT PASS\n")
+	print("TAB5 TOUCH ENDPOINT PASS\r\n")
 	var info [16]byte
 	read := false
 	for attempt := 0; attempt < 6 && !read; attempt++ {
