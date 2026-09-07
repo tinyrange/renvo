@@ -10,12 +10,14 @@ func BundledStdReadFile(path string) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	if name == "@module/go.mod" {
+	if name == "@module/go.mod" || name == "@runtime/go.mod" {
 		return []byte("module renvo.dev\n"), true
 	}
 	moduleFile := bundledHasPrefix(name, "@module/")
 	if moduleFile {
 		name = name[len("@module/"):]
+	} else if bundledHasPrefix(name, "@runtime/") {
+		name = name[len("@runtime/"):]
 	}
 	if bundledStdHasSuffix(name, "_test.go") {
 		return nil, false
@@ -41,9 +43,17 @@ func BundledStdReadDir(path string) ([]StdEntry, bool) {
 			{Name: "x", IsDir: true},
 		}, true
 	}
+	if name == "@runtime" {
+		return []StdEntry{{Name: "go.mod"}, {Name: "x", IsDir: true}}, true
+	}
+	if name == "@runtime/x" {
+		return []StdEntry{{Name: "runtime", IsDir: true}}, true
+	}
 	moduleDir := bundledHasPrefix(name, "@module/")
 	if moduleDir {
 		name = name[len("@module/"):]
+	} else if bundledHasPrefix(name, "@runtime/") {
+		name = name[len("@runtime/"):]
 	}
 	entries, ok := bundledStdRawReadDir(name)
 	if !ok {
@@ -95,6 +105,20 @@ func bundledStdDirHasFile(path string, includeAssets bool) bool {
 func bundledSourceName(path string) (string, bool) {
 	for len(path) > 0 && path[0] == '/' {
 		path = path[1:]
+	}
+	// The language runtime is a compiler dependency, independent of the
+	// optional application-module cache. Its private module view contains
+	// only the core runtime and a synthesized module declaration.
+	const runtimeRoot = "std/__renvo_runtime_module"
+	if path == runtimeRoot {
+		return "@runtime", true
+	}
+	if bundledHasPrefix(path, runtimeRoot+"/") {
+		relative := path[len(runtimeRoot)+1:]
+		if relative == "go.mod" || relative == "x" || relative == "x/runtime" || bundledHasPrefix(relative, "x/runtime/") {
+			return "@runtime/" + relative, true
+		}
+		return "", false
 	}
 	if !BundledExtrasEnabled {
 		if path == "std" || bundledHasPrefix(path, "std/") {

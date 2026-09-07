@@ -22,13 +22,24 @@ func (fs concurrencySourceFS) physical(path string) string {
 }
 
 func (fs concurrencySourceFS) ReadFile(path string) ([]byte, bool) {
-	return fs.base.ReadFile(fs.physical(path))
+	physical := fs.physical(path)
+	data, ok := fs.base.ReadFile(physical)
+	if !ok && physical != path {
+		return fs.base.ReadFile(path)
+	}
+	return data, ok
 }
 func (fs concurrencySourceFS) ReadDir(path string) ([]DirEntry, bool) {
-	return fs.base.ReadDir(fs.physical(path))
+	physical := fs.physical(path)
+	entries, ok := fs.base.ReadDir(physical)
+	if !ok && physical != path {
+		return fs.base.ReadDir(path)
+	}
+	return entries, ok
 }
 func (fs concurrencySourceFS) PathExists(path string) bool {
-	return fs.base.PathExists(fs.physical(path))
+	physical := fs.physical(path)
+	return fs.base.PathExists(physical) || physical != path && fs.base.PathExists(path)
 }
 
 // Pull the default handler into the ordinary dependency graph only for source
