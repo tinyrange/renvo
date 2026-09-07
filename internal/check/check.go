@@ -48,6 +48,7 @@ const (
 	CheckErrConstantOperation
 	CheckErrStructLiteral
 	CheckErrArrayLength
+	CheckErrNewVersion
 )
 
 const (

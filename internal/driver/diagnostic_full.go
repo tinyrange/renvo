@@ -427,6 +427,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrArrayLength:
 			code, message = "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int"
+		case check.CheckErrNewVersion:
+			code, message = "RENVO-CHECK-041", "new with an expression requires go1.26 or later"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)

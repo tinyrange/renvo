@@ -29,6 +29,26 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
+		if name == "new" {
+			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
+				return CheckErrBuiltinArity, callee
+			}
+			if !load.GoVersionBefore(pkg.Files[fileIndex].GoVersion, "1.26") || numericBuiltinInNestedFunction(*file, fn, callee) {
+				continue
+			}
+			if !numericReady {
+				body := syntax.ParseFuncBodyStatements(*file, fn)
+				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericReady = true
+			}
+			// This resolver identifies values, not bare type operands. Unknown
+			// operands must not turn valid new(Type) into a version error.
+			value := numericBuiltinExprValue(*pkg, *info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+			if value.kind != "" {
+				return CheckErrNewVersion, callee
+			}
+			continue
+		}
 		if name == "copy" || name == "delete" || name == "append" {
 			expanded := tokenTextIs(file, close-2, "...")
 			if name == "append" && (len(args) == 0 || expanded && len(args) != 2) || name != "append" && (len(args) != 2 || expanded) {

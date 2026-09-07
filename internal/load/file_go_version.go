@@ -1,5 +1,13 @@
 package load
 
+// GoVersionBefore reports whether a known language version predates minimum.
+// An unset or malformed version is not evidence for rejecting a feature.
+func GoVersionBefore(version, minimum string) bool {
+	version = goLanguageVersion(version)
+	minimum = goLanguageVersion(minimum)
+	return version != "" && minimum != "" && version != minimum && laterGoLanguageVersion(version, minimum) == minimum
+}
+
 func effectiveFileGoVersion(pkg Package, src []byte) string {
 	version := goLanguageVersion(pkg.GoVersion)
 	if version == "" && (pkg.Ref.Kind == PackageInModule || pkg.Ref.Kind == PackageDependency) {

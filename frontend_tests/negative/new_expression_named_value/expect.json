@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-041",
+  "file": "cmd/app/main.go",
+  "line": 7,
+  "column": 6,
+  "message": "new with an expression requires go1.26 or later"
+}
