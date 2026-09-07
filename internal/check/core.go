@@ -140,6 +140,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				}
 			}
 		}
+		if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+			return info, false, CheckErrType, decl.File, tok
+		}
 		if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
 			return info, false, CheckErrStructLiteral, decl.File, tok
 		}
@@ -185,6 +188,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if len(literals) > 0 {
 				scope, ok, tok := buildFuncScopeCore(file, fn)
 				if ok {
+					if mapTok := invalidMapLiteralTypes(pkg, info, file, literals, scope); mapTok >= 0 {
+						return info, false, CheckErrType, fileIndex, mapTok
+					}
 					tok = invalidStructLiterals(pkg, info, file, literals, scope)
 					if tok >= 0 {
 						return info, false, CheckErrStructLiteral, fileIndex, tok
