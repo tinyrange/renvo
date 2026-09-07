@@ -6223,9 +6223,15 @@ func renvoParseParamList(m *renvoMeta, p *renvoProgram, start int, end int, coun
 }
 
 func renvoParseType(m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
+	return renvoParseScopedType(nil, m, p, start, end)
+}
+
+// Function-body type expressions resolve lengths through the active lexical
+// bindings. Package declarations use the same parser without a local context.
+func renvoParseScopedType(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
 	renvoNonNil(m, p)
 	var result renvoTypeResult
-	renvoParseTypeInto(m, p, start, end, &result)
+	renvoParseTypeInto(g, m, p, start, end, &result)
 	return result
 }
 
@@ -6263,7 +6269,7 @@ func renvoParseFuncSignatureInto(m *renvoMeta, p *renvoProgram, openTok int, end
 	renvoSetTypeResult(result, typ, next)
 }
 
-func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
+func renvoParseTypeInto(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
 	renvoNonNil(m, p, result)
 	if start >= end {
 		renvoSetTypeResult(result, 0, start)
@@ -6283,7 +6289,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '.') && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') {
-		elem := renvoParseType(m, p, start+3, end)
+		elem := renvoParseScopedType(g, m, p, start+3, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6293,7 +6299,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '*') {
-		elem := renvoParseType(m, p, start+1, end)
+		elem := renvoParseScopedType(g, m, p, start+1, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6311,14 +6317,23 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		count := -1
 		ellipsis := closeTok == start+4 && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') && renvoTokCharIs(p, start+3, '.')
 		if !ellipsis {
-			length := renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+			var length renvoConstResult
+			if g == nil {
+				length = renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+			} else {
+				ep := renvoNewExprParse()
+				root := renvoParseExpressionRoot(ep, p, start+1, closeTok)
+				if root >= 0 {
+					length = renvoEvalConstExpr(g, ep, root)
+				}
+			}
 			if !length.ok || length.value < 0 {
 				renvoSetTypeResult(result, 0, start)
 				return
 			}
 			count = length.value
 		}
-		elem := renvoParseType(m, p, closeTok+1, end)
+		elem := renvoParseScopedType(g, m, p, closeTok+1, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6331,7 +6346,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '[') && renvoTokCharIs(p, start+1, ']') {
-		elem := renvoParseType(m, p, start+2, end)
+		elem := renvoParseScopedType(g, m, p, start+2, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6382,7 +6397,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 				if embedded {
 					typeStart = i
 				}
-				fieldType := renvoParseType(m, p, typeStart, lineEnd)
+				fieldType := renvoParseScopedType(g, m, p, typeStart, lineEnd)
 				if fieldType.typ == 0 {
 					renvoSetTypeResult(result, 0, start)
 					return
@@ -12091,7 +12106,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 					typeStart--
 				}
 				if typeStart < typeEnd {
-					typeResult := renvoParseType(meta, g.prog, typeStart, typeEnd)
+					typeResult := renvoParseScopedType(g, meta, g.prog, typeStart, typeEnd)
 					if typeResult.typ != 0 {
 						localType = typeResult.typ
 					}
@@ -12606,7 +12621,7 @@ func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok 
 	if nameCount < 2 || pos >= typeEnd {
 		return 0
 	}
-	typeResult := renvoParseType(g.meta, p, pos, typeEnd)
+	typeResult := renvoParseScopedType(g, g.meta, p, pos, typeEnd)
 	if typeResult.typ == 0 || typeResult.next != typeEnd {
 		return -1
 	}
@@ -13658,7 +13673,7 @@ func renvoTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 	for endTok < tokenCount && int(renvoTokEnd(p, endTok)) <= e.nameEnd {
 		endTok++
 	}
-	typeResult := renvoParseType(meta, p, e.tok, endTok)
+	typeResult := renvoParseScopedType(g, meta, p, e.tok, endTok)
 	if !renvoResolveInferredArrayCompositeLength(meta, g, ep, idx, typeResult.typ) {
 		return 0
 	}

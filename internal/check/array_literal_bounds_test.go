@@ -17,6 +17,14 @@ func TestArrayLiteralBounds(t *testing.T) {
 		`const N=2;func main(){_=[N]int{N:1}}`,
 		`func main(){_=[1]int{1<<80:1}}`,
 		`func main(){_=[(1<<80)-(1<<80)+1]int{1,2}}`,
+		`func main(){const N=1;_=[N]int{1,2}}`,
+		`func main(){const N=2;_=[N]int{N:1}}`,
+		`func main(){const N=1<<100;_=[1]int{N:1}}`,
+		`func main(){const N=-1;_=[...]int{N:1}}`,
+		`func main(){const(A=iota;B);_=[1]int{B:1}}`,
+		`func main(){const N=2;_=[N]int{N-1:1,2}}`,
+		`const N=0;func main(){{const N=2;_=N};_=[N]int{1}}`,
+		`const N=0;type A [N]int;func main(){const N=2;_=A{1}}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); result.Ok || result.Error != CheckErrArrayIndex {
@@ -37,6 +45,11 @@ func TestArrayLiteralBoundsControls(t *testing.T) {
 		`type A [2]int;type B=A;var _=B{1,2}`,
 		`func main(){_=[1]int{(1<<80)-(1<<80):1}}`,
 		`func main(){_=[2]int{0.0:1,2}}`,
+		`func main(){const N=2;_=[N]int{N-1:1}}`,
+		`const N=1;func main(){const N=N+1;_=[N]int{1,2}}`,
+		`func main(){const N=2;const M=N;{const N=0;_=[M]int{1,2}}}`,
+		`func main(){const N=0;_=func(){const N=2;_=[N]int{1,2}}}`,
+		`func main(){const N=2;_=func(){const N=0;_=[2]int{N:1}}}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); !result.Ok {

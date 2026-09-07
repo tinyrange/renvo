@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a83f4aff0ccc95c3a441c475447cf52c9238cdf43ceec9de7901398d041f5135"
+const CompilerSourceDigest = "68f9ce0b03ff180e829f346b16de03bc2891475da72c3e07ff543d504052317b"
 
 // source: backend/compiler_common_impl.go
 
@@ -6230,9 +6230,15 @@ return
 }
 
 func renvoParseType(m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
+return renvoParseScopedType(nil, m, p, start, end)
+}
+
+
+
+func renvoParseScopedType(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
 renvoNonNil(m, p)
 var result renvoTypeResult
-renvoParseTypeInto(m, p, start, end, &result)
+renvoParseTypeInto(g, m, p, start, end, &result)
 return result
 }
 
@@ -6270,7 +6276,7 @@ renvoTruncParams(&m.params, paramBase)
 renvoSetTypeResult(result, typ, next)
 }
 
-func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
+func renvoParseTypeInto(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
 renvoNonNil(m, p, result)
 if start >= end {
 renvoSetTypeResult(result, 0, start)
@@ -6290,7 +6296,7 @@ renvoSetTypeResult(result, renvoAddType(m, renvoTypeInterface, 0, start+2, close
 return
 }
 if renvoTokCharIs(p, start, '.') && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') {
-elem := renvoParseType(m, p, start+3, end)
+elem := renvoParseScopedType(g, m, p, start+3, end)
 if elem.typ == 0 {
 renvoSetTypeResult(result, 0, start)
 return
@@ -6300,7 +6306,7 @@ renvoSetTypeResult(result, typ, elem.next)
 return
 }
 if renvoTokCharIs(p, start, '*') {
-elem := renvoParseType(m, p, start+1, end)
+elem := renvoParseScopedType(g, m, p, start+1, end)
 if elem.typ == 0 {
 renvoSetTypeResult(result, 0, start)
 return
@@ -6318,14 +6324,23 @@ return
 count := -1
 ellipsis := closeTok == start+4 && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') && renvoTokCharIs(p, start+3, '.')
 if !ellipsis {
-length := renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+var length renvoConstResult
+if g == nil {
+length = renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+} else {
+ep := renvoNewExprParse()
+root := renvoParseExpressionRoot(ep, p, start+1, closeTok)
+if root >= 0 {
+length = renvoEvalConstExpr(g, ep, root)
+}
+}
 if !length.ok || length.value < 0 {
 renvoSetTypeResult(result, 0, start)
 return
 }
 count = length.value
 }
-elem := renvoParseType(m, p, closeTok+1, end)
+elem := renvoParseScopedType(g, m, p, closeTok+1, end)
 if elem.typ == 0 {
 renvoSetTypeResult(result, 0, start)
 return
@@ -6338,7 +6353,7 @@ renvoSetTypeResult(result, renvoAddSequenceType(m, renvoTypeArray, elem.typ, cou
 return
 }
 if renvoTokCharIs(p, start, '[') && renvoTokCharIs(p, start+1, ']') {
-elem := renvoParseType(m, p, start+2, end)
+elem := renvoParseScopedType(g, m, p, start+2, end)
 if elem.typ == 0 {
 renvoSetTypeResult(result, 0, start)
 return
@@ -6389,7 +6404,7 @@ embedded := typeStart >= lineEnd || nameTok != i || renvoTokIsKind(p, typeStart,
 if embedded {
 typeStart = i
 }
-fieldType := renvoParseType(m, p, typeStart, lineEnd)
+fieldType := renvoParseScopedType(g, m, p, typeStart, lineEnd)
 if fieldType.typ == 0 {
 renvoSetTypeResult(result, 0, start)
 return
@@ -12098,7 +12113,7 @@ if startKind == renvoTokIdent {
 typeStart--
 }
 if typeStart < typeEnd {
-typeResult := renvoParseType(meta, g.prog, typeStart, typeEnd)
+typeResult := renvoParseScopedType(g, meta, g.prog, typeStart, typeEnd)
 if typeResult.typ != 0 {
 localType = typeResult.typ
 }
@@ -12613,7 +12628,7 @@ nameCount := len(names)
 if nameCount < 2 || pos >= typeEnd {
 return 0
 }
-typeResult := renvoParseType(g.meta, p, pos, typeEnd)
+typeResult := renvoParseScopedType(g, g.meta, p, pos, typeEnd)
 if typeResult.typ == 0 || typeResult.next != typeEnd {
 return -1
 }
@@ -13665,7 +13680,7 @@ endTok := e.tok
 for endTok < tokenCount && int(renvoTokEnd(p, endTok)) <= e.nameEnd {
 endTok++
 }
-typeResult := renvoParseType(meta, p, e.tok, endTok)
+typeResult := renvoParseScopedType(g, meta, p, e.tok, endTok)
 if !renvoResolveInferredArrayCompositeLength(meta, g, ep, idx, typeResult.typ) {
 return 0
 }

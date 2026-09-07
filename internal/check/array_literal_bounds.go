@@ -1,12 +1,19 @@
 package check
 
-import "renvo.dev/internal/load"
+import (
+	"renvo.dev/internal/load"
+	"renvo.dev/internal/syntax"
+)
 
-func invalidArrayLiteralBounds(pkg load.Package, info PackageInfo, fileIndex int, literals []CompositeExpr, scope CoreScope) int {
+func invalidArrayLiteralBounds(pkg load.Package, info PackageInfo, fileIndex int, literals []CompositeExpr, scope CoreScope, fn syntax.FuncDecl, bindings []scopedTypeBinding) int {
 	file := pkg.Files[fileIndex].File
-	context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true}
 	for _, literal := range literals {
-		length, array := arrayLiteralLength(pkg, info, fileIndex, literal.TypeStart, literal.TypeEnd, scope, 0)
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true, scope: scope, before: literal.TypeStart}
+		// Enclosing bindings do not describe a nested function's declarations.
+		if fn.BodyEnd > 0 && !numericBuiltinInNestedFunction(file, fn, literal.TypeStart) {
+			context.bindings = bindings
+		}
+		length, array := arrayLiteralLength(context, literal.TypeStart, literal.TypeEnd, 0)
 		if !array {
 			continue
 		}
@@ -26,25 +33,27 @@ func invalidArrayLiteralBounds(pkg load.Package, info PackageInfo, fileIndex int
 	return -1
 }
 
-func arrayLiteralLength(pkg load.Package, info PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) (wideConstant, bool) {
-	if depth > len(info.Types)+1 || start < 0 || start >= end {
+func arrayLiteralLength(context constantIndexContext, start, end, depth int) (wideConstant, bool) {
+	if depth > len(context.info.Types)+1 || start < 0 || start >= end {
 		return wideConstant{}, false
 	}
-	file := pkg.Files[fileIndex].File
+	file := context.pkg.Files[context.fileIndex].File
 	if classifyType(file, start, end) == TypeArray {
 		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(file, start, end)
-		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true}
-		return arrayLiteralConstant(context, lengthStart, lengthEnd, scope), true
+		return wideConstantExpr(context, lengthStart, lengthEnd, 0), true
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, &file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(context.scope, &file, start) >= 0 {
 		return wideConstant{}, false
 	}
-	index := LookupType(info, tokenString(&file, start))
+	index := LookupType(*context.info, tokenString(&file, start))
 	if index < 0 {
 		return wideConstant{}, false
 	}
-	typ := info.Types[index]
-	return arrayLiteralLength(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
+	typ := context.info.Types[index]
+	context.fileIndex = typ.File
+	context.bindings = nil
+	context.scope = CoreScope{}
+	return arrayLiteralLength(context, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
 func arrayLiteralConstant(context constantIndexContext, start, end int, scope CoreScope) wideConstant {
