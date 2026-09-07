@@ -83,6 +83,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortDecls(info.Decls)
+	for _, decl := range info.Decls {
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: decl.File}
+		if tok := invalidArrayLengthTypeSpan(context, decl.TypeStart, decl.TypeEnd); tok >= 0 {
+			return info, false, CheckErrArrayLength, decl.File, tok
+		}
+	}
 	if file, tok := invalidPackageConstantOperations(&pkg, &info); tok >= 0 {
 		return info, false, CheckErrConstantOperation, file, tok
 	}

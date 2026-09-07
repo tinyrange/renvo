@@ -310,6 +310,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
 			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
+			} else if built.Build.ErrorDetail == check.CheckErrArrayLength {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
 				renvoSetDiagnostic(&d, "checker", renvoDiagnosticCode("CHECK", built.Build.ErrorDetail), renvoCheckMessage(built.Build.ErrorDetail))
 			} else {
