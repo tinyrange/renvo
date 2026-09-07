@@ -117,10 +117,12 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	config := &load.ModuleConfig{}
 	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
 	result.Module = module
+	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	if !module.Ok {
+		result.ErrorSourcePath = modulePath
+		result.ErrorOffset = module.ErrorOffset
 		return sourceFail(result, SourceErrModule, modulePath)
 	}
-	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	var normalizedFiles []string
 	if len(explicitFiles) > 0 {
 		rootDir := ""

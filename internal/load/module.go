@@ -28,6 +28,7 @@ const (
 type Module struct {
 	Root        string
 	Path        string
+	GoVersion   string
 	Ok          bool
 	Error       int
 	ErrorOffset int
@@ -112,6 +113,12 @@ func ParseModuleConfig(root string, src []byte, config *ModuleConfig) Module {
 				return moduleParseFail(module, ModuleErrPath, start)
 			}
 			module.Path, i = path, next
+		} else if directive == "go" {
+			version, next, ok := parseModulePath(src, i)
+			if !ok || module.GoVersion != "" || !validGoDirectiveVersion(version) || !goDirectiveLineEnd(src, next) {
+				return moduleParseFail(module, ModuleErrDirective, start)
+			}
+			module.GoVersion, i = version, next
 		} else if directive == "require" || directive == "exclude" {
 			path, next, ok := parseModulePath(src, i)
 			if !ok {
