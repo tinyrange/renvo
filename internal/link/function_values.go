@@ -1468,8 +1468,14 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 			return functionValueTokensText(program, start+1, end)
 		}
 	}
-	for i := fn.BodyStart + 1; i+2 < before; i++ {
+	for i := before - 3; i > fn.BodyStart; i-- {
 		if !functionValueTokenEquals(program, i, name) {
+			continue
+		}
+		if !functionValueTokenEquals(program, i+1, ":=") && !functionValueTokenEquals(program, i-1, "var") {
+			continue
+		}
+		if !functionValueBindingInScope(program, fn, i, before) {
 			continue
 		}
 		if functionValueTokenEquals(program, i+1, ":=") {
@@ -1573,6 +1579,59 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 	// generated closure function. Only receiver, parameter, and enclosing-local
 	// bindings belong in the persistent closure environment.
 	return ""
+}
+
+func functionValueBindingInScope(program *unit.Program, fn unit.Func, binding int, before int) bool {
+	for open := fn.BodyStart; open < binding; open++ {
+		if !functionValueTokenEquals(program, open, "{") {
+			continue
+		}
+		close := functionValueFindMatchingBrace(program, open)
+		if close > binding && before > close {
+			return false
+		}
+		if close < binding && close > open {
+			open = close
+		}
+	}
+	// Initializers have the control statement's implicit scope, not their
+	// surrounding brace block. Skip composite literals while locating its body.
+	owner := binding - 1
+	if owner >= 0 && (functionValueTokenEquals(program, owner, "if") || functionValueTokenEquals(program, owner, "for") || functionValueTokenEquals(program, owner, "switch")) {
+		for open := binding + 2; open < fn.BodyEnd; open++ {
+			end := functionValueTypeEnd(program, open)
+			if end > open && functionValueTokenEquals(program, end, "{") {
+				literalType := functionValueTokenEquals(program, open, "map") || functionValueTokenEquals(program, open, "[") || functionValueTokenEquals(program, open, "struct") || functionValueDeclaredType(program, functionValueTokenText(program, open))
+				if literalType {
+					close := functionValueFindMatchingBrace(program, end)
+					if close > end {
+						open = close
+						continue
+					}
+				}
+			}
+			if functionValueTokenEquals(program, open, "(") {
+				close := functionValueFindMatchingParen(program, open)
+				if close > open {
+					open = close
+					continue
+				}
+			}
+			if !functionValueTokenEquals(program, open, "{") {
+				continue
+			}
+			close := functionValueFindMatchingBrace(program, open)
+			for close+1 < fn.BodyEnd && functionValueTokenEquals(program, close+1, "else") {
+				next := concurrencyTopLevelToken(program, close+2, fn.BodyEnd, "{")
+				if next < 0 {
+					break
+				}
+				close = functionValueFindMatchingBrace(program, next)
+			}
+			return before <= close
+		}
+	}
+	return true
 }
 
 func functionValueTypeSwitchBindingType(program *unit.Program, binding int, before int) string {
