@@ -7388,7 +7388,7 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			for i := 0; i < fn.resultCount; i++ {
 				result := &g.meta.params[fn.firstResult+i]
-				offset := renvoFindLocalOffset(g, result.nameStart, result.nameEnd)
+				offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
 				if offset < 0 {
 					return false
 				}
@@ -21528,6 +21528,18 @@ func renvoFindLocalOffset(g *renvoLinearGen, nameStart int, nameEnd int) int {
 		return -1
 	}
 	return g.locals[localIndex].offset
+}
+
+// A return list assigns to the result declarations, even when a lexical local
+// with the same spelling is visible while evaluating the return expressions.
+func renvoFindResultLocalOffset(g *renvoLinearGen, nameStart int, nameEnd int) int {
+	for i := 0; i < g.localCount; i++ {
+		local := &g.locals[i]
+		if local.nameStart == nameStart && local.nameEnd == nameEnd {
+			return local.offset
+		}
+	}
+	return -1
 }
 
 func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
