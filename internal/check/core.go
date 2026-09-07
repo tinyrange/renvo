@@ -184,6 +184,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if code, indexTok := invalidMapIndexType(pkg, info, fileIndex, fn, body); code != CheckOK {
 				return info, false, code, fileIndex, indexTok
 			}
+			if tok := invalidPointerOrdering(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, tok
+			}
 			if code, tok := invalidLocalRules(pkg, info, file, fn, body); code != CheckOK {
 				return info, false, code, fileIndex, tok
 			}
