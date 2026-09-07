@@ -277,7 +277,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if code, tok := invalidUnsafeIntrinsicCalls(&pkg, &info, fileIndex, fn, &signature, out.CoreSelectors); code != CheckOK {
 				return info, false, code, fileIndex, tok
 			}
-			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
+			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope, builtinCalls); builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
 			callCheckArenaStart := arena.Mark()
@@ -616,7 +616,7 @@ func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, bas
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap")
+	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap") || tokenTextIs(file, tok, "make")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {

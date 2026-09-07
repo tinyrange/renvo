@@ -14,7 +14,7 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, scope CoreScope, calls []int) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
@@ -27,6 +27,12 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
+		if name == "make" {
+			if code, tok := invalidMakeBuiltinCall(pkg, info, fileIndex, scope, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
 		if name == "len" || name == "cap" {
 			if len(args) != 1 {
 				return CheckErrBuiltinArity, callee
