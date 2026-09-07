@@ -96,6 +96,12 @@ func Sprintln(a ...interface{}) string {
 }
 
 func formatValue(v interface{}, verb byte) (string, bool) {
+	if verb == 's' || verb == 'v' || verb == 'q' || verb == 'x' {
+		if text, ok := methodString(v); ok {
+			formatted, _ := formatValue(text, verb)
+			return formatted, false
+		}
+	}
 	switch v.(type) {
 	case string:
 		value := v.(string)

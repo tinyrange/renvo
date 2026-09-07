@@ -29,6 +29,7 @@ type TypeInfo struct {
 	Decl             int
 	Symbol           int
 	Alias            bool
+	Reflect          bool
 	TypeStart        int
 	TypeEnd          int
 	LenStart         int
@@ -74,6 +75,12 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		Direction: ChanBoth,
 	}
 	if out.Kind == TypeStruct {
+		for i := 0; i < len(file.Decls); i++ {
+			if file.Decls[i].NameTok == decl.Token {
+				out.Reflect = syntax.ReflectDirective(file, file.Decls[i])
+				break
+			}
+		}
 		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
 		close := findTypeMatching(file, open, '{', '}')
 		if open >= 0 && close > open && close <= decl.TypeEnd {
@@ -218,6 +225,12 @@ func isTypeSpanSeparator(file syntax.File, tok int) bool {
 	return tokCharIs(&file, tok, ';') || tokCharIs(&file, tok, ',')
 }
 
+// StructFields parses the fields between a checked struct's braces. It retains
+// tags and unnamed embedded fields for source-level metadata consumers.
+func StructFields(file syntax.File, start int, end int) []Field {
+	return parseStructFields(file, start, end)
+}
+
 func parseStructFields(file syntax.File, start int, end int) []Field {
 	var fields []Field
 	i := start
@@ -229,11 +242,14 @@ func parseStructFields(file syntax.File, start int, end int) []Field {
 		fieldEnd := nextStructFieldEnd(file, i, end)
 		first, last := trimFieldSpan(file, i, fieldEnd)
 		if first < last {
+			tag := ""
 			if file.Tokens[last-1].KindLine&255 == syntax.TokenString {
+				tag, _ = syntax.StringLiteralValue(file.Src, file.Tokens[last-1])
 				last--
 			}
 			parsed := parseFieldList(file, first, last)
 			for j := 0; j < len(parsed); j++ {
+				parsed[j].Tag = tag
 				fields = append(fields, parsed[j])
 			}
 		}
@@ -303,9 +319,10 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 	parenDepth := 0
 	bracketDepth := 0
+	braceDepth := 0
 	for i := start; i < end; i++ {
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
-		if parenDepth == 0 && bracketDepth == 0 && ch == int(c) {
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && ch == int(c) {
 			return i
 		}
 		if ch == int('(') {
@@ -319,6 +336,12 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
+			}
+		} else if ch == int('{') {
+			braceDepth++
+		} else if ch == int('}') {
+			if braceDepth > 0 {
+				braceDepth--
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/testfront"
@@ -51,7 +52,14 @@ func RunTestCommand(args []string, env []string, backend Backend, stdin io.Reade
 	if err != nil {
 		return testFail(result, TestErrWorkDir, packageDir)
 	}
-	generated, err := testfront.GenerateRenvoPackage(absoluteDir)
+	var tags []string
+	for i := 0; i+1 < len(compileArgs); i++ {
+		if compileArgs[i] == "-tags" {
+			tags = append(tags, strings.FieldsFunc(compileArgs[i+1], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' })...)
+			i++
+		}
+	}
+	generated, err := testfront.GenerateRenvoPackageWithTags(absoluteDir, tags)
 	if err != nil {
 		return testFail(result, TestErrGenerate, err.Error())
 	}
@@ -89,6 +97,7 @@ func RunTestCommand(args []string, env []string, backend Backend, stdin io.Reade
 		return testFail(result, TestErrExecute, err.Error())
 	}
 	command := exec.Command(executable)
+	command.Dir = absoluteDir
 	command.Env = env
 	command.Stdin = stdin
 	command.Stdout = stdout

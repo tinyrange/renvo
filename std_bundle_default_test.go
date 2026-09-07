@@ -18,8 +18,13 @@ func TestStandardLibraryAvailableInEveryBuild(t *testing.T) {
 		}
 	}
 	entries, ok := BundledStdReadDir("/std/strings")
-	if !ok || len(entries) != 1 || entries[0].Name != "strings.go" || entries[0].IsDir {
+	if !ok || len(entries) != 3 {
 		t.Fatalf("strings entries = %v, %v", entries, ok)
+	}
+	for i, name := range []string{"builder.go", "runes.go", "strings.go"} {
+		if entries[i].Name != name || entries[i].IsDir {
+			t.Fatalf("strings entry %d = %v, want %s", i, entries[i], name)
+		}
 	}
 }
 
