@@ -129,6 +129,17 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			continue
 		}
 		file := pkg.Files[decl.File].File
+		wantInterface := interfaceNamedType(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+		if wantInterface.known && !wantInterface.pointer && info.Types[wantInterface.index].Kind == TypeInterface {
+			values := splitExprList(file, decl.ValueStart, decl.ValueEnd)
+			if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
+				value := values[decl.ValueIndex]
+				got := interfaceExprType(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, 0)
+				if definiteInterfaceMismatch(pkg, info, wantInterface.index, got) {
+					return info, false, CheckErrType, decl.File, value.StartTok
+				}
+			}
+		}
 		literals := appendExprComposites(nil, file, decl.ValueStart, decl.ValueEnd)
 		var scope CoreScope
 		if len(literals) > 0 {
@@ -186,6 +197,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			if tok := invalidPointerOrdering(pkg, info, fileIndex, fn, body); tok >= 0 {
 				return info, false, CheckErrOperand, fileIndex, tok
+			}
+			if tok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrType, fileIndex, tok
 			}
 			if code, tok := invalidLocalRules(pkg, info, file, fn, body); code != CheckOK {
 				return info, false, code, fileIndex, tok
