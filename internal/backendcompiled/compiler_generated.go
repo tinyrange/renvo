@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bb555d587a8a8f24ba5276662118d1e29b62dd4d39f71f56df06092af42a5fd2"
+const CompilerSourceDigest = "2536e6eec1d8f4074a54db6d8062c7f729d9757662920da4ef9362cc00db8feb"
 
 // source: backend/compiler_common_impl.go
 
@@ -2062,7 +2062,7 @@ return int(renvoIdentCodes[entry-1])
 
 func renvoResolvedNumericCalleeCode(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 code := renvoExprIdentCode(g.prog, ep, idx)
-if code != renvoIdentReal && code != renvoIdentImag && code != renvoIdentComplex {
+if code != renvoIdentReal && code != renvoIdentImag && code != renvoIdentComplex && code != renvoIdentString {
 return code
 }
 e := &ep.exprs[idx]
@@ -13719,6 +13719,9 @@ if renvoTokIsKind(g.prog, callee.tok, renvoTokFunc) {
 end := renvoPrimaryTypeEnd(g.prog, callee.tok, renvoTokCount(g.prog))
 parsed := renvoParseType(g.meta, g.prog, callee.tok, end)
 return parsed.typ
+}
+if renvoFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0 || renvoFindGlobalType(g, callee.nameStart, callee.nameEnd) != 0 || renvoFindMetaFunction(g.meta, callee.nameStart, callee.nameEnd) >= 0 {
+return 0
 }
 builtin := renvoBuiltinTypeFromToken(g.prog, callee.tok)
 if builtin != 0 {

@@ -286,6 +286,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, scope); rangeTok >= 0 {
 				return info, false, CheckErrOperand, fileIndex, rangeTok
 			}
+			if conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, scope); conversionTok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, conversionTok
+			}
 			callCheckArenaStart := arena.Mark()
 			operandTok := invalidCallOperandCount(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
 			arena.Reset(callCheckArenaStart)

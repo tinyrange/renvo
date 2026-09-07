@@ -2055,7 +2055,7 @@ func renvoExprIdentCode(p *renvoProgram, ep *renvoExprParse, idx int) int {
 
 func renvoResolvedNumericCalleeCode(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 	code := renvoExprIdentCode(g.prog, ep, idx)
-	if code != renvoIdentReal && code != renvoIdentImag && code != renvoIdentComplex {
+	if code != renvoIdentReal && code != renvoIdentImag && code != renvoIdentComplex && code != renvoIdentString {
 		return code
 	}
 	e := &ep.exprs[idx]
@@ -13712,6 +13712,9 @@ func renvoConversionTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int)
 		end := renvoPrimaryTypeEnd(g.prog, callee.tok, renvoTokCount(g.prog))
 		parsed := renvoParseType(g.meta, g.prog, callee.tok, end)
 		return parsed.typ
+	}
+	if renvoFindLocalIndex(g, callee.nameStart, callee.nameEnd) >= 0 || renvoFindGlobalType(g, callee.nameStart, callee.nameEnd) != 0 || renvoFindMetaFunction(g.meta, callee.nameStart, callee.nameEnd) >= 0 {
+		return 0
 	}
 	builtin := renvoBuiltinTypeFromToken(g.prog, callee.tok)
 	if builtin != 0 {

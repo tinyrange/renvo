@@ -115,6 +115,9 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 	}
 	name := tokenString(&file, start)
 	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(info, name) < 0 {
+		if name != "nil" {
+			return numericBuiltinValue{kind: "bool"}
+		}
 		return numericBuiltinValue{kind: "other"}
 	}
 	for _, decl := range info.Decls {
