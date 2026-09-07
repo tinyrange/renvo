@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d517994efdbe2e668d62e972467c3cc409a0a70346ae15e4f9a72ee8a88fefc1"
+const CompilerSourceDigest = "7aa1d8c47189f3211cfbde5f0b52bd24164e8abf4254a524b36c005f3a1459b1"
 
 // source: backend/compiler_common_impl.go
 
@@ -21766,7 +21766,10 @@ if s.initStart+1 != s.initEnd {
 return -129
 }
 if renvoTokIsKind(g.prog, s.initStart, renvoTokNumber) {
-value := renvoParseIntToken(g.prog, s.initStart)
+value := renvoParseConstIntToken(g.prog, s.initStart)
+if g.prog.compilerInt32 && g.prog.parsedIntHigh != value>>31 {
+return -129
+}
 if renvoAsmImmFits8Signed(value) {
 return value
 }
@@ -28784,11 +28787,9 @@ return renvoEmitMachineIntExpr(g, ep, idx)
 }
 
 func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
-g.c.renvoTargetArch != renvoArchAmd64 &&
-g.c.renvoTargetArch != renvoArchAarch64 {
-return false
-}
+
+
+
 renvoNonNil(g, ep)
 e := &ep.exprs[idx]
 if e.kind == renvoExprInt || e.kind == renvoExprChar || e.kind == renvoExprBool {
@@ -36712,7 +36713,11 @@ return renvoFixedTargetUnknown
 }
 e := &ep.exprs[idx]
 if e.kind == renvoExprInt {
-return renvoParseIntToken(p, e.tok)
+value := renvoParseConstIntToken(p, e.tok)
+if p.compilerInt32 && p.parsedIntHigh != value>>31 {
+return renvoFixedTargetUnknown
+}
+return value
 }
 if e.kind == renvoExprChar {
 return renvoParseCharToken(p, e.tok)

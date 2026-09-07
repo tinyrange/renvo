@@ -21759,7 +21759,10 @@ func renvoFindSmallConstByName(g *renvoLinearGen, nameStart int, nameEnd int) in
 			return -129
 		}
 		if renvoTokIsKind(g.prog, s.initStart, renvoTokNumber) {
-			value := renvoParseIntToken(g.prog, s.initStart)
+			value := renvoParseConstIntToken(g.prog, s.initStart)
+			if g.prog.compilerInt32 && g.prog.parsedIntHigh != value>>31 {
+				return -129
+			}
 			if renvoAsmImmFits8Signed(value) {
 				return value
 			}
@@ -28777,11 +28780,9 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 }
 
 func renvoExprHasUnsignedIntType(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
-		g.c.renvoTargetArch != renvoArchAmd64 &&
-		g.c.renvoTargetArch != renvoArchAarch64 {
-		return false
-	}
+	// Signedness is a source-type property, including on fixed 32-bit targets.
+	// Constant folding must not turn an unsigned shift into an arithmetic one
+	// just because a particular machine emitter is selected.
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt || e.kind == renvoExprChar || e.kind == renvoExprBool {
