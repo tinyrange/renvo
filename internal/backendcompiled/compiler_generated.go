@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "da009f48b3bf3e90db5d7251965832db4ddeef75707695bda2239acdb28e0602"
+const CompilerSourceDigest = "dad20982ff804f153bbf9ce75f31b6e3e3f45c3be5daf5946537da6418c8b63d"
 
 // source: backend/compiler_common_impl.go
 
@@ -2058,6 +2058,18 @@ if entry == 0 {
 return 0
 }
 return int(renvoIdentCodes[entry-1])
+}
+
+func renvoResolvedNumericCalleeCode(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+code := renvoExprIdentCode(g.prog, ep, idx)
+if code != renvoIdentReal && code != renvoIdentImag && code != renvoIdentComplex {
+return code
+}
+e := &ep.exprs[idx]
+if renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 || renvoFindGlobalType(g, e.nameStart, e.nameEnd) != 0 || renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd) >= 0 {
+return 0
+}
+return code
 }
 
 func renvoBytesEqualText(src []byte, start int, end int, text string) bool {
@@ -13273,7 +13285,7 @@ if e.kind == renvoExprCall {
 if renvoExprIsErrorStringCall(g, ep, idx) {
 return renvoTypeString
 }
-callee := renvoExprIdentCode(p, ep, e.left)
+callee := renvoResolvedNumericCalleeCode(g, ep, e.left)
 if callee == renvoIdentRecover && e.argCount == 0 {
 return renvoBuiltinTypeInterface
 }
@@ -28755,7 +28767,7 @@ if renvoExprIsIdentText(g.prog, ep, e.left, "renvo_runtime_CallJIT") {
 return renvoEmitJITCall(g, ep, idx)
 }
 }
-callee := renvoExprIdentCode(g.prog, ep, e.left)
+callee := renvoResolvedNumericCalleeCode(g, ep, e.left)
 if callee == renvoIdentRecover {
 return renvoEmitBuiltinRecover(g, ep, idx)
 }
@@ -28961,7 +28973,7 @@ c0, _, comparison := renvoFloatComparisonChars(g.prog, e.tok)
 return !comparison && renvo32IEEEBinaryStack(g, offset, left, right, c0, 8)
 }
 if e.kind == renvoExprCall {
-callee := renvoExprIdentCode(g.prog, ep, e.left)
+callee := renvoResolvedNumericCalleeCode(g, ep, e.left)
 if e.argCount == 1 && (callee == renvoIdentReal || callee == renvoIdentImag) {
 arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 argType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, arg))
@@ -29962,7 +29974,7 @@ renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoEmitCopyMemSecondaryToStack(g, offset, 16)
 return true
 }
-if e.kind == renvoExprCall && renvoExprIdentCode(g.prog, ep, e.left) == renvoIdentComplex {
+if e.kind == renvoExprCall && renvoResolvedNumericCalleeCode(g, ep, e.left) == renvoIdentComplex {
 if e.argCount != 2 || !renvoEmit386Float64ExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), offset) ||
 !renvoEmit386Float64ExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), offset-8) {
 return false
@@ -30124,7 +30136,7 @@ renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPopPrimary(&g.asm)
 return true
 }
-if e.kind == renvoExprCall && renvoExprIdentCode(g.prog, ep, e.left) == renvoIdentComplex {
+if e.kind == renvoExprCall && renvoResolvedNumericCalleeCode(g, ep, e.left) == renvoIdentComplex {
 if e.argCount != 2 {
 return false
 }

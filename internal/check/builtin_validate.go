@@ -18,6 +18,8 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
+	var numericBindings []scopedTypeBinding
+	numericReady := false
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]
 		open := callee + 1
@@ -27,6 +29,20 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
+		if name == "real" || name == "imag" || name == "complex" {
+			if numericBuiltinInNestedFunction(*file, fn, callee) {
+				continue
+			}
+			if !numericReady {
+				body := syntax.ParseFuncBodyStatements(*file, fn)
+				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericReady = true
+			}
+			if code, tok := invalidNumericBuiltinCall(*pkg, *info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
 		if name == "make" {
 			if code, tok := invalidMakeBuiltinCall(pkg, info, fileIndex, scope, callee, close, args); code != CheckOK {
 				return code, tok
