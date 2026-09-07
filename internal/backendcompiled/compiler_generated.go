@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "35d99cc6e94f0c030f1d4fa8378b8a8c7a0dec2ce9524658bf268c5128061cc9"
+const CompilerSourceDigest = "2368abef4f6bb93f69c9613cf9fa2ceb152856f0e4e16559e19857a110d94c72"
 
 // source: backend/compiler_common_impl.go
 
@@ -3207,6 +3207,18 @@ renvoEvalConstExprInto(g, ep, idx, &result)
 return result
 }
 
+func renvoEvalBooleanConst(g *renvoLinearGen, tok int) renvoConstResult {
+p := g.prog
+local := renvoFindLocalIndex(g, renvoTokStart(p, tok), renvoTokEnd(p, tok))
+if local >= 0 {
+if g.locals[local].constValid != 0 && renvoTypeKindIsScalarInt(renvoResolveType(g.meta, g.locals[local].typ).kind) {
+return renvoConstResultOk(g.locals[local].constValue)
+}
+return renvoConstResult{}
+}
+return renvoConstResultOk(renvoBoolTokenValue(p, tok))
+}
+
 func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out *renvoConstResult) {
 renvoNonNil(g, ep, out)
 p := g.prog
@@ -3233,8 +3245,7 @@ renvoSetConstResult(out, value, true)
 return
 }
 if e.kind == renvoExprBool {
-value := renvoBoolTokenValue(p, e.tok)
-renvoSetConstResult(out, value, true)
+*out = renvoEvalBooleanConst(g, e.tok)
 return
 }
 if e.kind == renvoExprIdent {
@@ -3423,8 +3434,7 @@ right = renvoConstResultOk(value)
 value := renvoParseCharToken(p, rightTok)
 right = renvoConstResultOk(value)
 } else if rightKind == renvoExprBool {
-value := renvoBoolTokenValue(p, rightTok)
-right = renvoConstResultOk(value)
+right = renvoEvalBooleanConst(g, rightTok)
 } else {
 right = renvoEvalConstExpr(g, ep, rightIndex)
 }

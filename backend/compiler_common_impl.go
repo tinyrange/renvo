@@ -3200,6 +3200,18 @@ func renvoEvalConstExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) renvoCon
 	return result
 }
 
+func renvoEvalBooleanConst(g *renvoLinearGen, tok int) renvoConstResult {
+	p := g.prog
+	local := renvoFindLocalIndex(g, renvoTokStart(p, tok), renvoTokEnd(p, tok))
+	if local >= 0 {
+		if g.locals[local].constValid != 0 && renvoTypeKindIsScalarInt(renvoResolveType(g.meta, g.locals[local].typ).kind) {
+			return renvoConstResultOk(g.locals[local].constValue)
+		}
+		return renvoConstResult{}
+	}
+	return renvoConstResultOk(renvoBoolTokenValue(p, tok))
+}
+
 func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out *renvoConstResult) {
 	renvoNonNil(g, ep, out)
 	p := g.prog
@@ -3226,8 +3238,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		return
 	}
 	if e.kind == renvoExprBool {
-		value := renvoBoolTokenValue(p, e.tok)
-		renvoSetConstResult(out, value, true)
+		*out = renvoEvalBooleanConst(g, e.tok)
 		return
 	}
 	if e.kind == renvoExprIdent {
@@ -3416,8 +3427,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 			value := renvoParseCharToken(p, rightTok)
 			right = renvoConstResultOk(value)
 		} else if rightKind == renvoExprBool {
-			value := renvoBoolTokenValue(p, rightTok)
-			right = renvoConstResultOk(value)
+			right = renvoEvalBooleanConst(g, rightTok)
 		} else {
 			right = renvoEvalConstExpr(g, ep, rightIndex)
 		}

@@ -23,6 +23,12 @@ func TestInvalidPackageArrayLengths(t *testing.T) {
 		"var x [(1<<100)&^1]int",
 		"var x [-1&^1]int",
 		"var x [-'a']int",
+		"var x [true]int",
+		"var x [nil]int",
+		"var x [\"size\"]int",
+		"const n=false; var x [n]int",
+		"const n=\"size\"; type A [n]int",
+		"var n=2; var x [n]int",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source + "\nfunc main(){}")}})
