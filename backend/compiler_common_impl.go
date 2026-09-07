@@ -14278,7 +14278,11 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 			if elemSize < 1 {
 				elemSize = 8
 			}
-			baseOff := renvoAddUnnamedLocal(g, baseType)
+			// Save a pointer/length/capacity descriptor even when the source is
+			// a small array or pointer-to-array. Source-sized scratch storage
+			// can be smaller than the three words stored below and overwrite
+			// adjacent locals.
+			baseOff := renvoAddUnnamedLocal(g, renvoInferParsedExprType(g, ep, idx))
 			lowOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 			highOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 			maxOff := renvoAddUnnamedLocal(g, renvoTypeInt)

@@ -34,6 +34,12 @@ an M5Stack Unit Synth. It uses twelve MIDI channels for a procedurally varied
 ensemble of melody, bass, drums, arpeggio, electric piano, warm pads, music box,
 and guitar. Constrained progressions keep each newly generated cycle musical.
 
+The `rollercan` example controls a Unit RollerCAN on Grove I2C. Hold the NanoC6
+button to request 10 RPM with a 100 mA phase-current limit; release to disable
+output. It starts disabled and prints speed, current and voltage telemetry.
+See the [driver guide](../../device/motor/rollercan/README.md) for the complete
+register API, units, firmware compatibility and build instructions.
+
 The target is intentionally loaded with `-backend`: it exercises the same JIT
 preparation path available to custom boards and does not advertise itself as a
 compiled-in host target.

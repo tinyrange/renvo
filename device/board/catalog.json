@@ -66,6 +66,7 @@
       {"path": "examples/device/button_rgb_c", "language": "c"},
       {"path": "examples/device/air_quality", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
       {"path": "examples/device/miniscale", "hardware": [{"name": "Unit Mini Scales", "docs": "https://docs.m5stack.com/en/unit/Unit%20Mini%20Scales"}]},
+      {"path": "examples/device/rollercan", "hardware": [{"name": "Unit RollerCAN", "docs": "https://docs.m5stack.com/en/unit/Unit-RollerCAN"}]},
       {"path": "examples/device/synth", "hardware": [{"name": "Unit Synth", "docs": "https://docs.m5stack.com/en/unit/synth"}]}
     ]
   },

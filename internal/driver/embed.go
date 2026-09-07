@@ -851,6 +851,15 @@ func compressSourceEmbedArchive(data []byte) []byte {
 		flags := byte(0)
 		for bit := 0; bit < 8 && pos < len(data); bit++ {
 			distance, length := sourceEmbedArchiveMatch(data, buckets, previous, pos)
+			// A literal can expose a longer match at the next byte. Keep the
+			// same bounded dictionary search, but avoid committing to a short
+			// match when that would discard the larger saving immediately ahead.
+			if length >= 3 && length < 273 && pos+1 < len(data) {
+				_, nextLength := sourceEmbedArchiveMatch(data, buckets, previous, pos+1)
+				if nextLength > length+1 {
+					length = 0
+				}
+			}
 			if length == 18 {
 				// The zero extension byte prevents the next position from
 				// starting a match; stopping at 17 compresses this archive better.

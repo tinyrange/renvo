@@ -645,6 +645,7 @@ func platformPackageSpecs(boards []boardDefinition) []platformPackageSpec {
 		{Path: "device/sensor/adxl345"},
 		{Path: "device/sensor/bme688"},
 		{Path: "device/sensor/miniscale"},
+		{Path: "device/motor/rollercan"},
 		{Path: "device/audio/sam2695"},
 		{Path: "device/ws2812"},
 		{Path: "device/internal/esprmt"},
