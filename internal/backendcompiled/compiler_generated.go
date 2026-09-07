@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "68f9ce0b03ff180e829f346b16de03bc2891475da72c3e07ff543d504052317b"
+const CompilerSourceDigest = "ebbbd67a25ce45b3da7000b5e95c2e301011af751b6b6974b03e933dc521a159"
 
 // source: backend/compiler_common_impl.go
 
@@ -5108,6 +5108,10 @@ return 0, 0, false
 }
 
 func renvoParseTopDeclGroup(m *renvoMeta, p *renvoProgram, kind int, openTok int, endTok int) {
+renvoParseScopedDeclGroup(nil, m, p, kind, openTok, endTok)
+}
+
+func renvoParseScopedDeclGroup(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, kind int, openTok int, endTok int) {
 renvoNonNil(m, p)
 if !renvoTokCharIs(p, openTok, '(') || endTok <= openTok+1 {
 renvoMetaError(m)
@@ -5125,7 +5129,7 @@ j := openTok + 1
 for j < groupEnd {
 if renvoTokIsKind(p, j, renvoTokIdent) {
 entryEnd := renvoStatementLineEnd(p, j, groupEnd)
-renvoParseTopDeclEntry(m, p, kind, j, entryEnd)
+renvoParseScopedDeclEntry(g, m, p, kind, j, entryEnd)
 if entryEnd <= j {
 j++
 } else {
@@ -5556,6 +5560,10 @@ return start
 }
 
 func renvoParseTopDeclEntry(m *renvoMeta, p *renvoProgram, kind int, start int, end int) {
+renvoParseScopedDeclEntry(nil, m, p, kind, start, end)
+}
+
+func renvoParseScopedDeclEntry(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, kind int, start int, end int) {
 renvoNonNil(m, p)
 if start >= end || !renvoTokIsKind(p, start, renvoTokIdent) {
 renvoMetaError(m)
@@ -5572,7 +5580,7 @@ isAlias := renvoTokCharIs(p, typeStart, '=')
 if isAlias {
 typeStart++
 }
-typeResult := renvoParseType(m, p, typeStart, end)
+typeResult := renvoParseScopedType(g, m, p, typeStart, end)
 if typeResult.typ == 0 || typeResult.next > end {
 renvoMetaError(m)
 return
@@ -9491,9 +9499,9 @@ return true
 if stmt.kind == renvoStmtType {
 start := stmt.startTok + 1
 if renvoTokCharIs(p, start, '(') {
-renvoParseTopDeclGroup(g.meta, p, renvoTokType, start, stmt.endTok)
+renvoParseScopedDeclGroup(g, g.meta, p, renvoTokType, start, stmt.endTok)
 } else {
-renvoParseTopDeclEntry(g.meta, p, renvoTokType, start, stmt.endTok)
+renvoParseScopedDeclEntry(g, g.meta, p, renvoTokType, start, stmt.endTok)
 }
 return g.meta.ok
 }

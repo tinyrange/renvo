@@ -23,6 +23,13 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 		if close < 0 {
 			return false
 		}
+		// Local variable declarations already accept anonymous types in the
+		// backend. Hoisting their type can detach array lengths and field types
+		// from local declarations, or merge identically spelled distinct types.
+		if anonymousTypeLocalVariable(program, i) {
+			i = close
+			continue
+		}
 		if close == i+2 {
 			continue
 		}
@@ -69,4 +76,24 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	generatedStart := len(text)
 	text = appendFunctionValueString(text, generated)
 	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+}
+
+func anonymousTypeLocalVariable(program *unit.Program, start int) bool {
+	if functionValueEnclosingFunc(program, start) < 0 {
+		return false
+	}
+	// A direct declaration has the shape var name[, name...] Aggregate.
+	// Do not confuse a composite expression, signature, or field declaration
+	// with the native variable-type grammar supported here.
+	name := start - 1
+	for name >= 0 && program.Tokens[name].KindLine&255 == unit.TokenIdent {
+		if functionValueTokenEquals(program, name-1, "var") {
+			return true
+		}
+		if !functionValueTokenEquals(program, name-1, ",") {
+			break
+		}
+		name -= 2
+	}
+	return false
 }

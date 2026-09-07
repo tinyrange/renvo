@@ -191,6 +191,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				arena.Reset(functionArenaStart)
 				return info, false, statementErr, fileIndex, statementTok
 			}
+			if tok := invalidLocalArrayLengths(&pkg, &info, fileIndex, fn, body); tok >= 0 {
+				return info, false, CheckErrArrayLength, fileIndex, tok
+			}
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok

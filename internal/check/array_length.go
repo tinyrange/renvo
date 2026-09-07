@@ -1,6 +1,35 @@
 package check
 
-import "renvo.dev/internal/syntax"
+import (
+	"renvo.dev/internal/load"
+	"renvo.dev/internal/syntax"
+)
+
+func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
+	file := pkg.Files[fileIndex].File
+	bindings := collectScopedTypeBindings(file, fn, body)
+	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, bindings: bindings, strict: true}
+	for _, binding := range bindings {
+		if numericBuiltinInNestedFunction(file, fn, binding.name) {
+			continue
+		}
+		start, end := binding.typeStart, binding.typeEnd
+		context.before = binding.name
+		if !binding.writable && !binding.constant {
+			// Local type names enter scope at their identifier, unlike values.
+			// Their body follows the name and an optional alias equals sign.
+			start, end = binding.name+1, binding.visible
+			if tokenTextIs(&file, start, "=") {
+				start++
+			}
+			context.before = binding.visible
+		}
+		if tok := invalidArrayLengthTypeSpan(context, start, end); tok >= 0 {
+			return tok
+		}
+	}
+	return -1
+}
 
 func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int) int {
 	file := context.pkg.Files[context.fileIndex].File
