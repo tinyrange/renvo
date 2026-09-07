@@ -22,6 +22,18 @@ func TestAppendOperandValidation(t *testing.T) {
 		`type N int;func f(a []N,b []int){_=append(a,b...)}`,
 		`func f(a []*int,b []*string){_=append(a,b...)}`,
 		`func f(a [][]int,b [][]string){_=append(a,b...)}`,
+		`func main(){_=append([]int{},"x")}`,
+		`func main(){_=append([]string{},1)}`,
+		`func main(){_=append([]bool{},0)}`,
+		`func main(){_=append([]float64{},true)}`,
+		`func main(){_=append([]int{},1.5)}`,
+		`func main(){_=append([]int{},nil)}`,
+		`func main(){_=append([]int{},1,"x")}`,
+		`type N int;func f(a []N,b int){_=append(a,b)}`,
+		`type N int;func f(a []int,b N){_=append(a,b)}`,
+		`func f(a []int,b int32){_=append(a,b)}`,
+		`func f(a []float64,b float32){_=append(a,b)}`,
+		`type N string;func f(a []N){b:="x";_=append(a,b)}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); result.Ok || result.Error != CheckErrBuiltinOperand {
@@ -47,6 +59,15 @@ func TestAppendControls(t *testing.T) {
 		`func f(a []byte,b []uint8){_=append(a,b...)}`,
 		`func f(a []int){{a:=[]string{};_=append(a,[]string{}...)};_=append(a,nil...)}`,
 		`func f(a []int){_=func(a []string){_=append(a,[]string{}...)}}`,
+		`type N int;type A = N;func f(a []N,b A){_=append(a,b,1,2.0)}`,
+		`func f(a []byte,b uint8){_=append(a,b,'a')}`,
+		`func f(a []rune,b int32){_=append(a,b,1)}`,
+		`func f(a []string){b:="x";_=append(a,b)}`,
+		`func f(a []bool){b:=true;_=append(a,b)}`,
+		`func f(a []interface{}){_=append(a,1,"x",nil)}`,
+		`func f(a []*int){_=append(a,nil)}`,
+		`func f(a []int){{a:=[]string{};_=append(a,"x")}}`,
+		`type N float64;func f(a []N){_=append(a,1,1.5)}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); !result.Ok {

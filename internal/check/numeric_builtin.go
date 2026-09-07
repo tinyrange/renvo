@@ -172,7 +172,7 @@ func numericBuiltinTypeValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		value.kind = "float"
 	} else if name == "complex64" || name == "complex128" {
 		value.kind = "complex"
-	} else if definiteBuiltinType(name) {
+	} else if definitePrimitiveTypeCode(name) == definitePrimitiveInt || name == "byte" || name == "rune" {
 		value.kind = "int"
 	}
 	return value

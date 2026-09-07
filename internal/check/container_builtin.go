@@ -36,6 +36,14 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 	if expanded {
 		return invalidSliceTransferElements(pkg, info, fileIndex, scope, bindings, before, args[0], args[1], args[1].EndTok-1)
 	}
+	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, args[0].StartTok, args[0].EndTok, before, 0)
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
+		if invalidScalarAppendValue(pkg, info, destination, value, file, arg) {
+			return arg.StartTok
+		}
+	}
 	return -1
 }
 
