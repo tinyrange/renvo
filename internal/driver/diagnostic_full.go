@@ -333,6 +333,8 @@ func syntaxErrorDiagnostic(diagnostic Diagnostic, detail int) Diagnostic {
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-006", "invalid function or method declaration"
 	case syntax.ParseErrTopLevel:
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-007", "unexpected statement or expression at package scope"
+	case syntax.ParseErrDot:
+		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-008", "expected identifier or type assertion after dot"
 	default:
 		diagnostic.Phase, diagnostic.Code = "compiler", "RENVO-BUG-004"
 		diagnostic.Message = "compiler bug: parser returned undeclared error code " + diagnosticIntText(detail)

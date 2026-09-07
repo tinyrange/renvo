@@ -184,7 +184,7 @@ func scanTokens(src []byte) ([]Token, bool) {
 			if c == '|' && b == '|' || c == '<' && (b == '<' || b == '-') || c == '>' && b == '>' {
 				two = true
 			}
-			if c == '+' && b == '+' || c == '-' && b == '-' || c == '.' && b == '.' {
+			if c == '+' && b == '+' || c == '-' && b == '-' || c == '.' && b == '.' && i+1 < len(src) && src[i+1] == '.' {
 				two = true
 			}
 			if two {
@@ -256,10 +256,15 @@ func scanNumberEnd(src []byte, start int) int {
 	i := start
 	if src[i] == '0' && i+1 < len(src) && (src[i+1] == 'x' || src[i+1] == 'X' || src[i+1] == 'b' || src[i+1] == 'B' || src[i+1] == 'o' || src[i+1] == 'O') {
 		hex := src[i+1] == 'x' || src[i+1] == 'X'
+		dot := false
 		i += 2
 		for i < len(src) {
 			c := src[i]
 			if c == '.' && hex {
+				if dot {
+					break
+				}
+				dot = true
 				i++
 				continue
 			}
@@ -283,7 +288,7 @@ func scanNumberEnd(src []byte, start int) int {
 		for i < len(src) && isDigitOrUnderscore(src[i]) {
 			i++
 		}
-		if i < len(src) && src[i] == '.' {
+		if src[start] != '.' && i < len(src) && src[i] == '.' {
 			i++
 			for i < len(src) && isDigitOrUnderscore(src[i]) {
 				i++

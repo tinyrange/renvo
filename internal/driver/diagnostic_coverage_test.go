@@ -25,7 +25,7 @@ func TestEveryOptionErrorHasSpecificDiagnostic(t *testing.T) {
 }
 
 func TestEveryParserErrorHasSpecificDiagnostic(t *testing.T) {
-	for detail := syntax.ParseErrScan; detail <= syntax.ParseErrTopLevel; detail++ {
+	for detail := syntax.ParseErrScan; detail <= syntax.ParseErrDot; detail++ {
 		diagnostic := syntaxErrorDiagnostic(Diagnostic{}, detail)
 		if !diagnostic.Valid() || strings.HasPrefix(diagnostic.Code, "RENVO-BUG-") || strings.Contains(diagnostic.Message, "syntax is invalid") {
 			t.Errorf("parser error %d has generic diagnostic %#v", detail, diagnostic)
