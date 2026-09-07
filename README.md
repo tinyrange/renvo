@@ -259,6 +259,14 @@ renvo cc -c database.c -o database.o
 renvo cc main.o database.o -o app
 ```
 
+For Go source, `renvo -t linux/amd64 -c -o main.o main.go` emits object
+roots for exported package functions; explicit `//export` names take
+precedence. A `main` package also exports its generated entrypoint as the C
+`main` symbol, retaining the entrypoint's package-init calls. `-mode=object`
+is equivalent. This is Renvo's object ABI, not the Go toolchain's archive ABI.
+General library initialization, cross-object Go type identity, and the full
+range of Go ABI signatures are not yet established by this object support.
+
 A system C driver remains useful when an object intentionally refers to a host
 library such as libc. Renvo is still the compiler for `hello.c`: it searches installed and `-I`/`-isystem`
 headers, retains referenced external declarations from the real header, emits

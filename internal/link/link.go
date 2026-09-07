@@ -178,7 +178,11 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		var ok bool
 		packageActions := actions[actionOffset : actionOffset+len(programs[i].Tokens)]
 		actionOffset += len(packageActions)
-		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient)
+		var objectExports []string
+		if object && i == root && !c11Semantics {
+			objectExports = goObjectExportsCore(programs[i])
+		}
+		ok, line = appendProgramCoreWithExports(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient, objectExports)
 		if !ok {
 			appendOK = false
 			break
@@ -591,6 +595,10 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 }
 
 func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool) (bool, int) {
+	return appendProgramCoreWithExports(dst, src, actions, finalEOF, line, aliases, hasNext, transient, nil)
+}
+
+func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool, objectExports []string) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
@@ -646,6 +654,16 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			continue
 		}
 		mappedToken := len(dst.Tokens)
+		if i < len(objectExports) && objectExports[i] != "" {
+			if tokStart > pendingStart {
+				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
+			}
+			dst.Text = appendCoreStringBytes(dst.Text, "\n//export ")
+			dst.Text = appendCoreStringBytes(dst.Text, objectExports[i])
+			dst.Text = append(dst.Text, '\n')
+			pendingStart = tokStart
+			lineBase += 2
+		}
 		line = lineBase + (tok.KindLine >> 8) - 1
 		if line < lineBase {
 			line = lineBase
