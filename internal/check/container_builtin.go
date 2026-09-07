@@ -66,6 +66,14 @@ func invalidCopyDeleteOperands(pkg load.Package, info PackageInfo, fileIndex int
 			return args[1].StartTok
 		}
 	}
+	if name == "copy" {
+		destination := copySliceElement(pkg, info, fileIndex, scope, bindings, args[0].StartTok, args[0].EndTok, before, 0)
+		source := copySliceElement(pkg, info, fileIndex, scope, bindings, args[1].StartTok, args[1].EndTok, before, 0)
+		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, args[1].StartTok, args[1].EndTok, before, 0)
+		if destination != "" && (source != "" && destination != source || value.kind == "string" && destination != "uint8") {
+			return args[1].StartTok
+		}
+	}
 	return -1
 }
 
