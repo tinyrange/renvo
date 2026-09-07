@@ -349,9 +349,17 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
+	headerAssignment := false
 	for i < limit {
 		tok := file.Tokens[i]
 		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		if parenDepth == 0 && bracketDepth == 0 {
+			if tokenTextIs(file.Src, tok, ":=") || tokenTextIs(file.Src, tok, "=") {
+				headerAssignment = true
+			} else if c == ';' || tok.KindLine&255 == TokenRange {
+				headerAssignment = false
+			}
+		}
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -372,7 +380,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 				if nextTok.End > nextTok.Start {
 					next = file.Src[nextTok.Start]
 				}
-				continues := next == '{' || next == '.' || next == '[' || next == '(' || next == ',' ||
+				continues := next == ';' && headerAssignment || next == '{' || next == '.' || next == '[' || next == '(' || next == ',' ||
 					next == '!' || next == '=' || next == '<' || next == '>' || next == '+' || next == '-' ||
 					next == '*' || next == '/' || next == '%' || next == '&' || next == '|' || next == '^'
 				if continues {
