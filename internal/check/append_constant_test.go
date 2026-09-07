@@ -45,6 +45,11 @@ func TestAppendWideConstantExpressions(t *testing.T) {
 		{"func main(){_=append([]int8{},-257%129)}", true},
 		{"func main(){_=append([]uint8{},-257%129)}", false},
 		{"func main(){_=append([]int8{},(1<<100)%257)}", true},
+		{"func main(){_=append([]byte{},((1<<100)|255)&255)}", true},
+		{"func main(){_=append([]int8{},((1<<100)|128)&255)}", false},
+		{"func main(){_=append([]byte{},((1<<100)|255)^(1<<100))}", true},
+		{"func main(){_=append([]uint8{},-1&^1)}", false},
+		{"func main(){_=append([]int8{},-1&^127)}", true},
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + test.source)}})
 		result := CheckGraphCore(graph)

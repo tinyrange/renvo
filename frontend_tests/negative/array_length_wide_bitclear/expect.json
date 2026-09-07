@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-040",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 13,
+  "message": "array length must be a nonnegative integer representable by int"
+}

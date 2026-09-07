@@ -82,6 +82,9 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 			return wideConstant{}
 		}
 		operator := tokenString(&file, op)
+		if operator == "&" || operator == "|" || operator == "^" || operator == "&^" {
+			return wideBitwise(left, right, operator)
+		}
 		if operator == "+" {
 			return wideAdd(left, right)
 		}
