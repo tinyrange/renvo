@@ -249,6 +249,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
 			callCheckArenaStart := arena.Mark()
+			operandTok := invalidCallOperandCount(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
+			arena.Reset(callCheckArenaStart)
+			if operandTok >= 0 {
+				return info, false, CheckErrOperand, fileIndex, operandTok
+			}
 			callTok := invalidDefiniteCallArity(graph, pkgIndex, &info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
 			arena.Reset(callCheckArenaStart)
 			if callTok >= 0 {
