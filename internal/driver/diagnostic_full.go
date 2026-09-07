@@ -425,6 +425,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
 		case check.CheckErrStructLiteral:
 			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
+		case check.CheckErrArrayLength:
+			code, message = "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)

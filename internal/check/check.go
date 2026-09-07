@@ -47,6 +47,7 @@ const (
 	CheckErrRecursiveType
 	CheckErrConstantOperation
 	CheckErrStructLiteral
+	CheckErrArrayLength
 )
 
 const (
