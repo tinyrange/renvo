@@ -419,6 +419,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-035", "missing return"
 		case check.CheckErrMapKey:
 			code, message = "RENVO-CHECK-036", "map key type is not comparable"
+		case check.CheckErrRecursiveType:
+			code, message = "RENVO-CHECK-037", "invalid recursive value type"
 		}
 	} else if built.Build.Error == build.BuildErrLower {
 		phase, code, message = "lowerer", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)
