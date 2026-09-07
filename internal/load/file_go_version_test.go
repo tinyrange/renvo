@@ -48,8 +48,38 @@ func TestFileVersionDoesNotBorrowUnrelatedDirectives(t *testing.T) {
 			t.Fatalf("%s: %q", src, got)
 		}
 	}
-	if got := effectiveFileGoVersion(Package{Ref: PackageRef{Kind: PackageStandard}}, []byte("package fmt")); got != "" {
+	if got := effectiveFileGoVersion(Package{Ref: PackageRef{Kind: PackageStandard}}, []byte("package fmt")); got != CompilerGoVersion {
 		t.Fatalf("standard library: %q", got)
+	}
+}
+
+func TestStandardLibraryFileLanguageOwnership(t *testing.T) {
+	for _, moduleVersion := range []string{"1.16", "1.26"} {
+		workspace := LoadWorkspace("/repo", "/std", ".", []SourceFile{
+			{Path: "/repo/go.mod", Src: []byte("module example.com/app\ngo " + moduleVersion + "\n")},
+			{Path: "/repo/main.go", Src: []byte("package main\nimport \"versionprobe\"\nfunc main(){versionprobe.Use()}\n")},
+			{Path: "/std/versionprobe/base.go", Src: []byte("package versionprobe\nfunc Use(){}\n")},
+			{Path: "/std/versionprobe/tagged.go", Src: []byte("//go:build go1.22\n\npackage versionprobe\n")},
+		})
+		if !workspace.Ok {
+			t.Fatalf("load failed: %#v", workspace)
+		}
+		found := false
+		for _, pkg := range workspace.Graph.Packages {
+			if pkg.Ref.Kind != PackageStandard {
+				continue
+			}
+			found = true
+			if pkg.GoVersion != "" {
+				t.Fatalf("standard package borrowed module directive %q", pkg.GoVersion)
+			}
+			if len(pkg.Files) != 2 || pkg.Files[0].GoVersion != CompilerGoVersion || pkg.Files[1].GoVersion != "1.22" {
+				t.Fatalf("standard files: %#v", pkg.Files)
+			}
+		}
+		if !found {
+			t.Fatal("standard package missing")
+		}
 	}
 }
 

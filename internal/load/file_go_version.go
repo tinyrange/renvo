@@ -13,6 +13,12 @@ func effectiveFileGoVersion(pkg Package, src []byte) string {
 	if version == "" && (pkg.Ref.Kind == PackageInModule || pkg.Ref.Kind == PackageDependency) {
 		version = "1.16"
 	}
+	if version == "" && pkg.Ref.Kind == PackageStandard {
+		// Standard-library sources belong to this compiler's language baseline,
+		// not to the importing application's module. Explicit file constraints
+		// below still select a file-specific language version.
+		version = CompilerGoVersion
+	}
 	// Only leading comments can supply a file language constraint.
 	start := 0
 	if len(src) >= 3 && src[0] == 0xef && src[1] == 0xbb && src[2] == 0xbf {

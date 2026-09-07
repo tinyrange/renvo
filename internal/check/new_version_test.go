@@ -40,3 +40,26 @@ func TestNewExpressionLanguageVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestStandardLibraryNewUsesCompilerLanguageVersion(t *testing.T) {
+	for _, version := range []string{"1.16", "1.26"} {
+		for _, operand := range []string{"1", "int"} {
+			module := load.Module{Root: "/repo/case", Path: "example.com/case", GoVersion: version, Ok: true}
+			graph := load.LoadGraph(module, "/std", "/repo/case", ".", []load.SourceFile{
+				{Path: "/repo/case/main.go", Src: []byte("package main\nimport \"versionprobe\"\nfunc main(){_=versionprobe.Value()}\n")},
+				{Path: "/std/versionprobe/value.go", Src: []byte("package versionprobe\nfunc Value()*int{return new(" + operand + ")}\n")},
+			})
+			if !graph.Ok {
+				t.Fatalf("load failed: %d", graph.Error)
+			}
+			result := CheckGraphCore(graph)
+			want := CheckOK
+			if operand == "1" {
+				want = CheckErrNewVersion
+			}
+			if result.Error != want {
+				t.Fatalf("application %s, std new(%s): %d want %d", version, operand, result.Error, want)
+			}
+		}
+	}
+}
