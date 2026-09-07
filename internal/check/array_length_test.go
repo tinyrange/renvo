@@ -18,6 +18,8 @@ func TestInvalidPackageArrayLengths(t *testing.T) {
 		"type T struct { X [1<<100]int }",
 		"var x map[string][1<<100]int",
 		"var x *[1<<100]int",
+		"var x [(1<<100)/2]int",
+		"var x [-257%129]int",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source + "\nfunc main(){}")}})
@@ -39,6 +41,8 @@ func TestArrayLengthLargeIntermediates(t *testing.T) {
 		"var x [0x10000000000000000-0xFFFFFFFFFFFFFFFF]int",
 		"var x [(1<<63)-1]byte",
 		"var x map[[1]int][2]int",
+		"var x [(1<<100)/(1<<100)]int",
+		"var x [(1<<100)%257]int",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source + "\nfunc main(){}")}})

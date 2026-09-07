@@ -94,6 +94,13 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 			}
 			return wideMultiply(left, right)
 		}
+		if operator == "/" || operator == "%" {
+			quotient, remainder := wideDivide(left, right)
+			if operator == "/" {
+				return quotient
+			}
+			return remainder
+		}
 		if operator == "<<" || operator == ">>" {
 			count, known := wideInt(right)
 			if !known || count < 0 {
