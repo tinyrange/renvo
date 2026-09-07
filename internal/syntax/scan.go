@@ -163,7 +163,12 @@ func scanTokens(src []byte) ([]Token, bool) {
 				break
 			}
 			i++
-			tokens = append(tokens, Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
+			tok := Token{KindLine: TokenChar | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)}
+			if _, valid := RuneLiteralValue(src, tok); !valid {
+				ok = false
+				break
+			}
+			tokens = append(tokens, tok)
 			continue
 		}
 		if c >= 128 {

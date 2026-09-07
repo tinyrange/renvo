@@ -129,6 +129,13 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 	if end-start != 1 {
 		return wideConstant{}
 	}
+	if file.Tokens[start].KindLine&255 == syntax.TokenChar {
+		value, ok := syntax.RuneLiteralValue(file.Src, file.Tokens[start])
+		if ok {
+			return wideSmall(value)
+		}
+		return wideConstant{}
+	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenNumber {
 		if file.Tokens[start].End-file.Tokens[start].Start > 16384 {
 			return wideConstant{}

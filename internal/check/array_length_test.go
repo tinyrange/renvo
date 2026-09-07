@@ -22,6 +22,7 @@ func TestInvalidPackageArrayLengths(t *testing.T) {
 		"var x [-257%129]int",
 		"var x [(1<<100)&^1]int",
 		"var x [-1&^1]int",
+		"var x [-'a']int",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source + "\nfunc main(){}")}})
@@ -47,6 +48,7 @@ func TestArrayLengthLargeIntermediates(t *testing.T) {
 		"var x [(1<<100)%257]int",
 		"var x [((1<<100)|3)&3]int",
 		"var x [((1<<100)|3)^(1<<100)]int",
+		"var x ['界'-'界'+'a'-96]int",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source + "\nfunc main(){}")}})
