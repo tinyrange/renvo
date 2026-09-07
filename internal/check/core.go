@@ -110,6 +110,26 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		return info, false, CheckErrUndefined, file, tok
 	}
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
+	for _, decl := range info.Decls {
+		if decl.ValueStart < 0 {
+			continue
+		}
+		file := pkg.Files[decl.File].File
+		literals := appendExprComposites(nil, file, decl.ValueStart, decl.ValueEnd)
+		var scope CoreScope
+		if len(literals) > 0 {
+			for tok := decl.ValueStart; tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+					fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: decl.ValueStart - 1, BodyEnd: decl.ValueEnd + 1}
+					scope, _, _ = buildFuncScopeCore(file, fn)
+					break
+				}
+			}
+		}
+		if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
+			return info, false, CheckErrStructLiteral, decl.File, tok
+		}
+	}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		if tok := invalidDuplicateMapKey(file); tok >= 0 {
@@ -146,6 +166,16 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			}
 			if code, tok := invalidLocalRules(pkg, info, file, fn, body); code != CheckOK {
 				return info, false, code, fileIndex, tok
+			}
+			literals := buildFuncCompositeExprs(file, body)
+			if len(literals) > 0 {
+				scope, ok, tok := buildFuncScopeCore(file, fn)
+				if ok {
+					tok = invalidStructLiterals(pkg, info, file, literals, scope)
+					if tok >= 0 {
+						return info, false, CheckErrStructLiteral, fileIndex, tok
+					}
+				}
 			}
 			if fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(buildFuncSignature(file, fn).Results) > 0 &&
 				!returnBlockTerminates(file, body, fn.BodyStart+1, fn.BodyEnd-1, LookupPackageSymbol(info, "panic") < 0) {

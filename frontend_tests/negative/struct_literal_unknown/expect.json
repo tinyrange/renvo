@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-039",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 21,
+  "message": "invalid struct literal field list"
+}

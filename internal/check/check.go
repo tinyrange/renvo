@@ -46,6 +46,7 @@ const (
 	CheckErrMapKey
 	CheckErrRecursiveType
 	CheckErrConstantOperation
+	CheckErrStructLiteral
 )
 
 const (
