@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f95f05f3fd79163b4365c04d24d2cc1e5831fe593e959f8bbd86ca65a18c4024"
+const CompilerSourceDigest = "da009f48b3bf3e90db5d7251965832db4ddeef75707695bda2239acdb28e0602"
 
 // source: backend/compiler_common_impl.go
 
@@ -4240,16 +4240,11 @@ renvoNonNil(p)
 if funcTok < 0 || funcTok+1 >= end || !renvoTokIsKind(p, funcTok, renvoTokFunc) || !renvoTokCharIs(p, funcTok+1, '(') {
 return -1
 }
-paramsClose := renvoFindMatchingExprClose(p, funcTok+2, end, '(', ')')
-if paramsClose <= funcTok+1 {
-return -1
-}
-if renvoTokCharIs(p, paramsClose+1, '{') {
-return paramsClose + 1
-}
-resultStart := paramsClose + 1
-bodyOpen := renvoFindStatementBodyOpen(p, resultStart, end)
-if bodyOpen <= resultStart {
+
+
+
+bodyOpen := renvoPrimaryTypeEnd(p, funcTok, end)
+if bodyOpen <= funcTok || bodyOpen >= end || !renvoTokCharIs(p, bodyOpen, '{') {
 return -1
 }
 return bodyOpen
@@ -7393,11 +7388,19 @@ parts, ok := renvoSplitTopLevelComma(g.prog, stmt.exprStart, stmt.exprEnd)
 if !ok || len(parts)/2 != fn.resultCount {
 return false
 }
+var values []int
+if fn.resultCount > 1 {
+values = make([]int, fn.resultCount)
+}
 for i := 0; i < fn.resultCount; i++ {
 result := &g.meta.params[fn.firstResult+i]
 offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
 if offset < 0 {
 return false
+}
+if len(values) > 0 {
+offset = renvoAddUnnamedLocal(g, result.typ)
+values[i] = offset
 }
 ep := renvoNewExprParse()
 renvoNonNil(ep)
@@ -7405,6 +7408,16 @@ root := renvoParseExpressionRoot(ep, g.prog, parts[i*2], parts[i*2+1])
 if root < 0 || !renvoEmitExprToLocal(g, ep, root, offset) {
 return false
 }
+}
+
+
+for i := 0; i < len(values); i++ {
+result := &g.meta.params[fn.firstResult+i]
+offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
+if offset < 0 {
+return false
+}
+renvoEmitCopyStackToStack(g, values[i], offset, renvoTypeCopySize(g.meta, result.typ))
 }
 } else {
 if renvoTypeIsTuple(g.meta, fn.resultType) {

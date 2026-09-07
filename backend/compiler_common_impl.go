@@ -4233,16 +4233,11 @@ func renvoFuncLiteralBodyOpen(p *renvoProgram, funcTok int, end int) int {
 	if funcTok < 0 || funcTok+1 >= end || !renvoTokIsKind(p, funcTok, renvoTokFunc) || !renvoTokCharIs(p, funcTok+1, '(') {
 		return -1
 	}
-	paramsClose := renvoFindMatchingExprClose(p, funcTok+2, end, '(', ')')
-	if paramsClose <= funcTok+1 {
-		return -1
-	}
-	if renvoTokCharIs(p, paramsClose+1, '{') {
-		return paramsClose + 1
-	}
-	resultStart := paramsClose + 1
-	bodyOpen := renvoFindStatementBodyOpen(p, resultStart, end)
-	if bodyOpen <= resultStart {
+	// The body follows the signature's type span. Statement-header scanning
+	// treats a brace followed by () as a composite operand and skips it, which
+	// loses the body of an immediately invoked literal with a result type.
+	bodyOpen := renvoPrimaryTypeEnd(p, funcTok, end)
+	if bodyOpen <= funcTok || bodyOpen >= end || !renvoTokCharIs(p, bodyOpen, '{') {
 		return -1
 	}
 	return bodyOpen
@@ -7386,11 +7381,19 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 			if !ok || len(parts)/2 != fn.resultCount {
 				return false
 			}
+			var values []int
+			if fn.resultCount > 1 {
+				values = make([]int, fn.resultCount)
+			}
 			for i := 0; i < fn.resultCount; i++ {
 				result := &g.meta.params[fn.firstResult+i]
 				offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
 				if offset < 0 {
 					return false
+				}
+				if len(values) > 0 {
+					offset = renvoAddUnnamedLocal(g, result.typ)
+					values[i] = offset
 				}
 				ep := renvoNewExprParse()
 				renvoNonNil(ep)
@@ -7398,6 +7401,16 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 				if root < 0 || !renvoEmitExprToLocal(g, ep, root, offset) {
 					return false
 				}
+			}
+			// Return lists have assignment semantics: evaluate every value
+			// before replacing any named result used by a later expression.
+			for i := 0; i < len(values); i++ {
+				result := &g.meta.params[fn.firstResult+i]
+				offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
+				if offset < 0 {
+					return false
+				}
+				renvoEmitCopyStackToStack(g, values[i], offset, renvoTypeCopySize(g.meta, result.typ))
 			}
 		} else {
 			if renvoTypeIsTuple(g.meta, fn.resultType) {
