@@ -14,6 +14,7 @@ import (
 type mapLowerSpec struct {
 	typ       string
 	key       string
+	hashKey   string
 	value     string
 	storage   string
 	entry     string
@@ -90,6 +91,7 @@ func discoverMapLowerSpecs(program *unit.Program) []mapLowerSpec {
 		specs = append(specs, mapLowerSpec{
 			typ:       typ,
 			key:       functionValueTokensText(program, i+2, close),
+			hashKey:   compactMapLowerType(ordinaryUnderlyingType(program, functionValueTokensText(program, i+2, close), 0)),
 			value:     functionValueTokensText(program, close+1, end),
 			storage:   prefix,
 			entry:     prefix + "_entry",
@@ -935,8 +937,8 @@ func mapLowerGeneratedText(specs []mapLowerSpec, literals []mapLowerLiteral, mak
 		value := mapLowerGeneratedType(specs, spec.value)
 		representation := mapLowerRepresentation(spec)
 		out += "type " + spec.entry + " struct { key " + key + "; value " + value + " }\n"
-		if mapLowerIntegerKey(key) {
-			out += mapLowerIntegerStorage(spec, key, value, representation)
+		if mapLowerIntegerKey(spec.hashKey) || spec.hashKey == "string" {
+			out += mapLowerHashStorage(spec, key, value, representation)
 			continue
 		}
 		out += "type " + spec.storage + " struct { entries []" + spec.entry + " }\n"
@@ -986,12 +988,19 @@ func mapLowerIntegerKey(key string) bool {
 // Keep the dense entries used by map range, with a separate hash index. Bucket
 // links are entry indices plus one, so zero is an empty chain. Rehashing grows
 // geometrically; deletion repairs the moved last entry's link in its bucket.
-func mapLowerIntegerStorage(spec mapLowerSpec, key string, value string, representation string) string {
+func mapLowerHashStorage(spec mapLowerSpec, key string, value string, representation string) string {
 	hash := spec.storage + "_hash"
 	rehash := spec.storage + "_rehash"
 	unlink := spec.storage + "_unlink"
 	out := "type " + spec.storage + " struct { entries []" + spec.entry + "; buckets []int; next []int }\n"
-	out += "func " + hash + "(key " + key + ", size int) int { value := uint64(key); value = (value ^ (value >> 30))*uint64(0xbf58476d1ce4e5b9); value = (value ^ (value >> 27))*uint64(0x94d049bb133111eb); value = value ^ (value >> 31); return int(value & uint64(size-1)) }\n"
+	// Hash string contents, not descriptor addresses: independently allocated
+	// equal strings must search the same bucket. Keep the authored key type in
+	// all helper signatures while choosing hashing by its underlying type.
+	seed := "value := uint64(key);"
+	if spec.hashKey == "string" {
+		seed = "value := uint64(14695981039346656037); for offset := 0; offset < len(key); offset++ { value = (value ^ uint64(key[offset]))*uint64(1099511628211) };"
+	}
+	out += "func " + hash + "(key " + key + ", size int) int { " + seed + " value = (value ^ (value >> 30))*uint64(0xbf58476d1ce4e5b9); value = (value ^ (value >> 27))*uint64(0x94d049bb133111eb); value = value ^ (value >> 31); return int(value & uint64(size-1)) }\n"
 	out += "func " + rehash + "(mapping " + representation + ", size int) { buckets := make([]int,size); entries := mapping[0].entries; next := mapping[0].next; for index := 0; index < len(entries); index++ { bucket := " + hash + "(entries[index].key,size); next[index] = buckets[bucket]; buckets[bucket] = index+1 }; mapping[0].buckets = buckets }\n"
 	out += "func " + spec.find + "(mapping " + representation + ", key " + key + ") int { if mapping == nil { return -1 }; buckets := mapping[0].buckets; if len(buckets) == 0 { return -1 }; index := buckets[" + hash + "(key,len(buckets))]; for index != 0 { if mapping[0].entries[index-1].key == key { return index-1 }; index = mapping[0].next[index-1] }; return -1 }\n"
 	out += "func " + spec.get + "(mapping " + representation + ", key " + key + ") " + value + " { index := " + spec.find + "(mapping,key); if index < 0 { var zero " + value + "; return zero }; return mapping[0].entries[index].value }\n"
