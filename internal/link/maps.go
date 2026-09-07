@@ -166,6 +166,9 @@ func mapLowerShortLocalType(program *unit.Program, before int, name string) stri
 			if leftEnds[item]-leftStarts[item] != 1 || functionValueTokenText(program, leftStarts[item]) != name {
 				continue
 			}
+			if !functionValueBindingInScope(program, fn, leftStarts[item], before) {
+				continue
+			}
 			rhsStart := rightStarts[item]
 			rhsEnd := rightEnds[item]
 			typeEnd := functionValueTypeEnd(program, rhsStart)
@@ -174,6 +177,9 @@ func mapLowerShortLocalType(program *unit.Program, before int, name string) stri
 			}
 			if typ := ordinaryBuiltinExprType(program, assign, rhsStart, rhsEnd); typ != "" {
 				return typ
+			}
+			if rhsEnd-rhsStart == 1 && program.Tokens[rhsStart].KindLine&255 == unit.TokenIdent {
+				return mapLowerShortLocalType(program, assign, functionValueTokenText(program, rhsStart))
 			}
 		}
 	}
@@ -188,7 +194,7 @@ func mapLowerEdits(program *unit.Program, specs []mapLowerSpec) ([]functionValue
 	covered := make([]bool, len(program.Tokens))
 	var ok bool
 	edits, covered = mapLowerAssignmentEdits(program, specs, edits, covered, &literals)
-	edits, covered = mapLowerRangeEdits(program, specs, edits, covered)
+	edits, covered = mapLowerRangeEdits(program, specs, edits, covered, &literals)
 	edits, covered, ok = mapLowerConstructionEdits(program, specs, edits, covered, &literals, &makes)
 	if !ok {
 		return nil, nil, nil, false
@@ -279,32 +285,46 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 				replacement += "__renvo_map_address_" + name + "_" + functionValueDecimal(i) + " := &(" + functionValueTokensText(program, leftStarts[i], leftEnds[i]) + ");"
 			}
 		}
-		for i := 0; i < len(leftStarts); i++ {
-			if i > 0 {
-				replacement += ","
+		separateValues := len(rightStarts) == len(leftStarts)
+		if !separateValues {
+			for i := 0; i < len(leftStarts); i++ {
+				if i > 0 {
+					replacement += ","
+				}
+				replacement += "__renvo_map_value_" + name + "_" + functionValueDecimal(i)
 			}
-			replacement += "__renvo_map_value_" + name + "_" + functionValueDecimal(i)
+			replacement += " := "
 		}
-		replacement += " := "
 		for i := 0; i < len(rightStarts); i++ {
-			if i > 0 {
+			if i > 0 && !separateValues {
 				replacement += ","
 			}
 			expected := ""
 			if i < len(targetSpecs) && targetSpecs[i] >= 0 {
 				expected = specs[targetSpecs[i]].value
 			}
+			if separateValues {
+				temporary := "__renvo_map_value_" + name + "_" + functionValueDecimal(i)
+				if expected != "" {
+					// Preserve assignment context, including untyped constants and
+					// nil, without inventing a conversion from an inferred RHS type.
+					replacement += "var " + temporary + " " + mapLowerGeneratedType(specs, expected) + " = "
+				} else {
+					replacement += temporary + " := "
+				}
+			}
 			value, ok := mapLowerLiteralValue(program, specs, rightStarts[i], rightEnds[i], expected, literals)
 			if !ok {
 				value = mapLowerReadText(program, specs, rightStarts[i], rightEnds[i])
 			}
-			sourceType := ordinaryBuiltinExprType(program, assign, rightStarts[i], rightEnds[i])
-			if expected != "" && sourceType != "" && len(rightStarts) == len(leftStarts) && compactMapLowerType(sourceType) != compactMapLowerType(expected) {
-				value = expected + "(" + value + ")"
-			}
 			replacement += value
+			if separateValues {
+				replacement += ";"
+			}
 		}
-		replacement += ";"
+		if !separateValues {
+			replacement += ";"
+		}
 		for i := 0; i < len(leftStarts); i++ {
 			value := "__renvo_map_value_" + name + "_" + functionValueDecimal(i)
 			if targetSpecs[i] >= 0 {
@@ -390,7 +410,7 @@ func mapLowerAssignmentTarget(program *unit.Program, specs []mapLowerSpec, start
 	return mapLowerExprSpec(program, specs, open, start, open), open
 }
 
-func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool) {
+func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool, literals *[]mapLowerLiteral) ([]functionValueEdit, []bool) {
 	for rangeTok := 0; rangeTok < len(program.Tokens); rangeTok++ {
 		if !functionValueTokenEquals(program, rangeTok, "range") || covered[rangeTok] {
 			continue
@@ -403,6 +423,21 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			continue
 		}
 		bodyOpen := rangeTok + 1
+		literalOpen := -1
+		literalClose := -1
+		// A map literal's brace belongs to the range expression, not the
+		// loop body. Keep its construction inside the replacement so covering
+		// the header does not hide it from the construction-lowering pass.
+		typeEnd := functionValueTypeEnd(program, rangeTok+1)
+		if functionValueTokenEquals(program, rangeTok+1, "map") &&
+			typeEnd > rangeTok+1 && functionValueTokenEquals(program, typeEnd, "{") {
+			literalOpen = typeEnd
+			literalClose = functionValueFindMatchingBrace(program, literalOpen)
+			if literalClose < 0 {
+				continue
+			}
+			bodyOpen = literalClose + 1
+		}
 		for bodyOpen < len(program.Tokens) && !functionValueTokenEquals(program, bodyOpen, "{") {
 			bodyOpen++
 		}
@@ -410,6 +445,9 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			continue
 		}
 		spec := mapLowerExprSpec(program, specs, rangeTok, rangeTok+1, bodyOpen)
+		if literalOpen >= 0 {
+			spec = mapLowerSpecIndex(specs, functionValueTokensText(program, rangeTok+1, literalOpen))
+		}
 		if spec < 0 {
 			continue
 		}
@@ -418,6 +456,14 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			continue
 		}
 		expr := mapLowerReadText(program, specs, rangeTok+1, bodyOpen)
+		if literalOpen >= 0 {
+			var ok bool
+			typeText := functionValueTokensText(program, rangeTok+1, literalOpen)
+			expr, ok = mapLowerCreateLiteral(program, specs, spec, typeText, literalOpen, literalClose, literals)
+			if !ok {
+				continue
+			}
+		}
 		mappingName := "__renvo_map_range_mapping_" + functionValueDecimal(rangeTok)
 		mapping := "(" + expr + ")"
 		indexName := "__renvo_map_range_index_" + functionValueDecimal(rangeTok)
@@ -462,6 +508,7 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 }
 
 func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool, literals *[]mapLowerLiteral, makes *[]mapLowerMake) ([]functionValueEdit, []bool, bool) {
+	literalStarts := mapLowerLiteralTypeStarts(program)
 	for i := 0; i < len(program.Tokens); i++ {
 		if covered[i] {
 			continue
@@ -498,7 +545,7 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		if !functionValueTokenEquals(program, i, "{") {
 			continue
 		}
-		typeStart := mapLowerLiteralTypeStart(program, i)
+		typeStart := literalStarts[i]
 		if typeStart < 0 || functionValueTypeEnd(program, typeStart) != i {
 			continue
 		}
@@ -578,20 +625,29 @@ func mapLowerSequenceLiteral(program *unit.Program, specs []mapLowerSpec, typ st
 	return out + "}", true, true
 }
 
-func mapLowerLiteralTypeStart(program *unit.Program, open int) int {
-	match := -1
-	for i := open - 1; i >= 0; i-- {
-		if functionValueTypeEnd(program, i) == open {
-			// Nested types end at the same literal brace. Keep walking so the
-			// complete outer type owns the literal; in []map[K]V{...}, for
-			// example, the slice rather than its map element owns the brace.
-			match = i
+func mapLowerLiteralTypeStarts(program *unit.Program) []int {
+	starts := make([]int, len(program.Tokens))
+	for i := 0; i < len(starts); i++ {
+		starts[i] = -1
+	}
+	// Probe each possible type start once, rather than rescanning the entire
+	// preceding program for every brace. Only token positions escape a probe;
+	// reclaim its temporary token strings before considering the next start.
+	for i := 0; i < len(program.Tokens); i++ {
+		mark := arena.Mark()
+		end := functionValueTypeEnd(program, i)
+		arena.Rewind(mark)
+		if end > i && end < len(starts) && starts[end] < 0 && functionValueTokenEquals(program, end, "{") {
+			// The earliest start owns nested types such as []map[K]V.
+			starts[end] = i
 		}
 	}
-	if match >= 0 {
-		return match
+	for i := 0; i < len(starts); i++ {
+		if starts[i] < 0 && functionValueTokenEquals(program, i, "{") {
+			starts[i] = functionValuePrimaryStart(program, i-1)
+		}
 	}
-	return functionValuePrimaryStart(program, open-1)
+	return starts
 }
 
 func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool) {
@@ -635,6 +691,7 @@ func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []f
 }
 
 func mapLowerIndexEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool, bool) {
+	indexEditStart := len(edits)
 	for open := len(program.Tokens) - 1; open >= 0; open-- {
 		if covered[open] || !functionValueTokenEquals(program, open, "[") {
 			continue
@@ -660,7 +717,19 @@ func mapLowerIndexEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 		} else if mapLowerIndexIsCommaOK(program, baseStart, close) {
 			replacement = specs[spec].lookup + "(" + mapping + "," + key + ")"
 		}
-		edits = append(edits, functionValueTokenRangeEdit(program, baseStart, close+1, replacement))
+		edit := functionValueTokenRangeEdit(program, baseStart, close+1, replacement)
+		// Walking backward discovers indices inside a key before its enclosing
+		// lookup. mapLowerReadText recursively lowers those reads into the outer
+		// replacement, so their separate edits must be subsumed, not overlapped.
+		kept := indexEditStart
+		for i := indexEditStart; i < len(edits); i++ {
+			if edits[i].start >= edit.start && edits[i].end <= edit.end {
+				continue
+			}
+			edits[kept] = edits[i]
+			kept++
+		}
+		edits = append(edits[:kept], edit)
 		mapLowerCover(covered, baseStart, close+1)
 		open = baseStart
 	}

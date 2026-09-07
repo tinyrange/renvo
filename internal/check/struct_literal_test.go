@@ -31,6 +31,9 @@ func TestStructLiteralFieldLists(t *testing.T) {
 
 func TestValidStructLiteralFieldLists(t *testing.T) {
 	for _, source := range []string{
+		"type S struct { X int }; type Outer struct { S *S }; func main() { _ = Outer{&S{X:1}} }",
+		"type S struct { X int }; type Outer struct { Values map[string]S }; func main() { _ = Outer{map[string]S{\"a\": {X:1}}} }",
+		"type S struct { X int }; type Outer struct { Value S }; func main() { _ = Outer{func() S { return S{X:1} }()} }",
 		"type S struct { X,Y int }; func main() { _ = S{}; _ = S{1,2}; _ = S{Y:2} }",
 		"type S struct { _ int; X int }; func main() { _ = S{1,2}; _ = S{X:2} }",
 		"type S struct { X int }; func main() { type S map[int]int; k:=1; _ = S{k:1,k:2} }",

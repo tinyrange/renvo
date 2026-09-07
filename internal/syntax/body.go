@@ -374,7 +374,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 			}
 		} else if c == '{' && parenDepth == 0 && bracketDepth == 0 {
 			closeTok := skipBalanced(file, i, '{', '}')
-			if closeTok > i && closeTok < limit && TokenLine(file.Tokens[closeTok-1]) == TokenLine(file.Tokens[closeTok]) {
+			if closeTok > i && closeTok < limit && TokenLineAt(file, closeTok-1) == TokenLineAt(file, closeTok) {
 				next := byte(0)
 				nextTok := file.Tokens[closeTok]
 				if nextTok.End > nextTok.Start {
@@ -396,7 +396,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 }
 
 func findStmtEnd(file *File, start int, limit int) int {
-	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) && !lineContinues(file, start-1, start) {
+	if start < limit && start > 0 && TokenLineAt(file, start) != TokenLineAt(file, start-1) && !lineContinues(file, start-1, start) {
 		return start
 	}
 	i := start
@@ -411,7 +411,7 @@ func findStmtEnd(file *File, start int, limit int) int {
 			if c == ';' {
 				return i + 1
 			}
-			if i > start && TokenLine(file.Tokens[i]) != TokenLine(file.Tokens[prev]) && !lineContinues(file, prev, i) {
+			if i > start && TokenLineAt(file, i) != TokenLineAt(file, prev) && !lineContinues(file, prev, i) {
 				return i
 			}
 		}

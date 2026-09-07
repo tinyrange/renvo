@@ -1204,6 +1204,7 @@ const renvoBuiltinTypeComplex = 13
 const renvoBuiltinTypeInterface = 14
 const renvoBuiltinTypeFloat32 = 15
 const renvoBuiltinTypeComplex64 = 16
+const renvoBuiltinTypeError = 17
 
 type renvoTypeInfo struct {
 	kind        int
@@ -1289,26 +1290,27 @@ type renvoDeferSite struct {
 }
 
 type renvoMeta struct {
-	prog          *renvoProgram
-	types         []renvoTypeInfo
-	fields        []renvoFieldInfo
-	globals       []renvoSymbolInfo
-	params        []renvoSymbolInfo
-	funcs         []renvoFuncInfo
-	globalBuckets []int32
-	globalNext    []int32
-	funcBuckets   []int32
-	funcNext      []int32
-	typeBuckets   []int32
-	closures      []renvoClosureInfo
-	captures      []renvoSymbolInfo
-	panicEnabled  bool
-	arenaSize     int
-	scratchStart  int
-	scratchEnd    int
-	ok            bool
-	c             *renvoCompileContext
-	objectDecls   []renvoObjectDecl
+	runtimeTypeCount int
+	prog             *renvoProgram
+	types            []renvoTypeInfo
+	fields           []renvoFieldInfo
+	globals          []renvoSymbolInfo
+	params           []renvoSymbolInfo
+	funcs            []renvoFuncInfo
+	globalBuckets    []int32
+	globalNext       []int32
+	funcBuckets      []int32
+	funcNext         []int32
+	typeBuckets      []int32
+	closures         []renvoClosureInfo
+	captures         []renvoSymbolInfo
+	panicEnabled     bool
+	arenaSize        int
+	scratchStart     int
+	scratchEnd       int
+	ok               bool
+	c                *renvoCompileContext
+	objectDecls      []renvoObjectDecl
 }
 
 type renvoCompileResult struct {
@@ -5275,6 +5277,8 @@ func renvoInitBuiltinTypes(m *renvoMeta) {
 	renvoAddBuiltinType(m, renvoTypeInterface, 2*renvoBackendValueSlotSize)
 	renvoAddBuiltinType(m, renvoTypeFloat32, 4)
 	renvoAddBuiltinType(m, renvoTypeComplex64, 8)
+	renvoAddBuiltinType(m, renvoTypeInterface, 2*renvoBackendValueSlotSize)
+	m.types[renvoBuiltinTypeError].elem = -1
 }
 
 func renvoAddBuiltinType(m *renvoMeta, kind int, size int) {
@@ -6218,6 +6222,26 @@ func renvoBuildTupleTypeFromParams(m *renvoMeta, first int, count int) int {
 
 func renvoBuildTupleType(m *renvoMeta, types []int) int {
 	renvoNonNil(m)
+	// Interface method checks reparse signatures for each candidate type.
+	// Reuse their result tuples so reparsing does not create fresh function
+	// types and enlarge the candidate set at each subsequent assertion.
+	for candidate := len(m.types) - 1; candidate >= 0; candidate-- {
+		t := &m.types[candidate]
+		if t.kind != renvoTypeStruct || t.count != len(types) || t.nameEnd > t.nameStart {
+			continue
+		}
+		match := true
+		for i := 0; i < len(types); i++ {
+			field := m.fields[t.first+i]
+			if field.nameEnd > field.nameStart || field.typ != types[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return candidate
+		}
+	}
 	firstField := len(m.fields)
 	offset := 0
 	for i := 0; i < len(types); i++ {
@@ -6301,6 +6325,10 @@ func renvoParseTypeInto(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start 
 		closeTok := renvoFindMatchingBrace(p, start+1, end)
 		if closeTok <= start+1 {
 			renvoSetTypeResult(result, 0, start)
+			return
+		}
+		if closeTok == start+2 {
+			renvoSetTypeResult(result, renvoBuiltinTypeInterface, closeTok+1)
 			return
 		}
 		renvoSetTypeResult(result, renvoAddType(m, renvoTypeInterface, 0, start+2, closeTok, 2*renvoBackendValueSlotSize, 0, 0), closeTok+1)
@@ -6452,8 +6480,14 @@ func renvoParseTypeInto(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start 
 		return
 	}
 	if renvoTokIsKind(p, start, renvoTokIdent) {
-		if renvoTokIdentIs(p, start, "any") || renvoTokIdentIs(p, start, "error") {
-			renvoSetTypeResult(result, renvoAddType(m, renvoTypeInterface, 0, 0, 0, 2*renvoBackendValueSlotSize, 0, 0), start+1)
+		if renvoTokIdentIs(p, start, "any") {
+			// any and interface{} have one identity, including when nested in
+			// pointers and collections used in dynamic type assertions.
+			renvoSetTypeResult(result, renvoBuiltinTypeInterface, start+1)
+			return
+		}
+		if renvoTokIdentIs(p, start, "error") {
+			renvoSetTypeResult(result, renvoBuiltinTypeError, start+1)
 			return
 		}
 		builtin := renvoBuiltinTypeFromToken(p, start)
@@ -6545,7 +6579,10 @@ func renvoClosureIndexByToken(meta *renvoMeta, tok int) int {
 func renvoBuiltinTypeFromToken(p *renvoProgram, tokIndex int) int {
 	renvoNonNil(p)
 	tok := renvoTokAt(p, tokIndex)
-	if renvoTokIdentIs(p, tokIndex, "any") || renvoTokIdentIs(p, tokIndex, "error") {
+	if renvoTokIdentIs(p, tokIndex, "error") {
+		return renvoBuiltinTypeError
+	}
+	if renvoTokIdentIs(p, tokIndex, "any") {
 		return renvoBuiltinTypeInterface
 	}
 	if renvoTokIdentIs(p, tokIndex, "uintptr") || renvoTokIdentIs(p, tokIndex, "uint") {
@@ -7480,7 +7517,18 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if stmt.exprStart < stmt.exprEnd {
 		if fn.resultCount > 0 {
 			parts, ok := renvoSplitTopLevelComma(g.prog, stmt.exprStart, stmt.exprEnd)
-			if !ok || len(parts)/2 != fn.resultCount {
+			if !ok {
+				return false
+			}
+			if len(parts) == 2 && fn.resultCount > 1 {
+				if !renvoEmitDeferredNamedTupleReturn(g, stmt.exprStart, stmt.exprEnd) {
+					return false
+				}
+				renvoMoveCapturedLocals(g, true)
+				renvoAsmJmpLabel(&g.asm, g.deferReturnLabel)
+				return true
+			}
+			if len(parts)/2 != fn.resultCount {
 				return false
 			}
 			var values []int
@@ -7543,6 +7591,46 @@ func renvoEmitDeferredReturn(g *renvoLinearGen, stmt *renvoStmt) bool {
 	}
 	renvoMoveCapturedLocals(g, true)
 	renvoAsmJmpLabel(&g.asm, g.deferReturnLabel)
+	return true
+}
+
+// Evaluate a forwarded result tuple once, then assign the named result locals
+// before deferred calls run. Defers must observe (and may modify) those locals.
+func renvoEmitDeferredNamedTupleReturn(g *renvoLinearGen, start int, end int) bool {
+	fn := &g.meta.funcs[g.currentFunc]
+	ep := renvoNewExprParse()
+	root := renvoParseExpressionRoot(ep, g.prog, start, end)
+	if root < 0 {
+		return false
+	}
+	typ := renvoInferParsedExprType(g, ep, root)
+	tuple := renvoResolveType(g.meta, typ)
+	if !renvoTypeIsTuple(g.meta, typ) || tuple.count != fn.resultCount {
+		return false
+	}
+	sourceOffset := renvoAddUnnamedLocal(g, typ)
+	if !renvoEmitExprToLocal(g, ep, root, sourceOffset) {
+		return false
+	}
+	for i := 0; i < fn.resultCount; i++ {
+		from := g.meta.fields[tuple.first+i]
+		result := g.meta.params[fn.firstResult+i]
+		destination := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
+		if destination < 0 {
+			return false
+		}
+		source := sourceOffset - from.offset
+		if renvoResolveType(g.meta, result.typ).kind == renvoTypeInterface && renvoResolveType(g.meta, from.typ).kind != renvoTypeInterface {
+			if !renvoEmitConcreteLocalToInterface(g, from.typ, source, destination) {
+				return false
+			}
+		} else {
+			if !renvoTypesEquivalent(g.meta, from.typ, result.typ) {
+				return false
+			}
+			renvoEmitCopyStackToStack(g, source, destination, renvoTypeCopySize(g.meta, result.typ))
+		}
+	}
 	return true
 }
 
@@ -10601,12 +10689,16 @@ func renvoEmitTypeMatchJump(g *renvoLinearGen, tagOffset int, typ int, matchLabe
 	}
 	iface := renvoResolveType(g.meta, typ)
 	renvoNonNil(iface)
-	if iface.first >= iface.count {
+	if iface.first >= iface.count && iface.elem != -1 {
 		renvoAsmLoadPrimaryStack(&g.asm, tagOffset)
 		renvoAsmJnzPrimary(&g.asm, matchLabel)
 		return
 	}
-	for candidate := 1; candidate < len(g.meta.types); candidate++ {
+	// Signature parsing may intern types. Only the types present at entry
+	// can be runtime values here; newly interned signature types are not
+	// additional candidates for this assertion.
+	candidateCount := len(g.meta.types)
+	for candidate := 1; candidate < candidateCount; candidate++ {
 		tag := renvoRuntimeTypeTag(g.meta, candidate)
 		t := &g.meta.types[candidate]
 		if tag == 0 || t.kind == renvoTypeNamed && t.first == renvoNamedTypeAlias || renvoResolveType(g.meta, candidate).kind == renvoTypeInterface || !renvoTypeImplementsInterface(g, candidate, typ) {
@@ -10621,6 +10713,19 @@ func renvoTypeImplementsInterface(g *renvoLinearGen, typ int, interfaceType int)
 	meta := g.meta
 	iface := renvoResolveType(meta, interfaceType)
 	renvoNonNil(iface)
+	if iface.elem == -1 {
+		for i := 0; i < len(meta.funcs); i++ {
+			fn := &meta.funcs[i]
+			if fn.receiverType == 0 || !renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "Error") || !renvoMethodReceiverTypeMatches(meta, typ, fn.receiverType) {
+				continue
+			}
+			if renvoResolveType(meta, fn.receiverType).kind == renvoTypePointer && renvoResolveType(meta, typ).kind != renvoTypePointer {
+				return false
+			}
+			return fn.paramCount == 1 && renvoResolveType(meta, fn.resultType).kind == renvoTypeString
+		}
+		return false
+	}
 	for required := iface.first; required < iface.count; {
 		if !renvoTokIsKind(meta.prog, required, renvoTokIdent) {
 			required++
@@ -13287,7 +13392,45 @@ func renvoEmitTupleReturn(g *renvoLinearGen, start int, end int) bool {
 		if rootIndex < 0 {
 			return false
 		}
-		return renvoEmitStructReturnExpr(g, ep, rootIndex)
+		sourceType := renvoInferParsedExprType(g, ep, rootIndex)
+		source := renvoResolveType(g.meta, sourceType)
+		if source.kind != renvoTypeStruct || source.count != tuple.count {
+			return false
+		}
+		unchanged := true
+		for i := 0; i < tuple.count; i++ {
+			from := g.meta.fields[source.first+i]
+			to := g.meta.fields[tuple.first+i]
+			if from.offset != to.offset || !renvoTypesEquivalent(g.meta, from.typ, to.typ) {
+				unchanged = false
+			}
+		}
+		if unchanged {
+			return renvoEmitStructReturnExpr(g, ep, rootIndex)
+		}
+		// Forwarded result lists still require assignment conversion for each
+		// position. Evaluate the call once before boxing any concrete results.
+		sourceOffset := renvoAddUnnamedLocal(g, sourceType)
+		if !renvoEmitExprToLocal(g, ep, rootIndex, sourceOffset) {
+			return false
+		}
+		for i := 0; i < tuple.count; i++ {
+			from := g.meta.fields[source.first+i]
+			to := g.meta.fields[tuple.first+i]
+			offset := sourceOffset - from.offset
+			if renvoResolveType(g.meta, to.typ).kind == renvoTypeInterface && renvoResolveType(g.meta, from.typ).kind != renvoTypeInterface {
+				boxed := renvoAddUnnamedLocal(g, to.typ)
+				if !renvoEmitConcreteLocalToInterface(g, from.typ, offset, boxed) {
+					return false
+				}
+				offset = boxed
+			} else if !renvoTypesEquivalent(g.meta, from.typ, to.typ) {
+				return false
+			}
+			renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
+			renvoEmitCopyStackToMemSecondary(g, offset, to.offset, renvoTypeCopySize(g.meta, to.typ))
+		}
+		return true
 	}
 	return false
 }
@@ -13393,7 +13536,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 			return renvoInferParsedExprType(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		if callee == renvoIdentByteSlice && e.argCount == 1 {
-			return renvoAddType(meta, renvoTypeSlice, renvoTypeByte, 0, 0, renvoBackendSliceValueSize, 0, 0)
+			return renvoAddSequenceType(meta, renvoTypeSlice, renvoTypeByte, 0, renvoBackendSliceValueSize)
 		}
 		if callee == renvoIdentString && e.argCount == 1 {
 			return renvoTypeString
@@ -13474,7 +13617,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 			base = renvoResolveType(meta, base.elem)
 		}
 		if base.kind == renvoTypeArray {
-			return renvoAddType(meta, renvoTypeSlice, base.elem, 0, 0, renvoBackendSliceValueSize, 0, 0)
+			return renvoAddSequenceType(meta, renvoTypeSlice, base.elem, 0, renvoBackendSliceValueSize)
 		}
 		return baseType
 	}
@@ -13954,7 +14097,11 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 		return renvoEmitWideExprToLocal(g, ep, idx, offset, destResolved.kind)
 	}
 	if renvoTypeKindIsScalarValue(destResolved.kind) || destResolved.kind == renvoTypePointer || destResolved.kind == renvoTypeFunc {
-		if !renvoEmitScalarExprForKind(g, ep, idx, destResolved.kind) {
+		if destResolved.kind == renvoTypePointer && e.kind == renvoExprComposite && e.nameStart == e.nameEnd {
+			if !renvoEmitTypedPointerCompositeLiteral(g, ep, idx, destResolved.elem) {
+				return false
+			}
+		} else if !renvoEmitScalarExprForKind(g, ep, idx, destResolved.kind) {
 			return false
 		}
 		renvoAsmStorePrimaryStack(&g.asm, offset)
@@ -13963,7 +14110,13 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 	if !renvoTypeIsSlice(meta, destType) {
 		return false
 	}
-	if !renvoEmitSliceValueRegs(g, ep, idx) {
+	// A nested composite literal may omit its type. Its enclosing collection
+	// provides the element type through this destination slot.
+	if e.kind == renvoExprComposite && e.nameStart == e.nameEnd {
+		if !renvoEmitSliceLiteralRegs(g, ep, idx, destType) {
+			return false
+		}
+	} else if !renvoEmitSliceValueRegs(g, ep, idx) {
 		return false
 	}
 	renvoAsmStoreSliceStack(&g.asm, offset)
@@ -14080,6 +14233,19 @@ func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx 
 	valueOffset := renvoAddUnnamedLocal(g, sourceType)
 	if !renvoEmitExprToLocal(g, ep, idx, valueOffset) {
 		return false
+	}
+	return renvoEmitConcreteLocalToInterface(g, sourceType, valueOffset, offset)
+}
+
+func renvoEmitConcreteLocalToInterface(g *renvoLinearGen, sourceType int, valueOffset int, offset int) bool {
+	renvoNonNil(g)
+	source := renvoResolveType(g.meta, sourceType)
+	size := renvoTypeSize(g.meta, sourceType)
+	if size < 0 {
+		return false
+	}
+	if size == 0 {
+		size = renvoBackendValueSlotSize
 	}
 	if !renvoInterfaceValueStoredIndirect(g.meta, sourceType) {
 		if size <= g.c.renvoNativeIntSize &&
@@ -14315,6 +14481,11 @@ func renvoRuntimeTypeTag(meta *renvoMeta, typ int) int {
 		return 0
 	}
 	t := meta.types[typ]
+	// A tag embedded in generated code must keep its type identity after
+	// function-local compiler scratch is reclaimed.
+	if typ+1 > meta.runtimeTypeCount {
+		meta.runtimeTypeCount = typ + 1
+	}
 	if t.kind == renvoTypeNamed && t.first == renvoNamedTypeAlias && t.elem > 0 {
 		return renvoRuntimeTypeTag(meta, t.elem)
 	}
@@ -14713,6 +14884,9 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 			conversion := renvoResolveType(meta, renvoConversionTypeFromExpr(g, ep, calleeLeft))
 			renvoNonNil(conversion)
 			argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+			if conversion.kind == renvoTypeSlice && renvoExprIsNil(prog, &ep.exprs[argIndex]) {
+				return renvoEmitSliceValueRegs(g, ep, argIndex)
+			}
 			argType := renvoInferParsedExprType(g, ep, argIndex)
 			argResolved := renvoResolveType(meta, argType)
 			if conversion.kind == renvoTypeSlice && argResolved.kind == renvoTypeSlice && conversion.elem == argResolved.elem {
@@ -14878,7 +15052,7 @@ func renvoEmitSliceLiteralBacking(g *renvoLinearGen, ep *renvoExprParse, idx int
 			}
 			continue
 		}
-		if elemResolved.kind == renvoTypeArray || elemResolved.kind == renvoTypeSlice || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elemResolved.kind) {
+		if elemResolved.kind == renvoTypeArray || elemResolved.kind == renvoTypeSlice || elemResolved.kind == renvoTypePointer && ep.exprs[field.expr].kind == renvoExprComposite || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elemResolved.kind) {
 			tempOffset := renvoAddUnnamedLocal(g, elemType)
 			if !renvoEmitTypedAssign(g, ep, field.expr, tempOffset) {
 				return false
@@ -15184,7 +15358,7 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 		renvoAsmStorePrimaryStack(a, destOffset)
 		return true
 	}
-	if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || renvoTypeKindIsComplex(fieldResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(fieldResolved.kind) {
+	if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || fieldResolved.kind == renvoTypePointer && ep.exprs[idx].kind == renvoExprComposite || renvoTypeKindIsComplex(fieldResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(fieldResolved.kind) {
 		tempOffset := renvoAddUnnamedLocal(g, fieldType)
 		if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
 			return false
@@ -17971,6 +18145,17 @@ func renvoTypesEquivalent(meta *renvoMeta, left int, right int) bool {
 	}
 	if l.kind == renvoTypeArray {
 		return l.count == r.count && renvoTypesEquivalent(meta, l.elem, r.elem)
+	}
+	if l.kind == renvoTypeStruct && (renvoTypeIsTuple(meta, left) || renvoTypeIsTuple(meta, right)) {
+		if !renvoTypeIsTuple(meta, left) || !renvoTypeIsTuple(meta, right) || l.count != r.count {
+			return false
+		}
+		for i := 0; i < l.count; i++ {
+			if !renvoTypesEquivalent(meta, meta.fields[l.first+i].typ, meta.fields[r.first+i].typ) {
+				return false
+			}
+		}
+		return true
 	}
 	if l.kind == renvoTypeFunc {
 		if l.count != r.count || l.resolved != r.resolved || !renvoTypesEquivalent(meta, l.elem, r.elem) {
@@ -21668,6 +21853,7 @@ func renvoEmitIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
+		renvoAsmNormalizePrimaryForKind(a, elem.kind)
 		return true
 	}
 	return false
@@ -21987,6 +22173,37 @@ func renvoLocalAddressInReturn(g *renvoLinearGen, nameStart int, nameEnd int) bo
 	return false
 }
 
+func renvoLocalAddressStored(g *renvoLinearGen, nameStart int, nameEnd int) bool {
+	p := g.prog
+	fn := &g.meta.funcs[g.currentFunc]
+	for tok := fn.bodyStart; tok+1 < fn.bodyEnd; tok++ {
+		if !renvoTokCharIs(p, tok, '&') {
+			continue
+		}
+		name := tok + 1
+		for renvoTokCharIs(p, name, '(') {
+			name++
+		}
+		if !renvoTokIsKind(p, name, renvoTokIdent) || !renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) {
+			continue
+		}
+		before := tok - 1
+		for before > fn.bodyStart && renvoTokCharIs(p, before, '(') {
+			before--
+		}
+		if renvoTokCharIs(p, before, '=') {
+			if before > fn.bodyStart && renvoTokIdentIs(p, before-1, "_") {
+				continue
+			}
+			return true
+		}
+		if renvoTok2Is(p, before, ':', '=') || renvoTokCharIs(p, before, ':') {
+			return true
+		}
+	}
+	return false
+}
+
 func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameEnd int) bool {
 	renvoNonNil(g)
 	meta := g.meta
@@ -21998,6 +22215,12 @@ func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameE
 	}
 	outer := &meta.funcs[g.currentFunc]
 	if !renvoProgramUsesC11Semantics(p) {
+		// A stored address may outlive its lexical block even when this
+		// function returns no pointer. Keep the cell alive after stack slots
+		// are reused, and synchronize subsequent writes through either alias.
+		if renvoLocalAddressStored(g, nameStart, nameEnd) {
+			return true
+		}
 		// Returning a pointer-containing aggregate can retain a local's address
 		// just as returning the address directly can (including closure cells).
 		mayEscape := renvoResolveType(meta, outer.resultType).kind == renvoTypePointer
@@ -22514,7 +22737,7 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	} else {
 		ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 	}
-	if len(g.meta.captures) == captureCount {
+	if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 		renvoTruncTypes(&g.meta.types, typeCount)
 		renvoTruncFields(&g.meta.fields, fieldCount)
 		renvoRebuildNamedTypeIndex(g.meta)
@@ -26331,7 +26554,7 @@ func renvoEmitRuneSliceStringCopyValueRegs(g *renvoLinearGen, ep *renvoExprParse
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	indexOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	valueOff := renvoAddUnnamedLocal(g, renvoTypeInt32)
-	byteSliceType := renvoAddType(g.meta, renvoTypeSlice, renvoTypeByte, 0, 0, renvoBackendSliceValueSize, 0, 0)
+	byteSliceType := renvoAddSequenceType(g.meta, renvoTypeSlice, renvoTypeByte, 0, renvoBackendSliceValueSize)
 	destOff := renvoAddUnnamedLocal(g, byteSliceType)
 	renvoZeroLocalAtOffset(g, destOff)
 	loc := renvoSliceLocation{offset: destOff, typ: byteSliceType, ok: true}
@@ -26369,7 +26592,7 @@ func renvoEmitRuneSliceStringCopyValueRegs(g *renvoLinearGen, ep *renvoExprParse
 
 func renvoEmitStringConcatValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	byteSliceType := renvoAddType(g.meta, renvoTypeSlice, renvoTypeByte, 0, 0, renvoBackendSliceValueSize, 0, 0)
+	byteSliceType := renvoAddSequenceType(g.meta, renvoTypeSlice, renvoTypeByte, 0, renvoBackendSliceValueSize)
 	offset := renvoAddUnnamedLocal(g, byteSliceType)
 	renvoZeroLocalAtOffset(g, offset)
 	loc := renvoSliceLocation{offset: offset, typ: byteSliceType, ok: true}
@@ -26381,7 +26604,7 @@ func renvoEmitStringConcatValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx i
 
 func renvoEmitStringConcatPairValueRegs(g *renvoLinearGen, left *renvoExprParse, leftIndex int, right *renvoExprParse, rightIndex int) bool {
 	renvoNonNil(g, left, right)
-	byteSliceType := renvoAddType(g.meta, renvoTypeSlice, renvoTypeByte, 0, 0, renvoBackendSliceValueSize, 0, 0)
+	byteSliceType := renvoAddSequenceType(g.meta, renvoTypeSlice, renvoTypeByte, 0, renvoBackendSliceValueSize)
 	offset := renvoAddUnnamedLocal(g, byteSliceType)
 	renvoZeroLocalAtOffset(g, offset)
 	loc := renvoSliceLocation{offset: offset, typ: byteSliceType, ok: true}
@@ -28743,8 +28966,14 @@ func renvoEmitPointerCompositeLiteral(g *renvoLinearGen, ep *renvoExprParse, idx
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
 	innerIndex := e.left
-	inner := &ep.exprs[innerIndex]
 	elemType := renvoInferParsedExprType(g, ep, innerIndex)
+	return renvoEmitTypedPointerCompositeLiteral(g, ep, innerIndex, elemType)
+}
+
+// The collection element type supplies both the omitted type and address-of
+// operator in literals such as []*T{{field: value}}.
+func renvoEmitTypedPointerCompositeLiteral(g *renvoLinearGen, ep *renvoExprParse, innerIndex int, elemType int) bool {
+	inner := &ep.exprs[innerIndex]
 	resolved := renvoResolveType(g.meta, elemType)
 	renvoNonNil(resolved)
 	if resolved.kind != renvoTypeStruct && resolved.kind != renvoTypeArray {

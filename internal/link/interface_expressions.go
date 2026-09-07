@@ -11,6 +11,11 @@ func lowerInterfaceMethodExpressions(program *unit.Program, transient bool) bool
 		if program.Tokens[i].KindLine&255 != unit.TokenIdent || !functionValueTokenEquals(program, i+1, ".") || program.Tokens[i+2].KindLine&255 != unit.TokenIdent {
 			continue
 		}
+		// A selector member with the same name as an interface type is a
+		// value, not the start of a type-qualified method expression.
+		if i > 0 && functionValueTokenEquals(program, i-1, ".") {
+			continue
+		}
 		name := functionValueTokenText(program, i)
 		method := interfaceExpressionMethod(program, name, functionValueTokenText(program, i+2), 0)
 		if method < 0 {
