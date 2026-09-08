@@ -2044,6 +2044,14 @@ rtgLlvmDirectSignedDivide(out, remainder)
 func renvoRTGDirectCopyBytes(out *renvoAsm) {
 rtgLlvmDirectCopyBytes(out)
 }
+var renvoRTGObjectArgument0 = rtgLlvmRDI
+var renvoRTGObjectArgument1 = rtgLlvmRSI
+var renvoRTGObjectArgument2 = rtgLlvmRDX
+var renvoRTGObjectArgument3 = rtgLlvmRCX
+var renvoRTGObjectArgument4 = rtgLlvmR8
+var renvoRTGObjectArgument5 = rtgLlvmR9
+var renvoRTGObjectArgument6 = RTGNoRegister
+var renvoRTGObjectArgument7 = RTGNoRegister
 
 var renvoRTGPrimary = rtgLlvmPrimary
 

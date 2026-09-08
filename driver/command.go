@@ -2,12 +2,15 @@ package driver
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"renvo.dev/internal/backendcompiled"
+	"renvo.dev/internal/backendjit"
 	internal "renvo.dev/internal/driver"
 	"renvo.dev/internal/elflink"
 	"renvo.dev/internal/makefile"
+	"renvo.dev/internal/rtg"
 )
 
 // CommandRequest compiles a Renvo command using virtual paths only. Args omit
@@ -89,8 +92,44 @@ func CompileCommand(request *CommandRequest) (*CommandResult, error) {
 		r := internal.CheckCCommand(args, ".", fs)
 		return commandResult(r.Ok, internal.CSyntaxCommandDiagnostic(r), "", nil, r.DependencyFile, r.DependencyData), nil
 	}
-	r := internal.CompileFromFSWithModuleCache(args[1:], ".", "std/", ".", fs, backendcompiled.Backend{})
+	var backend internal.Backend = backendcompiled.Backend{}
+	definition, target := "", request.Target
+	for i := 1; i+1 < len(args); i++ {
+		if args[i] == "-backend" {
+			definition = args[i+1]
+			i++
+		} else if args[i] == "-t" {
+			target = args[i+1]
+			i++
+		}
+	}
+	if definition != "" {
+		data, ok := fs.ReadFile(definition)
+		if !ok {
+			return nil, fmt.Errorf("could not read backend definition %s", definition)
+		}
+		prepared := backendjit.Prepare(backendjit.PrepareConfig{
+			Definition: data, Filename: definition, ImportLoader: commandImportLoader{fs},
+			Target: target, StdRoot: "std/", HostTarget: "vm/vm32", ArenaSize: 32 << 20,
+			Bootstrap: backendcompiled.Backend{},
+		})
+		if !prepared.Ok {
+			return commandResult(false, prepared.Diagnostic, "", nil, "", nil), nil
+		}
+		backend = backendjit.NewPrepared(prepared, backendcompiled.Backend{}, backendjit.MemoryRunner{})
+	}
+	r := internal.CompileFromFSWithModuleCache(args[1:], ".", "std/", ".", fs, backend)
 	return commandResult(r.Ok, r.Diagnostic, r.Build.Options.Output, r.Binary, r.Build.Options.DependencyFile, internal.CDependencyOutput(r.Build.Options)), nil
+}
+
+type commandImportLoader struct{ fs SourceFS }
+
+func (l commandImportLoader) LoadImport(importer, name string) rtg.ImportSource {
+	if !path.IsAbs(name) {
+		name = path.Join(path.Dir(importer), name)
+	}
+	data, ok := l.fs.ReadFile(name)
+	return rtg.ImportSource{Source: data, Filename: name, Ok: ok}
 }
 
 func isObjectLink(args []string) bool {

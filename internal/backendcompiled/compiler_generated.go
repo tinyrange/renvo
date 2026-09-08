@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "18c5111b7897272a4c6adac8723a4dab70fabe00fecddf89f457aaedac29a7a3"
+const CompilerSourceDigest = "99fb604ca4a4e337c8c2946bc5cee779f7541abf5ea34dace9ef5e17f20539a3"
 
 // source: backend/compiler_common_impl.go
 
@@ -32,6 +32,9 @@ c.renvoTargetArch == renvoArch386 && !targetIsKernelModule(c)
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
+if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
+return c != nil && c.objectFile && !targetIsKernelModule(c)
+}
 return renvoIsHostedObjectAmd64(c) || renvoIsHostedObject386(c)
 }
 
@@ -6649,7 +6652,7 @@ align = m.types[t.elem].nativeAlign
 
 size = m.c.renvoNativeIntSize
 align = renvoNativeAlignment(m.c, size)
-} else if renvoFixedTarget == 0 && m.c.objectFile && t.kind == renvoTypeFunc {
+} else if (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && m.c.objectFile && t.kind == renvoTypeFunc {
 size = m.c.renvoNativeIntSize
 align = renvoNativeAlignment(m.c, size)
 }
@@ -17936,7 +17939,7 @@ argOffsets := make([]int, t.count)
 if !renvoPrepareFunctionValueArgs(g, ep, e, t, argOffsets) {
 return false
 }
-if renvoFixedTarget == 0 && g.c.objectFile && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoIsHostedObject(g.c) {
 return renvoEmitCObjectFunctionPointerCall(g, t, handleOffset, argOffsets, resultOffset)
 }
 return renvoEmitFunctionValueDispatch(g, funcType, handleOffset, argOffsets, resultOffset, -1)
@@ -17947,7 +17950,7 @@ renvoNonNil(g, functionType)
 if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
 return renvo386EmitCObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 }
-if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > 6 {
+if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > renvoRTGObjectRegisterCount() {
 return false
 }
 wordOffsets := make([]int, 0, len(argOffsets))
@@ -17978,22 +17981,12 @@ if len(wordOffsets) > 20 || hasAggregate && len(wordOffsets) > 6 {
 return false
 }
 for i := 0; i < len(wordOffsets); i++ {
-if i >= 6 {
+if renvoPreparedBackendActive == 0 && i >= 6 {
 continue
 }
 if renvoPreparedBackendActive != 0 {
-register := renvoRTGCallWord0
-if i == 1 {
-register = renvoRTGCallWord1
-} else if i == 2 {
-register = renvoRTGCallWord2
-} else if i == 3 {
-register = renvoRTGCallWord3
-} else if i == 4 {
-register = renvoRTGCallWord4
-} else if i == 5 {
-register = renvoRTGCallWord5
-}
+registers := renvoRTGObjectRegisters()
+register := registers[i]
 renvoRTGAsmLoadFrame(&g.asm, register, wordOffsets[i])
 } else {
 renvoAsmLoadPrimaryStack(&g.asm, wordOffsets[i])
@@ -18017,8 +18010,8 @@ if functionType.elem != 0 && !renvoTypeKindIsScalarInt(result.kind) && result.ki
 return false
 }
 if renvoPreparedBackendActive != 0 {
-renvoRTGAsmLoadFrame(&g.asm, renvoRTGPrimary, handleOffset)
-renvoRTGDirectCallIndirect(&g.asm, renvoRTGPrimary)
+renvoRTGAsmLoadFrame(&g.asm, renvoRTGScratch, handleOffset)
+renvoRTGDirectCallIndirect(&g.asm, renvoRTGScratch)
 } else if len(wordOffsets) > 6 {
 if !renvoEmitCObjectFunctionPointerIntegerStackCall(g, handleOffset, wordOffsets) {
 return false
@@ -19337,6 +19330,11 @@ return renvoEmitStructArgReverse(g, ep, idx, typ)
 e := &ep.exprs[idx]
 if e.kind == renvoExprInt {
 value := renvoParseIntToken(p, e.tok)
+if renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 8 && p.compilerInt32 && p.parsedIntHigh != value>>31 {
+renvoAsmLoadPrimaryIntToken(a, p, e.tok)
+renvoAsmPushPrimary(a)
+return 1
+}
 renvoAsmPushImm(a, value)
 return 1
 }
@@ -23402,6 +23400,42 @@ return true
 
 func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 renvoNonNil(g)
+
+
+leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
+rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
+if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32) && (leftShift || rightShift) {
+a := &g.asm
+shift := renvoAsmNewLabel(a)
+oversized := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+if g.c.renvoTargetArch == renvoArchWasm32 {
+renvoWasm32AsmCmpRaxImm8(a, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+renvoWasm32AsmCmpRaxImm8(a, 32)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+} else {
+renvoAsmCmpPrimaryImm8(a, 32)
+renvo386AsmJccLabel(a, 0x82, shift)
+}
+renvoAsmMarkLabel(a, oversized)
+if rightShift {
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmSarPrimaryImm(a, 31)
+} else {
+renvoAsmPrimaryImm(a, 0)
+}
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, shift)
+ok := false
+if g.c.renvoTargetArch == renvoArchWasm32 {
+ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
+} else {
+ok = renvo386EmitRaxRcxOp(g, tok, false)
+}
+renvoAsmMarkLabel(a, done)
+return ok
+}
 divide := renvoTokCharIs(g.prog, tok, '/')
 mod := renvoTokCharIs(g.prog, tok, '%')
 if (divide || mod) && !g.meta.panicEnabled {
@@ -24265,7 +24299,7 @@ fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
 if fnIndex < 0 {
 return false
 }
-if renvoFixedTarget == 0 && g.c.objectFile {
+if renvoIsHostedObject(g.c) {
 return renvoEmitObjectFunctionAddress(g, fnIndex)
 }
 renvoAsmPrimaryImm(a, renvoFunctionValueTag(g, fnIndex))
@@ -27587,15 +27621,16 @@ sret := renvoObjectExportUsesSRet(g.meta, fn)
 smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
 memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
 if variadic && (wordCount < 1 || wordCount > 7 || renvoPreparedBackendActive != 0 || sret || smallAggregateResult) ||
-renvoPreparedBackendActive != 0 && (wordCount > 6 && !sret || wordCount > 5 && sret || memoryAggregate) {
+renvoPreparedBackendActive != 0 && (wordCount > renvoRTGObjectRegisterCount() && !sret || wordCount > renvoRTGObjectRegisterCount()-1 && sret || memoryAggregate) {
 return false
 }
 symbolIndex := renvoAsmAddObjectFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 renvoObjectExportFrame(g, true)
 registerWords := 6
+if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
 if sret {
-registerWords = 5
+registerWords--
 }
 if !variadic && (wordCount > registerWords || memoryAggregate) {
 renvoAmd64BeginObjectStackArgs(&g.asm)
@@ -27821,6 +27856,8 @@ renvoAsmRecordRegisterPush(a, machineRegisters[register])
 }
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
+registerLimit := 6
+if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
 integerRegister := 0
 if sret {
 integerRegister = 1
@@ -27835,9 +27872,9 @@ memory := false
 if param.kind == renvoTypeStruct {
 size := renvoTypeSize(g.meta, paramType)
 words = renvoAlignValue(size, 8) / 8
-memory = size > 16 || integerRegister+words > 6
+memory = size > 16 || integerRegister+words > registerLimit
 } else {
-memory = integerRegister >= 6
+memory = integerRegister >= registerLimit
 }
 if memory {
 for word := 0; word < words; word++ {
@@ -28199,7 +28236,7 @@ return renvoBytesPrefixText(g.prog.src, decl.sectionStart, decl.sectionEnd, pref
 
 func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 if renvoPreparedBackendActive != 0 {
-renvoRTGAdjustObjectStack(&g.asm, reserve)
+renvoRTGObjectExportFrame(&g.asm, reserve)
 } else {
 renvoAmd64ObjectExportFrame(g, reserve)
 }
@@ -31110,7 +31147,7 @@ fnIndex := renvoFindMetaFunction(meta, e.nameStart, e.nameEnd)
 if fnIndex < 0 {
 return false
 }
-if renvoFixedTarget == 0 && g.c.objectFile {
+if renvoIsHostedObject(g.c) {
 return renvoEmitObjectFunctionAddress(g, fnIndex)
 }
 renvoAsmPrimaryImm(a, renvoFunctionValueTag(g, fnIndex))
@@ -31422,7 +31459,7 @@ renvoAsmPrimaryBssAddr(a, globalOffset)
 return true
 }
 fnIndex := renvoFindMetaFunction(meta, inner.nameStart, inner.nameEnd)
-if fnIndex >= 0 && renvoFixedTarget == 0 && g.c.objectFile {
+if fnIndex >= 0 && renvoIsHostedObject(g.c) {
 return renvoEmitObjectFunctionAddress(g, fnIndex)
 }
 return false
@@ -36705,7 +36742,7 @@ if target == renvoTargetLinux386 {
 return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\x57\x07\x1f\x23\xee\x5d\x27\x28\xd4\xc9\xbd\xaa\x9e\xa4\xf8\x91\xfe\xf8\x69\xc0\x5e\x71\xa7\xae\x63\xdc\x9e\x9e\xb8\xcb\xf1\x73", 3, true
+return "linux/aarch64", "\xd1\xcb\x13\x10\xe5\x67\x82\xda\xd7\xe9\x2a\x7d\x46\x5a\xd8\x65\xe4\xbc\xf2\x13\xcc\x32\xc3\x5d\x50\x48\x5b\x72\xc1\xdf\x40\x27", 3, true
 }
 if target == renvoTargetLinuxArm {
 return "linux/arm", "\x43\x5d\xdd\x4f\x60\xaf\xa9\x5c\xbb\x80\x66\xe8\x10\x26\x1d\xc6\xf8\x86\x2a\x01\x26\xb4\x50\x9a\x18\x47\xf1\xb2\x84\xe7\x69\xad", 3, true
@@ -36720,13 +36757,13 @@ if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\x7b\x23\xb2\xc2\xeb\x03\x57\x38\x8f\xc1\x2d\xad\xc4\x89\x54\x75\x52\xbb\xde\xe9\xf3\x7c\x18\xab\x07\x17\x6f\x17\xc9\x83\x37\xd7", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xbc\x37\xd8\xd6\x7d\xa8\x6a\x28\x1d\x8d\x1a\x8f\xfd\x75\x7d\x21\xc1\xb3\x3c\x33\x8a\x4a\xf1\x55\xe6\xc2\xa7\x4d\xb4\x22\x61\x1e", 3, true
+return "darwin/arm64", "\x29\x17\x57\x5e\x0d\x35\x29\xad\x6c\xb0\xa8\x0b\x71\xb2\xa8\xbe\x96\xf3\xbd\x01\x5c\xdf\xe9\xdb\x3e\x13\x91\x98\x89\x20\x33\x95", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\x25\x75\xea\x48\x1f\xa4\xdb\xd2\x41\xfc\x21\x29\x5b\x6e\xab\x95\x5e\x84\x27\x16\xf7\xe3\x45\x75\xbe\x8e\x4c\x63\x65\x07\xc9\x6b", 3, true
+return "windows/arm64", "\xfb\x6a\xb2\x5c\x75\x06\x48\xd7\xd1\xe6\x04\xae\xbe\xc3\xe8\x5d\x66\x9e\xc5\x85\xa0\x1a\x66\x69\xf5\x49\x78\x8d\x23\xb2\xba\xfd", 3, true
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "\xd8\xdc\x84\x4b\xa8\x36\xf5\x5e\x62\x26\xe4\x72\xc7\x10\x7f\xb3\xb6\x65\x2e\x02\x7b\xdf\x2d\x74\x90\x65\x80\x86\xd4\xb5\xed\x22", 3, true
@@ -38112,6 +38149,14 @@ var renvoRTGCallWord2 = RTGNoRegister
 var renvoRTGCallWord3 = RTGNoRegister
 var renvoRTGCallWord4 = RTGNoRegister
 var renvoRTGCallWord5 = RTGNoRegister
+var renvoRTGObjectArgument0 = RTGNoRegister
+var renvoRTGObjectArgument1 = RTGNoRegister
+var renvoRTGObjectArgument2 = RTGNoRegister
+var renvoRTGObjectArgument3 = RTGNoRegister
+var renvoRTGObjectArgument4 = RTGNoRegister
+var renvoRTGObjectArgument5 = RTGNoRegister
+var renvoRTGObjectArgument6 = RTGNoRegister
+var renvoRTGObjectArgument7 = RTGNoRegister
 var renvoRTGSyscallNumber = RTGNoRegister
 var renvoRTGSyscallWord0 = RTGNoRegister
 var renvoRTGSyscallWord1 = RTGNoRegister
@@ -38830,8 +38875,7 @@ return renvoCompileResult{data: data, ok: true}
 }
 
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
-renvoRTGDirectMoveImmediate(
-a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 if reserve {
 renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
 } else {
@@ -38839,11 +38883,33 @@ renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
 }
 }
 
-func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
-registers := []RTGRegister{
-renvoRTGCallWord0, renvoRTGCallWord1, renvoRTGCallWord2,
-renvoRTGCallWord3, renvoRTGCallWord4, renvoRTGCallWord5,
+func renvoRTGObjectExportFrame(a *renvoAsm, reserve bool) {
+if reserve {
+patch := renvoRTGFrameStart(a)
+renvoRTGFrameFinish(a, patch, 0)
+} else {
+renvoAsmLeave(a)
 }
+}
+
+func renvoRTGObjectRegisters() []RTGRegister {
+return []RTGRegister{
+renvoRTGObjectArgument0, renvoRTGObjectArgument1, renvoRTGObjectArgument2,
+renvoRTGObjectArgument3, renvoRTGObjectArgument4, renvoRTGObjectArgument5,
+renvoRTGObjectArgument6, renvoRTGObjectArgument7,
+}
+}
+
+func renvoRTGObjectRegisterCount() int {
+registers := renvoRTGObjectRegisters()
+for i := 0; i < len(registers); i++ {
+if !registers[i].Valid { return i }
+}
+return len(registers)
+}
+
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
+registers := renvoRTGObjectRegisters()
 if word < 0 || word >= len(registers) || !registers[word].Valid {
 return false
 }
@@ -51728,8 +51794,8 @@ renvoAsmMarkLabel(out, helper)
 renvoAarch64AsmPushReg(out,30)
 renvoAarch64AsmPushReg(out,3)
 renvoAarch64AsmPushReg(out,4)
-renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmPushReg(out,1)
+renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmLoadRegMem(out,9,31,48,8)
 renvoAarch64AsmCmpRegImm(out,9,0)
 renvoAarch64AsmBCondLabel(out,standard,0)
@@ -51828,8 +51894,8 @@ renvoAsmMarkLabel(out, helper)
 renvoAarch64AsmPushReg(out,30)
 renvoAarch64AsmPushReg(out,3)
 renvoAarch64AsmPushReg(out,4)
-renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmPushReg(out,1)
+renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmLoadRegMem(out,9,31,48,8)
 renvoAarch64AsmCmpRegImm(out,9,1)
 renvoAarch64AsmBCondLabel(out,standard,0)
@@ -51931,8 +51997,8 @@ renvoAsmMarkLabel(out, helper)
 renvoAarch64AsmPushReg(out,30)
 renvoAarch64AsmPushReg(out,3)
 renvoAarch64AsmPushReg(out,4)
-renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmPushReg(out,1)
+renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmLoadRegMem(out,9,31,48,8)
 renvoAarch64AsmCmpRegImm(out,9,0)
 renvoAarch64AsmBCondLabel(out,standard,0)
@@ -52030,8 +52096,8 @@ renvoAsmMarkLabel(out, helper)
 renvoAarch64AsmPushReg(out,30)
 renvoAarch64AsmPushReg(out,3)
 renvoAarch64AsmPushReg(out,4)
-renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmPushReg(out,1)
+renvoAarch64AsmPushReg(out,2)
 renvoAarch64AsmLoadRegMem(out,9,31,48,8)
 renvoAarch64AsmCmpRegImm(out,9,1)
 renvoAarch64AsmBCondLabel(out,standard,0)
@@ -52163,11 +52229,14 @@ g.winReadLabel = label
 }
 after := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
+
+renvoAarch64AsmPushReg(a, 30)
 if isWrite {
 rtgBuiltinWindowsAarch64PackageWindowsWriteAt(a)
 } else {
 rtgBuiltinWindowsAarch64PackageWindowsReadAt(a)
 }
+renvoAarch64AsmPopReg(a, 30)
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, after)
 renvoAsmCallLabel(a, label)
@@ -52281,8 +52350,8 @@ out[0xc8] = 6
 out[0xca] = 1
 out[0x9a] = 3
 out[0x96] = 0x22
-out[0xde] = 0
-out[0xdf] = 0x81
+out[0xde] = byte(33088 & 255)
+out[0xdf] = byte(33088 >> 8)
 out = append(out, a.code...)
 out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
 out = append(out, a.data...)
@@ -54596,6 +54665,22 @@ return true
 }
 if c0 == '>' {
 if c1 == '>' {
+done := 0
+if unsigned {
+
+
+shift := renvoAsmNewLabel(a)
+oversized := renvoAsmNewLabel(a)
+done = renvoAsmNewLabel(a)
+renvoWasm32AsmCmpRaxImm8(a, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+renvoWasm32AsmCmpRaxImm8(a, 32)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+renvoAsmMarkLabel(a, oversized)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, shift)
+}
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 opcode := renvoWasm32OpShrRegReg
@@ -54603,6 +54688,9 @@ if unsigned {
 opcode = renvoWasm32OpShrUnsignedRegReg
 }
 renvoWasm32EmitRegReg(a, opcode, renvoWasm32RegRax, renvoWasm32RegRdx)
+if unsigned {
+renvoAsmMarkLabel(a, done)
+}
 } else if c1 == '=' {
 renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
 } else {

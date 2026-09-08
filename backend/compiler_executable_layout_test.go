@@ -205,7 +205,13 @@ func TestWindowsImagesKeepCodeAndDataNonOverlapping(t *testing.T) {
 		default:
 			t.Fatalf("%s optional header = %T", target, file.OptionalHeader)
 		}
-		if dynamicBase != 0 {
+		if target == "windows/arm64" {
+			// ARM64 Windows requires DYNAMIC_BASE. This target uses PC-relative
+			// addresses and has no absolute image pointers to relocate.
+			if dynamicBase == 0 {
+				t.Error("windows/arm64 omits mandatory DYNAMIC_BASE")
+			}
+		} else if dynamicBase != 0 {
 			t.Errorf("%s advertises ASLR without a base relocation table", target)
 		}
 		if baseRelocationSize != 0 {

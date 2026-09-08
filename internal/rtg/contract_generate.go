@@ -422,6 +422,14 @@ var renvoRTGCallWord2 = RTGNoRegister
 var renvoRTGCallWord3 = RTGNoRegister
 var renvoRTGCallWord4 = RTGNoRegister
 var renvoRTGCallWord5 = RTGNoRegister
+var renvoRTGObjectArgument0 = RTGNoRegister
+var renvoRTGObjectArgument1 = RTGNoRegister
+var renvoRTGObjectArgument2 = RTGNoRegister
+var renvoRTGObjectArgument3 = RTGNoRegister
+var renvoRTGObjectArgument4 = RTGNoRegister
+var renvoRTGObjectArgument5 = RTGNoRegister
+var renvoRTGObjectArgument6 = RTGNoRegister
+var renvoRTGObjectArgument7 = RTGNoRegister
 var renvoRTGSyscallNumber = RTGNoRegister
 var renvoRTGSyscallWord0 = RTGNoRegister
 var renvoRTGSyscallWord1 = RTGNoRegister
@@ -1285,6 +1293,14 @@ func nativeDirectEmitterType(typ string) string {
 }
 
 func appendPreparedLocationAdapters(out []byte, document Document, target ResolvedTarget) []byte {
+	objectArguments := listField(document, target.ABI, "arguments")
+	if len(objectArguments) == 0 {
+		objectArguments = targetABICallWords(document, target.ABI)
+	}
+	for i := 0; i < 8; i++ {
+		out = appendPreparedRegisterAdapter(out, document, target.Arch,
+			"renvoRTGObjectArgument"+decimalText(i), objectArguments, i)
+	}
 	locations := []string{
 		"primary", "secondary", "tertiary", "scratch", "copy_destination",
 		"copy_source", "copy_count", "stack", "frame",

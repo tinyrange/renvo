@@ -47,6 +47,30 @@ go backend {
 		}
 	}
 
+	// A prepared backend may execute on VM32 while emitting a 64-bit target.
+	// Preserve the declared immediate width across that compiler-host boundary.
+	func asmMovRegImm64(a *RTGEmitter, reg int, imm int64) {
+		if imm < 0 {
+			part := int((^imm) & 65535)
+			asmEmit(a, 0x92800000|(part<<5)|reg)
+			for i := 1; i < 4; i++ {
+				part = int((imm >> (i * 16)) & 65535)
+				if part != 65535 {
+					asmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+				}
+			}
+			return
+		}
+		part := int(imm & 65535)
+		asmEmit(a, 0xd2800000|(part<<5)|reg)
+		for i := 1; i < 4; i++ {
+			part = int((imm >> (i * 16)) & 65535)
+			if part != 0 {
+				asmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+			}
+		}
+	}
+
 	func asmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
 		if imm == 0 {
 			asmMovRegReg(a, dst, src)
@@ -1040,7 +1064,7 @@ arch aarch64 {
 			asmMovRegReg(out, destination.Code, source.Code)
 		}
 		moveImmediate(out:emitter, destination:register, value:int64) {
-			asmMovRegImm(out, destination.Code, int(value))
+			asmMovRegImm64(out, destination.Code, value)
 		}
 		setCondition(out:emitter, condition:condition, destination:register) {
 			asmEmit(out, 0x9a9f07e0 |((condition.Code ^ 1) << 12) | destination.Code)

@@ -214,7 +214,13 @@ func renvoWindowsArm64ReserveBSS(out *renvoAsm, size int, alignment int) int {
 }
 `...)
 	source = appendCheckedInWindowsAarch64Runtime(source, projection, target.Runtime, template)
-	source = append(source, checkedInWindowsAarch64PackagingSource...)
+	characteristics, ok := integerField(document, target.Executable, "dll_characteristics")
+	if !ok || characteristics < 0 || characteristics > 65535 {
+		return checkedInTargetProjectionFailure(document, target.Executable, "windows/arm64 requires 16-bit DLL characteristics")
+	}
+	packaging := []byte(checkedInWindowsAarch64PackagingSource)
+	packaging = bytes.ReplaceAll(packaging, []byte("WINDOWS_ARM64_DLL_CHARACTERISTICS"), appendDecimalFrame(nil, characteristics))
+	source = append(source, packaging...)
 	source = bytes.TrimRight(source, "\n")
 	source = append(source, '\n')
 	return GenerateResult{Source: source, Descriptor: target.Descriptor, Manifest: manifest, Ok: true}
@@ -310,8 +316,8 @@ func renvoAsmImageWindowsArm64(a *renvoAsm) []byte {
 	out[0xca] = 1
 	out[0x9a] = 3
 	out[0x96] = 0x22
-	out[0xde] = 0
-	out[0xdf] = 0x81
+	out[0xde] = byte(WINDOWS_ARM64_DLL_CHARACTERISTICS & 255)
+	out[0xdf] = byte(WINDOWS_ARM64_DLL_CHARACTERISTICS >> 8)
 	out = append(out, a.code...)
 	out = renvoAppendUntil(out, renvoWinHeadersSize+textRawSize)
 	out = append(out, a.data...)
@@ -379,6 +385,8 @@ func renvoWinArm64DefinitionReadWrite(g *renvoLinearGen, isWrite bool) {
 	}
 	after := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, after, label)
+	// The definition emits a nested BL. Preserve this wrapper's caller LR.
+	renvoAarch64AsmPushReg(a, 30)
 `...)
 	source = append(source, "\tif isWrite {\n\t\t"...)
 	source = append(source, checkedInProjectionAlgorithmName(document, writeAt)...)
@@ -386,6 +394,7 @@ func renvoWinArm64DefinitionReadWrite(g *renvoLinearGen, isWrite bool) {
 	source = append(source, checkedInProjectionAlgorithmName(document, readAt)...)
 	source = append(source, `(a)
 	}
+	renvoAarch64AsmPopReg(a, 30)
 	renvoAsmRet(a)
 	renvoAsmMarkLabel(a, after)
 	renvoAsmCallLabel(a, label)

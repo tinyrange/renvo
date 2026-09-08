@@ -635,8 +635,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 }
 
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
-	renvoRTGDirectMoveImmediate(
-		a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 	if reserve {
 		renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
 	} else {
@@ -644,11 +643,33 @@ func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
 	}
 }
 
-func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
-	registers := []RTGRegister{
-		renvoRTGCallWord0, renvoRTGCallWord1, renvoRTGCallWord2,
-		renvoRTGCallWord3, renvoRTGCallWord4, renvoRTGCallWord5,
+func renvoRTGObjectExportFrame(a *renvoAsm, reserve bool) {
+	if reserve {
+		patch := renvoRTGFrameStart(a)
+		renvoRTGFrameFinish(a, patch, 0)
+	} else {
+		renvoAsmLeave(a)
 	}
+}
+
+func renvoRTGObjectRegisters() []RTGRegister {
+	return []RTGRegister{
+		renvoRTGObjectArgument0, renvoRTGObjectArgument1, renvoRTGObjectArgument2,
+		renvoRTGObjectArgument3, renvoRTGObjectArgument4, renvoRTGObjectArgument5,
+		renvoRTGObjectArgument6, renvoRTGObjectArgument7,
+	}
+}
+
+func renvoRTGObjectRegisterCount() int {
+	registers := renvoRTGObjectRegisters()
+	for i := 0; i < len(registers); i++ {
+		if !registers[i].Valid { return i }
+	}
+	return len(registers)
+}
+
+func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
+	registers := renvoRTGObjectRegisters()
 	if word < 0 || word >= len(registers) || !registers[word].Valid {
 		return false
 	}

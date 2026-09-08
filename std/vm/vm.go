@@ -794,11 +794,11 @@ func (m *machine) binaryValue(op int, dst int, right int32) bool {
 	case opAndNotRegReg:
 		m.regs[dst] = left &^ right
 	case opShlRegReg:
-		m.regs[dst] = left << (uint32(right) & 31)
+		m.regs[dst] = left << uint32(right)
 	case opShrRegReg:
-		m.regs[dst] = left >> (uint32(right) & 31)
+		m.regs[dst] = left >> uint32(right)
 	case opShrUnsignedRegReg:
-		m.regs[dst] = int32(uint32(left) >> (uint32(right) & 31))
+		m.regs[dst] = int32(uint32(left) >> uint32(right))
 	default:
 		m.trap = TrapInvalidInstruction
 		return false

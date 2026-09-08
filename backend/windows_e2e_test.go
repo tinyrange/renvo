@@ -41,6 +41,7 @@ func TestWindowsTargetsEndToEnd(t *testing.T) {
 	testSources := []string{
 		"tests/windows_args_env.go",
 		"tests/print_pass_smoke.go",
+		"tests/windows_arm64_io_return.go",
 		"tests/open_close_open_create_read_write_returns_usable_fd.go",
 		"tests/read_write_read_after_write_before_close.go",
 		"tests/chmod_success_then_read_validates_content.go",
