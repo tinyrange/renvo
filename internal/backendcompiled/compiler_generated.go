@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e778d66513c40c38683e0b47480a1cfde118195081725cb6e8be43b4ecaca3f4"
+const CompilerSourceDigest = "f5b6c76083c6571ccc31e29ae6dbad5a7b15ae7f74c2206ba4fab6f264fa56ef"
 
 // source: backend/compiler_common_impl.go
 
@@ -14061,6 +14061,19 @@ renvoNonNil(g, ep)
 if !renvoEmitSliceValueRegs(g, ep, idx) {
 return false
 }
+
+
+
+e := &ep.exprs[idx]
+if e.kind == renvoExprSlice && renvoTypeIsSlice(g.meta, renvoInferParsedExprType(g, ep, e.left)) {
+base := &ep.exprs[e.left]
+if base.kind == renvoExprIdent {
+local := renvoFindLocalIndex(g, base.nameStart, base.nameEnd)
+if local >= 0 && !renvoLocalIsCurrentFuncParam(g, local) && g.locals[local].constValid != 0 && renvoLocalNameAddressTaken(g, base.nameStart, base.nameEnd) {
+return true
+}
+}
+}
 if renvoReturnedSliceCanReuseDescriptor(g, ep, idx) {
 return true
 }
@@ -21272,6 +21285,9 @@ return false
 }
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
+
+
+renvoAsmNormalizePrimaryForKind(a, elem.kind)
 return true
 }
 return false
@@ -30573,6 +30589,28 @@ renvoAsmStorePrimaryStack(&g.asm, highOffset)
 }
 
 func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+if renvoPreparedBackendActive != 0 && renvoRTGPreparedIEEEFloat == 0 {
+
+
+
+renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+condition := 0x94
+if c0 == '!' {
+condition = 0x95
+} else if c0 == '<' {
+condition = 0x9c
+if c1 == '=' {
+condition = 0x9e
+}
+} else if c0 == '>' {
+condition = 0x9f
+if c1 == '=' {
+condition = 0x9d
+}
+}
+renvoAsmCmpTertiaryPrimarySet(&g.asm, condition)
+return true
+}
 size := 8
 if kind == renvoTypeFloat32 {
 size = 4
