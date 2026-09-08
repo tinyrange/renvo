@@ -1,4 +1,4 @@
-// Command renvoperf gates complete-compiler self-hosting for every Tier 1.
+// Command renvoperf gates the configured compiler workload for every Tier 1.
 package main
 
 import (

@@ -1,4 +1,4 @@
-name: Shared self-hosting measurement
+name: Shared compiler performance measurement
 
 on:
   workflow_call:
@@ -32,14 +32,13 @@ jobs:
           echo "reference=$(go run ./cmd/renvoperf -reference-revision)" >> "$GITHUB_OUTPUT"
 
   measure:
-    name: Self-hosting performance (${{ matrix.name }})
+    name: Compiler performance (${{ matrix.name }})
     needs: plan
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
-    # VM self-hosting is instruction-heavy. This is a hang timeout, not a CPU
-    # performance budget; reference and candidate use the same runner.
+    # Outer hang timeout for bootstrap and all paired workload measurements.
     timeout-minutes: 90
     steps:
       - name: Check out candidate
@@ -67,7 +66,11 @@ jobs:
       - name: Test OS resource accounting
         working-directory: candidate
         run: go test -count=1 ./internal/testmeasure/...
-      - name: Compare complete compiler self-hosting
+      - name: Verify WASI runtime failure paths
+        if: matrix.execution == 'wasmtime'
+        working-directory: candidate
+        run: go test -count=1 -run '^TestWASIHelperFailureAfterReturn$' ./backend
+      - name: Compare compiler workload
         working-directory: candidate
         shell: bash
         env:

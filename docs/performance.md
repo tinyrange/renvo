@@ -150,3 +150,30 @@ Compiler system profiles also move from 160 MiB to a 192 MiB arena, and their
 4 MiB + 10 KiB / 6 MiB binary limits become 8 MiB. Ordinary functional tests,
 VM corpus instruction/memory limits, and arena-exhaustion correctness checks
 remain in place.
+
+## WASI investigation
+
+Local reproduction with the CI-pinned Wasmtime 36.0.2 identified two independent
+problems:
+
+- The Wasm emitter used the first return as the end of an unnamed helper. An
+  allocator's successful return precedes its failure block, so this discarded
+  reachable error handling. The emitter now follows branches to determine the
+  helper's full extent. `TestWASIHelperFailureAfterReturn` checks both successful
+  allocation and exhausted-arena behavior on WASI and VM32, using the same
+  checked-in reproducer. The WASI workflow runs this regression before measuring.
+- The process measurement includes Wasmtime compiling the compiler module to
+  native code. With the same 224 MiB-arena compiler module on macOS, a normal
+  Wasmtime run peaked at 434 MiB RSS; precompiling the module before the measured
+  run reduced that to 220 MiB. This separates engine compilation from the actual
+  frontend/backend self-host workload. A subsequent run with the helper fix
+  self-hosted through stage3 and compiled and executed a smoke program at about
+  224 MiB peak RSS and 6.45 CPU seconds using a precompiled module.
+
+The full compiler still did not complete the local 192 MiB-arena probe after
+correcting helper boundaries. A 224 MiB arena completed the workload. These are
+local diagnostic experiments, not new thresholds: the checked-in WASI gate
+still uses its 192 MiB arena and includes Wasmtime module compilation. Using a
+224 MiB arena and preparing the Wasmtime module before timing is a possible
+follow-up that retains the 256 MiB process-memory ceiling. It requires choosing
+that measurement scope explicitly, with module compilation reported separately.
