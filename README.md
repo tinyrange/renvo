@@ -93,28 +93,28 @@ tier in the same change rather than silently weakening its tests.
 
 ### Performance gates
 
-Performance limits are regression budgets, not benchmark claims. The compiler
-tests make three attempts and use the best observed elapsed time and peak RSS;
-binary-size limits apply to the stripped compiler artifact. The current hard
-limits are:
+All nine Tier 1 targets use the complete bundled compiler self-hosting workload,
+including frontend and backend. The authoritative policy is
+[`internal/perfgate/policy.json`](internal/perfgate/policy.json).
 
-| Gate | Targets | Required limits |
-| --- | --- | --- |
-| Fixed-target compiler resources | `linux/amd64`, `linux/386`, `linux/aarch64`, `linux/arm`, `windows/amd64`, `windows/386` | 16 MiB peak RSS; 320 KiB compiler |
-| Fixed-target compiler elapsed time | The same Linux and Windows targets | 50 ms; run by `./tools/check performance` outside shared CI |
-| Darwin fixed-target compiler | `darwin/arm64` | 175 ms; 640 KiB compiler; run on the native macOS CI runner |
-| WASI fixed-target compiler | `wasi/wasm32` | 150 ms; 20 MiB peak RSS; 384 KiB compiler |
-| Self-hosted frontend | Native Linux target for the runner | 42 MiB peak RSS; 4 MiB stripped stage-3 compiler |
-| Self-hosted VM backend | `vm/vm32` | 2 MiB compiler bytecode; 400,000 VM steps; 80 MiB peak VM memory |
-| Self-hosted VM frontend | `vm/vm32` producing `linux/amd64` | 6 MiB frontend bytecode; 4 MiB output compiler; 12 billion VM steps; 150 MiB peak VM memory |
+| Metric | Gate |
+| --- | --- |
+| CPU time (user + kernel) | At most 25% above the pinned reference |
+| Peak memory | At most 256 MiB and 20% above the reference |
+| Stripped stage-3 compiler | At most 8 MiB and 10% above the reference |
+| VM instructions | At most 20% above the reference |
 
-`./tools/check ci-performance` runs the resource and binary-size gates that are
-stable on shared Linux runners, together with the WASI gate. It also records
-normalized frontend CPU time as telemetry, but CPU time is not currently a
-hard frontend limit. `./tools/check performance` adds the 50 ms fixed-target
-elapsed-time gate. The native Darwin job and the required backend/frontend jobs
-own the Darwin and VM gates respectively. The VM backend corpus additionally
-caps each regression program at 500 million steps and 16 MiB of VM memory.
+Reference and candidate run on the same runner: one warm-up each, followed by
+three alternating samples and median comparisons. Wall time is telemetry and a
+hang timeout. Larger increases block feature inclusion for maintainer evaluation
+case by case; passing a relative comparison never overrides an absolute ceiling.
+
+`./tools/check performance` and `./tools/check ci-performance` enforce the same
+policy, defaulting to the native target. Set `RENVO_PERF_TARGET` to select another
+target. Separate Linux, Windows, macOS, and virtual-target workflows check all nine
+targets on PRs, merge-queue commits, and `main`. Missing runners or measurements fail the gate.
+See [performance measurements and local commands](docs/performance.md) for
+platform memory definitions, runner coverage, and reproducibility details.
 
 The frontend supports packages and modules, local replacements, build tags and
 target-specific files, `//go:embed`, and an offline module cache. Language
@@ -602,11 +602,9 @@ go test ./frontend_tests
 go test -run '^(TestCompileTests|TestUnitFrontendCompileTests)$' ./backend
 ```
 
-The GitHub Actions workflow runs the complete backend matrix, compiler resource
-and normalized frontend performance gates, self-hosted frontend corpus,
-bundled standalone compiler checks, and native Windows coverage. Absolute
-runtime and WASI RSS gates remain part of `./tools/check performance`; they are
-not used as pass/fail signals on variable shared runners. Compiler regressions
+The GitHub Actions workflow runs the complete backend matrix, unified compiler
+self-hosting performance gates, self-hosted frontend corpus, bundled standalone
+compiler checks, and native Windows coverage. Compiler regressions
 belong in `backend/tests/`; every passing regression prints exactly `PASS\n`.
 
 Randomized differential testing compares deterministic, type-correct programs

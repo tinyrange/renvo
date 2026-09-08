@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 
 	"renvo.dev/internal/testmeasure"
 )
@@ -18,13 +17,7 @@ func main() {
 	cmd := exec.Command(os.Args[2], os.Args[3:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	started := time.Now()
-	err := cmd.Run()
-	result := testmeasure.Result{ElapsedNanoseconds: int64(time.Since(started))}
-	if cmd.ProcessState != nil {
-		result.CPUNanoseconds = int64(cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime())
-		result.MaxRSSKB = processMaxRSSKB(cmd.ProcessState)
-	}
+	result, err := testmeasure.Run(cmd)
 	data, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
 		fmt.Fprintln(os.Stderr, marshalErr)
@@ -35,8 +28,8 @@ func main() {
 		os.Exit(1)
 	}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+		if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() != 0 {
+			os.Exit(cmd.ProcessState.ExitCode())
 		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

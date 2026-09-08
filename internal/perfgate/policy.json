@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "reference_revision": "295f13616ce0bf1e3ebb94ca7a25c2c15090d8b0",
+  "samples": 3,
+  "compiler_bytes": 8388608,
+  "peak_memory_bytes": 268435456,
+  "compiler_arena_bytes": 201326592,
+  "cpu_growth_percent": 25,
+  "memory_growth_percent": 20,
+  "artifact_growth_percent": 10,
+  "vm_steps_growth_percent": 20,
+  "invocation_timeout_seconds": 900,
+  "vm_step_limit": 100000000000,
+  "targets": [
+    {"name":"linux/amd64", "runner":"ubuntu-latest", "execution":"native"},
+    {"name":"linux/386", "runner":"ubuntu-latest", "execution":"native"},
+    {"name":"linux/aarch64", "runner":"ubuntu-24.04-arm", "execution":"native"},
+    {"name":"linux/arm", "runner":"ubuntu-latest", "execution":"qemu-arm"},
+    {"name":"windows/amd64", "runner":"windows-latest", "execution":"native"},
+    {"name":"windows/386", "runner":"windows-latest", "execution":"native"},
+    {"name":"darwin/arm64", "runner":"macos-14", "execution":"native"},
+    {"name":"wasi/wasm32", "runner":"ubuntu-latest", "execution":"wasmtime"},
+    {"name":"vm/vm32", "runner":"ubuntu-latest", "execution":"vm"}
+  ]
+}

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 function usage() {
-  console.error("usage: node tools/wasm/profile.mjs FRONTEND.wasm [--backend BACKEND.wasm] [--workspace DIR] [--json] [--check]");
+  console.error("usage: node tools/wasm/profile.mjs FRONTEND.wasm [--backend BACKEND.wasm] [--workspace DIR] [--json]");
 }
 
 const args = process.argv.slice(2);
@@ -20,7 +20,6 @@ const compiler = path.resolve(args.shift());
 let workspace = process.cwd();
 let backend = "";
 let jsonOnly = false;
-let check = false;
 while (args.length > 0) {
   const option = args.shift();
   if (option === "--workspace" && args.length > 0) {
@@ -30,7 +29,8 @@ while (args.length > 0) {
   } else if (option === "--json") {
     jsonOnly = true;
   } else if (option === "--check") {
-    check = true;
+    console.error("Use RENVO_PERF_TARGET=wasi/wasm32 ./tools/check performance for the shared gate.");
+    process.exit(2);
   } else {
     usage();
     process.exit(2);
@@ -91,18 +91,6 @@ try {
   }
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true });
-}
-
-if (check) {
-  const sizeLimit = 2 * 1024 * 1024;
-  const selfhostLimit = 1000;
-  const compilerBytes = fs.statSync(compiler).size;
-  const selfhost = results.find((result) => result.name === "selfhost");
-  const selfhostMilliseconds = selfhost.pipelineMilliseconds ?? selfhost.executeMilliseconds;
-  if (compilerBytes > sizeLimit || selfhostMilliseconds > selfhostLimit) {
-    console.error(`WASM gate failed: frontend=${compilerBytes}/${sizeLimit} bytes selfhost=${selfhostMilliseconds.toFixed(1)}/${selfhostLimit} ms`);
-    process.exitCode = 1;
-  }
 }
 
 if (jsonOnly) {

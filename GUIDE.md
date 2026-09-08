@@ -174,9 +174,10 @@ limits and the target are required. `-system` cannot be combined with `-t` or
 The frontend size checks report two payloads independently: the stripped
 compiler with its native backends against the former 2,000,000-byte reference,
 and the offline bundle containing `std/`, `forms/`, and `device/` against the
-former 4 MiB reference. These are telemetry during M4 rather than test failures.
-The checked-in `systems/frontend-linux-amd64.rtg` profile still applies its
-explicit full-bundle limit and gives the running compiler a 128 MiB arena:
+former 4 MiB reference. Those historical comparisons are telemetry; both payloads
+must fit the shared 8 MiB ceiling. The checked-in
+`systems/frontend-linux-amd64.rtg` profile applies that full-bundle limit and
+gives the running compiler a 192 MiB arena:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
@@ -708,8 +709,8 @@ RSS bugs are often ownership bugs, not “the compiler needs more memory.”
   host contracts.
 - `browser/wasm32` wraps the Wasm output as browser HTML.
 - Linear-memory sizing follows arena policy.
-- Keep the WASI performance compiler below the same small size/RSS envelope as
-  native backends.
+- Keep the complete WASI self-hosting compiler within the shared policy described
+  in `docs/performance.md`.
 
 ## Correctness areas that deserve disproportionate testing
 
@@ -820,21 +821,9 @@ names and prints periodic progress plus the five slowest cases:
 ./tools/check frontend 'map_frontend_lowering'
 ```
 
-To run the ordinary backend test list while excluding separately managed
-performance gates:
-
-```sh
-tests="$(
-  go test -list '^Test' ./backend |
-  sed -n '/^Test/p' |
-  grep -v '^TestCompilerPerformance$' |
-  grep -v '^TestCompilerPerformanceWASI$' |
-  grep -v '^TestCompilerResourceGates$' |
-  grep -v '^TestFrontendCompilerPerformance$' |
-  paste -sd'|' -
-)"
-go test -count=1 -timeout 30m -run "^(${tests})$" ./backend
-```
+The ordinary backend suite and the compiler performance driver are separate.
+Use `./tools/check backend` for backend tests and `./tools/check performance`
+for the selected target's complete compiler self-hosting gate.
 
 The frontend corpus has several layers:
 
@@ -880,7 +869,7 @@ and self-hosting failures that are not independent bugs.
 - A Go build or package failure belongs to the host implementation and should
   be fixed before interpreting backend output.
 - Exit 137, `signal: killed`, or a vanished terminal usually indicates the
-  outer memory boundary, not Renvo's measured 16/32 MiB RSS gate. Reproduce the
+  outer memory boundary, separate from the compiler's measured memory gate. Reproduce the
   named child command inside `RENVO_CHECK_MEMORY_MAX` and inspect that first.
 - A gate failure should name runtime, RSS, binary size, or frontend CPU. Do not
   trade one budget for another or raise a threshold to make the aggregate green.
@@ -911,53 +900,23 @@ wrong.
 
 ## Performance gates are architecture constraints
 
-The direct backend compiler has extremely strict limits:
-
-- 50 ms best-of-three compile time for the legacy performance gate;
-- 16 MiB maximum RSS;
-- 256 KiB stripped compiler binary.
-
-The explicit resource gate is:
-
-```sh
-RENVO_COMPILER_RESOURCE_GATES=1 \
-  go test -count=1 -run '^TestCompilerResourceGates$' ./backend
-```
-
-The complete performance mode also runs the native 50 ms gate, the WASI 100 ms
-gate, both compiler binary/RSS policies, and the self-hosted frontend gate:
+All Tier 1 targets use the bundled frontend/backend compiler to build itself.
+The shared policy lives in `internal/perfgate/policy.json`: 8 MiB compiler,
+256 MiB peak memory, and median growth limits of 25% CPU, 20% memory,
+10% artifact size, and 20% VM instructions against a pinned source reference.
+Both revisions execute on the same runner. Larger increases block feature
+inclusion for maintainer evaluation case by case.
 
 ```sh
 ./tools/check performance
+RENVO_PERF_TARGET=vm/vm32 ./tools/check performance
 ```
 
-Absolute elapsed time and maximum RSS are properties of a controlled host, not
-stable signals on GitHub's shared runners. Actions therefore uses:
-
-```sh
-./tools/check ci-performance
-```
-
-That mode retains the native compiler resource/binary policy and the
-frontend binary policy plus calibrated CPU/RSS telemetry. It omits the absolute native and
-WASI performance tests, which remain mandatory through `performance` on a
-suitable development or dedicated benchmark host. Do not interpret this CI
-partition as permission to loosen or skip those limits locally.
-
-The self-hosted frontend telemetry builds through stage3 and reports the
-stripped compiler against the former 2,000,000-byte reference. Normalized CPU
-and peak RSS are recorded on every run for regression review; none of these
-frontend observations is currently an absolute pass/fail limit.
-
-The CPU telemetry is process user plus system CPU, normalized on the same
-runner. It is deliberately not raw wall-clock time.
-
-Run the frontend gate with the checkout's standard-library root:
-
-```sh
-RENVO_STDROOT="$PWD/std" \
-  go test -count=1 -run '^TestFrontendCompilerPerformance$' ./backend
-```
+`ci-performance` enforces exactly the same policy. Separate Linux, Windows, macOS, and virtual-target workflows run all nine
+Tier 1 targets on PRs, merge-queue commits, and main.
+See [performance.md](docs/performance.md) for workload, measurement definitions,
+reference handling, and limitations. CPU time is user plus kernel CPU; wall time
+is telemetry. Memory is peak RSS on Linux/macOS and peak job commit on Windows.
 
 When a gate moves, diagnose the phase:
 
@@ -1234,9 +1193,9 @@ ready and enqueued; wait for the queue validation and confirm the merge commit
 rather than treating “queued” as “merged.”
 
 The Actions workflow handles `pull_request`, `merge_group`, and pushes to
-`main`. Pull requests run the fast `preflight` and shared-runner-safe compiler
-performance/resource gates concurrently and can enter the merge queue once both
-pass. The exact prospective `main` commit then runs every platform, package, and
+`main`. Pull requests run the fast `preflight` and all nine compiler self-hosting performance gates in
+separate Linux, Windows, macOS, and virtual-target workflows concurrently and can enter the merge queue once both
+pass. The exact prospective `main` commit then runs all nine Tier 1 performance targets and every platform, package, and
 frontend job before the final `Required` job succeeds. The frontend corpus
 starts as soon as preflight passes because it has no data dependency on the
 backend or macOS package jobs. This keeps full testing as a pre-merge gate

@@ -1,0 +1,84 @@
+name: Shared self-hosting measurement
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Read platform policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.policy.outputs.matrix }}
+      reference: ${{ steps.policy.outputs.reference }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Read shared policy
+        id: policy
+        shell: bash
+        run: |
+          echo "matrix=$(go run ./cmd/renvoperf -matrix -platform '${{ inputs.platform }}')" >> "$GITHUB_OUTPUT"
+          echo "reference=$(go run ./cmd/renvoperf -reference-revision)" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: Self-hosting performance (${{ matrix.name }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    # VM self-hosting is instruction-heavy. This is a hang timeout, not a CPU
+    # performance budget; reference and candidate use the same runner.
+    timeout-minutes: 90
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v7
+        with:
+          path: candidate
+      - name: Check out reference
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.reference }}
+          path: reference
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/go.mod
+          cache: false
+      - name: Install ARM runner
+        if: matrix.execution == 'qemu-arm'
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Install pinned WASI runner
+        if: matrix.execution == 'wasmtime'
+        shell: bash
+        run: |
+          curl -fsSL https://wasmtime.dev/install.sh | bash -s -- --version v36.0.2
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+      - name: Test OS resource accounting
+        working-directory: candidate
+        run: go test -count=1 ./internal/testmeasure/...
+      - name: Compare complete compiler self-hosting
+        working-directory: candidate
+        shell: bash
+        env:
+          RENVO_PERF_TARGET: ${{ matrix.name }}
+          RENVO_PERF_REFERENCE: ${{ github.workspace }}/reference
+          RENVO_PERF_REPORT: ${{ github.workspace }}/performance.json
+        run: ./tools/check ci-performance
+      - name: Publish measurements, including failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selfhost-${{ strategy.job-index }}-${{ runner.os }}
+          path: performance.json
+          if-no-files-found: error
