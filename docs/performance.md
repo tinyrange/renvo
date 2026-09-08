@@ -98,12 +98,15 @@ go run ./cmd/renvoperf -matrix
 ```
 
 Both check modes enforce exactly the same policy. Native execution requires a
-compatible host; WASI and QEMU runs require their Linux tools. The default
+compatible host. QEMU requires Linux; WASI requires Wasmtime and can also be
+checked locally on macOS. WASI uses one preopened repository workspace and
+places temporary outputs in its ignored sandbox directory. The default
 report is `sandbox/performance/report.json`. Set `RENVO_PERF_REPORT` to retain
 separate runs and `RENVO_PERF_REFERENCE` to use an existing clean checkout of
 the pinned reference. CI uploads reports even when a gate fails. Reports include
 the policy, revisions, host, engine version where applicable, all samples, and
-failure reasons. `./tools/check full` runs the selected target's gate with the
+failure reasons, including CPU and memory from failed compiler invocations.
+`./tools/check full` runs the selected target's gate with the
 full functional suites; only CI spans every required host.
 
 The old direct-backend elapsed-time, calibration, and split frontend/VM gates

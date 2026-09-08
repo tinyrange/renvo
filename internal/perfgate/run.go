@@ -27,6 +27,7 @@ type Report struct {
 	Reference         []Sample `json:"reference"`
 	Candidate         []Sample `json:"candidate"`
 	Failures          []string `json:"failures"`
+	FailedMeasurement *Sample  `json:"failed_measurement,omitempty"`
 	OK                bool     `json:"ok"`
 }
 
@@ -36,6 +37,7 @@ type harness struct {
 	target Target
 	self   string
 	log    io.Writer
+	report *Report
 }
 
 // Run compiles two real revisions through stage2, then alternates fresh
@@ -103,7 +105,7 @@ func Run(root, reference, targetName string, log io.Writer) (report Report, err 
 	if err != nil {
 		return report, err
 	}
-	h := harness{policy: p, target: target, self: self, log: log}
+	h := harness{policy: p, target: target, self: self, log: log, report: &report}
 	if target.Execution == "wasmtime" || target.Execution == "qemu-arm" {
 		args := []string{"--version"}
 		out, e := exec.Command(target.Execution, args...).CombinedOutput()
@@ -117,6 +119,21 @@ func Run(root, reference, targetName string, log io.Writer) (report Report, err 
 	base := build{root: reference, directory: filepath.Join(work, "base")}
 	next := build{root: root, directory: filepath.Join(work, "candidate")}
 	for _, b := range []*build{&base, &next} {
+		if target.Execution == "wasmtime" {
+			// Renvo resolves WASI paths relative to a preopened workspace.
+			// Keep output there too, without relying on guest mount-name lookup.
+			sandbox := filepath.Join(b.root, "sandbox")
+			if err = os.MkdirAll(sandbox, 0755); err != nil {
+				return report, err
+			}
+			var directory string
+			directory, err = os.MkdirTemp(sandbox, "perfgate-wasi-")
+			if err != nil {
+				return report, err
+			}
+			defer os.RemoveAll(directory)
+			b.directory = filepath.Join(directory, filepath.Base(b.directory))
+		}
 		if err = h.prepare(b); err != nil {
 			return report, err
 		}
@@ -184,7 +201,7 @@ func runnable(t Target) error {
 		return fmt.Errorf("%s must execute on a compatible native host; current host is %s", t.Name, host)
 	}
 	if t.Execution == "qemu-arm" || t.Execution == "wasmtime" {
-		if runtime.GOOS != "linux" {
+		if t.Execution == "qemu-arm" && runtime.GOOS != "linux" {
 			return fmt.Errorf("%s performance runner requires Linux", t.Execution)
 		}
 		if _, err := exec.LookPath(t.Execution); err != nil {
@@ -254,12 +271,16 @@ func (h harness) execute(b *build, compiler string, args []string, output string
 		command = "qemu-arm"
 	case "wasmtime":
 		mapped := append([]string(nil), args...)
+		relative, err := filepath.Rel(b.root, output)
+		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return Sample{}, fmt.Errorf("WASI output must be inside its workspace: %s", output)
+		}
 		for i, arg := range mapped {
 			if arg == output {
-				mapped[i] = "/output/" + filepath.Base(output)
+				mapped[i] = filepath.ToSlash(relative)
 			}
 		}
-		args = append([]string{"run", "--dir", b.root + "::/workspace", "--dir", b.directory + "::/output", "--env", "PWD=/workspace", "--env", "RENVO_STDROOT=/workspace/std", compiler}, mapped...)
+		args = append([]string{"run", "--dir", b.root + "::.", "--env", "PWD=.", "--env", "RENVO_STDROOT=std", compiler}, mapped...)
 		command = "wasmtime"
 	case "vm":
 		request := VMRequest{Root: b.root, Compiler: compiler, Output: output, Stats: statsPath, Args: args, Memory: int(h.policy.PeakMemoryBytes), Steps: h.policy.VMStepLimit}
@@ -281,10 +302,13 @@ func (h harness) execute(b *build, compiler string, args []string, output string
 	cmd.Stdout = &log
 	cmd.Stderr = &log
 	usage, err := testmeasure.Run(cmd)
-	if err != nil {
-		return Sample{}, fmt.Errorf("%s compiler execution: %w\n%s", h.target.Name, err, log.String())
-	}
 	sample := Sample{CPU: usage.CPUNanoseconds, Wall: usage.ElapsedNanoseconds, Memory: usage.PeakMemoryBytes, MemoryMetric: usage.MemoryMetric}
+	if err != nil {
+		if h.report != nil {
+			h.report.FailedMeasurement = &sample
+		}
+		return sample, fmt.Errorf("%s %s compiler execution: %w\n%s", h.target.Name, filepath.Base(compiler), err, log.String())
+	}
 	if h.target.Execution == "vm" {
 		data, err := os.ReadFile(statsPath)
 		if err != nil {
