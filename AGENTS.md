@@ -25,7 +25,7 @@ take precedence whenever they disagree with the guide.
 - Backend compiler implementation may invoke only `open`, `close`, `read`,
   `write`, `chmod`, and `print`. This restriction does not limit target runtime
   operations or APIs implemented by the Renvo standard library.
-- Performance requirements are strictly defined in `backend/main_test.go` and
+- Performance requirements are defined in `internal/perfgate/policy.json` and
   cannot be violated.
 - Do not hardcode test cases, emit prebuilt or self-copying binaries, copy the
   compiler executable or source as compiled output, or patch the harness/runtime
@@ -70,7 +70,7 @@ focused corpus filters while iterating, for example:
 ./tools/check frontend 'map_frontend_lowering'
 ```
 
-`full` adds the backend, every compiler performance/resource gate, and the
+`full` adds the backend, the selected target’s compiler performance gate, and the
 complete frontend suite including self-hosting. Only run it locally when the
 user explicitly requests the full validation. On a systemd-based Linux host, set
 `RENVO_CHECK_MEMORY_MAX=4G` to isolate each command from the interactive

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0d6e69985fe8c8d8dc67e390e214d75db678ca07ce1a6ff5f4fb01b56c731edf"
+const CompilerSourceDigest = "e778d66513c40c38683e0b47480a1cfde118195081725cb6e8be43b4ecaca3f4"
 
 // source: backend/compiler_common_impl.go
 
@@ -14285,7 +14285,11 @@ elemSize := renvoTypeSize(meta, arrayType.elem)
 if elemSize < 1 {
 elemSize = 8
 }
-baseOff := renvoAddUnnamedLocal(g, baseType)
+
+
+
+
+baseOff := renvoAddUnnamedLocal(g, renvoInferParsedExprType(g, ep, idx))
 lowOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 highOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 maxOff := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -36632,7 +36636,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xb0\x2c\x4b\x0f\x54\x1e\x6c\x7a\x3d\x51\x34\xe0\xfd\x7a\x6a\x43\x47\xda\xac\x92\xaa\xc3\xda\xc0\xd6\x27\x4e\x4d\xda\x2d\xa0\x41", 3, true
+return "wasi/wasm32", "\x7b\x23\xb2\xc2\xeb\x03\x57\x38\x8f\xc1\x2d\xad\xc4\x89\x54\x75\x52\xbb\xde\xe9\xf3\x7c\x18\xab\x07\x17\x6f\x17\xc9\x83\x37\xd7", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x2a\xfb\x6c\xa3\x1e\xc5\xb9\xc4\x5c\x12\x21\x7e\x4a\x07\xc1\xd3\x8d\xbe\x4f\xb1\xe4\x13\x28\xd7\x98\xd1\x80\xce\x40\x05\x46\x22", 3, true
@@ -36644,7 +36648,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x8d\x0d\xe8\xa0\xd7\xaa\x3e\xa4\x43\x36\x4e\xde\x38\x58\xdb\xc0\x81\x3e\x2b\xa5\xdb\xcc\x33\x4b\xb1\x9a\xaf\xb1\x85\x7e\x18\x6a", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x0a\xf8\x00\x19\x9d\x07\xb2\x92\x52\x81\xe6\x26\x3d\xfd\xcf\x4f\x37\x78\x92\xfe\xea\x9b\x77\x59\x78\xb9\x86\x66\x2d\x43\x9b\x72", 3, true
+return "vm/vm32", "\xd8\xdc\x84\x4b\xa8\x36\xf5\x5e\x62\x26\xe4\x72\xc7\x10\x7f\xb3\xb6\x65\x2e\x02\x7b\xdf\x2d\x74\x90\x65\x80\x86\xd4\xb5\xed\x22", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -47037,9 +47041,9 @@ return lo < len(pcs) && pcs[lo] == pc
 }
 func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 ends := make([]int, len(routinePcs))
+visited := make([]int, len(instrPcs))
+pending := make([]int, 0, 64)
 symbolIndex := 0
-instrIndex := 0
-cachedRet := -1
 for i := 0; i < len(routinePcs); i++ {
 start := routinePcs[i]
 for symbolIndex < len(symbolPcs) && symbolPcs[symbolIndex] <= start {
@@ -47053,20 +47057,45 @@ if start == 0 || renvoWasm32SortedPcContains(symbolPcs, start) {
 ends[i] = nextSymbol
 continue
 }
-if cachedRet < start || cachedRet >= nextSymbol {
-for instrIndex < len(instrPcs) && instrPcs[instrIndex] < start {
-instrIndex++
+
+
+
+pending = pending[:0]
+pending = append(pending, renvoWasm32PcLowerBound(instrPcs, start))
+for len(pending) > 0 {
+index := pending[len(pending)-1]
+pending = pending[:len(pending)-1]
+if index >= len(instrPcs) || visited[index] == i+1 {
+continue
 }
-cachedRet = nextSymbol
-for j := instrIndex; j < len(instrPcs) && instrPcs[j] < nextSymbol; j++ {
-pc := instrPcs[j]
-if int(renvo_runtime_UnsafeByteAt(code, pc)) == renvoWasm32OpRet {
-cachedRet = pc + 1
-break
+pc := instrPcs[index]
+if pc < start || pc >= nextSymbol {
+continue
+}
+visited[index] = i + 1
+next := len(code)
+if index+1 < len(instrPcs) {
+next = instrPcs[index+1]
+}
+if next > ends[i] {
+ends[i] = next
+}
+op := int(renvo_runtime_UnsafeByteAt(code, pc))
+if op == renvoWasm32OpRet || op == renvoWasm32OpExit {
+continue
+}
+if op >= renvoWasm32OpJmp && op <= renvoWasm32OpJCond {
+offset := 1
+if op == renvoWasm32OpJCond {
+offset = 2
+}
+target := renvoGet32At(code, pc+offset)
+pending = append(pending, renvoWasm32PcLowerBound(instrPcs, target))
+}
+if op != renvoWasm32OpJmp {
+pending = append(pending, index+1)
 }
 }
-}
-ends[i] = cachedRet
 }
 return ends
 }
