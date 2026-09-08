@@ -123,6 +123,7 @@
     "packages": ["device/esp32p4", "examples/device/fontcache"],
     "examples": [
       {"path": "examples/device/forms_demo"},
+      {"path": "examples/device/tab5_keyboard_terminal", "hardware": [{"name": "Tab5 Keyboard", "docs": "https://docs.m5stack.com/en/tab5/Tab5_Keyboard"}]},
       {"path": "examples/device/sgp30_demo", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
       {"path": "examples/device/sensor_terminal", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel"}]},
       {"path": "examples/device/terminal_stress", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel", "optional": true}]},

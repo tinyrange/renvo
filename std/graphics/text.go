@@ -548,7 +548,7 @@ func (s *Surface) drawGlyphMask(mask *Image, x, y int, color Color) {
 	}
 	for maskY := minY; maskY < maxY; maskY++ {
 		for maskX := minX; maskX < maxX; maskX++ {
-			alpha := int(mask.Pixels[maskY*mask.Stride+maskX])
+			alpha := int(mask.Pixels[mask.PixelOffset(maskX, maskY)])
 			if alpha != 0 {
 				tinted := Color{
 					R: byte((int(color.R)*alpha + 127) / 255),
@@ -570,20 +570,20 @@ func (s *Surface) drawGlyphMaskRGB565(mask *Image, x, y, minX, minY, maxX, maxY 
 	solid := encodeRGB565(color)
 	for maskY := minY; maskY < maxY; maskY++ {
 		for maskX := minX; maskX < maxX; {
-			alpha := int(mask.Pixels[maskY*mask.Stride+maskX])
+			alpha := int(mask.Pixels[mask.PixelOffset(maskX, maskY)])
 			if alpha == 0 {
 				maskX++
 				continue
 			}
 			if alpha == 255 {
 				start := maskX
-				for maskX < maxX && mask.Pixels[maskY*mask.Stride+maskX] == 255 {
+				for maskX < maxX && mask.Pixels[mask.PixelOffset(maskX, maskY)] == 255 {
 					maskX++
 				}
 				s.fillRGB565Run(y+maskY, x+start, x+maskX, solid)
 				continue
 			}
-			offset := (y+maskY)*s.Stride + (x+maskX)*2
+			offset := s.PixelOffset(x+maskX, y+maskY)
 			destination := decodeRGB565(s.Pixels[offset], s.Pixels[offset+1])
 			blended := Color{
 				R: byte(blendRGB565Channel(int(color.R), int(destination.R), alpha)),
@@ -599,6 +599,17 @@ func (s *Surface) drawGlyphMaskRGB565(mask *Image, x, y, minX, minY, maxX, maxY 
 }
 
 func (s *Surface) fillRGB565Run(y, minX, maxX int, pixel uint16) {
+	if s.rotation != Rotation0 {
+		region := s.nativeRect(pixelRect{minX, y, maxX, y + 1})
+		for row := region.minY; row < region.maxY; row++ {
+			s.fillNativeRGB565Run(row, region.minX, region.maxX, pixel)
+		}
+		return
+	}
+	s.fillNativeRGB565Run(y, minX, maxX, pixel)
+}
+
+func (s *Surface) fillNativeRGB565Run(y, minX, maxX int, pixel uint16) {
 	start := y*s.Stride + minX*2
 	end := y*s.Stride + maxX*2
 	base := uintptr(unsafe.Pointer(&s.Pixels[0]))

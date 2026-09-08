@@ -17,10 +17,6 @@ const (
 	framebufferB     = uintptr(0x48600000)
 	framePixelCount  = DisplayWidth * DisplayHeight
 	framebufferSize  = framePixelCount * 2
-	landscapeWidth   = DisplayHeight
-	landscapeHeight  = DisplayWidth
-	surfaceBase      = uintptr(0x48200000)
-	surfaceSize      = landscapeWidth * landscapeHeight * 4
 	cacheLineSize    = uintptr(64)
 	displayMailbox   = uintptr(0x4ff40080)
 	frameDescriptorA = uintptr(0x4ff40100)
@@ -351,13 +347,13 @@ func bindExternalBytes(result *[]byte, address uintptr, size int) {
 	descriptor[5] = 0
 }
 
-// NewLandscapeSurface returns a 1280 by 720 RGBA surface backed directly by
-// Tab5 PSRAM, outside Renvo's small object arena.
+// NewLandscapeSurface returns a logical 1280 by 720 RGB565 surface which draws
+// directly into the native 720 by 1280 back buffer. No staging image is allocated.
 func NewLandscapeSurface() *graphics.Surface {
 	var pixels []byte
-	bindExternalBytes(&pixels, surfaceBase, surfaceSize)
-	return graphics.NewSurfaceBuffer(
-		landscapeWidth, landscapeHeight, pixels,
+	bindExternalBytes(&pixels, backFramebuffer, framebufferSize)
+	return graphics.NewRotatedSurfaceBuffer(
+		DisplayWidth, DisplayHeight, graphics.PixelRGB565, graphics.Rotation90, pixels,
 	)
 }
 
@@ -382,6 +378,7 @@ func clippedDamage(surface *graphics.Surface, region int) (int, int, int, int, b
 	if !ok {
 		return 0, 0, 0, 0, false
 	}
+	dirty = surface.NativeRect(dirty)
 	minX := int(dirty.MinX)
 	minY := int(dirty.MinY)
 	maxX := int(dirty.MaxX)
@@ -530,8 +527,8 @@ func copyWholeFramebuffer(source, destination uintptr) bool {
 }
 
 func presentPortrait(surface *graphics.Surface, synchronizeDamage bool, excludedTop, excludedBottom int) bool {
-	if surface == nil || surface.Width != DisplayWidth ||
-		surface.Height != DisplayHeight || surface.Format != graphics.PixelRGB565 ||
+	if surface == nil || surface.NativeWidth() != DisplayWidth ||
+		surface.NativeHeight() != DisplayHeight || surface.Format != graphics.PixelRGB565 ||
 		surface.Stride != DisplayWidth*2 || len(surface.Pixels) < framebufferSize {
 		return false
 	}
@@ -585,8 +582,8 @@ func presentPortrait(surface *graphics.Surface, synchronizeDamage bool, excluded
 	return true
 }
 
-// PresentPortrait publishes a native RGB565 back buffer at a full-frame DMA
-// boundary. After the flip, changed regions are copied into the old front so
+// PresentPortrait publishes a native RGB565 back buffer (any logical rotation)
+// at a full-frame DMA boundary. Changed regions are copied into the old front so
 // an ordinary incremental renderer starts from the latest generation.
 func PresentPortrait(surface *graphics.Surface) bool {
 	return presentPortrait(surface, true, 0, 0)
@@ -600,48 +597,13 @@ func PresentPortraitRetained(surface *graphics.Surface) bool {
 	return presentPortrait(surface, false, 0, 0)
 }
 
-// PresentLandscape rotates an RGBA forms surface through the same 90-degree
-// mapping used by the official Tab5 LVGL setup and converts it into the native
-// back buffer. The unchanged front buffer is refreshed during conversion, and
-// the two buffers swap only after the active frame reaches its boundary.
+// PresentLandscape publishes the already-native buffer from NewLandscapeSurface.
+// Forms damage is mapped to native coordinates for cache maintenance and DMA.
 func PresentLandscape(surface *graphics.Surface) bool {
-	if surface == nil || surface.Width != landscapeWidth ||
-		surface.Height != landscapeHeight || len(surface.Pixels) < surfaceSize {
+	if surface == nil || surface.Rotation() != graphics.Rotation90 {
 		return false
 	}
-	for y := 0; y < landscapeHeight; y++ {
-		for x := 0; x < landscapeWidth; x++ {
-			if x&63 == 0 {
-				Refresh()
-			}
-			source := y*surface.Stride + x*4
-			red := uint16(surface.Pixels[source])
-			green := uint16(surface.Pixels[source+1])
-			blue := uint16(surface.Pixels[source+2])
-			color := red&0xf8<<8 | green&0xfc<<3 | blue>>3
-			native := (DisplayHeight-1-x)*DisplayWidth + y
-			address := backFramebuffer + uintptr(native*2)
-			*(*uint16)(unsafe.Pointer(address)) = color
-		}
-	}
-	writeBack(backFramebuffer, framebufferSize)
-	if !scanoutStarted {
-		firstFront := backFramebuffer
-		firstBack := frontFramebuffer
-		copyWholeFramebuffer(firstFront, firstBack)
-		frontFramebuffer = firstFront
-		backFramebuffer = firstBack
-		frameSource = frontFramebuffer
-		return startScanout()
-	}
-	oldFront := frontFramebuffer
-	if !swapFrameDMA(backFramebuffer) {
-		return false
-	}
-	frontFramebuffer = backFramebuffer
-	backFramebuffer = oldFront
-	frameSource = frontFramebuffer
-	return true
+	return presentPortrait(surface, true, 0, 0)
 }
 
 // Refresh records bridge underruns and recovers a channel if an interrupt was

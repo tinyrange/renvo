@@ -29,7 +29,7 @@ func appendImageDecimal(output []byte, value int) []byte {
 // channel, so the stored premultiplied RGB channels are emitted as-is. Invalid,
 // destroyed and A8-only images return nil.
 func (s *Surface) EncodePPM() []byte {
-	if s == nil || s.Width <= 0 || s.Height <= 0 || s.Format != PixelRGBA8 || len(s.Pixels) < s.Stride*s.Height {
+	if s == nil || s.Width <= 0 || s.Height <= 0 || s.Format != PixelRGBA8 || len(s.Pixels) < s.Stride*s.NativeHeight() {
 		return nil
 	}
 	output := make([]byte, 0, 32+s.Width*s.Height*3)
@@ -40,7 +40,7 @@ func (s *Surface) EncodePPM() []byte {
 	output = appendImageText(output, "\n255\n")
 	for y := 0; y < s.Height; y++ {
 		for x := 0; x < s.Width; x++ {
-			offset := y*s.Stride + x*4
+			offset := s.PixelOffset(x, y)
 			output = append(output, s.Pixels[offset])
 			output = append(output, s.Pixels[offset+1])
 			output = append(output, s.Pixels[offset+2])

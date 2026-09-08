@@ -116,8 +116,8 @@ var defaultBackground = graphics.RGBA(7, 12, 18, 255)
 var defaultCursor = graphics.RGBA(80, 200, 130, 255)
 
 // Terminal is a fixed-capacity terminal model, renderer, scrollback buffer,
-// and optional touch keyboard. It performs no allocations while processing
-// output after construction.
+// and optional touch keyboard. Output processing allocates no storage after
+// construction; resizing may grow reusable cell/damage buffers.
 type Terminal struct {
 	columns, rows int
 	capacity      int
@@ -150,6 +150,8 @@ type Terminal struct {
 	display                         Display
 	scrollDisplay                   ScrollDisplay
 	surface                         *graphics.Surface
+	surfaceWidth, surfaceHeight     int
+	resizeCells                     []uint32
 	font                            *graphics.Font
 	cellWidth, cellHeight, baseline int
 	contentHeight                   int
@@ -257,6 +259,7 @@ func Start(display Display, options Options) (*Terminal, error) {
 	}
 	t := New(columns, rows, options.Scrollback)
 	t.display, t.surface, t.font = display, surface, font
+	t.surfaceWidth, t.surfaceHeight = surface.Width, surface.Height
 	if scrollDisplay, ok := display.(ScrollDisplay); ok {
 		t.scrollDisplay = scrollDisplay
 	}
@@ -281,6 +284,9 @@ func Start(display Display, options Options) (*Terminal, error) {
 	if t.cursorColor.A == 0 {
 		t.cursorColor = defaultCursor
 	}
+	// Native display buffers can be uninitialized and the cell grid may leave
+	// right/bottom margins. Initialize those pixels before the first scanout.
+	t.surface.Clear(t.defaultBackground)
 	active = t
 	if !t.Flush() {
 		active = nil
