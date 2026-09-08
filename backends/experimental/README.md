@@ -1,4 +1,110 @@
-# Experimental microcontroller backends
+# Experimental backends
+
+## Linux user-mode QEMU
+
+The `linux_*.rbe` entrypoints provide experimental native Linux ELF targets.
+They compile parsed source directly to machine instructions and static ELF
+images, without a host assembler, linker, guest compiler, or guest sysroot.
+Each Linux `.rbe` is independently maintained and self-contained: the file
+contains its selected CPU encoder, calling convention, Linux runtime, and ELF
+writer, with no `@import` dependencies. Copy one file to add or adapt that
+backend; changes to it do not affect another target's emitter. The four
+maintained Linux targets remain in `backend/definitions/`.
+
+The smoke is opt-in: its module lives under `frontend_tests/manual/`, outside
+the automatically discovered corpus tiers. CI and `tools/check` do not invoke
+the QEMU runner. The focused compiler regression programs remain in the normal
+backend corpus.
+
+Run the checked-in frontend smoke on all 33 QEMU user emulators:
+
+```sh
+./tools/qemu-smoke/run
+./tools/qemu-smoke/run --target mips --target mipsel
+./tools/qemu-smoke/run --list
+```
+
+The runner builds `cmd/renvo` once, copies each experimental RBE to an isolated
+temporary location with a different filename, and compiles the same source
+module for each selected target. This verifies single-file portability as well
+as comparing stdout byte-for-byte with its `expected.txt`.
+Nonzero exits, timeouts, stderr, missing emulators, and output mismatches fail
+the run. It uses a temporary directory under ignored `sandbox/` for binaries
+and guest working files, disables core dumps, and removes its temporary files.
+It never invokes host Go as an output oracle. `--compiler` reuses an existing
+Renvo binary; `--timeout` controls each compile/run timeout (default 60 seconds).
+
+The complete mapping lives in
+[`tools/qemu-smoke/targets.json`](../../tools/qemu-smoke/targets.json):
+
+| QEMU emulator suffix | Implementation |
+| --- | --- |
+| aarch64, arm, i386, x86_64 | Maintained Linux backends |
+| aarch64_be, armeb | Big-endian data variants of the maintained emitters |
+| mips, mipsel, mipsn32, mipsn32el, mips64, mips64el | MIPS32 and MIPS64, O32/N32/N64 Linux ABIs |
+| m68k | Imported Motorola 68000 emitter |
+| sh4, sh4eb | Imported SuperH emitter |
+| riscv32, riscv64 | Maintained RV32 architecture and experimental RV64 port |
+| alpha, hexagon, hppa, loongarch64 | Independent RBE with its own ISA encoder |
+| microblaze, microblazeel, or1k | Independent RBE with its own ISA encoder |
+| ppc, ppc64, ppc64le, s390x | Independent RBE with its own ISA encoder |
+| sparc, sparc32plus, sparc64 | Independent RBE with its own ISA encoder |
+| xtensa, xtensaeb | Linux ports of the maintained Xtensa CALL0 emitter |
+
+`qemu-xtensaeb` explicitly selects `-cpu test_kc705_be`, which supplies the
+integer divide instructions used by the emitter. The other rows use QEMU's
+default CPU. The PowerPC64 images use ELFv2 and Renvo's internal calling
+convention. HPPA reserves a private 4 MiB stack in BSS for that convention.
+
+The smoke source is
+[`qemu_native_smoke`](../../frontend_tests/manual/qemu_native_smoke/cmd/app/main.go).
+It checks signed quotient/remainder identities, high-bit unsigned division,
+oversized shifts, indirect function calls,
+recursion, eight arguments including stack arguments, a 512-element sieve,
+xorshift-generated insertion sorting, CRC32, initialized globals, linked heap
+records, aggregate returns, growing and aliased slices, overlapping copies,
+signed and unsigned narrow loads, and string slicing/equality. Success prints
+only `PASS\n`.
+
+These are integer and memory smoke tests, not self-hosting or full frontend
+conformance. The experimental Linux entrypoints currently accept the zero
+entry-argument form; they do not advertise argv/environment support. Filesystem
+operation bindings exist but are not covered by this smoke. Floating point,
+64-bit arithmetic on narrow targets, and the full standard library are not
+validated by this matrix. Experimental code size and speed are not substitutes
+for the maintained compiler performance gates.
+
+## Imported reusable architectures
+
+The seven CPU-only files `mips32.rtg`, `m68k.rtg`, `superh.rtg`, `z80.rtg`,
+`lr35902.rtg`, `mos6502.rtg`, and `wdc65816.rtg` were imported from
+`tinyrange/renvo_console` at commit
+`6d9c7de8bd30aa207a5e0eba3ea5838488f1a0fd` under Apache-2.0. Console image,
+firmware, peripheral, and SDK entrypoints were not imported. Z80, LR35902,
+MOS6502, and WDC65816 have no corresponding QEMU user emulator; their presence
+here does not imply validation by the Linux matrix.
+
+The MIPS, SuperH, and m68k host trap bindings were adapted for Linux. The m68k
+scratch register no longer overlaps the string comparison argument registers.
+The standalone Linux RBEs contain their own copies of the relevant CPU code;
+they do not import these architecture fragments. MIPS64 and RV64 are native-width
+ports of the reusable MIPS32 and RV32 sources. There is no shared Linux encoder
+or image-helper file, and no CPU selector dispatching across unrelated ISAs.
+The ARM, AArch64, and Xtensa variants originate in this repository's maintained
+architecture definitions. Big-endian Xtensa keeps canonical instruction fields
+until relocation, then converts those fields to the big-endian instruction
+layout; data retains the target byte order throughout.
+
+The additional ISA encoders were authored here and checked with LLVM MC where
+supported and QEMU execution. Processor encodings and syscall ABI facts were
+also checked against the QEMU `target/` and `linux-user/` sources and Linux
+architecture syscall tables. No QEMU or Linux implementation source is included
+in these backends. See the upstream
+[console provenance](https://github.com/tinyrange/renvo_console/blob/6d9c7de8bd30aa207a5e0eba3ea5838488f1a0fd/PROVENANCE.md),
+[QEMU architecture sources](https://github.com/qemu/qemu/tree/master/target), and
+[Linux architecture sources](https://github.com/torvalds/linux/tree/master/arch).
+
+## Microcontroller backends
 
 This directory contains source RBE backends for the microcontrollers exposed
 by `tinyrange/renvo_emu` that do not already have maintained Renvo backends.
@@ -45,7 +151,7 @@ control-flow combinations do not yet pass the full frontend corpus. These are
 explicit bootstrap limitations, not claims that the physical CPUs provide
 32-bit semantics.
 
-## Source conventions
+### Microcontroller source conventions
 
 - Do not add an experimental target when a maintained backend already covers
   the device.

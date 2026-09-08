@@ -2129,6 +2129,22 @@ func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 	}
 	if c0 == '>' {
 		if c1 == '>' {
+			done := 0
+			if unsigned {
+				// VM shift instructions mask the count, while Go requires zero
+				// for an unsigned shift by the word width or more.
+				shift := renvoAsmNewLabel(a)
+				oversized := renvoAsmNewLabel(a)
+				done = renvoAsmNewLabel(a)
+				renvoWasm32AsmCmpRaxImm8(a, 0)
+				renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+				renvoWasm32AsmCmpRaxImm8(a, 32)
+				renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+				renvoAsmMarkLabel(a, oversized)
+				renvoAsmPrimaryImm(a, 0)
+				renvoAsmJmpLabel(a, done)
+				renvoAsmMarkLabel(a, shift)
+			}
 			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 			opcode := renvoWasm32OpShrRegReg
@@ -2136,6 +2152,9 @@ func renvoWasm32EmitRaxRcxOp(g *renvoLinearGen, tok int, unsigned bool) bool {
 				opcode = renvoWasm32OpShrUnsignedRegReg
 			}
 			renvoWasm32EmitRegReg(a, opcode, renvoWasm32RegRax, renvoWasm32RegRdx)
+			if unsigned {
+				renvoAsmMarkLabel(a, done)
+			}
 		} else if c1 == '=' {
 			renvoWasm32AsmCmpRcxRaxSet(a, 0x9d)
 		} else {
