@@ -23393,6 +23393,42 @@ func renvoEmitUnsignedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bo
 
 func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 	renvoNonNil(g)
+	// x86 and WebAssembly mask native shift counts. Bound the signed-word
+	// path explicitly, just as the typed unsigned-right-shift path does.
+	leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
+	rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
+	if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32) && (leftShift || rightShift) {
+		a := &g.asm
+		shift := renvoAsmNewLabel(a)
+		oversized := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		if g.c.renvoTargetArch == renvoArchWasm32 {
+			renvoWasm32AsmCmpRaxImm8(a, 0)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+			renvoWasm32AsmCmpRaxImm8(a, 32)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+		} else {
+			renvoAsmCmpPrimaryImm8(a, 32)
+			renvo386AsmJccLabel(a, 0x82, shift)
+		}
+		renvoAsmMarkLabel(a, oversized)
+		if rightShift {
+			renvoAsmCopyTertiaryToPrimary(a)
+			renvoAsmSarPrimaryImm(a, 31)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+		}
+		renvoAsmJmpLabel(a, done)
+		renvoAsmMarkLabel(a, shift)
+		ok := false
+		if g.c.renvoTargetArch == renvoArchWasm32 {
+			ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
+		} else {
+			ok = renvo386EmitRaxRcxOp(g, tok, false)
+		}
+		renvoAsmMarkLabel(a, done)
+		return ok
+	}
 	divide := renvoTokCharIs(g.prog, tok, '/')
 	mod := renvoTokCharIs(g.prog, tok, '%')
 	if (divide || mod) && !g.meta.panicEnabled {
@@ -28193,7 +28229,7 @@ func renvoObjectFunctionSectionHasPrefix(g *renvoLinearGen, fnIndex int, prefix 
 
 func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 	if renvoPreparedBackendActive != 0 {
-		renvoRTGAdjustObjectStack(&g.asm, reserve)
+		renvoRTGObjectExportFrame(&g.asm, reserve)
 	} else {
 		renvoAmd64ObjectExportFrame(g, reserve)
 	}

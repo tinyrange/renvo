@@ -635,6 +635,15 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 }
 
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+	if reserve {
+		renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+	} else {
+		renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
+	}
+}
+
+func renvoRTGObjectExportFrame(a *renvoAsm, reserve bool) {
 	if reserve {
 		patch := renvoRTGFrameStart(a)
 		renvoRTGFrameFinish(a, patch, 0)

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ec7a59b61df3d83342e8bae089fe88eca3742a2c15a0dd854cd83382eb9978b1"
+const CompilerSourceDigest = "99fb604ca4a4e337c8c2946bc5cee779f7541abf5ea34dace9ef5e17f20539a3"
 
 // source: backend/compiler_common_impl.go
 
@@ -23400,6 +23400,42 @@ return true
 
 func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 renvoNonNil(g)
+
+
+leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
+rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
+if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32) && (leftShift || rightShift) {
+a := &g.asm
+shift := renvoAsmNewLabel(a)
+oversized := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+if g.c.renvoTargetArch == renvoArchWasm32 {
+renvoWasm32AsmCmpRaxImm8(a, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+renvoWasm32AsmCmpRaxImm8(a, 32)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+} else {
+renvoAsmCmpPrimaryImm8(a, 32)
+renvo386AsmJccLabel(a, 0x82, shift)
+}
+renvoAsmMarkLabel(a, oversized)
+if rightShift {
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmSarPrimaryImm(a, 31)
+} else {
+renvoAsmPrimaryImm(a, 0)
+}
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, shift)
+ok := false
+if g.c.renvoTargetArch == renvoArchWasm32 {
+ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
+} else {
+ok = renvo386EmitRaxRcxOp(g, tok, false)
+}
+renvoAsmMarkLabel(a, done)
+return ok
+}
 divide := renvoTokCharIs(g.prog, tok, '/')
 mod := renvoTokCharIs(g.prog, tok, '%')
 if (divide || mod) && !g.meta.panicEnabled {
@@ -28200,7 +28236,7 @@ return renvoBytesPrefixText(g.prog.src, decl.sectionStart, decl.sectionEnd, pref
 
 func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
 if renvoPreparedBackendActive != 0 {
-renvoRTGAdjustObjectStack(&g.asm, reserve)
+renvoRTGObjectExportFrame(&g.asm, reserve)
 } else {
 renvoAmd64ObjectExportFrame(g, reserve)
 }
@@ -38839,6 +38875,15 @@ return renvoCompileResult{data: data, ok: true}
 }
 
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
+if reserve {
+renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGScratch)
+} else {
+renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
+}
+}
+
+func renvoRTGObjectExportFrame(a *renvoAsm, reserve bool) {
 if reserve {
 patch := renvoRTGFrameStart(a)
 renvoRTGFrameFinish(a, patch, 0)
