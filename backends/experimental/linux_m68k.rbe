@@ -1,57 +1,791 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_m68k
 implements direct_emitter_v1
-@import "m68k.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func entryStart(out *RTGEmitter, stateOffset int) bool {
+	var m68kM68CodeAddress int
+
+	func m68kM68SetCodeAddress(address int) { m68kM68CodeAddress = address }
+
+	func m68kM68Emit16(out *RTGEmitter, value int) {
+		RTGByte(out, byte(value>>8))
+		RTGByte(out, byte(value))
+	}
+
+	func m68kM68Emit32(out *RTGEmitter, value int) {
+		RTGByte(out, byte(value>>24))
+		RTGByte(out, byte(value>>16))
+		RTGByte(out, byte(value>>8))
+		RTGByte(out, byte(value))
+	}
+
+	func m68kM68Patch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		code[at] = byte(value >> 8)
+		code[at+1] = byte(value)
+	}
+
+	func m68kM68Patch32(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		code[at] = byte(value >> 24)
+		code[at+1] = byte(value >> 16)
+		code[at+2] = byte(value >> 8)
+		code[at+3] = byte(value)
+	}
+
+	func m68kM68IsAddress(register RTGRegister) bool { return register.Code >= 8 }
+	func m68kM68RegisterNumber(register RTGRegister) int {
+		if register.Code >= 8 {
+			return register.Code - 8
+		}
+		return register.Code
+	}
+	func m68kM68RegisterEA(register RTGRegister) int {
+		if register.Code >= 8 {
+			return 8 + (register.Code - 8)
+		}
+		return register.Code
+	}
+
+	func m68kM68Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == source.Code {
+			return
+		}
+		sourceEA := m68kM68RegisterEA(source)
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0x2040|(m68kM68RegisterNumber(destination)<<9)|sourceEA)
+			return
+		}
+		m68kM68Emit16(out, 0x2000|(destination.Code<<9)|sourceEA)
+	}
+
+	func m68kM68MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value)
+		if !m68kM68IsAddress(destination) && immediate >= -128 && immediate <= 127 {
+			m68kM68Emit16(out, 0x7000|(destination.Code<<9)|(immediate&0xff))
+			return
+		}
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0x207c|(m68kM68RegisterNumber(destination)<<9))
+		} else {
+			m68kM68Emit16(out, 0x203c|(destination.Code<<9))
+		}
+		m68kM68Emit32(out, immediate)
+	}
+
+	func m68kM68AddImmediate(out *RTGEmitter, destination RTGRegister, value int) {
+		if value == 0 {
+			return
+		}
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0xd1fc|(m68kM68RegisterNumber(destination)<<9))
+			m68kM68Emit32(out, value)
+			return
+		}
+		m68kM68Emit16(out, 0x0680|destination.Code)
+		m68kM68Emit32(out, value)
+	}
+
+	func m68kM68EmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			if m68kM68IsAddress(destination) {
+				m68kM68Emit16(out, 0x207c|(m68kM68RegisterNumber(destination)<<9))
+			} else {
+				m68kM68Emit16(out, 0x203c|(destination.Code<<9))
+			}
+			at := out.Len()
+			m68kM68Emit32(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+
+		address := m68kM68Address()
+		index := value.Index
+		if index.Valid && index.Code == address.Code {
+			index = RTGRegister{Code: 9, Valid: true}
+			m68kM68Move(out, index, value.Index)
+		}
+		if value.Base.Valid {
+			m68kM68Move(out, address, value.Base)
+		} else {
+			m68kM68MoveImmediate(out, address, 0)
+		}
+		if value.Index.Valid {
+			for scale := 0; scale < value.Scale; scale++ {
+				m68kM68Emit16(out, 0xd1c0|(m68kM68RegisterNumber(address)<<9)|m68kM68RegisterEA(index))
+			}
+		}
+		m68kM68AddImmediate(out, address, value.Displacement)
+		m68kM68Move(out, destination, address)
+	}
+
+	func m68kM68MaterializeAddress(out *RTGEmitter, value RTGAddress) RTGRegister {
+		m68kM68EmitAddress(out, m68kM68Address(), value)
+		return m68kM68Address()
+	}
+
+	func m68kM68LoadLong(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		address := m68kM68MaterializeAddress(out, value)
+		ea := 0x10 | m68kM68RegisterNumber(address)
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0x2040|(m68kM68RegisterNumber(destination)<<9)|ea)
+		} else {
+			m68kM68Emit16(out, 0x2000|(destination.Code<<9)|ea)
+		}
+	}
+
+	func m68kM68LoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m68kM68LoadLong(out, destination, value)
+	}
+	func m68kM68LoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m68kM68LoadLong(out, destination, value)
+	}
+	func m68kM68LoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m68kM68LoadLong(out, destination, value)
+	}
+
+	func m68kM68LoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		address := m68kM68MaterializeAddress(out, value)
+		m68kM68Emit16(out, 0x3000|(destination.Code<<9)|0x10|m68kM68RegisterNumber(address))
+		m68kM68Emit16(out, 0x48c0|destination.Code)
+	}
+	func m68kM68LoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		address := m68kM68MaterializeAddress(out, value)
+		m68kM68Emit16(out, 0x3000|(destination.Code<<9)|0x10|m68kM68RegisterNumber(address))
+		m68kM68Emit16(out, 0x0280|destination.Code)
+		m68kM68Emit32(out, 0xffff)
+	}
+	func m68kM68LoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		address := m68kM68MaterializeAddress(out, value)
+		m68kM68Emit16(out, 0x1000|(destination.Code<<9)|0x10|m68kM68RegisterNumber(address))
+		m68kM68Emit16(out, 0x4880|destination.Code)
+		m68kM68Emit16(out, 0x48c0|destination.Code)
+	}
+	func m68kM68LoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		address := m68kM68MaterializeAddress(out, value)
+		m68kM68Emit16(out, 0x1000|(destination.Code<<9)|0x10|m68kM68RegisterNumber(address))
+		m68kM68Emit16(out, 0x0280|destination.Code)
+		m68kM68Emit32(out, 0xff)
+	}
+
+	func m68kM68StoreWidth(out *RTGEmitter, value RTGAddress, source RTGRegister, base int) {
+		address := m68kM68MaterializeAddress(out, value)
+		m68kM68Emit16(out, base|(m68kM68RegisterNumber(address)<<9)|m68kM68RegisterEA(source))
+	}
+	func m68kM68StoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m68kM68StoreWidth(out, value, source, 0x2080)
+	}
+	func m68kM68StoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m68kM68StoreWidth(out, value, source, 0x2080)
+	}
+	func m68kM68StoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m68kM68StoreWidth(out, value, source, 0x3080)
+	}
+	func m68kM68StoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m68kM68StoreWidth(out, value, source, 0x1080)
+	}
+
+	func m68kM68Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0xd1c0|(m68kM68RegisterNumber(destination)<<9)|m68kM68RegisterEA(source))
+		} else {
+			m68kM68Emit16(out, 0xd080|(destination.Code<<9)|m68kM68RegisterEA(source))
+		}
+	}
+	func m68kM68Subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if m68kM68IsAddress(destination) {
+			m68kM68Emit16(out, 0x91c0|(m68kM68RegisterNumber(destination)<<9)|m68kM68RegisterEA(source))
+		} else {
+			m68kM68Emit16(out, 0x9080|(destination.Code<<9)|m68kM68RegisterEA(source))
+		}
+	}
+	func m68kM68BitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m68kM68Emit16(out, 0xc080|(destination.Code<<9)|m68kM68RegisterEA(source))
+	}
+	func m68kM68BitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m68kM68Emit16(out, 0x8080|(destination.Code<<9)|m68kM68RegisterEA(source))
+	}
+	func m68kM68BitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m68kM68Emit16(out, 0xb180|(source.Code<<9)|m68kM68RegisterEA(destination))
+	}
+
+	func m68kM68Multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		left := m68kM68CompareLeft()
+		right := m68kM68CompareRight()
+		product := RTGRegister{Code: 6, Valid: true}
+		temporary := RTGRegister{Code: 7, Valid: true}
+		m68kM68PushRegister(out, destination)
+		m68kM68PushRegister(out, source)
+		m68kM68PushRegister(out, m68kM68Scratch())
+		m68kM68PushRegister(out, left)
+		m68kM68PushRegister(out, right)
+		m68kM68PushRegister(out, product)
+		m68kM68PushRegister(out, temporary)
+		m68kM68LoadNative(out, left, RTGAddress{Base: m68kM68Stack(), Displacement: 24})
+		m68kM68LoadNative(out, right, RTGAddress{Base: m68kM68Stack(), Displacement: 20})
+
+		m68kM68Move(out, product, left)
+		m68kM68Emit16(out, 0xc0c0|(product.Code<<9)|m68kM68RegisterEA(right))
+
+		m68kM68Move(out, temporary, left)
+		m68kM68Emit16(out, 0x4840|temporary.Code)
+		m68kM68Emit16(out, 0xc0c0|(temporary.Code<<9)|m68kM68RegisterEA(right))
+		m68kM68Emit16(out, 0x4840|temporary.Code)
+		m68kM68Emit16(out, 0x4240|temporary.Code)
+		m68kM68Add(out, product, temporary)
+
+		m68kM68Move(out, temporary, right)
+		m68kM68Emit16(out, 0x4840|temporary.Code)
+		m68kM68Emit16(out, 0xc0c0|(temporary.Code<<9)|m68kM68RegisterEA(left))
+		m68kM68Emit16(out, 0x4840|temporary.Code)
+		m68kM68Emit16(out, 0x4240|temporary.Code)
+		m68kM68Add(out, product, temporary)
+
+		m68kM68StoreU32(out, RTGAddress{Base: m68kM68Stack(), Displacement: 24}, product)
+		m68kM68PopRegister(out, temporary)
+		m68kM68PopRegister(out, product)
+		m68kM68PopRegister(out, right)
+		m68kM68PopRegister(out, left)
+		m68kM68PopRegister(out, m68kM68Scratch())
+		m68kM68AddImmediate(out, m68kM68Stack(), 4)
+		m68kM68PopRegister(out, destination)
+	}
+
+	func m68kM68Compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		m68kM68Emit16(out, 0xb080|(left.Code<<9)|m68kM68RegisterEA(right))
+	}
+	func m68kM68Test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		// MOVEM restores the designated scratch register without changing the
+		// condition codes produced by AND.
+		m68kM68PushRegister(out, m68kM68Scratch())
+		m68kM68Move(out, m68kM68Scratch(), left)
+		if right.Code == m68kM68Scratch().Code && left.Code != right.Code {
+			m68kM68Emit16(out, 0xc080|(m68kM68Scratch().Code<<9)|0x17)
+		} else {
+			m68kM68BitAnd(out, m68kM68Scratch(), right)
+		}
+		m68kM68Emit16(out, 0x4cdf)
+		m68kM68Emit16(out, 1<<m68kM68Scratch().Code)
+	}
+	func m68kM68Increment(out *RTGEmitter, operand RTGRegister) {
+		m68kM68Emit16(out, 0x5280|m68kM68RegisterEA(operand))
+	}
+	func m68kM68Decrement(out *RTGEmitter, operand RTGRegister) {
+		m68kM68Emit16(out, 0x5380|m68kM68RegisterEA(operand))
+	}
+
+	func m68kM68VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		// The direct-emitter contract supplies count in primary and value in
+		// tertiary. EXG puts the value in the required in-place destination while
+		// retaining the count in the only other register this operation may clobber.
+		m68kM68Emit16(out, 0xc140|(m68kM68Primary().Code<<9)|m68kM68Tertiary().Code)
+		instruction := 0xe1a8
+		if direction == RTGShiftRight {
+			instruction = 0xe0a8
+			if signed {
+				instruction = 0xe0a0
+			}
+		}
+		m68kM68Emit16(out, instruction|(m68kM68Tertiary().Code<<9)|m68kM68Primary().Code)
+	}
+	func m68kM68ShiftImmediate(out *RTGEmitter, operand RTGRegister, value byte, instruction int) {
+		remaining := int(value) & 31
+		for remaining > 0 {
+			count := remaining
+			if count > 8 {
+				count = 8
+			}
+			m68kM68Emit16(out, instruction|((count&7)<<9)|operand.Code)
+			remaining -= count
+		}
+	}
+	func m68kM68ShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m68kM68ShiftImmediate(out, operand, value, 0xe188)
+	}
+	func m68kM68ShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m68kM68ShiftImmediate(out, operand, value, 0xe088)
+	}
+	func m68kM68ShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m68kM68ShiftImmediate(out, operand, value, 0xe080)
+	}
+
+	func m68kM68ConditionCode(condition RTGCondition) int {
+		if condition.Code == 0 {
+			return 7
+		}
+		if condition.Code == 1 {
+			return 6
+		}
+		if condition.Code == 2 {
+			return 15
+		}
+		if condition.Code == 3 {
+			return 14
+		}
+		if condition.Code == 4 {
+			return 13
+		}
+		if condition.Code == 5 {
+			return 12
+		}
+		if condition.Code == 6 {
+			return 5
+		}
+		if condition.Code == 7 {
+			return 4
+		}
+		if condition.Code == 8 {
+			return 3
+		}
+		return 2
+	}
+	func m68kM68Jump(out *RTGEmitter, label RTGLabel) {
+		m68kM68Emit16(out, 0x4ef9)
+		m68kM68Emit32(out, 0)
+		out.Reloc(label)
+	}
+	func m68kM68JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		code := m68kM68ConditionCode(condition)
+		m68kM68Emit16(out, 0x6000|((code^1)<<8)|6)
+		m68kM68Jump(out, label)
+	}
+	func m68kM68SetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		code := m68kM68ConditionCode(condition)
+		m68kM68Emit16(out, 0x50c0|(code<<8)|destination.Code)
+		m68kM68Emit16(out, 0x0280|destination.Code)
+		m68kM68Emit32(out, 1)
+	}
+
+	func m68kM68Call(out *RTGEmitter, label RTGLabel) {
+		m68kM68Emit16(out, 0x4eb9)
+		m68kM68Emit32(out, 0)
+		out.Reloc(label)
+	}
+	func m68kM68CallIndirect(out *RTGEmitter, operand RTGRegister) {
+		address := operand
+		if !m68kM68IsAddress(operand) {
+			address = m68kM68Address()
+			m68kM68Move(out, address, operand)
+		}
+		m68kM68Emit16(out, 0x4e90|m68kM68RegisterNumber(address))
+	}
+	func m68kM68Return(out *RTGEmitter)      { m68kM68Emit16(out, 0x4e75) }
+	func m68kM68Leave(out *RTGEmitter)       { m68kM68Emit16(out, 0x4e5e) }
+	func m68kM68HostSyscall(out *RTGEmitter) { m68kM68Emit16(out, 0x4e40) }
+
+	func m68kM68SignedDivide(out *RTGEmitter, remainder bool) {
+		dividend := m68kM68CompareLeft()
+		divisor := m68kM68CompareRight()
+		unsignedRemainder := m68kM68Secondary()
+		quotient := RTGRegister{Code: 6, Valid: true}
+		quotientSign := RTGRegister{Code: 7, Valid: true}
+		dividendSign := RTGRegister{Code: 3, Valid: true}
+
+		m68kM68PushRegister(out, m68kM68Tertiary())
+		m68kM68PushRegister(out, dividendSign)
+		m68kM68PushRegister(out, dividend)
+		m68kM68PushRegister(out, divisor)
+		m68kM68PushRegister(out, quotient)
+		m68kM68PushRegister(out, quotientSign)
+
+		m68kM68Move(out, dividend, m68kM68Tertiary())
+		m68kM68Move(out, divisor, m68kM68Primary())
+		m68kM68Move(out, dividendSign, dividend)
+		m68kM68Move(out, quotientSign, dividend)
+		m68kM68BitXor(out, quotientSign, divisor)
+
+		positiveDividend := out.NewLabel()
+		m68kM68Emit16(out, 0x4a80|dividend.Code)
+		m68kM68JumpCondition(out, RTGCondition{Code: 5}, positiveDividend)
+		m68kM68Emit16(out, 0x4480|dividend.Code)
+		out.Mark(positiveDividend)
+
+		positiveDivisor := out.NewLabel()
+		m68kM68Emit16(out, 0x4a80|divisor.Code)
+		m68kM68JumpCondition(out, RTGCondition{Code: 5}, positiveDivisor)
+		m68kM68Emit16(out, 0x4480|divisor.Code)
+		out.Mark(positiveDivisor)
+
+		m68kM68MoveImmediate(out, unsignedRemainder, 0)
+		m68kM68MoveImmediate(out, quotient, 0)
+		for bit := 0; bit < 32; bit++ {
+			m68kM68Add(out, unsignedRemainder, unsignedRemainder)
+			noDividendBit := out.NewLabel()
+			m68kM68Emit16(out, 0x4a80|dividend.Code)
+			m68kM68JumpCondition(out, RTGCondition{Code: 5}, noDividendBit)
+			m68kM68Increment(out, unsignedRemainder)
+			out.Mark(noDividendBit)
+			m68kM68Add(out, dividend, dividend)
+			m68kM68Add(out, quotient, quotient)
+			m68kM68Compare(out, unsignedRemainder, divisor)
+			skip := out.NewLabel()
+			m68kM68JumpCondition(out, RTGCondition{Code: 6}, skip)
+			m68kM68Subtract(out, unsignedRemainder, divisor)
+			m68kM68Increment(out, quotient)
+			out.Mark(skip)
+		}
+
+		positiveQuotient := out.NewLabel()
+		m68kM68Emit16(out, 0x4a80|quotientSign.Code)
+		m68kM68JumpCondition(out, RTGCondition{Code: 5}, positiveQuotient)
+		m68kM68Emit16(out, 0x4480|quotient.Code)
+		out.Mark(positiveQuotient)
+
+		positiveRemainder := out.NewLabel()
+		m68kM68Emit16(out, 0x4a80|dividendSign.Code)
+		m68kM68JumpCondition(out, RTGCondition{Code: 5}, positiveRemainder)
+		m68kM68Emit16(out, 0x4480|unsignedRemainder.Code)
+		out.Mark(positiveRemainder)
+		if remainder {
+			m68kM68Move(out, m68kM68Primary(), unsignedRemainder)
+		} else {
+			m68kM68Move(out, m68kM68Primary(), quotient)
+		}
+		m68kM68PopRegister(out, quotientSign)
+		m68kM68PopRegister(out, quotient)
+		m68kM68PopRegister(out, divisor)
+		m68kM68PopRegister(out, dividend)
+		m68kM68PopRegister(out, dividendSign)
+		m68kM68PopRegister(out, m68kM68Tertiary())
+	}
+
+	func m68kM68PatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := m68kM68CodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			m68kM68Patch32(out, at, target)
+		}
+	}
+
+	func m68kM68FrameStart(out *RTGEmitter) int {
+		m68kM68Emit16(out, 0x4e56)
+		at := out.Len()
+		m68kM68Emit16(out, 0)
+		return at
+	}
+	func m68kM68FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		// LINK already saves the caller's A6 at 0(A6). Frame slots are based at
+		// -(offset+4), so reserve that saved-word bias in addition to stackUsed.
+		frameSize := (stackUsed + 7) & -4
+		m68kM68Patch16(out, at, -frameSize)
+	}
+	func m68kM68FrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		m68kM68LoadLong(out, destination, RTGAddress{Base: m68kM68Frame(), Displacement: -(offset + 4)})
+	}
+	func m68kM68FrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		m68kM68StoreU32(out, RTGAddress{Base: m68kM68Frame(), Displacement: -(offset + 4)}, source)
+	}
+	func m68kM68FrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		m68kM68EmitAddress(out, destination, RTGAddress{Base: m68kM68Frame(), Displacement: -(offset + 4)})
+	}
+	func m68kM68PushRegister(out *RTGEmitter, source RTGRegister) {
+		m68kM68AddImmediate(out, m68kM68Stack(), -4)
+		m68kM68StoreU32(out, RTGAddress{Base: m68kM68Stack()}, source)
+	}
+	func m68kM68PushImmediate(out *RTGEmitter, value int) {
+		m68kM68AddImmediate(out, m68kM68Stack(), -4)
+		m68kM68MoveImmediate(out, m68kM68Scratch(), int64(value))
+		m68kM68StoreU32(out, RTGAddress{Base: m68kM68Stack()}, m68kM68Scratch())
+	}
+	func m68kM68PopRegister(out *RTGEmitter, destination RTGRegister) {
+		m68kM68LoadNative(out, destination, RTGAddress{Base: m68kM68Stack()})
+		m68kM68AddImmediate(out, m68kM68Stack(), 4)
+	}
+
+	func m68kM68Primary() RTGRegister      { return RTGRegister{Code: 0, Valid: true} }
+	func m68kM68Secondary() RTGRegister    { return RTGRegister{Code: 1, Valid: true} }
+	func m68kM68Tertiary() RTGRegister     { return RTGRegister{Code: 2, Valid: true} }
+	func m68kM68Scratch() RTGRegister      { return RTGRegister{Code: 7, Valid: true} }
+	func m68kM68CompareLeft() RTGRegister  { return RTGRegister{Code: 4, Valid: true} }
+	func m68kM68CompareRight() RTGRegister { return RTGRegister{Code: 5, Valid: true} }
+	func m68kM68Address() RTGRegister      { return RTGRegister{Code: 8, Valid: true} }
+	func m68kM68Frame() RTGRegister        { return RTGRegister{Code: 14, Valid: true} }
+	func m68kM68Stack() RTGRegister        { return RTGRegister{Code: 15, Valid: true} }
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntryStart(out *RTGEmitter, stateOffset int) bool {
 		_ = stateOffset
-		m68k.m68SetCodeAddress(linux_elf.codeAddress)
+		m68kM68SetCodeAddress(elfCodeAddress)
 		return true
 	}
-	func entry(out *RTGEmitter, count int, stateOffset int) bool {
+	func targetEntry(out *RTGEmitter, count int, stateOffset int) bool {
 		_ = out
 		_ = stateOffset
 		return count == 0
 	}
-	func syscall(out *RTGEmitter) { m68k.m68Emit16(out, 0x4e40) }
-	func image(out *RTGEmitter) []byte {
+
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
-			m68k.m68Patch32(out, at, target)
+			m68kM68Patch32(out, at, target)
 		}
-		return linux_elf.image(out, 4, 0, 32, true)
+		return elfImage(out, 4, 0, 32, true)
 	}
 }
 
+arch m68k {
+	alias = "m68k"
+	endian = big
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 2
+	stack_word_bytes = 4
+	stack_alignment = 4
+	patch_relocations = go m68kM68PatchRelocations
+	registers integer = [d0, d1, d2, d3, d4, d5, d6, d7, a0, a1, a2, a3, a4, a5, a6, a7]
+	locations {
+		primary = d0
+		secondary = d1
+		tertiary = d2
+		scratch = d7
+		address = a0
+		compareLeft = d4
+		compareRight = d5
+		copy_destination = d1
+		copy_source = d4
+		copy_count = d5
+		stack = a7
+		frame = a6
+		link = a5
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go m68kM68Move
+		address = go m68kM68EmitAddress
+		load.native = go m68kM68LoadNative
+		load.i32 = go m68kM68LoadI32
+		load.u32 = go m68kM68LoadU32
+		load.i16 = go m68kM68LoadI16
+		load.u16 = go m68kM68LoadU16
+		load.i8 = go m68kM68LoadI8
+		load.u8 = go m68kM68LoadU8
+		store.native = go m68kM68StoreNative
+		store.u32 = go m68kM68StoreU32
+		store.u16 = go m68kM68StoreU16
+		store.u8 = go m68kM68StoreU8
+		add = go m68kM68Add
+		subtract = go m68kM68Subtract
+		multiply = go m68kM68Multiply
+		bit_and = go m68kM68BitAnd
+		bit_or = go m68kM68BitOr
+		bit_xor = go m68kM68BitXor
+		compare = go m68kM68Compare
+		test = go m68kM68Test
+		increment = go m68kM68Increment
+		decrement = go m68kM68Decrement
+		shift_left_immediate = go m68kM68ShiftLeftImmediate
+		shift_right_unsigned_immediate = go m68kM68ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go m68kM68ShiftRightSignedImmediate
+		call = go m68kM68Call
+		call_indirect = go m68kM68CallIndirect
+		jump = go m68kM68Jump
+		jump_condition = go m68kM68JumpCondition
+		set_condition = go m68kM68SetCondition
+		return = go m68kM68Return
+		leave = go m68kM68Leave
+		host_syscall = go m68kM68HostSyscall
+		move_immediate = go m68kM68MoveImmediate
+		variable_shift = go m68kM68VariableShift
+		signed_divide = go m68kM68SignedDivide
+		copy_bytes = sequence m68kCopyBytes
+	}
+	sequences {
+		m68kCopyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			m68kM68Compare(out, m68kD1, m68kD4)
+			m68kM68JumpCondition(out, m68kULT, forward)
+			m68kM68EmitAddress(out, m68kD3, record_address(Base:m68kD4, Index:m68kD5, Scale:1,))
+			m68kM68Compare(out, m68kD1, m68kD3)
+			m68kM68JumpCondition(out, m68kUGE, forward)
+			m68kM68EmitAddress(out, m68kD4, record_address(Base:m68kD4, Index:m68kD5, Scale:1, Displacement:-1,))
+			m68kM68EmitAddress(out, m68kD1, record_address(Base:m68kD1, Index:m68kD5, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			m68kM68MoveImmediate(out, m68kD3, 0)
+			m68kM68Compare(out, m68kD5, m68kD3)
+			m68kM68JumpCondition(out, m68kEQ, done)
+			m68kM68LoadU8(out, m68kD3, record_address(Base:m68kD4,))
+			m68kM68StoreU8(out, record_address(Base:m68kD1,), m68kD3)
+			m68kM68Decrement(out, m68kD4)
+			m68kM68Decrement(out, m68kD1)
+			m68kM68Decrement(out, m68kD5)
+			m68kM68Jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			m68kM68MoveImmediate(out, m68kD3, 0)
+			m68kM68Compare(out, m68kD5, m68kD3)
+			m68kM68JumpCondition(out, m68kEQ, done)
+			m68kM68LoadU8(out, m68kD3, record_address(Base:m68kD4,))
+			m68kM68StoreU8(out, record_address(Base:m68kD1,), m68kD3)
+			m68kM68Increment(out, m68kD4)
+			m68kM68Increment(out, m68kD1)
+			m68kM68Decrement(out, m68kD5)
+			m68kM68Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+abi m68k_internal {
+	arch = m68k
+	arguments = [d1, d2, d3, d4, d5, d6]
+	call_words = [d1, d2, d3, d4, d5, d6]
+	result = [d0, d1]
+	stack_alignment = 4
+	return_address = a5
+	frame_pointer = a6
+	frame_start = go m68kM68FrameStart
+	frame_finish = go m68kM68FrameFinish
+	push_register = go m68kM68PushRegister
+	push_immediate = go m68kM68PushImmediate
+	pop_register = go m68kM68PopRegister
+	frame_load = go m68kM68FrameLoad
+	frame_store = go m68kM68FrameStore
+	frame_address = go m68kM68FrameAddress
+}
 runtime linux_m68k {
-	emit_entry_start = go entryStart
-	emit_entry = go entry
+	emit_entry_start = go targetEntryStart
+	emit_entry = go targetEntry
 	syscall {
 		number = d0
 		arguments = [d1, d2, d3, d4, d5, a0]
 		result = d0
 		instruction = host_syscall
 	}
-	operation read { number = 3 args = [fd, buffer, count] }
-	operation write { number = 4 args = [fd, buffer, count] }
-	operation open { number = 5 args = [path, flags, mode] }
-	operation close { number = 6 args = [fd] }
-	operation chmod { number = 94 args = [fd, mode] }
-	operation print { use = write args = [stdout, buffer, count] }
-	operation exit { number = 1 args = [status] noreturn = true }
+	operation read {
+		number = 3 args = [fd, buffer, count]
+	}
+	operation write {
+		number = 4 args = [fd, buffer, count]
+	}
+	operation open {
+		number = 5 args = [path, flags, mode]
+	}
+	operation close {
+		number = 6 args = [fd]
+	}
+	operation chmod {
+		number = 94 args = [fd, mode]
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
+	operation exit {
+		number = 1 args = [status] noreturn = true
+	}
 }
 format elf_m68k {
 	kind = elf
 	byte_order = big
 	address_bits = 32
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-m68k {
 	family = native_v1

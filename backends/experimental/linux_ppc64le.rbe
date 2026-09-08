@@ -1,11 +1,643 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_ppc64le
 implements direct_emitter_v1
-@import "register_linux.rtg"
 go backend {
-	func start(out *RTGEmitter, state int) bool { _ = state; return register_linux.init(out, 2, 8, false) }
-	func image(out *RTGEmitter) []byte          { return register_linux.image(out, 21, 2) }
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	const encoderWord = 8
+	const encoderBig = false
+
+	var encoderPatch int = -1
+
+	func encoderReg(code int) RTGRegister { return RTGRegister{Code: code, Valid: true} }
+	func encoderPosition(out *RTGEmitter) int {
+		if encoderPatch >= 0 {
+			return encoderPatch
+		}
+		return out.Len()
+	}
+	func encoderByteOut(out *RTGEmitter, value byte) {
+		if encoderPatch >= 0 {
+			out.SetByteAt(encoderPatch, value)
+			encoderPatch++
+			return
+		}
+		RTGByte(out, value)
+	}
+	func encoderInsn(out *RTGEmitter, value int) {
+		for i := 0; i < 4; i++ {
+			shift := i * 8
+
+			encoderByteOut(out, byte(value>>uint(shift)))
+		}
+	}
+
+	func encoderTempReg() int {
+		return 31
+	}
+	func encoderPhysical(code int) int {
+		if code < 3 {
+			return code + 3
+		}
+		if code < 13 {
+			return code + 3
+		}
+		if code == 13 {
+			return 18
+		}
+		if code == 14 {
+			return 1
+		}
+		return 30
+	}
+	func encoderSmall(out *RTGEmitter, destination int, value int) {
+		encoderInsn(out, 0x38000000|(destination<<21)|(value&65535))
+		return
+	}
+
+	func encoderAlu(out *RTGEmitter, op int, destination int, left int, right int) {
+		opcode := 0x7c000214
+		arithmetic := true
+		if op == 1 {
+			opcode = 0x7c000050
+			temp := left
+			left = right
+			right = temp
+		}
+		if op == 2 {
+			opcode = 0x7c000038
+			arithmetic = false
+		}
+		if op == 3 {
+			opcode = 0x7c000378
+			arithmetic = false
+		}
+		if op == 4 {
+			opcode = 0x7c000278
+			arithmetic = false
+		}
+		if op == 5 {
+			opcode = 0x7c0001d6
+
+			opcode -= 4
+		}
+		if op == 6 {
+			opcode = 0x7c000030
+
+			opcode += 6
+
+			arithmetic = false
+		}
+		if op == 7 {
+			opcode = 0x7c000430
+
+			opcode += 6
+
+			arithmetic = false
+		}
+		if op == 8 {
+			opcode = 0x7c000630
+
+			opcode += 4
+
+			arithmetic = false
+		}
+		if op == 9 {
+			opcode = 0x7c0003d6
+
+			opcode -= 4
+		}
+		if op == 10 {
+			opcode = 0x7c000396
+
+			opcode -= 4
+		}
+		if arithmetic {
+			encoderInsn(out, opcode|(destination<<21)|(left<<16)|(right<<11))
+		} else {
+			encoderInsn(out, opcode|(left<<21)|(destination<<16)|(right<<11))
+		}
+		return
+	}
+	func encoderMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			encoderAlu(out, 3, encoderPhysical(destination.Code), encoderPhysical(source.Code), encoderPhysical(source.Code))
+		}
+	}
+	func encoderImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		d := encoderPhysical(destination.Code)
+
+		encoderSmall(out, d, int(uint64(value)>>uint((encoderWord-1)*8))&255)
+		for i := encoderWord - 2; i >= 0; i-- {
+			encoderSmall(out, encoderTempReg(), 8)
+			encoderAlu(out, 6, d, d, encoderTempReg())
+			encoderSmall(out, encoderTempReg(), int(uint64(value)>>uint(i*8))&255)
+			encoderAlu(out, 3, d, d, encoderTempReg())
+		}
+	}
+	func encoderBinary(out *RTGEmitter, op int, destination RTGRegister, source RTGRegister) {
+		encoderAlu(out, op, encoderPhysical(destination.Code), encoderPhysical(destination.Code), encoderPhysical(source.Code))
+	}
+	func encoderAdd(out *RTGEmitter, d RTGRegister, s RTGRegister)      { encoderBinary(out, 0, d, s) }
+	func encoderSubtract(out *RTGEmitter, d RTGRegister, s RTGRegister) { encoderBinary(out, 1, d, s) }
+	func encoderBitAnd(out *RTGEmitter, d RTGRegister, s RTGRegister)   { encoderBinary(out, 2, d, s) }
+	func encoderBitOr(out *RTGEmitter, d RTGRegister, s RTGRegister)    { encoderBinary(out, 3, d, s) }
+	func encoderBitXor(out *RTGEmitter, d RTGRegister, s RTGRegister)   { encoderBinary(out, 4, d, s) }
+	func encoderMultiply(out *RTGEmitter, d RTGRegister, s RTGRegister) { encoderBinary(out, 5, d, s) }
+	func encoderIncrement(out *RTGEmitter, d RTGRegister) {
+		encoderSmall(out, encoderTempReg(), 1)
+		encoderAlu(out, 0, encoderPhysical(d.Code), encoderPhysical(d.Code), encoderTempReg())
+	}
+	func encoderDecrement(out *RTGEmitter, d RTGRegister) {
+		encoderSmall(out, encoderTempReg(), 1)
+		encoderAlu(out, 1, encoderPhysical(d.Code), encoderPhysical(d.Code), encoderTempReg())
+	}
+	func encoderShiftImmediate(out *RTGEmitter, d RTGRegister, value byte, op int) {
+		encoderSmall(out, encoderTempReg(), int(value))
+		encoderAlu(out, op, encoderPhysical(d.Code), encoderPhysical(d.Code), encoderTempReg())
+	}
+	func encoderShiftLeft(out *RTGEmitter, d RTGRegister, value byte) {
+		encoderShiftImmediate(out, d, value, 6)
+	}
+	func encoderShiftRight(out *RTGEmitter, d RTGRegister, value byte) {
+		encoderShiftImmediate(out, d, value, 7)
+	}
+	func encoderShiftSigned(out *RTGEmitter, d RTGRegister, value byte) {
+		encoderShiftImmediate(out, d, value, 8)
+	}
+	func encoderVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		op := 6
+		if direction == RTGShiftRight {
+			op = 7
+			if signed {
+				op = 8
+			}
+		}
+		encoderAlu(out, op, encoderPhysical(0), encoderPhysical(2), encoderPhysical(0))
+	}
+	func encoderDivide(out *RTGEmitter, remainder bool, unsigned bool) {
+		op := 9
+		if unsigned {
+			op = 10
+		}
+		if remainder {
+			encoderAlu(out, op, encoderPhysical(3), encoderPhysical(2), encoderPhysical(0))
+			encoderAlu(out, 5, encoderPhysical(3), encoderPhysical(3), encoderPhysical(0))
+			encoderAlu(out, 1, encoderPhysical(0), encoderPhysical(2), encoderPhysical(3))
+		} else {
+			encoderAlu(out, op, encoderPhysical(0), encoderPhysical(2), encoderPhysical(0))
+		}
+	}
+	func encoderSignedDivide(out *RTGEmitter, remainder bool) { encoderDivide(out, remainder, false) }
+	func encoderUnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		encoderDivide(out, remainder, true)
+		return true
+	}
+	func encoderEffective(out *RTGEmitter, value RTGAddress) RTGRegister {
+		d := encoderReg(12)
+		if RTGAddressValid(value) {
+			encoderAddress(out, d, value)
+			return d
+		}
+		encoderImmediate(out, d, int64(value.Displacement))
+		if value.Base.Valid {
+			encoderAdd(out, d, value.Base)
+		}
+		if value.Index.Valid {
+			encoderMove(out, encoderReg(11), value.Index)
+			encoderShiftLeft(out, encoderReg(11), byte(RTGLog2(value.Scale)))
+			encoderAdd(out, d, encoderReg(11))
+		}
+		return d
+	}
+	func encoderAddress(out *RTGEmitter, d RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := out.Len()
+			encoderImmediate(out, d, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		a := encoderEffective(out, value)
+		encoderMove(out, d, a)
+	}
+	func encoderMemory(out *RTGEmitter, d RTGRegister, value RTGAddress, size int, store bool) {
+		a := encoderPhysical(encoderEffective(out, value).Code)
+		r := encoderPhysical(d.Code)
+
+		if store && d.Code == 13 {
+			encoderInsn(out, 0x7c0802a6|(r<<21))
+		}
+
+		opcode := 0x88000000
+		if size == 2 {
+			opcode = 0xa0000000
+		}
+		if size == 4 {
+			opcode = 0x80000000
+		}
+		if size == 8 {
+			opcode = 0xe8000000
+		}
+		if store {
+			opcode = 0x98000000
+			if size == 2 {
+				opcode = 0xb0000000
+			}
+			if size == 4 {
+				opcode = 0x90000000
+			}
+			if size == 8 {
+				opcode = 0xf8000000
+			}
+		}
+		encoderInsn(out, opcode|(r<<21)|(a<<16))
+		if !store && d.Code == 13 {
+			encoderInsn(out, 0x7c0803a6|(r<<21))
+		}
+		return
+	}
+	func encoderLoadNative(out *RTGEmitter, d RTGRegister, a RTGAddress) {
+		encoderMemory(out, d, a, encoderWord, false)
+	}
+	func encoderLoadU32(out *RTGEmitter, d RTGRegister, a RTGAddress) { encoderMemory(out, d, a, 4, false) }
+	func encoderLoadU16(out *RTGEmitter, d RTGRegister, a RTGAddress) { encoderMemory(out, d, a, 2, false) }
+	func encoderLoadU8(out *RTGEmitter, d RTGRegister, a RTGAddress)  { encoderMemory(out, d, a, 1, false) }
+	func encoderSignedLoad(out *RTGEmitter, d RTGRegister, a RTGAddress, size int) {
+		encoderMemory(out, d, a, size, false)
+		if size < encoderWord {
+			encoderShiftLeft(out, d, byte((encoderWord-size)*8))
+			encoderShiftSigned(out, d, byte((encoderWord-size)*8))
+		}
+	}
+	func encoderLoadI32(out *RTGEmitter, d RTGRegister, a RTGAddress) { encoderSignedLoad(out, d, a, 4) }
+	func encoderLoadI16(out *RTGEmitter, d RTGRegister, a RTGAddress) { encoderSignedLoad(out, d, a, 2) }
+	func encoderLoadI8(out *RTGEmitter, d RTGRegister, a RTGAddress)  { encoderSignedLoad(out, d, a, 1) }
+	func encoderStoreNative(out *RTGEmitter, a RTGAddress, s RTGRegister) {
+		encoderMemory(out, s, a, encoderWord, true)
+	}
+	func encoderStoreU32(out *RTGEmitter, a RTGAddress, s RTGRegister) { encoderMemory(out, s, a, 4, true) }
+	func encoderStoreU16(out *RTGEmitter, a RTGAddress, s RTGRegister) { encoderMemory(out, s, a, 2, true) }
+	func encoderStoreU8(out *RTGEmitter, a RTGAddress, s RTGRegister)  { encoderMemory(out, s, a, 1, true) }
+	func encoderLess(out *RTGEmitter, d RTGRegister, l RTGRegister, r RTGRegister, unsigned bool) {
+		rd := encoderPhysical(d.Code)
+		rl := encoderPhysical(l.Code)
+		rr := encoderPhysical(r.Code)
+
+		op := 0x7c000000
+		if unsigned {
+			op |= 0x40
+		}
+
+		op |= 0x200000
+
+		encoderInsn(out, op|(rl<<16)|(rr<<11))
+		encoderSmall(out, rd, 0)
+		encoderInsn(out, 0x40800008)
+		encoderSmall(out, rd, 1)
+		return
+	}
+	func encoderCompare(out *RTGEmitter, l RTGRegister, r RTGRegister) {
+		encoderMove(out, encoderReg(11), r)
+		encoderMove(out, encoderReg(5), l)
+		encoderMove(out, encoderReg(6), encoderReg(11))
+	}
+	func encoderTest(out *RTGEmitter, l RTGRegister, r RTGRegister) {
+		encoderMove(out, encoderReg(11), r)
+		encoderMove(out, encoderReg(5), l)
+		encoderBitAnd(out, encoderReg(5), encoderReg(11))
+		encoderImmediate(out, encoderReg(6), 0)
+	}
+	func encoderCondition(out *RTGEmitter, c RTGCondition, d RTGRegister) {
+		code := c.Code
+		invert := false
+		l := encoderReg(5)
+		r := encoderReg(6)
+		if code < 2 {
+			encoderMove(out, d, l)
+			encoderBitXor(out, d, r)
+			encoderImmediate(out, encoderReg(11), 0)
+			encoderLess(out, d, encoderReg(11), d, true)
+			invert = code == 0
+		} else {
+			if code == 2 || code == 3 || code == 8 || code == 9 {
+				l = encoderReg(6)
+				r = encoderReg(5)
+			}
+			encoderLess(out, d, l, r, code >= 6)
+			invert = code == 2 || code == 5 || code == 7 || code == 8
+		}
+		if invert {
+			encoderSmall(out, encoderTempReg(), 1)
+			encoderAlu(out, 4, encoderPhysical(d.Code), encoderPhysical(d.Code), encoderTempReg())
+		}
+	}
+	func encoderBranchZero(out *RTGEmitter, r RTGRegister, target int) {
+		at := encoderPosition(out)
+		rr := encoderPhysical(r.Code)
+
+		op := 0x2c000000
+
+		op |= 0x200000
+
+		encoderInsn(out, op|(rr<<16))
+		encoderInsn(out, 0x41820000|((target-at-4)&65532))
+		return
+	}
+	func encoderBranchRegister(out *RTGEmitter, r RTGRegister, link bool) {
+		rr := encoderPhysical(r.Code)
+
+		encoderInsn(out, 0x7c0903a6|(rr<<21))
+		op := 0x4e800420
+		if link {
+			op++
+		}
+		encoderInsn(out, op)
+		return
+	}
+	func encoderJump(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		encoderImmediate(out, encoderReg(4), 0)
+		out.RelocAt(at, label)
+		encoderBranchRegister(out, encoderReg(4), false)
+	}
+	func encoderCall(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		encoderImmediate(out, encoderReg(4), 0)
+		out.RelocAt(at, label)
+		encoderBranchRegister(out, encoderReg(4), true)
+	}
+	func encoderCallIndirect(out *RTGEmitter, r RTGRegister) { encoderBranchRegister(out, r, true) }
+	func encoderJumpCondition(out *RTGEmitter, c RTGCondition, label RTGLabel) {
+		encoderCondition(out, c, encoderReg(3))
+		at := out.Len()
+		encoderBranchZero(out, encoderReg(3), at)
+		encoderJump(out, label)
+		end := out.Len()
+		encoderPatch = at
+		encoderBranchZero(out, encoderReg(3), end)
+		encoderPatch = -1
+	}
+	func encoderFrameStart(out *RTGEmitter) int {
+		encoderInsn(out, 0x7c0802a6|(encoderPhysical(13)<<21))
+
+		encoderMove(out, encoderReg(4), encoderReg(15))
+		encoderMove(out, encoderReg(15), encoderReg(14))
+		at := out.Len()
+		encoderImmediate(out, encoderReg(3), 0)
+		encoderSubtract(out, encoderReg(14), encoderReg(3))
+		encoderStoreNative(out, RTGAddress{Base: encoderReg(15), Displacement: -encoderWord}, encoderReg(13))
+		encoderStoreNative(out, RTGAddress{Base: encoderReg(15), Displacement: -2 * encoderWord}, encoderReg(4))
+		return at
+	}
+	func encoderFrameFinish(out *RTGEmitter, at int, size int) {
+		encoderPatch = at
+		encoderImmediate(out, encoderReg(3), int64(RTGAlignValue(size+2*encoderWord, 16)))
+		encoderPatch = -1
+	}
+	func encoderFrameLoad(out *RTGEmitter, d RTGRegister, offset int) {
+		encoderLoadNative(out, d, RTGAddress{Base: encoderReg(15), Displacement: -(offset + 2*encoderWord)})
+	}
+	func encoderFrameStore(out *RTGEmitter, offset int, s RTGRegister) {
+		encoderStoreNative(out, RTGAddress{Base: encoderReg(15), Displacement: -(offset + 2*encoderWord)}, s)
+	}
+	func encoderFrameAddress(out *RTGEmitter, d RTGRegister, offset int) {
+		encoderAddress(out, d, RTGAddress{Base: encoderReg(15), Displacement: -(offset + 2*encoderWord)})
+	}
+	func encoderLeave(out *RTGEmitter) {
+		encoderLoadNative(out, encoderReg(13), RTGAddress{Base: encoderReg(15), Displacement: -encoderWord})
+		encoderLoadNative(out, encoderReg(3), RTGAddress{Base: encoderReg(15), Displacement: -2 * encoderWord})
+		encoderMove(out, encoderReg(14), encoderReg(15))
+		encoderMove(out, encoderReg(15), encoderReg(3))
+	}
+	func encoderRet(out *RTGEmitter) {
+		encoderInsn(out, 0x4e800020)
+		return
+	}
+	func encoderPatchImmediate(out *RTGEmitter, at int, value int) {
+		bytes := out.Code()
+		instruction := 0
+		for i := 0; i < 4; i++ {
+			shift := i * 8
+
+			instruction |= int(bytes[at+i]) << uint(shift)
+		}
+		physicalReg := instruction & 31
+
+		physicalReg = (instruction >> 21) & 31
+
+		for i := 0; i < 16; i++ {
+			if encoderPhysical(i) == physicalReg {
+				encoderPatch = at
+				encoderImmediate(out, encoderReg(i), int64(value))
+				encoderPatch = -1
+				return
+			}
+		}
+	}
+	func encoderPatchRelocations(out *RTGEmitter) {
+		for i := 0; i < out.RelocationCount(); i++ {
+			encoderPatchImmediate(out, out.RelocationOffset(i), elfCodeAddress+out.LabelPosition(out.RelocationLabel(i)))
+		}
+	}
+	func encoderImage(out *RTGEmitter, machine int, flags int) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
+			if !ok {
+				return nil
+			}
+			encoderPatchImmediate(out, out.AbsoluteRelocationOffset(i), target)
+		}
+		return elfImage(out, machine, flags, encoderWord*8, encoderBig)
+	}
+	func encoderInit(out *RTGEmitter) bool {
+		_ = out
+
+		encoderPatch = -1
+
+		return true
+	}
+	func encoderEntry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func encoderSyscall(out *RTGEmitter, number int) {
+		encoderSmall(out, 0, number)
+		encoderInsn(out, 0x44000002)
+		return
+	}
+	func encoderWrite(out *RTGEmitter) {
+		n := 64
+
+		n = 4
+
+		encoderSyscall(out, n)
+	}
+	func encoderRead(out *RTGEmitter) {
+		n := 63
+
+		n = 3
+
+		encoderSyscall(out, n)
+	}
+	func encoderClose(out *RTGEmitter) {
+		n := 57
+
+		n = 6
+
+		encoderSyscall(out, n)
+	}
+	func encoderChmod(out *RTGEmitter) {
+		n := 52
+
+		n = 94
+
+		encoderSyscall(out, n)
+	}
+	func encoderOpen(out *RTGEmitter) {
+		encoderSyscall(out, 5)
+		return
+	}
+	func encoderExit(out *RTGEmitter, status RTGRegister) {
+		encoderMove(out, encoderReg(0), status)
+		n := 93
+
+		n = 1
+
+		encoderSyscall(out, n)
+	}
+	func encoderCopyBytes(out *RTGEmitter) {
+		forward := out.NewLabel()
+		backward := out.NewLabel()
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		encoderCompare(out, encoderReg(7), encoderReg(8))
+		encoderJumpCondition(out, RTGCondition{Code: 6}, forward)
+		encoderMove(out, encoderReg(3), encoderReg(8))
+		encoderAdd(out, encoderReg(3), encoderReg(9))
+		encoderCompare(out, encoderReg(7), encoderReg(3))
+		encoderJumpCondition(out, RTGCondition{Code: 7}, forward)
+		encoderAdd(out, encoderReg(7), encoderReg(9))
+		encoderDecrement(out, encoderReg(7))
+		encoderAdd(out, encoderReg(8), encoderReg(9))
+		encoderDecrement(out, encoderReg(8))
+		out.Mark(backward)
+		encoderImmediate(out, encoderReg(3), 0)
+		encoderCompare(out, encoderReg(9), encoderReg(3))
+		encoderJumpCondition(out, RTGCondition{Code: 0}, done)
+		encoderLoadU8(out, encoderReg(3), RTGAddress{Base: encoderReg(8)})
+		encoderStoreU8(out, RTGAddress{Base: encoderReg(7)}, encoderReg(3))
+		encoderDecrement(out, encoderReg(7))
+		encoderDecrement(out, encoderReg(8))
+		encoderDecrement(out, encoderReg(9))
+		encoderJump(out, backward)
+		out.Mark(forward)
+		out.Mark(loop)
+		encoderImmediate(out, encoderReg(3), 0)
+		encoderCompare(out, encoderReg(9), encoderReg(3))
+		encoderJumpCondition(out, RTGCondition{Code: 0}, done)
+		encoderLoadU8(out, encoderReg(3), RTGAddress{Base: encoderReg(8)})
+		encoderStoreU8(out, RTGAddress{Base: encoderReg(7)}, encoderReg(3))
+		encoderIncrement(out, encoderReg(7))
+		encoderIncrement(out, encoderReg(8))
+		encoderDecrement(out, encoderReg(9))
+		encoderJump(out, loop)
+		out.Mark(done)
+	}
+
+	func encoderHostSyscall(out *RTGEmitter) {
+		encoderInsn(out, 0x44000002)
+		return
+	}
+
+	func targetStart(out *RTGEmitter, state int) bool { _ = state; return encoderInit(out) }
+	func targetImage(out *RTGEmitter) []byte          { return encoderImage(out, 21, 2) }
 }
 
 arch ppc64le {
@@ -16,7 +648,7 @@ arch ppc64le {
 	instruction_alignment = 4
 	stack_word_bytes = 8
 	stack_alignment = 16
-	patch_relocations = go register_linux.patchRelocations
+	patch_relocations = go encoderPatchRelocations
 	registers integer = [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15]
 	locations {
 		primary = r0
@@ -46,44 +678,44 @@ arch ppc64le {
 		ugt = 9
 	}
 	bind {
-		move = go register_linux.move
-		address = go register_linux.address
-		load.native = go register_linux.loadNative
-		load.i32 = go register_linux.loadI32
-		load.u32 = go register_linux.loadU32
-		load.i16 = go register_linux.loadI16
-		load.u16 = go register_linux.loadU16
-		load.i8 = go register_linux.loadI8
-		load.u8 = go register_linux.loadU8
-		store.native = go register_linux.storeNative
-		store.u32 = go register_linux.storeU32
-		store.u16 = go register_linux.storeU16
-		store.u8 = go register_linux.storeU8
-		add = go register_linux.add
-		subtract = go register_linux.subtract
-		multiply = go register_linux.multiply
-		bit_and = go register_linux.bitAnd
-		bit_or = go register_linux.bitOr
-		bit_xor = go register_linux.bitXor
-		compare = go register_linux.compare
-		test = go register_linux.test
-		increment = go register_linux.increment
-		decrement = go register_linux.decrement
-		shift_left_immediate = go register_linux.shiftLeft
-		shift_right_unsigned_immediate = go register_linux.shiftRight
-		shift_right_signed_immediate = go register_linux.shiftSigned
-		call = go register_linux.call
-		call_indirect = go register_linux.callIndirect
-		jump = go register_linux.jump
-		jump_condition = go register_linux.jumpCondition
-		set_condition = go register_linux.condition
-		return = go register_linux.ret
-		leave = go register_linux.leave
-		host_syscall = go register_linux.hostSyscall
-		move_immediate = go register_linux.immediate
-		variable_shift = go register_linux.variableShift
-		signed_divide = go register_linux.signedDivide
-		copy_bytes = go register_linux.copyBytes
+		move = go encoderMove
+		address = go encoderAddress
+		load.native = go encoderLoadNative
+		load.i32 = go encoderLoadI32
+		load.u32 = go encoderLoadU32
+		load.i16 = go encoderLoadI16
+		load.u16 = go encoderLoadU16
+		load.i8 = go encoderLoadI8
+		load.u8 = go encoderLoadU8
+		store.native = go encoderStoreNative
+		store.u32 = go encoderStoreU32
+		store.u16 = go encoderStoreU16
+		store.u8 = go encoderStoreU8
+		add = go encoderAdd
+		subtract = go encoderSubtract
+		multiply = go encoderMultiply
+		bit_and = go encoderBitAnd
+		bit_or = go encoderBitOr
+		bit_xor = go encoderBitXor
+		compare = go encoderCompare
+		test = go encoderTest
+		increment = go encoderIncrement
+		decrement = go encoderDecrement
+		shift_left_immediate = go encoderShiftLeft
+		shift_right_unsigned_immediate = go encoderShiftRight
+		shift_right_signed_immediate = go encoderShiftSigned
+		call = go encoderCall
+		call_indirect = go encoderCallIndirect
+		jump = go encoderJump
+		jump_condition = go encoderJumpCondition
+		set_condition = go encoderCondition
+		return = go encoderRet
+		leave = go encoderLeave
+		host_syscall = go encoderHostSyscall
+		move_immediate = go encoderImmediate
+		variable_shift = go encoderVariableShift
+		signed_divide = go encoderSignedDivide
+		copy_bytes = go encoderCopyBytes
 	}
 }
 abi internal_ppc64le {
@@ -92,30 +724,42 @@ abi internal_ppc64le {
 	call_words = [r0, r1, r2, r7, r8, r9]
 	result = [r0, r1]
 	stack_alignment = 16
-	frame_start = go register_linux.frameStart
-	frame_finish = go register_linux.frameFinish
-	frame_load = go register_linux.frameLoad
-	frame_store = go register_linux.frameStore
-	frame_address = go register_linux.frameAddress
-	unsigned_divide = go register_linux.unsignedDivide
+	frame_start = go encoderFrameStart
+	frame_finish = go encoderFrameFinish
+	frame_load = go encoderFrameLoad
+	frame_store = go encoderFrameStore
+	frame_address = go encoderFrameAddress
+	unsigned_divide = go encoderUnsignedDivide
 }
 runtime runtime_ppc64le {
-	emit_entry_start = go start
-	emit_entry = go register_linux.entry
-	emit_exit = go register_linux.exit
-	operation write { emit = go register_linux.write }
-	operation read { emit = go register_linux.read }
-	operation open { emit = go register_linux.open }
-	operation close { emit = go register_linux.close }
-	operation chmod { emit = go register_linux.chmod }
-	operation print { use = write args = [stdout, buffer, count] }
+	emit_entry_start = go targetStart
+	emit_entry = go encoderEntry
+	emit_exit = go encoderExit
+	operation write {
+		emit = go encoderWrite
+	}
+	operation read {
+		emit = go encoderRead
+	}
+	operation open {
+		emit = go encoderOpen
+	}
+	operation close {
+		emit = go encoderClose
+	}
+	operation chmod {
+		emit = go encoderChmod
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
 }
 format elf_ppc64le {
 	kind = elf
 	byte_order = little
 	address_bits = 64
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-ppc64le {
 	family = native_v1

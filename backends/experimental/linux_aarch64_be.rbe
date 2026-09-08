@@ -1,15 +1,652 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_aarch64_be
 implements direct_emitter_v1
-@import "aarch64_be.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
-	func image(out *RTGEmitter) []byte {
+	func aarch64_beBeAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0x8b000000|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xcb000000|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0x9b007c00|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0x8a000000|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xaa000000|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xca000000|(destination.Code<<0)|(destination.Code<<5)|(source.Code<<16))
+	}
+	func aarch64_beBeCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		RTGUint32(out, 0xeb00001f|(left.Code<<5)|(right.Code<<16))
+	}
+	func aarch64_beBeTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		RTGUint32(out, 0xea00001f|(left.Code<<5)|(right.Code<<16))
+	}
+	func aarch64_beBeIncrement(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0x91000400|(operand.Code<<0)|(operand.Code<<5))
+	}
+	func aarch64_beBeDecrement(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0xd1000400|(operand.Code<<0)|(operand.Code<<5))
+	}
+	func aarch64_beBeCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0xd63f0000|(operand.Code<<5))
+	}
+	func aarch64_beBeCall(out *RTGEmitter, label RTGLabel) {
+		RTGUint32(out, 0x94000000)
+		RTGReloc(out, label)
+	}
+	func aarch64_beBeJump(out *RTGEmitter, label RTGLabel) {
+		RTGUint32(out, 0x14000000)
+		RTGReloc(out, label)
+	}
+	func aarch64_beBeJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		RTGUint32(out, 0x54000000|(condition.Code<<0))
+		RTGReloc(out, label)
+	}
+	func aarch64_beAsmAlign(a *RTGEmitter) {
+		for a.Len()%4 != 0 {
+			RTGByte(a, 0)
+		}
+	}
+
+	func aarch64_beAsmMovRegReg(a *RTGEmitter, dst int, src int) {
+		if dst == src {
+			return
+		}
+		aarch64_beAsmEmit(a, 0xaa0003e0|(src<<16)|dst)
+	}
+
+	func aarch64_beAsmMovRegImm(a *RTGEmitter, reg int, imm int) {
+		if imm < 0 {
+			inv := -imm - 1
+			part := inv & 65535
+			aarch64_beAsmEmit(a, 0x92800000|(part<<5)|reg)
+			for i := 1; i < 4; i++ {
+				targetPart := (imm >> (i * 16)) & 65535
+				if targetPart != 65535 {
+					aarch64_beAsmEmit(a, 0xf2800000|(i<<21)|(targetPart<<5)|reg)
+				}
+			}
+			return
+		}
+		part := imm & 65535
+		aarch64_beAsmEmit(a, 0xd2800000|(part<<5)|reg)
+		for i := 1; i < 4; i++ {
+			part = (imm >> (i * 16)) & 65535
+			if part != 0 {
+				aarch64_beAsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+			}
+		}
+	}
+
+	func aarch64_beAsmPatchMovRegImmAt(a *RTGEmitter, at int, reg int, imm int) {
+		part := imm & 65535
+		a.PatchUint32(at, 0xd2800000|(part<<5)|reg)
+		for i := 1; i < 4; i++ {
+			part = (imm >> (i * 16)) & 65535
+			a.PatchUint32(at+i*4, 0xf2800000|(i<<21)|(part<<5)|reg)
+		}
+	}
+
+	func aarch64_beAsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
+		if imm == 0 {
+			aarch64_beAsmMovRegReg(a, dst, src)
+			return
+		}
+		op := 0x91000000
+		if imm < 0 {
+			op = 0xd1000000
+			imm = -imm
+		}
+		cur := src
+		for imm > 0 {
+			shift := 0
+			chunk := imm
+			if chunk > 4095 {
+				chunk = imm / 4096
+				if chunk > 4095 {
+					chunk = 4095
+				}
+				shift = 1
+				imm = imm - chunk*4096
+			} else {
+				imm = 0
+			}
+			aarch64_beAsmEmit(a, op|(shift<<22)|(chunk<<10)|(cur<<5)|dst)
+			cur = dst
+		}
+	}
+
+	func aarch64_beAsmAddr(a *RTGEmitter, base int, disp int) int {
+		if disp == 0 {
+			return base
+		}
+		aarch64_beAsmAddRegImm(a, aarch64Address.Code, base, disp)
+		return aarch64Address.Code
+	}
+
+	func aarch64_beAsmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
+		if disp != 0 && disp >= -256 && disp <= 255 {
+			imm := (disp & 511) << 12
+			if size == 1 {
+				aarch64_beAsmEmit(a, 0x38400000|imm|(base<<5)|dst)
+				return
+			}
+			if size == 2 {
+				aarch64_beAsmEmit(a, 0x78400000|imm|(base<<5)|dst)
+				return
+			}
+			if size == 4 {
+				aarch64_beAsmEmit(a, 0xb8400000|imm|(base<<5)|dst)
+				return
+			}
+			aarch64_beAsmEmit(a, 0xf8400000|imm|(base<<5)|dst)
+			return
+		}
+		addr := aarch64_beAsmAddr(a, base, disp)
+		if size == 1 {
+			aarch64_beAsmEmit(a, 0x39400000|(addr<<5)|dst)
+			return
+		}
+		if size == 2 {
+			aarch64_beAsmEmit(a, 0x79800000|(addr<<5)|dst)
+			return
+		}
+		if size == 4 {
+			aarch64_beAsmEmit(a, 0xb9800000|(addr<<5)|dst)
+			return
+		}
+		aarch64_beAsmEmit(a, 0xf9400000|(addr<<5)|dst)
+	}
+
+	func aarch64_beAsmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
+		if disp != 0 && disp >= -256 && disp <= 255 {
+			imm := (disp & 511) << 12
+			if size == 1 {
+				aarch64_beAsmEmit(a, 0x38000000|imm|(base<<5)|src)
+				return
+			}
+			if size == 2 {
+				aarch64_beAsmEmit(a, 0x78000000|imm|(base<<5)|src)
+				return
+			}
+			if size == 4 {
+				aarch64_beAsmEmit(a, 0xb8000000|imm|(base<<5)|src)
+				return
+			}
+			aarch64_beAsmEmit(a, 0xf8000000|imm|(base<<5)|src)
+			return
+		}
+		addr := aarch64_beAsmAddr(a, base, disp)
+		if size == 1 {
+			aarch64_beAsmEmit(a, 0x39000000|(addr<<5)|src)
+			return
+		}
+		if size == 2 {
+			aarch64_beAsmEmit(a, 0x79000000|(addr<<5)|src)
+			return
+		}
+		if size == 4 {
+			aarch64_beAsmEmit(a, 0xb9000000|(addr<<5)|src)
+			return
+		}
+		aarch64_beAsmEmit(a, 0xf9000000|(addr<<5)|src)
+	}
+
+	func aarch64_beAsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+		if base == 0x8948 && disp8 == 0x45 {
+			aarch64_beAsmStoreRegStack(a, aarch64Primary.Code, offset)
+			return
+		}
+		if base == 0x8948 && disp8 == 0x55 {
+			aarch64_beAsmStoreRegStack(a, aarch64Secondary.Code, offset)
+			return
+		}
+		if base == 0x8948 && disp8 == 0x4d {
+			aarch64_beAsmStoreRegStack(a, aarch64Tertiary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x45 {
+			aarch64_beAsmLoadRegStack(a, aarch64Primary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x55 {
+			aarch64_beAsmLoadRegStack(a, aarch64Secondary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x4d {
+			aarch64_beAsmLoadRegStack(a, aarch64Tertiary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x45 {
+			aarch64_beAsmLeaRegStack(a, aarch64Primary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x55 {
+			aarch64_beAsmLeaRegStack(a, aarch64Secondary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x7d {
+			aarch64_beAsmLeaRegStack(a, aarch64X3.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x75 {
+			aarch64_beAsmLeaRegStack(a, aarch64X4.Code, offset)
+			return
+		}
+	}
+
+	func aarch64_beAsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+		if op == 0x8b48 && disp8 == 0x4a {
+			aarch64_beAsmLoadRegMem(a, aarch64Tertiary.Code, aarch64Secondary.Code, disp, 8)
+			return
+		}
+		if op == 0x8b48 && disp8 == 0x52 {
+			aarch64_beAsmLoadRegMem(a, aarch64Secondary.Code, aarch64Secondary.Code, disp, 8)
+			return
+		}
+	}
+
+	func aarch64_beAsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+		shift := 3
+		if size == 1 {
+			shift = 0
+		}
+		if size == 2 {
+			shift = 1
+		}
+		if size == 4 {
+			shift = 2
+		}
+		aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, shift)
+		aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+	}
+
+	func aarch64_beAsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+		if kind == RTGScalarByte {
+			aarch64_beAsmEmit(a, 0x92401c00)
+			return
+		}
+		if kind == RTGScalarInt8 {
+			aarch64_beAsmEmit(a, 0x93401c00)
+			return
+		}
+		if kind == RTGScalarInt16 {
+			aarch64_beAsmEmit(a, 0x93403c00)
+			return
+		}
+		if kind == RTGScalarUint16 {
+			aarch64_beAsmEmit(a, 0x92403c00)
+			return
+		}
+		if kind == RTGScalarInt32 {
+			aarch64_beAsmEmit(a, 0x93407c00)
+			return
+		}
+		if kind == RTGScalarUint32 {
+			aarch64_beAsmEmit(a, 0x92407c00)
+		}
+	}
+
+	func aarch64_beAsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
+		if imm >= 0 && imm <= 4095 {
+			aarch64_beAsmEmit(a, 0xf100001f|(imm<<10)|(reg<<5))
+			return
+		}
+		aarch64_beAsmMovRegImm(a, aarch64Scratch.Code, imm)
+		aarch64_beAsmCmpRegReg(a, reg, aarch64Scratch.Code)
+	}
+
+	func aarch64_beAsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		aarch64_beAsmMovRegReg(a, aarch64Scratch.Code, aarch64Primary.Code)
+		aarch64_beAsmEmit(a, 0x9ac00c40)
+		if mod {
+			aarch64_beAsmEmit(a, 0x9b098800)
+		}
+	}
+
+	func aarch64_beCondFromSetcc(setcc int) int {
+		if setcc == 0x94 {
+			return 0
+		}
+		if setcc == 0x95 {
+			return 1
+		}
+		if setcc == 0x92 {
+			return 3
+		}
+		if setcc == 0x93 {
+			return 2
+		}
+		if setcc == 0x96 {
+			return 9
+		}
+		if setcc == 0x97 {
+			return 8
+		}
+		if setcc == 0x9c {
+			return 11
+		}
+		if setcc == 0x9e {
+			return 13
+		}
+		if setcc == 0x9f {
+			return 12
+		}
+		return 10
+	}
+
+	func aarch64_beAsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
+		shift := 3
+		if size == 1 {
+			shift = 0
+		}
+		if size == 2 {
+			shift = 1
+		}
+		if size == 4 {
+			shift = 2
+		}
+		aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, shift)
+		aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, size)
+	}
+
+	func aarch64_beEmitAddress(out *RTGEmitter, destination RTGRegister, memory RTGAddress) {
+		if RTGAddressValid(memory) {
+			aarch64_beEmitADR(out, destination, memory)
+			return
+		}
+		base := memory.Base.Code
+		if memory.Index.Valid {
+			shift := 0
+			if memory.Scale == 2 {
+				shift = 1
+			} else {
+				if memory.Scale == 4 {
+					shift = 2
+				} else {
+					if memory.Scale == 8 {
+						shift = 3
+					}
+				}
+			}
+			aarch64_beAsmAddRegRegShift(
+				out, destination.Code, base, memory.Index.Code, shift)
+			base = destination.Code
+		}
+		aarch64_beAsmAddRegImm(
+			out, destination.Code, base, memory.Displacement)
+	}
+
+	func aarch64_beMemoryBase(out *RTGEmitter, memory RTGAddress) int {
+		if RTGAddressValid(memory) || memory.Index.Valid {
+			aarch64_beEmitAddress(out, aarch64Address, memory)
+			return aarch64Address.Code
+		}
+		if memory.Displacement < -256 || memory.Displacement > 255 {
+			aarch64_beEmitAddress(out, aarch64Address, memory)
+			return aarch64Address.Code
+		}
+		return memory.Base.Code
+	}
+
+	func aarch64_beLoadWidth(
+		out *RTGEmitter,
+		destination RTGRegister,
+		memory RTGAddress,
+		size int,
+		signed bool,
+	) {
+		base := aarch64_beMemoryBase(out, memory)
+		displacement := memory.Displacement
+		if base == aarch64Address.Code {
+			displacement = 0
+		}
+		imm := (displacement & 511) << 12
+		op := 0xf8400000
+		if size == 1 {
+			op = 0x38400000
+			if signed {
+				op = 0x38800000
+			}
+		} else {
+			if size == 2 {
+				op = 0x78400000
+				if signed {
+					op = 0x78800000
+				}
+			} else {
+				if size == 4 {
+					op = 0xb8400000
+					if signed {
+						op = 0xb8800000
+					}
+				}
+			}
+		}
+		aarch64_beAsmEmit(
+			out, op|imm|(base<<5)|destination.Code)
+	}
+
+	func aarch64_beStoreWidth(
+		out *RTGEmitter,
+		memory RTGAddress,
+		source RTGRegister,
+		size int,
+	) {
+		base := aarch64_beMemoryBase(out, memory)
+		displacement := memory.Displacement
+		if base == aarch64Address.Code {
+			displacement = 0
+		}
+		imm := (displacement & 511) << 12
+		op := 0xf8000000
+		if size == 1 {
+			op = 0x38000000
+		} else {
+			if size == 2 {
+				op = 0x78000000
+			} else {
+				if size == 4 {
+					op = 0xb8000000
+				}
+			}
+		}
+		aarch64_beAsmEmit(out, op|imm|(base<<5)|source.Code)
+	}
+
+	func aarch64_beVariableShift(
+		out *RTGEmitter, direction RTGShiftDirection, signed bool,
+	) {
+		op := 0x9ac02400
+		if direction == RTGShiftLeft {
+			op = 0x9ac02000
+		} else {
+			if signed {
+				op = 0x9ac02800
+			}
+		}
+		aarch64_beAsmEmit(out,
+			op|(aarch64Primary.Code<<16)|
+				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
+	}
+
+	func aarch64_beSignedDivide(out *RTGEmitter, remainder bool) {
+		aarch64_beAsmMovRegReg(
+			out, aarch64Scratch.Code, aarch64Primary.Code)
+		aarch64_beAsmEmit(out,
+			0x9ac00c00|(aarch64Primary.Code<<16)|
+				(aarch64Tertiary.Code<<5)|aarch64Primary.Code)
+		if remainder {
+			aarch64_beAsmEmit(out,
+				0x9b008000|(aarch64Scratch.Code<<16)|
+					(aarch64Tertiary.Code<<10)|
+					(aarch64Primary.Code<<5)|aarch64Primary.Code)
+		}
+	}
+
+	func aarch64_beFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frame := (stackUsed + 15) & -16
+		high := frame / 4096
+		low := frame % 4096
+		if high > 0 {
+			out.PatchUint32(at, 0xd14003ff|(high<<10))
+		}
+		if low > 0 {
+			out.PatchUint32(at+4, 0xd10003ff|(low<<10))
+		}
+	}
+
+	func aarch64_beAapcs64PushRegister(out *RTGEmitter, source RTGRegister) {
+		aarch64_beAsmEmit(out, 0xf81f0fe0|source.Code)
+	}
+
+	func aarch64_beAapcs64PushImmediate(out *RTGEmitter, value int) {
+		aarch64_beAsmMovRegImm(out, aarch64Scratch.Code, value)
+		aarch64_beAsmEmit(out, 0xf81f0fe0|aarch64Scratch.Code)
+	}
+
+	func aarch64_beAapcs64PopRegister(out *RTGEmitter, destination RTGRegister) {
+		aarch64_beAsmEmit(out, 0xf84107e0|destination.Code)
+	}
+
+	func aarch64_beAapcs64UnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		aarch64_beAsmMovRegReg(out, aarch64Scratch.Code, aarch64Primary.Code)
+		aarch64_beAsmEmit(out, 0x9ac00840)
+		if remainder {
+			aarch64_beAsmEmit(out, 0x9b098800)
+		}
+		return true
+	}
+
+	func aarch64_beAapcs64StoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word < 6 {
+			aarch64_beAsmStoreRegStack(out, word, offset)
+			return
+		}
+		// Every pushed AArch64 call word occupies a 16-byte aligned slot.
+		// FP points below the saved FP/LR pair, so stacked arguments begin
+		// at FP+16 and retain that same stride.
+		aarch64_beAsmLoadRegMem(out, aarch64Scratch.Code, aarch64Frame.Code,
+			16+(word-6)*16, 8)
+		aarch64_beAsmStoreRegStack(out, aarch64Scratch.Code, offset)
+	}
+
+	func aarch64_beAapcs64CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		limit := wordCount
+		if limit > 6 {
+			limit = 6
+		}
+		for i := 0; i < limit; i++ {
+			aarch64_beAapcs64PopRegister(out, RTGRegister{Code: i, Valid: true})
+		}
+		aarch64_beAsmCallLabel(out, label)
+		if wordCount > 6 {
+			aarch64_beAsmAddRegImm(out, 31, 31, (wordCount-6)*16)
+		}
+	}
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
@@ -22,35 +659,645 @@ go backend {
 				out.PatchUint32(at+part*4, opcode|(part<<21)|(((target>>uint(part*16))&65535)<<5)|register)
 			}
 		}
-		return linux_elf.image(out, 183, 0, 64, true)
+		return elfImage(out, 183, 0, 64, true)
 	}
 }
 
+arch aarch64 {
+	alias = "aarch64"
+	endian = big
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 4
+	patch_relocations = aarch64_labels
+	registers gpr64 = [x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19, x20, x21, x22, x23, x24, x25, x26, x27, x28, x29, x30, sp]
+	locations {
+		primary = x0
+		secondary = x1
+		tertiary = x2
+		call_words = [x3, x4, x1, x2, x5, x6]
+		system = x8
+		scratch = x9
+		scratch2 = x10
+		address = x12
+		copy_destination = x3
+		copy_source = x4
+		copy_count = x1
+		frame = x29
+		link = x30
+		stack = sp
+		zero = xzr
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		uge = 2
+		ult = 3
+		ugt = 8
+		ule = 9
+		sge = 10
+		slt = 11
+		sgt = 12
+		sle = 13
+	}
+	forms {
+		binary = word32(destination:reg@0+5, source:reg@16)
+		compare = word32(left:reg@5, right:reg@16)
+		unary = word32(operand:reg@0+5)
+		register = word32(operand:reg@5)
+		branch = word32(label:label@reloc)
+		conditional_branch = word32(condition:condition@0, label:label@reloc)
+		fixed = bytes
+	}
+	instructions {
+		add = go aarch64_beBeAdd
+		subtract = go aarch64_beBeSubtract
+		multiply = go aarch64_beBeMultiply
+		bit_and = go aarch64_beBeBitAnd
+		bit_or = go aarch64_beBeBitOr
+		bit_xor = go aarch64_beBeBitXor
+		compare = go aarch64_beBeCompare
+		test = go aarch64_beBeTest
+		increment = go aarch64_beBeIncrement
+		decrement = go aarch64_beBeDecrement
+		call_indirect = go aarch64_beBeCallIndirect
+		call = go aarch64_beBeCall
+		jump = go aarch64_beBeJump
+		jump_condition = go aarch64_beBeJumpCondition
+		return fixed [0xc0, 0x03, 0x5f, 0xd6]
+		leave fixed [0xbf, 0x03, 0x00, 0x91, 0xfd, 0x7b, 0xc1, 0xa8]
+	}
+	bind {
+		move = sequence aarch64_beMove
+		address = go aarch64_beEmitAddress
+		load.native = go aarch64_beLoadNative
+		load.i32 = go aarch64_beLoadI32
+		load.u32 = go aarch64_beLoadU32
+		load.i16 = go aarch64_beLoadI16
+		load.u16 = go aarch64_beLoadU16
+		load.i8 = go aarch64_beLoadI8
+		load.u8 = go aarch64_beLoadU8
+		store.native = go aarch64_beStoreNative
+		store.u32 = go aarch64_beStoreU32
+		store.u16 = go aarch64_beStoreU16
+		store.u8 = go aarch64_beStoreU8
+		add = add
+		subtract = subtract
+		multiply = multiply
+		bit_and = bit_and
+		bit_or = bit_or
+		bit_xor = bit_xor
+		compare = compare
+		test = test
+		increment = increment
+		decrement = decrement
+		shift_left_immediate = sequence aarch64_beShiftLeftImmediate
+		shift_right_unsigned_immediate = sequence aarch64_beShiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence aarch64_beShiftRightSignedImmediate
+		call = call
+		call_indirect = call_indirect
+		jump = jump
+		jump_condition = jump_condition
+		set_condition = sequence aarch64_beSetCondition
+		return = return
+		leave = leave
+		host_syscall = sequence aarch64_beHostSyscall
+		move_immediate = sequence aarch64_beMoveImmediate
+		variable_shift = go aarch64_beVariableShift
+		signed_divide = go aarch64_beSignedDivide
+		copy_bytes = sequence aarch64_beCopyBytes
+	}
+	exports {
+		renvoAarch64AsmEmit = sequence aarch64_beAsmEmit
+		renvoAarch64AsmAlign = go aarch64_beAsmAlign
+		renvoAarch64AsmMovRegReg = go aarch64_beAsmMovRegReg
+		renvoAarch64AsmMovRegImm = go aarch64_beAsmMovRegImm
+		renvoAarch64AsmPatchMovRegImmAt = go aarch64_beAsmPatchMovRegImmAt
+		renvoAarch64AsmMovRegAbs = sequence aarch64_beAsmMovRegAbs
+		renvoAarch64AsmAddRegImm = go aarch64_beAsmAddRegImm
+		renvoAarch64AsmAddRegReg = sequence aarch64_beAsmAddRegReg
+		renvoAarch64AsmSubRegReg = sequence aarch64_beAsmSubRegReg
+		renvoAarch64AsmAddRegRegShift = sequence aarch64_beAsmAddRegRegShift
+		renvoAarch64AsmMulRegReg = sequence aarch64_beAsmMulRegReg
+		renvoAarch64AsmAddr = go aarch64_beAsmAddr
+		renvoAarch64AsmLoadRegMem = go aarch64_beAsmLoadRegMem
+		renvoAarch64AsmStoreRegMem = go aarch64_beAsmStoreRegMem
+		renvoAarch64AsmLoadRegStack = sequence aarch64_beAsmLoadRegStack
+		renvoAarch64AsmStoreRegStack = sequence aarch64_beAsmStoreRegStack
+		renvoAarch64AsmLeaRegStack = sequence aarch64_beAsmLeaRegStack
+		renvoAarch64AsmPushReg = sequence aarch64_beAsmPushReg
+		renvoAarch64AsmPopReg = sequence aarch64_beAsmPopReg
+		renvoAarch64AsmMovRaxImm = sequence aarch64_beAsmMovRaxImm
+		renvoAarch64AsmMovRaxImm64 = sequence aarch64_beAsmMovRaxImm64
+		renvoAarch64AsmMovRdxImm = sequence aarch64_beAsmMovRdxImm
+		renvoAarch64AsmMovRaxDataAddr = sequence aarch64_beAsmMovRaxDataAddr
+		renvoAarch64AsmMovRaxBssAddr = sequence aarch64_beAsmMovRaxBssAddr
+		renvoAarch64AsmMovR10BssAddr = sequence aarch64_beAsmMovR10BssAddr
+		renvoAarch64AsmLoadRaxBss = sequence aarch64_beAsmLoadRaxBss
+		renvoAarch64AsmStoreRaxBss = sequence aarch64_beAsmStoreRaxBss
+		renvoAarch64AsmMovRdiRax = sequence aarch64_beAsmMovRdiRax
+		renvoAarch64AsmMovRaxRdx = sequence aarch64_beAsmMovRaxRdx
+		renvoAarch64AsmMovRdxRax = sequence aarch64_beAsmMovRdxRax
+		renvoAarch64AsmMovRcxRax = sequence aarch64_beAsmMovRcxRax
+		renvoAarch64AsmMovRcxRdx = sequence aarch64_beAsmMovRcxRdx
+		renvoAarch64AsmMovRsiRax = sequence aarch64_beAsmMovRsiRax
+		renvoAarch64AsmMovR8Rax = sequence aarch64_beAsmMovR8Rax
+		renvoAarch64AsmMovR9Rax = sequence aarch64_beAsmMovR9Rax
+		renvoAarch64AsmAddRdxRcx = sequence aarch64_beAsmAddRdxRcx
+		renvoAarch64AsmSyscall = sequence aarch64_beAsmSyscall
+		renvoAarch64AsmPopRdi = sequence aarch64_beAsmPopRdi
+		renvoAarch64AsmPopRsi = sequence aarch64_beAsmPopRsi
+		renvoAarch64AsmStackMem = go aarch64_beAsmStackMem
+		renvoAarch64AsmAddRdxImm = sequence aarch64_beAsmAddRdxImm
+		renvoAarch64AsmMemDisp = go aarch64_beAsmMemDisp
+		renvoAarch64AsmLoadQwordRaxIndexRcx8 = sequence aarch64_beAsmLoadQwordRaxIndexRcx8
+		renvoAarch64AsmLoadQwordRaxIndexRcxDisp = sequence aarch64_beAsmLoadQwordRaxIndexRcxDisp
+		renvoAarch64AsmLoadRaxMemRdxDisp = sequence aarch64_beAsmLoadRaxMemRdxDisp
+		renvoAarch64AsmLoadRaxMemRdxDispSize = sequence aarch64_beAsmLoadRaxMemRdxDispSize
+		renvoAarch64AsmLoadByteRaxIndexRcx = sequence aarch64_beAsmLoadByteRaxIndexRcx
+		renvoAarch64AsmLoadRaxIndexRcxSize = go aarch64_beAsmLoadRaxIndexRcxSize
+		renvoAarch64AsmStoreRaxMemRdxRcx8 = sequence aarch64_beAsmStoreRaxMemRdxRcx8
+		renvoAarch64AsmStoreRaxMemRdxDisp = sequence aarch64_beAsmStoreRaxMemRdxDisp
+		renvoAarch64AsmStoreRaxMemRdxDispSize = sequence aarch64_beAsmStoreRaxMemRdxDispSize
+		renvoAarch64AsmNormalizeRaxForKind = go aarch64_beAsmNormalizeRaxForKind
+		renvoAarch64AsmIncMemRdx = sequence aarch64_beAsmIncMemRdx
+		renvoAarch64AsmDecMemRdx = sequence aarch64_beAsmDecMemRdx
+		renvoAarch64AsmBoolNotRax = sequence aarch64_beAsmBoolNotRax
+		renvoAarch64AsmNegRax = sequence aarch64_beAsmNegRax
+		renvoAarch64AsmCmpRaxImm8 = sequence aarch64_beAsmCmpRaxImm8
+		renvoAarch64AsmCmpRegImm = go aarch64_beAsmCmpRegImm
+		renvoAarch64AsmCmpRegReg = sequence aarch64_beAsmCmpRegReg
+		renvoAarch64AsmCsetRax = sequence aarch64_beAsmCsetRax
+		renvoAarch64AsmAddRaxRcx = sequence aarch64_beAsmAddRaxRcx
+		renvoAarch64AsmSubRaxRcx = sequence aarch64_beAsmSubRaxRcx
+		renvoAarch64AsmShlRcxImm = sequence aarch64_beAsmShlRcxImm
+		renvoAarch64AsmShlRaxImm = sequence aarch64_beAsmShlRaxImm
+		renvoAarch64AsmSarRaxImm = sequence aarch64_beAsmSarRaxImm
+		renvoAarch64AsmDivLeftRcxRightRax = go aarch64_beAsmDivLeftRcxRightRax
+		renvoAarch64CondFromSetcc = go aarch64_beCondFromSetcc
+		renvoAarch64AsmCmpRcxRaxSet = sequence aarch64_beAsmCmpRcxRaxSet
+		renvoAarch64AsmPushRax = sequence aarch64_beAsmPushRax
+		renvoAarch64AsmPushRcx = sequence aarch64_beAsmPushRcx
+		renvoAarch64AsmPushRdx = sequence aarch64_beAsmPushRdx
+		renvoAarch64AsmPopRax = sequence aarch64_beAsmPopRax
+		renvoAarch64AsmPopRcx = sequence aarch64_beAsmPopRcx
+		renvoAarch64AsmPopRdx = sequence aarch64_beAsmPopRdx
+		renvoAarch64AsmPushImm = sequence aarch64_beAsmPushImm
+		renvoAarch64AsmStoreSliceStack = sequence aarch64_beAsmStoreSliceStack
+		renvoAarch64AsmStoreAlMemRdxRcx1 = sequence aarch64_beAsmStoreAlMemRdxRcx1
+		renvoAarch64AsmStoreRaxMemRdxRcxSize = go aarch64_beAsmStoreRaxMemRdxRcxSize
+		renvoAarch64AsmIncRcx = sequence aarch64_beAsmIncRcx
+		renvoAarch64AsmIncRax = sequence aarch64_beAsmIncRax
+		renvoAarch64AsmImulRcxImm = sequence aarch64_beAsmImulRcxImm
+		renvoAarch64AsmLeave = sequence aarch64_beAsmLeave
+		renvoAarch64AsmRet = sequence aarch64_beAsmRet
+		renvoAarch64AsmCallLabel = sequence aarch64_beAsmCallLabel
+		renvoAarch64AsmJmpLabel = sequence aarch64_beAsmJmpLabel
+		renvoAarch64AsmBCondLabel = sequence aarch64_beAsmBCondLabel
+		renvoAarch64AsmJzLabel = sequence aarch64_beAsmJzLabel
+		renvoAarch64AsmJnzLabel = sequence aarch64_beAsmJnzLabel
+	}
+	relocation branch26 {
+		width = 4
+		signed = true
+		scale = 4
+		bits = 26
+		relative_to = instruction
+	}
+	relocation branch19 {
+		width = 4
+		signed = true
+		scale = 4
+		bits = 19
+		relative_to = instruction
+	}
+	relocation address21 {
+		width = 4
+		signed = true
+		scale = 1
+		bits = 21
+		relative_to = instruction
+	}
+	sequences {
+		aarch64_beAsmAddRaxRcx(a:emitter) {
+			aarch64_beAsmAddRegReg(a, aarch64Primary.Code, aarch64Primary.Code, aarch64Tertiary.Code)
+		}
+		aarch64_beAsmAddRdxImm(a:emitter, imm:int) {
+			aarch64_beAsmAddRegImm(a, aarch64Secondary.Code, aarch64Secondary.Code, imm)
+		}
+		aarch64_beAsmAddRdxRcx(a:emitter) {
+			aarch64_beAsmAddRegReg(a, aarch64Secondary.Code, aarch64Secondary.Code, aarch64Tertiary.Code)
+		}
+		aarch64_beAsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			aarch64_beAsmEmit(a, 0x8b000000 |(right << 16) |(left << 5) | dst)
+		}
+		aarch64_beAsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			aarch64_beAsmEmit(a, 0x8b000000 |(right << 16) |(shift << 10) |(left << 5) | dst)
+		}
+		aarch64_beAsmBoolNotRax(a:emitter) {
+			aarch64_beAsmCmpRaxImm8(a, 0)
+			aarch64_beAsmCsetRax(a, 0)
+		}
+		aarch64_beAsmCmpRaxImm8(a:emitter, imm:int) {
+			aarch64_beAsmCmpRegImm(a, aarch64Primary.Code, imm)
+		}
+		aarch64_beAsmCmpRegReg(a:emitter, left:int, right:int) {
+			aarch64_beAsmEmit(a, 0xeb00001f |(right << 16) |(left << 5))
+		}
+		aarch64_beAsmCsetRax(a:emitter, cond:int) {
+			aarch64_beAsmEmit(a, 0x9a9f07e0 |((cond ^ 1) << 12))
+		}
+		aarch64_beAsmDecMemRdx(a:emitter) {
+			aarch64_beAsmLoadRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
+			aarch64_beAsmAddRegImm(a, aarch64Scratch.Code, aarch64Scratch.Code, -1)
+			aarch64_beAsmStoreRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
+		}
+		aarch64_beAsmEmit(a:emitter, insn:int) {
+			RTGUint32(a, insn)
+		}
+		aarch64_beAsmImulRcxImm(a:emitter, imm:int) {
+			aarch64_beAsmMovRegImm(a, aarch64Scratch.Code, imm)
+			aarch64_beAsmEmit(a, 0x9b007c00 |(aarch64Scratch.Code << 16) |(aarch64Tertiary.Code << 5) | aarch64Tertiary.Code)
+		}
+		aarch64_beAsmIncMemRdx(a:emitter) {
+			aarch64_beAsmLoadRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
+			aarch64_beAsmAddRegImm(a, aarch64Scratch.Code, aarch64Scratch.Code, 1)
+			aarch64_beAsmStoreRegMem(a, aarch64Scratch.Code, aarch64Secondary.Code, 0, 8)
+		}
+		aarch64_beAsmIncRax(a:emitter) {
+			aarch64_beAsmAddRegImm(a, aarch64Primary.Code, aarch64Primary.Code, 1)
+		}
+		aarch64_beAsmIncRcx(a:emitter) {
+			aarch64_beAsmAddRegImm(a, aarch64Tertiary.Code, aarch64Tertiary.Code, 1)
+		}
+		aarch64_beAsmJnzLabel(a:emitter, label:int) {
+			aarch64_beAsmBCondLabel(a, label, 1)
+		}
+		aarch64_beAsmJzLabel(a:emitter, label:int) {
+			aarch64_beAsmBCondLabel(a, label, 0)
+		}
+		aarch64_beAsmLeaRegStack(a:emitter, dst:int, offset:int) {
+			aarch64_beAsmAddRegImm(a, dst, aarch64Frame.Code, -offset)
+		}
+		aarch64_beAsmLeave(a:emitter) {
+			aarch64_beAsmEmit(a, 0x910003bf)
+			aarch64_beAsmEmit(a, 0xa8c17bfd)
+		}
+		aarch64_beAsmLoadByteRaxIndexRcx(a:emitter) {
+			aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, 0)
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 1)
+		}
+		aarch64_beAsmLoadQwordRaxIndexRcx8(a:emitter) {
+			aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code, 3)
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
+		}
+		aarch64_beAsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			aarch64_beAsmAddRegReg(a, aarch64Address.Code, aarch64Primary.Code, aarch64Tertiary.Code)
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, disp, 8)
+		}
+		aarch64_beAsmLoadRaxBss(a:emitter, bssOff:int) {
+			aarch64_beAsmMovRegAbs(a, aarch64Address.Code, bssOff, RTGRelocationAbsoluteBSS)
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
+		}
+		aarch64_beAsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, 8)
+		}
+		aarch64_beAsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			aarch64_beAsmLoadRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, size)
+		}
+		aarch64_beAsmLoadRegStack(a:emitter, dst:int, offset:int) {
+			aarch64_beAsmLoadRegMem(a, dst, aarch64Frame.Code, -offset, 8)
+		}
+		aarch64_beAsmMovR10BssAddr(a:emitter, bssOff:int) {
+			aarch64_beAsmMovRegAbs(a, aarch64X7.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		aarch64_beAsmMovR8Rax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64X5.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMovR9Rax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64X6.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMovRaxBssAddr(a:emitter, bssOff:int) {
+			aarch64_beAsmMovRegAbs(a, aarch64Primary.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		aarch64_beAsmMovRaxDataAddr(a:emitter, dataOff:int) {
+			aarch64_beAsmMovRegAbs(a, aarch64Primary.Code, dataOff, 0)
+		}
+		aarch64_beAsmMovRaxImm(a:emitter, imm:int) {
+			aarch64_beAsmMovRegImm(a, aarch64Primary.Code, imm)
+		}
+		aarch64_beAsmMovRaxImm64(a:emitter, imm:int) {
+			aarch64_beAsmMovRaxImm(a, imm)
+		}
+		aarch64_beAsmMovRaxRdx(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64Primary.Code, aarch64Secondary.Code)
+		}
+		aarch64_beAsmMovRcxRax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64Tertiary.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMovRcxRdx(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64Tertiary.Code, aarch64Secondary.Code)
+		}
+		aarch64_beAsmMovRdiRax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64X3.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMovRdxImm(a:emitter, imm:int) {
+			aarch64_beAsmMovRegImm(a, aarch64Secondary.Code, imm)
+		}
+		aarch64_beAsmMovRdxRax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64Secondary.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMovRsiRax(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64X4.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			aarch64_beAsmEmit(a, 0x9b007c00 |(right << 16) |(left << 5) | dst)
+		}
+		aarch64_beAsmNegRax(a:emitter) {
+			aarch64_beAsmSubRegReg(a, aarch64Primary.Code, aarch64Zero.Code, aarch64Primary.Code)
+		}
+		aarch64_beAsmPopRax(a:emitter) {
+			aarch64_beAsmPopReg(a, aarch64Primary.Code)
+		}
+		aarch64_beAsmPopRcx(a:emitter) {
+			aarch64_beAsmPopReg(a, aarch64Tertiary.Code)
+		}
+		aarch64_beAsmPopRdi(a:emitter) {
+			aarch64_beAsmPopReg(a, aarch64X3.Code)
+		}
+		aarch64_beAsmPopRdx(a:emitter) {
+			aarch64_beAsmPopReg(a, aarch64Secondary.Code)
+		}
+		aarch64_beAsmPopReg(a:emitter, reg:int) {
+			aarch64_beAsmEmit(a, 0xf84107e0 | reg)
+		}
+		aarch64_beAsmPopRsi(a:emitter) {
+			aarch64_beAsmPopReg(a, aarch64X4.Code)
+		}
+		aarch64_beAsmPushImm(a:emitter, imm:int) {
+			aarch64_beAsmMovRegImm(a, aarch64Scratch.Code, imm)
+			aarch64_beAsmPushReg(a, aarch64Scratch.Code)
+		}
+		aarch64_beAsmPushRax(a:emitter) {
+			aarch64_beAsmPushReg(a, aarch64Primary.Code)
+		}
+		aarch64_beAsmPushRcx(a:emitter) {
+			aarch64_beAsmPushReg(a, aarch64Tertiary.Code)
+		}
+		aarch64_beAsmPushRdx(a:emitter) {
+			aarch64_beAsmPushReg(a, aarch64Secondary.Code)
+		}
+		aarch64_beAsmPushReg(a:emitter, reg:int) {
+			aarch64_beAsmEmit(a, 0xf81f0fe0 | reg)
+		}
+		aarch64_beAsmRet(a:emitter) {
+			aarch64_beAsmEmit(a, 0xd65f03c0)
+		}
+		aarch64_beAsmSarRaxImm(a:emitter, imm:int) {
+			aarch64_beAsmEmit(a, 0x9340fc00 |(imm << 16))
+		}
+		aarch64_beAsmShlRaxImm(a:emitter, imm:int) {
+			aarch64_beAsmEmit(a, 0xd3400000 |((64 - imm) << 16) |((63 - imm) << 10))
+		}
+		aarch64_beAsmShlRcxImm(a:emitter, imm:int) {
+			aarch64_beAsmEmit(a, 0xd3400000 |((64 - imm) << 16) |((63 - imm) << 10) |(aarch64Tertiary.Code << 5) | aarch64Tertiary.Code)
+		}
+		aarch64_beAsmStoreAlMemRdxRcx1(a:emitter) {
+			aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, 0)
+			aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 1)
+		}
+		aarch64_beAsmStoreRaxBss(a:emitter, bssOff:int) {
+			aarch64_beAsmMovRegAbs(a, aarch64Address.Code, bssOff, RTGRelocationAbsoluteBSS)
+			aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
+		}
+		aarch64_beAsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, 8)
+		}
+		aarch64_beAsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Secondary.Code, disp, size)
+		}
+		aarch64_beAsmStoreRaxMemRdxRcx8(a:emitter) {
+			aarch64_beAsmAddRegRegShift(a, aarch64Address.Code, aarch64Secondary.Code, aarch64Tertiary.Code, 3)
+			aarch64_beAsmStoreRegMem(a, aarch64Primary.Code, aarch64Address.Code, 0, 8)
+		}
+		aarch64_beAsmStoreRegStack(a:emitter, src:int, offset:int) {
+			aarch64_beAsmStoreRegMem(a, src, aarch64Frame.Code, -offset, 8)
+		}
+		aarch64_beAsmStoreSliceStack(a:emitter, offset:int) {
+			aarch64_beAsmStoreRegStack(a, aarch64Primary.Code, offset)
+			aarch64_beAsmStoreRegStack(a, aarch64Secondary.Code, offset - 8)
+			aarch64_beAsmStoreRegStack(a, aarch64Tertiary.Code, offset - 16)
+		}
+		aarch64_beAsmSubRaxRcx(a:emitter) {
+			aarch64_beAsmSubRegReg(a, aarch64Primary.Code, aarch64Primary.Code, aarch64Tertiary.Code)
+		}
+		aarch64_beAsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			aarch64_beAsmEmit(a, 0xcb000000 |(right << 16) |(left << 5) | dst)
+		}
+		aarch64_beAsmSyscall(a:emitter) {
+			aarch64_beAsmMovRegReg(a, aarch64System.Code, aarch64Primary.Code)
+			aarch64_beAsmMovRegReg(a, aarch64Scratch.Code, aarch64Secondary.Code)
+			aarch64_beAsmMovRegReg(a, 0, aarch64X3.Code)
+			aarch64_beAsmMovRegReg(a, 1, aarch64X4.Code)
+			aarch64_beAsmMovRegReg(a, 2, aarch64Scratch.Code)
+			aarch64_beAsmMovRegReg(a, 3, aarch64X7.Code)
+			aarch64_beAsmEmit(a, 0xd4000001)
+		}
+		aarch64_beAsmBCondLabel(a:emitter, label:int, cond:int) {
+			let at = a.Len()
+			aarch64_beAsmEmit(a, 0x54000000 | cond)
+			a.RelocAt(at, label)
+		}
+		aarch64_beAsmCallLabel(a:emitter, label:int) {
+			let at = a.Len()
+			aarch64_beAsmEmit(a, 0x94000000)
+			a.RelocAt(at, label)
+		}
+		aarch64_beAsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			aarch64_beAsmCmpRegReg(a, aarch64Tertiary.Code, aarch64Primary.Code)
+			let cond = aarch64_beCondFromSetcc(setcc)
+			aarch64_beAsmCsetRax(a, cond)
+		}
+		aarch64_beAsmJmpLabel(a:emitter, label:int) {
+			let at = a.Len()
+			aarch64_beAsmEmit(a, 0x14000000)
+			a.RelocAt(at, label)
+		}
+		aarch64_beAsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+			let at = a.Len()
+			aarch64_beAsmMovRegImm(a, reg, 0)
+			aarch64_beAsmEmit(a, 0xf2800000 |(1 << 21) | reg)
+			aarch64_beAsmEmit(a, 0xf2800000 |(2 << 21) | reg)
+			aarch64_beAsmEmit(a, 0xf2800000 |(3 << 21) | reg)
+			a.AbsoluteReloc(at, off, kind)
+		}
+		aarch64_beCopyBytes(out:emitter) {
+			let destination = aarch64X3
+			let source = aarch64X4
+			let count = aarch64Secondary
+			let value = aarch64Scratch2
+			let forward = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			aarch64Compare(out, destination, source)
+			aarch64JumpCondition(out, record_condition(Code:9), forward)
+			aarch64_beEmitAddress(out, aarch64Scratch, record_address(Base:source, Index:count, Scale:1,))
+			aarch64Compare(out, destination, aarch64Scratch)
+			aarch64JumpCondition(out, record_condition(Code:2), forward)
+			aarch64_beEmitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1,))
+			aarch64_beEmitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			aarch64Compare(out, count, aarch64Zero)
+			aarch64JumpCondition(out, record_condition(Code:0), done)
+			aarch64_beLoadU8(out, value, record_address(Base:source))
+			aarch64_beStoreU8(out, record_address(Base:destination), value)
+			aarch64Decrement(out, source)
+			aarch64Decrement(out, destination)
+			aarch64Decrement(out, count)
+			aarch64Jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			aarch64Compare(out, count, aarch64Zero)
+			aarch64JumpCondition(out, record_condition(Code:0), done)
+			aarch64_beLoadU8(out, value, record_address(Base:source))
+			aarch64_beStoreU8(out, record_address(Base:destination), value)
+			aarch64Increment(out, source)
+			aarch64Increment(out, destination)
+			aarch64Decrement(out, count)
+			aarch64Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+		aarch64_beFrameStart(out:emitter) -> int {
+			aarch64_beAsmEmit(out, 0xa9bf7bfd)
+			aarch64_beAsmEmit(out, 0x910003fd)
+			let at = out.Len()
+			aarch64_beAsmEmit(out, 0xd503201f)
+			aarch64_beAsmEmit(out, 0xd503201f)
+			return at
+		}
+		aarch64_beHostSyscall(out:emitter) {
+			aarch64_beAsmEmit(out, 0xd4000001)
+		}
+		aarch64_beMove(out:emitter, destination:register, source:register) {
+			aarch64_beAsmMovRegReg(out, destination.Code, source.Code)
+		}
+		aarch64_beMoveImmediate(out:emitter, destination:register, value:int64) {
+			aarch64_beAsmMovRegImm(out, destination.Code, int(value))
+		}
+		aarch64_beSetCondition(out:emitter, condition:condition, destination:register) {
+			aarch64_beAsmEmit(out, 0x9a9f07e0 |((condition.Code ^ 1) << 12) | destination.Code)
+		}
+		aarch64_beShiftLeftImmediate(out:emitter, operand:register, value:byte) {
+			let shift = int(value) & 63
+			aarch64_beAsmEmit(out, 0xd3400000 |((64 - shift) << 16) |((63 - shift) << 10) |(operand.Code << 5) | operand.Code)
+		}
+		aarch64_beShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			aarch64_beAsmEmit(out, 0x9340fc00 |((int(value) & 63) << 16) |(operand.Code << 5) | operand.Code)
+		}
+		aarch64_beShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			aarch64_beAsmEmit(out, 0xd340fc00 |((int(value) & 63) << 16) |(operand.Code << 5) | operand.Code)
+		}
+		aarch64_beEmitADR(out:emitter, destination:register, address:address) {
+			let at = out.Len()
+			aarch64_beAsmEmit(out, 0x90000000 | destination.Code)
+			aarch64_beAsmEmit(out, 0xd503201f)
+			aarch64_beAsmEmit(out, 0xd503201f)
+			aarch64_beAsmEmit(out, 0xd503201f)
+			RTGAddressRelocAt(out, address, at)
+		}
+		aarch64_beLoadI16(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 2, true)
+		}
+		aarch64_beLoadI32(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 4, true)
+		}
+		aarch64_beLoadI8(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 1, true)
+		}
+		aarch64_beLoadNative(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 8, false)
+		}
+		aarch64_beLoadU16(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 2, false)
+		}
+		aarch64_beLoadU32(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 4, false)
+		}
+		aarch64_beLoadU8(out:emitter, destination:register, address:address) {
+			aarch64_beLoadWidth(out, destination, address, 1, false)
+		}
+		aarch64_beStoreNative(out:emitter, address:address, source:register) {
+			aarch64_beStoreWidth(out, address, source, 8)
+		}
+		aarch64_beStoreU16(out:emitter, address:address, source:register) {
+			aarch64_beStoreWidth(out, address, source, 2)
+		}
+		aarch64_beStoreU32(out:emitter, address:address, source:register) {
+			aarch64_beStoreWidth(out, address, source, 4)
+		}
+		aarch64_beStoreU8(out:emitter, address:address, source:register) {
+			aarch64_beStoreWidth(out, address, source, 1)
+		}
+	}
+}
+abi aapcs64 {
+	arch = aarch64
+	frame_start = sequence aarch64_beFrameStart
+	frame_finish = go aarch64_beFrameFinish
+	push_register = go aarch64_beAapcs64PushRegister
+	push_immediate = go aarch64_beAapcs64PushImmediate
+	pop_register = go aarch64_beAapcs64PopRegister
+	unsigned_divide = go aarch64_beAapcs64UnsignedDivide
+	store_param_word = go aarch64_beAapcs64StoreParamWord
+	call_word_count = go aarch64_beAapcs64CallWordCount
+	call_words = [x3, x4, x1, x2, x5, x6]
+	arguments = [x0, x1, x2, x3, x4, x5, x6, x7]
+	result = [x0, x1]
+	stack_alignment = 16
+}
 runtime linux_aarch64_be {
-	emit_entry = go entry
+	emit_entry = go targetEntry
 	syscall {
 		number = x8
 		arguments = [x0, x1, x2, x3, x4, x5]
 		result = x0
 		instruction = svc
 	}
-	operation read { number = 63 args = [fd, buffer, count] }
-	operation write { number = 64 args = [fd, buffer, count] }
-	operation read_at { number = 67 args = [fd, buffer, count, offset] }
-	operation write_at { number = 68 args = [fd, buffer, count, offset] }
-	operation open { number = 56 args = [dirfd, path, flags, mode] }
-	operation close { number = 57 args = [fd] }
-	operation chmod { number = 52 args = [fd, mode] }
-	operation print { use = write args = [stderr, buffer, count] }
-	operation exit { number = 93 args = [status] noreturn = true }
+	operation read {
+		number = 63 args = [fd, buffer, count]
+	}
+	operation write {
+		number = 64 args = [fd, buffer, count]
+	}
+	operation read_at {
+		number = 67 args = [fd, buffer, count, offset]
+	}
+	operation write_at {
+		number = 68 args = [fd, buffer, count, offset]
+	}
+	operation open {
+		number = 56 args = [dirfd, path, flags, mode]
+	}
+	operation close {
+		number = 57 args = [fd]
+	}
+	operation chmod {
+		number = 52 args = [fd, mode]
+	}
+	operation print {
+		use = write args = [stderr, buffer, count]
+	}
+	operation exit {
+		number = 93 args = [status] noreturn = true
+	}
 }
-
 format elf_aarch64_be {
 	kind = elf
 	byte_order = big
 	address_bits = 64
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-aarch64_be {
 	family = native_v1

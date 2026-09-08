@@ -5,7 +5,11 @@
 The `linux_*.rbe` entrypoints provide experimental native Linux ELF targets.
 They compile parsed source directly to machine instructions and static ELF
 images, without a host assembler, linker, guest compiler, or guest sysroot.
-The four maintained Linux targets remain in `backend/definitions/`.
+Each Linux `.rbe` is independently maintained and self-contained: the file
+contains its selected CPU encoder, calling convention, Linux runtime, and ELF
+writer, with no `@import` dependencies. Copy one file to add or adapt that
+backend; changes to it do not affect another target's emitter. The four
+maintained Linux targets remain in `backend/definitions/`.
 
 The smoke is opt-in: its module lives under `frontend_tests/manual/`, outside
 the automatically discovered corpus tiers. CI and `tools/check` do not invoke
@@ -20,8 +24,10 @@ Run the checked-in frontend smoke on all 33 QEMU user emulators:
 ./tools/qemu-smoke/run --list
 ```
 
-The runner builds `cmd/renvo` once, compiles the same source module for each
-selected target, and compares stdout byte-for-byte with its `expected.txt`.
+The runner builds `cmd/renvo` once, copies each experimental RBE to an isolated
+temporary location with a different filename, and compiles the same source
+module for each selected target. This verifies single-file portability as well
+as comparing stdout byte-for-byte with its `expected.txt`.
 Nonzero exits, timeouts, stderr, missing emulators, and output mismatches fail
 the run. It uses a temporary directory under ignored `sandbox/` for binaries
 and guest working files, disables core dumps, and removes its temporary files.
@@ -39,10 +45,10 @@ The complete mapping lives in
 | m68k | Imported Motorola 68000 emitter |
 | sh4, sh4eb | Imported SuperH emitter |
 | riscv32, riscv64 | Maintained RV32 architecture and experimental RV64 port |
-| alpha, hexagon, hppa, loongarch64 | Shared lowering with separate ISA encoders |
-| microblaze, microblazeel, or1k | Shared lowering with separate ISA encoders |
-| ppc, ppc64, ppc64le, s390x | Shared lowering with separate ISA encoders |
-| sparc, sparc32plus, sparc64 | Shared lowering with separate ISA encoders |
+| alpha, hexagon, hppa, loongarch64 | Independent RBE with its own ISA encoder |
+| microblaze, microblazeel, or1k | Independent RBE with its own ISA encoder |
+| ppc, ppc64, ppc64le, s390x | Independent RBE with its own ISA encoder |
+| sparc, sparc32plus, sparc64 | Independent RBE with its own ISA encoder |
 | xtensa, xtensaeb | Linux ports of the maintained Xtensa CALL0 emitter |
 
 `qemu-xtensaeb` explicitly selects `-cpu test_kc705_be`, which supplies the
@@ -80,7 +86,10 @@ here does not imply validation by the Linux matrix.
 
 The MIPS, SuperH, and m68k host trap bindings were adapted for Linux. The m68k
 scratch register no longer overlaps the string comparison argument registers.
-MIPS64 and RV64 are native-width ports of the reusable MIPS32 and RV32 sources.
+The standalone Linux RBEs contain their own copies of the relevant CPU code;
+they do not import these architecture fragments. MIPS64 and RV64 are native-width
+ports of the reusable MIPS32 and RV32 sources. There is no shared Linux encoder
+or image-helper file, and no CPU selector dispatching across unrelated ISAs.
 The ARM, AArch64, and Xtensa variants originate in this repository's maintained
 architecture definitions. Big-endian Xtensa keeps canonical instruction fields
 until relocation, then converts those fields to the big-endian instruction
@@ -142,7 +151,7 @@ control-flow combinations do not yet pass the full frontend corpus. These are
 explicit bootstrap limitations, not claims that the physical CPUs provide
 32-bit semantics.
 
-## Source conventions
+### Microcontroller source conventions
 
 - Do not add an experimental target when a maintained backend already covers
   the device.

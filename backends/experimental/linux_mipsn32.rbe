@@ -1,61 +1,655 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_mipsn32
 implements direct_emitter_v1
-@import "mips32.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func entryStart(out *RTGEmitter, stateOffset int) bool {
+	var mips32MipsRelocationBase int
+	var mips32MipsBigEndian bool
+
+	func mips32MipsSetTargetCodeAddress(address int) {
+		mips32MipsRelocationBase = address
+	}
+	func mips32MipsSetBigEndian(value bool) { mips32MipsBigEndian = value }
+
+	func mips32MipsGetInstruction(out *RTGEmitter, at int) int {
+		if !mips32MipsBigEndian {
+			return RTGGet32At(out.Code(), at)
+		}
+		code := out.Code()
+		return int(code[at])<<24 | int(code[at+1])<<16 | int(code[at+2])<<8 | int(code[at+3])
+	}
+
+	func mips32MipsPatchInstruction(out *RTGEmitter, at int, value int) {
+		if !mips32MipsBigEndian {
+			out.PatchUint32(at, value)
+			return
+		}
+		code := out.Code()
+		code[at] = byte(value >> 24)
+		code[at+1] = byte(value >> 16)
+		code[at+2] = byte(value >> 8)
+		code[at+3] = byte(value)
+	}
+
+	func mips32MipsEmit(out *RTGEmitter, instruction int) {
+		if !mips32MipsBigEndian {
+			RTGUint32(out, instruction)
+			return
+		}
+		RTGByte(out, byte(instruction>>24))
+		RTGByte(out, byte(instruction>>16))
+		RTGByte(out, byte(instruction>>8))
+		RTGByte(out, byte(instruction))
+	}
+
+	func mips32MipsR(out *RTGEmitter, opcode int, source int, target int,
+		destination int, shift int, function int) {
+		mips32MipsEmit(out, (opcode<<26)|(source<<21)|(target<<16)|
+			(destination<<11)|(shift<<6)|function)
+	}
+
+	func mips32MipsI(out *RTGEmitter, opcode int, source int, target int,
+		immediate int) {
+		mips32MipsEmit(out, (opcode<<26)|(source<<21)|(target<<16)|(immediate&0xffff))
+	}
+
+	func mips32MipsMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			mips32MipsR(out, 0, source.Code, 0, destination.Code, 0, 0x21)
+		}
+	}
+
+	func mips32MipsMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value)
+		if immediate >= -32768 && immediate <= 32767 {
+			mips32MipsI(out, 0x09, 0, destination.Code, immediate)
+			return
+		}
+		mips32MipsI(out, 0x0f, 0, destination.Code, immediate>>16)
+		if immediate&0xffff != 0 {
+			mips32MipsI(out, 0x0d, destination.Code, destination.Code, immediate)
+		}
+	}
+
+	func mips32MipsEmitAddress(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := out.Len()
+			mips32MipsI(out, 0x0f, 0, destination.Code, 0)
+			mips32MipsI(out, 0x0d, destination.Code, destination.Code, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		base := value.Base
+		if !base.Valid {
+			base = mips32MipsZero()
+		}
+		if value.Index.Valid {
+			shift := RTGLog2(value.Scale)
+			mips32MipsR(out, 0, 0, value.Index.Code, mips32MipsAddress().Code, shift, 0)
+			mips32MipsR(out, 0, base.Code, mips32MipsAddress().Code,
+				destination.Code, 0, 0x21)
+			base = destination
+		}
+		if value.Displacement >= -32768 && value.Displacement <= 32767 {
+			mips32MipsI(out, 0x09, base.Code, destination.Code, value.Displacement)
+			return
+		}
+		temporary := mips32MipsAddress()
+		if destination.Code == temporary.Code || base.Code == temporary.Code {
+			temporary = mips32MipsScratch()
+		}
+		mips32MipsMoveImmediate(out, temporary, int64(value.Displacement))
+		mips32MipsR(out, 0, base.Code, temporary.Code, destination.Code, 0, 0x21)
+	}
+
+	func mips32MipsMaterializeAddress(out *RTGEmitter, value RTGAddress) RTGAddress {
+		if !RTGAddressValid(value) && !value.Index.Valid &&
+			value.Displacement >= -32768 && value.Displacement <= 32767 {
+			return value
+		}
+		mips32MipsEmitAddress(out, mips32MipsAddress(), value)
+		return RTGAddress{Base: mips32MipsAddress()}
+	}
+
+	func mips32MipsLoadWidth(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress, opcode int) {
+		value = mips32MipsMaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = mips32MipsZero()
+		}
+		mips32MipsI(out, opcode, base.Code, destination.Code, value.Displacement)
+		// MIPS I exposes a one-instruction load delay. Keeping a harmless slot
+		// here makes the shared emitter correct on the R3000A while remaining
+		// valid on Allegrex, whose interlocks make the slot unnecessary.
+		mips32MipsEmit(out, 0)
+	}
+
+	func mips32MipsStoreWidth(out *RTGEmitter, value RTGAddress,
+		source RTGRegister, opcode int) {
+		value = mips32MipsMaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = mips32MipsZero()
+		}
+		mips32MipsI(out, opcode, base.Code, source.Code, value.Displacement)
+	}
+
+	func mips32MipsLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x23)
+	}
+	func mips32MipsLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x23)
+	}
+	func mips32MipsLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x23)
+	}
+	func mips32MipsLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x21)
+	}
+	func mips32MipsLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x25)
+	}
+	func mips32MipsLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x20)
+	}
+	func mips32MipsLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mips32MipsLoadWidth(out, destination, value, 0x24)
+	}
+	func mips32MipsStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mips32MipsStoreWidth(out, value, source, 0x2b)
+	}
+	func mips32MipsStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mips32MipsStoreWidth(out, value, source, 0x2b)
+	}
+	func mips32MipsStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mips32MipsStoreWidth(out, value, source, 0x29)
+	}
+	func mips32MipsStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mips32MipsStoreWidth(out, value, source, 0x28)
+	}
+
+	func mips32MipsAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mips32MipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x21)
+	}
+	func mips32MipsSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mips32MipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x23)
+	}
+	func mips32MipsMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		// MIPS I predates the MIPS32 SPECIAL2 three-operand MUL encoding.
+		// Use the R3000A/Allegrex HI/LO sequence instead.
+		mips32MipsR(out, 0, destination.Code, source.Code, 0, 0, 0x18)
+		mips32MipsR(out, 0, 0, 0, destination.Code, 0, 0x12)
+	}
+	func mips32MipsBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mips32MipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x24)
+	}
+	func mips32MipsBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mips32MipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x25)
+	}
+	func mips32MipsBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mips32MipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x26)
+	}
+
+	func mips32MipsCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		mips32MipsMove(out, mips32MipsCompareLeft(), left)
+		mips32MipsMove(out, mips32MipsCompareRight(), right)
+	}
+	func mips32MipsTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		mips32MipsMove(out, mips32MipsCompareLeft(), left)
+		mips32MipsBitAnd(out, mips32MipsCompareLeft(), right)
+		mips32MipsMove(out, mips32MipsCompareRight(), mips32MipsZero())
+	}
+	func mips32MipsIncrement(out *RTGEmitter, operand RTGRegister) {
+		mips32MipsI(out, 0x09, operand.Code, operand.Code, 1)
+	}
+	func mips32MipsDecrement(out *RTGEmitter, operand RTGRegister) {
+		mips32MipsI(out, 0x09, operand.Code, operand.Code, -1)
+	}
+	func mips32MipsShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		mips32MipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, 0)
+	}
+	func mips32MipsShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		mips32MipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, 2)
+	}
+	func mips32MipsShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		mips32MipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, 3)
+	}
+
+	func mips32MipsCall(out *RTGEmitter, label RTGLabel) {
+		mips32MipsEmit(out, 0x0c000000)
+		out.Reloc(label)
+		mips32MipsEmit(out, 0)
+	}
+	func mips32MipsCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		mips32MipsR(out, 0, operand.Code, 0, 31, 0, 9)
+		mips32MipsEmit(out, 0)
+	}
+	func mips32MipsJump(out *RTGEmitter, label RTGLabel) {
+		mips32MipsEmit(out, 0x08000000)
+		out.Reloc(label)
+		mips32MipsEmit(out, 0)
+	}
+
+	func mips32MipsSetCondition(out *RTGEmitter, condition RTGCondition,
+		destination RTGRegister) {
+		code := condition.Code
+		left := mips32MipsCompareLeft()
+		right := mips32MipsCompareRight()
+		if code == 0 || code == 1 {
+			mips32MipsR(out, 0, left.Code, right.Code, destination.Code, 0, 0x26)
+			if code == 0 {
+				mips32MipsI(out, 0x0b, destination.Code, destination.Code, 1)
+			} else {
+				mips32MipsR(out, 0, 0, destination.Code, destination.Code, 0, 0x2b)
+			}
+			return
+		}
+		unsigned := code >= 6
+		invert := false
+		if code == 2 || code == 3 || code == 8 || code == 9 {
+			left, right = right, left
+			if code == 2 || code == 8 {
+				invert = true
+			}
+		} else {
+			if code == 5 || code == 7 {
+				invert = true
+			}
+		}
+		function := 0x2a
+		if unsigned {
+			function = 0x2b
+		}
+		mips32MipsR(out, 0, left.Code, right.Code, destination.Code, 0, function)
+		if invert {
+			mips32MipsI(out, 0x0e, destination.Code, destination.Code, 1)
+		}
+	}
+
+	func mips32MipsJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		mips32MipsSetCondition(out, condition, mips32MipsScratch())
+		// Skip J/NOP when the requested condition is false.
+		mips32MipsI(out, 4, mips32MipsScratch().Code, 0, 3)
+		mips32MipsEmit(out, 0)
+		mips32MipsEmit(out, 0x08000000)
+		out.Reloc(label)
+		mips32MipsEmit(out, 0)
+	}
+
+	func mips32MipsReturn(out *RTGEmitter) {
+		mips32MipsR(out, 0, 31, 0, 0, 0, 8)
+		mips32MipsEmit(out, 0)
+	}
+	func mips32MipsLeave(out *RTGEmitter) {
+		mips32MipsLoadWidth(out, mips32MipsLink(), RTGAddress{Base: mips32MipsFrame(), Displacement: -4}, 0x23)
+		mips32MipsLoadWidth(out, mips32MipsScratch(), RTGAddress{Base: mips32MipsFrame(), Displacement: -8}, 0x23)
+		mips32MipsMove(out, mips32MipsStack(), mips32MipsFrame())
+		mips32MipsMove(out, mips32MipsFrame(), mips32MipsScratch())
+	}
+	func mips32MipsHostSyscall(out *RTGEmitter) { mips32MipsEmit(out, 0x0000000c) }
+	func mips32MipsVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		function := 4
+		if direction == RTGShiftRight {
+			function = 6
+			if signed {
+				function = 7
+			}
+		}
+		mips32MipsR(out, 0, mips32MipsPrimary().Code, mips32MipsTertiary().Code,
+			mips32MipsPrimary().Code, 0, function)
+	}
+	func mips32MipsSignedDivide(out *RTGEmitter, remainder bool) {
+		mips32MipsR(out, 0, mips32MipsTertiary().Code, mips32MipsPrimary().Code, 0, 0, 0x1a)
+		function := 0x12
+		if remainder {
+			function = 0x10
+		}
+		mips32MipsR(out, 0, 0, 0, mips32MipsPrimary().Code, 0, function)
+	}
+
+	func mips32MipsPatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := mips32MipsRelocationBase + out.LabelPosition(out.RelocationLabel(index))
+			instruction := mips32MipsGetInstruction(out, at)
+			opcode := instruction >> 26
+			if opcode == 2 || opcode == 3 {
+				mips32MipsPatchInstruction(out, at, (instruction&0xfc000000)|((target>>2)&0x03ffffff))
+			} else {
+				if opcode == 0x0f {
+					register := (instruction >> 16) & 31
+					mips32MipsPatchInstruction(out, at, (0x0f<<26)|(register<<16)|((target>>16)&0xffff))
+					mips32MipsPatchInstruction(out, at+4, (0x0d<<26)|(register<<21)|(register<<16)|(target&0xffff))
+				}
+			}
+		}
+	}
+
+	func mips32MipsFrameStart(out *RTGEmitter) int {
+		mips32MipsMove(out, mips32MipsAddress(), mips32MipsFrame())
+		at := out.Len()
+		mips32MipsI(out, 0x0f, 0, mips32MipsScratch().Code, 0)
+		mips32MipsI(out, 0x0d, mips32MipsScratch().Code, mips32MipsScratch().Code, 0)
+		mips32MipsSubtract(out, mips32MipsStack(), mips32MipsScratch())
+		mips32MipsMove(out, mips32MipsFrame(), mips32MipsStack())
+		mips32MipsAdd(out, mips32MipsFrame(), mips32MipsScratch())
+		mips32MipsStoreWidth(out, RTGAddress{Base: mips32MipsFrame(), Displacement: -4}, mips32MipsLink(), 0x2b)
+		mips32MipsStoreWidth(out, RTGAddress{Base: mips32MipsFrame(), Displacement: -8}, mips32MipsAddress(), 0x2b)
+		return at
+	}
+	func mips32MipsFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 23) & -16
+		mips32MipsPatchInstruction(out, at, (0x0f<<26)|(mips32MipsScratch().Code<<16)|((frameSize>>16)&0xffff))
+		mips32MipsPatchInstruction(out, at+4, (0x0d<<26)|(mips32MipsScratch().Code<<21)|
+			(mips32MipsScratch().Code<<16)|(frameSize&0xffff))
+	}
+	func mips32MipsFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		mips32MipsLoadWidth(out, destination, RTGAddress{Base: mips32MipsFrame(), Displacement: -(offset + 8)}, 0x23)
+	}
+	func mips32MipsFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		mips32MipsStoreWidth(out, RTGAddress{Base: mips32MipsFrame(), Displacement: -(offset + 8)}, source, 0x2b)
+	}
+	func mips32MipsFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		mips32MipsEmitAddress(out, destination, RTGAddress{Base: mips32MipsFrame(), Displacement: -(offset + 8)})
+	}
+
+	func mips32MipsZero() RTGRegister    { return RTGRegister{Code: 0, Valid: true} }
+	func mips32MipsPrimary() RTGRegister { return RTGRegister{Code: 2, Valid: true} }
+
+	func mips32MipsTertiary() RTGRegister     { return RTGRegister{Code: 4, Valid: true} }
+	func mips32MipsScratch() RTGRegister      { return RTGRegister{Code: 8, Valid: true} }
+	func mips32MipsAddress() RTGRegister      { return RTGRegister{Code: 9, Valid: true} }
+	func mips32MipsCompareLeft() RTGRegister  { return RTGRegister{Code: 10, Valid: true} }
+	func mips32MipsCompareRight() RTGRegister { return RTGRegister{Code: 11, Valid: true} }
+	func mips32MipsStack() RTGRegister        { return RTGRegister{Code: 29, Valid: true} }
+	func mips32MipsFrame() RTGRegister        { return RTGRegister{Code: 30, Valid: true} }
+	func mips32MipsLink() RTGRegister         { return RTGRegister{Code: 31, Valid: true} }
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntryStart(out *RTGEmitter, stateOffset int) bool {
 		_ = stateOffset
-		mips32.mipsSetTargetCodeAddress(linux_elf.codeAddress)
-		mips32.mipsSetBigEndian(true)
+		mips32MipsSetTargetCodeAddress(elfCodeAddress)
+		mips32MipsSetBigEndian(true)
 		return true
 	}
-	func entry(out *RTGEmitter, count int, stateOffset int) bool {
+	func targetEntry(out *RTGEmitter, count int, stateOffset int) bool {
 		_ = out
 		_ = stateOffset
 		return count == 0
 	}
-	func syscall(out *RTGEmitter) { mips32.mipsEmit(out, 12) }
-	func image(out *RTGEmitter) []byte {
+
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
-			instruction := mips32.mipsGetInstruction(out, at)
+			instruction := mips32MipsGetInstruction(out, at)
 			register := (instruction >> 16) & 31
-			mips32.mipsPatchInstruction(out, at, (15<<26)|(register<<16)|((target>>16)&65535))
-			mips32.mipsPatchInstruction(out, at+4, (13<<26)|(register<<21)|(register<<16)|(target&65535))
+			mips32MipsPatchInstruction(out, at, (15<<26)|(register<<16)|((target>>16)&65535))
+			mips32MipsPatchInstruction(out, at+4, (13<<26)|(register<<21)|(register<<16)|(target&65535))
 		}
-		return linux_elf.image(out, 8, 0x20000020, 32, true)
+		return elfImage(out, 8, 0x20000020, 32, true)
 	}
 }
 
+arch mips32be {
+	alias = "mips32be"
+	endian = big
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 4
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go mips32MipsPatchRelocations
+	registers integer = [zero, at, v0, v1, a0, a1, a2, a3, t0, t1, t2, t3, t4, t5, t6, t7, s0, s1, s2, s3, s4, s5, s6, s7, t8, t9, k0, k1, gp, stack, frame, link]
+	locations {
+		primary = v0
+		secondary = v1
+		tertiary = a0
+		scratch = t0
+		address = t1
+		compareLeft = t2
+		compareRight = t3
+		copy_destination = a1
+		copy_source = a2
+		copy_count = a3
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go mips32MipsMove
+		address = go mips32MipsEmitAddress
+		load.native = go mips32MipsLoadNative
+		load.i32 = go mips32MipsLoadI32
+		load.u32 = go mips32MipsLoadU32
+		load.i16 = go mips32MipsLoadI16
+		load.u16 = go mips32MipsLoadU16
+		load.i8 = go mips32MipsLoadI8
+		load.u8 = go mips32MipsLoadU8
+		store.native = go mips32MipsStoreNative
+		store.u32 = go mips32MipsStoreU32
+		store.u16 = go mips32MipsStoreU16
+		store.u8 = go mips32MipsStoreU8
+		add = go mips32MipsAdd
+		subtract = go mips32MipsSubtract
+		multiply = go mips32MipsMultiply
+		bit_and = go mips32MipsBitAnd
+		bit_or = go mips32MipsBitOr
+		bit_xor = go mips32MipsBitXor
+		compare = go mips32MipsCompare
+		test = go mips32MipsTest
+		increment = go mips32MipsIncrement
+		decrement = go mips32MipsDecrement
+		shift_left_immediate = go mips32MipsShiftLeftImmediate
+		shift_right_unsigned_immediate = go mips32MipsShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go mips32MipsShiftRightSignedImmediate
+		call = go mips32MipsCall
+		call_indirect = go mips32MipsCallIndirect
+		jump = go mips32MipsJump
+		jump_condition = go mips32MipsJumpCondition
+		set_condition = go mips32MipsSetCondition
+		return = go mips32MipsReturn
+		leave = go mips32MipsLeave
+		host_syscall = go mips32MipsHostSyscall
+		move_immediate = go mips32MipsMoveImmediate
+		variable_shift = go mips32MipsVariableShift
+		signed_divide = go mips32MipsSignedDivide
+		copy_bytes = sequence mips32CopyBytesBE
+	}
+	sequences {
+		mips32CopyBytesBE(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			mips32MipsCompare(out, mips32beA1, mips32beA2)
+			mips32MipsJumpCondition(out, mips32beULT, forward)
+			mips32MipsEmitAddress(out, mips32beT0, record_address(Base:mips32beA2, Index:mips32beA3, Scale:1,))
+			mips32MipsCompare(out, mips32beA1, mips32beT0)
+			mips32MipsJumpCondition(out, mips32beUGE, forward)
+			mips32MipsEmitAddress(out, mips32beA2, record_address(Base:mips32beA2, Index:mips32beA3, Scale:1, Displacement:-1,))
+			mips32MipsEmitAddress(out, mips32beA1, record_address(Base:mips32beA1, Index:mips32beA3, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			mips32MipsCompare(out, mips32beA3, mips32beZERO)
+			mips32MipsJumpCondition(out, mips32beEQ, done)
+			mips32MipsLoadU8(out, mips32beT0, record_address(Base:mips32beA2,))
+			mips32MipsStoreU8(out, record_address(Base:mips32beA1,), mips32beT0)
+			mips32MipsDecrement(out, mips32beA2)
+			mips32MipsDecrement(out, mips32beA1)
+			mips32MipsDecrement(out, mips32beA3)
+			mips32MipsJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			mips32MipsCompare(out, mips32beA3, mips32beZERO)
+			mips32MipsJumpCondition(out, mips32beEQ, done)
+			mips32MipsLoadU8(out, mips32beT0, record_address(Base:mips32beA2,))
+			mips32MipsStoreU8(out, record_address(Base:mips32beA1,), mips32beT0)
+			mips32MipsIncrement(out, mips32beA2)
+			mips32MipsIncrement(out, mips32beA1)
+			mips32MipsDecrement(out, mips32beA3)
+			mips32MipsJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+abi mips32be_internal {
+	arch = mips32be
+	arguments = [v0, v1, a0, a1, a2, a3]
+	call_words = [v0, v1, a0, a1, a2, a3]
+	result = [v0, v1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go mips32MipsFrameStart
+	frame_finish = go mips32MipsFrameFinish
+	frame_load = go mips32MipsFrameLoad
+	frame_store = go mips32MipsFrameStore
+	frame_address = go mips32MipsFrameAddress
+}
 runtime linux_mipsn32 {
-	emit_entry_start = go entryStart
-	emit_entry = go entry
+	emit_entry_start = go targetEntryStart
+	emit_entry = go targetEntry
 	syscall {
 		number = v0
 		arguments = [a0, a1, a2, a3]
 		result = v0
 		instruction = host_syscall
 	}
-	operation read { number = 6000 args = [fd, buffer, count] }
-	operation write { number = 6001 args = [fd, buffer, count] }
-	operation open { number = 6002 args = [path, flags, mode] }
-	operation close { number = 6003 args = [fd] }
-	operation chmod { number = 6089 args = [fd, mode] }
-	operation print { use = write args = [stdout, buffer, count] }
-	operation exit { number = 6058 args = [status] noreturn = true }
+	operation read {
+		number = 6000 args = [fd, buffer, count]
+	}
+	operation write {
+		number = 6001 args = [fd, buffer, count]
+	}
+	operation open {
+		number = 6002 args = [path, flags, mode]
+	}
+	operation close {
+		number = 6003 args = [fd]
+	}
+	operation chmod {
+		number = 6089 args = [fd, mode]
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
+	operation exit {
+		number = 6058 args = [status] noreturn = true
+	}
 }
 format elf_mips {
 	kind = elf
 	byte_order = big
 	address_bits = 32
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-mipsn32 {
 	family = native_v1

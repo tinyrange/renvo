@@ -1,38 +1,530 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_riscv32
 implements direct_emitter_v1
-@import "../../backend/definitions/riscv32.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
-	func syscall(out *RTGEmitter, number int) {
-		riscv32.moveImmediate(out, RTGRegister{Code: 17, Valid: true}, int64(number))
-		riscv32.emit(out, 0x73)
+	func riscv32Emit(out *RTGEmitter, instruction int) {
+		RTGUint32(out, instruction)
 	}
-	func write(out *RTGEmitter) { syscall(out, 64) }
-	func read(out *RTGEmitter)  { syscall(out, 63) }
-	func close(out *RTGEmitter) { syscall(out, 57) }
-	func chmod(out *RTGEmitter) { syscall(out, 52) }
-	func exit(out *RTGEmitter, status RTGRegister) {
-		riscv32.move(out, RTGRegister{Code: 10, Valid: true}, status)
-		syscall(out, 93)
+
+	func riscv32EncodeR(
+		out *RTGEmitter, opcode int, funct3 int, funct7 int,
+		destination RTGRegister, left RTGRegister, right RTGRegister,
+	) {
+		riscv32Emit(out, opcode|(destination.Code<<7)|(funct3<<12)|
+			(left.Code<<15)|(right.Code<<20)|(funct7<<25))
 	}
-	func open(out *RTGEmitter) {
-		riscv32.move(out, RTGRegister{Code: 13, Valid: true}, RTGRegister{Code: 12, Valid: true})
-		riscv32.move(out, RTGRegister{Code: 12, Valid: true}, RTGRegister{Code: 11, Valid: true})
-		riscv32.move(out, RTGRegister{Code: 11, Valid: true}, RTGRegister{Code: 10, Valid: true})
-		riscv32.moveImmediate(out, RTGRegister{Code: 10, Valid: true}, -100)
-		syscall(out, 56)
+
+	func riscv32EncodeI(
+		out *RTGEmitter, opcode int, funct3 int, destination RTGRegister,
+		source RTGRegister, immediate int,
+	) {
+		riscv32Emit(out, opcode|(destination.Code<<7)|(funct3<<12)|
+			(source.Code<<15)|((immediate&0xfff)<<20))
 	}
-	func image(out *RTGEmitter) []byte {
+
+	func riscv32EncodeS(
+		out *RTGEmitter, funct3 int, base RTGRegister,
+		source RTGRegister, immediate int,
+	) {
+		value := immediate & 0xfff
+		riscv32Emit(out, 0x23|((value&0x1f)<<7)|(funct3<<12)|
+			(base.Code<<15)|(source.Code<<20)|((value>>5)<<25))
+	}
+
+	func riscv32EncodeU(out *RTGEmitter, opcode int, destination RTGRegister, immediate int) {
+		riscv32Emit(out, opcode|(destination.Code<<7)|(immediate&0xfffff000))
+	}
+
+	func riscv32Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			riscv32EncodeI(out, 0x13, 0, destination, source, 0)
+		}
+	}
+
+	func riscv32MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value)
+		hi := (immediate + 0x800) >> 12
+		lo := immediate - (hi << 12)
+		if hi == 0 {
+			riscv32EncodeI(out, 0x13, 0, destination, riscv32ZERO, lo)
+			return
+		}
+		riscv32EncodeU(out, 0x37, destination, hi<<12)
+		riscv32EncodeI(out, 0x13, 0, destination, destination, lo)
+	}
+
+	func riscv32EmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := out.Len()
+			// Materialize code addresses relative to the current PC. Besides being
+			// position independent, AUIPC keeps the architecture definition free of
+			// a board-specific text base.
+			riscv32EncodeU(out, 0x17, destination, 0)
+			riscv32EncodeI(out, 0x13, 0, destination, destination, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		base := value.Base
+		if !base.Valid {
+			base = riscv32ZERO
+		}
+		if value.Index.Valid {
+			shift := RTGLog2(value.Scale)
+			riscv32EncodeI(out, 0x13, 1, riscv32Address, value.Index, shift)
+			riscv32EncodeR(out, 0x33, 0, 0, destination, base, riscv32Address)
+			base = destination
+		}
+		if value.Displacement >= -2048 && value.Displacement <= 2047 {
+			riscv32EncodeI(out, 0x13, 0, destination, base, value.Displacement)
+			return
+		}
+		riscv32MoveImmediate(out, riscv32Address, int64(value.Displacement))
+		riscv32EncodeR(out, 0x33, 0, 0, destination, base, riscv32Address)
+	}
+
+	func riscv32MaterializeAddress(out *RTGEmitter, value RTGAddress) RTGAddress {
+		if !RTGAddressValid(value) && !value.Index.Valid &&
+			value.Displacement >= -2048 && value.Displacement <= 2047 {
+			return value
+		}
+		riscv32EmitAddress(out, riscv32Address, value)
+		return RTGAddress{Base: riscv32Address}
+	}
+
+	func riscv32LoadWidth(
+		out *RTGEmitter, destination RTGRegister, value RTGAddress,
+		funct3 int,
+	) {
+		value = riscv32MaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = riscv32ZERO
+		}
+		riscv32EncodeI(out, 0x03, funct3, destination, base, value.Displacement)
+	}
+
+	func riscv32StoreWidth(
+		out *RTGEmitter, value RTGAddress, source RTGRegister, funct3 int,
+	) {
+		value = riscv32MaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = riscv32ZERO
+		}
+		riscv32EncodeS(out, funct3, base, source, value.Displacement)
+	}
+
+	func riscv32LoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 2)
+	}
+	func riscv32LoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 2)
+	}
+	func riscv32LoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 2)
+	}
+	func riscv32LoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 1)
+	}
+	func riscv32LoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 5)
+	}
+	func riscv32LoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 0)
+	}
+	func riscv32LoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		riscv32LoadWidth(out, destination, value, 4)
+	}
+	func riscv32StoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		riscv32StoreWidth(out, value, source, 2)
+	}
+	func riscv32StoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		riscv32StoreWidth(out, value, source, 2)
+	}
+	func riscv32StoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		riscv32StoreWidth(out, value, source, 1)
+	}
+	func riscv32StoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		riscv32StoreWidth(out, value, source, 0)
+	}
+
+	func riscv32Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 0, 0, destination, destination, source)
+	}
+	func riscv32Subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 0, 0x20, destination, destination, source)
+	}
+	func riscv32Multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 0, 1, destination, destination, source)
+	}
+	func riscv32BitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 7, 0, destination, destination, source)
+	}
+	func riscv32BitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 6, 0, destination, destination, source)
+	}
+	func riscv32BitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		riscv32EncodeR(out, 0x33, 4, 0, destination, destination, source)
+	}
+
+	func riscv32Compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		riscv32Move(out, riscv32CompareLeft, left)
+		riscv32Move(out, riscv32CompareRight, right)
+	}
+	func riscv32Test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		riscv32Move(out, riscv32CompareLeft, left)
+		riscv32BitAnd(out, riscv32CompareLeft, right)
+		riscv32Move(out, riscv32CompareRight, riscv32ZERO)
+	}
+
+	func riscv32Increment(out *RTGEmitter, operand RTGRegister) {
+		riscv32EncodeI(out, 0x13, 0, operand, operand, 1)
+	}
+	func riscv32Decrement(out *RTGEmitter, operand RTGRegister) {
+		riscv32EncodeI(out, 0x13, 0, operand, operand, -1)
+	}
+	func riscv32ShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		riscv32EncodeI(out, 0x13, 1, operand, operand, int(value)&31)
+	}
+	func riscv32ShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		riscv32EncodeI(out, 0x13, 5, operand, operand, int(value)&31)
+	}
+	func riscv32ShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		riscv32EncodeI(out, 0x13, 5, operand, operand, (int(value)&31)|0x400)
+	}
+
+	func riscv32EmitJAL(out *RTGEmitter, destination RTGRegister, label RTGLabel) {
+		riscv32Emit(out, 0x6f|(destination.Code<<7))
+		out.Reloc(label)
+	}
+	func riscv32Call(out *RTGEmitter, label RTGLabel) {
+		// JAL only reaches +/-1 MiB, which large Forms/terminal images exceed.
+		// Reserve an AUIPC/JALR pair so relocation keeps the full PC-relative
+		// displacement. ra is call-clobbered already; using it as the temporary
+		// leaves arguments and every other live register untouched. JALR reads
+		// its base before replacing ra with the return address after the pair.
+		riscv32EncodeU(out, 0x17, riscv32LINK, 0)
+		out.Reloc(label)
+		riscv32EncodeI(out, 0x67, 0, riscv32LINK, riscv32LINK, 0)
+	}
+	func riscv32CallIndirect(out *RTGEmitter, operand RTGRegister) {
+		riscv32EncodeI(out, 0x67, 0, riscv32LINK, operand, 0)
+	}
+	func riscv32Jump(out *RTGEmitter, label RTGLabel) {
+		riscv32EmitJAL(out, riscv32ZERO, label)
+	}
+
+	func riscv32BranchInstruction(
+		out *RTGEmitter, funct3 int, left RTGRegister,
+		right RTGRegister, displacement int,
+	) {
+		value := displacement
+		instruction := 0x63 | (funct3 << 12) | (left.Code << 15) | (right.Code << 20)
+		instruction |= ((value >> 12) & 1) << 31
+		instruction |= ((value >> 5) & 0x3f) << 25
+		instruction |= ((value >> 1) & 0xf) << 8
+		instruction |= ((value >> 11) & 1) << 7
+		riscv32Emit(out, instruction)
+	}
+
+	func riscv32JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		// Skip the long-range JAL when the inverse condition is true. This keeps
+		// every compiler-generated conditional branch independent of function size.
+		code := condition.Code
+		left := riscv32CompareLeft
+		right := riscv32CompareRight
+		inverse := code ^ 1
+		if code == 2 || code == 3 || code == 8 || code == 9 {
+			// RISC-V has no <= or > branch opcodes. Express signed and
+			// unsigned forms by swapping operands.
+			left = riscv32CompareRight
+			right = riscv32CompareLeft
+			if code == 2 {
+				inverse = 4
+			} else {
+				if code == 3 {
+					inverse = 5
+				} else {
+					if code == 8 {
+						inverse = 6
+					} else {
+						inverse = 7
+					}
+				}
+			}
+		}
+		riscv32BranchInstruction(out, inverse, left, right, 8)
+		riscv32EmitJAL(out, riscv32ZERO, label)
+	}
+
+	func riscv32SetCondition(
+		out *RTGEmitter, condition RTGCondition, destination RTGRegister,
+	) {
+		code := condition.Code
+		if code == 0 || code == 1 {
+			riscv32EncodeR(out, 0x33, 4, 0, destination, riscv32CompareLeft, riscv32CompareRight)
+			if code == 0 {
+				riscv32EncodeI(out, 0x13, 3, destination, destination, 1)
+			} else {
+				riscv32EncodeR(out, 0x33, 3, 0, destination, riscv32ZERO, destination)
+			}
+			return
+		}
+		left := riscv32CompareLeft
+		right := riscv32CompareRight
+		invert := false
+		unsigned := code >= 6
+		if code == 4 || code == 6 {
+			// slt/ult
+		} else {
+			if code == 5 || code == 7 {
+				invert = true
+			} else {
+				if code == 2 || code == 3 || code == 8 || code == 9 {
+					// Greater-than forms compare in reverse.
+					left = riscv32CompareRight
+					right = riscv32CompareLeft
+					if code == 2 || code == 8 {
+						invert = true
+					}
+				}
+			}
+		}
+		funct3 := 2
+		if unsigned {
+			funct3 = 3
+		}
+		riscv32EncodeR(out, 0x33, funct3, 0, destination, left, right)
+		if invert {
+			riscv32EncodeI(out, 0x13, 4, destination, destination, 1)
+		}
+	}
+
+	func riscv32Ret(out *RTGEmitter) {
+		riscv32EncodeI(out, 0x67, 0, riscv32ZERO, riscv32LINK, 0)
+	}
+	func riscv32Leave(out *RTGEmitter) {
+		riscv32LoadWidth(out, riscv32LINK, RTGAddress{Base: riscv32FRAME, Displacement: -4}, 2)
+		riscv32LoadWidth(out, riscv32Scratch, RTGAddress{Base: riscv32FRAME, Displacement: -8}, 2)
+		riscv32Move(out, riscv32STACK, riscv32FRAME)
+		riscv32Move(out, riscv32FRAME, riscv32Scratch)
+	}
+
+	func riscv32HostSyscall(out *RTGEmitter) {
+		// Freestanding targets have no host syscall instruction.
+		riscv32Emit(out, 0x00100073)
+	}
+
+	func riscv32VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		funct3 := 1
+		funct7 := 0
+		if direction == RTGShiftRight {
+			funct3 = 5
+			if signed {
+				funct7 = 0x20
+			}
+		}
+		// The expression emitter leaves the shift count in primary and the
+		// value in tertiary. RISC-V names both sources explicitly, unlike x86's
+		// implicit count register, so preserve that operand order here.
+		riscv32EncodeR(out, 0x33, funct3, funct7, riscv32Primary, riscv32Tertiary, riscv32Primary)
+	}
+	func riscv32SignedDivide(out *RTGEmitter, remainder bool) {
+		funct3 := 4
+		if remainder {
+			funct3 = 6
+		}
+		riscv32EncodeR(out, 0x33, funct3, 1, riscv32Primary, riscv32Tertiary, riscv32Primary)
+	}
+
+	func riscv32PatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := out.LabelPosition(out.RelocationLabel(index))
+			delta := target - at
+			instruction := RTGGet32At(out.Code(), at)
+			if instruction&0x7f == 0x6f {
+				instruction &= 0x00000fff
+				instruction |= ((delta >> 20) & 1) << 31
+				instruction |= ((delta >> 1) & 0x3ff) << 21
+				instruction |= ((delta >> 11) & 1) << 20
+				instruction |= ((delta >> 12) & 0xff) << 12
+				out.PatchUint32(at, instruction)
+			} else {
+				if instruction&0x7f == 0x17 {
+					// Both code addresses (ADDI) and calls (JALR) use AUIPC.
+					// Preserve the second instruction's opcode/registers while patching
+					// its signed low immediate, including the carry into the high part.
+					register := (instruction >> 7) & 31
+					hi := (delta + 0x800) >> 12
+					lo := delta - (hi << 12)
+					out.PatchUint32(at, 0x17|(register<<7)|(hi<<12))
+					next := RTGGet32At(out.Code(), at+4) & 0x000fffff
+					out.PatchUint32(at+4, next|((lo&0xfff)<<20))
+				}
+			}
+		}
+	}
+
+	func riscv32FrameStart(out *RTGEmitter) int {
+		// Preserve the incoming frame pointer while the final frame size is still
+		// unknown. Local slots are biased by eight bytes below these saves.
+		riscv32Move(out, riscv32Address, riscv32FRAME)
+		at := out.Len()
+		riscv32EncodeU(out, 0x37, riscv32Scratch, 0)
+		riscv32EncodeI(out, 0x13, 0, riscv32Scratch, riscv32Scratch, 0)
+		riscv32Subtract(out, riscv32STACK, riscv32Scratch)
+		riscv32Move(out, riscv32FRAME, riscv32STACK)
+		riscv32Add(out, riscv32FRAME, riscv32Scratch)
+		riscv32StoreWidth(out, RTGAddress{Base: riscv32FRAME, Displacement: -4}, riscv32LINK, 2)
+		riscv32StoreWidth(out, RTGAddress{Base: riscv32FRAME, Displacement: -8}, riscv32Address, 2)
+		return at
+	}
+
+	func riscv32FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 23) & -16
+		hi := (frameSize + 0x800) >> 12
+		lo := frameSize - (hi << 12)
+		out.PatchUint32(at, 0x37|(riscv32Scratch.Code<<7)|(hi<<12))
+		out.PatchUint32(at+4, 0x13|(riscv32Scratch.Code<<7)|(riscv32Scratch.Code<<15)|((lo&0xfff)<<20))
+	}
+
+	func riscv32FrameLoad(
+		out *RTGEmitter, destination RTGRegister, offset int,
+	) {
+		riscv32LoadWidth(out, destination,
+			RTGAddress{Base: riscv32FRAME, Displacement: -(offset + 8)}, 2)
+	}
+	func riscv32FrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		riscv32StoreWidth(out, RTGAddress{Base: riscv32FRAME, Displacement: -(offset + 8)}, source, 2)
+	}
+	func riscv32FrameAddress(
+		out *RTGEmitter, destination RTGRegister, offset int,
+	) {
+		riscv32EmitAddress(out, destination,
+			RTGAddress{Base: riscv32FRAME, Displacement: -(offset + 8)})
+	}
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func targetSyscall(out *RTGEmitter, number int) {
+		riscv32MoveImmediate(out, RTGRegister{Code: 17, Valid: true}, int64(number))
+		riscv32Emit(out, 0x73)
+	}
+	func targetWrite(out *RTGEmitter) { targetSyscall(out, 64) }
+	func targetRead(out *RTGEmitter)  { targetSyscall(out, 63) }
+	func targetClose(out *RTGEmitter) { targetSyscall(out, 57) }
+	func targetChmod(out *RTGEmitter) { targetSyscall(out, 52) }
+	func targetExit(out *RTGEmitter, status RTGRegister) {
+		riscv32Move(out, RTGRegister{Code: 10, Valid: true}, status)
+		targetSyscall(out, 93)
+	}
+	func targetOpen(out *RTGEmitter) {
+		riscv32Move(out, RTGRegister{Code: 13, Valid: true}, RTGRegister{Code: 12, Valid: true})
+		riscv32Move(out, RTGRegister{Code: 12, Valid: true}, RTGRegister{Code: 11, Valid: true})
+		riscv32Move(out, RTGRegister{Code: 11, Valid: true}, RTGRegister{Code: 10, Valid: true})
+		riscv32MoveImmediate(out, RTGRegister{Code: 10, Valid: true}, -100)
+		targetSyscall(out, 56)
+	}
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
-			delta := target - linux_elf.codeAddress - at
+			delta := target - elfCodeAddress - at
 			hi := (delta + 0x800) >> 12
 			lo := delta - (hi << 12)
 			instruction := RTGGet32At(out.Code(), at)
@@ -40,26 +532,165 @@ go backend {
 			next := RTGGet32At(out.Code(), at+4)
 			out.PatchUint32(at+4, (next&0xfffff)|((lo&0xfff)<<20))
 		}
-		return linux_elf.image(out, 243, 0, 32, false)
+		return elfImage(out, 243, 0, 32, false)
 	}
 }
 
+arch riscv32 {
+	alias = "riscv32"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 4
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go riscv32PatchRelocations
+	registers integer = [zero, link, stack, gp, tp, t0, t1, t2, frame, s1, a0, a1, a2, a3, a4, a5, a6, a7, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, t3, t4, t5, t6]
+	locations {
+		primary = a0
+		secondary = a1
+		tertiary = a2
+		scratch = t0
+		address = t6
+		compareLeft = t3
+		compareRight = t4
+		copy_destination = a3
+		copy_source = a4
+		copy_count = a5
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go riscv32Move
+		address = go riscv32EmitAddress
+		load.native = go riscv32LoadNative
+		load.i32 = go riscv32LoadI32
+		load.u32 = go riscv32LoadU32
+		load.i16 = go riscv32LoadI16
+		load.u16 = go riscv32LoadU16
+		load.i8 = go riscv32LoadI8
+		load.u8 = go riscv32LoadU8
+		store.native = go riscv32StoreNative
+		store.u32 = go riscv32StoreU32
+		store.u16 = go riscv32StoreU16
+		store.u8 = go riscv32StoreU8
+		add = go riscv32Add
+		subtract = go riscv32Subtract
+		multiply = go riscv32Multiply
+		bit_and = go riscv32BitAnd
+		bit_or = go riscv32BitOr
+		bit_xor = go riscv32BitXor
+		compare = go riscv32Compare
+		test = go riscv32Test
+		increment = go riscv32Increment
+		decrement = go riscv32Decrement
+		shift_left_immediate = go riscv32ShiftLeftImmediate
+		shift_right_unsigned_immediate = go riscv32ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go riscv32ShiftRightSignedImmediate
+		call = go riscv32Call
+		call_indirect = go riscv32CallIndirect
+		jump = go riscv32Jump
+		jump_condition = go riscv32JumpCondition
+		set_condition = go riscv32SetCondition
+		return = go riscv32Ret
+		leave = go riscv32Leave
+		host_syscall = go riscv32HostSyscall
+		move_immediate = go riscv32MoveImmediate
+		variable_shift = go riscv32VariableShift
+		signed_divide = go riscv32SignedDivide
+		copy_bytes = sequence riscv32CopyBytes
+	}
+	sequences {
+		riscv32CopyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			riscv32Compare(out, riscv32CopyDestination, riscv32CopySource)
+			riscv32JumpCondition(out, riscv32ULT, forward)
+			riscv32EmitAddress(out, riscv32Scratch, record_address(Base:riscv32CopySource, Index:riscv32CopyCount, Scale:1,))
+			riscv32Compare(out, riscv32CopyDestination, riscv32Scratch)
+			riscv32JumpCondition(out, riscv32UGE, forward)
+			riscv32EmitAddress(out, riscv32CopySource, record_address(Base:riscv32CopySource, Index:riscv32CopyCount, Scale:1, Displacement:-1,))
+			riscv32EmitAddress(out, riscv32CopyDestination, record_address(Base:riscv32CopyDestination, Index:riscv32CopyCount, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			riscv32Compare(out, riscv32CopyCount, riscv32ZERO)
+			riscv32JumpCondition(out, riscv32EQ, done)
+			riscv32LoadU8(out, riscv32Scratch, record_address(Base:riscv32CopySource,))
+			riscv32StoreU8(out, record_address(Base:riscv32CopyDestination,), riscv32Scratch)
+			riscv32Decrement(out, riscv32CopySource)
+			riscv32Decrement(out, riscv32CopyDestination)
+			riscv32Decrement(out, riscv32CopyCount)
+			riscv32Jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			riscv32Compare(out, riscv32CopyCount, riscv32ZERO)
+			riscv32JumpCondition(out, riscv32EQ, done)
+			riscv32LoadU8(out, riscv32Scratch, record_address(Base:riscv32CopySource,))
+			riscv32StoreU8(out, record_address(Base:riscv32CopyDestination,), riscv32Scratch)
+			riscv32Increment(out, riscv32CopySource)
+			riscv32Increment(out, riscv32CopyDestination)
+			riscv32Decrement(out, riscv32CopyCount)
+			riscv32Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+abi riscv32_internal {
+	arch = riscv32
+	arguments = [a0, a1, a2, a3, a4, a5]
+	call_words = [a0, a1, a2, a3, a4, a5]
+	result = [a0, a1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go riscv32FrameStart
+	frame_finish = go riscv32FrameFinish
+	frame_load = go riscv32FrameLoad
+	frame_store = go riscv32FrameStore
+	frame_address = go riscv32FrameAddress
+}
 runtime linux_riscv32 {
-	emit_entry = go entry
-	emit_exit = go exit
-	operation write { emit = go write }
-	operation read { emit = go read }
-	operation open { emit = go open }
-	operation close { emit = go close }
-	operation chmod { emit = go chmod }
-	operation print { use = write args = [stdout, buffer, count] }
+	emit_entry = go targetEntry
+	emit_exit = go targetExit
+	operation write {
+		emit = go targetWrite
+	}
+	operation read {
+		emit = go targetRead
+	}
+	operation open {
+		emit = go targetOpen
+	}
+	operation close {
+		emit = go targetClose
+	}
+	operation chmod {
+		emit = go targetChmod
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
 }
 format elf_riscv32 {
 	kind = elf
 	byte_order = little
 	address_bits = 32
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-riscv32 {
 	family = native_v1

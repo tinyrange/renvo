@@ -1,57 +1,861 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_xtensa
 implements direct_emitter_v1
-@import "xtensa_linux.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func start(out *RTGEmitter, state int) bool            { _ = out; _ = state; return true }
-	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
-	func syscall(out *RTGEmitter, n int) {
-		xtensa_linux.move(out, xtensa_linux.a6, xtensa_linux.primary)
-		xtensa_linux.moveImmediate(out, xtensa_linux.primary, int64(n))
-		xtensa_linux.hostSyscall(out)
+	func xtensa_linuxUnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		op := 0xc2
+		if remainder {
+			op = 0xe2
+		}
+		xtensa_linuxEncodeRRR(out, op, xtensa_lx7Primary, xtensa_lx7Tertiary, xtensa_lx7Primary)
+		return true
 	}
-	func write(out *RTGEmitter) { syscall(out, 13) }
-	func read(out *RTGEmitter)  { syscall(out, 12) }
-	func open(out *RTGEmitter)  { syscall(out, 8) }
-	func close(out *RTGEmitter) { syscall(out, 9) }
-	func chmod(out *RTGEmitter) { syscall(out, 52) }
-	func exit(out *RTGEmitter, status RTGRegister) {
-		xtensa_linux.move(out, xtensa_linux.primary, status)
-		syscall(out, 118)
+	func xtensa_linuxEmit(out *RTGEmitter, instruction int) {
+		out.Uint24(instruction)
 	}
-	func image(out *RTGEmitter) []byte {
+
+	func xtensa_linuxEncodeRRR(
+		out *RTGEmitter, operation int, destination RTGRegister,
+		left RTGRegister, right RTGRegister,
+	) {
+		xtensa_linuxEmit(out, (operation<<16)|(destination.Code<<12)|
+			(left.Code<<8)|(right.Code<<4))
+	}
+
+	func xtensa_linuxEncodeRRI8(
+		out *RTGEmitter, operation int, register RTGRegister,
+		base RTGRegister, immediate int,
+	) {
+		xtensa_linuxEmit(out, ((immediate&0xff)<<16)|(operation<<12)|
+			(base.Code<<8)|(register.Code<<4)|2)
+	}
+
+	func xtensa_linuxMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			xtensa_linuxEncodeRRR(out, 0x20, destination, source, source)
+		}
+	}
+
+	func xtensa_linuxMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		remaining := value
+		var digits []int
+		for remaining < -128 || remaining > 127 {
+			digit := int(remaining & 255)
+			if digit >= 128 {
+				digit -= 256
+			}
+			digits = append(digits, digit)
+			remaining = (remaining - int64(digit)) >> 8
+		}
+		digits = append(digits, int(remaining))
+		top := digits[len(digits)-1]
+		xtensa_linuxEmit(out, ((top&0xff)<<16)|(((top>>8)&15)<<8)|
+			(destination.Code<<4)|0xa002)
+		for index := len(digits) - 2; index >= 0; index-- {
+			xtensa_linuxShiftLeftImmediate(out, destination, 8)
+			digit := digits[index]
+			if digit != 0 {
+				xtensa_linuxEmit(out, ((digit&0xff)<<16)|(destination.Code<<8)|
+					(destination.Code<<4)|0xc002)
+			}
+		}
+	}
+
+	func xtensa_linuxFixedImmediateBytes(destination RTGRegister, value int64) []byte {
+		remaining := value
+		digits := make([]int, 4)
+		for index := 0; index < 3; index++ {
+			digit := int(remaining & 255)
+			if digit >= 128 {
+				digit -= 256
+			}
+			digits[index] = digit
+			remaining = (remaining - int64(digit)) >> 8
+		}
+		digits[3] = int(remaining)
+		var result []byte
+		appendInstruction := func(instruction int) {
+			result = append(result, byte(instruction), byte(instruction>>8),
+				byte(instruction>>16))
+		}
+		top := digits[3]
+		appendInstruction(((top & 0xff) << 16) | (((top >> 8) & 15) << 8) |
+			(destination.Code << 4) | 0xa002)
+		for index := 2; index >= 0; index-- {
+			encoded := (32 - 8) & 31
+			appendInstruction(0x010000 | (destination.Code << 12) |
+				(destination.Code << 8) | ((encoded & 15) << 4) | ((encoded >> 4) << 20))
+			digit := digits[index]
+			appendInstruction(((digit & 0xff) << 16) | (destination.Code << 8) |
+				(destination.Code << 4) | 0xc002)
+		}
+		appendInstruction((destination.Code << 8) | (destination.Code << 4) | 0xc002)
+		return result
+	}
+
+	func xtensa_linuxEmitFixedImmediate(
+		out *RTGEmitter, destination RTGRegister, value int64,
+	) int {
+		at := out.Len()
+		code := xtensa_linuxFixedImmediateBytes(destination, value)
+		for index := 0; index < len(code); index++ {
+			out.Byte(int(code[index]))
+		}
+		return at
+	}
+
+	func xtensa_linuxPatchFixedImmediate(
+		out *RTGEmitter, at int, destination RTGRegister, value int64,
+	) {
+		code := xtensa_linuxFixedImmediateBytes(destination, value)
+		for offset := 0; offset < 24; offset += 4 {
+			out.PatchUint32(at+offset, RTGGet32At(code, offset))
+		}
+	}
+
+	func xtensa_linuxShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		shift := int(value) & 31
+		encoded := (32 - shift) & 31
+		xtensa_linuxEmit(out, 0x010000|(operand.Code<<12)|(operand.Code<<8)|
+			((encoded&15)<<4)|((encoded>>4)<<20))
+	}
+
+	func xtensa_linuxShiftRightUnsignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		shift := int(value) & 31
+		for shift > 15 {
+			xtensa_linuxEmit(out, 0x410000|(operand.Code<<12)|(15<<8)|(operand.Code<<4))
+			shift -= 15
+		}
+		if shift != 0 {
+			xtensa_linuxEmit(out, 0x410000|(operand.Code<<12)|(shift<<8)|(operand.Code<<4))
+		}
+	}
+
+	func xtensa_linuxShiftRightSignedImmediate(
+		out *RTGEmitter, operand RTGRegister, value byte,
+	) {
+		shift := int(value) & 31
+		xtensa_linuxEmit(out, 0x210000|(operand.Code<<12)|(operand.Code<<4)|
+			((shift&15)<<8)|((shift>>4)<<20))
+	}
+
+	func xtensa_linuxAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0x80, destination, destination, source)
+	}
+	func xtensa_linuxSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0xc0, destination, destination, source)
+	}
+	func xtensa_linuxMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0x82, destination, destination, source)
+	}
+	func xtensa_linuxBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0x10, destination, destination, source)
+	}
+	func xtensa_linuxBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0x20, destination, destination, source)
+	}
+	func xtensa_linuxBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		xtensa_linuxEncodeRRR(out, 0x30, destination, destination, source)
+	}
+
+	func xtensa_linuxIncrement(out *RTGEmitter, operand RTGRegister) {
+		xtensa_linuxEmit(out, (1<<16)|(operand.Code<<8)|(operand.Code<<4)|0xc002)
+	}
+	func xtensa_linuxDecrement(out *RTGEmitter, operand RTGRegister) {
+		xtensa_linuxEmit(out, (0xff<<16)|(operand.Code<<8)|(operand.Code<<4)|0xc002)
+	}
+
+	func xtensa_linuxEmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			if value.Kind != 0 {
+				at := xtensa_linuxEmitFixedImmediate(out, destination, 0)
+				RTGAddressRelocAt(out, value, at)
+				return
+			}
+			// CALL0 is the one architectural way to obtain the current PC. Use a
+			// local aligned landing pad, then add a linker-patched delta.
+			landing := out.NewLabel()
+			xtensa_linuxMove(out, xtensa_lx7A12, xtensa_lx7Link)
+			xtensa_linuxCallDirect(out, landing)
+			for out.Len()&3 != 0 {
+				out.Byte(0)
+			}
+			out.Mark(landing)
+			xtensa_linuxMove(out, destination, xtensa_lx7Link)
+			xtensa_linuxMove(out, xtensa_lx7Link, xtensa_lx7A12)
+			at := xtensa_linuxEmitFixedImmediate(out, xtensa_lx7Address, 0)
+			RTGAddressRelocAt(out, value, at)
+			xtensa_linuxAdd(out, destination, xtensa_lx7Address)
+			return
+		}
+
+		if value.Index.Valid {
+			result := destination
+			if destination.Code == value.Base.Code {
+				result = xtensa_lx7A13
+			}
+			xtensa_linuxMove(out, result, value.Index)
+			shift := RTGLog2(value.Scale)
+			if shift != 0 {
+				xtensa_linuxShiftLeftImmediate(out, result, byte(shift))
+			}
+			if value.Base.Valid {
+				xtensa_linuxAdd(out, result, value.Base)
+			}
+			if result.Code != destination.Code {
+				xtensa_linuxMove(out, destination, result)
+			}
+		} else {
+			if value.Base.Valid {
+				xtensa_linuxMove(out, destination, value.Base)
+			} else {
+				xtensa_linuxMoveImmediate(out, destination, 0)
+			}
+		}
+		if value.Displacement != 0 {
+			if value.Displacement >= -128 && value.Displacement <= 127 {
+				xtensa_linuxEmit(out, ((value.Displacement&0xff)<<16)|
+					(destination.Code<<8)|(destination.Code<<4)|0xc002)
+			} else {
+				// a13 is reserved for address construction so materializing a
+				// store address never destroys the value being stored.
+				temporary := xtensa_lx7A13
+				xtensa_linuxMoveImmediate(out, temporary, int64(value.Displacement))
+				xtensa_linuxAdd(out, destination, temporary)
+			}
+		}
+	}
+
+	func xtensa_linuxOffsetFits(value RTGAddress, width int) bool {
+		return value.Base.Valid && !value.Index.Valid && value.Displacement >= 0 &&
+			value.Displacement%width == 0 && value.Displacement/width <= 255
+	}
+
+	func xtensa_linuxMaterializeAddress(
+		out *RTGEmitter, value RTGAddress, width int,
+	) RTGAddress {
+		if !RTGAddressValid(value) && xtensa_linuxOffsetFits(value, width) {
+			return value
+		}
+		xtensa_linuxEmitAddress(out, xtensa_lx7Address, value)
+		return RTGAddress{Base: xtensa_lx7Address}
+	}
+
+	func xtensa_linuxLoadWidth(
+		out *RTGEmitter, destination RTGRegister, value RTGAddress,
+		width int, operation int,
+	) {
+		if width == 1 {
+			value = xtensa_linuxMaterializeAddress(out, value, width)
+			xtensa_linuxEncodeRRI8(out, operation, destination, value.Base, value.Displacement)
+			return
+		}
+		xtensa_linuxEmitAddress(out, xtensa_lx7Address, value)
+		xtensa_linuxMove(out, xtensa_lx7A13, xtensa_lx7Address)
+		xtensa_linuxMoveImmediate(out, destination, 0)
+		for i := width - 1; i >= 0; i-- {
+			xtensa_linuxEncodeRRI8(out, 0, xtensa_lx7A14, xtensa_lx7A13, i)
+			xtensa_linuxShiftLeftImmediate(out, destination, 8)
+			xtensa_linuxBitOr(out, destination, xtensa_lx7A14)
+		}
+		if operation == 9 {
+			xtensa_linuxShiftLeftImmediate(out, destination, 16)
+			xtensa_linuxShiftRightSignedImmediate(out, destination, 16)
+		}
+	}
+
+	func xtensa_linuxStoreWidth(
+		out *RTGEmitter, value RTGAddress, source RTGRegister,
+		width int, operation int,
+	) {
+		if width == 1 {
+			value = xtensa_linuxMaterializeAddress(out, value, width)
+			xtensa_linuxEncodeRRI8(out, operation, source, value.Base, value.Displacement)
+			return
+		}
+		xtensa_linuxEmitAddress(out, xtensa_lx7Address, value)
+		for i := 0; i < width; i++ {
+			xtensa_linuxMove(out, xtensa_lx7A14, source)
+			xtensa_linuxShiftRightUnsignedImmediate(out, xtensa_lx7A14, byte(i*8))
+			xtensa_linuxEncodeRRI8(out, 4, xtensa_lx7A14, xtensa_lx7Address, i)
+		}
+	}
+
+	func xtensa_linuxLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 4, 2)
+	}
+	func xtensa_linuxLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 4, 2)
+	}
+	func xtensa_linuxLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 4, 2)
+	}
+	func xtensa_linuxLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 2, 9)
+	}
+	func xtensa_linuxLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 2, 1)
+	}
+	func xtensa_linuxLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 1, 0)
+		xtensa_linuxEmit(out, 0x230000|(destination.Code<<12)|(destination.Code<<8))
+	}
+	func xtensa_linuxLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		xtensa_linuxLoadWidth(out, destination, value, 1, 0)
+	}
+	func xtensa_linuxStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		xtensa_linuxStoreWidth(out, value, source, 4, 6)
+	}
+	func xtensa_linuxStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		xtensa_linuxStoreWidth(out, value, source, 4, 6)
+	}
+	func xtensa_linuxStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		xtensa_linuxStoreWidth(out, value, source, 2, 5)
+	}
+	func xtensa_linuxStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		xtensa_linuxStoreWidth(out, value, source, 1, 4)
+	}
+
+	func xtensa_linuxCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		xtensa_linuxMove(out, xtensa_lx7CompareLeft, left)
+		xtensa_linuxMove(out, xtensa_lx7CompareRight, right)
+	}
+	func xtensa_linuxTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		xtensa_linuxMove(out, xtensa_lx7CompareLeft, left)
+		xtensa_linuxBitAnd(out, xtensa_lx7CompareLeft, right)
+		xtensa_linuxMoveImmediate(out, xtensa_lx7CompareRight, 0)
+	}
+
+	func xtensa_linuxConditionEncoding(condition RTGCondition) (int, RTGRegister, RTGRegister) {
+		left := xtensa_lx7CompareLeft
+		right := xtensa_lx7CompareRight
+		switch condition.Code {
+		case 0:
+			return 1, left, right
+		case 1:
+			return 9, left, right
+		case 2:
+			return 10, right, left
+		case 3:
+			return 2, right, left
+		case 4:
+			return 2, left, right
+		case 5:
+			return 10, left, right
+		case 6:
+			return 3, left, right
+		case 7:
+			return 11, left, right
+		case 8:
+			return 11, right, left
+		case 9:
+			return 3, right, left
+		default:
+			return 0, left, right
+		}
+	}
+
+	func xtensa_linuxBranchInstruction(
+		out *RTGEmitter, operation int, left RTGRegister,
+		right RTGRegister, displacement int,
+	) {
+		xtensa_linuxEmit(out, ((displacement&0xff)<<16)|(operation<<12)|
+			(left.Code<<8)|(right.Code<<4)|7)
+	}
+
+	func xtensa_linuxEmitJump(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		xtensa_linuxEmit(out, 6)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+
+	func xtensa_linuxEmitLongJump(out *RTGEmitter, label RTGLabel) {
+		landing := out.NewLabel()
+		xtensa_linuxMove(out, xtensa_lx7A12, xtensa_lx7Link)
+		xtensa_linuxCallDirect(out, landing)
+		for out.Len()&3 != 0 {
+			out.Byte(0)
+		}
+		out.Mark(landing)
+		xtensa_linuxMove(out, xtensa_lx7Scratch, xtensa_lx7Link)
+		xtensa_linuxMove(out, xtensa_lx7Link, xtensa_lx7A12)
+		at := xtensa_linuxEmitFixedImmediate(out, xtensa_lx7Address, 0)
+		out.RelocAt(at, RTGLabelIndex(label))
+		xtensa_linuxAdd(out, xtensa_lx7Address, xtensa_lx7Scratch)
+		xtensa_linuxJumpIndirect(out, xtensa_lx7Address)
+	}
+
+	func xtensa_linuxEmitRelaxedJump(out *RTGEmitter, label RTGLabel) {
+		xtensa_linuxEmitJump(out, label)
+		xtensa_linuxEmitLongJump(out, label)
+	}
+
+	func xtensa_linuxJump(out *RTGEmitter, label RTGLabel) {
+		xtensa_linuxEmitRelaxedJump(out, label)
+	}
+
+	func xtensa_linuxJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		operation, left, right := xtensa_linuxConditionEncoding(condition)
+		xtensa_linuxBranchInstruction(out, operation^8, left, right, 2)
+		xtensa_linuxEmitJump(out, label)
+	}
+
+	func xtensa_linuxSetCondition(
+		out *RTGEmitter, condition RTGCondition, destination RTGRegister,
+	) {
+		operation, left, right := xtensa_linuxConditionEncoding(condition)
+		xtensa_linuxMoveImmediate(out, destination, 0)
+		xtensa_linuxBranchInstruction(out, operation^8, left, right, 2)
+		xtensa_linuxMoveImmediate(out, destination, 1)
+	}
+
+	func xtensa_linuxCallDirect(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		xtensa_linuxEmit(out, 5)
+		out.RelocAt(at, RTGLabelIndex(label))
+	}
+
+	func xtensa_linuxCall(out *RTGEmitter, label RTGLabel) {
+		landing := out.NewLabel()
+		resume := out.NewLabel()
+		xtensa_linuxCallDirect(out, landing)
+		xtensa_linuxEmitJump(out, resume)
+		for out.Len()&3 != 0 {
+			out.Byte(0)
+		}
+		out.Mark(landing)
+		xtensa_linuxEmitRelaxedJump(out, label)
+		out.Mark(resume)
+	}
+
+	func xtensa_linuxCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		xtensa_linuxEmit(out, 0xc0|(operand.Code<<8))
+	}
+
+	func xtensa_linuxJumpIndirect(out *RTGEmitter, operand RTGRegister) {
+		xtensa_linuxEmit(out, 0xa0|(operand.Code<<8))
+	}
+
+	func xtensa_linuxRet(out *RTGEmitter) {
+		out.Uint16(0xf00d)
+	}
+
+	func xtensa_linuxLeave(out *RTGEmitter) {
+		xtensa_linuxLoadWidth(out, xtensa_lx7Link, RTGAddress{Base: xtensa_lx7Frame, Displacement: -4}, 4, 2)
+		xtensa_linuxLoadWidth(out, xtensa_lx7Scratch, RTGAddress{Base: xtensa_lx7Frame, Displacement: -8}, 4, 2)
+		xtensa_linuxMove(out, xtensa_lx7Stack, xtensa_lx7Frame)
+		xtensa_linuxMove(out, xtensa_lx7Frame, xtensa_lx7Scratch)
+	}
+
+	func xtensa_linuxHostSyscall(out *RTGEmitter) {
+		// Freestanding targets have no host syscall instruction.
+		xtensa_linuxEmit(out, 0x005000)
+	}
+
+	func xtensa_linuxVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		if direction == RTGShiftLeft {
+			xtensa_linuxEmit(out, 0x401000|(xtensa_lx7Primary.Code<<8))
+			xtensa_linuxEmit(out, 0xa10000|(xtensa_lx7Primary.Code<<12)|(xtensa_lx7Tertiary.Code<<8))
+			return
+		}
+		xtensa_linuxEmit(out, 0x400000|(xtensa_lx7Primary.Code<<8))
+		operation := 0x910000
+		if signed {
+			operation = 0xb10000
+		}
+		xtensa_linuxEmit(out, operation|(xtensa_lx7Primary.Code<<12)|(xtensa_lx7Tertiary.Code<<4))
+	}
+
+	func xtensa_linuxSignedDivide(out *RTGEmitter, remainder bool) {
+		operation := 0xd2
+		if remainder {
+			operation = 0xf2
+		}
+		xtensa_linuxEncodeRRR(out, operation, xtensa_lx7Primary, xtensa_lx7Tertiary, xtensa_lx7Primary)
+	}
+
+	func xtensa_linuxPatchRelocations(out *RTGEmitter) {
+		// Three-byte instructions can legally end at the final output byte. Add
+		// an unreachable pad so the four-byte patch helpers can inspect them.
+		out.Byte(0)
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := out.LabelPosition(out.RelocationLabel(index))
+			instruction := RTGGet32At(out.Code(), at) & 0xffffff
+			if instruction&0x3f == 6 {
+				delta := target - (at + 4)
+				if delta < -131072 || delta > 131071 {
+					if RTGGet32At(out.Code(), at+3)&0xffffff != 0x20c000 {
+						panic("Xtensa jump exceeds signed 18-bit range")
+					}
+					// The relaxed slot's long fallback starts immediately after J.
+					delta = -1
+				}
+				patched := 6 | ((delta & 0x3ffff) << 6)
+				out.PatchUint32(at, (RTGGet32At(out.Code(), at)&0xff000000)|patched)
+			} else {
+				if instruction&0x3f == 5 {
+					base := (at & -4) + 4
+					delta := target - base
+					if delta&3 != 0 || delta < -524288 || delta > 524284 {
+						panic("Xtensa CALL0 target is unaligned or out of range")
+					}
+					patched := 5 | (((delta >> 2) & 0x3ffff) << 6)
+					out.PatchUint32(at, (RTGGet32At(out.Code(), at)&0xff000000)|patched)
+				} else {
+					if instruction&0xf == 2 && (instruction>>12)&15 == 10 {
+						// Code-address materialization follows an aligned CALL0 landing
+						// pad and two moves. Locate that CALL0 to recover its link PC.
+						landing := at - 6
+						origin := 0
+						for candidate := landing - 6; candidate <= landing-3; candidate++ {
+							callInstruction := RTGGet32At(out.Code(), candidate) & 0xffffff
+							if callInstruction&0x3f == 5 {
+								callDelta := int(callInstruction>>6) & 0x3ffff
+								if callDelta&0x20000 != 0 {
+									callDelta -= 0x40000
+								}
+								callTarget := ((candidate & -4) + 4) + callDelta*4
+								if callTarget == landing {
+									origin = candidate + 3
+								}
+							}
+						}
+						if origin == 0 {
+							panic("Xtensa code-address landing pad is missing")
+						}
+						xtensa_linuxPatchFixedImmediate(out, at, xtensa_lx7Address, int64(target-origin))
+					}
+				}
+			}
+		}
+	}
+
+	func xtensa_linuxFrameStart(out *RTGEmitter) int {
+		xtensa_linuxMove(out, xtensa_lx7A12, xtensa_lx7Frame)
+		at := xtensa_linuxEmitFixedImmediate(out, xtensa_lx7Scratch, 0)
+		xtensa_linuxSubtract(out, xtensa_lx7Stack, xtensa_lx7Scratch)
+		xtensa_linuxMove(out, xtensa_lx7Frame, xtensa_lx7Stack)
+		xtensa_linuxAdd(out, xtensa_lx7Frame, xtensa_lx7Scratch)
+		xtensa_linuxStoreWidth(out, RTGAddress{Base: xtensa_lx7Frame, Displacement: -4}, xtensa_lx7Link, 4, 6)
+		xtensa_linuxStoreWidth(out, RTGAddress{Base: xtensa_lx7Frame, Displacement: -8}, xtensa_lx7A12, 4, 6)
+		return at
+	}
+
+	func xtensa_linuxFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 23) & -16
+		xtensa_linuxPatchFixedImmediate(out, at, xtensa_lx7Scratch, int64(frameSize))
+	}
+
+	func xtensa_linuxFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		xtensa_linuxLoadWidth(out, destination,
+			RTGAddress{Base: xtensa_lx7Frame, Displacement: -(offset + 8)}, 4, 2)
+	}
+	func xtensa_linuxFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		xtensa_linuxStoreWidth(out, RTGAddress{Base: xtensa_lx7Frame, Displacement: -(offset + 8)},
+			source, 4, 6)
+	}
+	func xtensa_linuxFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		xtensa_linuxEmitAddress(out, destination,
+			RTGAddress{Base: xtensa_lx7Frame, Displacement: -(offset + 8)})
+	}
+
+	func xtensa_linuxStoreParamWord(out *RTGEmitter, word int, offset int) {
+		registers := []RTGRegister{xtensa_lx7A2, xtensa_lx7A3, xtensa_lx7A4, xtensa_lx7A5, xtensa_lx7A6, xtensa_lx7A7}
+		if word >= 0 && word < len(registers) {
+			xtensa_linuxFrameStore(out, offset, registers[word])
+			return
+		}
+		xtensa_linuxLoadNative(out, xtensa_lx7Primary, RTGAddress{
+			Base: xtensa_lx7Frame, Displacement: (word - 6) * 4,
+		})
+		xtensa_linuxFrameStore(out, offset, xtensa_lx7Primary)
+	}
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetStart(out *RTGEmitter, state int) bool            { _ = out; _ = state; return true }
+	func targetEntry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func targetSyscall(out *RTGEmitter, n int) {
+		xtensa_linuxMove(out, xtensa_lx7A6, xtensa_lx7Primary)
+		xtensa_linuxMoveImmediate(out, xtensa_lx7Primary, int64(n))
+		xtensa_linuxHostSyscall(out)
+	}
+	func targetWrite(out *RTGEmitter) { targetSyscall(out, 13) }
+	func targetRead(out *RTGEmitter)  { targetSyscall(out, 12) }
+	func targetOpen(out *RTGEmitter)  { targetSyscall(out, 8) }
+	func targetClose(out *RTGEmitter) { targetSyscall(out, 9) }
+	func targetChmod(out *RTGEmitter) { targetSyscall(out, 52) }
+	func targetExit(out *RTGEmitter, status RTGRegister) {
+		xtensa_linuxMove(out, xtensa_lx7Primary, status)
+		targetSyscall(out, 118)
+	}
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
 			instruction := RTGGet32At(out.Code(), at)
-			xtensa_linux.patchFixedImmediate(out, at, RTGRegister{Code: (instruction >> 4) & 15, Valid: true}, int64(target))
+			xtensa_linuxPatchFixedImmediate(out, at, RTGRegister{Code: (instruction >> 4) & 15, Valid: true}, int64(target))
 		}
-		return linux_elf.image(out, 94, 0, 32, false)
+		return elfImage(out, 94, 0, 32, false)
 	}
 }
 
+arch xtensa_lx7 {
+	alias = "xtensa_lx7"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 1
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go xtensa_linuxPatchRelocations
+	registers integer = [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15]
+	locations {
+		primary = a2
+		secondary = a3
+		tertiary = a4
+		scratch = a8
+		address = a9
+		compareLeft = a10
+		compareRight = a11
+		copy_destination = a5
+		copy_source = a6
+		copy_count = a7
+		stack = a1
+		frame = a15
+		link = a0
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go xtensa_linuxMove
+		address = go xtensa_linuxEmitAddress
+		load.native = go xtensa_linuxLoadNative
+		load.i32 = go xtensa_linuxLoadI32
+		load.u32 = go xtensa_linuxLoadU32
+		load.i16 = go xtensa_linuxLoadI16
+		load.u16 = go xtensa_linuxLoadU16
+		load.i8 = go xtensa_linuxLoadI8
+		load.u8 = go xtensa_linuxLoadU8
+		store.native = go xtensa_linuxStoreNative
+		store.u32 = go xtensa_linuxStoreU32
+		store.u16 = go xtensa_linuxStoreU16
+		store.u8 = go xtensa_linuxStoreU8
+		add = go xtensa_linuxAdd
+		subtract = go xtensa_linuxSubtract
+		multiply = go xtensa_linuxMultiply
+		bit_and = go xtensa_linuxBitAnd
+		bit_or = go xtensa_linuxBitOr
+		bit_xor = go xtensa_linuxBitXor
+		compare = go xtensa_linuxCompare
+		test = go xtensa_linuxTest
+		increment = go xtensa_linuxIncrement
+		decrement = go xtensa_linuxDecrement
+		shift_left_immediate = go xtensa_linuxShiftLeftImmediate
+		shift_right_unsigned_immediate = go xtensa_linuxShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go xtensa_linuxShiftRightSignedImmediate
+		call = go xtensa_linuxCall
+		call_indirect = go xtensa_linuxCallIndirect
+		jump = go xtensa_linuxJump
+		jump_condition = go xtensa_linuxJumpCondition
+		set_condition = go xtensa_linuxSetCondition
+		return = go xtensa_linuxRet
+		leave = go xtensa_linuxLeave
+		host_syscall = go xtensa_linuxHostSyscall
+		move_immediate = go xtensa_linuxMoveImmediate
+		variable_shift = go xtensa_linuxVariableShift
+		signed_divide = go xtensa_linuxSignedDivide
+		copy_bytes = sequence xtensa_linuxCopyBytes
+	}
+	sequences {
+		xtensa_linuxCopyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			xtensa_linuxCompare(out, xtensa_lx7CopyDestination, xtensa_lx7CopySource)
+			xtensa_linuxJumpCondition(out, xtensa_lx7ULT, forward)
+			xtensa_linuxEmitAddress(out, xtensa_lx7Scratch, record_address(Base:xtensa_lx7CopySource, Index:xtensa_lx7CopyCount, Scale:1,))
+			xtensa_linuxCompare(out, xtensa_lx7CopyDestination, xtensa_lx7Scratch)
+			xtensa_linuxJumpCondition(out, xtensa_lx7UGE, forward)
+			xtensa_linuxEmitAddress(out, xtensa_lx7CopySource, record_address(Base:xtensa_lx7CopySource, Index:xtensa_lx7CopyCount, Scale:1, Displacement:-1,))
+			xtensa_linuxEmitAddress(out, xtensa_lx7CopyDestination, record_address(Base:xtensa_lx7CopyDestination, Index:xtensa_lx7CopyCount, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			xtensa_linuxMoveImmediate(out, xtensa_lx7Scratch, 0)
+			xtensa_linuxCompare(out, xtensa_lx7CopyCount, xtensa_lx7Scratch)
+			xtensa_linuxJumpCondition(out, xtensa_lx7EQ, done)
+			xtensa_linuxLoadU8(out, xtensa_lx7Scratch, record_address(Base:xtensa_lx7CopySource,))
+			xtensa_linuxStoreU8(out, record_address(Base:xtensa_lx7CopyDestination,), xtensa_lx7Scratch)
+			xtensa_linuxDecrement(out, xtensa_lx7CopySource)
+			xtensa_linuxDecrement(out, xtensa_lx7CopyDestination)
+			xtensa_linuxDecrement(out, xtensa_lx7CopyCount)
+			xtensa_linuxJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			xtensa_linuxMoveImmediate(out, xtensa_lx7Scratch, 0)
+			xtensa_linuxCompare(out, xtensa_lx7CopyCount, xtensa_lx7Scratch)
+			xtensa_linuxJumpCondition(out, xtensa_lx7EQ, done)
+			xtensa_linuxLoadU8(out, xtensa_lx7Scratch, record_address(Base:xtensa_lx7CopySource,))
+			xtensa_linuxStoreU8(out, record_address(Base:xtensa_lx7CopyDestination,), xtensa_lx7Scratch)
+			xtensa_linuxIncrement(out, xtensa_lx7CopySource)
+			xtensa_linuxIncrement(out, xtensa_lx7CopyDestination)
+			xtensa_linuxDecrement(out, xtensa_lx7CopyCount)
+			xtensa_linuxJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+abi xtensa_call0 {
+	arch = xtensa_lx7
+	arguments = [a2, a3, a4, a5, a6, a7]
+	call_words = [a2, a3, a4, a5, a6, a7]
+	result = [a2, a3]
+	stack_alignment = 16
+	return_address = a0
+	frame_pointer = a15
+	frame_start = go xtensa_linuxFrameStart
+	frame_finish = go xtensa_linuxFrameFinish
+	frame_load = go xtensa_linuxFrameLoad
+	frame_store = go xtensa_linuxFrameStore
+	frame_address = go xtensa_linuxFrameAddress
+	store_param_word = go xtensa_linuxStoreParamWord
+	unsigned_divide = go xtensa_linuxUnsignedDivide
+}
 runtime linux_xtensa {
-	emit_entry_start = go start
-	emit_entry = go entry
-	emit_exit = go exit
-	operation write { emit = go write }
-	operation read { emit = go read }
-	operation open { emit = go open }
-	operation close { emit = go close }
-	operation chmod { emit = go chmod }
-	operation print { use = write args = [stdout, buffer, count] }
+	emit_entry_start = go targetStart
+	emit_entry = go targetEntry
+	emit_exit = go targetExit
+	operation write {
+		emit = go targetWrite
+	}
+	operation read {
+		emit = go targetRead
+	}
+	operation open {
+		emit = go targetOpen
+	}
+	operation close {
+		emit = go targetClose
+	}
+	operation chmod {
+		emit = go targetChmod
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
 }
 format elf_xtensa {
 	kind = elf
 	byte_order = little
 	address_bits = 32
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-xtensa {
 	family = native_v1

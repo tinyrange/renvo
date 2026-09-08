@@ -59,7 +59,11 @@ def main():
                 binary = scratch / name
                 command = [str(compiler)]
                 if "backend" in row:
-                    command += ["-backend", str(ROOT / row["backend"])]
+                    # Compile a renamed, isolated copy to verify that this one
+                    # RBE carries the complete backend without sibling imports.
+                    backend = scratch / (name + ".rbe")
+                    shutil.copyfile(ROOT / row["backend"], backend)
+                    command += ["-backend", str(backend)]
                 command += ["-t", row["target"], "-o", str(binary), "./cmd/app"]
                 run(command, MODULE, args.timeout)
                 binary.chmod(0o755)

@@ -1,15 +1,533 @@
 # SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
 definition 1
 unit linux_armeb
 implements direct_emitter_v1
-@import "arm_be.rtg"
-@import "linux_elf.rtg"
 go backend {
-	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
-	func image(out *RTGEmitter) []byte {
+	func arm_beStoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word < 6 {
+			arm_beAsmStoreRegStack(out, word, offset)
+			return
+		}
+		arm_beAsmLoadRegMem(out, armScratch.Code, armFrame.Code, 8+(word-6)*4, 4)
+		arm_beAsmStoreRegStack(out, armScratch.Code, offset)
+	}
+
+	func arm_beBeAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe0800000|(destination.Code<<12)|(destination.Code<<16)|(source.Code<<0))
+	}
+	func arm_beBeSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe0400000|(destination.Code<<12)|(destination.Code<<16)|(source.Code<<0))
+	}
+	func arm_beBeMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe0000090|(destination.Code<<0)|(destination.Code<<16)|(source.Code<<8))
+	}
+	func arm_beBeBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe0000000|(destination.Code<<12)|(destination.Code<<16)|(source.Code<<0))
+	}
+	func arm_beBeBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe1800000|(destination.Code<<12)|(destination.Code<<16)|(source.Code<<0))
+	}
+	func arm_beBeBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGUint32(out, 0xe0200000|(destination.Code<<12)|(destination.Code<<16)|(source.Code<<0))
+	}
+	func arm_beBeCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		RTGUint32(out, 0xe1500000|(left.Code<<16)|(right.Code<<0))
+	}
+	func arm_beBeTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		RTGUint32(out, 0xe1100000|(left.Code<<16)|(right.Code<<0))
+	}
+	func arm_beBeIncrement(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0xe2800001|(operand.Code<<12)|(operand.Code<<16))
+	}
+	func arm_beBeDecrement(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0xe2400001|(operand.Code<<12)|(operand.Code<<16))
+	}
+	func arm_beBeCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		RTGUint32(out, 0xe12fff30|(operand.Code<<0))
+	}
+	func arm_beBeCall(out *RTGEmitter, label RTGLabel) { RTGUint32(out, 0xeb000000); RTGReloc(out, label) }
+	func arm_beBeJump(out *RTGEmitter, label RTGLabel) { RTGUint32(out, 0xea000000); RTGReloc(out, label) }
+	func arm_beBeJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		RTGUint32(out, 0x0a000000|(condition.Code<<28))
+		RTGReloc(out, label)
+	}
+	func arm_beAsmAlign(a *RTGEmitter) {
+		for a.Len()%4 != 0 {
+			RTGByte(a, 0)
+		}
+	}
+
+	func arm_beAsmMovRegReg(a *RTGEmitter, dst int, src int) {
+		if dst == src {
+			return
+		}
+		arm_beAsmEmit(a, 0xe1a00000|(dst<<12)|src)
+	}
+
+	func arm_beAsmMovRegImm(a *RTGEmitter, reg int, imm int) {
+		part := imm & 65535
+		arm_beAsmEmit(a, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+		part = (imm >> 16) & 65535
+		if part != 0 {
+			arm_beAsmEmit(a, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
+		}
+	}
+
+	func arm_beAsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {
+		if imm == 0 {
+			arm_beAsmMovRegReg(a, dst, src)
+			return
+		}
+		tmp := armScratch.Code
+		if dst == tmp || src == tmp {
+			tmp = armScratch2.Code
+		}
+		if imm < 0 {
+			arm_beAsmMovRegImm(a, tmp, -imm)
+			arm_beAsmSubRegReg(a, dst, src, tmp)
+			return
+		}
+		arm_beAsmMovRegImm(a, tmp, imm)
+		arm_beAsmAddRegReg(a, dst, src, tmp)
+	}
+
+	func arm_beAsmFrameStart(a *RTGEmitter) int {
+		at := a.Len()
+		arm_beAsmEmit(a, 0xe3009000) // movw r9, #0
+		arm_beAsmEmit(a, 0xe04dd009) // sub sp, sp, r9
+		return at
+	}
+
+	func arm_beAsmPatchFrame(a *RTGEmitter, at int, stackUsed int) {
+		frame := (stackUsed + 7) & -8
+		if frame > 65528 {
+			frame = 65528
+		}
+		a.PatchUint32(at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
+	}
+
+	func arm_beAsmAddRegSmallImm(a *RTGEmitter, dst int, src int, imm int) {
+		if imm < 0 {
+			arm_beAsmEmit(a, 0xe2400000|(src<<16)|(dst<<12)|(-imm))
+			return
+		}
+		arm_beAsmEmit(a, 0xe2800000|(src<<16)|(dst<<12)|imm)
+	}
+
+	func arm_beAsmAddr(a *RTGEmitter, base int, disp int) int {
+		if disp == 0 {
+			return base
+		}
+		arm_beAsmAddRegImm(a, armAddress.Code, base, disp)
+		return armAddress.Code
+	}
+
+	func arm_beAsmLoadStoreAddr(a *RTGEmitter, base int, disp int, size int) int {
+		if size == 2 && (disp < 0 || disp > 255) {
+			return arm_beAsmAddr(a, base, disp)
+		}
+		if size != 2 && (disp < -4095 || disp > 4095) {
+			return arm_beAsmAddr(a, base, disp)
+		}
+		return base
+	}
+
+	func arm_beAsmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
+		addr := arm_beAsmLoadStoreAddr(a, base, disp, size)
+		if addr != base {
+			disp = 0
+		}
+		up := 0x00800000
+		if disp < 0 {
+			up = 0
+			disp = -disp
+		}
+		if size == 1 {
+			arm_beAsmEmit(a, 0xe5500000|up|(addr<<16)|(dst<<12)|disp)
+			return
+		}
+		if size == 2 {
+			arm_beAsmEmit(a, 0xe15000f0|up|(addr<<16)|(dst<<12)|((disp&0xf0)<<4)|(disp&0x0f))
+			return
+		}
+		arm_beAsmEmit(a, 0xe5100000|up|(addr<<16)|(dst<<12)|disp)
+	}
+
+	func arm_beAsmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
+		addr := arm_beAsmLoadStoreAddr(a, base, disp, size)
+		if addr != base {
+			disp = 0
+		}
+		up := 0x00800000
+		if disp < 0 {
+			up = 0
+			disp = -disp
+		}
+		if size == 1 {
+			arm_beAsmEmit(a, 0xe5400000|up|(addr<<16)|(src<<12)|disp)
+			return
+		}
+		if size == 2 {
+			arm_beAsmEmit(a, 0xe14000b0|up|(addr<<16)|(src<<12)|((disp&0xf0)<<4)|(disp&0x0f))
+			return
+		}
+		arm_beAsmEmit(a, 0xe5000000|up|(addr<<16)|(src<<12)|disp)
+	}
+
+	func arm_beAsmStackMem(a *RTGEmitter, offset int, base int, disp8 int, disp32 int) {
+		if base == 0x8948 && disp8 == 0x45 {
+			arm_beAsmStoreRegStack(a, armPrimary.Code, offset)
+			return
+		}
+		if base == 0x8948 && disp8 == 0x55 {
+			arm_beAsmStoreRegStack(a, armSecondary.Code, offset)
+			return
+		}
+		if base == 0x8948 && disp8 == 0x4d {
+			arm_beAsmStoreRegStack(a, armTertiary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x45 {
+			arm_beAsmLoadRegStack(a, armPrimary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x55 {
+			arm_beAsmLoadRegStack(a, armSecondary.Code, offset)
+			return
+		}
+		if base == 0x8b48 && disp8 == 0x4d {
+			arm_beAsmLoadRegStack(a, armTertiary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x45 {
+			arm_beAsmLeaRegStack(a, armPrimary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x55 {
+			arm_beAsmLeaRegStack(a, armSecondary.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x7d {
+			arm_beAsmLeaRegStack(a, armR3.Code, offset)
+			return
+		}
+		if base == 0x8d48 && disp8 == 0x75 {
+			arm_beAsmLeaRegStack(a, armR4.Code, offset)
+			return
+		}
+	}
+
+	func arm_beAsmMemDisp(a *RTGEmitter, disp int, op int, disp8 int, disp32 int) {
+		if op == 0x8b48 && disp8 == 0x4a {
+			arm_beAsmLoadRegMem(a, armTertiary.Code, armSecondary.Code, disp, 4)
+			return
+		}
+		if op == 0x8b48 && disp8 == 0x52 {
+			arm_beAsmLoadRegMem(a, armSecondary.Code, armSecondary.Code, disp, 4)
+			return
+		}
+		if op == 0x8948 && disp8 == 0x41 {
+			arm_beAsmStoreRegMem(a, armPrimary.Code, armTertiary.Code, disp, 4)
+			return
+		}
+	}
+
+	func arm_beAsmLoadRaxIndexRcxSize(a *RTGEmitter, size int) {
+		shift := 3
+		if size == 1 {
+			shift = 0
+		}
+		if size == 2 {
+			shift = 1
+		}
+		if size == 4 {
+			shift = 2
+		}
+		arm_beAsmAddRegRegShift(a, armAddress.Code, armPrimary.Code, armTertiary.Code, shift)
+		arm_beAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
+	}
+
+	func arm_beAsmNormalizeRaxForKind(a *RTGEmitter, kind int) {
+		if kind == RTGScalarByte {
+			arm_beAsmEmit(a, 0xe6ef0070)
+			return
+		}
+		if kind == RTGScalarInt8 {
+			arm_beAsmEmit(a, 0xe6af0070)
+			return
+		}
+		if kind == RTGScalarInt16 {
+			arm_beAsmEmit(a, 0xe6bf0070)
+			return
+		}
+		if kind == RTGScalarUint16 {
+			arm_beAsmEmit(a, 0xe6ff0070)
+		}
+	}
+
+	func arm_beAsmCmpRegImm(a *RTGEmitter, reg int, imm int) {
+		if imm >= 0 && imm <= 255 {
+			arm_beAsmEmit(a, 0xe3500000|(reg<<16)|imm)
+			return
+		}
+		tmp := armScratch.Code
+		if reg == tmp {
+			tmp = armScratch2.Code
+		}
+		arm_beAsmMovRegImm(a, tmp, imm)
+		arm_beAsmCmpRegReg(a, reg, tmp)
+	}
+
+	func arm_beCondFromSetcc(setcc int) int {
+		if setcc == 0x94 {
+			return 0
+		}
+		if setcc == 0x95 {
+			return 1
+		}
+		if setcc == 0x9c {
+			return 11
+		}
+		if setcc == 0x9e {
+			return 13
+		}
+		if setcc == 0x9f {
+			return 12
+		}
+		return 10
+	}
+
+	func arm_beAsmDivLeftRcxRightRax(a *RTGEmitter, mod bool) {
+		arm_beAsmMovRegReg(a, armScratch.Code, armPrimary.Code)
+		arm_beAsmEmit(a, 0xe710f010|(armPrimary.Code<<16)|(armPrimary.Code<<8)|armTertiary.Code)
+		if mod {
+			arm_beAsmEmit(a, 0xe0600090|(armTertiary.Code<<12)|(armScratch.Code<<8)|armPrimary.Code)
+		}
+	}
+
+	func arm_beAsmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
+		shift := 3
+		if size == 1 {
+			shift = 0
+		}
+		if size == 2 {
+			shift = 1
+		}
+		if size == 4 {
+			shift = 2
+		}
+		arm_beAsmAddRegRegShift(a, armAddress.Code, armSecondary.Code, armTertiary.Code, shift)
+		arm_beAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, size)
+	}
+
+	func arm_beEmitAddress(
+		out *RTGEmitter, destination RTGRegister, memory RTGAddress,
+	) {
+		if RTGAddressValid(memory) {
+			part := memory.Addend & 65535
+			at := out.Len()
+			arm_beAsmEmit(out,
+				0xe3000000|((part&0xf000)<<4)|
+					(destination.Code<<12)|(part&0x0fff))
+			part = (memory.Addend >> 16) & 65535
+			arm_beAsmEmit(out,
+				0xe3400000|((part&0xf000)<<4)|
+					(destination.Code<<12)|(part&0x0fff))
+			arm_beAsmEmit(out,
+				0xe08f0000|(destination.Code<<12)|destination.Code)
+			RTGAddressRelocAt(out, memory, at)
+			return
+		}
+		base := memory.Base.Code
+		if memory.Index.Valid {
+			shift := 0
+			if memory.Scale == 2 {
+				shift = 1
+			} else {
+				if memory.Scale == 4 {
+					shift = 2
+				} else {
+					if memory.Scale == 8 {
+						shift = 3
+					}
+				}
+			}
+			arm_beAsmAddRegRegShift(
+				out, destination.Code, base, memory.Index.Code, shift)
+			base = destination.Code
+		}
+		arm_beAsmAddRegImm(
+			out, destination.Code, base, memory.Displacement)
+	}
+
+	func arm_beMemoryAddress(
+		out *RTGEmitter, memory RTGAddress, size int,
+	) RTGAddress {
+		limit := 4095
+		if size == 2 {
+			limit = 255
+		}
+		if RTGAddressValid(memory) || memory.Index.Valid ||
+			memory.Displacement < -limit ||
+			memory.Displacement > limit {
+			arm_beEmitAddress(out, armAddress, memory)
+			return RTGAddress{Base: armAddress}
+		}
+		return memory
+	}
+
+	func arm_beLoadExtra(
+		out *RTGEmitter,
+		destination RTGRegister,
+		memory RTGAddress,
+		opcode int,
+	) {
+		memory = arm_beMemoryAddress(out, memory, 2)
+		displacement := memory.Displacement
+		up := 0x00800000
+		if displacement < 0 {
+			up = 0
+			displacement = -displacement
+		}
+		arm_beAsmEmit(out,
+			opcode|up|(memory.Base.Code<<16)|
+				(destination.Code<<12)|
+				((displacement&0xf0)<<4)|(displacement&0x0f))
+	}
+
+	func arm_beVariableShift(
+		out *RTGEmitter, direction RTGShiftDirection, signed bool,
+	) {
+		kind := 0x20
+		if direction == RTGShiftLeft {
+			kind = 0
+		} else {
+			if signed {
+				kind = 0x40
+			}
+		}
+		arm_beAsmEmit(out,
+			0xe1a00010|(armPrimary.Code<<12)|
+				(armPrimary.Code<<8)|kind|armTertiary.Code)
+	}
+
+	func arm_beSignedDivide(out *RTGEmitter, remainder bool) {
+		arm_beAsmMovRegReg(
+			out, armScratch.Code, armPrimary.Code)
+		arm_beAsmEmit(out,
+			0xe710f010|(armPrimary.Code<<16)|
+				(armPrimary.Code<<8)|armTertiary.Code)
+		if remainder {
+			arm_beAsmEmit(out,
+				0xe0600090|(armTertiary.Code<<12)|
+					(armScratch.Code<<8)|armPrimary.Code)
+		}
+	}
+
+	func arm_beFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frame := (stackUsed + 7) & -8
+		if frame > 65528 {
+			frame = 65528
+		}
+		out.PatchUint32(at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
+	}
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func targetImage(out *RTGEmitter) []byte {
 		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
 			at := out.AbsoluteRelocationOffset(i)
-			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
 			if !ok {
 				return nil
 			}
@@ -20,35 +538,660 @@ go backend {
 			}
 			out.PatchUint32(at+8, 0xe1a00000)
 		}
-		return linux_elf.image(out, 40, 0x05800000, 32, true)
+		return elfImage(out, 40, 0x05800000, 32, true)
 	}
 }
 
+arch arm {
+	alias = "arm"
+	endian = big
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 4
+	patch_relocations = arm32_labels
+	registers gpr32 = [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		system = r7
+		scratch = r9
+		scratch2 = r10
+		address = r12
+		copy_destination = r3
+		copy_source = r4
+		copy_count = r1
+		frame = r11
+		stack = r13
+		link = r14
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		uge = 2
+		ult = 3
+		ugt = 8
+		ule = 9
+		sge = 10
+		slt = 11
+		sgt = 12
+		sle = 13
+	}
+	forms {
+		binary = word32(destination:reg@12+16, source:reg@0)
+		multiply = word32(destination:reg@0+16, source:reg@8)
+		compare = word32(left:reg@16, right:reg@0)
+		unary = word32(operand:reg@12+16)
+		register = word32(operand:reg@0)
+		branch = word32(label:label@reloc)
+		conditional_branch = word32(condition:condition@28, label:label@reloc)
+		fixed = bytes
+	}
+	instructions {
+		add = go arm_beBeAdd
+		subtract = go arm_beBeSubtract
+		multiply = go arm_beBeMultiply
+		bit_and = go arm_beBeBitAnd
+		bit_or = go arm_beBeBitOr
+		bit_xor = go arm_beBeBitXor
+		compare = go arm_beBeCompare
+		test = go arm_beBeTest
+		increment = go arm_beBeIncrement
+		decrement = go arm_beBeDecrement
+		call_indirect = go arm_beBeCallIndirect
+		call = go arm_beBeCall
+		jump = go arm_beBeJump
+		jump_condition = go arm_beBeJumpCondition
+		return fixed [0x1e, 0xff, 0x2f, 0xe1]
+		leave fixed [0x0b, 0xd0, 0xa0, 0xe1, 0x00, 0x48, 0xbd, 0xe8]
+	}
+	bind {
+		move = sequence arm_beMove
+		address = go arm_beEmitAddress
+		load.native = go arm_beLoadNative
+		load.i32 = go arm_beLoadI32
+		load.u32 = go arm_beLoadU32
+		load.i16 = go arm_beLoadI16
+		load.u16 = go arm_beLoadU16
+		load.i8 = go arm_beLoadI8
+		load.u8 = go arm_beLoadU8
+		store.native = go arm_beStoreNative
+		store.u32 = go arm_beStoreU32
+		store.u16 = go arm_beStoreU16
+		store.u8 = go arm_beStoreU8
+		add = add
+		subtract = subtract
+		multiply = multiply
+		bit_and = bit_and
+		bit_or = bit_or
+		bit_xor = bit_xor
+		compare = compare
+		test = test
+		increment = increment
+		decrement = decrement
+		shift_left_immediate = sequence arm_beShiftLeftImmediate
+		shift_right_unsigned_immediate = sequence arm_beShiftRightUnsignedImmediate
+		shift_right_signed_immediate = sequence arm_beShiftRightSignedImmediate
+		call = call
+		call_indirect = call_indirect
+		jump = jump
+		jump_condition = jump_condition
+		set_condition = sequence arm_beSetCondition
+		return = return
+		leave = leave
+		host_syscall = sequence arm_beHostSyscall
+		move_immediate = sequence arm_beMoveImmediate
+		variable_shift = go arm_beVariableShift
+		signed_divide = go arm_beSignedDivide
+		copy_bytes = sequence arm_beCopyBytes
+	}
+	exports {
+		renvoArmAsmEmit = sequence arm_beAsmEmit
+		renvoArmAsmAlign = go arm_beAsmAlign
+		renvoArmAsmMovRegReg = go arm_beAsmMovRegReg
+		renvoArmAsmMovRegImm = go arm_beAsmMovRegImm
+		renvoArmAsmPatchMovRegImmAt = sequence arm_beAsmPatchMovRegImmAt
+		renvoArmAsmMovRegAbs = sequence arm_beAsmMovRegAbs
+		renvoArmAsmAddRegImm = go arm_beAsmAddRegImm
+		renvoArmAsmFrameStart = go arm_beAsmFrameStart
+		renvoArmAsmPatchFrame = go arm_beAsmPatchFrame
+		renvoArmAsmAddRegSmallImm = go arm_beAsmAddRegSmallImm
+		renvoArmAsmAddRegReg = sequence arm_beAsmAddRegReg
+		renvoArmAsmSubRegReg = sequence arm_beAsmSubRegReg
+		renvoArmAsmAddRegRegShift = sequence arm_beAsmAddRegRegShift
+		renvoArmAsmMulRegReg = sequence arm_beAsmMulRegReg
+		renvoArmAsmAddr = go arm_beAsmAddr
+		renvoArmAsmLoadStoreAddr = go arm_beAsmLoadStoreAddr
+		renvoArmAsmLoadRegMem = go arm_beAsmLoadRegMem
+		renvoArmAsmStoreRegMem = go arm_beAsmStoreRegMem
+		renvoArmAsmLoadRegStack = sequence arm_beAsmLoadRegStack
+		renvoArmAsmStoreRegStack = sequence arm_beAsmStoreRegStack
+		renvoArmAsmLeaRegStack = sequence arm_beAsmLeaRegStack
+		renvoArmAsmPushReg = sequence arm_beAsmPushReg
+		renvoArmAsmPopReg = sequence arm_beAsmPopReg
+		renvoArmAsmMovRaxImm = sequence arm_beAsmMovRaxImm
+		renvoArmAsmMovRaxImm64 = sequence arm_beAsmMovRaxImm64
+		renvoArmAsmMovRdxImm = sequence arm_beAsmMovRdxImm
+		renvoArmAsmMovRaxDataAddr = sequence arm_beAsmMovRaxDataAddr
+		renvoArmAsmMovRaxBssAddr = sequence arm_beAsmMovRaxBssAddr
+		renvoArmAsmMovR10BssAddr = sequence arm_beAsmMovR10BssAddr
+		renvoArmAsmAccessRaxBss = sequence arm_beAsmAccessRaxBss
+		renvoArmAsmLoadRaxBss = sequence arm_beAsmLoadRaxBss
+		renvoArmAsmStoreRaxBss = sequence arm_beAsmStoreRaxBss
+		renvoArmAsmMovRdiRax = sequence arm_beAsmMovRdiRax
+		renvoArmAsmMovRaxRdx = sequence arm_beAsmMovRaxRdx
+		renvoArmAsmMovRdxRax = sequence arm_beAsmMovRdxRax
+		renvoArmAsmMovRcxRax = sequence arm_beAsmMovRcxRax
+		renvoArmAsmMovRcxRdx = sequence arm_beAsmMovRcxRdx
+		renvoArmAsmMovRsiRax = sequence arm_beAsmMovRsiRax
+		renvoArmAsmMovR8Rax = sequence arm_beAsmMovR8Rax
+		renvoArmAsmMovR9Rax = sequence arm_beAsmMovR9Rax
+		renvoArmAsmAddRdxRcx = sequence arm_beAsmAddRdxRcx
+		renvoArmAsmSyscall = sequence arm_beAsmSyscall
+		renvoArmAsmPopRdi = sequence arm_beAsmPopRdi
+		renvoArmAsmPopRsi = sequence arm_beAsmPopRsi
+		renvoArmAsmStackMem = go arm_beAsmStackMem
+		renvoArmAsmAddRdxImm = sequence arm_beAsmAddRdxImm
+		renvoArmAsmMemDisp = go arm_beAsmMemDisp
+		renvoArmAsmLoadQwordRaxIndexRcx8 = sequence arm_beAsmLoadQwordRaxIndexRcx8
+		renvoArmAsmLoadQwordRaxIndexRcxDisp = sequence arm_beAsmLoadQwordRaxIndexRcxDisp
+		renvoArmAsmLoadRaxMemRdxDisp = sequence arm_beAsmLoadRaxMemRdxDisp
+		renvoArmAsmLoadRaxMemRdxDispSize = sequence arm_beAsmLoadRaxMemRdxDispSize
+		renvoArmAsmLoadByteRaxIndexRcx = sequence arm_beAsmLoadByteRaxIndexRcx
+		renvoArmAsmLoadRaxIndexRcxSize = go arm_beAsmLoadRaxIndexRcxSize
+		renvoArmAsmStoreRaxMemRdxRcx8 = sequence arm_beAsmStoreRaxMemRdxRcx8
+		renvoArmAsmStoreRaxMemRdxDisp = sequence arm_beAsmStoreRaxMemRdxDisp
+		renvoArmAsmStoreRaxMemRdxDispSize = sequence arm_beAsmStoreRaxMemRdxDispSize
+		renvoArmAsmNormalizeRaxForKind = go arm_beAsmNormalizeRaxForKind
+		renvoArmAsmIncMemRdx = sequence arm_beAsmIncMemRdx
+		renvoArmAsmDecMemRdx = sequence arm_beAsmDecMemRdx
+		renvoArmAsmBoolNotRax = sequence arm_beAsmBoolNotRax
+		renvoArmAsmNegRax = sequence arm_beAsmNegRax
+		renvoArmAsmCmpRaxImm8 = sequence arm_beAsmCmpRaxImm8
+		renvoArmAsmCmpRegImm = go arm_beAsmCmpRegImm
+		renvoArmAsmCmpRegReg = sequence arm_beAsmCmpRegReg
+		renvoArmAsmCsetRax = sequence arm_beAsmCsetRax
+		renvoArmCondFromSetcc = go arm_beCondFromSetcc
+		renvoArmAsmCmpRcxRaxSet = sequence arm_beAsmCmpRcxRaxSet
+		renvoArmAsmAddRaxRcx = sequence arm_beAsmAddRaxRcx
+		renvoArmAsmSubRaxRcx = sequence arm_beAsmSubRaxRcx
+		renvoArmAsmShlRcxImm = sequence arm_beAsmShlRcxImm
+		renvoArmAsmShlRaxImm = sequence arm_beAsmShlRaxImm
+		renvoArmAsmSarRaxImm = sequence arm_beAsmSarRaxImm
+		renvoArmAsmShrRaxImm = sequence arm_beAsmShrRaxImm
+		renvoArmAsmDivLeftRcxRightRax = go arm_beAsmDivLeftRcxRightRax
+		renvoArmAsmPushRax = sequence arm_beAsmPushRax
+		renvoArmAsmPushRcx = sequence arm_beAsmPushRcx
+		renvoArmAsmPushRdx = sequence arm_beAsmPushRdx
+		renvoArmAsmPopRax = sequence arm_beAsmPopRax
+		renvoArmAsmPopRcx = sequence arm_beAsmPopRcx
+		renvoArmAsmPopRdx = sequence arm_beAsmPopRdx
+		renvoArmAsmPushImm = sequence arm_beAsmPushImm
+		renvoArmAsmStoreSliceStack = sequence arm_beAsmStoreSliceStack
+		renvoArmAsmStoreAlMemRdxRcx1 = sequence arm_beAsmStoreAlMemRdxRcx1
+		renvoArmAsmStoreRaxMemRdxRcxSize = go arm_beAsmStoreRaxMemRdxRcxSize
+		renvoArmAsmIncRcx = sequence arm_beAsmIncRcx
+		renvoArmAsmIncRax = sequence arm_beAsmIncRax
+		renvoArmAsmImulRcxImm = sequence arm_beAsmImulRcxImm
+		renvoArmAsmLeave = sequence arm_beAsmLeave
+		renvoArmAsmRet = sequence arm_beAsmRet
+		renvoArmAsmCallLabel = sequence arm_beAsmCallLabel
+		renvoArmAsmJmpLabel = sequence arm_beAsmJmpLabel
+		renvoArmAsmBCondLabel = sequence arm_beAsmBCondLabel
+		renvoArmAsmJzLabel = sequence arm_beAsmJzLabel
+		renvoArmAsmJnzLabel = sequence arm_beAsmJnzLabel
+	}
+	relocation branch24 {
+		width = 4
+		signed = true
+		scale = 4
+		bits = 24
+		relative_to = instruction
+	}
+	relocation address32 {
+		width = 8
+		signed = true
+		scale = 1
+		bits = 32
+		relative_to = pc_at_add
+	}
+	sequences {
+		arm_beAsmAddRaxRcx(a:emitter) {
+			arm_beAsmAddRegReg(a, armPrimary.Code, armPrimary.Code, armTertiary.Code)
+		}
+		arm_beAsmAddRdxImm(a:emitter, imm:int) {
+			arm_beAsmAddRegImm(a, armSecondary.Code, armSecondary.Code, imm)
+		}
+		arm_beAsmAddRdxRcx(a:emitter) {
+			arm_beAsmAddRegReg(a, armSecondary.Code, armSecondary.Code, armTertiary.Code)
+		}
+		arm_beAsmAddRegReg(a:emitter, dst:int, left:int, right:int) {
+			arm_beAsmEmit(a, 0xe0800000 |(left << 16) |(dst << 12) | right)
+		}
+		arm_beAsmAddRegRegShift(a:emitter, dst:int, left:int, right:int, shift:int) {
+			arm_beAsmEmit(a, 0xe0800000 |(left << 16) |(dst << 12) |(shift << 7) | right)
+		}
+		arm_beAsmBoolNotRax(a:emitter) {
+			arm_beAsmCmpRaxImm8(a, 0)
+			arm_beAsmCsetRax(a, 0)
+		}
+		arm_beAsmCmpRaxImm8(a:emitter, imm:int) {
+			arm_beAsmCmpRegImm(a, armPrimary.Code, imm)
+		}
+		arm_beAsmCmpRegReg(a:emitter, left:int, right:int) {
+			arm_beAsmEmit(a, 0xe1500000 |(left << 16) | right)
+		}
+		arm_beAsmCsetRax(a:emitter, cond:int) {
+			arm_beAsmEmit(a, 0xe3a00000)
+			arm_beAsmEmit(a,(cond << 28) | 0x03a00001)
+		}
+		arm_beAsmDecMemRdx(a:emitter) {
+			arm_beAsmLoadRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
+			arm_beAsmAddRegImm(a, armScratch.Code, armScratch.Code, -1)
+			arm_beAsmStoreRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
+		}
+		arm_beAsmEmit(a:emitter, insn:int) {
+			RTGUint32(a, insn)
+		}
+		arm_beAsmImulRcxImm(a:emitter, imm:int) {
+			arm_beAsmMovRegImm(a, armScratch.Code, imm)
+			arm_beAsmMulRegReg(a, armTertiary.Code, armTertiary.Code, armScratch.Code)
+		}
+		arm_beAsmIncMemRdx(a:emitter) {
+			arm_beAsmLoadRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
+			arm_beAsmAddRegImm(a, armScratch.Code, armScratch.Code, 1)
+			arm_beAsmStoreRegMem(a, armScratch.Code, armSecondary.Code, 0, 4)
+		}
+		arm_beAsmIncRax(a:emitter) {
+			arm_beAsmAddRegImm(a, armPrimary.Code, armPrimary.Code, 1)
+		}
+		arm_beAsmIncRcx(a:emitter) {
+			arm_beAsmAddRegImm(a, armTertiary.Code, armTertiary.Code, 1)
+		}
+		arm_beAsmJnzLabel(a:emitter, label:int) {
+			arm_beAsmBCondLabel(a, label, 1)
+		}
+		arm_beAsmJzLabel(a:emitter, label:int) {
+			arm_beAsmBCondLabel(a, label, 0)
+		}
+		arm_beAsmLeaRegStack(a:emitter, dst:int, offset:int) {
+			arm_beAsmAddRegImm(a, dst, armFrame.Code, -offset)
+		}
+		arm_beAsmLeave(a:emitter) {
+			arm_beAsmMovRegReg(a, armStack.Code, armFrame.Code)
+			arm_beAsmEmit(a, 0xe8bd4800)
+		}
+		arm_beAsmLoadByteRaxIndexRcx(a:emitter) {
+			arm_beAsmAddRegReg(a, armAddress.Code, armPrimary.Code, armTertiary.Code)
+			arm_beAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, 1)
+		}
+		arm_beAsmLoadQwordRaxIndexRcx8(a:emitter) {
+			arm_beAsmAddRegRegShift(a, armAddress.Code, armPrimary.Code, armTertiary.Code, 3)
+			arm_beAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, 0, 4)
+		}
+		arm_beAsmLoadQwordRaxIndexRcxDisp(a:emitter, disp:int) {
+			arm_beAsmAddRegReg(a, armAddress.Code, armPrimary.Code, armTertiary.Code)
+			arm_beAsmLoadRegMem(a, armPrimary.Code, armAddress.Code, disp, 4)
+		}
+		arm_beAsmLoadRaxBss(a:emitter, bssOff:int) {
+			arm_beAsmAccessRaxBss(a, bssOff, 0xe79f0000 | armAddress.Code)
+		}
+		arm_beAsmLoadRaxMemRdxDisp(a:emitter, disp:int) {
+			arm_beAsmLoadRegMem(a, armPrimary.Code, armSecondary.Code, disp, 4)
+		}
+		arm_beAsmLoadRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			arm_beAsmLoadRegMem(a, armPrimary.Code, armSecondary.Code, disp, size)
+		}
+		arm_beAsmLoadRegStack(a:emitter, dst:int, offset:int) {
+			arm_beAsmLoadRegMem(a, dst, armFrame.Code, -offset, 4)
+		}
+		arm_beAsmMovR10BssAddr(a:emitter, bssOff:int) {
+			arm_beAsmMovRegAbs(a, armR8.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		arm_beAsmMovR8Rax(a:emitter) {
+			arm_beAsmMovRegReg(a, armR5.Code, armPrimary.Code)
+		}
+		arm_beAsmMovR9Rax(a:emitter) {
+			arm_beAsmMovRegReg(a, armR6.Code, armPrimary.Code)
+		}
+		arm_beAsmMovRaxBssAddr(a:emitter, bssOff:int) {
+			arm_beAsmMovRegAbs(a, armPrimary.Code, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		arm_beAsmMovRaxDataAddr(a:emitter, dataOff:int) {
+			arm_beAsmMovRegAbs(a, armPrimary.Code, dataOff, 0)
+		}
+		arm_beAsmMovRaxImm(a:emitter, imm:int) {
+			arm_beAsmMovRegImm(a, armPrimary.Code, imm)
+		}
+		arm_beAsmMovRaxImm64(a:emitter, imm:int) {
+			arm_beAsmMovRaxImm(a, imm)
+		}
+		arm_beAsmMovRaxRdx(a:emitter) {
+			arm_beAsmMovRegReg(a, armPrimary.Code, armSecondary.Code)
+		}
+		arm_beAsmMovRcxRax(a:emitter) {
+			arm_beAsmMovRegReg(a, armTertiary.Code, armPrimary.Code)
+		}
+		arm_beAsmMovRcxRdx(a:emitter) {
+			arm_beAsmMovRegReg(a, armTertiary.Code, armSecondary.Code)
+		}
+		arm_beAsmMovRdiRax(a:emitter) {
+			arm_beAsmMovRegReg(a, armR3.Code, armPrimary.Code)
+		}
+		arm_beAsmMovRdxImm(a:emitter, imm:int) {
+			arm_beAsmMovRegImm(a, armSecondary.Code, imm)
+		}
+		arm_beAsmMovRdxRax(a:emitter) {
+			arm_beAsmMovRegReg(a, armSecondary.Code, armPrimary.Code)
+		}
+		arm_beAsmMovRsiRax(a:emitter) {
+			arm_beAsmMovRegReg(a, armR4.Code, armPrimary.Code)
+		}
+		arm_beAsmMulRegReg(a:emitter, dst:int, left:int, right:int) {
+			arm_beAsmEmit(a, 0xe0000090 |(dst << 16) |(right << 8) | left)
+		}
+		arm_beAsmNegRax(a:emitter) {
+			arm_beAsmEmit(a, 0xe2600000)
+		}
+		arm_beAsmPopRax(a:emitter) {
+			arm_beAsmPopReg(a, armPrimary.Code)
+		}
+		arm_beAsmPopRcx(a:emitter) {
+			arm_beAsmPopReg(a, armTertiary.Code)
+		}
+		arm_beAsmPopRdi(a:emitter) {
+			arm_beAsmPopReg(a, armR3.Code)
+		}
+		arm_beAsmPopRdx(a:emitter) {
+			arm_beAsmPopReg(a, armSecondary.Code)
+		}
+		arm_beAsmPopReg(a:emitter, reg:int) {
+			arm_beAsmEmit(a, 0xe49d0004 |(reg << 12))
+		}
+		arm_beAsmPopRsi(a:emitter) {
+			arm_beAsmPopReg(a, armR4.Code)
+		}
+		arm_beAsmPushImm(a:emitter, imm:int) {
+			arm_beAsmMovRegImm(a, armScratch.Code, imm)
+			arm_beAsmPushReg(a, armScratch.Code)
+		}
+		arm_beAsmPushRax(a:emitter) {
+			arm_beAsmPushReg(a, armPrimary.Code)
+		}
+		arm_beAsmPushRcx(a:emitter) {
+			arm_beAsmPushReg(a, armTertiary.Code)
+		}
+		arm_beAsmPushRdx(a:emitter) {
+			arm_beAsmPushReg(a, armSecondary.Code)
+		}
+		arm_beAsmPushReg(a:emitter, reg:int) {
+			arm_beAsmEmit(a, 0xe52d0004 |(reg << 12))
+		}
+		arm_beAsmRet(a:emitter) {
+			arm_beAsmEmit(a, 0xe12fff1e)
+		}
+		arm_beAsmSarRaxImm(a:emitter, imm:int) {
+			arm_beAsmEmit(a, 0xe1a00040 |(armPrimary.Code << 12) |(imm << 7) | armPrimary.Code)
+		}
+		arm_beAsmShlRaxImm(a:emitter, imm:int) {
+			arm_beAsmEmit(a, 0xe1a00000 |(armPrimary.Code << 12) |(imm << 7) | armPrimary.Code)
+		}
+		arm_beAsmShlRcxImm(a:emitter, imm:int) {
+			arm_beAsmEmit(a, 0xe1a00000 |(armTertiary.Code << 12) |(imm << 7) | armTertiary.Code)
+		}
+		arm_beAsmShrRaxImm(a:emitter, imm:int) {
+			arm_beAsmEmit(a, 0xe1a00020 |(armPrimary.Code << 12) |(imm << 7) | armPrimary.Code)
+		}
+		arm_beAsmStoreAlMemRdxRcx1(a:emitter) {
+			arm_beAsmAddRegReg(a, armAddress.Code, armSecondary.Code, armTertiary.Code)
+			arm_beAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, 1)
+		}
+		arm_beAsmStoreRaxBss(a:emitter, bssOff:int) {
+			arm_beAsmAccessRaxBss(a, bssOff, 0xe78f0000 | armAddress.Code)
+		}
+		arm_beAsmStoreRaxMemRdxDisp(a:emitter, disp:int) {
+			arm_beAsmStoreRegMem(a, armPrimary.Code, armSecondary.Code, disp, 4)
+		}
+		arm_beAsmStoreRaxMemRdxDispSize(a:emitter, disp:int, size:int) {
+			arm_beAsmStoreRegMem(a, armPrimary.Code, armSecondary.Code, disp, size)
+		}
+		arm_beAsmStoreRaxMemRdxRcx8(a:emitter) {
+			arm_beAsmAddRegRegShift(a, armAddress.Code, armSecondary.Code, armTertiary.Code, 3)
+			arm_beAsmStoreRegMem(a, armPrimary.Code, armAddress.Code, 0, 4)
+		}
+		arm_beAsmStoreRegStack(a:emitter, src:int, offset:int) {
+			arm_beAsmStoreRegMem(a, src, armFrame.Code, -offset, 4)
+		}
+		arm_beAsmStoreSliceStack(a:emitter, offset:int) {
+			arm_beAsmStoreRegStack(a, armPrimary.Code, offset)
+			arm_beAsmStoreRegStack(a, armSecondary.Code, offset - 8)
+			arm_beAsmStoreRegStack(a, armTertiary.Code, offset - 16)
+		}
+		arm_beAsmSubRaxRcx(a:emitter) {
+			arm_beAsmSubRegReg(a, armPrimary.Code, armPrimary.Code, armTertiary.Code)
+		}
+		arm_beAsmSubRegReg(a:emitter, dst:int, left:int, right:int) {
+			arm_beAsmEmit(a, 0xe0400000 |(left << 16) |(dst << 12) | right)
+		}
+		arm_beAsmSyscall(a:emitter) {
+			arm_beAsmMovRegReg(a, armSystem.Code, armPrimary.Code)
+			arm_beAsmMovRegReg(a, armScratch.Code, armSecondary.Code)
+			arm_beAsmMovRegReg(a, 0, armR3.Code)
+			arm_beAsmMovRegReg(a, 1, armR4.Code)
+			arm_beAsmMovRegReg(a, 2, armScratch.Code)
+			arm_beAsmMovRegReg(a, 3, armR8.Code)
+			arm_beAsmMovRegReg(a, 4, armR8.Code)
+			arm_beAsmMovRegImm(a, 5, 0)
+			arm_beAsmEmit(a, 0xef000000)
+		}
+		arm_beAsmAccessRaxBss(a:emitter, bssOff:int, insn:int) {
+			let at = a.Len()
+			RTGUint32(a, 0xe3000000 |(armAddress.Code << 12))
+			RTGUint32(a, 0xe3400000 |(armAddress.Code << 12))
+			RTGUint32(a, insn)
+			a.AbsoluteReloc(at, bssOff, RTGRelocationAbsoluteBSS)
+		}
+		arm_beAsmBCondLabel(a:emitter, label:int, cond:int) {
+			let at = a.Len()
+			arm_beAsmEmit(a,(cond << 28) | 0x0a000000)
+			a.RelocAt(at, label)
+		}
+		arm_beAsmCallLabel(a:emitter, label:int) {
+			let at = a.Len()
+			arm_beAsmEmit(a, 0xeb000000)
+			a.RelocAt(at, label)
+		}
+		arm_beAsmCmpRcxRaxSet(a:emitter, setcc:int) {
+			arm_beAsmCmpRegReg(a, armTertiary.Code, armPrimary.Code)
+			let cond = arm_beCondFromSetcc(setcc)
+			arm_beAsmCsetRax(a, cond)
+		}
+		arm_beAsmJmpLabel(a:emitter, label:int) {
+			let at = a.Len()
+			arm_beAsmEmit(a, 0xea000000)
+			a.RelocAt(at, label)
+		}
+		arm_beAsmMovRegAbs(a:emitter, reg:int, off:int, kind:int) {
+			let at = a.Len()
+			RTGUint32(a, 0xe3000000 |(reg << 12))
+			RTGUint32(a, 0xe3400000 |(reg << 12))
+			RTGUint32(a, 0xe08f0000 |(reg << 12) | reg)
+			a.AbsoluteReloc(at, off, kind)
+		}
+		arm_beAsmPatchMovRegImmAt(a:emitter, at:int, reg:int, imm:int) {
+			let part = imm & 65535
+			a.PatchUint32(at, 0xe3000000 |((part & 0xf000) << 4) |(reg << 12) |(part & 0x0fff))
+			set part =(imm >> 16) & 65535
+			a.PatchUint32(at + 4, 0xe3400000 |((part & 0xf000) << 4) |(reg << 12) |(part & 0x0fff))
+		}
+		arm_beCopyBytes(out:emitter) {
+			let destination = armR3
+			let source = armR4
+			let count = armSecondary
+			let value = armScratch2
+			let forward = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			armCompare(out, destination, source)
+			armJumpCondition(out, record_condition(Code:9), forward)
+			arm_beEmitAddress(out, armScratch, record_address(Base:source, Index:count, Scale:1,))
+			armCompare(out, destination, armScratch)
+			armJumpCondition(out, record_condition(Code:2), forward)
+			arm_beEmitAddress(out, source, record_address(Base:source, Index:count, Scale:1, Displacement:-1,))
+			arm_beEmitAddress(out, destination, record_address(Base:destination, Index:count, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			arm_beAsmCmpRegImm(out, count.Code, 0)
+			armJumpCondition(out, record_condition(Code:0), done)
+			arm_beLoadU8(out, value, record_address(Base:source))
+			arm_beStoreU8(out, record_address(Base:destination), value)
+			armDecrement(out, source)
+			armDecrement(out, destination)
+			armDecrement(out, count)
+			armJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			arm_beAsmCmpRegImm(out, count.Code, 0)
+			armJumpCondition(out, record_condition(Code:0), done)
+			arm_beLoadU8(out, value, record_address(Base:source))
+			arm_beStoreU8(out, record_address(Base:destination), value)
+			armIncrement(out, source)
+			armIncrement(out, destination)
+			armDecrement(out, count)
+			armJump(out, forwardLoop)
+			out.Mark(done)
+		}
+		arm_beFrameStart(out:emitter) -> int {
+			out.Bytes4(0x00, 0x48, 0x2d, 0xe9)
+			arm_beAsmMovRegReg(out, 11, 13)
+			let at = out.Len()
+			arm_beAsmEmit(out, 0xe3009000)
+			arm_beAsmEmit(out, 0xe04dd009)
+			return at
+		}
+		arm_beHostSyscall(out:emitter) {
+			arm_beAsmEmit(out, 0xef000000)
+		}
+		arm_beMove(out:emitter, destination:register, source:register) {
+			arm_beAsmMovRegReg(out, destination.Code, source.Code)
+		}
+		arm_beMoveImmediate(out:emitter, destination:register, value:int64) {
+			arm_beAsmMovRegImm(out, destination.Code, int(value))
+		}
+		arm_beSetCondition(out:emitter, condition:condition, destination:register) {
+			arm_beAsmEmit(out, 0xe3a00000 |(destination.Code << 12))
+			arm_beAsmEmit(out,(condition.Code << 28) | 0x03a00001 |(destination.Code << 12))
+		}
+		arm_beShiftLeftImmediate(out:emitter, operand:register, value:byte) {
+			arm_beShiftImmediate(out, operand, value, 0)
+		}
+		arm_beShiftRightSignedImmediate(out:emitter, operand:register, value:byte) {
+			arm_beShiftImmediate(out, operand, value, 0x40)
+		}
+		arm_beShiftRightUnsignedImmediate(out:emitter, operand:register, value:byte) {
+			arm_beShiftImmediate(out, operand, value, 0x20)
+		}
+		arm_beLoadI16(out:emitter, destination:register, address:address) {
+			arm_beLoadExtra(out, destination, address, 0xe15000f0)
+		}
+		arm_beLoadI32(out:emitter, destination:register, address:address) {
+			arm_beLoadNative(out, destination, address)
+		}
+		arm_beLoadI8(out:emitter, destination:register, address:address) {
+			arm_beLoadExtra(out, destination, address, 0xe15000d0)
+		}
+		arm_beLoadNative(out:emitter, destination:register, address:address) {
+			set address = arm_beMemoryAddress(out, address, 4)
+			arm_beAsmLoadRegMem(out, destination.Code, address.Base.Code, address.Displacement, 4)
+		}
+		arm_beLoadU16(out:emitter, destination:register, address:address) {
+			arm_beLoadExtra(out, destination, address, 0xe15000b0)
+		}
+		arm_beLoadU32(out:emitter, destination:register, address:address) {
+			arm_beLoadNative(out, destination, address)
+		}
+		arm_beLoadU8(out:emitter, destination:register, address:address) {
+			set address = arm_beMemoryAddress(out, address, 1)
+			arm_beAsmLoadRegMem(out, destination.Code, address.Base.Code, address.Displacement, 1)
+		}
+		arm_beShiftImmediate(out:emitter, operand:register, value:byte, kind:int) {
+			arm_beAsmEmit(out, 0xe1a00000 |(operand.Code << 12) |((int(value) & 31) << 7) | kind | operand.Code)
+		}
+		arm_beStoreNative(out:emitter, address:address, source:register) {
+			arm_beStoreWidth(out, address, source, 4)
+		}
+		arm_beStoreU16(out:emitter, address:address, source:register) {
+			arm_beStoreWidth(out, address, source, 2)
+		}
+		arm_beStoreU32(out:emitter, address:address, source:register) {
+			arm_beStoreWidth(out, address, source, 4)
+		}
+		arm_beStoreU8(out:emitter, address:address, source:register) {
+			arm_beStoreWidth(out, address, source, 1)
+		}
+		arm_beStoreWidth(out:emitter, address:address, source:register, size:int) {
+			set address = arm_beMemoryAddress(out, address, size)
+			arm_beAsmStoreRegMem(out, source.Code, address.Base.Code, address.Displacement, size)
+		}
+	}
+}
+abi renvo_arm {
+	store_param_word = go arm_beStoreParamWord
+	arch = arm
+	frame_start = sequence arm_beFrameStart
+	frame_finish = go arm_beFrameFinish
+	call_words = [r0, r1, r2, r3, r4, r5]
+	overflow_stride = 4
+	scalar_result = r0
+}
+abi aapcs32 {
+	internal = renvo_arm
+	arguments = [r0, r1, r2, r3]
+	result = [r0, r1]
+	stack_alignment = 8
+}
 runtime linux_armeb {
-	emit_entry = go entry
+	emit_entry = go targetEntry
 	syscall {
 		number = r7
 		arguments = [r0, r1, r2, r3, r4, r5]
 		result = r0
 		instruction = svc
 	}
-	operation read { number = 3 args = [fd, buffer, count] }
-	operation write { number = 4 args = [fd, buffer, count] }
-	operation read_at { number = 180 args = [fd, buffer, count, offset] }
-	operation write_at { number = 181 args = [fd, buffer, count, offset] }
-	operation open { number = 5 args = [path, flags, mode] }
-	operation close { number = 6 args = [fd] }
-	operation chmod { number = 94 args = [fd, mode] }
-	operation print { use = write args = [stderr, buffer, count] }
-	operation exit { number = 1 args = [status] noreturn = true }
+	operation read {
+		number = 3 args = [fd, buffer, count]
+	}
+	operation write {
+		number = 4 args = [fd, buffer, count]
+	}
+	operation read_at {
+		number = 180 args = [fd, buffer, count, offset]
+	}
+	operation write_at {
+		number = 181 args = [fd, buffer, count, offset]
+	}
+	operation open {
+		number = 5 args = [path, flags, mode]
+	}
+	operation close {
+		number = 6 args = [fd]
+	}
+	operation chmod {
+		number = 94 args = [fd, mode]
+	}
+	operation print {
+		use = write args = [stderr, buffer, count]
+	}
+	operation exit {
+		number = 1 args = [status] noreturn = true
+	}
 }
-
 format elf_armeb {
 	kind = elf
 	byte_order = big
 	address_bits = 32
 	code_offset = 0
-	image = go image
+	image = go targetImage
 }
 target experimental/linux-armeb {
 	family = native_v1
