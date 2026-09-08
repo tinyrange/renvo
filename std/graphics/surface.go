@@ -148,8 +148,14 @@ func (s *Surface) FillConvexPolygon(points []Point, color Color) {
 }
 
 func NewSurface(width, height int) *Surface {
+	return NewSurfaceFormat(width, height, PixelRGBA8)
+}
+
+// NewSurfaceFormat renders directly into storage in the requested pixel format.
+// RGB565 uses two bytes per opaque pixel; no RGBA staging framebuffer is created.
+func NewSurfaceFormat(width, height int, format PixelFormat) *Surface {
 	s := allocSurface()
-	s.resetFormat(width, height, PixelRGBA8)
+	s.resetFormat(width, height, format)
 	return s
 }
 
@@ -1078,6 +1084,11 @@ func (s *Surface) drawImageAxisAligned(image *Surface, src, dst Rect, sampling S
 	if srcWidth <= 0 || srcHeight <= 0 || dstWidth <= 0 || dstHeight <= 0 {
 		return true
 	}
+	if s.Format == PixelRGB565 && image.Format == PixelRGB565 && sampling == SamplingNearest && tint == White &&
+		srcMinX >= 0 && srcMinY >= 0 && srcMinX+srcWidth <= image.Width && srcMinY+srcHeight <= image.Height {
+		s.drawImageRGB565(image, srcMinX, srcMinY, srcWidth, srcHeight, dstMinX, dstMinY, dstWidth, dstHeight)
+		return true
+	}
 	for y := dstMinY; y < dstMinY+dstHeight; y++ {
 		sampleY := srcMinY*256 + ((2*(y-dstMinY)+1)*srcHeight*128)/dstHeight - 128
 		for x := dstMinX; x < dstMinX+dstWidth; x++ {
@@ -1086,6 +1097,25 @@ func (s *Surface) drawImageAxisAligned(image *Surface, src, dst Rect, sampling S
 		}
 	}
 	return true
+}
+
+// Native opaque images need neither color decoding nor alpha blending. Copy
+// their packed pixels directly, including nearest-neighbor scaling and rotation.
+func (s *Surface) drawImageRGB565(image *Surface, sx, sy, sw, sh, dx, dy, dw, dh int) {
+	region := intersectPixelRect(s.clip, pixelRect{dx, dy, dx + dw, dy + dh})
+	if region.minX >= region.maxX || region.minY >= region.maxY {
+		return
+	}
+	s.markDirtyRect(region)
+	for y := region.minY; y < region.maxY; y++ {
+		iy := sy + ((2*(y-dy)+1)*sh)/(2*dh)
+		for x := region.minX; x < region.maxX; x++ {
+			ix := sx + ((2*(x-dx)+1)*sw)/(2*dw)
+			source := image.PixelOffset(ix, iy)
+			dest := s.PixelOffset(x, y)
+			s.Pixels[dest], s.Pixels[dest+1] = image.Pixels[source], image.Pixels[source+1]
+		}
+	}
 }
 
 // DrawImage draws a cropped image through the current affine transform.
