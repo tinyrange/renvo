@@ -112,10 +112,6 @@ check_preflight() {
 backend_test_pattern() {
 	go test -list '^Test' ./backend |
 		sed -n '/^Test/p' |
-		grep -v '^TestCompilerPerformance$' |
-		grep -v '^TestCompilerPerformanceWASI$' |
-		grep -v '^TestCompilerResourceGates$' |
-		grep -v '^TestFrontendCompilerPerformance$' |
 		grep -v '^TestVM32FullBackendSuite$' |
 		grep -v '^TestVM32SelfHostedBackend$' |
 		paste -sd'|' -
@@ -153,19 +149,22 @@ check_backend() {
 }
 
 check_performance() {
-	run_check "compiler performance and resource gates" \
-		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
-		go test -count=1 -timeout 15m \
-		-run '^(TestCompilerPerformance|TestCompilerPerformanceWASI|TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
-		./backend
+	local args=(-root "$repository_root")
+	if [[ -n "${RENVO_PERF_TARGET:-}" ]]; then
+		args+=(-target "$RENVO_PERF_TARGET")
+	fi
+	if [[ -n "${RENVO_PERF_REFERENCE:-}" ]]; then
+		args+=(-reference "$RENVO_PERF_REFERENCE")
+	fi
+	if [[ -n "${RENVO_PERF_REPORT:-}" ]]; then
+		args+=(-report "$RENVO_PERF_REPORT")
+	fi
+	run_check "compiler performance gate" \
+		go run ./cmd/renvoperf "${args[@]}"
 }
 
 check_ci_performance() {
-	run_check "shared-runner compiler resource and normalized frontend gates" \
-		env RENVO_COMPILER_RESOURCE_GATES=1 RENVO_STDROOT="$repository_root/std" \
-		go test -count=1 -timeout 15m \
-		-run '^(TestCompilerPerformanceWASI|TestCompilerResourceGates|TestFrontendCompilerPerformance)$' \
-		./backend
+	check_performance
 }
 
 check_frontend() {
@@ -209,9 +208,10 @@ Modes:
   backend      Run the ordinary backend suite and applicable VM gates. An
                optional regular expression runs matching source and unit cases
                on the native target only.
-  performance  Run all compiler time, memory, and binary-size gates.
+  performance  Compare the target’s compiler workload against the reference;
+               default target is the native host, or set RENVO_PERF_TARGET.
   ci-performance
-               Run only gates that are stable on shared CI runners.
+               Run the identical performance policy used locally.
   frontend     Run the complete frontend corpus and self-hosting suite. An
                optional regular expression runs matching positive corpus cases.
   linux-boot   Perform the clean, opt-in pinned Linux build and two deterministic
@@ -274,8 +274,8 @@ case "$mode" in
 		check_xv6
 		;;
 	full)
-		# Measure before the parallel package and corpus suites can heat and
-		# throttle the host; frontend CPU, RSS, and size are reported as telemetry.
+		# Compare CPU before other suites heat the host. All Tier 1 targets
+		# run in the required CI matrix; local full uses the selected host target.
 		check_performance
 		check_preflight
 		check_backend
