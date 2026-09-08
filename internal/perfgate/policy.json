@@ -10,16 +10,63 @@
   "artifact_growth_percent": 10,
   "vm_steps_growth_percent": 20,
   "invocation_timeout_seconds": 900,
-  "vm_step_limit": 100000000000,
+  "vm_step_limit": 500000000,
   "targets": [
-    {"name":"linux/amd64", "runner":"ubuntu-latest", "execution":"native"},
-    {"name":"linux/386", "runner":"ubuntu-latest", "execution":"native"},
-    {"name":"linux/aarch64", "runner":"ubuntu-24.04-arm", "execution":"native"},
-    {"name":"linux/arm", "runner":"ubuntu-latest", "execution":"qemu-arm"},
-    {"name":"windows/amd64", "runner":"windows-latest", "execution":"native"},
-    {"name":"windows/386", "runner":"windows-latest", "execution":"native"},
-    {"name":"darwin/arm64", "runner":"macos-14", "execution":"native"},
-    {"name":"wasi/wasm32", "runner":"ubuntu-latest", "execution":"wasmtime"},
-    {"name":"vm/vm32", "runner":"ubuntu-latest", "execution":"vm"}
+    {
+      "name": "linux/amd64",
+      "runner": "ubuntu-latest",
+      "execution": "native",
+      "workload": "selfhost"
+    },
+    {
+      "name": "linux/386",
+      "runner": "ubuntu-latest",
+      "execution": "native",
+      "workload": "selfhost"
+    },
+    {
+      "name": "linux/aarch64",
+      "runner": "ubuntu-24.04-arm",
+      "execution": "native",
+      "workload": "selfhost"
+    },
+    {
+      "name": "linux/arm",
+      "runner": "ubuntu-latest",
+      "execution": "qemu-arm",
+      "workload": "selfhost"
+    },
+    {
+      "name": "windows/amd64",
+      "runner": "windows-latest",
+      "execution": "native",
+      "workload": "selfhost",
+      "arena_bytes": 268435456
+    },
+    {
+      "name": "windows/386",
+      "runner": "windows-latest",
+      "execution": "native",
+      "workload": "selfhost",
+      "arena_bytes": 268435456
+    },
+    {
+      "name": "darwin/arm64",
+      "runner": "macos-14",
+      "execution": "native",
+      "workload": "selfhost"
+    },
+    {
+      "name": "wasi/wasm32",
+      "runner": "ubuntu-latest",
+      "execution": "wasmtime",
+      "workload": "selfhost"
+    },
+    {
+      "name": "vm/vm32",
+      "runner": "ubuntu-latest",
+      "execution": "vm",
+      "workload": "prepared-backend"
+    }
   ]
 }

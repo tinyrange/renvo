@@ -900,7 +900,9 @@ wrong.
 
 ## Performance gates are architecture constraints
 
-All Tier 1 targets use the bundled frontend/backend compiler to build itself.
+Native and WASI Tier 1 targets use the bundled frontend/backend compiler to build
+itself. VM32 measures a prepared custom backend compiling a semantic regression
+program from a compact unit.
 The shared policy lives in `internal/perfgate/policy.json`: 8 MiB compiler,
 256 MiB peak memory, and median growth limits of 25% CPU, 20% memory,
 10% artifact size, and 20% VM instructions against a pinned source reference.

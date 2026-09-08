@@ -27,6 +27,22 @@ func TestCompilerProfilesFollowPolicy(t *testing.T) {
 	}
 }
 
+func TestWindowsArenaOverride(t *testing.T) {
+	p := Load()
+	for _, target := range p.Targets {
+		want := p.CompilerArenaBytes
+		if strings.HasPrefix(target.Name, "windows/") {
+			want = 256 * 1024 * 1024
+		}
+		if p.ArenaBytes(target.Name) != want {
+			t.Fatalf("wrong compiler arena for %s", target.Name)
+		}
+	}
+	if p.PeakMemoryBytes != 256*1024*1024 {
+		t.Fatal("changing Windows arena must not change the process-memory ceiling")
+	}
+}
+
 func TestPolicyCoversEveryTierOne(t *testing.T) {
 	p := Load()
 	if err := p.Validate(); err != nil {

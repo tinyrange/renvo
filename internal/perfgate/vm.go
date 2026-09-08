@@ -13,6 +13,7 @@ import (
 
 type VMRequest struct {
 	Root, Compiler, Output, Stats string
+	Input                         string
 	Args                          []string
 	Memory                        int
 	Steps                         int64
@@ -38,7 +39,13 @@ func ExecuteVM(path string) error {
 		return err
 	}
 	var files []vm.File
-	if request.Output != "" {
+	if request.Input != "" {
+		data, err := os.ReadFile(request.Input)
+		if err != nil {
+			return err
+		}
+		files = append(files, vm.File{Name: "/input.unit", Data: data, Mode: 0644})
+	} else if request.Output != "" {
 		err = filepath.WalkDir(request.Root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -87,6 +94,9 @@ func ExecuteVM(path string) error {
 	}
 	args := append([]string{"renvo"}, request.Args...)
 	for i, arg := range args {
+		if arg == request.Input && request.Input != "" {
+			args[i] = "/input.unit"
+		}
 		if arg == request.Output && request.Output != "" {
 			args[i] = "/output/artifact"
 		}

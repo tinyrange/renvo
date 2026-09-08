@@ -16,9 +16,11 @@ import (
 var policyData []byte
 
 type Target struct {
-	Name      string `json:"name"`
-	Runner    string `json:"runner"`
-	Execution string `json:"execution"`
+	Name       string `json:"name"`
+	Runner     string `json:"runner"`
+	Execution  string `json:"execution"`
+	Workload   string `json:"workload"`
+	ArenaBytes uint64 `json:"arena_bytes,omitempty"`
 }
 type Policy struct {
 	Version                  int      `json:"version"`
@@ -53,6 +55,9 @@ func (p Policy) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, target := range p.Targets {
+		if !slices.Contains([]string{"selfhost", "prepared-backend"}, target.Workload) || target.Workload == "prepared-backend" && target.Execution != "vm" {
+			return fmt.Errorf("invalid workload for %q", target.Name)
+		}
 		if _, ok := targetinfo.Lookup(target.Name); !ok || seen[target.Name] || target.Runner == "" || !slices.Contains([]string{"native", "qemu-arm", "wasmtime", "vm"}, target.Execution) {
 			return fmt.Errorf("invalid or duplicate performance target %q", target.Name)
 		}
@@ -62,6 +67,15 @@ func (p Policy) Validate() error {
 		return fmt.Errorf("no performance targets configured")
 	}
 	return nil
+}
+
+func (p Policy) ArenaBytes(targetName string) uint64 {
+	for _, target := range p.Targets {
+		if target.Name == targetName && target.ArenaBytes != 0 {
+			return target.ArenaBytes
+		}
+	}
+	return p.CompilerArenaBytes
 }
 
 func NativeTarget() string {

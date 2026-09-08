@@ -93,8 +93,9 @@ tier in the same change rather than silently weakening its tests.
 
 ### Performance gates
 
-All nine Tier 1 targets use the complete bundled compiler self-hosting workload,
-including frontend and backend. The authoritative policy is
+Native and WASI Tier 1 targets use the complete bundled compiler self-hosting
+workload, including frontend and backend. VM32 measures a prepared custom backend
+compiling a semantic regression program from a compact unit. The authoritative policy is
 [`internal/perfgate/policy.json`](internal/perfgate/policy.json).
 
 | Metric | Gate |

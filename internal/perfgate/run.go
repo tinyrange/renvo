@@ -31,13 +31,14 @@ type Report struct {
 	OK                bool     `json:"ok"`
 }
 
-type build struct{ root, directory, stage2 string }
+type build struct{ root, directory, stage2, unit string }
 type harness struct {
-	policy Policy
-	target Target
-	self   string
-	log    io.Writer
-	report *Report
+	policy  Policy
+	target  Target
+	self    string
+	log     io.Writer
+	report  *Report
+	fixture []byte
 }
 
 // Run compiles two real revisions through stage2, then alternates fresh
@@ -106,6 +107,12 @@ func Run(root, reference, targetName string, log io.Writer) (report Report, err 
 		return report, err
 	}
 	h := harness{policy: p, target: target, self: self, log: log, report: &report}
+	if target.Workload == "prepared-backend" {
+		h.fixture, err = os.ReadFile(filepath.Join(root, "internal/backendjit/testdata/semantic_runtime.go"))
+		if err != nil {
+			return report, err
+		}
+	}
 	if target.Execution == "wasmtime" || target.Execution == "qemu-arm" {
 		args := []string{"--version"}
 		out, e := exec.Command(target.Execution, args...).CombinedOutput()
@@ -139,7 +146,7 @@ func Run(root, reference, targetName string, log io.Writer) (report Report, err 
 		}
 	}
 	for _, b := range []*build{&base, &next} {
-		fmt.Fprintf(log, "%s warm-up self-host\n", filepath.Base(b.directory))
+		fmt.Fprintf(log, "%s warm-up workload\n", filepath.Base(b.directory))
 		if _, err = h.sample(b, "warmup"); err != nil {
 			return report, err
 		}
@@ -167,7 +174,7 @@ func Run(root, reference, targetName string, log io.Writer) (report Report, err 
 	report.Failures = p.Check(report.Reference, report.Candidate, target.Execution == "vm")
 	report.OK = len(report.Failures) == 0
 	if !report.OK {
-		return report, fmt.Errorf("self-hosting gate failed:\n%s", strings.Join(report.Failures, "\n"))
+		return report, fmt.Errorf("compiler performance gate failed:\n%s", strings.Join(report.Failures, "\n"))
 	}
 	return report, nil
 }
@@ -212,7 +219,7 @@ func runnable(t Target) error {
 }
 
 func compilerArgs(p Policy, target, output, source string) []string {
-	return []string{"-tags", "renvo_bundle", "-t", target, "-arena-size", fmt.Sprint(p.CompilerArenaBytes), "-s", "-o", output, source}
+	return []string{"-tags", "renvo_bundle", "-t", target, "-arena-size", fmt.Sprint(p.ArenaBytes(target)), "-s", "-o", output, source}
 }
 func (h harness) prepare(b *build) error {
 	if err := os.MkdirAll(b.directory, 0755); err != nil {
@@ -229,6 +236,9 @@ func (h harness) prepare(b *build) error {
 	cmd.Dir = b.root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("bootstrap: %w\n%s", err, out)
+	}
+	if h.target.Workload == "prepared-backend" {
+		return h.prepareVMBackend(b, stage0)
 	}
 	stage1 := filepath.Join(b.directory, "stage1")
 	if strings.HasPrefix(h.target.Name, "windows/") {
@@ -283,7 +293,7 @@ func (h harness) execute(b *build, compiler string, args []string, output string
 		args = append([]string{"run", "--dir", b.root + "::.", "--env", "PWD=.", "--env", "RENVO_STDROOT=std", compiler}, mapped...)
 		command = "wasmtime"
 	case "vm":
-		request := VMRequest{Root: b.root, Compiler: compiler, Output: output, Stats: statsPath, Args: args, Memory: int(h.policy.PeakMemoryBytes), Steps: h.policy.VMStepLimit}
+		request := VMRequest{Root: b.root, Compiler: compiler, Output: output, Stats: statsPath, Args: args, Memory: int(h.policy.PeakMemoryBytes), Steps: h.policy.VMStepLimit, Input: b.unit}
 		data, err := json.Marshal(request)
 		if err != nil {
 			return Sample{}, err
@@ -325,6 +335,9 @@ func (h harness) execute(b *build, compiler string, args []string, output string
 }
 
 func (h harness) sample(b *build, name string) (Sample, error) {
+	if h.target.Workload == "prepared-backend" {
+		return h.sampleVMBackend(b, name)
+	}
 	output := filepath.Join(b.directory, name)
 	if strings.HasPrefix(h.target.Name, "windows/") {
 		output += ".exe"

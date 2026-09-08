@@ -72,5 +72,5 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("PASS: complete compiler self-hosting")
+	fmt.Println("PASS: compiler performance (" + report.Target.Workload + ")")
 }

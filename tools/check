@@ -159,7 +159,7 @@ check_performance() {
 	if [[ -n "${RENVO_PERF_REPORT:-}" ]]; then
 		args+=(-report "$RENVO_PERF_REPORT")
 	fi
-	run_check "complete compiler self-hosting performance gate" \
+	run_check "compiler performance gate" \
 		go run ./cmd/renvoperf "${args[@]}"
 }
 
@@ -208,7 +208,7 @@ Modes:
   backend      Run the ordinary backend suite and applicable VM gates. An
                optional regular expression runs matching source and unit cases
                on the native target only.
-  performance  Compare complete compiler self-hosting against the reference;
+  performance  Compare the target’s compiler workload against the reference;
                default target is the native host, or set RENVO_PERF_TARGET.
   ci-performance
                Run the identical performance policy used locally.

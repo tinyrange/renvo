@@ -2,7 +2,7 @@
 
 `internal/perfgate/policy.json` owns the thresholds, reference revision, sampling
 settings, and required Tier 1 matrix. `cmd/renvoperf` is the shared local and CI
-driver. The workload is the complete bundled compiler (`cmd/renvo` with
+driver. Native and WASI targets use the complete bundled compiler (`cmd/renvo` with
 `renvo_bundle`), including source discovery, frontend analysis and lowering,
 the in-process backend, and writing the executable. It does not require the
 backend to accept Go source directly.
@@ -19,8 +19,11 @@ backend to accept Go source directly.
 | VM instructions, median of three | Reference +20% |
 
 VM linear memory also has the 256 MiB absolute and +20% relative memory limits;
-the host VM process is measured independently. Compilers use a 192 MiB arena,
-leaving room for runtime and host overhead under the memory ceiling.
+the host VM process is measured independently. Native and WASI self-hosting compilers use a 192 MiB arena by default. Windows
+uses the explicitly requested 256 MiB arena. The Windows process-memory ceiling
+remains 256 MiB; committed runtime overhead may therefore still fail that gate.
+The VM prepared-backend workload uses the production preparation tool’s 96 MiB
+compiler arena.
 
 Larger increases block feature inclusion. The maintainer evaluates the value
 of additional features and their cost case by case. There is no automatic
@@ -28,9 +31,9 @@ baseline ratchet, exception flag, or formal waiver procedure. Ordinary policy
 changes remain visible in review; an absolute ceiling is never overridden by
 a passing relative result.
 
-## Workload and reference
+## Workloads and reference
 
-Both source revisions are bootstrapped with host Go to stage0, then compiled
+For native and WASI targets, both source revisions are bootstrapped with host Go to stage0, then compiled
 through stage1 to a self-hosted stage2 for the selected target. Bootstrap work
 is excluded from the measurements. Each stage2 then builds its own revision of
 the complete compiler to stage3: one warm-up per revision, followed by three
@@ -46,6 +49,17 @@ worktree. CI checks out that exact revision separately. Measurements compare
 like target/host/engine pairs, never values from different operating systems.
 The initial reference is the pre-change main revision; timings are measured
 afresh rather than taken from a fabricated or machine-specific timing file.
+
+VM32 instead measures a prepared custom backend compiling a canonical compact
+unit. It uses the existing `internal/backendjit/testdata/semantic_runtime.go`
+program, covering structs, pointers, slices, branching, floating point, and
+64-bit arithmetic. The same candidate fixture bytes are supplied to both
+revisions. Each revision prepares its own VM-hosted backend and lowers the
+fixture before timing; no backend Go-source parser participates in the measured
+work. Warm-up and median sampling are unchanged. Each produced VM program must
+execute and print `PASS\n`. The artifact gate measures the prepared compiler’s
+bytecode, not the smaller output program. This avoids full compiler self-hosting
+inside an interpreter while exercising its browser-backend role.
 
 ## Measurement definitions
 
@@ -75,7 +89,7 @@ varies with CPU frequency, cache contention, and host load. Same-runner paired
 samples and medians reduce that noise without promising perfectly deterministic
 CI. Wall time remains in the report for diagnosis and a 15-minute per-invocation
 hang timeout; it is not the performance threshold. VM also has an outer
-100-billion-instruction hang limit. Missing runners, zero measurements, failed
+500-million-instruction hang limit. Missing runners, zero measurements, failed
 compilation, and failed smoke tests fail the gate rather than skipping it.
 
 ## Coverage and commands
