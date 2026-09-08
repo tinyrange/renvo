@@ -792,16 +792,20 @@ func rtgNativeAarch64PackageAsmMovRegImm64(a *RTGEmitter, reg int, imm int64) {
 		part := int((^imm) & 65535)
 		renvoAarch64AsmEmit(a, 0x92800000|(part<<5)|reg)
 		for i := 1; i < 4; i++ {
-			part = int((imm >> (i*16)) & 65535)
-			if part != 65535 { renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg) }
+			part = int((imm >> (i * 16)) & 65535)
+			if part != 65535 {
+				renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+			}
 		}
 		return
 	}
 	part := int(imm & 65535)
 	renvoAarch64AsmEmit(a, 0xd2800000|(part<<5)|reg)
 	for i := 1; i < 4; i++ {
-		part = int((imm >> (i*16)) & 65535)
-		if part != 0 { renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg) }
+		part = int((imm >> (i * 16)) & 65535)
+		if part != 0 {
+			renvoAarch64AsmEmit(a, 0xf2800000|(i<<21)|(part<<5)|reg)
+		}
 	}
 }
 func renvoAarch64AsmAddRegImm(a *RTGEmitter, dst int, src int, imm int) {

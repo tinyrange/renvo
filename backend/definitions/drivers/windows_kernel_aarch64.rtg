@@ -7,84 +7,102 @@ implements direct_emitter_v1
 # Native Windows ARM64 driver prototype. Kernel entry and callback bridges
 # preserve the platform registers; imports are resolved by the Windows loader.
 go backend {
-    func ntStaticCall(out *RTGEmitter, id int, words int) {
-        if out.StaticImportDLL(id)=="renvo.arm64" && out.StaticImportName(id)=="MemoryBarrier" {
-            aarch64.asmEmit(out,0xd5033fbf)
-            return
-        }
-        registers:=words
-        if registers>8 { registers=8 }
-        for i := 0; i < registers; i++ {
-            aarch64.aapcs64PopRegister(out, RTGRegister{Code:i,Valid:true})
-        }
-        stacked:=words-registers
-        if stacked>0 {
-            aarch64.asmEmit(out,0x910003e9)
-            aarch64.asmAddRegImm(out,31,31,-RTGAlignValue(stacked*8+8,16))
-            for i:=0;i<stacked;i++ {
-                aarch64.asmLoadRegMem(out,10,9,i*16,8)
-                aarch64.asmStoreRegMem(out,10,31,i*8,8)
-            }
-            aarch64.asmStoreRegMem(out,9,31,stacked*8,8)
-        }
-        at := out.Len()
-        aarch64.asmEmit(out, 0x90000010)
-        aarch64.asmEmit(out, 0x91000210)
-        aarch64.asmEmit(out, 0xd503201f)
-        aarch64.asmEmit(out, 0xd503201f)
-        out.AbsoluteReloc(at, id, RTGRelocationImport)
-        aarch64.asmEmit(out, 0xf9400210)
-        aarch64.asmEmit(out, 0xd63f0200)
-        if stacked>0 {
-            aarch64.asmLoadRegMem(out,9,31,stacked*8,8)
-            aarch64.asmEmit(out,0x9100013f)
-            aarch64.asmAddRegImm(out,31,31,stacked*16)
-        }
-    }
+	func ntStaticCall(out *RTGEmitter, id int, words int) {
+		if out.StaticImportDLL(id) == "renvo.arm64" && out.StaticImportName(id) == "MemoryBarrier" {
+			aarch64.asmEmit(out, 0xd5033fbf)
+			return
+		}
+		registers := words
+		if registers > 8 {
+			registers = 8
+		}
+		for i := 0; i < registers; i++ {
+			aarch64.aapcs64PopRegister(out, RTGRegister{Code: i, Valid: true})
+		}
+		stacked := words - registers
+		if stacked > 0 {
+			aarch64.asmEmit(out, 0x910003e9)
+			aarch64.asmAddRegImm(out, 31, 31, -RTGAlignValue(stacked*8+8, 16))
+			for i := 0; i < stacked; i++ {
+				aarch64.asmLoadRegMem(out, 10, 9, i*16, 8)
+				aarch64.asmStoreRegMem(out, 10, 31, i*8, 8)
+			}
+			aarch64.asmStoreRegMem(out, 9, 31, stacked*8, 8)
+		}
+		at := out.Len()
+		aarch64.asmEmit(out, 0x90000010)
+		aarch64.asmEmit(out, 0x91000210)
+		aarch64.asmEmit(out, 0xd503201f)
+		aarch64.asmEmit(out, 0xd503201f)
+		out.AbsoluteReloc(at, id, RTGRelocationImport)
+		aarch64.asmEmit(out, 0xf9400210)
+		aarch64.asmEmit(out, 0xd63f0200)
+		if stacked > 0 {
+			aarch64.asmLoadRegMem(out, 9, 31, stacked*8, 8)
+			aarch64.asmEmit(out, 0x9100013f)
+			aarch64.asmAddRegImm(out, 31, 31, stacked*16)
+		}
+	}
 
-    func ntCString(data []byte, text string) []byte {
-        for i:=0;i<len(text);i++ { data=append(data,text[i]) }
-        return append(data,0)
-    }
+	func ntCString(data []byte, text string) []byte {
+		for i := 0; i < len(text); i++ {
+			data = append(data, text[i])
+		}
+		return append(data, 0)
+	}
 
-    func ntImports(out *RTGEmitter, data []byte, rva int) ([]byte, []int, int, int) {
-        count := out.StaticImportCount()
-        iat := make([]int,count)
-        if count==0 { return data,iat,0,0 }
-        var dlls []string
-        for i:=0;i<count;i++ {
-            dll:=out.StaticImportDLL(i)
-            if dll=="renvo.arm64" { continue }
-            found:=false
-            for j:=0;j<len(dlls);j++ { if dlls[j]==dll { found=true } }
-            if !found { dlls=append(dlls,dll) }
-        }
-        table:=RTGAlignValue(len(data),8)
-        tableSize:=(len(dlls)+1)*20
-        data=ntAppendUntil(data,table+tableSize)
-        for d:=0;d<len(dlls);d++ {
-            var ids []int
-            for i:=0;i<count;i++ { if out.StaticImportDLL(i)==dlls[d] { ids=append(ids,i) } }
-            lookup:=RTGAlignValue(len(data),8)
-            thunks:=lookup+(len(ids)+1)*8
-            data=ntAppendUntil(data,thunks+(len(ids)+1)*8)
-            name:=len(data)
-            data=ntCString(data,dlls[d])
-            for j:=0;j<len(ids);j++ {
-                data=ntAppendUntil(data,RTGAlignValue(len(data),2))
-                hint:=len(data)
-                data=append(data,0,0)
-                data=ntCString(data,out.StaticImportName(ids[j]))
-                ntPut64(data,lookup+j*8,rva+hint)
-                ntPut64(data,thunks+j*8,rva+hint)
-                iat[ids[j]]=rva+thunks+j*8
-            }
-            ntPut32(data,table+d*20,rva+lookup)
-            ntPut32(data,table+d*20+12,rva+name)
-            ntPut32(data,table+d*20+16,rva+thunks)
-        }
-        return data,iat,rva+table,tableSize
-    }
+	func ntImports(out *RTGEmitter, data []byte, rva int) ([]byte, []int, int, int) {
+		count := out.StaticImportCount()
+		iat := make([]int, count)
+		if count == 0 {
+			return data, iat, 0, 0
+		}
+		var dlls []string
+		for i := 0; i < count; i++ {
+			dll := out.StaticImportDLL(i)
+			if dll == "renvo.arm64" {
+				continue
+			}
+			found := false
+			for j := 0; j < len(dlls); j++ {
+				if dlls[j] == dll {
+					found = true
+				}
+			}
+			if !found {
+				dlls = append(dlls, dll)
+			}
+		}
+		table := RTGAlignValue(len(data), 8)
+		tableSize := (len(dlls) + 1) * 20
+		data = ntAppendUntil(data, table+tableSize)
+		for d := 0; d < len(dlls); d++ {
+			var ids []int
+			for i := 0; i < count; i++ {
+				if out.StaticImportDLL(i) == dlls[d] {
+					ids = append(ids, i)
+				}
+			}
+			lookup := RTGAlignValue(len(data), 8)
+			thunks := lookup + (len(ids)+1)*8
+			data = ntAppendUntil(data, thunks+(len(ids)+1)*8)
+			name := len(data)
+			data = ntCString(data, dlls[d])
+			for j := 0; j < len(ids); j++ {
+				data = ntAppendUntil(data, RTGAlignValue(len(data), 2))
+				hint := len(data)
+				data = append(data, 0, 0)
+				data = ntCString(data, out.StaticImportName(ids[j]))
+				ntPut64(data, lookup+j*8, rva+hint)
+				ntPut64(data, thunks+j*8, rva+hint)
+				iat[ids[j]] = rva + thunks + j*8
+			}
+			ntPut32(data, table+d*20, rva+lookup)
+			ntPut32(data, table+d*20+12, rva+name)
+			ntPut32(data, table+d*20+16, rva+thunks)
+		}
+		return data, iat, rva + table, tableSize
+	}
 	func ntPut16(data []byte, at int, value int) {
 		data[at] = byte(value)
 		data[at+1] = byte(value >> 8)
@@ -121,127 +139,143 @@ go backend {
 		ntPut32(data, at+36, flags)
 	}
 
-
-    func ntImage(out *RTGEmitter) []byte {
-        entry := -1
-        for i := 0; i < out.SymbolCount(); i++ {
-            if out.SymbolNameEquals(i, "DriverEntry") { entry = out.SymbolPC(i) }
-        }
-        if entry < 0 { return nil }
-        textSize := out.Len()
-        textRaw := RTGAlignValue(textSize, 0x200)
-        dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
-        data := out.Data()
-        bssRVA := dataRVA+len(data)
-        data=ntAppendUntil(data,len(data)+out.BSSSize())
-        data,iat,importsRVA,importsSize := ntImports(out,data,dataRVA)
-        relocAt:=RTGAlignValue(len(data),4)
-        data=ntAppendUntil(data,relocAt+12)
-        ntPut32(data,relocAt,0x1000)
-        ntPut32(data,relocAt+4,12)
-        dataRaw := RTGAlignValue(len(data), 0x200)
-        dataSize := len(data)
-        if dataSize == 0 { dataSize = 1 }
-        for i := 0; i < out.RelocationCount(); i++ {
-            at := out.RelocationOffset(i)&0x7fffffff
-            label := out.RelocationLabel(i)&0x7fffffff
-            target := out.LabelPosition(label)
-            if target < 0 { return nil }
-            instruction := RTGGet32At(out.Code(), at)
-            delta := target-at
-            if instruction&0x7c000000 == 0x14000000 {
-                out.PatchUint32(at,(instruction&0xfc000000)|((delta>>2)&0x03ffffff))
-            } else if instruction&0xff000010 == 0x54000000 || instruction&0x7e000000 == 0x34000000 {
-                out.PatchUint32(at,(instruction&0xff00001f)|(((delta>>2)&0x7ffff)<<5))
-            } else if instruction&0x9f000000 == 0x10000000 {
-                out.PatchUint32(at,(instruction&0x9f00001f)|((delta&3)<<29)|(((delta>>2)&0x7ffff)<<5))
-            } else { return nil }
-        }
-        for i := 0; i < out.AbsoluteRelocationCount(); i++ {
-            at := out.AbsoluteRelocationOffset(i)
-            target, ok := RTGResolveAbsoluteRelocation(out,
-                out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
-                dataRVA, bssRVA)
-            kind:=out.AbsoluteRelocationKind(i)
-            addend:=out.AbsoluteRelocationAddend(i)
-            if kind==RTGRelocationImport {
-                if addend<0 || addend>=len(iat) { return nil }
-                target=iat[addend]
-                ok=true
-            }
-            if kind==RTGRelocationAbsoluteBSS && addend>=0x20000000 {
-                id:=(addend-0x20000000)/0x100000
-                if id>=out.ExternalImportCount() { return nil }
-                ok=false
-                for j:=0;j<out.SymbolCount();j++ {
-                    if out.SymbolNameEquals(j,out.ExternalImportName(id)) {
-                        target=0x1000+out.SymbolPC(j)+(addend-0x20000000)%0x100000
-                        ok=true
-                    }
-                }
-            }
-            if !ok { return nil }
-            reg := RTGGet32At(out.Code(), at)&31
-            delta := ((target>>12)-((0x1000+at)>>12))&0x1fffff
-            out.PatchUint32(at, 0x90000000|((delta&3)<<29)|(((delta>>2)&0x7ffff)<<5)|reg)
-            out.PatchUint32(at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
-            out.PatchUint32(at+8, 0xd503201f)
-            out.PatchUint32(at+12, 0xd503201f)
-        }
-        header := make([]byte, 0x200)
-        ntPut16(header, 0, 0x5a4d)
-        ntPut32(header, 0x3c, 0x80)
-        ntPut32(header, 0x80, 0x4550)
-        ntPut16(header, 0x84, 0xaa64)
-        ntPut16(header, 0x86, 2)
-        ntPut16(header, 0x94, 0xf0)
-        ntPut16(header, 0x96, 0x22)
-        opt := 0x98
-        ntPut16(header, opt, 0x20b)
-        ntPut32(header, opt+4, textRaw)
-        ntPut32(header, opt+8, dataRaw)
-        ntPut32(header, opt+16, 0x1000+entry)
-        ntPut32(header, opt+20, 0x1000)
-        ntPut32(header, opt+24, 0x40000000)
-        ntPut32(header, opt+28, 1)
-        ntPut32(header, opt+32, 0x1000)
-        ntPut32(header, opt+36, 0x200)
-        ntPut16(header, opt+40, 10)
-        ntPut16(header, opt+48, 10)
-        ntPut32(header, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
-        ntPut32(header, opt+60, 0x200)
-        ntPut16(header, opt+68, 1)
-        ntPut16(header, opt+70, 0x140)
-        ntPut32(header, opt+108, 16)
-        ntPut32(header, opt+120, importsRVA)
-        ntPut32(header, opt+124, importsSize)
-        ntPut32(header, opt+152, dataRVA+relocAt)
-        ntPut32(header, opt+156, 12)
-        ntSection(header, opt+240, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
-        ntSection(header, opt+280, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
-        image := append(header, out.Code()...)
-        image = ntAppendUntil(image, 0x200+textRaw)
-        image = append(image, data...)
-        return ntAppendUntil(image, 0x200+textRaw+dataRaw)
-    }
+	func ntImage(out *RTGEmitter) []byte {
+		entry := -1
+		for i := 0; i < out.SymbolCount(); i++ {
+			if out.SymbolNameEquals(i, "DriverEntry") {
+				entry = out.SymbolPC(i)
+			}
+		}
+		if entry < 0 {
+			return nil
+		}
+		textSize := out.Len()
+		textRaw := RTGAlignValue(textSize, 0x200)
+		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
+		data := out.Data()
+		bssRVA := dataRVA + len(data)
+		data = ntAppendUntil(data, len(data)+out.BSSSize())
+		data, iat, importsRVA, importsSize := ntImports(out, data, dataRVA)
+		relocAt := RTGAlignValue(len(data), 4)
+		data = ntAppendUntil(data, relocAt+12)
+		ntPut32(data, relocAt, 0x1000)
+		ntPut32(data, relocAt+4, 12)
+		dataRaw := RTGAlignValue(len(data), 0x200)
+		dataSize := len(data)
+		if dataSize == 0 {
+			dataSize = 1
+		}
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i) & 0x7fffffff
+			label := out.RelocationLabel(i) & 0x7fffffff
+			target := out.LabelPosition(label)
+			if target < 0 {
+				return nil
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			delta := target - at
+			if instruction&0x7c000000 == 0x14000000 {
+				out.PatchUint32(at, (instruction&0xfc000000)|((delta>>2)&0x03ffffff))
+			} else if instruction&0xff000010 == 0x54000000 || instruction&0x7e000000 == 0x34000000 {
+				out.PatchUint32(at, (instruction&0xff00001f)|(((delta>>2)&0x7ffff)<<5))
+			} else if instruction&0x9f000000 == 0x10000000 {
+				out.PatchUint32(at, (instruction&0x9f00001f)|((delta&3)<<29)|(((delta>>2)&0x7ffff)<<5))
+			} else {
+				return nil
+			}
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out,
+				out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i),
+				dataRVA, bssRVA)
+			kind := out.AbsoluteRelocationKind(i)
+			addend := out.AbsoluteRelocationAddend(i)
+			if kind == RTGRelocationImport {
+				if addend < 0 || addend >= len(iat) {
+					return nil
+				}
+				target = iat[addend]
+				ok = true
+			}
+			if kind == RTGRelocationAbsoluteBSS && addend >= 0x20000000 {
+				id := (addend - 0x20000000) / 0x100000
+				if id >= out.ExternalImportCount() {
+					return nil
+				}
+				ok = false
+				for j := 0; j < out.SymbolCount(); j++ {
+					if out.SymbolNameEquals(j, out.ExternalImportName(id)) {
+						target = 0x1000 + out.SymbolPC(j) + (addend-0x20000000)%0x100000
+						ok = true
+					}
+				}
+			}
+			if !ok {
+				return nil
+			}
+			reg := RTGGet32At(out.Code(), at) & 31
+			delta := ((target >> 12) - ((0x1000 + at) >> 12)) & 0x1fffff
+			out.PatchUint32(at, 0x90000000|((delta&3)<<29)|(((delta>>2)&0x7ffff)<<5)|reg)
+			out.PatchUint32(at+4, 0x91000000|((target&0xfff)<<10)|(reg<<5)|reg)
+			out.PatchUint32(at+8, 0xd503201f)
+			out.PatchUint32(at+12, 0xd503201f)
+		}
+		header := make([]byte, 0x200)
+		ntPut16(header, 0, 0x5a4d)
+		ntPut32(header, 0x3c, 0x80)
+		ntPut32(header, 0x80, 0x4550)
+		ntPut16(header, 0x84, 0xaa64)
+		ntPut16(header, 0x86, 2)
+		ntPut16(header, 0x94, 0xf0)
+		ntPut16(header, 0x96, 0x22)
+		opt := 0x98
+		ntPut16(header, opt, 0x20b)
+		ntPut32(header, opt+4, textRaw)
+		ntPut32(header, opt+8, dataRaw)
+		ntPut32(header, opt+16, 0x1000+entry)
+		ntPut32(header, opt+20, 0x1000)
+		ntPut32(header, opt+24, 0x40000000)
+		ntPut32(header, opt+28, 1)
+		ntPut32(header, opt+32, 0x1000)
+		ntPut32(header, opt+36, 0x200)
+		ntPut16(header, opt+40, 10)
+		ntPut16(header, opt+48, 10)
+		ntPut32(header, opt+56, RTGAlignValue(dataRVA+dataSize, 0x1000))
+		ntPut32(header, opt+60, 0x200)
+		ntPut16(header, opt+68, 1)
+		ntPut16(header, opt+70, 0x140)
+		ntPut32(header, opt+108, 16)
+		ntPut32(header, opt+120, importsRVA)
+		ntPut32(header, opt+124, importsSize)
+		ntPut32(header, opt+152, dataRVA+relocAt)
+		ntPut32(header, opt+156, 12)
+		ntSection(header, opt+240, ".text", textSize, 0x1000, textRaw, 0x200, 0x60000020)
+		ntSection(header, opt+280, ".data", dataSize, dataRVA, dataRaw, 0x200+textRaw, 0xc0000040)
+		image := append(header, out.Code()...)
+		image = ntAppendUntil(image, 0x200+textRaw)
+		image = append(image, data...)
+		return ntAppendUntil(image, 0x200+textRaw+dataRaw)
+	}
 }
+
 runtime windows_kernel_aarch64 {
-    emit_static_call = go ntStaticCall
+	emit_static_call = go ntStaticCall
 }
 format windows_kernel_pe {
-    kind = "pe-driver"
-    byte_order = little
-    address_bits = 64
-    code_offset = 0x1000
-    image = go ntImage
+	kind = "pe-driver"
+	byte_order = little
+	address_bits = 64
+	code_offset = 0x1000
+	image = go ntImage
 }
 target windows-kernel/arm64 {
-    family = native_v1
-    os = windows
-    arch = aarch64
-    abi = aapcs64
-    runtime = windows_kernel_aarch64
-    object = windows_kernel_pe
-    build_tags = [windows, arm64, renvo_kernel]
-    capabilities = [freestanding, object, function_symbols, imports, linkstatic]
+	family = native_v1
+	os = windows
+	arch = aarch64
+	abi = aapcs64
+	runtime = windows_kernel_aarch64
+	object = windows_kernel_pe
+	build_tags = [windows, arm64, renvo_kernel]
+	capabilities = [freestanding, object, function_symbols, imports, linkstatic]
 }
