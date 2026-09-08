@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# WDC 65C816 native-mode architecture. The first implementation intentionally
+# uses the processor's 8-bit accumulator/index widths after entering native
+# mode, allowing it to share the legal 6502 instruction subset and Renvo ABI.
+# The native 16-bit hardware stack and 24-bit bus remain target-controlled.
+@import "mos6502.rtg"
+
+arch wdc65816 {
+	alias = "wdc65816"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go mos6502.m65PatchRelocations
+	registers word16 = [r0, r1, r2, r3, r4, sp]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		scratch = r3
+		address = r3
+		compareLeft = r1
+		compareRight = r2
+		copy_destination = r1
+		copy_source = r2
+		copy_count = r0
+		stack = sp
+		frame = r4
+		link = r3
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go mos6502.m65Move
+		address = go mos6502.m65EmitAddress
+		load.native = go mos6502.m65LoadNative
+		load.i32 = go mos6502.m65LoadI32
+		load.u32 = go mos6502.m65LoadU32
+		load.i16 = go mos6502.m65LoadI16
+		load.u16 = go mos6502.m65LoadU16
+		load.i8 = go mos6502.m65LoadI8
+		load.u8 = go mos6502.m65LoadU8
+		store.native = go mos6502.m65StoreNative
+		store.u32 = go mos6502.m65StoreU32
+		store.u16 = go mos6502.m65StoreU16
+		store.u8 = go mos6502.m65StoreU8
+		add = go mos6502.m65Add
+		subtract = go mos6502.m65Subtract
+		multiply = go mos6502.m65Multiply
+		bit_and = go mos6502.m65BitAnd
+		bit_or = go mos6502.m65BitOr
+		bit_xor = go mos6502.m65BitXor
+		compare = go mos6502.m65Compare
+		test = go mos6502.m65Test
+		increment = go mos6502.m65Increment
+		decrement = go mos6502.m65Decrement
+		shift_left_immediate = go mos6502.m65ShiftLeftImmediate
+		shift_right_unsigned_immediate = go mos6502.m65ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go mos6502.m65ShiftRightSignedImmediate
+		call = go mos6502.m65Call
+		call_indirect = go mos6502.m65CallIndirect
+		jump = go mos6502.m65Jump
+		jump_condition = go mos6502.m65JumpCondition
+		set_condition = go mos6502.m65SetCondition
+		return = go mos6502.m65Return
+		leave = go mos6502.m65Leave
+		host_syscall = go mos6502.m65HostSyscall
+		move_immediate = go mos6502.m65MoveImmediate
+		variable_shift = go mos6502.m65VariableShift
+		signed_divide = go mos6502.m65SignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			mos6502.m65Compare(out, r1, r2)
+			mos6502.m65JumpCondition(out, ult, forward)
+			mos6502.m65EmitAddress(out, r3, record_address(Base:r2, Index:r0, Scale:1,))
+			mos6502.m65Compare(out, r1, r3)
+			mos6502.m65JumpCondition(out, uge, forward)
+			mos6502.m65EmitAddress(out, r2, record_address(Base:r2, Index:r0, Scale:1, Displacement:-1,))
+			mos6502.m65EmitAddress(out, r1, record_address(Base:r1, Index:r0, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			mos6502.m65MoveImmediate(out, r3, 0)
+			mos6502.m65Compare(out, r0, r3)
+			mos6502.m65JumpCondition(out, eq, done)
+			mos6502.m65LoadU8(out, r3, record_address(Base:r2,))
+			mos6502.m65StoreU8(out, record_address(Base:r1,), r3)
+			mos6502.m65Decrement(out, r2)
+			mos6502.m65Decrement(out, r1)
+			mos6502.m65Decrement(out, r0)
+			mos6502.m65Jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			mos6502.m65MoveImmediate(out, r3, 0)
+			mos6502.m65Compare(out, r0, r3)
+			mos6502.m65JumpCondition(out, eq, done)
+			mos6502.m65LoadU8(out, r3, record_address(Base:r2,))
+			mos6502.m65StoreU8(out, record_address(Base:r1,), r3)
+			mos6502.m65Increment(out, r2)
+			mos6502.m65Increment(out, r1)
+			mos6502.m65Decrement(out, r0)
+			mos6502.m65Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi wdc65816_internal {
+	arch = wdc65816
+	arguments = [r0, r1, r2]
+	call_words = [r0, r1, r2]
+	result = [r0, r1]
+	stack_alignment = 2
+	return_address = r3
+	frame_pointer = r4
+	frame_start = go mos6502.m65FrameStart
+	frame_finish = go mos6502.m65FrameFinish
+	push_register = go mos6502.m65PushRegister
+	push_immediate = go mos6502.m65PushImmediate
+	pop_register = go mos6502.m65PopRegister
+	frame_load = go mos6502.m65FrameLoad
+	frame_store = go mos6502.m65FrameStore
+	frame_address = go mos6502.m65FrameAddress
+	store_param_word = go mos6502.m65StoreParamWord
+	call_word_count = go mos6502.m65CallWordCount
+}

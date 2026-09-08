@@ -1,0 +1,7 @@
+@	boot\r
+:	rk(0,0)rkunix\r
+#	echo RENVO_V7_BOOT_OK\r
+RENVO_V7_BOOT_OK	ls /\r
+RKUNIX	echo RENVO_DISK_WRITE_OK > /renvo\r
+#	cat /renvo\r
+#	rm /renvo\r

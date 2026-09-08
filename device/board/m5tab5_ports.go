@@ -32,3 +32,14 @@ func PortA() i2c.Port {
 	)
 	return i2c.DefinePort(controller, &controller.clock)
 }
+
+// ExtPort1 returns the Tab5 keyboard expansion connector: SDA GPIO0 and SCL
+// GPIO1. The keyboard uses address 0x6d; GPIO50 is its optional active-low IRQ.
+// Do not independently initialize two buses on this connector.
+func ExtPort1() i2c.Port {
+	controller := &portAController{}
+	controller.bus = i2c.NewBitBang(
+		esp32p4.GPIO(0), esp32p4.GPIO(1), &controller.clock, 100000,
+	)
+	return i2c.DefinePort(controller, &controller.clock)
+}

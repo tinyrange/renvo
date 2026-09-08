@@ -1,0 +1,167 @@
+[
+  {
+    "emulator": "aarch64",
+    "target": "linux/aarch64"
+  },
+  {
+    "emulator": "aarch64_be",
+    "target": "experimental/linux-aarch64_be",
+    "backend": "backends/experimental/linux_aarch64_be.rbe"
+  },
+  {
+    "emulator": "alpha",
+    "target": "experimental/linux-alpha",
+    "backend": "backends/experimental/linux_alpha.rbe"
+  },
+  {
+    "emulator": "arm",
+    "target": "linux/arm"
+  },
+  {
+    "emulator": "armeb",
+    "target": "experimental/linux-armeb",
+    "backend": "backends/experimental/linux_armeb.rbe"
+  },
+  {
+    "emulator": "hexagon",
+    "target": "experimental/linux-hexagon",
+    "backend": "backends/experimental/linux_hexagon.rbe"
+  },
+  {
+    "emulator": "hppa",
+    "target": "experimental/linux-hppa",
+    "backend": "backends/experimental/linux_hppa.rbe"
+  },
+  {
+    "emulator": "i386",
+    "target": "linux/386"
+  },
+  {
+    "emulator": "loongarch64",
+    "target": "experimental/linux-loongarch64",
+    "backend": "backends/experimental/linux_loongarch64.rbe"
+  },
+  {
+    "emulator": "m68k",
+    "target": "experimental/linux-m68k",
+    "backend": "backends/experimental/linux_m68k.rbe"
+  },
+  {
+    "emulator": "microblaze",
+    "target": "experimental/linux-microblaze",
+    "backend": "backends/experimental/linux_microblaze.rbe"
+  },
+  {
+    "emulator": "microblazeel",
+    "target": "experimental/linux-microblazeel",
+    "backend": "backends/experimental/linux_microblazeel.rbe"
+  },
+  {
+    "emulator": "mips",
+    "target": "experimental/linux-mips",
+    "backend": "backends/experimental/linux_mips.rbe"
+  },
+  {
+    "emulator": "mips64",
+    "target": "experimental/linux-mips64",
+    "backend": "backends/experimental/linux_mips64.rbe"
+  },
+  {
+    "emulator": "mips64el",
+    "target": "experimental/linux-mips64el",
+    "backend": "backends/experimental/linux_mips64el.rbe"
+  },
+  {
+    "emulator": "mipsel",
+    "target": "experimental/linux-mipsel",
+    "backend": "backends/experimental/linux_mipsel.rbe"
+  },
+  {
+    "emulator": "mipsn32",
+    "target": "experimental/linux-mipsn32",
+    "backend": "backends/experimental/linux_mipsn32.rbe"
+  },
+  {
+    "emulator": "mipsn32el",
+    "target": "experimental/linux-mipsn32el",
+    "backend": "backends/experimental/linux_mipsn32el.rbe"
+  },
+  {
+    "emulator": "or1k",
+    "target": "experimental/linux-or1k",
+    "backend": "backends/experimental/linux_or1k.rbe"
+  },
+  {
+    "emulator": "ppc",
+    "target": "experimental/linux-ppc",
+    "backend": "backends/experimental/linux_ppc.rbe"
+  },
+  {
+    "emulator": "ppc64",
+    "target": "experimental/linux-ppc64",
+    "backend": "backends/experimental/linux_ppc64.rbe"
+  },
+  {
+    "emulator": "ppc64le",
+    "target": "experimental/linux-ppc64le",
+    "backend": "backends/experimental/linux_ppc64le.rbe"
+  },
+  {
+    "emulator": "riscv32",
+    "target": "experimental/linux-riscv32",
+    "backend": "backends/experimental/linux_riscv32.rbe"
+  },
+  {
+    "emulator": "riscv64",
+    "target": "experimental/linux-riscv64",
+    "backend": "backends/experimental/linux_riscv64.rbe"
+  },
+  {
+    "emulator": "s390x",
+    "target": "experimental/linux-s390x",
+    "backend": "backends/experimental/linux_s390x.rbe"
+  },
+  {
+    "emulator": "sh4",
+    "target": "experimental/linux-sh4",
+    "backend": "backends/experimental/linux_sh4.rbe"
+  },
+  {
+    "emulator": "sh4eb",
+    "target": "experimental/linux-sh4eb",
+    "backend": "backends/experimental/linux_sh4eb.rbe"
+  },
+  {
+    "emulator": "sparc",
+    "target": "experimental/linux-sparc",
+    "backend": "backends/experimental/linux_sparc.rbe"
+  },
+  {
+    "emulator": "sparc32plus",
+    "target": "experimental/linux-sparc32plus",
+    "backend": "backends/experimental/linux_sparc32plus.rbe"
+  },
+  {
+    "emulator": "sparc64",
+    "target": "experimental/linux-sparc64",
+    "backend": "backends/experimental/linux_sparc64.rbe"
+  },
+  {
+    "emulator": "x86_64",
+    "target": "linux/amd64"
+  },
+  {
+    "emulator": "xtensa",
+    "target": "experimental/linux-xtensa",
+    "backend": "backends/experimental/linux_xtensa.rbe"
+  },
+  {
+    "emulator": "xtensaeb",
+    "target": "experimental/linux-xtensaeb",
+    "backend": "backends/experimental/linux_xtensaeb.rbe",
+    "arguments": [
+      "-cpu",
+      "test_kc705_be"
+    ]
+  }
+]

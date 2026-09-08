@@ -1,0 +1,1103 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Original Sharp LR35902 emitter. The Game Boy CPU resembles a Z80 but lacks
+# its IX/IY registers, ED instruction page, and port-I/O instructions. Two
+# logical pairs are therefore held in private work RAM while BC/DE/HL remain
+# native registers. All instruction sequences below use the LR35902 ISA.
+go backend {
+	var lrCodeAddress int
+
+	const lrResultWord = 0xdf8c
+	const lrAuxWord = 0xdf8e
+	const lrCompareLeftWord = 0xdf90
+	const lrCompareRightWord = 0xdf92
+	const lrSignByte = 0xdf94
+	const lrQuotientSignByte = 0xdf95
+	const lrXWord = 0xdfc0
+	const lrYWord = 0xdfc2
+
+	func lrSetCodeAddress(address int)        { lrCodeAddress = address }
+	func lrEmit16(out *RTGEmitter, value int) { RTGByte(out, byte(value)); RTGByte(out, byte(value>>8)) }
+	func lrPatch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		code[at] = byte(value)
+		code[at+1] = byte(value >> 8)
+	}
+	func lrStoreAAbsolute(out *RTGEmitter, address int) { RTGByte(out, 0xea); lrEmit16(out, address) }
+	func lrLoadAAbsolute(out *RTGEmitter, address int)  { RTGByte(out, 0xfa); lrEmit16(out, address) }
+	func lrLogicalAddress(register RTGRegister) int {
+		if register.Code == 3 {
+			return lrXWord
+		}
+		if register.Code == 4 {
+			return lrYWord
+		}
+		return 0
+	}
+
+	func lrStorePairAbsolute(out *RTGEmitter, register RTGRegister, address int) {
+		if register.Code == 0 {
+			RTGByte(out, 0x79)
+			lrStoreAAbsolute(out, address)
+			RTGByte(out, 0x78)
+			lrStoreAAbsolute(out, address+1)
+			return
+		}
+		if register.Code == 1 {
+			RTGByte(out, 0x7b)
+			lrStoreAAbsolute(out, address)
+			RTGByte(out, 0x7a)
+			lrStoreAAbsolute(out, address+1)
+			return
+		}
+		if register.Code == 2 {
+			RTGByte(out, 0x7d)
+			lrStoreAAbsolute(out, address)
+			RTGByte(out, 0x7c)
+			lrStoreAAbsolute(out, address+1)
+			return
+		}
+		if register.Code == 5 {
+			RTGByte(out, 0x08)
+			lrEmit16(out, address)
+			return
+		}
+		source := lrLogicalAddress(register)
+		lrLoadAAbsolute(out, source)
+		lrStoreAAbsolute(out, address)
+		lrLoadAAbsolute(out, source+1)
+		lrStoreAAbsolute(out, address+1)
+	}
+	func lrLoadPairAbsolute(out *RTGEmitter, register RTGRegister, address int) {
+		if register.Code == 0 {
+			lrLoadAAbsolute(out, address)
+			RTGByte(out, 0x4f)
+			lrLoadAAbsolute(out, address+1)
+			RTGByte(out, 0x47)
+			return
+		}
+		if register.Code == 1 {
+			lrLoadAAbsolute(out, address)
+			RTGByte(out, 0x5f)
+			lrLoadAAbsolute(out, address+1)
+			RTGByte(out, 0x57)
+			return
+		}
+		if register.Code == 2 {
+			lrLoadAAbsolute(out, address)
+			RTGByte(out, 0x6f)
+			lrLoadAAbsolute(out, address+1)
+			RTGByte(out, 0x67)
+			return
+		}
+		if register.Code == 5 {
+			lrLoadPairAbsolute(out, lrHL(), address)
+			RTGByte(out, 0xf9)
+			return
+		}
+		destination := lrLogicalAddress(register)
+		lrLoadAAbsolute(out, address)
+		lrStoreAAbsolute(out, destination)
+		lrLoadAAbsolute(out, address+1)
+		lrStoreAAbsolute(out, destination+1)
+	}
+	func lrMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value) & 0xffff
+		if destination.Code == 0 {
+			RTGByte(out, 0x01)
+			lrEmit16(out, immediate)
+			return
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0x11)
+			lrEmit16(out, immediate)
+			return
+		}
+		if destination.Code == 2 {
+			RTGByte(out, 0x21)
+			lrEmit16(out, immediate)
+			return
+		}
+		if destination.Code == 5 {
+			RTGByte(out, 0x31)
+			lrEmit16(out, immediate)
+			return
+		}
+		address := lrLogicalAddress(destination)
+		RTGByte(out, 0x3e)
+		RTGByte(out, byte(immediate))
+		lrStoreAAbsolute(out, address)
+		RTGByte(out, 0x3e)
+		RTGByte(out, byte(immediate>>8))
+		lrStoreAAbsolute(out, address+1)
+	}
+	func lrMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == source.Code {
+			return
+		}
+		if destination.Code < 3 && source.Code < 3 {
+			low := 1
+			high := 0
+			dlow := 1
+			dhigh := 0
+			if source.Code == 1 {
+				low = 3
+				high = 2
+			}
+			if source.Code == 2 {
+				low = 5
+				high = 4
+			}
+			if destination.Code == 1 {
+				dlow = 3
+				dhigh = 2
+			}
+			if destination.Code == 2 {
+				dlow = 5
+				dhigh = 4
+			}
+			RTGByte(out, byte(0x40|(dlow<<3)|low))
+			RTGByte(out, byte(0x40|(dhigh<<3)|high))
+			return
+		}
+		if destination.Code == 5 && source.Code == 2 {
+			RTGByte(out, 0xf9)
+			return
+		}
+		lrStorePairAbsolute(out, source, lrResultWord)
+		lrLoadPairAbsolute(out, destination, lrResultWord)
+	}
+
+	func lrSaveWorking(out *RTGEmitter) {
+		RTGByte(out, 0xc5)
+		RTGByte(out, 0xd5)
+		RTGByte(out, 0xe5)
+		lrLoadPairAbsolute(out, lrBC(), lrXWord)
+		RTGByte(out, 0xc5)
+		lrLoadPairAbsolute(out, lrBC(), lrYWord)
+		RTGByte(out, 0xc5)
+	}
+	func lrSavedOffset(source RTGRegister) int {
+		if source.Code == 4 {
+			return 0
+		}
+		if source.Code == 3 {
+			return 2
+		}
+		if source.Code == 2 {
+			return 4
+		}
+		if source.Code == 1 {
+			return 6
+		}
+		if source.Code == 0 {
+			return 8
+		}
+		return 10
+	}
+	func lrLoadSaved(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		RTGByte(out, 0xf8)
+		RTGByte(out, byte(lrSavedOffset(source)))
+		if source.Code == 5 {
+			if destination.Code == 0 {
+				RTGByte(out, 0x4d)
+				RTGByte(out, 0x44)
+			}
+			if destination.Code == 1 {
+				RTGByte(out, 0x5d)
+				RTGByte(out, 0x54)
+			}
+			return
+		}
+		if destination.Code == 0 {
+			RTGByte(out, 0x2a)
+			RTGByte(out, 0x4f)
+			RTGByte(out, 0x7e)
+			RTGByte(out, 0x47)
+			return
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0x2a)
+			RTGByte(out, 0x5f)
+			RTGByte(out, 0x7e)
+			RTGByte(out, 0x57)
+			return
+		}
+		RTGByte(out, 0x2a)
+		lrStoreAAbsolute(out, lrAuxWord)
+		RTGByte(out, 0x7e)
+		RTGByte(out, 0x67)
+		lrLoadAAbsolute(out, lrAuxWord)
+		RTGByte(out, 0x6f)
+	}
+	func lrRestoreAll(out *RTGEmitter) {
+		RTGByte(out, 0xc1)
+		lrStorePairAbsolute(out, lrBC(), lrYWord)
+		RTGByte(out, 0xc1)
+		lrStorePairAbsolute(out, lrBC(), lrXWord)
+		RTGByte(out, 0xe1)
+		RTGByte(out, 0xd1)
+		RTGByte(out, 0xc1)
+	}
+	func lrRestoreExcept(out *RTGEmitter, destination RTGRegister) {
+		RTGByte(out, 0xc1)
+		if destination.Code != 4 {
+			lrStorePairAbsolute(out, lrBC(), lrYWord)
+		}
+		RTGByte(out, 0xc1)
+		if destination.Code != 3 {
+			lrStorePairAbsolute(out, lrBC(), lrXWord)
+		}
+		if destination.Code == 2 {
+			RTGByte(out, 0xf1)
+		} else {
+			RTGByte(out, 0xe1)
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0xf1)
+		} else {
+			RTGByte(out, 0xd1)
+		}
+		if destination.Code == 0 {
+			RTGByte(out, 0xf1)
+		} else {
+			RTGByte(out, 0xc1)
+		}
+		lrLoadPairAbsolute(out, destination, lrResultWord)
+	}
+	func lrAddressFromSaved(out *RTGEmitter, value RTGAddress) {
+		if RTGAddressValid(value) {
+			RTGByte(out, 0x21)
+			at := out.Len()
+			lrEmit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		if value.Base.Valid {
+			lrLoadSaved(out, lrHL(), value.Base)
+		} else {
+			lrMoveImmediate(out, lrHL(), 0)
+		}
+		if value.Index.Valid {
+			lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+			lrLoadSaved(out, lrDE(), value.Index)
+			lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+			for scale := 0; scale < value.Scale; scale++ {
+				RTGByte(out, 0x19)
+			}
+		}
+		if value.Displacement != 0 {
+			lrMoveImmediate(out, lrDE(), int64(value.Displacement))
+			RTGByte(out, 0x19)
+		}
+	}
+	func lrEmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, destination)
+	}
+	func lrLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		RTGByte(out, 0x7e)
+		lrStoreAAbsolute(out, lrResultWord)
+		RTGByte(out, 0x23)
+		RTGByte(out, 0x7e)
+		lrStoreAAbsolute(out, lrResultWord+1)
+		lrRestoreExcept(out, destination)
+	}
+	func lrLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrLoadNative(out, destination, value)
+	}
+	func lrLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrLoadNative(out, destination, value)
+	}
+	func lrLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrLoadNative(out, destination, value)
+	}
+	func lrLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrLoadNative(out, destination, value)
+	}
+	func lrLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		RTGByte(out, 0x7e)
+		lrStoreAAbsolute(out, lrResultWord)
+		RTGByte(out, 0xaf)
+		lrStoreAAbsolute(out, lrResultWord+1)
+		lrRestoreExcept(out, destination)
+	}
+	func lrLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		RTGByte(out, 0x7e)
+		lrStoreAAbsolute(out, lrResultWord)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x7f)
+		positive := out.NewLabel()
+		lrJumpOpcode(out, 0xca, positive)
+		RTGByte(out, 0x3e)
+		RTGByte(out, 0xff)
+		done := out.NewLabel()
+		lrJump(out, done)
+		out.Mark(positive)
+		RTGByte(out, 0xaf)
+		out.Mark(done)
+		lrStoreAAbsolute(out, lrResultWord+1)
+		lrRestoreExcept(out, destination)
+	}
+	func lrStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadSaved(out, lrDE(), source)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+		RTGByte(out, 0x73)
+		RTGByte(out, 0x23)
+		RTGByte(out, 0x72)
+		lrRestoreAll(out)
+	}
+	func lrStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		lrStoreNative(out, value, source)
+	}
+	func lrStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		lrStoreNative(out, value, source)
+	}
+	func lrStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		lrSaveWorking(out)
+		lrAddressFromSaved(out, value)
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadSaved(out, lrDE(), source)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+		RTGByte(out, 0x73)
+		lrRestoreAll(out)
+	}
+
+	func lrBinaryStart(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrHL(), destination)
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadSaved(out, lrDE(), source)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+	}
+	func lrBinaryFinish(out *RTGEmitter, destination RTGRegister) {
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, destination)
+	}
+	func lrAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrBinaryStart(out, destination, source)
+		RTGByte(out, 0x19)
+		if destination.Code == 5 {
+			RTGByte(out, 0xf9)
+		}
+		lrBinaryFinish(out, destination)
+	}
+	func lrSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrBinaryStart(out, destination, source)
+		RTGByte(out, 0x7d)
+		RTGByte(out, 0x93)
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x7c)
+		RTGByte(out, 0x9a)
+		RTGByte(out, 0x67)
+		lrBinaryFinish(out, destination)
+	}
+	func lrBitOperation(out *RTGEmitter, destination RTGRegister, source RTGRegister, low int, high int) {
+		lrBinaryStart(out, destination, source)
+		RTGByte(out, 0x7d)
+		RTGByte(out, byte(low))
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x7c)
+		RTGByte(out, byte(high))
+		RTGByte(out, 0x67)
+		lrBinaryFinish(out, destination)
+	}
+	func lrBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrBitOperation(out, destination, source, 0xa3, 0xa2)
+	}
+	func lrBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrBitOperation(out, destination, source, 0xb3, 0xb2)
+	}
+	func lrBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrBitOperation(out, destination, source, 0xab, 0xaa)
+	}
+	func lrMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrBC(), destination)
+		lrLoadSaved(out, lrDE(), source)
+		lrMoveImmediate(out, lrHL(), 0)
+		for bit := 0; bit < 16; bit++ {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x41)
+			skip := out.NewLabel()
+			lrJumpOpcode(out, 0xca, skip)
+			RTGByte(out, 0x19)
+			out.Mark(skip)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x23)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x12)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x38)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x19)
+		}
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, destination)
+	}
+
+	func lrCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		lrStorePairAbsolute(out, left, lrCompareLeftWord)
+		lrStorePairAbsolute(out, right, lrCompareRightWord)
+	}
+	func lrTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		lrStorePairAbsolute(out, left, lrCompareLeftWord)
+		lrStorePairAbsolute(out, right, lrCompareRightWord)
+		RTGByte(out, 0xc5)
+		lrLoadAAbsolute(out, lrCompareRightWord)
+		RTGByte(out, 0x47)
+		lrLoadAAbsolute(out, lrCompareLeftWord)
+		RTGByte(out, 0xa0)
+		lrStoreAAbsolute(out, lrCompareLeftWord)
+		lrLoadAAbsolute(out, lrCompareRightWord+1)
+		RTGByte(out, 0x47)
+		lrLoadAAbsolute(out, lrCompareLeftWord+1)
+		RTGByte(out, 0xa0)
+		lrStoreAAbsolute(out, lrCompareLeftWord+1)
+		RTGByte(out, 0xc1)
+		RTGByte(out, 0xaf)
+		lrStoreAAbsolute(out, lrCompareRightWord)
+		lrStoreAAbsolute(out, lrCompareRightWord+1)
+	}
+	func lrIncrement(out *RTGEmitter, operand RTGRegister) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrHL(), operand)
+		RTGByte(out, 0x23)
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, operand)
+	}
+	func lrDecrement(out *RTGEmitter, operand RTGRegister) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrHL(), operand)
+		RTGByte(out, 0x2b)
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, operand)
+	}
+
+	func lrShiftImmediate(out *RTGEmitter, operand RTGRegister, value byte, direction RTGShiftDirection, signed bool) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrHL(), operand)
+		for count := 0; count < int(value); count++ {
+			if direction == RTGShiftLeft {
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x25)
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x14)
+			} else {
+				RTGByte(out, 0xcb)
+				if signed {
+					RTGByte(out, 0x2c)
+				} else {
+					RTGByte(out, 0x3c)
+				}
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x1d)
+			}
+		}
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		lrRestoreExcept(out, operand)
+	}
+	func lrShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		lrShiftImmediate(out, operand, value, RTGShiftLeft, false)
+	}
+	func lrShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		lrShiftImmediate(out, operand, value, RTGShiftRight, false)
+	}
+	func lrShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		lrShiftImmediate(out, operand, value, RTGShiftRight, true)
+	}
+	func lrVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrHL(), lrPrimary())
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadSaved(out, lrBC(), lrTertiary())
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		saturated := out.NewLabel()
+		RTGByte(out, 0x7c)
+		RTGByte(out, 0xb7)
+		lrJumpOpcode(out, 0xc2, saturated)
+		RTGByte(out, 0x7d)
+		RTGByte(out, 0xfe)
+		RTGByte(out, 16)
+		lrJumpOpcode(out, 0xd2, saturated)
+		out.Mark(loop)
+		RTGByte(out, 0x7d)
+		RTGByte(out, 0xb7)
+		lrJumpOpcode(out, 0xca, done)
+		if direction == RTGShiftLeft {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x21)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x10)
+		} else {
+			RTGByte(out, 0xcb)
+			if signed {
+				RTGByte(out, 0x28)
+			} else {
+				RTGByte(out, 0x38)
+			}
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x19)
+		}
+		RTGByte(out, 0x2d)
+		lrJump(out, loop)
+		out.Mark(saturated)
+		if direction == RTGShiftRight && signed {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x78)
+			positive := out.NewLabel()
+			lrJumpOpcode(out, 0xca, positive)
+			lrMoveImmediate(out, lrBC(), -1)
+			lrJump(out, done)
+			out.Mark(positive)
+		}
+		if direction == RTGShiftLeft || !signed {
+			lrMoveImmediate(out, lrBC(), 0)
+		}
+		out.Mark(done)
+		lrStorePairAbsolute(out, lrBC(), lrResultWord)
+		lrRestoreExcept(out, lrPrimary())
+	}
+
+	func lrJump(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0xc3)
+		at := out.Len()
+		lrEmit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func lrJumpOpcode(out *RTGEmitter, opcode int, label RTGLabel) {
+		RTGByte(out, byte(opcode))
+		at := out.Len()
+		lrEmit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func lrJumpEqual(out *RTGEmitter, wantEqual bool, label RTGLabel) {
+		RTGByte(out, 0xc5)
+		lrLoadAAbsolute(out, lrCompareRightWord)
+		RTGByte(out, 0x47)
+		lrLoadAAbsolute(out, lrCompareLeftWord)
+		RTGByte(out, 0xa8)
+		RTGByte(out, 0x4f)
+		lrLoadAAbsolute(out, lrCompareRightWord+1)
+		RTGByte(out, 0x47)
+		lrLoadAAbsolute(out, lrCompareLeftWord+1)
+		RTGByte(out, 0xa8)
+		RTGByte(out, 0xb1)
+		RTGByte(out, 0xc1)
+		if wantEqual {
+			lrJumpOpcode(out, 0xca, label)
+		} else {
+			lrJumpOpcode(out, 0xc2, label)
+		}
+	}
+	func lrJumpLess(out *RTGEmitter, signed bool, wantLess bool, label RTGLabel) {
+		done := out.NewLabel()
+		RTGByte(out, 0xc5)
+		lrLoadAAbsolute(out, lrCompareRightWord+1)
+		if signed {
+			RTGByte(out, 0xee)
+			RTGByte(out, 0x80)
+		}
+		RTGByte(out, 0x47)
+		lrLoadAAbsolute(out, lrCompareLeftWord+1)
+		if signed {
+			RTGByte(out, 0xee)
+			RTGByte(out, 0x80)
+		}
+		RTGByte(out, 0xb8)
+		if wantLess {
+			less := out.NewLabel()
+			lrJumpOpcode(out, 0xda, less)
+			lrJumpOpcode(out, 0xc2, done)
+			lrLoadAAbsolute(out, lrCompareRightWord)
+			RTGByte(out, 0x47)
+			lrLoadAAbsolute(out, lrCompareLeftWord)
+			RTGByte(out, 0xb8)
+			lrJumpOpcode(out, 0xda, less)
+			lrJump(out, done)
+			out.Mark(less)
+			RTGByte(out, 0xc1)
+			lrJump(out, label)
+		} else {
+			less := out.NewLabel()
+			lrJumpOpcode(out, 0xda, less)
+			greater := out.NewLabel()
+			lrJumpOpcode(out, 0xc2, greater)
+			lrLoadAAbsolute(out, lrCompareRightWord)
+			RTGByte(out, 0x47)
+			lrLoadAAbsolute(out, lrCompareLeftWord)
+			RTGByte(out, 0xb8)
+			lrJumpOpcode(out, 0xda, less)
+			out.Mark(greater)
+			RTGByte(out, 0xc1)
+			lrJump(out, label)
+			out.Mark(less)
+		}
+		out.Mark(done)
+		RTGByte(out, 0xc1)
+	}
+	func lrJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		if condition.Code == 0 {
+			lrJumpEqual(out, true, label)
+			return
+		}
+		if condition.Code == 1 {
+			lrJumpEqual(out, false, label)
+			return
+		}
+		if condition.Code == 4 {
+			lrJumpLess(out, true, true, label)
+			return
+		}
+		if condition.Code == 5 {
+			lrJumpLess(out, true, false, label)
+			return
+		}
+		if condition.Code == 6 {
+			lrJumpLess(out, false, true, label)
+			return
+		}
+		if condition.Code == 7 {
+			lrJumpLess(out, false, false, label)
+			return
+		}
+		if condition.Code == 2 || condition.Code == 8 {
+			lrJumpEqual(out, true, label)
+			if condition.Code == 2 {
+				lrJumpLess(out, true, true, label)
+			} else {
+				lrJumpLess(out, false, true, label)
+			}
+			return
+		}
+		if condition.Code == 3 || condition.Code == 9 {
+			skip := out.NewLabel()
+			lrJumpEqual(out, true, skip)
+			if condition.Code == 3 {
+				lrJumpLess(out, true, false, label)
+			} else {
+				lrJumpLess(out, false, false, label)
+			}
+			out.Mark(skip)
+		}
+	}
+	func lrSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		matched := out.NewLabel()
+		done := out.NewLabel()
+		lrJumpCondition(out, condition, matched)
+		lrMoveImmediate(out, destination, 0)
+		lrJump(out, done)
+		out.Mark(matched)
+		lrMoveImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+
+	func lrCall(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0xcd)
+		at := out.Len()
+		lrEmit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func lrCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrDE(), operand)
+		RTGByte(out, 0x21)
+		returnAt := out.Len()
+		lrEmit16(out, 0)
+		returnLabel := out.NewLabel()
+		RTGLabelRelocAt(out, returnLabel, returnAt)
+		RTGByte(out, 0xe5)
+		RTGByte(out, 0xd5)
+		lrRestoreAll(out)
+		RTGByte(out, 0xc9)
+		out.Mark(returnLabel)
+	}
+	func lrReturn(out *RTGEmitter) { RTGByte(out, 0xc9) }
+	func lrLeave(out *RTGEmitter) {
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadPairAbsolute(out, lrHL(), lrYWord)
+		RTGByte(out, 0xf9)
+		RTGByte(out, 0xe1)
+		lrStorePairAbsolute(out, lrHL(), lrYWord)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+	}
+	func lrHostSyscall(out *RTGEmitter) { RTGByte(out, 0xd3) }
+
+	func lrNegateBC(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x91)
+		RTGByte(out, 0x4f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x90)
+		RTGByte(out, 0x47)
+	}
+	func lrNegateDE(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x93)
+		RTGByte(out, 0x5f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x92)
+		RTGByte(out, 0x57)
+	}
+	func lrNegateHL(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x95)
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x94)
+		RTGByte(out, 0x67)
+	}
+	func lrSignedDivide(out *RTGEmitter, remainder bool) {
+		lrSaveWorking(out)
+		lrLoadSaved(out, lrBC(), lrTertiary())
+		lrLoadSaved(out, lrHL(), lrPrimary())
+		RTGByte(out, 0x78)
+		RTGByte(out, 0xe6)
+		RTGByte(out, 0x80)
+		lrStoreAAbsolute(out, lrSignByte)
+		RTGByte(out, 0x78)
+		RTGByte(out, 0xac)
+		RTGByte(out, 0xe6)
+		RTGByte(out, 0x80)
+		lrStoreAAbsolute(out, lrQuotientSignByte)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x78)
+		dividendPositive := out.NewLabel()
+		lrJumpOpcode(out, 0xca, dividendPositive)
+		lrNegateBC(out)
+		out.Mark(dividendPositive)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x7c)
+		divisorPositive := out.NewLabel()
+		lrJumpOpcode(out, 0xca, divisorPositive)
+		lrNegateHL(out)
+		out.Mark(divisorPositive)
+		RTGByte(out, 0x7c)
+		RTGByte(out, 0xb5)
+		divideZero := out.NewLabel()
+		finish := out.NewLabel()
+		lrJumpOpcode(out, 0xca, divideZero)
+		lrMoveImmediate(out, lrDE(), 0)
+		for bit := 0; bit < 16; bit++ {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x21)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x10)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x13)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x12)
+			subtract := out.NewLabel()
+			skip := out.NewLabel()
+			RTGByte(out, 0x7a)
+			RTGByte(out, 0xbc)
+			lrJumpOpcode(out, 0xda, skip)
+			lrJumpOpcode(out, 0xc2, subtract)
+			RTGByte(out, 0x7b)
+			RTGByte(out, 0xbd)
+			lrJumpOpcode(out, 0xda, skip)
+			out.Mark(subtract)
+			RTGByte(out, 0x7b)
+			RTGByte(out, 0x95)
+			RTGByte(out, 0x5f)
+			RTGByte(out, 0x7a)
+			RTGByte(out, 0x9c)
+			RTGByte(out, 0x57)
+			RTGByte(out, 0x0c)
+			out.Mark(skip)
+		}
+		if remainder {
+			lrLoadAAbsolute(out, lrSignByte)
+			RTGByte(out, 0xb7)
+			positive := out.NewLabel()
+			lrJumpOpcode(out, 0xca, positive)
+			lrNegateDE(out)
+			out.Mark(positive)
+			lrStorePairAbsolute(out, lrDE(), lrResultWord)
+		} else {
+			lrLoadAAbsolute(out, lrQuotientSignByte)
+			RTGByte(out, 0xb7)
+			positive := out.NewLabel()
+			lrJumpOpcode(out, 0xca, positive)
+			lrNegateBC(out)
+			out.Mark(positive)
+			lrStorePairAbsolute(out, lrBC(), lrResultWord)
+		}
+		lrJump(out, finish)
+		out.Mark(divideZero)
+		lrMoveImmediate(out, lrHL(), 0)
+		lrStorePairAbsolute(out, lrHL(), lrResultWord)
+		out.Mark(finish)
+		lrRestoreExcept(out, lrPrimary())
+	}
+
+	func lrPatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := lrCodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			lrPatch16(out, at, target)
+		}
+	}
+	func lrFrameStart(out *RTGEmitter) int {
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadPairAbsolute(out, lrHL(), lrYWord)
+		RTGByte(out, 0xe5)
+		RTGByte(out, 0xf8)
+		RTGByte(out, 0)
+		lrStorePairAbsolute(out, lrHL(), lrYWord)
+		RTGByte(out, 0x21)
+		at := out.Len()
+		lrEmit16(out, 0)
+		RTGByte(out, 0x39)
+		RTGByte(out, 0xf9)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+		return at
+	}
+	func lrFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 3) & -2
+		lrPatch16(out, at, -frameSize)
+	}
+	func lrFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		lrLoadNative(out, destination, RTGAddress{Base: lrY(), Displacement: -(offset + 2)})
+	}
+	func lrFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		lrStoreNative(out, RTGAddress{Base: lrY(), Displacement: -(offset + 2)}, source)
+	}
+	func lrFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		lrEmitAddress(out, destination, RTGAddress{Base: lrY(), Displacement: -(offset + 2)})
+	}
+	func lrPushRegister(out *RTGEmitter, source RTGRegister) {
+		if source.Code == 0 {
+			RTGByte(out, 0xc5)
+			return
+		}
+		if source.Code == 1 {
+			RTGByte(out, 0xd5)
+			return
+		}
+		if source.Code == 2 {
+			RTGByte(out, 0xe5)
+			return
+		}
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrLoadPairAbsolute(out, lrHL(), lrLogicalAddress(source))
+		RTGByte(out, 0xe5)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+	}
+	func lrPushImmediate(out *RTGEmitter, value int) {
+		lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+		lrMoveImmediate(out, lrHL(), int64(value))
+		RTGByte(out, 0xe5)
+		lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+	}
+	func lrPopRegister(out *RTGEmitter, destination RTGRegister) {
+		if destination.Code == 0 {
+			RTGByte(out, 0xc1)
+			return
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0xd1)
+			return
+		}
+		if destination.Code == 2 {
+			RTGByte(out, 0xe1)
+			return
+		}
+		RTGByte(out, 0xe1)
+		lrStorePairAbsolute(out, lrHL(), lrLogicalAddress(destination))
+	}
+	func lrStoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word == 0 {
+			lrFrameStore(out, offset, lrHL())
+			return
+		}
+		if word == 1 {
+			lrFrameStore(out, offset, lrDE())
+			return
+		}
+		if word == 2 {
+			lrFrameStore(out, offset, lrBC())
+			return
+		}
+		lrLoadNative(out, lrHL(), RTGAddress{Base: lrY(), Displacement: 4 + (word-3)*2})
+		lrFrameStore(out, offset, lrHL())
+	}
+	func lrCallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		if wordCount > 0 {
+			lrPopRegister(out, lrHL())
+		}
+		if wordCount > 1 {
+			lrPopRegister(out, lrDE())
+		}
+		if wordCount > 2 {
+			lrPopRegister(out, lrBC())
+		}
+		lrCall(out, label)
+		if wordCount > 3 {
+			lrStorePairAbsolute(out, lrHL(), lrAuxWord)
+			lrMoveImmediate(out, lrHL(), int64((wordCount-3)*2))
+			RTGByte(out, 0x39)
+			RTGByte(out, 0xf9)
+			lrLoadPairAbsolute(out, lrHL(), lrAuxWord)
+		}
+	}
+
+	func lrBC() RTGRegister        { return RTGRegister{Code: 0, Valid: true} }
+	func lrDE() RTGRegister        { return RTGRegister{Code: 1, Valid: true} }
+	func lrHL() RTGRegister        { return RTGRegister{Code: 2, Valid: true} }
+	func lrX() RTGRegister         { return RTGRegister{Code: 3, Valid: true} }
+	func lrY() RTGRegister         { return RTGRegister{Code: 4, Valid: true} }
+	func lrSP() RTGRegister        { return RTGRegister{Code: 5, Valid: true} }
+	func lrPrimary() RTGRegister   { return lrHL() }
+	func lrSecondary() RTGRegister { return lrDE() }
+	func lrTertiary() RTGRegister  { return lrBC() }
+}
+
+arch lr35902 {
+	alias = "lr35902"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go lrPatchRelocations
+	registers pair16 = [bc, de, hl, x, y, sp]
+	locations {
+		primary = hl
+		secondary = de
+		tertiary = bc
+		scratch = x
+		address = x
+		compareLeft = bc
+		compareRight = de
+		copy_destination = de
+		copy_source = bc
+		copy_count = hl
+		stack = sp
+		frame = y
+		link = x
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go lrMove
+		address = go lrEmitAddress
+		load.native = go lrLoadNative
+		load.i32 = go lrLoadI32
+		load.u32 = go lrLoadU32
+		load.i16 = go lrLoadI16
+		load.u16 = go lrLoadU16
+		load.i8 = go lrLoadI8
+		load.u8 = go lrLoadU8
+		store.native = go lrStoreNative
+		store.u32 = go lrStoreU32
+		store.u16 = go lrStoreU16
+		store.u8 = go lrStoreU8
+		add = go lrAdd
+		subtract = go lrSubtract
+		multiply = go lrMultiply
+		bit_and = go lrBitAnd
+		bit_or = go lrBitOr
+		bit_xor = go lrBitXor
+		compare = go lrCompare
+		test = go lrTest
+		increment = go lrIncrement
+		decrement = go lrDecrement
+		shift_left_immediate = go lrShiftLeftImmediate
+		shift_right_unsigned_immediate = go lrShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go lrShiftRightSignedImmediate
+		call = go lrCall
+		call_indirect = go lrCallIndirect
+		jump = go lrJump
+		jump_condition = go lrJumpCondition
+		set_condition = go lrSetCondition
+		return = go lrReturn
+		leave = go lrLeave
+		host_syscall = go lrHostSyscall
+		move_immediate = go lrMoveImmediate
+		variable_shift = go lrVariableShift
+		signed_divide = go lrSignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			lrCompare(out, de, bc)
+			lrJumpCondition(out, ult, forward)
+			lrEmitAddress(out, x, record_address(Base:bc, Index:hl, Scale:1,))
+			lrCompare(out, de, x)
+			lrJumpCondition(out, uge, forward)
+			lrEmitAddress(out, bc, record_address(Base:bc, Index:hl, Scale:1, Displacement:-1,))
+			lrEmitAddress(out, de, record_address(Base:de, Index:hl, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			lrMoveImmediate(out, x, 0)
+			lrCompare(out, hl, x)
+			lrJumpCondition(out, eq, done)
+			lrLoadU8(out, x, record_address(Base:bc,))
+			lrStoreU8(out, record_address(Base:de,), x)
+			lrDecrement(out, bc)
+			lrDecrement(out, de)
+			lrDecrement(out, hl)
+			lrJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			lrMoveImmediate(out, x, 0)
+			lrCompare(out, hl, x)
+			lrJumpCondition(out, eq, done)
+			lrLoadU8(out, x, record_address(Base:bc,))
+			lrStoreU8(out, record_address(Base:de,), x)
+			lrIncrement(out, bc)
+			lrIncrement(out, de)
+			lrDecrement(out, hl)
+			lrJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi lr35902_internal {
+	arch = lr35902
+	arguments = [hl, de, bc]
+	call_words = [hl, de, bc]
+	result = [hl, de]
+	stack_alignment = 2
+	return_address = x
+	frame_pointer = y
+	frame_start = go lrFrameStart
+	frame_finish = go lrFrameFinish
+	push_register = go lrPushRegister
+	push_immediate = go lrPushImmediate
+	pop_register = go lrPopRegister
+	frame_load = go lrFrameLoad
+	frame_store = go lrFrameStore
+	frame_address = go lrFrameAddress
+	store_param_word = go lrStoreParamWord
+	call_word_count = go lrCallWordCount
+}

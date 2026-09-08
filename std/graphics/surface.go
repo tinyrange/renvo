@@ -13,14 +13,15 @@ type pixelRect struct {
 	maxY int
 }
 
-// Surface is a top-down, tightly packed software render target. RGBA8 is the
-// default; caller-owned RGB565 buffers can be used for direct display scanout.
+// Surface is a software render target with logical Width/Height and tightly
+// packed native Pixels/Stride. Rotated surfaces render directly in scanout order.
 type Surface struct {
 	Width    int
 	Height   int
 	Stride   int
 	Pixels   []byte
 	Format   PixelFormat
+	rotation Rotation
 	revision int
 
 	blend              BlendMode
@@ -98,7 +99,7 @@ func (s *Surface) UpdateImage(rect Rect, pixels []byte) {
 			if i+pixelSize > len(pixels) {
 				return
 			}
-			o := y*s.Stride + x*pixelSize
+			o := s.PixelOffset(x, y)
 			for channel := 0; channel < pixelSize; channel++ {
 				s.Pixels[o+channel] = pixels[i+channel]
 			}
@@ -147,8 +148,14 @@ func (s *Surface) FillConvexPolygon(points []Point, color Color) {
 }
 
 func NewSurface(width, height int) *Surface {
+	return NewSurfaceFormat(width, height, PixelRGBA8)
+}
+
+// NewSurfaceFormat renders directly into storage in the requested pixel format.
+// RGB565 uses two bytes per opaque pixel; no RGBA staging framebuffer is created.
+func NewSurfaceFormat(width, height int, format PixelFormat) *Surface {
 	s := allocSurface()
-	s.resetFormat(width, height, PixelRGBA8)
+	s.resetFormat(width, height, format)
 	return s
 }
 
@@ -210,6 +217,7 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 	}
 	s.Width = width
 	s.Height = height
+	s.rotation = Rotation0
 	pixelSize := pixelFormatBytes(format)
 	if pixelSize == 0 {
 		format = PixelRGBA8
@@ -246,7 +254,12 @@ func (s *Surface) resetFormatStorage(width, height int, format PixelFormat, clea
 }
 
 func (s *Surface) Resize(width, height int) {
+	rotation := s.rotation
+	if rotation == Rotation90 || rotation == Rotation270 {
+		width, height = height, width
+	}
 	s.resetFormat(width, height, s.Format)
+	s.orient(rotation)
 }
 
 func (s *Surface) DirtyRect() (Rect, bool) {
@@ -624,7 +637,7 @@ func (s *Surface) putPixel(x, y int, c Color) {
 // rasterizers mark their bounds once and use this path for every covered pixel.
 func (s *Surface) writePixel(x, y int, c Color) {
 	if s.Format == PixelRGB565 {
-		o := y*s.Stride + x*2
+		o := s.PixelOffset(x, y)
 		if s.blend != BlendCopy && c.A != 255 {
 			destination := decodeRGB565(s.Pixels[o], s.Pixels[o+1])
 			inv := 255 - int(c.A)
@@ -637,7 +650,7 @@ func (s *Surface) writePixel(x, y int, c Color) {
 		return
 	}
 	if s.Format == PixelA8 {
-		o := y*s.Stride + x
+		o := s.PixelOffset(x, y)
 		if s.blend == BlendCopy || c.A == 255 {
 			s.Pixels[o] = c.A
 		} else {
@@ -645,7 +658,7 @@ func (s *Surface) writePixel(x, y int, c Color) {
 		}
 		return
 	}
-	o := y*s.Stride + x*4
+	o := s.PixelOffset(x, y)
 	if s.blend == BlendCopy || c.A == 255 {
 		s.Pixels[o], s.Pixels[o+1], s.Pixels[o+2], s.Pixels[o+3] = c.R, c.G, c.B, c.A
 		return
@@ -790,6 +803,7 @@ func (s *Surface) fillPixelRect(region pixelRect, color Color) {
 	}
 	if s.Format == PixelRGB565 && (s.blend == BlendCopy || color.A == 255) {
 		s.markDirtyRect(region)
+		region = s.nativeRect(region)
 		pixel := encodeRGB565(color)
 		low, high := byte(pixel), byte(pixel>>8)
 		word := uint32(pixel) | uint32(pixel)<<16
@@ -820,6 +834,7 @@ func (s *Surface) fillPixelRect(region pixelRect, color Color) {
 		return
 	}
 	s.markDirtyRect(region)
+	region = s.nativeRect(region)
 	rowStart := region.minY*s.Stride + region.minX*4
 	rowEnd := region.minY*s.Stride + region.maxX*4
 	for offset := rowStart; offset < rowEnd; offset += 4 {
@@ -977,14 +992,14 @@ func (image *Surface) imagePixel(x, y int) Color {
 		return Color{}
 	}
 	if image.Format == PixelA8 {
-		a := image.Pixels[y*image.Stride+x]
+		a := image.Pixels[image.PixelOffset(x, y)]
 		return Color{R: a, G: a, B: a, A: a}
 	}
 	if image.Format == PixelRGB565 {
-		o := y*image.Stride + x*2
+		o := image.PixelOffset(x, y)
 		return decodeRGB565(image.Pixels[o], image.Pixels[o+1])
 	}
-	o := y*image.Stride + x*4
+	o := image.PixelOffset(x, y)
 	return Color{image.Pixels[o], image.Pixels[o+1], image.Pixels[o+2], image.Pixels[o+3]}
 }
 
@@ -1069,6 +1084,11 @@ func (s *Surface) drawImageAxisAligned(image *Surface, src, dst Rect, sampling S
 	if srcWidth <= 0 || srcHeight <= 0 || dstWidth <= 0 || dstHeight <= 0 {
 		return true
 	}
+	if s.Format == PixelRGB565 && image.Format == PixelRGB565 && sampling == SamplingNearest && tint == White &&
+		srcMinX >= 0 && srcMinY >= 0 && srcMinX+srcWidth <= image.Width && srcMinY+srcHeight <= image.Height {
+		s.drawImageRGB565(image, srcMinX, srcMinY, srcWidth, srcHeight, dstMinX, dstMinY, dstWidth, dstHeight)
+		return true
+	}
 	for y := dstMinY; y < dstMinY+dstHeight; y++ {
 		sampleY := srcMinY*256 + ((2*(y-dstMinY)+1)*srcHeight*128)/dstHeight - 128
 		for x := dstMinX; x < dstMinX+dstWidth; x++ {
@@ -1077,6 +1097,25 @@ func (s *Surface) drawImageAxisAligned(image *Surface, src, dst Rect, sampling S
 		}
 	}
 	return true
+}
+
+// Native opaque images need neither color decoding nor alpha blending. Copy
+// their packed pixels directly, including nearest-neighbor scaling and rotation.
+func (s *Surface) drawImageRGB565(image *Surface, sx, sy, sw, sh, dx, dy, dw, dh int) {
+	region := intersectPixelRect(s.clip, pixelRect{dx, dy, dx + dw, dy + dh})
+	if region.minX >= region.maxX || region.minY >= region.maxY {
+		return
+	}
+	s.markDirtyRect(region)
+	for y := region.minY; y < region.maxY; y++ {
+		iy := sy + ((2*(y-dy)+1)*sh)/(2*dh)
+		for x := region.minX; x < region.maxX; x++ {
+			ix := sx + ((2*(x-dx)+1)*sw)/(2*dw)
+			source := image.PixelOffset(ix, iy)
+			dest := s.PixelOffset(x, y)
+			s.Pixels[dest], s.Pixels[dest+1] = image.Pixels[source], image.Pixels[source+1]
+		}
+	}
 }
 
 // DrawImage draws a cropped image through the current affine transform.

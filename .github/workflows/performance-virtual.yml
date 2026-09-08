@@ -1,0 +1,20 @@
+name: Performance (Virtual)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-virtual-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  performance:
+    uses: ./.github/workflows/performance-run.yml
+    with:
+      platform: virtual

@@ -314,11 +314,11 @@ func renvoRTGEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 		return true
 	}
 	if c0 == '<' && c1 == '<' {
-		renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
+		renvoRTGEmitBoundedVariableShift(a, RTGShiftLeft, false)
 		return true
 	}
 	if c0 == '>' && c1 == '>' {
-		renvoRTGDirectVariableShift(a, RTGShiftRight, true)
+		renvoRTGEmitBoundedVariableShift(a, RTGShiftRight, true)
 		return true
 	}
 	setcc := 0
@@ -345,6 +345,34 @@ func renvoRTGEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 		return true
 	}
 	return false
+}
+
+// Prepared ISA emitters expose machine shifts, whose count masking differs.
+// Apply the language's full-word boundary before invoking those instructions.
+func renvoRTGEmitBoundedVariableShift(a *renvoAsm, direction RTGShiftDirection, signed bool) {
+	shift := renvoAsmNewLabel(a)
+	done := renvoAsmNewLabel(a)
+	bits := a.c.renvoNativeIntSize * 8
+	oversized := renvoAsmNewLabel(a)
+	// Two signed comparisons also work on bytecode backends whose branch
+	// instructions have no unsigned condition encoding.
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 0)
+	renvoRTGDirectCompare(a, renvoRTGPrimary, renvoRTGScratch)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x9c), oversized)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(bits))
+	renvoRTGDirectCompare(a, renvoRTGPrimary, renvoRTGScratch)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x9c), shift)
+	renvoAsmMarkLabel(a, oversized)
+	if direction == RTGShiftRight && signed {
+		renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGTertiary)
+		renvoRTGDirectShiftRightSignedImmediate(a, renvoRTGPrimary, byte(bits-1))
+	} else {
+		renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
+	}
+	renvoAsmJmpLabel(a, done)
+	renvoAsmMarkLabel(a, shift)
+	renvoRTGDirectVariableShift(a, direction, signed)
+	renvoAsmMarkLabel(a, done)
 }
 
 func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
@@ -384,7 +412,7 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	framePatch := renvoRTGFrameStart(a)
 	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoRTGAsmStoreFrame(a, g.returnStruct, renvoRTGCallWord0)
+		renvoRTGStoreParamWord(g, 0, g.returnStruct)
 	}
 	renvoBindFunctionParams(g, fnInfoIndex)
 	if !renvoBindClosureCaptures(g, fnInfoIndex) ||

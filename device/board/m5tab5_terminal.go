@@ -8,8 +8,11 @@ import (
 	"unsafe"
 )
 
-// Screen adapts the Tab5 portrait framebuffer to display-oriented packages.
+// Screen adapts the Tab5 framebuffer to display-oriented packages.
 type Screen struct {
+	// Landscape must be set before InitializeTerminal. It selects native-layout
+	// 1280 by 720 rendering without a post-render rotation pass.
+	Landscape               bool
 	ready                   bool
 	surface                 *graphics.Surface
 	scrollPrepared          bool
@@ -19,6 +22,25 @@ type Screen struct {
 
 // Display is the Tab5's 720 by 1280 portrait display.
 var Display = Screen{}
+
+// SetLandscape switches portrait/landscape without reallocating or rotating the
+// native framebuffer. The terminal automatically refits on its next Flush.
+// Forms callers must also resize/invalidate their form before presentation.
+func (s *Screen) SetLandscape(landscape bool) {
+	s.Landscape = landscape
+	Touch.Landscape = landscape
+	Touch.lastReport = -1
+	Touch.primary = -1
+	Touch.pressed = false
+	if s.surface != nil {
+		rotation := graphics.Rotation0
+		if landscape {
+			rotation = graphics.Rotation90
+		}
+		s.surface.SetRotation(rotation)
+	}
+	s.scrollPrepared, s.scrollBackStale = false, false
+}
 
 // Console is the board's active terminal after StartTerminal succeeds.
 var Console *terminal.Terminal
@@ -75,7 +97,12 @@ func (s *Screen) InitializeTerminal() (*graphics.Surface, bool) {
 	if !InitFramebuffer() {
 		return nil, false
 	}
-	s.surface = NewPortraitSurface()
+	if s.Landscape {
+		s.surface = NewLandscapeSurface()
+	} else {
+		s.surface = NewPortraitSurface()
+	}
+	Touch.Landscape = s.Landscape
 	s.ready = s.surface != nil
 	return s.surface, s.ready
 }
@@ -118,22 +145,24 @@ func (s *Screen) PrepareTerminal(surface *graphics.Surface, scrolling bool) bool
 
 func (s *Screen) copyTerminalRegion(surface *graphics.Surface, sourceY, destinationY, height int) bool {
 	if surface == nil || surface.Format != graphics.PixelRGB565 ||
-		surface.Width != DisplayWidth || surface.Height != DisplayHeight ||
+		surface.NativeWidth() != DisplayWidth || surface.NativeHeight() != DisplayHeight ||
 		len(surface.Pixels) < framebufferSize || !scanoutStarted ||
 		sourceY < 0 || destinationY < 0 || height <= 0 ||
-		sourceY+height > DisplayHeight || destinationY+height > DisplayHeight {
+		sourceY+height > surface.Height || destinationY+height > surface.Height {
 		return false
 	}
 	destination := uintptr(unsafe.Pointer(&surface.Pixels[0]))
 	if destination != backFramebuffer {
 		return false
 	}
-	destinationStart := destinationY * surface.Stride
-	destinationSize := height * surface.Stride
+	src := surface.NativeRect(graphics.R(0, graphics.Scalar(sourceY), graphics.Scalar(surface.Width), graphics.Scalar(height)))
+	dst := surface.NativeRect(graphics.R(0, graphics.Scalar(destinationY), graphics.Scalar(surface.Width), graphics.Scalar(height)))
+	destinationStart := int(dst.MinY) * surface.Stride
+	destinationSize := int(dst.Height()) * surface.Stride
 	writeBackInvalidate(destination+uintptr(destinationStart), destinationSize)
 	if !copyRectDMA2DAt(
 		frontFramebuffer, destination,
-		0, sourceY, 0, destinationY, DisplayWidth, height,
+		int(src.MinX), int(src.MinY), int(dst.MinX), int(dst.MinY), int(dst.Width()), int(dst.Height()),
 	) {
 		return false
 	}
@@ -146,14 +175,21 @@ func (s *Screen) copyTerminalRegion(surface *graphics.Surface, sourceY, destinat
 // large CPU/PSRAM memmove otherwise required by terminal scrolling.
 func (s *Screen) ScrollTerminal(surface *graphics.Surface, top, bottom, pixels int) bool {
 	if surface == nil || surface.Format != graphics.PixelRGB565 ||
-		surface.Width != DisplayWidth || surface.Height != DisplayHeight ||
+		surface.NativeWidth() != DisplayWidth || surface.NativeHeight() != DisplayHeight ||
 		len(surface.Pixels) < framebufferSize || !scanoutStarted ||
-		top < 0 || bottom > DisplayHeight || top >= bottom ||
+		top < 0 || bottom > surface.Height || top >= bottom ||
 		pixels <= 0 || pixels >= bottom-top {
 		return false
 	}
 	if !s.copyTerminalRegion(surface, top+pixels, top, bottom-top-pixels) {
 		return false
+	}
+	if surface.Rotation() != graphics.Rotation0 {
+		// Landscape scrolling is a native column copy. Synchronize its damage
+		// normally; the portrait-only excluded-row optimization is inapplicable.
+		surface.MarkUpdated(graphics.R(0, graphics.Scalar(top), graphics.Scalar(surface.Width), graphics.Scalar(bottom-top-pixels)))
+		s.scrollBackStale = false
+		return true
 	}
 	s.scrollTop, s.scrollBottom = top, bottom
 	s.scrollPrepared = true
@@ -175,6 +211,7 @@ func (*Screen) DelayMilliseconds(milliseconds uint32) {
 // Touchscreen adapts the first active ST7121 contact to pointer input. It
 // retains the last coordinate for the release transition.
 type Touchscreen struct {
+	Landscape  bool
 	ready      bool
 	primary    int
 	x, y       int
@@ -226,6 +263,9 @@ func (t *Touchscreen) ReadPointer() (x, y int, pressed, ok bool) {
 	}
 	if primaryIndex >= 0 {
 		t.x, t.y = PortraitPoint(t.points[primaryIndex])
+		if t.Landscape {
+			t.x, t.y = LandscapePoint(t.points[primaryIndex])
+		}
 		t.pressed = true
 	}
 	return t.x, t.y, t.pressed, true

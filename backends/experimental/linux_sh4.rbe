@@ -1,0 +1,874 @@
+# SPDX-License-Identifier: Apache-2.0
+# Self-contained Linux backend. Copy this file to use or extend this target.
+definition 1
+unit linux_sh4
+implements direct_emitter_v1
+go backend {
+	var superhShCodeAddress int
+	var superhShBigEndian bool
+	var superhShComparisonSaved bool
+
+	func superhShSetCodeAddress(address int) { superhShCodeAddress = address }
+	func superhShSetBigEndian(value bool)    { superhShBigEndian = value }
+
+	func superhShEmit16(out *RTGEmitter, value int) {
+		if superhShBigEndian {
+			RTGByte(out, byte(value>>8))
+			RTGByte(out, byte(value))
+			return
+		}
+		RTGByte(out, byte(value))
+		RTGByte(out, byte(value>>8))
+	}
+
+	func superhShEmit32(out *RTGEmitter, value int) {
+		if superhShBigEndian {
+			RTGByte(out, byte(value>>24))
+			RTGByte(out, byte(value>>16))
+			RTGByte(out, byte(value>>8))
+			RTGByte(out, byte(value))
+			return
+		}
+		RTGUint32(out, value)
+	}
+
+	func superhShPatch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		if superhShBigEndian {
+			code[at] = byte(value >> 8)
+			code[at+1] = byte(value)
+			return
+		}
+		code[at] = byte(value)
+		code[at+1] = byte(value >> 8)
+	}
+
+	func superhShPatch32(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		if superhShBigEndian {
+			code[at] = byte(value >> 24)
+			code[at+1] = byte(value >> 16)
+			code[at+2] = byte(value >> 8)
+			code[at+3] = byte(value)
+			return
+		}
+		out.PatchUint32(at, value)
+	}
+
+	func superhShMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			superhShEmit16(out, 0x6003|(destination.Code<<8)|(source.Code<<4))
+		}
+	}
+
+	func superhShLiteral(out *RTGEmitter, destination RTGRegister, value int) int {
+		if out.Len()&3 != 0 {
+			superhShEmit16(out, 0x0009)
+		}
+		superhShEmit16(out, 0xd000|(destination.Code<<8)|1)
+		superhShEmit16(out, 0xa003)
+		superhShEmit16(out, 0x0009)
+		superhShEmit16(out, 0x0009)
+		at := out.Len()
+		superhShEmit32(out, value)
+		return at
+	}
+
+	func superhShMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value)
+		if immediate >= -128 && immediate <= 127 {
+			superhShEmit16(out, 0xe000|(destination.Code<<8)|(immediate&0xff))
+			return
+		}
+		superhShLiteral(out, destination, immediate)
+	}
+
+	func superhShEmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := superhShLiteral(out, destination, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		index := value.Index
+		if index.Valid && (value.Scale != 1 || (index.Code == destination.Code && (!value.Base.Valid || value.Base.Code != destination.Code))) {
+			// Preserve an index which aliases the destination before materializing
+			// the base. Pick a temporary distinct from the base as well, since the
+			// scaled-index path must retain both values until the final addition.
+			temporary := superhShScratch()
+			if value.Base.Valid && value.Base.Code == temporary.Code {
+				temporary = superhShCompareLeft()
+			}
+			superhShMove(out, temporary, index)
+			index = temporary
+		}
+		if value.Base.Valid {
+			superhShMove(out, destination, value.Base)
+		} else {
+			superhShMoveImmediate(out, destination, 0)
+		}
+		if index.Valid {
+			shift := RTGLog2(value.Scale)
+			for shift > 0 {
+				superhShEmit16(out, 0x4000|(index.Code<<8))
+				shift--
+			}
+			superhShEmit16(out, 0x300c|(destination.Code<<8)|(index.Code<<4))
+		}
+		if value.Displacement != 0 {
+			if value.Displacement >= -128 && value.Displacement <= 127 {
+				superhShEmit16(out, 0x7000|(destination.Code<<8)|(value.Displacement&0xff))
+			} else {
+				temporary := superhShScratch()
+				if destination.Code == temporary.Code {
+					temporary = superhShCompareLeft()
+				}
+				superhShMoveImmediate(out, temporary, int64(value.Displacement))
+				superhShEmit16(out, 0x300c|(destination.Code<<8)|(temporary.Code<<4))
+			}
+		}
+	}
+
+	func superhShMaterializeAddress(out *RTGEmitter, value RTGAddress) RTGRegister {
+		superhShEmitAddress(out, superhShAddress(), value)
+		return superhShAddress()
+	}
+
+	func superhShLoadWidth(out *RTGEmitter, destination RTGRegister, value RTGAddress, opcode int) {
+		// Address formation borrows four physical helper registers. Save them,
+		// load through compareRight, restore them, and only then publish the
+		// result to its requested location.
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShAddress().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShScratch().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareLeft().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareRight().Code<<4))
+		adjusted := value
+		if adjusted.Base.Valid && adjusted.Base.Code == superhShStack().Code {
+			adjusted.Displacement += 16
+		}
+		address := superhShMaterializeAddress(out, adjusted)
+		superhShEmit16(out, opcode|(superhShCompareRight().Code<<8)|(address.Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareRight().Code<<4))
+		superhShEmit16(out, 0x5000|(superhShCompareRight().Code<<8)|(superhShStack().Code<<4)|1)
+		superhShEmit16(out, 0x5000|(superhShCompareLeft().Code<<8)|(superhShStack().Code<<4)|2)
+		superhShEmit16(out, 0x5000|(superhShScratch().Code<<8)|(superhShStack().Code<<4)|3)
+		superhShEmit16(out, 0x5000|(superhShAddress().Code<<8)|(superhShStack().Code<<4)|4)
+		superhShEmit16(out, 0x5000|(destination.Code<<8)|(superhShStack().Code<<4)|0)
+		superhShEmit16(out, 0x7000|(superhShStack().Code<<8)|20)
+	}
+	func superhShLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6002)
+	}
+	func superhShLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6002)
+	}
+	func superhShLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6002)
+	}
+	func superhShLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6001)
+	}
+	func superhShLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6001)
+		superhShEmit16(out, 0x600d|(destination.Code<<8)|(destination.Code<<4))
+	}
+	func superhShLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6000)
+	}
+	func superhShLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		superhShLoadWidth(out, destination, value, 0x6000)
+		superhShEmit16(out, 0x600c|(destination.Code<<8)|(destination.Code<<4))
+	}
+
+	func superhShStoreWidth(out *RTGEmitter, value RTGAddress, source RTGRegister, opcode int) {
+		// Preserve every helper register as required by the store contract, plus
+		// the value itself while the target address is formed.
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShAddress().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShScratch().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareLeft().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareRight().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(source.Code<<4))
+		adjusted := value
+		if adjusted.Base.Valid && adjusted.Base.Code == superhShStack().Code {
+			adjusted.Displacement += 20
+		}
+		address := superhShMaterializeAddress(out, adjusted)
+		superhShEmit16(out, 0x5000|(superhShCompareRight().Code<<8)|(superhShStack().Code<<4)|0)
+		superhShEmit16(out, opcode|(address.Code<<8)|(superhShCompareRight().Code<<4))
+		superhShEmit16(out, 0x5000|(superhShCompareRight().Code<<8)|(superhShStack().Code<<4)|1)
+		superhShEmit16(out, 0x5000|(superhShCompareLeft().Code<<8)|(superhShStack().Code<<4)|2)
+		superhShEmit16(out, 0x5000|(superhShScratch().Code<<8)|(superhShStack().Code<<4)|3)
+		superhShEmit16(out, 0x5000|(superhShAddress().Code<<8)|(superhShStack().Code<<4)|4)
+		superhShEmit16(out, 0x7000|(superhShStack().Code<<8)|20)
+	}
+	func superhShStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		superhShStoreWidth(out, value, source, 0x2002)
+	}
+	func superhShStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		superhShStoreWidth(out, value, source, 0x2002)
+	}
+	func superhShStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		superhShStoreWidth(out, value, source, 0x2001)
+	}
+	func superhShStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		superhShStoreWidth(out, value, source, 0x2000)
+	}
+
+	func superhShAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x300c|(destination.Code<<8)|(source.Code<<4))
+	}
+	func superhShSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x3008|(destination.Code<<8)|(source.Code<<4))
+	}
+	func superhShMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x0007|(destination.Code<<8)|(source.Code<<4))
+		superhShEmit16(out, 0x001a|(destination.Code<<8))
+	}
+	func superhShBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x2009|(destination.Code<<8)|(source.Code<<4))
+	}
+	func superhShBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x200b|(destination.Code<<8)|(source.Code<<4))
+	}
+	func superhShBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		superhShEmit16(out, 0x200a|(destination.Code<<8)|(source.Code<<4))
+	}
+
+	func superhShCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		compareLeft := superhShCompareLeft()
+		compareRight := superhShCompareRight()
+		// The contract for compare preserves all locations. Keep the previous
+		// contents until shConditionT has consumed the operands into the T bit.
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(compareLeft.Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(compareRight.Code<<4))
+		superhShComparisonSaved = true
+		if left.Code == compareLeft.Code {
+			superhShMove(out, compareRight, right)
+			return
+		}
+		if right.Code == compareRight.Code {
+			superhShMove(out, compareLeft, left)
+			return
+		}
+		if left.Code == compareRight.Code && right.Code == compareLeft.Code {
+			// Swap the two dedicated comparison registers without borrowing a
+			// general register whose live value the operation must preserve.
+			superhShBitXor(out, compareLeft, compareRight)
+			superhShBitXor(out, compareRight, compareLeft)
+			superhShBitXor(out, compareLeft, compareRight)
+			return
+		}
+		if right.Code == compareLeft.Code {
+			// Preserve the right operand before replacing compareLeft.
+			superhShMove(out, compareRight, right)
+			superhShMove(out, compareLeft, left)
+			return
+		}
+		superhShMove(out, superhShCompareLeft(), left)
+		superhShMove(out, superhShCompareRight(), right)
+	}
+	func superhShRestoreComparison(out *RTGEmitter) {
+		if !superhShComparisonSaved {
+			return
+		}
+		superhShEmit16(out, 0x6006|(superhShCompareRight().Code<<8)|(superhShStack().Code<<4))
+		superhShEmit16(out, 0x6006|(superhShCompareLeft().Code<<8)|(superhShStack().Code<<4))
+		superhShComparisonSaved = false
+	}
+	func superhShTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		superhShCompare(out, left, right)
+		superhShBitAnd(out, superhShCompareLeft(), superhShCompareRight())
+		superhShMoveImmediate(out, superhShCompareRight(), 0)
+	}
+
+	func superhShConditionT(out *RTGEmitter, condition RTGCondition) bool {
+		left := superhShCompareLeft()
+		right := superhShCompareRight()
+		code := condition.Code
+		if code == 0 || code == 1 {
+			superhShEmit16(out, 0x3000|(left.Code<<8)|(right.Code<<4))
+			superhShRestoreComparison(out)
+			return code == 1
+		}
+		if code == 2 {
+			superhShEmit16(out, 0x3003|(right.Code<<8)|(left.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 3 {
+			superhShEmit16(out, 0x3007|(left.Code<<8)|(right.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 4 {
+			superhShEmit16(out, 0x3007|(right.Code<<8)|(left.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 5 {
+			superhShEmit16(out, 0x3003|(left.Code<<8)|(right.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 6 {
+			superhShEmit16(out, 0x3006|(right.Code<<8)|(left.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 7 {
+			superhShEmit16(out, 0x3002|(left.Code<<8)|(right.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		if code == 8 {
+			superhShEmit16(out, 0x3002|(right.Code<<8)|(left.Code<<4))
+			superhShRestoreComparison(out)
+			return false
+		}
+		superhShEmit16(out, 0x3006|(left.Code<<8)|(right.Code<<4))
+		superhShRestoreComparison(out)
+		return false
+	}
+
+	func superhShSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		invert := superhShConditionT(out, condition)
+		superhShEmit16(out, 0x0029|(destination.Code<<8))
+		if invert {
+			superhShEmit16(out, 0x600b|(destination.Code<<8)|(destination.Code<<4))
+			superhShEmit16(out, 0x7000|(destination.Code<<8)|1)
+		}
+	}
+
+	func superhShLocalBranch(out *RTGEmitter, whenTrue bool) int {
+		at := out.Len()
+		opcode := 0x8b00
+		if whenTrue {
+			opcode = 0x8900
+		}
+		superhShEmit16(out, opcode)
+		return at
+	}
+	func superhShPatchLocalBranch(out *RTGEmitter, at int, target int) {
+		displacement := (target - (at + 4)) / 2
+		code := out.Code()
+		opcode := int(code[at]) | int(code[at+1])<<8
+		if superhShBigEndian {
+			opcode = int(code[at])<<8 | int(code[at+1])
+		}
+		superhShPatch16(out, at, (opcode&0xff00)|(displacement&0xff))
+	}
+
+	func superhShLoadLabel(out *RTGEmitter, destination RTGRegister, label RTGLabel) {
+		at := superhShLiteral(out, destination, 0)
+		out.Reloc(label)
+		_ = at
+	}
+	func superhShCall(out *RTGEmitter, label RTGLabel) {
+		superhShLoadLabel(out, superhShScratch(), label)
+		superhShEmit16(out, 0x400b|(superhShScratch().Code<<8))
+		superhShEmit16(out, 0x0009)
+	}
+	func superhShCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		superhShEmit16(out, 0x400b|(operand.Code<<8))
+		superhShEmit16(out, 0x0009)
+	}
+	func superhShJump(out *RTGEmitter, label RTGLabel) {
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShScratch().Code<<4))
+		superhShLoadLabel(out, superhShScratch(), label)
+		superhShEmit16(out, 0x402b|(superhShScratch().Code<<8))
+		superhShEmit16(out, 0x6006|(superhShScratch().Code<<8)|(superhShStack().Code<<4))
+	}
+	func superhShJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		invert := superhShConditionT(out, condition)
+		// Skip the long jump when the requested predicate is false. BT/BF do
+		// not have delay slots, while shJump restores its temporary in JMP's.
+		skip := superhShLocalBranch(out, invert)
+		superhShJump(out, label)
+		superhShPatchLocalBranch(out, skip, out.Len())
+	}
+
+	func superhShIncrement(out *RTGEmitter, operand RTGRegister) {
+		superhShEmit16(out, 0x7000|(operand.Code<<8)|1)
+	}
+	func superhShDecrement(out *RTGEmitter, operand RTGRegister) {
+		superhShEmit16(out, 0x7000|(operand.Code<<8)|0xff)
+	}
+	func superhShShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count >= 16 {
+			superhShEmit16(out, 0x4028|(operand.Code<<8))
+			count -= 16
+		}
+		for count >= 8 {
+			superhShEmit16(out, 0x4018|(operand.Code<<8))
+			count -= 8
+		}
+		for count >= 2 {
+			superhShEmit16(out, 0x4008|(operand.Code<<8))
+			count -= 2
+		}
+		for count > 0 {
+			superhShEmit16(out, 0x4000|(operand.Code<<8))
+			count--
+		}
+	}
+	func superhShShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count >= 16 {
+			superhShEmit16(out, 0x4029|(operand.Code<<8))
+			count -= 16
+		}
+		for count >= 8 {
+			superhShEmit16(out, 0x4019|(operand.Code<<8))
+			count -= 8
+		}
+		for count >= 2 {
+			superhShEmit16(out, 0x4009|(operand.Code<<8))
+			count -= 2
+		}
+		for count > 0 {
+			superhShEmit16(out, 0x4001|(operand.Code<<8))
+			count--
+		}
+	}
+	func superhShShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count > 0 {
+			superhShEmit16(out, 0x4021|(operand.Code<<8))
+			count--
+		}
+	}
+
+	func superhShVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		superhShMove(out, superhShScratch(), superhShTertiary())
+		loop := out.NewLabel()
+		out.Mark(loop)
+		superhShEmit16(out, 0x8800|(superhShPrimary().Code<<8))
+		// CMP/EQ #0,R0 produces the T bit directly, so use a local BT rather
+		// than re-evaluating the backend's saved comparison operands.
+		done := superhShLocalBranch(out, true)
+		if direction == RTGShiftLeft {
+			superhShEmit16(out, 0x4000|(superhShScratch().Code<<8))
+		} else {
+			if signed {
+				superhShEmit16(out, 0x4021|(superhShScratch().Code<<8))
+			} else {
+				superhShEmit16(out, 0x4001|(superhShScratch().Code<<8))
+			}
+		}
+		superhShDecrement(out, superhShPrimary())
+		superhShJump(out, loop)
+		superhShPatchLocalBranch(out, done, out.Len())
+		superhShMove(out, superhShPrimary(), superhShScratch())
+	}
+
+	func superhShSignedDivide(out *RTGEmitter, remainder bool) {
+		// Preserve every non-result location used by the software division. The
+		// direct-emitter contract exposes only secondary and flags as clobbered;
+		// larger expressions can keep live values in all four helper registers.
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShTertiary().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShScratch().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShAddress().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareLeft().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShCompareRight().Code<<4))
+		superhShEmit16(out, 0x2006|(superhShStack().Code<<8)|(superhShPrimary().Code<<4))
+		superhShMove(out, superhShCompareRight(), superhShPrimary())
+		superhShEmit16(out, 0x4011|(superhShCompareRight().Code<<8))
+		positiveDivisor := superhShLocalBranch(out, true)
+		superhShEmit16(out, 0x600b|(superhShCompareRight().Code<<8)|(superhShCompareRight().Code<<4))
+		superhShPatchLocalBranch(out, positiveDivisor, out.Len())
+		superhShEmit16(out, 0x4011|(superhShTertiary().Code<<8))
+		positiveDividend := superhShLocalBranch(out, true)
+		superhShEmit16(out, 0x600b|(superhShTertiary().Code<<8)|(superhShTertiary().Code<<4))
+		superhShPatchLocalBranch(out, positiveDividend, out.Len())
+		superhShMoveImmediate(out, superhShScratch(), 0)
+		superhShMoveImmediate(out, superhShAddress(), 0)
+		superhShMoveImmediate(out, superhShCompareLeft(), 32)
+		loop := out.Len()
+		superhShEmit16(out, 0x4000|(superhShTertiary().Code<<8))
+		superhShEmit16(out, 0x4024|(superhShAddress().Code<<8))
+		superhShEmit16(out, 0x3002|(superhShAddress().Code<<8)|(superhShCompareRight().Code<<4))
+		skipSubtract := superhShLocalBranch(out, false)
+		superhShSubtract(out, superhShAddress(), superhShCompareRight())
+		superhShEmit16(out, 0x0018)
+		superhShPatchLocalBranch(out, skipSubtract, out.Len())
+		superhShEmit16(out, 0x4024|(superhShScratch().Code<<8))
+		superhShDecrement(out, superhShCompareLeft())
+		// CMP/EQ #imm is restricted to R0. TST Rn,Rn gives the same zero
+		// predicate for the dedicated loop counter without emitting an illegal
+		// 0x8Axx opcode on SH-2/SH-4.
+		superhShEmit16(out, 0x2008|(superhShCompareLeft().Code<<8)|(superhShCompareLeft().Code<<4))
+		back := superhShLocalBranch(out, false)
+		superhShPatchLocalBranch(out, back, loop)
+		if remainder {
+			superhShMove(out, superhShPrimary(), superhShAddress())
+		} else {
+			superhShMove(out, superhShPrimary(), superhShScratch())
+		}
+		// The divisor is at stack offset zero; the original dividend precedes the
+		// five saved helper locations at offset twenty.
+		superhShEmit16(out, 0x5000|(superhShCompareLeft().Code<<8)|(superhShStack().Code<<4)|0)
+		superhShMove(out, superhShAddress(), superhShStack())
+		superhShEmit16(out, 0x7000|(superhShAddress().Code<<8)|20)
+		superhShEmit16(out, 0x6002|(superhShCompareRight().Code<<8)|(superhShAddress().Code<<4))
+		if !remainder {
+			superhShBitXor(out, superhShCompareRight(), superhShCompareLeft())
+		}
+		superhShEmit16(out, 0x4011|(superhShCompareRight().Code<<8))
+		positiveResult := superhShLocalBranch(out, true)
+		superhShEmit16(out, 0x600b|(superhShPrimary().Code<<8)|(superhShPrimary().Code<<4))
+		superhShPatchLocalBranch(out, positiveResult, out.Len())
+		superhShEmit16(out, 0x7000|(superhShStack().Code<<8)|4)
+		superhShEmit16(out, 0x6006|(superhShCompareRight().Code<<8)|(superhShStack().Code<<4))
+		superhShEmit16(out, 0x6006|(superhShCompareLeft().Code<<8)|(superhShStack().Code<<4))
+		superhShEmit16(out, 0x6006|(superhShAddress().Code<<8)|(superhShStack().Code<<4))
+		superhShEmit16(out, 0x6006|(superhShScratch().Code<<8)|(superhShStack().Code<<4))
+		superhShEmit16(out, 0x6006|(superhShTertiary().Code<<8)|(superhShStack().Code<<4))
+	}
+
+	func superhShReturn(out *RTGEmitter) { superhShEmit16(out, 0x000b); superhShEmit16(out, 0x0009) }
+	func superhShLeave(out *RTGEmitter) {
+		superhShLoadNative(out, superhShScratch(), RTGAddress{Base: superhShFrame(), Displacement: -4})
+		superhShEmit16(out, 0x402a|(superhShScratch().Code<<8))
+		superhShLoadNative(out, superhShAddress(), RTGAddress{Base: superhShFrame(), Displacement: -8})
+		superhShMove(out, superhShStack(), superhShFrame())
+		superhShMove(out, superhShFrame(), superhShAddress())
+	}
+	func superhShHostSyscall(out *RTGEmitter) { superhShEmit16(out, 0xc314) }
+
+	func superhShPatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := superhShCodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			superhShPatch32(out, at, target)
+		}
+	}
+
+	func superhShFrameStart(out *RTGEmitter) int {
+		superhShMove(out, superhShAddress(), superhShFrame())
+		at := superhShLiteral(out, superhShScratch(), 0)
+		superhShSubtract(out, superhShStack(), superhShScratch())
+		superhShMove(out, superhShFrame(), superhShStack())
+		superhShAdd(out, superhShFrame(), superhShScratch())
+		superhShStoreNative(out, RTGAddress{Base: superhShFrame(), Displacement: -8}, superhShAddress())
+		superhShEmit16(out, 0x002a|(superhShScratch().Code<<8))
+		superhShStoreNative(out, RTGAddress{Base: superhShFrame(), Displacement: -4}, superhShScratch())
+		return at
+	}
+	func superhShFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		// Reserve both linkage words even without locals so a callee's frame
+		// cannot overlap this function's saved PR/frame pair.
+		superhShPatch32(out, at, (stackUsed+23)&-16)
+	}
+	func superhShFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		superhShLoadNative(out, destination, RTGAddress{Base: superhShFrame(), Displacement: -(offset + 8)})
+	}
+	func superhShFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		superhShStoreNative(out, RTGAddress{Base: superhShFrame(), Displacement: -(offset + 8)}, source)
+	}
+	func superhShFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		superhShEmitAddress(out, destination, RTGAddress{Base: superhShFrame(), Displacement: -(offset + 8)})
+	}
+
+	func superhShPrimary() RTGRegister { return RTGRegister{Code: 0, Valid: true} }
+
+	func superhShTertiary() RTGRegister     { return RTGRegister{Code: 2, Valid: true} }
+	func superhShScratch() RTGRegister      { return RTGRegister{Code: 8, Valid: true} }
+	func superhShAddress() RTGRegister      { return RTGRegister{Code: 9, Valid: true} }
+	func superhShCompareLeft() RTGRegister  { return RTGRegister{Code: 10, Valid: true} }
+	func superhShCompareRight() RTGRegister { return RTGRegister{Code: 11, Valid: true} }
+	func superhShFrame() RTGRegister        { return RTGRegister{Code: 14, Valid: true} }
+	func superhShStack() RTGRegister        { return RTGRegister{Code: 15, Valid: true} }
+
+	const elfCodeAddress = 0x11000
+
+	func elfDataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func elfDataAddress(out *RTGEmitter) int { return 0x10000 + elfDataOffset(out) }
+	func elfBssAddress(out *RTGEmitter) int {
+		return RTGAlignValue(elfDataAddress(out)+len(out.Data()), 16)
+	}
+	func elfPut(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func elfImage(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := elfDataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		elfPut(result, 16, 2, 2, big)
+		elfPut(result, 18, uint64(machine), 2, big)
+		elfPut(result, 20, 1, 4, big)
+		if bits == 32 {
+			elfPut(result, 24, elfCodeAddress, 4, big)
+			elfPut(result, 28, 52, 4, big)
+			elfPut(result, 36, uint64(flags), 4, big)
+			elfPut(result, 40, 52, 2, big)
+			elfPut(result, 42, 32, 2, big)
+			elfPut(result, 44, 2, 2, big)
+		} else {
+			elfPut(result, 24, elfCodeAddress, 8, big)
+			elfPut(result, 32, 64, 8, big)
+			elfPut(result, 48, uint64(flags), 4, big)
+			elfPut(result, 52, 64, 2, big)
+			elfPut(result, 54, 56, 2, big)
+			elfPut(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = elfDataAddress(out)
+				size = len(out.Data())
+				memory = elfBssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(file), 4, big)
+				elfPut(result, at+8, uint64(address), 4, big)
+				elfPut(result, at+12, uint64(address), 4, big)
+				elfPut(result, at+16, uint64(size), 4, big)
+				elfPut(result, at+20, uint64(memory), 4, big)
+				elfPut(result, at+24, uint64(permissions), 4, big)
+				elfPut(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				elfPut(result, at, 1, 4, big)
+				elfPut(result, at+4, uint64(permissions), 4, big)
+				elfPut(result, at+8, uint64(file), 8, big)
+				elfPut(result, at+16, uint64(address), 8, big)
+				elfPut(result, at+24, uint64(address), 8, big)
+				elfPut(result, at+32, uint64(size), 8, big)
+				elfPut(result, at+40, uint64(memory), 8, big)
+				elfPut(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+
+	func targetEntryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		superhShSetCodeAddress(elfCodeAddress)
+		superhShSetBigEndian(false)
+		return true
+	}
+	func targetEntry(out *RTGEmitter, count int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return count == 0
+	}
+
+	func targetImage(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), elfDataAddress(out), elfBssAddress(out))
+			if !ok {
+				return nil
+			}
+			superhShPatch32(out, at, target)
+		}
+		return elfImage(out, 42, 9, 32, false)
+	}
+}
+
+arch sh4le {
+	alias = "sh4le"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 2
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go superhShPatchRelocations
+	registers integer = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12, link, frame, stack]
+	locations {
+		primary = value0
+		secondary = value1
+		tertiary = value2
+		scratch = scratch
+		address = address
+		compareLeft = compareLeft
+		compareRight = compareRight
+		copy_destination = arg3
+		copy_source = arg4
+		copy_count = arg5
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go superhShMove
+		address = go superhShEmitAddress
+		load.native = go superhShLoadNative
+		load.i32 = go superhShLoadI32
+		load.u32 = go superhShLoadU32
+		load.i16 = go superhShLoadI16
+		load.u16 = go superhShLoadU16
+		load.i8 = go superhShLoadI8
+		load.u8 = go superhShLoadU8
+		store.native = go superhShStoreNative
+		store.u32 = go superhShStoreU32
+		store.u16 = go superhShStoreU16
+		store.u8 = go superhShStoreU8
+		add = go superhShAdd
+		subtract = go superhShSubtract
+		multiply = go superhShMultiply
+		bit_and = go superhShBitAnd
+		bit_or = go superhShBitOr
+		bit_xor = go superhShBitXor
+		compare = go superhShCompare
+		test = go superhShTest
+		increment = go superhShIncrement
+		decrement = go superhShDecrement
+		shift_left_immediate = go superhShShiftLeftImmediate
+		shift_right_unsigned_immediate = go superhShShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go superhShShiftRightSignedImmediate
+		call = go superhShCall
+		call_indirect = go superhShCallIndirect
+		jump = go superhShJump
+		jump_condition = go superhShJumpCondition
+		set_condition = go superhShSetCondition
+		return = go superhShReturn
+		leave = go superhShLeave
+		host_syscall = go superhShHostSyscall
+		move_immediate = go superhShMoveImmediate
+		variable_shift = go superhShVariableShift
+		signed_divide = go superhShSignedDivide
+		copy_bytes = sequence superhCopyBytes
+	}
+	sequences {
+		superhCopyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			superhShCompare(out, sh4leARG3, sh4leARG4)
+			superhShJumpCondition(out, sh4leULT, forward)
+			superhShEmitAddress(out, sh4leSCRATCH, record_address(Base:sh4leARG4, Index:sh4leARG5, Scale:1,))
+			superhShCompare(out, sh4leARG3, sh4leSCRATCH)
+			superhShJumpCondition(out, sh4leUGE, forward)
+			superhShEmitAddress(out, sh4leARG4, record_address(Base:sh4leARG4, Index:sh4leARG5, Scale:1, Displacement:-1,))
+			superhShEmitAddress(out, sh4leARG3, record_address(Base:sh4leARG3, Index:sh4leARG5, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			superhShMoveImmediate(out, sh4leSCRATCH, 0)
+			superhShCompare(out, sh4leARG5, sh4leSCRATCH)
+			superhShJumpCondition(out, sh4leEQ, done)
+			superhShLoadU8(out, sh4leSCRATCH, record_address(Base:sh4leARG4,))
+			superhShStoreU8(out, record_address(Base:sh4leARG3,), sh4leSCRATCH)
+			superhShDecrement(out, sh4leARG4) ; superhShDecrement(out, sh4leARG3) ; superhShDecrement(out, sh4leARG5)
+			superhShJump(out, backwardLoop)
+			out.Mark(forward) ; out.Mark(forwardLoop)
+			superhShMoveImmediate(out, sh4leSCRATCH, 0)
+			superhShCompare(out, sh4leARG5, sh4leSCRATCH)
+			superhShJumpCondition(out, sh4leEQ, done)
+			superhShLoadU8(out, sh4leSCRATCH, record_address(Base:sh4leARG4,))
+			superhShStoreU8(out, record_address(Base:sh4leARG3,), sh4leSCRATCH)
+			superhShIncrement(out, sh4leARG4) ; superhShIncrement(out, sh4leARG3) ; superhShDecrement(out, sh4leARG5)
+			superhShJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+abi sh4le_internal {
+	arch = sh4le
+	arguments = [value0, value1, value2, arg3, arg4, arg5]
+	call_words = [value0, value1, value2, arg3, arg4, arg5]
+	result = [value0, value1]
+	caller_saved = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	callee_saved = [frame]
+	clobbered = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	saved = [frame]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go superhShFrameStart
+	frame_finish = go superhShFrameFinish
+	frame_load = go superhShFrameLoad
+	frame_store = go superhShFrameStore
+	frame_address = go superhShFrameAddress
+}
+runtime linux_sh4 {
+	emit_entry_start = go targetEntryStart
+	emit_entry = go targetEntry
+	syscall {
+		number = arg3
+		arguments = [arg4, arg5, work6, work7]
+		result = value0
+		instruction = host_syscall
+	}
+	operation read {
+		number = 3 args = [fd, buffer, count]
+	}
+	operation write {
+		number = 4 args = [fd, buffer, count]
+	}
+	operation open {
+		number = 5 args = [path, flags, mode]
+	}
+	operation close {
+		number = 6 args = [fd]
+	}
+	operation chmod {
+		number = 94 args = [fd, mode]
+	}
+	operation print {
+		use = write args = [stdout, buffer, count]
+	}
+	operation exit {
+		number = 1 args = [status] noreturn = true
+	}
+}
+format elf_sh4 {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	code_offset = 0
+	image = go targetImage
+}
+target experimental/linux-sh4 {
+	family = native_v1
+	os = linux
+	arch = sh4le
+	frontend_arch = sh4le
+	abi = sh4le_internal
+	runtime = linux_sh4
+	executable = elf_sh4
+	arena_default = 16777216
+	build_tags = [linux, unix, sh4]
+	capabilities = [hosted, executable, filesystem, heap]
+}

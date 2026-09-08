@@ -84,9 +84,7 @@ func (t *Terminal) scrollSurfacePixels(lines int) bool {
 		t.surface.BeginDamage(graphics.R(
 			0, 0, graphics.Scalar(t.surface.Width), graphics.Scalar(pixelHeight),
 		))
-		start := shift * t.surface.Stride
-		length := (pixelHeight - shift) * t.surface.Stride
-		copy(t.surface.Pixels[:length], t.surface.Pixels[start:start+length])
+		t.surface.CopyPixels(0, 0, 0, shift, t.surface.Width, pixelHeight-shift)
 	}
 	t.surface.FillRect(graphics.R(
 		0, graphics.Scalar(pixelHeight-shift),
@@ -103,6 +101,11 @@ func (t *Terminal) scrollSurfacePixels(lines int) bool {
 func (t *Terminal) Flush() bool {
 	if t.surface == nil || t.display == nil {
 		return true
+	}
+	if t.surfaceWidth != t.surface.Width || t.surfaceHeight != t.surface.Height {
+		if !t.ResizeToSurface() {
+			return false
+		}
 	}
 	if !t.hasDirtyRows() && t.pendingScroll == 0 && !t.keyboardDirty {
 		return true

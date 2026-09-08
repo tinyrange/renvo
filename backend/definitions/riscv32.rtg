@@ -197,7 +197,14 @@ go backend {
 		out.Reloc(label)
 	}
 	func call(out *RTGEmitter, label RTGLabel) {
-		emitJAL(out, link, label)
+		// JAL only reaches +/-1 MiB, which large Forms/terminal images exceed.
+		// Reserve an AUIPC/JALR pair so relocation keeps the full PC-relative
+		// displacement. ra is call-clobbered already; using it as the temporary
+		// leaves arguments and every other live register untouched. JALR reads
+		// its base before replacing ra with the return address after the pair.
+		encodeU(out, 0x17, link, 0)
+		out.Reloc(label)
+		encodeI(out, 0x67, 0, link, link, 0)
 	}
 	func callIndirect(out *RTGEmitter, operand RTGRegister) {
 		encodeI(out, 0x67, 0, link, operand, 0)
@@ -335,13 +342,15 @@ go backend {
 				instruction |= ((delta >> 12) & 0xff) << 12
 				out.PatchUint32(at, instruction)
 			} else if instruction&0x7f == 0x17 {
-				// AUIPC/ADDI pair used by emitAddress.
+				// Both code addresses (ADDI) and calls (JALR) use AUIPC.
+				// Preserve the second instruction's opcode/registers while patching
+				// its signed low immediate, including the carry into the high part.
 				register := (instruction >> 7) & 31
 				hi := (delta + 0x800) >> 12
 				lo := delta - (hi << 12)
 				out.PatchUint32(at, 0x17|(register<<7)|(hi<<12))
-				out.PatchUint32(at+4,
-					0x13|(register<<7)|(register<<15)|((lo&0xfff)<<20))
+				next := RTGGet32At(out.Code(), at+4) & 0x000fffff
+				out.PatchUint32(at+4, next|((lo&0xfff)<<20))
 			}
 		}
 	}

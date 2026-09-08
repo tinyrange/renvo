@@ -1,6 +1,15 @@
 # Shared 32-bit ARM machine facts, encoder, direct-emitter bindings, and
 # calling conventions. Target entrypoints own environment-specific behavior.
 go backend {
+	func storeParamWord(out *RTGEmitter, word int, offset int) {
+		if word < 6 {
+			asmStoreRegStack(out, word, offset)
+			return
+		}
+		asmLoadRegMem(out, scratch.Code, frame.Code, 8+(word-6)*4, 4)
+		asmStoreRegStack(out, scratch.Code, offset)
+	}
+
 	func asmAlign(a *RTGEmitter) {
 		for a.Len()%4 != 0 {
 			RTGByte(a, 0)
@@ -979,6 +988,7 @@ arch arm {
 }
 
 abi renvo_arm {
+	store_param_word = go storeParamWord
 	arch = arm
 	frame_start = sequence frameStart
 	frame_finish = go frameFinish

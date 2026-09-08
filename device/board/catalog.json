@@ -66,6 +66,7 @@
       {"path": "examples/device/button_rgb_c", "language": "c"},
       {"path": "examples/device/air_quality", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
       {"path": "examples/device/miniscale", "hardware": [{"name": "Unit Mini Scales", "docs": "https://docs.m5stack.com/en/unit/Unit%20Mini%20Scales"}]},
+      {"path": "examples/device/rollercan", "hardware": [{"name": "Unit RollerCAN", "docs": "https://docs.m5stack.com/en/unit/Unit-RollerCAN"}]},
       {"path": "examples/device/synth", "hardware": [{"name": "Unit Synth", "docs": "https://docs.m5stack.com/en/unit/synth"}]}
     ]
   },
@@ -122,10 +123,24 @@
     "packages": ["device/esp32p4", "examples/device/fontcache"],
     "examples": [
       {"path": "examples/device/forms_demo"},
+      {"path": "examples/device/tab5_keyboard_terminal", "hardware": [{"name": "Tab5 Keyboard", "docs": "https://docs.m5stack.com/en/tab5/Tab5_Keyboard"}]},
+      {"path": "examples/device/tab5_sd_shell", "hardware": [{"name": "Tab5 Keyboard", "docs": "https://docs.m5stack.com/en/tab5/Tab5_Keyboard"}, {"name": "FAT32 microSD card", "docs": "https://docs.m5stack.com/en/core/Tab5"}]},
       {"path": "examples/device/sgp30_demo", "hardware": [{"name": "Unit Mini TVOC/eCO2", "docs": "https://docs.m5stack.com/en/unit/tvoc"}]},
       {"path": "examples/device/sensor_terminal", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel"}]},
       {"path": "examples/device/terminal_stress", "hardware": [{"name": "Unit Accel", "docs": "https://docs.m5stack.com/en/unit/accel", "optional": true}]},
       {"path": "examples/device/touch_trails"}
     ]
+  },
+  {
+    "name": "M5Stack CoreS3 SE",
+    "target": "m5cores3se/xtensa_lx7",
+    "tag": "m5cores3se",
+    "docs": "https://docs.m5stack.com/en/core/M5CoreS3%20SE",
+    "artwork": "cores3se",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "packages": ["device/esp32s3"],
+    "examples": [{"path": "examples/device/cores3_forms"}]
   }
 ]
