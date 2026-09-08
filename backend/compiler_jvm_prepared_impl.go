@@ -468,6 +468,12 @@ func renvoRTGAddressRelocAt(out *renvoAsm, address renvoRTGAddress, at int) {
 	}
 }
 
+func renvoRTGLabelRelocAt(out *renvoAsm, label int, at int) {
+	if label >= 0 {
+		renvoAsmAddReloc(out, at, label)
+	}
+}
+
 func renvoRTGDataAddress(offset int) renvoRTGAddress {
 	return renvoRTGAddress{Kind: 1, Addend: offset}
 }
@@ -4289,6 +4295,14 @@ rtgJvmDirectSignedDivide(out, remainder)
 func renvoRTGDirectCopyBytes(out *renvoAsm) {
 rtgJvmDirectCopyBytes(out)
 }
+var renvoRTGObjectArgument0 = rtgJvmRDI
+var renvoRTGObjectArgument1 = rtgJvmRSI
+var renvoRTGObjectArgument2 = rtgJvmRDX
+var renvoRTGObjectArgument3 = rtgJvmRCX
+var renvoRTGObjectArgument4 = rtgJvmR8
+var renvoRTGObjectArgument5 = rtgJvmR9
+var renvoRTGObjectArgument6 = RTGNoRegister
+var renvoRTGObjectArgument7 = RTGNoRegister
 
 var renvoRTGPrimary = rtgJvmPrimary
 

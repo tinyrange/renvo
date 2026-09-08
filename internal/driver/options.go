@@ -619,8 +619,15 @@ func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarg
 	if options.Script && !optionArgIsGoFile(options.Files[0]) {
 		return parseFail(options, ParseErrScriptRequiresGo, options.Files[0], len(args))
 	}
-	if options.Mode == ModeObject && len(options.Files) != 1 {
+	if options.Mode == ModeObject && options.CCompiler && len(options.Files) != 1 {
 		return parseFail(options, ParseErrObjectFileCount, options.Package, len(args))
+	}
+	if options.Mode == ModeObject && len(options.Files) > 1 {
+		for _, file := range options.Files {
+			if !optionArgIsGoFile(file) {
+				return parseFail(options, ParseErrObjectFileCount, options.Package, len(args))
+			}
+		}
 	}
 	if requireAdvertisedTarget && options.System == "" {
 		if options.WindowsGUI && options.Target != "windows/amd64" && options.Target != "windows/386" && options.Target != "windows/arm64" {

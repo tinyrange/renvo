@@ -230,7 +230,6 @@ func TestParseOptionsRejectsInvalidInputs(t *testing.T) {
 		{name: "unsupported mode", args: []string{"-mode=firmware", "-o", "app", "main.go"}, err: ParseErrUnsupportedMode, arg: "firmware", at: 0},
 		{name: "kernel module on non-Linux target", args: []string{"-mode=kernel-module", "-t", "windows/amd64", "-o", "app.ko", "main.go"}, err: ParseErrModeRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
 		{name: "object on non-Linux target", args: []string{"-c", "-t", "windows/amd64", "-o", "app.o", "main.c"}, err: ParseErrObjectRequiresLinuxAmd64, arg: "windows/amd64", at: 0},
-		{name: "object package mode", args: []string{"-c", "-o", "app.o", "./cmd/app"}, err: ParseErrObjectFileCount, arg: "./cmd/app", at: 4},
 		{name: "object multiple files", args: []string{"-c", "-o", "app.o", "main.c", "other.c"}, err: ParseErrObjectFileCount, arg: "main.c", at: 5},
 		{name: "missing include path", args: []string{"-c", "-I"}, err: ParseErrMissingIncludePath, arg: "-I", at: 1},
 		{name: "missing system include path", args: []string{"-c", "-isystem"}, err: ParseErrMissingIncludePath, arg: "-isystem", at: 1},

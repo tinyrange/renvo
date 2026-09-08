@@ -286,8 +286,9 @@ extend arch aarch64 {
 			asmPushReg(out, 30)
 			asmPushReg(out, 3)
 			asmPushReg(out, 4)
-			asmPushReg(out, 2)
+			# The runtime ABI supplies length in x1 and offset in x2.
 			asmPushReg(out, 1)
+			asmPushReg(out, 2)
 			asmLoadRegMem(out, 9, 31, 48, 8)
 			asmCmpRegImm(out, 9, 0)
 			jumpCondition(out, record_condition(Code:0), standard)
@@ -385,8 +386,9 @@ extend arch aarch64 {
 			asmPushReg(out, 30)
 			asmPushReg(out, 3)
 			asmPushReg(out, 4)
-			asmPushReg(out, 2)
+			# The runtime ABI supplies length in x1 and offset in x2.
 			asmPushReg(out, 1)
+			asmPushReg(out, 2)
 			asmLoadRegMem(out, 9, 31, 48, 8)
 			asmCmpRegImm(out, 9, 1)
 			jumpCondition(out, record_condition(Code:0), standard)
@@ -487,8 +489,9 @@ extend arch aarch64 {
 			asmPushReg(out, 30)
 			asmPushReg(out, 3)
 			asmPushReg(out, 4)
-			asmPushReg(out, 2)
+			# The runtime ABI supplies length in x1 and offset in x2.
 			asmPushReg(out, 1)
+			asmPushReg(out, 2)
 			asmLoadRegMem(out, 9, 31, 48, 8)
 			asmCmpRegImm(out, 9, 0)
 			jumpCondition(out, record_condition(Code:0), standard)
@@ -585,8 +588,9 @@ extend arch aarch64 {
 			asmPushReg(out, 30)
 			asmPushReg(out, 3)
 			asmPushReg(out, 4)
-			asmPushReg(out, 2)
+			# The runtime ABI supplies length in x1 and offset in x2.
 			asmPushReg(out, 1)
+			asmPushReg(out, 2)
 			asmLoadRegMem(out, 9, 31, 48, 8)
 			asmCmpRegImm(out, 9, 1)
 			jumpCondition(out, record_condition(Code:0), standard)
@@ -717,7 +721,7 @@ format pe64_arm64 {
 	file_alignment = 0x200
 	section_alignment = 0x1000
 	coff_characteristics = 0x22
-	dll_characteristics = 0x8100
+	dll_characteristics = 0x8140
 	os_version_major = 6
 	os_version_minor = 1
 	image_version_major = 1
