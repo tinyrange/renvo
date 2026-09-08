@@ -135,6 +135,7 @@
     "target": "m5cores3se/xtensa_lx7",
     "tag": "m5cores3se",
     "docs": "https://docs.m5stack.com/en/core/M5CoreS3%20SE",
+    "artwork": "cores3se",
     "machine": "esp32s3/xtensa_lx7",
     "definition": "backends/esp32s3.rtg",
     "backend": "backends/esp32s3-xtensa_lx7.wasm",
