@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"renvo.dev/internal/linkedimage"
+	"renvo.dev/internal/perfgate"
 )
 
 func TestBundledFrontendStandaloneAllTargets(t *testing.T) {
@@ -500,7 +501,7 @@ x/24i $pc-32
 
 func assertBundledFrontendWritableMemory(t *testing.T, path string) {
 	t.Helper()
-	const limit = 166 * 1024 * 1024
+	limit := perfgate.Load().PeakMemoryBytes
 	file, err := elf.Open(path)
 	if err != nil {
 		t.Fatalf("open bundled frontend ELF failed: %v", err)
