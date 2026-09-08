@@ -41,14 +41,14 @@
       "runner": "windows-latest",
       "execution": "native",
       "workload": "selfhost",
-      "arena_bytes": 268435456
+      "arena_bytes": 251658240
     },
     {
       "name": "windows/386",
       "runner": "windows-latest",
       "execution": "native",
       "workload": "selfhost",
-      "arena_bytes": 268435456
+      "arena_bytes": 251658240
     },
     {
       "name": "darwin/arm64",
@@ -60,7 +60,8 @@
       "name": "wasi/wasm32",
       "runner": "ubuntu-latest",
       "execution": "wasmtime",
-      "workload": "selfhost"
+      "workload": "selfhost",
+      "arena_bytes": 268435456
     },
     {
       "name": "vm/vm32",

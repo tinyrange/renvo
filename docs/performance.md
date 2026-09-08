@@ -19,9 +19,11 @@ backend to accept Go source directly.
 | VM instructions, median of three | Reference +20% |
 
 VM linear memory also has the 256 MiB absolute and +20% relative memory limits;
-the host VM process is measured independently. Native and WASI self-hosting compilers use a 192 MiB arena by default. Windows
-uses the explicitly requested 256 MiB arena. The Windows process-memory ceiling
-remains 256 MiB; committed runtime overhead may therefore still fail that gate.
+the host VM process is measured independently. Self-hosting compilers use a 192 MiB arena by default. Windows uses a 240 MiB
+arena, reserving 16 MiB of the 256 MiB process-memory ceiling for runtime overhead
+(the initial 256 MiB arena measured about 264–265 MiB total commit). WASI uses
+a 256 MiB arena. Its process-memory ceiling remains 256 MiB and includes
+Wasmtime overhead, so this arena increase alone does not establish a passing gate.
 The VM prepared-backend workload uses the production preparation tool’s 96 MiB
 compiler arena.
 
@@ -172,8 +174,8 @@ problems:
 
 The full compiler still did not complete the local 192 MiB-arena probe after
 correcting helper boundaries. A 224 MiB arena completed the workload. These are
-local diagnostic experiments, not new thresholds: the checked-in WASI gate
-still uses its 192 MiB arena and includes Wasmtime module compilation. Using a
-224 MiB arena and preparing the Wasmtime module before timing is a possible
-follow-up that retains the 256 MiB process-memory ceiling. It requires choosing
-that measurement scope explicitly, with module compilation reported separately.
+local diagnostic experiments. Following review, the WASI gate arena was raised
+to 256 MiB. The gate still includes Wasmtime module compilation and retains the
+256 MiB process-memory ceiling. Preparing the Wasmtime module before timing
+remains a possible follow-up, with module compilation reported separately. The
+224 MiB diagnostic result does not establish a passing gate at the new arena size.

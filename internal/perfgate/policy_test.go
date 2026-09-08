@@ -27,11 +27,13 @@ func TestCompilerProfilesFollowPolicy(t *testing.T) {
 	}
 }
 
-func TestWindowsArenaOverride(t *testing.T) {
+func TestTargetArenaOverrides(t *testing.T) {
 	p := Load()
 	for _, target := range p.Targets {
 		want := p.CompilerArenaBytes
 		if strings.HasPrefix(target.Name, "windows/") {
+			want = 240 * 1024 * 1024
+		} else if target.Name == "wasi/wasm32" {
 			want = 256 * 1024 * 1024
 		}
 		if p.ArenaBytes(target.Name) != want {
@@ -39,7 +41,7 @@ func TestWindowsArenaOverride(t *testing.T) {
 		}
 	}
 	if p.PeakMemoryBytes != 256*1024*1024 {
-		t.Fatal("changing Windows arena must not change the process-memory ceiling")
+		t.Fatal("changing compiler arenas must not change the process-memory ceiling")
 	}
 }
 
