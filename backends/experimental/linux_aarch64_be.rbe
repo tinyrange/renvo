@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_aarch64_be
+implements direct_emitter_v1
+@import "aarch64_be.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			register := RTGGet32At(out.Code(), at) & 31
+			for part := 0; part < 4; part++ {
+				opcode := 0xf2800000
+				if part == 0 {
+					opcode = 0xd2800000
+				}
+				out.PatchUint32(at+part*4, opcode|(part<<21)|(((target>>uint(part*16))&65535)<<5)|register)
+			}
+		}
+		return linux_elf.image(out, 183, 0, 64, true)
+	}
+}
+
+runtime linux_aarch64_be {
+	emit_entry = go entry
+	syscall {
+		number = x8
+		arguments = [x0, x1, x2, x3, x4, x5]
+		result = x0
+		instruction = svc
+	}
+	operation read { number = 63 args = [fd, buffer, count] }
+	operation write { number = 64 args = [fd, buffer, count] }
+	operation read_at { number = 67 args = [fd, buffer, count, offset] }
+	operation write_at { number = 68 args = [fd, buffer, count, offset] }
+	operation open { number = 56 args = [dirfd, path, flags, mode] }
+	operation close { number = 57 args = [fd] }
+	operation chmod { number = 52 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 93 args = [status] noreturn = true }
+}
+
+format elf_aarch64_be {
+	kind = elf
+	byte_order = big
+	address_bits = 64
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-aarch64_be {
+	family = native_v1
+	os = linux
+	arch = aarch64
+	abi = aapcs64
+	runtime = linux_aarch64_be
+	executable = elf_aarch64_be
+	arena_default = 16777216
+	build_tags = [linux, unix, aarch64, arm64]
+	capabilities = [hosted, executable, filesystem, heap]
+}

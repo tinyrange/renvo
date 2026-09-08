@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_armeb
+implements direct_emitter_v1
+@import "arm_be.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			reg := (RTGGet32At(out.Code(), at) >> 12) & 15
+			for part := 0; part < 2; part++ {
+				value := (target >> uint(part*16)) & 65535
+				out.PatchUint32(at+part*4, 0xe3000000|(part<<22)|((value&0xf000)<<4)|(reg<<12)|(value&4095))
+			}
+			out.PatchUint32(at+8, 0xe1a00000)
+		}
+		return linux_elf.image(out, 40, 0x05800000, 32, true)
+	}
+}
+
+runtime linux_armeb {
+	emit_entry = go entry
+	syscall {
+		number = r7
+		arguments = [r0, r1, r2, r3, r4, r5]
+		result = r0
+		instruction = svc
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation read_at { number = 180 args = [fd, buffer, count, offset] }
+	operation write_at { number = 181 args = [fd, buffer, count, offset] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stderr, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+
+format elf_armeb {
+	kind = elf
+	byte_order = big
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-armeb {
+	family = native_v1
+	os = linux
+	arch = arm
+	abi = aapcs32
+	runtime = linux_armeb
+	executable = elf_armeb
+	arena_default = 16777216
+	build_tags = [linux, unix, arm]
+	capabilities = [hosted, executable, filesystem, heap]
+}

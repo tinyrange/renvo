@@ -1,0 +1,838 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Shared integer emitter for the SH-2 and SH-4 console targets.  Both targets
+# use the same Renvo-internal ABI; the importing definition selects instruction
+# and data byte order and supplies the final code address.
+go backend {
+	var shCodeAddress int
+	var shBigEndian bool
+	var shComparisonSaved bool
+
+	func shSetCodeAddress(address int) { shCodeAddress = address }
+	func shSetBigEndian(value bool)    { shBigEndian = value }
+
+	func shEmit16(out *RTGEmitter, value int) {
+		if shBigEndian {
+			RTGByte(out, byte(value>>8))
+			RTGByte(out, byte(value))
+			return
+		}
+		RTGByte(out, byte(value))
+		RTGByte(out, byte(value>>8))
+	}
+
+	func shEmit32(out *RTGEmitter, value int) {
+		if shBigEndian {
+			RTGByte(out, byte(value>>24))
+			RTGByte(out, byte(value>>16))
+			RTGByte(out, byte(value>>8))
+			RTGByte(out, byte(value))
+			return
+		}
+		RTGUint32(out, value)
+	}
+
+	func shPatch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		if shBigEndian {
+			code[at] = byte(value >> 8)
+			code[at+1] = byte(value)
+			return
+		}
+		code[at] = byte(value)
+		code[at+1] = byte(value >> 8)
+	}
+
+	func shPatch32(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		if shBigEndian {
+			code[at] = byte(value >> 24)
+			code[at+1] = byte(value >> 16)
+			code[at+2] = byte(value >> 8)
+			code[at+3] = byte(value)
+			return
+		}
+		out.PatchUint32(at, value)
+	}
+
+	func shMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			shEmit16(out, 0x6003|(destination.Code<<8)|(source.Code<<4))
+		}
+	}
+
+	// SH PC-relative literals are naturally aligned and have an unsigned,
+	// four-byte-scaled displacement. Keeping each literal beside its use avoids
+	// a target-wide literal-pool pass and keeps every load in range.
+	func shLiteral(out *RTGEmitter, destination RTGRegister, value int) int {
+		if out.Len()&3 != 0 {
+			shEmit16(out, 0x0009)
+		}
+		shEmit16(out, 0xd000|(destination.Code<<8)|1)
+		shEmit16(out, 0xa003)
+		shEmit16(out, 0x0009)
+		shEmit16(out, 0x0009)
+		at := out.Len()
+		shEmit32(out, value)
+		return at
+	}
+
+	func shMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value)
+		if immediate >= -128 && immediate <= 127 {
+			shEmit16(out, 0xe000|(destination.Code<<8)|(immediate&0xff))
+			return
+		}
+		shLiteral(out, destination, immediate)
+	}
+
+	func shEmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := shLiteral(out, destination, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		index := value.Index
+		if index.Valid && (value.Scale != 1 || (index.Code == destination.Code && (!value.Base.Valid || value.Base.Code != destination.Code))) {
+			// Preserve an index which aliases the destination before materializing
+			// the base. Pick a temporary distinct from the base as well, since the
+			// scaled-index path must retain both values until the final addition.
+			temporary := shScratch()
+			if value.Base.Valid && value.Base.Code == temporary.Code {
+				temporary = shCompareLeft()
+			}
+			shMove(out, temporary, index)
+			index = temporary
+		}
+		if value.Base.Valid {
+			shMove(out, destination, value.Base)
+		} else {
+			shMoveImmediate(out, destination, 0)
+		}
+		if index.Valid {
+			shift := RTGLog2(value.Scale)
+			for shift > 0 {
+				shEmit16(out, 0x4000|(index.Code<<8))
+				shift--
+			}
+			shEmit16(out, 0x300c|(destination.Code<<8)|(index.Code<<4))
+		}
+		if value.Displacement != 0 {
+			if value.Displacement >= -128 && value.Displacement <= 127 {
+				shEmit16(out, 0x7000|(destination.Code<<8)|(value.Displacement&0xff))
+			} else {
+				temporary := shScratch()
+				if destination.Code == temporary.Code {
+					temporary = shCompareLeft()
+				}
+				shMoveImmediate(out, temporary, int64(value.Displacement))
+				shEmit16(out, 0x300c|(destination.Code<<8)|(temporary.Code<<4))
+			}
+		}
+	}
+
+	func shMaterializeAddress(out *RTGEmitter, value RTGAddress) RTGRegister {
+		shEmitAddress(out, shAddress(), value)
+		return shAddress()
+	}
+
+	func shLoadWidth(out *RTGEmitter, destination RTGRegister, value RTGAddress, opcode int) {
+		// Address formation borrows four physical helper registers. Save them,
+		// load through compareRight, restore them, and only then publish the
+		// result to its requested location.
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shAddress().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shScratch().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareLeft().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareRight().Code<<4))
+		adjusted := value
+		if adjusted.Base.Valid && adjusted.Base.Code == shStack().Code {
+			adjusted.Displacement += 16
+		}
+		address := shMaterializeAddress(out, adjusted)
+		shEmit16(out, opcode|(shCompareRight().Code<<8)|(address.Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareRight().Code<<4))
+		shEmit16(out, 0x5000|(shCompareRight().Code<<8)|(shStack().Code<<4)|1)
+		shEmit16(out, 0x5000|(shCompareLeft().Code<<8)|(shStack().Code<<4)|2)
+		shEmit16(out, 0x5000|(shScratch().Code<<8)|(shStack().Code<<4)|3)
+		shEmit16(out, 0x5000|(shAddress().Code<<8)|(shStack().Code<<4)|4)
+		shEmit16(out, 0x5000|(destination.Code<<8)|(shStack().Code<<4)|0)
+		shEmit16(out, 0x7000|(shStack().Code<<8)|20)
+	}
+	func shLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6002)
+	}
+	func shLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6002)
+	}
+	func shLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6002)
+	}
+	func shLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6001)
+	}
+	func shLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6001)
+		shEmit16(out, 0x600d|(destination.Code<<8)|(destination.Code<<4))
+	}
+	func shLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6000)
+	}
+	func shLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		shLoadWidth(out, destination, value, 0x6000)
+		shEmit16(out, 0x600c|(destination.Code<<8)|(destination.Code<<4))
+	}
+
+	func shStoreWidth(out *RTGEmitter, value RTGAddress, source RTGRegister, opcode int) {
+		// Preserve every helper register as required by the store contract, plus
+		// the value itself while the target address is formed.
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shAddress().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shScratch().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareLeft().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareRight().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(source.Code<<4))
+		adjusted := value
+		if adjusted.Base.Valid && adjusted.Base.Code == shStack().Code {
+			adjusted.Displacement += 20
+		}
+		address := shMaterializeAddress(out, adjusted)
+		shEmit16(out, 0x5000|(shCompareRight().Code<<8)|(shStack().Code<<4)|0)
+		shEmit16(out, opcode|(address.Code<<8)|(shCompareRight().Code<<4))
+		shEmit16(out, 0x5000|(shCompareRight().Code<<8)|(shStack().Code<<4)|1)
+		shEmit16(out, 0x5000|(shCompareLeft().Code<<8)|(shStack().Code<<4)|2)
+		shEmit16(out, 0x5000|(shScratch().Code<<8)|(shStack().Code<<4)|3)
+		shEmit16(out, 0x5000|(shAddress().Code<<8)|(shStack().Code<<4)|4)
+		shEmit16(out, 0x7000|(shStack().Code<<8)|20)
+	}
+	func shStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		shStoreWidth(out, value, source, 0x2002)
+	}
+	func shStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		shStoreWidth(out, value, source, 0x2002)
+	}
+	func shStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		shStoreWidth(out, value, source, 0x2001)
+	}
+	func shStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		shStoreWidth(out, value, source, 0x2000)
+	}
+
+	func shAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x300c|(destination.Code<<8)|(source.Code<<4))
+	}
+	func shSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x3008|(destination.Code<<8)|(source.Code<<4))
+	}
+	func shMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x0007|(destination.Code<<8)|(source.Code<<4))
+		shEmit16(out, 0x001a|(destination.Code<<8))
+	}
+	func shBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x2009|(destination.Code<<8)|(source.Code<<4))
+	}
+	func shBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x200b|(destination.Code<<8)|(source.Code<<4))
+	}
+	func shBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		shEmit16(out, 0x200a|(destination.Code<<8)|(source.Code<<4))
+	}
+
+	func shCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		compareLeft := shCompareLeft()
+		compareRight := shCompareRight()
+		// The contract for compare preserves all locations. Keep the previous
+		// contents until shConditionT has consumed the operands into the T bit.
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(compareLeft.Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(compareRight.Code<<4))
+		shComparisonSaved = true
+		if left.Code == compareLeft.Code {
+			shMove(out, compareRight, right)
+			return
+		}
+		if right.Code == compareRight.Code {
+			shMove(out, compareLeft, left)
+			return
+		}
+		if left.Code == compareRight.Code && right.Code == compareLeft.Code {
+			// Swap the two dedicated comparison registers without borrowing a
+			// general register whose live value the operation must preserve.
+			shBitXor(out, compareLeft, compareRight)
+			shBitXor(out, compareRight, compareLeft)
+			shBitXor(out, compareLeft, compareRight)
+			return
+		}
+		if right.Code == compareLeft.Code {
+			// Preserve the right operand before replacing compareLeft.
+			shMove(out, compareRight, right)
+			shMove(out, compareLeft, left)
+			return
+		}
+		shMove(out, shCompareLeft(), left)
+		shMove(out, shCompareRight(), right)
+	}
+	func shRestoreComparison(out *RTGEmitter) {
+		if !shComparisonSaved {
+			return
+		}
+		shEmit16(out, 0x6006|(shCompareRight().Code<<8)|(shStack().Code<<4))
+		shEmit16(out, 0x6006|(shCompareLeft().Code<<8)|(shStack().Code<<4))
+		shComparisonSaved = false
+	}
+	func shTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		shCompare(out, left, right)
+		shBitAnd(out, shCompareLeft(), shCompareRight())
+		shMoveImmediate(out, shCompareRight(), 0)
+	}
+
+	func shConditionT(out *RTGEmitter, condition RTGCondition) bool {
+		left := shCompareLeft()
+		right := shCompareRight()
+		code := condition.Code
+		if code == 0 || code == 1 {
+			shEmit16(out, 0x3000|(left.Code<<8)|(right.Code<<4))
+			shRestoreComparison(out)
+			return code == 1
+		}
+		if code == 2 {
+			shEmit16(out, 0x3003|(right.Code<<8)|(left.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 3 {
+			shEmit16(out, 0x3007|(left.Code<<8)|(right.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 4 {
+			shEmit16(out, 0x3007|(right.Code<<8)|(left.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 5 {
+			shEmit16(out, 0x3003|(left.Code<<8)|(right.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 6 {
+			shEmit16(out, 0x3006|(right.Code<<8)|(left.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 7 {
+			shEmit16(out, 0x3002|(left.Code<<8)|(right.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		if code == 8 {
+			shEmit16(out, 0x3002|(right.Code<<8)|(left.Code<<4))
+			shRestoreComparison(out)
+			return false
+		}
+		shEmit16(out, 0x3006|(left.Code<<8)|(right.Code<<4))
+		shRestoreComparison(out)
+		return false
+	}
+
+	func shSetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		invert := shConditionT(out, condition)
+		shEmit16(out, 0x0029|(destination.Code<<8))
+		if invert {
+			shEmit16(out, 0x600b|(destination.Code<<8)|(destination.Code<<4))
+			shEmit16(out, 0x7000|(destination.Code<<8)|1)
+		}
+	}
+
+	func shLocalBranch(out *RTGEmitter, whenTrue bool) int {
+		at := out.Len()
+		opcode := 0x8b00
+		if whenTrue {
+			opcode = 0x8900
+		}
+		shEmit16(out, opcode)
+		return at
+	}
+	func shPatchLocalBranch(out *RTGEmitter, at int, target int) {
+		displacement := (target - (at + 4)) / 2
+		code := out.Code()
+		opcode := int(code[at]) | int(code[at+1])<<8
+		if shBigEndian {
+			opcode = int(code[at])<<8 | int(code[at+1])
+		}
+		shPatch16(out, at, (opcode&0xff00)|(displacement&0xff))
+	}
+
+	func shLoadLabel(out *RTGEmitter, destination RTGRegister, label RTGLabel) {
+		at := shLiteral(out, destination, 0)
+		out.Reloc(label)
+		_ = at
+	}
+	func shCall(out *RTGEmitter, label RTGLabel) {
+		shLoadLabel(out, shScratch(), label)
+		shEmit16(out, 0x400b|(shScratch().Code<<8))
+		shEmit16(out, 0x0009)
+	}
+	func shCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		shEmit16(out, 0x400b|(operand.Code<<8))
+		shEmit16(out, 0x0009)
+	}
+	func shJump(out *RTGEmitter, label RTGLabel) {
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shScratch().Code<<4))
+		shLoadLabel(out, shScratch(), label)
+		shEmit16(out, 0x402b|(shScratch().Code<<8))
+		shEmit16(out, 0x6006|(shScratch().Code<<8)|(shStack().Code<<4))
+	}
+	func shJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		invert := shConditionT(out, condition)
+		// Skip the long jump when the requested predicate is false. BT/BF do
+		// not have delay slots, while shJump restores its temporary in JMP's.
+		skip := shLocalBranch(out, invert)
+		shJump(out, label)
+		shPatchLocalBranch(out, skip, out.Len())
+	}
+
+	func shIncrement(out *RTGEmitter, operand RTGRegister) { shEmit16(out, 0x7000|(operand.Code<<8)|1) }
+	func shDecrement(out *RTGEmitter, operand RTGRegister) { shEmit16(out, 0x7000|(operand.Code<<8)|0xff) }
+	func shShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count >= 16 {
+			shEmit16(out, 0x4028|(operand.Code<<8))
+			count -= 16
+		}
+		for count >= 8 {
+			shEmit16(out, 0x4018|(operand.Code<<8))
+			count -= 8
+		}
+		for count >= 2 {
+			shEmit16(out, 0x4008|(operand.Code<<8))
+			count -= 2
+		}
+		for count > 0 {
+			shEmit16(out, 0x4000|(operand.Code<<8))
+			count--
+		}
+	}
+	func shShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count >= 16 {
+			shEmit16(out, 0x4029|(operand.Code<<8))
+			count -= 16
+		}
+		for count >= 8 {
+			shEmit16(out, 0x4019|(operand.Code<<8))
+			count -= 8
+		}
+		for count >= 2 {
+			shEmit16(out, 0x4009|(operand.Code<<8))
+			count -= 2
+		}
+		for count > 0 {
+			shEmit16(out, 0x4001|(operand.Code<<8))
+			count--
+		}
+	}
+	func shShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		count := int(value) & 31
+		for count > 0 {
+			shEmit16(out, 0x4021|(operand.Code<<8))
+			count--
+		}
+	}
+
+	func shVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		shMove(out, shScratch(), shTertiary())
+		loop := out.NewLabel()
+		out.Mark(loop)
+		shEmit16(out, 0x8800|(shPrimary().Code<<8))
+		// CMP/EQ #0,R0 produces the T bit directly, so use a local BT rather
+		// than re-evaluating the backend's saved comparison operands.
+		done := shLocalBranch(out, true)
+		if direction == RTGShiftLeft {
+			shEmit16(out, 0x4000|(shScratch().Code<<8))
+		} else if signed {
+			shEmit16(out, 0x4021|(shScratch().Code<<8))
+		} else {
+			shEmit16(out, 0x4001|(shScratch().Code<<8))
+		}
+		shDecrement(out, shPrimary())
+		shJump(out, loop)
+		shPatchLocalBranch(out, done, out.Len())
+		shMove(out, shPrimary(), shScratch())
+	}
+
+	func shSignedDivide(out *RTGEmitter, remainder bool) {
+		// Preserve every non-result location used by the software division. The
+		// direct-emitter contract exposes only secondary and flags as clobbered;
+		// larger expressions can keep live values in all four helper registers.
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shTertiary().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shScratch().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shAddress().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareLeft().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shCompareRight().Code<<4))
+		shEmit16(out, 0x2006|(shStack().Code<<8)|(shPrimary().Code<<4))
+		shMove(out, shCompareRight(), shPrimary())
+		shEmit16(out, 0x4011|(shCompareRight().Code<<8))
+		positiveDivisor := shLocalBranch(out, true)
+		shEmit16(out, 0x600b|(shCompareRight().Code<<8)|(shCompareRight().Code<<4))
+		shPatchLocalBranch(out, positiveDivisor, out.Len())
+		shEmit16(out, 0x4011|(shTertiary().Code<<8))
+		positiveDividend := shLocalBranch(out, true)
+		shEmit16(out, 0x600b|(shTertiary().Code<<8)|(shTertiary().Code<<4))
+		shPatchLocalBranch(out, positiveDividend, out.Len())
+		shMoveImmediate(out, shScratch(), 0)
+		shMoveImmediate(out, shAddress(), 0)
+		shMoveImmediate(out, shCompareLeft(), 32)
+		loop := out.Len()
+		shEmit16(out, 0x4000|(shTertiary().Code<<8))
+		shEmit16(out, 0x4024|(shAddress().Code<<8))
+		shEmit16(out, 0x3002|(shAddress().Code<<8)|(shCompareRight().Code<<4))
+		skipSubtract := shLocalBranch(out, false)
+		shSubtract(out, shAddress(), shCompareRight())
+		shEmit16(out, 0x0018)
+		shPatchLocalBranch(out, skipSubtract, out.Len())
+		shEmit16(out, 0x4024|(shScratch().Code<<8))
+		shDecrement(out, shCompareLeft())
+		// CMP/EQ #imm is restricted to R0. TST Rn,Rn gives the same zero
+		// predicate for the dedicated loop counter without emitting an illegal
+		// 0x8Axx opcode on SH-2/SH-4.
+		shEmit16(out, 0x2008|(shCompareLeft().Code<<8)|(shCompareLeft().Code<<4))
+		back := shLocalBranch(out, false)
+		shPatchLocalBranch(out, back, loop)
+		if remainder {
+			shMove(out, shPrimary(), shAddress())
+		} else {
+			shMove(out, shPrimary(), shScratch())
+		}
+		// The divisor is at stack offset zero; the original dividend precedes the
+		// five saved helper locations at offset twenty.
+		shEmit16(out, 0x5000|(shCompareLeft().Code<<8)|(shStack().Code<<4)|0)
+		shMove(out, shAddress(), shStack())
+		shEmit16(out, 0x7000|(shAddress().Code<<8)|20)
+		shEmit16(out, 0x6002|(shCompareRight().Code<<8)|(shAddress().Code<<4))
+		if !remainder {
+			shBitXor(out, shCompareRight(), shCompareLeft())
+		}
+		shEmit16(out, 0x4011|(shCompareRight().Code<<8))
+		positiveResult := shLocalBranch(out, true)
+		shEmit16(out, 0x600b|(shPrimary().Code<<8)|(shPrimary().Code<<4))
+		shPatchLocalBranch(out, positiveResult, out.Len())
+		shEmit16(out, 0x7000|(shStack().Code<<8)|4)
+		shEmit16(out, 0x6006|(shCompareRight().Code<<8)|(shStack().Code<<4))
+		shEmit16(out, 0x6006|(shCompareLeft().Code<<8)|(shStack().Code<<4))
+		shEmit16(out, 0x6006|(shAddress().Code<<8)|(shStack().Code<<4))
+		shEmit16(out, 0x6006|(shScratch().Code<<8)|(shStack().Code<<4))
+		shEmit16(out, 0x6006|(shTertiary().Code<<8)|(shStack().Code<<4))
+	}
+
+	func shReturn(out *RTGEmitter) { shEmit16(out, 0x000b); shEmit16(out, 0x0009) }
+	func shLeave(out *RTGEmitter) {
+		shLoadNative(out, shScratch(), RTGAddress{Base: shFrame(), Displacement: -4})
+		shEmit16(out, 0x402a|(shScratch().Code<<8))
+		shLoadNative(out, shAddress(), RTGAddress{Base: shFrame(), Displacement: -8})
+		shMove(out, shStack(), shFrame())
+		shMove(out, shFrame(), shAddress())
+	}
+	func shHostSyscall(out *RTGEmitter) { shEmit16(out, 0xc314) }
+
+	func shPatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := shCodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			shPatch32(out, at, target)
+		}
+	}
+
+	func shFrameStart(out *RTGEmitter) int {
+		shMove(out, shAddress(), shFrame())
+		at := shLiteral(out, shScratch(), 0)
+		shSubtract(out, shStack(), shScratch())
+		shMove(out, shFrame(), shStack())
+		shAdd(out, shFrame(), shScratch())
+		shStoreNative(out, RTGAddress{Base: shFrame(), Displacement: -8}, shAddress())
+		shEmit16(out, 0x002a|(shScratch().Code<<8))
+		shStoreNative(out, RTGAddress{Base: shFrame(), Displacement: -4}, shScratch())
+		return at
+	}
+	func shFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		// Reserve both linkage words even without locals so a callee's frame
+		// cannot overlap this function's saved PR/frame pair.
+		shPatch32(out, at, (stackUsed+23)&-16)
+	}
+	func shFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		shLoadNative(out, destination, RTGAddress{Base: shFrame(), Displacement: -(offset + 8)})
+	}
+	func shFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		shStoreNative(out, RTGAddress{Base: shFrame(), Displacement: -(offset + 8)}, source)
+	}
+	func shFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		shEmitAddress(out, destination, RTGAddress{Base: shFrame(), Displacement: -(offset + 8)})
+	}
+
+	func shPrimary() RTGRegister      { return RTGRegister{Code: 0, Valid: true} }
+	func shSecondary() RTGRegister    { return RTGRegister{Code: 1, Valid: true} }
+	func shTertiary() RTGRegister     { return RTGRegister{Code: 2, Valid: true} }
+	func shScratch() RTGRegister      { return RTGRegister{Code: 8, Valid: true} }
+	func shAddress() RTGRegister      { return RTGRegister{Code: 9, Valid: true} }
+	func shCompareLeft() RTGRegister  { return RTGRegister{Code: 10, Valid: true} }
+	func shCompareRight() RTGRegister { return RTGRegister{Code: 11, Valid: true} }
+	func shFrame() RTGRegister        { return RTGRegister{Code: 14, Valid: true} }
+	func shStack() RTGRegister        { return RTGRegister{Code: 15, Valid: true} }
+}
+
+arch sh4le {
+	alias = "sh4le"
+	endian = little
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 2
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go shPatchRelocations
+	registers integer = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12, link, frame, stack]
+	locations {
+		primary = value0
+		secondary = value1
+		tertiary = value2
+		scratch = scratch
+		address = address
+		compareLeft = compareLeft
+		compareRight = compareRight
+		copy_destination = arg3
+		copy_source = arg4
+		copy_count = arg5
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go shMove
+		address = go shEmitAddress
+		load.native = go shLoadNative
+		load.i32 = go shLoadI32
+		load.u32 = go shLoadU32
+		load.i16 = go shLoadI16
+		load.u16 = go shLoadU16
+		load.i8 = go shLoadI8
+		load.u8 = go shLoadU8
+		store.native = go shStoreNative
+		store.u32 = go shStoreU32
+		store.u16 = go shStoreU16
+		store.u8 = go shStoreU8
+		add = go shAdd
+		subtract = go shSubtract
+		multiply = go shMultiply
+		bit_and = go shBitAnd
+		bit_or = go shBitOr
+		bit_xor = go shBitXor
+		compare = go shCompare
+		test = go shTest
+		increment = go shIncrement
+		decrement = go shDecrement
+		shift_left_immediate = go shShiftLeftImmediate
+		shift_right_unsigned_immediate = go shShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go shShiftRightSignedImmediate
+		call = go shCall
+		call_indirect = go shCallIndirect
+		jump = go shJump
+		jump_condition = go shJumpCondition
+		set_condition = go shSetCondition
+		return = go shReturn
+		leave = go shLeave
+		host_syscall = go shHostSyscall
+		move_immediate = go shMoveImmediate
+		variable_shift = go shVariableShift
+		signed_divide = go shSignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			shCompare(out, arg3, arg4)
+			shJumpCondition(out, ult, forward)
+			shEmitAddress(out, scratch, record_address(Base:arg4, Index:arg5, Scale:1,))
+			shCompare(out, arg3, scratch)
+			shJumpCondition(out, uge, forward)
+			shEmitAddress(out, arg4, record_address(Base:arg4, Index:arg5, Scale:1, Displacement:-1,))
+			shEmitAddress(out, arg3, record_address(Base:arg3, Index:arg5, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			shMoveImmediate(out, scratch, 0)
+			shCompare(out, arg5, scratch)
+			shJumpCondition(out, eq, done)
+			shLoadU8(out, scratch, record_address(Base:arg4,))
+			shStoreU8(out, record_address(Base:arg3,), scratch)
+			shDecrement(out, arg4) ; shDecrement(out, arg3) ; shDecrement(out, arg5)
+			shJump(out, backwardLoop)
+			out.Mark(forward) ; out.Mark(forwardLoop)
+			shMoveImmediate(out, scratch, 0)
+			shCompare(out, arg5, scratch)
+			shJumpCondition(out, eq, done)
+			shLoadU8(out, scratch, record_address(Base:arg4,))
+			shStoreU8(out, record_address(Base:arg3,), scratch)
+			shIncrement(out, arg4) ; shIncrement(out, arg3) ; shDecrement(out, arg5)
+			shJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi sh4le_internal {
+	arch = sh4le
+	arguments = [value0, value1, value2, arg3, arg4, arg5]
+	call_words = [value0, value1, value2, arg3, arg4, arg5]
+	result = [value0, value1]
+	caller_saved = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	callee_saved = [frame]
+	clobbered = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	saved = [frame]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go shFrameStart
+	frame_finish = go shFrameFinish
+	frame_load = go shFrameLoad
+	frame_store = go shFrameStore
+	frame_address = go shFrameAddress
+}
+
+arch sh2be {
+	alias = "sh2be"
+	endian = big
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 2
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go shPatchRelocations
+	registers integer = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12, link, frame, stack]
+	locations {
+		primary = value0
+		secondary = value1
+		tertiary = value2
+		scratch = scratch
+		address = address
+		compareLeft = compareLeft
+		compareRight = compareRight
+		copy_destination = arg3
+		copy_source = arg4
+		copy_count = arg5
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go shMove
+		address = go shEmitAddress
+		load.native = go shLoadNative
+		load.i32 = go shLoadI32
+		load.u32 = go shLoadU32
+		load.i16 = go shLoadI16
+		load.u16 = go shLoadU16
+		load.i8 = go shLoadI8
+		load.u8 = go shLoadU8
+		store.native = go shStoreNative
+		store.u32 = go shStoreU32
+		store.u16 = go shStoreU16
+		store.u8 = go shStoreU8
+		add = go shAdd
+		subtract = go shSubtract
+		multiply = go shMultiply
+		bit_and = go shBitAnd
+		bit_or = go shBitOr
+		bit_xor = go shBitXor
+		compare = go shCompare
+		test = go shTest
+		increment = go shIncrement
+		decrement = go shDecrement
+		shift_left_immediate = go shShiftLeftImmediate
+		shift_right_unsigned_immediate = go shShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go shShiftRightSignedImmediate
+		call = go shCall
+		call_indirect = go shCallIndirect
+		jump = go shJump
+		jump_condition = go shJumpCondition
+		set_condition = go shSetCondition
+		return = go shReturn
+		leave = go shLeave
+		host_syscall = go shHostSyscall
+		move_immediate = go shMoveImmediate
+		variable_shift = go shVariableShift
+		signed_divide = go shSignedDivide
+		copy_bytes = sequence copyBytesBE
+	}
+	sequences {
+		copyBytesBE(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			shCompare(out, arg3, arg4)
+			shJumpCondition(out, ult, forward)
+			shEmitAddress(out, scratch, record_address(Base:arg4, Index:arg5, Scale:1,))
+			shCompare(out, arg3, scratch)
+			shJumpCondition(out, uge, forward)
+			shEmitAddress(out, arg4, record_address(Base:arg4, Index:arg5, Scale:1, Displacement:-1,))
+			shEmitAddress(out, arg3, record_address(Base:arg3, Index:arg5, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			shMoveImmediate(out, scratch, 0)
+			shCompare(out, arg5, scratch)
+			shJumpCondition(out, eq, done)
+			shLoadU8(out, scratch, record_address(Base:arg4,))
+			shStoreU8(out, record_address(Base:arg3,), scratch)
+			shDecrement(out, arg4) ; shDecrement(out, arg3) ; shDecrement(out, arg5)
+			shJump(out, backwardLoop)
+			out.Mark(forward) ; out.Mark(forwardLoop)
+			shMoveImmediate(out, scratch, 0)
+			shCompare(out, arg5, scratch)
+			shJumpCondition(out, eq, done)
+			shLoadU8(out, scratch, record_address(Base:arg4,))
+			shStoreU8(out, record_address(Base:arg3,), scratch)
+			shIncrement(out, arg4) ; shIncrement(out, arg3) ; shDecrement(out, arg5)
+			shJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi sh2be_internal {
+	arch = sh2be
+	arguments = [value0, value1, value2, arg3, arg4, arg5]
+	call_words = [value0, value1, value2, arg3, arg4, arg5]
+	result = [value0, value1]
+	caller_saved = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	callee_saved = [frame]
+	clobbered = [value0, value1, value2, arg3, arg4, arg5, work6, work7, scratch, address, compareLeft, compareRight, work12]
+	saved = [frame]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go shFrameStart
+	frame_finish = go shFrameFinish
+	frame_load = go shFrameLoad
+	frame_store = go shFrameStore
+	frame_address = go shFrameAddress
+}

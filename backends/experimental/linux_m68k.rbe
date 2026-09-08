@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_m68k
+implements direct_emitter_v1
+@import "m68k.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		m68k.m68SetCodeAddress(linux_elf.codeAddress)
+		return true
+	}
+	func entry(out *RTGEmitter, count int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return count == 0
+	}
+	func syscall(out *RTGEmitter) { m68k.m68Emit16(out, 0x4e40) }
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			m68k.m68Patch32(out, at, target)
+		}
+		return linux_elf.image(out, 4, 0, 32, true)
+	}
+}
+
+runtime linux_m68k {
+	emit_entry_start = go entryStart
+	emit_entry = go entry
+	syscall {
+		number = d0
+		arguments = [d1, d2, d3, d4, d5, a0]
+		result = d0
+		instruction = host_syscall
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stdout, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+format elf_m68k {
+	kind = elf
+	byte_order = big
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-m68k {
+	family = native_v1
+	os = linux
+	arch = m68k
+	frontend_arch = m68k
+	abi = m68k_internal
+	runtime = linux_m68k
+	executable = elf_m68k
+	arena_default = 16777216
+	build_tags = [linux, unix, m68k]
+	capabilities = [hosted, executable, filesystem, heap]
+}

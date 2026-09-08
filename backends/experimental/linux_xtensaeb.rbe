@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_xtensaeb
+implements direct_emitter_v1
+@import "xtensa_linux_be.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func start(out *RTGEmitter, state int) bool {
+		_ = out
+		_ = state
+		xtensa_linux_be.resetInstructions()
+		return true
+	}
+	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func syscall(out *RTGEmitter, n int) {
+		xtensa_linux_be.move(out, xtensa_linux_be.a6, xtensa_linux_be.primary)
+		xtensa_linux_be.moveImmediate(out, xtensa_linux_be.primary, int64(n))
+		xtensa_linux_be.hostSyscall(out)
+	}
+	func write(out *RTGEmitter) { syscall(out, 13) }
+	func read(out *RTGEmitter)  { syscall(out, 12) }
+	func open(out *RTGEmitter)  { syscall(out, 8) }
+	func close(out *RTGEmitter) { syscall(out, 9) }
+	func chmod(out *RTGEmitter) { syscall(out, 52) }
+	func exit(out *RTGEmitter, status RTGRegister) {
+		xtensa_linux_be.move(out, xtensa_linux_be.primary, status)
+		syscall(out, 118)
+	}
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			instruction := RTGGet32At(out.Code(), at)
+			xtensa_linux_be.patchFixedImmediate(out, at, RTGRegister{Code: (instruction >> 4) & 15, Valid: true}, int64(target))
+		}
+		xtensa_linux_be.convertInstructions(out)
+		return linux_elf.image(out, 94, 0, 32, true)
+	}
+}
+
+runtime linux_xtensaeb {
+	emit_entry_start = go start
+	emit_entry = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation read { emit = go read }
+	operation open { emit = go open }
+	operation close { emit = go close }
+	operation chmod { emit = go chmod }
+	operation print { use = write args = [stdout, buffer, count] }
+}
+format elf_xtensa {
+	kind = elf
+	byte_order = big
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-xtensaeb {
+	family = native_v1
+	os = linux
+	arch = xtensa_lx7
+	abi = xtensa_call0
+	runtime = linux_xtensaeb
+	executable = elf_xtensa
+	arena_default = 16777216
+	build_tags = [linux, unix, xtensa]
+	capabilities = [hosted, executable, filesystem, heap]
+}

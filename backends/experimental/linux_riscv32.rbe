@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_riscv32
+implements direct_emitter_v1
+@import "../../backend/definitions/riscv32.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func syscall(out *RTGEmitter, number int) {
+		riscv32.moveImmediate(out, RTGRegister{Code: 17, Valid: true}, int64(number))
+		riscv32.emit(out, 0x73)
+	}
+	func write(out *RTGEmitter) { syscall(out, 64) }
+	func read(out *RTGEmitter)  { syscall(out, 63) }
+	func close(out *RTGEmitter) { syscall(out, 57) }
+	func chmod(out *RTGEmitter) { syscall(out, 52) }
+	func exit(out *RTGEmitter, status RTGRegister) {
+		riscv32.move(out, RTGRegister{Code: 10, Valid: true}, status)
+		syscall(out, 93)
+	}
+	func open(out *RTGEmitter) {
+		riscv32.move(out, RTGRegister{Code: 13, Valid: true}, RTGRegister{Code: 12, Valid: true})
+		riscv32.move(out, RTGRegister{Code: 12, Valid: true}, RTGRegister{Code: 11, Valid: true})
+		riscv32.move(out, RTGRegister{Code: 11, Valid: true}, RTGRegister{Code: 10, Valid: true})
+		riscv32.moveImmediate(out, RTGRegister{Code: 10, Valid: true}, -100)
+		syscall(out, 56)
+	}
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			delta := target - linux_elf.codeAddress - at
+			hi := (delta + 0x800) >> 12
+			lo := delta - (hi << 12)
+			instruction := RTGGet32At(out.Code(), at)
+			out.PatchUint32(at, (instruction&0xfff)|(hi<<12))
+			next := RTGGet32At(out.Code(), at+4)
+			out.PatchUint32(at+4, (next&0xfffff)|((lo&0xfff)<<20))
+		}
+		return linux_elf.image(out, 243, 0, 32, false)
+	}
+}
+
+runtime linux_riscv32 {
+	emit_entry = go entry
+	emit_exit = go exit
+	operation write { emit = go write }
+	operation read { emit = go read }
+	operation open { emit = go open }
+	operation close { emit = go close }
+	operation chmod { emit = go chmod }
+	operation print { use = write args = [stdout, buffer, count] }
+}
+format elf_riscv32 {
+	kind = elf
+	byte_order = little
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-riscv32 {
+	family = native_v1
+	os = linux
+	arch = riscv32
+	abi = riscv32_internal
+	runtime = linux_riscv32
+	executable = elf_riscv32
+	arena_default = 16777216
+	build_tags = [linux, unix, riscv32]
+	capabilities = [hosted, executable, filesystem, heap]
+}

@@ -1,0 +1,980 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Original MOS 6502-family emitter. Renvo's six logical 16-bit registers and
+# software stack live in zero-page/RAM, leaving A/X/Y free for instruction
+# lowering. The emitted instruction subset runs unchanged on the NES 2A03 and
+# the HuC6280 after its target startup establishes the memory-page registers.
+go backend {
+	var m65CodeAddress int
+	var m65AbsoluteModes []int
+
+	const m65RegisterBase = 0x20
+	const m65AddressWord = 0x40
+	const m65TempWord = 0x42
+	const m65TempWord2 = 0x44
+	const m65CompareLeft = 0x46
+	const m65CompareRight = 0x48
+	const m65MultiplyLeft = 0x4a
+	const m65MultiplyRight = 0x4c
+	const m65MultiplyResult = 0x4e
+	const m65DivideValue = 0x50
+	const m65DivideDivisor = 0x52
+	const m65DivideRemainder = 0x54
+	const m65CountByte = 0x56
+	const m65SignByte = 0x57
+	const m65QuotientSignByte = 0x58
+
+	func m65SetCodeAddress(address int)        { m65CodeAddress = address; m65AbsoluteModes = nil }
+	func m65Emit16(out *RTGEmitter, value int) { RTGByte(out, byte(value)); RTGByte(out, byte(value>>8)) }
+	func m65Patch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		code[at] = byte(value)
+		code[at+1] = byte(value >> 8)
+	}
+	func m65RegisterAddress(register RTGRegister) int { return m65RegisterBase + register.Code*2 }
+	func m65LoadAZero(out *RTGEmitter, address int)   { RTGByte(out, 0xa5); RTGByte(out, byte(address)) }
+	func m65StoreAZero(out *RTGEmitter, address int)  { RTGByte(out, 0x85); RTGByte(out, byte(address)) }
+	func m65MoveWord(out *RTGEmitter, destination int, source int) {
+		if destination == source {
+			return
+		}
+		m65LoadAZero(out, source)
+		m65StoreAZero(out, destination)
+		m65LoadAZero(out, source+1)
+		m65StoreAZero(out, destination+1)
+	}
+	func m65Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65MoveWord(out, m65RegisterAddress(destination), m65RegisterAddress(source))
+	}
+	func m65ImmediateWord(out *RTGEmitter, address int, value int) {
+		RTGByte(out, 0xa9)
+		RTGByte(out, byte(value))
+		m65StoreAZero(out, address)
+		RTGByte(out, 0xa9)
+		RTGByte(out, byte(value>>8))
+		m65StoreAZero(out, address+1)
+	}
+	func m65MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		m65ImmediateWord(out, m65RegisterAddress(destination), int(value)&0xffff)
+	}
+	func m65AddWord(out *RTGEmitter, destination int, source int) {
+		RTGByte(out, 0x18)
+		m65LoadAZero(out, destination)
+		RTGByte(out, 0x65)
+		RTGByte(out, byte(source))
+		m65StoreAZero(out, destination)
+		m65LoadAZero(out, destination+1)
+		RTGByte(out, 0x65)
+		RTGByte(out, byte(source+1))
+		m65StoreAZero(out, destination+1)
+	}
+	func m65SubtractWord(out *RTGEmitter, destination int, source int) {
+		RTGByte(out, 0x38)
+		m65LoadAZero(out, destination)
+		RTGByte(out, 0xe5)
+		RTGByte(out, byte(source))
+		m65StoreAZero(out, destination)
+		m65LoadAZero(out, destination+1)
+		RTGByte(out, 0xe5)
+		RTGByte(out, byte(source+1))
+		m65StoreAZero(out, destination+1)
+	}
+	func m65AddImmediateWord(out *RTGEmitter, address int, value int) {
+		RTGByte(out, 0x18)
+		m65LoadAZero(out, address)
+		RTGByte(out, 0x69)
+		RTGByte(out, byte(value))
+		m65StoreAZero(out, address)
+		m65LoadAZero(out, address+1)
+		RTGByte(out, 0x69)
+		RTGByte(out, byte(value>>8))
+		m65StoreAZero(out, address+1)
+	}
+	func m65NegateWord(out *RTGEmitter, address int) {
+		m65LoadAZero(out, address)
+		RTGByte(out, 0x49)
+		RTGByte(out, 0xff)
+		RTGByte(out, 0x18)
+		RTGByte(out, 0x69)
+		RTGByte(out, 1)
+		m65StoreAZero(out, address)
+		m65LoadAZero(out, address+1)
+		RTGByte(out, 0x49)
+		RTGByte(out, 0xff)
+		RTGByte(out, 0x69)
+		RTGByte(out, 0)
+		m65StoreAZero(out, address+1)
+	}
+
+	// Absolute mode 0 patches one contiguous operand, mode 1 patches two
+	// immediate bytes four bytes apart, and mode 2 patches two absolute operands.
+	func m65AddressReloc(out *RTGEmitter, value RTGAddress, at int, mode int) {
+		RTGAddressRelocAt(out, value, at)
+		m65AbsoluteModes = append(m65AbsoluteModes, mode)
+	}
+	func m65PatchAbsolute(out *RTGEmitter, dataAddress int, bssAddress int) bool {
+		for index := 0; index < out.AbsoluteRelocationCount(); index++ {
+			at := out.AbsoluteRelocationOffset(index)
+			target, resolved := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(index), out.AbsoluteRelocationAddend(index), dataAddress, bssAddress)
+			if !resolved || target < 0 || target > 0xffff {
+				return false
+			}
+			mode := m65AbsoluteModes[index]
+			code := out.Code()
+			code[at] = byte(target)
+			if mode == 0 {
+				code[at+1] = byte(target >> 8)
+			}
+			if mode == 1 {
+				code[at+4] = byte(target >> 8)
+			}
+			if mode == 2 {
+				code[at+1] = byte(target >> 8)
+				code[at+5] = byte(target + 1)
+				code[at+6] = byte((target + 1) >> 8)
+			}
+		}
+		return true
+	}
+	func m65EmitRelocImmediate(out *RTGEmitter, destination int, value RTGAddress) {
+		RTGByte(out, 0xa9)
+		at := out.Len()
+		RTGByte(out, 0)
+		m65StoreAZero(out, destination)
+		RTGByte(out, 0xa9)
+		RTGByte(out, 0)
+		m65StoreAZero(out, destination+1)
+		m65AddressReloc(out, value, at, 1)
+	}
+	func m65AddressFrom(out *RTGEmitter, value RTGAddress) {
+		if RTGAddressValid(value) {
+			m65EmitRelocImmediate(out, m65AddressWord, value)
+			return
+		}
+		if value.Base.Valid {
+			m65MoveWord(out, m65AddressWord, m65RegisterAddress(value.Base))
+		} else {
+			m65ImmediateWord(out, m65AddressWord, 0)
+		}
+		if value.Index.Valid {
+			for scale := 0; scale < value.Scale; scale++ {
+				m65AddWord(out, m65AddressWord, m65RegisterAddress(value.Index))
+			}
+		}
+		if value.Displacement != 0 {
+			m65AddImmediateWord(out, m65AddressWord, value.Displacement)
+		}
+	}
+	func m65EmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65AddressFrom(out, value)
+		m65MoveWord(out, m65RegisterAddress(destination), m65AddressWord)
+	}
+
+	func m65LoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		dest := m65RegisterAddress(destination)
+		if RTGAddressValid(value) {
+			RTGByte(out, 0xad)
+			at := out.Len()
+			m65Emit16(out, 0)
+			m65StoreAZero(out, dest)
+			RTGByte(out, 0xad)
+			m65Emit16(out, 0)
+			m65StoreAZero(out, dest+1)
+			m65AddressReloc(out, value, at, 2)
+			return
+		}
+		m65AddressFrom(out, value)
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		RTGByte(out, 0xb1)
+		RTGByte(out, m65AddressWord)
+		m65StoreAZero(out, dest)
+		RTGByte(out, 0xc8)
+		RTGByte(out, 0xb1)
+		RTGByte(out, m65AddressWord)
+		m65StoreAZero(out, dest+1)
+	}
+	func m65LoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65LoadNative(out, destination, value)
+	}
+	func m65LoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65LoadNative(out, destination, value)
+	}
+	func m65LoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65LoadNative(out, destination, value)
+	}
+	func m65LoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65LoadNative(out, destination, value)
+	}
+	func m65LoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		dest := m65RegisterAddress(destination)
+		if RTGAddressValid(value) {
+			RTGByte(out, 0xad)
+			at := out.Len()
+			m65Emit16(out, 0)
+			m65AddressReloc(out, value, at, 0)
+		} else {
+			m65AddressFrom(out, value)
+			RTGByte(out, 0xa0)
+			RTGByte(out, 0)
+			RTGByte(out, 0xb1)
+			RTGByte(out, m65AddressWord)
+		}
+		m65StoreAZero(out, dest)
+		RTGByte(out, 0xa9)
+		RTGByte(out, 0)
+		m65StoreAZero(out, dest+1)
+	}
+	func m65LoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		m65LoadU8(out, destination, value)
+		dest := m65RegisterAddress(destination)
+		m65LoadAZero(out, dest)
+		RTGByte(out, 0x10)
+		RTGByte(out, 4)
+		RTGByte(out, 0xa9)
+		RTGByte(out, 0xff)
+		m65StoreAZero(out, dest+1)
+	}
+	func m65StoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		src := m65RegisterAddress(source)
+		if RTGAddressValid(value) {
+			m65LoadAZero(out, src)
+			RTGByte(out, 0x8d)
+			at := out.Len()
+			m65Emit16(out, 0)
+			m65LoadAZero(out, src+1)
+			RTGByte(out, 0x8d)
+			m65Emit16(out, 0)
+			m65AddressReloc(out, value, at, 2)
+			return
+		}
+		m65AddressFrom(out, value)
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		m65LoadAZero(out, src)
+		RTGByte(out, 0x91)
+		RTGByte(out, m65AddressWord)
+		RTGByte(out, 0xc8)
+		m65LoadAZero(out, src+1)
+		RTGByte(out, 0x91)
+		RTGByte(out, m65AddressWord)
+	}
+	func m65StoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m65StoreNative(out, value, source)
+	}
+	func m65StoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		m65StoreNative(out, value, source)
+	}
+	func m65StoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		src := m65RegisterAddress(source)
+		m65LoadAZero(out, src)
+		if RTGAddressValid(value) {
+			RTGByte(out, 0x8d)
+			at := out.Len()
+			m65Emit16(out, 0)
+			m65AddressReloc(out, value, at, 0)
+		} else {
+			m65StoreAZero(out, m65TempWord)
+			m65AddressFrom(out, value)
+			m65LoadAZero(out, m65TempWord)
+			RTGByte(out, 0xa0)
+			RTGByte(out, 0)
+			RTGByte(out, 0x91)
+			RTGByte(out, m65AddressWord)
+		}
+	}
+
+	func m65Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65AddWord(out, m65RegisterAddress(destination), m65RegisterAddress(source))
+	}
+	func m65Subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65SubtractWord(out, m65RegisterAddress(destination), m65RegisterAddress(source))
+	}
+	func m65BitOperation(out *RTGEmitter, destination RTGRegister, source RTGRegister, opcode int) {
+		dest := m65RegisterAddress(destination)
+		src := m65RegisterAddress(source)
+		m65LoadAZero(out, dest)
+		RTGByte(out, byte(opcode))
+		RTGByte(out, byte(src))
+		m65StoreAZero(out, dest)
+		m65LoadAZero(out, dest+1)
+		RTGByte(out, byte(opcode))
+		RTGByte(out, byte(src+1))
+		m65StoreAZero(out, dest+1)
+	}
+	func m65BitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65BitOperation(out, destination, source, 0x25)
+	}
+	func m65BitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65BitOperation(out, destination, source, 0x05)
+	}
+	func m65BitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65BitOperation(out, destination, source, 0x45)
+	}
+	func m65Increment(out *RTGEmitter, operand RTGRegister) {
+		m65AddImmediateWord(out, m65RegisterAddress(operand), 1)
+	}
+	func m65Decrement(out *RTGEmitter, operand RTGRegister) {
+		m65AddImmediateWord(out, m65RegisterAddress(operand), -1)
+	}
+
+	func m65Jump(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0x4c)
+		at := out.Len()
+		m65Emit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func m65Branch(out *RTGEmitter, opcode int, label RTGLabel) {
+		inverse := opcode ^ 0x20
+		RTGByte(out, byte(inverse))
+		RTGByte(out, 3)
+		m65Jump(out, label)
+	}
+	func m65Multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		m65MoveWord(out, m65MultiplyLeft, m65RegisterAddress(destination))
+		m65MoveWord(out, m65MultiplyRight, m65RegisterAddress(source))
+		m65ImmediateWord(out, m65MultiplyResult, 0)
+		RTGByte(out, 0xa9)
+		RTGByte(out, 16)
+		m65StoreAZero(out, m65CountByte)
+		loop := out.NewLabel()
+		skip := out.NewLabel()
+		out.Mark(loop)
+		m65LoadAZero(out, m65MultiplyRight)
+		RTGByte(out, 0x29)
+		RTGByte(out, 1)
+		m65Branch(out, 0xf0, skip)
+		m65AddWord(out, m65MultiplyResult, m65MultiplyLeft)
+		out.Mark(skip)
+		RTGByte(out, 0x06)
+		RTGByte(out, m65MultiplyLeft)
+		RTGByte(out, 0x26)
+		RTGByte(out, m65MultiplyLeft+1)
+		RTGByte(out, 0x46)
+		RTGByte(out, m65MultiplyRight+1)
+		RTGByte(out, 0x66)
+		RTGByte(out, m65MultiplyRight)
+		RTGByte(out, 0xc6)
+		RTGByte(out, m65CountByte)
+		m65Branch(out, 0xd0, loop)
+		m65MoveWord(out, m65RegisterAddress(destination), m65MultiplyResult)
+	}
+
+	func m65Compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		m65MoveWord(out, m65CompareLeft, m65RegisterAddress(left))
+		m65MoveWord(out, m65CompareRight, m65RegisterAddress(right))
+	}
+	func m65Test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		l := m65RegisterAddress(left)
+		r := m65RegisterAddress(right)
+		m65LoadAZero(out, l)
+		RTGByte(out, 0x25)
+		RTGByte(out, byte(r))
+		m65StoreAZero(out, m65CompareLeft)
+		m65LoadAZero(out, l+1)
+		RTGByte(out, 0x25)
+		RTGByte(out, byte(r+1))
+		m65StoreAZero(out, m65CompareLeft+1)
+		m65ImmediateWord(out, m65CompareRight, 0)
+	}
+	func m65JumpEqual(out *RTGEmitter, wantEqual bool, label RTGLabel) {
+		m65LoadAZero(out, m65CompareLeft)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65CompareRight)
+		if !wantEqual {
+			m65Branch(out, 0xd0, label)
+			m65LoadAZero(out, m65CompareLeft+1)
+			RTGByte(out, 0xc5)
+			RTGByte(out, m65CompareRight+1)
+			m65Branch(out, 0xd0, label)
+			return
+		}
+		done := out.NewLabel()
+		m65Branch(out, 0xd0, done)
+		m65LoadAZero(out, m65CompareLeft+1)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65CompareRight+1)
+		m65Branch(out, 0xf0, label)
+		out.Mark(done)
+	}
+	func m65JumpLess(out *RTGEmitter, signed bool, wantLess bool, label RTGLabel) {
+		low := out.NewLabel()
+		done := out.NewLabel()
+		m65LoadAZero(out, m65CompareLeft+1)
+		if signed {
+			RTGByte(out, 0x49)
+			RTGByte(out, 0x80)
+		}
+		m65StoreAZero(out, m65TempWord)
+		m65LoadAZero(out, m65CompareRight+1)
+		if signed {
+			RTGByte(out, 0x49)
+			RTGByte(out, 0x80)
+		}
+		m65StoreAZero(out, m65TempWord+1)
+		m65LoadAZero(out, m65TempWord)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65TempWord+1)
+		m65Branch(out, 0xf0, low)
+		if wantLess {
+			m65Branch(out, 0x90, label)
+		} else {
+			m65Branch(out, 0xb0, label)
+		}
+		m65Jump(out, done)
+		out.Mark(low)
+		m65LoadAZero(out, m65CompareLeft)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65CompareRight)
+		if wantLess {
+			m65Branch(out, 0x90, label)
+		} else {
+			m65Branch(out, 0xb0, label)
+		}
+		out.Mark(done)
+	}
+	func m65JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		if condition.Code == 0 {
+			m65JumpEqual(out, true, label)
+			return
+		}
+		if condition.Code == 1 {
+			m65JumpEqual(out, false, label)
+			return
+		}
+		if condition.Code == 4 {
+			m65JumpLess(out, true, true, label)
+			return
+		}
+		if condition.Code == 5 {
+			m65JumpLess(out, true, false, label)
+			return
+		}
+		if condition.Code == 6 {
+			m65JumpLess(out, false, true, label)
+			return
+		}
+		if condition.Code == 7 {
+			m65JumpLess(out, false, false, label)
+			return
+		}
+		if condition.Code == 2 || condition.Code == 8 {
+			m65JumpEqual(out, true, label)
+			m65JumpLess(out, condition.Code == 2, true, label)
+			return
+		}
+		if condition.Code == 3 || condition.Code == 9 {
+			skip := out.NewLabel()
+			m65JumpEqual(out, true, skip)
+			m65JumpLess(out, condition.Code == 3, false, label)
+			out.Mark(skip)
+		}
+	}
+	func m65SetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		matched := out.NewLabel()
+		done := out.NewLabel()
+		m65JumpCondition(out, condition, matched)
+		m65MoveImmediate(out, destination, 0)
+		m65Jump(out, done)
+		out.Mark(matched)
+		m65MoveImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+
+	func m65ShiftImmediate(out *RTGEmitter, operand RTGRegister, value byte, direction RTGShiftDirection, signed bool) {
+		address := m65RegisterAddress(operand)
+		for count := 0; count < int(value); count++ {
+			if direction == RTGShiftLeft {
+				RTGByte(out, 0x06)
+				RTGByte(out, byte(address))
+				RTGByte(out, 0x26)
+				RTGByte(out, byte(address+1))
+			} else if signed {
+				m65LoadAZero(out, address+1)
+				RTGByte(out, 0xc9)
+				RTGByte(out, 0x80)
+				RTGByte(out, 0x66)
+				RTGByte(out, byte(address+1))
+				RTGByte(out, 0x66)
+				RTGByte(out, byte(address))
+			} else {
+				RTGByte(out, 0x46)
+				RTGByte(out, byte(address+1))
+				RTGByte(out, 0x66)
+				RTGByte(out, byte(address))
+			}
+		}
+	}
+	func m65ShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m65ShiftImmediate(out, operand, value, RTGShiftLeft, false)
+	}
+	func m65ShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m65ShiftImmediate(out, operand, value, RTGShiftRight, false)
+	}
+	func m65ShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		m65ShiftImmediate(out, operand, value, RTGShiftRight, true)
+	}
+	func m65VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		value := m65RegisterAddress(m65Tertiary())
+		count := m65RegisterAddress(m65Primary())
+		m65MoveWord(out, m65TempWord, value)
+		m65LoadAZero(out, count+1)
+		saturated := out.NewLabel()
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		m65Branch(out, 0xd0, saturated)
+		m65LoadAZero(out, count)
+		RTGByte(out, 0xc9)
+		RTGByte(out, 16)
+		m65Branch(out, 0xb0, saturated)
+		out.Mark(loop)
+		m65LoadAZero(out, count)
+		m65Branch(out, 0xf0, done)
+		if direction == RTGShiftLeft {
+			RTGByte(out, 0x06)
+			RTGByte(out, m65TempWord)
+			RTGByte(out, 0x26)
+			RTGByte(out, m65TempWord+1)
+		} else if signed {
+			m65LoadAZero(out, m65TempWord+1)
+			RTGByte(out, 0xc9)
+			RTGByte(out, 0x80)
+			RTGByte(out, 0x66)
+			RTGByte(out, m65TempWord+1)
+			RTGByte(out, 0x66)
+			RTGByte(out, m65TempWord)
+		} else {
+			RTGByte(out, 0x46)
+			RTGByte(out, m65TempWord+1)
+			RTGByte(out, 0x66)
+			RTGByte(out, m65TempWord)
+		}
+		RTGByte(out, 0xc6)
+		RTGByte(out, byte(count))
+		m65Jump(out, loop)
+		out.Mark(saturated)
+		if direction == RTGShiftRight && signed {
+			m65LoadAZero(out, m65TempWord+1)
+			positive := out.NewLabel()
+			m65Branch(out, 0x10, positive)
+			m65ImmediateWord(out, m65TempWord, 0xffff)
+			m65Jump(out, done)
+			out.Mark(positive)
+		}
+		if direction == RTGShiftLeft || !signed {
+			m65ImmediateWord(out, m65TempWord, 0)
+		}
+		out.Mark(done)
+		m65MoveWord(out, m65RegisterAddress(m65Primary()), m65TempWord)
+	}
+
+	func m65SignedDivide(out *RTGEmitter, remainder bool) {
+		m65MoveWord(out, m65DivideValue, m65RegisterAddress(m65Tertiary()))
+		m65MoveWord(out, m65DivideDivisor, m65RegisterAddress(m65Primary()))
+		m65ImmediateWord(out, m65DivideRemainder, 0)
+		m65LoadAZero(out, m65DivideValue+1)
+		RTGByte(out, 0x29)
+		RTGByte(out, 0x80)
+		m65StoreAZero(out, m65SignByte)
+		m65LoadAZero(out, m65DivideValue+1)
+		RTGByte(out, 0x45)
+		RTGByte(out, m65DivideDivisor+1)
+		RTGByte(out, 0x29)
+		RTGByte(out, 0x80)
+		m65StoreAZero(out, m65QuotientSignByte)
+		m65LoadAZero(out, m65DivideValue+1)
+		valuePositive := out.NewLabel()
+		m65Branch(out, 0x10, valuePositive)
+		m65NegateWord(out, m65DivideValue)
+		out.Mark(valuePositive)
+		m65LoadAZero(out, m65DivideDivisor+1)
+		divisorPositive := out.NewLabel()
+		m65Branch(out, 0x10, divisorPositive)
+		m65NegateWord(out, m65DivideDivisor)
+		out.Mark(divisorPositive)
+		m65LoadAZero(out, m65DivideDivisor)
+		RTGByte(out, 0x05)
+		RTGByte(out, m65DivideDivisor+1)
+		divideZero := out.NewLabel()
+		finish := out.NewLabel()
+		m65Branch(out, 0xf0, divideZero)
+		RTGByte(out, 0xa9)
+		RTGByte(out, 16)
+		m65StoreAZero(out, m65CountByte)
+		loop := out.NewLabel()
+		skip := out.NewLabel()
+		subtract := out.NewLabel()
+		out.Mark(loop)
+		RTGByte(out, 0x06)
+		RTGByte(out, m65DivideValue)
+		RTGByte(out, 0x26)
+		RTGByte(out, m65DivideValue+1)
+		RTGByte(out, 0x26)
+		RTGByte(out, m65DivideRemainder)
+		RTGByte(out, 0x26)
+		RTGByte(out, m65DivideRemainder+1)
+		m65LoadAZero(out, m65DivideRemainder+1)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65DivideDivisor+1)
+		m65Branch(out, 0x90, skip)
+		m65Branch(out, 0xd0, subtract)
+		m65LoadAZero(out, m65DivideRemainder)
+		RTGByte(out, 0xc5)
+		RTGByte(out, m65DivideDivisor)
+		m65Branch(out, 0x90, skip)
+		out.Mark(subtract)
+		m65SubtractWord(out, m65DivideRemainder, m65DivideDivisor)
+		RTGByte(out, 0xe6)
+		RTGByte(out, m65DivideValue)
+		out.Mark(skip)
+		RTGByte(out, 0xc6)
+		RTGByte(out, m65CountByte)
+		m65Branch(out, 0xd0, loop)
+		if remainder {
+			m65LoadAZero(out, m65SignByte)
+			positive := out.NewLabel()
+			m65Branch(out, 0xf0, positive)
+			m65NegateWord(out, m65DivideRemainder)
+			out.Mark(positive)
+			m65MoveWord(out, m65RegisterAddress(m65Primary()), m65DivideRemainder)
+		} else {
+			m65LoadAZero(out, m65QuotientSignByte)
+			positive := out.NewLabel()
+			m65Branch(out, 0xf0, positive)
+			m65NegateWord(out, m65DivideValue)
+			out.Mark(positive)
+			m65MoveWord(out, m65RegisterAddress(m65Primary()), m65DivideValue)
+		}
+		m65Jump(out, finish)
+		out.Mark(divideZero)
+		m65MoveImmediate(out, m65Primary(), 0)
+		out.Mark(finish)
+	}
+
+	func m65Call(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0x20)
+		at := out.Len()
+		m65Emit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func m65CallIndirect(out *RTGEmitter, operand RTGRegister) {
+		skip := out.NewLabel()
+		ret := out.NewLabel()
+		m65Jump(out, skip)
+		wordAt := out.Len()
+		m65Emit16(out, 0)
+		RTGLabelRelocAt(out, ret, wordAt)
+		out.Mark(skip)
+		RTGByte(out, 0xad)
+		m65Emit16(out, m65CodeAddress+wordAt)
+		RTGByte(out, 0x38)
+		RTGByte(out, 0xe9)
+		RTGByte(out, 1)
+		RTGByte(out, 0xaa)
+		RTGByte(out, 0xad)
+		m65Emit16(out, m65CodeAddress+wordAt+1)
+		RTGByte(out, 0xe9)
+		RTGByte(out, 0)
+		RTGByte(out, 0x48)
+		RTGByte(out, 0x8a)
+		RTGByte(out, 0x48)
+		RTGByte(out, 0x6c)
+		m65Emit16(out, m65RegisterAddress(operand))
+		out.Mark(ret)
+	}
+	func m65Return(out *RTGEmitter)      { RTGByte(out, 0x60) }
+	func m65HostSyscall(out *RTGEmitter) { RTGByte(out, 0x02) }
+
+	func m65PushWord(out *RTGEmitter, source int) {
+		sp := m65RegisterAddress(m65SP())
+		m65AddImmediateWord(out, sp, -2)
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		m65LoadAZero(out, source)
+		RTGByte(out, 0x91)
+		RTGByte(out, byte(sp))
+		RTGByte(out, 0xc8)
+		m65LoadAZero(out, source+1)
+		RTGByte(out, 0x91)
+		RTGByte(out, byte(sp))
+	}
+	func m65PushRegister(out *RTGEmitter, source RTGRegister) {
+		src := m65RegisterAddress(source)
+		if source.Code == 5 {
+			m65MoveWord(out, m65TempWord, src)
+			src = m65TempWord
+		}
+		m65PushWord(out, src)
+	}
+	func m65PushImmediate(out *RTGEmitter, value int) {
+		m65ImmediateWord(out, m65TempWord, value)
+		m65PushWord(out, m65TempWord)
+	}
+	func m65PopRegister(out *RTGEmitter, destination RTGRegister) {
+		sp := m65RegisterAddress(m65SP())
+		dest := m65RegisterAddress(destination)
+		target := dest
+		if destination.Code == 5 {
+			target = m65TempWord
+		}
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		RTGByte(out, 0xb1)
+		RTGByte(out, byte(sp))
+		m65StoreAZero(out, target)
+		RTGByte(out, 0xc8)
+		RTGByte(out, 0xb1)
+		RTGByte(out, byte(sp))
+		m65StoreAZero(out, target+1)
+		m65AddImmediateWord(out, sp, 2)
+		if destination.Code == 5 {
+			m65MoveWord(out, dest, m65TempWord)
+		}
+	}
+	func m65FrameStart(out *RTGEmitter) int {
+		m65PushRegister(out, m65Frame())
+		m65Move(out, m65Frame(), m65SP())
+		sp := m65RegisterAddress(m65SP())
+		RTGByte(out, 0x18)
+		m65LoadAZero(out, sp)
+		RTGByte(out, 0x69)
+		at := out.Len()
+		RTGByte(out, 0)
+		m65StoreAZero(out, sp)
+		m65LoadAZero(out, sp+1)
+		RTGByte(out, 0x69)
+		RTGByte(out, 0)
+		m65StoreAZero(out, sp+1)
+		return at
+	}
+	func m65FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 3) & -2
+		code := out.Code()
+		code[at] = byte(-frameSize)
+		code[at+6] = byte((-frameSize) >> 8)
+	}
+	func m65FrameAddressValue(out *RTGEmitter, destination RTGRegister, offset int) {
+		m65Move(out, destination, m65Frame())
+		m65AddImmediateWord(out, m65RegisterAddress(destination), -(offset + 2))
+	}
+	func m65FrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		m65MoveWord(out, m65AddressWord, m65RegisterAddress(m65Frame()))
+		m65AddImmediateWord(out, m65AddressWord, -(offset + 2))
+		dest := m65RegisterAddress(destination)
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		RTGByte(out, 0xb1)
+		RTGByte(out, m65AddressWord)
+		m65StoreAZero(out, dest)
+		RTGByte(out, 0xc8)
+		RTGByte(out, 0xb1)
+		RTGByte(out, m65AddressWord)
+		m65StoreAZero(out, dest+1)
+	}
+	func m65FrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		m65MoveWord(out, m65AddressWord, m65RegisterAddress(m65Frame()))
+		m65AddImmediateWord(out, m65AddressWord, -(offset + 2))
+		src := m65RegisterAddress(source)
+		RTGByte(out, 0xa0)
+		RTGByte(out, 0)
+		m65LoadAZero(out, src)
+		RTGByte(out, 0x91)
+		RTGByte(out, m65AddressWord)
+		RTGByte(out, 0xc8)
+		m65LoadAZero(out, src+1)
+		RTGByte(out, 0x91)
+		RTGByte(out, m65AddressWord)
+	}
+	func m65FrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		m65FrameAddressValue(out, destination, offset)
+	}
+	func m65Leave(out *RTGEmitter) { m65Move(out, m65SP(), m65Frame()); m65PopRegister(out, m65Frame()) }
+	func m65StoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word == 0 {
+			m65FrameStore(out, offset, m65Primary())
+			return
+		}
+		if word == 1 {
+			m65FrameStore(out, offset, m65Secondary())
+			return
+		}
+		if word == 2 {
+			m65FrameStore(out, offset, m65Tertiary())
+			return
+		}
+		m65Move(out, m65Scratch(), m65Frame())
+		m65AddImmediateWord(out, m65RegisterAddress(m65Scratch()), 2+(word-3)*2)
+		m65LoadNative(out, m65Scratch(), RTGAddress{Base: m65Scratch()})
+		m65FrameStore(out, offset, m65Scratch())
+	}
+	func m65CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		if wordCount > 0 {
+			m65PopRegister(out, m65Primary())
+		}
+		if wordCount > 1 {
+			m65PopRegister(out, m65Secondary())
+		}
+		if wordCount > 2 {
+			m65PopRegister(out, m65Tertiary())
+		}
+		m65Call(out, label)
+		if wordCount > 3 {
+			m65AddImmediateWord(out, m65RegisterAddress(m65SP()), (wordCount-3)*2)
+		}
+	}
+	func m65PatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := m65CodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			m65Patch16(out, at, target)
+		}
+	}
+
+	func m65R0() RTGRegister        { return RTGRegister{Code: 0, Valid: true} }
+	func m65R1() RTGRegister        { return RTGRegister{Code: 1, Valid: true} }
+	func m65R2() RTGRegister        { return RTGRegister{Code: 2, Valid: true} }
+	func m65R3() RTGRegister        { return RTGRegister{Code: 3, Valid: true} }
+	func m65R4() RTGRegister        { return RTGRegister{Code: 4, Valid: true} }
+	func m65SP() RTGRegister        { return RTGRegister{Code: 5, Valid: true} }
+	func m65Primary() RTGRegister   { return m65R0() }
+	func m65Secondary() RTGRegister { return m65R1() }
+	func m65Tertiary() RTGRegister  { return m65R2() }
+	func m65Scratch() RTGRegister   { return m65R3() }
+	func m65Frame() RTGRegister     { return m65R4() }
+}
+
+arch mos6502 {
+	alias = "mos6502"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go m65PatchRelocations
+	registers word16 = [r0, r1, r2, r3, r4, sp]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		scratch = r3
+		address = r3
+		compareLeft = r1
+		compareRight = r2
+		copy_destination = r1
+		copy_source = r2
+		copy_count = r0
+		stack = sp
+		frame = r4
+		link = r3
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go m65Move
+		address = go m65EmitAddress
+		load.native = go m65LoadNative
+		load.i32 = go m65LoadI32
+		load.u32 = go m65LoadU32
+		load.i16 = go m65LoadI16
+		load.u16 = go m65LoadU16
+		load.i8 = go m65LoadI8
+		load.u8 = go m65LoadU8
+		store.native = go m65StoreNative
+		store.u32 = go m65StoreU32
+		store.u16 = go m65StoreU16
+		store.u8 = go m65StoreU8
+		add = go m65Add
+		subtract = go m65Subtract
+		multiply = go m65Multiply
+		bit_and = go m65BitAnd
+		bit_or = go m65BitOr
+		bit_xor = go m65BitXor
+		compare = go m65Compare
+		test = go m65Test
+		increment = go m65Increment
+		decrement = go m65Decrement
+		shift_left_immediate = go m65ShiftLeftImmediate
+		shift_right_unsigned_immediate = go m65ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go m65ShiftRightSignedImmediate
+		call = go m65Call
+		call_indirect = go m65CallIndirect
+		jump = go m65Jump
+		jump_condition = go m65JumpCondition
+		set_condition = go m65SetCondition
+		return = go m65Return
+		leave = go m65Leave
+		host_syscall = go m65HostSyscall
+		move_immediate = go m65MoveImmediate
+		variable_shift = go m65VariableShift
+		signed_divide = go m65SignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			m65Compare(out, r1, r2)
+			m65JumpCondition(out, ult, forward)
+			m65EmitAddress(out, r3, record_address(Base:r2, Index:r0, Scale:1,))
+			m65Compare(out, r1, r3)
+			m65JumpCondition(out, uge, forward)
+			m65EmitAddress(out, r2, record_address(Base:r2, Index:r0, Scale:1, Displacement:-1,))
+			m65EmitAddress(out, r1, record_address(Base:r1, Index:r0, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			m65MoveImmediate(out, r3, 0)
+			m65Compare(out, r0, r3)
+			m65JumpCondition(out, eq, done)
+			m65LoadU8(out, r3, record_address(Base:r2,))
+			m65StoreU8(out, record_address(Base:r1,), r3)
+			m65Decrement(out, r2)
+			m65Decrement(out, r1)
+			m65Decrement(out, r0)
+			m65Jump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			m65MoveImmediate(out, r3, 0)
+			m65Compare(out, r0, r3)
+			m65JumpCondition(out, eq, done)
+			m65LoadU8(out, r3, record_address(Base:r2,))
+			m65StoreU8(out, record_address(Base:r1,), r3)
+			m65Increment(out, r2)
+			m65Increment(out, r1)
+			m65Decrement(out, r0)
+			m65Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi mos6502_internal {
+	arch = mos6502
+	arguments = [r0, r1, r2]
+	call_words = [r0, r1, r2]
+	result = [r0, r1]
+	stack_alignment = 2
+	return_address = r3
+	frame_pointer = r4
+	frame_start = go m65FrameStart
+	frame_finish = go m65FrameFinish
+	push_register = go m65PushRegister
+	push_immediate = go m65PushImmediate
+	pop_register = go m65PopRegister
+	frame_load = go m65FrameLoad
+	frame_store = go m65FrameStore
+	frame_address = go m65FrameAddress
+	store_param_word = go m65StoreParamWord
+	call_word_count = go m65CallWordCount
+}

@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Compile the native smoke once per target and compare QEMU output to its fixture."""
+import argparse
+import json
+import os
+from pathlib import Path
+import resource
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+MODULE = ROOT / "frontend_tests/manual/qemu_native_smoke"
+
+
+def run(command, cwd, timeout):
+    result = subprocess.run(command, cwd=cwd, env={**os.environ, "RENVO_STDROOT": str(ROOT / "std")},
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError(f"exit {result.returncode}: {' '.join(map(str, command))}\n"
+                           + result.stdout.decode(errors="replace") + result.stderr.decode(errors="replace"))
+    return result
+
+
+def main():
+    matrix = json.loads((Path(__file__).parent / "targets.json").read_text())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", action="append", choices=[row["emulator"] for row in matrix],
+                        help="select an emulator suffix; repeat to select several (default: all 33)")
+    parser.add_argument("--compiler", type=Path, help="reuse a built cmd/renvo executable")
+    parser.add_argument("--timeout", type=int, default=60, help="timeout in seconds for each build/run")
+    parser.add_argument("--list", action="store_true", help="list the complete emulator matrix")
+    args = parser.parse_args()
+    if args.list:
+        for row in matrix:
+            print("qemu-" + row["emulator"], *row.get("arguments", []))
+        return 0
+    if args.timeout <= 0:
+        parser.error("--timeout must be positive")
+    selected = [row for row in matrix if not args.target or row["emulator"] in args.target]
+    missing = ["qemu-" + row["emulator"] for row in selected if not shutil.which("qemu-" + row["emulator"])]
+    if missing:
+        parser.error("missing required emulators: " + ", ".join(missing))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    expected = (MODULE / "expected.txt").read_bytes()
+    failures = []
+    (ROOT / "sandbox").mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="qemu-native-", dir=ROOT / "sandbox") as scratch:
+        scratch = Path(scratch)
+        compiler = args.compiler.resolve() if args.compiler else scratch / "renvo"
+        if not args.compiler:
+            run(["go", "build", "-o", str(compiler), "./cmd/renvo"], ROOT, args.timeout)
+        for row in selected:
+            name = row["emulator"]
+            started = time.monotonic()
+            try:
+                binary = scratch / name
+                command = [str(compiler)]
+                if "backend" in row:
+                    command += ["-backend", str(ROOT / row["backend"])]
+                command += ["-t", row["target"], "-o", str(binary), "./cmd/app"]
+                run(command, MODULE, args.timeout)
+                binary.chmod(0o755)
+                result = run(["qemu-" + name, *row.get("arguments", []), str(binary)], scratch, args.timeout)
+                if result.stdout != expected or result.stderr:
+                    raise RuntimeError(f"expected stdout {expected!r} and empty stderr; "
+                                       f"got stdout {result.stdout!r}, stderr {result.stderr!r}")
+                print(f"PASS qemu-{name} ({time.monotonic()-started:.2f}s)", flush=True)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                failures.append(name)
+                print(f"FAIL qemu-{name}: {error}", file=sys.stderr, flush=True)
+    print(f"{len(selected)-len(failures)}/{len(selected)} emulators passed", flush=True)
+    return int(bool(failures))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

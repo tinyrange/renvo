@@ -1,0 +1,1235 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Original Zilog Z80 emitter with a compact Renvo-internal 16-bit ABI.  The
+# checked-in console targets own their reset, memory, I/O, and image policies.
+go backend {
+	var z80CodeAddress int
+
+	const z80ResultWord = 0x0000dfcc
+	const z80AuxWord = 0x0000dfce
+	const z80SignByte = 0x0000dfd0
+	const z80QuotientSignByte = 0x0000dfd1
+
+	func z80SetCodeAddress(address int)        { z80CodeAddress = address }
+	func z80Emit16(out *RTGEmitter, value int) { RTGByte(out, byte(value)); RTGByte(out, byte(value>>8)) }
+	func z80Patch16(out *RTGEmitter, at int, value int) {
+		code := out.Code()
+		code[at] = byte(value)
+		code[at+1] = byte(value >> 8)
+	}
+
+	func z80StorePairAbsolute(out *RTGEmitter, register RTGRegister, address int) {
+		if register.Code == 0 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x43)
+		}
+		if register.Code == 1 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x53)
+		}
+		if register.Code == 2 {
+			RTGByte(out, 0x22)
+		}
+		if register.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x22)
+		}
+		if register.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x22)
+		}
+		if register.Code == 5 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x73)
+		}
+		z80Emit16(out, address)
+	}
+	func z80LoadPairAbsolute(out *RTGEmitter, register RTGRegister, address int) {
+		if register.Code == 0 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x4b)
+		}
+		if register.Code == 1 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x5b)
+		}
+		if register.Code == 2 {
+			RTGByte(out, 0x2a)
+		}
+		if register.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x2a)
+		}
+		if register.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x2a)
+		}
+		if register.Code == 5 {
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x7b)
+		}
+		z80Emit16(out, address)
+	}
+	func z80MoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		immediate := int(value) & 0xffff
+		if destination.Code == 0 {
+			RTGByte(out, 0x01)
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0x11)
+		}
+		if destination.Code == 2 {
+			RTGByte(out, 0x21)
+		}
+		if destination.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x21)
+		}
+		if destination.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x21)
+		}
+		if destination.Code == 5 {
+			RTGByte(out, 0x31)
+		}
+		z80Emit16(out, immediate)
+	}
+	func z80Move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == source.Code {
+			return
+		}
+		if destination.Code < 3 && source.Code < 3 {
+			low := 1
+			high := 0
+			if source.Code == 1 {
+				low = 3
+				high = 2
+			}
+			if source.Code == 2 {
+				low = 5
+				high = 4
+			}
+			dlow := 1
+			dhigh := 0
+			if destination.Code == 1 {
+				dlow = 3
+				dhigh = 2
+			}
+			if destination.Code == 2 {
+				dlow = 5
+				dhigh = 4
+			}
+			RTGByte(out, byte(0x40|(dlow<<3)|low))
+			RTGByte(out, byte(0x40|(dhigh<<3)|high))
+			return
+		}
+		if destination.Code == 5 && source.Code == 2 {
+			RTGByte(out, 0xf9)
+			return
+		}
+		z80StorePairAbsolute(out, source, z80ResultWord)
+		z80LoadPairAbsolute(out, destination, z80ResultWord)
+	}
+	func z80PushWorking(out *RTGEmitter) {
+		RTGByte(out, 0xc5)
+		RTGByte(out, 0xd5)
+		RTGByte(out, 0xe5)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xe5)
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0xe5)
+	}
+	func z80PopWorking(out *RTGEmitter) {
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0xe1)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xe1)
+		RTGByte(out, 0xe1)
+		RTGByte(out, 0xd1)
+		RTGByte(out, 0xc1)
+	}
+	func z80SaveLocations(out *RTGEmitter) {
+		z80PushWorking(out)
+		z80MoveImmediate(out, z80IX(), 0)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x39)
+	}
+	func z80LoadSaved(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		offset := 0
+		if source.Code == 0 {
+			offset = 8
+		}
+		if source.Code == 1 {
+			offset = 6
+		}
+		if source.Code == 2 {
+			offset = 4
+		}
+		if source.Code == 3 {
+			offset = 2
+		}
+		if source.Code == 4 {
+			offset = 0
+		}
+		if source.Code == 5 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xe5)
+			RTGByte(out, 0xe1)
+			z80MoveImmediate(out, z80DE(), 10)
+			RTGByte(out, 0x19)
+		} else {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x6e)
+			RTGByte(out, byte(offset))
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x66)
+			RTGByte(out, byte(offset+1))
+		}
+		if destination.Code != 2 {
+			z80Move(out, destination, z80HL())
+		}
+	}
+	func z80RestoreExcept(out *RTGEmitter, destination RTGRegister) {
+		z80PopWorking(out)
+		z80LoadPairAbsolute(out, destination, z80ResultWord)
+	}
+	func z80RestoreAll(out *RTGEmitter) { z80PopWorking(out) }
+
+	func z80AddressFromSaved(out *RTGEmitter, value RTGAddress) {
+		if RTGAddressValid(value) {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x21)
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		if value.Base.Valid {
+			z80LoadSaved(out, z80HL(), value.Base)
+		} else {
+			z80MoveImmediate(out, z80HL(), 0)
+		}
+		if value.Index.Valid {
+			z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+			z80LoadSaved(out, z80DE(), value.Index)
+			z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+			for scale := 0; scale < value.Scale; scale++ {
+				RTGByte(out, 0x19)
+			}
+		}
+		if value.Displacement != 0 {
+			z80MoveImmediate(out, z80DE(), int64(value.Displacement))
+			RTGByte(out, 0x19)
+		}
+		z80Move(out, z80IX(), z80HL())
+	}
+	func z80EmitAddress(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			if destination.Code == 0 {
+				RTGByte(out, 0x01)
+			}
+			if destination.Code == 1 {
+				RTGByte(out, 0x11)
+			}
+			if destination.Code == 2 {
+				RTGByte(out, 0x21)
+			}
+			if destination.Code == 3 {
+				RTGByte(out, 0xdd)
+				RTGByte(out, 0x21)
+			}
+			if destination.Code == 4 {
+				RTGByte(out, 0xfd)
+				RTGByte(out, 0x21)
+			}
+			if destination.Code == 5 {
+				RTGByte(out, 0x31)
+			}
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		z80SaveLocations(out)
+		z80AddressFromSaved(out, value)
+		z80StorePairAbsolute(out, z80IX(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+	func z80LoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			if destination.Code == 0 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x4b)
+			}
+			if destination.Code == 1 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x5b)
+			}
+			if destination.Code == 2 {
+				RTGByte(out, 0x2a)
+			}
+			if destination.Code == 3 {
+				RTGByte(out, 0xdd)
+				RTGByte(out, 0x2a)
+			}
+			if destination.Code == 4 {
+				RTGByte(out, 0xfd)
+				RTGByte(out, 0x2a)
+			}
+			if destination.Code == 5 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x7b)
+			}
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		z80SaveLocations(out)
+		z80AddressFromSaved(out, value)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x6e)
+		RTGByte(out, 0)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x66)
+		RTGByte(out, 1)
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+	func z80LoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		z80LoadNative(out, destination, value)
+	}
+	func z80LoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		z80LoadNative(out, destination, value)
+	}
+	func z80LoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) && destination.Code < 3 {
+			RTGByte(out, 0x3a)
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			if destination.Code == 0 {
+				RTGByte(out, 0x4f)
+				RTGByte(out, 0x06)
+				RTGByte(out, 0)
+			}
+			if destination.Code == 1 {
+				RTGByte(out, 0x5f)
+				RTGByte(out, 0x16)
+				RTGByte(out, 0)
+			}
+			if destination.Code == 2 {
+				RTGByte(out, 0x6f)
+				RTGByte(out, 0x26)
+				RTGByte(out, 0)
+			}
+			return
+		}
+		z80SaveLocations(out)
+		z80AddressFromSaved(out, value)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x6e)
+		RTGByte(out, 0)
+		RTGByte(out, 0x26)
+		RTGByte(out, 0)
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+	func z80LoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		z80SaveLocations(out)
+		z80AddressFromSaved(out, value)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x6e)
+		RTGByte(out, 0)
+		RTGByte(out, 0x26)
+		RTGByte(out, 0)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x7d)
+		nonnegative := out.NewLabel()
+		z80JumpOpcode(out, 0xca, nonnegative)
+		RTGByte(out, 0x26)
+		RTGByte(out, 0xff)
+		out.Mark(nonnegative)
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+
+	// Wide scalar lowering splits 32-bit values into native 16-bit words before
+	// reaching this emitter; these aliases are the per-word memory operation.
+	func z80LoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		z80LoadNative(out, destination, value)
+	}
+	func z80LoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		z80LoadNative(out, destination, value)
+	}
+
+	func z80StoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		if RTGAddressValid(value) {
+			if source.Code == 0 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x43)
+			}
+			if source.Code == 1 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x53)
+			}
+			if source.Code == 2 {
+				RTGByte(out, 0x22)
+			}
+			if source.Code == 3 {
+				RTGByte(out, 0xdd)
+				RTGByte(out, 0x22)
+			}
+			if source.Code == 4 {
+				RTGByte(out, 0xfd)
+				RTGByte(out, 0x22)
+			}
+			if source.Code == 5 {
+				RTGByte(out, 0xed)
+				RTGByte(out, 0x73)
+			}
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), source)
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80AddressFromSaved(out, value)
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x75)
+		RTGByte(out, 0)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x74)
+		RTGByte(out, 1)
+		z80RestoreAll(out)
+	}
+	func z80StoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		z80StoreNative(out, value, source)
+	}
+	func z80StoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		z80StoreNative(out, value, source)
+	}
+	func z80StoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		if RTGAddressValid(value) && source.Code < 3 {
+			if source.Code == 0 {
+				RTGByte(out, 0x79)
+			}
+			if source.Code == 1 {
+				RTGByte(out, 0x7b)
+			}
+			if source.Code == 2 {
+				RTGByte(out, 0x7d)
+			}
+			RTGByte(out, 0x32)
+			at := out.Len()
+			z80Emit16(out, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), source)
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80AddressFromSaved(out, value)
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x75)
+		RTGByte(out, 0)
+		z80RestoreAll(out)
+	}
+
+	func z80BinaryStart(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), destination)
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80LoadSaved(out, z80DE(), source)
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+	}
+	func z80BinaryFinish(out *RTGEmitter, destination RTGRegister) {
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+	func z80Add(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == 2 && source.Code == 0 {
+			RTGByte(out, 0x09)
+			return
+		}
+		if destination.Code == 2 && source.Code == 1 {
+			RTGByte(out, 0x19)
+			return
+		}
+		if destination.Code == 2 && source.Code == 2 {
+			RTGByte(out, 0x29)
+			return
+		}
+		z80BinaryStart(out, destination, source)
+		RTGByte(out, 0x19)
+		z80BinaryFinish(out, destination)
+	}
+	func z80Subtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code == 2 && source.Code == 0 {
+			RTGByte(out, 0xb7)
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x42)
+			return
+		}
+		if destination.Code == 2 && source.Code == 1 {
+			RTGByte(out, 0xb7)
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x52)
+			return
+		}
+		z80BinaryStart(out, destination, source)
+		RTGByte(out, 0xb7)
+		RTGByte(out, 0xed)
+		RTGByte(out, 0x52)
+		z80BinaryFinish(out, destination)
+	}
+	func z80BitOperation(out *RTGEmitter, destination RTGRegister, source RTGRegister, low int, high int) {
+		z80BinaryStart(out, destination, source)
+		RTGByte(out, 0x7d)
+		RTGByte(out, byte(low))
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x7c)
+		RTGByte(out, byte(high))
+		RTGByte(out, 0x67)
+		z80BinaryFinish(out, destination)
+	}
+	func z80BitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		z80BitOperation(out, destination, source, 0xa3, 0xa2)
+	}
+	func z80BitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		z80BitOperation(out, destination, source, 0xb3, 0xb2)
+	}
+	func z80BitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		z80BitOperation(out, destination, source, 0xab, 0xaa)
+	}
+
+	func z80Multiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80BC(), destination)
+		z80LoadSaved(out, z80DE(), source)
+		z80MoveImmediate(out, z80IX(), 0)
+		for bit := 0; bit < 16; bit++ {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x43)
+			skip := out.NewLabel()
+			z80JumpOpcode(out, 0xca, skip)
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x09)
+			out.Mark(skip)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x21)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x10)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x3a)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x1b)
+		}
+		z80StorePairAbsolute(out, z80IX(), z80ResultWord)
+		z80RestoreExcept(out, destination)
+	}
+	func z80Compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), left)
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80LoadSaved(out, z80DE(), right)
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+		RTGByte(out, 0xb7)
+		RTGByte(out, 0xed)
+		RTGByte(out, 0x52)
+		z80RestoreAll(out)
+	}
+	func z80Test(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), left)
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80LoadSaved(out, z80DE(), right)
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+		RTGByte(out, 0x7d)
+		RTGByte(out, 0xa3)
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x7c)
+		RTGByte(out, 0xa2)
+		RTGByte(out, 0xb5)
+		z80RestoreAll(out)
+	}
+	func z80Increment(out *RTGEmitter, operand RTGRegister) {
+		if operand.Code == 0 {
+			RTGByte(out, 0x03)
+		}
+		if operand.Code == 1 {
+			RTGByte(out, 0x13)
+		}
+		if operand.Code == 2 {
+			RTGByte(out, 0x23)
+		}
+		if operand.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x23)
+		}
+		if operand.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x23)
+		}
+		if operand.Code == 5 {
+			RTGByte(out, 0x33)
+		}
+	}
+	func z80Decrement(out *RTGEmitter, operand RTGRegister) {
+		if operand.Code == 0 {
+			RTGByte(out, 0x0b)
+		}
+		if operand.Code == 1 {
+			RTGByte(out, 0x1b)
+		}
+		if operand.Code == 2 {
+			RTGByte(out, 0x2b)
+		}
+		if operand.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0x2b)
+		}
+		if operand.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x2b)
+		}
+		if operand.Code == 5 {
+			RTGByte(out, 0x3b)
+		}
+	}
+
+	func z80ShiftImmediate(out *RTGEmitter, operand RTGRegister, value byte, direction RTGShiftDirection, signed bool) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), operand)
+		for count := 0; count < int(value); count++ {
+			if direction == RTGShiftLeft {
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x25)
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x14)
+			} else {
+				RTGByte(out, 0xcb)
+				if signed {
+					RTGByte(out, 0x2c)
+				} else {
+					RTGByte(out, 0x3c)
+				}
+				RTGByte(out, 0xcb)
+				RTGByte(out, 0x1d)
+			}
+		}
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, operand)
+	}
+	func z80ShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		z80ShiftImmediate(out, operand, value, RTGShiftLeft, false)
+	}
+	func z80ShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		z80ShiftImmediate(out, operand, value, RTGShiftRight, false)
+	}
+	func z80ShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		z80ShiftImmediate(out, operand, value, RTGShiftRight, true)
+	}
+	func z80VariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80HL(), z80Tertiary())
+		z80StorePairAbsolute(out, z80HL(), z80AuxWord)
+		z80LoadSaved(out, z80BC(), z80Primary())
+		z80LoadPairAbsolute(out, z80HL(), z80AuxWord)
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		saturated := out.NewLabel()
+		RTGByte(out, 0x78)
+		RTGByte(out, 0xb7)
+		z80JumpOpcode(out, 0xc2, saturated)
+		RTGByte(out, 0x79)
+		RTGByte(out, 0xfe)
+		RTGByte(out, 16)
+		z80JumpOpcode(out, 0xd2, saturated)
+		out.Mark(loop)
+		RTGByte(out, 0x79)
+		RTGByte(out, 0xb7)
+		z80JumpOpcode(out, 0xca, done)
+		if direction == RTGShiftLeft {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x25)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x14)
+		} else {
+			RTGByte(out, 0xcb)
+			if signed {
+				RTGByte(out, 0x2c)
+			} else {
+				RTGByte(out, 0x3c)
+			}
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x1d)
+		}
+		RTGByte(out, 0x0d)
+		z80Jump(out, loop)
+		out.Mark(saturated)
+		if direction == RTGShiftRight && signed {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x7c)
+			positive := out.NewLabel()
+			z80JumpOpcode(out, 0xca, positive)
+			z80MoveImmediate(out, z80HL(), -1)
+			z80Jump(out, done)
+			out.Mark(positive)
+		}
+		if direction == RTGShiftLeft || !signed {
+			z80MoveImmediate(out, z80HL(), 0)
+		}
+		out.Mark(done)
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		z80RestoreExcept(out, z80Primary())
+	}
+
+	func z80Jump(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0xc3)
+		at := out.Len()
+		z80Emit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func z80JumpOpcode(out *RTGEmitter, opcode int, label RTGLabel) {
+		RTGByte(out, byte(opcode))
+		at := out.Len()
+		z80Emit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func z80JumpSigned(out *RTGEmitter, less bool, label RTGLabel) {
+		overflow := out.NewLabel()
+		done := out.NewLabel()
+		z80JumpOpcode(out, 0xea, overflow)
+		if less {
+			z80JumpOpcode(out, 0xfa, label)
+		} else {
+			z80JumpOpcode(out, 0xf2, label)
+		}
+		z80Jump(out, done)
+		out.Mark(overflow)
+		if less {
+			z80JumpOpcode(out, 0xf2, label)
+		} else {
+			z80JumpOpcode(out, 0xfa, label)
+		}
+		out.Mark(done)
+	}
+	func z80JumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		if condition.Code == 0 {
+			z80JumpOpcode(out, 0xca, label)
+			return
+		}
+		if condition.Code == 1 {
+			z80JumpOpcode(out, 0xc2, label)
+			return
+		}
+		if condition.Code == 4 {
+			z80JumpSigned(out, true, label)
+			return
+		}
+		if condition.Code == 5 {
+			z80JumpSigned(out, false, label)
+			return
+		}
+		if condition.Code == 6 {
+			z80JumpOpcode(out, 0xda, label)
+			return
+		}
+		if condition.Code == 7 {
+			z80JumpOpcode(out, 0xd2, label)
+			return
+		}
+		if condition.Code == 8 {
+			z80JumpOpcode(out, 0xda, label)
+			z80JumpOpcode(out, 0xca, label)
+			return
+		}
+		if condition.Code == 9 {
+			skip := out.NewLabel()
+			z80JumpOpcode(out, 0xda, skip)
+			z80JumpOpcode(out, 0xc2, label)
+			out.Mark(skip)
+			return
+		}
+		if condition.Code == 2 {
+			z80JumpOpcode(out, 0xca, label)
+			z80JumpSigned(out, true, label)
+			return
+		}
+		if condition.Code == 3 {
+			skip := out.NewLabel()
+			z80JumpOpcode(out, 0xca, skip)
+			z80JumpSigned(out, false, label)
+			out.Mark(skip)
+		}
+	}
+	func z80SetCondition(out *RTGEmitter, condition RTGCondition, destination RTGRegister) {
+		matched := out.NewLabel()
+		done := out.NewLabel()
+		z80JumpCondition(out, condition, matched)
+		z80MoveImmediate(out, destination, 0)
+		z80Jump(out, done)
+		out.Mark(matched)
+		z80MoveImmediate(out, destination, 1)
+		out.Mark(done)
+	}
+
+	func z80Call(out *RTGEmitter, label RTGLabel) {
+		RTGByte(out, 0xcd)
+		at := out.Len()
+		z80Emit16(out, 0)
+		RTGLabelRelocAt(out, label, at)
+	}
+	func z80CallIndirect(out *RTGEmitter, operand RTGRegister) {
+		z80Move(out, z80IX(), operand)
+		z80StorePairAbsolute(out, z80IX(), z80AuxWord)
+		returnLabel := out.NewLabel()
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x21)
+		at := out.Len()
+		z80Emit16(out, 0)
+		RTGLabelRelocAt(out, returnLabel, at)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xe5)
+		z80LoadPairAbsolute(out, z80IX(), z80AuxWord)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xe9)
+		out.Mark(returnLabel)
+	}
+	func z80Return(out *RTGEmitter) { RTGByte(out, 0xc9) }
+	func z80Leave(out *RTGEmitter) {
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0xf9)
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0xe1)
+	}
+	func z80HostSyscall(out *RTGEmitter) { RTGByte(out, 0xed); RTGByte(out, 0x00) }
+
+	func z80NegateBC(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x91)
+		RTGByte(out, 0x4f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x90)
+		RTGByte(out, 0x47)
+	}
+	func z80NegateDE(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x93)
+		RTGByte(out, 0x5f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x92)
+		RTGByte(out, 0x57)
+	}
+	func z80NegateHL(out *RTGEmitter) {
+		RTGByte(out, 0xaf)
+		RTGByte(out, 0x95)
+		RTGByte(out, 0x6f)
+		RTGByte(out, 0x9f)
+		RTGByte(out, 0x94)
+		RTGByte(out, 0x67)
+	}
+	func z80SignedDivide(out *RTGEmitter, remainder bool) {
+		z80SaveLocations(out)
+		z80LoadSaved(out, z80BC(), z80Tertiary())
+		z80LoadSaved(out, z80HL(), z80Primary())
+		RTGByte(out, 0x78)
+		RTGByte(out, 0xe6)
+		RTGByte(out, 0x80)
+		RTGByte(out, 0x32)
+		z80Emit16(out, z80SignByte)
+		RTGByte(out, 0x78)
+		RTGByte(out, 0xac)
+		RTGByte(out, 0xe6)
+		RTGByte(out, 0x80)
+		RTGByte(out, 0x32)
+		z80Emit16(out, z80QuotientSignByte)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x78)
+		dividendPositive := out.NewLabel()
+		z80JumpOpcode(out, 0xca, dividendPositive)
+		z80NegateBC(out)
+		out.Mark(dividendPositive)
+		RTGByte(out, 0xcb)
+		RTGByte(out, 0x7c)
+		divisorPositive := out.NewLabel()
+		z80JumpOpcode(out, 0xca, divisorPositive)
+		z80NegateHL(out)
+		out.Mark(divisorPositive)
+		RTGByte(out, 0x7c)
+		RTGByte(out, 0xb5)
+		divideZero := out.NewLabel()
+		finish := out.NewLabel()
+		z80JumpOpcode(out, 0xca, divideZero)
+		z80MoveImmediate(out, z80DE(), 0)
+		z80MoveImmediate(out, z80IY(), 0)
+		for bit := 0; bit < 16; bit++ {
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x21)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x10)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x13)
+			RTGByte(out, 0xcb)
+			RTGByte(out, 0x12)
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x29)
+			subtract := out.NewLabel()
+			skip := out.NewLabel()
+			RTGByte(out, 0x7a)
+			RTGByte(out, 0xbc)
+			z80JumpOpcode(out, 0xda, skip)
+			z80JumpOpcode(out, 0xc2, subtract)
+			RTGByte(out, 0x7b)
+			RTGByte(out, 0xbd)
+			z80JumpOpcode(out, 0xda, skip)
+			out.Mark(subtract)
+			RTGByte(out, 0xeb)
+			RTGByte(out, 0xb7)
+			RTGByte(out, 0xed)
+			RTGByte(out, 0x52)
+			RTGByte(out, 0xeb)
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0x23)
+			out.Mark(skip)
+		}
+		if remainder {
+			RTGByte(out, 0x3a)
+			z80Emit16(out, z80SignByte)
+			RTGByte(out, 0xb7)
+			positive := out.NewLabel()
+			z80JumpOpcode(out, 0xca, positive)
+			z80NegateDE(out)
+			out.Mark(positive)
+			z80StorePairAbsolute(out, z80DE(), z80ResultWord)
+		} else {
+			z80StorePairAbsolute(out, z80IY(), z80ResultWord)
+			z80LoadPairAbsolute(out, z80BC(), z80ResultWord)
+			RTGByte(out, 0x3a)
+			z80Emit16(out, z80QuotientSignByte)
+			RTGByte(out, 0xb7)
+			positive := out.NewLabel()
+			z80JumpOpcode(out, 0xca, positive)
+			z80NegateBC(out)
+			out.Mark(positive)
+			z80StorePairAbsolute(out, z80BC(), z80ResultWord)
+		}
+		z80Jump(out, finish)
+		out.Mark(divideZero)
+		z80MoveImmediate(out, z80HL(), 0)
+		z80StorePairAbsolute(out, z80HL(), z80ResultWord)
+		out.Mark(finish)
+		z80RestoreExcept(out, z80Primary())
+	}
+
+	func z80PatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := z80CodeAddress + out.LabelPosition(out.RelocationLabel(index))
+			z80Patch16(out, at, target)
+		}
+	}
+	func z80FrameStart(out *RTGEmitter) int {
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0xe5)
+		z80MoveImmediate(out, z80IY(), 0)
+		RTGByte(out, 0xfd)
+		RTGByte(out, 0x39)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x21)
+		at := out.Len()
+		z80Emit16(out, 0)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0x39)
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xf9)
+		return at
+	}
+	func z80FrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 3) & -2
+		z80Patch16(out, at, -frameSize)
+	}
+	func z80FrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		displacement := -(offset + 2)
+		if displacement >= -128 && destination.Code < 3 {
+			low := 0x4e
+			high := 0x46
+			if destination.Code == 1 {
+				low = 0x5e
+				high = 0x56
+			}
+			if destination.Code == 2 {
+				low = 0x6e
+				high = 0x66
+			}
+			RTGByte(out, 0xfd)
+			RTGByte(out, byte(low))
+			RTGByte(out, byte(displacement))
+			RTGByte(out, 0xfd)
+			RTGByte(out, byte(high))
+			RTGByte(out, byte(displacement+1))
+			return
+		}
+		z80LoadNative(out, destination, RTGAddress{Base: z80IY(), Displacement: displacement})
+	}
+	func z80FrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		displacement := -(offset + 2)
+		if displacement >= -128 && source.Code < 3 {
+			low := 0x71
+			high := 0x70
+			if source.Code == 1 {
+				low = 0x73
+				high = 0x72
+			}
+			if source.Code == 2 {
+				low = 0x75
+				high = 0x74
+			}
+			RTGByte(out, 0xfd)
+			RTGByte(out, byte(low))
+			RTGByte(out, byte(displacement))
+			RTGByte(out, 0xfd)
+			RTGByte(out, byte(high))
+			RTGByte(out, byte(displacement+1))
+			return
+		}
+		z80StoreNative(out, RTGAddress{Base: z80IY(), Displacement: displacement}, source)
+	}
+	func z80FrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		z80EmitAddress(out, destination, RTGAddress{Base: z80IY(), Displacement: -(offset + 2)})
+	}
+	func z80PushRegister(out *RTGEmitter, source RTGRegister) {
+		if source.Code == 0 {
+			RTGByte(out, 0xc5)
+		}
+		if source.Code == 1 {
+			RTGByte(out, 0xd5)
+		}
+		if source.Code == 2 {
+			RTGByte(out, 0xe5)
+		}
+		if source.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xe5)
+		}
+		if source.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0xe5)
+		}
+		if source.Code == 5 {
+			z80Move(out, z80IX(), source)
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xe5)
+		}
+	}
+	func z80PushImmediate(out *RTGEmitter, value int) {
+		z80MoveImmediate(out, z80IX(), int64(value))
+		RTGByte(out, 0xdd)
+		RTGByte(out, 0xe5)
+	}
+	func z80PopRegister(out *RTGEmitter, destination RTGRegister) {
+		if destination.Code == 0 {
+			RTGByte(out, 0xc1)
+		}
+		if destination.Code == 1 {
+			RTGByte(out, 0xd1)
+		}
+		if destination.Code == 2 {
+			RTGByte(out, 0xe1)
+		}
+		if destination.Code == 3 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xe1)
+		}
+		if destination.Code == 4 {
+			RTGByte(out, 0xfd)
+			RTGByte(out, 0xe1)
+		}
+		if destination.Code == 5 {
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xe1)
+			RTGByte(out, 0xdd)
+			RTGByte(out, 0xf9)
+		}
+	}
+	func z80StoreParamWord(out *RTGEmitter, word int, offset int) {
+		if word == 0 {
+			z80FrameStore(out, offset, z80HL())
+			return
+		}
+		if word == 1 {
+			z80FrameStore(out, offset, z80DE())
+			return
+		}
+		if word == 2 {
+			z80FrameStore(out, offset, z80BC())
+			return
+		}
+		z80LoadNative(out, z80HL(), RTGAddress{Base: z80IY(), Displacement: 4 + (word-3)*2})
+		z80FrameStore(out, offset, z80HL())
+	}
+	func z80CallWordCount(out *RTGEmitter, label RTGLabel, wordCount int) {
+		if wordCount > 0 {
+			z80PopRegister(out, z80HL())
+		}
+		if wordCount > 1 {
+			z80PopRegister(out, z80DE())
+		}
+		if wordCount > 2 {
+			z80PopRegister(out, z80BC())
+		}
+		z80Call(out, label)
+		if wordCount > 3 {
+			z80MoveImmediate(out, z80IX(), int64((wordCount-3)*2))
+			z80Add(out, z80SP(), z80IX())
+		}
+	}
+
+	func z80BC() RTGRegister        { return RTGRegister{Code: 0, Valid: true} }
+	func z80DE() RTGRegister        { return RTGRegister{Code: 1, Valid: true} }
+	func z80HL() RTGRegister        { return RTGRegister{Code: 2, Valid: true} }
+	func z80IX() RTGRegister        { return RTGRegister{Code: 3, Valid: true} }
+	func z80IY() RTGRegister        { return RTGRegister{Code: 4, Valid: true} }
+	func z80SP() RTGRegister        { return RTGRegister{Code: 5, Valid: true} }
+	func z80Primary() RTGRegister   { return z80HL() }
+	func z80Secondary() RTGRegister { return z80DE() }
+	func z80Tertiary() RTGRegister  { return z80BC() }
+}
+
+arch z80 {
+	alias = "z80"
+	endian = little
+	word_bits = 16
+	pointer_bits = 16
+	instruction_alignment = 1
+	stack_word_bytes = 2
+	stack_alignment = 2
+	patch_relocations = go z80PatchRelocations
+	registers pair16 = [bc, de, hl, ix, iy, sp]
+	locations {
+		primary = hl
+		secondary = de
+		tertiary = bc
+		scratch = ix
+		address = ix
+		compareLeft = bc
+		compareRight = de
+		copy_destination = de
+		copy_source = bc
+		copy_count = hl
+		stack = sp
+		frame = iy
+		link = ix
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go z80Move
+		address = go z80EmitAddress
+		load.native = go z80LoadNative
+		load.i32 = go z80LoadI32
+		load.u32 = go z80LoadU32
+		load.i16 = go z80LoadI16
+		load.u16 = go z80LoadU16
+		load.i8 = go z80LoadI8
+		load.u8 = go z80LoadU8
+		store.native = go z80StoreNative
+		store.u32 = go z80StoreU32
+		store.u16 = go z80StoreU16
+		store.u8 = go z80StoreU8
+		add = go z80Add
+		subtract = go z80Subtract
+		multiply = go z80Multiply
+		bit_and = go z80BitAnd
+		bit_or = go z80BitOr
+		bit_xor = go z80BitXor
+		compare = go z80Compare
+		test = go z80Test
+		increment = go z80Increment
+		decrement = go z80Decrement
+		shift_left_immediate = go z80ShiftLeftImmediate
+		shift_right_unsigned_immediate = go z80ShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go z80ShiftRightSignedImmediate
+		call = go z80Call
+		call_indirect = go z80CallIndirect
+		jump = go z80Jump
+		jump_condition = go z80JumpCondition
+		set_condition = go z80SetCondition
+		return = go z80Return
+		leave = go z80Leave
+		host_syscall = go z80HostSyscall
+		move_immediate = go z80MoveImmediate
+		variable_shift = go z80VariableShift
+		signed_divide = go z80SignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			z80Compare(out, de, bc)
+			z80JumpCondition(out, ult, forward)
+			z80EmitAddress(out, ix, record_address(Base:bc, Index:hl, Scale:1,))
+			z80Compare(out, de, ix)
+			z80JumpCondition(out, uge, forward)
+			z80EmitAddress(out, bc, record_address(Base:bc, Index:hl, Scale:1, Displacement:-1,))
+			z80EmitAddress(out, de, record_address(Base:de, Index:hl, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			z80MoveImmediate(out, ix, 0)
+			z80Compare(out, hl, ix)
+			z80JumpCondition(out, eq, done)
+			z80LoadU8(out, ix, record_address(Base:bc,))
+			z80StoreU8(out, record_address(Base:de,), ix)
+			z80Decrement(out, bc) ; z80Decrement(out, de) ; z80Decrement(out, hl)
+			z80Jump(out, backwardLoop)
+			out.Mark(forward) ; out.Mark(forwardLoop)
+			z80MoveImmediate(out, ix, 0)
+			z80Compare(out, hl, ix)
+			z80JumpCondition(out, eq, done)
+			z80LoadU8(out, ix, record_address(Base:bc,))
+			z80StoreU8(out, record_address(Base:de,), ix)
+			z80Increment(out, bc) ; z80Increment(out, de) ; z80Decrement(out, hl)
+			z80Jump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi z80_internal {
+	arch = z80
+	arguments = [hl, de, bc]
+	# Runtime operations and ordinary calls share primary/secondary/tertiary as
+	# words zero through two; additional words remain on the hardware stack.
+	call_words = [hl, de, bc]
+	result = [hl, de]
+	stack_alignment = 2
+	return_address = ix
+	frame_pointer = iy
+	frame_start = go z80FrameStart
+	frame_finish = go z80FrameFinish
+	push_register = go z80PushRegister
+	push_immediate = go z80PushImmediate
+	pop_register = go z80PopRegister
+	frame_load = go z80FrameLoad
+	frame_store = go z80FrameStore
+	frame_address = go z80FrameAddress
+	store_param_word = go z80StoreParamWord
+	call_word_count = go z80CallWordCount
+}

@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_sh4eb
+implements direct_emitter_v1
+@import "superh.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		superh.shSetCodeAddress(linux_elf.codeAddress)
+		superh.shSetBigEndian(true)
+		return true
+	}
+	func entry(out *RTGEmitter, count int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return count == 0
+	}
+	func syscall(out *RTGEmitter) { superh.shEmit16(out, 0xc314) }
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			superh.shPatch32(out, at, target)
+		}
+		return linux_elf.image(out, 42, 9, 32, true)
+	}
+}
+
+runtime linux_sh4eb {
+	emit_entry_start = go entryStart
+	emit_entry = go entry
+	syscall {
+		number = arg3
+		arguments = [arg4, arg5, work6, work7]
+		result = value0
+		instruction = host_syscall
+	}
+	operation read { number = 3 args = [fd, buffer, count] }
+	operation write { number = 4 args = [fd, buffer, count] }
+	operation open { number = 5 args = [path, flags, mode] }
+	operation close { number = 6 args = [fd] }
+	operation chmod { number = 94 args = [fd, mode] }
+	operation print { use = write args = [stdout, buffer, count] }
+	operation exit { number = 1 args = [status] noreturn = true }
+}
+format elf_sh4eb {
+	kind = elf
+	byte_order = big
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-sh4eb {
+	family = native_v1
+	os = linux
+	arch = sh2be
+	frontend_arch = sh2be
+	abi = sh2be_internal
+	runtime = linux_sh4eb
+	executable = elf_sh4eb
+	arena_default = 16777216
+	build_tags = [linux, unix, sh4eb]
+	capabilities = [hosted, executable, filesystem, heap]
+}

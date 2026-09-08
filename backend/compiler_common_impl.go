@@ -9875,7 +9875,16 @@ func renvoEmitLinearRangeForScoped(g *renvoLinearGen, stmt *renvoStmt, rangeTok 
 		}
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmAddSecondaryTertiary(a)
-		renvoEmitCopyMemSecondaryToStack(g, valueOffset, elemSize)
+		elemKind := renvoResolveType(g.meta, resolved.elem).kind
+		if elemSize < g.c.renvoNativeIntSize && renvoTypeKindIsScalarInt(elemKind) {
+			// Scalar locals occupy native-word slots. Copying only the leading
+			// bytes puts a narrow value in the high bits on big-endian targets.
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, elemSize)
+			renvoAsmNormalizePrimaryForKind(a, elemKind)
+			renvoAsmStorePrimaryStack(a, valueOffset)
+		} else {
+			renvoEmitCopyMemSecondaryToStack(g, valueOffset, elemSize)
+		}
 	}
 	for localIndex := 0; localIndex < g.localCount; localIndex++ {
 		if g.locals[localIndex].offset == keyOffset || g.locals[localIndex].offset == valueOffset {
@@ -23268,6 +23277,22 @@ func renvoAsmCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
 	}
 	renvoAmd64AsmCmpRcxRaxSet(a, setcc)
 }
+func renvoEmitBounded386UnsignedRightShift(g *renvoLinearGen, tok int) bool {
+	a := &g.asm
+	shift := renvoAsmNewLabel(a)
+	done := renvoAsmNewLabel(a)
+	renvoAsmCmpPrimaryImm8(a, 32)
+	renvo386AsmJccLabel(a, 0x82, shift)
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmJmpLabel(a, done)
+	renvoAsmMarkLabel(a, shift)
+	if !renvo386EmitRaxRcxOp(g, tok, true) {
+		return false
+	}
+	renvoAsmMarkLabel(a, done)
+	return true
+}
+
 func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
 	renvoNonNil(g)
 	float := renvoTypeKindIsFloat(kind)
@@ -23289,6 +23314,24 @@ func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool 
 	}
 	if !float && (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && (renvoTokStartsWith(g.prog, tok, '/') || renvoTokStartsWith(g.prog, tok, '%')) {
 		return renvoEmitUnsignedPrimaryTertiaryOp(g, tok, kind)
+	}
+	// Compound right shifts retain the destination's unsigned type. The
+	// untyped machine operation defaults to arithmetic shift on a full word.
+	if (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && renvoTokStartsWith(g.prog, tok, '>') {
+		if renvoPreparedBackendActive != 0 {
+			renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)
+		} else if g.c.renvoTargetArch == renvoArch386 {
+			return renvoEmitBounded386UnsignedRightShift(g, tok)
+		} else if g.c.renvoTargetArch == renvoArchArm {
+			return renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
+		} else if g.c.renvoTargetArch == renvoArchWasm32 {
+			return renvoWasm32EmitRaxRcxOp(g, tok, true)
+		} else if g.c.renvoTargetArch == renvoArchAmd64 {
+			renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe8\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8")
+		} else {
+			renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, 2))
+		}
+		return true
 	}
 	return renvoEmitPrimaryTertiaryOp(g, tok)
 }
@@ -24600,7 +24643,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		result := renvoResolveType(g.meta, resultType)
 		unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
 		if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
-			if !renvo386EmitRaxRcxOp(g, e.tok, true) {
+			if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 				return false
 			}
 		} else if unsignedShift && (renvoTokCharIs(p, e.tok, '/') || renvoTokCharIs(p, e.tok, '%')) {
@@ -31586,9 +31629,9 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		}
 		if renvoPreparedBackendActive != 0 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
 			if op0 == '<' {
-				renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
+				renvoRTGEmitBoundedVariableShift(a, RTGShiftLeft, false)
 			} else {
-				renvoRTGDirectVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
+				renvoRTGEmitBoundedVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
 			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
@@ -31623,7 +31666,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				} else if g.c.renvoTargetArch == renvoArchWasm32 {
 					renvoWasm32EmitRaxRcxOp(g, e.tok, true)
 				} else {
-					renvo386EmitRaxRcxOp(g, e.tok, true)
+					renvoEmitBounded386UnsignedRightShift(g, e.tok)
 				}
 				renvoAsmNormalizePrimaryForKind(a, resultKind)
 				return true

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f5b6c76083c6571ccc31e29ae6dbad5a7b15ae7f74c2206ba4fab6f264fa56ef"
+const CompilerSourceDigest = "18c5111b7897272a4c6adac8723a4dab70fabe00fecddf89f457aaedac29a7a3"
 
 // source: backend/compiler_common_impl.go
 
@@ -9882,7 +9882,16 @@ renvoAsmLoadPrimaryStack(a, sourceOffset)
 }
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmAddSecondaryTertiary(a)
+elemKind := renvoResolveType(g.meta, resolved.elem).kind
+if elemSize < g.c.renvoNativeIntSize && renvoTypeKindIsScalarInt(elemKind) {
+
+
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, elemSize)
+renvoAsmNormalizePrimaryForKind(a, elemKind)
+renvoAsmStorePrimaryStack(a, valueOffset)
+} else {
 renvoEmitCopyMemSecondaryToStack(g, valueOffset, elemSize)
+}
 }
 for localIndex := 0; localIndex < g.localCount; localIndex++ {
 if g.locals[localIndex].offset == keyOffset || g.locals[localIndex].offset == valueOffset {
@@ -23275,6 +23284,22 @@ return
 }
 renvoAmd64AsmCmpRcxRaxSet(a, setcc)
 }
+func renvoEmitBounded386UnsignedRightShift(g *renvoLinearGen, tok int) bool {
+a := &g.asm
+shift := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmCmpPrimaryImm8(a, 32)
+renvo386AsmJccLabel(a, 0x82, shift)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, shift)
+if !renvo386EmitRaxRcxOp(g, tok, true) {
+return false
+}
+renvoAsmMarkLabel(a, done)
+return true
+}
+
 func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
 renvoNonNil(g)
 float := renvoTypeKindIsFloat(kind)
@@ -23296,6 +23321,24 @@ return renvoEmitIEEEFloatPrimaryTertiaryOp(g, tok, kind)
 }
 if !float && (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && (renvoTokStartsWith(g.prog, tok, '/') || renvoTokStartsWith(g.prog, tok, '%')) {
 return renvoEmitUnsignedPrimaryTertiaryOp(g, tok, kind)
+}
+
+
+if (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && renvoTokStartsWith(g.prog, tok, '>') {
+if renvoPreparedBackendActive != 0 {
+renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)
+} else if g.c.renvoTargetArch == renvoArch386 {
+return renvoEmitBounded386UnsignedRightShift(g, tok)
+} else if g.c.renvoTargetArch == renvoArchArm {
+return renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
+} else if g.c.renvoTargetArch == renvoArchWasm32 {
+return renvoWasm32EmitRaxRcxOp(g, tok, true)
+} else if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe8\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8")
+} else {
+renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, 2))
+}
+return true
 }
 return renvoEmitPrimaryTertiaryOp(g, tok)
 }
@@ -24607,7 +24650,7 @@ resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
 unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
 if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
-if !renvo386EmitRaxRcxOp(g, e.tok, true) {
+if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 return false
 }
 } else if unsignedShift && (renvoTokCharIs(p, e.tok, '/') || renvoTokCharIs(p, e.tok, '%')) {
@@ -31593,9 +31636,9 @@ return true
 }
 if renvoPreparedBackendActive != 0 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
 if op0 == '<' {
-renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
+renvoRTGEmitBoundedVariableShift(a, RTGShiftLeft, false)
 } else {
-renvoRTGDirectVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
+renvoRTGEmitBoundedVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
 }
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
@@ -31630,7 +31673,7 @@ renvoArmEmitRaxRcxOp(g, e.tok, 0xe1a00030)
 } else if g.c.renvoTargetArch == renvoArchWasm32 {
 renvoWasm32EmitRaxRcxOp(g, e.tok, true)
 } else {
-renvo386EmitRaxRcxOp(g, e.tok, true)
+renvoEmitBounded386UnsignedRightShift(g, e.tok)
 }
 renvoAsmNormalizePrimaryForKind(a, resultKind)
 return true
@@ -36662,10 +36705,10 @@ if target == renvoTargetLinux386 {
 return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\x26\x0a\x90\x2d\x2c\x51\xf9\x20\x6a\xcf\xb9\x69\x1c\xe3\x1a\x61\x71\x2f\xfe\x24\x7d\x55\x25\x01\x91\x0f\x7c\xfb\x60\x86\xcb\xc5", 3, true
+return "linux/aarch64", "\x57\x07\x1f\x23\xee\x5d\x27\x28\xd4\xc9\xbd\xaa\x9e\xa4\xf8\x91\xfe\xf8\x69\xc0\x5e\x71\xa7\xae\x63\xdc\x9e\x9e\xb8\xcb\xf1\x73", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x40\x6c\xe0\x00\x18\xa6\x52\x39\x7e\x94\xf7\x6d\x19\xa8\xb6\x38\x9f\xfb\x2f\x2c\xe5\x39\x5a\x08\x2a\xb2\x4e\x19\xe2\xe6\x16\x8b", 3, true
+return "linux/arm", "\x43\x5d\xdd\x4f\x60\xaf\xa9\x5c\xbb\x80\x66\xe8\x10\x26\x1d\xc6\xf8\x86\x2a\x01\x26\xb4\x50\x9a\x18\x47\xf1\xb2\x84\xe7\x69\xad", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
@@ -36677,13 +36720,13 @@ if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\x7b\x23\xb2\xc2\xeb\x03\x57\x38\x8f\xc1\x2d\xad\xc4\x89\x54\x75\x52\xbb\xde\xe9\xf3\x7c\x18\xab\x07\x17\x6f\x17\xc9\x83\x37\xd7", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\x2a\xfb\x6c\xa3\x1e\xc5\xb9\xc4\x5c\x12\x21\x7e\x4a\x07\xc1\xd3\x8d\xbe\x4f\xb1\xe4\x13\x28\xd7\x98\xd1\x80\xce\x40\x05\x46\x22", 3, true
+return "darwin/arm64", "\xbc\x37\xd8\xd6\x7d\xa8\x6a\x28\x1d\x8d\x1a\x8f\xfd\x75\x7d\x21\xc1\xb3\x3c\x33\x8a\x4a\xf1\x55\xe6\xc2\xa7\x4d\xb4\x22\x61\x1e", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\x8d\x0d\xe8\xa0\xd7\xaa\x3e\xa4\x43\x36\x4e\xde\x38\x58\xdb\xc0\x81\x3e\x2b\xa5\xdb\xcc\x33\x4b\xb1\x9a\xaf\xb1\x85\x7e\x18\x6a", 3, true
+return "windows/arm64", "\x25\x75\xea\x48\x1f\xa4\xdb\xd2\x41\xfc\x21\x29\x5b\x6e\xab\x95\x5e\x84\x27\x16\xf7\xe3\x45\x75\xbe\x8e\x4c\x63\x65\x07\xc9\x6b", 3, true
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "\xd8\xdc\x84\x4b\xa8\x36\xf5\x5e\x62\x26\xe4\x72\xc7\x10\x7f\xb3\xb6\x65\x2e\x02\x7b\xdf\x2d\x74\x90\x65\x80\x86\xd4\xb5\xed\x22", 3, true
@@ -38466,11 +38509,11 @@ renvoRTGDirectBitXor(a, renvoRTGPrimary, renvoRTGTertiary)
 return true
 }
 if c0 == '<' && c1 == '<' {
-renvoRTGDirectVariableShift(a, RTGShiftLeft, false)
+renvoRTGEmitBoundedVariableShift(a, RTGShiftLeft, false)
 return true
 }
 if c0 == '>' && c1 == '>' {
-renvoRTGDirectVariableShift(a, RTGShiftRight, true)
+renvoRTGEmitBoundedVariableShift(a, RTGShiftRight, true)
 return true
 }
 setcc := 0
@@ -38497,6 +38540,34 @@ renvoRTGDirectSetCondition(a, renvoRTGConditionFromSetcc(setcc), renvoRTGPrimary
 return true
 }
 return false
+}
+
+
+
+func renvoRTGEmitBoundedVariableShift(a *renvoAsm, direction RTGShiftDirection, signed bool) {
+shift := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+bits := a.c.renvoNativeIntSize * 8
+oversized := renvoAsmNewLabel(a)
+
+
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 0)
+renvoRTGDirectCompare(a, renvoRTGPrimary, renvoRTGScratch)
+renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x9c), oversized)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(bits))
+renvoRTGDirectCompare(a, renvoRTGPrimary, renvoRTGScratch)
+renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x9c), shift)
+renvoAsmMarkLabel(a, oversized)
+if direction == RTGShiftRight && signed {
+renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGTertiary)
+renvoRTGDirectShiftRightSignedImmediate(a, renvoRTGPrimary, byte(bits-1))
+} else {
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
+}
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, shift)
+renvoRTGDirectVariableShift(a, direction, signed)
+renvoAsmMarkLabel(a, done)
 }
 
 func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
@@ -38536,7 +38607,7 @@ renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 framePatch := renvoRTGFrameStart(a)
 if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-renvoRTGAsmStoreFrame(a, g.returnStruct, renvoRTGCallWord0)
+renvoRTGStoreParamWord(g, 0, g.returnStruct)
 }
 renvoBindFunctionParams(g, fnInfoIndex)
 if !renvoBindClosureCaptures(g, fnInfoIndex) ||

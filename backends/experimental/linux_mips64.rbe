@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_mips64
+implements direct_emitter_v1
+@import "mips64.rtg"
+@import "linux_elf.rtg"
+go backend {
+	func entryStart(out *RTGEmitter, stateOffset int) bool {
+		_ = stateOffset
+		mips64.mipsSetTargetCodeAddress(linux_elf.codeAddress)
+		mips64.mipsSetBigEndian(true)
+		return true
+	}
+	func entry(out *RTGEmitter, count int, stateOffset int) bool {
+		_ = out
+		_ = stateOffset
+		return count == 0
+	}
+	func syscall(out *RTGEmitter) { mips64.mipsEmit(out, 12) }
+	func image(out *RTGEmitter) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			instruction := mips64.mipsGetInstruction(out, at)
+			register := (instruction >> 16) & 31
+			mips64.mipsPatchInstruction(out, at, (15<<26)|(register<<16)|((target>>16)&65535))
+			mips64.mipsPatchInstruction(out, at+4, (13<<26)|(register<<21)|(register<<16)|(target&65535))
+		}
+		return linux_elf.image(out, 8, 0x20000000, 64, true)
+	}
+}
+
+runtime linux_mips64 {
+	emit_entry_start = go entryStart
+	emit_entry = go entry
+	syscall {
+		number = v0
+		arguments = [a0, a1, a2, a3]
+		result = v0
+		instruction = host_syscall
+	}
+	operation read { number = 5000 args = [fd, buffer, count] }
+	operation write { number = 5001 args = [fd, buffer, count] }
+	operation open { number = 5002 args = [path, flags, mode] }
+	operation close { number = 5003 args = [fd] }
+	operation chmod { number = 5089 args = [fd, mode] }
+	operation print { use = write args = [stdout, buffer, count] }
+	operation exit { number = 5058 args = [status] noreturn = true }
+}
+format elf_mips {
+	kind = elf
+	byte_order = big
+	address_bits = 64
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-mips64 {
+	family = native_v1
+	os = linux
+	arch = mips64be
+	frontend_arch = mips64be
+	abi = mips64be_internal
+	runtime = linux_mips64
+	executable = elf_mips
+	arena_default = 16777216
+	build_tags = [linux, unix, mips]
+	capabilities = [hosted, executable, filesystem, heap]
+}

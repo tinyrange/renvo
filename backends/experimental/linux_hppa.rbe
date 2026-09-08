@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: Apache-2.0
+definition 1
+unit linux_hppa
+implements direct_emitter_v1
+@import "register_linux.rtg"
+go backend {
+	func start(out *RTGEmitter, state int) bool { _ = state; return register_linux.init(out, 9, 4, true) }
+	func image(out *RTGEmitter) []byte          { return register_linux.image(out, 15, 528) }
+}
+
+arch hppa {
+	alias = "hppa"
+	endian = big
+	word_bits = 32
+	pointer_bits = 32
+	instruction_alignment = 4
+	stack_word_bytes = 4
+	stack_alignment = 16
+	patch_relocations = go register_linux.patchRelocations
+	registers integer = [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15]
+	locations {
+		primary = r0
+		secondary = r1
+		tertiary = r2
+		scratch = r3
+		address = r4
+		compareLeft = r5
+		compareRight = r6
+		copy_destination = r7
+		copy_source = r8
+		copy_count = r9
+		link = r13
+		stack = r14
+		frame = r15
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go register_linux.move
+		address = go register_linux.address
+		load.native = go register_linux.loadNative
+		load.i32 = go register_linux.loadI32
+		load.u32 = go register_linux.loadU32
+		load.i16 = go register_linux.loadI16
+		load.u16 = go register_linux.loadU16
+		load.i8 = go register_linux.loadI8
+		load.u8 = go register_linux.loadU8
+		store.native = go register_linux.storeNative
+		store.u32 = go register_linux.storeU32
+		store.u16 = go register_linux.storeU16
+		store.u8 = go register_linux.storeU8
+		add = go register_linux.add
+		subtract = go register_linux.subtract
+		multiply = go register_linux.multiply
+		bit_and = go register_linux.bitAnd
+		bit_or = go register_linux.bitOr
+		bit_xor = go register_linux.bitXor
+		compare = go register_linux.compare
+		test = go register_linux.test
+		increment = go register_linux.increment
+		decrement = go register_linux.decrement
+		shift_left_immediate = go register_linux.shiftLeft
+		shift_right_unsigned_immediate = go register_linux.shiftRight
+		shift_right_signed_immediate = go register_linux.shiftSigned
+		call = go register_linux.call
+		call_indirect = go register_linux.callIndirect
+		jump = go register_linux.jump
+		jump_condition = go register_linux.jumpCondition
+		set_condition = go register_linux.condition
+		return = go register_linux.ret
+		leave = go register_linux.leave
+		host_syscall = go register_linux.hostSyscall
+		move_immediate = go register_linux.immediate
+		variable_shift = go register_linux.variableShift
+		signed_divide = go register_linux.signedDivide
+		copy_bytes = go register_linux.copyBytes
+	}
+}
+abi internal_hppa {
+	arch = hppa
+	arguments = [r0, r1, r2, r7, r8, r9]
+	call_words = [r0, r1, r2, r7, r8, r9]
+	result = [r0, r1]
+	stack_alignment = 16
+	frame_start = go register_linux.frameStart
+	frame_finish = go register_linux.frameFinish
+	frame_load = go register_linux.frameLoad
+	frame_store = go register_linux.frameStore
+	frame_address = go register_linux.frameAddress
+	unsigned_divide = go register_linux.unsignedDivide
+}
+runtime runtime_hppa {
+	emit_entry_start = go start
+	emit_entry = go register_linux.entry
+	emit_exit = go register_linux.exit
+	operation write { emit = go register_linux.write }
+	operation read { emit = go register_linux.read }
+	operation open { emit = go register_linux.open }
+	operation close { emit = go register_linux.close }
+	operation chmod { emit = go register_linux.chmod }
+	operation print { use = write args = [stdout, buffer, count] }
+}
+format elf_hppa {
+	kind = elf
+	byte_order = big
+	address_bits = 32
+	code_offset = 0
+	image = go image
+}
+target experimental/linux-hppa {
+	family = native_v1
+	os = linux
+	arch = hppa
+	abi = internal_hppa
+	runtime = runtime_hppa
+	executable = elf_hppa
+	arena_default = 16777216
+	build_tags = [linux, unix, hppa]
+	capabilities = [hosted, executable, filesystem, heap]
+}

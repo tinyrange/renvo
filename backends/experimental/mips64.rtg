@@ -1,0 +1,649 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Shared MIPS-I emitter and Renvo-internal 64-bit calling conventions.
+# Importing platform definitions provide mipsTargetCodeAddress so jump and
+# address relocations remain target-local.
+go backend {
+	var mipsRelocationBase int
+	var mipsBigEndian bool
+
+	func mipsSetTargetCodeAddress(address int) {
+		mipsRelocationBase = address
+	}
+	func mipsSetBigEndian(value bool) { mipsBigEndian = value }
+
+	func mipsGetInstruction(out *RTGEmitter, at int) int {
+		if !mipsBigEndian {
+			return RTGGet32At(out.Code(), at)
+		}
+		code := out.Code()
+		return int(code[at])<<24 | int(code[at+1])<<16 | int(code[at+2])<<8 | int(code[at+3])
+	}
+
+	func mipsPatchInstruction(out *RTGEmitter, at int, value int) {
+		if !mipsBigEndian {
+			out.PatchUint32(at, value)
+			return
+		}
+		code := out.Code()
+		code[at] = byte(value >> 24)
+		code[at+1] = byte(value >> 16)
+		code[at+2] = byte(value >> 8)
+		code[at+3] = byte(value)
+	}
+
+	func mipsEmit(out *RTGEmitter, instruction int) {
+		if !mipsBigEndian {
+			RTGUint32(out, instruction)
+			return
+		}
+		RTGByte(out, byte(instruction>>24))
+		RTGByte(out, byte(instruction>>16))
+		RTGByte(out, byte(instruction>>8))
+		RTGByte(out, byte(instruction))
+	}
+
+	func mipsR(out *RTGEmitter, opcode int, source int, target int,
+		destination int, shift int, function int) {
+		mipsEmit(out, (opcode<<26)|(source<<21)|(target<<16)|
+			(destination<<11)|(shift<<6)|function)
+	}
+
+	func mipsI(out *RTGEmitter, opcode int, source int, target int,
+		immediate int) {
+		mipsEmit(out, (opcode<<26)|(source<<21)|(target<<16)|(immediate&0xffff))
+	}
+
+	func mipsMove(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			mipsR(out, 0, source.Code, 0, destination.Code, 0, 0x2d)
+		}
+	}
+
+	func mipsMoveImmediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		if value >= -32768 && value <= 32767 {
+			mipsI(out, 0x19, 0, destination.Code, int(value))
+			return
+		}
+		mipsI(out, 0x0d, 0, destination.Code, int(uint64(value)>>48))
+		for shift := 32; shift >= 0; shift -= 16 {
+			mipsR(out, 0, 0, destination.Code, destination.Code, 16, 0x38)
+			mipsI(out, 0x0d, destination.Code, destination.Code, int(uint64(value)>>uint(shift)))
+		}
+	}
+
+	func mipsEmitAddress(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := out.Len()
+			mipsI(out, 0x0f, 0, destination.Code, 0)
+			mipsI(out, 0x0d, destination.Code, destination.Code, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		base := value.Base
+		if !base.Valid {
+			base = mipsZero()
+		}
+		if value.Index.Valid {
+			shift := RTGLog2(value.Scale)
+			mipsR(out, 0, 0, value.Index.Code, mipsAddress().Code, shift, 0)
+			mipsR(out, 0, base.Code, mipsAddress().Code,
+				destination.Code, 0, 0x2d)
+			base = destination
+		}
+		if value.Displacement >= -32768 && value.Displacement <= 32767 {
+			mipsI(out, 0x19, base.Code, destination.Code, value.Displacement)
+			return
+		}
+		temporary := mipsAddress()
+		if destination.Code == temporary.Code || base.Code == temporary.Code {
+			temporary = mipsScratch()
+		}
+		mipsMoveImmediate(out, temporary, int64(value.Displacement))
+		mipsR(out, 0, base.Code, temporary.Code, destination.Code, 0, 0x2d)
+	}
+
+	func mipsMaterializeAddress(out *RTGEmitter, value RTGAddress) RTGAddress {
+		if !RTGAddressValid(value) && !value.Index.Valid &&
+			value.Displacement >= -32768 && value.Displacement <= 32767 {
+			return value
+		}
+		mipsEmitAddress(out, mipsAddress(), value)
+		return RTGAddress{Base: mipsAddress()}
+	}
+
+	func mipsLoadWidth(out *RTGEmitter, destination RTGRegister,
+		value RTGAddress, opcode int) {
+		value = mipsMaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = mipsZero()
+		}
+		mipsI(out, opcode, base.Code, destination.Code, value.Displacement)
+		// MIPS I exposes a one-instruction load delay. Keeping a harmless slot
+		// here makes the shared emitter correct on the R3000A while remaining
+		// valid on Allegrex, whose interlocks make the slot unnecessary.
+		mipsEmit(out, 0)
+	}
+
+	func mipsStoreWidth(out *RTGEmitter, value RTGAddress,
+		source RTGRegister, opcode int) {
+		value = mipsMaterializeAddress(out, value)
+		base := value.Base
+		if !base.Valid {
+			base = mipsZero()
+		}
+		mipsI(out, opcode, base.Code, source.Code, value.Displacement)
+	}
+
+	func mipsLoadNative(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x37)
+	}
+	func mipsLoadI32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x23)
+	}
+	func mipsLoadU32(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x27)
+	}
+	func mipsLoadI16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x21)
+	}
+	func mipsLoadU16(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x25)
+	}
+	func mipsLoadI8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x20)
+	}
+	func mipsLoadU8(out *RTGEmitter, destination RTGRegister, value RTGAddress) {
+		mipsLoadWidth(out, destination, value, 0x24)
+	}
+	func mipsStoreNative(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mipsStoreWidth(out, value, source, 0x3f)
+	}
+	func mipsStoreU32(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mipsStoreWidth(out, value, source, 0x2b)
+	}
+	func mipsStoreU16(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mipsStoreWidth(out, value, source, 0x29)
+	}
+	func mipsStoreU8(out *RTGEmitter, value RTGAddress, source RTGRegister) {
+		mipsStoreWidth(out, value, source, 0x28)
+	}
+
+	func mipsAdd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x2d)
+	}
+	func mipsSubtract(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x2f)
+	}
+	func mipsMultiply(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		// MIPS I predates the MIPS32 SPECIAL2 three-operand MUL encoding.
+		// Use the R3000A/Allegrex HI/LO sequence instead.
+		mipsR(out, 0, destination.Code, source.Code, 0, 0, 0x1c)
+		mipsR(out, 0, 0, 0, destination.Code, 0, 0x12)
+	}
+	func mipsBitAnd(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x24)
+	}
+	func mipsBitOr(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x25)
+	}
+	func mipsBitXor(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		mipsR(out, 0, destination.Code, source.Code, destination.Code, 0, 0x26)
+	}
+
+	func mipsCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		mipsMove(out, mipsCompareLeft(), left)
+		mipsMove(out, mipsCompareRight(), right)
+	}
+	func mipsTest(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		mipsMove(out, mipsCompareLeft(), left)
+		mipsBitAnd(out, mipsCompareLeft(), right)
+		mipsMove(out, mipsCompareRight(), mipsZero())
+	}
+	func mipsIncrement(out *RTGEmitter, operand RTGRegister) {
+		mipsI(out, 0x19, operand.Code, operand.Code, 1)
+	}
+	func mipsDecrement(out *RTGEmitter, operand RTGRegister) {
+		mipsI(out, 0x19, operand.Code, operand.Code, -1)
+	}
+	func mipsShiftLeftImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		function := 56
+		if value&32 != 0 {
+			function += 4
+		}
+		mipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, function)
+	}
+
+	func mipsShiftRightUnsignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		function := 58
+		if value&32 != 0 {
+			function += 4
+		}
+		mipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, function)
+	}
+
+	func mipsShiftRightSignedImmediate(out *RTGEmitter, operand RTGRegister, value byte) {
+		function := 59
+		if value&32 != 0 {
+			function += 4
+		}
+		mipsR(out, 0, 0, operand.Code, operand.Code, int(value)&31, function)
+	}
+
+	func mipsCall(out *RTGEmitter, label RTGLabel) {
+		mipsEmit(out, 0x0c000000)
+		out.Reloc(label)
+		mipsEmit(out, 0)
+	}
+	func mipsCallIndirect(out *RTGEmitter, operand RTGRegister) {
+		mipsR(out, 0, operand.Code, 0, 31, 0, 9)
+		mipsEmit(out, 0)
+	}
+	func mipsJump(out *RTGEmitter, label RTGLabel) {
+		mipsEmit(out, 0x08000000)
+		out.Reloc(label)
+		mipsEmit(out, 0)
+	}
+
+	func mipsSetCondition(out *RTGEmitter, condition RTGCondition,
+		destination RTGRegister) {
+		code := condition.Code
+		left := mipsCompareLeft()
+		right := mipsCompareRight()
+		if code == 0 || code == 1 {
+			mipsR(out, 0, left.Code, right.Code, destination.Code, 0, 0x26)
+			if code == 0 {
+				mipsI(out, 0x0b, destination.Code, destination.Code, 1)
+			} else {
+				mipsR(out, 0, 0, destination.Code, destination.Code, 0, 0x2b)
+			}
+			return
+		}
+		unsigned := code >= 6
+		invert := false
+		if code == 2 || code == 3 || code == 8 || code == 9 {
+			left, right = right, left
+			if code == 2 || code == 8 {
+				invert = true
+			}
+		} else if code == 5 || code == 7 {
+			invert = true
+		}
+		function := 0x2a
+		if unsigned {
+			function = 0x2b
+		}
+		mipsR(out, 0, left.Code, right.Code, destination.Code, 0, function)
+		if invert {
+			mipsI(out, 0x0e, destination.Code, destination.Code, 1)
+		}
+	}
+
+	func mipsJumpCondition(out *RTGEmitter, condition RTGCondition, label RTGLabel) {
+		mipsSetCondition(out, condition, mipsScratch())
+		// Skip J/NOP when the requested condition is false.
+		mipsI(out, 4, mipsScratch().Code, 0, 3)
+		mipsEmit(out, 0)
+		mipsEmit(out, 0x08000000)
+		out.Reloc(label)
+		mipsEmit(out, 0)
+	}
+
+	func mipsReturn(out *RTGEmitter) {
+		mipsR(out, 0, 31, 0, 0, 0, 8)
+		mipsEmit(out, 0)
+	}
+	func mipsLeave(out *RTGEmitter) {
+		mipsLoadWidth(out, mipsLink(), RTGAddress{Base: mipsFrame(), Displacement: -8}, 0x37)
+		mipsLoadWidth(out, mipsScratch(), RTGAddress{Base: mipsFrame(), Displacement: -16}, 0x37)
+		mipsMove(out, mipsStack(), mipsFrame())
+		mipsMove(out, mipsFrame(), mipsScratch())
+	}
+	func mipsHostSyscall(out *RTGEmitter) { mipsEmit(out, 0x0000000c) }
+	func mipsVariableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		function := 0x14
+		if direction == RTGShiftRight {
+			function = 0x16
+			if signed {
+				function = 0x17
+			}
+		}
+		mipsR(out, 0, mipsPrimary().Code, mipsTertiary().Code,
+			mipsPrimary().Code, 0, function)
+	}
+	func mipsUnsignedDivide(out *RTGEmitter, remainder bool) bool {
+		mipsR(out, 0, mipsTertiary().Code, mipsPrimary().Code, 0, 0, 0x1f)
+		function := 0x12
+		if remainder {
+			function = 0x10
+		}
+		mipsR(out, 0, 0, 0, mipsPrimary().Code, 0, function)
+		return true
+	}
+	func mipsSignedDivide(out *RTGEmitter, remainder bool) {
+		mipsR(out, 0, mipsTertiary().Code, mipsPrimary().Code, 0, 0, 0x1e)
+		function := 0x12
+		if remainder {
+			function = 0x10
+		}
+		mipsR(out, 0, 0, 0, mipsPrimary().Code, 0, function)
+	}
+
+	func mipsPatchRelocations(out *RTGEmitter) {
+		for index := 0; index < out.RelocationCount(); index++ {
+			at := out.RelocationOffset(index)
+			target := mipsRelocationBase + out.LabelPosition(out.RelocationLabel(index))
+			instruction := mipsGetInstruction(out, at)
+			opcode := instruction >> 26
+			if opcode == 2 || opcode == 3 {
+				mipsPatchInstruction(out, at, (instruction&0xfc000000)|((target>>2)&0x03ffffff))
+			} else if opcode == 0x0f {
+				register := (instruction >> 16) & 31
+				mipsPatchInstruction(out, at, (0x0f<<26)|(register<<16)|((target>>16)&0xffff))
+				mipsPatchInstruction(out, at+4, (0x0d<<26)|(register<<21)|(register<<16)|(target&0xffff))
+			}
+		}
+	}
+
+	func mipsFrameStart(out *RTGEmitter) int {
+		mipsMove(out, mipsAddress(), mipsFrame())
+		at := out.Len()
+		mipsI(out, 0x0f, 0, mipsScratch().Code, 0)
+		mipsI(out, 0x0d, mipsScratch().Code, mipsScratch().Code, 0)
+		mipsSubtract(out, mipsStack(), mipsScratch())
+		mipsMove(out, mipsFrame(), mipsStack())
+		mipsAdd(out, mipsFrame(), mipsScratch())
+		mipsStoreWidth(out, RTGAddress{Base: mipsFrame(), Displacement: -8}, mipsLink(), 0x3f)
+		mipsStoreWidth(out, RTGAddress{Base: mipsFrame(), Displacement: -16}, mipsAddress(), 0x3f)
+		return at
+	}
+	func mipsFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		frameSize := (stackUsed + 31) & -16
+		mipsPatchInstruction(out, at, (0x0f<<26)|(mipsScratch().Code<<16)|((frameSize>>16)&0xffff))
+		mipsPatchInstruction(out, at+4, (0x0d<<26)|(mipsScratch().Code<<21)|
+			(mipsScratch().Code<<16)|(frameSize&0xffff))
+	}
+	func mipsFrameLoad(out *RTGEmitter, destination RTGRegister, offset int) {
+		mipsLoadWidth(out, destination, RTGAddress{Base: mipsFrame(), Displacement: -(offset + 16)}, 0x37)
+	}
+	func mipsFrameStore(out *RTGEmitter, offset int, source RTGRegister) {
+		mipsStoreWidth(out, RTGAddress{Base: mipsFrame(), Displacement: -(offset + 16)}, source, 0x3f)
+	}
+	func mipsFrameAddress(out *RTGEmitter, destination RTGRegister, offset int) {
+		mipsEmitAddress(out, destination, RTGAddress{Base: mipsFrame(), Displacement: -(offset + 16)})
+	}
+
+	func mipsZero() RTGRegister         { return RTGRegister{Code: 0, Valid: true} }
+	func mipsPrimary() RTGRegister      { return RTGRegister{Code: 2, Valid: true} }
+	func mipsSecondary() RTGRegister    { return RTGRegister{Code: 3, Valid: true} }
+	func mipsTertiary() RTGRegister     { return RTGRegister{Code: 4, Valid: true} }
+	func mipsScratch() RTGRegister      { return RTGRegister{Code: 8, Valid: true} }
+	func mipsAddress() RTGRegister      { return RTGRegister{Code: 9, Valid: true} }
+	func mipsCompareLeft() RTGRegister  { return RTGRegister{Code: 10, Valid: true} }
+	func mipsCompareRight() RTGRegister { return RTGRegister{Code: 11, Valid: true} }
+	func mipsStack() RTGRegister        { return RTGRegister{Code: 29, Valid: true} }
+	func mipsFrame() RTGRegister        { return RTGRegister{Code: 30, Valid: true} }
+	func mipsLink() RTGRegister         { return RTGRegister{Code: 31, Valid: true} }
+}
+
+arch mips64el {
+	alias = "mips64el"
+	endian = little
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 4
+	stack_word_bytes = 8
+	stack_alignment = 16
+	patch_relocations = go mipsPatchRelocations
+	registers integer = [zero, at, v0, v1, a0, a1, a2, a3, t0, t1, t2, t3, t4, t5, t6, t7, s0, s1, s2, s3, s4, s5, s6, s7, t8, t9, k0, k1, gp, stack, frame, link]
+	locations {
+		primary = v0
+		secondary = v1
+		tertiary = a0
+		scratch = t0
+		address = t1
+		compareLeft = t2
+		compareRight = t3
+		copy_destination = a1
+		copy_source = a2
+		copy_count = a3
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go mipsMove
+		address = go mipsEmitAddress
+		load.native = go mipsLoadNative
+		load.i32 = go mipsLoadI32
+		load.u32 = go mipsLoadU32
+		load.i16 = go mipsLoadI16
+		load.u16 = go mipsLoadU16
+		load.i8 = go mipsLoadI8
+		load.u8 = go mipsLoadU8
+		store.native = go mipsStoreNative
+		store.u32 = go mipsStoreU32
+		store.u16 = go mipsStoreU16
+		store.u8 = go mipsStoreU8
+		add = go mipsAdd
+		subtract = go mipsSubtract
+		multiply = go mipsMultiply
+		bit_and = go mipsBitAnd
+		bit_or = go mipsBitOr
+		bit_xor = go mipsBitXor
+		compare = go mipsCompare
+		test = go mipsTest
+		increment = go mipsIncrement
+		decrement = go mipsDecrement
+		shift_left_immediate = go mipsShiftLeftImmediate
+		shift_right_unsigned_immediate = go mipsShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go mipsShiftRightSignedImmediate
+		call = go mipsCall
+		call_indirect = go mipsCallIndirect
+		jump = go mipsJump
+		jump_condition = go mipsJumpCondition
+		set_condition = go mipsSetCondition
+		return = go mipsReturn
+		leave = go mipsLeave
+		host_syscall = go mipsHostSyscall
+		move_immediate = go mipsMoveImmediate
+		variable_shift = go mipsVariableShift
+		signed_divide = go mipsSignedDivide
+		copy_bytes = sequence copyBytes
+	}
+	sequences {
+		copyBytes(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			mipsCompare(out, a1, a2)
+			mipsJumpCondition(out, ult, forward)
+			mipsEmitAddress(out, t0, record_address(Base:a2, Index:a3, Scale:1,))
+			mipsCompare(out, a1, t0)
+			mipsJumpCondition(out, uge, forward)
+			mipsEmitAddress(out, a2, record_address(Base:a2, Index:a3, Scale:1, Displacement:-1,))
+			mipsEmitAddress(out, a1, record_address(Base:a1, Index:a3, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			mipsCompare(out, a3, zero)
+			mipsJumpCondition(out, eq, done)
+			mipsLoadU8(out, t0, record_address(Base:a2,))
+			mipsStoreU8(out, record_address(Base:a1,), t0)
+			mipsDecrement(out, a2)
+			mipsDecrement(out, a1)
+			mipsDecrement(out, a3)
+			mipsJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			mipsCompare(out, a3, zero)
+			mipsJumpCondition(out, eq, done)
+			mipsLoadU8(out, t0, record_address(Base:a2,))
+			mipsStoreU8(out, record_address(Base:a1,), t0)
+			mipsIncrement(out, a2)
+			mipsIncrement(out, a1)
+			mipsDecrement(out, a3)
+			mipsJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi mips64el_internal {
+	unsigned_divide = go mipsUnsignedDivide
+	arch = mips64el
+	arguments = [v0, v1, a0, a1, a2, a3]
+	call_words = [v0, v1, a0, a1, a2, a3]
+	result = [v0, v1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go mipsFrameStart
+	frame_finish = go mipsFrameFinish
+	frame_load = go mipsFrameLoad
+	frame_store = go mipsFrameStore
+	frame_address = go mipsFrameAddress
+}
+
+arch mips64be {
+	alias = "mips64be"
+	endian = big
+	word_bits = 64
+	pointer_bits = 64
+	instruction_alignment = 4
+	stack_word_bytes = 8
+	stack_alignment = 16
+	patch_relocations = go mipsPatchRelocations
+	registers integer = [zero, at, v0, v1, a0, a1, a2, a3, t0, t1, t2, t3, t4, t5, t6, t7, s0, s1, s2, s3, s4, s5, s6, s7, t8, t9, k0, k1, gp, stack, frame, link]
+	locations {
+		primary = v0
+		secondary = v1
+		tertiary = a0
+		scratch = t0
+		address = t1
+		compareLeft = t2
+		compareRight = t3
+		copy_destination = a1
+		copy_source = a2
+		copy_count = a3
+		stack = stack
+		frame = frame
+		link = link
+	}
+	conditions {
+		eq = 0
+		ne = 1
+		sle = 2
+		sgt = 3
+		slt = 4
+		sge = 5
+		ult = 6
+		uge = 7
+		ule = 8
+		ugt = 9
+	}
+	bind {
+		move = go mipsMove
+		address = go mipsEmitAddress
+		load.native = go mipsLoadNative
+		load.i32 = go mipsLoadI32
+		load.u32 = go mipsLoadU32
+		load.i16 = go mipsLoadI16
+		load.u16 = go mipsLoadU16
+		load.i8 = go mipsLoadI8
+		load.u8 = go mipsLoadU8
+		store.native = go mipsStoreNative
+		store.u32 = go mipsStoreU32
+		store.u16 = go mipsStoreU16
+		store.u8 = go mipsStoreU8
+		add = go mipsAdd
+		subtract = go mipsSubtract
+		multiply = go mipsMultiply
+		bit_and = go mipsBitAnd
+		bit_or = go mipsBitOr
+		bit_xor = go mipsBitXor
+		compare = go mipsCompare
+		test = go mipsTest
+		increment = go mipsIncrement
+		decrement = go mipsDecrement
+		shift_left_immediate = go mipsShiftLeftImmediate
+		shift_right_unsigned_immediate = go mipsShiftRightUnsignedImmediate
+		shift_right_signed_immediate = go mipsShiftRightSignedImmediate
+		call = go mipsCall
+		call_indirect = go mipsCallIndirect
+		jump = go mipsJump
+		jump_condition = go mipsJumpCondition
+		set_condition = go mipsSetCondition
+		return = go mipsReturn
+		leave = go mipsLeave
+		host_syscall = go mipsHostSyscall
+		move_immediate = go mipsMoveImmediate
+		variable_shift = go mipsVariableShift
+		signed_divide = go mipsSignedDivide
+		copy_bytes = sequence copyBytesBE
+	}
+	sequences {
+		copyBytesBE(out:emitter) {
+			let forward = out.NewLabel()
+			let backwardLoop = out.NewLabel()
+			let forwardLoop = out.NewLabel()
+			let done = out.NewLabel()
+			mipsCompare(out, a1, a2)
+			mipsJumpCondition(out, ult, forward)
+			mipsEmitAddress(out, t0, record_address(Base:a2, Index:a3, Scale:1,))
+			mipsCompare(out, a1, t0)
+			mipsJumpCondition(out, uge, forward)
+			mipsEmitAddress(out, a2, record_address(Base:a2, Index:a3, Scale:1, Displacement:-1,))
+			mipsEmitAddress(out, a1, record_address(Base:a1, Index:a3, Scale:1, Displacement:-1,))
+			out.Mark(backwardLoop)
+			mipsCompare(out, a3, zero)
+			mipsJumpCondition(out, eq, done)
+			mipsLoadU8(out, t0, record_address(Base:a2,))
+			mipsStoreU8(out, record_address(Base:a1,), t0)
+			mipsDecrement(out, a2)
+			mipsDecrement(out, a1)
+			mipsDecrement(out, a3)
+			mipsJump(out, backwardLoop)
+			out.Mark(forward)
+			out.Mark(forwardLoop)
+			mipsCompare(out, a3, zero)
+			mipsJumpCondition(out, eq, done)
+			mipsLoadU8(out, t0, record_address(Base:a2,))
+			mipsStoreU8(out, record_address(Base:a1,), t0)
+			mipsIncrement(out, a2)
+			mipsIncrement(out, a1)
+			mipsDecrement(out, a3)
+			mipsJump(out, forwardLoop)
+			out.Mark(done)
+		}
+	}
+}
+
+abi mips64be_internal {
+	unsigned_divide = go mipsUnsignedDivide
+	arch = mips64be
+	arguments = [v0, v1, a0, a1, a2, a3]
+	call_words = [v0, v1, a0, a1, a2, a3]
+	result = [v0, v1]
+	stack_alignment = 16
+	return_address = link
+	frame_pointer = frame
+	frame_start = go mipsFrameStart
+	frame_finish = go mipsFrameFinish
+	frame_load = go mipsFrameLoad
+	frame_store = go mipsFrameStore
+	frame_address = go mipsFrameAddress
+}

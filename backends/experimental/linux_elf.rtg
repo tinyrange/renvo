@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Static Linux images shared by experimental native emitters. Text is RX;
+# initialized data and zero-filled BSS occupy a separate RW load segment.
+go backend {
+	const codeAddress = 0x11000
+
+	func dataOffset(out *RTGEmitter) int  { return RTGAlignValue(0x1000+len(out.Code()), 0x10000) }
+	func dataAddress(out *RTGEmitter) int { return 0x10000 + dataOffset(out) }
+	func bssAddress(out *RTGEmitter) int  { return RTGAlignValue(dataAddress(out)+len(out.Data()), 16) }
+	func put(image []byte, at int, value uint64, width int, big bool) {
+		for i := 0; i < width; i++ {
+			shift := i * 8
+			if big {
+				shift = (width - 1 - i) * 8
+			}
+			image[at+i] = byte(value >> uint(shift))
+		}
+	}
+	func image(out *RTGEmitter, machine int, flags int, bits int, big bool) []byte {
+		offset := dataOffset(out)
+		result := make([]byte, offset+len(out.Data()))
+		result[0] = 0x7f
+		result[1] = 'E'
+		result[2] = 'L'
+		result[3] = 'F'
+		result[4] = 1
+		if bits == 64 {
+			result[4] = 2
+		}
+		result[5] = 1
+		if big {
+			result[5] = 2
+		}
+		result[6] = 1
+		put(result, 16, 2, 2, big)
+		put(result, 18, uint64(machine), 2, big)
+		put(result, 20, 1, 4, big)
+		if bits == 32 {
+			put(result, 24, codeAddress, 4, big)
+			put(result, 28, 52, 4, big)
+			put(result, 36, uint64(flags), 4, big)
+			put(result, 40, 52, 2, big)
+			put(result, 42, 32, 2, big)
+			put(result, 44, 2, 2, big)
+		} else {
+			put(result, 24, codeAddress, 8, big)
+			put(result, 32, 64, 8, big)
+			put(result, 48, uint64(flags), 4, big)
+			put(result, 52, 64, 2, big)
+			put(result, 54, 56, 2, big)
+			put(result, 56, 2, 2, big)
+		}
+		for i := 0; i < 2; i++ {
+			file := 0
+			address := 0x10000
+			size := 0x1000 + len(out.Code())
+			memory := size
+			permissions := 5
+			if i == 1 {
+				file = offset
+				address = dataAddress(out)
+				size = len(out.Data())
+				memory = bssAddress(out) - address + out.BSSSize()
+				permissions = 6
+			}
+			if bits == 32 {
+				at := 52 + i*32
+				put(result, at, 1, 4, big)
+				put(result, at+4, uint64(file), 4, big)
+				put(result, at+8, uint64(address), 4, big)
+				put(result, at+12, uint64(address), 4, big)
+				put(result, at+16, uint64(size), 4, big)
+				put(result, at+20, uint64(memory), 4, big)
+				put(result, at+24, uint64(permissions), 4, big)
+				put(result, at+28, 0x10000, 4, big)
+			} else {
+				at := 64 + i*56
+				put(result, at, 1, 4, big)
+				put(result, at+4, uint64(permissions), 4, big)
+				put(result, at+8, uint64(file), 8, big)
+				put(result, at+16, uint64(address), 8, big)
+				put(result, at+24, uint64(address), 8, big)
+				put(result, at+32, uint64(size), 8, big)
+				put(result, at+40, uint64(memory), 8, big)
+				put(result, at+48, 0x10000, 8, big)
+			}
+		}
+		copy(result[0x1000:], out.Code())
+		copy(result[offset:], out.Data())
+		return result
+	}
+}

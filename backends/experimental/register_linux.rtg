@@ -1,0 +1,1621 @@
+# SPDX-License-Identifier: Apache-2.0
+# Shared scalar lowering for experimental Linux register-machine backends.
+# Register codes are virtual locations; only the instruction encoders map them
+# to ISA registers. No host assembler, linker, interpreter, or compiler is used.
+@import "linux_elf.rtg"
+go backend {
+	var cpu int
+	var word int
+	var big bool
+	var patch int = -1
+
+	func reg(code int) RTGRegister { return RTGRegister{Code: code, Valid: true} }
+	func position(out *RTGEmitter) int {
+		if patch >= 0 {
+			return patch
+		}
+		return out.Len()
+	}
+	func byteOut(out *RTGEmitter, value byte) {
+		if patch >= 0 {
+			out.SetByteAt(patch, value)
+			patch++
+			return
+		}
+		RTGByte(out, value)
+	}
+	func insn(out *RTGEmitter, value int) {
+		for i := 0; i < 4; i++ {
+			shift := i * 8
+			if big {
+				shift = (3 - i) * 8
+			}
+			byteOut(out, byte(value>>uint(shift)))
+		}
+	}
+	func half(out *RTGEmitter, value int) { byteOut(out, byte(value>>8)); byteOut(out, byte(value)) }
+	func tempReg() int {
+		if cpu == 8 {
+			return 0
+		}
+		if cpu == 4 || cpu == 10 {
+			return 28
+		}
+		return 31
+	}
+	func physical(code int) int {
+		if cpu == 10 {
+			if code < 3 {
+				return code
+			}
+			if code < 13 {
+				return code + 5
+			}
+			if code == 13 {
+				return 31
+			}
+			if code == 14 {
+				return 29
+			}
+			return 30
+		}
+		if cpu == 9 {
+			if code < 3 {
+				return 26 - code
+			}
+			if code < 13 {
+				return code
+			}
+			if code == 13 {
+				return 2
+			}
+			if code == 14 {
+				return 30
+			}
+			return 29
+		}
+		if cpu == 8 {
+			if code < 7 {
+				return code + 2
+			}
+			if code == 7 {
+				return 9
+			}
+			if code == 8 {
+				return 10
+			}
+			if code == 9 {
+				return 12
+			}
+			if code == 10 {
+				return 0
+			}
+			if code == 11 {
+				return 13
+			}
+			if code == 12 {
+				return 1
+			}
+			if code == 13 {
+				return 14
+			}
+			if code == 14 {
+				return 15
+			}
+			return 11
+		}
+		if cpu == 4 {
+			if code < 3 {
+				return code + 16
+			}
+			if code < 13 {
+				return code - 2
+			}
+			if code == 13 {
+				return 26
+			}
+			if code == 14 {
+				return 30
+			}
+			return 15
+		}
+		if cpu == 7 {
+			if code < 3 {
+				return code + 8
+			}
+			if code < 13 {
+				return code + 13
+			}
+			if code == 13 {
+				return 15
+			}
+			if code == 14 {
+				return 14
+			}
+			return 30
+		}
+		if cpu == 5 {
+			if code < 3 {
+				return code + 3
+			}
+			if code < 13 {
+				return code + 9
+			}
+			if code == 13 {
+				return 9
+			}
+			if code == 14 {
+				return 1
+			}
+			return 22
+		}
+		if cpu == 6 {
+			if code < 3 {
+				return code + 5
+			}
+			if code < 13 {
+				return code + 15
+			}
+			if code == 13 {
+				return 15
+			}
+			if code == 14 {
+				return 1
+			}
+			return 28
+		}
+		if cpu == 1 || cpu == 2 {
+			if code < 3 {
+				return code + 3
+			}
+			if code < 13 {
+				return code + 3
+			}
+			if code == 13 {
+				return 18
+			}
+			if code == 14 {
+				return 1
+			}
+			return 30
+		}
+		// LoongArch: a0-a2, temporaries, ra, sp, and fp. r31 is reserved for
+		// constant synthesis and never overlaps the virtual register set.
+		if code < 3 {
+			return code + 4
+		}
+		if code < 13 {
+			return code + 9
+		}
+		if code == 13 {
+			return 1
+		}
+		if code == 14 {
+			return 3
+		}
+		return 22
+	}
+	func small(out *RTGEmitter, destination int, value int) {
+		if cpu == 10 {
+			insn(out, 0x7800c000|((value&511)<<5)|((value&0x3e00)<<7)|((value&0xc000)<<8)|destination)
+			return
+		}
+		if cpu == 9 {
+			insn(out, 0x34000000|(destination<<16)|((value&8191)<<1)|((value>>13)&1))
+			return
+		}
+		if cpu == 8 {
+			insn(out, 0xa7090000|(destination<<20)|(value&65535))
+			return
+		}
+		if cpu == 4 {
+			insn(out, 0x201f0000|(destination<<21)|(value&65535))
+			return
+		}
+		if cpu == 7 {
+			insn(out, 0x80102000|(destination<<25)|(value&8191))
+			return
+		}
+		if cpu == 5 {
+			insn(out, 0x9c000000|(destination<<21)|(value&65535))
+			return
+		}
+		if cpu == 6 {
+			insn(out, 0x30000000|(destination<<21)|(value&65535))
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			insn(out, 0x38000000|(destination<<21)|(value&65535))
+			return
+		}
+		insn(out, 0x02c00000|((value&4095)<<10)|destination)
+	}
+
+	// op: add, sub, and, or, xor, multiply, shl, shr, sar, sdiv, udiv.
+	func alu(out *RTGEmitter, op int, destination int, left int, right int) {
+		if cpu == 10 {
+			code := 0xf300c000
+			if op == 1 {
+				code = 0xf320c000
+				t := left
+				left = right
+				right = t
+			}
+			if op == 2 {
+				code = 0xf100c000
+			}
+			if op == 3 {
+				code = 0xf120c000
+			}
+			if op == 4 {
+				code = 0xf160c000
+			}
+			if op == 5 {
+				code = 0xed00c000
+			}
+			if op == 6 {
+				code = 0xc640c080
+			}
+			if op == 7 {
+				code = 0xc640c040
+			}
+			if op == 8 {
+				code = 0xc640c000
+			}
+			insn(out, code|(left<<16)|(right<<8)|destination)
+			return
+		}
+		if cpu == 9 {
+			if op == 5 {
+				alu(out, 3, 13, left, left)
+				alu(out, 3, 14, right, right)
+				small(out, 17, 0)
+				for i := 0; i < 32; i++ {
+					insn(out, 0xd0001800|(14<<21)|(15<<16)|(31<<5)|31)
+					insn(out, 0x08002880|(15<<16))
+					alu(out, 0, 17, 17, 13)
+					insn(out, 0xd4000800|(13<<21)|(13<<16)|(1<<5)|1)
+					insn(out, 0xd0000800|(14<<21)|(30<<5)|14)
+				}
+				alu(out, 3, destination, 17, 17)
+				return
+			}
+			if op >= 6 && op <= 8 {
+				if op == 7 {
+					insn(out, (11<<21)|(right<<16)|0x1840)
+					insn(out, 0xd0000000|(left<<21)|destination)
+				} else {
+					insn(out, (11<<21)|(right<<16)|0x18c0)
+					if op == 6 {
+						insn(out, 0xd4000000|(destination<<21)|(left<<16))
+					} else {
+						insn(out, 0xd0001400|(left<<21)|(destination<<16))
+					}
+				}
+				return
+			}
+			code := 0x600
+			if op == 1 {
+				code = 0x400
+			}
+			if op == 2 {
+				code = 0x200
+			}
+			if op == 3 {
+				code = 0x240
+			}
+			if op == 4 {
+				code = 0x280
+			}
+			insn(out, 0x08000000|(right<<21)|(left<<16)|code|destination)
+			return
+		}
+		if cpu == 8 {
+			if op >= 6 && op <= 8 {
+				code := 13
+				if op == 7 {
+					code = 12
+				}
+				if op == 8 {
+					code = 10
+				}
+				insn(out, 0xeb000000|(destination<<20)|(left<<16)|(right<<12))
+				half(out, code)
+				return
+			}
+			code := 0xe8
+			if op == 1 {
+				code = 0xe9
+			}
+			if op == 2 {
+				code = 0xe4
+			}
+			if op == 3 {
+				code = 0xe6
+			}
+			if op == 4 {
+				code = 0xe7
+			}
+			if op == 5 {
+				code = 0xed
+			}
+			insn(out, 0xb9000000|(code<<16)|(right<<12)|(destination<<4)|left)
+			return
+		}
+		if cpu == 4 {
+			major := 16
+			minor := 32
+			if op == 1 {
+				minor = 41
+			}
+			if op >= 2 && op <= 4 {
+				major = 17
+				minor = (op - 2) * 32
+			}
+			if op == 5 {
+				major = 19
+				minor = 32
+			}
+			if op >= 6 {
+				major = 18
+				minor = 57
+				if op == 7 {
+					minor = 52
+				}
+				if op == 8 {
+					minor = 60
+				}
+			}
+			insn(out, (major<<26)|(left<<21)|(right<<16)|(minor<<5)|destination)
+			return
+		}
+		if cpu == 7 {
+			opcode := 0
+			if op == 1 {
+				opcode = 4
+			}
+			if op == 2 {
+				opcode = 1
+			}
+			if op == 3 {
+				opcode = 2
+			}
+			if op == 4 {
+				opcode = 3
+			}
+			if op == 5 {
+				opcode = 11
+				if word == 8 {
+					opcode = 9
+				}
+			}
+			if op == 6 {
+				opcode = 37
+			}
+			if op == 7 {
+				opcode = 38
+			}
+			if op == 8 {
+				opcode = 39
+			}
+			if op == 9 || op == 10 {
+				opcode = 15
+				if op == 10 {
+					opcode = 14
+				}
+				if word == 8 {
+					opcode = 45
+					if op == 10 {
+						opcode = 13
+					}
+				} else {
+					if op == 9 {
+						insn(out, 0x8138201f|(1<<25)|(left<<14))
+						insn(out, 0x81804000)
+					} else {
+						insn(out, 0x81800000)
+					}
+				}
+			}
+			x := 0
+			if word == 8 && op >= 6 && op <= 8 {
+				x = 4096
+			}
+			insn(out, 0x80000000|(destination<<25)|(opcode<<19)|(left<<14)|x|right)
+			return
+		}
+		if cpu == 5 {
+			opcode := 0
+			if op == 1 {
+				opcode = 2
+			}
+			if op == 2 {
+				opcode = 3
+			}
+			if op == 3 {
+				opcode = 4
+			}
+			if op == 4 {
+				opcode = 5
+			}
+			if op == 5 {
+				opcode = 0x306
+			}
+			if op == 6 {
+				opcode = 8
+			}
+			if op == 7 {
+				opcode = 0x48
+			}
+			if op == 8 {
+				opcode = 0x88
+			}
+			if op == 9 {
+				opcode = 0x309
+			}
+			if op == 10 {
+				opcode = 0x30a
+			}
+			insn(out, 0xe0000000|opcode|(destination<<21)|(left<<16)|(right<<11))
+			return
+		}
+		if cpu == 6 {
+			opcode := 0x10000000
+			if op == 1 {
+				opcode = 0x14000000
+				t := left
+				left = right
+				right = t
+			}
+			if op == 2 {
+				opcode = 0x84000000
+			}
+			if op == 3 {
+				opcode = 0x80000000
+			}
+			if op == 4 {
+				opcode = 0x88000000
+			}
+			if op == 5 {
+				opcode = 0x40000000
+			}
+			if op == 6 {
+				opcode = 0x44000400
+			}
+			if op == 7 {
+				opcode = 0x44000000
+			}
+			if op == 8 {
+				opcode = 0x44000200
+			}
+			if op == 9 || op == 10 {
+				opcode = 0x48000000
+				if op == 10 {
+					opcode |= 2
+				}
+				t := left
+				left = right
+				right = t
+			}
+			insn(out, opcode|(destination<<21)|(left<<16)|(right<<11))
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			opcode := 0x7c000214
+			arithmetic := true
+			if op == 1 {
+				opcode = 0x7c000050
+				temp := left
+				left = right
+				right = temp
+			}
+			if op == 2 {
+				opcode = 0x7c000038
+				arithmetic = false
+			}
+			if op == 3 {
+				opcode = 0x7c000378
+				arithmetic = false
+			}
+			if op == 4 {
+				opcode = 0x7c000278
+				arithmetic = false
+			}
+			if op == 5 {
+				opcode = 0x7c0001d6
+				if word == 8 {
+					opcode -= 4
+				}
+			}
+			if op == 6 {
+				opcode = 0x7c000030
+				if word == 8 {
+					opcode += 6
+				}
+				arithmetic = false
+			}
+			if op == 7 {
+				opcode = 0x7c000430
+				if word == 8 {
+					opcode += 6
+				}
+				arithmetic = false
+			}
+			if op == 8 {
+				opcode = 0x7c000630
+				if word == 8 {
+					opcode += 4
+				}
+				arithmetic = false
+			}
+			if op == 9 {
+				opcode = 0x7c0003d6
+				if word == 8 {
+					opcode -= 4
+				}
+			}
+			if op == 10 {
+				opcode = 0x7c000396
+				if word == 8 {
+					opcode -= 4
+				}
+			}
+			if arithmetic {
+				insn(out, opcode|(destination<<21)|(left<<16)|(right<<11))
+			} else {
+				insn(out, opcode|(left<<21)|(destination<<16)|(right<<11))
+			}
+			return
+		}
+		opcode := 0x00108000
+		if op == 1 {
+			opcode = 0x00118000
+		}
+		if op == 2 {
+			opcode = 0x00148000
+		}
+		if op == 3 {
+			opcode = 0x00150000
+		}
+		if op == 4 {
+			opcode = 0x00158000
+		}
+		if op == 5 {
+			opcode = 0x001d8000
+		}
+		if op == 6 {
+			opcode = 0x00188000
+		}
+		if op == 7 {
+			opcode = 0x00190000
+		}
+		if op == 8 {
+			opcode = 0x00198000
+		}
+		if op == 9 {
+			opcode = 0x00220000
+		}
+		if op == 10 {
+			opcode = 0x00230000
+		}
+		insn(out, opcode|(right<<10)|(left<<5)|destination)
+	}
+	func move(out *RTGEmitter, destination RTGRegister, source RTGRegister) {
+		if destination.Code != source.Code {
+			alu(out, 3, physical(destination.Code), physical(source.Code), physical(source.Code))
+		}
+	}
+	func immediate(out *RTGEmitter, destination RTGRegister, value int64) {
+		d := physical(destination.Code)
+		if cpu == 8 {
+			half(out, 0xc008|(d<<4))
+			insn(out, int(uint64(value)>>32))
+			half(out, 0xc009|(d<<4))
+			insn(out, int(uint64(value)&0xffffffff))
+			return
+		}
+		small(out, d, int(uint64(value)>>uint((word-1)*8))&255)
+		for i := word - 2; i >= 0; i-- {
+			small(out, tempReg(), 8)
+			alu(out, 6, d, d, tempReg())
+			small(out, tempReg(), int(uint64(value)>>uint(i*8))&255)
+			alu(out, 3, d, d, tempReg())
+		}
+	}
+	func binary(out *RTGEmitter, op int, destination RTGRegister, source RTGRegister) {
+		alu(out, op, physical(destination.Code), physical(destination.Code), physical(source.Code))
+	}
+	func add(out *RTGEmitter, d RTGRegister, s RTGRegister)      { binary(out, 0, d, s) }
+	func subtract(out *RTGEmitter, d RTGRegister, s RTGRegister) { binary(out, 1, d, s) }
+	func bitAnd(out *RTGEmitter, d RTGRegister, s RTGRegister)   { binary(out, 2, d, s) }
+	func bitOr(out *RTGEmitter, d RTGRegister, s RTGRegister)    { binary(out, 3, d, s) }
+	func bitXor(out *RTGEmitter, d RTGRegister, s RTGRegister)   { binary(out, 4, d, s) }
+	func multiply(out *RTGEmitter, d RTGRegister, s RTGRegister) { binary(out, 5, d, s) }
+	func increment(out *RTGEmitter, d RTGRegister) {
+		small(out, tempReg(), 1)
+		alu(out, 0, physical(d.Code), physical(d.Code), tempReg())
+	}
+	func decrement(out *RTGEmitter, d RTGRegister) {
+		small(out, tempReg(), 1)
+		alu(out, 1, physical(d.Code), physical(d.Code), tempReg())
+	}
+	func shiftImmediate(out *RTGEmitter, d RTGRegister, value byte, op int) {
+		if cpu == 8 {
+			r := physical(d.Code)
+			code := 13
+			if op == 7 {
+				code = 12
+			}
+			if op == 8 {
+				code = 10
+			}
+			insn(out, 0xeb000000|(r<<20)|(r<<16)|int(value))
+			half(out, code)
+			return
+		}
+		small(out, tempReg(), int(value))
+		alu(out, op, physical(d.Code), physical(d.Code), tempReg())
+	}
+	func shiftLeft(out *RTGEmitter, d RTGRegister, value byte)   { shiftImmediate(out, d, value, 6) }
+	func shiftRight(out *RTGEmitter, d RTGRegister, value byte)  { shiftImmediate(out, d, value, 7) }
+	func shiftSigned(out *RTGEmitter, d RTGRegister, value byte) { shiftImmediate(out, d, value, 8) }
+	func variableShift(out *RTGEmitter, direction RTGShiftDirection, signed bool) {
+		op := 6
+		if direction == RTGShiftRight {
+			op = 7
+			if signed {
+				op = 8
+			}
+		}
+		alu(out, op, physical(0), physical(2), physical(0))
+	}
+	func divide(out *RTGEmitter, remainder bool, unsigned bool) {
+		if cpu == 8 {
+			alu(out, 3, 5, 2, 2)
+			alu(out, 3, 1, 4, 4)
+			op := 0x0d
+			if unsigned {
+				small(out, 0, 0)
+				op = 0x87
+			}
+			insn(out, 0xb9000005|(op<<16))
+			r := 1
+			if remainder {
+				r = 0
+			}
+			alu(out, 3, 2, r, r)
+			return
+		}
+		if cpu == 4 || cpu == 9 || cpu == 10 {
+			softwareDivide(out, remainder, unsigned)
+			return
+		}
+		op := 9
+		if unsigned {
+			op = 10
+		}
+		if remainder {
+			alu(out, op, physical(3), physical(2), physical(0))
+			alu(out, 5, physical(3), physical(3), physical(0))
+			alu(out, 1, physical(0), physical(2), physical(3))
+		} else {
+			alu(out, op, physical(0), physical(2), physical(0))
+		}
+	}
+	func signedDivide(out *RTGEmitter, remainder bool)        { divide(out, remainder, false) }
+	func unsignedDivide(out *RTGEmitter, remainder bool) bool { divide(out, remainder, true); return true }
+	func effective(out *RTGEmitter, value RTGAddress) RTGRegister {
+		d := reg(12)
+		if RTGAddressValid(value) {
+			address(out, d, value)
+			return d
+		}
+		immediate(out, d, int64(value.Displacement))
+		if value.Base.Valid {
+			add(out, d, value.Base)
+		}
+		if value.Index.Valid {
+			move(out, reg(11), value.Index)
+			shiftLeft(out, reg(11), byte(RTGLog2(value.Scale)))
+			add(out, d, reg(11))
+		}
+		return d
+	}
+	func address(out *RTGEmitter, d RTGRegister, value RTGAddress) {
+		if RTGAddressValid(value) {
+			at := out.Len()
+			immediate(out, d, 0)
+			RTGAddressRelocAt(out, value, at)
+			return
+		}
+		a := effective(out, value)
+		move(out, d, a)
+	}
+	func memory(out *RTGEmitter, d RTGRegister, value RTGAddress, size int, store bool) {
+		a := physical(effective(out, value).Code)
+		r := physical(d.Code)
+		if cpu == 10 {
+			if !store {
+				small(out, r, 0)
+			}
+			for i := 0; i < size; i++ {
+				if store {
+					small(out, 28, i*8)
+					alu(out, 7, 18, r, 28)
+					insn(out, 0xa100c000|(a<<16)|(18<<8)|i)
+				} else {
+					insn(out, 0x9120c000|(a<<16)|((size-1-i)<<5)|18)
+					small(out, 28, 8)
+					alu(out, 6, r, r, 28)
+					alu(out, 3, r, r, 18)
+				}
+			}
+			return
+		}
+		if cpu == 9 {
+			if !store {
+				small(out, r, 0)
+			}
+			for i := 0; i < size; i++ {
+				if store {
+					small(out, 31, (size-1-i)*8)
+					alu(out, 7, 18, r, 31)
+					insn(out, 0x60000000|(a<<21)|(18<<16)|(i<<1))
+				} else {
+					insn(out, 0x40000000|(a<<21)|(18<<16)|(i<<1))
+					small(out, 31, 8)
+					alu(out, 6, r, r, 31)
+					alu(out, 3, r, r, 18)
+				}
+			}
+			return
+		}
+		if cpu == 8 {
+			if store && size < 8 {
+				op := 0x42
+				if size == 2 {
+					op = 0x40
+				}
+				if size == 4 {
+					op = 0x50
+				}
+				insn(out, (op<<24)|(r<<20)|(a<<12))
+				return
+			}
+			op := 0x90
+			if size == 2 {
+				op = 0x91
+			}
+			if size == 4 {
+				op = 0x16
+			}
+			if size == 8 {
+				op = 4
+			}
+			if store {
+				op = 0x24
+			}
+			insn(out, 0xe3000000|(r<<20)|(a<<12))
+			half(out, op)
+			return
+		}
+		if cpu == 4 {
+			if !store {
+				small(out, r, 0)
+			}
+			for i := 0; i < size; i++ {
+				if store {
+					small(out, 28, i*8)
+					alu(out, 7, 27, r, 28)
+					insn(out, 0x38000000|(27<<21)|(a<<16)|i)
+				} else {
+					insn(out, 0x28000000|(27<<21)|(a<<16)|(size-1-i))
+					small(out, 28, 8)
+					alu(out, 6, r, r, 28)
+					alu(out, 3, r, r, 27)
+				}
+			}
+			return
+		}
+		if cpu == 7 {
+			if !store {
+				small(out, r, 0)
+			}
+			for i := 0; i < size; i++ {
+				if store {
+					small(out, tempReg(), (size-1-i)*8)
+					alu(out, 7, 2, r, tempReg())
+					insn(out, 0xc0282000|(2<<25)|(a<<14)|i)
+				} else {
+					insn(out, 0xc0082000|(2<<25)|(a<<14)|i)
+					small(out, tempReg(), 8)
+					alu(out, 6, r, r, tempReg())
+					alu(out, 3, r, r, 2)
+				}
+			}
+			return
+		}
+		if cpu == 5 {
+			op := 0x8c000000
+			if size == 2 {
+				op = 0x94000000
+			}
+			if size == 4 {
+				op = 0x84000000
+			}
+			if store {
+				op = 0xd8000000
+				if size == 2 {
+					op = 0xdc000000
+				}
+				if size == 4 {
+					op = 0xd4000000
+				}
+				insn(out, op|(a<<16)|(r<<11))
+			} else {
+				insn(out, op|(r<<21)|(a<<16))
+			}
+			return
+		}
+		if cpu == 6 {
+			opcode := 0xe0000000
+			if size == 2 {
+				opcode = 0xe4000000
+			}
+			if size == 4 {
+				opcode = 0xe8000000
+			}
+			if store {
+				opcode |= 0x10000000
+			}
+			insn(out, opcode|(r<<21)|(a<<16))
+			return
+		}
+		if (cpu == 1 || cpu == 2) && store && d.Code == 13 {
+			insn(out, 0x7c0802a6|(r<<21))
+		}
+		if cpu == 1 || cpu == 2 {
+			opcode := 0x88000000
+			if size == 2 {
+				opcode = 0xa0000000
+			}
+			if size == 4 {
+				opcode = 0x80000000
+			}
+			if size == 8 {
+				opcode = 0xe8000000
+			}
+			if store {
+				opcode = 0x98000000
+				if size == 2 {
+					opcode = 0xb0000000
+				}
+				if size == 4 {
+					opcode = 0x90000000
+				}
+				if size == 8 {
+					opcode = 0xf8000000
+				}
+			}
+			insn(out, opcode|(r<<21)|(a<<16))
+			if !store && d.Code == 13 {
+				insn(out, 0x7c0803a6|(r<<21))
+			}
+			return
+		}
+		opcode := 0x2a000000
+		if size == 2 {
+			opcode = 0x2a400000
+		}
+		if size == 4 {
+			opcode = 0x2a800000
+		}
+		if size == 8 {
+			opcode = 0x28c00000
+		}
+		if store {
+			opcode = 0x29000000
+			if size == 2 {
+				opcode = 0x29400000
+			}
+			if size == 4 {
+				opcode = 0x29800000
+			}
+			if size == 8 {
+				opcode = 0x29c00000
+			}
+		}
+		insn(out, opcode|(a<<5)|r)
+	}
+	func loadNative(out *RTGEmitter, d RTGRegister, a RTGAddress) { memory(out, d, a, word, false) }
+	func loadU32(out *RTGEmitter, d RTGRegister, a RTGAddress)    { memory(out, d, a, 4, false) }
+	func loadU16(out *RTGEmitter, d RTGRegister, a RTGAddress)    { memory(out, d, a, 2, false) }
+	func loadU8(out *RTGEmitter, d RTGRegister, a RTGAddress)     { memory(out, d, a, 1, false) }
+	func signedLoad(out *RTGEmitter, d RTGRegister, a RTGAddress, size int) {
+		memory(out, d, a, size, false)
+		if size < word {
+			shiftLeft(out, d, byte((word-size)*8))
+			shiftSigned(out, d, byte((word-size)*8))
+		}
+	}
+	func loadI32(out *RTGEmitter, d RTGRegister, a RTGAddress)     { signedLoad(out, d, a, 4) }
+	func loadI16(out *RTGEmitter, d RTGRegister, a RTGAddress)     { signedLoad(out, d, a, 2) }
+	func loadI8(out *RTGEmitter, d RTGRegister, a RTGAddress)      { signedLoad(out, d, a, 1) }
+	func storeNative(out *RTGEmitter, a RTGAddress, s RTGRegister) { memory(out, s, a, word, true) }
+	func storeU32(out *RTGEmitter, a RTGAddress, s RTGRegister)    { memory(out, s, a, 4, true) }
+	func storeU16(out *RTGEmitter, a RTGAddress, s RTGRegister)    { memory(out, s, a, 2, true) }
+	func storeU8(out *RTGEmitter, a RTGAddress, s RTGRegister)     { memory(out, s, a, 1, true) }
+	func less(out *RTGEmitter, d RTGRegister, l RTGRegister, r RTGRegister, unsigned bool) {
+		rd := physical(d.Code)
+		rl := physical(l.Code)
+		rr := physical(r.Code)
+		if cpu == 10 {
+			op := 0xf240c000
+			if unsigned {
+				op = 0xf260c000
+			}
+			insn(out, op|(rr<<16)|(rl<<8))
+			insn(out, 0x7a00c020|rd)
+			return
+		}
+		if cpu == 9 {
+			cf := 5
+			if unsigned {
+				cf = 9
+			}
+			insn(out, 0x08000880|(rr<<21)|(rl<<16)|(cf<<12)|rd)
+			small(out, rd, 1)
+			return
+		}
+		if cpu == 8 {
+			op := 0x20
+			if unsigned {
+				op = 0x21
+			}
+			insn(out, 0xb9000000|(op<<16)|(rl<<4)|rr)
+			small(out, rd, 0)
+			insn(out, 0xa7a40004)
+			small(out, rd, 1)
+			return
+		}
+		if cpu == 4 {
+			op := 77
+			if unsigned {
+				op = 29
+			}
+			insn(out, 0x40000000|(rl<<21)|(rr<<16)|(op<<5)|rd)
+			return
+		}
+		if cpu == 7 {
+			insn(out, 0x80a00000|(rl<<14)|rr)
+			small(out, rd, 0)
+			op := 11
+			if unsigned {
+				op = 13
+			}
+			b := 0x800000
+			if word == 8 {
+				b = 0x680000
+			}
+			insn(out, (op<<25)|b|3)
+			insn(out, 0x01000000)
+			small(out, rd, 1)
+			return
+		}
+		if cpu == 5 {
+			op := 12
+			if unsigned {
+				op = 4
+			}
+			insn(out, 0xe4000000|(op<<21)|(rl<<16)|(rr<<11))
+			small(out, rd, 0)
+			insn(out, 0x0c000003)
+			insn(out, 0x15000000)
+			small(out, rd, 1)
+			return
+		}
+		if cpu == 6 {
+			op := 0x14000001
+			if unsigned {
+				op |= 2
+			}
+			insn(out, op|(rd<<21)|(rr<<16)|(rl<<11))
+			insn(out, 0x64000000|(rd<<21)|(rd<<16)|31)
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			op := 0x7c000000
+			if unsigned {
+				op |= 0x40
+			}
+			if word == 8 {
+				op |= 0x200000
+			}
+			insn(out, op|(rl<<16)|(rr<<11))
+			small(out, rd, 0)
+			insn(out, 0x40800008)
+			small(out, rd, 1)
+			return
+		}
+		op := 0x00120000
+		if unsigned {
+			op = 0x00128000
+		}
+		insn(out, op|(rr<<10)|(rl<<5)|rd)
+	}
+	func compare(out *RTGEmitter, l RTGRegister, r RTGRegister) {
+		move(out, reg(11), r)
+		move(out, reg(5), l)
+		move(out, reg(6), reg(11))
+	}
+	func test(out *RTGEmitter, l RTGRegister, r RTGRegister) {
+		move(out, reg(11), r)
+		move(out, reg(5), l)
+		bitAnd(out, reg(5), reg(11))
+		immediate(out, reg(6), 0)
+	}
+	func condition(out *RTGEmitter, c RTGCondition, d RTGRegister) {
+		code := c.Code
+		invert := false
+		l := reg(5)
+		r := reg(6)
+		if code < 2 {
+			move(out, d, l)
+			bitXor(out, d, r)
+			immediate(out, reg(11), 0)
+			less(out, d, reg(11), d, true)
+			invert = code == 0
+		} else {
+			if code == 2 || code == 3 || code == 8 || code == 9 {
+				l = reg(6)
+				r = reg(5)
+			}
+			less(out, d, l, r, code >= 6)
+			invert = code == 2 || code == 5 || code == 7 || code == 8
+		}
+		if invert {
+			small(out, tempReg(), 1)
+			alu(out, 4, physical(d.Code), physical(d.Code), tempReg())
+		}
+	}
+	func branchZero(out *RTGEmitter, r RTGRegister, target int) {
+		at := position(out)
+		rr := physical(r.Code)
+		if cpu == 10 {
+			insn(out, 0x7500c000|(rr<<16))
+			delta := target - at - 4
+			insn(out, 0x5c00d000|((delta>>1)&511)|((delta&0x1fc00)<<6))
+			return
+		}
+		if cpu == 9 {
+			insn(out, 0x08003880|(rr<<16))
+			delta := (target - at - 12) >> 2
+			insn(out, 0xe8000000|((delta&1023)<<3)|(((delta>>10)&1)<<2)|(((delta>>11)&31)<<16)|((delta>>16)&1))
+			insn(out, 0x08000240)
+			return
+		}
+		if cpu == 8 {
+			insn(out, 0xb9020000|(rr<<4)|rr)
+			insn(out, 0xa7840000|(((target-at-4)>>1)&65535))
+			return
+		}
+		if cpu == 4 {
+			insn(out, 0xe4000000|(rr<<21)|(((target-at-4)>>2)&0x1fffff))
+			return
+		}
+		if cpu == 7 {
+			insn(out, 0x80a02000|(rr<<14))
+			b := 0x02800000
+			if word == 8 {
+				b = 0x02680000
+			}
+			insn(out, b|(((target-at-4)>>2)&0x7ffff))
+			insn(out, 0x01000000)
+			return
+		}
+		if cpu == 5 {
+			insn(out, 0xbc000000|(rr<<16))
+			insn(out, 0x10000000|(((target-at-4)>>2)&0x3ffffff))
+			insn(out, 0x15000000)
+			return
+		}
+		if cpu == 6 {
+			insn(out, 0xbc000000|(rr<<16)|((target-at)&65535))
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			op := 0x2c000000
+			if word == 8 {
+				op |= 0x200000
+			}
+			insn(out, op|(rr<<16))
+			insn(out, 0x41820000|((target-at-4)&65532))
+			return
+		}
+		delta := (target - at) >> 2
+		insn(out, 0x58000000|((delta&65535)<<10)|(rr<<5))
+	}
+	func branchRegister(out *RTGEmitter, r RTGRegister, link bool) {
+		rr := physical(r.Code)
+		if cpu == 10 {
+			op := 0x5280c000
+			if link {
+				op = 0x50a0c000
+			}
+			insn(out, op|(rr<<16))
+			return
+		}
+		if cpu == 9 {
+			op := 0xe800c000
+			if link {
+				op = 0xe800f000
+			}
+			insn(out, op|(rr<<21))
+			insn(out, 0x08000240)
+			return
+		}
+		if cpu == 8 {
+			op := 0x07f0
+			if link {
+				op = 0x0de0
+			}
+			half(out, op|rr)
+			return
+		}
+		if cpu == 4 {
+			lr := 31
+			if link {
+				lr = 26
+			}
+			insn(out, 0x68000000|(lr<<21)|(rr<<16))
+			return
+		}
+		if cpu == 7 {
+			lr := 0
+			if link {
+				lr = 15
+			}
+			insn(out, 0x81c00000|(lr<<25)|(rr<<14))
+			insn(out, 0x01000000)
+			return
+		}
+		if cpu == 5 {
+			op := 0x44000000
+			if link {
+				op = 0x48000000
+			}
+			insn(out, op|(rr<<11))
+			insn(out, 0x15000000)
+			return
+		}
+		if cpu == 6 {
+			if link {
+				insn(out, 0x98000000|(15<<21)|(28<<16)|(rr<<11))
+				insn(out, 0x80000000)
+			} else {
+				insn(out, 0x98080000|(rr<<11))
+			}
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			insn(out, 0x7c0903a6|(rr<<21))
+			op := 0x4e800420
+			if link {
+				op++
+			}
+			insn(out, op)
+			return
+		}
+		lr := 0
+		if link {
+			lr = 1
+		}
+		insn(out, 0x4c000000|(rr<<5)|lr)
+	}
+	func jump(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		immediate(out, reg(4), 0)
+		out.RelocAt(at, label)
+		branchRegister(out, reg(4), false)
+	}
+	func call(out *RTGEmitter, label RTGLabel) {
+		at := out.Len()
+		immediate(out, reg(4), 0)
+		out.RelocAt(at, label)
+		branchRegister(out, reg(4), true)
+	}
+	func callIndirect(out *RTGEmitter, r RTGRegister) { branchRegister(out, r, true) }
+	func jumpCondition(out *RTGEmitter, c RTGCondition, label RTGLabel) {
+		condition(out, c, reg(3))
+		at := out.Len()
+		branchZero(out, reg(3), at)
+		jump(out, label)
+		end := out.Len()
+		patch = at
+		branchZero(out, reg(3), end)
+		patch = -1
+	}
+	func frameStart(out *RTGEmitter) int {
+		if cpu == 1 || cpu == 2 {
+			insn(out, 0x7c0802a6|(physical(13)<<21))
+		}
+		move(out, reg(4), reg(15))
+		move(out, reg(15), reg(14))
+		at := out.Len()
+		immediate(out, reg(3), 0)
+		subtract(out, reg(14), reg(3))
+		storeNative(out, RTGAddress{Base: reg(15), Displacement: -word}, reg(13))
+		storeNative(out, RTGAddress{Base: reg(15), Displacement: -2 * word}, reg(4))
+		return at
+	}
+	func frameFinish(out *RTGEmitter, at int, size int) {
+		patch = at
+		immediate(out, reg(3), int64(RTGAlignValue(size+2*word, 16)))
+		patch = -1
+	}
+	func frameLoad(out *RTGEmitter, d RTGRegister, offset int) {
+		loadNative(out, d, RTGAddress{Base: reg(15), Displacement: -(offset + 2*word)})
+	}
+	func frameStore(out *RTGEmitter, offset int, s RTGRegister) {
+		storeNative(out, RTGAddress{Base: reg(15), Displacement: -(offset + 2*word)}, s)
+	}
+	func frameAddress(out *RTGEmitter, d RTGRegister, offset int) {
+		address(out, d, RTGAddress{Base: reg(15), Displacement: -(offset + 2*word)})
+	}
+	func leave(out *RTGEmitter) {
+		loadNative(out, reg(13), RTGAddress{Base: reg(15), Displacement: -word})
+		loadNative(out, reg(3), RTGAddress{Base: reg(15), Displacement: -2 * word})
+		move(out, reg(14), reg(15))
+		move(out, reg(15), reg(3))
+	}
+	func ret(out *RTGEmitter) {
+		if cpu == 7 {
+			insn(out, 0x81c3e008)
+			insn(out, 0x01000000)
+			return
+		}
+		if cpu == 6 {
+			insn(out, 0xb6000008|(15<<16))
+			insn(out, 0x80000000)
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			insn(out, 0x4e800020)
+			return
+		}
+		branchRegister(out, reg(13), false)
+	}
+	func patchImmediate(out *RTGEmitter, at int, value int) {
+		// The first instruction contains the destination register. Find its virtual
+		// location using the selected ISA's one-to-one register mapping.
+		bytes := out.Code()
+		instruction := 0
+		for i := 0; i < 4; i++ {
+			shift := i * 8
+			if big {
+				shift = (3 - i) * 8
+			}
+			instruction |= int(bytes[at+i]) << uint(shift)
+		}
+		physicalReg := instruction & 31
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 5 || cpu == 4 {
+			physicalReg = (instruction >> 21) & 31
+		}
+		if cpu == 7 {
+			physicalReg = (instruction >> 25) & 31
+		}
+		if cpu == 8 {
+			physicalReg = (instruction >> 20) & 15
+		}
+		if cpu == 9 {
+			physicalReg = (instruction >> 16) & 31
+		}
+		for i := 0; i < 16; i++ {
+			if physical(i) == physicalReg {
+				patch = at
+				immediate(out, reg(i), int64(value))
+				patch = -1
+				return
+			}
+		}
+	}
+	func patchRelocations(out *RTGEmitter) {
+		for i := 0; i < out.RelocationCount(); i++ {
+			patchImmediate(out, out.RelocationOffset(i), linux_elf.codeAddress+out.LabelPosition(out.RelocationLabel(i)))
+		}
+	}
+	func image(out *RTGEmitter, machine int, flags int) []byte {
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			target, ok := RTGResolveAbsoluteRelocation(out, out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i), linux_elf.dataAddress(out), linux_elf.bssAddress(out))
+			if !ok {
+				return nil
+			}
+			patchImmediate(out, out.AbsoluteRelocationOffset(i), target)
+		}
+		return linux_elf.image(out, machine, flags, word*8, big)
+	}
+	func init(out *RTGEmitter, kind int, width int, be bool) bool {
+		_ = out
+		cpu = kind
+		word = width
+		big = be
+		patch = -1
+		if cpu == 9 {
+			offset := out.ReserveBSS(4194304, 16)
+			address(out, reg(14), RTGBSSAddress(offset+4194304))
+		}
+		if cpu == 7 && word == 8 {
+			insn(out, 0x80002000|(14<<25)|(14<<14)|2047)
+		}
+		return true
+	}
+	func entry(out *RTGEmitter, count int, state int) bool { _ = out; _ = state; return count == 0 }
+	func syscall(out *RTGEmitter, number int) {
+		if cpu == 10 {
+			small(out, 6, number)
+			insn(out, 0x5400c004)
+			return
+		}
+		if cpu == 9 {
+			small(out, 20, number)
+			small(out, 19, 256)
+			insn(out, 0xe4000000|(19<<21))
+			insn(out, 0x08000240)
+			alu(out, 3, 26, 28, 28)
+			return
+		}
+		if cpu == 8 {
+			half(out, 0x0a00|number)
+			return
+		}
+		if cpu == 4 {
+			small(out, 0, number)
+			insn(out, 0x83)
+			alu(out, 3, 16, 0, 0)
+			return
+		}
+		if cpu == 7 {
+			small(out, 1, number)
+			n := 16
+			if word == 8 {
+				n = 109
+			}
+			insn(out, 0x91d02000|n)
+			return
+		}
+		if cpu == 5 {
+			small(out, 11, number)
+			insn(out, 0x20000001)
+			alu(out, 3, 3, 11, 11)
+			return
+		}
+		if cpu == 6 {
+			small(out, 12, number)
+			insn(out, 0xb9cc0008)
+			alu(out, 3, 5, 3, 3)
+			return
+		}
+		if cpu == 1 || cpu == 2 {
+			small(out, 0, number)
+			insn(out, 0x44000002)
+			return
+		}
+		small(out, 11, number)
+		insn(out, 0x002b0000)
+	}
+	func write(out *RTGEmitter) {
+		n := 64
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 4 || cpu == 8 || cpu == 9 {
+			n = 4
+		}
+		syscall(out, n)
+	}
+	func read(out *RTGEmitter) {
+		n := 63
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 4 || cpu == 8 || cpu == 9 {
+			n = 3
+		}
+		syscall(out, n)
+	}
+	func close(out *RTGEmitter) {
+		n := 57
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 4 || cpu == 8 || cpu == 9 {
+			n = 6
+		}
+		syscall(out, n)
+	}
+	func chmod(out *RTGEmitter) {
+		if cpu == 7 || cpu == 4 {
+			syscall(out, 124)
+			return
+		}
+		n := 52
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 4 || cpu == 8 || cpu == 9 {
+			n = 94
+		}
+		syscall(out, n)
+	}
+	func open(out *RTGEmitter) {
+		if cpu == 10 {
+			alu(out, 3, 3, 2, 2)
+			alu(out, 3, 2, 1, 1)
+			alu(out, 3, 1, 0, 0)
+			small(out, 0, -100)
+			syscall(out, 56)
+			return
+		}
+		if cpu == 4 {
+			syscall(out, 45)
+			return
+		}
+		if cpu == 5 {
+			alu(out, 3, 6, 5, 5)
+			alu(out, 3, 5, 4, 4)
+			alu(out, 3, 4, 3, 3)
+			small(out, 3, -100)
+			syscall(out, 56)
+			return
+		}
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 8 || cpu == 9 {
+			syscall(out, 5)
+			return
+		}
+		alu(out, 3, 7, 6, 6)
+		alu(out, 3, 6, 5, 5)
+		alu(out, 3, 5, 4, 4)
+		small(out, 4, -100)
+		syscall(out, 56)
+	}
+	func exit(out *RTGEmitter, status RTGRegister) {
+		move(out, reg(0), status)
+		n := 93
+		if cpu == 1 || cpu == 2 || cpu == 6 || cpu == 7 || cpu == 4 || cpu == 8 || cpu == 9 {
+			n = 1
+		}
+		syscall(out, n)
+	}
+	func copyBytes(out *RTGEmitter) {
+		forward := out.NewLabel()
+		backward := out.NewLabel()
+		loop := out.NewLabel()
+		done := out.NewLabel()
+		compare(out, reg(7), reg(8))
+		jumpCondition(out, RTGCondition{Code: 6}, forward)
+		move(out, reg(3), reg(8))
+		add(out, reg(3), reg(9))
+		compare(out, reg(7), reg(3))
+		jumpCondition(out, RTGCondition{Code: 7}, forward)
+		add(out, reg(7), reg(9))
+		decrement(out, reg(7))
+		add(out, reg(8), reg(9))
+		decrement(out, reg(8))
+		out.Mark(backward)
+		immediate(out, reg(3), 0)
+		compare(out, reg(9), reg(3))
+		jumpCondition(out, RTGCondition{Code: 0}, done)
+		loadU8(out, reg(3), RTGAddress{Base: reg(8)})
+		storeU8(out, RTGAddress{Base: reg(7)}, reg(3))
+		decrement(out, reg(7))
+		decrement(out, reg(8))
+		decrement(out, reg(9))
+		jump(out, backward)
+		out.Mark(forward)
+		out.Mark(loop)
+		immediate(out, reg(3), 0)
+		compare(out, reg(9), reg(3))
+		jumpCondition(out, RTGCondition{Code: 0}, done)
+		loadU8(out, reg(3), RTGAddress{Base: reg(8)})
+		storeU8(out, RTGAddress{Base: reg(7)}, reg(3))
+		increment(out, reg(7))
+		increment(out, reg(8))
+		decrement(out, reg(9))
+		jump(out, loop)
+		out.Mark(done)
+	}
+	func softwareDivide(out *RTGEmitter, remainder bool, unsigned bool) {
+		immediate(out, reg(3), int64(word*5))
+		subtract(out, reg(14), reg(3))
+		for i := 7; i <= 10; i++ {
+			storeNative(out, RTGAddress{Base: reg(14), Displacement: (i - 7) * word}, reg(i))
+		}
+		move(out, reg(7), reg(2))
+		move(out, reg(8), reg(0))
+		immediate(out, reg(3), 0)
+		if !unsigned {
+			move(out, reg(3), reg(7))
+			if !remainder {
+				bitXor(out, reg(3), reg(8))
+			}
+			shiftSigned(out, reg(3), byte(word*8-1))
+		}
+		storeNative(out, RTGAddress{Base: reg(14), Displacement: 4 * word}, reg(3))
+		if !unsigned {
+			for i := 7; i <= 8; i++ {
+				move(out, reg(3), reg(i))
+				shiftSigned(out, reg(3), byte(word*8-1))
+				bitXor(out, reg(i), reg(3))
+				subtract(out, reg(i), reg(3))
+			}
+		}
+		immediate(out, reg(9), 0)
+		immediate(out, reg(10), 0)
+		for i := word*8 - 1; i >= 0; i-- {
+			sub := out.NewLabel()
+			skip := out.NewLabel()
+			immediate(out, reg(3), 0)
+			compare(out, reg(10), reg(3))
+			shiftLeft(out, reg(10), 1)
+			move(out, reg(3), reg(7))
+			shiftRight(out, reg(3), byte(i))
+			immediate(out, reg(0), 1)
+			bitAnd(out, reg(3), reg(0))
+			bitOr(out, reg(10), reg(3))
+			shiftLeft(out, reg(9), 1)
+			jumpCondition(out, RTGCondition{Code: 4}, sub)
+			compare(out, reg(10), reg(8))
+			jumpCondition(out, RTGCondition{Code: 6}, skip)
+			out.Mark(sub)
+			subtract(out, reg(10), reg(8))
+			increment(out, reg(9))
+			out.Mark(skip)
+		}
+		result := 9
+		if remainder {
+			result = 10
+		}
+		move(out, reg(0), reg(result))
+		loadNative(out, reg(3), RTGAddress{Base: reg(14), Displacement: 4 * word})
+		bitXor(out, reg(0), reg(3))
+		subtract(out, reg(0), reg(3))
+		for i := 7; i <= 10; i++ {
+			loadNative(out, reg(i), RTGAddress{Base: reg(14), Displacement: (i - 7) * word})
+		}
+		immediate(out, reg(3), int64(word*5))
+		add(out, reg(14), reg(3))
+	}
+	func hostSyscall(out *RTGEmitter) {
+		if cpu == 1 || cpu == 2 {
+			insn(out, 0x44000002)
+			return
+		}
+		if cpu == 3 {
+			insn(out, 0x002b0000)
+			return
+		}
+		if cpu == 4 {
+			insn(out, 0x83)
+			return
+		}
+		if cpu == 5 {
+			insn(out, 0x20000001)
+			return
+		}
+		if cpu == 6 {
+			insn(out, 0xb9cc0008)
+			return
+		}
+		if cpu == 7 {
+			n := 16
+			if word == 8 {
+				n = 109
+			}
+			insn(out, 0x91d02000|n)
+			return
+		}
+		if cpu == 8 {
+			half(out, 0x0a00)
+			return
+		}
+		if cpu == 9 {
+			small(out, 19, 256)
+			insn(out, 0xe4000000|(19<<21))
+			insn(out, 0x08000240)
+			return
+		}
+		if cpu == 10 {
+			insn(out, 0x5400c004)
+			return
+		}
+		panic("unsupported Linux register-machine CPU")
+	}
+}

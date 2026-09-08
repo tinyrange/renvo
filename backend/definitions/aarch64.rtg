@@ -428,8 +428,8 @@ go backend {
 		if remainder {
 			asmEmit(out,
 				0x9b008000|(scratch.Code<<16)|
-					(primary.Code<<10)|
-					(tertiary.Code<<5)|primary.Code)
+					(tertiary.Code<<10)|
+					(primary.Code<<5)|primary.Code)
 		}
 	}
 
