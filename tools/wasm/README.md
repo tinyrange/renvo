@@ -54,17 +54,17 @@ Profile small, medium, and self-hosting builds in fresh Node processes:
 
 ```sh
 node tools/wasm/profile.mjs sandbox/wasm/renvowasi.wasm
-node tools/wasm/profile.mjs sandbox/wasm/renvowasi.wasm --check
 node tools/wasm/profile.mjs sandbox/wasm/renvowasi.wasm \
-  --backend sandbox/wasm/renvowasi-backend.wasm --check
+  --backend sandbox/wasm/renvowasi-backend.wasm
 node tools/wasm/profile.mjs sandbox/wasm/renvowasi.wasm --json > sandbox/wasm/profile.json
 ```
 
-`--check` enforces a module no larger than 2 MiB and a self-host frontend run
-under one second. Peak RSS is the Node process high-water mark. Linear memory
-is the WASM reservation and is normally higher than resident memory because
-V8 commits pages on demand. The WASI profile reserves a 160 MiB compiler arena
-and permits a 6 MiB generated unit.
+Profiling is telemetry. Use
+`RENVO_PERF_TARGET=wasi/wasm32 ./tools/check performance` on Linux with Wasmtime
+for the [shared complete-compiler gate](../../docs/performance.md).
+Peak RSS here is the Node process high-water mark. Linear memory is the WASM
+reservation, which can exceed resident memory because V8 commits pages on demand.
+The WASI system profiles allow a 192 MiB compiler arena and 8 MiB generated unit.
 
 ## Browser editor
 
@@ -209,9 +209,8 @@ On Node v20.19.1, Linux/x64, and an Intel i7-13620H, the self-hosted frontend is
 frontend compiles its own package in about 500 ms; the backend turns that unit
 into a runnable compiler in about 330 ms, for an approximately 832 ms complete
 self-host pipeline. The frontend reserves about 171 MiB of linear memory and
-peaks around 130 MiB resident. These figures are comparison data; the enforced
-portable gates are a frontend no larger than 2 MiB and self-hosting under one
-second.
+peaks around 130 MiB resident. These historical figures are comparison data. Current gates use the complete
+bundled compiler and the shared policy linked above.
 
 The main backend size win comes from lowering virtual stack-frame accesses to
 a per-routine frame-base local plus WASM memory offsets. That avoids rebuilding
