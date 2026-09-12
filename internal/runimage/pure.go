@@ -45,11 +45,10 @@ func (a *CodeArena) Install(code []byte) (int, error) {
 		return 0, err
 	}
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(a.base+uintptr(at))), len(code)), code)
-	if err := pureWritable(a.base, a.size, false); err != nil {
+	if err := pureSeal(a.base, a.size, at, len(code)); err != nil {
 		a.broken = true
 		return 0, err
 	}
-	pureFlush(a.base+uintptr(at), len(code))
 	a.used = at + len(code)
 	a.entries[at] = true
 	return at, nil

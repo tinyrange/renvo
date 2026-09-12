@@ -120,49 +120,55 @@ func decodeText(data []byte) (*Package, error) {
 
 // Resolve is offline and rejects cycles, hash mismatches and conflicting import
 // identities. Returned packages are in deterministic dependency-first order.
-func Resolve(root []byte, available map[string][]byte) ([]*Package, error) {
-	seen, active := map[string]string{}, map[string]bool{}
+func Resolve(root []byte, load func(string) ([]byte, error)) ([]*Package, error) {
+	seen, active := map[string]*Package{}, map[string]bool{}
 	imports := map[string]string{}
 	var result []*Package
-	var visit func([]byte) error
-	visit = func(data []byte) error {
-		p, err := Decode(data)
-		if err != nil {
-			return err
-		}
+	var visit func(*Package) error
+	visit = func(p *Package) error {
 		name := p.Manifest.Name
 		if active[name] {
 			return fmt.Errorf("RFE dependency cycle at %s", name)
-		}
-		if digest, ok := seen[name]; ok {
-			if digest != p.Digest {
-				return fmt.Errorf("conflicting RFE dependency %s", name)
-			}
-			return nil
 		}
 		if owner, ok := imports[p.Manifest.Import]; ok && owner != name {
 			return fmt.Errorf("duplicate RFE import identity %s", p.Manifest.Import)
 		}
 		imports[p.Manifest.Import] = name
 		active[name] = true
+		seen[name] = p
 		for _, dep := range p.Manifest.Requires {
-			child, err := Decode(available[dep.Name])
-			if err != nil {
-				return fmt.Errorf("dependency %s: %w", dep.Name, err)
+			child := seen[dep.Name]
+			if child == nil {
+				data, err := load(dep.Name)
+				if err != nil {
+					return fmt.Errorf("dependency %s: %w", dep.Name, err)
+				}
+				child, err = Decode(data)
+				if err != nil {
+					return fmt.Errorf("dependency %s: %w", dep.Name, err)
+				}
 			}
 			if child.Manifest.Name != dep.Name || dep.SHA256 != "" && child.Digest != dep.SHA256 {
 				return fmt.Errorf("dependency hash mismatch: %s", dep.Name)
 			}
-			if err = visit(available[dep.Name]); err != nil {
-				return err
+			if active[dep.Name] {
+				return fmt.Errorf("RFE dependency cycle at %s", dep.Name)
+			}
+			if seen[dep.Name] == nil {
+				if err := visit(child); err != nil {
+					return err
+				}
 			}
 		}
 		active[name] = false
-		seen[name] = p.Digest
 		result = append(result, p)
 		return nil
 	}
-	if err := visit(root); err != nil {
+	p, err := Decode(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := visit(p); err != nil {
 		return nil, err
 	}
 	return result, nil

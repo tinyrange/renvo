@@ -24,18 +24,18 @@ func TestDependencyResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := testSource("machine", Dependency{Name: "cpu", SHA256: parsed.Digest})
-	packages, err := Resolve(root, map[string][]byte{"cpu": cpu})
+	packages, err := Resolve(root, mapLoader(map[string][]byte{"cpu": cpu}))
 	if err != nil || len(packages) != 2 || packages[0].Manifest.Name != "cpu" {
 		t.Fatalf("resolution: %v", err)
 	}
 	for _, available := range []map[string][]byte{nil, {"cpu": append(cpu, '\n')}, {"cpu": testSource("different")}} {
-		if _, err := Resolve(root, available); err == nil {
+		if _, err := Resolve(root, mapLoader(available)); err == nil {
 			t.Fatal("accepted missing or substituted dependency")
 		}
 	}
 	a := testSource("a", Dependency{Name: "b"})
 	b := testSource("b", Dependency{Name: "a"})
-	if _, err := Resolve(a, map[string][]byte{"a": a, "b": b}); err == nil {
+	if _, err := Resolve(a, mapLoader(map[string][]byte{"a": a, "b": b})); err == nil {
 		t.Fatal("accepted dependency cycle")
 	}
 }
@@ -69,7 +69,7 @@ func TestEmulatorSourcePackages(t *testing.T) {
 		available[name] = data
 	}
 	source := testSource("test-suite", Dependency{Name: "v7-user"}, Dependency{Name: "pdp11-machine"})
-	packages, err := Resolve(source, available)
+	packages, err := Resolve(source, mapLoader(available))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,4 +104,8 @@ func TestWorkspaceRejectsSourceCollision(t *testing.T) {
 	if err = Workspace(t.TempDir(), "/unused", []*Package{p}); err == nil || !strings.Contains(err.Error(), "unique") {
 		t.Fatal("accepted generated source collision", err)
 	}
+}
+
+func mapLoader(files map[string][]byte) func(string) ([]byte, error) {
+	return func(name string) ([]byte, error) { return files[name], nil }
 }

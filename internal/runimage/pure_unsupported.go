@@ -10,5 +10,7 @@ func pureMap(size int) (uintptr, error) {
 func pureWritable(base uintptr, size int, write bool) error {
 	return fmt.Errorf("unsupported native RFE host")
 }
-func pureFlush(base uintptr, size int)       {}
+func pureSeal(base uintptr, size, at, count int) error {
+	return fmt.Errorf("unsupported native RFE host")
+}
 func pureUnmap(base uintptr, size int) error { return nil }

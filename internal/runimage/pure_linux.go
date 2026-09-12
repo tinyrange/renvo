@@ -24,3 +24,10 @@ func pureWritable(base uintptr, size int, write bool) error {
 func pureUnmap(base uintptr, size int) error {
 	return syscall.Munmap(unsafe.Slice((*byte)(unsafe.Pointer(base)), size))
 }
+func pureSeal(base uintptr, size, at, count int) error {
+	if err := pureWritable(base, size, false); err != nil {
+		return err
+	}
+	pureFlush(base+uintptr(at), count)
+	return nil
+}

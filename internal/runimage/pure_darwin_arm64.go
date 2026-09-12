@@ -9,5 +9,9 @@ func pureWritable(base uintptr, size int, write bool) error {
 	darwinJITWriteProtect(!write)
 	return nil
 }
-func pureFlush(base uintptr, size int)       { darwinInvalidateInstructionCache(base, uintptr(size)) }
+func pureSeal(base uintptr, size, at, count int) error {
+	darwinJITWriteProtect(true)
+	darwinInvalidateInstructionCache(base+uintptr(at), uintptr(count))
+	return nil
+}
 func pureUnmap(base uintptr, size int) error { return darwinMunmap(base, uintptr(size)) }

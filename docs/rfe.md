@@ -86,8 +86,13 @@ truncation. Loops and arbitrary calls are rejected. Decoder validation rejects
 overlapping masks and checks state indices over the rule's accepted encodings;
 each rule may have at most 16 variable opcode bits.
 
-Generated `Decodable` and `Lower` functions feed a small, architecture-neutral
-SSA IR. Constant folding, mask propagation and dead-value elimination remove
+Expressions are parsed once into a typed tree shared by validation and code
+generation. Guards and state indices must depend only on the opcode; values
+are unsigned integers or booleans with checked operand types. Generated
+`Execute` and `Lower` functions share one decoder and the same instruction
+semantics. The PDP-11 interpreter uses `Execute` for ALU operations after
+resolving operands, including memory operands and byte operations. `Lower`
+feeds a small, architecture-neutral SSA IR. Constant folding, mask propagation and dead-value elimination remove
 overwritten intermediate flags. State stores commit at the end of the block.
 Renvo emits call-free native state transformations from this IR using its
 existing amd64 and arm64 code generators. Memory, devices, traps and syscalls
@@ -139,10 +144,20 @@ SIGILL and SIGTRAP. Pending bits coalesce, SIGKILL cannot be caught or ignored,
 fork inherits dispositions but clears pending signals and alarms, and exec
 preserves ignored dispositions and the alarm while resetting handlers.
 Only the scheduler mutates process state; terminal notifications and completed
-host reads arrive over channels. A descriptor retains an in-flight host read
+host I/O arrives over channels. Descriptor installation and removal share one
+ownership path across close, dup and fork. A syscall table keeps ABI argument
+layouts, trace names and named handlers together. A descriptor retains an in-flight host read
 across EINTR, preventing the interrupted operation from consuming input meant
-for a subsequent read. Generic Go readers cannot be forcibly cancelled; callers
-embedding the kernel own the lifetime and closing of their input readers.
+for a subsequent read. Host writes use copied buffers and run asynchronously,
+serialized within each kernel, so blocked output cannot prevent signal delivery.
+Generic Go readers and writers cannot be forcibly cancelled: a host write may
+finish after the guest receives EINTR. Callers embedding the kernel own the
+lifetime and closing of their host streams.
+
+Floating arithmetic deliberately retains exact rational intermediates. The
+embedded `BenchmarkFloating` measures F/D add, multiply and divide separately;
+an Apple M4 baseline measured 376–540 ns and 31–44 allocations per instruction.
+This identifies an optimization opportunity without trading away D precision.
 
 The initial user environment
 limits its in-memory filesystem to 64 MiB, live processes to 64, descriptors to

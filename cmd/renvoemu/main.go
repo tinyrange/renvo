@@ -42,36 +42,13 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	available := map[string][]byte{}
 	dir := *search
 	if dir == "" {
 		dir = filepath.Dir(f.Arg(0))
 	}
-	var load func([]byte) error
-	load = func(data []byte) error {
-		p, err := rfe.Decode(data)
-		if err != nil {
-			return err
-		}
-		if _, ok := available[p.Manifest.Name]; ok {
-			return nil
-		}
-		available[p.Manifest.Name] = data
-		for _, d := range p.Manifest.Requires {
-			b, err := os.ReadFile(filepath.Join(dir, d.Name+".rfe"))
-			if err != nil {
-				return err
-			}
-			if err = load(b); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err = load(source); err != nil {
-		return err
-	}
-	packages, err := rfe.Resolve(source, available)
+	packages, err := rfe.Resolve(source, func(name string) ([]byte, error) {
+		return os.ReadFile(filepath.Join(dir, name+".rfe"))
+	})
 	if err != nil {
 		return err
 	}

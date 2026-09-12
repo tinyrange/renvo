@@ -253,6 +253,90 @@ func (f *FS) validParent(name string) bool {
 	return n != nil && n.Mode&0o170000 == 0o40000 && len(path.Base(name)) <= 14
 }
 
+-- io.go --
+package v7
+
+// A completion owns its buffer, never guest memory. The scheduler alone owns
+// descriptors; closing done publishes the worker's result without polling races.
+type ioOperation struct {
+	data []byte
+	n    int
+	err  error
+	done chan struct{}
+}
+
+func (op *ioOperation) ready() bool {
+	if op == nil {
+		return true
+	}
+	select {
+	case <-op.done:
+		return true
+	default:
+		return false
+	}
+}
+func (k *Kernel) startIO(fn func([]byte) (int, error), data []byte) *ioOperation {
+	op := &ioOperation{data: data, done: make(chan struct{})}
+	go func() {
+		op.n, op.err = fn(data)
+		close(op.done)
+		select {
+		case k.wake <- struct{}{}:
+		default:
+		}
+	}()
+	return op
+}
+
+// Reads remain on the shared descriptor after EINTR, so a subsequent read
+// receives the result rather than losing input to an abandoned operation.
+func (k *Kernel) readInput(d *descriptor, dst []byte) (int, error, bool) {
+	if d.readOp == nil {
+		d.readOp = k.startIO(d.input.Read, make([]byte, len(dst)))
+	}
+	op := d.readOp
+	if !op.ready() {
+		return 0, nil, false
+	}
+	n := copy(dst, op.data[:op.n])
+	op.data, op.n = op.data[n:], op.n-n
+	if op.n == 0 && op.err == nil {
+		d.readOp = nil
+	}
+	return n, op.err, true
+}
+
+// Serialize host writes, including stdout/stderr aliases. A resumed syscall
+// retrieves its own completion exactly once. Generic io.Writer cannot cancel
+// an in-flight write; EINTR releases the guest but that write may still finish.
+func (k *Kernel) writeOutput(d *descriptor, src []byte, c *call) (int, error, bool) {
+	if c.write == nil {
+		if !k.outputOp.ready() {
+			return 0, nil, false
+		}
+		c.write = k.startIO(d.output.Write, append([]byte(nil), src...))
+		k.outputOp = c.write
+	}
+	if !c.write.ready() {
+		return 0, nil, false
+	}
+	return c.write.n, c.write.err, true
+}
+func (k *Kernel) hasIO() bool {
+	for _, p := range k.Processes {
+		if p.Exited || p.pending == nil {
+			continue
+		}
+		d := p.fd(p.pending.args[0])
+		if d != nil && ((p.pending.number == 3 && d.input != nil && d.readOp != nil) ||
+			(p.pending.number == 4 && d.output != nil && k.outputOp != nil)) {
+			return true
+		}
+	}
+	return false
+}
+
 -- main.go --
 package v7
 
@@ -630,7 +714,6 @@ func putLong(b []byte, v uint32) {
 package v7
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"path"
@@ -638,17 +721,14 @@ import (
 )
 
 type descriptor struct {
-	node       *Node
-	name       string
-	offset     int
-	mode       int
-	input      io.Reader
-	output     io.Writer
-	refs       int
-	pipe       *pipe
-	readResult chan inputResult
-	readData   []byte
-	readError  error
+	node   *Node
+	name   string
+	offset int
+	mode   int
+	input  io.Reader
+	output io.Writer
+	pipe   *pipe
+	readOp *ioOperation
 }
 type pipe struct {
 	data             []byte
@@ -674,6 +754,7 @@ type Process struct {
 type call struct {
 	number uint16
 	args   [4]uint16
+	write  *ioOperation
 }
 type Kernel struct {
 	FS            *FS
@@ -686,8 +767,9 @@ type Kernel struct {
 	Trace         io.Writer
 	Execute       func(*pdp11.CPU, int) int
 	// Signals delivers terminal signals to the foreground guest process group.
-	Signals <-chan int
-	wake    chan struct{}
+	Signals  <-chan int
+	wake     chan struct{}
+	outputOp *ioOperation
 }
 
 func New(fs *FS, in io.Reader, out, errout io.Writer) *Kernel {
@@ -700,9 +782,9 @@ func (k *Kernel) Start(image []byte, args, env []string) (*Process, error) {
 	}
 	k.nextPID++
 	p := &Process{CPU: cpu, Memory: mem, PID: k.nextPID, Group: k.nextPID, CWD: "/"}
-	p.files[0] = &descriptor{input: k.Input, mode: 0, refs: 1, name: "/dev/tty"}
-	p.files[1] = &descriptor{output: k.Output, mode: 1, refs: 1, name: "/dev/tty"}
-	p.files[2] = &descriptor{output: k.Error, mode: 1, refs: 1, name: "/dev/tty"}
+	p.files[0] = &descriptor{input: k.Input, mode: 0, name: "/dev/tty"}
+	p.files[1] = &descriptor{output: k.Output, mode: 1, name: "/dev/tty"}
+	p.files[2] = &descriptor{output: k.Error, mode: 1, name: "/dev/tty"}
 	k.Processes = append(k.Processes, p)
 	return p, nil
 }
@@ -787,7 +869,7 @@ func (k *Kernel) Run(p *Process) (int, error) {
 				k.Ticks = next
 				continue
 			}
-			if k.hasInput() || k.Signals != nil {
+			if k.hasIO() || k.Signals != nil {
 				select {
 				case <-k.wake:
 				case sig, ok := <-k.Signals:
@@ -871,37 +953,10 @@ func (k *Kernel) trap(p *Process) error {
 	}
 	p.CPU.PSW &^= pdp11.C
 	if k.Trace != nil {
-		fmt.Fprintf(k.Trace, "pid=%d pc=%06o sys=%d args=%v\n", p.PID, p.CPU.InstructionPC, number, c.args)
+		fmt.Fprintf(k.Trace, "pid=%d pc=%06o sys=%d(%s) args=%v\n", p.PID, p.CPU.InstructionPC, number, syscalls[number].name, c.args)
 	}
 	k.syscall(p, c)
 	return nil
-}
-func sysargs(n uint16) (int, int) {
-	switch n {
-	case 1, 6, 23, 27, 34, 40, 46:
-		return 1, 1
-	case 3, 4:
-		return 3, 1
-	case 19, 26:
-		return 4, 1
-	case 25, 41:
-		return 2, 2
-	case 28, 31, 32, 37:
-		return 2, 1
-	case 5, 8, 9, 11, 15, 18, 30, 33, 48:
-		return 2, 0
-	case 10, 12, 17, 22, 35, 43, 51, 61:
-		return 1, 0
-	case 14, 16, 21, 59:
-		return 3, 0
-	case 44:
-		return 4, 0
-	case 54:
-		return 3, 0
-	case 60:
-		return 1, 1
-	}
-	return 0, 0
 }
 func (p *Process) error(errno uint16) { p.CPU.PSW |= pdp11.C; p.CPU.R[0] = errno }
 func (p *Process) result(v uint16)    { p.CPU.PSW &^= pdp11.C; p.CPU.R[0] = v }
@@ -911,37 +966,43 @@ func (p *Process) fd(n uint16) *descriptor {
 	}
 	return p.files[n]
 }
-func (p *Process) alloc(d *descriptor) int {
-	for i := range p.files {
-		if p.files[i] == nil {
-			p.files[i] = d
-			d.refs++
-			if d.pipe != nil {
-				if d.mode == 0 {
-					d.pipe.readers++
-				} else {
-					d.pipe.writers++
-				}
-			}
+
+// Each descriptor slot owns a pipe endpoint reference; dup and fork use the
+// same installation rule. Ordinary files need no separate reference counter.
+func (d *descriptor) adjust(delta int) {
+	if d != nil && d.pipe != nil {
+		if d.mode == 0 {
+			d.pipe.readers += delta
+		} else {
+			d.pipe.writers += delta
+		}
+	}
+}
+func (p *Process) install(fd int, d *descriptor) {
+	p.files[fd].adjust(-1)
+	p.files[fd] = d
+	d.adjust(1)
+}
+func (p *Process) freeFD() int {
+	for i, d := range p.files {
+		if d == nil {
 			return i
 		}
 	}
 	return -1
 }
+func (p *Process) alloc(d *descriptor) int {
+	fd := p.freeFD()
+	if fd >= 0 {
+		p.install(fd, d)
+	}
+	return fd
+}
 func (p *Process) close(n uint16) bool {
-	d := p.fd(n)
-	if d == nil {
+	if p.fd(n) == nil {
 		return false
 	}
-	p.files[n] = nil
-	d.refs--
-	if d.pipe != nil {
-		if d.mode == 0 {
-			d.pipe.readers--
-		} else {
-			d.pipe.writers--
-		}
-	}
+	p.install(int(n), nil)
 	return true
 }
 func (k *Kernel) exit(p *Process, status uint16) {
@@ -974,581 +1035,12 @@ func (k *Kernel) wait(p *Process) {
 	}
 }
 func (k *Kernel) syscall(p *Process, c call) {
-	a := c.args
 	p.CPU.PSW &^= pdp11.C
-	name := func(addr uint16) (string, bool) {
-		s, ok := p.Memory.str(addr)
-		if !ok || s == "" {
-			p.error(14)
-			return "", false
-		}
-		return k.FS.resolve(p.CWD, s), true
-	}
-	switch c.number {
-	case 1:
-		k.exit(p, (a[0]&255)<<8)
-	case 2:
-		live := 0
-		for _, q := range k.Processes {
-			if !q.Exited || q.Parent != 0 {
-				live++
-			}
-		}
-		if live >= 64 || k.nextPID == 65535 {
-			p.error(11)
-			p.CPU.R[7] += 2
-			return
-		}
-		k.nextPID++
-		q := *p
-		q.PID = k.nextPID
-		q.Parent = p.PID
-		q.posted, q.alarm = 0, 0
-		q.CPU = p.CPU
-		mem := *p.Memory
-		mem.Data = append([]byte{}, mem.Data...)
-		if mem.Separate {
-			mem.Text = append([]byte{}, mem.Text...)
-		} else {
-			mem.Text = mem.Data
-		}
-		q.Memory = &mem
-		q.CPU.Bus = q.Memory
-		q.CPU.R[0] = p.PID
-		for _, d := range q.files {
-			if d != nil {
-				d.refs++
-				if d.pipe != nil {
-					if d.mode == 0 {
-						d.pipe.readers++
-					} else {
-						d.pipe.writers++
-					}
-				}
-			}
-		}
-		reused := false
-		for i, old := range k.Processes {
-			if old.Exited && old.Parent == 0 {
-				k.Processes[i] = &q
-				reused = true
-				break
-			}
-		}
-		if !reused {
-			k.Processes = append(k.Processes, &q)
-		}
-		p.result(q.PID)
-		p.CPU.R[7] += 2
-	case 7:
-		k.wait(p)
-	case 3, 4:
-		d := p.fd(a[0])
-		if d == nil || c.number == 3 && d.mode == 1 || c.number == 4 && d.mode == 0 {
-			p.error(9)
-			return
-		}
-		b, ok := p.Memory.bytes(a[1], int(a[2]), c.number == 3)
-		if !ok {
-			p.error(14)
-			return
-		}
-		n := 0
-		if c.number == 3 {
-			if len(b) == 0 {
-				p.result(0)
-				return
-			}
-			if d.pipe != nil {
-				if len(d.pipe.data) == 0 && d.pipe.writers != 0 {
-					p.pending = &c
-					return
-				}
-				n = copy(b, d.pipe.data)
-				d.pipe.data = d.pipe.data[n:]
-			} else if d.input != nil {
-				var ready bool
-				n, ready = k.readInput(d, b)
-				if !ready {
-					p.pending = &c
-					return
-				}
-				if n == 0 && d.readError != nil && d.readError != io.EOF {
-					p.error(5)
-					return
-				}
-			} else if d.name != "/dev/null" && d.node != nil {
-				data := d.node.Data
-				if d.node.Mode&0o170000 == 0o40000 {
-					data = k.FS.directory(d.name)
-				}
-				if d.offset < len(data) {
-					n = copy(b, data[d.offset:])
-					d.offset += n
-				}
-			}
-		} else {
-			if d.pipe != nil {
-				if d.pipe.readers == 0 {
-					p.error(32)
-					k.PostSignal(p, 13)
-					return
-				}
-				space := 4096 - len(d.pipe.data)
-				if len(b) > space {
-					if len(b) <= 4096 {
-						p.pending = &c
-						return
-					}
-					b = b[:space]
-				}
-				if len(b) == 0 && a[2] != 0 {
-					p.pending = &c
-					return
-				}
-				d.pipe.data = append(d.pipe.data, b...)
-				n = len(b)
-			} else if d.output != nil {
-				var err error
-				n, err = d.output.Write(b)
-				if err != nil {
-					p.error(5)
-					return
-				}
-			} else if d.name == "/dev/null" {
-				n = len(b)
-			} else if d.node != nil {
-				end := d.offset + len(b)
-				if end > d.offset && end > k.FS.Limit {
-					p.error(27)
-					return
-				}
-				if end > len(d.node.Data) {
-					growth := end - len(d.node.Data)
-					if growth > k.FS.Limit-k.FS.Bytes {
-						p.error(28)
-						return
-					}
-					d.node.Data = append(d.node.Data, make([]byte, growth)...)
-					k.FS.Bytes += growth
-				}
-				n = copy(d.node.Data[d.offset:], b)
-				d.offset += n
-			}
-		}
-		p.result(uint16(n))
-	case 5, 8:
-		free := false
-		for _, d := range p.files {
-			if d == nil {
-				free = true
-				break
-			}
-		}
-		if !free {
-			p.error(24)
-			return
-		}
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		node := k.FS.Nodes[n]
-		mode := int(a[1])
-		if c.number == 8 {
-			mode = 1
-			if node == nil {
-				if !k.FS.validParent(n) {
-					p.error(2)
-					return
-				}
-				if k.FS.Add(n, nil, 0o100000|(a[1]&0o777)&^p.mask) != nil {
-					p.error(28)
-					return
-				}
-				node = k.FS.Nodes[n]
-			} else if node.Mode&0o170000 == 0o100000 {
-				k.FS.Bytes -= len(node.Data)
-				node.Data = nil
-			}
-		}
-		if node == nil {
-			p.error(2)
-			return
-		}
-		if mode > 2 {
-			p.error(22)
-			return
-		}
-		if node.Mode&0o170000 == 0o40000 && mode != 0 {
-			p.error(21)
-			return
-		}
-		kind := node.Mode & 0o170000
-		if kind != 0o100000 && kind != 0o40000 && n != "/dev/null" && n != "/dev/tty" {
-			p.error(6)
-			return
-		}
-		d := &descriptor{node: node, name: n, mode: mode}
-		if n == "/dev/tty" {
-			d.input = k.Input
-			d.output = k.Output
-		}
-		fd := p.alloc(d)
-		if fd < 0 {
-			p.error(24)
-		} else {
-			p.result(uint16(fd))
-		}
-	case 6:
-		if !p.close(a[0]) {
-			p.error(9)
-		} else {
-			p.result(0)
-		}
-	case 9:
-		old, ok := name(a[0])
-		if !ok {
-			return
-		}
-		newName, ok := name(a[1])
-		if !ok {
-			return
-		}
-		node := k.FS.Nodes[old]
-		if node == nil {
-			p.error(2)
-		} else if k.FS.Nodes[newName] != nil {
-			p.error(17)
-		} else if !k.FS.validParent(newName) {
-			p.error(2)
-		} else if node.Mode&0o170000 == 0o40000 {
-			p.error(1)
-		} else {
-			k.FS.Nodes[newName] = node
-			node.Links++
-			p.result(0)
-		}
-	case 10:
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		node := k.FS.Nodes[n]
-		if node == nil {
-			p.error(2)
-		} else if node.Mode&0o170000 == 0o40000 {
-			p.error(1)
-		} else {
-			delete(k.FS.Nodes, n)
-			node.Links--
-			p.result(0)
-		}
-	case 11, 59:
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		args, ok := p.Memory.vector(a[1])
-		if !ok {
-			p.error(14)
-			return
-		}
-		var env []string
-		if c.number == 59 {
-			env, ok = p.Memory.vector(a[2])
-			if !ok {
-				p.error(14)
-				return
-			}
-		}
-		node := k.FS.Nodes[n]
-		if node == nil {
-			p.error(2)
-			return
-		}
-		mem, cpu, err := Load(node.Data, args, env)
-		if err != nil {
-			p.error(8)
-			return
-		}
-		cpu.Ticks = p.CPU.Ticks
-		p.Memory, p.CPU = mem, cpu
-		for i := range p.signals {
-			if p.signals[i]&1 == 0 {
-				p.signals[i] = 0
-			}
-		}
-	case 12:
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		node := k.FS.Nodes[n]
-		if node == nil {
-			p.error(2)
-		} else if node.Mode&0o170000 != 0o40000 {
-			p.error(20)
-		} else {
-			p.CWD = n
-			p.result(0)
-		}
-	case 13:
-		seconds := uint32(k.Ticks / TicksPerSecond)
-		p.result(uint16(seconds >> 16))
-		p.CPU.R[1] = uint16(seconds)
-	case 15:
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		node := k.FS.Nodes[n]
-		if node == nil {
-			p.error(2)
-		} else {
-			node.Mode = node.Mode&0o170000 | a[1]&0o7777
-			p.result(0)
-		}
-	case 17:
-		brk := (int(a[0]) + 63) &^ 63
-		if brk < p.Memory.DataStart || brk > p.Memory.Stack {
-			p.error(12)
-		} else {
-			if brk > p.Memory.Break {
-				clear(p.Memory.Data[p.Memory.Break:brk])
-			}
-			p.Memory.Break = brk
-			p.result(0)
-		}
-	case 18, 28:
-		var node *Node
-		var n string
-		addr := a[1]
-		if c.number == 18 {
-			var ok bool
-			n, ok = name(a[0])
-			if !ok {
-				return
-			}
-			node = k.FS.Nodes[n]
-			if node == nil {
-				p.error(2)
-				return
-			}
-		} else {
-			d := p.fd(a[0])
-			if d == nil {
-				p.error(9)
-				return
-			}
-			node = d.node
-			n = d.name
-			if node == nil {
-				node = &Node{Mode: 0o20666, Links: 1}
-			}
-		}
-		b, ok := p.Memory.bytes(addr, 30, true)
-		if !ok {
-			p.error(14)
-			return
-		}
-		clear(b)
-		binary.LittleEndian.PutUint16(b, 1)
-		binary.LittleEndian.PutUint16(b[2:], node.Inode)
-		binary.LittleEndian.PutUint16(b[4:], node.Mode)
-		binary.LittleEndian.PutUint16(b[6:], node.Links)
-		binary.LittleEndian.PutUint16(b[8:], node.UID)
-		binary.LittleEndian.PutUint16(b[10:], node.GID)
-		size := len(node.Data)
-		if node.Mode&0o170000 == 0o40000 {
-			size = len(k.FS.directory(n))
-		}
-		putLong(b[14:], uint32(size))
-		p.result(0)
-	case 19:
-		d := p.fd(a[0])
-		if d == nil {
-			p.error(9)
-			return
-		}
-		if d.node == nil || d.pipe != nil {
-			p.error(29)
-			return
-		}
-		offset := int64(int32(uint32(a[1])<<16 | uint32(a[2])))
-		switch a[3] {
-		case 0:
-		case 1:
-			offset += int64(d.offset)
-		case 2:
-			offset += int64(len(d.node.Data))
-		default:
-			p.error(22)
-			return
-		}
-		if offset < 0 || offset > 1<<31-1 {
-			p.error(22)
-			return
-		}
-		d.offset = int(offset)
-		p.result(uint16(offset >> 16))
-		p.CPU.R[1] = uint16(offset)
-	case 20:
-		p.result(p.PID)
-		p.CPU.R[1] = p.Parent
-	case 24, 47:
-		p.result(0)
-		p.CPU.R[1] = 0
-	case 23, 46:
-		if a[0] != 0 {
-			p.error(1)
-		} else {
-			p.result(0)
-		}
-	case 27:
-		old := uint16(0)
-		if p.alarm > k.Ticks {
-			old = uint16((p.alarm - k.Ticks + TicksPerSecond - 1) / TicksPerSecond)
-		}
-		p.alarm = 0
-		if a[0] != 0 {
-			p.alarm = k.Ticks + uint64(a[0])*TicksPerSecond
-		}
-		p.result(old)
-	case 29:
-		p.paused = true
-	case 37:
-		found := false
-		for _, q := range k.Processes {
-			if q.Exited {
-				continue
-			}
-			pid := int16(a[0])
-			if (pid > 0 && q.PID == a[0]) || (pid == 0 && q.Group == p.Group) || (pid == -1 && q != p) {
-				found = true
-				k.PostSignal(q, int(a[1]))
-			}
-		}
-		if found {
-			p.result(0)
-		} else {
-			p.error(3)
-		}
-	case 31, 32, 54:
-		if p.fd(a[0]) == nil {
-			p.error(9)
-			return
-		}
-		if p.fd(a[0]).name != "/dev/tty" {
-			p.error(25)
-			return
-		}
-		request, addr := uint16(0x7408), a[1]
-		if c.number == 31 {
-			request = 0x7409
-		}
-		if c.number == 54 {
-			request, addr = a[1], a[2]
-		}
-		if request != 0x7408 && request != 0x7409 && request != 0x740a {
-			p.error(25)
-			return
-		}
-		b, ok := p.Memory.bytes(addr, 6, request == 0x7408)
-		if !ok {
-			p.error(14)
-			return
-		}
-		if request == 0x7408 {
-			copy(b, []byte{13, 13, 8, 21, 0, 0})
-		}
-		p.result(0)
-	case 33:
-		n, ok := name(a[0])
-		if !ok {
-			return
-		}
-		if k.FS.Nodes[n] == nil {
-			p.error(2)
-		} else {
-			p.result(0)
-		}
-	case 34, 36, 38, 39:
-		p.result(0)
-	case 41:
-		d := p.fd(a[0] & 63)
-		if d == nil {
-			p.error(9)
-			return
-		}
-		if a[0]&64 != 0 {
-			if a[1] >= 20 {
-				p.error(9)
-				return
-			}
-			if a[1] != a[0]&63 {
-				p.close(a[1])
-				p.files[a[1]] = d
-				d.refs++
-				if d.pipe != nil {
-					if d.mode == 0 {
-						d.pipe.readers++
-					} else {
-						d.pipe.writers++
-					}
-				}
-			}
-			p.result(a[1])
-		} else {
-			fd := p.alloc(d)
-			if fd < 0 {
-				p.error(24)
-			} else {
-				p.result(uint16(fd))
-			}
-		}
-	case 42:
-		buf := &pipe{}
-		r := p.alloc(&descriptor{pipe: buf, mode: 0})
-		w := p.alloc(&descriptor{pipe: buf, mode: 1})
-		if r < 0 || w < 0 {
-			if r >= 0 {
-				p.close(uint16(r))
-			}
-			if w >= 0 {
-				p.close(uint16(w))
-			}
-			p.error(24)
-		} else {
-			p.result(uint16(r))
-			p.CPU.R[1] = uint16(w)
-		}
-	case 43:
-		b, ok := p.Memory.bytes(a[0], 16, true)
-		if !ok {
-			p.error(14)
-			return
-		}
-		clear(b)
-		putLong(b, uint32(p.CPU.Ticks*60/TicksPerSecond))
-		p.result(0)
-	case 48:
-		sig := int(a[0])
-		if sig <= 0 || sig >= len(p.signals) || sig == 9 {
-			p.error(22)
-		} else {
-			old := p.signals[sig]
-			p.signals[sig] = a[1]
-			p.posted &^= 1 << uint(sig-1)
-			p.result(old)
-		}
-	case 60:
-		old := p.mask
-		p.mask = a[0] & 0o777
-		p.result(old)
-	default:
+	if c.number >= 64 || syscalls[c.number].invoke == nil {
 		p.error(22)
+		return
 	}
+	syscalls[c.number].invoke(k, p, c)
 }
 
 // InstallExecutable adds a guest entrypoint without exposing a host path.
@@ -1655,56 +1147,6 @@ func (k *Kernel) deliver(p *Process) {
 	}
 }
 
-type inputResult struct {
-	data []byte
-	err  error
-}
-
-// A host read never pins the guest scheduler. The descriptor owns the pending
-// read across fork, dup and EINTR, so an interrupted read cannot steal input
-// from its successor. The reader owns no pointers into guest memory.
-func (k *Kernel) readInput(d *descriptor, dst []byte) (int, bool) {
-	if d.readResult != nil {
-		select {
-		case result := <-d.readResult:
-			d.readData, d.readError, d.readResult = result.data, result.err, nil
-		default:
-			return 0, false
-		}
-	}
-	if len(d.readData) != 0 {
-		n := copy(dst, d.readData)
-		d.readData = d.readData[n:]
-		return n, true
-	}
-	if d.readError != nil {
-		return 0, true
-	}
-	d.readResult = make(chan inputResult, 1)
-	reader, result, wake := d.input, d.readResult, k.wake
-	size := len(dst)
-	go func() {
-		data := make([]byte, size)
-		n, err := reader.Read(data)
-		result <- inputResult{data[:n], err}
-		select {
-		case wake <- struct{}{}:
-		default:
-		}
-	}()
-	return 0, false
-}
-func (k *Kernel) hasInput() bool {
-	for _, p := range k.Processes {
-		if !p.Exited && p.pending != nil && p.pending.number == 3 {
-			if d := p.fd(p.pending.args[0]); d != nil && d.readResult != nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 -- signals_test.go --
 package v7
 
@@ -1725,6 +1167,58 @@ func signalProcess(t *testing.T) (*Kernel, *Process) {
 		t.Fatal(err)
 	}
 	return k, p
+}
+
+func TestInterruptedHostWrite(t *testing.T) {
+	k, p := signalProcess(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p.files[1].output = writer
+	copy(p.Memory.Data[0o300:], "OLD")
+	k.syscall(p, call{number: 4, args: [4]uint16{1, 0o300, 3}})
+	if p.pending == nil {
+		t.Fatal("host write should block the process")
+	}
+	op := p.pending.write
+	p.signals[2] = 0o200
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	if p.pending != nil || p.CPU.R[0] != 4 || p.CPU.R[7] != 0o200 {
+		t.Fatal("blocked host write did not receive EINTR")
+	}
+	copy(p.Memory.Data[0o300:], "NEW")
+	// The worker owns a snapshot, so the guest may reuse its buffer after EINTR.
+	got := make([]byte, 3)
+	if _, err := io.ReadFull(reader, got); err != nil || string(got) != "OLD" {
+		t.Fatalf("write snapshot %q: %v", got, err)
+	}
+	select {
+	case <-op.done:
+	case <-time.After(time.Second):
+		t.Fatal("write did not complete")
+	}
+	// A later write must neither replay the abandoned write nor consume its result.
+	k.syscall(p, call{number: 4, args: [4]uint16{1, 0o300, 3}})
+	if _, err := io.ReadFull(reader, got); err != nil || string(got) != "NEW" {
+		t.Fatalf("subsequent write %q: %v", got, err)
+	}
+	deadline := time.After(time.Second)
+	for p.pending != nil {
+		c := *p.pending
+		p.pending = nil
+		k.syscall(p, c)
+		if p.pending != nil {
+			select {
+			case <-k.wake:
+			case <-deadline:
+				t.Fatal("write completion lost")
+			}
+		}
+	}
+	if p.CPU.R[0] != 3 {
+		t.Fatal("write completion byte count")
+	}
 }
 func TestSignalFrameAndDispositions(t *testing.T) {
 	for _, sig := range []int{2, 4, 5, 14} {
@@ -1965,6 +1459,683 @@ func TestSignalExecAndTerminalInput(t *testing.T) {
 	if err != nil || status != 143 || p.Status != 15 {
 		t.Fatalf("terminal signal during input: %d %v", status, err)
 	}
+}
+
+-- syscalls.go --
+package v7
+
+import (
+	"encoding/binary"
+	"io"
+)
+
+type syscallEntry struct {
+	name            string
+	args, registers int
+	invoke          func(*Kernel, *Process, call)
+}
+
+var syscalls = [64]syscallEntry{
+	1:  {"exit", 1, 1, (*Kernel).sysExit},
+	2:  {"fork", 0, 0, (*Kernel).sysFork},
+	7:  {"wait", 0, 0, (*Kernel).sysWait},
+	3:  {"read", 3, 1, (*Kernel).sysReadWrite},
+	4:  {"write", 3, 1, (*Kernel).sysReadWrite},
+	5:  {"open", 2, 0, (*Kernel).sysOpen},
+	8:  {"creat", 2, 0, (*Kernel).sysOpen},
+	6:  {"close", 1, 1, (*Kernel).sysClose},
+	9:  {"link", 2, 0, (*Kernel).sysLink},
+	10: {"unlink", 1, 0, (*Kernel).sysUnlink},
+	11: {"exec", 2, 0, (*Kernel).sysExec},
+	59: {"execve", 3, 0, (*Kernel).sysExec},
+	12: {"chdir", 1, 0, (*Kernel).sysChdir},
+	13: {"time", 0, 0, (*Kernel).sysTime},
+	15: {"chmod", 2, 0, (*Kernel).sysChmod},
+	17: {"break", 1, 0, (*Kernel).sysBreak},
+	18: {"stat", 2, 0, (*Kernel).sysStat},
+	28: {"fstat", 2, 1, (*Kernel).sysStat},
+	19: {"seek", 4, 1, (*Kernel).sysSeek},
+	20: {"pid", 0, 0, (*Kernel).sysPID},
+	24: {"getuid", 0, 0, (*Kernel).sysIDs},
+	47: {"getgid", 0, 0, (*Kernel).sysIDs},
+	23: {"setuid", 1, 1, (*Kernel).sysSetID},
+	46: {"setgid", 1, 1, (*Kernel).sysSetID},
+	27: {"alarm", 1, 1, (*Kernel).sysAlarm},
+	29: {"pause", 0, 0, (*Kernel).sysPause},
+	37: {"kill", 2, 1, (*Kernel).sysKill},
+	31: {"stty", 2, 1, (*Kernel).sysIoctl},
+	32: {"gtty", 2, 1, (*Kernel).sysIoctl},
+	54: {"ioctl", 3, 0, (*Kernel).sysIoctl},
+	33: {"access", 2, 0, (*Kernel).sysAccess},
+	34: {"nice", 1, 1, (*Kernel).sysNoop},
+	36: {"sync", 0, 0, (*Kernel).sysNoop},
+	38: {"switch", 0, 0, (*Kernel).sysNoop},
+	39: {"setpgrp", 0, 0, (*Kernel).sysNoop},
+	41: {"dup", 2, 2, (*Kernel).sysDup},
+	42: {"pipe", 0, 0, (*Kernel).sysPipe},
+	43: {"times", 1, 0, (*Kernel).sysTimes},
+	48: {"signal", 2, 0, (*Kernel).sysSignal},
+	60: {"umask", 1, 1, (*Kernel).sysUmask},
+	14: {"unsupported", 3, 0, nil},
+	16: {"unsupported", 3, 0, nil},
+	21: {"unsupported", 3, 0, nil},
+	22: {"unsupported", 1, 0, nil},
+	25: {"unsupported", 2, 2, nil},
+	26: {"unsupported", 4, 1, nil},
+	30: {"unsupported", 2, 0, nil},
+	35: {"unsupported", 1, 0, nil},
+	40: {"unsupported", 1, 1, nil},
+	44: {"unsupported", 4, 0, nil},
+	51: {"unsupported", 1, 0, nil},
+	61: {"unsupported", 1, 0, nil},
+}
+
+func sysargs(n uint16) (int, int) {
+	if n >= 64 {
+		return 0, 0
+	}
+	s := syscalls[n]
+	return s.args, s.registers
+}
+func (k *Kernel) pathArg(p *Process, addr uint16) (string, bool) {
+	s, ok := p.Memory.str(addr)
+	if !ok || s == "" {
+		p.error(14)
+		return "", false
+	}
+	return k.FS.resolve(p.CWD, s), true
+}
+func (k *Kernel) sysExit(p *Process, c call) {
+	a := c.args
+	k.exit(p, (a[0]&255)<<8)
+}
+func (k *Kernel) sysFork(p *Process, c call) {
+	live := 0
+	for _, q := range k.Processes {
+		if !q.Exited || q.Parent != 0 {
+			live++
+		}
+	}
+	if live >= 64 || k.nextPID == 65535 {
+		p.error(11)
+		p.CPU.R[7] += 2
+		return
+	}
+	k.nextPID++
+	q := *p
+	q.PID = k.nextPID
+	q.Parent = p.PID
+	q.posted, q.alarm = 0, 0
+	q.CPU = p.CPU
+	mem := *p.Memory
+	mem.Data = append([]byte{}, mem.Data...)
+	if mem.Separate {
+		mem.Text = append([]byte{}, mem.Text...)
+	} else {
+		mem.Text = mem.Data
+	}
+	q.Memory = &mem
+	q.CPU.Bus = q.Memory
+	q.CPU.R[0] = p.PID
+	for _, d := range q.files {
+		d.adjust(1)
+	}
+	reused := false
+	for i, old := range k.Processes {
+		if old.Exited && old.Parent == 0 {
+			k.Processes[i] = &q
+			reused = true
+			break
+		}
+	}
+	if !reused {
+		k.Processes = append(k.Processes, &q)
+	}
+	p.result(q.PID)
+	p.CPU.R[7] += 2
+}
+func (k *Kernel) sysWait(p *Process, c call) {
+	k.wait(p)
+}
+func (k *Kernel) sysReadWrite(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0])
+	if d == nil || c.number == 3 && d.mode == 1 || c.number == 4 && d.mode == 0 {
+		p.error(9)
+		return
+	}
+	b, ok := p.Memory.bytes(a[1], int(a[2]), c.number == 3)
+	if !ok {
+		p.error(14)
+		return
+	}
+	n := 0
+	if c.number == 3 {
+		if len(b) == 0 {
+			p.result(0)
+			return
+		}
+		if d.pipe != nil {
+			if len(d.pipe.data) == 0 && d.pipe.writers != 0 {
+				p.pending = &c
+				return
+			}
+			n = copy(b, d.pipe.data)
+			d.pipe.data = d.pipe.data[n:]
+		} else if d.input != nil {
+			var err error
+			var ready bool
+			n, err, ready = k.readInput(d, b)
+			if !ready {
+				p.pending = &c
+				return
+			}
+			if n == 0 && err != nil && err != io.EOF {
+				p.error(5)
+				return
+			}
+		} else if d.name != "/dev/null" && d.node != nil {
+			data := d.node.Data
+			if d.node.Mode&0o170000 == 0o40000 {
+				data = k.FS.directory(d.name)
+			}
+			if d.offset < len(data) {
+				n = copy(b, data[d.offset:])
+				d.offset += n
+			}
+		}
+	} else {
+		if d.pipe != nil {
+			if d.pipe.readers == 0 {
+				p.error(32)
+				k.PostSignal(p, 13)
+				return
+			}
+			space := 4096 - len(d.pipe.data)
+			if len(b) > space {
+				if len(b) <= 4096 {
+					p.pending = &c
+					return
+				}
+				b = b[:space]
+			}
+			if len(b) == 0 && a[2] != 0 {
+				p.pending = &c
+				return
+			}
+			d.pipe.data = append(d.pipe.data, b...)
+			n = len(b)
+		} else if d.output != nil {
+			var err error
+			var ready bool
+			n, err, ready = k.writeOutput(d, b, &c)
+			if !ready {
+				p.pending = &c
+				return
+			}
+			if n == 0 && err != nil {
+				p.error(5)
+				return
+			}
+		} else if d.name == "/dev/null" {
+			n = len(b)
+		} else if d.node != nil {
+			end := d.offset + len(b)
+			if end > d.offset && end > k.FS.Limit {
+				p.error(27)
+				return
+			}
+			if end > len(d.node.Data) {
+				growth := end - len(d.node.Data)
+				if growth > k.FS.Limit-k.FS.Bytes {
+					p.error(28)
+					return
+				}
+				d.node.Data = append(d.node.Data, make([]byte, growth)...)
+				k.FS.Bytes += growth
+			}
+			n = copy(d.node.Data[d.offset:], b)
+			d.offset += n
+		}
+	}
+	p.result(uint16(n))
+}
+func (k *Kernel) sysOpen(p *Process, c call) {
+	a := c.args
+	if p.freeFD() < 0 {
+		p.error(24)
+		return
+	}
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	mode := int(a[1])
+	if c.number == 8 {
+		mode = 1
+		if node == nil {
+			if !k.FS.validParent(n) {
+				p.error(2)
+				return
+			}
+			if k.FS.Add(n, nil, 0o100000|(a[1]&0o777)&^p.mask) != nil {
+				p.error(28)
+				return
+			}
+			node = k.FS.Nodes[n]
+		} else if node.Mode&0o170000 == 0o100000 {
+			k.FS.Bytes -= len(node.Data)
+			node.Data = nil
+		}
+	}
+	if node == nil {
+		p.error(2)
+		return
+	}
+	if mode > 2 {
+		p.error(22)
+		return
+	}
+	if node.Mode&0o170000 == 0o40000 && mode != 0 {
+		p.error(21)
+		return
+	}
+	kind := node.Mode & 0o170000
+	if kind != 0o100000 && kind != 0o40000 && n != "/dev/null" && n != "/dev/tty" {
+		p.error(6)
+		return
+	}
+	d := &descriptor{node: node, name: n, mode: mode}
+	if n == "/dev/tty" {
+		d.input = k.Input
+		d.output = k.Output
+	}
+	fd := p.alloc(d)
+	if fd < 0 {
+		p.error(24)
+	} else {
+		p.result(uint16(fd))
+	}
+}
+func (k *Kernel) sysClose(p *Process, c call) {
+	a := c.args
+	if !p.close(a[0]) {
+		p.error(9)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysLink(p *Process, c call) {
+	a := c.args
+	old, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	newName, ok := k.pathArg(p, a[1])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[old]
+	if node == nil {
+		p.error(2)
+	} else if k.FS.Nodes[newName] != nil {
+		p.error(17)
+	} else if !k.FS.validParent(newName) {
+		p.error(2)
+	} else if node.Mode&0o170000 == 0o40000 {
+		p.error(1)
+	} else {
+		k.FS.Nodes[newName] = node
+		node.Links++
+		p.result(0)
+	}
+}
+func (k *Kernel) sysUnlink(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else if node.Mode&0o170000 == 0o40000 {
+		p.error(1)
+	} else {
+		delete(k.FS.Nodes, n)
+		node.Links--
+		p.result(0)
+	}
+}
+func (k *Kernel) sysExec(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	args, ok := p.Memory.vector(a[1])
+	if !ok {
+		p.error(14)
+		return
+	}
+	var env []string
+	if c.number == 59 {
+		env, ok = p.Memory.vector(a[2])
+		if !ok {
+			p.error(14)
+			return
+		}
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+		return
+	}
+	mem, cpu, err := Load(node.Data, args, env)
+	if err != nil {
+		p.error(8)
+		return
+	}
+	cpu.Ticks = p.CPU.Ticks
+	p.Memory, p.CPU = mem, cpu
+	for i := range p.signals {
+		if p.signals[i]&1 == 0 {
+			p.signals[i] = 0
+		}
+	}
+}
+func (k *Kernel) sysChdir(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else if node.Mode&0o170000 != 0o40000 {
+		p.error(20)
+	} else {
+		p.CWD = n
+		p.result(0)
+	}
+}
+func (k *Kernel) sysTime(p *Process, c call) {
+	seconds := uint32(k.Ticks / TicksPerSecond)
+	p.result(uint16(seconds >> 16))
+	p.CPU.R[1] = uint16(seconds)
+}
+func (k *Kernel) sysChmod(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else {
+		node.Mode = node.Mode&0o170000 | a[1]&0o7777
+		p.result(0)
+	}
+}
+func (k *Kernel) sysBreak(p *Process, c call) {
+	a := c.args
+	brk := (int(a[0]) + 63) &^ 63
+	if brk < p.Memory.DataStart || brk > p.Memory.Stack {
+		p.error(12)
+	} else {
+		if brk > p.Memory.Break {
+			clear(p.Memory.Data[p.Memory.Break:brk])
+		}
+		p.Memory.Break = brk
+		p.result(0)
+	}
+}
+func (k *Kernel) sysStat(p *Process, c call) {
+	a := c.args
+	var node *Node
+	var n string
+	addr := a[1]
+	if c.number == 18 {
+		var ok bool
+		n, ok = k.pathArg(p, a[0])
+		if !ok {
+			return
+		}
+		node = k.FS.Nodes[n]
+		if node == nil {
+			p.error(2)
+			return
+		}
+	} else {
+		d := p.fd(a[0])
+		if d == nil {
+			p.error(9)
+			return
+		}
+		node = d.node
+		n = d.name
+		if node == nil {
+			node = &Node{Mode: 0o20666, Links: 1}
+		}
+	}
+	b, ok := p.Memory.bytes(addr, 30, true)
+	if !ok {
+		p.error(14)
+		return
+	}
+	clear(b)
+	binary.LittleEndian.PutUint16(b, 1)
+	binary.LittleEndian.PutUint16(b[2:], node.Inode)
+	binary.LittleEndian.PutUint16(b[4:], node.Mode)
+	binary.LittleEndian.PutUint16(b[6:], node.Links)
+	binary.LittleEndian.PutUint16(b[8:], node.UID)
+	binary.LittleEndian.PutUint16(b[10:], node.GID)
+	size := len(node.Data)
+	if node.Mode&0o170000 == 0o40000 {
+		size = len(k.FS.directory(n))
+	}
+	putLong(b[14:], uint32(size))
+	p.result(0)
+}
+func (k *Kernel) sysSeek(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0])
+	if d == nil {
+		p.error(9)
+		return
+	}
+	if d.node == nil || d.pipe != nil {
+		p.error(29)
+		return
+	}
+	offset := int64(int32(uint32(a[1])<<16 | uint32(a[2])))
+	switch a[3] {
+	case 0:
+	case 1:
+		offset += int64(d.offset)
+	case 2:
+		offset += int64(len(d.node.Data))
+	default:
+		p.error(22)
+		return
+	}
+	if offset < 0 || offset > 1<<31-1 {
+		p.error(22)
+		return
+	}
+	d.offset = int(offset)
+	p.result(uint16(offset >> 16))
+	p.CPU.R[1] = uint16(offset)
+}
+func (k *Kernel) sysPID(p *Process, c call) {
+	p.result(p.PID)
+	p.CPU.R[1] = p.Parent
+}
+func (k *Kernel) sysIDs(p *Process, c call) {
+	p.result(0)
+	p.CPU.R[1] = 0
+}
+func (k *Kernel) sysSetID(p *Process, c call) {
+	a := c.args
+	if a[0] != 0 {
+		p.error(1)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysAlarm(p *Process, c call) {
+	a := c.args
+	old := uint16(0)
+	if p.alarm > k.Ticks {
+		old = uint16((p.alarm - k.Ticks + TicksPerSecond - 1) / TicksPerSecond)
+	}
+	p.alarm = 0
+	if a[0] != 0 {
+		p.alarm = k.Ticks + uint64(a[0])*TicksPerSecond
+	}
+	p.result(old)
+}
+func (k *Kernel) sysPause(p *Process, c call) {
+	p.paused = true
+}
+func (k *Kernel) sysKill(p *Process, c call) {
+	a := c.args
+	found := false
+	for _, q := range k.Processes {
+		if q.Exited {
+			continue
+		}
+		pid := int16(a[0])
+		if (pid > 0 && q.PID == a[0]) || (pid == 0 && q.Group == p.Group) || (pid == -1 && q != p) {
+			found = true
+			k.PostSignal(q, int(a[1]))
+		}
+	}
+	if found {
+		p.result(0)
+	} else {
+		p.error(3)
+	}
+}
+func (k *Kernel) sysIoctl(p *Process, c call) {
+	a := c.args
+	if p.fd(a[0]) == nil {
+		p.error(9)
+		return
+	}
+	if p.fd(a[0]).name != "/dev/tty" {
+		p.error(25)
+		return
+	}
+	request, addr := uint16(0x7408), a[1]
+	if c.number == 31 {
+		request = 0x7409
+	}
+	if c.number == 54 {
+		request, addr = a[1], a[2]
+	}
+	if request != 0x7408 && request != 0x7409 && request != 0x740a {
+		p.error(25)
+		return
+	}
+	b, ok := p.Memory.bytes(addr, 6, request == 0x7408)
+	if !ok {
+		p.error(14)
+		return
+	}
+	if request == 0x7408 {
+		copy(b, []byte{13, 13, 8, 21, 0, 0})
+	}
+	p.result(0)
+}
+func (k *Kernel) sysAccess(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	if k.FS.Nodes[n] == nil {
+		p.error(2)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysNoop(p *Process, c call) {
+	p.result(0)
+}
+func (k *Kernel) sysDup(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0] & 63)
+	if d == nil {
+		p.error(9)
+		return
+	}
+	if a[0]&64 != 0 {
+		if a[1] >= 20 {
+			p.error(9)
+			return
+		}
+		if a[1] != a[0]&63 {
+			p.install(int(a[1]), d)
+		}
+		p.result(a[1])
+	} else {
+		fd := p.alloc(d)
+		if fd < 0 {
+			p.error(24)
+		} else {
+			p.result(uint16(fd))
+		}
+	}
+}
+func (k *Kernel) sysPipe(p *Process, c call) {
+	buf := &pipe{}
+	r := p.alloc(&descriptor{pipe: buf, mode: 0})
+	w := p.alloc(&descriptor{pipe: buf, mode: 1})
+	if r < 0 || w < 0 {
+		if r >= 0 {
+			p.close(uint16(r))
+		}
+		if w >= 0 {
+			p.close(uint16(w))
+		}
+		p.error(24)
+	} else {
+		p.result(uint16(r))
+		p.CPU.R[1] = uint16(w)
+	}
+}
+func (k *Kernel) sysTimes(p *Process, c call) {
+	a := c.args
+	b, ok := p.Memory.bytes(a[0], 16, true)
+	if !ok {
+		p.error(14)
+		return
+	}
+	clear(b)
+	putLong(b, uint32(p.CPU.Ticks*60/TicksPerSecond))
+	p.result(0)
+}
+func (k *Kernel) sysSignal(p *Process, c call) {
+	a := c.args
+	sig := int(a[0])
+	if sig <= 0 || sig >= len(p.signals) || sig == 9 {
+		p.error(22)
+	} else {
+		old := p.signals[sig]
+		p.signals[sig] = a[1]
+		p.posted &^= 1 << uint(sig-1)
+		p.result(old)
+	}
+}
+func (k *Kernel) sysUmask(p *Process, c call) {
+	a := c.args
+	old := p.mask
+	p.mask = a[0] & 0o777
+	p.result(old)
 }
 
 -- v7_test.go --

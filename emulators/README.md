@@ -53,7 +53,7 @@ The V7 personality supports 0407, 0410 and 0411 executables, cooperative
 fork/exec/wait, pipes, basic files/directories, and V7 signals. Handlers receive
 the V7 PC/PSW stack frame and return through the guest trampoline's RTI.
 `kill`, `alarm`, `pause`, ignored signals, default termination, signal wait
-status and `EINTR` for blocked reads, pipe writes and waits are implemented.
+status and `EINTR` for blocked reads, host/pipe writes and waits are implemented.
 Host SIGINT, SIGQUIT and SIGTERM are forwarded to the guest foreground group.
 Alarms use deterministic virtual time at one million scheduler ticks per
 second; idle waits advance to the next alarm. `time` and `times` use that same
@@ -86,12 +86,14 @@ The optional tests run shell pipelines, create/read/remove a guest file, catch
 shell signals, wake `sleep` through an alarm, and run `awk` arithmetic and its
 square-root, exponential and logarithm library routines. They also check that
 disk input remains unchanged. No test downloads an operating system.
-The CPU tests compare every accepted lowering encoding against the interpreter
-with all condition-code combinations and check native/IR agreement, MMU
+The CPU tests compare generated Go and IR execution for every accepted lowering
+encoding with all condition-code combinations, and use literal architectural
+vectors to check their shared ALU rules. They also check native/IR agreement, MMU
 boundaries, traps, code modification and instruction budgets.
 Floating tests cover literal DEC-format results, the 56th significand bit,
 rounding ties, conversions, addressing, exception masks and kernel trap entry.
 Signal tests cover handler return, disposition inheritance across fork/exec,
-bad stacks, interrupted host reads without lost input, and trap-to-signal mapping.
+bad stacks, interrupted host reads without lost input, blocked host writes with
+stable buffers, and trap-to-signal mapping.
 
 See [the RFE format and runtime](../docs/rfe.md) for authoring and extension.
