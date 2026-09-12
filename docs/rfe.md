@@ -89,10 +89,12 @@ each rule may have at most 16 variable opcode bits.
 Expressions are parsed once into a typed tree shared by validation and code
 generation. Guards and state indices must depend only on the opcode; values
 are unsigned integers or booleans with checked operand types. Generated
-`Execute` and `Lower` functions share one decoder and the same instruction
+`Execute` and `Lower` functions use the same validated decoder rules and instruction
 semantics. The PDP-11 interpreter uses `Execute` for ALU operations after
 resolving operands, including memory operands and byte operations. `Lower`
-feeds a small, architecture-neutral SSA IR. Constant folding, mask propagation and dead-value elimination remove
+feeds a small, architecture-neutral SSA IR. Grouped dispatch is emitted directly
+into each entry point to avoid a second runtime dispatch. Constant folding,
+mask propagation and dead-value elimination remove
 overwritten intermediate flags. State stores commit at the end of the block.
 Renvo emits call-free native state transformations from this IR using its
 existing amd64 and arm64 code generators. Memory, devices, traps and syscalls
@@ -146,18 +148,38 @@ preserves ignored dispositions and the alarm while resetting handlers.
 Only the scheduler mutates process state; terminal notifications and completed
 host I/O arrives over channels. Descriptor installation and removal share one
 ownership path across close, dup and fork. A syscall table keeps ABI argument
-layouts, trace names and named handlers together. A descriptor retains an in-flight host read
-across EINTR, preventing the interrupted operation from consuming input meant
-for a subsequent read. Host writes use copied buffers and run asynchronously,
+layouts, trace names and named handlers together. The kernel retains one shared
+terminal read across EINTR, close and reopen, so all terminal descriptors consume
+the same buffered input without competing host reads. Host writes use copied buffers and run asynchronously,
 serialized within each kernel, so blocked output cannot prevent signal delivery.
 Generic Go readers and writers cannot be forcibly cancelled: a host write may
 finish after the guest receives EINTR. Callers embedding the kernel own the
 lifetime and closing of their host streams.
 
+Because this personality has no guest init process, the kernel adopts children
+whose parent exits and automatically reaps them, including children which have
+already exited. Direct children of a live process retain their normal wait status.
+
 Floating arithmetic deliberately retains exact rational intermediates. The
 embedded `BenchmarkFloating` measures F/D add, multiply and divide separately;
 an Apple M4 baseline measured 376–540 ns and 31–44 allocations per instruction.
 This identifies an optimization opportunity without trading away D precision.
+
+Profiling the shared ALU found decoder dispatch overhead and redundant integer
+mask operations. Direct grouped dispatch, single-bit selection and modular
+truncation simplification retain one authored set of instruction semantics.
+On Apple M4, three isolated one-second runs of `BenchmarkRegisterBlock` gave
+these medians against commit `d75f89bb` (each iteration executes 16 increments):
+
+| Mode | Before | After |
+| --- | ---: | ---: |
+| Interpreter | 276.4 ns | 262.6 ns |
+| IR | 361.2 ns | 247.1 ns |
+| Native | 94.39 ns | 77.65 ns |
+
+Native code shrank from 2,052 to 1,292 bytes, and IR allocation from 1,024 to
+640 bytes per iteration. These are microbenchmark results, not whole-program
+speedups. Interpreter execution still trails the earlier handwritten ALU.
 
 The initial user environment
 limits its in-memory filesystem to 64 MiB, live processes to 64, descriptors to

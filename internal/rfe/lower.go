@@ -194,24 +194,42 @@ func GenerateLowering(source []byte) ([]byte, error) {
 	var out bytes.Buffer
 	fmt.Fprintf(&out, "// Code generated from instructions.lower by renvoemu; DO NOT EDIT.\npackage %s\nimport emu %q\nconst LoweringStateWords = %d\n", file.Name.Name, "renvo.dev/internal/rfe/runtime", words)
 	out.WriteString("func rfeBool(v bool) uint64 {if v{return 1};return 0}\nfunc rfeChoose(c bool,t,f uint64)uint64{if c{return t};return f}\nfunc rfeChooseBool(c,t,f bool)bool{if c{return t};return f}\n")
-	fmt.Fprintf(&out, "func rfeDecode(opcode uint64) int {if opcode >> %d != 0 {return -1};switch {\n", bits)
-	for i, r := range rules {
-		fmt.Fprintf(&out, "case opcode & %#x == %#x:\n", r.mask, r.value)
-		if r.guard != nil {
-			fmt.Fprintf(&out, "if !(%s){return -1}\n", r.guard.emit(false))
+	// Emit the same validated dispatch directly into each entry point. This
+	// avoids decoding to a rule number followed by a second switch in Execute.
+	// Equal masks form value switches; overlap validation makes grouping safe.
+	dispatch := func(body func(rule)) {
+		fmt.Fprintf(&out, "if opcode >> %d != 0 {return false};\n", bits)
+		grouped := map[uint64]bool{}
+		for _, group := range rules {
+			if grouped[group.mask] {
+				continue
+			}
+			grouped[group.mask] = true
+			fmt.Fprintf(&out, "switch opcode & %#x {\n", group.mask)
+			for _, r := range rules {
+				if r.mask != group.mask {
+					continue
+				}
+				fmt.Fprintf(&out, "case %#x:\n", r.value)
+				if r.guard != nil {
+					fmt.Fprintf(&out, "if !(%s){return false}\n", r.guard.emit(false))
+				}
+				body(r)
+				out.WriteString("return true\n")
+			}
+			out.WriteString("}\n")
 		}
-		fmt.Fprintf(&out, "return %d\n", i)
+		out.WriteString("return false}\n")
 	}
-	out.WriteString("};return -1}\nfunc Decodable(opcode uint64)bool{return rfeDecode(opcode)>=0}\n")
+	out.WriteString("func Decodable(opcode uint64)bool{\n")
+	dispatch(func(rule) {})
 	for _, ir := range []bool{false, true} {
 		if ir {
 			out.WriteString("func Lower(opcode uint64,b *emu.Builder)bool{\n")
 		} else {
 			fmt.Fprintf(&out, "func Execute(opcode uint64,state *[%d]uint64)bool{\n", words)
 		}
-		out.WriteString("switch rfeDecode(opcode){\n")
-		for i, r := range rules {
-			fmt.Fprintf(&out, "case %d:\n", i)
+		dispatch(func(r rule) {
 			for _, s := range r.assignments {
 				v := s.value.emit(ir && s.value.dynamic)
 				if s.target.op == token.IDENT {
@@ -222,9 +240,7 @@ func GenerateLowering(source []byte) ([]byte, error) {
 					fmt.Fprintf(&out, "%s=%s\n", s.target.emit(false), v)
 				}
 			}
-			out.WriteString("return true\n")
-		}
-		out.WriteString("};return false}\n")
+		})
 	}
 	return format.Source(out.Bytes())
 }

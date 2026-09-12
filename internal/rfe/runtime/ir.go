@@ -124,6 +124,21 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 				return a
 			}
 			prior := b.Ops[a]
+			// Low-bit truncation commutes with modular addition/subtraction:
+			// ((x & m) + y) & m == (x + y) & m for m = 2^n - 1.
+			if mask&(mask+1) == 0 && (prior.Kind == Add || prior.Kind == Sub) {
+				strip := func(v Value) Value {
+					o := b.Ops[v]
+					if o.Kind == And && b.Ops[o.B].Kind == Const && b.Ops[o.B].Imm&mask == mask {
+						return o.A
+					}
+					return v
+				}
+				x, y := strip(prior.A), strip(prior.B)
+				if x != prior.A || y != prior.B {
+					return b.Binary(And, b.Binary(prior.Kind, x, y), c)
+				}
+			}
 			if prior.Kind == And && b.Ops[prior.B].Kind == Const {
 				return b.Binary(And, prior.A, b.Constant(mask&b.Ops[prior.B].Imm))
 			}
@@ -158,6 +173,27 @@ func (b *Builder) Choose(c, t, f Value) Value {
 	// Conditions follow Go-style truth values even when supplied by an IR client.
 	if b.masks[c]&^uint64(1) != 0 {
 		c = b.Binary(Equal, b.Binary(Equal, c, b.Constant(0)), b.Constant(0))
+	}
+	if b.Ops[c].Kind == Const {
+		if b.Ops[c].Imm != 0 {
+			return t
+		}
+		return f
+	}
+	// A boolean selecting one bit is just a shift, not a full-width mask.
+	if b.Ops[t].Kind == Const && b.Ops[f].Kind == Const && b.Ops[f].Imm == 0 {
+		v := b.Ops[t].Imm
+		if v != 0 && v&(v-1) == 0 {
+			var shift uint64
+			for v > 1 {
+				v >>= 1
+				shift++
+			}
+			if shift == 0 {
+				return c
+			}
+			return b.Shift(Shl, c, shift)
+		}
 	}
 	mask := b.Binary(Sub, b.Constant(0), c)
 	return b.Binary(Or, b.Binary(And, t, mask), b.Binary(And, f, b.Binary(Xor, mask, b.Constant(^uint64(0)))))

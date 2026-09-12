@@ -15,6 +15,38 @@ func TestNativeIR(t *testing.T) {
 		t.Skip(err)
 	}
 	defer n.Close()
+	for _, bit := range []uint64{1, 4, 1 << 63} {
+		for _, constant := range []bool{false, true} {
+			for _, condition := range []uint64{0, 1, 2, 1 << 63, ^uint64(0)} {
+				var b Builder
+				c := b.Load(0)
+				if constant {
+					c = b.Constant(condition)
+				}
+				b.Store(1, b.Choose(c, b.Constant(bit), b.Constant(0)))
+				ops := b.Finish(2)
+				entry, err := n.Compile(ops, 2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := uint64(0)
+				if condition != 0 {
+					want = bit
+				}
+				for _, native := range []bool{false, true} {
+					state := []uint64{condition, 0}
+					if native {
+						err = n.Call(entry, state)
+					} else {
+						err = Interpret(ops, state)
+					}
+					if err != nil || state[1] != want {
+						t.Fatalf("bit choice: bit=%x condition=%x constant=%v native=%v got=%x err=%v", bit, condition, constant, native, state[1], err)
+					}
+				}
+			}
+		}
+	}
 	var choice Builder
 	choice.Store(1, choice.Choose(choice.Load(0), choice.Constant(0x1234), choice.Constant(0xabcd)))
 	ops := choice.Finish(2)
@@ -40,6 +72,37 @@ func TestNativeIR(t *testing.T) {
 		}
 	}
 	r := rand.New(rand.NewSource(473))
+	for _, mask := range []uint64{0, 255, 65535, 0xff00, ^uint64(0)} {
+		for _, kind := range []int{Add, Sub} {
+			var b Builder
+			x := b.Binary(And, b.Load(0), b.Constant(mask))
+			y := b.Binary(And, b.Load(1), b.Constant(mask))
+			b.Store(2, b.Binary(And, b.Binary(kind, x, y), b.Constant(mask)))
+			ops := b.Finish(3)
+			entry, err := n.Compile(ops, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 50; i++ {
+				x, y := r.Uint64(), r.Uint64()
+				want := ((x & mask) + (y & mask)) & mask
+				if kind == Sub {
+					want = ((x & mask) - (y & mask)) & mask
+				}
+				for _, native := range []bool{false, true} {
+					state := []uint64{x, y, 0}
+					if native {
+						err = n.Call(entry, state)
+					} else {
+						err = Interpret(ops, state)
+					}
+					if err != nil || state[2] != want {
+						t.Fatalf("masked arithmetic: kind=%d mask=%x got=%x want=%x err=%v", kind, mask, state[2], want, err)
+					}
+				}
+			}
+		}
+	}
 	for kind := Add; kind <= Less; kind++ {
 		for _, shift := range []uint64{0, 1, 15, 31, 63, 64, 255} {
 			var b Builder

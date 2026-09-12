@@ -289,20 +289,20 @@ func (k *Kernel) startIO(fn func([]byte) (int, error), data []byte) *ioOperation
 	return op
 }
 
-// Reads remain on the shared descriptor after EINTR, so a subsequent read
-// receives the result rather than losing input to an abandoned operation.
+// All terminal descriptors share the kernel's input operation. EINTR, close and
+// reopening /dev/tty must not abandon a read or start competing host reads.
 func (k *Kernel) readInput(d *descriptor, dst []byte) (int, error, bool) {
-	if d.readOp == nil {
-		d.readOp = k.startIO(d.input.Read, make([]byte, len(dst)))
+	if k.inputOp == nil {
+		k.inputOp = k.startIO(d.input.Read, make([]byte, len(dst)))
 	}
-	op := d.readOp
+	op := k.inputOp
 	if !op.ready() {
 		return 0, nil, false
 	}
 	n := copy(dst, op.data[:op.n])
 	op.data, op.n = op.data[n:], op.n-n
 	if op.n == 0 && op.err == nil {
-		d.readOp = nil
+		k.inputOp = nil
 	}
 	return n, op.err, true
 }
@@ -329,7 +329,7 @@ func (k *Kernel) hasIO() bool {
 			continue
 		}
 		d := p.fd(p.pending.args[0])
-		if d != nil && ((p.pending.number == 3 && d.input != nil && d.readOp != nil) ||
+		if d != nil && ((p.pending.number == 3 && d.input != nil && k.inputOp != nil) ||
 			(p.pending.number == 4 && d.output != nil && k.outputOp != nil)) {
 			return true
 		}
@@ -728,7 +728,6 @@ type descriptor struct {
 	input  io.Reader
 	output io.Writer
 	pipe   *pipe
-	readOp *ioOperation
 }
 type pipe struct {
 	data             []byte
@@ -749,6 +748,7 @@ type Process struct {
 	posted      uint32
 	alarm       uint64
 	paused      bool
+	orphan      bool
 	Group       uint16
 }
 type call struct {
@@ -769,6 +769,7 @@ type Kernel struct {
 	// Signals delivers terminal signals to the foreground guest process group.
 	Signals  <-chan int
 	wake     chan struct{}
+	inputOp  *ioOperation
 	outputOp *ioOperation
 }
 
@@ -1005,11 +1006,30 @@ func (p *Process) close(n uint16) bool {
 	p.install(int(n), nil)
 	return true
 }
+func (p *Process) reap() {
+	p.Parent = 0
+	p.Memory = nil
+	p.CPU.Bus = nil
+	p.pending = nil
+}
 func (k *Kernel) exit(p *Process, status uint16) {
 	p.Exited = true
 	p.Status = status
 	for i := 0; i < 20; i++ {
 		p.close(uint16(i))
+	}
+	// There is no guest init process in this personality. Adopt children into
+	// the kernel and reap them automatically, including already-exited children.
+	for _, q := range k.Processes {
+		if q.Parent == p.PID {
+			q.Parent, q.orphan = 0, true
+			if q.Exited {
+				q.reap()
+			}
+		}
+	}
+	if p.orphan {
+		p.reap()
 	}
 }
 func (k *Kernel) wait(p *Process) {
@@ -1022,9 +1042,7 @@ func (k *Kernel) wait(p *Process) {
 		if q.Exited {
 			p.result(q.PID)
 			p.CPU.R[1] = q.Status
-			q.Parent = 0
-			q.Memory = nil
-			q.CPU.Bus = nil
+			q.reap()
 			p.waiting = false
 			return
 		}
@@ -1167,6 +1185,94 @@ func signalProcess(t *testing.T) (*Kernel, *Process) {
 		t.Fatal(err)
 	}
 	return k, p
+}
+
+func TestOrphanReaping(t *testing.T) {
+	for _, childFirst := range []bool{false, true} {
+		k, p := signalProcess(t)
+		fork := func(parent *Process) *Process {
+			t.Helper()
+			k.syscall(parent, call{number: 2})
+			if parent.CPU.PSW&pdp11.C != 0 {
+				t.Fatalf("fork: errno %d", parent.CPU.R[0])
+			}
+			for _, q := range k.Processes {
+				if q.PID == parent.CPU.R[0] {
+					return q
+				}
+			}
+			t.Fatal("missing child")
+			return nil
+		}
+		for i := 0; i < 128; i++ {
+			child := fork(p)
+			grandchild := fork(child)
+			if childFirst {
+				k.exit(child, 0)
+				k.exit(grandchild, 0)
+			} else {
+				k.exit(grandchild, 0)
+				k.exit(child, 0)
+			}
+			k.wait(p)
+			if p.CPU.R[0] != child.PID || p.CPU.PSW&pdp11.C != 0 {
+				t.Fatal("lost direct-child wait status")
+			}
+			if grandchild.Memory != nil || grandchild.CPU.Bus != nil || grandchild.Parent != 0 {
+				t.Fatal("orphan resources retained")
+			}
+			if len(k.Processes) > 3 {
+				t.Fatal("process slots not reused")
+			}
+		}
+	}
+}
+
+func TestInterruptedReadAfterReopen(t *testing.T) {
+	k, p := signalProcess(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	k.Input = reader
+	p.files[0].input = reader
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 2}})
+	old := k.inputOp
+	p.signals[2] = 0o200
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	p.close(0)
+	copy(p.Memory.Data[0o400:], "/dev/tty\x00")
+	k.syscall(p, call{number: 5, args: [4]uint16{0o400, 0}})
+	if p.CPU.R[0] != 0 || p.CPU.PSW&pdp11.C != 0 {
+		t.Fatal("reopen failed")
+	}
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+	if k.inputOp != old {
+		t.Fatal("reopen started a competing host read")
+	}
+	done := make(chan error, 1)
+	go func() { _, err := writer.Write([]byte("XY")); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("host read did not complete")
+	}
+	<-old.done
+	p.pending = nil
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+	if p.pending != nil || p.CPU.R[0] != 1 || p.Memory.Data[0o300] != 'X' {
+		t.Fatal("lost interrupted read")
+	}
+	// A second terminal open consumes the remainder from the same input stream.
+	k.syscall(p, call{number: 5, args: [4]uint16{0o400, 0}})
+	fd := p.CPU.R[0]
+	k.syscall(p, call{number: 3, args: [4]uint16{fd, 0o300, 1}})
+	if p.pending != nil || p.CPU.R[0] != 1 || p.Memory.Data[0o300] != 'Y' {
+		t.Fatal("terminal opens do not share buffered input")
+	}
 }
 
 func TestInterruptedHostWrite(t *testing.T) {
@@ -1565,6 +1671,7 @@ func (k *Kernel) sysFork(p *Process, c call) {
 	q := *p
 	q.PID = k.nextPID
 	q.Parent = p.PID
+	q.orphan = false
 	q.posted, q.alarm = 0, 0
 	q.CPU = p.CPU
 	mem := *p.Memory
