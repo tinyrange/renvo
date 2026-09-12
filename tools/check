@@ -30,12 +30,12 @@ check_format() {
 	local sources=()
 	while IFS= read -r source; do
 		sources+=("$source")
-	done < <(git ls-files -- '*.rtg' '*.rbe')
+	done < <(git ls-files -- '*.rtg' '*.rbe' '*.rfe')
 	if ((${#sources[@]} == 0)); then
-		printf 'no tracked RTG or RBE sources found\n' >&2
+		printf 'no tracked RTG, RBE, or RFE sources found\n' >&2
 		return 1
 	fi
-	run_check "RTG and RBE syntax and formatting" \
+	run_check "RTG, RBE, and RFE syntax and formatting" \
 		go run ./cmd/renvofmt -check "${sources[@]}"
 }
 

@@ -1,4 +1,4 @@
-// Command renvofmt formats and validates RTG and RBE source files.
+// Command renvofmt formats and validates RTG, RBE, and RFE source files.
 package main
 
 import (
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"renvo.dev/internal/rfe"
 	"sort"
 
 	"renvo.dev/internal/rtg"
@@ -34,7 +35,7 @@ func main() {
 		fail(err.Error())
 	}
 	if len(paths) == 0 {
-		fail("no .rtg or .rbe files found")
+		fail("no .rtg, .rbe, or .rfe files found")
 	}
 	if !*write && !*list && !*check && len(paths) != 1 {
 		fail("standard-output mode accepts exactly one source file")
@@ -48,7 +49,13 @@ func main() {
 			failed = true
 			continue
 		}
-		formatted, formatErr := rtgformat.Source(source, path, filesystemImportLoader{})
+		var formatted []byte
+		var formatErr error
+		if filepath.Ext(path) == ".rfe" {
+			formatted, formatErr = rfe.Format(source)
+		} else {
+			formatted, formatErr = rtgformat.Source(source, path, filesystemImportLoader{})
+		}
 		if formatErr != nil {
 			fmt.Fprintln(os.Stderr, formatErr)
 			failed = true
@@ -91,8 +98,8 @@ func sourcePaths(arguments []string) ([]string, error) {
 			return nil, err
 		}
 		if !info.IsDir() {
-			if !rtgformat.Extension(argument) {
-				return nil, fmt.Errorf("%s is not an .rtg or .rbe file", argument)
+			if !sourceExtension(argument) {
+				return nil, fmt.Errorf("%s is not an .rtg, .rbe, or .rfe file", argument)
 			}
 			clean := filepath.Clean(argument)
 			if !seen[clean] {
@@ -111,7 +118,7 @@ func sourcePaths(arguments []string) ([]string, error) {
 				}
 				return nil
 			}
-			if rtgformat.Extension(path) {
+			if sourceExtension(path) {
 				clean := filepath.Clean(path)
 				if !seen[clean] {
 					seen[clean] = true
@@ -126,6 +133,10 @@ func sourcePaths(arguments []string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func sourceExtension(path string) bool {
+	return rtgformat.Extension(path) || filepath.Ext(path) == ".rfe"
 }
 
 type filesystemImportLoader struct{}
