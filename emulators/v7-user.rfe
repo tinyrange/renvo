@@ -1,0 +1,2473 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "v7-user",
+  "import": "renvo.dev/emulators/v7",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "pdp11"
+    }
+  ]
+}
+
+-- disk.go --
+package v7
+
+import (
+	"encoding/binary"
+	"fmt"
+	"strings"
+)
+
+// ImportDisk reads a V7 filesystem from an RK05 image. Block and inode sizes,
+// PDP word-swapped longs, and packed 24-bit addresses are decoded explicitly.
+// No disk bytes are modified. Device nodes become virtual personality nodes.
+func (f *FS) ImportDisk(disk []byte) error {
+	word := func(b []byte) uint32 { return uint32(binary.LittleEndian.Uint16(b)) }
+	long := func(b []byte) uint32 { return word(b)<<16 | word(b[2:]) }
+	if len(disk) < 1536 || len(disk)%512 != 0 {
+		return fmt.Errorf("invalid V7 filesystem image")
+	}
+	isize := int(word(disk[512:]))
+	if isize < 3 || isize*512 > len(disk) {
+		return fmt.Errorf("invalid V7 inode area")
+	}
+	block := func(n uint32) ([]byte, error) {
+		if n < uint32(isize) || uint64(n)*512+512 > uint64(len(disk)) {
+			return nil, fmt.Errorf("V7 block %d outside image", n)
+		}
+		return disk[int(n)*512 : int(n)*512+512], nil
+	}
+	readInode := func(ino uint16) (*Node, error) {
+		if ino == 0 || int(ino) > (isize-2)*8 {
+			return nil, fmt.Errorf("V7 inode out of range")
+		}
+		at := 1024 + (int(ino)-1)*64
+		b := disk[at : at+64]
+		n := &Node{Mode: uint16(word(b)), Links: uint16(word(b[2:])), UID: uint16(word(b[4:])), GID: uint16(word(b[6:])), Inode: ino}
+		size := long(b[8:])
+		kind := n.Mode & 0o170000
+		if kind != 0o100000 && kind != 0o40000 {
+			return n, nil
+		}
+		if uint64(size) > uint64(f.Limit-f.Bytes) {
+			return nil, fmt.Errorf("V7 filesystem memory limit")
+		}
+		addresses := make([]uint32, 13)
+		for i := range addresses {
+			p := b[12+3*i:]
+			addresses[i] = uint32(p[0])<<16 | uint32(p[1]) | uint32(p[2])<<8
+		}
+		var indirect func(uint32, int, int) (uint32, error)
+		indirect = func(root uint32, level, index int) (uint32, error) {
+			if root == 0 {
+				return 0, nil
+			}
+			data, err := block(root)
+			if err != nil {
+				return 0, err
+			}
+			stride := 1
+			for i := 1; i < level; i++ {
+				stride *= 128
+			}
+			slot := index / stride
+			if slot >= 128 {
+				return 0, fmt.Errorf("V7 indirect index overflow")
+			}
+			v := long(data[slot*4:])
+			if level == 1 {
+				return v, nil
+			}
+			return indirect(v, level-1, index%stride)
+		}
+		n.Data = make([]byte, int(size))
+		for i := 0; i < (int(size)+511)/512; i++ {
+			var address uint32
+			var err error
+			if i < 10 {
+				address = addresses[i]
+			} else if i < 138 {
+				address, err = indirect(addresses[10], 1, i-10)
+			} else if i < 16522 {
+				address, err = indirect(addresses[11], 2, i-138)
+			} else {
+				address, err = indirect(addresses[12], 3, i-16522)
+			}
+			if err != nil {
+				return nil, err
+			}
+			if address != 0 {
+				data, err := block(address)
+				if err != nil {
+					return nil, err
+				}
+				copy(n.Data[i*512:], data)
+			}
+		}
+		f.Bytes += len(n.Data)
+		return n, nil
+	}
+	seen := map[uint16]*Node{}
+	directories := map[uint16]bool{}
+	var walk func(uint16, string, int) error
+	walk = func(ino uint16, name string, depth int) error {
+		if depth > 64 || len(f.Nodes) > 65535 {
+			return fmt.Errorf("V7 directory limit")
+		}
+		n := seen[ino]
+		if n == nil {
+			var err error
+			n, err = readInode(ino)
+			if err != nil {
+				return err
+			}
+			seen[ino] = n
+		}
+		f.Nodes[name] = n
+		if ino > f.next {
+			f.next = ino
+		}
+		if n.Mode&0o170000 != 0o40000 {
+			return nil
+		}
+		if directories[ino] {
+			return fmt.Errorf("V7 directory cycle")
+		}
+		directories[ino] = true
+		defer delete(directories, ino)
+		if len(n.Data)%16 != 0 {
+			return fmt.Errorf("invalid V7 directory length")
+		}
+		for i := 0; i < len(n.Data); i += 16 {
+			child := uint16(word(n.Data[i:]))
+			if child == 0 {
+				continue
+			}
+			entry := string(n.Data[i+2 : i+16])
+			if at := strings.IndexByte(entry, 0); at >= 0 {
+				entry = entry[:at]
+			}
+			if entry == "." || entry == ".." {
+				continue
+			}
+			if entry == "" || strings.Contains(entry, "/") {
+				return fmt.Errorf("invalid V7 directory name")
+			}
+			prefix := name
+			if prefix != "/" {
+				prefix += "/"
+			}
+			if err := walk(child, prefix+entry, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(2, "/", 0)
+}
+
+-- fs.go --
+package v7
+
+import (
+	"encoding/binary"
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+)
+
+// FS is a private in-memory Unix namespace. Guest mutations never implicitly
+// modify the host files or disk image from which it was populated.
+type Node struct {
+	Data                         []byte
+	Mode, Inode, Links, UID, GID uint16
+}
+type FS struct {
+	Nodes map[string]*Node
+	next  uint16
+	Bytes int
+	Limit int
+}
+
+func NewFS() *FS {
+	f := &FS{Nodes: map[string]*Node{}, Limit: 64 << 20}
+	f.Add("/", nil, 0o40755)
+	f.Add("/dev", nil, 0o40755)
+	f.Add("/dev/null", nil, 0o20666)
+	f.Add("/dev/tty", nil, 0o20666)
+	return f
+}
+func (f *FS) Add(name string, data []byte, mode uint16) error {
+	name = path.Clean("/" + name)
+	old := f.Nodes[name]
+	size := 0
+	if old != nil {
+		size = len(old.Data)
+	}
+	if len(data) > f.Limit-f.Bytes+size || f.next == 65535 {
+		return fmt.Errorf("V7 filesystem limit exceeded")
+	}
+	f.next++
+	f.Nodes[name] = &Node{Data: append([]byte{}, data...), Mode: mode, Inode: f.next, Links: 1}
+	f.Bytes += len(data) - size
+	return nil
+}
+func (f *FS) directory(name string) []byte {
+	names := []string{".", ".."}
+	prefix := name
+	if prefix != "/" {
+		prefix += "/"
+	}
+	for p := range f.Nodes {
+		if strings.HasPrefix(p, prefix) && p != name {
+			tail := strings.TrimPrefix(p, prefix)
+			if tail != "" && !strings.Contains(tail, "/") {
+				names = append(names, tail)
+			}
+		}
+	}
+	sort.Strings(names[2:])
+	out := make([]byte, len(names)*16)
+	for i, n := range names {
+		node := f.Nodes[path.Clean(prefix+n)]
+		if node != nil {
+			binary.LittleEndian.PutUint16(out[i*16:], node.Inode)
+		}
+		copy(out[i*16+2:i*16+16], n)
+	}
+	return out
+}
+func (f *FS) resolve(cwd, name string) string {
+	if !strings.HasPrefix(name, "/") {
+		name = path.Join(cwd, name)
+	}
+	return path.Clean("/" + name)
+}
+func (f *FS) validParent(name string) bool {
+	n := f.Nodes[path.Dir(name)]
+	return n != nil && n.Mode&0o170000 == 0o40000 && len(path.Base(name)) <= 14
+}
+
+-- io.go --
+package v7
+
+// A completion owns its buffer, never guest memory. The scheduler alone owns
+// descriptors; closing done publishes the worker's result without polling races.
+type ioOperation struct {
+	data []byte
+	n    int
+	err  error
+	done chan struct{}
+}
+
+func (op *ioOperation) ready() bool {
+	if op == nil {
+		return true
+	}
+	select {
+	case <-op.done:
+		return true
+	default:
+		return false
+	}
+}
+func (k *Kernel) startIO(fn func([]byte) (int, error), data []byte) *ioOperation {
+	op := &ioOperation{data: data, done: make(chan struct{})}
+	go func() {
+		op.n, op.err = fn(data)
+		close(op.done)
+		select {
+		case k.wake <- struct{}{}:
+		default:
+		}
+	}()
+	return op
+}
+
+// All terminal descriptors share the kernel's input operation. EINTR, close and
+// reopening /dev/tty must not abandon a read or start competing host reads.
+func (k *Kernel) readInput(d *descriptor, dst []byte) (int, error, bool) {
+	if k.inputOp == nil {
+		k.inputOp = k.startIO(d.input.Read, make([]byte, len(dst)))
+	}
+	op := k.inputOp
+	if !op.ready() {
+		return 0, nil, false
+	}
+	n := copy(dst, op.data[:op.n])
+	op.data, op.n = op.data[n:], op.n-n
+	if op.n == 0 && op.err == nil {
+		k.inputOp = nil
+	}
+	return n, op.err, true
+}
+
+// Serialize host writes, including stdout/stderr aliases. A resumed syscall
+// retrieves its own completion exactly once. Generic io.Writer cannot cancel
+// an in-flight write; EINTR releases the guest but that write may still finish.
+func (k *Kernel) writeOutput(d *descriptor, src []byte, c *call) (int, error, bool) {
+	if c.write == nil {
+		if !k.outputOp.ready() {
+			return 0, nil, false
+		}
+		c.write = k.startIO(d.output.Write, append([]byte(nil), src...))
+		k.outputOp = c.write
+	}
+	if !c.write.ready() {
+		return 0, nil, false
+	}
+	return c.write.n, c.write.err, true
+}
+func (k *Kernel) hasIO() bool {
+	for _, p := range k.Processes {
+		if p.Exited || p.pending == nil {
+			continue
+		}
+		d := p.fd(p.pending.args[0])
+		if d != nil && ((p.pending.number == 3 && d.input != nil && k.inputOp != nil) ||
+			(p.pending.number == 4 && d.output != nil && k.outputOp != nil)) {
+			return true
+		}
+	}
+	return false
+}
+
+-- main.go --
+package v7
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"renvo.dev/emulators/pdp11"
+	"syscall"
+)
+
+func Main(args []string) int {
+	f := flag.NewFlagSet("v7-user", flag.ContinueOnError)
+	disk := f.String("disk", "", "V7 filesystem image, copied into memory")
+	root := f.String("root", "", "host directory to import into the private guest filesystem")
+	limit := f.Uint64("steps", 100000000, "instruction budget")
+	trace := f.Bool("trace", false, "trace guest syscalls")
+	mode := f.String("engine", "native", "native, ir, or interpreter")
+	stats := f.Bool("stats", false, "print execution statistics")
+	if err := f.Parse(args); err != nil {
+		return 2
+	}
+	if f.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: v7-user [-disk image | -root directory] executable [arguments]")
+		return 2
+	}
+	fs := NewFS()
+	fail := func(err error) int { fmt.Fprintln(os.Stderr, "v7-user:", err); return 1 }
+	if *disk != "" && *root != "" {
+		return fail(fmt.Errorf("choose a disk image or host directory"))
+	}
+	if *disk != "" {
+		b, err := os.ReadFile(*disk)
+		if err != nil {
+			return fail(err)
+		}
+		if err = fs.ImportDisk(b); err != nil {
+			return fail(err)
+		}
+	}
+	if *root != "" {
+		err := filepath.WalkDir(*root, func(p string, d os.DirEntry, e error) error {
+			if e != nil {
+				return e
+			}
+			rel, e := filepath.Rel(*root, p)
+			if e != nil {
+				return e
+			}
+			if rel == "." {
+				return nil
+			}
+			name := "/" + filepath.ToSlash(rel)
+			if d.IsDir() {
+				return fs.Add(name, nil, 0o40755)
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			info, e := d.Info()
+			if e != nil {
+				return e
+			}
+			if info.Size() > int64(fs.Limit-fs.Bytes) {
+				return fmt.Errorf("guest filesystem limit")
+			}
+			b, e := os.ReadFile(p)
+			if e != nil {
+				return e
+			}
+			return fs.Add(name, b, 0o100000|uint16(info.Mode().Perm()))
+		})
+		if err != nil {
+			return fail(err)
+		}
+	}
+	var image []byte
+	if *disk != "" || *root != "" {
+		node := fs.Nodes[fs.resolve("/", f.Arg(0))]
+		if node == nil {
+			return fail(fmt.Errorf("guest executable not found: %s", f.Arg(0)))
+		}
+		image = node.Data
+	} else {
+		var err error
+		image, err = os.ReadFile(f.Arg(0))
+		if err != nil {
+			return fail(err)
+		}
+	}
+	engine, err := pdp11.NewEngine(*mode)
+	if err != nil {
+		return fail(err)
+	}
+	defer engine.Close()
+	k := New(fs, os.Stdin, os.Stdout, os.Stderr)
+	hostSignals := make(chan os.Signal, 1)
+	signal.Notify(hostSignals, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(hostSignals)
+	guestSignals := make(chan int, 1)
+	done := make(chan struct{})
+	defer close(done)
+	k.Signals = guestSignals
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case s := <-hostSignals:
+				n := 2
+				if s == syscall.SIGTERM {
+					n = 15
+				} else if s == syscall.SIGQUIT {
+					n = 3
+				}
+				select {
+				case guestSignals <- n:
+				case <-done:
+					return
+				}
+			}
+		}
+	}()
+	k.Execute = engine.Step
+	k.Limit = *limit
+	if *trace {
+		k.Trace = os.Stderr
+	}
+	p, err := k.Start(image, f.Args(), []string{"PATH=/bin:/usr/bin", "HOME=/"})
+	if err != nil {
+		return fail(err)
+	}
+	status, err := k.Run(p)
+	if *stats {
+		fmt.Fprintf(os.Stderr, "%+v\n", engine.Stats)
+	}
+	if err != nil {
+		return fail(err)
+	}
+	return status
+}
+
+-- memory.go --
+// Package v7 implements a PDP-11 Unix Seventh Edition user personality.
+package v7
+
+import (
+	"encoding/binary"
+	"fmt"
+	"renvo.dev/emulators/pdp11"
+	emu "renvo.dev/internal/rfe/runtime"
+	"strings"
+)
+
+type Memory struct {
+	Text, Data                       []byte
+	Separate                         bool
+	TextEnd, DataStart, Break, Stack int
+}
+
+func (m *Memory) region(a uint64, w int, access emu.Access) ([]byte, int, *emu.Fault) {
+	fail := func(k emu.FaultKind) ([]byte, int, *emu.Fault) {
+		return nil, 0, &emu.Fault{Kind: k, Access: access, Address: a, Width: w}
+	}
+	if w != 1 && w != 2 {
+		return fail(emu.DeviceFault)
+	}
+	if w == 2 && a&1 != 0 {
+		return fail(emu.Misaligned)
+	}
+	if a >= 1<<17 || int(a&65535)+w > 65536 {
+		return fail(emu.Boundary)
+	}
+	off := int(a & 65535)
+	data := a&65536 != 0
+	if m.Separate && !data {
+		if access == emu.Write || off+w > m.TextEnd {
+			return fail(emu.Permission)
+		}
+		return m.Text, off, nil
+	}
+	if access == emu.Write && off < m.DataStart {
+		return fail(emu.Permission)
+	}
+	if off+w > m.Break && off < m.Stack {
+		return fail(emu.Unmapped)
+	}
+	return m.Data, off, nil
+}
+func (m *Memory) Load(a uint64, w int, k emu.Access, t uint64) (uint64, *emu.Fault) {
+	b, i, f := m.region(a, w, k)
+	if f != nil {
+		return 0, f
+	}
+	v := uint64(b[i])
+	if w == 2 {
+		v |= uint64(b[i+1]) << 8
+	}
+	return v, nil
+}
+func (m *Memory) Store(a uint64, w int, v uint64, t uint64) *emu.Fault {
+	b, i, f := m.region(a, w, emu.Write)
+	if f != nil {
+		return f
+	}
+	b[i] = byte(v)
+	if w == 2 {
+		b[i+1] = byte(v >> 8)
+	}
+	return nil
+}
+func (m *Memory) Peek(a uint64, w int) (uint64, bool) {
+	v, f := m.Load(a, w, emu.Execute, 0)
+	return v, f == nil
+}
+func (m *Memory) bytes(a uint16, n int, write bool) ([]byte, bool) {
+	if n < 0 || int(a)+n > 65536 {
+		return nil, false
+	}
+	if n == 0 {
+		return m.Data[int(a):int(a)], true
+	}
+	access := emu.Read
+	if write {
+		access = emu.Write
+	}
+	for i := 0; i < n; i++ {
+		if _, _, f := m.region(65536+uint64(a)+uint64(i), 1, access); f != nil {
+			return nil, false
+		}
+	}
+	return m.Data[int(a) : int(a)+n], true
+}
+func (m *Memory) word(a uint16, data bool) (uint16, bool) {
+	addr := uint64(a)
+	if data {
+		addr += 65536
+	}
+	v, f := m.Load(addr, 2, emu.Read, 0)
+	return uint16(v), f == nil
+}
+func (m *Memory) str(a uint16) (string, bool) {
+	var b []byte
+	for i := int(a); i < 65536 && len(b) < 4096; i++ {
+		s, ok := m.bytes(uint16(i), 1, false)
+		if !ok {
+			return "", false
+		}
+		if s[0] == 0 {
+			return string(b), true
+		}
+		b = append(b, s[0])
+	}
+	return "", false
+}
+func (m *Memory) vector(a uint16) ([]string, bool) {
+	var out []string
+	if a == 0 {
+		return out, true
+	}
+	for i := int(a); i+2 <= 65536 && len(out) < 512; i += 2 {
+		p, ok := m.word(uint16(i), true)
+		if !ok {
+			return nil, false
+		}
+		if p == 0 {
+			return out, true
+		}
+		s, ok := m.str(p)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return nil, false
+}
+
+// Load accepts V7 0407, 0410, and 0411 a.out files. PDP-11 longs are word
+// swapped relative to little-endian uint32; a.out's header is eight words.
+func Load(image []byte, args, env []string) (*Memory, pdp11.CPU, error) {
+	var cpu pdp11.CPU
+	if len(image) < 16 {
+		return nil, cpu, fmt.Errorf("truncated V7 a.out header")
+	}
+	word := func(i int) int { return int(binary.LittleEndian.Uint16(image[i:])) }
+	magic, text, data, bss, entry := word(0), word(2), word(4), word(6), word(10)
+	if magic != 0o407 && magic != 0o410 && magic != 0o411 {
+		return nil, cpu, fmt.Errorf("unsupported V7 a.out magic %#o", magic)
+	}
+	if text&1 != 0 || entry&1 != 0 || len(image) < 16+text+data {
+		return nil, cpu, fmt.Errorf("invalid V7 a.out segments")
+	}
+	m := &Memory{Data: make([]byte, 65536), Stack: 65536 - 8192, TextEnd: text, Separate: magic == 0o411}
+	if m.Separate {
+		m.Text = make([]byte, 65536)
+		copy(m.Text, image[16:16+text])
+		copy(m.Data, image[16+text:16+text+data])
+		m.Break = data + bss
+	} else {
+		m.Text = m.Data
+		copy(m.Data, image[16:16+text])
+		start := text
+		if magic == 0o410 {
+			start = (text + 8191) &^ 8191
+			m.DataStart = start
+		}
+		if start+data+bss > m.Stack {
+			return nil, cpu, fmt.Errorf("V7 a.out data overlaps stack")
+		}
+		copy(m.Data[start:], image[16+text:16+text+data])
+		m.Break = start + data + bss
+	}
+	if m.Break > m.Stack || entry >= text {
+		return nil, cpu, fmt.Errorf("V7 a.out address space overflow or invalid entry")
+	}
+	m.Break = (m.Break + 63) &^ 63
+	sp := 65534
+	values := append(append([]string{}, args...), env...)
+	ptrs := make([]uint16, len(values))
+	total := 0
+	for i := len(values) - 1; i >= 0; i-- {
+		s := values[i]
+		total += len(s) + 1
+		if strings.IndexByte(s, 0) >= 0 || total > 5120 {
+			return nil, cpu, fmt.Errorf("V7 argument list too large or contains NUL")
+		}
+		sp -= len(s) + 1
+		if sp < m.Stack {
+			return nil, cpu, fmt.Errorf("V7 argument stack overflow")
+		}
+		copy(m.Data[sp:], s)
+		ptrs[i] = uint16(sp)
+	}
+	// V7 rounds the total string area to words before copying argv strings.
+	// crt0 relies on argv[0] being aligned when it clears the word before it.
+	if sp&1 != 0 {
+		if sp-1 < m.Stack {
+			return nil, cpu, fmt.Errorf("V7 argument stack overflow")
+		}
+		copy(m.Data[sp-1:65533], m.Data[sp:65534])
+		m.Data[65533] = 0
+		for i := range ptrs {
+			ptrs[i]--
+		}
+		sp--
+	}
+	sp -= 2 * (len(values) + 3)
+	if sp < m.Stack {
+		return nil, cpu, fmt.Errorf("V7 argument vector overflow")
+	}
+	at := sp
+	put := func(v uint16) { binary.LittleEndian.PutUint16(m.Data[at:], v); at += 2 }
+	put(uint16(len(args)))
+	for i := 0; i < len(args); i++ {
+		put(ptrs[i])
+	}
+	put(0)
+	for i := len(args); i < len(values); i++ {
+		put(ptrs[i])
+	}
+	put(0)
+	cpu = pdp11.CPU{Bus: m, User: true, PSW: 0o140000}
+	cpu.R[6] = uint16(sp)
+	cpu.R[7] = uint16(entry)
+	return m, cpu, nil
+}
+func putLong(b []byte, v uint32) {
+	binary.LittleEndian.PutUint16(b, uint16(v>>16))
+	binary.LittleEndian.PutUint16(b[2:], uint16(v))
+}
+
+-- process.go --
+package v7
+
+import (
+	"fmt"
+	"io"
+	"path"
+	"renvo.dev/emulators/pdp11"
+)
+
+type descriptor struct {
+	node   *Node
+	name   string
+	offset int
+	mode   int
+	input  io.Reader
+	output io.Writer
+	pipe   *pipe
+}
+type pipe struct {
+	data             []byte
+	readers, writers int
+}
+type Process struct {
+	CPU         pdp11.CPU
+	Memory      *Memory
+	PID, Parent uint16
+	CWD         string
+	files       [20]*descriptor
+	signals     [20]uint16
+	mask        uint16
+	Exited      bool
+	Status      uint16
+	waiting     bool
+	pending     *call
+	posted      uint32
+	alarm       uint64
+	paused      bool
+	orphan      bool
+	Group       uint16
+}
+type call struct {
+	number uint16
+	args   [4]uint16
+	write  *ioOperation
+}
+type Kernel struct {
+	FS            *FS
+	Processes     []*Process
+	Input         io.Reader
+	Output, Error io.Writer
+	nextPID       uint16
+	Ticks         uint64
+	Limit         uint64
+	Trace         io.Writer
+	Execute       func(*pdp11.CPU, int) int
+	// Signals delivers terminal signals to the foreground guest process group.
+	Signals  <-chan int
+	wake     chan struct{}
+	inputOp  *ioOperation
+	outputOp *ioOperation
+}
+
+func New(fs *FS, in io.Reader, out, errout io.Writer) *Kernel {
+	return &Kernel{FS: fs, Input: in, Output: out, Error: errout, Limit: 100_000_000, wake: make(chan struct{}, 1)}
+}
+func (k *Kernel) Start(image []byte, args, env []string) (*Process, error) {
+	mem, cpu, err := Load(image, args, env)
+	if err != nil {
+		return nil, err
+	}
+	k.nextPID++
+	p := &Process{CPU: cpu, Memory: mem, PID: k.nextPID, Group: k.nextPID, CWD: "/"}
+	p.files[0] = &descriptor{input: k.Input, mode: 0, name: "/dev/tty"}
+	p.files[1] = &descriptor{output: k.Output, mode: 1, name: "/dev/tty"}
+	p.files[2] = &descriptor{output: k.Error, mode: 1, name: "/dev/tty"}
+	k.Processes = append(k.Processes, p)
+	return p, nil
+}
+func (k *Kernel) Run(p *Process) (int, error) {
+	for !p.Exited {
+		k.pollSignals(p)
+		progress := false
+		for _, q := range k.Processes {
+			if q.Exited {
+				continue
+			}
+			if q.posted != 0 {
+				progress = true
+			}
+			k.deliver(q)
+			if q.Exited || q.paused {
+				continue
+			}
+			if q.waiting {
+				k.wait(q)
+				if q.waiting {
+					continue
+				}
+			}
+			if q.pending != nil {
+				c := *q.pending
+				q.pending = nil
+				k.syscall(q, c)
+				if q.pending != nil {
+					continue
+				}
+			}
+			for i := 0; i < 1024 && !q.Exited && !q.waiting && !q.paused && q.pending == nil; i++ {
+				k.pollSignals(p)
+				k.deliver(q)
+				if q.Exited {
+					break
+				}
+				if k.Ticks >= k.Limit {
+					return 0, fmt.Errorf("V7 instruction budget exhausted at pid %d pc %06o", q.PID, q.CPU.R[7])
+				}
+				progress = true
+				// Keep data and stack mappings disjoint; grow the abstract stack in 64-byte
+				// clicks before executing an instruction which uses the current SP.
+				sp := int(q.CPU.R[6])
+				if sp < q.Memory.Stack && sp >= q.Memory.Break+64 {
+					q.Memory.Stack = sp &^ 63
+				}
+				count := 1
+				if k.Execute != nil {
+					budget := 1024 - i
+					if uint64(budget) > k.Limit-k.Ticks {
+						budget = int(k.Limit - k.Ticks)
+					}
+					if next := k.nextAlarm(); next != 0 && uint64(budget) > next-k.Ticks {
+						budget = int(next - k.Ticks)
+					}
+					count = k.Execute(&q.CPU, budget)
+				} else {
+					q.CPU.Step()
+				}
+				if count < 1 {
+					return 0, fmt.Errorf("V7 executor made no progress")
+				}
+				i += count - 1
+				k.Ticks += uint64(count)
+				if q.CPU.Trap != 0 {
+					if err := k.trap(q); err != nil {
+						return 0, err
+					}
+				}
+				if q.CPU.Halted || q.CPU.Waiting {
+					return 0, fmt.Errorf("V7 privileged stop at pid %d pc %06o", q.PID, q.CPU.InstructionPC)
+				}
+			}
+		}
+		if !progress && !p.Exited {
+			if next := k.nextAlarm(); next != 0 {
+				if next >= k.Limit {
+					return 0, fmt.Errorf("V7 instruction budget exhausted waiting for alarm")
+				}
+				k.Ticks = next
+				continue
+			}
+			if k.hasIO() || k.Signals != nil {
+				select {
+				case <-k.wake:
+				case sig, ok := <-k.Signals:
+					if ok {
+						k.terminalSignal(p, sig)
+					} else {
+						k.Signals = nil
+					}
+				}
+				continue
+			}
+			return 0, fmt.Errorf("V7 processes blocked with no runnable producer")
+		}
+	}
+	if p.Status&127 != 0 {
+		return 128 + int(p.Status&127), nil
+	}
+	return int(p.Status >> 8), nil
+}
+func (k *Kernel) trap(p *Process) error {
+	vector := p.CPU.Trap
+	p.CPU.Trap = 0
+	if vector != 0o34 {
+		sig := 4
+		switch vector {
+		case 4:
+			sig = 10
+		case 0o14:
+			sig = 5
+		case 0o20:
+			sig = 6
+		case 0o30:
+			sig = 7
+		case 0o244:
+			sig = 8
+		case 0o250:
+			sig = 11
+		}
+		k.PostSignal(p, sig)
+		return nil
+	}
+	number := p.CPU.Instruction & 63
+	at := p.CPU.R[7]
+	data := false
+	if number == 0 {
+		ptr, ok := p.Memory.word(at, false)
+		p.CPU.R[7] += 2
+		if !ok {
+			p.error(14)
+			return nil
+		}
+		word, ok := p.Memory.word(ptr, true)
+		if !ok {
+			p.error(14)
+			return nil
+		}
+		if word&^63 != 0o104400 {
+			p.error(22)
+			return nil
+		}
+		number = word & 63
+		at = ptr + 2
+		data = true
+	}
+	nargs, nregs := sysargs(number)
+	if !data {
+		p.CPU.R[7] += uint16(2 * (nargs - nregs))
+	}
+	c := call{number: number}
+	for i := 0; i < nregs; i++ {
+		c.args[i] = p.CPU.R[i]
+	}
+	for i := nregs; i < nargs; i++ {
+		v, ok := p.Memory.word(at, data)
+		if !ok {
+			p.error(14)
+			return nil
+		}
+		c.args[i] = v
+		at += 2
+	}
+	p.CPU.PSW &^= pdp11.C
+	if k.Trace != nil {
+		fmt.Fprintf(k.Trace, "pid=%d pc=%06o sys=%d(%s) args=%v\n", p.PID, p.CPU.InstructionPC, number, syscalls[number].name, c.args)
+	}
+	k.syscall(p, c)
+	return nil
+}
+func (p *Process) error(errno uint16) { p.CPU.PSW |= pdp11.C; p.CPU.R[0] = errno }
+func (p *Process) result(v uint16)    { p.CPU.PSW &^= pdp11.C; p.CPU.R[0] = v }
+func (p *Process) fd(n uint16) *descriptor {
+	if n >= 20 {
+		return nil
+	}
+	return p.files[n]
+}
+
+// Each descriptor slot owns a pipe endpoint reference; dup and fork use the
+// same installation rule. Ordinary files need no separate reference counter.
+func (d *descriptor) adjust(delta int) {
+	if d != nil && d.pipe != nil {
+		if d.mode == 0 {
+			d.pipe.readers += delta
+		} else {
+			d.pipe.writers += delta
+		}
+	}
+}
+func (p *Process) install(fd int, d *descriptor) {
+	p.files[fd].adjust(-1)
+	p.files[fd] = d
+	d.adjust(1)
+}
+func (p *Process) freeFD() int {
+	for i, d := range p.files {
+		if d == nil {
+			return i
+		}
+	}
+	return -1
+}
+func (p *Process) alloc(d *descriptor) int {
+	fd := p.freeFD()
+	if fd >= 0 {
+		p.install(fd, d)
+	}
+	return fd
+}
+func (p *Process) close(n uint16) bool {
+	if p.fd(n) == nil {
+		return false
+	}
+	p.install(int(n), nil)
+	return true
+}
+func (p *Process) reap() {
+	p.Parent = 0
+	p.Memory = nil
+	p.CPU.Bus = nil
+	p.pending = nil
+}
+func (k *Kernel) exit(p *Process, status uint16) {
+	p.Exited = true
+	p.Status = status
+	for i := 0; i < 20; i++ {
+		p.close(uint16(i))
+	}
+	// There is no guest init process in this personality. Adopt children into
+	// the kernel and reap them automatically, including already-exited children.
+	for _, q := range k.Processes {
+		if q.Parent == p.PID {
+			q.Parent, q.orphan = 0, true
+			if q.Exited {
+				q.reap()
+			}
+		}
+	}
+	if p.orphan {
+		p.reap()
+	}
+}
+func (k *Kernel) wait(p *Process) {
+	has := false
+	for _, q := range k.Processes {
+		if q.Parent != p.PID {
+			continue
+		}
+		has = true
+		if q.Exited {
+			p.result(q.PID)
+			p.CPU.R[1] = q.Status
+			q.reap()
+			p.waiting = false
+			return
+		}
+	}
+	p.waiting = has
+	if !has {
+		p.error(10)
+	}
+}
+func (k *Kernel) syscall(p *Process, c call) {
+	p.CPU.PSW &^= pdp11.C
+	if c.number >= 64 || syscalls[c.number].invoke == nil {
+		p.error(22)
+		return
+	}
+	syscalls[c.number].invoke(k, p, c)
+}
+
+// InstallExecutable adds a guest entrypoint without exposing a host path.
+func (k *Kernel) InstallExecutable(name string, image []byte) error {
+	name = path.Clean("/" + name)
+	return k.FS.Add(name, image, 0o100755)
+}
+
+-- signals.go --
+package v7
+
+import "encoding/binary"
+
+// Virtual time is independent of host speed. Idle waits jump to the next alarm;
+// executable blocks are bounded by the next timer deadline.
+const TicksPerSecond uint64 = 1_000_000
+
+// PostSignal is called on the kernel's scheduler thread. Cross-thread terminal
+// signals enter through Kernel.Signals. V7 coalesces each pending signal bit.
+func (k *Kernel) PostSignal(p *Process, sig int) {
+	if sig > 0 && sig < len(p.signals) && !p.Exited {
+		p.posted |= 1 << uint(sig-1)
+	}
+}
+func (k *Kernel) terminalSignal(p *Process, sig int) {
+	for _, q := range k.Processes {
+		if q.Group == p.Group {
+			k.PostSignal(q, sig)
+		}
+	}
+}
+func (k *Kernel) pollSignals(p *Process) {
+	for _, q := range k.Processes {
+		if !q.Exited && q.alarm != 0 && q.alarm <= k.Ticks {
+			q.alarm = 0
+			k.PostSignal(q, 14)
+		}
+	}
+	for k.Signals != nil {
+		select {
+		case sig, ok := <-k.Signals:
+			if !ok {
+				k.Signals = nil
+				return
+			}
+			k.terminalSignal(p, sig)
+		default:
+			return
+		}
+	}
+}
+func (k *Kernel) nextAlarm() uint64 {
+	var next uint64
+	for _, q := range k.Processes {
+		if !q.Exited && q.alarm > k.Ticks && (next == 0 || q.alarm < next) {
+			next = q.alarm
+		}
+	}
+	return next
+}
+func (k *Kernel) deliver(p *Process) {
+	for sig := 1; sig < len(p.signals); sig++ {
+		bit := uint32(1) << uint(sig-1)
+		if p.posted&bit == 0 {
+			continue
+		}
+		p.posted &^= bit
+		handler := p.signals[sig]
+		if handler&1 != 0 && sig != 9 {
+			continue
+		}
+		if handler == 0 || sig == 9 {
+			// Wait status contains the terminating signal. No core file is emitted,
+			// so the core-dumped bit must remain clear.
+			k.exit(p, uint16(sig))
+			return
+		}
+		if p.waiting || p.pending != nil || p.paused {
+			p.waiting, p.paused, p.pending = false, false, nil
+			p.error(4) // EINTR is saved in the return context, before handler entry.
+		}
+		sp := int(p.CPU.R[6]) - 4
+		if sp < p.Memory.Break+64 || sp&1 != 0 || sp < 0 {
+			k.exit(p, 11)
+			return
+		}
+		if sp < p.Memory.Stack {
+			p.Memory.Stack = sp &^ 63
+		}
+		b, ok := p.Memory.bytes(uint16(sp), 4, true)
+		if !ok {
+			k.exit(p, 11)
+			return
+		}
+		binary.LittleEndian.PutUint16(b, p.CPU.R[7])
+		binary.LittleEndian.PutUint16(b[2:], p.CPU.PSW)
+		p.CPU.R[6], p.CPU.R[7] = uint16(sp), handler
+		p.CPU.PSW &^= 0o20
+		p.CPU.Trap, p.CPU.Fault = 0, 0
+		if sig != 4 && sig != 5 {
+			p.signals[sig] = 0
+		}
+		return
+	}
+}
+
+-- signals_test.go --
+package v7
+
+import (
+	"bytes"
+	"encoding/binary"
+	"io"
+	"renvo.dev/emulators/pdp11"
+	"testing"
+	"time"
+)
+
+func signalProcess(t *testing.T) (*Kernel, *Process) {
+	t.Helper()
+	k := New(NewFS(), bytes.NewReader(nil), io.Discard, io.Discard)
+	p, err := k.Start(aout(0o407, []uint16{0o005000, 0o104401}, make([]byte, 512)), []string{"test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k, p
+}
+
+func TestOrphanReaping(t *testing.T) {
+	for _, childFirst := range []bool{false, true} {
+		k, p := signalProcess(t)
+		fork := func(parent *Process) *Process {
+			t.Helper()
+			k.syscall(parent, call{number: 2})
+			if parent.CPU.PSW&pdp11.C != 0 {
+				t.Fatalf("fork: errno %d", parent.CPU.R[0])
+			}
+			for _, q := range k.Processes {
+				if q.PID == parent.CPU.R[0] {
+					return q
+				}
+			}
+			t.Fatal("missing child")
+			return nil
+		}
+		for i := 0; i < 128; i++ {
+			child := fork(p)
+			grandchild := fork(child)
+			if childFirst {
+				k.exit(child, 0)
+				k.exit(grandchild, 0)
+			} else {
+				k.exit(grandchild, 0)
+				k.exit(child, 0)
+			}
+			k.wait(p)
+			if p.CPU.R[0] != child.PID || p.CPU.PSW&pdp11.C != 0 {
+				t.Fatal("lost direct-child wait status")
+			}
+			if grandchild.Memory != nil || grandchild.CPU.Bus != nil || grandchild.Parent != 0 {
+				t.Fatal("orphan resources retained")
+			}
+			if len(k.Processes) > 3 {
+				t.Fatal("process slots not reused")
+			}
+		}
+	}
+}
+
+func TestInterruptedReadAfterReopen(t *testing.T) {
+	k, p := signalProcess(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	k.Input = reader
+	p.files[0].input = reader
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 2}})
+	old := k.inputOp
+	p.signals[2] = 0o200
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	p.close(0)
+	copy(p.Memory.Data[0o400:], "/dev/tty\x00")
+	k.syscall(p, call{number: 5, args: [4]uint16{0o400, 0}})
+	if p.CPU.R[0] != 0 || p.CPU.PSW&pdp11.C != 0 {
+		t.Fatal("reopen failed")
+	}
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+	if k.inputOp != old {
+		t.Fatal("reopen started a competing host read")
+	}
+	done := make(chan error, 1)
+	go func() { _, err := writer.Write([]byte("XY")); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("host read did not complete")
+	}
+	<-old.done
+	p.pending = nil
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+	if p.pending != nil || p.CPU.R[0] != 1 || p.Memory.Data[0o300] != 'X' {
+		t.Fatal("lost interrupted read")
+	}
+	// A second terminal open consumes the remainder from the same input stream.
+	k.syscall(p, call{number: 5, args: [4]uint16{0o400, 0}})
+	fd := p.CPU.R[0]
+	k.syscall(p, call{number: 3, args: [4]uint16{fd, 0o300, 1}})
+	if p.pending != nil || p.CPU.R[0] != 1 || p.Memory.Data[0o300] != 'Y' {
+		t.Fatal("terminal opens do not share buffered input")
+	}
+}
+
+func TestInterruptedHostWrite(t *testing.T) {
+	k, p := signalProcess(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p.files[1].output = writer
+	copy(p.Memory.Data[0o300:], "OLD")
+	k.syscall(p, call{number: 4, args: [4]uint16{1, 0o300, 3}})
+	if p.pending == nil {
+		t.Fatal("host write should block the process")
+	}
+	op := p.pending.write
+	p.signals[2] = 0o200
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	if p.pending != nil || p.CPU.R[0] != 4 || p.CPU.R[7] != 0o200 {
+		t.Fatal("blocked host write did not receive EINTR")
+	}
+	copy(p.Memory.Data[0o300:], "NEW")
+	// The worker owns a snapshot, so the guest may reuse its buffer after EINTR.
+	got := make([]byte, 3)
+	if _, err := io.ReadFull(reader, got); err != nil || string(got) != "OLD" {
+		t.Fatalf("write snapshot %q: %v", got, err)
+	}
+	select {
+	case <-op.done:
+	case <-time.After(time.Second):
+		t.Fatal("write did not complete")
+	}
+	// A later write must neither replay the abandoned write nor consume its result.
+	k.syscall(p, call{number: 4, args: [4]uint16{1, 0o300, 3}})
+	if _, err := io.ReadFull(reader, got); err != nil || string(got) != "NEW" {
+		t.Fatalf("subsequent write %q: %v", got, err)
+	}
+	deadline := time.After(time.Second)
+	for p.pending != nil {
+		c := *p.pending
+		p.pending = nil
+		k.syscall(p, c)
+		if p.pending != nil {
+			select {
+			case <-k.wake:
+			case <-deadline:
+				t.Fatal("write completion lost")
+			}
+		}
+	}
+	if p.CPU.R[0] != 3 {
+		t.Fatal("write completion byte count")
+	}
+}
+func TestSignalFrameAndDispositions(t *testing.T) {
+	for _, sig := range []int{2, 4, 5, 14} {
+		k, p := signalProcess(t)
+		p.CPU.R[7] = 0o100
+		p.CPU.PSW |= 0o20 | pdp11.N
+		p.signals[sig] = 0o200
+		binary.LittleEndian.PutUint16(p.Memory.Data[0o200:], 2) // RTI trampoline
+		pc, psw, sp := p.CPU.R[7], p.CPU.PSW, p.CPU.R[6]
+		k.PostSignal(p, sig)
+		k.PostSignal(p, sig)
+		k.deliver(p)
+		if p.Exited || p.CPU.R[6] != sp-4 || p.CPU.R[7] != 0o200 || p.CPU.PSW&0o20 != 0 || p.posted != 0 {
+			t.Fatal("signal frame entry")
+		}
+		gotPC, _ := p.Memory.word(sp-4, true)
+		gotPSW, _ := p.Memory.word(sp-2, true)
+		if gotPC != pc || gotPSW != psw {
+			t.Fatal("saved PC/PSW")
+		}
+		if (p.signals[sig] == 0) != (sig != 4 && sig != 5) {
+			t.Fatal("V7 disposition reset")
+		}
+		p.CPU.Step()
+		if p.CPU.R[7] != pc || p.CPU.R[6] != sp || p.CPU.PSW != psw || p.CPU.Trap != 0 {
+			t.Fatal("RTI signal return")
+		}
+	}
+	k, p := signalProcess(t)
+	p.signals[2] = 1
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	if p.Exited || p.CPU.R[7] != 0 {
+		t.Fatal("ignored signal")
+	}
+	k.PostSignal(p, 9)
+	k.deliver(p)
+	if !p.Exited || p.Status != 9 {
+		t.Fatal("SIGKILL wait status")
+	}
+	k, p = signalProcess(t)
+	p.CPU.R[6] = uint16(p.Memory.Break)
+	p.signals[2] = 0o200
+	k.PostSignal(p, 2)
+	k.deliver(p)
+	if !p.Exited || p.Status != 11 {
+		t.Fatal("bad handler stack")
+	}
+}
+
+func TestAlarmPauseAcrossEngines(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		code := []uint16{0o104460, 14, 0, 0o012700, 1, 0o104433, 0o104435, 0o010002, 0o005000, 0o104401}
+		code[2] = uint16(len(code) * 2)
+		code = append(code, 0o005201, 2) // increment R1 and RTI
+		k := New(NewFS(), bytes.NewReader(nil), io.Discard, io.Discard)
+		e, err := pdp11.NewEngine(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k.Execute = e.Step
+		p, err := k.Start(aout(0o407, code, nil), []string{"alarm"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := k.Run(p)
+		e.Close()
+		if err != nil || status != 0 || p.CPU.R[1] != 1 || p.CPU.R[2] != 4 || k.Ticks < TicksPerSecond {
+			t.Fatalf("%s alarm: status %d err %v R=%v ticks=%d", mode, status, err, p.CPU.R, k.Ticks)
+		}
+	}
+}
+
+func TestInterruptedWaitPipeAndHostRead(t *testing.T) {
+	for _, kind := range []string{"wait", "pipe-read", "pipe-write", "host-read"} {
+		k, p := signalProcess(t)
+		var writer *io.PipeWriter
+		switch kind {
+		case "wait":
+			k.syscall(p, call{number: 2})
+			k.syscall(p, call{number: 7})
+		case "pipe-read", "pipe-write":
+			k.syscall(p, call{number: 42})
+			r, w := p.CPU.R[0], p.CPU.R[1]
+			if kind == "pipe-read" {
+				k.syscall(p, call{number: 3, args: [4]uint16{r, 0o300, 1}})
+			} else {
+				p.fd(w).pipe.data = make([]byte, 4096)
+				k.syscall(p, call{number: 4, args: [4]uint16{w, 0o300, 1}})
+			}
+		case "host-read":
+			reader, w := io.Pipe()
+			writer = w
+			defer reader.Close()
+			defer writer.Close()
+			p.files[0].input = reader
+			k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+		}
+		if !p.waiting && p.pending == nil {
+			t.Fatal(kind, "did not block")
+		}
+		p.signals[2] = 0o200
+		p.CPU.R[7] = 0o100
+		k.PostSignal(p, 2)
+		k.deliver(p)
+		if p.waiting || p.pending != nil || p.CPU.R[0] != 4 || p.CPU.PSW&pdp11.C == 0 {
+			t.Fatal(kind, "missing EINTR")
+		}
+		if writer != nil {
+			go func() { writer.Write([]byte("X")) }()
+			deadline := time.After(time.Second)
+			for {
+				k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+				if p.pending == nil {
+					break
+				}
+				p.pending = nil
+				select {
+				case <-k.wake:
+				case <-deadline:
+					t.Fatal("interrupted host read lost input")
+				}
+			}
+			if p.Memory.Data[0o300] != 'X' || p.CPU.R[0] != 1 {
+				t.Fatal("pending descriptor read was not retained")
+			}
+		}
+	}
+}
+
+func TestSignalsForkKillAlarmAndPipe(t *testing.T) {
+	k, p := signalProcess(t)
+	p.signals[2] = 0o200
+	k.syscall(p, call{number: 27, args: [4]uint16{3}})
+	k.Ticks = TicksPerSecond + 1
+	k.syscall(p, call{number: 27})
+	if p.CPU.R[0] != 2 || p.alarm != 0 {
+		t.Fatal("alarm cancellation/remaining seconds")
+	}
+	p.alarm = k.Ticks + TicksPerSecond
+	p.posted = 1 << 4
+	k.syscall(p, call{number: 2})
+	child := k.Processes[1]
+	if child.alarm != 0 || child.posted != 0 || child.signals[2] != 0o200 || child.Group != p.Group {
+		t.Fatal("fork signal inheritance")
+	}
+	p.posted = 0
+	k.syscall(p, call{number: 37, args: [4]uint16{child.PID, 9}})
+	k.deliver(child)
+	k.wait(p)
+	if p.CPU.R[1] != 9 || p.CPU.R[0] != child.PID {
+		t.Fatal("kill/wait signal status")
+	}
+	k.syscall(p, call{number: 37, args: [4]uint16{32000, 0}})
+	if p.CPU.R[0] != 3 || p.CPU.PSW&pdp11.C == 0 {
+		t.Fatal("kill ESRCH")
+	}
+	p.signals[13] = 1
+	k.syscall(p, call{number: 42})
+	r, w := p.CPU.R[0], p.CPU.R[1]
+	p.close(r)
+	k.syscall(p, call{number: 4, args: [4]uint16{w, 0o300, 1}})
+	if p.CPU.R[0] != 32 {
+		t.Fatal("EPIPE")
+	}
+	k.deliver(p)
+	if p.Exited {
+		t.Fatal("ignored SIGPIPE")
+	}
+	p.signals[13] = 0
+	k.syscall(p, call{number: 4, args: [4]uint16{w, 0o300, 1}})
+	k.deliver(p)
+	if !p.Exited || p.Status != 13 {
+		t.Fatal("SIGPIPE default action")
+	}
+}
+
+func TestTrapSignalsAndFloatingHandler(t *testing.T) {
+	for _, v := range []struct {
+		code []uint16
+		sig  uint16
+	}{
+		{[]uint16{0o000007}, 4}, {[]uint16{3}, 5}, {[]uint16{4}, 6}, {[]uint16{0o104000}, 7},
+		{[]uint16{0o013700, 1}, 10}, {[]uint16{0o013700, 0o10000}, 11},
+		{[]uint16{0o170011, 0o172427, 0x4080, 0o174401}, 8},
+	} {
+		k := New(NewFS(), bytes.NewReader(nil), io.Discard, io.Discard)
+		p, err := k.Start(aout(0o407, v.code, nil), []string{"trap"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := k.Run(p)
+		if err != nil || p.Status != v.sig || status != 128+int(v.sig) {
+			t.Fatalf("trap code %o: status %d signal %d err %v", v.code, status, p.Status, err)
+		}
+	}
+	// A real FP exception returns through a guest RTI handler to the next opcode.
+	code := []uint16{0o104460, 8, 0, 0o170011, 0o172427, 0x4080, 0o174401, 0o005000, 0o104401}
+	code[2] = uint16(len(code) * 2)
+	code = append(code, 0o005202, 2)
+	k := New(NewFS(), bytes.NewReader(nil), io.Discard, io.Discard)
+	p, err := k.Start(aout(0o407, code, nil), []string{"fpe"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := k.Run(p)
+	if err != nil || status != 0 || p.CPU.R[2] != 1 || p.CPU.FEC != 4 {
+		t.Fatalf("FP signal handler: %d %v %+v", status, err, p.CPU)
+	}
+}
+
+func TestSignalExecAndTerminalInput(t *testing.T) {
+	k, p := signalProcess(t)
+	p.signals[2], p.signals[3] = 0o200, 1
+	p.alarm = TicksPerSecond
+	p.CPU.FR[0] = 123
+	if err := k.InstallExecutable("/next", aout(0o407, []uint16{0o005000, 0o104401}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	copy(p.Memory.Data[0o300:], "/next\x00")
+	binary.LittleEndian.PutUint16(p.Memory.Data[0o320:], 0o300)
+	binary.LittleEndian.PutUint16(p.Memory.Data[0o322:], 0)
+	k.syscall(p, call{number: 11, args: [4]uint16{0o300, 0o320}})
+	if p.CPU.PSW&pdp11.C != 0 || p.signals[2] != 0 || p.signals[3] != 1 || p.alarm != TicksPerSecond || p.CPU.FR[0] != 0 {
+		t.Fatal("exec signal and FP state")
+	}
+	// Terminal delivery must wake a blocked scheduler without host input arriving.
+	k, p = signalProcess(t)
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p.files[0].input = reader
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0o300, 1}})
+	signals := make(chan int, 1)
+	k.Signals = signals
+	signals <- 15
+	status, err := k.Run(p)
+	if err != nil || status != 143 || p.Status != 15 {
+		t.Fatalf("terminal signal during input: %d %v", status, err)
+	}
+}
+
+-- syscalls.go --
+package v7
+
+import (
+	"encoding/binary"
+	"io"
+)
+
+type syscallEntry struct {
+	name            string
+	args, registers int
+	invoke          func(*Kernel, *Process, call)
+}
+
+var syscalls = [64]syscallEntry{
+	1:  {"exit", 1, 1, (*Kernel).sysExit},
+	2:  {"fork", 0, 0, (*Kernel).sysFork},
+	7:  {"wait", 0, 0, (*Kernel).sysWait},
+	3:  {"read", 3, 1, (*Kernel).sysReadWrite},
+	4:  {"write", 3, 1, (*Kernel).sysReadWrite},
+	5:  {"open", 2, 0, (*Kernel).sysOpen},
+	8:  {"creat", 2, 0, (*Kernel).sysOpen},
+	6:  {"close", 1, 1, (*Kernel).sysClose},
+	9:  {"link", 2, 0, (*Kernel).sysLink},
+	10: {"unlink", 1, 0, (*Kernel).sysUnlink},
+	11: {"exec", 2, 0, (*Kernel).sysExec},
+	59: {"execve", 3, 0, (*Kernel).sysExec},
+	12: {"chdir", 1, 0, (*Kernel).sysChdir},
+	13: {"time", 0, 0, (*Kernel).sysTime},
+	15: {"chmod", 2, 0, (*Kernel).sysChmod},
+	17: {"break", 1, 0, (*Kernel).sysBreak},
+	18: {"stat", 2, 0, (*Kernel).sysStat},
+	28: {"fstat", 2, 1, (*Kernel).sysStat},
+	19: {"seek", 4, 1, (*Kernel).sysSeek},
+	20: {"pid", 0, 0, (*Kernel).sysPID},
+	24: {"getuid", 0, 0, (*Kernel).sysIDs},
+	47: {"getgid", 0, 0, (*Kernel).sysIDs},
+	23: {"setuid", 1, 1, (*Kernel).sysSetID},
+	46: {"setgid", 1, 1, (*Kernel).sysSetID},
+	27: {"alarm", 1, 1, (*Kernel).sysAlarm},
+	29: {"pause", 0, 0, (*Kernel).sysPause},
+	37: {"kill", 2, 1, (*Kernel).sysKill},
+	31: {"stty", 2, 1, (*Kernel).sysIoctl},
+	32: {"gtty", 2, 1, (*Kernel).sysIoctl},
+	54: {"ioctl", 3, 0, (*Kernel).sysIoctl},
+	33: {"access", 2, 0, (*Kernel).sysAccess},
+	34: {"nice", 1, 1, (*Kernel).sysNoop},
+	36: {"sync", 0, 0, (*Kernel).sysNoop},
+	38: {"switch", 0, 0, (*Kernel).sysNoop},
+	39: {"setpgrp", 0, 0, (*Kernel).sysNoop},
+	41: {"dup", 2, 2, (*Kernel).sysDup},
+	42: {"pipe", 0, 0, (*Kernel).sysPipe},
+	43: {"times", 1, 0, (*Kernel).sysTimes},
+	48: {"signal", 2, 0, (*Kernel).sysSignal},
+	60: {"umask", 1, 1, (*Kernel).sysUmask},
+	14: {"unsupported", 3, 0, nil},
+	16: {"unsupported", 3, 0, nil},
+	21: {"unsupported", 3, 0, nil},
+	22: {"unsupported", 1, 0, nil},
+	25: {"unsupported", 2, 2, nil},
+	26: {"unsupported", 4, 1, nil},
+	30: {"unsupported", 2, 0, nil},
+	35: {"unsupported", 1, 0, nil},
+	40: {"unsupported", 1, 1, nil},
+	44: {"unsupported", 4, 0, nil},
+	51: {"unsupported", 1, 0, nil},
+	61: {"unsupported", 1, 0, nil},
+}
+
+func sysargs(n uint16) (int, int) {
+	if n >= 64 {
+		return 0, 0
+	}
+	s := syscalls[n]
+	return s.args, s.registers
+}
+func (k *Kernel) pathArg(p *Process, addr uint16) (string, bool) {
+	s, ok := p.Memory.str(addr)
+	if !ok || s == "" {
+		p.error(14)
+		return "", false
+	}
+	return k.FS.resolve(p.CWD, s), true
+}
+func (k *Kernel) sysExit(p *Process, c call) {
+	a := c.args
+	k.exit(p, (a[0]&255)<<8)
+}
+func (k *Kernel) sysFork(p *Process, c call) {
+	live := 0
+	for _, q := range k.Processes {
+		if !q.Exited || q.Parent != 0 {
+			live++
+		}
+	}
+	if live >= 64 || k.nextPID == 65535 {
+		p.error(11)
+		p.CPU.R[7] += 2
+		return
+	}
+	k.nextPID++
+	q := *p
+	q.PID = k.nextPID
+	q.Parent = p.PID
+	q.orphan = false
+	q.posted, q.alarm = 0, 0
+	q.CPU = p.CPU
+	mem := *p.Memory
+	mem.Data = append([]byte{}, mem.Data...)
+	if mem.Separate {
+		mem.Text = append([]byte{}, mem.Text...)
+	} else {
+		mem.Text = mem.Data
+	}
+	q.Memory = &mem
+	q.CPU.Bus = q.Memory
+	q.CPU.R[0] = p.PID
+	for _, d := range q.files {
+		d.adjust(1)
+	}
+	reused := false
+	for i, old := range k.Processes {
+		if old.Exited && old.Parent == 0 {
+			k.Processes[i] = &q
+			reused = true
+			break
+		}
+	}
+	if !reused {
+		k.Processes = append(k.Processes, &q)
+	}
+	p.result(q.PID)
+	p.CPU.R[7] += 2
+}
+func (k *Kernel) sysWait(p *Process, c call) {
+	k.wait(p)
+}
+func (k *Kernel) sysReadWrite(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0])
+	if d == nil || c.number == 3 && d.mode == 1 || c.number == 4 && d.mode == 0 {
+		p.error(9)
+		return
+	}
+	b, ok := p.Memory.bytes(a[1], int(a[2]), c.number == 3)
+	if !ok {
+		p.error(14)
+		return
+	}
+	n := 0
+	if c.number == 3 {
+		if len(b) == 0 {
+			p.result(0)
+			return
+		}
+		if d.pipe != nil {
+			if len(d.pipe.data) == 0 && d.pipe.writers != 0 {
+				p.pending = &c
+				return
+			}
+			n = copy(b, d.pipe.data)
+			d.pipe.data = d.pipe.data[n:]
+		} else if d.input != nil {
+			var err error
+			var ready bool
+			n, err, ready = k.readInput(d, b)
+			if !ready {
+				p.pending = &c
+				return
+			}
+			if n == 0 && err != nil && err != io.EOF {
+				p.error(5)
+				return
+			}
+		} else if d.name != "/dev/null" && d.node != nil {
+			data := d.node.Data
+			if d.node.Mode&0o170000 == 0o40000 {
+				data = k.FS.directory(d.name)
+			}
+			if d.offset < len(data) {
+				n = copy(b, data[d.offset:])
+				d.offset += n
+			}
+		}
+	} else {
+		if d.pipe != nil {
+			if d.pipe.readers == 0 {
+				p.error(32)
+				k.PostSignal(p, 13)
+				return
+			}
+			space := 4096 - len(d.pipe.data)
+			if len(b) > space {
+				if len(b) <= 4096 {
+					p.pending = &c
+					return
+				}
+				b = b[:space]
+			}
+			if len(b) == 0 && a[2] != 0 {
+				p.pending = &c
+				return
+			}
+			d.pipe.data = append(d.pipe.data, b...)
+			n = len(b)
+		} else if d.output != nil {
+			var err error
+			var ready bool
+			n, err, ready = k.writeOutput(d, b, &c)
+			if !ready {
+				p.pending = &c
+				return
+			}
+			if n == 0 && err != nil {
+				p.error(5)
+				return
+			}
+		} else if d.name == "/dev/null" {
+			n = len(b)
+		} else if d.node != nil {
+			end := d.offset + len(b)
+			if end > d.offset && end > k.FS.Limit {
+				p.error(27)
+				return
+			}
+			if end > len(d.node.Data) {
+				growth := end - len(d.node.Data)
+				if growth > k.FS.Limit-k.FS.Bytes {
+					p.error(28)
+					return
+				}
+				d.node.Data = append(d.node.Data, make([]byte, growth)...)
+				k.FS.Bytes += growth
+			}
+			n = copy(d.node.Data[d.offset:], b)
+			d.offset += n
+		}
+	}
+	p.result(uint16(n))
+}
+func (k *Kernel) sysOpen(p *Process, c call) {
+	a := c.args
+	if p.freeFD() < 0 {
+		p.error(24)
+		return
+	}
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	mode := int(a[1])
+	if c.number == 8 {
+		mode = 1
+		if node == nil {
+			if !k.FS.validParent(n) {
+				p.error(2)
+				return
+			}
+			if k.FS.Add(n, nil, 0o100000|(a[1]&0o777)&^p.mask) != nil {
+				p.error(28)
+				return
+			}
+			node = k.FS.Nodes[n]
+		} else if node.Mode&0o170000 == 0o100000 {
+			k.FS.Bytes -= len(node.Data)
+			node.Data = nil
+		}
+	}
+	if node == nil {
+		p.error(2)
+		return
+	}
+	if mode > 2 {
+		p.error(22)
+		return
+	}
+	if node.Mode&0o170000 == 0o40000 && mode != 0 {
+		p.error(21)
+		return
+	}
+	kind := node.Mode & 0o170000
+	if kind != 0o100000 && kind != 0o40000 && n != "/dev/null" && n != "/dev/tty" {
+		p.error(6)
+		return
+	}
+	d := &descriptor{node: node, name: n, mode: mode}
+	if n == "/dev/tty" {
+		d.input = k.Input
+		d.output = k.Output
+	}
+	fd := p.alloc(d)
+	if fd < 0 {
+		p.error(24)
+	} else {
+		p.result(uint16(fd))
+	}
+}
+func (k *Kernel) sysClose(p *Process, c call) {
+	a := c.args
+	if !p.close(a[0]) {
+		p.error(9)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysLink(p *Process, c call) {
+	a := c.args
+	old, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	newName, ok := k.pathArg(p, a[1])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[old]
+	if node == nil {
+		p.error(2)
+	} else if k.FS.Nodes[newName] != nil {
+		p.error(17)
+	} else if !k.FS.validParent(newName) {
+		p.error(2)
+	} else if node.Mode&0o170000 == 0o40000 {
+		p.error(1)
+	} else {
+		k.FS.Nodes[newName] = node
+		node.Links++
+		p.result(0)
+	}
+}
+func (k *Kernel) sysUnlink(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else if node.Mode&0o170000 == 0o40000 {
+		p.error(1)
+	} else {
+		delete(k.FS.Nodes, n)
+		node.Links--
+		p.result(0)
+	}
+}
+func (k *Kernel) sysExec(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	args, ok := p.Memory.vector(a[1])
+	if !ok {
+		p.error(14)
+		return
+	}
+	var env []string
+	if c.number == 59 {
+		env, ok = p.Memory.vector(a[2])
+		if !ok {
+			p.error(14)
+			return
+		}
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+		return
+	}
+	mem, cpu, err := Load(node.Data, args, env)
+	if err != nil {
+		p.error(8)
+		return
+	}
+	cpu.Ticks = p.CPU.Ticks
+	p.Memory, p.CPU = mem, cpu
+	for i := range p.signals {
+		if p.signals[i]&1 == 0 {
+			p.signals[i] = 0
+		}
+	}
+}
+func (k *Kernel) sysChdir(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else if node.Mode&0o170000 != 0o40000 {
+		p.error(20)
+	} else {
+		p.CWD = n
+		p.result(0)
+	}
+}
+func (k *Kernel) sysTime(p *Process, c call) {
+	seconds := uint32(k.Ticks / TicksPerSecond)
+	p.result(uint16(seconds >> 16))
+	p.CPU.R[1] = uint16(seconds)
+}
+func (k *Kernel) sysChmod(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	node := k.FS.Nodes[n]
+	if node == nil {
+		p.error(2)
+	} else {
+		node.Mode = node.Mode&0o170000 | a[1]&0o7777
+		p.result(0)
+	}
+}
+func (k *Kernel) sysBreak(p *Process, c call) {
+	a := c.args
+	brk := (int(a[0]) + 63) &^ 63
+	if brk < p.Memory.DataStart || brk > p.Memory.Stack {
+		p.error(12)
+	} else {
+		if brk > p.Memory.Break {
+			clear(p.Memory.Data[p.Memory.Break:brk])
+		}
+		p.Memory.Break = brk
+		p.result(0)
+	}
+}
+func (k *Kernel) sysStat(p *Process, c call) {
+	a := c.args
+	var node *Node
+	var n string
+	addr := a[1]
+	if c.number == 18 {
+		var ok bool
+		n, ok = k.pathArg(p, a[0])
+		if !ok {
+			return
+		}
+		node = k.FS.Nodes[n]
+		if node == nil {
+			p.error(2)
+			return
+		}
+	} else {
+		d := p.fd(a[0])
+		if d == nil {
+			p.error(9)
+			return
+		}
+		node = d.node
+		n = d.name
+		if node == nil {
+			node = &Node{Mode: 0o20666, Links: 1}
+		}
+	}
+	b, ok := p.Memory.bytes(addr, 30, true)
+	if !ok {
+		p.error(14)
+		return
+	}
+	clear(b)
+	binary.LittleEndian.PutUint16(b, 1)
+	binary.LittleEndian.PutUint16(b[2:], node.Inode)
+	binary.LittleEndian.PutUint16(b[4:], node.Mode)
+	binary.LittleEndian.PutUint16(b[6:], node.Links)
+	binary.LittleEndian.PutUint16(b[8:], node.UID)
+	binary.LittleEndian.PutUint16(b[10:], node.GID)
+	size := len(node.Data)
+	if node.Mode&0o170000 == 0o40000 {
+		size = len(k.FS.directory(n))
+	}
+	putLong(b[14:], uint32(size))
+	p.result(0)
+}
+func (k *Kernel) sysSeek(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0])
+	if d == nil {
+		p.error(9)
+		return
+	}
+	if d.node == nil || d.pipe != nil {
+		p.error(29)
+		return
+	}
+	offset := int64(int32(uint32(a[1])<<16 | uint32(a[2])))
+	switch a[3] {
+	case 0:
+	case 1:
+		offset += int64(d.offset)
+	case 2:
+		offset += int64(len(d.node.Data))
+	default:
+		p.error(22)
+		return
+	}
+	if offset < 0 || offset > 1<<31-1 {
+		p.error(22)
+		return
+	}
+	d.offset = int(offset)
+	p.result(uint16(offset >> 16))
+	p.CPU.R[1] = uint16(offset)
+}
+func (k *Kernel) sysPID(p *Process, c call) {
+	p.result(p.PID)
+	p.CPU.R[1] = p.Parent
+}
+func (k *Kernel) sysIDs(p *Process, c call) {
+	p.result(0)
+	p.CPU.R[1] = 0
+}
+func (k *Kernel) sysSetID(p *Process, c call) {
+	a := c.args
+	if a[0] != 0 {
+		p.error(1)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysAlarm(p *Process, c call) {
+	a := c.args
+	old := uint16(0)
+	if p.alarm > k.Ticks {
+		old = uint16((p.alarm - k.Ticks + TicksPerSecond - 1) / TicksPerSecond)
+	}
+	p.alarm = 0
+	if a[0] != 0 {
+		p.alarm = k.Ticks + uint64(a[0])*TicksPerSecond
+	}
+	p.result(old)
+}
+func (k *Kernel) sysPause(p *Process, c call) {
+	p.paused = true
+}
+func (k *Kernel) sysKill(p *Process, c call) {
+	a := c.args
+	found := false
+	for _, q := range k.Processes {
+		if q.Exited {
+			continue
+		}
+		pid := int16(a[0])
+		if (pid > 0 && q.PID == a[0]) || (pid == 0 && q.Group == p.Group) || (pid == -1 && q != p) {
+			found = true
+			k.PostSignal(q, int(a[1]))
+		}
+	}
+	if found {
+		p.result(0)
+	} else {
+		p.error(3)
+	}
+}
+func (k *Kernel) sysIoctl(p *Process, c call) {
+	a := c.args
+	if p.fd(a[0]) == nil {
+		p.error(9)
+		return
+	}
+	if p.fd(a[0]).name != "/dev/tty" {
+		p.error(25)
+		return
+	}
+	request, addr := uint16(0x7408), a[1]
+	if c.number == 31 {
+		request = 0x7409
+	}
+	if c.number == 54 {
+		request, addr = a[1], a[2]
+	}
+	if request != 0x7408 && request != 0x7409 && request != 0x740a {
+		p.error(25)
+		return
+	}
+	b, ok := p.Memory.bytes(addr, 6, request == 0x7408)
+	if !ok {
+		p.error(14)
+		return
+	}
+	if request == 0x7408 {
+		copy(b, []byte{13, 13, 8, 21, 0, 0})
+	}
+	p.result(0)
+}
+func (k *Kernel) sysAccess(p *Process, c call) {
+	a := c.args
+	n, ok := k.pathArg(p, a[0])
+	if !ok {
+		return
+	}
+	if k.FS.Nodes[n] == nil {
+		p.error(2)
+	} else {
+		p.result(0)
+	}
+}
+func (k *Kernel) sysNoop(p *Process, c call) {
+	p.result(0)
+}
+func (k *Kernel) sysDup(p *Process, c call) {
+	a := c.args
+	d := p.fd(a[0] & 63)
+	if d == nil {
+		p.error(9)
+		return
+	}
+	if a[0]&64 != 0 {
+		if a[1] >= 20 {
+			p.error(9)
+			return
+		}
+		if a[1] != a[0]&63 {
+			p.install(int(a[1]), d)
+		}
+		p.result(a[1])
+	} else {
+		fd := p.alloc(d)
+		if fd < 0 {
+			p.error(24)
+		} else {
+			p.result(uint16(fd))
+		}
+	}
+}
+func (k *Kernel) sysPipe(p *Process, c call) {
+	buf := &pipe{}
+	r := p.alloc(&descriptor{pipe: buf, mode: 0})
+	w := p.alloc(&descriptor{pipe: buf, mode: 1})
+	if r < 0 || w < 0 {
+		if r >= 0 {
+			p.close(uint16(r))
+		}
+		if w >= 0 {
+			p.close(uint16(w))
+		}
+		p.error(24)
+	} else {
+		p.result(uint16(r))
+		p.CPU.R[1] = uint16(w)
+	}
+}
+func (k *Kernel) sysTimes(p *Process, c call) {
+	a := c.args
+	b, ok := p.Memory.bytes(a[0], 16, true)
+	if !ok {
+		p.error(14)
+		return
+	}
+	clear(b)
+	putLong(b, uint32(p.CPU.Ticks*60/TicksPerSecond))
+	p.result(0)
+}
+func (k *Kernel) sysSignal(p *Process, c call) {
+	a := c.args
+	sig := int(a[0])
+	if sig <= 0 || sig >= len(p.signals) || sig == 9 {
+		p.error(22)
+	} else {
+		old := p.signals[sig]
+		p.signals[sig] = a[1]
+		p.posted &^= 1 << uint(sig-1)
+		p.result(old)
+	}
+}
+func (k *Kernel) sysUmask(p *Process, c call) {
+	a := c.args
+	old := p.mask
+	p.mask = a[0] & 0o777
+	p.result(old)
+}
+
+-- v7_test.go --
+package v7
+
+import (
+	"bytes"
+	"encoding/binary"
+	"io"
+	"os"
+	"renvo.dev/emulators/pdp11"
+	"strings"
+	"testing"
+)
+
+func aout(magic uint16, code []uint16, data []byte) []byte {
+	b := make([]byte, 16+2*len(code)+len(data))
+	binary.LittleEndian.PutUint16(b, magic)
+	binary.LittleEndian.PutUint16(b[2:], uint16(2*len(code)))
+	binary.LittleEndian.PutUint16(b[4:], uint16(len(data)))
+	binary.LittleEndian.PutUint16(b[14:], 1)
+	for i, w := range code {
+		binary.LittleEndian.PutUint16(b[16+i*2:], w)
+	}
+	copy(b[16+len(code)*2:], data)
+	return b
+}
+func TestAOutAndSyscalls(t *testing.T) {
+	for _, magic := range []uint16{0o407, 0o410, 0o411} {
+		for _, indirect := range []bool{false, true} {
+			pointer := uint16(14)
+			if magic == 0o410 {
+				pointer = 8192
+			}
+			if magic == 0o411 {
+				pointer = 0
+			}
+			code := []uint16{0o012700, 1, 0o104404, pointer, 5, 0o005000, 0o104401}
+			data := []byte("PASS\n")
+			if indirect {
+				code = []uint16{0o012700, 1, 0o104400, pointer + 6, 0o005000, 0o104401}
+				if magic == 0o407 {
+					pointer = 12
+					code[3] = pointer + 6
+				}
+				data = append(data, 0, 0, 0, 0, 0, 0, 0)
+				binary.LittleEndian.PutUint16(data[6:], 0o104404)
+				binary.LittleEndian.PutUint16(data[8:], pointer)
+				binary.LittleEndian.PutUint16(data[10:], 5)
+			}
+			var out bytes.Buffer
+			k := New(NewFS(), strings.NewReader(""), &out, &out)
+			p, err := k.Start(aout(magic, code, data), []string{"odd-length-name", "x"}, []string{"X=Y"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := k.Run(p)
+			if err != nil || status != 0 || out.String() != "PASS\n" {
+				t.Fatalf("magic=%o indirect=%v: status=%d err=%v output=%q", magic, indirect, status, err, out.String())
+			}
+		}
+	}
+}
+func TestArgumentAlignmentAndSeparateData(t *testing.T) {
+	for _, args := range [][]string{{"a"}, {"ab"}, {"abc", "d"}} {
+		m, c, err := Load(aout(0o411, []uint16{0o016600, 2, 0o005060, 0o177776, 0o005000, 0o104401}, []byte{42, 43}), args, []string{"X=Y"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, ok := m.word(c.R[6]+2, true)
+		if !ok || p&1 != 0 {
+			t.Fatal("unaligned argv[0]")
+		}
+		s, ok := m.str(p)
+		if !ok || s != args[0] {
+			t.Fatal("corrupt argument", s)
+		}
+		if m.Text[0] == m.Data[0] {
+			t.Fatal("I/D aliased")
+		}
+		for i := 0; i < 3; i++ {
+			c.Step()
+		}
+		if c.Trap != 0 {
+			t.Fatal("crt0 argument alignment trap")
+		}
+	}
+}
+func TestMalformedAOutAndPointers(t *testing.T) {
+	for _, b := range [][]byte{nil, make([]byte, 15), aout(0o405, []uint16{0}, nil), aout(0o407, []uint16{0}, nil)[:17]} {
+		if _, _, err := Load(b, nil, nil); err == nil {
+			t.Fatal("accepted invalid a.out")
+		}
+	}
+	k := New(NewFS(), strings.NewReader("unchanged"), io.Discard, io.Discard)
+	p, err := k.Start(aout(0o410, []uint16{0}, nil), []string{"a"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.syscall(p, call{number: 3, args: [4]uint16{0, 0, 1}})
+	if p.CPU.R[0] != 14 || p.CPU.PSW&pdp11.C == 0 {
+		t.Fatal("read into protected text accepted")
+	}
+	k.syscall(p, call{number: 4, args: [4]uint16{1, 65535, 2}})
+	if p.CPU.R[0] != 14 {
+		t.Fatal("wrapped buffer accepted")
+	}
+	k.syscall(p, call{number: 63})
+	if p.CPU.R[0] != 22 {
+		t.Fatal("unknown syscall pretended to succeed")
+	}
+}
+func TestForkPipeAndWait(t *testing.T) {
+	k := New(NewFS(), strings.NewReader(""), io.Discard, io.Discard)
+	p, err := k.Start(aout(0o407, []uint16{0}, make([]byte, 64)), []string{"a"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.syscall(p, call{number: 42})
+	readFD, writeFD := p.CPU.R[0], p.CPU.R[1]
+	pc := p.CPU.R[7]
+	k.syscall(p, call{number: 2})
+	child := k.Processes[1]
+	if p.CPU.R[7] != pc+2 || child.CPU.R[7] != pc || child.CPU.R[0] != p.PID {
+		t.Fatal("fork return ABI")
+	}
+	child.Memory.Data[32] = 42
+	if p.Memory.Data[32] != 0 {
+		t.Fatal("fork memory aliased")
+	}
+	p.close(writeFD)
+	child.close(readFD)
+	k.syscall(p, call{number: 3, args: [4]uint16{readFD, 40, 1}})
+	if p.pending == nil {
+		t.Fatal("empty pipe did not block")
+	}
+	k.syscall(child, call{number: 4, args: [4]uint16{writeFD, 32, 1}})
+	c := *p.pending
+	p.pending = nil
+	k.syscall(p, c)
+	if p.Memory.Data[40] != 42 || p.CPU.R[0] != 1 {
+		t.Fatal("pipe read")
+	}
+	k.exit(child, 7<<8)
+	k.wait(p)
+	if p.CPU.R[0] != child.PID || p.CPU.R[1] != 7<<8 || child.Memory != nil {
+		t.Fatal("wait status or process reclamation")
+	}
+	k.syscall(p, call{number: 3, args: [4]uint16{readFD, 40, 1}})
+	if p.CPU.R[0] != 0 || p.pending != nil {
+		t.Fatal("pipe EOF")
+	}
+}
+func TestHistoricalFloatingAndSignals(t *testing.T) {
+	image := os.Getenv("RENVO_PDP11_V7_IMAGE")
+	if image == "" {
+		t.Skip("set RENVO_PDP11_V7_IMAGE for historical FP and signal tests")
+	}
+	disk, err := os.ReadFile(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		fs := NewFS()
+		if err = fs.ImportDisk(disk); err != nil {
+			t.Fatal(err)
+		}
+		e, err := pdp11.NewEngine(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		k := New(fs, strings.NewReader(""), &out, &out)
+		k.Execute = e.Step
+		command := `trap 'echo SIGNAL_OK' 2; kill -2 $$; echo AFTER_SIGNAL; sleep 1; echo ALARM_OK; awk 'BEGIN { print 1.5+2.25; print 1.5*2.25; print 2.25/1.5; print sqrt(2); print exp(1); print log(2); exit }'`
+		p, err := k.Start(fs.Nodes["/bin/sh"].Data, []string{"sh", "-c", command}, []string{"PATH=/bin:/usr/bin"})
+		if err != nil {
+			e.Close()
+			t.Fatal(err)
+		}
+		status, err := k.Run(p)
+		e.Close()
+		want := "SIGNAL_OK\nAFTER_SIGNAL\nALARM_OK\n3.75\n3.375\n1.5\n1.41421\n2.71828\n.693147\n"
+		if err != nil || status != 0 || out.String() != want {
+			t.Fatalf("%s historical FP/signals: %d %v output %q", mode, status, err, out.String())
+		}
+	}
+}
+
+func TestHistoricalV7Commands(t *testing.T) {
+	image := os.Getenv("RENVO_PDP11_V7_IMAGE")
+	if image == "" {
+		t.Skip("set RENVO_PDP11_V7_IMAGE for historical executable tests")
+	}
+	disk, err := os.ReadFile(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"interpreter", "native"} {
+		fs := NewFS()
+		if err = fs.ImportDisk(disk); err != nil {
+			t.Fatal(err)
+		}
+		engine, err := pdp11.NewEngine(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		k := New(fs, strings.NewReader(""), &out, &out)
+		k.Execute = engine.Step
+		p, err := k.Start(fs.Nodes["/bin/sh"].Data, []string{"sh", "-c", "echo RFE_SHELL_OK; echo pipe | /bin/cat; echo file > /RFE; /bin/cat /RFE; /bin/rm /RFE"}, []string{"PATH=/bin:/usr/bin"})
+		if err != nil {
+			engine.Close()
+			t.Fatal(err)
+		}
+		status, err := k.Run(p)
+		engine.Close()
+		if err != nil || status != 0 || out.String() != "RFE_SHELL_OK\npipe\nfile\n" {
+			t.Fatalf("%s: status %d err %v output %q", mode, status, err, out.String())
+		}
+		if fs.Nodes["/RFE"] != nil {
+			t.Fatal("guest unlink failed")
+		}
+		if mode == "native" && engine.Stats.NativeInstructions == 0 {
+			t.Fatal("no native guest execution")
+		}
+	}
+}

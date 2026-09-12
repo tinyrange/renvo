@@ -3,9 +3,113 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "99fb604ca4a4e337c8c2946bc5cee779f7541abf5ea34dace9ef5e17f20539a3"
+const CompilerSourceDigest = "323bcdf6a3e95eccc766758d9146f7c4a7e29a52c0052b7423d8c1ac61f6c093"
 
 // source: backend/compiler_common_impl.go
+
+
+
+
+
+
+func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool) {
+if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 0 || len(records) > 8192 {
+return nil, false
+}
+count := len(records) / 4
+for i := 0; i < count; i++ {
+op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+if op < 0 || op > 11 || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
+return nil, false
+}
+if op >= 2 && (left < 0 || left >= i || records[left*4] == 2) {
+return nil, false
+}
+if op >= 3 && op != 8 && op != 9 && (right < 0 || right >= i || records[right*4] == 2) {
+return nil, false
+}
+}
+arch := renvoArchAmd64
+if arm64 {
+arch = renvoArchAarch64
+}
+
+
+context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+g := renvoLinearGen{c: context, stackPeak: (count + 1) * 8}
+g.asm.c = context
+g.asm.code = make([]byte, 0, count*32+64)
+a := &g.asm
+frame := renvoEmitGlobalInitFrameStart(&g)
+renvoAsmStorePrimaryStack(a, 8)
+for i := 0; i < count; i++ {
+op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+if op == 0 {
+renvoAsmPrimaryImm(a, immediate)
+} else if op == 1 {
+renvoAsmLoadSecondaryStack(a, 8)
+renvoAsmLoadPrimaryMemSecondaryDisp(a, immediate*8)
+} else {
+renvoAsmLoadPrimaryStack(a, (left+2)*8)
+if op == 2 {
+renvoAsmLoadSecondaryStack(a, 8)
+renvoAsmStorePrimaryMemSecondaryDisp(a, immediate*8)
+continue
+}
+if op == 8 || op == 9 {
+if immediate < 0 || immediate >= 64 {
+renvoAsmPrimaryImm(a, 0)
+} else if op == 8 {
+renvoAsmShlPrimaryImm(a, immediate)
+} else if arm64 {
+renvoAarch64AsmEmit(a, 0xd340fc00|(immediate<<16))
+} else {
+renvoAsmShrPrimaryImm(a, immediate)
+}
+} else {
+renvoAsmLoadTertiaryStack(a, (right+2)*8)
+if op == 3 {
+renvoAsmAddPrimaryTertiary(a)
+} else if op == 4 {
+renvoAsmSubPrimaryTertiary(a)
+} else if op >= 5 && op <= 7 {
+
+
+if arm64 {
+encoding := 0x8a000040
+if op == 6 {
+encoding = 0xaa000040
+}
+if op == 7 {
+encoding = 0xca000040
+}
+renvoAarch64AsmEmit(a, encoding)
+} else {
+encoding := 0xc82148
+if op == 6 {
+encoding = 0xc80948
+}
+if op == 7 {
+encoding = 0xc83148
+}
+renvoAsmEmit24(a, encoding)
+}
+} else {
+condition := 0x94
+if op == 11 {
+condition = 0x97
+}
+renvoAsmCmpTertiaryPrimarySet(a, condition)
+}
+}
+}
+renvoAsmStorePrimaryStack(a, (i+2)*8)
+}
+renvoEmitGlobalInitFrameEnd(&g, frame)
+renvoAsmRet(a)
+renvoAsmPatch(a)
+return a.code, !a.patchFailed
+}
 
 const renvoAbsBssReloc = 1
 const renvoImportReloc = 2

@@ -1,0 +1,634 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "pdp11-machine",
+  "import": "renvo.dev/emulators/pdp11machine",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "pdp11"
+    }
+  ]
+}
+
+-- machine.go --
+// Package pdp11machine composes the shared PDP-11 CPU with RAM, RK11/RK05,
+// a console, and a KW11-style clock. Device semantics follow the existing
+// V7-tested Renvo C machine; bus and timing contracts follow renvo_emu.
+package pdp11machine
+
+import (
+	"fmt"
+	"renvo.dev/emulators/pdp11"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+const RAMSize = 248 * 1024
+const DiskSize = 203 * 24 * 512
+
+type Machine struct {
+	CPU                                pdp11.CPU
+	RAM                                []byte
+	Disks                              [8][]byte
+	Output                             []byte
+	RXCS, RXBUF, TXCS, ClockCS         uint16
+	RKDS, RKER, RKCS, RKWC, RKBA, RKDA uint16
+	rxIRQ, txIRQ, clockIRQ, diskIRQ    bool
+	Events                             emu.Queue
+	ClockPeriod                        uint64
+	lastClock                          uint64
+}
+
+func New() *Machine {
+	m := &Machine{RAM: make([]byte, RAMSize), ClockPeriod: 16667}
+	m.CPU.Bus = m
+	m.CPU.System = m
+	m.Reset()
+	return m
+}
+func (m *Machine) Reset() {
+	m.RXCS, m.TXCS, m.ClockCS = 0, 0o200, 0o200
+	m.rxIRQ, m.txIRQ, m.clockIRQ, m.diskIRQ = false, false, false, false
+	m.RKDS, m.RKCS = 0o4700, 0o200
+	m.RKER, m.RKWC, m.RKBA, m.RKDA = 0, 0, 0, 0
+}
+func (m *Machine) Mount(unit int, data []byte) error {
+	if unit < 0 || unit >= 8 || len(data) == 0 || len(data) > DiskSize || len(data)%512 != 0 {
+		return fmt.Errorf("invalid RK05 image or unit")
+	}
+	m.Disks[unit] = make([]byte, DiskSize)
+	copy(m.Disks[unit], data)
+	return nil
+}
+func (m *Machine) Boot() error {
+	if len(m.Disks[0]) == 0 {
+		return fmt.Errorf("RK0 has no disk")
+	}
+	copy(m.RAM[:512], m.Disks[0][:512])
+	m.CPU.R[0] = 0
+	m.CPU.R[1] = 0o177404
+	m.CPU.R[6] = 0o2000
+	m.CPU.R[7] = 0
+	return nil
+}
+func (m *Machine) Receive(ch byte) bool {
+	if m.RXCS&0o200 != 0 {
+		return false
+	}
+	m.RXBUF = uint16(ch & 127)
+	m.RXCS |= 0o200
+	if m.RXCS&0o100 != 0 {
+		m.rxIRQ = true
+	}
+	return true
+}
+func (m *Machine) Interrupt(p int) uint16 {
+	if m.clockIRQ && p < 6 {
+		m.clockIRQ = false
+		return 0o100
+	}
+	if m.diskIRQ && p < 5 {
+		m.diskIRQ = false
+		return 0o220
+	}
+	if m.rxIRQ && p < 4 {
+		m.rxIRQ = false
+		return 0o60
+	}
+	if m.txIRQ && p < 4 {
+		m.txIRQ = false
+		return 0o64
+	}
+	return 0
+}
+func (m *Machine) Step() { m.CPU.Step(); m.Advance() }
+func (m *Machine) Advance() {
+	if m.ClockPeriod != 0 && m.CPU.Ticks/m.ClockPeriod > m.lastClock {
+		m.lastClock = m.CPU.Ticks / m.ClockPeriod
+		m.ClockCS |= 0o200
+		if m.ClockCS&0o100 != 0 {
+			m.clockIRQ = true
+		}
+	}
+	for {
+		e, ok := m.Events.Pop(m.CPU.Ticks)
+		if !ok {
+			break
+		}
+		if e.Kind == 1 {
+			m.Receive(byte(e.Value))
+		}
+	}
+}
+func (m *Machine) Peek(a uint64, w int) (uint64, bool) {
+	if w != 1 && w != 2 || a >= uint64(len(m.RAM)) || uint64(w) > uint64(len(m.RAM))-a {
+		return 0, false
+	}
+	v := uint64(m.RAM[a])
+	if w == 2 {
+		v |= uint64(m.RAM[a+1]) << 8
+	}
+	return v, true
+}
+func (m *Machine) Load(a uint64, w int, k emu.Access, t uint64) (uint64, *emu.Fault) {
+	if w != 1 && w != 2 {
+		return 0, &emu.Fault{Kind: emu.DeviceFault, Access: k, Address: a, Width: w}
+	}
+	if w == 2 && a&1 != 0 {
+		return 0, &emu.Fault{Kind: emu.Misaligned, Access: k, Address: a, Width: w}
+	}
+	if v, ok := m.Peek(a, w); ok {
+		return v, nil
+	}
+	if a >= 0o17760000 && a <= 0o17777777 {
+		v, ok := m.ioRead(uint16(a) & 0o177776)
+		if ok {
+			if w == 1 {
+				v = v >> ((a & 1) * 8) & 255
+			}
+			return uint64(v), nil
+		}
+	}
+	return 0, &emu.Fault{Kind: emu.Unmapped, Access: k, Address: a, Width: w}
+}
+func (m *Machine) Store(a uint64, w int, v uint64, t uint64) *emu.Fault {
+	if w != 1 && w != 2 {
+		return &emu.Fault{Kind: emu.DeviceFault, Access: emu.Write, Address: a, Width: w}
+	}
+	if w == 2 && a&1 != 0 {
+		return &emu.Fault{Kind: emu.Misaligned, Access: emu.Write, Address: a, Width: w}
+	}
+	if _, ok := m.Peek(a, w); ok {
+		m.RAM[a] = byte(v)
+		if w == 2 {
+			m.RAM[a+1] = byte(v >> 8)
+		}
+		return nil
+	}
+	if a >= 0o17760000 && a <= 0o17777777 {
+		addr := uint16(a) & 0o177776
+		value := uint16(v)
+		if w == 1 {
+			old, ok := m.ioValue(addr)
+			if !ok {
+				return &emu.Fault{Kind: emu.Unmapped, Access: emu.Write, Address: a, Width: w}
+			}
+			if a&1 != 0 {
+				value = old&255 | value<<8
+			} else {
+				value = old&0xff00 | value&255
+			}
+		}
+		if m.ioWrite(addr, value) {
+			return nil
+		}
+	}
+	return &emu.Fault{Kind: emu.Unmapped, Access: emu.Write, Address: a, Width: w}
+}
+
+// ioValue is a side-effect-free register merge for byte writes: writing one
+// lane must not consume a console receive byte from the other lane.
+func (m *Machine) ioValue(a uint16) (uint16, bool) {
+	switch a {
+	case 0o177560:
+		return m.RXCS, true
+	case 0o177562:
+		return m.RXBUF, true
+	case 0o177564:
+		return m.TXCS, true
+	case 0o177566:
+		return 0, true
+	case 0o177546:
+		return m.ClockCS, true
+	case 0o177570, 0o177762, 0o177764, 0o177766, 0o177770:
+		return 0, true
+	case 0o177760:
+		return RAMSize/64 - 1, true
+	case 0o177400:
+		return m.RKDS&0o17777 | m.RKDA&0o160000, true
+	case 0o177402:
+		return m.RKER, true
+	case 0o177404:
+		return m.RKCS, true
+	case 0o177406:
+		return m.RKWC, true
+	case 0o177410:
+		return m.RKBA, true
+	case 0o177412:
+		return m.RKDA, true
+	case 0o177414, 0o177416:
+		return 0, true
+	}
+	return 0, false
+}
+func (m *Machine) ioRead(a uint16) (uint16, bool) {
+	v, ok := m.ioValue(a)
+	if a == 0o177562 {
+		m.RXCS &^= 0o200
+		m.rxIRQ = false
+	}
+	return v, ok
+}
+func (m *Machine) ioWrite(a, v uint16) bool {
+	switch a {
+	case 0o177560:
+		m.RXCS = m.RXCS&0o200 | v&0o100
+		m.rxIRQ = m.RXCS&0o300 == 0o300
+	case 0o177562:
+	case 0o177564:
+		m.TXCS = 0o200 | v&0o100
+		m.txIRQ = v&0o100 != 0
+	case 0o177566:
+		m.Output = append(m.Output, byte(v&127))
+		m.TXCS |= 0o200
+		if m.TXCS&0o100 != 0 {
+			m.txIRQ = true
+		}
+	case 0o177546:
+		m.ClockCS = v & 0o300
+		if v&0o100 == 0 {
+			m.clockIRQ = false
+		}
+	case 0o177570:
+	case 0o177404:
+		m.RKCS = m.RKCS&0o200 | v&0o177577
+		if v&1 != 0 {
+			m.diskGo()
+		} else if m.RKCS&0o300 == 0o300 {
+			m.diskIRQ = true
+		}
+	case 0o177406:
+		m.RKWC = v
+	case 0o177410:
+		m.RKBA = v & 0o177776
+	case 0o177412:
+		m.RKDA = v
+	case 0o177400, 0o177402, 0o177414, 0o177416:
+	default:
+		return false
+	}
+	return true
+}
+func (m *Machine) diskGo() {
+	sector := int(m.RKDA>>5&0o377)*24 + int(m.RKDA>>4&1)*12 + int(m.RKDA&15)
+	address := int(m.RKBA) | int(m.RKCS&0o60)<<12
+	command, unit := m.RKCS>>1&7, int(m.RKDA>>13)
+	m.RKCS &^= 0o201
+	if command == 0 {
+		m.RKER = 0
+		m.RKCS = 0o200
+		m.RKDS = 0o4700
+	} else if command == 1 || command == 2 || command == 3 || command == 5 {
+		if m.RKDA&15 >= 12 || m.RKDA>>5&0o377 >= 203 {
+			m.RKER |= 0o40
+		}
+		for m.RKWC != 0 && m.RKER == 0 {
+			count := (65536 - int(m.RKWC)) * 2
+			if count > 512 {
+				count = 512
+			}
+			if address+count > len(m.RAM) {
+				m.RKER |= 0o2000
+				break
+			}
+			off := sector * 512
+			if off+512 > len(m.Disks[unit]) {
+				m.RKER |= 0o200
+				break
+			}
+			for i := 0; i < count; i++ {
+				switch command {
+				case 1:
+					m.Disks[unit][off+i] = m.RAM[address+i]
+				case 2:
+					m.RAM[address+i] = m.Disks[unit][off+i]
+				case 3:
+					if m.RAM[address+i] != m.Disks[unit][off+i] {
+						m.RKER |= 1
+					}
+				}
+			}
+			address += count
+			m.RKWC += uint16(count / 2)
+			sector++
+		}
+		m.RKBA = uint16(address)
+		m.RKCS = m.RKCS&^0o60 | uint16(address>>12)&0o60
+		m.RKDA = uint16(unit<<13 | sector/24<<5 | (sector/12&1)<<4 | sector%12)
+	} else if command == 4 || command == 6 {
+		m.RKCS |= 0o20000
+	} else {
+		m.RKER |= 0o40
+	}
+	if m.RKER != 0 {
+		m.RKCS |= 0o140000
+	}
+	m.RKCS |= 0o200
+	if m.RKCS&0o100 != 0 {
+		m.diskIRQ = true
+	}
+}
+
+-- machine_test.go --
+package pdp11machine
+
+import (
+	"bytes"
+	"os"
+	"renvo.dev/emulators/pdp11"
+	emu "renvo.dev/internal/rfe/runtime"
+	"strings"
+	"testing"
+)
+
+func word(m *Machine, a int, v uint16) { m.RAM[a] = byte(v); m.RAM[a+1] = byte(v >> 8) }
+func TestMMUAndTrapBoundary(t *testing.T) {
+	m := New()
+	c := &m.CPU
+	c.MMR0 = 1
+	c.MMR3 = 4
+	c.PAR[0], c.PAR[8] = 0o100, 0o200
+	c.PDR[0], c.PDR[8] = 0o77406, 0o77406
+	word(m, 0o100*64+0o14, 0o1111)
+	word(m, 0o200*64+0o14, 0o700)
+	c.R[7], c.R[6] = 0o400, 0o1000
+	c.TakeTrap(0o14)
+	if c.Halted || c.Fault != 0 || c.R[7] != 0o700 || c.R[6] != 0o774 {
+		t.Fatal("kernel D trap vector", c)
+	}
+	v, _ := m.Peek(0o200*64+0o774, 2)
+	if v != 0o400 {
+		t.Fatal("saved PC")
+	}
+	engine, err := pdp11.NewEngine("native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	word(m, 0o100*64, 0o005200)
+	word(m, 0o100*64+2, 0o005201)
+	word(m, 0o100*64+4, 0)
+	for i := 0; i < 12; i++ {
+		c.R[7] = 0
+		engine.Step(c, 2)
+	}
+	if engine.Stats.NativeInstructions == 0 || c.PDR[0]&0o200 == 0 {
+		t.Fatal("mapped native fetch")
+	}
+	word(m, 0o300*64, 0o005300)
+	c.PAR[0] = 0o300
+	c.R[7] = 0
+	before := c.R[0]
+	engine.Step(c, 2)
+	if c.R[0] != before-1 {
+		t.Fatal("stale PAR mapping")
+	}
+	c.PDR[0] = 0
+	c.R[7] = 0
+	word(m, 0o200*64+0o250, 0o700)
+	word(m, 0o200*64+0o252, 0)
+	engine.Step(c, 2)
+	if c.MMR0&0o100000 == 0 || c.R[7] != 0o700 {
+		t.Fatal("PDR fault bypassed")
+	}
+}
+func TestDevicesAndDMA(t *testing.T) {
+	m := New()
+	disk := make([]byte, 512)
+	for i := range disk {
+		disk[i] = byte(i)
+	}
+	if err := m.Mount(1, disk); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Receive('x') || m.Receive('y') {
+		t.Fatal("receive latch")
+	}
+	v, ok := m.ioRead(0o177562)
+	if !ok || v != 'x' || !m.Receive('z') {
+		t.Fatal("receive register")
+	}
+	m.ioWrite(0o177564, 0o100)
+	m.ioWrite(0o177566, 'y')
+	if string(m.Output) != "y" || m.Interrupt(0) != 0o64 {
+		t.Fatal("transmit interrupt")
+	}
+	m.ioWrite(0o177546, 0o100)
+	m.CPU.Ticks = m.ClockPeriod
+	m.Advance()
+	if m.Interrupt(5) != 0o100 {
+		t.Fatal("clock priority")
+	}
+	m.Advance()
+	if m.Interrupt(5) != 0 {
+		t.Fatal("duplicate clock at same tick")
+	}
+	m.RKBA, m.RKWC, m.RKDA, m.RKCS = 0o1000, 0o177400, 0o20000, 0o105
+	m.diskGo()
+	if m.RKER != 0 || m.RKWC != 0 || m.RAM[0o1001] != 1 || m.Interrupt(4) != 0o220 {
+		t.Fatal("disk DMA read")
+	}
+	m.RAM[0o1000], m.RAM[0o1001] = 42, 43
+	m.RKBA, m.RKWC, m.RKDA, m.RKCS = 0o1000, 0o177777, 0o20000, 3
+	m.diskGo()
+	if m.Disks[1][0] != 42 || m.Disks[1][1] != 43 || m.Disks[1][2] != 2 || disk[0] != 0 {
+		t.Fatal("partial sector or source-image mutation")
+	}
+	if _, f := m.Load(1, 2, emu.Read, 0); f == nil || f.Kind != emu.Misaligned {
+		t.Fatal("odd bus access")
+	}
+	if _, ok := m.Peek(0o17777562, 2); ok {
+		t.Fatal("speculative MMIO fetch")
+	}
+}
+func TestHistoricalV7Boot(t *testing.T) {
+	name := os.Getenv("RENVO_PDP11_V7_IMAGE")
+	if name == "" {
+		t.Skip("set RENVO_PDP11_V7_IMAGE for full-system V7 boot")
+	}
+	disk, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := append([]byte{}, disk...)
+	m := New()
+	if err = m.Mount(0, disk); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.Boot(); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := pdp11.NewEngine("native")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	triggers := []string{"@", ":", "#", "RFE_BOOT_OK", "#", "RFE_DISK_OK", "#"}
+	inputs := []string{"boot\r", "rk(0,0)rkunix\r", "echo RFE_BOOT_OK\r", "echo RFE_DISK_OK > /rfe\r", "cat /rfe\r", "rm /rfe\r", ""}
+	next, search := 0, 0
+	pending := ""
+	for m.CPU.Ticks < 10000000 && !m.CPU.Halted && next < len(triggers) {
+		if len(pending) > 0 && m.Receive(pending[0]) {
+			pending = pending[1:]
+		}
+		budget := int(m.ClockPeriod - m.CPU.Ticks%m.ClockPeriod)
+		if budget > 32 {
+			budget = 32
+		}
+		engine.Step(&m.CPU, budget)
+		m.Advance()
+		if strings.Contains(string(m.Output[search:]), triggers[next]) {
+			pending += inputs[next]
+			next++
+			search = len(m.Output)
+		}
+	}
+	if next != len(triggers) || !bytes.Contains(m.Output, []byte("\r\nRFE_DISK_OK\r\n")) || m.CPU.Halted {
+		t.Fatalf("V7 boot did not complete:\n%s", m.Output)
+	}
+	if !bytes.Equal(disk, before) {
+		t.Fatal("source disk mutated")
+	}
+	if engine.Stats.NativeInstructions == 0 {
+		t.Fatal("no native blocks used during boot")
+	}
+}
+
+-- main.go --
+package pdp11machine
+
+import (
+	"bufio"
+	"flag"
+	"fmt"
+	"os"
+	"renvo.dev/emulators/pdp11"
+	"strings"
+)
+
+// Script is a sequence of output-substring TAB input lines, matching the
+// existing PDP-11 example's deterministic boot script convention.
+func Main(args []string) int {
+	f := flag.NewFlagSet("pdp11-machine", flag.ContinueOnError)
+	steps := f.Uint64("steps", 100000000, "instruction budget")
+	script := f.String("script", "", "output-triggered console script")
+	mode := f.String("engine", "native", "native, ir, or interpreter")
+	stats := f.Bool("stats", false, "print execution statistics")
+	if err := f.Parse(args); err != nil {
+		return 2
+	}
+	if f.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: pdp11-machine [-script file] [-steps count] rk05-image")
+		return 2
+	}
+	fail := func(e error) int { fmt.Fprintln(os.Stderr, "pdp11-machine:", e); return 1 }
+	data, err := os.ReadFile(f.Arg(0))
+	if err != nil {
+		return fail(err)
+	}
+	m := New()
+	if err = m.Mount(0, data); err != nil {
+		return fail(err)
+	}
+	if err = m.Boot(); err != nil {
+		return fail(err)
+	}
+	var triggers, inputs []string
+	if *script != "" {
+		data, err := os.ReadFile(*script)
+		if err != nil {
+			return fail(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if line == "" || strings.HasPrefix(line, "# ") {
+				continue
+			}
+			pair := strings.SplitN(line, "\t", 2)
+			if len(pair) != 2 {
+				return fail(fmt.Errorf("script line needs a tab"))
+			}
+			triggers = append(triggers, pair[0])
+			s := strings.ReplaceAll(pair[1], `\r`, "\r")
+			s = strings.ReplaceAll(s, `\n`, "\n")
+			inputs = append(inputs, s)
+		}
+	}
+	input := make(chan byte, 1024)
+	if *script == "" {
+		go func() {
+			r := bufio.NewReader(os.Stdin)
+			for {
+				b, e := r.ReadByte()
+				if e != nil {
+					return
+				}
+				if b == '\n' {
+					b = '\r'
+				}
+				input <- b
+			}
+		}()
+	}
+	engine, err := pdp11.NewEngine(*mode)
+	if err != nil {
+		return fail(err)
+	}
+	defer engine.Close()
+	next, sent, search := 0, 0, 0
+	pending := ""
+	for m.CPU.Ticks < *steps && !m.CPU.Halted {
+		if len(pending) > 0 && m.Receive(pending[0]) {
+			pending = pending[1:]
+		}
+		if *script == "" && m.RXCS&0o200 == 0 {
+			select {
+			case b := <-input:
+				m.Receive(b)
+			default:
+			}
+		}
+		budget := 32
+		if left := *steps - m.CPU.Ticks; left < uint64(budget) {
+			budget = int(left)
+		}
+		if m.ClockPeriod != 0 {
+			if left := m.ClockPeriod - m.CPU.Ticks%m.ClockPeriod; left < uint64(budget) {
+				budget = int(left)
+			}
+		}
+		if at, ok := m.Events.Next(); ok {
+			if at <= m.CPU.Ticks {
+				m.Advance()
+				continue
+			}
+			if at-m.CPU.Ticks < uint64(budget) {
+				budget = int(at - m.CPU.Ticks)
+			}
+		}
+		engine.Step(&m.CPU, budget)
+		m.Advance()
+		if len(m.Output) > sent {
+			if _, err = os.Stdout.Write(m.Output[sent:]); err != nil {
+				return fail(err)
+			}
+			sent = len(m.Output)
+		}
+		if next < len(triggers) && strings.Contains(string(m.Output[search:]), triggers[next]) {
+			pending += inputs[next]
+			next++
+			search = len(m.Output)
+		}
+	}
+	if *stats {
+		fmt.Fprintf(os.Stderr, "%+v\n", engine.Stats)
+	}
+	if m.CPU.Halted {
+		return fail(fmt.Errorf("machine halted at pc %06o, fault %03o", m.CPU.R[7], m.CPU.Fault))
+	}
+	if *script != "" && (next != len(triggers) || pending != "") {
+		return fail(fmt.Errorf("script incomplete after %d instructions", m.CPU.Ticks))
+	}
+	return 0
+}
