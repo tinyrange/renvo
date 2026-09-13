@@ -4650,6 +4650,13 @@ const boardArtworkPaths = {
     <rect x="22" y="25" width="46" height="23" rx="3" class="board-screen"/>
     <g class="board-keys"><path d="M77 26h58M77 34h58M22 57h112M22 65h112M22 73h112"/><path d="M84 23v55M94 23v55M104 23v55M114 23v55M124 23v55M32 53v25M42 53v25M52 53v25M62 53v25M72 53v25"/></g>
     <rect x="146" y="38" width="11" height="21" rx="3" class="board-metal"/>`,
+  poep4: `
+    <rect x="27" y="18" width="106" height="64" rx="10" class="board-shell"/>
+    <rect x="36" y="28" width="49" height="43" rx="3" class="board-metal"/>
+    <path d="M44 36h33v22H67v6H54v-6H44z" class="board-port"/>
+    <path d="M49 37v9m6-9v9m6-9v9m6-9v9m6-9v9" class="board-pin"/>
+    <rect x="101" y="44" width="24" height="12" rx="5" class="board-port"/>
+    <circle cx="98" cy="68" r="3" class="board-led"/>`,
   tab5: `
     <rect x="17" y="10" width="126" height="80" rx="10" class="board-shell"/>
     <rect x="25" y="18" width="110" height="64" rx="4" class="board-screen"/>
