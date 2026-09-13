@@ -6638,9 +6638,8 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 		}
 		renvoNativeTypeLayout(m, fn.resultType)
 	}
-	states := make([]byte, len(m.types))
 	for i := 0; i < len(m.types); i++ {
-		renvoFinalizeValueLayout(m, i, states)
+		renvoFinalizeValueLayout(m, i)
 	}
 	for i := 0; i < len(m.types); i++ {
 		renvoMarkDenseCallWords(m, i)
@@ -6650,21 +6649,24 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 // Array strides and containing field offsets depend on the completed layout
 // of their value elements, including types declared later in the source.
 // Pointer edges do not contribute to value size and must not be traversed.
-func renvoFinalizeValueLayout(m *renvoMeta, typ int, states []byte) {
-	if typ <= 0 || typ >= len(m.types) || states[typ] != 0 {
+func renvoFinalizeValueLayout(m *renvoMeta, typ int) {
+	if typ <= 0 || typ >= len(m.types) {
 		return
 	}
-	states[typ] = 1
 	t := renvoResolveType(m, typ)
-	if t.nativeAlign > 0 {
+	if t.nativeAlign != 0 {
 		return
 	}
+	// Negative alignment records a completed ordinary value layout; positive
+	// values remain reserved for native layouts. Native layout may still
+	// replace this marker when an enclosing ABI requires it.
+	t.nativeAlign = -1
 	if t.kind == renvoTypeArray {
-		renvoFinalizeValueLayout(m, t.elem, states)
+		renvoFinalizeValueLayout(m, t.elem)
 		t.size = renvoTypeSize(m, t.elem) * t.count
 	} else if t.kind == renvoTypeStruct {
 		for j := 0; j < t.count; j++ {
-			renvoFinalizeValueLayout(m, m.fields[t.first+j].typ, states)
+			renvoFinalizeValueLayout(m, m.fields[t.first+j].typ)
 		}
 		nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, typ)
 		offset := 0
