@@ -1,0 +1,305 @@
+definition 1
+unit windows_nt31_386
+implements direct_emitter_v1
+@import "../x86_32.rtg"
+
+# PE32 freestanding stdcall DLLs and video miniports for NT 3.1. DriverEntry
+# selects a native image; other exported functions form an ordinary DLL.
+go backend {
+	func ntPut16(b []byte, at int, v int) { b[at] = byte(v); b[at+1] = byte(v >> 8) }
+	func ntPut32(b []byte, at int, v int) { ntPut16(b, at, v); ntPut16(b, at+2, v>>16) }
+	func ntPad(b []byte, size int) []byte {
+		for len(b) < size {
+			b = append(b, 0)
+		}
+		return b
+	}
+	func ntString(b []byte, s string) []byte {
+		for i := 0; i < len(s); i++ {
+			b = append(b, s[i])
+		}
+		return append(b, 0)
+	}
+	func ntStaticCall(out *RTGEmitter, id int, words int) {
+		out.Bytes2(0xff, 0x15)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, id, RTGRelocationImport)
+	}
+	func ntSection(b []byte, at int, name string, size int, rva int, raw int, offset int, flags int) {
+		for i := 0; i < len(name); i++ {
+			b[at+i] = name[i]
+		}
+		ntPut32(b, at+8, size)
+		ntPut32(b, at+12, rva)
+		ntPut32(b, at+16, raw)
+		ntPut32(b, at+20, offset)
+		ntPut32(b, at+36, flags)
+	}
+	func ntImports(out *RTGEmitter, b []byte, rva int) ([]byte, []int, int, int) {
+		iat := make([]int, out.StaticImportCount())
+		var dlls []string
+		for i := 0; i < len(iat); i++ {
+			dll := out.StaticImportDLL(i)
+			found := false
+			for j := 0; j < len(dlls); j++ {
+				if dlls[j] == dll {
+					found = true
+				}
+			}
+			if !found {
+				dlls = append(dlls, dll)
+			}
+		}
+		if len(dlls) == 0 {
+			return b, iat, 0, 0
+		}
+		start := RTGAlignValue(len(b), 4)
+		b = ntPad(b, start+(len(dlls)+1)*20)
+		for d := 0; d < len(dlls); d++ {
+			var ids []int
+			for i := 0; i < len(iat); i++ {
+				if out.StaticImportDLL(i) == dlls[d] {
+					ids = append(ids, i)
+				}
+			}
+			lookup := RTGAlignValue(len(b), 4)
+			thunks := lookup + (len(ids)+1)*4
+			b = ntPad(b, thunks+(len(ids)+1)*4)
+			name := len(b)
+			b = ntString(b, dlls[d])
+			for j := 0; j < len(ids); j++ {
+				b = ntPad(b, RTGAlignValue(len(b), 2))
+				hint := len(b)
+				b = append(b, 0, 0)
+				b = ntString(b, out.StaticImportName(ids[j]))
+				ntPut32(b, lookup+j*4, rva+hint)
+				ntPut32(b, thunks+j*4, rva+hint)
+				iat[ids[j]] = rva + thunks + j*4
+			}
+			ntPut32(b, start+d*20, rva+lookup)
+			ntPut32(b, start+d*20+12, rva+name)
+			ntPut32(b, start+d*20+16, rva+thunks)
+		}
+		return b, iat, rva + start, len(b) - start
+	}
+	func ntName(out *RTGEmitter, i int) string {
+		b := make([]byte, out.SymbolNameLength(i))
+		for j := 0; j < len(b); j++ {
+			b[j] = out.SymbolNameByte(i, j)
+		}
+		return string(b)
+	}
+	func ntLess(a string, b string) bool {
+		for i := 0; i < len(a) && i < len(b); i++ {
+			if a[i] != b[i] {
+				return a[i] < b[i]
+			}
+		}
+		return len(a) < len(b)
+	}
+	func ntImage(out *RTGEmitter) []byte {
+		entry := -1
+		var names []string
+		var ids []int
+		for i := 0; i < out.SymbolCount(); i++ {
+			if out.SymbolNameEquals(i, "DriverEntry") {
+				entry = out.SymbolPC(i)
+			}
+			if out.SymbolPC(i) >= 0 {
+				names = append(names, ntName(out, i))
+				ids = append(ids, i)
+			}
+		}
+		for i := 0; i < len(names); i++ {
+			for j := i + 1; j < len(names); j++ {
+				if ntLess(names[j], names[i]) {
+					s := names[i]
+					names[i] = names[j]
+					names[j] = s
+					k := ids[i]
+					ids[i] = ids[j]
+					ids[j] = k
+				}
+			}
+		}
+		textSize := out.Len()
+		textRaw := RTGAlignValue(textSize, 512)
+		dataRVA := RTGAlignValue(4096+textSize, 4096)
+		data := out.Data()
+		bssRVA := dataRVA + len(data)
+		data = ntPad(data, len(data)+out.BSSSize())
+		data, iat, importsRVA, importsSize := ntImports(out, data, dataRVA)
+		exportAt := RTGAlignValue(len(data), 4)
+		data = ntPad(data, exportAt+40)
+		functions := len(data)
+		data = ntPad(data, functions+len(names)*4)
+		pointers := len(data)
+		data = ntPad(data, pointers+len(names)*4)
+		ordinals := len(data)
+		data = ntPad(data, ordinals+len(names)*2)
+		dllName := len(data)
+		data = ntString(data, "renvo-nt31")
+		for i := 0; i < len(names); i++ {
+			ntPut32(data, functions+i*4, 4096+out.SymbolPC(ids[i]))
+			ntPut32(data, pointers+i*4, dataRVA+len(data))
+			ntPut16(data, ordinals+i*2, i)
+			data = ntString(data, names[i])
+		}
+		ntPut32(data, exportAt+12, dataRVA+dllName)
+		ntPut32(data, exportAt+16, 1)
+		ntPut32(data, exportAt+20, len(names))
+		ntPut32(data, exportAt+24, len(names))
+		ntPut32(data, exportAt+28, dataRVA+functions)
+		ntPut32(data, exportAt+32, dataRVA+pointers)
+		ntPut32(data, exportAt+36, dataRVA+ordinals)
+		exportSize := len(data) - exportAt
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i) & 0x7fffffff
+			target := out.LabelPosition(out.RelocationLabel(i) & 0x7fffffff)
+			if target < 0 {
+				return nil
+			}
+			out.PatchUint32(at, RTGGet32At(out.Code(), at)+target-at-4)
+		}
+		var relocations []int
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			kind := out.AbsoluteRelocationKind(i)
+			addend := out.AbsoluteRelocationAddend(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, kind, addend, dataRVA, bssRVA)
+			if kind == RTGRelocationImport {
+				if addend < 0 || addend >= len(iat) {
+					return nil
+				}
+				target = 0x62000000 + iat[addend]
+				ok = true
+				relocations = append(relocations, 4096+at)
+			}
+			if kind == RTGRelocationAbsoluteBSS && addend >= 0x20000000 {
+				id := (addend - 0x20000000) / 0x100000
+				if id >= out.ExternalImportCount() {
+					return nil
+				}
+				ok = false
+				for j := 0; j < out.SymbolCount(); j++ {
+					if out.SymbolNameEquals(j, out.ExternalImportName(id)) {
+						target = 4096 + out.SymbolPC(j) + (addend-0x20000000)%0x100000
+						ok = true
+					}
+				}
+			}
+			if !ok {
+				return nil
+			}
+			if kind != RTGRelocationImport {
+				target -= 4096 + at - 3
+			}
+			out.PatchUint32(at, target)
+		}
+		relocAt := RTGAlignValue(len(data), 4)
+		data = ntPad(data, relocAt)
+		for i := 0; i < len(relocations); i++ {
+			for j := i + 1; j < len(relocations); j++ {
+				if relocations[j] < relocations[i] {
+					v := relocations[i]
+					relocations[i] = relocations[j]
+					relocations[j] = v
+				}
+			}
+		}
+		for i := 0; i < len(relocations); {
+			page := relocations[i] & -4096
+			start := len(data)
+			data = ntPad(data, start+8)
+			for i < len(relocations) && relocations[i]&-4096 == page {
+				v := 0x3000 | (relocations[i] & 4095)
+				data = append(data, byte(v), byte(v>>8))
+				i++
+			}
+			data = ntPad(data, RTGAlignValue(len(data), 4))
+			ntPut32(data, start, page)
+			ntPut32(data, start+4, len(data)-start)
+		}
+		if len(data) == relocAt {
+			data = ntPad(data, relocAt+12)
+			ntPut32(data, relocAt, 4096)
+			ntPut32(data, relocAt+4, 12)
+		}
+		h := make([]byte, 512)
+		ntPut16(h, 0, 0x5a4d)
+		ntPut32(h, 60, 128)
+		ntPut32(h, 128, 0x4550)
+		ntPut16(h, 132, 0x14c)
+		ntPut16(h, 134, 2)
+		ntPut16(h, 148, 224)
+		ntPut16(h, 150, 0x2102)
+		opt := 152
+		ntPut16(h, opt, 0x10b)
+		ntPut32(h, opt+4, textRaw)
+		ntPut32(h, opt+8, RTGAlignValue(len(data), 512))
+		ntPut16(h, opt+68, 3)
+		if entry >= 0 {
+			ntPut32(h, opt+16, 4096+entry)
+			ntPut16(h, opt+68, 1)
+			ntPut16(h, 150, 0x102)
+		}
+		ntPut32(h, opt+20, 4096)
+		ntPut32(h, opt+24, dataRVA)
+		ntPut32(h, opt+28, 0x62000000)
+		ntPut32(h, opt+32, 4096)
+		ntPut32(h, opt+36, 512)
+		ntPut16(h, opt+40, 3)
+		ntPut16(h, opt+42, 10)
+		ntPut16(h, opt+48, 3)
+		ntPut16(h, opt+50, 10)
+		ntPut32(h, opt+56, RTGAlignValue(dataRVA+len(data), 4096))
+		ntPut32(h, opt+60, 512)
+		ntPut32(h, opt+92, 16)
+		ntPut32(h, opt+96, dataRVA+exportAt)
+		ntPut32(h, opt+100, exportSize)
+		ntPut32(h, opt+104, importsRVA)
+		ntPut32(h, opt+108, importsSize)
+		ntPut32(h, opt+136, dataRVA+relocAt)
+		ntPut32(h, opt+140, len(data)-relocAt)
+		ntSection(h, opt+224, ".text", textSize, 4096, textRaw, 512, 0x60000020)
+		ntSection(h, opt+264, ".data", len(data), dataRVA, RTGAlignValue(len(data), 512), 512+textRaw, 0xc0000040)
+		result := append(h, out.Code()...)
+		result = ntPad(result, 512+textRaw)
+		result = append(result, data...)
+		result = ntPad(result, RTGAlignValue(len(result), 512))
+		sum := 0
+		for i := 0; i < len(result); i += 2 {
+			sum += int(result[i]) | int(result[i+1])<<8
+			sum = (sum & 65535) + (sum >> 16)
+		}
+		sum = (sum & 65535) + (sum >> 16)
+		ntPut32(result, opt+64, sum+len(result))
+		return result
+	}
+}
+
+abi nt31_stdcall {
+	internal = renvo_x86_32
+	arguments = [stack]
+	result = [eax, edx]
+	stack_alignment = 4
+}
+runtime nt31 { emit_static_call = go ntStaticCall }
+format nt31_pe {
+	kind = "pe-driver"
+	byte_order = little
+	address_bits = 32
+	code_offset = 0x1000
+	image = go ntImage
+}
+target windows-nt31/386 {
+	family = native_v1
+	os = windows
+	arch = x86_32
+	abi = nt31_stdcall
+	runtime = nt31
+	object = nt31_pe
+	build_tags = [windows, 386, renvo_nt31]
+	capabilities = [freestanding, object, function_symbols, imports, linkstatic]
+}

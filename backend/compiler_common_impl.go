@@ -20,8 +20,12 @@ func renvoIsHostedObjectAmd64(c *renvoCompileContext) bool {
 }
 
 func renvoIsHostedObject386(c *renvoCompileContext) bool {
-	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		c.renvoTargetArch == renvoArch386 && !targetIsKernelModule(c)
+	if c == nil {
+		return false
+	}
+	x86 := c.renvoTargetArch == renvoArch386 || renvoPreparedBackendActive != 0 && renvoRTGTargetHasBuildTag(c.renvoTarget, "386")
+	return c != nil && c.objectFile && (c.renvoTargetOS == renvoOSLinux || targetIsWindows(c.renvoTargetOS)) &&
+		x86 && !targetIsKernelModule(c)
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
@@ -27560,7 +27564,15 @@ func renvo386EmitObjectCABIWrapperBodyMode(g *renvoLinearGen, fnIndex int, wordC
 		// in edx. Load both before releasing the private result slot.
 		renvoAsmEmitText(&g.asm, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
 	}
-	renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9\xc3")
+	renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9")
+	if targetIsWindows(g.c.renvoTargetOS) && !variadic {
+		// Win32 callbacks use stdcall; the callback owns its argument stack.
+		renvoAsmEmit8(&g.asm, 0xc2)
+		renvoAsmEmit8(&g.asm, (wordCount*4)&255)
+		renvoAsmEmit8(&g.asm, (wordCount*4)>>8)
+	} else {
+		renvoAsmEmit8(&g.asm, 0xc3)
+	}
 	return true
 }
 
@@ -27621,7 +27633,9 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
 	registerWords := 6
-	if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerWords = renvoRTGObjectRegisterCount()
+	}
 	if sret {
 		registerWords--
 	}
@@ -27850,7 +27864,9 @@ func renvoAmd64PushObjectIntegerRegister(a *renvoAsm, register int) {
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 	registerLimit := 6
-	if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerLimit = renvoRTGObjectRegisterCount()
+	}
 	integerRegister := 0
 	if sret {
 		integerRegister = 1

@@ -606,7 +606,7 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && !targetIsWindows(g.c.renvoTargetOS) {
 		importID := renvoAsmAddExternalImportRange(&g.asm,
 			g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "99fb604ca4a4e337c8c2946bc5cee779f7541abf5ea34dace9ef5e17f20539a3"
+const CompilerSourceDigest = "0c73f22cfb05fd54c0e09a10b2901b3834d94c6658f246096ceeb1ee10e39bea"
 
 // source: backend/compiler_common_impl.go
 
@@ -27,8 +27,12 @@ amd64ABI && !targetIsKernelModule(c)
 }
 
 func renvoIsHostedObject386(c *renvoCompileContext) bool {
-return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-c.renvoTargetArch == renvoArch386 && !targetIsKernelModule(c)
+if c == nil {
+return false
+}
+x86 := c.renvoTargetArch == renvoArch386 || renvoPreparedBackendActive != 0 && renvoRTGTargetHasBuildTag(c.renvoTarget, "386")
+return c != nil && c.objectFile && (c.renvoTargetOS == renvoOSLinux || targetIsWindows(c.renvoTargetOS)) &&
+x86 && !targetIsKernelModule(c)
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
@@ -27567,7 +27571,15 @@ if wideResult {
 
 renvoAsmEmitText(&g.asm, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
 }
-renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9\xc3")
+renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9")
+if targetIsWindows(g.c.renvoTargetOS) && !variadic {
+
+renvoAsmEmit8(&g.asm, 0xc2)
+renvoAsmEmit8(&g.asm, (wordCount*4)&255)
+renvoAsmEmit8(&g.asm, (wordCount*4)>>8)
+} else {
+renvoAsmEmit8(&g.asm, 0xc3)
+}
 return true
 }
 
@@ -27628,7 +27640,9 @@ symbolIndex := renvoAsmAddObjectFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 renvoObjectExportFrame(g, true)
 registerWords := 6
-if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
+if renvoPreparedBackendActive != 0 {
+registerWords = renvoRTGObjectRegisterCount()
+}
 if sret {
 registerWords--
 }
@@ -27857,7 +27871,9 @@ renvoAsmRecordRegisterPush(a, machineRegisters[register])
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 registerLimit := 6
-if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
+if renvoPreparedBackendActive != 0 {
+registerLimit = renvoRTGObjectRegisterCount()
+}
 integerRegister := 0
 if sret {
 integerRegister = 1
@@ -34424,7 +34440,7 @@ return true
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
-if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && !targetIsWindows(g.c.renvoTargetOS) {
 importID := renvoAsmAddExternalImportRange(&g.asm,
 g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
