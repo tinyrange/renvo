@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "84caf6e0a06d006120db4434084621b870acd54b4ada956cb65d37470327590d"
+const CompilerSourceDigest = "0e91c135a98e54be414cc5cb58fb9e30b0398cfa0547ef627340e61a8871a4ba"
 
 // source: backend/compiler_common_impl.go
 
@@ -47336,6 +47336,9 @@ return lo < len(pcs) && pcs[lo] == pc
 }
 func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 ends := make([]int, len(routinePcs))
+
+
+mark := renvo_runtime_ArenaMark()
 visited := make([]int, len(instrPcs))
 pending := make([]int, 0, 64)
 symbolIndex := 0
@@ -47392,6 +47395,7 @@ pending = append(pending, index+1)
 }
 }
 }
+renvo_runtime_ArenaReset(mark)
 return ends
 }
 func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
