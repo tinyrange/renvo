@@ -2073,6 +2073,9 @@ go backend {
 
 	func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 		ends := make([]int, len(routinePcs))
+		// Only the result escapes this analysis. Reuse the per-instruction
+		// visitation map and worklist storage while emitting the module.
+		mark := RTGArenaMark()
 		visited := make([]int, len(instrPcs))
 		pending := make([]int, 0, 64)
 		symbolIndex := 0
@@ -2129,6 +2132,7 @@ go backend {
 				}
 			}
 		}
+		RTGArenaReset(mark)
 		return ends
 	}
 

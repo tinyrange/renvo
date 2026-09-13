@@ -471,6 +471,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	// Constant-capacity makes cause the self-host backend to materialize every
 	// branch as a separate static ring, including branches for other targets.
 	codeCapacity := 0
+	labelCapacity, relocCapacity, absRelocCapacity := 0, 0, 0
 	a.symbols = nil
 	a.symbolName = nil
 	a.staticImports = nil
@@ -478,23 +479,17 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget != 0 {
 		if renvoFixedTarget == renvoTargetWasiWasm32 {
 			codeCapacity = 655360
-			a.labelPos = make([]int32, 0, 8192)
-			a.relocs = make([]int32, 0, 32768)
-			a.absRelocs = make([]int32, 0, 4096)
+			labelCapacity, relocCapacity, absRelocCapacity = 8192, 32768, 4096
 		} else {
 			codeCapacity = 2097152
-			a.labelPos = make([]int32, 0, 32768)
-			a.relocs = make([]int32, 0, 65536)
-			a.absRelocs = make([]int32, 0, 49152)
+			labelCapacity, relocCapacity, absRelocCapacity = 32768, 65536, 49152
 		}
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 1024)
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
 		codeCapacity = 655360
-		a.labelPos = make([]int32, 0, 32768)
-		a.relocs = make([]int32, 0, 131072)
-		a.absRelocs = make([]int32, 0, 98304)
+		labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 		a.symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else if a.c.optimizeRuntime {
 		// The full frontend currently emits about 3.47 MiB of code, 37,100
@@ -502,17 +497,13 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// Reserve one measured growth range so arena-backed slices do not retain
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
-		a.labelPos = make([]int32, 0, 40960)
-		a.relocs = make([]int32, 0, 163840)
-		a.absRelocs = make([]int32, 0, 32768)
+		labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
 	} else {
 		codeCapacity = 2097152
-		a.labelPos = make([]int32, 0, 24576)
-		a.relocs = make([]int32, 0, 81920)
-		a.absRelocs = make([]int32, 0, 12288)
+		labelCapacity, relocCapacity, absRelocCapacity = 24576, 81920, 12288
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
@@ -538,6 +529,9 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 		a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 	}
+	a.labelPos = make([]int32, 0, labelCapacity)
+	a.relocs = make([]int32, 0, relocCapacity)
+	a.absRelocs = make([]int32, 0, absRelocCapacity)
 	a.code = make([]byte, 0, codeCapacity)
 	a.bssSize = 0
 	a.codeOffset = 0
@@ -6639,11 +6633,36 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 		renvoNativeTypeLayout(m, fn.resultType)
 	}
 	for i := 0; i < len(m.types); i++ {
-		t := &m.types[i]
-		if t.kind != renvoTypeStruct || t.nativeAlign > 0 {
-			continue
+		renvoFinalizeValueLayout(m, i)
+	}
+	for i := 0; i < len(m.types); i++ {
+		renvoMarkDenseCallWords(m, i)
+	}
+}
+
+// Array strides and containing field offsets depend on the completed layout
+// of their value elements, including types declared later in the source.
+// Pointer edges do not contribute to value size and must not be traversed.
+func renvoFinalizeValueLayout(m *renvoMeta, typ int) {
+	if typ <= 0 || typ >= len(m.types) {
+		return
+	}
+	t := renvoResolveType(m, typ)
+	if t.nativeAlign != 0 {
+		return
+	}
+	// Negative alignment records a completed ordinary value layout; positive
+	// values remain reserved for native layouts. Native layout may still
+	// replace this marker when an enclosing ABI requires it.
+	t.nativeAlign = -1
+	if t.kind == renvoTypeArray {
+		renvoFinalizeValueLayout(m, t.elem)
+		t.size = renvoTypeSize(m, t.elem) * t.count
+	} else if t.kind == renvoTypeStruct {
+		for j := 0; j < t.count; j++ {
+			renvoFinalizeValueLayout(m, m.fields[t.first+j].typ)
 		}
-		nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, i)
+		nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, typ)
 		offset := 0
 		for j := 0; j < t.count; j++ {
 			field := &m.fields[t.first+j]
@@ -6661,13 +6680,10 @@ func renvoFinalizeTypeLayouts(m *renvoMeta) {
 			offset += renvoTypeSize(m, field.typ)
 		}
 		if nativeLayout {
-			renvoNativeTypeLayout(m, i)
+			renvoNativeTypeLayout(m, typ)
 		} else {
 			t.size = renvoAlignTo8(offset)
 		}
-	}
-	for i := 0; i < len(m.types); i++ {
-		renvoMarkDenseCallWords(m, i)
 	}
 }
 

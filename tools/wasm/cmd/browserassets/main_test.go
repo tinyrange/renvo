@@ -49,6 +49,42 @@ func TestEmptyPackagedDefinitionHasNoName(t *testing.T) {
 	}
 }
 
+func TestPoEP4ExamplesPackageNetworkingDependencies(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..")
+	boards, err := readBoardDefinitions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := t.TempDir()
+	packages, err := buildPlatformPackages(root, output, boards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"poe_p4_tcp", "poe_p4_dhcp", "poe_p4_http"} {
+		pkg := packages["renvo.dev/examples/device/"+name]
+		if !pkg.Main || len(pkg.Boards) != 1 || pkg.Boards[0].Target != "m5poep4/riscv32" {
+			t.Fatalf("%s is not selectable for Unit PoE-P4: %+v", name, pkg)
+		}
+		for _, imported := range pkg.Imports {
+			if strings.HasPrefix(imported, "renvo.dev/") {
+				if _, ok := packages[imported]; !ok {
+					t.Errorf("%s is missing browser dependency %s", name, imported)
+				}
+			}
+		}
+	}
+	for _, name := range []string{"ethernet.go", "mac.go"} {
+		if _, err := os.Stat(filepath.Join(output, "stdlib/module/device/esp32p4", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"echo.go", "dhcp.go", "http.go", "stream.go"} {
+		if _, err := os.Stat(filepath.Join(output, "stdlib/module/device/tcpip", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestBrowserCustomDefinitionsResolveFromPackagedNames(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..")
 	for _, target := range customTargets {

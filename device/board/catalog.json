@@ -112,6 +112,22 @@
     "examples": [{"path": "examples/device/keyboard_terminal"}]
   },
   {
+    "name": "M5Stack Unit PoE-P4",
+    "target": "m5poep4/riscv32",
+    "tag": "m5poep4",
+    "docs": "https://docs.m5stack.com/en/unit/Unit_PoE-P4",
+    "artwork": "poep4",
+    "machine": "esp32p4/riscv32",
+    "definition": "backends/esp32p4.rtg",
+    "backend": "backends/esp32p4-riscv32.wasm",
+    "packages": ["device/esp32p4", "device/tcpip"],
+    "examples": [
+      {"path": "examples/device/poe_p4_tcp"},
+      {"path": "examples/device/poe_p4_dhcp"},
+      {"path": "examples/device/poe_p4_http"}
+    ]
+  },
+  {
     "name": "M5Stack Tab5",
     "target": "m5tab5/riscv32",
     "tag": "m5tab5",

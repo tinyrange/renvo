@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "323bcdf6a3e95eccc766758d9146f7c4a7e29a52c0052b7423d8c1ac61f6c093"
+const CompilerSourceDigest = "eae2e00adf557c9c60884a7d61dab2e813ad6af83a95049946b5628ba6531b46"
 
 // source: backend/compiler_common_impl.go
 
@@ -478,6 +478,7 @@ a.c = context
 
 
 codeCapacity := 0
+labelCapacity, relocCapacity, absRelocCapacity := 0, 0, 0
 a.symbols = nil
 a.symbolName = nil
 a.staticImports = nil
@@ -485,23 +486,17 @@ a.darwinImports = nil
 if renvoFixedTarget != 0 {
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 codeCapacity = 655360
-a.labelPos = make([]int32, 0, 8192)
-a.relocs = make([]int32, 0, 32768)
-a.absRelocs = make([]int32, 0, 4096)
+labelCapacity, relocCapacity, absRelocCapacity = 8192, 32768, 4096
 } else {
 codeCapacity = 2097152
-a.labelPos = make([]int32, 0, 32768)
-a.relocs = make([]int32, 0, 65536)
-a.absRelocs = make([]int32, 0, 49152)
+labelCapacity, relocCapacity, absRelocCapacity = 32768, 65536, 49152
 }
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 1024)
 }
 } else if a.c.renvoTargetArch == renvoArchWasm32 {
 codeCapacity = 655360
-a.labelPos = make([]int32, 0, 32768)
-a.relocs = make([]int32, 0, 131072)
-a.absRelocs = make([]int32, 0, 98304)
+labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else if a.c.optimizeRuntime {
 
@@ -509,17 +504,13 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 
 codeCapacity = 3670016
-a.labelPos = make([]int32, 0, 40960)
-a.relocs = make([]int32, 0, 163840)
-a.absRelocs = make([]int32, 0, 32768)
+labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
 } else {
 codeCapacity = 2097152
-a.labelPos = make([]int32, 0, 24576)
-a.relocs = make([]int32, 0, 81920)
-a.absRelocs = make([]int32, 0, 12288)
+labelCapacity, relocCapacity, absRelocCapacity = 24576, 81920, 12288
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
@@ -545,6 +536,9 @@ a.openbsdSyscalls = make([]int, 0, 128)
 if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 }
+a.labelPos = make([]int32, 0, labelCapacity)
+a.relocs = make([]int32, 0, relocCapacity)
+a.absRelocs = make([]int32, 0, absRelocCapacity)
 a.code = make([]byte, 0, codeCapacity)
 a.bssSize = 0
 a.codeOffset = 0
@@ -6646,11 +6640,36 @@ renvoNativeTypeLayout(m, resolved.elem)
 renvoNativeTypeLayout(m, fn.resultType)
 }
 for i := 0; i < len(m.types); i++ {
-t := &m.types[i]
-if t.kind != renvoTypeStruct || t.nativeAlign > 0 {
-continue
+renvoFinalizeValueLayout(m, i)
 }
-nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, i)
+for i := 0; i < len(m.types); i++ {
+renvoMarkDenseCallWords(m, i)
+}
+}
+
+
+
+
+func renvoFinalizeValueLayout(m *renvoMeta, typ int) {
+if typ <= 0 || typ >= len(m.types) {
+return
+}
+t := renvoResolveType(m, typ)
+if t.nativeAlign != 0 {
+return
+}
+
+
+
+t.nativeAlign = -1
+if t.kind == renvoTypeArray {
+renvoFinalizeValueLayout(m, t.elem)
+t.size = renvoTypeSize(m, t.elem) * t.count
+} else if t.kind == renvoTypeStruct {
+for j := 0; j < t.count; j++ {
+renvoFinalizeValueLayout(m, m.fields[t.first+j].typ)
+}
+nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, typ)
 offset := 0
 for j := 0; j < t.count; j++ {
 field := &m.fields[t.first+j]
@@ -6668,13 +6687,10 @@ field.offset = offset
 offset += renvoTypeSize(m, field.typ)
 }
 if nativeLayout {
-renvoNativeTypeLayout(m, i)
+renvoNativeTypeLayout(m, typ)
 } else {
 t.size = renvoAlignTo8(offset)
 }
-}
-for i := 0; i < len(m.types); i++ {
-renvoMarkDenseCallWords(m, i)
 }
 }
 
@@ -36858,7 +36874,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x7b\x23\xb2\xc2\xeb\x03\x57\x38\x8f\xc1\x2d\xad\xc4\x89\x54\x75\x52\xbb\xde\xe9\xf3\x7c\x18\xab\x07\x17\x6f\x17\xc9\x83\x37\xd7", 3, true
+return "wasi/wasm32", "\xdb\x73\xca\x0f\xa2\xe8\x46\xda\xee\x41\x93\x02\xe9\x80\xb0\x88\xf8\xba\x37\x5b\x31\x17\x30\x06\xb5\x1a\x78\x53\x85\x6b\x6b\xe0", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x29\x17\x57\x5e\x0d\x35\x29\xad\x6c\xb0\xa8\x0b\x71\xb2\xa8\xbe\x96\xf3\xbd\x01\x5c\xdf\xe9\xdb\x3e\x13\x91\x98\x89\x20\x33\x95", 3, true
@@ -36870,7 +36886,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xfb\x6a\xb2\x5c\x75\x06\x48\xd7\xd1\xe6\x04\xae\xbe\xc3\xe8\x5d\x66\x9e\xc5\x85\xa0\x1a\x66\x69\xf5\x49\x78\x8d\x23\xb2\xba\xfd", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xd8\xdc\x84\x4b\xa8\x36\xf5\x5e\x62\x26\xe4\x72\xc7\x10\x7f\xb3\xb6\x65\x2e\x02\x7b\xdf\x2d\x74\x90\x65\x80\x86\xd4\xb5\xed\x22", 3, true
+return "vm/vm32", "\x3c\xb9\xad\x62\x9f\x35\x01\x38\x44\x14\x6a\x27\x9a\xb6\x1d\xc1\xa1\x39\xfe\x24\x6c\xea\x0e\x58\x42\x37\x68\x0d\xc2\x6a\x03\x6b", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -47320,6 +47336,9 @@ return lo < len(pcs) && pcs[lo] == pc
 }
 func renvoWasm32RoutineEnds(routinePcs []int, symbolPcs []int, code []byte, instrPcs []int) []int {
 ends := make([]int, len(routinePcs))
+
+
+mark := renvo_runtime_ArenaMark()
 visited := make([]int, len(instrPcs))
 pending := make([]int, 0, 64)
 symbolIndex := 0
@@ -47376,6 +47395,7 @@ pending = append(pending, index+1)
 }
 }
 }
+renvo_runtime_ArenaReset(mark)
 return ends
 }
 func renvoWasm32RoutineFrameSize(code []byte, pcs []int) int {
