@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "323bcdf6a3e95eccc766758d9146f7c4a7e29a52c0052b7423d8c1ac61f6c093"
+const CompilerSourceDigest = "ed75e199f8059c611c5086a03b07a8381a6d07992503c22fcd18d46edaa314de"
 
 // source: backend/compiler_common_impl.go
 
@@ -6645,12 +6645,35 @@ renvoNativeTypeLayout(m, resolved.elem)
 }
 renvoNativeTypeLayout(m, fn.resultType)
 }
+states := make([]byte, len(m.types))
 for i := 0; i < len(m.types); i++ {
-t := &m.types[i]
-if t.kind != renvoTypeStruct || t.nativeAlign > 0 {
-continue
+renvoFinalizeValueLayout(m, i, states)
 }
-nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, i)
+for i := 0; i < len(m.types); i++ {
+renvoMarkDenseCallWords(m, i)
+}
+}
+
+
+
+
+func renvoFinalizeValueLayout(m *renvoMeta, typ int, states []byte) {
+if typ <= 0 || typ >= len(m.types) || states[typ] != 0 {
+return
+}
+states[typ] = 1
+t := renvoResolveType(m, typ)
+if t.nativeAlign > 0 {
+return
+}
+if t.kind == renvoTypeArray {
+renvoFinalizeValueLayout(m, t.elem, states)
+t.size = renvoTypeSize(m, t.elem) * t.count
+} else if t.kind == renvoTypeStruct {
+for j := 0; j < t.count; j++ {
+renvoFinalizeValueLayout(m, m.fields[t.first+j].typ, states)
+}
+nativeLayout := m.c.objectFile || t.count > 0 && !renvoTypeIsTuple(m, typ)
 offset := 0
 for j := 0; j < t.count; j++ {
 field := &m.fields[t.first+j]
@@ -6668,13 +6691,10 @@ field.offset = offset
 offset += renvoTypeSize(m, field.typ)
 }
 if nativeLayout {
-renvoNativeTypeLayout(m, i)
+renvoNativeTypeLayout(m, typ)
 } else {
 t.size = renvoAlignTo8(offset)
 }
-}
-for i := 0; i < len(m.types); i++ {
-renvoMarkDenseCallWords(m, i)
 }
 }
 
