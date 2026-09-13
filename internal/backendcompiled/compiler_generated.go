@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9319cf9a73e04617e1719014d02d514cee144e0db13d7be49ca71078c6c72b4a"
+const CompilerSourceDigest = "84caf6e0a06d006120db4434084621b870acd54b4ada956cb65d37470327590d"
 
 // source: backend/compiler_common_impl.go
 
@@ -478,6 +478,7 @@ a.c = context
 
 
 codeCapacity := 0
+labelCapacity, relocCapacity, absRelocCapacity := 0, 0, 0
 a.symbols = nil
 a.symbolName = nil
 a.staticImports = nil
@@ -485,23 +486,17 @@ a.darwinImports = nil
 if renvoFixedTarget != 0 {
 if renvoFixedTarget == renvoTargetWasiWasm32 {
 codeCapacity = 655360
-a.labelPos = make([]int32, 0, 8192)
-a.relocs = make([]int32, 0, 32768)
-a.absRelocs = make([]int32, 0, 4096)
+labelCapacity, relocCapacity, absRelocCapacity = 8192, 32768, 4096
 } else {
 codeCapacity = 2097152
-a.labelPos = make([]int32, 0, 32768)
-a.relocs = make([]int32, 0, 65536)
-a.absRelocs = make([]int32, 0, 49152)
+labelCapacity, relocCapacity, absRelocCapacity = 32768, 65536, 49152
 }
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 1024)
 }
 } else if a.c.renvoTargetArch == renvoArchWasm32 {
 codeCapacity = 655360
-a.labelPos = make([]int32, 0, 32768)
-a.relocs = make([]int32, 0, 131072)
-a.absRelocs = make([]int32, 0, 98304)
+labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else if a.c.optimizeRuntime {
 
@@ -509,17 +504,13 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 
 codeCapacity = 3670016
-a.labelPos = make([]int32, 0, 40960)
-a.relocs = make([]int32, 0, 163840)
-a.absRelocs = make([]int32, 0, 32768)
+labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
 } else {
 codeCapacity = 2097152
-a.labelPos = make([]int32, 0, 24576)
-a.relocs = make([]int32, 0, 81920)
-a.absRelocs = make([]int32, 0, 12288)
+labelCapacity, relocCapacity, absRelocCapacity = 24576, 81920, 12288
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
@@ -545,6 +536,9 @@ a.openbsdSyscalls = make([]int, 0, 128)
 if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 }
+a.labelPos = make([]int32, 0, labelCapacity)
+a.relocs = make([]int32, 0, relocCapacity)
+a.absRelocs = make([]int32, 0, absRelocCapacity)
 a.code = make([]byte, 0, codeCapacity)
 a.bssSize = 0
 a.codeOffset = 0
