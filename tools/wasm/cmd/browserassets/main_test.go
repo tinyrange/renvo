@@ -85,6 +85,50 @@ func TestPoEP4ExamplesPackageNetworkingDependencies(t *testing.T) {
 	}
 }
 
+func TestDualKeyExamplesPackageInputDependencies(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..")
+	boards, err := readBoardDefinitions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, board := range boards {
+		if board.Target != "m5dualkey/xtensa_lx7" {
+			continue
+		}
+		found = true
+		if board.Machine != "esp32s3/xtensa_lx7" || board.Flash == nil || board.Flash.Offset != 0x20000 || board.Flash.MaxSize != 0x380000 || board.Flash.Reset != "watchdog" {
+			t.Fatalf("incorrect DualKey target/flash configuration: %+v", board)
+		}
+	}
+	if !found {
+		t.Fatal("DualKey board missing")
+	}
+	output := t.TempDir()
+	packages, err := buildPlatformPackages(root, output, boards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"dualkey_switches", "dualkey_hid"} {
+		pkg := packages["renvo.dev/examples/device/"+name]
+		if !pkg.Main || len(pkg.Boards) != 1 || pkg.Boards[0].Target != "m5dualkey/xtensa_lx7" {
+			t.Fatalf("%s is not selectable for DualKey: %+v", name, pkg)
+		}
+		for _, imported := range pkg.Imports {
+			if strings.HasPrefix(imported, "renvo.dev/") {
+				if _, ok := packages[imported]; !ok {
+					t.Errorf("%s missing %s", name, imported)
+				}
+			}
+		}
+	}
+	for _, path := range []string{"device/esp32s3/usbhid/usb.go", "device/input/button/debounce.go"} {
+		if _, err := os.Stat(filepath.Join(output, "stdlib/module", path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestBrowserCustomDefinitionsResolveFromPackagedNames(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..")
 	for _, target := range customTargets {

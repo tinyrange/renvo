@@ -36,6 +36,34 @@ test("ESP targets and ELF machines are checked", async () => {
   await assert.rejects(() => elfToESPImage(syntheticELF(94, 0x40370000, []), "esp32c6/riscv32"), /does not match/);
 });
 
+test("DualKey flash uses its application partition and watchdog reset", async () => {
+  const elf = syntheticELF(94, 0x40370000, [
+    { name: ".text", address: 0x40370000, data: new Uint8Array(16) },
+  ]);
+  const session = new ESPWebSerial({});
+  const commands = [];
+  session.open = async () => {};
+  session.connectBootloader = async () => {};
+  session.command = async (opcode, payload) => {
+    commands.push({ opcode, words: Array.from(new Uint32Array(payload.buffer, payload.byteOffset, payload.byteLength / 4)) });
+    return opcode === 0x0a ? 9 : 0;
+  };
+  await session.flash(elf, "esp32s3/xtensa_lx7", { offset: 0x20000, maxSize: 0x380000, reset: "watchdog" });
+  assert.equal(commands.find(c => c.opcode === 2).words[3], 0x20000);
+  assert.deepEqual(commands.filter(c => c.opcode === 9).map(c => c.words.slice(0, 2)), [
+    [0x600080b0, 0x50d83aa1], [0x6000809c, 2000], [0x60008098, 0xd0000102], [0x600080b0, 0],
+  ]);
+});
+
+test("oversized DualKey images are rejected before opening or erasing", async () => {
+  const elf = syntheticELF(94, 0x40370000, [
+    { name: ".text", address: 0x40370000, data: new Uint8Array(8192) },
+  ]);
+  const session = new ESPWebSerial({});
+  session.open = async () => assert.fail("must not open the device");
+  await assert.rejects(() => session.flash(elf, "esp32s3/xtensa_lx7", { offset: 0x20000, maxSize: 4096 }), /exceeds/);
+});
+
 test("ROM loader synchronization works through a WebUSB-shaped stream", async () => {
   let input;
   const readable = new ReadableStream({ start(controller) { input = controller; } });

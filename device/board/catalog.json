@@ -88,6 +88,22 @@
     ]
   },
   {
+    "name": "M5Stack Chain DualKey",
+    "target": "m5dualkey/xtensa_lx7",
+    "tag": "m5dualkey",
+    "docs": "https://docs.m5stack.com/en/chain/Chain_DualKey",
+    "artwork": "dualkey",
+    "machine": "esp32s3/xtensa_lx7",
+    "definition": "backends/esp32s3.rtg",
+    "backend": "backends/esp32s3-xtensa_lx7.wasm",
+    "flash": {"offset": 131072, "maxSize": 3670016, "reset": "watchdog"},
+    "packages": ["device/esp32s3", "device/esp32s3/usbhid", "device/input/button"],
+    "examples": [
+      {"path": "examples/device/dualkey_switches"},
+      {"path": "examples/device/dualkey_hid"}
+    ]
+  },
+  {
     "name": "M5Stack StickS3",
     "target": "m5sticks3/xtensa_lx7",
     "tag": "m5sticks3",

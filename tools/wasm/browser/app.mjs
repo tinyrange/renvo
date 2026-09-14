@@ -1896,7 +1896,7 @@ async function runArtifactWithMode(resumeAfterBuild) {
           serial: appendSerialText,
           progress,
         });
-		await espSession.flash(lastRunnableArtifact.data, deviceMachineTarget());
+        await espSession.flash(lastRunnableArtifact.data, deviceMachineTarget(), selectedTarget?.flash);
       }
       const flashMilliseconds = performance.now() - flashStarted;
       if (hotReload) {
@@ -4613,7 +4613,7 @@ function exampleTitle(slug) {
   if (slug === "pdp11v7") return "PDP-11 V7";
   if (slug === "msdos") return "MS-DOS 8086";
   return slug.split(/[_-]+/).map((word) => {
-    if (/^(c|i2c|http|rgb|usb|ws2812|adxl345|sgp30)$/i.test(word)) return word.toUpperCase();
+    if (/^(c|i2c|http|hid|rgb|usb|ws2812|adxl345|sgp30)$/i.test(word)) return word.toUpperCase();
     return word.charAt(0).toUpperCase() + word.slice(1);
   }).join(" ");
 }
@@ -4622,13 +4622,19 @@ function examplePresentation(entry) {
   const slug = entry.slug;
   if (entry.computers.length) return { icon: "R", category: entry.computers[0].family || "Computer", tone: "system" };
   if (/adxl|quality|env|sgp|sensor/.test(slug)) return { icon: "⌁", category: "Sensors", tone: "sensor" };
-  if (/forms|touch|keyboard/.test(slug)) return { icon: "▦", category: "Input", tone: "interface" };
+  if (/forms|touch|keyboard|dualkey/.test(slug)) return { icon: "▦", category: "Input", tone: "interface" };
   if (/terminal/.test(slug)) return { icon: ">_", category: "Terminal", tone: "console" };
   if (/blink|rgb|ws2812/.test(slug)) return { icon: "✦", category: "LEDs", tone: "light" };
   return { icon: "R", category: "General", tone: "system" };
 }
 
 const boardArtworkPaths = {
+  dualkey: `
+    <rect x="24" y="20" width="112" height="62" rx="12" class="board-shell"/>
+    <rect x="34" y="29" width="40" height="40" rx="7" class="board-button"/>
+    <rect x="86" y="29" width="40" height="40" rx="7" class="board-button"/>
+    <rect x="70" y="12" width="20" height="8" rx="3" class="board-metal"/>
+    <circle cx="54" cy="74" r="3" class="board-led"/><circle cx="106" cy="74" r="3" class="board-led"/>`,
   nanoc6: `
     <rect x="18" y="31" width="124" height="38" rx="9" class="board-shell"/>
     <rect x="142" y="39" width="15" height="22" rx="3" class="board-metal"/>
