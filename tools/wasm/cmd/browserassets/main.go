@@ -42,6 +42,7 @@ type targetAsset struct {
 	Device            string                  `json:"device,omitempty"`
 	Docs              string                  `json:"docs,omitempty"`
 	Artwork           string                  `json:"artwork,omitempty"`
+	Flash             *boardFlash             `json:"flash,omitempty"`
 	Tags              []string                `json:"tags,omitempty"`
 	Definition        string                  `json:"definition,omitempty"`
 	DescriptorVersion int                     `json:"descriptorVersion,omitempty"`
@@ -182,6 +183,13 @@ type boardDefinition struct {
 	Backend    string         `json:"backend"`
 	Packages   []string       `json:"packages"`
 	Examples   []boardExample `json:"examples"`
+	Flash      *boardFlash    `json:"flash,omitempty"`
+}
+
+type boardFlash struct {
+	Offset  uint32 `json:"offset"`
+	MaxSize uint32 `json:"maxSize"`
+	Reset   string `json:"reset,omitempty"`
 }
 
 var customTargets = []customTarget{
@@ -285,6 +293,7 @@ func main() {
 			Backend: board.Backend, Output: outputName(board.Machine, descriptor.OutputKind),
 			Tags: tags, Definition: hex.EncodeToString(descriptor.Definition[:]),
 			DescriptorVersion: descriptor.Version, Device: boardDevice(board), Docs: board.Docs, Artwork: board.Artwork,
+			Flash: board.Flash,
 		})
 	}
 	for _, asset := range []*string{&catalog.Compiler, &catalog.Linker, &catalog.LanguageService, &catalog.Formatter, &catalog.BackendJIT, &catalog.VMBackend, &catalog.TerminalCompiler} {

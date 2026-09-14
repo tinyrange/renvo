@@ -15180,7 +15180,17 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 		} else if mode == renvoNativeCopyStackToBSS {
 			renvoAsmStorePrimaryBss(a, destOffset+at)
 		} else {
+			// A narrow frame store uses secondary to address its destination.
+			// Keep the source base across that store when a split tail still
+			// needs another memory load (for example, a three-byte RGB value).
+			preserveSource := mode == renvoNativeCopyMemToStack && chunkSize < g.c.renvoNativeIntSize && at+chunkSize < size
+			if preserveSource {
+				renvoAsmPushSecondary(a)
+			}
 			renvoAsmStorePrimaryStackSize(a, destOffset-at, chunkSize)
+			if preserveSource {
+				renvoAsmPopSecondary(a)
+			}
 		}
 		at += chunkSize
 	}

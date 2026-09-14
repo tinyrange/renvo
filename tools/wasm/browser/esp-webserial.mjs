@@ -137,10 +137,18 @@ export class ESPWebSerial {
     }
   }
 
-  async flash(elf, targetName) {
+  async flash(elf, targetName, { offset = FLASH_OFFSET, maxSize = 0, reset = "" } = {}) {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset % 0x10000 !== 0 ||
+        !Number.isSafeInteger(maxSize) || maxSize < 0 || maxSize % 0x1000 !== 0) {
+      throw new Error("invalid ESP application partition");
+    }
+    if (reset !== "" && (reset !== "watchdog" || targetName !== "esp32s3/xtensa_lx7")) {
+      throw new Error("unsupported ESP reset strategy");
+    }
     this.monitoring = false;
     this.discardFrames();
     const image = await elfToESPImage(elf, targetName);
+    if (maxSize && image.length > maxSize) throw new Error("ESP image exceeds application partition capacity");
     this.log(`Prepared ${formatBytes(image.length)} ESP app image`);
     await this.open();
     await this.connectBootloader();
@@ -151,7 +159,7 @@ export class ESPWebSerial {
     this.log(`ROM loader connected (${targetName})`);
     await this.command(0x0d, words(0), 3000);
     const blocks = Math.ceil(image.length / FLASH_BLOCK);
-    await this.command(0x02, words(image.length, blocks, FLASH_BLOCK, FLASH_OFFSET, 0), 10000);
+    await this.command(0x02, words(image.length, blocks, FLASH_BLOCK, offset, 0), 10000);
     for (let sequence = 0; sequence < blocks; sequence++) {
       const block = new Uint8Array(FLASH_BLOCK);
       block.fill(0xff);
@@ -161,13 +169,13 @@ export class ESPWebSerial {
       await this.command(0x03, concat(words(block.length, sequence, 0, 0), block), 5000, checksum);
       this.progress((sequence + 1) / blocks);
     }
-    this.log(`Wrote ${formatBytes(image.length)} at 0x${FLASH_OFFSET.toString(16)}`);
+    this.log(`Wrote ${formatBytes(image.length)} at 0x${offset.toString(16)}`);
     // Leave the ROM loader idle, then reset explicitly. Asking FLASH_END to
     // reboot can tear down native USB before the browser has released the
     // download-mode control signals, which puts C6 boards straight back into
     // the loader on re-enumeration.
     await this.command(0x04, words(1), 3000);
-    await this.startApplication(targetName);
+    await this.startApplication(targetName, reset);
     this.log("Application started; serial monitor attached");
   }
 
@@ -227,8 +235,19 @@ export class ESPWebSerial {
     await this.setDTR(false);
   }
 
-  async startApplication(targetName) {
+  async startApplication(targetName, reset = "") {
     this.log("Restarting board into the application…");
+    if (reset === "watchdog") {
+      // ESP32-S3 RTC watchdog system reset, matching esptool's watchdog reset.
+      // Unlike a pin reset, this leaves download mode on the DualKey.
+      for (const [address, value] of [
+        [0x600080b0, 0x50d83aa1], [0x6000809c, 2000],
+        [0x60008098, (1 << 31) | (5 << 28) | (1 << 8) | 2], [0x600080b0, 0],
+      ]) await this.command(0x09, words(address, value, 0xffffffff, 0), 3000);
+      this.monitoring = true;
+      await delay(1000);
+      return;
+    }
     await this.setDTR(false);
     await this.setRTS(true);
     await delay(200);

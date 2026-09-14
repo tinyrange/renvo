@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "eae2e00adf557c9c60884a7d61dab2e813ad6af83a95049946b5628ba6531b46"
+const CompilerSourceDigest = "e0630f93b0a5f0fff652e5aac6200ed6c25131ef47fe7d996cdae18ded793578"
 
 // source: backend/compiler_common_impl.go
 
@@ -15187,7 +15187,17 @@ renvoAsmStorePrimaryMemSecondaryDispSize(a, destOffset+at, chunkSize)
 } else if mode == renvoNativeCopyStackToBSS {
 renvoAsmStorePrimaryBss(a, destOffset+at)
 } else {
+
+
+
+preserveSource := mode == renvoNativeCopyMemToStack && chunkSize < g.c.renvoNativeIntSize && at+chunkSize < size
+if preserveSource {
+renvoAsmPushSecondary(a)
+}
 renvoAsmStorePrimaryStackSize(a, destOffset-at, chunkSize)
+if preserveSource {
+renvoAsmPopSecondary(a)
+}
 }
 at += chunkSize
 }
