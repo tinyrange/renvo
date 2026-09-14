@@ -16099,6 +16099,14 @@ func (t *translator) usualArithmeticType(left int, right int) int {
 	a, b := t.integerPromotion(left), t.integerPromotion(right)
 	ai, bi := t.typeInfo(a), t.typeInfo(b)
 	if ai.kind == cTypeFloat || bi.kind == cTypeFloat {
+		// Floating rank wins over every integer rank, even when the integer
+		// has the same or a larger storage width.
+		if ai.kind != cTypeFloat {
+			return b
+		}
+		if bi.kind != cTypeFloat {
+			return a
+		}
 		if ai.size > bi.size {
 			return a
 		}
