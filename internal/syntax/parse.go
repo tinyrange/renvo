@@ -14,6 +14,7 @@ const (
 	ParseErrDecl
 	ParseErrFunc
 	ParseErrTopLevel
+	ParseErrDot
 )
 
 type File struct {
@@ -91,7 +92,26 @@ func ParseFile(src []byte) File {
 		return parseFail(file, ParseErrScan, len(tokens)-1)
 	}
 	parseTokens(&file)
+	if file.Ok {
+		validateDots(&file)
+	}
 	return file
+}
+
+func validateDots(file *File) {
+	// Dot punctuation cannot be followed by more dot punctuation. Ellipses
+	// are distinct tokens: 1... scans as 1. . ., not an expanded argument.
+	// Keep incomplete selectors available to editor declaration recovery;
+	// this is not a complete expression grammar validation pass.
+	for tok := 2; tok+1 < len(file.Tokens); tok++ {
+		if tokCharIs(file.Tokens, tok, '.') {
+			next := file.Tokens[tok+1]
+			if next.KindLine&255 == TokenOperator && file.Src[next.Start] == '.' {
+				parseFailInPlace(file, ParseErrDot, tok)
+				return
+			}
+		}
+	}
 }
 
 func parseTokens(file *File) {

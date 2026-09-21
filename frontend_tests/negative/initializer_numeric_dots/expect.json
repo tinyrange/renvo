@@ -1,0 +1,8 @@
+{
+  "phase": "parser",
+  "code": "RENVO-PARSE-008",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 27,
+  "message": "expected identifier or type assertion after dot"
+}
