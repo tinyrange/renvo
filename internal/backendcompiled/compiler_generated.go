@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0b8db32f1d8ae5d0609daf397a5b9e0d8db25ec8d2cfa25f39b5c2555ac71290"
+const CompilerSourceDigest = "d126906795b3da044365af71a4c1a6ed6874edc11258f615bf74afa298ef8590"
 
 // source: backend/compiler_common_impl.go
 
@@ -37048,7 +37048,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xdb\x73\xca\x0f\xa2\xe8\x46\xda\xee\x41\x93\x02\xe9\x80\xb0\x88\xf8\xba\x37\x5b\x31\x17\x30\x06\xb5\x1a\x78\x53\x85\x6b\x6b\xe0", 3, true
+return "wasi/wasm32", "\xe4\xc2\x5a\xdc\xdf\x16\x84\xe0\xdc\xaa\x50\x79\x94\xdd\xcc\xdb\x56\x78\x4a\xa4\xbb\x8f\x9b\xd7\xaf\xb9\x98\x61\xd7\x9a\x58\xe7", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
@@ -37060,7 +37060,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x3c\xb9\xad\x62\x9f\x35\x01\x38\x44\x14\x6a\x27\x9a\xb6\x1d\xc1\xa1\x39\xfe\x24\x6c\xea\x0e\x58\x42\x37\x68\x0d\xc2\x6a\x03\x6b", 3, true
+return "vm/vm32", "\x41\xd4\xf1\xbc\x21\xfe\x6c\xbe\x41\x02\xbb\xab\x7a\x64\xe4\xe5\xaf\x02\x54\x36\xa0\xfd\x75\xa7\xc5\x6b\xd7\x6c\x6c\x8a\x43\xff", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -48130,6 +48130,10 @@ renvoPut32At(out, 32, renvoVMChecksum(out[renvoVMHeaderSize:]))
 return out
 }
 func renvoWasm32Image(a *renvoAsm) []byte {
+out := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
+return out.data[:out.length]
+}
+func rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a *renvoAsm) renvoWasmBuffer {
 dataBase := renvoWasm32ProgramBase
 bssBase := renvoAlignTo8(dataBase + len(a.data))
 renvoWasm32Patch(a, dataBase, bssBase)
@@ -48162,7 +48166,7 @@ renvoWasm32AppendCodeSectionDirect(&out, a, instrPcs, routinePcs, routineEnds, s
 if len(a.data) > 0 {
 renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
 }
-return out.data[:out.length]
+return out
 }
 func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
 renvoWasmAppendI32Const(out, 0)
@@ -53724,7 +53728,10 @@ var result renvoCompileResult
 if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 result.data = renvoVMImage(a)
 } else {
-result.data = renvoWasm32Image(a)
+
+
+image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
+result.data = image.data[:image.length]
 }
 result.ok = true
 return result
