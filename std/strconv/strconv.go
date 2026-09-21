@@ -3,6 +3,8 @@ package strconv
 var ErrSyntax = syntaxError{marker: 1}
 var ErrRange = rangeError{marker: 2}
 
+const IntSize = 32 << (^uint(0) >> 63)
+
 type syntaxError struct{ marker int }
 type rangeError struct{ marker int }
 
@@ -74,6 +76,12 @@ func FormatUint(i uint64, base int) string {
 }
 
 func ParseInt(s string, base int, bitSize int) (int64, error) {
+	if bitSize == 0 {
+		bitSize = IntSize
+	}
+	if bitSize < 1 || bitSize > 64 {
+		return 0, ErrSyntax
+	}
 	if len(s) == 0 {
 		return 0, ErrSyntax
 	}
@@ -85,9 +93,19 @@ func ParseInt(s string, base int, bitSize int) (int64, error) {
 			return 0, ErrSyntax
 		}
 	}
-	u, err := ParseUint(s, base, bitSize)
-	if err != nil {
+	u, err := ParseUint(s, base, 64)
+	if err != nil && err != ErrRange {
 		return 0, err
+	}
+	limit := uint64(1) << uint(bitSize-1)
+	if !neg {
+		limit--
+	}
+	if err == ErrRange || u > limit {
+		if neg {
+			return -int64(limit), ErrRange
+		}
+		return int64(limit), ErrRange
 	}
 	if neg {
 		return -int64(u), nil
@@ -96,21 +114,32 @@ func ParseInt(s string, base int, bitSize int) (int64, error) {
 }
 
 func ParseUint(s string, base int, bitSize int) (uint64, error) {
+	if bitSize == 0 {
+		bitSize = IntSize
+	}
+	if bitSize < 1 || bitSize > 64 {
+		return 0, ErrSyntax
+	}
 	if len(s) == 0 {
 		return 0, ErrSyntax
 	}
-	if base == 0 {
+	automatic := base == 0
+	prefix := false
+	if automatic {
 		base = 10
 		if len(s) > 1 && s[0] == '0' {
 			base = 8
 			if len(s) > 2 && (s[1] == 'x' || s[1] == 'X') {
 				base = 16
 				s = s[2:]
+				prefix = true
 			} else if len(s) > 2 && (s[1] == 'b' || s[1] == 'B') {
 				base = 2
 				s = s[2:]
+				prefix = true
 			} else if len(s) > 2 && (s[1] == 'o' || s[1] == 'O') {
 				s = s[2:]
+				prefix = true
 			}
 		}
 	}
@@ -118,16 +147,30 @@ func ParseUint(s string, base int, bitSize int) (uint64, error) {
 		return 0, ErrSyntax
 	}
 	var out uint64
+	limit := ^uint64(0)
+	if bitSize < 64 {
+		limit = (uint64(1) << uint(bitSize)) - 1
+	}
+	cutoff := limit / uint64(base)
+	remainder := limit % uint64(base)
+	previousDigit := false
 	for i := 0; i < len(s); i++ {
+		if s[i] == '_' && automatic {
+			if (!previousDigit && !(i == 0 && prefix)) || i+1 == len(s) {
+				return 0, ErrSyntax
+			}
+			previousDigit = false
+			continue
+		}
 		d, ok := digitValue(s[i])
 		if !ok || d >= base {
 			return 0, ErrSyntax
 		}
-		next := out*uint64(base) + uint64(d)
-		if next < out {
-			return 0, ErrRange
+		if out > cutoff || out == cutoff && uint64(d) > remainder {
+			return limit, ErrRange
 		}
-		out = next
+		out = out*uint64(base) + uint64(d)
+		previousDigit = true
 	}
 	return out, nil
 }
