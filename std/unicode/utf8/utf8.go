@@ -135,9 +135,8 @@ func EncodeRune(p []byte, r rune) int {
 		r = RuneError
 		n = 3
 	}
-	if len(p) < n {
-		panic("utf8.EncodeRune: buffer too short")
-	}
+	// Check the complete destination before writing any bytes.
+	_ = p[n-1]
 	if n == 1 {
 		p[0] = byte(r)
 	} else if n == 2 {

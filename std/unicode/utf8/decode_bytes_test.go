@@ -40,3 +40,23 @@ func TestLastRuneAndInvalidEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestEncodeRuneShortBuffer(t *testing.T) {
+	for _, r := range []rune{'a', 'é', '€', '𐐀', -1} {
+		width := RuneLen(r)
+		if width < 0 {
+			width = 3
+		}
+		for size := 0; size < width; size++ {
+			buf := []byte{1, 2, 3, 4}
+			panicked := false
+			func() {
+				defer func() { panicked = recover() != nil }()
+				EncodeRune(buf[:size], r)
+			}()
+			if !panicked || buf[0] != 1 || buf[1] != 2 || buf[2] != 3 || buf[3] != 4 {
+				t.Fatalf("rune %U size %d: panic=%v buffer=%v", r, size, panicked, buf)
+			}
+		}
+	}
+}
