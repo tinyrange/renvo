@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "edec482d199eff9c63ecee358838acc0db8e434db941b057711ede047ad6b9ab"
+const CompilerSourceDigest = "3159064d537956f7be62638eb45c35c380764512d9a802b627bf4fd1bed18772"
 
 // source: backend/compiler_common_impl.go
 
@@ -4854,6 +4854,9 @@ if tokEnd <= tokStart {
 return false
 }
 c := renvo_runtime_UnsafeByteAt(p.src, tokStart)
+if c == '=' || c == ':' && tokEnd == tokStart+2 && renvo_runtime_UnsafeByteAt(p.src, tokStart+1) == '=' {
+return true
+}
 if c == ',' || c == '*' || c == '&' || c == '|' {
 return true
 }
