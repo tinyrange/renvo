@@ -20,8 +20,22 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 	localsReady := false
 	var numericBindings []scopedTypeBinding
 	numericReady := false
+	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]
+		// Resolution records calls in token order. Walk nested function spans
+		// once instead of rescanning the prefix for every len/cap invocation.
+		for nestedScan < callee {
+			if file.Tokens[nestedScan].KindLine&255 == syntax.TokenFunc {
+				end := pointerOrderingNestedFunctionEnd(*file, nestedScan, fn.BodyEnd-1)
+				if end > nestedScan {
+					nestedEnd = end
+					nestedScan = end
+				}
+			}
+			nestedScan++
+		}
+		nested := callee <= nestedEnd
 		open := callee + 1
 		name := tokenString(file, callee)
 		close := findTypeMatching(*file, open, '(', ')')
@@ -30,7 +44,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		}
 		args := splitExprList(*file, open+1, close-1)
 		if name == "real" || name == "imag" || name == "complex" {
-			if numericBuiltinInNestedFunction(*file, fn, callee) {
+			if nested {
 				continue
 			}
 			if !numericReady {
@@ -53,7 +67,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
 				return CheckErrBuiltinArity, callee
 			}
-			if !numericBuiltinInNestedFunction(*file, fn, callee) {
+			if !nested {
 				if !numericReady {
 					body := syntax.ParseFuncBodyStatements(*file, fn)
 					numericBindings = collectScopedTypeBindings(*file, fn, body)
