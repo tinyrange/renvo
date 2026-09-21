@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d126906795b3da044365af71a4c1a6ed6874edc11258f615bf74afa298ef8590"
+const CompilerSourceDigest = "90dde19e2667540ce3e92267b6cd4eb67507c8f47ab5d97c1577ddc30d35ccb8"
 
 // source: backend/compiler_common_impl.go
 
@@ -44314,16 +44314,41 @@ s.done = true
 return true
 }
 
+
+
+func renvoAsmImageAarch64ReuseCode(a *renvoAsm, out []byte) []byte {
+codeLen := len(a.code)
+loadFileSize := a.codeOffset + codeLen + len(a.data)
+if !a.c.stripSymbols || cap(a.code) < loadFileSize {
+return renvoAsmImageAarch64(a)
+}
+renvoAsmPatch(a)
+renvoAsmPatchAarch64Abs(a)
+bssOffset := renvoAsmBssOffset(a)
+out = out[:loadFileSize]
+copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
+a.code = out[a.codeOffset : a.codeOffset+codeLen]
+out = renvoAppendElfHeaderAarch64(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+out = out[:a.codeOffset+codeLen]
+out = append(out, a.data...)
+if renvoFixedTarget == 0 {
+return renvoAppendReplLinkTable(out, a)
+}
+return out
+}
+
 func (s *renvoAarch64ProgramSession) finishStep() bool {
 if s.queueIndex < len(s.gen.funcQueue) {
 return false
 }
 a := &s.gen.asm
-data := renvoAsmImageAarch64(a)
+var data []byte
 if targetIsWindows(s.gen.c.renvoTargetOS) {
 data = renvoAsmImageWindowsArm64(a)
 } else if targetIsDarwin(s.gen.c.renvoTargetOS) {
 data = renvoDarwinArm64Image(a)
+} else {
+data = renvoAsmImageAarch64ReuseCode(a, a.code)
 }
 if a.patchFailed || len(data) == 0 {
 s.done = true
