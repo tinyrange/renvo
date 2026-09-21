@@ -3291,6 +3291,18 @@ func renvoEvalConstExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) renvoCon
 	return result
 }
 
+func renvoEvalBooleanConst(g *renvoLinearGen, tok int) renvoConstResult {
+	p := g.prog
+	local := renvoFindLocalIndex(g, renvoTokStart(p, tok), renvoTokEnd(p, tok))
+	if local >= 0 {
+		if g.locals[local].constValid != 0 && renvoTypeKindIsScalarInt(renvoResolveType(g.meta, g.locals[local].typ).kind) {
+			return renvoConstResultOk(g.locals[local].constValue)
+		}
+		return renvoConstResult{}
+	}
+	return renvoConstResultOk(renvoBoolTokenValue(p, tok))
+}
+
 func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out *renvoConstResult) {
 	renvoNonNil(g, ep, out)
 	p := g.prog
@@ -3317,8 +3329,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		return
 	}
 	if e.kind == renvoExprBool {
-		value := renvoBoolTokenValue(p, e.tok)
-		renvoSetConstResult(out, value, true)
+		*out = renvoEvalBooleanConst(g, e.tok)
 		return
 	}
 	if e.kind == renvoExprIdent {
@@ -3501,8 +3512,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 			value := renvoParseCharToken(p, rightTok)
 			right = renvoConstResultOk(value)
 		} else if rightKind == renvoExprBool {
-			value := renvoBoolTokenValue(p, rightTok)
-			right = renvoConstResultOk(value)
+			right = renvoEvalBooleanConst(g, rightTok)
 		} else {
 			right = renvoEvalConstExpr(g, ep, rightIndex)
 		}
@@ -5248,6 +5258,10 @@ func renvoFindContainingTopDeclGroup(p *renvoProgram, kind int, start int, end i
 }
 
 func renvoParseTopDeclGroup(m *renvoMeta, p *renvoProgram, kind int, openTok int, endTok int) {
+	renvoParseScopedDeclGroup(nil, m, p, kind, openTok, endTok)
+}
+
+func renvoParseScopedDeclGroup(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, kind int, openTok int, endTok int) {
 	renvoNonNil(m, p)
 	if !renvoTokCharIs(p, openTok, '(') || endTok <= openTok+1 {
 		renvoMetaError(m)
@@ -5265,7 +5279,7 @@ func renvoParseTopDeclGroup(m *renvoMeta, p *renvoProgram, kind int, openTok int
 	for j < groupEnd {
 		if renvoTokIsKind(p, j, renvoTokIdent) {
 			entryEnd := renvoStatementLineEnd(p, j, groupEnd)
-			renvoParseTopDeclEntry(m, p, kind, j, entryEnd)
+			renvoParseScopedDeclEntry(g, m, p, kind, j, entryEnd)
 			if entryEnd <= j {
 				j++
 			} else {
@@ -5692,6 +5706,10 @@ func renvoFindConstSpecEqual(p *renvoProgram, start int, end int) int {
 }
 
 func renvoParseTopDeclEntry(m *renvoMeta, p *renvoProgram, kind int, start int, end int) {
+	renvoParseScopedDeclEntry(nil, m, p, kind, start, end)
+}
+
+func renvoParseScopedDeclEntry(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, kind int, start int, end int) {
 	renvoNonNil(m, p)
 	if start >= end || !renvoTokIsKind(p, start, renvoTokIdent) {
 		renvoMetaError(m)
@@ -5708,7 +5726,7 @@ func renvoParseTopDeclEntry(m *renvoMeta, p *renvoProgram, kind int, start int, 
 		if isAlias {
 			typeStart++
 		}
-		typeResult := renvoParseType(m, p, typeStart, end)
+		typeResult := renvoParseScopedType(g, m, p, typeStart, end)
 		if typeResult.typ == 0 || typeResult.next > end {
 			renvoMetaError(m)
 			return
@@ -6386,9 +6404,15 @@ func renvoParseParamList(m *renvoMeta, p *renvoProgram, start int, end int, coun
 }
 
 func renvoParseType(m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
+	return renvoParseScopedType(nil, m, p, start, end)
+}
+
+// Function-body type expressions resolve lengths through the active lexical
+// bindings. Package declarations use the same parser without a local context.
+func renvoParseScopedType(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int) renvoTypeResult {
 	renvoNonNil(m, p)
 	var result renvoTypeResult
-	renvoParseTypeInto(m, p, start, end, &result)
+	renvoParseTypeInto(g, m, p, start, end, &result)
 	return result
 }
 
@@ -6426,7 +6450,7 @@ func renvoParseFuncSignatureInto(m *renvoMeta, p *renvoProgram, openTok int, end
 	renvoSetTypeResult(result, typ, next)
 }
 
-func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
+func renvoParseTypeInto(g *renvoLinearGen, m *renvoMeta, p *renvoProgram, start int, end int, result *renvoTypeResult) {
 	renvoNonNil(m, p, result)
 	if start >= end {
 		renvoSetTypeResult(result, 0, start)
@@ -6450,7 +6474,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '.') && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') {
-		elem := renvoParseType(m, p, start+3, end)
+		elem := renvoParseScopedType(g, m, p, start+3, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6460,7 +6484,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '*') {
-		elem := renvoParseType(m, p, start+1, end)
+		elem := renvoParseScopedType(g, m, p, start+1, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6478,14 +6502,23 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		count := -1
 		ellipsis := closeTok == start+4 && renvoTokCharIs(p, start+1, '.') && renvoTokCharIs(p, start+2, '.') && renvoTokCharIs(p, start+3, '.')
 		if !ellipsis {
-			length := renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+			var length renvoConstResult
+			if g == nil {
+				length = renvoEvalMetaConstExpr(m, p, start+1, closeTok, 0)
+			} else {
+				ep := renvoNewExprParse()
+				root := renvoParseExpressionRoot(ep, p, start+1, closeTok)
+				if root >= 0 {
+					length = renvoEvalConstExpr(g, ep, root)
+				}
+			}
 			if !length.ok || length.value < 0 {
 				renvoSetTypeResult(result, 0, start)
 				return
 			}
 			count = length.value
 		}
-		elem := renvoParseType(m, p, closeTok+1, end)
+		elem := renvoParseScopedType(g, m, p, closeTok+1, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6498,7 +6531,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 		return
 	}
 	if renvoTokCharIs(p, start, '[') && renvoTokCharIs(p, start+1, ']') {
-		elem := renvoParseType(m, p, start+2, end)
+		elem := renvoParseScopedType(g, m, p, start+2, end)
 		if elem.typ == 0 {
 			renvoSetTypeResult(result, 0, start)
 			return
@@ -6549,7 +6582,7 @@ func renvoParseTypeInto(m *renvoMeta, p *renvoProgram, start int, end int, resul
 				if embedded {
 					typeStart = i
 				}
-				fieldType := renvoParseType(m, p, typeStart, lineEnd)
+				fieldType := renvoParseScopedType(g, m, p, typeStart, lineEnd)
 				if fieldType.typ == 0 {
 					renvoSetTypeResult(result, 0, start)
 					return
@@ -9327,6 +9360,10 @@ func renvoFunctionLocalCap(fn *renvoFuncDecl) int {
 }
 
 func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
+	return renvoEmitLinearRangeMode(g, start, end, false)
+}
+
+func renvoEmitLinearRangeMode(g *renvoLinearGen, start int, end int, variableGroup bool) bool {
 	renvoNonNil(g)
 	constGroup := g.constEvalIotaValid != 0
 	constGroupRepeatStart := 0
@@ -9374,6 +9411,10 @@ func renvoEmitLinearRange(g *renvoLinearGen, start int, end int) bool {
 				stmt.startTok = constGroupRepeatStart
 				stmt.endTok = constGroupRepeatEnd
 			}
+			stmt.kind = renvoStmtVar
+		} else if variableGroup {
+			// VarSpec entries omit the var keyword, but retain declaration
+			// semantics, including initializer scope and zero initialization.
 			stmt.kind = renvoStmtVar
 		}
 		lastKind = stmt.kind
@@ -9700,9 +9741,9 @@ func renvoEmitLinearStmtCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if stmt.kind == renvoStmtType {
 		start := stmt.startTok + 1
 		if renvoTokCharIs(p, start, '(') {
-			renvoParseTopDeclGroup(g.meta, p, renvoTokType, start, stmt.endTok)
+			renvoParseScopedDeclGroup(g, g.meta, p, renvoTokType, start, stmt.endTok)
 		} else {
-			renvoParseTopDeclEntry(g.meta, p, renvoTokType, start, stmt.endTok)
+			renvoParseScopedDeclEntry(g, g.meta, p, renvoTokType, start, stmt.endTok)
 		}
 		return g.meta.ok
 	}
@@ -12092,6 +12133,19 @@ func renvoEmitLinearCompoundLValue(g *renvoLinearGen, stmt *renvoStmt, assignTok
 }
 
 func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
+	// A standalone ConstDecl is a one-specification group. Limit its iota
+	// context to emission of that declaration, including all early returns.
+	if renvoTokIsKind(g.prog, stmt.startTok, renvoTokConst) && !renvoTokCharIs(g.prog, stmt.startTok+1, '(') {
+		oldIota, oldValid := g.constEvalIota, g.constEvalIotaValid
+		g.constEvalIota, g.constEvalIotaValid = 0, 1
+		ok := renvoEmitLinearAssignCore(g, stmt)
+		g.constEvalIota, g.constEvalIotaValid = oldIota, oldValid
+		return ok
+	}
+	return renvoEmitLinearAssignCore(g, stmt)
+}
+
+func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 	renvoNonNil(g, stmt)
 	meta := g.meta
 	p := g.prog
@@ -12101,6 +12155,9 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 	tokenData := p.toks.data
 	startBase := stmt.startTok * renvoTokenStride
 	startKind := int(tokenData[startBase]) & 255
+	if startKind == renvoTokVar && renvoTokCharIs(p, stmt.startTok+1, '(') {
+		return renvoEmitLinearRangeMode(g, stmt.startTok+2, stmt.endTok-1, true)
+	}
 	if startKind == renvoTokConst && renvoTokCharIs(p, stmt.startTok+1, '(') {
 		g.constEvalIota = 0
 		g.constEvalIotaValid = 1
@@ -12317,7 +12374,7 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 					typeStart--
 				}
 				if typeStart < typeEnd {
-					typeResult := renvoParseType(meta, g.prog, typeStart, typeEnd)
+					typeResult := renvoParseScopedType(g, meta, g.prog, typeStart, typeEnd)
 					if typeResult.typ != 0 {
 						localType = typeResult.typ
 					}
@@ -12333,6 +12390,22 @@ func renvoEmitLinearAssign(g *renvoLinearGen, stmt *renvoStmt) bool {
 				if inferredType != 0 {
 					localType = inferredType
 				}
+			}
+			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
+				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+				// A Go declaration enters scope after its initializer. Preserve any
+				// outer binding until the value has been completely evaluated.
+				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
+				temp := renvoAddUnnamedLocal(g, localType)
+				if !renvoEmitExprToLocal(g, ep, len(ep.exprs)-1, temp) {
+					return false
+				}
+				offset = renvoAddTypedLocal(g, nameStart, nameEnd, localType)
+				renvoEmitCopyStackToStack(g, temp, offset, renvoTypeCopySize(meta, localType))
+				if (g.constEvalIotaValid != 0 || startKind == renvoTokConst) && value.ok {
+					renvoSetLocalConstAtOffset(g, offset, value.value, renvoResolveType(meta, localType).kind)
+				}
+				return true
 			}
 			offset = renvoAddTypedLocal(g, nameStart, nameEnd, localType)
 		}
@@ -12816,7 +12889,7 @@ func renvoEmitGroupedTypedVarDecl(g *renvoLinearGen, stmt *renvoStmt, assignTok 
 	if nameCount < 2 || pos >= typeEnd {
 		return 0
 	}
-	typeResult := renvoParseType(g.meta, p, pos, typeEnd)
+	typeResult := renvoParseScopedType(g, g.meta, p, pos, typeEnd)
 	if typeResult.typ == 0 || typeResult.next != typeEnd {
 		return -1
 	}
@@ -13900,7 +13973,7 @@ func renvoTypeFromExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 	for endTok < tokenCount && int(renvoTokEnd(p, endTok)) <= e.nameEnd {
 		endTok++
 	}
-	typeResult := renvoParseType(meta, p, e.tok, endTok)
+	typeResult := renvoParseScopedType(g, meta, p, e.tok, endTok)
 	if !renvoResolveInferredArrayCompositeLength(meta, g, ep, idx, typeResult.typ) {
 		return 0
 	}
