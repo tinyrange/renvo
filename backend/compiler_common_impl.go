@@ -9670,7 +9670,9 @@ func renvoSyncCapturedStmtTargets(g *renvoLinearGen, stmt *renvoStmt) {
 		}
 		addressResult := rhs < stmt.endTok && renvoTokCharIs(g.prog, rhs, '&')
 		for tok := lhsStart; tok < lhsEnd; tok++ {
-			if !renvoTokIsKind(g.prog, tok, renvoTokIdent) {
+			// Selector names are fields, even when a same-named local exists.
+			// Synchronizing that unrelated local can overwrite an alias write.
+			if !renvoTokIsKind(g.prog, tok, renvoTokIdent) || tok > lhsStart && renvoTokCharIs(g.prog, tok-1, '.') {
 				continue
 			}
 			localIndex := renvoFindLocalIndex(g, int(renvoTokStart(g.prog, tok)), int(renvoTokEnd(g.prog, tok)))
@@ -13115,7 +13117,12 @@ func renvoEmitMultiAssign(g *renvoLinearGen, stmt *renvoStmt, assignTok int) boo
 				return false
 			}
 			root := &ep.exprs[rootIndex]
-			if root.kind != renvoExprIdent && renvoEmitAddressPrimary(g, ep, rootIndex) {
+			captured := false
+			if root.kind == renvoExprIdent {
+				localIndex := renvoFindLocalIndex(g, root.nameStart, root.nameEnd)
+				captured = localIndex >= 0 && g.locals[localIndex].captureOff > 0
+			}
+			if (root.kind != renvoExprIdent || captured) && renvoEmitAddressPrimary(g, ep, rootIndex) {
 				address := renvoAddUnnamedLocal(g, renvoTypeInt)
 				renvoAsmStorePrimaryStack(&g.asm, address)
 				lhs[i*2] = -address
@@ -13159,6 +13166,11 @@ func renvoEmitMultiAssign(g *renvoLinearGen, stmt *renvoStmt, assignTok int) boo
 		if !renvoEmitTempToTarget(g, stmt.kind, lhsStart, lhsEnd, tempOffsets[i], tempTypes[i]) {
 			return false
 		}
+	}
+	if stmt.kind == renvoStmtAssign && lhsCount > 1 {
+		// Every captured target above was staged by its cell address. Refresh
+		// mirrors only after committing all writes in source order.
+		renvoMoveCapturedLocals(g, false)
 	}
 	return true
 }
@@ -14208,6 +14220,7 @@ func renvoEmitTypedAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset
 	meta := g.meta
 	renvoNonNil(meta)
 	destType := renvoLocalTypeAtOffset(g, offset)
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprAssert {
 		return renvoEmitTypeAssertionToLocal(g, ep, idx, offset, 0, true)
@@ -14429,6 +14442,7 @@ func renvoExprIsNil(p *renvoProgram, e *renvoExpr) bool {
 func renvoEmitInterfaceAssignToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
 	renvoNonNil(g, ep)
 	if idx >= 0 && idx < len(ep.exprs) {
+		renvoRefreshCapturedExpr(g, ep, idx)
 		e := &ep.exprs[idx]
 		if renvoExprIsNil(g.prog, e) {
 			renvoAsmStoreStackImm(&g.asm, offset, 0)
@@ -14962,6 +14976,7 @@ func renvoEmitSliceValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 	renvoNonNil(g, ep)
 	meta := g.meta
 	a := &g.asm
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprAssert {
 		typ := renvoInferParsedExprType(g, ep, idx)
@@ -19947,6 +19962,53 @@ func renvoEmitMethodReceiverArgTokensReverse(g *renvoLinearGen, dotTok int, rece
 	}
 	return renvoEmitMethodReceiverArgReverse(g, receiverEp, len(receiverEp.exprs)-1, receiverType)
 }
+func renvoEmitCapturedAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) {
+	root := idx
+	for ep.exprs[root].kind == renvoExprSelector || ep.exprs[root].kind == renvoExprIndex {
+		e := &ep.exprs[root]
+		typ := renvoInferParsedExprType(g, ep, e.left)
+		kind := renvoResolveType(g.meta, typ).kind
+		if e.kind == renvoExprIndex && kind != renvoTypeArray || e.kind == renvoExprSelector && (kind != renvoTypeStruct || renvoStructPromotedPointerField(g, typ, e.nameStart, e.nameEnd) >= 0) {
+			return
+		}
+		root = e.left
+	}
+	e := &ep.exprs[root]
+	if root == idx || e.kind != renvoExprIdent {
+		return
+	}
+	localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
+	if localIndex < 0 || g.locals[localIndex].captureOff <= 0 {
+		return
+	}
+	// Preserve the computed field/index displacement, but use the cell's
+	// lifetime rather than the temporary stack mirror's lifetime.
+	a := &g.asm
+	renvoAsmPushPrimary(a)
+	renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
+	renvoAsmPopTertiary(a)
+	renvoAsmAddPrimaryTertiary(a)
+}
+
+func renvoRefreshCapturedExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) {
+	if !g.hasCapturedLocals {
+		return
+	}
+	for ep.exprs[idx].kind == renvoExprSelector || ep.exprs[idx].kind == renvoExprIndex {
+		idx = ep.exprs[idx].left
+	}
+	e := &ep.exprs[idx]
+	if e.kind != renvoExprIdent {
+		return
+	}
+	renvoMoveCapturedLocal(g, renvoFindLocalIndex(g, e.nameStart, e.nameEnd), false)
+}
+
 func renvoEmitAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	a := &g.asm
@@ -19972,12 +20034,14 @@ func renvoEmitAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 			return false
 		}
 		renvoAsmCopySecondaryToPrimary(a)
+		renvoEmitCapturedAddress(g, ep, idx)
 		return true
 	}
 	if e.kind == renvoExprIndex {
 		if !renvoEmitIndexAddressPrimary(g, ep, idx) {
 			return false
 		}
+		renvoEmitCapturedAddress(g, ep, idx)
 		return true
 	}
 	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
@@ -22449,7 +22513,143 @@ func renvoFindSmallConstByName(g *renvoLinearGen, nameStart int, nameEnd int) in
 	return -129
 }
 
-func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameEnd int) bool {
+func renvoTypeCanCarryLocalAddress(meta *renvoMeta, typ int, depth int) bool {
+	if depth > 32 {
+		return true
+	}
+	t := renvoResolveType(meta, typ)
+	if t.kind == renvoTypePointer || t.kind == renvoTypeSlice || t.kind == renvoTypeInterface || t.kind == renvoTypeFunc {
+		return true
+	}
+	if t.kind == renvoTypeArray {
+		return renvoTypeCanCarryLocalAddress(meta, t.elem, depth+1)
+	}
+	if t.kind == renvoTypeStruct {
+		for i := 0; i < t.count; i++ {
+			if renvoTypeCanCarryLocalAddress(meta, meta.fields[t.first+i].typ, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// An address into pointer or slice storage does not retain the local holding
+// that pointer/header. Only paths entirely within a value own the local cell.
+func renvoLocalStorageAddress(g *renvoLinearGen, name int, typ int, end int) bool {
+	p := g.prog
+	for tok := name + 1; tok < end; {
+		if renvoTokCharIs(p, tok, ')') {
+			tok++
+			continue
+		}
+		t := renvoResolveType(g.meta, typ)
+		if renvoTokCharIs(p, tok, '.') && tok+1 < end {
+			if t.kind != renvoTypeStruct {
+				return false
+			}
+			g.fieldCacheStart = -1
+			found := renvoLoadStructFieldPath(g, typ, int(renvoTokStart(p, tok+1)), int(renvoTokEnd(p, tok+1)))
+			g.fieldCacheStart = -1
+			if !found || g.fieldPointerIndex >= 0 {
+				return false
+			}
+			typ = g.meta.fields[g.fieldIndex].typ
+			tok += 2
+			continue
+		}
+		if renvoTokCharIs(p, tok, '[') {
+			if t.kind != renvoTypeArray {
+				return false
+			}
+			close := renvoFindMatchingExprClose(p, tok+1, end, '[', ']')
+			if close <= tok {
+				return false
+			}
+			typ = t.elem
+			tok = close + 1
+			continue
+		}
+		return true
+	}
+	return true
+}
+
+func renvoLocalStorageAddressTaken(g *renvoLinearGen, nameStart int, nameEnd int, typ int) bool {
+	p := g.prog
+	fn := &g.meta.funcs[g.currentFunc]
+	for tok := fn.bodyStart; tok+1 < fn.bodyEnd; tok++ {
+		if !renvoTokCharIs(p, tok, '&') {
+			continue
+		}
+		name := tok + 1
+		for name < fn.bodyEnd && renvoTokCharIs(p, name, '(') {
+			name++
+		}
+		if name < fn.bodyEnd && renvoTokIsKind(p, name, renvoTokIdent) && renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) && renvoLocalStorageAddress(g, name, typ, fn.bodyEnd) {
+			return true
+		}
+	}
+	return false
+}
+
+func renvoLocalAddressInReturn(g *renvoLinearGen, nameStart int, nameEnd int) bool {
+	p := g.prog
+	fn := &g.meta.funcs[g.currentFunc]
+	for tok := fn.bodyStart; tok < fn.bodyEnd; tok++ {
+		if !renvoTokIsKind(p, tok, renvoTokReturn) {
+			continue
+		}
+		end := renvoStatementLineEnd(p, tok+1, fn.bodyEnd)
+		for i := tok + 1; i+1 < end; i++ {
+			if !renvoTokCharIs(p, i, '&') {
+				continue
+			}
+			name := i + 1
+			if renvoTokCharIs(p, name, '(') {
+				name++
+			}
+			if name < end && renvoTokIsKind(p, name, renvoTokIdent) && renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) {
+				return true
+			}
+		}
+		tok = end - 1
+	}
+	return false
+}
+
+func renvoLocalAddressStored(g *renvoLinearGen, nameStart int, nameEnd int) bool {
+	p := g.prog
+	fn := &g.meta.funcs[g.currentFunc]
+	for tok := fn.bodyStart; tok+1 < fn.bodyEnd; tok++ {
+		if !renvoTokCharIs(p, tok, '&') {
+			continue
+		}
+		name := tok + 1
+		for renvoTokCharIs(p, name, '(') {
+			name++
+		}
+		if !renvoTokIsKind(p, name, renvoTokIdent) || !renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) {
+			continue
+		}
+		before := tok - 1
+		for before > fn.bodyStart && renvoTokCharIs(p, before, '(') {
+			before--
+		}
+		if renvoTokCharIs(p, before, '=') {
+			if before > fn.bodyStart && renvoTokIdentIs(p, before-1, "_") {
+				continue
+			}
+			return true
+		}
+		if renvoTok2Is(p, before, ':', '=') || renvoTokCharIs(p, before, ':') {
+			return true
+		}
+	}
+	return false
+}
+
+func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameEnd int, typ int) bool {
 	renvoNonNil(g)
 	meta := g.meta
 	p := g.prog
@@ -22459,6 +22659,37 @@ func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameE
 		return false
 	}
 	outer := &meta.funcs[g.currentFunc]
+	if !renvoProgramUsesC11Semantics(p) && renvoLocalStorageAddressTaken(g, nameStart, nameEnd, typ) {
+		// A stored address may outlive its lexical block even when this
+		// function returns no pointer. Keep the cell alive after stack slots
+		// are reused, and synchronize subsequent writes through either alias.
+		if renvoLocalAddressStored(g, nameStart, nameEnd) {
+			return true
+		}
+		// Returning a pointer-containing aggregate can retain a local's address
+		// just as returning the address directly can (including closure cells).
+		mayEscape := renvoResolveType(meta, outer.resultType).kind == renvoTypePointer
+		if !mayEscape && renvoTypeCanCarryLocalAddress(meta, outer.resultType, 0) {
+			mayEscape = renvoLocalAddressInReturn(g, nameStart, nameEnd)
+		}
+		// Range and three-clause declaration bindings get fresh cells on
+		// iteration boundaries, just like captured loop variables.
+		if !mayEscape && nameStart >= int(renvoTokStart(p, outer.bodyStart)) {
+			for tok := outer.bodyStart; tok < outer.bodyEnd && int(renvoTokStart(p, tok)) < nameStart; tok++ {
+				if !renvoTokIsKind(p, tok, renvoTokFor) {
+					continue
+				}
+				open := renvoFindStatementBodyOpen(p, tok+1, outer.bodyEnd)
+				if open > tok && nameStart < int(renvoTokStart(p, open)) {
+					mayEscape = true
+					break
+				}
+			}
+		}
+		if mayEscape && renvoLocalNameAddressTaken(g, nameStart, nameEnd) {
+			return true
+		}
+	}
 	for i := 0; i < len(meta.closures); i++ {
 		fnIndex := meta.closures[i].fnIndex
 		closure := &meta.funcs[fnIndex]
@@ -22483,7 +22714,7 @@ func renvoAddTypedLocal(g *renvoLinearGen, nameStart int, nameEnd int, typ int) 
 		size = renvoBackendValueSlotSize
 	}
 	captureOff := 0
-	if renvoLocalCapturedInCurrentFunction(g, nameStart, nameEnd) {
+	if renvoLocalCapturedInCurrentFunction(g, nameStart, nameEnd, typ) {
 		captureOff = -1
 		if g.deferStackFloor >= 0 {
 			g.stackUsed = renvoAlignTo8(g.stackUsed + renvoBackendValueSlotSize)
@@ -22559,7 +22790,25 @@ func renvoMoveCapturedLocal(g *renvoLinearGen, localIndex int, toCell bool) {
 	renvoAsmLoadPrimaryStack(&g.asm, local.captureOff)
 	renvoAsmJzPrimary(&g.asm, skip)
 	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	if toCell {
+	if local.size >= 64 {
+		oldCount, oldStack := g.localCount, g.stackUsed
+		source := renvoAddUnnamedLocal(g, renvoTypeInt)
+		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
+		count := renvoAddUnnamedLocal(g, renvoTypeInt)
+		if toCell {
+			renvoAsmStorePrimaryStack(&g.asm, destination)
+			renvoAsmAddressPrimaryStack(&g.asm, local.offset)
+			renvoAsmStorePrimaryStack(&g.asm, source)
+		} else {
+			renvoAsmStorePrimaryStack(&g.asm, source)
+			renvoAsmAddressPrimaryStack(&g.asm, local.offset)
+			renvoAsmStorePrimaryStack(&g.asm, destination)
+		}
+		renvoAsmStoreStackImm(&g.asm, count, local.size)
+		renvoEmitCopyBytes(g, source, destination, count)
+		g.localCount = oldCount
+		renvoRestoreStackFloor(g, oldStack)
+	} else if toCell {
 		renvoEmitCopyStackToMemSecondary(g, local.offset, 0, local.size)
 	} else {
 		renvoEmitCopyMemSecondaryToStack(g, local.offset, local.size)
@@ -25480,19 +25729,8 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				}
 				return false
 			}
-			if inner.kind == renvoExprSelector {
-				if !renvoEmitSelectorAddressSecondary(g, ep, e.left) {
-					return false
-				}
-				if renvoPreparedBackendActive != 0 {
-					renvoAsmCopySecondaryToPrimary(a)
-				} else {
-					renvoAsmEmit16(a, 0x5852)
-				}
-				return true
-			}
-			if inner.kind == renvoExprIndex {
-				return renvoEmitIndexAddressPrimary(g, ep, e.left)
+			if inner.kind == renvoExprSelector || inner.kind == renvoExprIndex {
+				return renvoEmitAddressPrimary(g, ep, e.left)
 			}
 			return false
 		}
@@ -26279,6 +26517,7 @@ func renvoEmitCPointerDifference(g *renvoLinearGen, ep *renvoExprParse, call *re
 
 func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprIdent && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameEnd, "nil") {
 		renvoAsmPrimaryImm(&g.asm, 0)
@@ -28546,7 +28785,9 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
 	registerWords := 6
-	if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerWords = renvoRTGObjectRegisterCount()
+	}
 	if sret {
 		registerWords--
 	}
@@ -28775,7 +29016,9 @@ func renvoAmd64PushObjectIntegerRegister(a *renvoAsm, register int) {
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 	registerLimit := 6
-	if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerLimit = renvoRTGObjectRegisterCount()
+	}
 	integerRegister := 0
 	if sret {
 		integerRegister = 1
@@ -29326,6 +29569,7 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if renvoExprIsNil(g.prog, e) {
 		renvoAsmPrimaryImm(&g.asm, 0)
@@ -29528,6 +29772,7 @@ func renvoEmit386Float64ExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx i
 	if g.c.renvoTargetArch != renvoArch386 && g.c.renvoTargetArch != renvoArchArm && g.c.renvoTargetArch != renvoArchWasm32 && (renvoPreparedBackendActive == 0 || renvoRTGPreparedIEEEFloat == 0) {
 		return false
 	}
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprFloat {
 		renvoStoreFloat64BitsStack(&g.asm, offset, renvoParseFloatTokenBits(g.prog, e.tok, 52, 11, 1023))
@@ -29712,6 +29957,7 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 			return renvoEmit386Float64ExprToLocal(g, ep, idx, offset)
 		}
 	}
+	renvoRefreshCapturedExpr(g, ep, idx)
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprCall && e.argCount == 1 && renvoRuntimeIntrinsicForCall(g, ep, e) == 21 {
 		return renvoEmit386Float64ExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), offset)
@@ -32438,19 +32684,8 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				}
 				return false
 			}
-			if inner.kind == renvoExprSelector {
-				if !renvoEmitSelectorAddressSecondary(g, ep, e.left) {
-					return false
-				}
-				if renvoPreparedBackendActive != 0 || g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
-					renvoAsmCopySecondaryToPrimary(a)
-				} else {
-					renvoAsmEmit16(a, 0x5852)
-				}
-				return true
-			}
-			if inner.kind == renvoExprIndex {
-				return renvoEmitIndexAddressPrimary(g, ep, e.left)
+			if inner.kind == renvoExprSelector || inner.kind == renvoExprIndex {
+				return renvoEmitAddressPrimary(g, ep, e.left)
 			}
 			return false
 		}
