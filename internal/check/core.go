@@ -191,7 +191,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
-			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, builtinCalls); builtinErr != CheckOK {
+			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope, builtinCalls); builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
 			callCheckArenaStart := arena.Mark()
@@ -333,11 +333,46 @@ func resolutionCapacitiesCore(tokens int) (int, int) {
 
 func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, start int, end int, builtinCalls *[]int) ([]CoreNameRef, []CoreSelectorRef, int) {
 	undefined := -1
+	var aggregateNames []int
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		token := file.Tokens[i]
+		if (token.KindLine&255 == syntax.TokenStruct || token.KindLine&255 == syntax.TokenInterface) && tokCharIs(file, i+1, '{') {
+			close := findTypeMatching(*file, i+1, '{', '}')
+			if close > i+1 && close <= end {
+				if token.KindLine&255 == syntax.TokenStruct {
+					fields := parseStructFields(*file, i+2, close-1)
+					for _, field := range fields {
+						if field.NameTok >= 0 && field.Name != "" {
+							aggregateNames = append(aggregateNames, field.NameTok)
+						}
+					}
+				} else {
+					methods, _ := parseInterfaceElements(*file, i+2, close-1)
+					for _, method := range methods {
+						aggregateNames = append(aggregateNames, method.NameTok)
+						for _, field := range method.Signature.Params {
+							if field.NameTok >= 0 {
+								aggregateNames = append(aggregateNames, field.NameTok)
+							}
+						}
+						for _, field := range method.Signature.Results {
+							if field.NameTok >= 0 {
+								aggregateNames = append(aggregateNames, field.NameTok)
+							}
+						}
+					}
+				}
+			}
+		}
 		blank := token.KindLine&255 == syntax.TokenIdent && token.End-token.Start == 1 && file.Src[int(token.Start)] == '_'
 		scopeIndex := -1
 		skipRef := token.KindLine&255 != syntax.TokenIdent || blank || shouldSkipIdentRef(file, i, end)
+		for _, name := range aggregateNames {
+			if name == i {
+				skipRef = true
+				break
+			}
+		}
 		if !skipRef {
 			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
 		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokenTextIs(file, i+1, ":") {
@@ -430,7 +465,7 @@ func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, bas
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len")
+	return tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap") || tokenTextIs(file, tok, "make") || tokenTextIs(file, tok, "real") || tokenTextIs(file, tok, "imag") || tokenTextIs(file, tok, "complex")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {

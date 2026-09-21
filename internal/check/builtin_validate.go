@@ -14,10 +14,12 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, scope CoreScope, calls []int) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
+	var numericBindings []scopedTypeBinding
+	numericReady := false
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]
 		open := callee + 1
@@ -27,9 +29,45 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
-		if name == "len" {
-			if len(args) != 1 {
+		if name == "real" || name == "imag" || name == "complex" {
+			if numericBuiltinInNestedFunction(*file, fn, callee) {
+				continue
+			}
+			if !numericReady {
+				body := syntax.ParseFuncBodyStatements(*file, fn)
+				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericReady = true
+			}
+			if code, tok := invalidNumericBuiltinCall(*pkg, *info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
+		if name == "make" {
+			if code, tok := invalidMakeBuiltinCall(pkg, info, fileIndex, scope, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
+		if name == "len" || name == "cap" {
+			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
 				return CheckErrBuiltinArity, callee
+			}
+			if !numericBuiltinInNestedFunction(*file, fn, callee) {
+				if !numericReady {
+					body := syntax.ParseFuncBodyStatements(*file, fn)
+					numericBindings = collectScopedTypeBindings(*file, fn, body)
+					numericReady = true
+				}
+				value := numericBuiltinExprValue(*pkg, *info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+				if value.kind == "int" || value.kind == "float" || value.kind == "complex" || value.kind == "bool" || value.kind == "other" || name == "cap" && value.kind == "string" {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
+			}
+			if name == "cap" {
+				if invalidCapacityLiteral(*file, args[0]) {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
 			}
 			continue
 		}
