@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "6c2a4e0619d2c0654019ef1d31c78861f5ead564e4065ca16ae260fdc458e46d"
+const CompilerSourceDigest = "ebeea8198e68af9fe351f406b5804b7d8f03e6f477507eadfdc53a7b5d53e71f"
 
 // source: backend/compiler_common_impl.go
 
@@ -9311,6 +9311,8 @@ wideCompareLabel         int
 locals                   []renvoLocalInfo
 localCount               int
 hasCapturedLocals        bool
+addressNamesReady        bool
+addressNameTokens        []int
 localCacheStart          int
 localCacheCount          int
 localCacheIndex          int
@@ -15469,6 +15471,23 @@ loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+renvoAsmPrimaryImm(a, 4)
+renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+renvoAsmAddSecondaryImm(a, 4)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmPushImm(a, 4)
+renvoAsmPopTertiary(a)
+renvoAsmSubPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmJmpLabel(a, wordLoop)
+}
 renvoAsmMarkLabel(a, loopLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmJzPrimary(a, doneLabel)
@@ -19970,15 +19989,12 @@ return -1
 return renvoEmitMethodReceiverArgReverse(g, receiverEp, len(receiverEp.exprs)-1, receiverType)
 }
 func renvoEmitCapturedAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) {
-root := idx
-for ep.exprs[root].kind == renvoExprSelector || ep.exprs[root].kind == renvoExprIndex {
-e := &ep.exprs[root]
-typ := renvoInferParsedExprType(g, ep, e.left)
-kind := renvoResolveType(g.meta, typ).kind
-if e.kind == renvoExprIndex && kind != renvoTypeArray || e.kind == renvoExprSelector && (kind != renvoTypeStruct || renvoStructPromotedPointerField(g, typ, e.nameStart, e.nameEnd) >= 0) {
+if !g.hasCapturedLocals {
 return
 }
-root = e.left
+root := idx
+for ep.exprs[root].kind == renvoExprSelector || ep.exprs[root].kind == renvoExprIndex {
+root = ep.exprs[root].left
 }
 e := &ep.exprs[root]
 if root == idx || e.kind != renvoExprIdent {
@@ -19987,6 +20003,14 @@ return
 localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
 if localIndex < 0 || g.locals[localIndex].captureOff <= 0 {
 return
+}
+for at := idx; at != root; at = ep.exprs[at].left {
+part := &ep.exprs[at]
+typ := renvoInferParsedExprType(g, ep, part.left)
+kind := renvoResolveType(g.meta, typ).kind
+if part.kind == renvoExprIndex && kind != renvoTypeArray || part.kind == renvoExprSelector && (kind != renvoTypeStruct || renvoStructPromotedPointerField(g, typ, part.nameStart, part.nameEnd) >= 0) {
+return
+}
 }
 
 
@@ -22585,6 +22609,8 @@ return true
 func renvoLocalStorageAddressTaken(g *renvoLinearGen, nameStart int, nameEnd int, typ int) bool {
 p := g.prog
 fn := &g.meta.funcs[g.currentFunc]
+if !g.addressNamesReady {
+g.addressNamesReady = true
 for tok := fn.bodyStart; tok+1 < fn.bodyEnd; tok++ {
 if !renvoTokCharIs(p, tok, '&') {
 continue
@@ -22593,7 +22619,13 @@ name := tok + 1
 for name < fn.bodyEnd && renvoTokCharIs(p, name, '(') {
 name++
 }
-if name < fn.bodyEnd && renvoTokIsKind(p, name, renvoTokIdent) && renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) && renvoLocalStorageAddress(g, name, typ, fn.bodyEnd) {
+if name < fn.bodyEnd && renvoTokIsKind(p, name, renvoTokIdent) {
+g.addressNameTokens = append(g.addressNameTokens, name)
+}
+}
+}
+for _, name := range g.addressNameTokens {
+if renvoBytesEqualRange(p.src, renvoTokStart(p, name), renvoTokEnd(p, name), nameStart, nameEnd) && renvoLocalStorageAddress(g, name, typ, fn.bodyEnd) {
 return true
 }
 }
@@ -23184,6 +23216,8 @@ renvoNonNil(g)
 g.checkedPointerLocals = 0
 g.invalidatedPointerLocals = 0
 g.hasCapturedLocals = false
+g.addressNamesReady = false
+g.addressNameTokens = nil
 persistentCapacity := renvoLinearPersistentCapacity(g)
 typeCount := len(g.meta.types)
 fieldCount := len(g.meta.fields)
