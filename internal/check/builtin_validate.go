@@ -92,7 +92,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				return CheckErrBuiltinArity, callee
 			}
 			if !nested {
-				if !numericReady {
+				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
 					body := syntax.ParseFuncBodyStatements(*file, fn)
 					numericBindings = collectScopedTypeBindings(*file, fn, body)
 					numericReady = true
@@ -386,4 +386,14 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 
 func fileForPackage(pkg *load.Package, fileIndex int) *syntax.File {
 	return &pkg.Files[fileIndex].File
+}
+
+// Only identifier operands consult lexical value bindings. Literals, selectors,
+// and type conversions can be classified without rebuilding the function body.
+func numericBuiltinNeedsBindings(file syntax.File, start, end int) bool {
+	start, end = stripOuterParens(file, start, end)
+	for start < end && (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) {
+		start, end = stripOuterParens(file, start+1, end)
+	}
+	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }
