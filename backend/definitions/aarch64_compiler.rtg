@@ -636,16 +636,41 @@ go compiler {
 		return true
 	}
 
+	// Image assembly is terminal: reuse spare code capacity rather than keeping
+	// both the instruction buffer and a second executable-sized allocation live.
+	func renvoAsmImageAarch64ReuseCode(a *renvoAsm, out []byte) []byte {
+		codeLen := len(a.code)
+		loadFileSize := a.codeOffset + codeLen + len(a.data)
+		if !a.c.stripSymbols || cap(a.code) < loadFileSize {
+			return renvoAsmImageAarch64(a)
+		}
+		renvoAsmPatch(a)
+		renvoAsmPatchAarch64Abs(a)
+		bssOffset := renvoAsmBssOffset(a)
+		out = out[:loadFileSize]
+		copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
+		a.code = out[a.codeOffset : a.codeOffset+codeLen]
+		out = renvoAppendElfHeaderAarch64(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+		out = out[:a.codeOffset+codeLen]
+		out = append(out, a.data...)
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
+		return out
+	}
+
 	func (s *renvoAarch64ProgramSession) finishStep() bool {
 		if s.queueIndex < len(s.gen.funcQueue) {
 			return false
 		}
 		a := &s.gen.asm
-		data := renvoAsmImageAarch64(a)
+		var data []byte
 		if targetIsWindows(s.gen.c.renvoTargetOS) {
 			data = renvoAsmImageWindowsArm64(a)
 		} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
 			data = renvoDarwinArm64Image(a)
+		} else {
+			data = renvoAsmImageAarch64ReuseCode(a, a.code)
 		}
 		if a.patchFailed || len(data) == 0 {
 			s.done = true
