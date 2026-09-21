@@ -80,6 +80,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortDecls(info.Decls)
+	for _, decl := range info.Decls {
+		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: decl.File}
+		if tok := invalidArrayLengthTypeSpan(context, decl.TypeStart, decl.TypeEnd); tok >= 0 {
+			return info, false, CheckErrArrayLength, decl.File, tok
+		}
+	}
 	if file, tok := invalidPackageConstantOperations(&pkg, &info); tok >= 0 {
 		return info, false, CheckErrConstantOperation, file, tok
 	}
@@ -125,6 +131,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if tok := invalidBareReturnShadow(file, fn, body, buildFuncSignature(file, fn)); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrScope, fileIndex, tok
+			}
+			if tok := invalidLocalArrayLengths(&pkg, &info, fileIndex, fn, body); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return info, false, CheckErrArrayLength, fileIndex, tok
 			}
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
 				arena.Reset(functionArenaStart)

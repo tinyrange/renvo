@@ -45,6 +45,7 @@ const (
 	CheckErrMissingReturn
 	CheckErrRecursiveType
 	CheckErrConstantOperation
+	CheckErrArrayLength
 )
 
 const (

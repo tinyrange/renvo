@@ -302,6 +302,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-035", "missing return")
 			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
+			} else if built.Build.ErrorDetail == check.CheckErrArrayLength {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int")
 			} else if built.Build.ErrorDetail == check.CheckErrConstantOperation {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
