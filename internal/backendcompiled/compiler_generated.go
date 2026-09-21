@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "874656661c2226684d2f5c77d713845f4a64f413db826f7f9642755a20faa556"
+const CompilerSourceDigest = "3c000b9a801bd75151daa83395b8c603242fe82448be2815ec3de4f27491ba33"
 
 // source: backend/compiler_common_impl.go
 
@@ -10649,8 +10649,9 @@ return false
 }
 }
 stringSwitch := rootIndex >= 0 && renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, rootIndex))
+interfaceSwitch := rootIndex >= 0 && !typeSwitch && renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, rootIndex)).kind == renvoTypeInterface
 if renvoFixedTarget == 0 {
-if rootIndex >= 0 && !typeSwitch && !stringSwitch {
+if rootIndex >= 0 && !typeSwitch && !stringSwitch && !interfaceSwitch {
 constant := renvoEvalConstExpr(g, ep, rootIndex)
 if constant.ok {
 clause, known := renvoFindConstantSwitchClause(g, stmt, constant.value)
@@ -10662,18 +10663,26 @@ return renvoEmitConstantSwitchClause(g, stmt, clause)
 }
 registerSwitch := false
 if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 {
-if g.c.code16 && rootIndex >= 0 && !stringSwitch && !typeSwitch {
+if g.c.code16 && rootIndex >= 0 && !stringSwitch && !typeSwitch && !interfaceSwitch {
 registerSwitch = renvoSwitchCasesAreConstant(g, stmt)
 }
 }
 valueOffset := -1
 if !registerSwitch {
-valueOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
+valueType := renvoTypeInt
+if interfaceSwitch {
+valueType = renvoBuiltinTypeInterface
+}
+valueOffset = renvoAddUnnamedLocal(g, valueType)
 }
 typeValueOffset := 0
 typeValueType := 0
 lenOffset := 0
-if stringSwitch {
+if interfaceSwitch {
+if !renvoEmitInterfaceAssignToLocal(g, ep, rootIndex, valueOffset) {
+return false
+}
+} else if stringSwitch {
 lenOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
 if !renvoEmitStringValueRegs(g, ep, rootIndex) {
 return false
@@ -10728,7 +10737,7 @@ i = clause + 1
 for i := 0; i < len(clauseStarts); i++ {
 clause := clauseStarts[i]
 if renvoTokIsKind(p, clause, renvoTokCase) {
-if !renvoEmitSwitchCaseTests(g, stmt, clause, valueOffset, lenOffset, stringSwitch, typeSwitch, clauseLabels[i]) {
+if !renvoEmitSwitchCaseTests(g, stmt, clause, valueOffset, lenOffset, stringSwitch, typeSwitch, interfaceSwitch, clauseLabels[i]) {
 return false
 }
 }
@@ -11011,7 +11020,7 @@ required = end
 return true
 }
 
-func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, valueOffset int, lenOffset int, stringSwitch bool, typeSwitch bool, matchLabel int) bool {
+func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, valueOffset int, lenOffset int, stringSwitch bool, typeSwitch bool, interfaceSwitch bool, matchLabel int) bool {
 renvoNonNil(g, stmt)
 a := &g.asm
 p := g.prog
@@ -11044,6 +11053,15 @@ return false
 }
 renvoEmitTypeMatchJump(g, valueOffset, caseType.typ, matchLabel)
 }
+} else if interfaceSwitch {
+caseOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
+if !renvoEmitInterfaceAssignToLocal(g, ep, rootIndex, caseOffset) {
+return false
+}
+if !renvoEmitInterfaceCompareLocals(g, valueOffset, caseOffset, false) {
+return false
+}
+renvoAsmJnzPrimary(a, matchLabel)
 } else if stringSwitch {
 ok := false
 if g.c.renvoTargetArch == renvoArch386 {
@@ -14570,6 +14588,12 @@ right := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 if !renvoEmitInterfaceAssignToLocal(g, ep, e.left, left) || !renvoEmitInterfaceAssignToLocal(g, ep, e.right, right) {
 return false
 }
+return renvoEmitInterfaceCompareLocals(g, left, right, renvoTok2Is(g.prog, e.tok, '!', '='))
+}
+
+
+
+func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, notEqual bool) bool {
 a := &g.asm
 indirectTypeBase := renvoInterfaceIndirectTypeBaseFor(g.meta)
 different := renvoAsmNewLabel(a)
@@ -14671,7 +14695,7 @@ renvoEmitRuntimeFault(g)
 renvoAsmJmpMarkLabel(a, done, different)
 renvoAsmPrimaryImm(a, 0)
 renvoAsmMarkLabel(a, done)
-if renvoTok2Is(g.prog, e.tok, '!', '=') {
+if notEqual {
 renvoAsmBoolNotPrimary(a)
 }
 return true

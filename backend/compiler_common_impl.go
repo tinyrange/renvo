@@ -10642,8 +10642,9 @@ func renvoEmitLinearSwitch(g *renvoLinearGen, stmt *renvoStmt) bool {
 		}
 	}
 	stringSwitch := rootIndex >= 0 && renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, rootIndex))
+	interfaceSwitch := rootIndex >= 0 && !typeSwitch && renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, rootIndex)).kind == renvoTypeInterface
 	if renvoFixedTarget == 0 {
-		if rootIndex >= 0 && !typeSwitch && !stringSwitch {
+		if rootIndex >= 0 && !typeSwitch && !stringSwitch && !interfaceSwitch {
 			constant := renvoEvalConstExpr(g, ep, rootIndex)
 			if constant.ok {
 				clause, known := renvoFindConstantSwitchClause(g, stmt, constant.value)
@@ -10655,18 +10656,26 @@ func renvoEmitLinearSwitch(g *renvoLinearGen, stmt *renvoStmt) bool {
 	}
 	registerSwitch := false
 	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 {
-		if g.c.code16 && rootIndex >= 0 && !stringSwitch && !typeSwitch {
+		if g.c.code16 && rootIndex >= 0 && !stringSwitch && !typeSwitch && !interfaceSwitch {
 			registerSwitch = renvoSwitchCasesAreConstant(g, stmt)
 		}
 	}
 	valueOffset := -1
 	if !registerSwitch {
-		valueOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
+		valueType := renvoTypeInt
+		if interfaceSwitch {
+			valueType = renvoBuiltinTypeInterface
+		}
+		valueOffset = renvoAddUnnamedLocal(g, valueType)
 	}
 	typeValueOffset := 0
 	typeValueType := 0
 	lenOffset := 0
-	if stringSwitch {
+	if interfaceSwitch {
+		if !renvoEmitInterfaceAssignToLocal(g, ep, rootIndex, valueOffset) {
+			return false
+		}
+	} else if stringSwitch {
 		lenOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
 		if !renvoEmitStringValueRegs(g, ep, rootIndex) {
 			return false
@@ -10721,7 +10730,7 @@ func renvoEmitLinearSwitch(g *renvoLinearGen, stmt *renvoStmt) bool {
 	for i := 0; i < len(clauseStarts); i++ {
 		clause := clauseStarts[i]
 		if renvoTokIsKind(p, clause, renvoTokCase) {
-			if !renvoEmitSwitchCaseTests(g, stmt, clause, valueOffset, lenOffset, stringSwitch, typeSwitch, clauseLabels[i]) {
+			if !renvoEmitSwitchCaseTests(g, stmt, clause, valueOffset, lenOffset, stringSwitch, typeSwitch, interfaceSwitch, clauseLabels[i]) {
 				return false
 			}
 		}
@@ -11004,7 +11013,7 @@ func renvoTypeImplementsInterface(g *renvoLinearGen, typ int, interfaceType int)
 	return true
 }
 
-func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, valueOffset int, lenOffset int, stringSwitch bool, typeSwitch bool, matchLabel int) bool {
+func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, valueOffset int, lenOffset int, stringSwitch bool, typeSwitch bool, interfaceSwitch bool, matchLabel int) bool {
 	renvoNonNil(g, stmt)
 	a := &g.asm
 	p := g.prog
@@ -11037,6 +11046,15 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 				}
 				renvoEmitTypeMatchJump(g, valueOffset, caseType.typ, matchLabel)
 			}
+		} else if interfaceSwitch {
+			caseOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
+			if !renvoEmitInterfaceAssignToLocal(g, ep, rootIndex, caseOffset) {
+				return false
+			}
+			if !renvoEmitInterfaceCompareLocals(g, valueOffset, caseOffset, false) {
+				return false
+			}
+			renvoAsmJnzPrimary(a, matchLabel)
 		} else if stringSwitch {
 			ok := false
 			if g.c.renvoTargetArch == renvoArch386 {
@@ -14563,6 +14581,12 @@ func renvoEmitInterfaceCompare(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 	if !renvoEmitInterfaceAssignToLocal(g, ep, e.left, left) || !renvoEmitInterfaceAssignToLocal(g, ep, e.right, right) {
 		return false
 	}
+	return renvoEmitInterfaceCompareLocals(g, left, right, renvoTok2Is(g.prog, e.tok, '!', '='))
+}
+
+// Switch tags are evaluated once and retained across the ordered case tests.
+// Share the full dynamic-type and payload comparison with ordinary equality.
+func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, notEqual bool) bool {
 	a := &g.asm
 	indirectTypeBase := renvoInterfaceIndirectTypeBaseFor(g.meta)
 	different := renvoAsmNewLabel(a)
@@ -14664,7 +14688,7 @@ func renvoEmitInterfaceCompare(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 	renvoAsmJmpMarkLabel(a, done, different)
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmMarkLabel(a, done)
-	if renvoTok2Is(g.prog, e.tok, '!', '=') {
+	if notEqual {
 		renvoAsmBoolNotPrimary(a)
 	}
 	return true
