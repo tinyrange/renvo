@@ -122,6 +122,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				arena.Reset(functionArenaStart)
 				return info, false, statementErr, fileIndex, statementTok
 			}
+			if tok := invalidBareReturnShadow(file, fn, body, buildFuncSignature(file, fn)); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return info, false, CheckErrScope, fileIndex, tok
+			}
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
