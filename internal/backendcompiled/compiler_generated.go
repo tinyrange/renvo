@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9e62084f2d443b33aca5eb677515c6aea6460b0b6d7a03f507129131a29c3ec9"
+const CompilerSourceDigest = "e0f6f682f784d48ea9afde577b8d52e60e828e5b8bf106515e64151dc8dbfccd"
 
 // source: backend/compiler_common_impl.go
 
@@ -496,6 +496,9 @@ a.symbols = make([]renvoAsmSymbol, 0, 1024)
 }
 } else if a.c.renvoTargetArch == renvoArchWasm32 {
 codeCapacity = 655360
+if a.c.optimizeRuntime {
+codeCapacity = 8388608
+}
 labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else if a.c.optimizeRuntime {
@@ -505,6 +508,12 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 codeCapacity = 3670016
 labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+
+
+if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
+codeCapacity = 8388608
+labelCapacity, relocCapacity, absRelocCapacity = 65536, 262144, 65536
+}
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
@@ -44562,6 +44571,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoAarch64ELFCodeOffset
@@ -46005,6 +46015,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoLinuxArmCodeOffset
@@ -54112,6 +54123,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 renvoLoadCompilerFixedTarget(&g)
 if g.fixedTargetState != 1 {

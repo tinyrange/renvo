@@ -783,6 +783,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 		renvoLoadCompilerFixedTarget(&g)
 		if g.fixedTargetState != 1 {
