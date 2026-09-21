@@ -18886,93 +18886,98 @@ func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffse
 		hiddenResultOffset = renvoAddUnnamedLocal(g, resultType)
 		renvoZeroLocalAtOffset(g, hiddenResultOffset)
 	}
-	for fnIndex := 0; fnIndex < len(meta.funcs); fnIndex++ {
-		if directTarget >= 0 && fnIndex != directTarget {
-			continue
-		}
-		mode := renvoFunctionValueMode(meta, fnIndex, funcType)
-		direct := mode == renvoFunctionValueDirect || mode == renvoFunctionValueMethodExpression
-		closure := mode == renvoFunctionValueClosure || mode == renvoFunctionValueBoundMethod
-		if !direct && !closure {
-			continue
-		}
-		if mode == renvoFunctionValueClosure {
-			closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
-			if closureIndex >= 0 && !g.meta.closures[closureIndex].ready {
-				literalTok := g.meta.funcs[fnIndex].literalTok
-				parentReady := true
-				for parent := 0; parent < len(g.meta.funcs); parent++ {
-					fn := &g.meta.funcs[parent]
-					if parent != fnIndex && literalTok >= fn.bodyStart && literalTok < fn.bodyEnd && (parent >= len(g.funcReachable) || !g.funcReachable[parent]) {
-						parentReady = false
+	// Direct values are integer tags, whereas bound methods and closures
+	// hold pointers. Exhaust direct candidates before dereferencing a handle.
+	for pass := 0; pass < 2; pass++ {
+		for fnIndex := 0; fnIndex < len(meta.funcs); fnIndex++ {
+			if directTarget >= 0 && fnIndex != directTarget {
+				continue
+			}
+			mode := renvoFunctionValueMode(meta, fnIndex, funcType)
+			direct := mode == renvoFunctionValueDirect || mode == renvoFunctionValueMethodExpression
+			closure := mode == renvoFunctionValueClosure || mode == renvoFunctionValueBoundMethod
+			if !direct && !closure || pass == 0 && !direct || pass == 1 && !closure {
+				continue
+			}
+			if mode == renvoFunctionValueClosure {
+				closureIndex := renvoClosureIndexByFunction(g.meta, fnIndex)
+				if closureIndex >= 0 && !g.meta.closures[closureIndex].ready {
+					literalTok := g.meta.funcs[fnIndex].literalTok
+					parentReady := true
+					for parent := 0; parent < len(g.meta.funcs); parent++ {
+						fn := &g.meta.funcs[parent]
+						if parent != fnIndex && literalTok >= fn.bodyStart && literalTok < fn.bodyEnd && (parent >= len(g.funcReachable) || !g.funcReachable[parent]) {
+							parentReady = false
+						}
+					}
+					if !parentReady {
+						continue
 					}
 				}
-				if !parentReady {
-					continue
+			}
+			compareOffset := handleOffset
+			if closure {
+				if closureTagOffset < 0 {
+					closureTagOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
+					renvoAsmLoadPrimaryStackMemory(&g.asm, handleOffset, 0)
+					renvoAsmStorePrimaryStack(&g.asm, closureTagOffset)
 				}
+				compareOffset = closureTagOffset
 			}
-		}
-		compareOffset := handleOffset
-		if closure {
-			if closureTagOffset < 0 {
-				closureTagOffset = renvoAddUnnamedLocal(g, renvoTypeInt)
-				renvoAsmLoadPrimaryStackMemory(&g.asm, handleOffset, 0)
-				renvoAsmStorePrimaryStack(&g.asm, closureTagOffset)
+			nextLabel := renvoAsmNewLabel(&g.asm)
+			tag := renvoFunctionValueTag(g, fnIndex)
+			if directTarget < 0 {
+				renvoAsmJcmpStackImm(&g.asm, compareOffset, tag, nextLabel, 0x95)
 			}
-			compareOffset = closureTagOffset
-		}
-		nextLabel := renvoAsmNewLabel(&g.asm)
-		tag := renvoFunctionValueTag(g, fnIndex)
-		if directTarget < 0 {
-			renvoAsmJcmpStackImm(&g.asm, compareOffset, tag, nextLabel, 0x95)
-		}
-		wordCount := 0
-		extra := 0
-		if mode == renvoFunctionValueClosure {
-			renvoAsmPushStackWord(&g.asm, handleOffset)
-			extra = 1
-		} else if mode == renvoFunctionValueBoundMethod {
-			receiverType := g.meta.params[g.meta.funcs[fnIndex].firstParam].typ
-			receiverOffset := renvoAddUnnamedLocal(g, receiverType)
-			renvoAsmLoadSecondaryStack(&g.asm, handleOffset)
-			renvoAsmAddSecondaryImm(&g.asm, renvoBackendValueSlotSize)
-			renvoEmitCopyMemSecondaryToStack(g, receiverOffset, renvoTypeCopySize(g.meta, receiverType))
-			extra = renvoEmitTypedLocalArgReverse(g, receiverOffset, receiverType)
-		}
-		for i := 0; i < len(argOffsets); i++ {
-			wordCount += renvoEmitTypedLocalArgReverse(g, argOffsets[i], g.meta.fields[funcInfo.first+i].typ)
-		}
-		if hiddenResultOffset > 0 {
-			renvoAsmAddressPrimaryStack(&g.asm, hiddenResultOffset)
-			renvoAsmPushPrimary(&g.asm)
-			extra++
-		}
-		oldSuppress := g.suppressPanicCheck
-		g.suppressPanicCheck = true
-		if g.emittingDefers {
-			renvoAsmPrimaryImm(&g.asm, 1)
-			renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
-		}
-		renvoEmitCallWithWordCount(g, fnIndex, wordCount+extra)
-		if g.emittingDefers {
-			renvoAsmLoadPrimaryStack(&g.asm, previousDeferPendingOffset)
-			renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
-		}
-		g.suppressPanicCheck = oldSuppress
-		if mode == renvoFunctionValueClosure {
-			renvoAsmPushSliceRegs(&g.asm)
-			if !renvoReloadClosureCaptures(g, fnIndex, handleOffset) {
-				return false
+			wordCount := 0
+			extra := 0
+			if mode == renvoFunctionValueClosure {
+				renvoAsmPushStackWord(&g.asm, handleOffset)
+				extra = 1
+			} else if mode == renvoFunctionValueBoundMethod {
+				receiverType := g.meta.params[g.meta.funcs[fnIndex].firstParam].typ
+				receiverOffset := renvoAddUnnamedLocal(g, receiverType)
+				renvoAsmLoadSecondaryStack(&g.asm, handleOffset)
+				renvoAsmAddSecondaryImm(&g.asm, renvoBackendValueSlotSize)
+				renvoEmitCopyMemSecondaryToStack(g, receiverOffset, renvoTypeCopySize(g.meta, receiverType))
+				extra = renvoEmitTypedLocalArgReverse(g, receiverOffset, receiverType)
 			}
-			renvoAsmPopPrimary(&g.asm)
-			renvoAsmPopSecondary(&g.asm)
-			renvoAsmPopTertiary(&g.asm)
+			for i := 0; i < len(argOffsets); i++ {
+				wordCount += renvoEmitTypedLocalArgReverse(g, argOffsets[i], g.meta.fields[funcInfo.first+i].typ)
+			}
+			if hiddenResultOffset > 0 {
+				renvoAsmAddressPrimaryStack(&g.asm, hiddenResultOffset)
+				renvoAsmPushPrimary(&g.asm)
+				extra++
+			}
+			oldSuppress := g.suppressPanicCheck
+			g.suppressPanicCheck = true
+			if g.emittingDefers {
+				renvoAsmPrimaryImm(&g.asm, 1)
+				renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
+			}
+			renvoEmitCallWithWordCount(g, fnIndex, wordCount+extra)
+			if g.emittingDefers {
+				renvoAsmLoadPrimaryStack(&g.asm, previousDeferPendingOffset)
+				renvoAsmStorePrimaryThreadState(g, renvoThreadPanicDeferPendingOff)
+			}
+			g.suppressPanicCheck = oldSuppress
+			if mode == renvoFunctionValueClosure {
+				renvoAsmPushSliceRegs(&g.asm)
+				if !renvoReloadClosureCaptures(g, fnIndex, handleOffset) {
+					return false
+				}
+				renvoAsmPopPrimary(&g.asm)
+				renvoAsmPopSecondary(&g.asm)
+				renvoAsmPopTertiary(&g.asm)
+			}
+			if !g.emittingDefers {
+				renvoEmitPostCallPanicCheck(g)
+			}
+			renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 		}
-		if !g.emittingDefers {
-			renvoEmitPostCallPanicCheck(g)
-		}
-		renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 	}
+
 	// A nil handle, an invalid handle, or a function signature without any
 	// concrete whole-program targets is still a valid call site. It faults only
 	// if execution reaches it; guarded nil calls therefore compile normally.
