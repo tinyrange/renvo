@@ -5089,7 +5089,140 @@ func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	renvoFinalizeTypeLayouts(m)
 	renvoBuildFuncLookup(m)
 	renvoResolveGlobalInitTypes(m)
+	if m.panicEnabled && !renvoProgramUsesC11Semantics(p) {
+		m.panicEnabled = renvoReachablePanicRequired(m)
+	}
 	m.scratchEnd = renvo_runtime_ArenaMark()
+}
+
+// The scanner's hint includes unused library bodies. Only omit unwind state
+// when a conservative executable call graph proves those bodies unreachable.
+// Function values retain every signature-compatible dispatch target. Opaque
+// entrypoints and anonymous functions conservatively keep unwind support.
+type renvoPanicReachability struct {
+	meta   *renvoMeta
+	seen   []bool
+	values []bool
+	queue  []int
+}
+
+func renvoPanicReachMark(state *renvoPanicReachability, fn int) {
+	if fn >= 0 && fn < len(state.seen) && !state.seen[fn] {
+		state.seen[fn] = true
+		state.queue = append(state.queue, fn)
+	}
+}
+
+func renvoPanicReachFunctionValue(state *renvoPanicReachability, fnIndex int) {
+	if state.values[fnIndex] {
+		return
+	}
+	state.values[fnIndex] = true
+	m := state.meta
+	typ := renvoFunctionTypeFromInfo(m, fnIndex)
+	for i := 0; i < len(m.funcs); i++ {
+		if renvoFunctionValueMode(m, i, typ) != 0 {
+			renvoPanicReachMark(state, i)
+		}
+	}
+	if m.funcs[fnIndex].receiverType != 0 {
+		typ = renvoFunctionTypeFromInfoStart(m, fnIndex, 0)
+		for i := 0; i < len(m.funcs); i++ {
+			if renvoFunctionValueMode(m, i, typ) != 0 {
+				renvoPanicReachMark(state, i)
+			}
+		}
+	}
+}
+
+func renvoPanicReachRange(state *renvoPanicReachability, start int, end int) bool {
+	m := state.meta
+	p := m.prog
+	data := p.toks.data
+	for tok := start; tok < end; tok++ {
+		base := tok * renvoTokenStride
+		first := int(renvo_runtime_UnsafeInt32At(data, base))
+		kind := first & 255
+		if kind == renvoTokFunc {
+			return true
+		}
+		selector := false
+		if tok > start {
+			previous := int(renvo_runtime_UnsafeInt32At(data, base-renvoTokenStride))
+			selector = previous&255 == renvoTokOp && byte(previous>>24) == '.'
+		}
+		if kind == renvoTokOp && byte(first>>24) == '(' && selector {
+			return true
+		}
+		if kind != renvoTokIdent {
+			continue
+		}
+		nextChar := byte(0)
+		if tok+1 < end {
+			next := int(renvo_runtime_UnsafeInt32At(data, base+renvoTokenStride))
+			if next&255 == renvoTokOp {
+				nextChar = byte(next >> 24)
+			}
+		}
+		if nextChar == ':' {
+			continue
+		}
+		packed := int(renvo_runtime_UnsafeInt32At(data, base+1))
+		nameStart := packed & 0xffffff
+		size := packed>>24&255 | first>>16&0xff00
+		nameEnd := nameStart + size
+		if size == 5 && (renvoBytesEqualText(p.src, nameStart, nameEnd, "panic") || renvoBytesEqualText(p.src, nameStart, nameEnd, "defer")) || size == 7 && renvoBytesEqualText(p.src, nameStart, nameEnd, "recover") {
+			return true
+		}
+		bucket := renvoHashRange(p.src, nameStart, nameEnd) % len(m.funcBuckets)
+		index := int(renvo_runtime_UnsafeInt32At(m.funcBuckets, bucket))
+		for index >= 0 {
+			fn := &m.funcs[index]
+			if selector == (fn.receiverType != 0) && renvoBytesEqualRange(p.src, fn.nameStart, fn.nameEnd, nameStart, nameEnd) {
+				if nextChar != '(' {
+					renvoPanicReachFunctionValue(state, index)
+				}
+				renvoPanicReachMark(state, index)
+			}
+			index = int(renvo_runtime_UnsafeInt32At(m.funcNext, index))
+		}
+	}
+	return false
+}
+
+func renvoReachablePanicRequired(m *renvoMeta) bool {
+	p := m.prog
+	if m.c.objectFile || m.c.emitImage || targetIsKernelModule(m.c) || renvoPreparedBackendActive != 0 || p.entryFunc < 0 || p.entryFunc >= len(m.funcs) {
+		return true
+	}
+	var state renvoPanicReachability
+	state.meta = m
+	state.seen = make([]bool, len(m.funcs))
+	state.values = make([]bool, len(m.funcs))
+	state.queue = make([]int, 0, len(m.funcs))
+	renvoPanicReachMark(&state, p.entryFunc)
+	for i := 0; i < len(m.funcs); i++ {
+		fn := &m.funcs[i]
+		if fn.exportNameEnd > fn.exportNameStart || fn.nameEnd-fn.nameStart >= 11 && renvoBytesEqualText(p.src, fn.nameStart, fn.nameStart+11, "__renvoSoft") {
+			renvoPanicReachMark(&state, i)
+		}
+	}
+	for i := 0; i < len(m.globals); i++ {
+		global := &m.globals[i]
+		if renvoPanicReachRange(&state, global.initStart, global.initEnd) {
+			return true
+		}
+	}
+	for cursor := 0; cursor < len(state.queue); cursor++ {
+		fn := &m.funcs[state.queue[cursor]]
+		if fn.linkStatic != 0 {
+			continue
+		}
+		if renvoPanicReachRange(&state, fn.bodyStart, fn.bodyEnd) {
+			return true
+		}
+	}
+	return false
 }
 
 func renvoC11UsesDefer(p *renvoProgram) bool {
