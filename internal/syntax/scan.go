@@ -61,11 +61,23 @@ func scanTokens(src []byte) ([]Token, bool) {
 			i += 2
 			continue
 		}
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 128 && unicodeIdentifierWidth(src, i, true) > 0 {
 			start := i
-			i++
+			if c >= 128 {
+				i += unicodeIdentifierWidth(src, i, true)
+			} else {
+				i++
+			}
 			for i < len(src) {
 				part := src[i]
+				if part >= 128 {
+					width := unicodeIdentifierWidth(src, i, false)
+					if width == 0 {
+						break
+					}
+					i += width
+					continue
+				}
 				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
 					break
 				}
