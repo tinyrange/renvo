@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a2a45221d975ab40ddb82450d640284f388b4d07a56c94076f89f5a58cf360f5"
+const CompilerSourceDigest = "edec482d199eff9c63ecee358838acc0db8e434db941b057711ede047ad6b9ab"
 
 // source: backend/compiler_common_impl.go
 
@@ -7037,6 +7037,27 @@ if size >= 2 {
 return 2
 }
 return 1
+}
+
+func renvoLanguageTypeAlignment(meta *renvoMeta, typ int) int {
+t := renvoResolveType(meta, typ)
+if t.kind == renvoTypeComplex64 {
+return renvoNativeAlignment(meta.c, 4)
+}
+if t.kind == renvoTypeArray {
+return renvoLanguageTypeAlignment(meta, t.elem)
+}
+if t.kind == renvoTypeStruct {
+alignment := 1
+for i := 0; i < t.count; i++ {
+fieldAlignment := renvoLanguageTypeAlignment(meta, meta.fields[t.first+i].typ)
+if fieldAlignment > alignment {
+alignment = fieldAlignment
+}
+}
+return alignment
+}
+return renvoNativeAlignment(meta.c, renvoTypeSize(meta, typ))
 }
 
 func renvoFindResolvedNamedTypeIndex(m *renvoMeta, typ int) int {
@@ -25124,6 +25145,10 @@ if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
 renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, arg)))
 return true
 }
+if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(g.meta, renvoInferParsedExprType(g, ep, arg)))
+return true
+}
 if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
 selector := &ep.exprs[arg]
 renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
@@ -32000,6 +32025,10 @@ if e.argCount == 1 {
 arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
 renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, arg)))
+return true
+}
+if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(meta, renvoInferParsedExprType(g, ep, arg)))
 return true
 }
 if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
