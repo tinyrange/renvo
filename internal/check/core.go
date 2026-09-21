@@ -191,7 +191,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
-			if builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope, builtinCalls); builtinErr != CheckOK {
+			builtinCheckArenaStart := arena.Mark()
+			builtinErr, builtinTok := invalidBuiltinCalls(&pkg, &info, fileIndex, fn, &signature, scope, builtinCalls)
+			arena.Reset(builtinCheckArenaStart)
+			if builtinErr != CheckOK {
 				return info, false, builtinErr, fileIndex, builtinTok
 			}
 			callCheckArenaStart := arena.Mark()
