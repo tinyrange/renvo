@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8f17e31afbe187366cd3b67db801739b318f58c3c5ece1524143a3ddc7704082"
+const CompilerSourceDigest = "1ecebbf01f65f93c957b4986eb447caef948ce303ea5375d3c4f418e1ebc6f37"
 
 // source: backend/compiler_common_impl.go
 
@@ -4346,16 +4346,11 @@ renvoNonNil(p)
 if funcTok < 0 || funcTok+1 >= end || !renvoTokIsKind(p, funcTok, renvoTokFunc) || !renvoTokCharIs(p, funcTok+1, '(') {
 return -1
 }
-paramsClose := renvoFindMatchingExprClose(p, funcTok+2, end, '(', ')')
-if paramsClose <= funcTok+1 {
-return -1
-}
-if renvoTokCharIs(p, paramsClose+1, '{') {
-return paramsClose + 1
-}
-resultStart := paramsClose + 1
-bodyOpen := renvoFindStatementBodyOpen(p, resultStart, end)
-if bodyOpen <= resultStart {
+
+
+
+bodyOpen := renvoPrimaryTypeEnd(p, funcTok, end)
+if bodyOpen <= funcTok || bodyOpen >= end || !renvoTokCharIs(p, bodyOpen, '{') {
 return -1
 }
 return bodyOpen
@@ -7639,14 +7634,33 @@ fn := &g.meta.funcs[g.currentFunc]
 if stmt.exprStart < stmt.exprEnd {
 if fn.resultCount > 0 {
 parts, ok := renvoSplitTopLevelComma(g.prog, stmt.exprStart, stmt.exprEnd)
-if !ok || len(parts)/2 != fn.resultCount {
+if !ok {
 return false
+}
+if len(parts) == 2 && fn.resultCount > 1 {
+if !renvoEmitDeferredNamedTupleReturn(g, stmt.exprStart, stmt.exprEnd) {
+return false
+}
+renvoMoveCapturedLocals(g, true)
+renvoAsmJmpLabel(&g.asm, g.deferReturnLabel)
+return true
+}
+if len(parts)/2 != fn.resultCount {
+return false
+}
+var values []int
+if fn.resultCount > 1 {
+values = make([]int, fn.resultCount)
 }
 for i := 0; i < fn.resultCount; i++ {
 result := &g.meta.params[fn.firstResult+i]
-offset := renvoFindLocalOffset(g, result.nameStart, result.nameEnd)
+offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
 if offset < 0 {
 return false
+}
+if len(values) > 0 {
+offset = renvoAddUnnamedLocal(g, result.typ)
+values[i] = offset
 }
 ep := renvoNewExprParse()
 renvoNonNil(ep)
@@ -7654,6 +7668,16 @@ root := renvoParseExpressionRoot(ep, g.prog, parts[i*2], parts[i*2+1])
 if root < 0 || !renvoEmitExprToLocal(g, ep, root, offset) {
 return false
 }
+}
+
+
+for i := 0; i < len(values); i++ {
+result := &g.meta.params[fn.firstResult+i]
+offset := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
+if offset < 0 {
+return false
+}
+renvoEmitCopyStackToStack(g, values[i], offset, renvoTypeCopySize(g.meta, result.typ))
 }
 } else {
 if renvoTypeIsTuple(g.meta, fn.resultType) {
@@ -7684,6 +7708,46 @@ return false
 }
 renvoMoveCapturedLocals(g, true)
 renvoAsmJmpLabel(&g.asm, g.deferReturnLabel)
+return true
+}
+
+
+
+func renvoEmitDeferredNamedTupleReturn(g *renvoLinearGen, start int, end int) bool {
+fn := &g.meta.funcs[g.currentFunc]
+ep := renvoNewExprParse()
+root := renvoParseExpressionRoot(ep, g.prog, start, end)
+if root < 0 {
+return false
+}
+typ := renvoInferParsedExprType(g, ep, root)
+tuple := renvoResolveType(g.meta, typ)
+if !renvoTypeIsTuple(g.meta, typ) || tuple.count != fn.resultCount {
+return false
+}
+sourceOffset := renvoAddUnnamedLocal(g, typ)
+if !renvoEmitExprToLocal(g, ep, root, sourceOffset) {
+return false
+}
+for i := 0; i < fn.resultCount; i++ {
+from := g.meta.fields[tuple.first+i]
+result := g.meta.params[fn.firstResult+i]
+destination := renvoFindResultLocalOffset(g, result.nameStart, result.nameEnd)
+if destination < 0 {
+return false
+}
+source := sourceOffset - from.offset
+if renvoResolveType(g.meta, result.typ).kind == renvoTypeInterface && renvoResolveType(g.meta, from.typ).kind != renvoTypeInterface {
+if !renvoEmitConcreteLocalToInterface(g, from.typ, source, destination) {
+return false
+}
+} else {
+if !renvoTypesEquivalent(g.meta, from.typ, result.typ) {
+return false
+}
+renvoEmitCopyStackToStack(g, source, destination, renvoTypeCopySize(g.meta, result.typ))
+}
+}
 return true
 }
 
@@ -13396,7 +13460,45 @@ rootIndex := renvoParseExpressionRoot(ep, g.prog, start, end)
 if rootIndex < 0 {
 return false
 }
+sourceType := renvoInferParsedExprType(g, ep, rootIndex)
+source := renvoResolveType(g.meta, sourceType)
+if source.kind != renvoTypeStruct || source.count != tuple.count {
+return false
+}
+unchanged := true
+for i := 0; i < tuple.count; i++ {
+from := g.meta.fields[source.first+i]
+to := g.meta.fields[tuple.first+i]
+if from.offset != to.offset || !renvoTypesEquivalent(g.meta, from.typ, to.typ) {
+unchanged = false
+}
+}
+if unchanged {
 return renvoEmitStructReturnExpr(g, ep, rootIndex)
+}
+
+
+sourceOffset := renvoAddUnnamedLocal(g, sourceType)
+if !renvoEmitExprToLocal(g, ep, rootIndex, sourceOffset) {
+return false
+}
+for i := 0; i < tuple.count; i++ {
+from := g.meta.fields[source.first+i]
+to := g.meta.fields[tuple.first+i]
+offset := sourceOffset - from.offset
+if renvoResolveType(g.meta, to.typ).kind == renvoTypeInterface && renvoResolveType(g.meta, from.typ).kind != renvoTypeInterface {
+boxed := renvoAddUnnamedLocal(g, to.typ)
+if !renvoEmitConcreteLocalToInterface(g, from.typ, offset, boxed) {
+return false
+}
+offset = boxed
+} else if !renvoTypesEquivalent(g.meta, from.typ, to.typ) {
+return false
+}
+renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
+renvoEmitCopyStackToMemSecondary(g, offset, to.offset, renvoTypeCopySize(g.meta, to.typ))
+}
+return true
 }
 return false
 }
@@ -14186,6 +14288,19 @@ size = renvoBackendValueSlotSize
 valueOffset := renvoAddUnnamedLocal(g, sourceType)
 if !renvoEmitExprToLocal(g, ep, idx, valueOffset) {
 return false
+}
+return renvoEmitConcreteLocalToInterface(g, sourceType, valueOffset, offset)
+}
+
+func renvoEmitConcreteLocalToInterface(g *renvoLinearGen, sourceType int, valueOffset int, offset int) bool {
+renvoNonNil(g)
+source := renvoResolveType(g.meta, sourceType)
+size := renvoTypeSize(g.meta, sourceType)
+if size < 0 {
+return false
+}
+if size == 0 {
+size = renvoBackendValueSlotSize
 }
 if !renvoInterfaceValueStoredIndirect(g.meta, sourceType) {
 if size <= g.c.renvoNativeIntSize &&
@@ -21842,6 +21957,18 @@ if localIndex < 0 {
 return -1
 }
 return g.locals[localIndex].offset
+}
+
+
+
+func renvoFindResultLocalOffset(g *renvoLinearGen, nameStart int, nameEnd int) int {
+for i := 0; i < g.localCount; i++ {
+local := &g.locals[i]
+if local.nameStart == nameStart && local.nameEnd == nameEnd {
+return local.offset
+}
+}
+return -1
 }
 
 func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
