@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "72fe4adaa691157a16411007257258f72c987f8bb0566e92db5b73fdc2a1f651"
+const CompilerSourceDigest = "5c11797e5114e4c870639f7a77d43ffd8ba0609934566b1f8518eb18d761830e"
 
 // source: backend/compiler_common_impl.go
 
@@ -45539,7 +45539,7 @@ renvoAsmPatchArm(a)
 bssOffset := renvoAsmBssOffset(a)
 out = out[:loadFileSize]
 copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
-a.code = out[a.codeOffset:a.codeOffset+codeLen]
+a.code = out[a.codeOffset : a.codeOffset+codeLen]
 out = renvoAppendElfHeaderArm(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 out = out[:a.codeOffset+codeLen]
 out = append(out, a.data...)

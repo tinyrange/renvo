@@ -1279,7 +1279,7 @@ func renvoAsmImageArmReuseCode(a *renvoAsm, out []byte) []byte {
 	bssOffset := renvoAsmBssOffset(a)
 	out = out[:loadFileSize]
 	copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
-	a.code = out[a.codeOffset:a.codeOffset+codeLen]
+	a.code = out[a.codeOffset : a.codeOffset+codeLen]
 	out = renvoAppendElfHeaderArm(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
 	out = out[:a.codeOffset+codeLen]
 	out = append(out, a.data...)
