@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "92bd9ed9e3e56cc78b8507d7c04df6adf0e3e8a8c5d8aa48db312b85739c413c"
+const CompilerSourceDigest = "2ccc5a3cf31d8448bc1858efb2f3c2c3d2e6e792c0ea17fc519abee96a8439bb"
 
 // source: backend/compiler_common_impl.go
 
@@ -15311,8 +15311,7 @@ renvoAsmMulTertiaryImm(a, elemSize)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmStorePrimaryStack(a, sizeOffset)
 renvoEmitArenaAllocStackPrimary(g, sizeOffset)
-renvoAsmLoadTertiaryStack(a, lenOffset)
-renvoAsmMulTertiaryImm(a, elemSize)
+renvoAsmLoadTertiaryStack(a, sizeOffset)
 renvoEmitMakeZero(g)
 }
 renvoAsmLoadSecondaryTertiaryStack(a, lenOffset, capOffset)
@@ -15398,11 +15397,10 @@ renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
 
 
 
-
 func renvoEmitMakeStaticRingPrimary(g *renvoLinearGen, backingSize int, zeroSize int) {
 sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 renvoAsmStoreStackImm(&g.asm, sizeOffset, backingSize)
-renvoEmitPersistentAllocToPrimary(g, sizeOffset)
+renvoEmitArenaAllocStackPrimary(g, sizeOffset)
 if zeroSize > 0 {
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPrimaryImm(&g.asm, zeroSize)

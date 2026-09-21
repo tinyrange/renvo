@@ -15304,8 +15304,7 @@ func renvoEmitMakeSliceRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		renvoAsmCopyTertiaryToPrimary(a)
 		renvoAsmStorePrimaryStack(a, sizeOffset)
 		renvoEmitArenaAllocStackPrimary(g, sizeOffset)
-		renvoAsmLoadTertiaryStack(a, lenOffset)
-		renvoAsmMulTertiaryImm(a, elemSize)
+		renvoAsmLoadTertiaryStack(a, sizeOffset)
 		renvoEmitMakeZero(g)
 	}
 	renvoAsmLoadSecondaryTertiaryStack(a, lenOffset, capOffset)
@@ -15389,13 +15388,12 @@ func renvoEmitMakeZero(g *renvoLinearGen) {
 	renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
 }
 
-// Retain the historical helper entry point, but never cycle through live
-// allocations. Like slice literals, these escaping constant-sized values use
-// persistent storage; scratch-arena rewinds must not invalidate them.
+// Retain the historical helper entry point, but allocate fresh backing storage
+// through the same arena as dynamic-capacity make calls.
 func renvoEmitMakeStaticRingPrimary(g *renvoLinearGen, backingSize int, zeroSize int) {
 	sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStoreStackImm(&g.asm, sizeOffset, backingSize)
-	renvoEmitPersistentAllocToPrimary(g, sizeOffset)
+	renvoEmitArenaAllocStackPrimary(g, sizeOffset)
 	if zeroSize > 0 {
 		renvoAsmCopyPrimaryToSecondary(&g.asm)
 		renvoAsmPrimaryImm(&g.asm, zeroSize)
