@@ -123,7 +123,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
 			}
-			if fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(buildFuncSignature(file, fn).Results) > 0 &&
+			if !pkg.Files[fileIndex].C && fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(buildFuncSignature(file, fn).Results) > 0 &&
 				!returnBlockTerminates(file, body, fn.BodyStart+1, fn.BodyEnd-1, LookupPackageSymbol(info, "panic") < 0) {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
