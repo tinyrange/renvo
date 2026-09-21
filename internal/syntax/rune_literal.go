@@ -26,30 +26,3 @@ func RuneLiteralValue(src []byte, tok Token) (int, bool) {
 	value, width := identifierRune(src, start)
 	return value, width > 0 && start+width == end
 }
-
-// Source encoding has already been validated before scanner calls this helper.
-func identifierRune(src []byte, start int) (int, int) {
-	if start < 0 || start >= len(src) {
-		return 0, 0
-	}
-	c := src[start]
-	if c < 128 {
-		return int(c), 1
-	}
-	width := 2
-	value := int(c & 31)
-	if c >= 240 {
-		width = 4
-		value = int(c & 7)
-	} else if c >= 224 {
-		width = 3
-		value = int(c & 15)
-	}
-	if start+width > len(src) {
-		return 0, 0
-	}
-	for i := 1; i < width; i++ {
-		value = value*64 + int(src[start+i]&63)
-	}
-	return value, width
-}
