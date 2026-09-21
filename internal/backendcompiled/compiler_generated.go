@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "99215e5959f5f7585366b04db3bf8c0cc256bc551bf707bebb3f80822f7fe731"
+const CompilerSourceDigest = "0b8db32f1d8ae5d0609daf397a5b9e0d8db25ec8d2cfa25f39b5c2555ac71290"
 
 // source: backend/compiler_common_impl.go
 
@@ -24107,7 +24107,11 @@ func renvoEmitWideCompareOperand(g *renvoLinearGen, ep *renvoExprParse, idx int,
 if renvoTypeKindIsFloat(floatKind) {
 return renvoEmitScalarExprForKind(g, ep, idx, floatKind)
 }
-return renvoEmitIntExpr(g, ep, idx)
+if !renvoEmitIntExpr(g, ep, idx) {
+return false
+}
+renvoNormalizeNativeExprPrimary(g, ep, idx)
+return true
 }
 
 func renvoEmitWideStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -37032,7 +37036,7 @@ if target == renvoTargetLinux386 {
 return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\xd1\xcb\x13\x10\xe5\x67\x82\xda\xd7\xe9\x2a\x7d\x46\x5a\xd8\x65\xe4\xbc\xf2\x13\xcc\x32\xc3\x5d\x50\x48\x5b\x72\xc1\xdf\x40\x27", 3, true
+return "linux/aarch64", "\xf3\x34\x4f\x65\x24\xa7\x5b\xf8\xc4\x08\x89\x0c\x48\xa1\xa9\x62\x49\x30\xc9\x58\xfb\x01\x4c\x07\x9d\xd4\xd9\xc3\xd3\xb6\x06\x2a", 3, true
 }
 if target == renvoTargetLinuxArm {
 return "linux/arm", "\x43\x5d\xdd\x4f\x60\xaf\xa9\x5c\xbb\x80\x66\xe8\x10\x26\x1d\xc6\xf8\x86\x2a\x01\x26\xb4\x50\x9a\x18\x47\xf1\xb2\x84\xe7\x69\xad", 3, true
@@ -37047,13 +37051,13 @@ if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\xdb\x73\xca\x0f\xa2\xe8\x46\xda\xee\x41\x93\x02\xe9\x80\xb0\x88\xf8\xba\x37\x5b\x31\x17\x30\x06\xb5\x1a\x78\x53\x85\x6b\x6b\xe0", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\x29\x17\x57\x5e\x0d\x35\x29\xad\x6c\xb0\xa8\x0b\x71\xb2\xa8\xbe\x96\xf3\xbd\x01\x5c\xdf\xe9\xdb\x3e\x13\x91\x98\x89\x20\x33\x95", 3, true
+return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\xfb\x6a\xb2\x5c\x75\x06\x48\xd7\xd1\xe6\x04\xae\xbe\xc3\xe8\x5d\x66\x9e\xc5\x85\xa0\x1a\x66\x69\xf5\x49\x78\x8d\x23\xb2\xba\xfd", 3, true
+return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "\x3c\xb9\xad\x62\x9f\x35\x01\x38\x44\x14\x6a\x27\x9a\xb6\x1d\xc1\xa1\x39\xfe\x24\x6c\xea\x0e\x58\x42\x37\x68\x0d\xc2\x6a\x03\x6b", 3, true
@@ -43085,6 +43089,22 @@ renvoAarch64AsmAddRegImm(a, 12, base, disp)
 return 12
 }
 func renvoAarch64AsmLoadRegMem(a *renvoAsm, dst int, base int, disp int, size int) {
+
+
+if disp > 255 && (size == 1 || size == 2 || size == 4 || size == 8) && disp%size == 0 && disp/size < 4096 {
+op := 0xf9400000
+if size == 1 {
+op = 0x39400000
+}
+if size == 2 {
+op = 0x79800000
+}
+if size == 4 {
+op = 0xb9800000
+}
+renvoAarch64AsmEmit(a, op|((disp/size)<<10)|(base<<5)|dst)
+return
+}
 if disp != 0 && disp >= -256 && disp <= 255 {
 imm := (disp & 511) << 12
 if size == 1 {
@@ -43118,6 +43138,20 @@ return
 renvoAarch64AsmEmit(a, 0xf9400000|(addr<<5)|dst)
 }
 func renvoAarch64AsmStoreRegMem(a *renvoAsm, src int, base int, disp int, size int) {
+if disp > 255 && (size == 1 || size == 2 || size == 4 || size == 8) && disp%size == 0 && disp/size < 4096 {
+op := 0xf9000000
+if size == 1 {
+op = 0x39000000
+}
+if size == 2 {
+op = 0x79000000
+}
+if size == 4 {
+op = 0xb9000000
+}
+renvoAarch64AsmEmit(a, op|((disp/size)<<10)|(base<<5)|src)
+return
+}
 if disp != 0 && disp >= -256 && disp <= 255 {
 imm := (disp & 511) << 12
 if size == 1 {
