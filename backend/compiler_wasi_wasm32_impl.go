@@ -838,7 +838,10 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 		result.data = renvoVMImage(a)
 	} else {
-		result.data = renvoWasm32Image(a)
+		// Keep the owned buffer in a struct across this call. Returning its slice
+		// view would copy the complete image again in a self-hosted compiler.
+		image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
+		result.data = image.data[:image.length]
 	}
 	result.ok = true
 	return result

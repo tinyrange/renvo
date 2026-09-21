@@ -2670,6 +2670,11 @@ go backend {
 	}
 
 	func renvoWasm32Image(a *RTGEmitter) []byte {
+		out := renvoWasm32ImageBuffer(a)
+		return out.data[:out.length]
+	}
+
+	func renvoWasm32ImageBuffer(a *RTGEmitter) renvoWasmBuffer {
 		dataBase := renvoWasm32ProgramBase
 		bssBase := RTGAlign8(dataBase + len(a.Data()))
 		renvoWasm32Patch(a, dataBase, bssBase)
@@ -2702,7 +2707,7 @@ go backend {
 		if len(a.Data()) > 0 {
 			renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.Data()))
 		}
-		return out.data[:out.length]
+		return out
 	}
 
 	func renvoWasiWasm32AppendPrint(out *renvoWasmBuffer, ptr int, length int) {
