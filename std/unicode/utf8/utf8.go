@@ -5,6 +5,55 @@ const RuneSelf = 0x80
 const MaxRune = '\U0010FFFF'
 const UTFMax = 4
 
+func Valid(p []byte) bool {
+	for len(p) > 0 {
+		r, n := DecodeRune(p)
+		if r == RuneError && n == 1 {
+			return false
+		}
+		p = p[n:]
+	}
+	return true
+}
+
+func DecodeLastRuneInString(s string) (rune, int) {
+	end := len(s)
+	if end == 0 {
+		return RuneError, 0
+	}
+	if s[end-1] < RuneSelf {
+		return rune(s[end-1]), 1
+	}
+	start := end - 1
+	limit := end - UTFMax
+	if limit < 0 {
+		limit = 0
+	}
+	for start > limit && s[start]&0xc0 == 0x80 {
+		start--
+	}
+	r, size := DecodeRuneInString(s[start:])
+	if start+size != end {
+		return RuneError, 1
+	}
+	return r, size
+}
+func DecodeLastRune(p []byte) (rune, int) {
+	if len(p) > UTFMax {
+		p = p[len(p)-UTFMax:]
+	}
+	return DecodeLastRuneInString(string(p))
+}
+
+// DecodeRune decodes the first rune, returning RuneError and width 1 for an
+// invalid encoding, or width 0 for an empty input.
+func DecodeRune(p []byte) (rune, int) {
+	if len(p) > UTFMax {
+		p = p[:UTFMax]
+	}
+	return DecodeRuneInString(string(p))
+}
+
 func RuneLen(r rune) int {
 	if r < 0 {
 		return -1
@@ -82,8 +131,12 @@ func RuneCountInString(s string) int {
 
 func EncodeRune(p []byte, r rune) int {
 	n := RuneLen(r)
-	if n < 0 || len(p) < n {
-		return 0
+	if n < 0 {
+		r = RuneError
+		n = 3
+	}
+	if len(p) < n {
+		panic("utf8.EncodeRune: buffer too short")
 	}
 	if n == 1 {
 		p[0] = byte(r)
