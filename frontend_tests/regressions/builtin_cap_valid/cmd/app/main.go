@@ -1,6 +1,9 @@
 package main
 
-import _ "renvo.dev/x/runtime/serial"
+import (
+	"renvo.dev/x/runtime"
+	"renvo.dev/x/runtime/serial"
+)
 
 import "fmt"
 
@@ -10,6 +13,7 @@ func shadowed() int {
 }
 
 func main() {
+	runtime.EnableGoroutines(serial.New())
 	values := make([]int, 2, 5)
 	channel := make(chan int, 3)
 	if cap([2]int{}) == 2 && cap(&[3]int{}) == 3 && cap(values) == 5 && cap(channel) == 3 && shadowed() == 13 {

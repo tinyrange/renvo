@@ -1,12 +1,16 @@
 package main
 
-import _ "renvo.dev/x/runtime/serial"
+import (
+	"renvo.dev/x/runtime"
+	"renvo.dev/x/runtime/serial"
+)
 
 type Slice []int
 type Alias = Slice
 type Map map[int]int
 
 func main() {
+	runtime.EnableGoroutines(serial.New())
 	s := make(Alias, 2, 4)
 	s[1] = 7
 	if len(s) != 2 || cap(s) != 4 || s[0] != 0 || s[1] != 7 {
