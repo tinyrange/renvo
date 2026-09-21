@@ -2598,6 +2598,26 @@ go backend {
 		return
 	}
 
+	// Encode the small segment header separately, then append initialized data
+	// directly to the final image instead of growing a second payload buffer.
+	func renvoWasm32AppendDataSectionDirect(out *renvoWasmBuffer, dataBase int, data []byte) {
+		var header renvoWasmBuffer
+		renvoWasmAppendU32(&header, 1)
+		renvoWasmPut(&header, 0x00)
+		renvoWasmAppendI32Const(&header, dataBase)
+		renvoWasmPut(&header, 0x0b)
+		renvoWasmAppendU32(&header, len(data))
+		renvoWasm32EnsureAdditionalCapacity(out, len(data)+header.length+6)
+		renvoWasmPut(out, 11)
+		renvoWasmAppendU32(out, header.length+len(data))
+		for i := 0; i < header.length; i++ {
+			renvoWasmPut(out, header.data[i])
+		}
+		for i := 0; i < len(data); i++ {
+			renvoWasmPut(out, data[i])
+		}
+	}
+
 	func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 		var out renvoWasmBuffer
 		renvoWasmAppendU32(&out, 1)
@@ -2705,7 +2725,7 @@ go backend {
 		renvoWasmAppendSection(&out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
 		renvoWasm32AppendCodeSectionDirect(&out, a, instrPcs, routinePcs, routineEnds, symbolPcs, callStackBase, frameTop, exprStackBase, browserStepRoutine)
 		if len(a.Data()) > 0 {
-			renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.Data()))
+			renvoWasm32AppendDataSectionDirect(&out, dataBase, a.Data())
 		}
 		return out
 	}
@@ -3751,6 +3771,7 @@ arch vm32 {
 		renvoWasm32CondLt = go renvoWasm32CondLt
 		renvoWasm32CondNe = go renvoWasm32CondNe
 		renvoWasm32CondOpcodes = go renvoWasm32CondOpcodes
+		renvoWasm32AppendDataSectionDirect = go renvoWasm32AppendDataSectionDirect
 		renvoWasm32DataSectionFull = go renvoWasm32DataSectionFull
 		renvoWasm32EmitBranch = go renvoWasm32EmitBranch
 		renvoWasm32EmitCallLabel = go renvoWasm32EmitCallLabel

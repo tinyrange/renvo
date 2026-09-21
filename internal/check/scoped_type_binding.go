@@ -29,11 +29,12 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			bindings = append(bindings, scopedTypeBinding{name: field.NameTok, visible: fn.BodyStart, end: fn.BodyEnd, typeStart: field.TypeStart, typeEnd: field.TypeEnd, valueStart: -1, valueEnd: -1, writable: true})
 		}
 	}
-	for _, stmt := range body.Stmts {
+	scopeEnds := localRuleScopeEnds(body)
+	for statementIndex, stmt := range body.Stmts {
 		start, end := stmt.StartTok, stmt.EndTok
 		scopeEnd := 0
 		if stmt.Kind == syntax.StmtDecl {
-			scopeEnd = localRuleScopeEnd(body, start)
+			scopeEnd = scopeEnds[statementIndex]
 			kind := file.Tokens[start].KindLine & 255
 			start++
 			constant := kind == syntax.TokenConst
@@ -87,7 +88,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 		op := findTopLevelAssignOp(file, start, end)
 		if op >= 0 && tokenTextIs(&file, op, ":=") {
 			if scopeEnd == 0 {
-				scopeEnd = localRuleScopeEnd(body, stmt.StartTok)
+				scopeEnd = scopeEnds[statementIndex]
 			}
 			bindings = appendScopedTypeBindings(bindings, file, start, end, scopeEnd, true, false, true)
 		}
