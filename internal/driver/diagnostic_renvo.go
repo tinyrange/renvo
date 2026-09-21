@@ -49,9 +49,9 @@ const renvoOptionMessageBlob = "missing output after -omissing target after -tun
 
 var renvoOptionMessageOffsets = [...]int{0, 0, 23, 46, 64, 64, 88, 106, 126, 144, 182, 182, 218, 236, 268, 291, 330, 368, 411, 452, 491, 541, 577, 577, 577, 611, 654, 695, 728, 754, 795, 829, 861, 914, 914}
 
-const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scope"
+const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scopeexpected identifier or type assertion after dot"
 
-var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225}
+var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225, 272}
 
 const renvoLowerMessageBlob = "invalid checked graph reached the lowererinvalid package index reached the lowererinvalid source token reached the lowererpackage unit construction failedunchecked program reached the lowerer"
 
@@ -77,7 +77,7 @@ func renvoSetDiagnosticDetail(d *Diagnostic, code string, message string) {
 }
 
 func renvoSyntaxErrorDiagnostic(d *Diagnostic, detail int) {
-	if detail > syntax.ParseOK && detail <= syntax.ParseErrTopLevel {
+	if detail > syntax.ParseOK && detail <= syntax.ParseErrDot {
 		number := detail + 1
 		if detail == syntax.ParseErrScan {
 			number = 1

@@ -331,6 +331,8 @@ func syntaxErrorDiagnostic(diagnostic Diagnostic, detail int) Diagnostic {
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-005", "invalid top-level declaration"
 	case syntax.ParseErrFunc:
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-006", "invalid function or method declaration"
+	case syntax.ParseErrDot:
+		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-008", "expected identifier or type assertion after dot"
 	case syntax.ParseErrTopLevel:
 		diagnostic.Code, diagnostic.Message = "RENVO-PARSE-007", "unexpected statement or expression at package scope"
 	default:

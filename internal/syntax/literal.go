@@ -78,9 +78,18 @@ func stringEscapeValue(src []byte, slash int, end int) (int, int, bool, bool) {
 		return 0, 0, false, false
 	}
 	value := 0
+	limit := 255
+	if unicode {
+		limit = 0x10ffff
+	}
 	for i := 0; i < digits; i++ {
 		digit, ok := hexValue(src[start+i])
 		if !ok || digit >= base {
+			return 0, 0, false, false
+		}
+		// Bound each step before multiplication: an eight-digit Unicode
+		// escape may otherwise wrap a 32-bit int before final validation.
+		if value > (limit-digit)/base {
 			return 0, 0, false, false
 		}
 		value = value*base + digit
