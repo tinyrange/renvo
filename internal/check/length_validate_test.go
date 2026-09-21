@@ -18,6 +18,7 @@ func TestLengthCapacityArity(t *testing.T) {
 func TestLengthCapacityScalarOperands(t *testing.T) {
 	for _, source := range []string{
 		`func main(){_=len(1)}`,
+		`func main(){_=func(){_=len([]int{1})};_=len(1)}`,
 		`func main(){_=len(true)}`,
 		`func main(){_=len(nil)}`,
 		`func main(){v:=1;_=len(v)}`,
