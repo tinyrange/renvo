@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3dd0d05f0424a945d85f5c9480994df667bc934896efc4a178cfe62c98423c3f"
+const CompilerSourceDigest = "72fe4adaa691157a16411007257258f72c987f8bb0566e92db5b73fdc2a1f651"
 
 // source: backend/compiler_common_impl.go
 
@@ -45527,10 +45527,32 @@ renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
 return true
 }
 
+
+
+func renvoAsmImageArmReuseCode(a *renvoAsm, out []byte) []byte {
+codeLen := len(a.code)
+loadFileSize := a.codeOffset + codeLen + len(a.data)
+if !a.c.stripSymbols || cap(a.code) < loadFileSize {
+return renvoAsmImageArm(a)
+}
+renvoAsmPatchArm(a)
+bssOffset := renvoAsmBssOffset(a)
+out = out[:loadFileSize]
+copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
+a.code = out[a.codeOffset:a.codeOffset+codeLen]
+out = renvoAppendElfHeaderArm(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+out = out[:a.codeOffset+codeLen]
+out = append(out, a.data...)
+if renvoFixedTarget == 0 {
+return renvoAppendReplLinkTable(out, a)
+}
+return out
+}
+
 func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
 renvoNonNil(g)
 a := &g.asm
-data := renvoAsmImageArm(a)
+data := renvoAsmImageArmReuseCode(a, a.code)
 var result renvoCompileResult
 if a.patchFailed || len(data) == 0 {
 return result
