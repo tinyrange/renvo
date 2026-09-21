@@ -216,7 +216,7 @@ func selfHostedFrontendCompiler(t *testing.T, root string) frontendConfig {
 
 	target := frontendTarget(t)
 	selfHostOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "renvo-frontend-selfhost-*")
+		dir, err := frontendSuiteTempDir("renvo-frontend-selfhost-*")
 		if err != nil {
 			selfHostErr = err
 			return
@@ -327,7 +327,7 @@ func runFrontendCorpusCase(t *testing.T, frontend frontendConfig, dir string) {
 		return
 	}
 
-	outDir, err := os.MkdirTemp("", "renvo-frontend-corpus-case-*")
+	outDir, err := frontendSuiteTempDir("renvo-frontend-corpus-case-*")
 	if err != nil {
 		t.Fatalf("create corpus output directory: %v", err)
 	}
@@ -373,7 +373,7 @@ func frontendCompiler(t *testing.T, root string) frontendConfig {
 		return frontendConfig{}
 	}
 	frontendOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "renvo-frontend-corpus-*")
+		dir, err := frontendSuiteTempDir("renvo-frontend-corpus-*")
 		if err != nil {
 			frontendErr = err
 			return
