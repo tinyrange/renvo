@@ -10,6 +10,7 @@ type constantIndexContext struct {
 	info      *PackageInfo
 	fileIndex int
 	fn        syntax.FuncDecl
+	strict    bool
 }
 
 func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body) int {
@@ -49,6 +50,9 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 		return 0, false
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
+		if context.strict {
+			return 0, false
+		}
 		return constantIndexInt(context, start+2, end-1, before, depth+1)
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
@@ -69,6 +73,9 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 			return 0, false
 		}
 		if tokenTextIs(&file, start, "-") {
+			if value == -int(^uint(0)>>1)-1 {
+				return 0, false
+			}
 			return -value, true
 		}
 		if tokenTextIs(&file, start, "^") {
@@ -85,7 +92,7 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
-	for i := context.fn.BodyStart + 1; i+3 < before; i++ {
+	for i := context.fn.BodyStart + 1; !context.strict && i+3 < before; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(&file, i+1, start) && tokenTextIs(&file, i+2, "=") {
 			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
@@ -93,6 +100,9 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 	name := tokenString(&file, start)
 	for i := 0; i < len(context.info.Decls); i++ {
 		if context.info.Decls[i].Kind == SymbolConst && context.info.Decls[i].Name == name && context.info.Decls[i].File >= 0 && context.info.Decls[i].File < len(context.pkg.Files) {
+			if context.strict && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
+				return 0, false
+			}
 			values := splitExprList(context.pkg.Files[context.info.Decls[i].File].File, context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
 			if context.info.Decls[i].ValueIndex >= 0 && context.info.Decls[i].ValueIndex < len(values) {
 				context.fileIndex = context.info.Decls[i].File
@@ -138,15 +148,32 @@ func constantIndexPrecedence(operator string) int {
 }
 
 func applyConstantIndexOperator(operator string, left int, right int) (int, bool) {
+	maximum := int(^uint(0) >> 1)
+	minimum := -maximum - 1
 	switch operator {
 	case "+":
+		if right > 0 && left > maximum-right || right < 0 && left < minimum-right {
+			return 0, false
+		}
 		return left + right, true
 	case "-":
+		if right < 0 && left > maximum+right || right > 0 && left < minimum+right {
+			return 0, false
+		}
 		return left - right, true
 	case "*":
+		if left == minimum && right == -1 || right == minimum && left == -1 {
+			return 0, false
+		}
+		if right != 0 && (left*right)/right != left {
+			return 0, false
+		}
 		return left * right, true
 	case "/", "%":
 		if right == 0 {
+			return 0, false
+		}
+		if left == minimum && right == -1 {
 			return 0, false
 		}
 		if operator == "/" {
@@ -154,10 +181,13 @@ func applyConstantIndexOperator(operator string, left int, right int) (int, bool
 		}
 		return left % right, true
 	case "<<", ">>":
-		if right < 0 || right >= 63 {
+		if right < 0 || right >= 32 && maximum == 2147483647 || right >= 64 {
 			return 0, false
 		}
 		if operator == "<<" {
+			if (left<<uint(right))>>uint(right) != left {
+				return 0, false
+			}
 			return left << uint(right), true
 		}
 		return left >> uint(right), true

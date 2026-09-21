@@ -44,6 +44,7 @@ const (
 	CheckErrInitSignature
 	CheckErrMissingReturn
 	CheckErrRecursiveType
+	CheckErrConstantOperation
 )
 
 const (

@@ -419,6 +419,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-035", "missing return"
 		case check.CheckErrRecursiveType:
 			code, message = "RENVO-CHECK-037", "invalid recursive value type"
+		case check.CheckErrConstantOperation:
+			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
 		}
