@@ -3442,6 +3442,8 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		} else if renvoTokCharIs(p, e.tok, '+') {
 		} else if renvoTokCharIs(p, e.tok, '^') {
 			value = ^value
+			typ := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+			value = renvoConvertConstInt(g.c.renvoNativeIntSize, value, typ.kind)
 		} else if renvoTokCharIs(p, e.tok, '!') {
 			value = 0
 			if inner.value == 0 {
@@ -3461,6 +3463,10 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		rightKind := rightExpr.kind
 		rightTok := rightExpr.tok
 		left := renvoEvalConstExpr(g, ep, e.left)
+		shift := renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>')
+		if shift && !left.ok {
+			left = renvoEvalIntegralShiftLiteral(g, ep, e.left)
+		}
 		if !left.ok {
 			if renvoFixedTarget == 0 {
 				right := renvoEvalConstExpr(g, ep, rightIndex)
@@ -3529,10 +3535,18 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 			right = renvoEvalConstExpr(g, ep, rightIndex)
 		}
 		if !right.ok {
+			if shift {
+				right = renvoEvalIntegralShiftLiteral(g, ep, rightIndex)
+			}
+		}
+		if !right.ok {
 			renvoSetConstResult(out, 0, false)
 			return
 		}
 		usesFloat := renvoBinaryUsesFloat(g, ep, e)
+		if shift {
+			usesFloat = false
+		}
 		if usesFloat {
 			// Runtime and typed constant lowering preserve the full IEEE value;
 			// the integer-only evaluator must not approximate it.
@@ -3553,6 +3567,51 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 		return
 	}
 	renvoSetConstResult(out, 0, false)
+}
+
+// A shift permits an untyped floating literal only when its exact value is an
+// integer. Never round through IEEE arithmetic or truncate fractional digits.
+func renvoEvalIntegralShiftLiteral(g *renvoLinearGen, ep *renvoExprParse, idx int) renvoConstResult {
+	e := &ep.exprs[idx]
+	p := g.prog
+	if e.kind == renvoExprUnary && (renvoTokCharIs(p, e.tok, '+') || renvoTokCharIs(p, e.tok, '-')) {
+		value := renvoEvalIntegralShiftLiteral(g, ep, e.left)
+		if value.ok && renvoTokCharIs(p, e.tok, '-') {
+			value.value = -value.value
+		}
+		return value
+	}
+	if e.kind != renvoExprFloat {
+		return renvoConstResult{}
+	}
+	tok := renvoTokAt(p, e.tok)
+	if tok.end-tok.start >= 800 || renvoExprTokenIsImaginary(p, e.tok) {
+		return renvoConstResult{}
+	}
+	for at := tok.start; at < tok.end; at++ {
+		ch := renvo_runtime_UnsafeByteAt(p.src, at)
+		if ch == 'x' || ch == 'X' || ch == 'p' || ch == 'P' {
+			return renvoConstResult{}
+		}
+	}
+	var decimal renvoFloatDecimal
+	renvoFloatDecimalSetToken(&decimal, p, e.tok)
+	if decimal.trunc || decimal.dp < decimal.nd || decimal.dp > 19 {
+		return renvoConstResult{}
+	}
+	value := 0
+	maximum := int(^uint(0) >> 1)
+	for at := 0; at < decimal.dp; at++ {
+		digit := 0
+		if at < decimal.nd {
+			digit = int(decimal.digit[at] - '0')
+		}
+		if value > (maximum-digit)/10 {
+			return renvoConstResult{}
+		}
+		value = value*10 + digit
+	}
+	return renvoConstResultOk(value)
 }
 
 // renvoFunctionLeadingReturnExpr finds an unconditional return at the start of
@@ -5646,6 +5705,12 @@ func renvoEvalMetaParsedConstExprInto(m *renvoMeta, p *renvoProgram, ep *renvoEx
 		} else if renvoTokCharIs(p, e.tok, '+') {
 		} else if renvoTokCharIs(p, e.tok, '^') {
 			value = ^value
+			var g renvoLinearGen
+			g.c = m.c
+			g.meta = m
+			g.prog = p
+			typ := renvoResolveType(m, renvoInferParsedExprType(&g, ep, e.left))
+			value = renvoConvertConstInt(m.c.renvoNativeIntSize, value, typ.kind)
 		} else if renvoTokCharIs(p, e.tok, '!') {
 			value = 0
 			if inner.value == 0 {
@@ -13858,6 +13923,9 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		}
 		leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
 		if renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>') {
+			if renvoExprIsUntypedNumber(ep, e.left) {
+				return renvoTypeInt
+			}
 			return leftTypeIndex
 		}
 		rightTypeIndex := renvoInferParsedExprType(g, ep, e.right)
@@ -25072,7 +25140,8 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		constResult := renvoEvalConstExpr(g, ep, idx)
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(g.meta, resultType)
-		if constResult.ok && !ep.hasFloat && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind) {
+		exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
+		if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind) {
 			renvoAsmPrimaryImm(a, constResult.value)
 			return true
 		}
@@ -29498,6 +29567,25 @@ func renvoEmit386Float64ExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx i
 		return true
 	}
 	if e.kind == renvoExprBinary {
+		// A constant shift remains integer-valued when used in a floating
+		// expression. Evaluate it before converting, rather than issuing an
+		// unsupported floating-point shift operation on 32-bit targets.
+		if renvoTok2Is(g.prog, e.tok, '<', '<') || renvoTok2Is(g.prog, e.tok, '>', '>') {
+			constant := renvoEvalConstExpr(g, ep, idx)
+			if constant.ok {
+				unsigned := renvoExprHasUnsignedIntType(g, ep, idx)
+				high := constant.value >> 32
+				if g.prog.compilerInt32 && unsigned {
+					high = 0
+				}
+				temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+				renvoAsmStoreStackImm(&g.asm, temp, constant.value)
+				renvoAsmStoreStackImm(&g.asm, temp-4, high)
+				renvo32IEEEIntToFloatStack(g, temp, 8, 8, !unsigned)
+				renvoEmitCopyStackToStack(g, temp, offset, 8)
+				return true
+			}
+		}
 		kind := renvoBinaryFloatKind(g, ep, e)
 		if kind == renvoTypeFloat32 {
 			temp := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
@@ -31959,7 +32047,8 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(meta, resultType)
 		renvoNonNil(result)
-		if constResult.ok && !ep.hasFloat && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 && !renvoTypeKindIsFloat(result.kind) {
+		exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
+		if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 && !renvoTypeKindIsFloat(result.kind) {
 			renvoAsmPrimaryImm(a, constResult.value)
 			return true
 		}

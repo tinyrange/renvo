@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3f45845983c089d1cb3d463cd36ac6824d6bcbce1f599dff4dd80dd36847ca9a"
+const CompilerSourceDigest = "874656661c2226684d2f5c77d713845f4a64f413db826f7f9642755a20faa556"
 
 // source: backend/compiler_common_impl.go
 
@@ -3449,6 +3449,8 @@ value = -value
 } else if renvoTokCharIs(p, e.tok, '+') {
 } else if renvoTokCharIs(p, e.tok, '^') {
 value = ^value
+typ := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+value = renvoConvertConstInt(g.c.renvoNativeIntSize, value, typ.kind)
 } else if renvoTokCharIs(p, e.tok, '!') {
 value = 0
 if inner.value == 0 {
@@ -3468,6 +3470,10 @@ rightExpr := &ep.exprs[rightIndex]
 rightKind := rightExpr.kind
 rightTok := rightExpr.tok
 left := renvoEvalConstExpr(g, ep, e.left)
+shift := renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>')
+if shift && !left.ok {
+left = renvoEvalIntegralShiftLiteral(g, ep, e.left)
+}
 if !left.ok {
 if renvoFixedTarget == 0 {
 right := renvoEvalConstExpr(g, ep, rightIndex)
@@ -3536,10 +3542,18 @@ right = renvoEvalBooleanConst(g, rightTok)
 right = renvoEvalConstExpr(g, ep, rightIndex)
 }
 if !right.ok {
+if shift {
+right = renvoEvalIntegralShiftLiteral(g, ep, rightIndex)
+}
+}
+if !right.ok {
 renvoSetConstResult(out, 0, false)
 return
 }
 usesFloat := renvoBinaryUsesFloat(g, ep, e)
+if shift {
+usesFloat = false
+}
 if usesFloat {
 
 
@@ -3560,6 +3574,51 @@ renvoEvalConstBinaryInto(g, opTok, left.value, right.value, unsignedKind, out)
 return
 }
 renvoSetConstResult(out, 0, false)
+}
+
+
+
+func renvoEvalIntegralShiftLiteral(g *renvoLinearGen, ep *renvoExprParse, idx int) renvoConstResult {
+e := &ep.exprs[idx]
+p := g.prog
+if e.kind == renvoExprUnary && (renvoTokCharIs(p, e.tok, '+') || renvoTokCharIs(p, e.tok, '-')) {
+value := renvoEvalIntegralShiftLiteral(g, ep, e.left)
+if value.ok && renvoTokCharIs(p, e.tok, '-') {
+value.value = -value.value
+}
+return value
+}
+if e.kind != renvoExprFloat {
+return renvoConstResult{}
+}
+tok := renvoTokAt(p, e.tok)
+if tok.end-tok.start >= 800 || renvoExprTokenIsImaginary(p, e.tok) {
+return renvoConstResult{}
+}
+for at := tok.start; at < tok.end; at++ {
+ch := renvo_runtime_UnsafeByteAt(p.src, at)
+if ch == 'x' || ch == 'X' || ch == 'p' || ch == 'P' {
+return renvoConstResult{}
+}
+}
+var decimal renvoFloatDecimal
+renvoFloatDecimalSetToken(&decimal, p, e.tok)
+if decimal.trunc || decimal.dp < decimal.nd || decimal.dp > 19 {
+return renvoConstResult{}
+}
+value := 0
+maximum := int(^uint(0) >> 1)
+for at := 0; at < decimal.dp; at++ {
+digit := 0
+if at < decimal.nd {
+digit = int(decimal.digit[at] - '0')
+}
+if value > (maximum-digit)/10 {
+return renvoConstResult{}
+}
+value = value*10 + digit
+}
+return renvoConstResultOk(value)
 }
 
 
@@ -5653,6 +5712,12 @@ value = -value
 } else if renvoTokCharIs(p, e.tok, '+') {
 } else if renvoTokCharIs(p, e.tok, '^') {
 value = ^value
+var g renvoLinearGen
+g.c = m.c
+g.meta = m
+g.prog = p
+typ := renvoResolveType(m, renvoInferParsedExprType(&g, ep, e.left))
+value = renvoConvertConstInt(m.c.renvoNativeIntSize, value, typ.kind)
 } else if renvoTokCharIs(p, e.tok, '!') {
 value = 0
 if inner.value == 0 {
@@ -13865,6 +13930,9 @@ return renvoTypeBool
 }
 leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
 if renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>') {
+if renvoExprIsUntypedNumber(ep, e.left) {
+return renvoTypeInt
+}
 return leftTypeIndex
 }
 rightTypeIndex := renvoInferParsedExprType(g, ep, e.right)
@@ -25079,7 +25147,8 @@ if e.kind == renvoExprUnary || e.kind == renvoExprBinary || e.kind == renvoExprC
 constResult := renvoEvalConstExpr(g, ep, idx)
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
-if constResult.ok && !ep.hasFloat && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind) {
+exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
+if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind) {
 renvoAsmPrimaryImm(a, constResult.value)
 return true
 }
@@ -29505,6 +29574,25 @@ renvo32IEEENegateStack(g, offset, 8)
 return true
 }
 if e.kind == renvoExprBinary {
+
+
+
+if renvoTok2Is(g.prog, e.tok, '<', '<') || renvoTok2Is(g.prog, e.tok, '>', '>') {
+constant := renvoEvalConstExpr(g, ep, idx)
+if constant.ok {
+unsigned := renvoExprHasUnsignedIntType(g, ep, idx)
+high := constant.value >> 32
+if g.prog.compilerInt32 && unsigned {
+high = 0
+}
+temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+renvoAsmStoreStackImm(&g.asm, temp, constant.value)
+renvoAsmStoreStackImm(&g.asm, temp-4, high)
+renvo32IEEEIntToFloatStack(g, temp, 8, 8, !unsigned)
+renvoEmitCopyStackToStack(g, temp, offset, 8)
+return true
+}
+}
 kind := renvoBinaryFloatKind(g, ep, e)
 if kind == renvoTypeFloat32 {
 temp := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
@@ -31966,7 +32054,8 @@ constResult := renvoEvalConstExpr(g, ep, idx)
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(meta, resultType)
 renvoNonNil(result)
-if constResult.ok && !ep.hasFloat && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 && !renvoTypeKindIsFloat(result.kind) {
+exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
+if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 && !renvoTypeKindIsFloat(result.kind) {
 renvoAsmPrimaryImm(a, constResult.value)
 return true
 }
