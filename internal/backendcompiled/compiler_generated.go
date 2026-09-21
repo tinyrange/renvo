@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d9197bf408f2f2d189a58f9e6d1c993014d74593d780582f73ac4f1d8621e2d6"
+const CompilerSourceDigest = "8859c95d25bcbd5f508aaba72d74cdfb6b917cf90a6a2032ed57b320f7a7d2c9"
 
 // source: backend/compiler_common_impl.go
 
@@ -14613,6 +14613,7 @@ return true
 const renvoInterfaceIndirectTypeBase = 1048576
 const renvoPanicTypeAssertionTag = 1048575
 const renvoPanicOutOfMemoryTag = 1048574
+const renvoPanicNilTag = 1048573
 
 func renvoInterfaceIndirectTypeBaseFor(meta *renvoMeta) int {
 if meta != nil && meta.c.renvoNativeIntSize == 2 {
@@ -18854,6 +18855,10 @@ func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffse
 renvoNonNil(g)
 meta := g.meta
 renvoNonNil(meta)
+if directTarget < 0 {
+renvoAsmLoadPrimaryStack(&g.asm, handleOffset)
+renvoEmitRuntimeNonNilPrimary(g)
+}
 doneLabel := renvoAsmNewLabel(&g.asm)
 funcInfo := renvoResolveType(meta, funcType)
 renvoNonNil(funcInfo)
@@ -19218,6 +19223,13 @@ valueOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 if !renvoEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 return false
 }
+
+
+nonNil := renvoAsmNewLabel(&g.asm)
+renvoAsmLoadPrimaryStack(&g.asm, valueOffset-renvoBackendValueSlotSize)
+renvoAsmJnzPrimary(&g.asm, nonNil)
+renvoAsmStoreStackImm(&g.asm, valueOffset-renvoBackendValueSlotSize, renvoPanicNilTag)
+renvoAsmMarkLabel(&g.asm, nonNil)
 return renvoEmitPanicState(g, valueOffset)
 }
 
@@ -19543,6 +19555,7 @@ normalLabel := renvoAsmNewLabel(a)
 stringLabel := renvoAsmNewLabel(a)
 assertionLabel := renvoAsmNewLabel(a)
 outOfMemoryLabel := renvoAsmNewLabel(a)
+nilLabel := renvoAsmNewLabel(a)
 exitLabel := renvoAsmNewLabel(a)
 renvoAsmPushPrimary(a)
 renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicIDOff)
@@ -19553,6 +19566,9 @@ renvoAsmCopyPrimaryToTertiary(a)
 renvoAsmPrimaryImm(a, renvoPanicOutOfMemoryTag)
 renvoAsmCmpTertiaryPrimarySet(a, 0x94)
 renvoAsmJnzPrimary(a, outOfMemoryLabel)
+renvoAsmPrimaryImm(a, renvoPanicNilTag)
+renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+renvoAsmJnzPrimary(a, nilLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmPrimaryImm(a, renvoPanicTypeAssertionTag)
 renvoAsmCmpTertiaryPrimarySet(a, 0x94)
@@ -19576,6 +19592,8 @@ renvoAsmJmpMarkLabel(a, exitLabel, assertionLabel)
 renvoEmitStaticWrite(g, "interface conversion failed", 2)
 renvoAsmJmpMarkLabel(a, exitLabel, outOfMemoryLabel)
 renvoEmitStaticWrite(g, "out of memory", 2)
+renvoAsmJmpMarkLabel(a, exitLabel, nilLabel)
+renvoEmitStaticWrite(g, "panic called with nil argument", 2)
 renvoAsmMarkLabel(a, exitLabel)
 renvoEmitStaticWrite(g, "\n", 2)
 renvoAsmPrimaryImm(a, 2)
@@ -25323,7 +25341,11 @@ if e.kind == renvoExprUnary {
 if renvoTokCharIs(p, e.tok, '&') {
 inner := &ep.exprs[e.left]
 if inner.kind == renvoExprUnary && renvoTokCharIs(p, inner.tok, '*') {
-return renvoEmitIntExpr(g, ep, inner.left)
+if !renvoEmitIntExpr(g, ep, inner.left) {
+return false
+}
+renvoEmitRuntimeNonNilPrimary(g)
+return true
 }
 if inner.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
@@ -32249,7 +32271,11 @@ if e.kind == renvoExprUnary {
 if renvoTokCharIs(p, e.tok, '&') {
 inner := &ep.exprs[e.left]
 if inner.kind == renvoExprUnary && renvoTokCharIs(p, inner.tok, '*') {
-return renvoEmitIntExpr(g, ep, inner.left)
+if !renvoEmitIntExpr(g, ep, inner.left) {
+return false
+}
+renvoEmitRuntimeNonNilPrimary(g)
+return true
 }
 if inner.kind == renvoExprIdent {
 localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
