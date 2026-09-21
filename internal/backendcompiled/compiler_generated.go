@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "23f97a0b7827a721b3e9b04ab0d3c405520a92b5502a3da1b5e55548f338e011"
+const CompilerSourceDigest = "8f17e31afbe187366cd3b67db801739b318f58c3c5ece1524143a3ddc7704082"
 
 // source: backend/compiler_common_impl.go
 
@@ -11230,6 +11230,17 @@ return false
 renvoAsmMarkLabel(a, skipLabel)
 return true
 }
+if renvoStringOrderingExpr(g, ep, e) {
+if !renvoEmitStringOrdering(g, ep, e) {
+return false
+}
+if jumpIfTrue {
+renvoAsmJnzPrimary(a, label)
+} else {
+renvoAsmJzPrimary(a, label)
+}
+return true
+}
 if !renvoBinaryComparesInterface(g, ep, e) {
 if g.c.renvoNativeIntSize == 4 && renvoEmitWideCompareExpr(g, ep, idx) {
 if jumpIfTrue {
@@ -20955,6 +20966,67 @@ renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoEmitCopyStackToMemSecondary(g, tempOffset, 0, elemSize)
 return true
 }
+func renvoStringOrderingExpr(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) bool {
+p := g.prog
+if !renvoTokCharIs(p, e.tok, '<') && !renvoTokCharIs(p, e.tok, '>') && !renvoTok2Is(p, e.tok, '<', '=') && !renvoTok2Is(p, e.tok, '>', '=') {
+return false
+}
+return renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, e.left)) || renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, e.right))
+}
+
+func renvoEmitStringOrdering(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) bool {
+a := &g.asm
+left := renvoAddUnnamedLocal(g, renvoTypeString)
+right := renvoAddUnnamedLocal(g, renvoTypeString)
+if !renvoEmitStringValueRegs(g, ep, e.left) {
+return false
+}
+renvoAsmStorePrimarySecondaryStack(a, left, left-8)
+if !renvoEmitStringValueRegs(g, ep, e.right) {
+return false
+}
+renvoAsmStorePrimarySecondaryStack(a, right, right-8)
+index := renvoAddUnnamedLocal(g, renvoTypeInt)
+lbyte := renvoAddUnnamedLocal(g, renvoTypeInt)
+rbyte := renvoAddUnnamedLocal(g, renvoTypeInt)
+loop := renvoAsmNewLabel(a)
+lengths := renvoAsmNewLabel(a)
+less := renvoAsmNewLabel(a)
+greater := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmStoreStackImm(a, index, 0)
+renvoAsmMarkLabel(a, loop)
+renvoAsmJgeStackStack(a, index, left-8, lengths)
+renvoAsmJgeStackStack(a, index, right-8, lengths)
+renvoAsmLoadPrimaryTertiaryStack(a, left, index)
+renvoAsmLoadPrimaryIndexTertiarySize(a, 1)
+renvoAsmStorePrimaryStack(a, lbyte)
+renvoAsmLoadPrimaryTertiaryStack(a, right, index)
+renvoAsmLoadPrimaryIndexTertiarySize(a, 1)
+renvoAsmStorePrimaryStack(a, rbyte)
+renvoAsmJcmpStackStack(a, lbyte, rbyte, less, 0x9c)
+renvoAsmJcmpStackStack(a, lbyte, rbyte, greater, 0x9f)
+renvoAsmIncStack(a, index)
+renvoAsmJmpMarkLabel(a, loop, lengths)
+renvoAsmJcmpStackStack(a, left-8, right-8, less, 0x9c)
+renvoAsmJcmpStackStack(a, left-8, right-8, greater, 0x9f)
+equalValue := 0
+if renvoTok2Is(g.prog, e.tok, '<', '=') || renvoTok2Is(g.prog, e.tok, '>', '=') {
+equalValue = 1
+}
+lessValue := 0
+if renvo_runtime_UnsafeByteAt(g.prog.src, int(renvoTokStart(g.prog, e.tok))) == '<' {
+lessValue = 1
+}
+renvoAsmPrimaryImm(a, equalValue)
+renvoAsmJmpMarkLabel(a, done, less)
+renvoAsmPrimaryImm(a, lessValue)
+renvoAsmJmpMarkLabel(a, done, greater)
+renvoAsmPrimaryImm(a, 1-lessValue)
+renvoAsmMarkLabel(a, done)
+return true
+}
+
 func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, right int, notEqual bool) bool {
 renvoNonNil(g, ep)
 a := &g.asm
@@ -20986,14 +21058,17 @@ return true
 }
 rightExpr := &ep.exprs[right]
 if rightExpr.kind == renvoExprSelector {
+leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
 rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
+if !renvoEmitStringValueRegs(g, ep, left) {
+return false
+}
+renvoAsmStorePrimarySecondaryStack(a, leftOff, leftOff-8)
 if !renvoEmitStringValueRegs(g, ep, right) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-if !renvoEmitStringValueRegs(g, ep, left) {
-return false
-}
+renvoAsmLoadPrimarySecondaryStack(a, leftOff, leftOff-8)
 renvoAsmPushStringRegs(a)
 renvoAsmLoadPrimarySecondaryStack(a, rightOff, rightOff-8)
 renvoAsmCopySecondaryToTertiary(a)
@@ -25102,6 +25177,9 @@ return false
 if e.kind == renvoExprBinary {
 if renvoBinaryUsesFloat(g, ep, e) {
 return renvoEmitFloatBinaryExpr(g, ep, idx)
+}
+if renvoStringOrderingExpr(g, ep, e) {
+return renvoEmitStringOrdering(g, ep, e)
 }
 if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
 leftType := renvoInferParsedExprType(g, ep, e.left)
@@ -32036,6 +32114,9 @@ op1 = renvo_runtime_UnsafeByteAt(p.src, opStart+1)
 }
 if renvoBinaryUsesFloat(g, ep, e) {
 return renvoEmitFloatBinaryExpr(g, ep, idx)
+}
+if renvoStringOrderingExpr(g, ep, e) {
+return renvoEmitStringOrdering(g, ep, e)
 }
 if opLen == 2 && (op0 == '=' || op0 == '!') && op1 == '=' {
 leftType := renvoInferParsedExprType(g, ep, e.left)
