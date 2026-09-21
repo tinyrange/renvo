@@ -15289,27 +15289,14 @@ func renvoEmitMakeSliceRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 	} else {
 		renvoAsmCopyStackSlot(a, lenOffset, capOffset)
 	}
-	backingSize := 32768
-	backingConst := false
-	lenConst := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1))
-	if lenConst.ok && lenConst.value > 0 {
-		backingSize = renvoStaticSliceBackingSize(lenConst.value*elemSize, elemSize)
-		backingConst = true
-	}
-	if e.argCount == 3 {
-		backingConst = false
-		capConst := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2))
-		if capConst.ok && capConst.value > 0 {
-			backingSize = renvoStaticSliceBackingSize(capConst.value*elemSize, elemSize)
-			backingConst = true
-		}
-	}
-	if backingConst {
-		zeroSize := 0
-		if lenConst.ok && lenConst.value > 0 {
-			zeroSize = lenConst.value * elemSize
-		}
-		renvoEmitMakeStaticRingPrimary(g, backingSize, zeroSize)
+	// Constant bounds do not prove that previous allocations are dead. Every
+	// evaluation needs fresh backing storage, including selector assignments.
+	capacityArg := e.firstArg + e.argCount - 1
+	capacity := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, capacityArg))
+	length := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1))
+	if capacity.ok && length.ok && length.value >= 0 && length.value <= capacity.value && capacity.value > 0 && capacity.value <= 1073741824/elemSize {
+		size := capacity.value * elemSize
+		renvoEmitMakeStaticRingPrimary(g, size, size)
 	} else {
 		sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 		renvoAsmLoadTertiaryStack(a, capOffset)
@@ -15402,53 +15389,22 @@ func renvoEmitMakeZero(g *renvoLinearGen) {
 	renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
 }
 
+// Retain the historical helper entry point, but never cycle through live
+// allocations. Like slice literals, these escaping constant-sized values use
+// persistent storage; scratch-arena rewinds must not invalidate them.
 func renvoEmitMakeStaticRingPrimary(g *renvoLinearGen, backingSize int, zeroSize int) {
-	renvoNonNil(g)
-	a := &g.asm
-	slotCount := 1
-	if backingSize <= 4096 {
-		slotCount = 3
-	} else if backingSize <= 65536 {
-		slotCount = 2
-	}
-	cursorOff := g.asm.bssSize
-	dataOff := cursorOff + 8
-	g.asm.bssSize += 8 + backingSize*slotCount
-	noWrapLabel := renvoAsmNewLabel(a)
-	renvoAsmLoadPrimaryBss(a, cursorOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmIncPrimary(a)
-	renvoAsmCmpPrimaryImm8(a, slotCount)
-	renvoAsmJnzLabel(a, noWrapLabel)
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmMarkLabel(a, noWrapLabel)
-	renvoAsmStorePrimaryBss(a, cursorOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmMulTertiaryImm(a, backingSize)
-	renvoAsmPrimaryBssAddr(a, dataOff)
-	renvoAsmAddPrimaryTertiary(a)
+	sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
+	renvoAsmStoreStackImm(&g.asm, sizeOffset, backingSize)
+	renvoEmitPersistentAllocToPrimary(g, sizeOffset)
 	if zeroSize > 0 {
-		if zeroSize > backingSize {
-			zeroSize = backingSize
-		}
-		zeroSize = renvoAlignTo8(zeroSize)
-		addrOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmStorePrimaryStack(a, addrOff)
-		renvoAsmCopyPrimaryToSecondary(a)
-		if zeroSize <= 128 {
-			renvoAsmPrimaryImm(a, 0)
-			for at := 0; at < zeroSize; at += 8 {
-				renvoAsmStorePrimaryMemSecondaryDisp(a, at)
-			}
-		} else {
-			renvoAsmPrimaryImm(a, zeroSize)
-			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmLoadPrimaryStack(a, addrOff)
-			renvoEmitMakeZero(g)
-		}
-		renvoAsmLoadPrimaryStack(a, addrOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, zeroSize)
+		renvoAsmCopyPrimaryToTertiary(&g.asm)
+		renvoAsmCopySecondaryToPrimary(&g.asm)
+		renvoEmitMakeZero(g)
 	}
 }
+
 func renvoEmitByteSliceConversionRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	a := &g.asm
