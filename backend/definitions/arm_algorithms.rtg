@@ -654,10 +654,32 @@ go compiler {
 		return true
 	}
 
+	// Image assembly is terminal: reuse spare code capacity rather than keeping
+	// both the instruction buffer and a second executable-sized allocation live.
+	func renvoAsmImageArmReuseCode(a *renvoAsm, out []byte) []byte {
+		codeLen := len(a.code)
+		loadFileSize := a.codeOffset + codeLen + len(a.data)
+		if !a.c.stripSymbols || cap(a.code) < loadFileSize {
+			return renvoAsmImageArm(a)
+		}
+		renvoAsmPatchArm(a)
+		bssOffset := renvoAsmBssOffset(a)
+		out = out[:loadFileSize]
+		copy(out[a.codeOffset:a.codeOffset+codeLen], out[:codeLen])
+		a.code = out[a.codeOffset : a.codeOffset+codeLen]
+		out = renvoAppendElfHeaderArm(out[:0], a.codeOffset, loadFileSize, bssOffset, a.bssSize, 0)
+		out = out[:a.codeOffset+codeLen]
+		out = append(out, a.data...)
+		if renvoFixedTarget == 0 {
+			return renvoAppendReplLinkTable(out, a)
+		}
+		return out
+	}
+
 	func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
 		renvoNonNil(g)
 		a := &g.asm
-		data := renvoAsmImageArm(a)
+		data := renvoAsmImageArmReuseCode(a, a.code)
 		var result renvoCompileResult
 		if a.patchFailed || len(data) == 0 {
 			return result
