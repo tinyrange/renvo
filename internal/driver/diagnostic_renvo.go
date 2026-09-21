@@ -296,6 +296,12 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		if built.Build.Error == build.BuildErrCheck {
 			if built.Build.ErrorDetail == check.CheckErrGraph {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
+			} else if built.Build.ErrorDetail == check.CheckErrInitSignature {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-034", "func init must have no receiver, parameters, or results")
+			} else if built.Build.ErrorDetail == check.CheckErrMissingReturn {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-035", "missing return")
+			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-033", "type assertion requires a type; found a composite literal")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {

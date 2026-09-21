@@ -8,6 +8,9 @@ import "renvo.dev/internal/syntax"
 // valid unless a preceding declaration gives the callee a definite literal
 // value.
 func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
+	if code, tok := invalidBranchTarget(file, body); code != CheckOK {
+		return code, tok
+	}
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]

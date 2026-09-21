@@ -97,6 +97,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
+	if file, tok := invalidRecursiveValueType(pkg, info); tok >= 0 {
+		return info, false, CheckErrRecursiveType, file, tok
+	}
 	if file, tok := undefinedSimplePackageTypeCore(pkg, info); tok >= 0 {
 		return info, false, CheckErrUndefined, file, tok
 	}
@@ -119,6 +122,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if indexTok := invalidConstantArrayIndex(&pkg, &info, fileIndex, fn, &body); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrArrayIndex, fileIndex, indexTok
+			}
+			if fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(buildFuncSignature(file, fn).Results) > 0 &&
+				!returnBlockTerminates(file, body, fn.BodyStart+1, fn.BodyEnd-1, LookupPackageSymbol(info, "panic") < 0) {
+				arena.Reset(functionArenaStart)
+				return info, false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
 			}
 			arena.Reset(functionArenaStart)
 			if fn.BodyStart < 0 {
