@@ -422,7 +422,11 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 	}
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprInt {
-		return renvoParseIntToken(p, e.tok)
+		value := renvoParseConstIntToken(p, e.tok)
+		if p.compilerInt32 && p.parsedIntHigh != value>>31 {
+			return renvoFixedTargetUnknown
+		}
+		return value
 	}
 	if e.kind == renvoExprChar {
 		return renvoParseCharToken(p, e.tok)
