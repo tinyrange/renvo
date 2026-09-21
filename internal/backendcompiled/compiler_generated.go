@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bf52ee025b48c58f68f7be117e59dfa205ee8b1b0580ec6e82e29436b81e0acf"
+const CompilerSourceDigest = "c12513373b09487191f1be4378ce01b1029cf104aaf5d999bb3489bd41e196be"
 
 // source: backend/compiler_common_impl.go
 
@@ -1312,6 +1312,7 @@ const renvoBuiltinTypeComplex = 13
 const renvoBuiltinTypeInterface = 14
 const renvoBuiltinTypeFloat32 = 15
 const renvoBuiltinTypeComplex64 = 16
+const renvoBuiltinTypeError = 17
 
 type renvoTypeInfo struct {
 kind        int
@@ -1397,26 +1398,27 @@ directTarget int
 }
 
 type renvoMeta struct {
-prog          *renvoProgram
-types         []renvoTypeInfo
-fields        []renvoFieldInfo
-globals       []renvoSymbolInfo
-params        []renvoSymbolInfo
-funcs         []renvoFuncInfo
-globalBuckets []int32
-globalNext    []int32
-funcBuckets   []int32
-funcNext      []int32
-typeBuckets   []int32
-closures      []renvoClosureInfo
-captures      []renvoSymbolInfo
-panicEnabled  bool
-arenaSize     int
-scratchStart  int
-scratchEnd    int
-ok            bool
-c             *renvoCompileContext
-objectDecls   []renvoObjectDecl
+runtimeTypeCount int
+prog             *renvoProgram
+types            []renvoTypeInfo
+fields           []renvoFieldInfo
+globals          []renvoSymbolInfo
+params           []renvoSymbolInfo
+funcs            []renvoFuncInfo
+globalBuckets    []int32
+globalNext       []int32
+funcBuckets      []int32
+funcNext         []int32
+typeBuckets      []int32
+closures         []renvoClosureInfo
+captures         []renvoSymbolInfo
+panicEnabled     bool
+arenaSize        int
+scratchStart     int
+scratchEnd       int
+ok               bool
+c                *renvoCompileContext
+objectDecls      []renvoObjectDecl
 }
 
 type renvoCompileResult struct {
@@ -5418,6 +5420,8 @@ renvoAddBuiltinType(m, renvoTypeComplex, 2*renvoBackendValueSlotSize)
 renvoAddBuiltinType(m, renvoTypeInterface, 2*renvoBackendValueSlotSize)
 renvoAddBuiltinType(m, renvoTypeFloat32, 4)
 renvoAddBuiltinType(m, renvoTypeComplex64, 8)
+renvoAddBuiltinType(m, renvoTypeInterface, 2*renvoBackendValueSlotSize)
+m.types[renvoBuiltinTypeError].elem = -1
 }
 
 func renvoAddBuiltinType(m *renvoMeta, kind int, size int) {
@@ -6351,6 +6355,26 @@ return renvoBuildTupleType(m, types)
 
 func renvoBuildTupleType(m *renvoMeta, types []int) int {
 renvoNonNil(m)
+
+
+
+for candidate := len(m.types) - 1; candidate >= 0; candidate-- {
+t := &m.types[candidate]
+if t.kind != renvoTypeStruct || t.count != len(types) || t.nameEnd > t.nameStart {
+continue
+}
+match := true
+for i := 0; i < len(types); i++ {
+field := m.fields[t.first+i]
+if field.nameEnd > field.nameStart || field.typ != types[i] {
+match = false
+break
+}
+}
+if match {
+return candidate
+}
+}
 firstField := len(m.fields)
 offset := 0
 for i := 0; i < len(types); i++ {
@@ -6428,6 +6452,10 @@ if renvoTokIdentIs(p, start, "interface") && renvoTokCharIs(p, start+1, '{') {
 closeTok := renvoFindMatchingBrace(p, start+1, end)
 if closeTok <= start+1 {
 renvoSetTypeResult(result, 0, start)
+return
+}
+if closeTok == start+2 {
+renvoSetTypeResult(result, renvoBuiltinTypeInterface, closeTok+1)
 return
 }
 renvoSetTypeResult(result, renvoAddType(m, renvoTypeInterface, 0, start+2, closeTok, 2*renvoBackendValueSlotSize, 0, 0), closeTok+1)
@@ -6570,8 +6598,14 @@ renvoSetTypeResult(result, typ, closeTok+1)
 return
 }
 if renvoTokIsKind(p, start, renvoTokIdent) {
-if renvoTokIdentIs(p, start, "any") || renvoTokIdentIs(p, start, "error") {
-renvoSetTypeResult(result, renvoAddType(m, renvoTypeInterface, 0, 0, 0, 2*renvoBackendValueSlotSize, 0, 0), start+1)
+if renvoTokIdentIs(p, start, "any") {
+
+
+renvoSetTypeResult(result, renvoBuiltinTypeInterface, start+1)
+return
+}
+if renvoTokIdentIs(p, start, "error") {
+renvoSetTypeResult(result, renvoBuiltinTypeError, start+1)
 return
 }
 builtin := renvoBuiltinTypeFromToken(p, start)
@@ -6663,7 +6697,10 @@ return -1
 func renvoBuiltinTypeFromToken(p *renvoProgram, tokIndex int) int {
 renvoNonNil(p)
 tok := renvoTokAt(p, tokIndex)
-if renvoTokIdentIs(p, tokIndex, "any") || renvoTokIdentIs(p, tokIndex, "error") {
+if renvoTokIdentIs(p, tokIndex, "error") {
+return renvoBuiltinTypeError
+}
+if renvoTokIdentIs(p, tokIndex, "any") {
 return renvoBuiltinTypeInterface
 }
 if renvoTokIdentIs(p, tokIndex, "uintptr") || renvoTokIdentIs(p, tokIndex, "uint") {
@@ -10697,12 +10734,16 @@ return
 }
 iface := renvoResolveType(g.meta, typ)
 renvoNonNil(iface)
-if iface.first >= iface.count {
+if iface.first >= iface.count && iface.elem != -1 {
 renvoAsmLoadPrimaryStack(&g.asm, tagOffset)
 renvoAsmJnzPrimary(&g.asm, matchLabel)
 return
 }
-for candidate := 1; candidate < len(g.meta.types); candidate++ {
+
+
+
+candidateCount := len(g.meta.types)
+for candidate := 1; candidate < candidateCount; candidate++ {
 tag := renvoRuntimeTypeTag(g.meta, candidate)
 t := &g.meta.types[candidate]
 if tag == 0 || t.kind == renvoTypeNamed && t.first == renvoNamedTypeAlias || renvoResolveType(g.meta, candidate).kind == renvoTypeInterface || !renvoTypeImplementsInterface(g, candidate, typ) {
@@ -10717,6 +10758,19 @@ renvoNonNil(g)
 meta := g.meta
 iface := renvoResolveType(meta, interfaceType)
 renvoNonNil(iface)
+if iface.elem == -1 {
+for i := 0; i < len(meta.funcs); i++ {
+fn := &meta.funcs[i]
+if fn.receiverType == 0 || !renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "Error") || !renvoMethodReceiverTypeMatches(meta, typ, fn.receiverType) {
+continue
+}
+if renvoResolveType(meta, fn.receiverType).kind == renvoTypePointer && renvoResolveType(meta, typ).kind != renvoTypePointer {
+return false
+}
+return fn.paramCount == 1 && renvoResolveType(meta, fn.resultType).kind == renvoTypeString
+}
+return false
+}
 for required := iface.first; required < iface.count; {
 if !renvoTokIsKind(meta.prog, required, renvoTokIdent) {
 required++
@@ -14349,6 +14403,11 @@ if typ <= 0 || typ >= len(meta.types) {
 return 0
 }
 t := meta.types[typ]
+
+
+if typ+1 > meta.runtimeTypeCount {
+meta.runtimeTypeCount = typ + 1
+}
 if t.kind == renvoTypeNamed && t.first == renvoNamedTypeAlias && t.elem > 0 {
 return renvoRuntimeTypeTag(meta, t.elem)
 }
@@ -18075,6 +18134,17 @@ return renvoTypesEquivalent(meta, l.elem, r.elem)
 }
 if l.kind == renvoTypeArray {
 return l.count == r.count && renvoTypesEquivalent(meta, l.elem, r.elem)
+}
+if l.kind == renvoTypeStruct && (renvoTypeIsTuple(meta, left) || renvoTypeIsTuple(meta, right)) {
+if !renvoTypeIsTuple(meta, left) || !renvoTypeIsTuple(meta, right) || l.count != r.count {
+return false
+}
+for i := 0; i < l.count; i++ {
+if !renvoTypesEquivalent(meta, meta.fields[l.first+i].typ, meta.fields[r.first+i].typ) {
+return false
+}
+}
+return true
 }
 if l.kind == renvoTypeFunc {
 if l.count != r.count || l.resolved != r.resolved || !renvoTypesEquivalent(meta, l.elem, r.elem) {
@@ -22449,7 +22519,7 @@ ok = renvo386EmitScalarFunction(g, fnInfoIndex)
 } else {
 ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 }
-if len(g.meta.captures) == captureCount {
+if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 renvoTruncTypes(&g.meta.types, typeCount)
 renvoTruncFields(&g.meta.fields, fieldCount)
 renvoRebuildNamedTypeIndex(g.meta)
