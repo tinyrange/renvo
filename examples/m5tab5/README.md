@@ -46,3 +46,39 @@ The useful Tab5 demos are also published in the web editor:
 
 Build any demo by replacing the final package in the startup command, for
 example `./examples/device/forms_demo`.
+
+## Simulate Forms display traffic
+
+The host-side Tab5 simulator exercises the real 720 by 1280 RGB565 Forms demo,
+its retained two-generation buffer algorithm, and pointer dispatch without
+initializing physical hardware. The acceptance test drags the slider for 60
+consecutive UI frames and reports paint latency plus four separate quantities:
+
+- changed bytes are RGB565 pixels whose value differs from the displayed frame;
+- damage bytes are the union of regions Forms repainted, including overdraw;
+- cache writeback bytes count the backend's coalesced whole-row maintenance
+  ranges, rounded to 64-byte cache lines (actual bus traffic depends on dirty
+  cache lines); and
+- scanout bytes are the continuous video-mode framebuffer payload.
+
+Run it with:
+
+```sh
+go test -tags m5tab5 -run TestTab5SliderDragAt60FPS -v \
+  ./examples/device/forms_demo
+```
+
+The Tab5 timing programmed by the backend is 720 by 1280 active pixels inside
+an 802 by 1544 raster at an 80 MHz pixel clock. That is 64.61 Hz. Each RGB565
+frame is 1,843,200 bytes, so the display continuously reads and transmits about
+119.08 MB/s of active pixel payload even when the UI is unchanged. During the
+active part of a line the payload rate is 160 MB/s. The two 1040 Mbps DSI lanes
+have 260 MB/s of aggregate raw capacity before protocol overhead.
+
+The test requires the host-rendered p95 paint time to stay below the 16.67 ms
+60 FPS budget and verifies that all 60 automated updates are presented. This is
+a software regression gate, not a physical ESP32-P4 timing claim: it precisely
+models pixel volume and buffer generations, but not P4 cache misses, PSRAM
+latency, DMA arbitration, or DSI underruns. `FramebufferStats` and the demo's
+on-screen FPS counter remain the authoritative on-device checks for those
+effects.
