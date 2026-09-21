@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3159064d537956f7be62638eb45c35c380764512d9a802b627bf4fd1bed18772"
+const CompilerSourceDigest = "d9197bf408f2f2d189a58f9e6d1c993014d74593d780582f73ac4f1d8621e2d6"
 
 // source: backend/compiler_common_impl.go
 
@@ -13815,6 +13815,9 @@ if e.kind == renvoExprComposite {
 return renvoTypeFromExpr(g, ep, idx)
 }
 if e.kind == renvoExprUnary {
+if renvoTokCharIs(p, e.tok, '!') {
+return renvoTypeBool
+}
 if renvoTokCharIs(p, e.tok, '+') || renvoTokCharIs(p, e.tok, '-') || renvoTokCharIs(p, e.tok, '^') {
 return renvoInferParsedExprType(g, ep, e.left)
 }
@@ -13843,10 +13846,10 @@ if start+1 < end {
 c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
 }
 if renvoIsComparisonChars(c0, c1) {
-return renvoTypeInt
+return renvoTypeBool
 }
 if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
-return renvoTypeInt
+return renvoTypeBool
 }
 leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
 if renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>') {
@@ -24472,14 +24475,17 @@ return false
 }
 }
 }
-if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
-return false
-}
-renvoAsmPushPrimary(&g.asm)
 if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
 return false
 }
+renvoAsmPushPrimary(&g.asm)
+if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
+return false
+}
 renvoAsmPopTertiary(&g.asm)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmCopyTertiaryToPrimary(&g.asm)
+renvoAsmCopySecondaryToTertiary(&g.asm)
 if renvoPreparedBackendActive != 0 {
 renvoRTGDirectCompare(&g.asm, renvoRTGTertiary, renvoRTGPrimary)
 } else {
@@ -32679,21 +32685,15 @@ return false
 }
 }
 }
-if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
+if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
 return false
 }
 renvoAsmPushPrimary(&g.asm)
-if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
+if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
 return false
 }
 renvoAsmPopTertiary(&g.asm)
 if usesFloat && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64) {
-
-
-
-renvoAsmCopyPrimaryToSecondary(&g.asm)
-renvoAsmCopyTertiaryToPrimary(&g.asm)
-renvoAsmCopySecondaryToTertiary(&g.asm)
 if !renvoEmitIEEEFloatPrimaryTertiaryOp(g, e.tok, floatKind) {
 return false
 }
@@ -32704,6 +32704,10 @@ renvoAsmJzPrimary(&g.asm, label)
 }
 return true
 }
+
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmCopyTertiaryToPrimary(&g.asm)
+renvoAsmCopySecondaryToTertiary(&g.asm)
 if renvoPreparedBackendActive != 0 {
 renvoRTGDirectCompare(&g.asm, renvoRTGTertiary, renvoRTGPrimary)
 } else if g.c.renvoTargetArch == renvoArchAarch64 {

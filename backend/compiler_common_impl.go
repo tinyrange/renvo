@@ -13808,6 +13808,9 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		return renvoTypeFromExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary {
+		if renvoTokCharIs(p, e.tok, '!') {
+			return renvoTypeBool
+		}
 		if renvoTokCharIs(p, e.tok, '+') || renvoTokCharIs(p, e.tok, '-') || renvoTokCharIs(p, e.tok, '^') {
 			return renvoInferParsedExprType(g, ep, e.left)
 		}
@@ -13836,10 +13839,10 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 			c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
 		}
 		if renvoIsComparisonChars(c0, c1) {
-			return renvoTypeInt
+			return renvoTypeBool
 		}
 		if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
-			return renvoTypeInt
+			return renvoTypeBool
 		}
 		leftTypeIndex := renvoInferParsedExprType(g, ep, e.left)
 		if renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>') {
@@ -24465,14 +24468,17 @@ func renvoEmitWideCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExp
 			}
 		}
 	}
-	if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
-		return false
-	}
-	renvoAsmPushPrimary(&g.asm)
 	if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
 		return false
 	}
+	renvoAsmPushPrimary(&g.asm)
+	if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
+		return false
+	}
 	renvoAsmPopTertiary(&g.asm)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmCopyTertiaryToPrimary(&g.asm)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
 	if renvoPreparedBackendActive != 0 {
 		renvoRTGDirectCompare(&g.asm, renvoRTGTertiary, renvoRTGPrimary)
 	} else {
@@ -32672,21 +32678,15 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 			}
 		}
 	}
-	if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
+	if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
 		return false
 	}
 	renvoAsmPushPrimary(&g.asm)
-	if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
+	if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
 		return false
 	}
 	renvoAsmPopTertiary(&g.asm)
 	if usesFloat && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64) {
-		// Compare-jump lowering evaluates the right operand first, whereas the
-		// arithmetic expression path leaves the left operand in tertiary. Restore
-		// that canonical order before applying directional IEEE predicates.
-		renvoAsmCopyPrimaryToSecondary(&g.asm)
-		renvoAsmCopyTertiaryToPrimary(&g.asm)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
 		if !renvoEmitIEEEFloatPrimaryTertiaryOp(g, e.tok, floatKind) {
 			return false
 		}
@@ -32697,6 +32697,10 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 		}
 		return true
 	}
+	// Evaluate calls left to right, then arrange the integer comparison operands.
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmCopyTertiaryToPrimary(&g.asm)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
 	if renvoPreparedBackendActive != 0 {
 		renvoRTGDirectCompare(&g.asm, renvoRTGTertiary, renvoRTGPrimary)
 	} else if g.c.renvoTargetArch == renvoArchAarch64 {
