@@ -908,6 +908,11 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 	if pos+2 >= len(data) {
 		return 0, 0
 	}
+	limit := len(data) - pos
+	if limit > maxLength {
+		limit = maxLength
+	}
+	first, second, third := data[pos], data[pos+1], data[pos+2]
 	bestDistance := 0
 	bestLength := 0
 	checked := 0
@@ -921,20 +926,20 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 		// A candidate must extend the current best match to improve it. Reject
 		// mismatches at that boundary before rescanning an identical prefix.
 		// This keeps the deeper, size-saving search cheap on repetitive source.
-		if bestLength > 0 && pos+bestLength < len(data) && data[candidate+bestLength] != data[pos+bestLength] {
+		if bestLength > 0 && data[candidate+bestLength] != data[pos+bestLength] {
 			continue
 		}
-		if data[candidate] != data[pos] || data[candidate+1] != data[pos+1] || data[candidate+2] != data[pos+2] {
+		if data[candidate] != first || data[candidate+1] != second || data[candidate+2] != third {
 			continue
 		}
-		length := 0
-		for length < maxLength && pos+length < len(data) && data[candidate+length] == data[pos+length] {
+		length := 3
+		for length < limit && data[candidate+length] == data[pos+length] {
 			length++
 		}
 		if length > bestLength {
 			bestDistance = distance
 			bestLength = length
-			if length == maxLength {
+			if length == limit {
 				break
 			}
 		}
