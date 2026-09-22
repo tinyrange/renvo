@@ -14,9 +14,8 @@ type scopedTypeBinding struct {
 	iotaValue            int
 }
 
-func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax.Body) []scopedTypeBinding {
+func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax.Body, signature *FuncSignature) []scopedTypeBinding {
 	var bindings []scopedTypeBinding
-	signature := buildFuncSignature(file, fn)
 	for group := 0; group < 3; group++ {
 		fields := signature.Params
 		if group == 1 {

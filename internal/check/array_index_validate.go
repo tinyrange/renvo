@@ -18,21 +18,20 @@ type constantIndexContext struct {
 	strict    bool
 }
 
-func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body) int {
+func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
 	if fileIndex < 0 || fileIndex >= len(pkg.Files) {
 		return -1
 	}
-	file := pkg.Files[fileIndex].File
-	indexes := buildFuncIndexExprs(&file, body)
+	file := &pkg.Files[fileIndex].File
+	indexes := buildFuncIndexExprs(file, body)
 	if len(indexes) == 0 {
 		return -1
 	}
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: fn}
-	signature := buildFuncSignature(file, fn)
-	locals := collectDefiniteLocalTypes(file, fn)
+	locals := collectDefiniteLocalTypes(*file, fn)
 	for i := 0; i < len(indexes); i++ {
 		index := &indexes[i]
-		length, array := constantIndexArrayLength(&context, &signature, locals, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
+		length, array := constantIndexArrayLength(&context, signature, locals, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
 		if !array {
 			continue
 		}
@@ -48,20 +47,20 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 	if depth > 32 || context.fileIndex < 0 || context.fileIndex >= len(context.pkg.Files) {
 		return 0, false
 	}
-	file := context.pkg.Files[context.fileIndex].File
-	start, end = trimExprSpan(file, start, end)
-	start, end = stripOuterParens(&file, start, end)
+	file := &context.pkg.Files[context.fileIndex].File
+	start, end = trimExprSpan(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return 0, false
 	}
-	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(&file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
 		if context.strict {
 			return 0, false
 		}
 		return constantIndexInt(context, start+2, end-1, before, depth+1)
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
-		operator := constantIndexOperator(&file, start, end, precedence)
+		operator := constantIndexOperator(file, start, end, precedence)
 		if operator < 0 {
 			continue
 		}
@@ -70,20 +69,20 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		if !leftOK || !rightOK {
 			return 0, false
 		}
-		return applyConstantIndexOperator(tokenString(&file, operator), left, right)
+		return applyConstantIndexOperator(tokenString(file, operator), left, right)
 	}
-	if tokenTextIs(&file, start, "+") || tokenTextIs(&file, start, "-") || tokenTextIs(&file, start, "^") {
+	if tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-") || tokenTextIs(file, start, "^") {
 		value, ok := constantIndexInt(context, start+1, end, before, depth+1)
 		if !ok {
 			return 0, false
 		}
-		if tokenTextIs(&file, start, "-") {
+		if tokenTextIs(file, start, "-") {
 			if value == -int(^uint(0)>>1)-1 {
 				return 0, false
 			}
 			return -value, true
 		}
-		if tokenTextIs(&file, start, "^") {
+		if tokenTextIs(file, start, "^") {
 			return value ^ -1, true
 		}
 		return value, true
@@ -92,17 +91,17 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		return 0, false
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenNumber {
-		return parseConstInt(file, start)
+		return parseConstInt(*file, start)
 	}
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
 	for i := context.fn.BodyStart + 1; !context.strict && i+3 < before; i++ {
-		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(&file, i+1, start) && tokenTextIs(&file, i+2, "=") {
-			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
+		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokenTextIs(file, i+2, "=") {
+			return constantIndexInt(context, i+3, statementSpecEnd(*file, i+1, before), before, depth+1)
 		}
 	}
-	name := tokenString(&file, start)
+	name := tokenString(file, start)
 	for i := 0; i < len(context.info.Decls); i++ {
 		if context.info.Decls[i].Kind == SymbolConst && context.info.Decls[i].Name == name && context.info.Decls[i].File >= 0 && context.info.Decls[i].File < len(context.pkg.Files) {
 			if context.strict && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
@@ -213,8 +212,8 @@ func constantIndexType(context *constantIndexContext, tok int, depth int) bool {
 	if depth > 16 || context.fileIndex < 0 || context.fileIndex >= len(context.pkg.Files) {
 		return false
 	}
-	file := context.pkg.Files[context.fileIndex].File
-	name := tokenString(&file, tok)
+	file := &context.pkg.Files[context.fileIndex].File
+	name := tokenString(file, tok)
 	if name == "int" || name == "int8" || name == "int16" || name == "int32" || name == "int64" || name == "uint" || name == "uint8" || name == "uint16" || name == "uint32" || name == "uint64" || name == "uintptr" || name == "byte" || name == "rune" {
 		return true
 	}
@@ -234,19 +233,19 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 	if depth > 16 {
 		return 0, false
 	}
-	file := context.pkg.Files[context.fileIndex].File
-	start, end = stripOuterParens(&file, start, end)
-	for start < end && (tokCharIs(&file, start, '&') || tokCharIs(&file, start, '*')) {
+	file := &context.pkg.Files[context.fileIndex].File
+	start, end = stripOuterParens(file, start, end)
+	for start < end && (tokCharIs(file, start, '&') || tokCharIs(file, start, '*')) {
 		start++
-		start, end = stripOuterParens(&file, start, end)
+		start, end = stripOuterParens(file, start, end)
 	}
-	if start < end && tokCharIs(&file, end-1, '}') {
-		return constantIndexTypeLength(context, start, findTypeTopLevelChar(&file, start, end, '{'), before, depth+1)
+	if start < end && tokCharIs(file, end-1, '}') {
+		return constantIndexTypeLength(context, start, findTypeTopLevelChar(file, start, end, '{'), before, depth+1)
 	}
 	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
-	name := tokenString(&file, start)
+	name := tokenString(file, start)
 	for group := 0; group < 3; group++ {
 		var fields []Field
 		if group == 0 {
@@ -262,12 +261,12 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 			}
 		}
 	}
-	if typeStart, typeEnd, ok := findDefiniteLocalType(&file, locals, start, before); ok && typeStart >= 0 && typeEnd > typeStart {
+	if typeStart, typeEnd, ok := findDefiniteLocalType(file, locals, start, before); ok && typeStart >= 0 && typeEnd > typeStart {
 		return constantIndexTypeLength(context, typeStart, typeEnd, before, depth+1)
 	}
 	for i := before - 1; i > context.fn.BodyStart; i-- {
-		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && statementTokensEqual(&file, i, start) && i+2 < before && tokenTextIs(&file, i+1, ":=") {
-			valueStart, valueEnd := trimExprSpan(file, i+2, statementSpecEnd(file, i+2, before))
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && statementTokensEqual(file, i, start) && i+2 < before && tokenTextIs(file, i+1, ":=") {
+			valueStart, valueEnd := trimExprSpan(*file, i+2, statementSpecEnd(*file, i+2, before))
 			return constantIndexArrayLength(context, signature, locals, valueStart, valueEnd, i, depth+1)
 		}
 	}
@@ -285,21 +284,21 @@ func constantIndexTypeLength(context *constantIndexContext, start int, end int, 
 	if depth > 16 || context.fileIndex < 0 || context.fileIndex >= len(context.pkg.Files) {
 		return 0, false
 	}
-	file := context.pkg.Files[context.fileIndex].File
-	start, end = trimTypeSpan(file, start, end)
-	for start < end && tokCharIs(&file, start, '*') {
+	file := &context.pkg.Files[context.fileIndex].File
+	start, end = trimTypeSpan(*file, start, end)
+	for start < end && tokCharIs(file, start, '*') {
 		start++
-		start, end = trimTypeSpan(file, start, end)
+		start, end = trimTypeSpan(*file, start, end)
 	}
-	if classifyType(file, start, end) == TypeArray {
-		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(file, start, end)
+	if classifyType(*file, start, end) == TypeArray {
+		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(*file, start, end)
 		length, ok := constantIndexInt(context, lengthStart, lengthEnd, before, depth+1)
 		return length, ok && length >= 0
 	}
 	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
-	typeIndex := lookupType(context.info.Types, tokenString(&file, start))
+	typeIndex := lookupType(context.info.Types, tokenString(file, start))
 	if typeIndex < 0 {
 		return 0, false
 	}

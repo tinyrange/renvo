@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
+func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body, signature *FuncSignature) int {
 	file := pkg.Files[fileIndex].File
 	// Array lengths occur only in nonempty bracket groups followed by a type.
 	// Avoid building all local bindings for functions with no possible array type.
@@ -27,7 +27,7 @@ func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex in
 	if !possible {
 		return -1
 	}
-	bindings := collectScopedTypeBindings(file, fn, body)
+	bindings := collectScopedTypeBindings(file, fn, body, signature)
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, bindings: bindings, strict: true}
 	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for _, binding := range bindings {

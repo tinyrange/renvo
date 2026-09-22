@@ -53,7 +53,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			}
 			if !numericReady {
 				body := syntax.ParseFuncBodyStatements(*file, fn)
-				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
 				numericReady = true
 			}
 			if name == "append" {
@@ -73,7 +73,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			}
 			if !numericReady {
 				body := syntax.ParseFuncBodyStatements(*file, fn)
-				numericBindings = collectScopedTypeBindings(*file, fn, body)
+				numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
 				numericReady = true
 			}
 			if code, tok := invalidNumericBuiltinCall(pkg, info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
@@ -94,7 +94,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if !nested {
 				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
 					body := syntax.ParseFuncBodyStatements(*file, fn)
-					numericBindings = collectScopedTypeBindings(*file, fn, body)
+					numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
 					numericReady = true
 				}
 				value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
