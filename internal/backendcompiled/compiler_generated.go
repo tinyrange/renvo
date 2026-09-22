@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "99097c6c448e7d6fb1e97a1f5fc65e56613231c042f7e576bd1868764ebce469"
+const CompilerSourceDigest = "5f6fc83cf481d60fa8a094ade8c0a15d655af1dca1cdf9af033115edabbfba5b"
 
 // source: backend/compiler_common_impl.go
 
@@ -1983,70 +1983,70 @@ for i := start; i < end; i++ {
 h = h*5 + int(renvo_runtime_UnsafeByteAt(src, i))
 }
 if n == 2 {
-if h == 627 {
+if h == 627 && renvoBytesEqualText(src, start, end, "if") {
 return renvoTokIf
 }
 }
 if n == 3 {
-if h == 3549 {
+if h == 3549 && renvoBytesEqualText(src, start, end, "var") {
 return renvoTokVar
 }
-if h == 3219 {
+if h == 3219 && renvoBytesEqualText(src, start, end, "for") {
 return renvoTokFor
 }
 }
 if n == 4 {
-if h == 18186 {
+if h == 18186 && renvoBytesEqualText(src, start, end, "type") {
 return renvoTokType
 }
-if h == 16324 {
+if h == 16324 && renvoBytesEqualText(src, start, end, "func") {
 return renvoTokFunc
 }
-if h == 16001 {
+if h == 16001 && renvoBytesEqualText(src, start, end, "else") {
 return renvoTokElse
 }
-if h == 16341 {
+if h == 16341 && renvoBytesEqualText(src, start, end, "goto") {
 return renvoTokGoto
 }
-if h == 15476 {
+if h == 15476 && renvoBytesEqualText(src, start, end, "case") {
 return renvoTokCase
 }
 }
 if n == 5 {
-if h == 78294 || h == 85499 {
+if (h == 78294 && renvoBytesEqualText(src, start, end, "defer")) || (h == 85499 && renvoBytesEqualText(src, start, end, "panic")) {
 toks.panicEnabled = true
 }
-if h == 79191 {
+if h == 79191 && renvoBytesEqualText(src, start, end, "const") {
 return renvoTokConst
 }
-if h == 78617 {
+if h == 78617 && renvoBytesEqualText(src, start, end, "break") {
 return renvoTokBreak
 }
 }
 if n == 6 {
-if h == 449661 {
+if h == 449661 && renvoBytesEqualText(src, start, end, "struct") {
 return renvoTokStruct
 }
-if h == 437480 {
+if h == 437480 && renvoBytesEqualText(src, start, end, "return") {
 return renvoTokReturn
 }
-if h == 450374 {
+if h == 450374 && renvoBytesEqualText(src, start, end, "switch") {
 return renvoTokSwitch
 }
 }
 if n == 7 {
-if h == 2176194 {
+if h == 2176194 && renvoBytesEqualText(src, start, end, "recover") {
 toks.panicEnabled = true
 }
-if h == 2131416 {
+if h == 2131416 && renvoBytesEqualText(src, start, end, "package") {
 return renvoTokPackage
 }
-if h == 1957581 {
+if h == 1957581 && renvoBytesEqualText(src, start, end, "default") {
 return renvoTokDefault
 }
 }
 if n == 8 {
-if h == 9901561 {
+if h == 9901561 && renvoBytesEqualText(src, start, end, "continue") {
 return renvoTokContinue
 }
 }
@@ -9210,6 +9210,7 @@ ok       bool
 }
 
 type renvoLinearGen struct {
+wasmMemoryRanges       []int
 prog                   *renvoProgram
 meta                   *renvoMeta
 asm                    renvoAsm
@@ -22437,6 +22438,12 @@ g.stackUsed = renvoAlignTo8(g.stackUsed + size)
 }
 renvoRecordStackPeak(g)
 offset := g.stackUsed
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+}
 if g.localCount >= len(g.locals) {
 renvoGrowLocalTable(g)
 }
@@ -55475,6 +55482,13 @@ candidates[j] = 0
 }
 }
 }
+for i := 0; i+1 < len(g.wasmMemoryRanges); i += 2 {
+for j := 0; j < len(candidates); j++ {
+if candidates[j] != 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, g.wasmMemoryRanges[i], g.wasmMemoryRanges[i+1]) {
+candidates[j] = 0
+}
+}
+}
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 
@@ -55522,6 +55536,7 @@ a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
 }
 
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+g.wasmMemoryRanges = nil
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
 fn := &g.prog.funcs[metaFn.declIndex]
