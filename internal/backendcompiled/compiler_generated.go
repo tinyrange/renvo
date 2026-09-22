@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "41d99be9937467806a2c5d391e3c0d70fcf3bc1ca0d13ce7f670f5182f483981"
+const CompilerSourceDigest = "0e5f71721c65b77ad67a5431cf3b47891d587a74e39bf2a8122a487787902715"
 
 // source: backend/compiler_common_impl.go
 
@@ -15397,7 +15397,7 @@ reusedLabel := renvoAsmNewLabel(a)
 highReady := renvoAsmNewLabel(a)
 plain := renvoAsmNewLabel(a)
 renvoAsmPushPrimary(a)
-renvoAsmPrimaryImm(a, 8192)
+renvoAsmPrimaryImm(a, 256)
 renvoAsmCmpTertiaryPrimarySet(a, 0x92)
 renvoAsmJnzPrimary(a, small)
 renvoAsmPopPrimary(a)
@@ -15479,16 +15479,17 @@ renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
 
 
-if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordSize := g.c.renvoNativeIntSize
 wordLoop := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, wordLoop)
-renvoAsmPrimaryImm(a, 4)
+renvoAsmPrimaryImm(a, wordSize)
 renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
 renvoAsmPrimaryImm(a, 0)
-renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-renvoAsmAddSecondaryImm(a, 4)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, wordSize)
+renvoAsmAddSecondaryImm(a, wordSize)
 renvoAsmCopyTertiaryToPrimary(a)
-renvoAsmPushImm(a, 4)
+renvoAsmPushImm(a, wordSize)
 renvoAsmPopTertiary(a)
 renvoAsmSubPrimaryTertiary(a)
 renvoAsmCopyPrimaryToTertiary(a)
