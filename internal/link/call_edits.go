@@ -11,6 +11,7 @@ type callTokenEdit struct {
 	offset int
 	text   []byte
 	tokens []syntax.Token
+	delta  int
 }
 
 // rewriteBuiltinCalls preserves declaration structure while replacing complete
@@ -60,18 +61,16 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 	out.Tokens = make([]unit.Token, 0, count+1)
 	out.Decls = make([]unit.Decl, 0, len(original.Decls)+len(helper.Decls))
 	out.Funcs = make([]unit.Func, 0, len(original.Funcs)+len(helper.Funcs))
-	tokenMap := make([]int, len(original.Tokens)+1)
 	cursor, delta = 0, 0
-	for _, change := range changes {
+	for changeIndex := 0; changeIndex < len(changes); changeIndex++ {
+		change := &changes[changeIndex]
 		for cursor < change.start {
-			tokenMap[cursor] = len(out.Tokens)
 			tok := original.Tokens[cursor]
 			tok.Start += delta
 			out.Tokens = append(out.Tokens, tok)
 			cursor++
 		}
 		for cursor < change.end {
-			tokenMap[cursor] = len(out.Tokens)
 			cursor++
 		}
 		for _, tok := range change.tokens[:len(change.tokens)-1] {
@@ -84,38 +83,36 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 				out.Tokens = append(out.Tokens, unit.MakeToken(kind, change.offset+syntax.TokenStart(tok), syntax.TokenSize(tok), 1))
 			}
 		}
+		change.delta = len(out.Tokens) - change.end
 		if change.end > change.start {
 			delta = change.offset + len(change.text) - (original.Tokens[change.end-1].Start + original.Tokens[change.end-1].Size)
 		}
 	}
 	for cursor < len(original.Tokens)-1 {
-		tokenMap[cursor] = len(out.Tokens)
 		tok := original.Tokens[cursor]
 		tok.Start += delta
 		out.Tokens = append(out.Tokens, tok)
 		cursor++
 	}
-	tokenMap[cursor] = len(out.Tokens)
-	tokenMap[cursor+1] = len(out.Tokens)
 	for _, decl := range original.Decls {
 		decl.NameStart = mapFunctionValueOffset(decl.NameStart, edits, originalLength)
 		decl.NameEnd = mapFunctionValueOffset(decl.NameEnd, edits, originalLength)
-		decl.StartTok = tokenMap[decl.StartTok]
-		decl.EndTok = tokenMap[decl.EndTok]
+		decl.StartTok = mapBuiltinCallToken(decl.StartTok, changes)
+		decl.EndTok = mapBuiltinCallToken(decl.EndTok, changes)
 		out.Decls = append(out.Decls, decl)
 	}
 	for _, fn := range original.Funcs {
 		fn.NameStart = mapFunctionValueOffset(fn.NameStart, edits, originalLength)
 		fn.NameEnd = mapFunctionValueOffset(fn.NameEnd, edits, originalLength)
-		fn.StartTok = tokenMap[fn.StartTok]
-		fn.NameTok = tokenMap[fn.NameTok]
+		fn.StartTok = mapBuiltinCallToken(fn.StartTok, changes)
+		fn.NameTok = mapBuiltinCallToken(fn.NameTok, changes)
 		if fn.ReceiverStart != fn.ReceiverEnd {
-			fn.ReceiverStart = tokenMap[fn.ReceiverStart]
-			fn.ReceiverEnd = tokenMap[fn.ReceiverEnd]
+			fn.ReceiverStart = mapBuiltinCallToken(fn.ReceiverStart, changes)
+			fn.ReceiverEnd = mapBuiltinCallToken(fn.ReceiverEnd, changes)
 		}
-		fn.BodyStart = tokenMap[fn.BodyStart]
-		fn.BodyEnd = tokenMap[fn.BodyEnd]
-		fn.EndTok = tokenMap[fn.EndTok]
+		fn.BodyStart = mapBuiltinCallToken(fn.BodyStart, changes)
+		fn.BodyEnd = mapBuiltinCallToken(fn.BodyEnd, changes)
+		fn.EndTok = mapBuiltinCallToken(fn.EndTok, changes)
 		out.Funcs = append(out.Funcs, fn)
 	}
 	if len(helper.Tokens) > 0 {
@@ -168,4 +165,21 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 	out.Packages = remapFunctionValuePackages(original, &out, edits, originalLength, generatedStart)
 	replaceFunctionValueProgram(original, &out)
 	return true
+}
+
+// Changes are ordered and disjoint. Only declaration/function boundaries need
+// remapping, so retain one cumulative token delta per edit instead of a map
+// entry for every token in the linked program.
+func mapBuiltinCallToken(index int, changes []callTokenEdit) int {
+	delta := 0
+	for _, change := range changes {
+		if index < change.start {
+			break
+		}
+		if index < change.end {
+			return change.start + delta
+		}
+		delta = change.delta
+	}
+	return index + delta
 }

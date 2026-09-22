@@ -2329,17 +2329,31 @@ func setFunctionValuePackageTableRanges(item *unit.PackageInfo, program *unit.Pr
 }
 
 func functionValueTokenRangeForText(items []unit.Token, start int, end int) (int, int) {
-	first := len(items)
-	last := len(items)
-	for i := 0; i < len(items); i++ {
-		if items[i].Start >= start && items[i].Start < end {
-			if first == len(items) {
-				first = i
-			}
-			last = i + 1
+	// Token offsets are ordered. Package remapping must not scan the whole
+	// linked token stream again for every package.
+	lo, hi := 0, len(items)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if items[mid].Start < start {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
 	}
-	return first, last
+	first := lo
+	if first == len(items) || items[first].Start >= end {
+		return len(items), len(items)
+	}
+	hi = len(items)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if items[mid].Start < end {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return first, lo
 }
 
 func functionValueDeclRangeForText(items []unit.Decl, start int, end int) (int, int) {
