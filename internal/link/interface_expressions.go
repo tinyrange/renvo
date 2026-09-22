@@ -4,6 +4,23 @@ import "renvo.dev/internal/arena"
 import "renvo.dev/internal/unit"
 
 func lowerInterfaceMethodExpressions(program *unit.Program, transient bool) bool {
+	var candidates []int
+	for i := 0; i < len(program.Decls); i++ {
+		decl := &program.Decls[i]
+		if decl.Kind != unit.TokenType {
+			continue
+		}
+		start := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd) + 1
+		if functionValueTokenEquals(program, start, "=") {
+			start++
+		}
+		if functionValueTokenEquals(program, start, "interface") || start < len(program.Tokens) && program.Tokens[start].KindLine&255 == unit.TokenIdent {
+			candidates = append(candidates, i)
+		}
+	}
+	if len(candidates) == 0 {
+		return true
+	}
 	var edits []functionValueEdit
 	generated := ""
 	count := 0
@@ -17,6 +34,17 @@ func lowerInterfaceMethodExpressions(program *unit.Program, transient bool) bool
 			continue
 		}
 		name := functionValueTokenText(program, i)
+		possible := false
+		for _, index := range candidates {
+			decl := &program.Decls[index]
+			if interfaceExpressionName(program.Text, decl.NameStart, decl.NameEnd, name) {
+				possible = true
+				break
+			}
+		}
+		if !possible {
+			continue
+		}
 		method := interfaceExpressionMethod(program, name, functionValueTokenText(program, i+2), 0)
 		if method < 0 {
 			continue

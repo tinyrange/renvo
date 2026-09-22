@@ -38,6 +38,11 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 		}
 		changes = append(changes, callTokenEdit{start: start, end: cursor, offset: edit.start + delta, text: fragment, tokens: tokens})
 		count += len(tokens) - 1 - (cursor - start)
+		for _, tok := range tokens {
+			if functionValueTokenIsEllipsis(fragment, tok) {
+				count += 2
+			}
+		}
 		delta += len(edit.text) - (edit.end - edit.start)
 	}
 	var helper unit.Program

@@ -14,6 +14,7 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 	generatedCount := 0
 	for {
 		var edits []functionValueEdit
+		pending := false
 		lastStart := len(program.Tokens)
 		for i := len(program.Tokens) - 2; i >= 0; i-- {
 			mark := arena.Mark()
@@ -27,6 +28,7 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 				return false
 			}
 			if close >= lastStart {
+				pending = true
 				arena.Reset(mark)
 				continue
 			}
@@ -133,6 +135,9 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		}
 		if transient {
 			renvo_runtime_ArenaDiscardLinkTokens(oldTokens)
+		}
+		if !pending {
+			return true
 		}
 	}
 
@@ -1086,14 +1091,13 @@ func ordinaryBuiltinShadowed(program *unit.Program, at int, name string) bool {
 func ordinaryBuiltinTopLevelObject(program *unit.Program, name string) bool {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
-		if fn.ReceiverStart >= fn.ReceiverEnd && functionValueTokenText(program, fn.NameTok) == name {
+		if fn.ReceiverStart >= fn.ReceiverEnd && functionValueTokenEquals(program, fn.NameTok, name) {
 			return true
 		}
 	}
 	for i := 0; i < len(program.Decls); i++ {
 		decl := program.Decls[i]
-		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok >= 0 && functionValueTokenText(program, nameTok) == name {
+		if ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, name) {
 			return true
 		}
 	}
