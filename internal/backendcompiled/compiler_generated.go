@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "47247be3ed068a53bbbb3aba57ab8c88868d08cc2620916cb5823e21784d4460"
+const CompilerSourceDigest = "348088d28d2a4db4f6c54c8155c4ef0fb67a536959affd5063a5cf327040696c"
 
 // source: backend/compiler_common_impl.go
 
@@ -15929,7 +15929,7 @@ renvoNonNil(g)
 
 
 if renvoPreparedBackendActive == 0 && size >= 64 &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 (mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
 destination := renvoAddUnnamedLocal(g, renvoTypeInt)
