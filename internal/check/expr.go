@@ -119,7 +119,7 @@ func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end in
 		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
 			continue
 		}
-		close := findTypeMatching(*file, i, '[', ']')
+		close := findTypeMatching(file, i, '[', ']')
 		if close <= i || close > end {
 			continue
 		}
@@ -151,7 +151,7 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 		if isCompositeTypeBodyOpen(file, i) {
 			continue
 		}
-		close := findTypeMatching(file, i, '{', '}')
+		close := findTypeMatching(&file, i, '{', '}')
 		if close <= i || close > end {
 			continue
 		}

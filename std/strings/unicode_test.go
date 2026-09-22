@@ -43,3 +43,24 @@ func TestUnicodeStringOperations(t *testing.T) {
 		t.Fatal("rune splitting")
 	}
 }
+
+func TestMapPreservesPrefixAndInvalidRunes(t *testing.T) {
+	identity := func(r rune) rune { return r }
+	if Map(identity, "plain") != "plain" || Map(identity, "a\xffz") != "a\ufffdz" {
+		t.Fatal("identity mapping")
+	}
+	if Map(func(r rune) rune {
+		if r == 'x' {
+			return -1
+		}
+		return r
+	}, "abxc") != "abc" {
+		t.Fatal("deletion prefix")
+	}
+	if ToLower("PATH/to/file") != "path/to/file" || ToUpper("path/to/file") != "PATH/TO/FILE" {
+		t.Fatal("ASCII casing")
+	}
+	if TrimSpace(" \tplain\r\n") != "plain" || TrimSpace(" x \u2003") != "x" || TrimSpace("\u2003 x ") != "x" {
+		t.Fatal("mixed trim")
+	}
+}

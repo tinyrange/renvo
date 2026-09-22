@@ -21,7 +21,7 @@ func duplicateExplicitInterfaceMethod(file syntax.File) int {
 		if file.Tokens[i].KindLine&255 != syntax.TokenInterface || !tokCharIs(&file, i+1, '{') {
 			continue
 		}
-		close := findTypeMatching(file, i+1, '{', '}')
+		close := findTypeMatching(&file, i+1, '{', '}')
 		if close <= i+1 {
 			continue
 		}
@@ -78,7 +78,7 @@ func isInterfaceMethodSpec(file syntax.File, start int, end int) bool {
 
 func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod {
 	paramsStart := start + 1
-	paramsEnd := findTypeMatching(file, paramsStart, '(', ')')
+	paramsEnd := findTypeMatching(&file, paramsStart, '(', ')')
 	if paramsEnd < 0 || paramsEnd > end {
 		paramsEnd = paramsStart + 1
 	}

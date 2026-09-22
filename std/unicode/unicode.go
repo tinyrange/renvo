@@ -45,16 +45,30 @@ func inRanges(r rune, ranges string) bool {
 }
 func IsLetter(r rune) bool { return inRanges(r, letterRanges) }
 func IsDigit(r rune) bool  { return inRanges(r, digitRanges) }
-func IsSpace(r rune) bool  { return inRanges(r, spaceRanges) }
-func IsUpper(r rune) bool  { return inRanges(r, upperRanges) }
-func IsLower(r rune) bool  { return inRanges(r, lowerRanges) }
-func IsTitle(r rune) bool  { return inRanges(r, titleRanges) }
+func IsSpace(r rune) bool {
+	if r <= MaxASCII {
+		return r == ' ' || r >= '\t' && r <= '\r'
+	}
+	return inRanges(r, spaceRanges)
+}
+func IsUpper(r rune) bool { return inRanges(r, upperRanges) }
+func IsLower(r rune) bool { return inRanges(r, lowerRanges) }
+func IsTitle(r rune) bool { return inRanges(r, titleRanges) }
 
 func To(caseKind int, r rune) rune {
 	if caseKind < 0 || caseKind >= MaxCase {
 		return ReplacementChar
 	}
 	if r < 0 || r > MaxRune {
+		return r
+	}
+	if r <= MaxASCII {
+		if caseKind == LowerCase && r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		if caseKind != LowerCase && r >= 'a' && r <= 'z' {
+			return r - ('a' - 'A')
+		}
 		return r
 	}
 	lo, hi := 0, len(caseRanges)/20

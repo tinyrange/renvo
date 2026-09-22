@@ -7,14 +7,28 @@ import (
 
 func Map(mapping func(rune) rune, s string) string {
 	var out []byte
-	for _, r := range s {
+	for i, r := range s {
 		mapped := mapping(r)
+		if out == nil {
+			if mapped == r && r != utf8.RuneError {
+				continue
+			}
+			out = make([]byte, 0, len(s))
+			out = append(out, s[:i]...)
+		}
 		if mapped < 0 {
+			continue
+		}
+		if mapped < utf8.RuneSelf {
+			out = append(out, byte(mapped))
 			continue
 		}
 		var encoded [utf8.UTFMax]byte
 		n := utf8.EncodeRune(encoded[:], mapped)
 		out = append(out, encoded[:n]...)
+	}
+	if out == nil {
+		return s
 	}
 	return string(out)
 }
