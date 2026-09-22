@@ -82,8 +82,9 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		}
 		return definiteStructExpr(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
+	name := tokenString(file, start)
 	for _, decl := range info.Decls {
-		if decl.Name != tokenString(file, start) || decl.Kind != SymbolVar {
+		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {

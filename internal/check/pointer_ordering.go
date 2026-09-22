@@ -16,6 +16,16 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 			op = pointerOrderingNestedFunctionEnd(*file, op, fn.BodyEnd-1)
 			continue
 		}
+		// Most tokens cannot be ordering or shift operators. Reject them
+		// before checking their full spelling.
+		kind := file.Tokens[op].KindLine
+		if kind&255 != syntax.TokenOperator {
+			continue
+		}
+		first := file.Src[file.Tokens[op].Start]
+		if first != '<' && first != '>' {
+			continue
+		}
 		shift := tokenTextIs(file, op, "<<") || tokenTextIs(file, op, ">>")
 		if !shift && !tokenTextIs(file, op, "<") && !tokenTextIs(file, op, "<=") && !tokenTextIs(file, op, ">") && !tokenTextIs(file, op, ">=") {
 			continue
