@@ -220,6 +220,19 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 
+			operatorMark := arena.Mark()
+			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope)
+			arena.Reset(operatorMark)
+			if operatorTok >= 0 {
+				return false, CheckErrOperand, fileIndex, operatorTok
+			}
+			rangeMark := arena.Mark()
+			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope)
+			arena.Reset(rangeMark)
+			if rangeTok >= 0 {
+				return false, CheckErrOperand, fileIndex, rangeTok
+			}
+
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody

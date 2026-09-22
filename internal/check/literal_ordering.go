@@ -26,12 +26,16 @@ func invalidLiteralOrdering(file *syntax.File, op int, start int, end int) bool 
 }
 
 func literalOrderingBoundary(file *syntax.File, at int, limit int, direction int) int {
+	return operandBoundary(file, at, limit, direction, true)
+}
+
+func operandBoundary(file *syntax.File, at int, limit int, direction int, literalsOnly bool) int {
 	depth := 0
 	for ; at >= 0 && at < len(file.Tokens) && (direction < 0 && at >= limit || direction > 0 && at < limit); at += direction {
 		kind := file.Tokens[at].KindLine & 255
 		// An identifier or string cannot be a purely numeric literal expression.
 		// Stop before scanning or classifying the rest of that operand.
-		if kind == syntax.TokenIdent || kind == syntax.TokenString {
+		if literalsOnly && (kind == syntax.TokenIdent || kind == syntax.TokenString) {
 			return -2
 		}
 		ch := file.Tokens[at].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
