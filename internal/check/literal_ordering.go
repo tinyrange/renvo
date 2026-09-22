@@ -66,7 +66,7 @@ func literalNumericKind(file *syntax.File, start int, end int, depth int) int {
 	if depth > 64 {
 		return 0
 	}
-	start, end = stripOuterParens(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
 		return 0
 	}

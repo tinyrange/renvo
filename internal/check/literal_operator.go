@@ -24,7 +24,7 @@ func invalidLiteralUnary(file *syntax.File, op int, end int) bool {
 	start := op + 1
 	finish := start + 1
 	for start < end && tokCharIs(file, start, '(') {
-		close := findTypeMatching(*file, start, '(', ')')
+		close := findTypeMatching(file, start, '(', ')')
 		if close <= start || close > end {
 			return false
 		}

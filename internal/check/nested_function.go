@@ -12,7 +12,7 @@ func pointerOrderingNestedFunctionEnd(file syntax.File, start, end int) int {
 			if tokCharIs(&file, tok, '[') {
 				open, close = '[', ']'
 			}
-			finish := findTypeMatching(file, tok, open, close)
+			finish := findTypeMatching(&file, tok, open, close)
 			if finish <= tok {
 				return start
 			}
@@ -20,7 +20,7 @@ func pointerOrderingNestedFunctionEnd(file syntax.File, start, end int) int {
 			continue
 		}
 		if tokCharIs(&file, tok, '{') {
-			finish := findTypeMatching(file, tok, '{', '}')
+			finish := findTypeMatching(&file, tok, '{', '}')
 			if finish <= tok {
 				return start
 			}

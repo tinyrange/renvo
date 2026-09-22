@@ -21,7 +21,7 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 	var length wideConstant
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
-		start, end := stripOuterParens(file, arg.StartTok, arg.EndTok)
+		start, end := stripOuterParens(&file, arg.StartTok, arg.EndTok)
 		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(*info, tokenString(&file, start)) < 0) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
@@ -49,7 +49,7 @@ func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, en
 		return 0
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	kind := classifyType(file, start, end)
 	if kind == TypeSlice || kind == TypeMap || kind == TypeChan {
 		for open := start; open < end; open++ {
@@ -59,7 +59,7 @@ func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, en
 			if !isCompositeTypeBodyOpen(file, open) {
 				return -1
 			}
-			close := findTypeMatching(file, open, '{', '}')
+			close := findTypeMatching(&file, open, '{', '}')
 			if close <= open {
 				return 0
 			}

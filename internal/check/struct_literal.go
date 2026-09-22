@@ -14,7 +14,7 @@ func invalidStructLiterals(pkg load.Package, info PackageInfo, file syntax.File,
 		keyed, positional := false, false
 		seen := make([]bool, len(fields))
 		for _, element := range literal.Elems {
-			colon := findTypeTopLevelChar(file, element.StartTok, element.EndTok, ':')
+			colon := findTypeTopLevelChar(&file, element.StartTok, element.EndTok, ':')
 			if colon < 0 {
 				positional = true
 			} else {
@@ -44,10 +44,10 @@ func literalStructFields(pkg load.Package, info PackageInfo, file syntax.File, s
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return nil, false
 	}
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if classifyType(file, start, end) == TypeStruct {
-		open := findTypeTopLevelChar(file, start, end, '{')
-		if open >= 0 && findTypeMatching(file, open, '{', '}') == end {
+		open := findTypeTopLevelChar(&file, start, end, '{')
+		if open >= 0 && findTypeMatching(&file, open, '{', '}') == end {
 			return literalStructFieldNames(file, parseStructFields(file, open+1, end-1)), true
 		}
 	}
@@ -58,7 +58,7 @@ func literalStructFields(pkg load.Package, info PackageInfo, file syntax.File, s
 	if lookupScopeTokenNameCore(scope, &file, start) >= 0 {
 		return nil, false
 	}
-	index := LookupType(info, tokenString(&file, start))
+	index := lookupType(info.Types, tokenString(&file, start))
 	if index < 0 {
 		return nil, false
 	}
