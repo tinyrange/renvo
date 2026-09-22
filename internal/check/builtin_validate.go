@@ -14,12 +14,28 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
+	var numericBindings []scopedTypeBinding
+	numericReady := false
+	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]
+		// Resolution records calls in token order. Walk nested function spans
+		// once instead of rescanning the prefix for every len/cap invocation.
+		for nestedScan < callee {
+			if file.Tokens[nestedScan].KindLine&255 == syntax.TokenFunc {
+				end := pointerOrderingNestedFunctionEnd(*file, nestedScan, fn.BodyEnd-1)
+				if end > nestedScan {
+					nestedEnd = end
+					nestedScan = end
+				}
+			}
+			nestedScan++
+		}
+		nested := callee <= nestedEnd
 		open := callee + 1
 		name := tokenString(file, callee)
 		close := findTypeMatching(file, open, '(', ')')
@@ -27,9 +43,66 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
-		if name == "len" {
-			if len(args) != 1 {
+		if name == "copy" || name == "delete" || name == "append" {
+			expanded := tokenTextIs(file, close-2, "...")
+			if name == "append" && (len(args) == 0 || expanded && len(args) != 2) || name != "append" && (len(args) != 2 || expanded) {
 				return CheckErrBuiltinArity, callee
+			}
+			if nested {
+				continue
+			}
+			if !numericReady {
+				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				numericReady = true
+			}
+			if name == "append" {
+				if tok := invalidAppendOperands(pkg, info, fileIndex, scope, numericBindings, callee, args, expanded); tok >= 0 {
+					return CheckErrBuiltinOperand, tok
+				}
+				continue
+			}
+			if tok := invalidCopyDeleteOperands(pkg, info, fileIndex, scope, numericBindings, name, callee, args); tok >= 0 {
+				return CheckErrBuiltinOperand, tok
+			}
+			continue
+		}
+		if name == "real" || name == "imag" || name == "complex" {
+			if nested {
+				continue
+			}
+			if !numericReady {
+				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				numericReady = true
+			}
+			if code, tok := invalidNumericBuiltinCall(pkg, info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
+		if name == "make" {
+			if code, tok := invalidMakeBuiltinCall(pkg, info, fileIndex, scope, callee, close, args); code != CheckOK {
+				return code, tok
+			}
+			continue
+		}
+		if name == "len" || name == "cap" {
+			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
+				return CheckErrBuiltinArity, callee
+			}
+			if !nested {
+				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
+					numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+					numericReady = true
+				}
+				value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+				if value.kind == "int" || value.kind == "float" || value.kind == "complex" || value.kind == "bool" || value.kind == "other" || name == "cap" && value.kind == "string" {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
+			}
+			if name == "cap" {
+				if invalidCapacityLiteral(*file, args[0]) {
+					return CheckErrBuiltinOperand, args[0].StartTok
+				}
 			}
 			continue
 		}
@@ -310,4 +383,14 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 
 func fileForPackage(pkg *load.Package, fileIndex int) *syntax.File {
 	return &pkg.Files[fileIndex].File
+}
+
+// Only identifier operands consult lexical value bindings. Literals, selectors,
+// and type conversions can be classified without rebuilding the function body.
+func numericBuiltinNeedsBindings(file syntax.File, start, end int) bool {
+	start, end = stripOuterParens(&file, start, end)
+	for start < end && (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) {
+		start, end = stripOuterParens(&file, start+1, end)
+	}
+	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }

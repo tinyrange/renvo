@@ -37,11 +37,14 @@ func functionMayNeedChannelCheck(file syntax.File, fn syntax.FuncDecl) bool {
 }
 
 func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, int) {
-	for i := fn.BodyStart + 2; i+1 < fn.BodyEnd; i++ {
+	for i := fn.BodyStart + 1; i+1 < fn.BodyEnd; i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenOperator {
 			continue
 		}
 		operator := file.Src[int(file.Tokens[i].Start)]
+		if invalidLiteralUnary(&file, i, fn.BodyEnd) || invalidLiteralOrdering(&file, i, fn.BodyStart+1, fn.BodyEnd-1) {
+			return CheckErrOperand, i
+		}
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
 			leftToken := file.Tokens[i-1]
 			rightToken := file.Tokens[i+1]

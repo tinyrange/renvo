@@ -296,6 +296,16 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		if built.Build.Error == build.BuildErrCheck {
 			if built.Build.ErrorDetail == check.CheckErrGraph {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
+			} else if built.Build.ErrorDetail == check.CheckErrInitSignature {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-034", "func init must have no receiver, parameters, or results")
+			} else if built.Build.ErrorDetail == check.CheckErrMissingReturn {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-035", "missing return")
+			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
+			} else if built.Build.ErrorDetail == check.CheckErrArrayLength {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int")
+			} else if built.Build.ErrorDetail == check.CheckErrConstantOperation {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
 			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {

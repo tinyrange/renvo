@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-038",
+  "file": "cmd/app/main.go",
+  "line": 2,
+  "column": 12,
+  "message": "invalid constant operation: zero divisor or negative shift count"
+}

@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -771,9 +772,11 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 	if spec.kind != embedVarFS || spec.qualifier == "" {
 		return nil, false
 	}
+	scratchStart := arena.Mark()
 	archive := buildSourceEmbedArchive(files)
 	compressed := compressSourceEmbedArchive(archive)
 	quoted := quoteSourceEmbedExpression(compressed)
+	scratchEnd := arena.Mark()
 	out := make([]byte, 0, len(spec.qualifier)+len(quoted)+24)
 	out = append(out, spec.qualifier...)
 	out = append(out, ".NewFS("...)
@@ -781,6 +784,18 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 	out = append(out, ',', ' ')
 	out = appendSourceEmbedDecimal(out, len(archive))
 	out = append(out, ')')
+	// All allocations since scratchStart are private. Temporarily retain the
+	// initializer at the high end, rewind the dead archive/compression/quoting
+	// storage, and copy just the result back into the low arena. Discard alone
+	// releases pages but leaves that scratch consuming the fixed arena range.
+	if scratchEnd > scratchStart {
+		persistStart := arena.PersistMark()
+		retained := arena.PersistBytes(out)
+		arena.Reset(scratchStart)
+		out = make([]byte, len(retained))
+		copy(out, retained)
+		arena.PersistReset(persistStart)
+	}
 	return out, true
 }
 

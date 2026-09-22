@@ -8,9 +8,19 @@ import "renvo.dev/internal/unit"
 // collisions while keeping the compact backend source subset ASCII-only.
 func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 	maybeUnicode := false
-	for i := 0; i < len(program.Text); i++ {
-		if program.Text[i] >= 128 {
-			maybeUnicode = true
+	// Non-ASCII comments and string literals need no identifier rewriting.
+	// Inspect identifier bytes directly before allocating names or edits.
+	for _, token := range program.Tokens {
+		if token.KindLine&255 != unit.TokenIdent || token.Start < 0 || token.Size <= 0 || token.Start > len(program.Text)-token.Size {
+			continue
+		}
+		for pos := token.Start; pos < token.Start+token.Size; pos++ {
+			if program.Text[pos] >= 128 {
+				maybeUnicode = true
+				break
+			}
+		}
+		if maybeUnicode {
 			break
 		}
 	}

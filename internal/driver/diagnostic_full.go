@@ -413,6 +413,16 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
 		case check.CheckErrCallArity:
 			code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
+		case check.CheckErrInitSignature:
+			code, message = "RENVO-CHECK-034", "func init must have no receiver, parameters, or results"
+		case check.CheckErrMissingReturn:
+			code, message = "RENVO-CHECK-035", "missing return"
+		case check.CheckErrRecursiveType:
+			code, message = "RENVO-CHECK-037", "invalid recursive value type"
+		case check.CheckErrArrayLength:
+			code, message = "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int"
+		case check.CheckErrConstantOperation:
+			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
 		case check.CheckErrStructLiteral:
 			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrTypeAssertion:

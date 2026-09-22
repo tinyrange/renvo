@@ -65,6 +65,7 @@ type sourceCollector struct {
 	target        string
 	tags          []string
 	files         []load.SourceFile
+	sourceDirs    []string
 	loaded        []string
 	loading       []string
 	resolved      []load.ModuleVersion
@@ -220,6 +221,14 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 			return
 		}
 	}
+	// Different import paths can resolve to one physical source directory.
+	// The graph retains their identities; the workspace needs each file once.
+	dir := load.CleanPath(ref.Dir)
+	if findString(c.sourceDirs, dir) >= 0 {
+		c.loading = c.loading[:len(c.loading)-1]
+		return
+	}
+	c.sourceDirs = append(c.sourceDirs, dir)
 	explicit := ref.ImportPath == c.explicitRoot && len(c.explicitFiles) > 0
 	var paths []string
 	if explicit {

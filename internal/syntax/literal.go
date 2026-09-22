@@ -48,6 +48,19 @@ func stringEscapeValue(src []byte, slash int, end int) (int, int, bool, bool) {
 		return 0, 0, false, false
 	}
 	esc := src[slash+1]
+	// Two hexadecimal digits fit in a byte without an accumulator overflow
+	// check. Decode this common escape before searching the simple escapes.
+	if esc == 'x' {
+		if slash+4 > end {
+			return 0, 0, false, false
+		}
+		high, highOK := hexValue(src[slash+2])
+		low, lowOK := hexValue(src[slash+3])
+		if !highOK || !lowOK {
+			return 0, 0, false, false
+		}
+		return slash + 4, high*16 + low, false, true
+	}
 	simple := "abfnrtv\\\""
 	values := "\a\b\f\n\r\t\v\\\""
 	for i := 0; i < len(simple); i++ {
@@ -59,9 +72,7 @@ func stringEscapeValue(src []byte, slash int, end int) (int, int, bool, bool) {
 	base := 16
 	unicode := false
 	start := slash + 2
-	if esc == 'x' {
-		digits = 2
-	} else if esc == 'u' {
+	if esc == 'u' {
 		digits = 4
 		unicode = true
 	} else if esc == 'U' {

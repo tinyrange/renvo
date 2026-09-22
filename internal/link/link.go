@@ -1302,6 +1302,14 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 	duplicate := make([]bool, total)
 	for i := 0; i < len(programs); i++ {
 		initOrdinal := 0
+		// Only receiver-bearing functions can be methods. Collect their name
+		// tokens once instead of scanning every function for every symbol.
+		var methodNames []int
+		for _, fn := range programs[i].Funcs {
+			if fn.ReceiverStart < fn.ReceiverEnd {
+				methodNames = append(methodNames, fn.NameTok)
+			}
+		}
 		for j := 0; j < len(programs[i].Symbols); j++ {
 			index := symbolOffsets[i] + j
 			name := programs[i].Symbols[j].Name
@@ -1310,7 +1318,7 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			// package-aliased when needed, and method selectors inside the owning
 			// package intentionally retain the authored method spelling. Aliasing a
 			// colliding "Device.Read" declaration alone would disconnect d.Read().
-			if coreSymbolIsMethod(programs[i], programs[i].Symbols[j]) {
+			if coreSymbolIsMethod(methodNames, programs[i].Symbols[j].Token) {
 				continue
 			}
 			directiveSize := -1
@@ -1361,10 +1369,9 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 	return out
 }
 
-func coreSymbolIsMethod(program unit.Program, symbol unit.Symbol) bool {
-	for i := 0; i < len(program.Funcs); i++ {
-		fn := program.Funcs[i]
-		if fn.NameTok == symbol.Token && fn.ReceiverStart < fn.ReceiverEnd {
+func coreSymbolIsMethod(methodNames []int, token int) bool {
+	for _, name := range methodNames {
+		if name == token {
 			return true
 		}
 	}
