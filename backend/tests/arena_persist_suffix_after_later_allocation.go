@@ -6,11 +6,14 @@ func renvo_runtime_ArenaPersistReset(mark int)             {}
 func renvo_runtime_ArenaPersistString(value string) string { return value }
 func renvo_runtime_ArenaBytesStart(value []byte) int       { return 0 }
 
+func renvo_runtime_ArenaPersistBytes(value []byte) []byte { return value }
+
 func appMain() int {
 	mark := renvo_runtime_ArenaMark()
 	padding := make([]byte, 16)
 	padding[0] = 1
-	unit := make([]byte, 64)
+	// Promote the unit explicitly; ordinary make uses the scratch arena.
+	unit := renvo_runtime_ArenaPersistBytes(make([]byte, 64))
 	unit[0] = 'R'
 	unit[1] = 'N'
 	unit[2] = 'V'
