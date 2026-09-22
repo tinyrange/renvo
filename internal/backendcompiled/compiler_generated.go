@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b3fe4e8682d46716acb0f262466d069fc81edb4bfcd80802e3f55f425936f960"
+const CompilerSourceDigest = "e311af3fb074c6b40670b722ec39645b42ccec1a0cf0897f04ff37c317d604a6"
 
 // source: backend/compiler_common_impl.go
 
@@ -8668,6 +8668,14 @@ renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
 return
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
+unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+if unsigned {
+if setcc < 0x94 {
+setcc += 10
+} else {
+setcc += 8
+}
+}
 cond := renvoWasm32CondEq
 if setcc == 0x95 {
 cond = renvoWasm32CondNe
@@ -8680,7 +8688,11 @@ cond = renvoWasm32CondLe
 } else if setcc == 0x9f {
 cond = renvoWasm32CondGt
 }
+if unsigned {
+renvoWasm32CompareUnsigned(a)
+} else {
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 renvoWasm32EmitCondBranch(a, cond, label)
 return
 }
@@ -11579,7 +11591,8 @@ func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte
 if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
 g.c.renvoTargetArch != renvoArchAmd64 &&
 g.c.renvoTargetArch != renvoArchAarch64 &&
-g.c.renvoTargetArch != renvoArchWasm32 {
+g.c.renvoTargetArch != renvoArchWasm32 &&
+!(g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm)) {
 return false
 }
 renvoNonNil(g)
@@ -25463,6 +25476,18 @@ renvoAsmPopTertiary(a)
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
 unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+comparisonStart := renvoTokStart(p, e.tok)
+comparisonEnd := renvoTokEnd(p, e.tok)
+comparisonChar := renvo_runtime_UnsafeByteAt(p.src, comparisonStart)
+comparisonSecond := byte(0)
+if comparisonStart+1 < comparisonEnd {
+comparisonSecond = renvo_runtime_UnsafeByteAt(p.src, comparisonStart+1)
+}
+if (comparisonChar == '<' || comparisonChar == '>') && comparisonSecond != comparisonChar &&
+(renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) &&
+renvoEmitUnsignedPrimaryTertiaryCompare(g, comparisonChar, comparisonSecond, comparisonEnd-comparisonStart) {
+return true
+}
 if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
 if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 return false
@@ -32472,7 +32497,7 @@ return false
 }
 }
 renvoAsmPopTertiary(a)
-if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
 }
@@ -32629,7 +32654,7 @@ unsigned := (c0 == '<' || c0 == '>') &&
 (renvoExprHasUnsignedIntType(g, ep, e.left) ||
 renvoExprHasUnsignedIntType(g, ep, e.right))
 right := &ep.exprs[rightIndex]
-if !usesFloat {
+if !usesFloat && !(unsigned && g.c.renvoTargetArch == renvoArchWasm32) {
 rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 if !renvoEmitIntExpr(g, ep, leftIndex) {
@@ -32710,7 +32735,12 @@ renvoAarch64AsmCmpRegReg(&g.asm, renvoAarch64RegRcx, renvoAarch64RegRax)
 } else if g.c.renvoTargetArch == renvoArchArm {
 renvoArmAsmCmpRegReg(&g.asm, renvoArmRegRcx, renvoArmRegRax)
 } else if g.c.renvoTargetArch == renvoArchWasm32 {
+if unsigned {
+renvoWasm32CompareUnsigned(&g.asm)
+unsigned = false
+} else {
 renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 } else {
 renvoAsmEmit24(&g.asm, 0xc13948)
 }
@@ -37563,7 +37593,7 @@ if target == renvoTargetLinuxAarch64 {
 return "linux/aarch64", "\xf3\x34\x4f\x65\x24\xa7\x5b\xf8\xc4\x08\x89\x0c\x48\xa1\xa9\x62\x49\x30\xc9\x58\xfb\x01\x4c\x07\x9d\xd4\xd9\xc3\xd3\xb6\x06\x2a", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x43\x5d\xdd\x4f\x60\xaf\xa9\x5c\xbb\x80\x66\xe8\x10\x26\x1d\xc6\xf8\x86\x2a\x01\x26\xb4\x50\x9a\x18\x47\xf1\xb2\x84\xe7\x69\xad", 3, true
+return "linux/arm", "\x84\xd9\xca\x41\xee\x61\x4e\x7c\xc4\xfa\x8b\x28\x51\x9b\xf3\x4b\xb2\xf8\x98\x67\xcd\x93\x35\x69\xba\xd7\xcb\x29\x6b\x6e\xe7\x22", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
@@ -37572,7 +37602,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x06\xa8\x35\x92\x2b\x5f\x02\xf1\x62\x87\x15\xc8\x1e\x22\xba\x53\x57\x11\x6e\x2f\x7b\xdf\x2d\x2f\x91\x20\xa5\x21\xd4\xe7\x5c\x16", 3, true
+return "wasi/wasm32", "\xd6\x83\xc9\xd8\x33\xf5\x52\x0d\x1b\xdc\x1c\x71\x5a\x5b\x8f\x93\x92\x72\xef\xd7\x2a\x9d\xda\x57\xf7\xa2\x04\x43\xa9\xac\x12\x29", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
@@ -37584,7 +37614,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x40\xf3\xc1\xbb\x5c\xa5\xc7\x28\x38\x90\xfe\x69\x68\x25\x2a\xcd\x5f\x00\xdc\xfd\xc2\x4c\xa5\xec\x3b\x72\xc1\x0a\xf2\x62\x8b\x53", 3, true
+return "vm/vm32", "\x5d\x01\x5e\xb2\xcc\x34\x31\xad\x36\x96\x8c\x6f\xba\x40\xe4\xa7\x8b\x1b\x85\x88\x13\x8c\xd6\x9e\x70\x30\xe6\xd3\x5e\xeb\x84\x5f", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -45164,6 +45194,18 @@ return 13
 if setcc == 0x9f {
 return 12
 }
+if setcc == 0x92 {
+return 3
+}
+if setcc == 0x93 {
+return 2
+}
+if setcc == 0x96 {
+return 9
+}
+if setcc == 0x97 {
+return 8
+}
 return 10
 }
 func renvoArmAsmDivLeftRcxRightRax(a *renvoAsm, mod bool) {
@@ -47077,7 +47119,37 @@ renvoWasm32EmitRegReg(a, renvoWasm32OpDivRegReg, renvoWasm32RegRcx, renvoWasm32R
 }
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 }
+func renvoWasm32CompareUnsigned(a *renvoAsm) {
+done := a.NewLabel()
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 1)
+renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondNe, renvoRTGLabelCode(done))
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+a.Mark(done)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+}
 func renvoWasm32AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+if unsigned {
+if setcc < 0x94 {
+setcc += 10
+} else {
+setcc += 8
+}
+}
 cond := renvoWasm32CondEq
 if setcc == 0x95 {
 cond = renvoWasm32CondNe
@@ -47090,7 +47162,11 @@ cond = renvoWasm32CondGt
 } else if setcc == 0x9d {
 cond = renvoWasm32CondGe
 }
+if unsigned {
+renvoWasm32CompareUnsigned(a)
+} else {
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 renvoAsmEmit8(a, renvoWasm32OpSetCond)
 renvoAsmEmit8(a, cond)
 }
