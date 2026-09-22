@@ -254,6 +254,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if callTok >= 0 {
 				return false, CheckErrCallArity, fileIndex, callTok
 			}
+			operandTok := invalidCallOperandCount(graph, pkgIndex, info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
+			if operandTok >= 0 {
+				return false, CheckErrOperand, fileIndex, operandTok
+			}
 			prepareDefiniteCallTargets(pkg, info, out.CoreRefs, callTargets)
 			callCheckArenaStart = arena.Mark()
 			callTypeTok := invalidDefiniteCallArgumentType(pkg, info, fileIndex, fn, &signature, out.CoreRefs, callTargets)
