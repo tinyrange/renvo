@@ -22228,7 +22228,7 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
-	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
 		// Primary holds the base, secondary the length, and tertiary the
@@ -22347,7 +22347,7 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
-	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
 		// Compare the original index and length without materializing each

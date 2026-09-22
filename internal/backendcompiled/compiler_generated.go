@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "588bd6af76c96d502fb3b7dc29707f27f2004adab2ca336012a7045c2c2eb11a"
+const CompilerSourceDigest = "74db8e246498ec3abd39bfc21f39262eb17b08ab2df32f27e901b65344371718"
 
 // source: backend/compiler_common_impl.go
 
@@ -22235,7 +22235,7 @@ return label
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
-if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
 
@@ -22354,7 +22354,7 @@ return label
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
-if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
 
