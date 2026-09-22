@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"renvo.dev/internal/arena"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/syntax"
 )
@@ -771,9 +772,11 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 	if spec.kind != embedVarFS || spec.qualifier == "" {
 		return nil, false
 	}
+	scratchStart := arena.Mark()
 	archive := buildSourceEmbedArchive(files)
 	compressed := compressSourceEmbedArchive(archive)
 	quoted := quoteSourceEmbedExpression(compressed)
+	scratchEnd := arena.Mark()
 	out := make([]byte, 0, len(spec.qualifier)+len(quoted)+24)
 	out = append(out, spec.qualifier...)
 	out = append(out, ".NewFS("...)
@@ -781,6 +784,9 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 	out = append(out, ',', ' ')
 	out = appendSourceEmbedDecimal(out, len(archive))
 	out = append(out, ')')
+	// The initializer owns its bytes. Archive, match tables, and quoting
+	// scratch are private to this call and no longer needed after the copy.
+	arena.Discard(scratchStart, scratchEnd)
 	return out, true
 }
 
