@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "77d7274a15ee8e7a6429111b7882453df73e60d8103d722a1849c71c6a0f6f02"
+const CompilerSourceDigest = "adc4d8f0c37f23d7119ba6b14f9bd3f9ee550288c4a66b17d149412c62da7171"
 
 // source: backend/compiler_common_impl.go
 
@@ -15367,7 +15367,7 @@ return g.makeZeroLabel
 }
 afterLabel := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-if g.c.renvoTargetArch == renvoArchAmd64 {
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 
 
 renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
