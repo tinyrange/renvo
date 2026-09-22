@@ -236,6 +236,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if undefinedTok >= 0 {
 				return false, CheckErrUndefined, fileIndex, undefinedTok
 			}
+			unsafeCheckArenaStart := arena.Mark()
+			unsafeErr, unsafeTok := invalidUnsafeIntrinsicCalls(pkg, info, fileIndex, fn, &signature, out.CoreSelectors)
+			arena.Reset(unsafeCheckArenaStart)
+			if unsafeErr != CheckOK {
+				return false, unsafeErr, fileIndex, unsafeTok
+			}
 			builtinCheckArenaStart := arena.Mark()
 			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls)
 			arena.Reset(builtinCheckArenaStart)

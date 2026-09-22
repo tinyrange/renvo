@@ -35,8 +35,12 @@ type Result struct {
 }
 
 func GeneratePackage(dir string) (Result, error) {
+	return generatePackage(dir, build.Default)
+}
+
+func generatePackage(dir string, context build.Context) (Result, error) {
 	dir = filepath.Clean(dir)
-	pkg, err := build.Default.ImportDir(dir, 0)
+	pkg, err := context.ImportDir(dir, 0)
 	if err != nil {
 		return Result{}, err
 	}
@@ -71,12 +75,23 @@ func GeneratePackage(dir string) (Result, error) {
 	if len(out.Tests) == 0 {
 		return Result{}, ErrNoTests
 	}
+	if err := renamePackageMain(out.Files); err != nil {
+		return Result{}, err
+	}
 	out.Files = append(out.Files, GeneratedFile{Name: "renvo_testmain.go", Data: testMainSource(out.Tests)})
 	return out, nil
 }
 
 func GenerateRenvoPackage(dir string) (Result, error) {
-	out, err := GeneratePackage(dir)
+	return GenerateRenvoPackageWithTags(dir, nil)
+}
+
+func GenerateRenvoPackageWithTags(dir string, tags []string) (Result, error) {
+	context := build.Default
+	context.BuildTags = append([]string{}, context.BuildTags...)
+	context.BuildTags = append(context.BuildTags, "renvo")
+	context.BuildTags = append(context.BuildTags, tags...)
+	out, err := generatePackage(dir, context)
 	if err != nil {
 		return Result{}, err
 	}

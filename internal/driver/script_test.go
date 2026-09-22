@@ -82,3 +82,14 @@ func TestStandaloneCSourceContextPreservesSingleGoObject(t *testing.T) {
 		t.Fatalf("object source options = %#v", options)
 	}
 }
+
+func TestStandaloneGoFilesWithoutModule(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/standalone/main.go", Src: []byte("package main\nfunc main() { println(value()) }\n")},
+		{Path: "/standalone/value.go", Src: []byte("package main\nfunc value() int { return 42 }\n")},
+	}
+	result := BuildFromFS([]string{"-emit-unit", "-o", "out.unit", "/standalone/main.go", "/standalone/value.go"}, "/outside", "/std", memorySourceFS{files: files})
+	if !result.Ok {
+		t.Fatalf("standalone Go files failed: %#v", result)
+	}
+}

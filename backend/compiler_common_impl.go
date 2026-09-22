@@ -15863,7 +15863,7 @@ func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int,
 	// straight-line bytecode. The bulk loop is primarily a native-code size
 	// optimization, so retain the compact path for the hosted targets without
 	// imposing its loop overhead on the deterministic VM frontend.
-	if renvoFixedTarget == 0 && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
+	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 		count := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -15919,6 +15919,28 @@ const renvoNativeCopyBSSToStack = 5
 
 func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 	renvoNonNil(g)
+	// Large aggregate loads and stores use the existing overlap-safe copy
+	// operation instead of expanding a load/store pair for every word.
+	if renvoPreparedBackendActive == 0 && size >= 64 &&
+		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
+		(mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
+		source := renvoAddUnnamedLocal(g, renvoTypeInt)
+		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
+		count := renvoAddUnnamedLocal(g, renvoTypeInt)
+		if mode == renvoNativeCopyMemToStack {
+			renvoAsmStoreSecondaryStack(&g.asm, source)
+			renvoAsmAddressPrimaryStack(&g.asm, destOffset)
+			renvoAsmStorePrimaryStack(&g.asm, destination)
+		} else {
+			renvoAsmAddSecondaryImm(&g.asm, destOffset)
+			renvoAsmStoreSecondaryStack(&g.asm, destination)
+			renvoAsmAddressPrimaryStack(&g.asm, srcOffset)
+			renvoAsmStorePrimaryStack(&g.asm, source)
+		}
+		renvoAsmStoreStackImm(&g.asm, count, size)
+		renvoEmitCopyBytes(g, source, destination, count)
+		return
+	}
 	a := &g.asm
 	for at := 0; at < size; {
 		chunkSize := g.c.renvoNativeIntSize
@@ -21129,6 +21151,20 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, destPtr)
 	renvoAsmCmpTertiaryPrimaryJump(a, 0x9e, forward)
 	renvoAsmCopyStackSlot(a, byteCount, index)
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+		wordLoop := renvoAsmNewLabel(a)
+		wordDone := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmJcmpStackImm(a, index, 4, wordDone, 0x9c)
+		renvoAsmLoadPrimaryStack(a, index)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, index)
+		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
+		renvoAsmJmpLabel(a, wordLoop)
+		renvoAsmMarkLabel(a, wordDone)
+	}
 	backward := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, backward)
 	renvoAsmJcmpStackImm(a, index, 0, copyDone, 0x9e)
@@ -21137,6 +21173,24 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmJmpLabel(a, backward)
 	renvoAsmMarkLabel(a, forward)
 	renvoAsmStoreStackImm(a, index, 0)
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+		wordLoop := renvoAsmNewLabel(a)
+		wordDone := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmLoadPrimaryTertiaryStack(a, byteCount, index)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9f, wordDone)
+		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
+		renvoAsmLoadPrimaryStack(a, index)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, index)
+		renvoAsmJmpLabel(a, wordLoop)
+		renvoAsmMarkLabel(a, wordDone)
+	}
 	forwardLoop := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, forwardLoop)
 	renvoAsmJgeStackStack(a, index, byteCount, copyDone)
@@ -21146,6 +21200,20 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmMarkLabel(a, copyDone)
 }
 
+func renvoEmitCopyWordAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
+	renvoNonNil(g)
+	a := &g.asm
+	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, index)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, 4)
+	renvoAsmPushPrimary(a)
+	renvoAsmLoadPrimaryTertiaryStack(a, destPtr, index)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+}
 func renvoEmitCopyByteAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
 	renvoNonNil(g)
 	a := &g.asm
