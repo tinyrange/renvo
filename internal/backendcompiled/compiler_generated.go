@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9a43e349d8c35154176e468c88cd4335d0d8f1e5ced65386696d978c26a895de"
+const CompilerSourceDigest = "a6b4890d282b4f2f7c75741347a113b85a9152bfb034413dfe83182f009fc182"
 
 // source: backend/compiler_common_impl.go
 
@@ -15387,6 +15387,12 @@ renvoAsmMarkLabel(a, plain)
 func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
 
 
+
+if g.c.objectFile {
+return
+}
+
+
 if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
 return
 }
@@ -22684,7 +22690,7 @@ renvoAsmPrimaryImm(a, 0)
 renvoAsmPushImm(a, (size+7)/8)
 renvoAsmPopTertiary(a)
 renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
+} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 256 {
 renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmPushImm(a, size)
 renvoAsmPopTertiary(a)
