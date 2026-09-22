@@ -12441,7 +12441,8 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 				}
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15364,6 +15365,23 @@ func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmPushPrimary(a)
+	// VM32 and WASM memory supports unaligned word stores. Clear whole
+	// words before the byte tail, avoiding one interpreted loop per byte.
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, 4)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+		renvoAsmAddSecondaryImm(a, 4)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmJzPrimary(a, doneLabel)
