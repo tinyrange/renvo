@@ -50,11 +50,11 @@ func constantIndexInt(context constantIndexContext, start int, end int, before i
 	}
 	file := context.pkg.Files[context.fileIndex].File
 	start, end = trimExprSpan(file, start, end)
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if start < 0 || end <= start {
 		return 0, false
 	}
-	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
+	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(&file, start+1, '(', ')') == end && constantIndexType(context, start, 0) {
 		if context.strict {
 			return 0, false
 		}
@@ -217,7 +217,7 @@ func constantIndexType(context constantIndexContext, tok int, depth int) bool {
 	if name == "int" || name == "int8" || name == "int16" || name == "int32" || name == "int64" || name == "uint" || name == "uint8" || name == "uint16" || name == "uint32" || name == "uint64" || name == "uintptr" || name == "byte" || name == "rune" {
 		return true
 	}
-	typeIndex := LookupType(*context.info, name)
+	typeIndex := lookupType(context.info.Types, name)
 	if typeIndex < 0 {
 		return false
 	}
@@ -233,13 +233,13 @@ func constantIndexArrayLength(context constantIndexContext, signature FuncSignat
 		return 0, false
 	}
 	file := context.pkg.Files[context.fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	for start < end && (tokCharIs(&file, start, '&') || tokCharIs(&file, start, '*')) {
 		start++
-		start, end = stripOuterParens(file, start, end)
+		start, end = stripOuterParens(&file, start, end)
 	}
 	if start < end && tokCharIs(&file, end-1, '}') {
-		return constantIndexTypeLength(context, start, findTypeTopLevelChar(file, start, end, '{'), before, depth+1)
+		return constantIndexTypeLength(context, start, findTypeTopLevelChar(&file, start, end, '{'), before, depth+1)
 	}
 	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
@@ -296,7 +296,7 @@ func constantIndexTypeLength(context constantIndexContext, start int, end int, b
 	if end != start+1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
-	typeIndex := LookupType(*context.info, tokenString(&file, start))
+	typeIndex := lookupType(context.info.Types, tokenString(&file, start))
 	if typeIndex < 0 {
 		return 0, false
 	}

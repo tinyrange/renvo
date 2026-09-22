@@ -115,10 +115,12 @@ func collectSourcesForTargetTagsWithModuleCache(workDir string, stdRoot string, 
 	config := &load.ModuleConfig{}
 	module := load.ParseModuleConfig(moduleRoot, moduleSrc, config)
 	result.Module = module
+	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	if !module.Ok {
+		result.ErrorSourcePath = modulePath
+		result.ErrorOffset = module.ErrorOffset
 		return sourceFail(result, SourceErrModule, modulePath)
 	}
-	result.Files = append(result.Files, load.SourceFile{Path: modulePath, Src: moduleSrc})
 	var normalizedFiles []string
 	if len(explicitFiles) > 0 {
 		rootDir := ""
@@ -488,7 +490,12 @@ func (c *sourceCollector) resolveDependency(importPath string) load.PackageRef {
 				return unsupportedPackage(importPath)
 			}
 		}
-		manifest := []byte(requirement.Path)
+		manifest := []byte("module " + requirement.Path + "\n")
+		if dependency.GoVersion != "" {
+			manifest = append(manifest, "go "...)
+			manifest = append(manifest, dependency.GoVersion...)
+			manifest = append(manifest, '\n')
+		}
 		c.files = append(c.files, load.SourceFile{Path: goModPath, Src: manifest})
 		c.modules = append(c.modules, dependency)
 		c.resolved = append(c.resolved, requirement)
@@ -1184,6 +1191,9 @@ func hasBuildTag(target string, tag string, tags []string) bool {
 		return true
 	}
 	if tag == "renvo" || tag == "cgo" {
+		return true
+	}
+	if load.HasGoReleaseTag(tag) {
 		return true
 	}
 	return targetinfo.HasBuildTag(target, tag) || renvoBackendTargetHasBuildTag(target, tag)

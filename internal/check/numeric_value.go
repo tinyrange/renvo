@@ -29,7 +29,7 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		return numericBuiltinValue{}
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if start < 0 || start >= end {
 		return numericBuiltinValue{}
 	}
@@ -58,7 +58,7 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 	if (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) && start+1 < end {
 		return numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
 	}
-	if start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end {
+	if start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(&file, start+1, '(', ')') == end {
 		return numericBuiltinTypeValue(pkg, info, fileIndex, scope, start, start+1, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -113,7 +113,7 @@ func numericBuiltinTypeValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		return numericBuiltinValue{}
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}

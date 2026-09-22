@@ -122,7 +122,7 @@ func resolveSelector(fileIndex int, info PackageInfo, checked []PackageInfo, sco
 		selector.Kind = SelectorImport
 		selector.Package = baseRef.Package
 		if baseRef.Package < len(checked) {
-			selector.Symbol = LookupPackageSymbol(checked[baseRef.Package], name)
+			selector.Symbol = lookupPackageSymbol(checked[baseRef.Package].Symbols, name)
 		}
 	}
 	return selector
