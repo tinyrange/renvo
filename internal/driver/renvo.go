@@ -419,15 +419,7 @@ func (fs RenvoFS) ReadFile(path string) ([]byte, bool) {
 	// reclaim trailing capacity when this read still owns the last allocation.
 	// Limit the returned capacity so a later append cannot enter reused space.
 	arena.DiscardBytes(out[used:])
-	start := arena.BytesStart(out)
-	if start != 0 && arena.Mark() == start+len(out) {
-		end := start + used
-		if remainder := end % 8; remainder != 0 {
-			end += 8 - remainder
-		}
-		arena.Rewind(end)
-	}
-	return out[:used:used], true
+	return arena.TrimLastBytes(out[:used]), true
 }
 
 func (fs RenvoFS) ReadDir(path string) ([]DirEntry, bool) {
