@@ -303,9 +303,10 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 	parenDepth := 0
 	bracketDepth := 0
+	braceDepth := 0
 	for i := start; i < end; i++ {
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
-		if parenDepth == 0 && bracketDepth == 0 && ch == int(c) {
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && ch == int(c) {
 			return i
 		}
 		if ch == int('(') {
@@ -319,6 +320,12 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 		} else if ch == int(']') {
 			if bracketDepth > 0 {
 				bracketDepth--
+			}
+		} else if ch == int('{') {
+			braceDepth++
+		} else if ch == int('}') {
+			if braceDepth > 0 {
+				braceDepth--
 			}
 		}
 	}
