@@ -1453,7 +1453,8 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 			return functionValueTokensText(program, start+1, end)
 		}
 	}
-	for i := fn.BodyStart + 1; i+2 < before; i++ {
+	// Include a named declaration immediately before the use.
+	for i := fn.BodyStart + 1; i+1 < before; i++ {
 		if !functionValueTokenEquals(program, i, name) {
 			continue
 		}
