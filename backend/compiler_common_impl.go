@@ -15922,7 +15922,7 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 	// Large aggregate loads and stores use the existing overlap-safe copy
 	// operation instead of expanding a load/store pair for every word.
 	if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
-		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
+		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 		(mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -21151,7 +21151,7 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, destPtr)
 	renvoAsmCmpTertiaryPrimaryJump(a, 0x9e, forward)
 	renvoAsmCopyStackSlot(a, byteCount, index)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+	if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
 		wordLoop := renvoAsmNewLabel(a)
 		wordDone := renvoAsmNewLabel(a)
 		renvoAsmMarkLabel(a, wordLoop)
@@ -21173,7 +21173,7 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmJmpLabel(a, backward)
 	renvoAsmMarkLabel(a, forward)
 	renvoAsmStoreStackImm(a, index, 0)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+	if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
 		wordLoop := renvoAsmNewLabel(a)
 		wordDone := renvoAsmNewLabel(a)
 		renvoAsmMarkLabel(a, wordLoop)
