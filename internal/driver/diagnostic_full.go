@@ -413,6 +413,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-031", "return value is not assignable to the function result"
 		case check.CheckErrCallArity:
 			code, message = "RENVO-CHECK-032", "function call argument count does not match parameters"
+		case check.CheckErrStructLiteral:
+			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
 		}
