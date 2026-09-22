@@ -24,6 +24,7 @@ func TestAuditSourceEncodingAndLiteralLimit(t *testing.T) {
 		"package main\n// 日本語\nvar s = `é`",
 		"\xef\xbb\xbfpackage main\nvar s = \"\\xff\"",
 		"package main\nvar x = .5 + +.01",
+		"package main\nvar π, 世界, α٢, 𐐀 = 1, 2, 3, 4",
 	} {
 		if file := ParseFile([]byte(source)); !file.Ok {
 			t.Fatalf("rejected valid source: %+v", file)
