@@ -296,6 +296,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		if built.Build.Error == build.BuildErrCheck {
 			if built.Build.ErrorDetail == check.CheckErrGraph {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
+			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-033", "type assertion requires a type; found a composite literal")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
