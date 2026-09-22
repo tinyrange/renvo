@@ -473,6 +473,7 @@ go compiler {
 		g.prog = p
 		g.meta = meta
 		g.arenaSize = meta.arenaSize
+		g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 		a := &g.asm
 		renvoAsmInitWithContext(a, g.c)
 		a.codeOffset = renvoAarch64ELFCodeOffset

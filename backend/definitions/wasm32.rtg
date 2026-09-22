@@ -3421,14 +3421,17 @@ go backend {
 						stack = stack[:0]
 					} else {
 						base := len(stack) - extra
+						// Earlier pushes can belong to an enclosing call whose later
+						// argument is this call. Keep those live values in distinct
+						// local slots until the enclosing call consumes them.
 						if extra > 0 {
-							locals[i] = 1
+							locals[i] = base + 1
 						}
 						for depth := 0; depth < extra; depth++ {
-							locals[stack[base+depth]] = depth + 1
+							locals[stack[base+depth]] = base + depth + 1
 						}
-						if extra > maxCallArgs {
-							maxCallArgs = extra
+						if extra > 0 && base+extra > maxCallArgs {
+							maxCallArgs = base + extra
 						}
 						stack = stack[:len(stack)-extra]
 					}
