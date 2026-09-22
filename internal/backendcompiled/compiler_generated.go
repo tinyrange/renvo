@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "38a781a5e653e3423af8140f81a55fb37687a2efe15870c89dba94e032e1d82a"
+const CompilerSourceDigest = "4795d06e4db50f785893a2ae4ae221ff33c965094f87229387bee7eea025c8b6"
 
 // source: backend/compiler_common_impl.go
 
@@ -15416,7 +15416,7 @@ reusedLabel := renvoAsmNewLabel(a)
 highReady := renvoAsmNewLabel(a)
 plain := renvoAsmNewLabel(a)
 renvoAsmPushPrimary(a)
-renvoAsmPrimaryImm(a, 8192)
+renvoAsmPrimaryImm(a, 256)
 renvoAsmCmpTertiaryPrimarySet(a, 0x92)
 renvoAsmJnzPrimary(a, small)
 renvoAsmPopPrimary(a)
@@ -15492,22 +15492,44 @@ renvoAsmPopPrimary(a)
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 a := &g.asm
 renvoEmitMakeZeroFreshArenaReturn(g)
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+
+
+renvoAsmCopyPrimaryToSecondary(a)
+renvoAsmPushPrimary(a)
+renvoAsmPrimaryImm(a, 0)
+for width := 4; width >= 1; width -= 3 {
+loop := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, loop)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
+renvoAsmJmpMarkLabel(a, loop, done)
+}
+renvoAsmPopPrimary(a)
+renvoAsmRet(a)
+return
+}
 loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
 
 
-if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordSize := g.c.renvoNativeIntSize
 wordLoop := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, wordLoop)
-renvoAsmPrimaryImm(a, 4)
+renvoAsmPrimaryImm(a, wordSize)
 renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
 renvoAsmPrimaryImm(a, 0)
-renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-renvoAsmAddSecondaryImm(a, 4)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, wordSize)
+renvoAsmAddSecondaryImm(a, wordSize)
 renvoAsmCopyTertiaryToPrimary(a)
-renvoAsmPushImm(a, 4)
+renvoAsmPushImm(a, wordSize)
 renvoAsmPopTertiary(a)
 renvoAsmSubPrimaryTertiary(a)
 renvoAsmCopyPrimaryToTertiary(a)
@@ -22698,7 +22720,7 @@ renvoAsmPrimaryImm(a, 0)
 renvoAsmPushImm(a, (size+7)/8)
 renvoAsmPopTertiary(a)
 renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
 renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmPushImm(a, size)
 renvoAsmPopTertiary(a)
