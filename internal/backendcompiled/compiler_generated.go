@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2ccc5a3cf31d8448bc1858efb2f3c2c3d2e6e792c0ea17fc519abee96a8439bb"
+const CompilerSourceDigest = "aff479a167790ea770c27e47c180fb2d16caeafa0b25e66c8814ced2d66cd63e"
 
 // source: backend/compiler_common_impl.go
 
@@ -15333,6 +15333,10 @@ return g.makeZeroLabel
 afterLabel := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
 if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
+renvoEmitMakeZeroFreshArenaReturn(g)
+if g.c.renvoTarget == renvoTargetLinuxAmd64 {
+renvoEmitLinuxAmd64MakeZeroPages(g)
+}
 
 
 renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
@@ -15344,8 +15348,128 @@ renvoAsmMarkLabel(a, afterLabel)
 return g.makeZeroLabel
 }
 
+
+
+
+
+func renvoEmitLinuxAmd64MakeZeroPages(g *renvoLinearGen) {
+a := &g.asm
+plain := renvoAsmNewLabel(a)
+fallback := renvoAsmNewLabel(a)
+
+renvoAsmEmitText(a, "\x48\x81\xf9\x00\x20\x00\x00")
+renvoAmd64AsmJccLabel(a, 0x82, plain)
+
+renvoAsmEmitText(a, "\x50\x57\x56\x52\x41\x53\x51")
+
+renvoAsmEmitText(a, "\x48\x8d\xb8\xff\x0f\x00\x00\x48\x81\xe7\x00\xf0\xff\xff")
+renvoAsmEmitText(a, "\x48\x8d\x34\x08\x48\x81\xe6\x00\xf0\xff\xff\x48\x29\xfe")
+
+renvoAsmEmitText(a, "\xba\x04\x00\x00\x00\xb8\x1c\x00\x00\x00\x0f\x05\x85\xc0")
+renvoAmd64AsmJccLabel(a, 0x88, fallback)
+
+renvoAsmEmitText(a, "\x48\x8b\x7c\x24\x28\x48\x89\xf9\x48\xf7\xd9\x81\xe1\xff\x0f\x00\x00\x31\xc0\xf3\xaa")
+
+renvoAsmEmitText(a, "\x48\x8b\x7c\x24\x28\x48\x03\x3c\x24\x48\x89\xf9\x81\xe1\xff\x0f\x00\x00")
+renvoAsmEmitText(a, "\x48\x81\xe7\x00\xf0\xff\xff\x31\xc0\xf3\xaa")
+renvoAsmEmitText(a, "\x59\x41\x5b\x5a\x5e\x5f\x58\xc3")
+renvoAsmMarkLabel(a, fallback)
+renvoAsmEmitText(a, "\x59\x41\x5b\x5a\x5e\x5f\x58")
+renvoAsmMarkLabel(a, plain)
+}
+
+
+
+
+func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+return
+}
+renvoStringHeapOffsets(g)
+a := &g.asm
+small := renvoAsmNewLabel(a)
+reusedLabel := renvoAsmNewLabel(a)
+highReady := renvoAsmNewLabel(a)
+plain := renvoAsmNewLabel(a)
+renvoAsmPushPrimary(a)
+renvoAsmPrimaryImm(a, 8192)
+renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+renvoAsmJnzPrimary(a, small)
+renvoAsmPopPrimary(a)
+renvoAsmPushSecondary(a)
+renvoAsmPushPrimary(a)
+renvoAsmPushTertiary(a)
+renvoAsmCopyPrimaryToSecondary(a)
+renvoAsmAddPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+renvoAsmJnzPrimary(a, reusedLabel)
+renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+renvoAsmJzPrimary(a, highReady)
+renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+renvoAsmJnzPrimary(a, reusedLabel)
+renvoAsmMarkLabel(a, highReady)
+renvoAsmCopySecondaryToPrimary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+renvoAsmJnzPrimary(a, reusedLabel)
+renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+renvoAsmJnzPrimary(a, reusedLabel)
+renvoAsmPopTertiary(a)
+renvoAsmPopPrimary(a)
+renvoAsmPopSecondary(a)
+renvoAsmPushImm(a, 0)
+renvoAsmPopTertiary(a)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, reusedLabel)
+renvoAsmPopTertiary(a)
+renvoAsmPopPrimary(a)
+renvoAsmPopSecondary(a)
+renvoAsmJmpLabel(a, plain)
+renvoAsmMarkLabel(a, small)
+renvoAsmPopPrimary(a)
+renvoAsmMarkLabel(a, plain)
+}
+
+
+
+
+func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
+a := &g.asm
+cursor := g.stringHeapOff
+dirty := cursor + 16
+condition := 0x97
+if persistent {
+cursor = g.stringHeapEndOff
+dirty = g.stringHeapOff + 24
+condition = 0x92
+}
+done := renvoAsmNewLabel(a)
+record := renvoAsmNewLabel(a)
+renvoAsmPushPrimary(a)
+renvoAsmLoadPrimaryBss(a, cursor)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmLoadPrimaryBss(a, dirty)
+if persistent {
+renvoAsmJzPrimary(a, record)
+}
+renvoAsmCmpTertiaryPrimarySet(a, condition)
+renvoAsmJzPrimary(a, done)
+renvoAsmMarkLabel(a, record)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmStorePrimaryBss(a, dirty)
+renvoAsmMarkLabel(a, done)
+renvoAsmPopPrimary(a)
+}
+
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 a := &g.asm
+renvoEmitMakeZeroFreshArenaReturn(g)
 loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
@@ -19021,6 +19145,7 @@ if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args
 return false
 }
 renvoStringHeapOffsets(g)
+renvoEmitArenaRememberReset(g, false)
 renvoAsmStorePrimaryBss(&g.asm, g.stringHeapOff)
 return true
 }
@@ -26398,8 +26523,8 @@ return
 g.stringHeapReady = 1
 g.stringHeapOff = g.asm.bssSize
 g.stringHeapEndOff = g.stringHeapOff + 8
-g.stringHeapDataOff = g.stringHeapOff + 16
-g.asm.bssSize += 16 + renvoStringArenaSize(g)
+g.stringHeapDataOff = g.stringHeapOff + 32
+g.asm.bssSize += 32 + renvoStringArenaSize(g)
 }
 
 func renvoStringArenaSize(g *renvoLinearGen) int {
@@ -35927,6 +36052,7 @@ if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 return false
 }
 renvoStringHeapOffsets(g)
+renvoEmitArenaRememberReset(g, true)
 a := &g.asm
 if g.c.renvoTargetArch == renvoArchAmd64 && g.c.renvoTargetOS == renvoOSLinux {
 renvoEmitRuntimeArenaPersistResetMadvise(g)
