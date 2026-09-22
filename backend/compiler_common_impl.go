@@ -501,6 +501,10 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
 		labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+		if a.c.renvoTargetArch == renvoArch386 {
+			codeCapacity = 4194304
+			labelCapacity, relocCapacity = 65536, 262144
+		}
 		// ARM instruction streams and relocations need a larger range than x86.
 		// Reserve their final growth range before scratch emission starts.
 		if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
@@ -7039,6 +7043,27 @@ func renvoNativeAlignment(context *renvoCompileContext, size int) int {
 		return 2
 	}
 	return 1
+}
+
+func renvoLanguageTypeAlignment(meta *renvoMeta, typ int) int {
+	t := renvoResolveType(meta, typ)
+	if t.kind == renvoTypeComplex64 {
+		return renvoNativeAlignment(meta.c, 4)
+	}
+	if t.kind == renvoTypeArray {
+		return renvoLanguageTypeAlignment(meta, t.elem)
+	}
+	if t.kind == renvoTypeStruct {
+		alignment := 1
+		for i := 0; i < t.count; i++ {
+			fieldAlignment := renvoLanguageTypeAlignment(meta, meta.fields[t.first+i].typ)
+			if fieldAlignment > alignment {
+				alignment = fieldAlignment
+			}
+		}
+		return alignment
+	}
+	return renvoNativeAlignment(meta.c, renvoTypeSize(meta, typ))
 }
 
 func renvoFindResolvedNamedTypeIndex(m *renvoMeta, typ int) int {
@@ -15301,9 +15326,9 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	}
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 		// Preserve the result pointer and ABI call register while REP STOSB
-		// clears RCX bytes beginning at RAX.
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
 		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 		renvoAsmMarkLabel(a, afterLabel)
 		return g.makeZeroLabel
@@ -25151,6 +25176,10 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, arg)))
 				return true
 			}
+			if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+				renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(g.meta, renvoInferParsedExprType(g, ep, arg)))
+				return true
+			}
 			if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
 				selector := &ep.exprs[arg]
 				renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
@@ -32027,6 +32056,10 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 			if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
 				renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, arg)))
+				return true
+			}
+			if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+				renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(meta, renvoInferParsedExprType(g, ep, arg)))
 				return true
 			}
 			if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
