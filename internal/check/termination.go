@@ -43,7 +43,7 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 		if start == end {
 			return true
 		}
-		first := findTypeTopLevelChar(file, start, end, ';')
+		first := findTypeTopLevelChar(&file, start, end, ';')
 		return first >= 0 && tokCharIs(&file, first+1, ';')
 	}
 	if stmt.Kind == syntax.StmtSwitch || stmt.Kind == syntax.StmtSelect {
@@ -74,11 +74,11 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 		start, end := trimExprSpan(file, stmt.ExprStart, stmt.ExprEnd)
 		calleeEnd := start + 1
 		if tokCharIs(&file, start, '(') {
-			calleeEnd = findTypeMatching(file, start, '(', ')')
+			calleeEnd = findTypeMatching(&file, start, '(', ')')
 		}
-		calleeStart, nameEnd := stripOuterParens(file, start, calleeEnd)
+		calleeStart, nameEnd := stripOuterParens(&file, start, calleeEnd)
 		if nameEnd == calleeStart+1 && tokenTextIs(&file, calleeStart, "panic") &&
-			calleeEnd < end && tokCharIs(&file, calleeEnd, '(') && findTypeMatching(file, calleeEnd, '(', ')') == end {
+			calleeEnd < end && tokCharIs(&file, calleeEnd, '(') && findTypeMatching(&file, calleeEnd, '(', ')') == end {
 			for i := 0; i < len(file.Funcs); i++ {
 				fn := file.Funcs[i]
 				if fn.BodyStart < start && fn.BodyEnd > end {
