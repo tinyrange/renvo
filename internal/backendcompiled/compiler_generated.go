@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9c36bac21b11d59b2d114aff8bb86a679fc47e34dcd7eef9348dc70117ca0e42"
+const CompilerSourceDigest = "7d2bfd2892ede656e937365ba9baa4d286e04b0237f3b4bec5fb18f125bac0bd"
 
 // source: backend/compiler_common_impl.go
 
@@ -12429,7 +12429,8 @@ localType = inferredType
 }
 }
 if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 
 
 value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -37318,6 +37319,15 @@ return renvoParseCharToken(p, e.tok)
 }
 if e.kind == renvoExprBool {
 return renvoBoolTokenValue(p, e.tok)
+}
+
+
+if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
+constant := renvoEvalConstExpr(g, ep, idx)
+if constant.ok {
+return constant.value
+}
+return renvoFixedTargetUnknown
 }
 if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
 fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
