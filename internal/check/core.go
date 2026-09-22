@@ -80,6 +80,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if undefinedTok >= 0 {
 				return info, false, CheckErrUndefined, fileIndex, undefinedTok
 			}
+			for tok := decl.ValueStart; tok >= 0 && tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenOperator && (invalidLiteralUnary(&file, tok, decl.ValueEnd) || invalidLiteralOrdering(&file, tok, decl.ValueStart, decl.ValueEnd)) {
+					return info, false, CheckErrOperand, fileIndex, tok
+				}
+			}
 		}
 	}
 	sortDecls(info.Decls)
