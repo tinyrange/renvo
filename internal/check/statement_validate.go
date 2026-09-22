@@ -104,7 +104,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
 // before the assertion's closing parenthesis. Struct and interface type bodies
 // are permitted because their braces are part of the asserted type itself.
 func malformedTypeAssertionComposite(file syntax.File, dot int, end int) int {
-	close := findTypeMatching(file, dot+1, '(', ')')
+	close := findTypeMatching(&file, dot+1, '(', ')')
 	if close <= dot+2 || close > end {
 		return -1
 	}
@@ -117,12 +117,12 @@ func malformedTypeAssertionComposite(file syntax.File, dot int, end int) int {
 }
 
 func definiteCallExpression(file syntax.File, start int, end int) bool {
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if end-start < 2 || !tokCharIs(&file, end-1, ')') {
 		return false
 	}
 	for open := end - 2; open >= start; open-- {
-		if tokCharIs(&file, open, '(') && findTypeMatching(file, open, '(', ')') == end {
+		if tokCharIs(&file, open, '(') && findTypeMatching(&file, open, '(', ')') == end {
 			if open == start+1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent {
 				name := tokenString(&file, start)
 				if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" || name == "recover" {
@@ -247,7 +247,7 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 }
 
 func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
 	if end-start != 1 {
 		return false
 	}
@@ -259,7 +259,7 @@ func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 }
 
 func expressionMayBeMultiValued(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
 	if end <= start {
 		return false
 	}
@@ -269,8 +269,8 @@ func expressionMayBeMultiValued(file syntax.File, span ExprSpan) bool {
 	return tokenTextIs(&file, start, "<-")
 }
 
-func stripOuterParens(file syntax.File, start int, end int) (int, int) {
-	for end-start >= 2 && tokCharIs(&file, start, '(') && findTypeMatching(file, start, '(', ')') == end {
+func stripOuterParens(file *syntax.File, start int, end int) (int, int) {
+	for end-start >= 2 && tokCharIs(file, start, '(') && findTypeMatching(file, start, '(', ')') == end {
 		start++
 		end--
 	}
@@ -301,7 +301,7 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 }
 
 func expressionIsDefiniteLiteral(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
 	if end-start != 1 {
 		return false
 	}

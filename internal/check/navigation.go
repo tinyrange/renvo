@@ -275,10 +275,10 @@ func navigationFindMember(graph load.Graph, program Program, typ completionType,
 		return navigationTarget{}, false
 	}
 	info := program.Packages[typ.Package]
-	if symbol := LookupPackageSymbol(info, typ.Name+"."+name); symbol >= 0 {
+	if symbol := lookupPackageSymbol(info.Symbols, typ.Name+"."+name); symbol >= 0 {
 		return navigationTarget{packageIndex: typ.Package, symbolIndex: symbol, member: true, memberType: typ.Name, memberName: name}, true
 	}
-	typeIndex := LookupType(info, typ.Name)
+	typeIndex := lookupType(info.Types, typ.Name)
 	if typeIndex < 0 || typeIndex >= len(info.Types) {
 		return navigationTarget{}, false
 	}
