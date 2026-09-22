@@ -1936,6 +1936,13 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 			}
 		}
 	}
+	for i := 0; i+1 < len(g.wasmMemoryRanges); i += 2 {
+		for j := 0; j < len(candidates); j++ {
+			if candidates[j] != 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, g.wasmMemoryRanges[i], g.wasmMemoryRanges[i+1]) {
+				candidates[j] = 0
+			}
+		}
+	}
 	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 		// Wide operations read and write whole frame-backed slots. Stack slots
@@ -1983,6 +1990,7 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 }
 
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+	g.wasmMemoryRanges = nil
 	a := &g.asm
 	metaFn := &g.meta.funcs[fnInfoIndex]
 	fn := &g.prog.funcs[metaFn.declIndex]
