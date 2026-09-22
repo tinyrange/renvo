@@ -28,8 +28,8 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if depth > 32 {
 		return numericBuiltinValue{}
 	}
-	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(&file, start, end)
+	file := &pkg.Files[fileIndex].File
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
 		return numericBuiltinValue{}
 	}
@@ -42,7 +42,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 			return numericBuiltinValue{kind: "int", identity: "int32"}
 		}
 		if kind == syntax.TokenNumber {
-			text := tokenString(&file, start)
+			text := tokenString(file, start)
 			if len(text) > 0 && text[len(text)-1] == 'i' {
 				return numericBuiltinValue{kind: "complex", identity: "complex128"}
 			}
@@ -55,10 +55,10 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 			return numericBuiltinValue{kind: "int", identity: "int"}
 		}
 	}
-	if (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) && start+1 < end {
+	if (tokCharIs(file, start, '+') || tokCharIs(file, start, '-')) && start+1 < end {
 		return numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
 	}
-	if start+1 < end && tokCharIs(&file, start+1, '(') && findTypeMatching(&file, start+1, '(', ')') == end {
+	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end {
 		return numericBuiltinTypeValue(pkg, info, fileIndex, scope, start, start+1, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -66,7 +66,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	}
 	chosen := -1
 	for i, binding := range bindings {
-		if binding.visible <= before && before < binding.end && coreTokensEqual(&file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
@@ -81,8 +81,8 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		}
 		return value
 	}
-	name := tokenString(&file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
+	name := tokenString(file, start)
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
@@ -112,15 +112,15 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return numericBuiltinValue{}
 	}
-	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(&file, start, end)
+	file := &pkg.Files[fileIndex].File
+	start, end = stripOuterParens(file, start, end)
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}
-	if lookupScopeTokenNameCore(scope, &file, start) >= 0 {
+	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
-	name := tokenString(&file, start)
+	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := info.Types[index]
