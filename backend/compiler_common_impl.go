@@ -489,6 +489,9 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
 		codeCapacity = 655360
+		if a.c.optimizeRuntime {
+			codeCapacity = 8388608
+		}
 		labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 		a.symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else if a.c.optimizeRuntime {
@@ -498,6 +501,12 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
 		labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+		// ARM instruction streams and relocations need a larger range than x86.
+		// Reserve their final growth range before scratch emission starts.
+		if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
+			codeCapacity = 8388608
+			labelCapacity, relocCapacity, absRelocCapacity = 65536, 262144, 65536
+		}
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
@@ -1963,70 +1972,70 @@ func renvoKeywordKind(src []byte, start int, end int, toks *renvoTokens) int {
 		h = h*5 + int(renvo_runtime_UnsafeByteAt(src, i))
 	}
 	if n == 2 {
-		if h == 627 {
+		if h == 627 && renvoBytesEqualText(src, start, end, "if") {
 			return renvoTokIf
 		}
 	}
 	if n == 3 {
-		if h == 3549 {
+		if h == 3549 && renvoBytesEqualText(src, start, end, "var") {
 			return renvoTokVar
 		}
-		if h == 3219 {
+		if h == 3219 && renvoBytesEqualText(src, start, end, "for") {
 			return renvoTokFor
 		}
 	}
 	if n == 4 {
-		if h == 18186 {
+		if h == 18186 && renvoBytesEqualText(src, start, end, "type") {
 			return renvoTokType
 		}
-		if h == 16324 {
+		if h == 16324 && renvoBytesEqualText(src, start, end, "func") {
 			return renvoTokFunc
 		}
-		if h == 16001 {
+		if h == 16001 && renvoBytesEqualText(src, start, end, "else") {
 			return renvoTokElse
 		}
-		if h == 16341 {
+		if h == 16341 && renvoBytesEqualText(src, start, end, "goto") {
 			return renvoTokGoto
 		}
-		if h == 15476 {
+		if h == 15476 && renvoBytesEqualText(src, start, end, "case") {
 			return renvoTokCase
 		}
 	}
 	if n == 5 {
-		if h == 78294 || h == 85499 {
+		if (h == 78294 && renvoBytesEqualText(src, start, end, "defer")) || (h == 85499 && renvoBytesEqualText(src, start, end, "panic")) {
 			toks.panicEnabled = true
 		}
-		if h == 79191 {
+		if h == 79191 && renvoBytesEqualText(src, start, end, "const") {
 			return renvoTokConst
 		}
-		if h == 78617 {
+		if h == 78617 && renvoBytesEqualText(src, start, end, "break") {
 			return renvoTokBreak
 		}
 	}
 	if n == 6 {
-		if h == 449661 {
+		if h == 449661 && renvoBytesEqualText(src, start, end, "struct") {
 			return renvoTokStruct
 		}
-		if h == 437480 {
+		if h == 437480 && renvoBytesEqualText(src, start, end, "return") {
 			return renvoTokReturn
 		}
-		if h == 450374 {
+		if h == 450374 && renvoBytesEqualText(src, start, end, "switch") {
 			return renvoTokSwitch
 		}
 	}
 	if n == 7 {
-		if h == 2176194 {
+		if h == 2176194 && renvoBytesEqualText(src, start, end, "recover") {
 			toks.panicEnabled = true
 		}
-		if h == 2131416 {
+		if h == 2131416 && renvoBytesEqualText(src, start, end, "package") {
 			return renvoTokPackage
 		}
-		if h == 1957581 {
+		if h == 1957581 && renvoBytesEqualText(src, start, end, "default") {
 			return renvoTokDefault
 		}
 	}
 	if n == 8 {
-		if h == 9901561 {
+		if h == 9901561 && renvoBytesEqualText(src, start, end, "continue") {
 			return renvoTokContinue
 		}
 	}
@@ -12392,7 +12401,8 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 				}
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15308,6 +15318,23 @@ func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmPushPrimary(a)
+	// VM32 and WASM memory supports unaligned word stores. Clear whole
+	// words before the byte tail, avoiding one interpreted loop per byte.
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, 4)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+		renvoAsmAddSecondaryImm(a, 4)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmJzPrimary(a, doneLabel)
