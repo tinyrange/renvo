@@ -419,6 +419,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-035", "missing return"
 		case check.CheckErrRecursiveType:
 			code, message = "RENVO-CHECK-037", "invalid recursive value type"
+		case check.CheckErrStructLiteral:
+			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
 		}

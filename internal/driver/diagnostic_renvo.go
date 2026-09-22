@@ -302,6 +302,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-035", "missing return")
 			} else if built.Build.ErrorDetail == check.CheckErrRecursiveType {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-037", "invalid recursive value type")
+			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-033", "type assertion requires a type; found a composite literal")
 			} else if built.Build.ErrorDetail >= check.CheckErrDuplicate && built.Build.ErrorDetail <= check.CheckErrCallArity {
