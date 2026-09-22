@@ -98,12 +98,12 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if tokCharIs(file, end-1, '}') {
 		for open := end - 2; open >= start; open-- {
 			if tokCharIs(file, open, '{') && findTypeMatching(file, open, '{', '}') == end {
-				return makeAllocationType(*pkg, *info, fileIndex, start, open, scope, 0)
+				return makeAllocationType(pkg, info, fileIndex, start, open, scope, 0)
 			}
 		}
 	}
 	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
-		return makeAllocationType(*pkg, *info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), scope, 0)
+		return makeAllocationType(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0
@@ -117,7 +117,7 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if chosen >= 0 {
 		binding := bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
-			return makeAllocationType(*pkg, *info, fileIndex, binding.typeStart, binding.typeEnd, scope, 0)
+			return makeAllocationType(pkg, info, fileIndex, binding.typeStart, binding.typeEnd, scope, 0)
 		}
 		return containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
@@ -126,7 +126,7 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return makeAllocationType(*pkg, *info, decl.File, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
+			return makeAllocationType(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
 		}
 		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {

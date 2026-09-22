@@ -17,7 +17,7 @@ func invalidPackageConstantOperations(pkg *load.Package, info *PackageInfo) (int
 		values := splitExprList(file, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			span := values[decl.ValueIndex]
-			if tok := invalidConstantSpanOperation(context, span.StartTok, span.EndTok, 0); tok >= 0 {
+			if tok := invalidConstantSpanOperation(&context, span.StartTok, span.EndTok, 0); tok >= 0 {
 				return decl.File, tok
 			}
 		}
@@ -25,7 +25,7 @@ func invalidPackageConstantOperations(pkg *load.Package, info *PackageInfo) (int
 	return -1, -1
 }
 
-func invalidConstantSpanOperation(context constantIndexContext, start int, end int, depth int) int {
+func invalidConstantSpanOperation(context *constantIndexContext, start int, end int, depth int) int {
 	if depth > 64 {
 		return -1
 	}
@@ -47,7 +47,7 @@ func invalidConstantSpanOperation(context constantIndexContext, start int, end i
 		}
 		operator := tokenString(&file, op)
 		if operator == "/" || operator == "%" || operator == "<<" || operator == ">>" {
-			value, known := constantIndexInt(&context, op+1, end, 0, 0)
+			value, known := constantIndexInt(context, op+1, end, 0, 0)
 			if known && ((operator == "/" || operator == "%") && value == 0 || (operator == "<<" || operator == ">>") && value < 0) {
 				return op
 			}

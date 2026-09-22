@@ -109,7 +109,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		}
 	}
 	sortTypes(info.Types)
-	if file, tok := invalidRecursiveValueType(pkg, info); tok >= 0 {
+	if file, tok := invalidRecursiveValueType(&pkg, &info); tok >= 0 {
 		return info, false, CheckErrRecursiveType, file, tok
 	}
 	if file, tok := undefinedSimplePackageTypeCore(pkg, info); tok >= 0 {

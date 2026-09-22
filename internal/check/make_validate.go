@@ -10,7 +10,7 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 	if len(args) == 0 || len(args) > 3 || tokenTextIs(&file, close-2, "...") {
 		return CheckErrBuiltinArity, callee
 	}
-	typ := makeAllocationType(*pkg, *info, fileIndex, args[0].StartTok, args[0].EndTok, scope, 0)
+	typ := makeAllocationType(pkg, info, fileIndex, args[0].StartTok, args[0].EndTok, scope, 0)
 	if typ < 0 {
 		return CheckErrBuiltinOperand, args[0].StartTok
 	}
@@ -44,7 +44,7 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 
 // Zero denotes an unresolved type, positive values the permitted allocation
 // families, and -1 a definitely invalid first argument.
-func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) int {
+func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) int {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return 0
 	}
