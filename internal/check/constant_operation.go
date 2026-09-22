@@ -30,7 +30,7 @@ func invalidConstantSpanOperation(context constantIndexContext, start int, end i
 		return -1
 	}
 	file := context.pkg.Files[context.fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if start < 0 || start >= end {
 		return -1
 	}
@@ -57,7 +57,7 @@ func invalidConstantSpanOperation(context constantIndexContext, start int, end i
 	// Nested calls and unary expressions can contain constant arithmetic too.
 	for i := start; i < end; i++ {
 		if tokCharIs(&file, i, '(') {
-			close := findTypeMatching(file, i, '(', ')')
+			close := findTypeMatching(&file, i, '(', ')')
 			if close > i && close <= end {
 				for _, arg := range splitExprList(file, i+1, close-1) {
 					if tok := invalidConstantSpanOperation(context, arg.StartTok, arg.EndTok, depth+1); tok >= 0 {

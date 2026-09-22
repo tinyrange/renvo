@@ -71,6 +71,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 	info.CoreBodies = make([]CoreFuncBody, 0, countPackageFuncsCore(pkg))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
+		if tok := duplicateExplicitInterfaceMethod(file); tok >= 0 {
+			return info, false, CheckErrDuplicate, fileIndex, tok
+		}
 		for i := 0; i < len(file.Decls); i++ {
 			decl, undefinedTok := buildDeclInfoCore(file, fileIndex, info, checked, file.Decls[i])
 			info.Decls = append(info.Decls, decl)
@@ -113,6 +116,29 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 		return info, false, CheckErrUndefined, file, tok
 	}
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
+	for _, decl := range info.Decls {
+		if decl.ValueStart < 0 {
+			continue
+		}
+		file := pkg.Files[decl.File].File
+		mark := arena.Mark()
+		literals := appendExprComposites(nil, file, decl.ValueStart, decl.ValueEnd)
+		var scope CoreScope
+		if len(literals) > 0 {
+			for tok := decl.ValueStart; tok < decl.ValueEnd; tok++ {
+				if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+					fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: decl.ValueStart - 1, BodyEnd: decl.ValueEnd + 1}
+					scope, _, _ = buildFuncScopeCore(file, fn)
+					break
+				}
+			}
+		}
+		tok := invalidStructLiterals(pkg, info, file, literals, scope)
+		arena.Reset(mark)
+		if tok >= 0 {
+			return info, false, CheckErrStructLiteral, decl.File, tok
+		}
+	}
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
@@ -145,6 +171,16 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 				arena.Reset(functionArenaStart)
 				return info, false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
 			}
+			literals := buildFuncCompositeExprs(file, body)
+			if len(literals) > 0 {
+				scope, ok, _ := buildFuncScopeCore(file, fn)
+				if ok {
+					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
+						arena.Reset(functionArenaStart)
+						return info, false, CheckErrStructLiteral, fileIndex, tok
+					}
+				}
+			}
 			arena.Reset(functionArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
@@ -175,6 +211,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 			if !ok {
 				return info, false, CheckErrScope, fileIndex, scopeTok
 			}
+
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
@@ -278,7 +315,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		Kind:       declSymbolKind(decl.Kind),
 		File:       fileIndex,
 		Token:      decl.NameTok,
-		Symbol:     LookupPackageSymbol(info, name),
+		Symbol:     lookupPackageSymbol(info.Symbols, name),
 		ValueIndex: declNameIndex(file, decl),
 		TypeStart:  -1,
 		TypeEnd:    -1,
@@ -340,7 +377,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		token := file.Tokens[i]
 		if (token.KindLine&255 == syntax.TokenStruct || token.KindLine&255 == syntax.TokenInterface) && tokCharIs(file, i+1, '{') {
-			close := findTypeMatching(*file, i+1, '{', '}')
+			close := findTypeMatching(file, i+1, '{', '}')
 			if close > i+1 && close <= end {
 				if token.KindLine&255 == syntax.TokenStruct {
 					fields := parseStructFields(*file, i+2, close-1)
@@ -513,7 +550,7 @@ func buildPackageTypeRefsCore(pkg load.Package, info PackageInfo, checked []Pack
 		}
 		file := pkg.Files[decl.File].File
 		if decl.Kind == SymbolType {
-			typeIndex := LookupType(info, decl.Name)
+			typeIndex := lookupType(info.Types, decl.Name)
 			if typeIndex >= 0 {
 				refs = appendTypeInfoRefsCore(refs, pkg, info, checked, info.Types[typeIndex], i)
 				continue
@@ -1019,7 +1056,7 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 		token := file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(&file, i+1, '(') {
-			paramsEnd := findTypeMatching(file, i+1, '(', ')')
+			paramsEnd := findTypeMatching(&file, i+1, '(', ')')
 			if paramsEnd > i+1 && paramsEnd <= end {
 				var literal CoreScope
 				ok, tok := collectCoreFieldNames(file, i+2, paramsEnd-1, NameParam, &literal)
@@ -1183,7 +1220,7 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 	variable := file.Tokens[start].KindLine&255 == syntax.TokenVar
 	specStart := start + 1
 	if specStart < end && tokCharIs(&file, specStart, '(') {
-		closeTok := findTypeMatching(file, specStart, '(', ')')
+		closeTok := findTypeMatching(&file, specStart, '(', ')')
 		if closeTok <= specStart || closeTok > end {
 			return start
 		}
@@ -1243,7 +1280,7 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 		}
 		specStart := i + 1
 		if specStart < end && tokCharIs(&file, specStart, '(') {
-			closeTok := findTypeMatching(file, specStart, '(', ')')
+			closeTok := findTypeMatching(&file, specStart, '(', ')')
 			if closeTok <= specStart || closeTok > end {
 				continue
 			}

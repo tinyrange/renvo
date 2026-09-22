@@ -77,7 +77,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			start++
 			end = stmt.BodyStart
 			scopeEnd = stmt.EndTok
-			if semi := findTypeTopLevelChar(file, start, end, ';'); semi >= 0 {
+			if semi := findTypeTopLevelChar(&file, start, end, ';'); semi >= 0 {
 				end = semi
 			}
 		} else if stmt.Kind == syntax.StmtCase {

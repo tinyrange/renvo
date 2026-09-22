@@ -423,6 +423,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int"
 		case check.CheckErrConstantOperation:
 			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
+		case check.CheckErrStructLiteral:
+			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrTypeAssertion:
 			code, message = "RENVO-CHECK-033", "type assertion requires a type; found a composite literal"
 		}

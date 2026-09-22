@@ -72,7 +72,7 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 		if tok > start && file.Tokens[tok-1].KindLine&255 == syntax.TokenMap {
 			continue
 		}
-		close := findTypeMatching(file, tok, '[', ']')
+		close := findTypeMatching(&file, tok, '[', ']')
 		if close <= tok || close > end {
 			continue
 		}
@@ -101,7 +101,7 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 
 func arrayLengthVariableName(context constantIndexContext, start, end int) bool {
 	file := context.pkg.Files[context.fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return false
 	}

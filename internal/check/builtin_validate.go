@@ -38,7 +38,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		nested := callee <= nestedEnd
 		open := callee + 1
 		name := tokenString(file, callee)
-		close := findTypeMatching(*file, open, '(', ')')
+		close := findTypeMatching(file, open, '(', ')')
 		if close <= open || close > fn.BodyEnd {
 			continue
 		}
@@ -133,7 +133,7 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
-	start, end = stripOuterParens(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return ""
 	}
@@ -225,7 +225,7 @@ func definiteBuiltinCanonicalTypeName(pkg *load.Package, info *PackageInfo, name
 	if depth > len(info.Types)+2 {
 		return name
 	}
-	typeIndex := LookupType(*info, name)
+	typeIndex := lookupType(info.Types, name)
 	if typeIndex < 0 {
 		return ""
 	}
@@ -242,7 +242,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
-	start, end = stripOuterParens(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
 	}
@@ -352,7 +352,7 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 	if depth > len(info.Types)+2 {
 		return builtinTypeUnknown
 	}
-	typeIndex := LookupType(*info, name)
+	typeIndex := lookupType(info.Types, name)
 	if typeIndex < 0 {
 		return builtinTypeUnknown
 	}
@@ -367,9 +367,9 @@ func fileForPackage(pkg *load.Package, fileIndex int) *syntax.File {
 // Only identifier operands consult lexical value bindings. Literals, selectors,
 // and type conversions can be classified without rebuilding the function body.
 func numericBuiltinNeedsBindings(file syntax.File, start, end int) bool {
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	for start < end && (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) {
-		start, end = stripOuterParens(file, start+1, end)
+		start, end = stripOuterParens(&file, start+1, end)
 	}
 	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }
