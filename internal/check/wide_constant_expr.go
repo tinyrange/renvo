@@ -72,7 +72,7 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		return wideConstant{}
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
-		op := constantIndexOperator(file, start, end, precedence)
+		op := constantIndexOperator(&file, start, end, precedence)
 		if op < 0 {
 			continue
 		}

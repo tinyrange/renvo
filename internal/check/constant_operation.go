@@ -35,7 +35,7 @@ func invalidConstantSpanOperation(context constantIndexContext, start int, end i
 		return -1
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
-		op := constantIndexOperator(file, start, end, precedence)
+		op := constantIndexOperator(&file, start, end, precedence)
 		if op < 0 {
 			continue
 		}
@@ -47,7 +47,7 @@ func invalidConstantSpanOperation(context constantIndexContext, start int, end i
 		}
 		operator := tokenString(&file, op)
 		if operator == "/" || operator == "%" || operator == "<<" || operator == ">>" {
-			value, known := constantIndexInt(context, op+1, end, 0, 0)
+			value, known := constantIndexInt(&context, op+1, end, 0, 0)
 			if known && ((operator == "/" || operator == "%") && value == 0 || (operator == "<<" || operator == ">>") && value < 0) {
 				return op
 			}
