@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "4fded29f3adf4d06fe4a8d2780123c89928afa566a3028f031b574d879833c1b"
+const CompilerSourceDigest = "2ccc5a3cf31d8448bc1858efb2f3c2c3d2e6e792c0ea17fc519abee96a8439bb"
 
 // source: backend/compiler_common_impl.go
 
@@ -15296,27 +15296,14 @@ renvoAsmStorePrimaryStack(a, capOffset)
 } else {
 renvoAsmCopyStackSlot(a, lenOffset, capOffset)
 }
-backingSize := 32768
-backingConst := false
-lenConst := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1))
-if lenConst.ok && lenConst.value > 0 {
-backingSize = renvoStaticSliceBackingSize(lenConst.value*elemSize, elemSize)
-backingConst = true
-}
-if e.argCount == 3 {
-backingConst = false
-capConst := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2))
-if capConst.ok && capConst.value > 0 {
-backingSize = renvoStaticSliceBackingSize(capConst.value*elemSize, elemSize)
-backingConst = true
-}
-}
-if backingConst {
-zeroSize := 0
-if lenConst.ok && lenConst.value > 0 {
-zeroSize = lenConst.value * elemSize
-}
-renvoEmitMakeStaticRingPrimary(g, backingSize, zeroSize)
+
+
+capacityArg := e.firstArg + e.argCount - 1
+capacity := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, capacityArg))
+length := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1))
+if capacity.ok && length.ok && length.value >= 0 && length.value <= capacity.value && capacity.value > 0 && capacity.value <= 1073741824/elemSize {
+size := capacity.value * elemSize
+renvoEmitMakeStaticRingPrimary(g, size, size)
 } else {
 sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 renvoAsmLoadTertiaryStack(a, capOffset)
@@ -15324,8 +15311,7 @@ renvoAsmMulTertiaryImm(a, elemSize)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmStorePrimaryStack(a, sizeOffset)
 renvoEmitArenaAllocStackPrimary(g, sizeOffset)
-renvoAsmLoadTertiaryStack(a, lenOffset)
-renvoAsmMulTertiaryImm(a, elemSize)
+renvoAsmLoadTertiaryStack(a, sizeOffset)
 renvoEmitMakeZero(g)
 }
 renvoAsmLoadSecondaryTertiaryStack(a, lenOffset, capOffset)
@@ -15409,53 +15395,21 @@ return
 renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
 }
 
+
+
 func renvoEmitMakeStaticRingPrimary(g *renvoLinearGen, backingSize int, zeroSize int) {
-renvoNonNil(g)
-a := &g.asm
-slotCount := 1
-if backingSize <= 4096 {
-slotCount = 3
-} else if backingSize <= 65536 {
-slotCount = 2
-}
-cursorOff := g.asm.bssSize
-dataOff := cursorOff + 8
-g.asm.bssSize += 8 + backingSize*slotCount
-noWrapLabel := renvoAsmNewLabel(a)
-renvoAsmLoadPrimaryBss(a, cursorOff)
-renvoAsmPushPrimary(a)
-renvoAsmIncPrimary(a)
-renvoAsmCmpPrimaryImm8(a, slotCount)
-renvoAsmJnzLabel(a, noWrapLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmMarkLabel(a, noWrapLabel)
-renvoAsmStorePrimaryBss(a, cursorOff)
-renvoAsmPopTertiary(a)
-renvoAsmMulTertiaryImm(a, backingSize)
-renvoAsmPrimaryBssAddr(a, dataOff)
-renvoAsmAddPrimaryTertiary(a)
+sizeOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
+renvoAsmStoreStackImm(&g.asm, sizeOffset, backingSize)
+renvoEmitArenaAllocStackPrimary(g, sizeOffset)
 if zeroSize > 0 {
-if zeroSize > backingSize {
-zeroSize = backingSize
-}
-zeroSize = renvoAlignTo8(zeroSize)
-addrOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-renvoAsmStorePrimaryStack(a, addrOff)
-renvoAsmCopyPrimaryToSecondary(a)
-if zeroSize <= 128 {
-renvoAsmPrimaryImm(a, 0)
-for at := 0; at < zeroSize; at += 8 {
-renvoAsmStorePrimaryMemSecondaryDisp(a, at)
-}
-} else {
-renvoAsmPrimaryImm(a, zeroSize)
-renvoAsmCopyPrimaryToTertiary(a)
-renvoAsmLoadPrimaryStack(a, addrOff)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmPrimaryImm(&g.asm, zeroSize)
+renvoAsmCopyPrimaryToTertiary(&g.asm)
+renvoAsmCopySecondaryToPrimary(&g.asm)
 renvoEmitMakeZero(g)
 }
-renvoAsmLoadPrimaryStack(a, addrOff)
 }
-}
+
 func renvoEmitByteSliceConversionRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
 a := &g.asm

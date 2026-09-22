@@ -44,5 +44,22 @@ func main() {
 	if len(invalid) != 3 || invalid[0] != '\ufffd' || invalid[1] != 'A' || invalid[2] != '\ufffd' {
 		panic("UTF16 replacement")
 	}
+	if strings.ToLower("ASCII Already lower") != "ascii already lower" || strings.ToUpper("ascii") != "ASCII" {
+		panic("ASCII casing")
+	}
+	if strings.TrimSpace(" \t\u2003text\u00a0\r\n") != "text" {
+		panic("mixed whitespace")
+	}
+	if strings.Map(func(r rune) rune { return r }, "sameé") != "sameé" || strings.Map(func(r rune) rune { return r }, "a\xffb") != "a\ufffdb" {
+		panic("identity map")
+	}
+	if strings.Map(func(r rune) rune {
+		if r == 'x' {
+			return -1
+		}
+		return r
+	}, "beforexxé") != "beforeé" {
+		panic("map deletion after prefix")
+	}
 	print("PASS\n")
 }
