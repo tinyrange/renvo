@@ -71,6 +71,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info PackageInfo, chec
 	info.CoreBodies = make([]CoreFuncBody, 0, countPackageFuncsCore(pkg))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
+		if tok := duplicateExplicitInterfaceMethod(file); tok >= 0 {
+			return info, false, CheckErrDuplicate, fileIndex, tok
+		}
 		for i := 0; i < len(file.Decls); i++ {
 			decl, undefinedTok := buildDeclInfoCore(file, fileIndex, info, checked, file.Decls[i])
 			info.Decls = append(info.Decls, decl)
