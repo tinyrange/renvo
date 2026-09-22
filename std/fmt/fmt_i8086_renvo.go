@@ -3,6 +3,20 @@
 // Package fmt provides compact formatting for Renvo's 16-bit MS-DOS target.
 package fmt
 
+// Stringer supplies the text representation used by string formatting verbs.
+type Stringer interface{ String() string }
+
+func methodString(value interface{}) (string, bool) {
+	// Errors take precedence when a value implements both interfaces.
+	if err, ok := value.(error); ok {
+		return err.Error(), true
+	}
+	if s, ok := value.(Stringer); ok {
+		return s.String(), true
+	}
+	return "", false
+}
+
 type Writer interface {
 	Write(p []byte) (n int, err error)
 }
@@ -14,7 +28,7 @@ func Print(a ...interface{}) (int, error) {
 }
 
 func Println(a ...interface{}) (int, error) {
-	text := Sprint(a...) + "\n"
+	text := Sprintln(a...)
 	print(text)
 	return len(text), nil
 }
@@ -80,10 +94,28 @@ func Fprintf(w Writer, format string, a ...interface{}) (int, error) {
 }
 
 func Fprintln(w Writer, a ...interface{}) (int, error) {
-	return writeString(w, Sprint(a...)+"\n")
+	return writeString(w, Sprintln(a...))
+}
+
+// Sprintln formats operands with a space between each pair and a final newline.
+func Sprintln(a ...interface{}) string {
+	out := ""
+	for i := 0; i < len(a); i++ {
+		if i > 0 {
+			out = out + " "
+		}
+		out = out + Sprint(a[i])
+	}
+	return out + "\n"
 }
 
 func formatValue(v interface{}, verb byte) (string, bool) {
+	if verb == 's' || verb == 'v' || verb == 'q' || verb == 'x' {
+		if text, ok := methodString(v); ok {
+			formatted, _ := formatValue(text, verb)
+			return formatted, false
+		}
+	}
 	switch v.(type) {
 	case string:
 		value := v.(string)
