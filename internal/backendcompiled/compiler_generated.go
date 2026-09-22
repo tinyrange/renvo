@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e21ff84531e5901ddab090fb848594888cf83293d384d0c83e5655057107bc97"
+const CompilerSourceDigest = "6cfc97c3a9d4a57b72b59a714488e2dbaab7fbffb0abe3f64e1972f79c54fe82"
 
 // source: backend/compiler_common_impl.go
 
@@ -9210,6 +9210,7 @@ ok       bool
 }
 
 type renvoLinearGen struct {
+wasmMemoryRanges       []int
 prog                   *renvoProgram
 meta                   *renvoMeta
 asm                    renvoAsm
@@ -15348,7 +15349,7 @@ return g.makeZeroLabel
 }
 afterLabel := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-if g.c.renvoTargetArch == renvoArchAmd64 {
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 
 
 renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
@@ -18910,6 +18911,9 @@ if renvoTypeUsesHiddenResult(meta, resultType) && hiddenResultOffset == 0 {
 hiddenResultOffset = renvoAddUnnamedLocal(g, resultType)
 renvoZeroLocalAtOffset(g, hiddenResultOffset)
 }
+
+
+for pass := 0; pass < 2; pass++ {
 for fnIndex := 0; fnIndex < len(meta.funcs); fnIndex++ {
 if directTarget >= 0 && fnIndex != directTarget {
 continue
@@ -18917,7 +18921,7 @@ continue
 mode := renvoFunctionValueMode(meta, fnIndex, funcType)
 direct := mode == renvoFunctionValueDirect || mode == renvoFunctionValueMethodExpression
 closure := mode == renvoFunctionValueClosure || mode == renvoFunctionValueBoundMethod
-if !direct && !closure {
+if !direct && !closure || pass == 0 && !direct || pass == 1 && !closure {
 continue
 }
 if mode == renvoFunctionValueClosure {
@@ -18997,6 +19001,8 @@ renvoEmitPostCallPanicCheck(g)
 }
 renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 }
+}
+
 
 
 
@@ -21916,6 +21922,22 @@ return label
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+renvoAsmAddScaledTertiary(a, elemSize)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
 negative := renvoAsmNewLabel(&g.asm)
 invalid := renvoAsmNewLabel(&g.asm)
 renvoAsmPushPrimary(&g.asm)
@@ -22019,6 +22041,29 @@ return label
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoAsmCopyPrimaryToSecondary(a)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 1)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+if !g.meta.panicEnabled {
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmRet(a)
+return
+}
 invalid := renvoAsmNewLabel(&g.asm)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPushTertiary(&g.asm)
@@ -22414,6 +22459,12 @@ g.stackUsed = renvoAlignTo8(g.stackUsed + size)
 }
 renvoRecordStackPeak(g)
 offset := g.stackUsed
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+}
 if g.localCount >= len(g.locals) {
 renvoGrowLocalTable(g)
 }
@@ -55506,6 +55557,13 @@ candidates[j] = 0
 }
 }
 }
+for i := 0; i+1 < len(g.wasmMemoryRanges); i += 2 {
+for j := 0; j < len(candidates); j++ {
+if candidates[j] != 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, g.wasmMemoryRanges[i], g.wasmMemoryRanges[i+1]) {
+candidates[j] = 0
+}
+}
+}
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 
@@ -55553,6 +55611,7 @@ a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
 }
 
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+g.wasmMemoryRanges = nil
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
 fn := &g.prog.funcs[metaFn.declIndex]
