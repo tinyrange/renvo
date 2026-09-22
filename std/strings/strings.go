@@ -89,7 +89,24 @@ func Count(s string, substr string) int {
 }
 
 func TrimSpace(s string) string {
-	return TrimFunc(s, unicode.IsSpace)
+	start := 0
+	for start < len(s) && s[start] < utf8.RuneSelf {
+		if !isSpace(s[start]) {
+			break
+		}
+		start++
+	}
+	end := len(s)
+	for end > start && s[end-1] < utf8.RuneSelf {
+		if !isSpace(s[end-1]) {
+			break
+		}
+		end--
+	}
+	if start < end && (s[start] >= utf8.RuneSelf || s[end-1] >= utf8.RuneSelf) {
+		return TrimFunc(s[start:end], unicode.IsSpace)
+	}
+	return s[start:end]
 }
 
 func TrimPrefix(s string, prefix string) string {
