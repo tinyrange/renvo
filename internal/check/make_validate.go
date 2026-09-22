@@ -21,8 +21,8 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 	var length wideConstant
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
-		start, end := stripOuterParens(file, arg.StartTok, arg.EndTok)
-		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(*info, tokenString(&file, start)) < 0) {
+		start, end := stripOuterParens(&file, arg.StartTok, arg.EndTok)
+		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
 		if unsafeAddFractionalDecimal(file, start, end) {
@@ -49,7 +49,7 @@ func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, en
 		return 0
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	kind := classifyType(file, start, end)
 	if kind == TypeSlice || kind == TypeMap || kind == TypeChan {
 		for open := start; open < end; open++ {
@@ -59,7 +59,7 @@ func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, en
 			if !isCompositeTypeBodyOpen(file, open) {
 				return -1
 			}
-			close := findTypeMatching(file, open, '{', '}')
+			close := findTypeMatching(&file, open, '{', '}')
 			if close <= open {
 				return 0
 			}
@@ -80,12 +80,12 @@ func makeAllocationType(pkg load.Package, info PackageInfo, fileIndex, start, en
 		return 0
 	}
 	name := tokenString(&file, start)
-	index := LookupType(info, name)
+	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := info.Types[index]
 		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 	}
-	if definiteBuiltinType(name) || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" || name == "any" || name == "error" || name == "true" || name == "false" || name == "nil" || LookupPackageSymbol(info, name) >= 0 {
+	if definiteBuiltinType(name) || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" || name == "any" || name == "error" || name == "true" || name == "false" || name == "nil" || lookupPackageSymbol(info.Symbols, name) >= 0 {
 		return -1
 	}
 	return 0

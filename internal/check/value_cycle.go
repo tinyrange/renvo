@@ -32,21 +32,21 @@ func recursiveValueNamedType(pkg load.Package, info PackageInfo, index int, stat
 }
 
 func recursiveValueTypeSpan(pkg load.Package, info PackageInfo, file syntax.File, start int, end int, states []byte) bool {
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if start < 0 || start >= end {
 		return false
 	}
 	kind := classifyType(file, start, end)
 	if kind == TypeNamed && end-start == 1 {
-		index := LookupType(info, tokenString(&file, start))
+		index := lookupType(info.Types, tokenString(&file, start))
 		return index >= 0 && recursiveValueNamedType(pkg, info, index, states)
 	}
 	if kind == TypeArray {
-		close := findTypeMatching(file, start, '[', ']')
+		close := findTypeMatching(&file, start, '[', ']')
 		return close > start && recursiveValueTypeSpan(pkg, info, file, close, end, states)
 	}
 	if kind == TypeStruct {
-		open := findTypeTopLevelChar(file, start, end, '{')
+		open := findTypeTopLevelChar(&file, start, end, '{')
 		if open < 0 {
 			return false
 		}

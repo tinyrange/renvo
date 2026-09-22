@@ -67,7 +67,7 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 	}
 	file := context.pkg.Files[context.fileIndex].File
 	start, end = trimExprSpan(file, start, end)
-	start, end = stripOuterParens(file, start, end)
+	start, end = stripOuterParens(&file, start, end)
 	if start < 0 || start >= end {
 		return wideConstant{}
 	}
@@ -164,7 +164,7 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		if context.bindings == nil && lookupScopeTokenNameCore(context.scope, &file, start) >= 0 {
 			return wideConstant{}
 		}
-		if context.iotaKnown && tokenTextIs(&file, start, "iota") && LookupPackageSymbol(*context.info, "iota") < 0 {
+		if context.iotaKnown && tokenTextIs(&file, start, "iota") && lookupPackageSymbol(context.info.Symbols, "iota") < 0 {
 			return wideSmall(context.iotaValue)
 		}
 		index := LookupDecl(*context.info, tokenString(&file, start))

@@ -6,7 +6,7 @@ import "renvo.dev/internal/syntax"
 // Leave conversions, calls, selectors, and indexes to declaration-aware type
 // checking: a suffix can change a literal's type (e.g. a map lookup of a slice).
 func invalidCapacityLiteral(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
+	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
 	if start < 0 || start >= end {
 		return false
 	}
@@ -17,13 +17,13 @@ func invalidCapacityLiteral(file syntax.File, span ExprSpan) bool {
 	if kind != syntax.TokenMap && kind != syntax.TokenStruct {
 		return false
 	}
-	open := findTypeTopLevelChar(file, start, end, '{')
+	open := findTypeTopLevelChar(&file, start, end, '{')
 	if open < 0 {
 		return false
 	}
-	close := findTypeMatching(file, open, '{', '}')
+	close := findTypeMatching(&file, open, '{', '}')
 	if kind == syntax.TokenStruct && close < end && tokCharIs(&file, close, '{') {
-		close = findTypeMatching(file, close, '{', '}')
+		close = findTypeMatching(&file, close, '{', '}')
 	}
 	return close == end
 }

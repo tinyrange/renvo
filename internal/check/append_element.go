@@ -8,10 +8,10 @@ import (
 // Scalar assignment requires identical types for typed operands, whereas
 // untyped constants may acquire the destination type. Unknown type identities
 // and general constant representability still require broader type checking.
-func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, destination string, source numericBuiltinValue, file syntax.File, arg ExprSpan) bool {
+func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, destination string, source numericBuiltinValue, file *syntax.File, arg ExprSpan) bool {
 	underlying := destination
 	if len(destination) > 6 && destination[:6] == "named:" {
-		index := LookupType(info, destination[6:])
+		index := lookupType(info.Types, destination[6:])
 		if index < 0 {
 			return false
 		}
@@ -20,7 +20,7 @@ func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int,
 	}
 	want := scalarAppendKind(underlying)
 	if want == "int" {
-		context := constantIndexContext{pkg: &pkg, info: &info, fileIndex: fileIndex, strict: true, bindings: bindings, before: before}
+		context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, strict: true, bindings: bindings, before: before}
 		value := arrayLiteralConstant(context, arg.StartTok, arg.EndTok, scope)
 		if integerConstantOutsideType(value, underlying) {
 			return true
@@ -48,7 +48,7 @@ func invalidScalarAppendValue(pkg load.Package, info PackageInfo, fileIndex int,
 	if want == "string" || want == "bool" || source.kind == "string" || source.kind == "bool" {
 		return want != source.kind
 	}
-	return want == "int" && unsafeAddFractionalDecimal(file, arg.StartTok, arg.EndTok)
+	return want == "int" && unsafeAddFractionalDecimal(*file, arg.StartTok, arg.EndTok)
 }
 
 // Fixed-width integer bounds are target independent. For machine-sized types,
@@ -75,12 +75,29 @@ func integerConstantOutsideType(value wideConstant, name string) bool {
 	if !unsigned {
 		bits--
 	}
-	limit := wideShift(wideSmall(1), bits, true)
-	comparison := wideMagnitudeCompare(value, limit)
-	if value.negative {
-		return comparison > 0
+	// Compare directly with 2^bits in the 15-bit limb representation.
+	// Constructing that bound would allocate new limbs for every append.
+	highest := len(value.words) - 1
+	for highest >= 0 && value.words[highest] == 0 {
+		highest--
 	}
-	return comparison >= 0
+	limb := bits / 15
+	if highest != limb {
+		return highest > limb
+	}
+	limit := 1 << uint(bits%15)
+	if value.words[limb] != limit {
+		return value.words[limb] > limit
+	}
+	if !value.negative {
+		return true
+	}
+	for i := 0; i < limb; i++ {
+		if value.words[i] != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func scalarAppendKind(name string) string {
