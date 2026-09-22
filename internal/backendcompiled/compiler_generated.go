@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "cff161334cae6c505a85ee86b27e3915751dbc4859b648f5f074117d37f700f3"
+const CompilerSourceDigest = "d2de0ee6fd119e34e74d311c61a9aebdc3db8359ec0aee4c4ff95a1a9ec2a416"
 
 // source: backend/compiler_common_impl.go
 
@@ -18869,6 +18869,9 @@ if renvoTypeUsesHiddenResult(meta, resultType) && hiddenResultOffset == 0 {
 hiddenResultOffset = renvoAddUnnamedLocal(g, resultType)
 renvoZeroLocalAtOffset(g, hiddenResultOffset)
 }
+
+
+for pass := 0; pass < 2; pass++ {
 for fnIndex := 0; fnIndex < len(meta.funcs); fnIndex++ {
 if directTarget >= 0 && fnIndex != directTarget {
 continue
@@ -18876,7 +18879,7 @@ continue
 mode := renvoFunctionValueMode(meta, fnIndex, funcType)
 direct := mode == renvoFunctionValueDirect || mode == renvoFunctionValueMethodExpression
 closure := mode == renvoFunctionValueClosure || mode == renvoFunctionValueBoundMethod
-if !direct && !closure {
+if !direct && !closure || pass == 0 && !direct || pass == 1 && !closure {
 continue
 }
 if mode == renvoFunctionValueClosure {
@@ -18956,6 +18959,8 @@ renvoEmitPostCallPanicCheck(g)
 }
 renvoAsmJmpMarkLabel(&g.asm, doneLabel, nextLabel)
 }
+}
+
 
 
 
