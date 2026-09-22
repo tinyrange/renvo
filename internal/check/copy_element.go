@@ -11,7 +11,7 @@ import (
 func invalidSliceTransferElements(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, dst, src ExprSpan, sourceEnd int) int {
 	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, dst.StartTok, dst.EndTok, before, 0)
 	source := copySliceElement(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
-	value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
+	value := numericBuiltinExprValue(&pkg, &info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
 	if destination != "" && (source != "" && destination != source || value.kind == "string" && destination != "uint8") {
 		return src.StartTok
 	}

@@ -48,7 +48,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if name == "append" && (len(args) == 0 || expanded && len(args) != 2) || name != "append" && (len(args) != 2 || expanded) {
 				return CheckErrBuiltinArity, callee
 			}
-			if numericBuiltinInNestedFunction(*file, fn, callee) {
+			if nested {
 				continue
 			}
 			if !numericReady {

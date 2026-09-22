@@ -17,7 +17,7 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 		if expanded && i == 1 {
 			end-- // exclude the ellipsis, which is not part of the source value
 		}
-		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, end, before, 0)
+		value := numericBuiltinExprValue(&pkg, &info, fileIndex, scope, bindings, arg.StartTok, end, before, 0)
 		start, finish := stripOuterParens(file, arg.StartTok, end)
 		if i == 1 && finish-start == 1 && tokenTextIs(&file, start, "nil") && value.kind == "other" {
 			continue
@@ -39,7 +39,7 @@ func invalidAppendOperands(pkg load.Package, info PackageInfo, fileIndex int, sc
 	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, args[0].StartTok, args[0].EndTok, before, 0)
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
-		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
+		value := numericBuiltinExprValue(&pkg, &info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
 		if invalidScalarAppendValue(pkg, info, fileIndex, scope, bindings, before, destination, value, file, arg) {
 			return arg.StartTok
 		}
@@ -55,7 +55,7 @@ func invalidCopyDeleteOperands(pkg load.Package, info PackageInfo, fileIndex int
 	}
 	for i := 0; i < count; i++ {
 		arg := args[i]
-		value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
+		value := numericBuiltinExprValue(&pkg, &info, fileIndex, scope, bindings, arg.StartTok, arg.EndTok, before, 0)
 		if name == "copy" && i == 1 && value.kind == "string" {
 			continue
 		}
