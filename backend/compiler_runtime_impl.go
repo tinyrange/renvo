@@ -1240,6 +1240,7 @@ func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, id
 		return false
 	}
 	renvoStringHeapOffsets(g)
+	renvoEmitArenaRememberReset(g, true)
 	a := &g.asm
 	if g.c.renvoTargetArch == renvoArchAmd64 && g.c.renvoTargetOS == renvoOSLinux {
 		renvoEmitRuntimeArenaPersistResetMadvise(g)
