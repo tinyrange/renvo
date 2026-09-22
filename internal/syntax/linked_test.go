@@ -11,14 +11,14 @@ func TestLinkedParsingPreservesWideLines(t *testing.T) {
 	if ordinary.Ok || ordinary.Error != ParseErrScan {
 		t.Fatal("source line admission changed")
 	}
-	linked := ParseLinkedFile([]byte(source))
+	linked, lines := ParseLinkedFile([]byte(source))
 	if !linked.Ok || len(linked.Decls) != 2 || len(linked.Funcs) != 1 {
 		t.Fatalf("linked parse: %+v", linked.Error)
 	}
-	if line := TokenLineAt(&linked, linked.Decls[0].NameTok); line != TokenLineLimit+2 {
+	if line := TokenLineAt(&linked, linked.Decls[0].NameTok, lines); line != TokenLineLimit+2 {
 		t.Fatalf("lost physical line: %d", line)
 	}
-	if line := TokenLineAt(&linked, linked.Decls[1].NameTok); line != TokenLineLimit+3 {
+	if line := TokenLineAt(&linked, linked.Decls[1].NameTok, lines); line != TokenLineLimit+3 {
 		t.Fatalf("lost declaration boundary: %d", line)
 	}
 }
@@ -29,7 +29,7 @@ func TestLinkedParsingRetainsEncodingAndEscapeValidation(t *testing.T) {
 		"package p\n// bad \xff\n",
 		"package p\nvar X = \"unterminated\n",
 	} {
-		if ParseLinkedFile([]byte(source)).Ok {
+		if file, _ := ParseLinkedFile([]byte(source)); file.Ok {
 			t.Fatal("invalid linked source accepted")
 		}
 	}

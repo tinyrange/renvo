@@ -18,8 +18,6 @@ const (
 )
 
 type File struct {
-	// Physical line offsets for generated linked text beyond the packed limit.
-	LineStarts  []int
 	Src         []byte
 	Tokens      []Token
 	PackageName int
@@ -59,12 +57,13 @@ type FuncDecl struct {
 	BodyEnd       int
 }
 
-func ParseFile(src []byte) File { return parseFileMode(src, false) }
+func ParseFile(src []byte) File { file, _ := parseFileMode(src, false); return file }
 
 // ParseLinkedFile preserves physical lines for generated text from admitted sources.
-func ParseLinkedFile(src []byte) File { return parseFileMode(src, true) }
+func ParseLinkedFile(src []byte) (File, []int) { return parseFileMode(src, true) }
 
-func parseFileMode(src []byte, linked bool) File {
+func parseFileMode(src []byte, linked bool) (File, []int) {
+	var lineStarts []int
 	tokenArenaStart := arena.Mark()
 	tokens, scanOK := scanTokensMode(src, linked)
 	tokenArenaEnd := arena.Mark()
@@ -96,21 +95,21 @@ func parseFileMode(src []byte, linked bool) File {
 	tokens = tokens[:len(tokens):len(tokens)]
 	file.Tokens = tokens
 	if !scanOK {
-		return parseFail(file, ParseErrScan, len(tokens)-1)
+		return parseFail(file, ParseErrScan, len(tokens)-1), nil
 	}
 	if linked {
-		file.LineStarts = append(file.LineStarts, 0)
+		lineStarts = append(lineStarts, 0)
 		for i := 0; i < len(src); i++ {
 			if src[i] == '\n' {
-				file.LineStarts = append(file.LineStarts, i+1)
+				lineStarts = append(lineStarts, i+1)
 			}
 		}
 	}
-	parseTokens(&file)
+	parseTokens(&file, lineStarts)
 	if file.Ok {
 		validateDots(&file)
 	}
-	return file
+	return file, lineStarts
 }
 
 func validateDots(file *File) {
@@ -129,7 +128,7 @@ func validateDots(file *File) {
 	}
 }
 
-func parseTokens(file *File) {
+func parseTokens(file *File, lineStarts []int) {
 	if len(file.Tokens) < 3 || file.Tokens[0].KindLine&255 != TokenPackage || file.Tokens[1].KindLine&255 != TokenIdent {
 		parseFailInPlace(file, ParseErrPackage, 0)
 		return
@@ -143,7 +142,7 @@ func parseTokens(file *File) {
 		}
 		kind := file.Tokens[i].KindLine & 255
 		if kind == TokenImport {
-			next, ok := parseImportDecl(file, i)
+			next, ok := parseImportDecl(file, lineStarts, i)
 			if !ok {
 				parseFailInPlace(file, ParseErrImport, i)
 				return
@@ -152,7 +151,7 @@ func parseTokens(file *File) {
 			continue
 		}
 		if kind == TokenConst || kind == TokenVar || kind == TokenType {
-			next, ok := parseTopDecl(file, i)
+			next, ok := parseTopDecl(file, lineStarts, i)
 			if !ok {
 				parseFailInPlace(file, ParseErrDecl, i)
 				return
@@ -161,7 +160,7 @@ func parseTokens(file *File) {
 			continue
 		}
 		if kind == TokenFunc {
-			fn, ok := parseFuncDecl(file, i)
+			fn, ok := parseFuncDecl(file, lineStarts, i)
 			if !ok {
 				parseFailInPlace(file, ParseErrFunc, i)
 				return
@@ -188,7 +187,7 @@ func parseFail(file File, err int, tok int) File {
 	return file
 }
 
-func parseImportDecl(file *File, start int) (int, bool) {
+func parseImportDecl(file *File, lineStarts []int, start int) (int, bool) {
 	i := start + 1
 	if tokCharIs(file.Tokens, i, '(') {
 		i++
@@ -197,7 +196,7 @@ func parseImportDecl(file *File, start int) (int, bool) {
 			if tokCharIs(file.Tokens, i, ')') {
 				return i + 1, true
 			}
-			next, ok := parseImportSpec(file, i, true)
+			next, ok := parseImportSpec(file, lineStarts, i, true)
 			if !ok {
 				return start, false
 			}
@@ -205,14 +204,14 @@ func parseImportDecl(file *File, start int) (int, bool) {
 		}
 		return start, false
 	}
-	next, ok := parseImportSpec(file, i, false)
+	next, ok := parseImportSpec(file, lineStarts, i, false)
 	if !ok {
 		return start, false
 	}
 	return next, true
 }
 
-func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
+func parseImportSpec(file *File, lineStarts []int, start int, grouped bool) (int, bool) {
 	nameTok := -1
 	pathTok := start
 	if pathTok >= len(file.Tokens) {
@@ -237,7 +236,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 		if grouped && tokCharIs(file.Tokens, next, ')') {
 			break
 		}
-		if TokenLineAt(file, next) != TokenLineAt(file, pathTok) {
+		if TokenLineAt(file, next, lineStarts) != TokenLineAt(file, pathTok, lineStarts) {
 			break
 		}
 		return start, false
@@ -251,7 +250,7 @@ func parseImportSpec(file *File, start int, grouped bool) (int, bool) {
 	return next, true
 }
 
-func parseTopDecl(file *File, start int) (int, bool) {
+func parseTopDecl(file *File, lineStarts []int, start int) (int, bool) {
 	kind := file.Tokens[start].KindLine & 255
 	i := start + 1
 	if tokCharIs(file.Tokens, i, '(') {
@@ -261,7 +260,7 @@ func parseTopDecl(file *File, start int) (int, bool) {
 			if tokCharIs(file.Tokens, i, ')') {
 				return i + 1, true
 			}
-			next, ok := parseDeclSpec(file, kind, i, true)
+			next, ok := parseDeclSpec(file, lineStarts, kind, i, true)
 			if !ok {
 				return start, false
 			}
@@ -269,18 +268,18 @@ func parseTopDecl(file *File, start int) (int, bool) {
 		}
 		return start, false
 	}
-	next, ok := parseDeclSpec(file, kind, i, false)
+	next, ok := parseDeclSpec(file, lineStarts, kind, i, false)
 	if !ok {
 		return start, false
 	}
 	return next, true
 }
 
-func parseDeclSpec(file *File, kind int, start int, grouped bool) (int, bool) {
+func parseDeclSpec(file *File, lineStarts []int, kind int, start int, grouped bool) (int, bool) {
 	if start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != TokenIdent {
 		return start, false
 	}
-	end, next, ok := skipDeclSpec(file, start, grouped)
+	end, next, ok := skipDeclSpec(file, lineStarts, start, grouped)
 	if !ok || end <= start {
 		return start, false
 	}
@@ -301,7 +300,7 @@ func parseDeclSpec(file *File, kind int, start int, grouped bool) (int, bool) {
 	return next, true
 }
 
-func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
+func parseFuncDecl(file *File, lineStarts []int, start int) (FuncDecl, bool) {
 	fn := FuncDecl{
 		StartTok:      start,
 		EndTok:        start,
@@ -341,7 +340,7 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 	fn.ParamsEnd = paramsEnd
 	i = paramsEnd
 	fn.ResultStart = i
-	bodyStart, declarationEnd := findFuncBody(file, i)
+	bodyStart, declarationEnd := findFuncBody(file, lineStarts, i)
 	if bodyStart < 0 {
 		// Bodyless declarations are retained for project assembly binding.  The
 		// checker/lowerer reject them later unless a selected .rtgasm entry owns
@@ -361,7 +360,7 @@ func parseFuncDecl(file *File, start int) (FuncDecl, bool) {
 	return fn, true
 }
 
-func findFuncBody(file *File, start int) (int, int) {
+func findFuncBody(file *File, lineStarts []int, start int) (int, int) {
 	i := start
 	for i < len(file.Tokens) && file.Tokens[i].KindLine&255 != TokenEOF {
 		if tokCharIs(file.Tokens, i, ';') {
@@ -398,7 +397,7 @@ func findFuncBody(file *File, start int) (int, int) {
 		if i > start {
 			previous = i - 1
 		}
-		if TokenLineAt(file, i) > TokenLineAt(file, previous) {
+		if TokenLineAt(file, i, lineStarts) > TokenLineAt(file, previous, lineStarts) {
 			kind := file.Tokens[i].KindLine & 255
 			if kind == TokenConst || kind == TokenVar || kind == TokenType || kind == TokenImport ||
 				kind == TokenFunc && i+1 < len(file.Tokens) && file.Tokens[i+1].KindLine&255 == TokenIdent {
@@ -413,8 +412,8 @@ func findFuncBody(file *File, start int) (int, int) {
 	return -1, -1
 }
 
-func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
-	line := TokenLineAt(file, start)
+func skipDeclSpec(file *File, lineStarts []int, start int, grouped bool) (int, int, bool) {
+	line := TokenLineAt(file, start, lineStarts)
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -428,7 +427,7 @@ func skipDeclSpec(file *File, start int, grouped bool) (int, int, bool) {
 			if c == ';' {
 				return i, i + 1, true
 			}
-			if i > start && TokenLineAt(file, i) != line {
+			if i > start && TokenLineAt(file, i, lineStarts) != line {
 				return i, i, true
 			}
 		}
