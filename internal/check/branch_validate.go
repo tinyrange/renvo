@@ -28,7 +28,7 @@ func invalidBranchTarget(file syntax.File, body syntax.Body) (int, int) {
 			}
 			for tok := body.Stmts[clause].EndTok; tok < stmt.StartTok; tok++ {
 				if tokCharIs(&file, tok, '{') {
-					end := findTypeMatching(file, tok, '{', '}')
+					end := findTypeMatching(&file, tok, '{', '}')
 					if end > stmt.StartTok {
 						return CheckErrBody, stmt.StartTok
 					}
