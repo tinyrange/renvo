@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d168d75481ef473404125003f4648439fa4bbb06d2bc7cddc9a7d5070d59737f"
+const CompilerSourceDigest = "588bd6af76c96d502fb3b7dc29707f27f2004adab2ca336012a7045c2c2eb11a"
 
 // source: backend/compiler_common_impl.go
 
@@ -15519,6 +15519,12 @@ renvoAsmMarkLabel(a, plain)
 func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
 
 
+
+if g.c.objectFile {
+return
+}
+
+
 if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
 return
 }
@@ -15605,7 +15611,7 @@ renvoAsmPopPrimary(a)
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 a := &g.asm
 renvoEmitMakeZeroFreshArenaReturn(g)
-if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 
 
 renvoAsmCopyPrimaryToSecondary(a)
@@ -23083,7 +23089,7 @@ renvoAsmPrimaryImm(a, 0)
 renvoAsmPushImm(a, (size+7)/8)
 renvoAsmPopTertiary(a)
 renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
+} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 256 {
 renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmPushImm(a, size)
 renvoAsmPopTertiary(a)

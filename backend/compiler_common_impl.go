@@ -15510,6 +15510,12 @@ func renvoEmitLinuxAmd64MakeZeroPages(g *renvoLinearGen) {
 // contain old values. Avoid touching large allocations in the virgin interval;
 // reused ranges and non-arena addresses still take the ordinary zeroing path.
 func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
+	// Object writers require relocations to name storage inside a section;
+	// the executable fast path also references the arena's one-past end.
+	// Keep ordinary zeroing for objects, including prepared object targets.
+	if g.c.objectFile {
+		return
+	}
 	// Structured WASM helpers assign operand-stack slots statically; the
 	// branch-specific save/restore paths below require a native operand stack.
 	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
@@ -15598,7 +15604,7 @@ func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	a := &g.asm
 	renvoEmitMakeZeroFreshArenaReturn(g)
-	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		// Keep the zero value and byte count in registers throughout each loop.
 		// The generic arithmetic path spills the count for every stored word.
 		renvoAsmCopyPrimaryToSecondary(a)
@@ -23076,7 +23082,7 @@ func renvoZeroLocalAtOffset(g *renvoLinearGen, offset int) {
 		renvoAsmPushImm(a, (size+7)/8)
 		renvoAsmPopTertiary(a)
 		renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-	} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
+	} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 256 {
 		renvoAsmAddressPrimaryStack(a, offset)
 		renvoAsmPushImm(a, size)
 		renvoAsmPopTertiary(a)
