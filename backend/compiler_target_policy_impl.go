@@ -433,6 +433,15 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 	if e.kind == renvoExprBool {
 		return renvoBoolTokenValue(p, e.tok)
 	}
+	// Target specialization must observe ordinary lexical shadowing too.
+	// A local variable is not the package constant with the same spelling.
+	if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
+		constant := renvoEvalConstExpr(g, ep, idx)
+		if constant.ok {
+			return constant.value
+		}
+		return renvoFixedTargetUnknown
+	}
 	if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
 		fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
 		nameSize := e.nameEnd - e.nameStart
