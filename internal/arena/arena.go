@@ -72,3 +72,19 @@ func Discard(start int, end int) { renvo_runtime_ArenaDiscard(start, end) }
 // DiscardBytes releases complete pages covered by a dead byte slice without
 // changing the arena allocation cursor. Callers must not read value again.
 func DiscardBytes(value []byte) { renvo_runtime_ArenaDiscardBytes(value) }
+
+// TrimLastBytes reclaims unused trailing capacity when value is the last
+// low-arena allocation. The caller must own the complete allocation and must
+// not retain aliases into its unused capacity. The returned slice cannot grow
+// into the reclaimed range without allocating new storage.
+func TrimLastBytes(value []byte) []byte {
+	start := renvo_runtime_ArenaBytesStart(value)
+	if start != 0 && renvo_runtime_ArenaMark() == start+cap(value) {
+		end := start + len(value)
+		if remainder := end % 8; remainder != 0 {
+			end += 8 - remainder
+		}
+		renvo_runtime_ArenaReset(end)
+	}
+	return value[:len(value):len(value)]
+}
