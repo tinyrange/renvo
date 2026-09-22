@@ -12441,7 +12441,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
 				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
-				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
+					renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -21912,6 +21912,22 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Primary holds the base, secondary the length, and tertiary the
+		// index. Keep all three in registers through the bounds checks.
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+		renvoAsmAddScaledTertiary(a, elemSize)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return
+	}
 	negative := renvoAsmNewLabel(&g.asm)
 	invalid := renvoAsmNewLabel(&g.asm)
 	renvoAsmPushPrimary(&g.asm)
@@ -22015,6 +22031,29 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Compare the original index and length without materializing each
+		// intermediate condition or spilling the length onto the VM stack.
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		if !g.meta.panicEnabled {
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmRet(a)
+		return
+	}
 	invalid := renvoAsmNewLabel(&g.asm)
 	renvoAsmCopyPrimaryToSecondary(&g.asm)
 	renvoAsmPushTertiary(&g.asm)
@@ -28463,7 +28502,9 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
 	registerWords := 6
-	if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerWords = renvoRTGObjectRegisterCount()
+	}
 	if sret {
 		registerWords--
 	}
@@ -28692,7 +28733,9 @@ func renvoAmd64PushObjectIntegerRegister(a *renvoAsm, register int) {
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 	registerLimit := 6
-	if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
+	if renvoPreparedBackendActive != 0 {
+		registerLimit = renvoRTGObjectRegisterCount()
+	}
 	integerRegister := 0
 	if sret {
 		integerRegister = 1

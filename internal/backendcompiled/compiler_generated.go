@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "51b16c3a3e39097c22f79f8a6a760c3452367600091fba14a09506b31950efc9"
+const CompilerSourceDigest = "0901ea00ffae8d3d749798c86aed88c414ddc1265432442537586d40ee28ca86"
 
 // source: backend/compiler_common_impl.go
 
@@ -21919,6 +21919,22 @@ return label
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+renvoAsmAddScaledTertiary(a, elemSize)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
 negative := renvoAsmNewLabel(&g.asm)
 invalid := renvoAsmNewLabel(&g.asm)
 renvoAsmPushPrimary(&g.asm)
@@ -22022,6 +22038,29 @@ return label
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoAsmCopyPrimaryToSecondary(a)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 1)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+if !g.meta.panicEnabled {
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmRet(a)
+return
+}
 invalid := renvoAsmNewLabel(&g.asm)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPushTertiary(&g.asm)
@@ -28470,7 +28509,9 @@ symbolIndex := renvoAsmAddObjectFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 renvoObjectExportFrame(g, true)
 registerWords := 6
-if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
+if renvoPreparedBackendActive != 0 {
+registerWords = renvoRTGObjectRegisterCount()
+}
 if sret {
 registerWords--
 }
@@ -28699,7 +28740,9 @@ renvoAsmRecordRegisterPush(a, machineRegisters[register])
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 registerLimit := 6
-if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
+if renvoPreparedBackendActive != 0 {
+registerLimit = renvoRTGObjectRegisterCount()
+}
 integerRegister := 0
 if sret {
 integerRegister = 1
