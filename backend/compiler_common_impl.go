@@ -7045,6 +7045,27 @@ func renvoNativeAlignment(context *renvoCompileContext, size int) int {
 	return 1
 }
 
+func renvoLanguageTypeAlignment(meta *renvoMeta, typ int) int {
+	t := renvoResolveType(meta, typ)
+	if t.kind == renvoTypeComplex64 {
+		return renvoNativeAlignment(meta.c, 4)
+	}
+	if t.kind == renvoTypeArray {
+		return renvoLanguageTypeAlignment(meta, t.elem)
+	}
+	if t.kind == renvoTypeStruct {
+		alignment := 1
+		for i := 0; i < t.count; i++ {
+			fieldAlignment := renvoLanguageTypeAlignment(meta, meta.fields[t.first+i].typ)
+			if fieldAlignment > alignment {
+				alignment = fieldAlignment
+			}
+		}
+		return alignment
+	}
+	return renvoNativeAlignment(meta.c, renvoTypeSize(meta, typ))
+}
+
 func renvoFindResolvedNamedTypeIndex(m *renvoMeta, typ int) int {
 	renvoNonNil(m)
 	if typ < 0 || typ >= len(m.types) {
@@ -8661,6 +8682,14 @@ func renvoAsmCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {
+		unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+		if unsigned {
+			if setcc < 0x94 {
+				setcc += 10
+			} else {
+				setcc += 8
+			}
+		}
 		cond := renvoWasm32CondEq
 		if setcc == 0x95 {
 			cond = renvoWasm32CondNe
@@ -8673,7 +8702,11 @@ func renvoAsmCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
 		} else if setcc == 0x9f {
 			cond = renvoWasm32CondGt
 		}
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		if unsigned {
+			renvoWasm32CompareUnsigned(a)
+		} else {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		}
 		renvoWasm32EmitCondBranch(a, cond, label)
 		return
 	}
@@ -9167,6 +9200,7 @@ type renvoSliceLocation struct {
 }
 
 type renvoLinearGen struct {
+	wasmMemoryRanges       []int
 	prog                   *renvoProgram
 	meta                   *renvoMeta
 	asm                    renvoAsm
@@ -11572,7 +11606,8 @@ func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte
 	if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
 		g.c.renvoTargetArch != renvoArchAmd64 &&
 		g.c.renvoTargetArch != renvoArchAarch64 &&
-		g.c.renvoTargetArch != renvoArchWasm32 {
+		g.c.renvoTargetArch != renvoArchWasm32 &&
+		!(g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm)) {
 		return false
 	}
 	renvoNonNil(g)
@@ -15304,9 +15339,9 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	}
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 		// Preserve the result pointer and ABI call register while REP STOSB
-		// clears RCX bytes beginning at RAX.
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
 		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 		renvoAsmMarkLabel(a, afterLabel)
 		return g.makeZeroLabel
@@ -22375,6 +22410,12 @@ func renvoAddTypedLocal(g *renvoLinearGen, nameStart int, nameEnd int, typ int) 
 	}
 	renvoRecordStackPeak(g)
 	offset := g.stackUsed
+	// A later scalar can reuse an earlier aggregate temporary's stack range.
+	// Retain its memory requirements after lexical locals are discarded.
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+		(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+		g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+	}
 	if g.localCount >= len(g.locals) {
 		renvoGrowLocalTable(g)
 	}
@@ -25153,6 +25194,10 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, arg)))
 				return true
 			}
+			if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+				renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(g.meta, renvoInferParsedExprType(g, ep, arg)))
+				return true
+			}
 			if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
 				selector := &ep.exprs[arg]
 				renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
@@ -25461,6 +25506,18 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(g.meta, resultType)
 		unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+		comparisonStart := renvoTokStart(p, e.tok)
+		comparisonEnd := renvoTokEnd(p, e.tok)
+		comparisonChar := renvo_runtime_UnsafeByteAt(p.src, comparisonStart)
+		comparisonSecond := byte(0)
+		if comparisonStart+1 < comparisonEnd {
+			comparisonSecond = renvo_runtime_UnsafeByteAt(p.src, comparisonStart+1)
+		}
+		if (comparisonChar == '<' || comparisonChar == '>') && comparisonSecond != comparisonChar &&
+			(renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) &&
+			renvoEmitUnsignedPrimaryTertiaryCompare(g, comparisonChar, comparisonSecond, comparisonEnd-comparisonStart) {
+			return true
+		}
 		if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
 			if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 				return false
@@ -32031,6 +32088,10 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, arg)))
 				return true
 			}
+			if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+				renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(meta, renvoInferParsedExprType(g, ep, arg)))
+				return true
+			}
 			if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
 				selector := &ep.exprs[arg]
 				renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
@@ -32470,7 +32531,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 		}
 		renvoAsmPopTertiary(a)
-		if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+		if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
 		}
@@ -32627,7 +32688,7 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 		(renvoExprHasUnsignedIntType(g, ep, e.left) ||
 			renvoExprHasUnsignedIntType(g, ep, e.right))
 	right := &ep.exprs[rightIndex]
-	if !usesFloat {
+	if !usesFloat && !(unsigned && g.c.renvoTargetArch == renvoArchWasm32) {
 		rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 		if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 			if !renvoEmitIntExpr(g, ep, leftIndex) {
@@ -32708,7 +32769,12 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 	} else if g.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmCmpRegReg(&g.asm, renvoArmRegRcx, renvoArmRegRax)
 	} else if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		if unsigned {
+			renvoWasm32CompareUnsigned(&g.asm)
+			unsigned = false
+		} else {
+			renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		}
 	} else {
 		renvoAsmEmit24(&g.asm, 0xc13948)
 	}
