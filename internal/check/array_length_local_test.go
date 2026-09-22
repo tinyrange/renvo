@@ -8,6 +8,15 @@ import (
 func TestLocalArrayLengthDeclarations(t *testing.T) {
 	for _, source := range []string{
 		`func main(){var a [-1]int;_=a}`,
+		`func main(){var a [-1]*int;_=a}`,
+		`func main(){var a [-1][]int;_=a}`,
+		`func main(){var a [-1](int);_=a}`,
+		`func main(){var a [-1]struct{};_=a}`,
+		`func main(){var a [-1]interface{};_=a}`,
+		`func main(){var a [-1]map[int]int;_=a}`,
+		`func main(){var a [-1]chan int;_=a}`,
+		`func main(){var a [-1]<-chan int;_=a}`,
+		`func main(){var a [-1]func();_=a}`,
 		`func main(){var a [1.5]int;_=a}`,
 		`func main(){var a [true]int;_=a}`,
 		`func main(){var a [nil]int;_=a}`,

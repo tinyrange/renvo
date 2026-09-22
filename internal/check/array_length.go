@@ -7,10 +7,42 @@ import (
 
 func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body) int {
 	file := pkg.Files[fileIndex].File
+	// Array lengths occur only in nonempty bracket groups followed by a type.
+	// Avoid building all local bindings for functions with no possible array type.
+	possible := false
+	for tok := fn.StartTok + 1; tok+1 < fn.EndTok; tok++ {
+		if !tokCharIs(&file, tok, ']') || tokCharIs(&file, tok-1, '[') {
+			continue
+		}
+		switch file.Tokens[tok+1].KindLine & 255 {
+		case syntax.TokenIdent, syntax.TokenStruct, syntax.TokenInterface, syntax.TokenMap, syntax.TokenChan, syntax.TokenFunc:
+			possible = true
+		default:
+			possible = tokCharIs(&file, tok+1, '[') || tokCharIs(&file, tok+1, '*') || tokCharIs(&file, tok+1, '(') || tokenTextIs(&file, tok+1, "<-")
+		}
+		if possible {
+			break
+		}
+	}
+	if !possible {
+		return -1
+	}
 	bindings := collectScopedTypeBindings(file, fn, body)
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, bindings: bindings, strict: true}
+	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for _, binding := range bindings {
-		if numericBuiltinInNestedFunction(file, fn, binding.name) {
+		// Bindings follow signature fields and then source-ordered statements.
+		// Advance across nested functions once for the entire binding list.
+		for nestedScan < binding.name {
+			if file.Tokens[nestedScan].KindLine&255 == syntax.TokenFunc {
+				end := pointerOrderingNestedFunctionEnd(file, nestedScan, fn.BodyEnd-1)
+				if end > nestedScan {
+					nestedEnd, nestedScan = end, end
+				}
+			}
+			nestedScan++
+		}
+		if nestedEnd >= 0 && binding.name <= nestedEnd {
 			continue
 		}
 		start, end := binding.typeStart, binding.typeEnd
@@ -47,7 +79,7 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 		if arrayLengthVariableName(context, tok+1, close-1) {
 			return tok + 1
 		}
-		operand := numericBuiltinExprValue(*context.pkg, *context.info, context.fileIndex, context.scope, context.bindings, tok+1, close-1, context.before, 0)
+		operand := numericBuiltinExprValue(context.pkg, context.info, context.fileIndex, context.scope, context.bindings, tok+1, close-1, context.before, 0)
 		if operand.kind == "bool" || operand.kind == "string" || operand.kind == "other" {
 			return tok + 1
 		}

@@ -4,7 +4,7 @@ import (
 	"renvo.dev/internal/load"
 )
 
-func invalidNumericBuiltinCall(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, name string, callee, close int, args []ExprSpan) (int, int) {
+func invalidNumericBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, name string, callee, close int, args []ExprSpan) (int, int) {
 	file := pkg.Files[fileIndex].File
 	count := 1
 	if name == "complex" {
