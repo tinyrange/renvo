@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "6c4c257b27deae3b3fbe8b70b07309b41fc883820c866a6a1bf17f39742bef33"
+const CompilerSourceDigest = "60478f5aa2b951e7b2922261a2cfb30999f4c7df9da61b1e0c70229a09679f53"
 
 // source: backend/compiler_common_impl.go
 
@@ -15325,6 +15325,23 @@ loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+renvoAsmPrimaryImm(a, 4)
+renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+renvoAsmAddSecondaryImm(a, 4)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmPushImm(a, 4)
+renvoAsmPopTertiary(a)
+renvoAsmSubPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmJmpLabel(a, wordLoop)
+}
 renvoAsmMarkLabel(a, loopLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmJzPrimary(a, doneLabel)
