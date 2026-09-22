@@ -784,9 +784,18 @@ func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]by
 	out = append(out, ',', ' ')
 	out = appendSourceEmbedDecimal(out, len(archive))
 	out = append(out, ')')
-	// The initializer owns its bytes. Archive, match tables, and quoting
-	// scratch are private to this call and no longer needed after the copy.
-	arena.Discard(scratchStart, scratchEnd)
+	// All allocations since scratchStart are private. Temporarily retain the
+	// initializer at the high end, rewind the dead archive/compression/quoting
+	// storage, and copy just the result back into the low arena. Discard alone
+	// releases pages but leaves that scratch consuming the fixed arena range.
+	if scratchEnd > scratchStart {
+		persistStart := arena.PersistMark()
+		retained := arena.PersistBytes(out)
+		arena.Reset(scratchStart)
+		out = make([]byte, len(retained))
+		copy(out, retained)
+		arena.PersistReset(persistStart)
+	}
 	return out, true
 }
 
