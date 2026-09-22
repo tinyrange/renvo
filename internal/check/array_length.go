@@ -86,7 +86,7 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 		if unsafeAddFractionalDecimal(file, tok+1, close-1) {
 			return tok + 1
 		}
-		value := wideConstantExpr(context, tok+1, close-1, 0)
+		value := wideConstantExpr(&context, tok+1, close-1, 0)
 		if value.ok {
 			// Every supported target has at most 64-bit ints. Target-specific
 			// smaller bounds remain the target layout checker's responsibility.

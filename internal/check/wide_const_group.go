@@ -22,7 +22,7 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			values := splitExprList(file, target.ValueStart, target.ValueEnd)
 			if target.ValueIndex >= 0 && target.ValueIndex < len(values) {
 				context.iotaKnown = false
-				return wideConstantExpr(context, values[target.ValueIndex].StartTok, values[target.ValueIndex].EndTok, depth)
+				return wideConstantExpr(&context, values[target.ValueIndex].StartTok, values[target.ValueIndex].EndTok, depth)
 			}
 		}
 	}
@@ -68,7 +68,7 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			return wideConstant{}
 		}
 		context.iotaKnown, context.iotaValue = true, ordinal
-		return wideConstantExpr(context, values[index].StartTok, values[index].EndTok, depth)
+		return wideConstantExpr(&context, values[index].StartTok, values[index].EndTok, depth)
 	}
 	return wideConstant{}
 }

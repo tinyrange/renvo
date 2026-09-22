@@ -61,18 +61,18 @@ func wideIntegerLiteral(text string) wideConstant {
 // This checker path never uses a truncated intermediate as proof that a type
 // is invalid. Unsupported expressions or precision exhaustion stay unknown.
 // The precision budget limits scratch allocation, not the target integer size.
-func wideConstantExpr(context constantIndexContext, start int, end int, depth int) wideConstant {
+func wideConstantExpr(context *constantIndexContext, start int, end int, depth int) wideConstant {
 	if depth > 64 {
 		return wideConstant{}
 	}
-	file := context.pkg.Files[context.fileIndex].File
-	start, end = trimExprSpan(file, start, end)
-	start, end = stripOuterParens(&file, start, end)
+	file := &context.pkg.Files[context.fileIndex].File
+	start, end = trimExprSpan(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
 		return wideConstant{}
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
-		op := constantIndexOperator(&file, start, end, precedence)
+		op := constantIndexOperator(file, start, end, precedence)
 		if op < 0 {
 			continue
 		}
@@ -81,7 +81,7 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		if !left.ok || !right.ok {
 			return wideConstant{}
 		}
-		operator := tokenString(&file, op)
+		operator := tokenString(file, op)
 		if operator == "&" || operator == "|" || operator == "^" || operator == "&^" {
 			return wideBitwise(left, right, operator)
 		}
@@ -116,12 +116,12 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		}
 		return wideConstant{}
 	}
-	if tokenTextIs(&file, start, "+") || tokenTextIs(&file, start, "-") || tokenTextIs(&file, start, "^") {
+	if tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-") || tokenTextIs(file, start, "^") {
 		value := wideConstantExpr(context, start+1, end, depth+1)
-		if tokenTextIs(&file, start, "-") {
+		if tokenTextIs(file, start, "-") {
 			return wideNegate(value)
 		}
-		if tokenTextIs(&file, start, "^") {
+		if tokenTextIs(file, start, "^") {
 			return wideAdd(wideNegate(value), wideSmall(-1))
 		}
 		return value
@@ -140,12 +140,12 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		if file.Tokens[start].End-file.Tokens[start].Start > 16384 {
 			return wideConstant{}
 		}
-		return wideIntegerLiteral(tokenString(&file, start))
+		return wideIntegerLiteral(tokenString(file, start))
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent {
 		chosen := -1
 		for i, binding := range context.bindings {
-			if binding.visible <= context.before && context.before < binding.end && coreTokensEqual(&file, binding.name, start) && (chosen < 0 || binding.visible > context.bindings[chosen].visible) {
+			if binding.visible <= context.before && context.before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > context.bindings[chosen].visible) {
 				chosen = i
 			}
 		}
@@ -156,18 +156,19 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 			}
 			// Resolve the initializer at its declaration, not at the use site.
 			// An omitted expression keeps its template but receives a new iota.
-			context.before = binding.name
-			context.scope = CoreScope{}
-			context.iotaKnown, context.iotaValue = true, binding.iotaValue
-			return wideConstantExpr(context, binding.valueStart, binding.valueEnd, depth+1)
+			next := *context
+			next.before = binding.name
+			next.scope = CoreScope{}
+			next.iotaKnown, next.iotaValue = true, binding.iotaValue
+			return wideConstantExpr(&next, binding.valueStart, binding.valueEnd, depth+1)
 		}
-		if context.bindings == nil && lookupScopeTokenNameCore(context.scope, &file, start) >= 0 {
+		if context.bindings == nil && lookupScopeTokenNameCore(context.scope, file, start) >= 0 {
 			return wideConstant{}
 		}
-		if context.iotaKnown && tokenTextIs(&file, start, "iota") && lookupPackageSymbol(context.info.Symbols, "iota") < 0 {
+		if context.iotaKnown && tokenTextIs(file, start, "iota") && lookupPackageSymbol(context.info.Symbols, "iota") < 0 {
 			return wideSmall(context.iotaValue)
 		}
-		index := LookupDecl(*context.info, tokenString(&file, start))
+		index := LookupDecl(*context.info, tokenString(file, start))
 		if index < 0 {
 			return wideConstant{}
 		}
@@ -175,7 +176,7 @@ func wideConstantExpr(context constantIndexContext, start int, end int, depth in
 		if decl.Kind != SymbolConst {
 			return wideConstant{}
 		}
-		return wideDeclaredConstant(context, decl, depth+1)
+		return wideDeclaredConstant(*context, decl, depth+1)
 	}
 	return wideConstant{}
 }
