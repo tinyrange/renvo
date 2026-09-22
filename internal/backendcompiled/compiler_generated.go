@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "308450f281ecc21848227000be554772b4c0167c9da58b8d09ddab65cf7dd878"
+const CompilerSourceDigest = "5be955f9b6461df89750178e06f83c605b6d84dde12bb3e49630de416eb2ce45"
 
 // source: backend/compiler_common_impl.go
 
@@ -12448,7 +12448,8 @@ localType = inferredType
 }
 }
 if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 
 
 value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15371,6 +15372,23 @@ loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+renvoAsmPrimaryImm(a, 4)
+renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+renvoAsmAddSecondaryImm(a, 4)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmPushImm(a, 4)
+renvoAsmPopTertiary(a)
+renvoAsmSubPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmJmpLabel(a, wordLoop)
+}
 renvoAsmMarkLabel(a, loopLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmJzPrimary(a, doneLabel)
@@ -37353,6 +37371,15 @@ return renvoParseCharToken(p, e.tok)
 }
 if e.kind == renvoExprBool {
 return renvoBoolTokenValue(p, e.tok)
+}
+
+
+if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
+constant := renvoEvalConstExpr(g, ep, idx)
+if constant.ok {
+return constant.value
+}
+return renvoFixedTargetUnknown
 }
 if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
 fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
