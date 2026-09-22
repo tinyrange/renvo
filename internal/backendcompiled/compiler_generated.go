@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "399227be58cb41d54dc3cba140689ada738f1ca8ef15308da3d857998de8db36"
+const CompilerSourceDigest = "af375487036bd4d7969d4fa42f2c67a40a384ae031bd62260029ed8b7a53e6ca"
 
 // source: backend/compiler_common_impl.go
 
@@ -15929,7 +15929,7 @@ renvoNonNil(g)
 
 
 if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 (mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
 destination := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -21147,6 +21147,10 @@ if g.c.renvoTargetArch == renvoArch386 {
 renvo386EmitCopyBytes(g, srcPtr, destPtr, byteCount)
 return
 }
+if g.c.renvoTargetArch == renvoArchAarch64 {
+renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+return
+}
 if g.c.renvoTargetArch == renvoArchArm {
 renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
 return
@@ -21205,6 +21209,61 @@ renvoEmitCopyByteAt(g, srcPtr, destPtr, index)
 renvoAsmIncStack(a, index)
 renvoAsmJmpLabel(a, forwardLoop)
 renvoAsmMarkLabel(a, copyDone)
+}
+
+
+
+func renvoEmitCopyBytesAarch64(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+a := &g.asm
+renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
+renvoAarch64AsmLoadRegStack(a, 1, destPtr)
+renvoAarch64AsmLoadRegStack(a, 2, byteCount)
+forward := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAarch64AsmCmpRegReg(a, 1, 0)
+renvoAarch64AsmBCondLabel(a, forward, 9)
+renvoAarch64AsmAddRegRegShift(a, 0, 0, 2, 0)
+renvoAarch64AsmAddRegRegShift(a, 1, 1, 2, 0)
+for direction := 0; direction < 2; direction++ {
+if direction == 1 {
+renvoAsmMarkLabel(a, forward)
+}
+words := renvoAsmNewLabel(a)
+tail := renvoAsmNewLabel(a)
+bytes := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, words)
+renvoAarch64AsmCmpRegImm(a, 2, 8)
+renvoAarch64AsmBCondLabel(a, tail, 3)
+if direction == 0 {
+renvoAarch64AsmAddRegImm(a, 0, 0, -8)
+renvoAarch64AsmAddRegImm(a, 1, 1, -8)
+}
+renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 8)
+renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 8)
+if direction == 1 {
+renvoAarch64AsmAddRegImm(a, 0, 0, 8)
+renvoAarch64AsmAddRegImm(a, 1, 1, 8)
+}
+renvoAarch64AsmAddRegImm(a, 2, 2, -8)
+renvoAsmJmpLabel(a, words)
+renvoAsmMarkLabel(a, tail)
+renvoAsmMarkLabel(a, bytes)
+renvoAarch64AsmCmpRegImm(a, 2, 0)
+renvoAarch64AsmBCondLabel(a, done, 0)
+if direction == 0 {
+renvoAarch64AsmAddRegImm(a, 0, 0, -1)
+renvoAarch64AsmAddRegImm(a, 1, 1, -1)
+}
+renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 1)
+renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 1)
+if direction == 1 {
+renvoAarch64AsmAddRegImm(a, 0, 0, 1)
+renvoAarch64AsmAddRegImm(a, 1, 1, 1)
+}
+renvoAarch64AsmAddRegImm(a, 2, 2, -1)
+renvoAsmJmpLabel(a, bytes)
+}
+renvoAsmMarkLabel(a, done)
 }
 
 func renvoEmitCopyWordAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
