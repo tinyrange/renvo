@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7d2bfd2892ede656e937365ba9baa4d286e04b0237f3b4bec5fb18f125bac0bd"
+const CompilerSourceDigest = "0543fa7f973ad75f1f6daa1b0238955d219eea8579ef706338de06302cd3fd01"
 
 // source: backend/compiler_common_impl.go
 
@@ -508,6 +508,10 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 codeCapacity = 3670016
 labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+if a.c.renvoTargetArch == renvoArch386 {
+codeCapacity = 4194304
+labelCapacity, relocCapacity = 65536, 262144
+}
 
 
 if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
@@ -41389,6 +41393,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvo386ELFCodeOffset
