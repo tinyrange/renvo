@@ -1563,62 +1563,62 @@ func keywordKind(src []byte, start int, end int) int {
 	for i := start; i < end; i++ {
 		h = h*5 + int(src[i])
 	}
-	if n == 2 && h == 627 {
+	if n == 2 && h == 627 && string(src[start:end]) == "if" {
 		return renvoTokIf
 	}
 	if n == 3 {
-		if h == 3549 {
+		if h == 3549 && string(src[start:end]) == "var" {
 			return renvoTokVar
 		}
-		if h == 3219 {
+		if h == 3219 && string(src[start:end]) == "for" {
 			return renvoTokFor
 		}
 	}
 	if n == 4 {
-		if h == 18186 {
+		if h == 18186 && string(src[start:end]) == "type" {
 			return renvoTokType
 		}
-		if h == 16324 {
+		if h == 16324 && string(src[start:end]) == "func" {
 			return renvoTokFunc
 		}
-		if h == 16001 {
+		if h == 16001 && string(src[start:end]) == "else" {
 			return renvoTokElse
 		}
-		if h == 16341 {
+		if h == 16341 && string(src[start:end]) == "goto" {
 			return renvoTokGoto
 		}
-		if h == 15476 {
+		if h == 15476 && string(src[start:end]) == "case" {
 			return renvoTokCase
 		}
 	}
 	if n == 5 {
-		if h == 79191 {
+		if h == 79191 && string(src[start:end]) == "const" {
 			return renvoTokConst
 		}
-		if h == 78617 {
+		if h == 78617 && string(src[start:end]) == "break" {
 			return renvoTokBreak
 		}
 	}
 	if n == 6 {
-		if h == 449661 {
+		if h == 449661 && string(src[start:end]) == "struct" {
 			return renvoTokStruct
 		}
-		if h == 437480 {
+		if h == 437480 && string(src[start:end]) == "return" {
 			return renvoTokReturn
 		}
-		if h == 450374 {
+		if h == 450374 && string(src[start:end]) == "switch" {
 			return renvoTokSwitch
 		}
 	}
 	if n == 7 {
-		if h == 2131416 {
+		if h == 2131416 && string(src[start:end]) == "package" {
 			return renvoTokPackage
 		}
-		if h == 1957581 {
+		if h == 1957581 && string(src[start:end]) == "default" {
 			return renvoTokDefault
 		}
 	}
-	if n == 8 && h == 9901561 {
+	if n == 8 && h == 9901561 && string(src[start:end]) == "continue" {
 		return renvoTokContinue
 	}
 	return renvoTokIdent
