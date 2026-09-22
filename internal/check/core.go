@@ -166,6 +166,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return false, CheckErrAssignTarget, fileIndex, tok
+			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
