@@ -45,6 +45,7 @@ const (
 	CheckErrMissingReturn
 	CheckErrRecursiveType
 	CheckErrConstantOperation
+	CheckErrStructLiteral
 )
 
 const (
@@ -238,8 +239,12 @@ func CheckGraph(graph load.Graph) Program {
 }
 
 func LookupPackageSymbol(info PackageInfo, name string) int {
-	for i := 0; i < len(info.Symbols); i++ {
-		if info.Symbols[i].Name == name {
+	return lookupPackageSymbol(info.Symbols, name)
+}
+
+func lookupPackageSymbol(symbols []Symbol, name string) int {
+	for i := 0; i < len(symbols); i++ {
+		if symbols[i].Name == name {
 			return i
 		}
 	}
@@ -366,7 +371,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	sortImports(info.Imports)
 	if info.Cgo != nil {
 		for i := 0; i < len(info.Cgo.Exports); i++ {
-			info.Cgo.Exports[i].Symbol = LookupPackageSymbol(info, info.Cgo.Exports[i].GoName)
+			info.Cgo.Exports[i].Symbol = lookupPackageSymbol(info.Symbols, info.Cgo.Exports[i].GoName)
 		}
 	}
 	return info, true, CheckOK, -1, -1

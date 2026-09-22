@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "91d1993e5f6a4d7bd1a977a6fc8fc700957ce5248105d7d708763076783c5e24"
+const CompilerSourceDigest = "e21ff84531e5901ddab090fb848594888cf83293d384d0c83e5655057107bc97"
 
 // source: backend/compiler_common_impl.go
 
@@ -496,6 +496,9 @@ a.symbols = make([]renvoAsmSymbol, 0, 1024)
 }
 } else if a.c.renvoTargetArch == renvoArchWasm32 {
 codeCapacity = 655360
+if a.c.optimizeRuntime {
+codeCapacity = 8388608
+}
 labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 a.symbols = make([]renvoAsmSymbol, 0, 2048)
 } else if a.c.optimizeRuntime {
@@ -505,6 +508,16 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 codeCapacity = 3670016
 labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+if a.c.renvoTargetArch == renvoArch386 {
+codeCapacity = 4194304
+labelCapacity, relocCapacity = 65536, 262144
+}
+
+
+if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
+codeCapacity = 8388608
+labelCapacity, relocCapacity, absRelocCapacity = 65536, 262144, 65536
+}
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbols = make([]renvoAsmSymbol, 0, 4096)
 }
@@ -1970,70 +1983,70 @@ for i := start; i < end; i++ {
 h = h*5 + int(renvo_runtime_UnsafeByteAt(src, i))
 }
 if n == 2 {
-if h == 627 {
+if h == 627 && renvoBytesEqualText(src, start, end, "if") {
 return renvoTokIf
 }
 }
 if n == 3 {
-if h == 3549 {
+if h == 3549 && renvoBytesEqualText(src, start, end, "var") {
 return renvoTokVar
 }
-if h == 3219 {
+if h == 3219 && renvoBytesEqualText(src, start, end, "for") {
 return renvoTokFor
 }
 }
 if n == 4 {
-if h == 18186 {
+if h == 18186 && renvoBytesEqualText(src, start, end, "type") {
 return renvoTokType
 }
-if h == 16324 {
+if h == 16324 && renvoBytesEqualText(src, start, end, "func") {
 return renvoTokFunc
 }
-if h == 16001 {
+if h == 16001 && renvoBytesEqualText(src, start, end, "else") {
 return renvoTokElse
 }
-if h == 16341 {
+if h == 16341 && renvoBytesEqualText(src, start, end, "goto") {
 return renvoTokGoto
 }
-if h == 15476 {
+if h == 15476 && renvoBytesEqualText(src, start, end, "case") {
 return renvoTokCase
 }
 }
 if n == 5 {
-if h == 78294 || h == 85499 {
+if (h == 78294 && renvoBytesEqualText(src, start, end, "defer")) || (h == 85499 && renvoBytesEqualText(src, start, end, "panic")) {
 toks.panicEnabled = true
 }
-if h == 79191 {
+if h == 79191 && renvoBytesEqualText(src, start, end, "const") {
 return renvoTokConst
 }
-if h == 78617 {
+if h == 78617 && renvoBytesEqualText(src, start, end, "break") {
 return renvoTokBreak
 }
 }
 if n == 6 {
-if h == 449661 {
+if h == 449661 && renvoBytesEqualText(src, start, end, "struct") {
 return renvoTokStruct
 }
-if h == 437480 {
+if h == 437480 && renvoBytesEqualText(src, start, end, "return") {
 return renvoTokReturn
 }
-if h == 450374 {
+if h == 450374 && renvoBytesEqualText(src, start, end, "switch") {
 return renvoTokSwitch
 }
 }
 if n == 7 {
-if h == 2176194 {
+if h == 2176194 && renvoBytesEqualText(src, start, end, "recover") {
 toks.panicEnabled = true
 }
-if h == 2131416 {
+if h == 2131416 && renvoBytesEqualText(src, start, end, "package") {
 return renvoTokPackage
 }
-if h == 1957581 {
+if h == 1957581 && renvoBytesEqualText(src, start, end, "default") {
 return renvoTokDefault
 }
 }
 if n == 8 {
-if h == 9901561 {
+if h == 9901561 && renvoBytesEqualText(src, start, end, "continue") {
 return renvoTokContinue
 }
 }
@@ -8679,6 +8692,14 @@ renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
 return
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
+unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+if unsigned {
+if setcc < 0x94 {
+setcc += 10
+} else {
+setcc += 8
+}
+}
 cond := renvoWasm32CondEq
 if setcc == 0x95 {
 cond = renvoWasm32CondNe
@@ -8691,7 +8712,11 @@ cond = renvoWasm32CondLe
 } else if setcc == 0x9f {
 cond = renvoWasm32CondGt
 }
+if unsigned {
+renvoWasm32CompareUnsigned(a)
+} else {
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 renvoWasm32EmitCondBranch(a, cond, label)
 return
 }
@@ -11590,7 +11615,8 @@ func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte
 if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
 g.c.renvoTargetArch != renvoArchAmd64 &&
 g.c.renvoTargetArch != renvoArchAarch64 &&
-g.c.renvoTargetArch != renvoArchWasm32 {
+g.c.renvoTargetArch != renvoArchWasm32 &&
+!(g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm)) {
 return false
 }
 renvoNonNil(g)
@@ -12423,7 +12449,8 @@ localType = inferredType
 }
 }
 if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 
 
 value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15339,6 +15366,23 @@ loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+renvoAsmPrimaryImm(a, 4)
+renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+renvoAsmAddSecondaryImm(a, 4)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmPushImm(a, 4)
+renvoAsmPopTertiary(a)
+renvoAsmSubPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmJmpLabel(a, wordLoop)
+}
 renvoAsmMarkLabel(a, loopLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmJzPrimary(a, doneLabel)
@@ -25460,6 +25504,18 @@ renvoAsmPopTertiary(a)
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
 unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+comparisonStart := renvoTokStart(p, e.tok)
+comparisonEnd := renvoTokEnd(p, e.tok)
+comparisonChar := renvo_runtime_UnsafeByteAt(p.src, comparisonStart)
+comparisonSecond := byte(0)
+if comparisonStart+1 < comparisonEnd {
+comparisonSecond = renvo_runtime_UnsafeByteAt(p.src, comparisonStart+1)
+}
+if (comparisonChar == '<' || comparisonChar == '>') && comparisonSecond != comparisonChar &&
+(renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) &&
+renvoEmitUnsignedPrimaryTertiaryCompare(g, comparisonChar, comparisonSecond, comparisonEnd-comparisonStart) {
+return true
+}
 if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
 if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 return false
@@ -32473,7 +32529,7 @@ return false
 }
 }
 renvoAsmPopTertiary(a)
-if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
 }
@@ -32630,7 +32686,7 @@ unsigned := (c0 == '<' || c0 == '>') &&
 (renvoExprHasUnsignedIntType(g, ep, e.left) ||
 renvoExprHasUnsignedIntType(g, ep, e.right))
 right := &ep.exprs[rightIndex]
-if !usesFloat {
+if !usesFloat && !(unsigned && g.c.renvoTargetArch == renvoArchWasm32) {
 rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 if !renvoEmitIntExpr(g, ep, leftIndex) {
@@ -32711,7 +32767,12 @@ renvoAarch64AsmCmpRegReg(&g.asm, renvoAarch64RegRcx, renvoAarch64RegRax)
 } else if g.c.renvoTargetArch == renvoArchArm {
 renvoArmAsmCmpRegReg(&g.asm, renvoArmRegRcx, renvoArmRegRax)
 } else if g.c.renvoTargetArch == renvoArchWasm32 {
+if unsigned {
+renvoWasm32CompareUnsigned(&g.asm)
+unsigned = false
+} else {
 renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 } else {
 renvoAsmEmit24(&g.asm, 0xc13948)
 }
@@ -37296,6 +37357,15 @@ return renvoParseCharToken(p, e.tok)
 if e.kind == renvoExprBool {
 return renvoBoolTokenValue(p, e.tok)
 }
+
+
+if e.kind == renvoExprIdent && renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
+constant := renvoEvalConstExpr(g, ep, idx)
+if constant.ok {
+return constant.value
+}
+return renvoFixedTargetUnknown
+}
 if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
 fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
 nameSize := e.nameEnd - e.nameStart
@@ -37555,7 +37625,7 @@ if target == renvoTargetLinuxAarch64 {
 return "linux/aarch64", "\xf3\x34\x4f\x65\x24\xa7\x5b\xf8\xc4\x08\x89\x0c\x48\xa1\xa9\x62\x49\x30\xc9\x58\xfb\x01\x4c\x07\x9d\xd4\xd9\xc3\xd3\xb6\x06\x2a", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x43\x5d\xdd\x4f\x60\xaf\xa9\x5c\xbb\x80\x66\xe8\x10\x26\x1d\xc6\xf8\x86\x2a\x01\x26\xb4\x50\x9a\x18\x47\xf1\xb2\x84\xe7\x69\xad", 3, true
+return "linux/arm", "\x84\xd9\xca\x41\xee\x61\x4e\x7c\xc4\xfa\x8b\x28\x51\x9b\xf3\x4b\xb2\xf8\x98\x67\xcd\x93\x35\x69\xba\xd7\xcb\x29\x6b\x6e\xe7\x22", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
@@ -37564,7 +37634,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x2c\x8a\xfe\x5a\xa0\x18\x6d\xd1\xed\x99\xa0\x41\x5d\x88\x93\xe4\x29\x51\xc7\x99\x14\x73\x87\xa5\xdf\xfc\x24\x60\x4b\xd8\xe1\xe8", 3, true
+return "wasi/wasm32", "\xd6\x83\xc9\xd8\x33\xf5\x52\x0d\x1b\xdc\x1c\x71\x5a\x5b\x8f\x93\x92\x72\xef\xd7\x2a\x9d\xda\x57\xf7\xa2\x04\x43\xa9\xac\x12\x29", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
@@ -37576,7 +37646,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x95\x3a\xc6\x0b\x56\x1a\x63\xa4\xa9\x53\xe7\x91\x6b\xb5\xf7\xae\x6e\xb1\x8b\x90\x7e\x05\xa8\xcf\xd6\xb6\x30\xd7\xc5\x7f\x73\xdc", 3, true
+return "vm/vm32", "\x5d\x01\x5e\xb2\xcc\x34\x31\xad\x36\x96\x8c\x6f\xba\x40\xe4\xa7\x8b\x1b\x85\x88\x13\x8c\xd6\x9e\x70\x30\xe6\xd3\x5e\xeb\x84\x5f", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -41356,6 +41426,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvo386ELFCodeOffset
@@ -44667,6 +44738,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoAarch64ELFCodeOffset
@@ -45153,6 +45225,18 @@ return 13
 }
 if setcc == 0x9f {
 return 12
+}
+if setcc == 0x92 {
+return 3
+}
+if setcc == 0x93 {
+return 2
+}
+if setcc == 0x96 {
+return 9
+}
+if setcc == 0x97 {
+return 8
 }
 return 10
 }
@@ -46110,6 +46194,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoLinuxArmCodeOffset
@@ -47066,7 +47151,37 @@ renvoWasm32EmitRegReg(a, renvoWasm32OpDivRegReg, renvoWasm32RegRcx, renvoWasm32R
 }
 renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 }
+func renvoWasm32CompareUnsigned(a *renvoAsm) {
+done := a.NewLabel()
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 1)
+renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondNe, renvoRTGLabelCode(done))
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+a.Mark(done)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+}
 func renvoWasm32AsmCmpRcxRaxSet(a *renvoAsm, setcc int) {
+unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+if unsigned {
+if setcc < 0x94 {
+setcc += 10
+} else {
+setcc += 8
+}
+}
 cond := renvoWasm32CondEq
 if setcc == 0x95 {
 cond = renvoWasm32CondNe
@@ -47079,7 +47194,11 @@ cond = renvoWasm32CondGt
 } else if setcc == 0x9d {
 cond = renvoWasm32CondGe
 }
+if unsigned {
+renvoWasm32CompareUnsigned(a)
+} else {
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+}
 renvoAsmEmit8(a, renvoWasm32OpSetCond)
 renvoAsmEmit8(a, cond)
 }
@@ -48613,6 +48732,23 @@ renvo_runtime_ArenaReset(mark)
 }
 return
 }
+func renvoWasm32AppendDataSectionDirect(out *renvoWasmBuffer, dataBase int, data []byte) {
+var header renvoWasmBuffer
+renvoWasmAppendU32(&header, 1)
+renvoWasmPut(&header, 0x00)
+renvoWasmAppendI32Const(&header, dataBase)
+renvoWasmPut(&header, 0x0b)
+renvoWasmAppendU32(&header, len(data))
+renvoWasm32EnsureAdditionalCapacity(out, len(data)+header.length+6)
+renvoWasmPut(out, 11)
+renvoWasmAppendU32(out, header.length+len(data))
+for i := 0; i < header.length; i++ {
+renvoWasmPut(out, header.data[i])
+}
+for i := 0; i < len(data); i++ {
+renvoWasmPut(out, data[i])
+}
+}
 func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 var out renvoWasmBuffer
 renvoWasmAppendU32(&out, 1)
@@ -48705,7 +48841,7 @@ browserStepIndex = renvoWasm32VmFuncBase + len(routinePcs)
 renvoWasmAppendSection(&out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
 renvoWasm32AppendCodeSectionDirect(&out, a, instrPcs, routinePcs, routineEnds, symbolPcs, callStackBase, frameTop, exprStackBase, browserStepRoutine)
 if len(a.data) > 0 {
-renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
+renvoWasm32AppendDataSectionDirect(&out, dataBase, a.data)
 }
 return out
 }
@@ -54217,6 +54353,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
 renvoLoadCompilerFixedTarget(&g)
 if g.fixedTargetState != 1 {

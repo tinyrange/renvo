@@ -489,6 +489,9 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		}
 	} else if a.c.renvoTargetArch == renvoArchWasm32 {
 		codeCapacity = 655360
+		if a.c.optimizeRuntime {
+			codeCapacity = 8388608
+		}
 		labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
 		a.symbols = make([]renvoAsmSymbol, 0, 2048)
 	} else if a.c.optimizeRuntime {
@@ -498,6 +501,16 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
 		labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+		if a.c.renvoTargetArch == renvoArch386 {
+			codeCapacity = 4194304
+			labelCapacity, relocCapacity = 65536, 262144
+		}
+		// ARM instruction streams and relocations need a larger range than x86.
+		// Reserve their final growth range before scratch emission starts.
+		if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
+			codeCapacity = 8388608
+			labelCapacity, relocCapacity, absRelocCapacity = 65536, 262144, 65536
+		}
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			a.symbols = make([]renvoAsmSymbol, 0, 4096)
 		}
@@ -1963,70 +1976,70 @@ func renvoKeywordKind(src []byte, start int, end int, toks *renvoTokens) int {
 		h = h*5 + int(renvo_runtime_UnsafeByteAt(src, i))
 	}
 	if n == 2 {
-		if h == 627 {
+		if h == 627 && renvoBytesEqualText(src, start, end, "if") {
 			return renvoTokIf
 		}
 	}
 	if n == 3 {
-		if h == 3549 {
+		if h == 3549 && renvoBytesEqualText(src, start, end, "var") {
 			return renvoTokVar
 		}
-		if h == 3219 {
+		if h == 3219 && renvoBytesEqualText(src, start, end, "for") {
 			return renvoTokFor
 		}
 	}
 	if n == 4 {
-		if h == 18186 {
+		if h == 18186 && renvoBytesEqualText(src, start, end, "type") {
 			return renvoTokType
 		}
-		if h == 16324 {
+		if h == 16324 && renvoBytesEqualText(src, start, end, "func") {
 			return renvoTokFunc
 		}
-		if h == 16001 {
+		if h == 16001 && renvoBytesEqualText(src, start, end, "else") {
 			return renvoTokElse
 		}
-		if h == 16341 {
+		if h == 16341 && renvoBytesEqualText(src, start, end, "goto") {
 			return renvoTokGoto
 		}
-		if h == 15476 {
+		if h == 15476 && renvoBytesEqualText(src, start, end, "case") {
 			return renvoTokCase
 		}
 	}
 	if n == 5 {
-		if h == 78294 || h == 85499 {
+		if (h == 78294 && renvoBytesEqualText(src, start, end, "defer")) || (h == 85499 && renvoBytesEqualText(src, start, end, "panic")) {
 			toks.panicEnabled = true
 		}
-		if h == 79191 {
+		if h == 79191 && renvoBytesEqualText(src, start, end, "const") {
 			return renvoTokConst
 		}
-		if h == 78617 {
+		if h == 78617 && renvoBytesEqualText(src, start, end, "break") {
 			return renvoTokBreak
 		}
 	}
 	if n == 6 {
-		if h == 449661 {
+		if h == 449661 && renvoBytesEqualText(src, start, end, "struct") {
 			return renvoTokStruct
 		}
-		if h == 437480 {
+		if h == 437480 && renvoBytesEqualText(src, start, end, "return") {
 			return renvoTokReturn
 		}
-		if h == 450374 {
+		if h == 450374 && renvoBytesEqualText(src, start, end, "switch") {
 			return renvoTokSwitch
 		}
 	}
 	if n == 7 {
-		if h == 2176194 {
+		if h == 2176194 && renvoBytesEqualText(src, start, end, "recover") {
 			toks.panicEnabled = true
 		}
-		if h == 2131416 {
+		if h == 2131416 && renvoBytesEqualText(src, start, end, "package") {
 			return renvoTokPackage
 		}
-		if h == 1957581 {
+		if h == 1957581 && renvoBytesEqualText(src, start, end, "default") {
 			return renvoTokDefault
 		}
 	}
 	if n == 8 {
-		if h == 9901561 {
+		if h == 9901561 && renvoBytesEqualText(src, start, end, "continue") {
 			return renvoTokContinue
 		}
 	}
@@ -8672,6 +8685,14 @@ func renvoAsmCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchWasm32 {
+		unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+		if unsigned {
+			if setcc < 0x94 {
+				setcc += 10
+			} else {
+				setcc += 8
+			}
+		}
 		cond := renvoWasm32CondEq
 		if setcc == 0x95 {
 			cond = renvoWasm32CondNe
@@ -8684,7 +8705,11 @@ func renvoAsmCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
 		} else if setcc == 0x9f {
 			cond = renvoWasm32CondGt
 		}
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		if unsigned {
+			renvoWasm32CompareUnsigned(a)
+		} else {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		}
 		renvoWasm32EmitCondBranch(a, cond, label)
 		return
 	}
@@ -11583,7 +11608,8 @@ func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte
 	if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
 		g.c.renvoTargetArch != renvoArchAmd64 &&
 		g.c.renvoTargetArch != renvoArchAarch64 &&
-		g.c.renvoTargetArch != renvoArchWasm32 {
+		g.c.renvoTargetArch != renvoArchWasm32 &&
+		!(g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm)) {
 		return false
 	}
 	renvoNonNil(g)
@@ -12416,7 +12442,8 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 				}
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
-				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 || renvoFindGlobalOffset(g, nameStart, nameEnd) >= 0) {
+				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
+				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15332,6 +15359,23 @@ func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmPushPrimary(a)
+	// VM32 and WASM memory supports unaligned word stores. Clear whole
+	// words before the byte tail, avoiding one interpreted loop per byte.
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, 4)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+		renvoAsmAddSecondaryImm(a, 4)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmJzPrimary(a, doneLabel)
@@ -25453,6 +25497,18 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		resultType := renvoInferParsedExprType(g, ep, idx)
 		result := renvoResolveType(g.meta, resultType)
 		unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
+		comparisonStart := renvoTokStart(p, e.tok)
+		comparisonEnd := renvoTokEnd(p, e.tok)
+		comparisonChar := renvo_runtime_UnsafeByteAt(p.src, comparisonStart)
+		comparisonSecond := byte(0)
+		if comparisonStart+1 < comparisonEnd {
+			comparisonSecond = renvo_runtime_UnsafeByteAt(p.src, comparisonStart+1)
+		}
+		if (comparisonChar == '<' || comparisonChar == '>') && comparisonSecond != comparisonChar &&
+			(renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) &&
+			renvoEmitUnsignedPrimaryTertiaryCompare(g, comparisonChar, comparisonSecond, comparisonEnd-comparisonStart) {
+			return true
+		}
 		if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
 			if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
 				return false
@@ -32466,7 +32522,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 		}
 		renvoAsmPopTertiary(a)
-		if g.c.renvoNativeIntSize == 8 && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+		if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return true
 		}
@@ -32623,7 +32679,7 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 		(renvoExprHasUnsignedIntType(g, ep, e.left) ||
 			renvoExprHasUnsignedIntType(g, ep, e.right))
 	right := &ep.exprs[rightIndex]
-	if !usesFloat {
+	if !usesFloat && !(unsigned && g.c.renvoTargetArch == renvoArchWasm32) {
 		rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 		if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 			if !renvoEmitIntExpr(g, ep, leftIndex) {
@@ -32704,7 +32760,12 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 	} else if g.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmCmpRegReg(&g.asm, renvoArmRegRcx, renvoArmRegRax)
 	} else if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		if unsigned {
+			renvoWasm32CompareUnsigned(&g.asm)
+			unsigned = false
+		} else {
+			renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		}
 	} else {
 		renvoAsmEmit24(&g.asm, 0xc13948)
 	}
