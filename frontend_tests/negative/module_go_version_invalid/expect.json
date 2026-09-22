@@ -1,0 +1,8 @@
+{
+  "phase": "loader",
+  "code": "RENVO-LOAD-003",
+  "file": "go.mod",
+  "line": 3,
+  "column": 1,
+  "message": "invalid module declaration"
+}

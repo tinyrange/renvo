@@ -173,7 +173,7 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 			}
 		}
 		if tokenTextIs(&file, i, "make") && i+2 < fn.BodyEnd && tokCharIs(&file, i+1, '(') {
-			close := findTypeMatching(file, i+1, '(', ')')
+			close := findTypeMatching(&file, i+1, '(', ')')
 			if close > i+1 {
 				args := splitExprList(file, i+2, close-1)
 				if len(args) > 0 {
@@ -244,7 +244,7 @@ func invalidDefiniteChannelOperation(file syntax.File, fn syntax.FuncDecl) int {
 			if i > fn.BodyStart+1 && tokCharIs(&file, i-1, '.') {
 				continue
 			}
-			close := findTypeMatching(file, i+1, '(', ')')
+			close := findTypeMatching(&file, i+1, '(', ')')
 			args := splitExprList(file, i+2, close-1)
 			if len(args) != 1 {
 				return i

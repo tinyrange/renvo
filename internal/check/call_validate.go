@@ -66,7 +66,7 @@ func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, cal
 	if symbol.Kind != SymbolFunc {
 		return -1
 	}
-	close := findTypeMatching(*caller, open, '(', ')')
+	close := findTypeMatching(caller, open, '(', ')')
 	if close <= open || close > callerFn.BodyEnd {
 		return -1
 	}
@@ -123,7 +123,7 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 		if len(target.pointerParams) == 0 && !hasLiteral {
 			continue
 		}
-		close := findTypeMatching(*file, open, '(', ')')
+		close := findTypeMatching(file, open, '(', ')')
 		if close <= open || close > caller.BodyEnd {
 			continue
 		}
@@ -372,7 +372,7 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 		}
 		specStart := i + 1
 		if specStart < caller.BodyEnd && file.Tokens[specStart].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('(') {
-			close := findTypeMatching(file, specStart, '(', ')')
+			close := findTypeMatching(&file, specStart, '(', ')')
 			if close <= specStart || close > caller.BodyEnd {
 				continue
 			}
