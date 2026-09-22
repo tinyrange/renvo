@@ -85,7 +85,7 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 		Kind:       declSymbolKind(decl.Kind),
 		File:       fileIndex,
 		Token:      decl.NameTok,
-		Symbol:     LookupPackageSymbol(info, name),
+		Symbol:     lookupPackageSymbol(info.Symbols, name),
 		ValueIndex: declNameIndex(file, decl),
 		TypeStart:  -1,
 		TypeEnd:    -1,

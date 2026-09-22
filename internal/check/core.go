@@ -295,7 +295,7 @@ func buildDeclInfoCore(file syntax.File, fileIndex int, info PackageInfo, checke
 		Kind:       declSymbolKind(decl.Kind),
 		File:       fileIndex,
 		Token:      decl.NameTok,
-		Symbol:     LookupPackageSymbol(info, name),
+		Symbol:     lookupPackageSymbol(info.Symbols, name),
 		ValueIndex: declNameIndex(file, decl),
 		TypeStart:  -1,
 		TypeEnd:    -1,
@@ -495,7 +495,7 @@ func buildPackageTypeRefsCore(pkg load.Package, info PackageInfo, checked []Pack
 		}
 		file := pkg.Files[decl.File].File
 		if decl.Kind == SymbolType {
-			typeIndex := LookupType(info, decl.Name)
+			typeIndex := lookupType(info.Types, decl.Name)
 			if typeIndex >= 0 {
 				refs = appendTypeInfoRefsCore(refs, pkg, info, checked, info.Types[typeIndex], i)
 				continue
@@ -1001,7 +1001,7 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 		token := file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(&file, i+1, '(') {
-			paramsEnd := findTypeMatching(file, i+1, '(', ')')
+			paramsEnd := findTypeMatching(&file, i+1, '(', ')')
 			if paramsEnd > i+1 && paramsEnd <= end {
 				var literal CoreScope
 				ok, tok := collectCoreFieldNames(file, i+2, paramsEnd-1, NameParam, &literal)
@@ -1165,7 +1165,7 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 	variable := file.Tokens[start].KindLine&255 == syntax.TokenVar
 	specStart := start + 1
 	if specStart < end && tokCharIs(&file, specStart, '(') {
-		closeTok := findTypeMatching(file, specStart, '(', ')')
+		closeTok := findTypeMatching(&file, specStart, '(', ')')
 		if closeTok <= specStart || closeTok > end {
 			return start
 		}
@@ -1225,7 +1225,7 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 		}
 		specStart := i + 1
 		if specStart < end && tokCharIs(&file, specStart, '(') {
-			closeTok := findTypeMatching(file, specStart, '(', ')')
+			closeTok := findTypeMatching(&file, specStart, '(', ')')
 			if closeTok <= specStart || closeTok > end {
 				continue
 			}
