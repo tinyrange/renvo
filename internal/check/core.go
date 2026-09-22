@@ -158,7 +158,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
 			}
-			if statementErr, statementTok := invalidDefiniteStatement(*file, body); statementErr != CheckOK {
+			if statementErr, statementTok := invalidDefiniteStatement(*file, body, pkg.Files[fileIndex].C); statementErr != CheckOK {
 				arena.Reset(functionArenaStart)
 				return false, statementErr, fileIndex, statementTok
 			}

@@ -7,8 +7,8 @@ import "renvo.dev/internal/syntax"
 // expressions may be multi-valued, and function-valued expressions remain
 // valid unless a preceding declaration gives the callee a definite literal
 // value.
-func invalidDefiniteStatement(file syntax.File, body syntax.Body) (int, int) {
-	if code, tok := invalidBranchTarget(file, body); code != CheckOK {
+func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) (int, int) {
+	if code, tok := invalidBranchTarget(file, body, cSource); code != CheckOK {
 		return code, tok
 	}
 	var literalLocals []int

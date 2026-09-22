@@ -2,7 +2,7 @@ package check
 
 import "renvo.dev/internal/syntax"
 
-func invalidBranchTarget(file syntax.File, body syntax.Body) (int, int) {
+func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int, int) {
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind == syntax.StmtFallthrough {
@@ -77,6 +77,11 @@ func invalidBranchTarget(file syntax.File, body syntax.Body) (int, int) {
 				}
 				return CheckErrBreak, stmt.StartTok
 			}
+			continue
+		}
+		// C labels have function scope and allow jumps into nested blocks or
+		// across ordinary declarations. These scope restrictions belong to Go.
+		if cSource {
 			continue
 		}
 		for j := 0; j < len(body.Stmts); j++ {

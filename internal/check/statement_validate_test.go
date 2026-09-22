@@ -26,7 +26,7 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 				t.Fatalf("parse failed: %#v", file)
 			}
 			body := syntax.ParseFuncBody(file, file.Funcs[0])
-			got, tok := invalidDefiniteStatement(file, body)
+			got, tok := invalidDefiniteStatement(file, body, false)
 			if got != tc.want || tok < 0 {
 				t.Fatalf("validation = (%d, %d), want error %d", got, tok, tc.want)
 			}
@@ -40,7 +40,7 @@ func TestTypeAssertionValidationPreservesTypeBodies(t *testing.T) {
 		t.Fatalf("parse failed: %#v", file)
 	}
 	body := syntax.ParseFuncBody(file, file.Funcs[0])
-	if code, tok := invalidDefiniteStatement(file, body); code != CheckOK {
+	if code, tok := invalidDefiniteStatement(file, body, false); code != CheckOK {
 		t.Fatalf("type body rejected: error=%d token=%d", code, tok)
 	}
 }
@@ -80,7 +80,7 @@ func main() {
 		t.Fatalf("parse failed: %#v", file)
 	}
 	body := syntax.ParseFuncBody(file, file.Funcs[1])
-	if code, tok := invalidDefiniteStatement(file, body); code != CheckOK {
+	if code, tok := invalidDefiniteStatement(file, body, false); code != CheckOK {
 		t.Fatalf("valid statements rejected: error=%d token=%d text=%q", code, tok, syntax.TokenText(file.Src, file.Tokens[tok]))
 	}
 }
@@ -103,7 +103,7 @@ func TestInvalidConcurrencyStatements(t *testing.T) {
 				t.Fatalf("parse failed: %#v", file)
 			}
 			body := syntax.ParseFuncBody(file, file.Funcs[0])
-			got, _ := invalidDefiniteStatement(file, body)
+			got, _ := invalidDefiniteStatement(file, body, false)
 			if got != test.err {
 				t.Fatalf("error = %d, want %d", got, test.err)
 			}
