@@ -15522,7 +15522,7 @@ func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
 	highReady := renvoAsmNewLabel(a)
 	plain := renvoAsmNewLabel(a)
 	renvoAsmPushPrimary(a)
-	renvoAsmPrimaryImm(a, 4096)
+	renvoAsmPrimaryImm(a, 256)
 	renvoAsmCmpTertiaryPrimarySet(a, 0x92)
 	renvoAsmJnzPrimary(a, small)
 	renvoAsmPopPrimary(a)
@@ -15602,18 +15602,19 @@ func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmPushPrimary(a)
-	// VM32 and WASM memory supports unaligned word stores. Clear whole
-	// words before the byte tail, avoiding one interpreted loop per byte.
-	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+	// AArch64, VM32, and WASM support unaligned word stores. Clear whole
+	// native words before the byte tail rather than looping over every byte.
+	if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+		wordSize := g.c.renvoNativeIntSize
 		wordLoop := renvoAsmNewLabel(a)
 		renvoAsmMarkLabel(a, wordLoop)
-		renvoAsmPrimaryImm(a, 4)
+		renvoAsmPrimaryImm(a, wordSize)
 		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
 		renvoAsmPrimaryImm(a, 0)
-		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-		renvoAsmAddSecondaryImm(a, 4)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, wordSize)
+		renvoAsmAddSecondaryImm(a, wordSize)
 		renvoAsmCopyTertiaryToPrimary(a)
-		renvoAsmPushImm(a, 4)
+		renvoAsmPushImm(a, wordSize)
 		renvoAsmPopTertiary(a)
 		renvoAsmSubPrimaryTertiary(a)
 		renvoAsmCopyPrimaryToTertiary(a)
