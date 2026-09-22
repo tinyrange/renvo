@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "da834fc13897c6c3a8930eb33809be032ac0bb0da9cc04977b35c9210ef29336"
+const CompilerSourceDigest = "b45932515e09e8281ecac53821aef8cb980c8fb40060898a8c83d344118a7267"
 
 // source: backend/compiler_common_impl.go
 
@@ -508,6 +508,10 @@ a.symbols = make([]renvoAsmSymbol, 0, 2048)
 
 codeCapacity = 3670016
 labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+if a.c.renvoTargetArch == renvoArch386 {
+codeCapacity = 4194304
+labelCapacity, relocCapacity = 65536, 262144
+}
 
 
 if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
@@ -7046,6 +7050,27 @@ if size >= 2 {
 return 2
 }
 return 1
+}
+
+func renvoLanguageTypeAlignment(meta *renvoMeta, typ int) int {
+t := renvoResolveType(meta, typ)
+if t.kind == renvoTypeComplex64 {
+return renvoNativeAlignment(meta.c, 4)
+}
+if t.kind == renvoTypeArray {
+return renvoLanguageTypeAlignment(meta, t.elem)
+}
+if t.kind == renvoTypeStruct {
+alignment := 1
+for i := 0; i < t.count; i++ {
+fieldAlignment := renvoLanguageTypeAlignment(meta, meta.fields[t.first+i].typ)
+if fieldAlignment > alignment {
+alignment = fieldAlignment
+}
+}
+return alignment
+}
+return renvoNativeAlignment(meta.c, renvoTypeSize(meta, typ))
 }
 
 func renvoFindResolvedNamedTypeIndex(m *renvoMeta, typ int) int {
@@ -25151,6 +25176,10 @@ if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
 renvoAsmPrimaryImm(a, renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, arg)))
 return true
 }
+if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(g.meta, renvoInferParsedExprType(g, ep, arg)))
+return true
+}
 if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
 selector := &ep.exprs[arg]
 renvoAsmPrimaryImm(a, renvoStructFieldOffset(g, renvoInferParsedExprType(g, ep, selector.left), selector.nameStart, selector.nameEnd))
@@ -32027,6 +32056,10 @@ if e.argCount == 1 {
 arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 if renvoExprIsIdentText(p, ep, e.left, "Sizeof") {
 renvoAsmPrimaryImm(a, renvoTypeSize(meta, renvoInferParsedExprType(g, ep, arg)))
+return true
+}
+if renvoExprIsIdentText(p, ep, e.left, "Alignof") {
+renvoAsmPrimaryImm(a, renvoLanguageTypeAlignment(meta, renvoInferParsedExprType(g, ep, arg)))
 return true
 }
 if renvoExprIsIdentText(p, ep, e.left, "Offsetof") {
@@ -41360,6 +41393,7 @@ g.c = meta.c
 g.prog = p
 g.meta = meta
 g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 a := &g.asm
 renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvo386ELFCodeOffset
