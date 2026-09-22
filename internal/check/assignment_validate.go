@@ -42,7 +42,7 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 			continue
 		}
 		operator := file.Src[int(file.Tokens[i].Start)]
-		if invalidLiteralUnary(file, i, fn.BodyEnd) || invalidLiteralOrdering(file, i, fn.BodyStart+1, fn.BodyEnd-1) {
+		if invalidLiteralUnary(&file, i, fn.BodyEnd) || invalidLiteralOrdering(&file, i, fn.BodyStart+1, fn.BodyEnd-1) {
 			return CheckErrOperand, i
 		}
 		if operator == '+' || operator == '-' || operator == '*' || operator == '/' || operator == '%' || operator == '&' || operator == '|' || operator == '^' || operator == '<' || operator == '>' || operator == '!' || operator == '=' {
