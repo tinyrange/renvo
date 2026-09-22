@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "4795d06e4db50f785893a2ae4ae221ff33c965094f87229387bee7eea025c8b6"
+const CompilerSourceDigest = "19113421f5ac93e846ed2e6ad2e92f1b2afec73c323a9b310602e9b9c684c520"
 
 // source: backend/compiler_common_impl.go
 
@@ -15492,7 +15492,7 @@ renvoAsmPopPrimary(a)
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 a := &g.asm
 renvoEmitMakeZeroFreshArenaReturn(g)
-if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 
 
 renvoAsmCopyPrimaryToSecondary(a)

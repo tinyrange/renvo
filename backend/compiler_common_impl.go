@@ -15485,7 +15485,7 @@ func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	a := &g.asm
 	renvoEmitMakeZeroFreshArenaReturn(g)
-	if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		// Keep the zero value and byte count in registers throughout each loop.
 		// The generic arithmetic path spills the count for every stored word.
 		renvoAsmCopyPrimaryToSecondary(a)
