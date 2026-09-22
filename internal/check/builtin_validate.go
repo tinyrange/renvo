@@ -22,7 +22,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		callee := calls[call]
 		open := callee + 1
 		name := tokenString(file, callee)
-		close := findTypeMatching(*file, open, '(', ')')
+		close := findTypeMatching(file, open, '(', ')')
 		if close <= open || close > fn.BodyEnd {
 			continue
 		}
@@ -81,7 +81,7 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
-	start, end = stripOuterParens(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return ""
 	}
@@ -173,7 +173,7 @@ func definiteBuiltinCanonicalTypeName(pkg *load.Package, info *PackageInfo, name
 	if depth > len(info.Types)+2 {
 		return name
 	}
-	typeIndex := LookupType(*info, name)
+	typeIndex := lookupType(info.Types, name)
 	if typeIndex < 0 {
 		return ""
 	}
@@ -190,7 +190,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
-	start, end = stripOuterParens(*file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
 	}
@@ -300,7 +300,7 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 	if depth > len(info.Types)+2 {
 		return builtinTypeUnknown
 	}
-	typeIndex := LookupType(*info, name)
+	typeIndex := lookupType(info.Types, name)
 	if typeIndex < 0 {
 		return builtinTypeUnknown
 	}

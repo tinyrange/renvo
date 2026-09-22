@@ -881,7 +881,41 @@ go backend {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
 
+	// Compare unsigned 32-bit words without changing the VM comparison format.
+	// Their upper 31-bit halves have a signed-safe difference. Only equal halves
+	// need a second comparison of the low bits. Preserve all operand registers.
+	func renvoWasm32CompareUnsigned(a *RTGEmitter) {
+		done := a.NewLabel()
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 1)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondNe, RTGLabelIndex(done))
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		a.Mark(done)
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+	}
+
 	func renvoWasm32AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
+		unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
+		if unsigned {
+			if setcc < 0x94 {
+				setcc += 10
+			} else {
+				setcc += 8
+			}
+		}
 		cond := renvoWasm32CondEq
 		if setcc == 0x95 {
 			cond = renvoWasm32CondNe
@@ -894,7 +928,11 @@ go backend {
 		} else if setcc == 0x9d {
 			cond = renvoWasm32CondGe
 		}
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		if unsigned {
+			renvoWasm32CompareUnsigned(a)
+		} else {
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
+		}
 		a.Int8(renvoWasm32OpSetCond)
 		a.Int8(cond)
 	}
@@ -3700,6 +3738,7 @@ arch vm32 {
 		renvoWasm32AsmCallLabel = go renvoWasm32AsmCallLabel
 		renvoWasm32AsmCmpRaxImm8 = go renvoWasm32AsmCmpRaxImm8
 		renvoWasm32AsmCmpRcxRaxSet = go renvoWasm32AsmCmpRcxRaxSet
+		renvoWasm32CompareUnsigned = go renvoWasm32CompareUnsigned
 		renvoWasm32AsmDecMemRdx = go renvoWasm32AsmDecMemRdx
 		renvoWasm32AsmDivLeftRcxRightRax = go renvoWasm32AsmDivLeftRcxRightRax
 		renvoWasm32AsmExit = go renvoWasm32AsmExit
