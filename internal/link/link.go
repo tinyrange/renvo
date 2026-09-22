@@ -218,6 +218,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
+	if !lowerUnicodeIdentifiers(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
 	if c11Semantics && !coreTextHasC11Directive(program.Text) {
 		program.Text = appendCoreStringBytes(program.Text, "\n// renvo:c11\n")
 		if len(program.Tokens) > 0 {
@@ -1506,7 +1510,7 @@ func coreSymbolAliasName(pkg int, name string) string {
 	out = append(out, '_')
 	for i := 0; i < len(name); i++ {
 		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 128 {
 			out = append(out, c)
 		} else {
 			out = append(out, '_')
