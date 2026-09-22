@@ -3190,7 +3190,7 @@ func functionValueTokenEquals(program *unit.Program, tok int, want string) bool 
 	if tok < 0 || tok >= len(program.Tokens) {
 		return false
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
 		return false
 	}
@@ -3206,7 +3206,7 @@ func functionValueTokenText(program *unit.Program, tok int) string {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return ""
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return ""
 	}

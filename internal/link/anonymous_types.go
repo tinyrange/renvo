@@ -12,7 +12,7 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	var names []string
 	generated := ""
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if (!functionValueTokenEquals(program, i, "struct") && !functionValueTokenEquals(program, i, "interface")) || !functionValueTokenEquals(program, i+1, "{") {
+		if (program.Tokens[i].KindLine&255 != unit.TokenStruct && !functionValueTokenEquals(program, i, "interface")) || !functionValueTokenEquals(program, i+1, "{") {
 			continue
 		}
 		// The right-hand side of a type declaration is already supported.

@@ -17,9 +17,15 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		pending := false
 		lastStart := len(program.Tokens)
 		for i := len(program.Tokens) - 2; i >= 0; i-- {
+			if program.Tokens[i].KindLine&255 != unit.TokenIdent || !functionValueTokenEquals(program, i+1, "(") {
+				continue
+			}
+			if !functionValueTokenEquals(program, i, "min") && !functionValueTokenEquals(program, i, "max") && !functionValueTokenEquals(program, i, "clear") && !functionValueTokenEquals(program, i, "string") {
+				continue
+			}
 			mark := arena.Mark()
 			name := functionValueTokenText(program, i)
-			if (name != "min" && name != "max" && name != "clear" && name != "string") || !functionValueTokenEquals(program, i+1, "(") || ordinaryBuiltinShadowed(program, i, name) {
+			if ordinaryBuiltinShadowed(program, i, name) {
 				arena.Reset(mark)
 				continue
 			}
