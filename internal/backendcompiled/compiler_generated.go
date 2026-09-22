@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2e9b909327f8460fb542ec7dcf16023140792e1356932bc81cdf764270e7f21c"
+const CompilerSourceDigest = "995daaea099d6f783e3f06720d179c4ebc72e763f3f31b8e5c7d9d1350b1cd2a"
 
 // source: backend/compiler_common_impl.go
 
@@ -1979,70 +1979,70 @@ for i := start; i < end; i++ {
 h = h*5 + int(renvo_runtime_UnsafeByteAt(src, i))
 }
 if n == 2 {
-if h == 627 {
+if h == 627 && renvoBytesEqualText(src, start, end, "if") {
 return renvoTokIf
 }
 }
 if n == 3 {
-if h == 3549 {
+if h == 3549 && renvoBytesEqualText(src, start, end, "var") {
 return renvoTokVar
 }
-if h == 3219 {
+if h == 3219 && renvoBytesEqualText(src, start, end, "for") {
 return renvoTokFor
 }
 }
 if n == 4 {
-if h == 18186 {
+if h == 18186 && renvoBytesEqualText(src, start, end, "type") {
 return renvoTokType
 }
-if h == 16324 {
+if h == 16324 && renvoBytesEqualText(src, start, end, "func") {
 return renvoTokFunc
 }
-if h == 16001 {
+if h == 16001 && renvoBytesEqualText(src, start, end, "else") {
 return renvoTokElse
 }
-if h == 16341 {
+if h == 16341 && renvoBytesEqualText(src, start, end, "goto") {
 return renvoTokGoto
 }
-if h == 15476 {
+if h == 15476 && renvoBytesEqualText(src, start, end, "case") {
 return renvoTokCase
 }
 }
 if n == 5 {
-if h == 78294 || h == 85499 {
+if (h == 78294 && renvoBytesEqualText(src, start, end, "defer")) || (h == 85499 && renvoBytesEqualText(src, start, end, "panic")) {
 toks.panicEnabled = true
 }
-if h == 79191 {
+if h == 79191 && renvoBytesEqualText(src, start, end, "const") {
 return renvoTokConst
 }
-if h == 78617 {
+if h == 78617 && renvoBytesEqualText(src, start, end, "break") {
 return renvoTokBreak
 }
 }
 if n == 6 {
-if h == 449661 {
+if h == 449661 && renvoBytesEqualText(src, start, end, "struct") {
 return renvoTokStruct
 }
-if h == 437480 {
+if h == 437480 && renvoBytesEqualText(src, start, end, "return") {
 return renvoTokReturn
 }
-if h == 450374 {
+if h == 450374 && renvoBytesEqualText(src, start, end, "switch") {
 return renvoTokSwitch
 }
 }
 if n == 7 {
-if h == 2176194 {
+if h == 2176194 && renvoBytesEqualText(src, start, end, "recover") {
 toks.panicEnabled = true
 }
-if h == 2131416 {
+if h == 2131416 && renvoBytesEqualText(src, start, end, "package") {
 return renvoTokPackage
 }
-if h == 1957581 {
+if h == 1957581 && renvoBytesEqualText(src, start, end, "default") {
 return renvoTokDefault
 }
 }
 if n == 8 {
-if h == 9901561 {
+if h == 9901561 && renvoBytesEqualText(src, start, end, "continue") {
 return renvoTokContinue
 }
 }
