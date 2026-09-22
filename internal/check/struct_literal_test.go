@@ -7,6 +7,8 @@ import (
 
 func TestStructLiteralFieldLists(t *testing.T) {
 	for _, source := range []string{
+		"type S struct { X int }; type Outer struct { S }; func main() { _ = Outer{S:S{}, S:S{}} }",
+		"type S struct { X int }; type Outer struct { S }; func main() { _ = Outer{X:1} }",
 		"type S struct { X int }; func main() { _ = S{X:1, X:2} }",
 		"type S struct { X,Y int }; func main() { _ = S{1, Y:2} }",
 		"type S struct { X,Y int }; func main() { _ = S{X:1, 2} }",
@@ -31,6 +33,8 @@ func TestStructLiteralFieldLists(t *testing.T) {
 
 func TestValidStructLiteralFieldLists(t *testing.T) {
 	for _, source := range []string{
+		"type S struct { X int }; type Outer struct { S; Label string }; func main() { _ = Outer{S:S{X:1}, Label:\"ok\"} }",
+		"type S struct { X int }; type Outer struct { *S }; type Alias = Outer; func main() { _ = Alias{S:&S{X:1}} }",
 		"type S struct { X int }; type Outer struct { S *S }; func main() { _ = Outer{&S{X:1}} }",
 		"type S struct { X int }; type Outer struct { Values map[string]S }; func main() { _ = Outer{map[string]S{\"a\": {X:1}}} }",
 		"type S struct { X int }; type Outer struct { Value S }; func main() { _ = Outer{func() S { return S{X:1} }()} }",

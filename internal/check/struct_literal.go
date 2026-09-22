@@ -48,7 +48,7 @@ func literalStructFields(pkg load.Package, info PackageInfo, file syntax.File, s
 	if classifyType(file, start, end) == TypeStruct {
 		open := findTypeTopLevelChar(file, start, end, '{')
 		if open >= 0 && findTypeMatching(file, open, '{', '}') == end {
-			return parseStructFields(file, open+1, end-1), true
+			return literalStructFieldNames(file, parseStructFields(file, open+1, end-1)), true
 		}
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -64,10 +64,35 @@ func literalStructFields(pkg load.Package, info PackageInfo, file syntax.File, s
 	}
 	typ := info.Types[index]
 	if typ.Kind == TypeStruct {
-		return typ.Fields, true
+		return literalStructFieldNames(pkg.Files[typ.File].File, typ.Fields), true
 	}
 	if typ.Kind == TypeNamed {
 		return literalStructFields(pkg, info, pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 	}
 	return nil, false
+}
+
+// Signature parsing leaves embedded fields unnamed. Their literal key is the
+// final type identifier, including for pointers and package-qualified types.
+func literalStructFieldNames(file syntax.File, fields []Field) []Field {
+	var named []Field
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
+		if field.Name != "" || field.TypeEnd <= field.TypeStart {
+			continue
+		}
+		tok := field.TypeEnd - 1
+		if file.Tokens[tok].KindLine&255 != syntax.TokenIdent {
+			continue
+		}
+		if named == nil {
+			named = make([]Field, len(fields))
+			copy(named, fields)
+		}
+		named[i].Name = tokenString(&file, tok)
+	}
+	if named != nil {
+		return named
+	}
+	return fields
 }
