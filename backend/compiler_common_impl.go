@@ -4860,6 +4860,9 @@ func renvoLineContinuesAfterPrevToken(p *renvoProgram, i int) bool {
 		return false
 	}
 	c := renvo_runtime_UnsafeByteAt(p.src, tokStart)
+	if c == '=' || c == ':' && tokEnd == tokStart+2 && renvo_runtime_UnsafeByteAt(p.src, tokStart+1) == '=' {
+		return true
+	}
 	if c == ',' || c == '*' || c == '&' || c == '|' {
 		return true
 	}
