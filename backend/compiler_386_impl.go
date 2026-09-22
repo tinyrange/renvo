@@ -110,6 +110,7 @@ func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGe
 	g.prog = p
 	g.meta = meta
 	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
 	a := &g.asm
 	renvoAsmInitWithContext(a, g.c)
 	a.codeOffset = renvo386ELFCodeOffset
