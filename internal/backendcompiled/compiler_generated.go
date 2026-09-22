@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bb73dd51fac827f45eefd0a54681b30ae2c6d893c8ebaeee8f048d4042b87c86"
+const CompilerSourceDigest = "b2eb5cef50093ffbcd45abf634730dfd01b47397233e6be74889e8116c4a76d9"
 
 // source: backend/compiler_common_impl.go
 
@@ -9210,6 +9210,7 @@ ok       bool
 }
 
 type renvoLinearGen struct {
+wasmMemoryRanges       []int
 prog                   *renvoProgram
 meta                   *renvoMeta
 asm                    renvoAsm
@@ -22437,6 +22438,12 @@ g.stackUsed = renvoAlignTo8(g.stackUsed + size)
 }
 renvoRecordStackPeak(g)
 offset := g.stackUsed
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+}
 if g.localCount >= len(g.locals) {
 renvoGrowLocalTable(g)
 }
@@ -55475,6 +55482,13 @@ candidates[j] = 0
 }
 }
 }
+for i := 0; i+1 < len(g.wasmMemoryRanges); i += 2 {
+for j := 0; j < len(candidates); j++ {
+if candidates[j] != 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, g.wasmMemoryRanges[i], g.wasmMemoryRanges[i+1]) {
+candidates[j] = 0
+}
+}
+}
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 
@@ -55522,6 +55536,7 @@ a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
 }
 
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+g.wasmMemoryRanges = nil
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
 fn := &g.prog.funcs[metaFn.declIndex]
