@@ -46,8 +46,12 @@ type TypeInfo struct {
 }
 
 func LookupType(info PackageInfo, name string) int {
-	for i := 0; i < len(info.Types); i++ {
-		if info.Types[i].Name == name {
+	return lookupType(info.Types, name)
+}
+
+func lookupType(types []TypeInfo, name string) int {
+	for i := 0; i < len(types); i++ {
+		if types[i].Name == name {
 			return i
 		}
 	}
@@ -74,14 +78,14 @@ func buildTypeInfo(file syntax.File, decl DeclInfo, declIndex int) TypeInfo {
 		Direction: ChanBoth,
 	}
 	if out.Kind == TypeStruct {
-		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
-		close := findTypeMatching(file, open, '{', '}')
+		open := findTypeTopLevelChar(&file, decl.TypeStart, decl.TypeEnd, '{')
+		close := findTypeMatching(&file, open, '{', '}')
 		if open >= 0 && close > open && close <= decl.TypeEnd {
 			out.Fields = parseStructFields(file, open+1, close-1)
 		}
 	} else if out.Kind == TypeInterface {
-		open := findTypeTopLevelChar(file, decl.TypeStart, decl.TypeEnd, '{')
-		close := findTypeMatching(file, open, '{', '}')
+		open := findTypeTopLevelChar(&file, decl.TypeStart, decl.TypeEnd, '{')
+		close := findTypeMatching(&file, open, '{', '}')
 		if open >= 0 && close > open && close <= decl.TypeEnd {
 			out.InterfaceMethods, out.InterfaceEmbeds = parseInterfaceElements(file, open+1, close-1)
 		}
@@ -159,7 +163,7 @@ func parseMapTypeShape(file syntax.File, start int, end int) (int, int, int, int
 	if start+1 >= end || !tokCharIs(&file, start+1, '[') {
 		return -1, -1, -1, -1
 	}
-	close := findTypeMatching(file, start+1, '[', ']')
+	close := findTypeMatching(&file, start+1, '[', ']')
 	if close <= start+2 || close > end {
 		return -1, -1, -1, -1
 	}
@@ -172,7 +176,7 @@ func parseArrayTypeShape(file syntax.File, start int, end int) (int, int, int, i
 	if start >= end || !tokCharIs(&file, start, '[') {
 		return -1, -1, -1, -1
 	}
-	close := findTypeMatching(file, start, '[', ']')
+	close := findTypeMatching(&file, start, '[', ']')
 	if close <= start || close > end {
 		return -1, -1, -1, -1
 	}
@@ -189,7 +193,7 @@ func parseFuncTypeSignature(file syntax.File, start int, end int) FuncSignature 
 	if start+1 >= end || !tokCharIs(&file, start+1, '(') {
 		return FuncSignature{}
 	}
-	paramsEnd := findTypeMatching(file, start+1, '(', ')')
+	paramsEnd := findTypeMatching(&file, start+1, '(', ')')
 	if paramsEnd <= start+1 || paramsEnd > end {
 		return FuncSignature{}
 	}
@@ -300,7 +304,7 @@ func nextStructFieldEnd(file syntax.File, start int, end int) int {
 	return end
 }
 
-func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
+func findTypeTopLevelChar(file *syntax.File, start int, end int, c byte) int {
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
@@ -332,8 +336,8 @@ func findTypeTopLevelChar(file syntax.File, start int, end int, c byte) int {
 	return -1
 }
 
-func findTypeMatching(file syntax.File, open int, left byte, right byte) int {
-	if open < 0 || !tokCharIs(&file, open, left) {
+func findTypeMatching(file *syntax.File, open int, left byte, right byte) int {
+	if open < 0 || !tokCharIs(file, open, left) {
 		return -1
 	}
 	depth := 0

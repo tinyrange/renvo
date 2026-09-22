@@ -253,6 +253,18 @@ go backend {
 		if setcc == 0x9f {
 			return 12
 		}
+		if setcc == 0x92 {
+			return 3
+		}
+		if setcc == 0x93 {
+			return 2
+		}
+		if setcc == 0x96 {
+			return 9
+		}
+		if setcc == 0x97 {
+			return 8
+		}
 		return 10
 	}
 
