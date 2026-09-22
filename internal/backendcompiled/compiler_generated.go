@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0326d7456b6f489420fd08cbc9f42abe28c0d595390692df02f0923bbd55c985"
+const CompilerSourceDigest = "c0db2bd6f2152da6880d5adb92349d49369e0e6158682e3730621cc60a471ba2"
 
 // source: backend/compiler_common_impl.go
 
@@ -15529,7 +15529,7 @@ reusedLabel := renvoAsmNewLabel(a)
 highReady := renvoAsmNewLabel(a)
 plain := renvoAsmNewLabel(a)
 renvoAsmPushPrimary(a)
-renvoAsmPrimaryImm(a, 8192)
+renvoAsmPrimaryImm(a, 4096)
 renvoAsmCmpTertiaryPrimarySet(a, 0x92)
 renvoAsmJnzPrimary(a, small)
 renvoAsmPopPrimary(a)
