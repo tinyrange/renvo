@@ -30,7 +30,10 @@ func TestRunTestCommandCompilesAndRunsGoTests(t *testing.T) {
 		t.Fatal(err)
 	}
 	testPath := filepath.Join(dir, "value_test.go")
-	if err := os.WriteFile(testPath, []byte("package value\nimport \"testing\"\nfunc TestAdd(t *testing.T) { if Add(2, 3) != 5 { t.Fatal(\"bad sum\") } }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "input.txt"), []byte("package-local data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(testPath, []byte("package value\nimport \"testing\"\nimport \"os\"\nfunc TestAdd(t *testing.T) { if Add(2, 3) != 5 { t.Fatal(\"bad sum\") }; data, err := os.ReadFile(\"input.txt\"); if err != nil || string(data) != \"package-local data\" { t.Fatal(\"test working directory\") } }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	env := []string{
@@ -39,7 +42,7 @@ func TestRunTestCommandCompilesAndRunsGoTests(t *testing.T) {
 	commandBackend := CommandBackend{Path: backend}
 	result := RunTestCommand([]string{"renvo", "test", dir}, env, commandBackend, os.Stdin, os.Stdout, os.Stderr)
 	if !result.Ok || result.ExitCode != 0 {
-		t.Fatalf("passing test result = %#v", result)
+		t.Fatalf("passing test: ok=%v error=%d arg=%q exit=%d diagnostic=%v", result.Ok, result.Error, result.ErrorArg, result.ExitCode, result.Compile.Diagnostic)
 	}
 	assertNoTemporaryTestFiles(t, dir)
 
@@ -48,7 +51,7 @@ func TestRunTestCommandCompilesAndRunsGoTests(t *testing.T) {
 	}
 	result = RunTestCommand([]string{"renvo", "test", dir}, env, commandBackend, os.Stdin, os.Stdout, os.Stderr)
 	if !result.Ok || result.ExitCode == 0 {
-		t.Fatalf("failing test result = %#v", result)
+		t.Fatalf("failing test: ok=%v error=%d arg=%q exit=%d diagnostic=%v", result.Ok, result.Error, result.ErrorArg, result.ExitCode, result.Compile.Diagnostic)
 	}
 	assertNoTemporaryTestFiles(t, dir)
 }
