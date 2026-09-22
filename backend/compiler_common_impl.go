@@ -1404,6 +1404,7 @@ type renvoDeferSite struct {
 }
 
 type renvoMeta struct {
+	typeIndexVersion int
 	runtimeTypeCount int
 	prog             *renvoProgram
 	types            []renvoTypeInfo
@@ -5826,6 +5827,7 @@ func renvoParseScopedDeclEntry(g *renvoLinearGen, m *renvoMeta, p *renvoProgram,
 		}
 		directNamedType := !isAlias && (renvoTokIsKind(p, typeStart, renvoTokStruct) || renvoTokCharIs(p, typeStart, '*') || renvoTokCharIs(p, typeStart, '['))
 		if directNamedType && (m.types[typeResult.typ].kind == renvoTypeStruct || m.types[typeResult.typ].kind == renvoTypePointer || m.types[typeResult.typ].kind == renvoTypeSlice) {
+			m.typeIndexVersion++
 			m.types[typeResult.typ].nameStart = int(name.start)
 			m.types[typeResult.typ].nameEnd = int(name.end)
 			renvoIndexNamedType(m, typeResult.typ)
@@ -6407,6 +6409,7 @@ func renvoParseFuncResults(m *renvoMeta, p *renvoProgram, start int, end int) (i
 			count := len(parts) / 2
 			allUnnamed := count > 0
 			typeCount := len(m.types)
+			typeIndexVersion := m.typeIndexVersion
 			fieldCount := len(m.fields)
 			parsedTypes := make([]int, count)
 			for i := 0; i < count; i++ {
@@ -6426,7 +6429,9 @@ func renvoParseFuncResults(m *renvoMeta, p *renvoProgram, start int, end int) (i
 			}
 			renvoTruncTypes(&m.types, typeCount)
 			renvoTruncFields(&m.fields, fieldCount)
-			renvoRebuildNamedTypeIndex(m)
+			if m.typeIndexVersion != typeIndexVersion {
+				renvoRebuildNamedTypeIndex(m)
+			}
 			firstResult := len(m.params)
 			resultCount := 0
 			renvoParseParamList(m, p, start+1, closeTok, &resultCount)
@@ -6870,6 +6875,7 @@ func renvoIndexNamedType(m *renvoMeta, index int) {
 	for probes := 0; probes < len(buckets); probes++ {
 		if buckets[bucket] == 0 {
 			buckets[bucket] = int32(index + 1)
+			m.typeIndexVersion++
 			return
 		}
 		bucket++
@@ -23393,6 +23399,7 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.addressNameTokens = nil
 	persistentCapacity := renvoLinearPersistentCapacity(g)
 	typeCount := len(g.meta.types)
+	typeIndexVersion := g.meta.typeIndexVersion
 	fieldCount := len(g.meta.fields)
 	captureCount := len(g.meta.captures)
 	mark := renvo_runtime_ArenaMark()
@@ -23417,7 +23424,11 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 		renvoTruncTypes(&g.meta.types, typeCount)
 		renvoTruncFields(&g.meta.fields, fieldCount)
-		renvoRebuildNamedTypeIndex(g.meta)
+		// Unnamed scratch types never enter the name index. Rebuild only when
+		// emission changed that index or renamed a type.
+		if g.meta.typeIndexVersion != typeIndexVersion {
+			renvoRebuildNamedTypeIndex(g.meta)
+		}
 	}
 	if persistentCapacity == renvoLinearPersistentCapacity(g) {
 		renvo_runtime_ArenaReset(mark)

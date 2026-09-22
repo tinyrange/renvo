@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "74db8e246498ec3abd39bfc21f39262eb17b08ab2df32f27e901b65344371718"
+const CompilerSourceDigest = "f91079a5781bd3fb73ad50bd88364c778c3ba5004354857f0adefb625da00988"
 
 // source: backend/compiler_common_impl.go
 
@@ -1411,6 +1411,7 @@ directTarget int
 }
 
 type renvoMeta struct {
+typeIndexVersion int
 runtimeTypeCount int
 prog             *renvoProgram
 types            []renvoTypeInfo
@@ -5833,6 +5834,7 @@ return
 }
 directNamedType := !isAlias && (renvoTokIsKind(p, typeStart, renvoTokStruct) || renvoTokCharIs(p, typeStart, '*') || renvoTokCharIs(p, typeStart, '['))
 if directNamedType && (m.types[typeResult.typ].kind == renvoTypeStruct || m.types[typeResult.typ].kind == renvoTypePointer || m.types[typeResult.typ].kind == renvoTypeSlice) {
+m.typeIndexVersion++
 m.types[typeResult.typ].nameStart = int(name.start)
 m.types[typeResult.typ].nameEnd = int(name.end)
 renvoIndexNamedType(m, typeResult.typ)
@@ -6414,6 +6416,7 @@ return 0, 0
 count := len(parts) / 2
 allUnnamed := count > 0
 typeCount := len(m.types)
+typeIndexVersion := m.typeIndexVersion
 fieldCount := len(m.fields)
 parsedTypes := make([]int, count)
 for i := 0; i < count; i++ {
@@ -6433,7 +6436,9 @@ return parsedTypes[0], 0
 }
 renvoTruncTypes(&m.types, typeCount)
 renvoTruncFields(&m.fields, fieldCount)
+if m.typeIndexVersion != typeIndexVersion {
 renvoRebuildNamedTypeIndex(m)
+}
 firstResult := len(m.params)
 resultCount := 0
 renvoParseParamList(m, p, start+1, closeTok, &resultCount)
@@ -6877,6 +6882,7 @@ bucket := renvoHashRange(m.prog.src, t.nameStart, t.nameEnd) % len(buckets)
 for probes := 0; probes < len(buckets); probes++ {
 if buckets[bucket] == 0 {
 buckets[bucket] = int32(index + 1)
+m.typeIndexVersion++
 return
 }
 bucket++
@@ -23400,6 +23406,7 @@ g.addressNamesReady = false
 g.addressNameTokens = nil
 persistentCapacity := renvoLinearPersistentCapacity(g)
 typeCount := len(g.meta.types)
+typeIndexVersion := g.meta.typeIndexVersion
 fieldCount := len(g.meta.fields)
 captureCount := len(g.meta.captures)
 mark := renvo_runtime_ArenaMark()
@@ -23424,7 +23431,11 @@ ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 renvoTruncTypes(&g.meta.types, typeCount)
 renvoTruncFields(&g.meta.fields, fieldCount)
+
+
+if g.meta.typeIndexVersion != typeIndexVersion {
 renvoRebuildNamedTypeIndex(g.meta)
+}
 }
 if persistentCapacity == renvoLinearPersistentCapacity(g) {
 renvo_runtime_ArenaReset(mark)
