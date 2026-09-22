@@ -122,7 +122,7 @@ func (fs standaloneCSourceFS) PathExists(path string) bool {
 }
 
 func standaloneCSourceContext(workDir string, options Options) (string, Options) {
-	if len(options.Files) == 0 || options.Mode != ModeObject && !(options.CCompiler && options.Mode == ModeExecutable) {
+	if len(options.Files) == 0 {
 		return workDir, options
 	}
 	// Object mode has historically accepted a single source outside the current
@@ -140,7 +140,7 @@ func standaloneCSourceContext(workDir string, options Options) (string, Options)
 	files := make([]string, len(options.Files))
 	for i := 0; i < len(options.Files); i++ {
 		path := load.CleanPath(load.JoinPath(workDir, options.Files[i]))
-		if !optionArgIsCFile(path) && !optionArgIsPreprocessedCFile(path) {
+		if !isFrontendSourceName(load.BasePath(path)) {
 			return workDir, options
 		}
 		if dir == "" {
@@ -191,7 +191,7 @@ func (fs scriptSourceFS) PathExists(path string) bool {
 }
 
 func sourceFSForOptions(fs SourceFS, workDir string, options Options) SourceFS {
-	if len(options.Files) > 0 && (options.Mode == ModeObject || options.CCompiler && options.Mode == ModeExecutable) {
+	if len(options.Files) > 0 {
 		_, _, _, hasModule := findModuleSource(workDir, fs)
 		fs = standaloneCSourceFS{
 			base:       fs,
