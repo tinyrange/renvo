@@ -1343,6 +1343,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 				out[index] = alias
 			} else if directiveSize >= 0 {
 				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
+			} else if corePredeclaredAliasNeeded(name) {
+				out[index] = coreSymbolAliasName(i, name)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
