@@ -156,6 +156,7 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 			continue
 		}
 		typeStart := exprOperandStartBefore(file, start, i)
+		typeStart = compositeAggregatePrefixStart(file, start, typeStart)
 		if typeStart >= i {
 			continue
 		}
@@ -174,6 +175,43 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 		})
 	}
 	return composites
+}
+
+// '*' inside an aggregate element type is not a multiplication boundary.
+// The ordinary operand scan stops there; recover the map/array/slice prefix
+// before validating the literal's contents (map[int]*S is not an S literal).
+func compositeAggregatePrefixStart(file syntax.File, limit, start int) int {
+	result, pos := start, start
+	for pos > limit {
+		for pos > limit && tokCharIs(&file, pos-1, '*') {
+			pos--
+		}
+		if pos <= limit || !tokCharIs(&file, pos-1, ']') {
+			break
+		}
+		depth, open := 0, -1
+		for i := pos - 1; i >= limit; i-- {
+			if tokCharIs(&file, i, ']') {
+				depth++
+			}
+			if tokCharIs(&file, i, '[') {
+				depth--
+				if depth == 0 {
+					open = i
+					break
+				}
+			}
+		}
+		if open < 0 {
+			break
+		}
+		pos = open
+		if pos > limit && file.Tokens[pos-1].KindLine&255 == syntax.TokenMap {
+			pos--
+		}
+		result = pos
+	}
+	return result
 }
 
 func exprOperandStartBefore(file syntax.File, start int, before int) int {

@@ -41,6 +41,7 @@ const (
 	CheckErrReturnType
 	CheckErrCallArity
 	CheckErrTypeAssertion
+	CheckErrStructLiteral
 )
 
 const (
