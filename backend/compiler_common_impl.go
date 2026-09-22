@@ -501,6 +501,10 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 		// their undersized predecessor pages at the self-host peak.
 		codeCapacity = 3670016
 		labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
+		if a.c.renvoTargetArch == renvoArch386 {
+			codeCapacity = 4194304
+			labelCapacity, relocCapacity = 65536, 262144
+		}
 		// ARM instruction streams and relocations need a larger range than x86.
 		// Reserve their final growth range before scratch emission starts.
 		if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
