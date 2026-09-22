@@ -4,6 +4,20 @@
 // supported scalar, string, byte-slice, Boolean, and error values.
 package fmt
 
+// Stringer supplies the text representation used by string formatting verbs.
+type Stringer interface{ String() string }
+
+func methodString(value interface{}) (string, bool) {
+	// Errors take precedence when a value implements both interfaces.
+	if err, ok := value.(error); ok {
+		return err.Error(), true
+	}
+	if s, ok := value.(Stringer); ok {
+		return s.String(), true
+	}
+	return "", false
+}
+
 // Writer is the minimal byte sink accepted by the Fprint functions.
 type Writer interface {
 	Write(p []byte) (n int, err error)
@@ -20,7 +34,7 @@ func Print(a ...interface{}) (int, error) {
 // Println formats its operands, writes them to standard output followed by a
 // newline, and returns the number of bytes written.
 func Println(a ...interface{}) (int, error) {
-	text := Sprint(a...) + "\n"
+	text := Sprintln(a...)
 	print(text)
 	return len(text), nil
 }
@@ -92,10 +106,28 @@ func Fprintf(w Writer, format string, a ...interface{}) (int, error) {
 
 // Fprintln formats its operands and writes them to w followed by a newline.
 func Fprintln(w Writer, a ...interface{}) (int, error) {
-	return writeString(w, Sprint(a...)+"\n")
+	return writeString(w, Sprintln(a...))
+}
+
+// Sprintln formats operands with a space between each pair and a final newline.
+func Sprintln(a ...interface{}) string {
+	out := ""
+	for i := 0; i < len(a); i++ {
+		if i > 0 {
+			out = out + " "
+		}
+		out = out + Sprint(a[i])
+	}
+	return out + "\n"
 }
 
 func formatValue(v interface{}, verb string) (string, bool) {
+	if verb == "s" || verb == "v" || verb == "q" || verb == "x" {
+		if text, ok := methodString(v); ok {
+			formatted, _ := formatValue(text, verb)
+			return formatted, false
+		}
+	}
 	if verb == "s" {
 		if s, ok := v.(string); ok {
 			return s, true
