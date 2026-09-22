@@ -84,7 +84,7 @@ func literalNumericKind(file *syntax.File, start int, end int, depth int) int {
 		return 0
 	}
 	for precedence := 1; precedence <= 2; precedence++ {
-		op := constantIndexOperator(*file, start, end, precedence)
+		op := constantIndexOperator(file, start, end, precedence)
 		if op < 0 {
 			continue
 		}
