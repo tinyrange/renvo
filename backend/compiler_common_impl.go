@@ -12441,7 +12441,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
 				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
-					renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
+				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -28502,9 +28502,7 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
 	registerWords := 6
-	if renvoPreparedBackendActive != 0 {
-		registerWords = renvoRTGObjectRegisterCount()
-	}
+	if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
 	if sret {
 		registerWords--
 	}
@@ -28733,9 +28731,7 @@ func renvoAmd64PushObjectIntegerRegister(a *renvoAsm, register int) {
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 	registerLimit := 6
-	if renvoPreparedBackendActive != 0 {
-		registerLimit = renvoRTGObjectRegisterCount()
-	}
+	if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
 	integerRegister := 0
 	if sret {
 		integerRegister = 1

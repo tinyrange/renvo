@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0901ea00ffae8d3d749798c86aed88c414ddc1265432442537586d40ee28ca86"
+const CompilerSourceDigest = "4fded29f3adf4d06fe4a8d2780123c89928afa566a3028f031b574d879833c1b"
 
 // source: backend/compiler_common_impl.go
 
@@ -28509,9 +28509,7 @@ symbolIndex := renvoAsmAddObjectFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 renvoObjectExportFrame(g, true)
 registerWords := 6
-if renvoPreparedBackendActive != 0 {
-registerWords = renvoRTGObjectRegisterCount()
-}
+if renvoPreparedBackendActive != 0 { registerWords = renvoRTGObjectRegisterCount() }
 if sret {
 registerWords--
 }
@@ -28740,9 +28738,7 @@ renvoAsmRecordRegisterPush(a, machineRegisters[register])
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
 registerLimit := 6
-if renvoPreparedBackendActive != 0 {
-registerLimit = renvoRTGObjectRegisterCount()
-}
+if renvoPreparedBackendActive != 0 { registerLimit = renvoRTGObjectRegisterCount() }
 integerRegister := 0
 if sret {
 integerRegister = 1
