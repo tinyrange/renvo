@@ -16,8 +16,11 @@ func invalidLiteralOrdering(file *syntax.File, op int, start int, end int) bool 
 		return false
 	}
 	left := literalOrderingBoundary(file, op-1, start, -1) + 1
-	right := literalOrderingBoundary(file, op+1, end, 1)
 	leftKind := literalNumericKind(file, left, op, 0)
+	if leftKind == 0 {
+		return false
+	}
+	right := literalOrderingBoundary(file, op+1, end, 1)
 	rightKind := literalNumericKind(file, op+1, right, 0)
 	return leftKind != 0 && rightKind != 0 && (leftKind == 2 || rightKind == 2)
 }
@@ -25,6 +28,12 @@ func invalidLiteralOrdering(file *syntax.File, op int, start int, end int) bool 
 func literalOrderingBoundary(file *syntax.File, at int, limit int, direction int) int {
 	depth := 0
 	for ; at >= 0 && at < len(file.Tokens) && (direction < 0 && at >= limit || direction > 0 && at < limit); at += direction {
+		kind := file.Tokens[at].KindLine & 255
+		// An identifier or string cannot be a purely numeric literal expression.
+		// Stop before scanning or classifying the rest of that operand.
+		if kind == syntax.TokenIdent || kind == syntax.TokenString {
+			return -2
+		}
 		ch := file.Tokens[at].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
 		if ch == int('(') || ch == int('[') || ch == int('{') {
 			if direction < 0 && depth == 0 {
@@ -40,7 +49,6 @@ func literalOrderingBoundary(file *syntax.File, at int, limit int, direction int
 			}
 			depth -= direction
 		} else if depth == 0 {
-			kind := file.Tokens[at].KindLine & 255
 			binary := exprBinaryOperatorKind(*file, at)
 			if ch == int(',') || ch == int(';') || ch == int(':') || isAssignOp(*file, at) || binary == exprBinaryCompare || binary == exprBinaryLogical ||
 				kind == syntax.TokenReturn || kind == syntax.TokenIf || kind == syntax.TokenFor || kind == syntax.TokenCase || kind == syntax.TokenSwitch {
