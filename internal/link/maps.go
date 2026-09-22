@@ -1048,12 +1048,6 @@ func mapLowerGeneratedText(specs []mapLowerSpec, literals []mapLowerLiteral, mak
 	return out
 }
 
-func mapLowerIntegerKey(key string) bool {
-	return key == "int" || key == "uint" || key == "uintptr" || key == "byte" || key == "rune" ||
-		key == "int8" || key == "int16" || key == "int32" || key == "int64" ||
-		key == "uint8" || key == "uint16" || key == "uint32" || key == "uint64"
-}
-
 // Keep the dense entries used by map range, with a separate hash index. Bucket
 // links are entry indices plus one, so zero is an empty chain. Rehashing grows
 // geometrically; deletion repairs the moved last entry's link in its bucket.
