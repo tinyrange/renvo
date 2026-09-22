@@ -138,6 +138,21 @@ func appMain() int {
 	assertStmtKinds(t, body, want)
 }
 
+func TestParseFuncBodyCompositeInitializer(t *testing.T) {
+	file := parseOneFuncBodyTestFile(t, `package main
+func main() {
+ if m := map[int]int{1: 2}; m[1] == 2 { println(m[1]) }; println(3)
+ for m := map[int]int{1: 2}; m[1] < 3; m[1]++ { println(m[1]) }; println(4)
+ for _, x := range []int{1} { println(x) }; println(5)
+}
+`)
+	body := ParseFuncBodyStatements(file, file.Funcs[0])
+	if !body.Ok {
+		t.Fatalf("parse failed: %+v", body)
+	}
+	assertStmtKinds(t, body, []int{StmtBlock, StmtIf, StmtBlock, StmtExpr, StmtExpr, StmtFor, StmtBlock, StmtExpr, StmtExpr, StmtFor, StmtBlock, StmtExpr, StmtExpr})
+}
+
 func TestParseFuncBodyExpressionKinds(t *testing.T) {
 	file := parseOneFuncBodyTestFile(t, `package main
 
