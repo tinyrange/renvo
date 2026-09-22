@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9dc3e7919390cc981590ae84f1b2a556288e570349a81d2854452408a6765582"
+const CompilerSourceDigest = "4ea00be831d88204663fc92e608635ee06fcde7e2ea1c8cb04440f7b1d79b9e0"
 
 // source: backend/compiler_common_impl.go
 
@@ -9287,6 +9287,7 @@ ok       bool
 }
 
 type renvoLinearGen struct {
+wasmMemoryRanges       []int
 prog                   *renvoProgram
 meta                   *renvoMeta
 asm                    renvoAsm
@@ -15439,7 +15440,7 @@ return g.makeZeroLabel
 }
 afterLabel := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-if g.c.renvoTargetArch == renvoArchAmd64 {
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 
 
 renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
@@ -22530,6 +22531,12 @@ g.stackUsed = renvoAlignTo8(g.stackUsed + size)
 }
 renvoRecordStackPeak(g)
 offset := g.stackUsed
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+}
 if g.localCount >= len(g.locals) {
 renvoGrowLocalTable(g)
 }
@@ -55658,6 +55665,13 @@ candidates[j] = 0
 }
 }
 }
+for i := 0; i+1 < len(g.wasmMemoryRanges); i += 2 {
+for j := 0; j < len(candidates); j++ {
+if candidates[j] != 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, g.wasmMemoryRanges[i], g.wasmMemoryRanges[i+1]) {
+candidates[j] = 0
+}
+}
+}
 for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
 
@@ -55705,6 +55719,7 @@ a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
 }
 
 func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+g.wasmMemoryRanges = nil
 a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
 fn := &g.prog.funcs[metaFn.declIndex]

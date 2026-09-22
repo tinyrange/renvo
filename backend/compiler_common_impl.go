@@ -9280,6 +9280,7 @@ type renvoSliceLocation struct {
 }
 
 type renvoLinearGen struct {
+	wasmMemoryRanges       []int
 	prog                   *renvoProgram
 	meta                   *renvoMeta
 	asm                    renvoAsm
@@ -15432,9 +15433,9 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	}
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 		// Preserve the result pointer and ABI call register while REP STOSB
-		// clears RCX bytes beginning at RAX.
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
 		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 		renvoAsmMarkLabel(a, afterLabel)
 		return g.makeZeroLabel
@@ -22523,6 +22524,12 @@ func renvoAddTypedLocal(g *renvoLinearGen, nameStart int, nameEnd int, typ int) 
 	}
 	renvoRecordStackPeak(g)
 	offset := g.stackUsed
+	// A later scalar can reuse an earlier aggregate temporary's stack range.
+	// Retain its memory requirements after lexical locals are discarded.
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 &&
+		(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+		g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+	}
 	if g.localCount >= len(g.locals) {
 		renvoGrowLocalTable(g)
 	}
