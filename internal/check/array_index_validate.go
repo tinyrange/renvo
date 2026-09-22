@@ -29,9 +29,17 @@ func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex i
 	}
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: fn}
 	locals := collectDefiniteLocalTypes(*file, fn)
+	// Index short declarations once. Resolving each indexed base must not
+	// rescan every preceding token in a large function.
+	var shortDecls []int
+	for tok := fn.BodyStart + 1; tok+2 < fn.BodyEnd; tok++ {
+		if tokenTextIs(file, tok+1, ":=") && file.Tokens[tok].KindLine&255 == syntax.TokenIdent {
+			shortDecls = append(shortDecls, tok)
+		}
+	}
 	for i := 0; i < len(indexes); i++ {
 		index := &indexes[i]
-		length, array := constantIndexArrayLength(&context, signature, locals, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
+		length, array := constantIndexArrayLength(&context, signature, locals, shortDecls, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
 		if !array {
 			continue
 		}
@@ -229,7 +237,7 @@ func constantIndexType(context *constantIndexContext, tok int, depth int) bool {
 	return constantIndexType(&next, context.info.Types[typeIndex].TypeStart, depth+1)
 }
 
-func constantIndexArrayLength(context *constantIndexContext, signature *FuncSignature, locals []definiteLocalTypeSpan, start int, end int, before int, depth int) (int, bool) {
+func constantIndexArrayLength(context *constantIndexContext, signature *FuncSignature, locals []definiteLocalTypeSpan, shortDecls []int, start int, end int, before int, depth int) (int, bool) {
 	if depth > 16 {
 		return 0, false
 	}
@@ -264,10 +272,11 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 	if typeStart, typeEnd, ok := findDefiniteLocalType(file, locals, start, before); ok && typeStart >= 0 && typeEnd > typeStart {
 		return constantIndexTypeLength(context, typeStart, typeEnd, before, depth+1)
 	}
-	for i := before - 1; i > context.fn.BodyStart; i-- {
-		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && statementTokensEqual(file, i, start) && i+2 < before && tokenTextIs(file, i+1, ":=") {
+	for pos := len(shortDecls) - 1; pos >= 0; pos-- {
+		i := shortDecls[pos]
+		if i+2 < before && statementTokensEqual(file, i, start) {
 			valueStart, valueEnd := trimExprSpan(*file, i+2, statementSpecEnd(*file, i+2, before))
-			return constantIndexArrayLength(context, signature, locals, valueStart, valueEnd, i, depth+1)
+			return constantIndexArrayLength(context, signature, locals, shortDecls, valueStart, valueEnd, i, depth+1)
 		}
 	}
 	for i := 0; i < len(context.info.Decls); i++ {

@@ -14,7 +14,7 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, scope CoreScope, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
@@ -52,8 +52,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				continue
 			}
 			if !numericReady {
-				body := syntax.ParseFuncBodyStatements(*file, fn)
-				numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
+				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
 				numericReady = true
 			}
 			if name == "append" {
@@ -72,8 +71,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				continue
 			}
 			if !numericReady {
-				body := syntax.ParseFuncBodyStatements(*file, fn)
-				numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
+				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
 				numericReady = true
 			}
 			if code, tok := invalidNumericBuiltinCall(pkg, info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
@@ -93,8 +91,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			}
 			if !nested {
 				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
-					body := syntax.ParseFuncBodyStatements(*file, fn)
-					numericBindings = collectScopedTypeBindings(*file, fn, body, signature)
+					numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
 					numericReady = true
 				}
 				value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)

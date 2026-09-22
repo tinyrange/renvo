@@ -152,8 +152,8 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(*file, fn)
-			validationArenaStart := arena.Mark()
 			body := syntax.ParseFuncBodyStatements(*file, fn)
+			validationArenaStart := arena.Mark()
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
@@ -189,7 +189,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 					}
 				}
 			}
-			// Keep the signature for the remaining checks, but release body scratch.
+			// Keep the parsed signature and body for builtin validation; release check scratch.
 			arena.Reset(validationArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
@@ -237,7 +237,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrUndefined, fileIndex, undefinedTok
 			}
 			builtinCheckArenaStart := arena.Mark()
-			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, scope, builtinCalls)
+			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls)
 			arena.Reset(builtinCheckArenaStart)
 			if builtinErr != CheckOK {
 				return false, builtinErr, fileIndex, builtinTok
