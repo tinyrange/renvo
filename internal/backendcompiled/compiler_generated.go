@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "355101a46d99e3867e7c190604771cd8ec42dd7298ca3242f1d8a8c4edc30f8b"
+const CompilerSourceDigest = "0aa92e03d3d129fc82dc3001afe7434b279e0434dce7fa03411e98fe9a1f87b0"
 
 // source: backend/compiler_common_impl.go
 
@@ -15605,6 +15605,27 @@ renvoAsmPopPrimary(a)
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 a := &g.asm
 renvoEmitMakeZeroFreshArenaReturn(g)
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+
+
+renvoAsmCopyPrimaryToSecondary(a)
+renvoAsmPushPrimary(a)
+renvoAsmPrimaryImm(a, 0)
+for width := 4; width >= 1; width -= 3 {
+loop := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, loop)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
+renvoAsmJmpMarkLabel(a, loop, done)
+}
+renvoAsmPopPrimary(a)
+renvoAsmRet(a)
+return
+}
 loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
