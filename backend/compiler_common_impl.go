@@ -15245,6 +15245,23 @@ func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmCopyPrimaryToSecondary(a)
 	renvoAsmPushPrimary(a)
+	// VM32 and WASM memory supports unaligned word stores. Clear whole
+	// words before the byte tail, avoiding one interpreted loop per byte.
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, 4)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+		renvoAsmAddSecondaryImm(a, 4)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 4)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmJzPrimary(a, doneLabel)
