@@ -24,7 +24,7 @@ func numericBuiltinInNestedFunction(file syntax.File, fn syntax.FuncDecl, callee
 	return false
 }
 
-func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) numericBuiltinValue {
+func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) numericBuiltinValue {
 	if depth > 32 {
 		return numericBuiltinValue{}
 	}
@@ -82,7 +82,7 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		return value
 	}
 	name := tokenString(&file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(info, name) < 0 {
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, &file, start) < 0 && LookupPackageSymbol(*info, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
@@ -108,7 +108,7 @@ func numericBuiltinExprValue(pkg load.Package, info PackageInfo, fileIndex int, 
 	return numericBuiltinValue{}
 }
 
-func numericBuiltinTypeValue(pkg load.Package, info PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) numericBuiltinValue {
+func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) numericBuiltinValue {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return numericBuiltinValue{}
 	}
@@ -121,7 +121,7 @@ func numericBuiltinTypeValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		return numericBuiltinValue{}
 	}
 	name := tokenString(&file, start)
-	index := LookupType(info, name)
+	index := LookupType(*info, name)
 	if index >= 0 {
 		typ := info.Types[index]
 		value := numericBuiltinTypeValue(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
@@ -130,7 +130,7 @@ func numericBuiltinTypeValue(pkg load.Package, info PackageInfo, fileIndex int, 
 		}
 		return value
 	}
-	if LookupPackageSymbol(info, name) >= 0 {
+	if LookupPackageSymbol(*info, name) >= 0 {
 		return numericBuiltinValue{}
 	}
 	value := numericBuiltinValue{identity: name, typed: true}

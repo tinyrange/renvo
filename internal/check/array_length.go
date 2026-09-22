@@ -79,7 +79,7 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 		if arrayLengthVariableName(context, tok+1, close-1) {
 			return tok + 1
 		}
-		operand := numericBuiltinExprValue(*context.pkg, *context.info, context.fileIndex, context.scope, context.bindings, tok+1, close-1, context.before, 0)
+		operand := numericBuiltinExprValue(context.pkg, context.info, context.fileIndex, context.scope, context.bindings, tok+1, close-1, context.before, 0)
 		if operand.kind == "bool" || operand.kind == "string" || operand.kind == "other" {
 			return tok + 1
 		}

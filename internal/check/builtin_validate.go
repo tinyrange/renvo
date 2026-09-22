@@ -52,7 +52,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				numericBindings = collectScopedTypeBindings(*file, fn, body)
 				numericReady = true
 			}
-			if code, tok := invalidNumericBuiltinCall(*pkg, *info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
+			if code, tok := invalidNumericBuiltinCall(pkg, info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
 				return code, tok
 			}
 			continue
@@ -73,7 +73,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 					numericBindings = collectScopedTypeBindings(*file, fn, body)
 					numericReady = true
 				}
-				value := numericBuiltinExprValue(*pkg, *info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+				value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
 				if value.kind == "int" || value.kind == "float" || value.kind == "complex" || value.kind == "bool" || value.kind == "other" || name == "cap" && value.kind == "string" {
 					return CheckErrBuiltinOperand, args[0].StartTok
 				}
