@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e8f6feaba5fdebfb4d904c0ca6553396469108bf5f0a347048d295b440448c56"
+const CompilerSourceDigest = "a6b4890d282b4f2f7c75741347a113b85a9152bfb034413dfe83182f009fc182"
 
 // source: backend/compiler_common_impl.go
 
@@ -15385,6 +15385,12 @@ renvoAsmMarkLabel(a, plain)
 
 
 func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
+
+
+
+if g.c.objectFile {
+return
+}
 
 
 if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
