@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e0f6f682f784d48ea9afde577b8d52e60e828e5b8bf106515e64151dc8dbfccd"
+const CompilerSourceDigest = "4dd9596eccdddc3187e24fedc97dc2848e79c1464ffaa2f7a53c6eb56cee7327"
 
 // source: backend/compiler_common_impl.go
 
@@ -15251,6 +15251,23 @@ loopLabel := renvoAsmNewLabel(a)
 doneLabel := renvoAsmNewLabel(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPushPrimary(a)
+
+
+if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+renvoAsmPrimaryImm(a, 4)
+renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
+renvoAsmAddSecondaryImm(a, 4)
+renvoAsmCopyTertiaryToPrimary(a)
+renvoAsmPushImm(a, 4)
+renvoAsmPopTertiary(a)
+renvoAsmSubPrimaryTertiary(a)
+renvoAsmCopyPrimaryToTertiary(a)
+renvoAsmJmpLabel(a, wordLoop)
+}
 renvoAsmMarkLabel(a, loopLabel)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmJzPrimary(a, doneLabel)
@@ -37468,7 +37485,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x2c\x8a\xfe\x5a\xa0\x18\x6d\xd1\xed\x99\xa0\x41\x5d\x88\x93\xe4\x29\x51\xc7\x99\x14\x73\x87\xa5\xdf\xfc\x24\x60\x4b\xd8\xe1\xe8", 3, true
+return "wasi/wasm32", "\x06\xa8\x35\x92\x2b\x5f\x02\xf1\x62\x87\x15\xc8\x1e\x22\xba\x53\x57\x11\x6e\x2f\x7b\xdf\x2d\x2f\x91\x20\xa5\x21\xd4\xe7\x5c\x16", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
@@ -37480,7 +37497,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x95\x3a\xc6\x0b\x56\x1a\x63\xa4\xa9\x53\xe7\x91\x6b\xb5\xf7\xae\x6e\xb1\x8b\x90\x7e\x05\xa8\xcf\xd6\xb6\x30\xd7\xc5\x7f\x73\xdc", 3, true
+return "vm/vm32", "\x40\xf3\xc1\xbb\x5c\xa5\xc7\x28\x38\x90\xfe\x69\x68\x25\x2a\xcd\x5f\x00\xdc\xfd\xc2\x4c\xa5\xec\x3b\x72\xc1\x0a\xf2\x62\x8b\x53", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -48519,6 +48536,23 @@ renvo_runtime_ArenaReset(mark)
 }
 return
 }
+func renvoWasm32AppendDataSectionDirect(out *renvoWasmBuffer, dataBase int, data []byte) {
+var header renvoWasmBuffer
+renvoWasmAppendU32(&header, 1)
+renvoWasmPut(&header, 0x00)
+renvoWasmAppendI32Const(&header, dataBase)
+renvoWasmPut(&header, 0x0b)
+renvoWasmAppendU32(&header, len(data))
+renvoWasm32EnsureAdditionalCapacity(out, len(data)+header.length+6)
+renvoWasmPut(out, 11)
+renvoWasmAppendU32(out, header.length+len(data))
+for i := 0; i < header.length; i++ {
+renvoWasmPut(out, header.data[i])
+}
+for i := 0; i < len(data); i++ {
+renvoWasmPut(out, data[i])
+}
+}
 func renvoWasm32DataSectionFull(dataBase int, data []byte) []byte {
 var out renvoWasmBuffer
 renvoWasmAppendU32(&out, 1)
@@ -48611,7 +48645,7 @@ browserStepIndex = renvoWasm32VmFuncBase + len(routinePcs)
 renvoWasmAppendSection(&out, 7, renvoWasm32ExportSectionFull(browserStepIndex))
 renvoWasm32AppendCodeSectionDirect(&out, a, instrPcs, routinePcs, routineEnds, symbolPcs, callStackBase, frameTop, exprStackBase, browserStepRoutine)
 if len(a.data) > 0 {
-renvoWasmAppendSection(&out, 11, renvoWasm32DataSectionFull(dataBase, a.data))
+renvoWasm32AppendDataSectionDirect(&out, dataBase, a.data)
 }
 return out
 }
