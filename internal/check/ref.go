@@ -148,7 +148,7 @@ func resolveNameRef(fileIndex int, info PackageInfo, scope FuncScope, name strin
 		ref.Package = info.Imports[importIndex].Package
 		return ref
 	}
-	symbolIndex := LookupPackageSymbol(info, name)
+	symbolIndex := lookupPackageSymbol(info.Symbols, name)
 	if symbolIndex >= 0 {
 		ref.Kind = RefPackage
 		ref.Index = symbolIndex

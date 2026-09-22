@@ -47,7 +47,7 @@ func buildPackageTypeRefs(pkg load.Package, info PackageInfo, checked []PackageI
 		}
 		file := pkg.Files[decl.File].File
 		if decl.Kind == SymbolType {
-			typeIndex := LookupType(info, decl.Name)
+			typeIndex := lookupType(info.Types, decl.Name)
 			if typeIndex >= 0 {
 				refs = appendTypeInfoRefs(refs, pkg, info, checked, info.Types[typeIndex], i)
 				continue
