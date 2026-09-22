@@ -36,7 +36,7 @@ func main() {
 	if !bytes.Contains(linked.Program.Text, []byte("(*value.callback()) = __renvo_function_0{}")) ||
 		!bytes.Contains(linked.Program.Text, []byte("(*value.callback()) = __renvo_function_0{kind: 1}")) ||
 		!bytes.Contains(linked.Program.Text, []byte("(*value.callback()) .kind!= 0")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&(*value.callback()), 2)")) {
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0((*value.callback()), 2)")) {
 		t.Fatalf("function pointer accessor was not lowered:\n%s", linked.Program.Text)
 	}
 }

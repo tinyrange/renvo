@@ -200,11 +200,16 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
-	if !lowerConcurrencyCore(&program, transient) {
+	concurrencyNeeded := len(program.ConcurrencySites) > 0
+	if !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
 	if !lowerMapsCore(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerInterfaceMethodExpressions(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}

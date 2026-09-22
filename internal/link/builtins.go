@@ -8,22 +8,57 @@ import (
 
 func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 	stringLess := ""
+	stringLessEmitted := false
+	runeString := ""
 	generated := ""
 	generatedCount := 0
 	for {
-		changed := false
+		var edits []functionValueEdit
+		lastStart := len(program.Tokens)
 		for i := len(program.Tokens) - 2; i >= 0; i-- {
+			mark := arena.Mark()
 			name := functionValueTokenText(program, i)
-			if (name != "min" && name != "max" && name != "clear") || !functionValueTokenEquals(program, i+1, "(") || ordinaryBuiltinShadowed(program, i, name) {
+			if (name != "min" && name != "max" && name != "clear" && name != "string") || !functionValueTokenEquals(program, i+1, "(") || ordinaryBuiltinShadowed(program, i, name) {
+				arena.Reset(mark)
 				continue
 			}
 			close := functionValueFindMatchingParen(program, i+1)
 			if close < 0 {
 				return false
 			}
+			if close >= lastStart {
+				arena.Reset(mark)
+				continue
+			}
 			starts, ends := ordinaryBuiltinArguments(program, i+2, close)
 			replacement := ""
-			if name == "clear" {
+			if name == "string" {
+				if len(starts) != 1 || !ordinaryIntegerExpression(program, i, starts[0], ends[0]) {
+					arena.Reset(mark)
+					continue
+				}
+				constant := ordinaryConstantValue(program, starts[0], ends[0], 0)
+				if constant.ok && constant.kind == 1 {
+					value := int64(0)
+					if constant.number.negative || constant.number.scale < 0 {
+						value = 0xfffd
+					} else {
+						for j := 0; j < len(constant.number.digits) && value <= 0x10ffff; j++ {
+							value = value*10 + int64(constant.number.digits[j]-'0')
+						}
+						for j := 0; j < constant.number.scale && value <= 0x10ffff; j++ {
+							value *= 10
+						}
+					}
+					replacement = string(appendCoreQuotedString(nil, ordinaryRuneString(value)))
+				} else {
+					if runeString == "" {
+						runeString = ordinaryBuiltinGeneratedName(program, "__renvo_builtin_rune_string")
+						generated += "func " + runeString + "(value int64) string { " + ordinaryRuneStringBody + " }\n"
+					}
+					replacement = runeString + "(int64(" + functionValueTokensText(program, starts[0], ends[0]) + "))"
+				}
+			} else if name == "clear" {
 				if len(starts) != 1 {
 					return false
 				}
@@ -64,48 +99,61 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			if replacement == "" {
 				return false
 			}
-			originalLength := len(program.Text)
-			edits := []functionValueEdit{functionValueTokenRangeEdit(program, i, close+1, replacement)}
-			// Linking retains one package clause per input package. Builtin
-			// lowering reparses that combined text, so collapse those clauses in
-			// the same way as function-value lowering before the first reparse.
-			edits = appendFunctionValuePackageEdits(program, edits)
-			if transient {
-				renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
-			}
-			text, ok := applyFunctionValueEdits(program.Text, edits)
-			if transient {
-				arena.DiscardBytes(program.Text)
-			}
-			if !ok || !reparseFunctionValueProgram(program, text, edits, originalLength, -1) {
-				return false
-			}
-			changed = true
+			edits = append(edits, functionValueTokenRangeEdit(program, i, close+1, replacement))
+			lastStart = i
+		}
+		if len(edits) == 0 {
 			break
 		}
-		if !changed {
-			break
+		// Apply disjoint innermost calls together; revisit enclosing calls only
+		// after reparsing their changed operands.
+		originalLength := len(program.Text)
+		edits = appendFunctionValuePackageEdits(program, edits)
+		if transient {
+			renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+		}
+		text, ok := applyFunctionValueEdits(program.Text, edits)
+		if transient {
+			arena.DiscardBytes(program.Text)
+		}
+		if !ok {
+			return false
+		}
+		generatedStart := -1
+		if generated != "" || stringLess != "" && !stringLessEmitted {
+			text = append(text, '\n')
+			generatedStart = len(text)
+			text = appendFunctionValueString(text, generated)
+			generated = ""
+			if stringLess != "" && !stringLessEmitted {
+				text = appendFunctionValueString(text, "func "+stringLess+"(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n")
+				stringLessEmitted = true
+			}
+		}
+		if !reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart) {
+			return false
 		}
 	}
-	if stringLess == "" && generated == "" {
-		return true
+
+	return true
+}
+
+const ordinaryRuneStringBody = "if value < 0 || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff { value = 0xfffd }; if value < 0x80 { return string([]byte{byte(value)}) }; if value < 0x800 { return string([]byte{byte(0xc0 | value>>6),byte(0x80 | value&63)}) }; if value < 0x10000 { return string([]byte{byte(0xe0 | value>>12),byte(0x80 | value>>6&63),byte(0x80 | value&63)}) }; return string([]byte{byte(0xf0 | value>>18),byte(0x80 | value>>12&63),byte(0x80 | value>>6&63),byte(0x80 | value&63)})"
+
+func ordinaryRuneString(value int64) string {
+	if value < 0 || value > 0x10ffff || value >= 0xd800 && value <= 0xdfff {
+		value = 0xfffd
 	}
-	originalLength := len(program.Text)
-	text := program.Text
-	if len(text) > 0 && text[len(text)-1] != '\n' {
-		text = append(text, '\n')
+	if value < 0x80 {
+		return string([]byte{byte(value)})
 	}
-	generatedStart := len(text)
-	text = appendFunctionValueString(text, generated)
-	if stringLess != "" {
-		help := "func " + stringLess + "(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n"
-		text = appendFunctionValueString(text, help)
+	if value < 0x800 {
+		return string([]byte{byte(0xc0 | value>>6), byte(0x80 | value&63)})
 	}
-	if transient {
-		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
-		arena.DiscardBytes(program.Text)
+	if value < 0x10000 {
+		return string([]byte{byte(0xe0 | value>>12), byte(0x80 | value>>6&63), byte(0x80 | value&63)})
 	}
-	return reparseFunctionValueProgram(program, text, nil, originalLength, generatedStart)
+	return string([]byte{byte(0xf0 | value>>18), byte(0x80 | value>>12&63), byte(0x80 | value>>6&63), byte(0x80 | value&63)})
 }
 
 func ordinaryBuiltinArguments(program *unit.Program, start int, close int) ([]int, []int) {
@@ -223,6 +271,12 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return ordinaryGlobalType(program, name)
 	}
+	if functionValueTokenEquals(program, end-1, "}") {
+		typeEnd := functionValueTypeEnd(program, start)
+		if typeEnd > start && functionValueTokenEquals(program, typeEnd, "{") && functionValueFindMatchingBrace(program, typeEnd) == end-1 {
+			return functionValueTokensText(program, start, typeEnd)
+		}
+	}
 	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-") || functionValueTokenEquals(program, start, "^")) && start+1 < end {
 		return ordinaryBuiltinExprType(program, before, start+1, end)
 	}
@@ -259,10 +313,17 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		if ordinaryBuiltinTypeName(name) {
 			return name
 		}
+		if functionValueDeclaredType(program, name) && functionValueEnclosingLocalTypeDepthMode(program, before, name, 0, false) == "" {
+			return name
+		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
 	if functionValueTokenEquals(program, end-1, ")") {
 		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
+		if open > start && functionValueTokenEquals(program, open-1, ".") &&
+			!functionValueTokenEquals(program, open+1, "type") && functionValueTypeEnd(program, open+1) == end-1 {
+			return functionValueTokensText(program, open+1, end-1)
+		}
 		if open > start {
 			if fn, ok := functionValueCalledFunction(program, open); ok {
 				return functionValueDeclaredResultType(program, fn)
@@ -394,7 +455,7 @@ func ordinaryBuiltinTypeName(name string) bool {
 func ordinaryGlobalType(program *unit.Program, name string) string {
 	for i := 0; i < len(program.Decls); i++ {
 		decl := program.Decls[i]
-		if functionValueTokenText(program, functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)) != name {
+		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, name) {
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
@@ -404,6 +465,15 @@ func ordinaryGlobalType(program *unit.Program, name string) string {
 			return functionValueTokensText(program, start, end)
 		}
 		if functionValueTokenEquals(program, start, "=") {
+			// A named function used as an initializer is a function value, not
+			// a call. Global literals have already been lifted to this form.
+			if fnIndex := functionValueGlobalInitializerFunction(program, decl); fnIndex >= 0 {
+				fn := program.Funcs[fnIndex]
+				_, sigEnd, ok := parseFunctionValueCallableSignature(program, fn.NameTok, "")
+				if ok {
+					return "func" + functionValueTokensText(program, fn.NameTok+1, sigEnd)
+				}
+			}
 			return ordinaryBuiltinExprType(program, nameTok, start+1, decl.EndTok)
 		}
 	}
@@ -416,10 +486,10 @@ func ordinaryUnderlyingType(program *unit.Program, typ string, depth int) string
 	}
 	for i := 0; i < len(program.Decls); i++ {
 		decl := program.Decls[i]
-		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if functionValueTokenText(program, nameTok) != typ {
+		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, typ) {
 			continue
 		}
+		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
 		start := nameTok + 1
 		if functionValueTokenEquals(program, start, "=") {
 			start++
@@ -1061,4 +1131,23 @@ func ordinaryBuiltinLocalDeclaration(program *unit.Program, nameTok int, limit i
 		}
 	}
 	return false
+}
+
+func ordinaryIntegerExpression(program *unit.Program, before, start, end int) bool {
+	mark := arena.Mark()
+	integer := mapLowerIntegerKey(ordinaryUnderlyingType(program, ordinaryBuiltinExprType(program, before, start, end), 0))
+	arena.Reset(mark)
+	return integer
+}
+
+func ordinarySpanEquals(text []byte, start, end int, name string) bool {
+	if start < 0 || end > len(text) || end-start != len(name) {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		if text[start+i] != name[i] {
+			return false
+		}
+	}
+	return true
 }
