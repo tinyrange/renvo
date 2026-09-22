@@ -244,10 +244,19 @@ func LookupPackageSymbol(info PackageInfo, name string) int {
 }
 
 func lookupPackageSymbol(symbols []Symbol, name string) int {
-	for i := 0; i < len(symbols); i++ {
-		if symbols[i].Name == name {
-			return i
+	// Package headers sort names before exposing their symbols to body checks.
+	// Find the first equal row so repeated init declarations retain their order.
+	low, high := 0, len(symbols)
+	for low < high {
+		mid := low + (high-low)/2
+		if checkStringAfter(name, symbols[mid].Name) {
+			low = mid + 1
+		} else {
+			high = mid
 		}
+	}
+	if low < len(symbols) && symbols[low].Name == name {
+		return low
 	}
 	return -1
 }
