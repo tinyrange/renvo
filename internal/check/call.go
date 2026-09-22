@@ -99,7 +99,7 @@ func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 		if !tokCharIs(&file, i, '(') {
 			continue
 		}
-		closeTok := findTypeMatching(file, i, '(', ')')
+		closeTok := findTypeMatching(&file, i, '(', ')')
 		if closeTok <= i || closeTok > end+1 {
 			continue
 		}
