@@ -15348,9 +15348,9 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	}
 	afterLabel := renvoAsmNewLabel(a)
 	renvoAsmJmpMarkLabel(a, afterLabel, g.makeZeroLabel)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
+	if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
 		// Preserve the result pointer and ABI call register while REP STOSB
-		// clears RCX bytes beginning at RAX.
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
 		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 		renvoAsmMarkLabel(a, afterLabel)
 		return g.makeZeroLabel
