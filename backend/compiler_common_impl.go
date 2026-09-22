@@ -15390,7 +15390,7 @@ func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
 	highReady := renvoAsmNewLabel(a)
 	plain := renvoAsmNewLabel(a)
 	renvoAsmPushPrimary(a)
-	renvoAsmPrimaryImm(a, 8192)
+	renvoAsmPrimaryImm(a, 4096)
 	renvoAsmCmpTertiaryPrimarySet(a, 0x92)
 	renvoAsmJnzPrimary(a, small)
 	renvoAsmPopPrimary(a)
