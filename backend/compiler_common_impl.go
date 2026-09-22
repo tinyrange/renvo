@@ -23076,7 +23076,7 @@ func renvoZeroLocalAtOffset(g *renvoLinearGen, offset int) {
 		renvoAsmPushImm(a, (size+7)/8)
 		renvoAsmPopTertiary(a)
 		renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-	} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+	} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
 		renvoAsmAddressPrimaryStack(a, offset)
 		renvoAsmPushImm(a, size)
 		renvoAsmPopTertiary(a)

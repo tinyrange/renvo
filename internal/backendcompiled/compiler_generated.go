@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0aa92e03d3d129fc82dc3001afe7434b279e0434dce7fa03411e98fe9a1f87b0"
+const CompilerSourceDigest = "d168d75481ef473404125003f4648439fa4bbb06d2bc7cddc9a7d5070d59737f"
 
 // source: backend/compiler_common_impl.go
 
@@ -23083,7 +23083,7 @@ renvoAsmPrimaryImm(a, 0)
 renvoAsmPushImm(a, (size+7)/8)
 renvoAsmPopTertiary(a)
 renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
-} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+} else if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 64 {
 renvoAsmAddressPrimaryStack(a, offset)
 renvoAsmPushImm(a, size)
 renvoAsmPopTertiary(a)
