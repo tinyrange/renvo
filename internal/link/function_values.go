@@ -141,7 +141,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	if transient {
 		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
 	}
-	text, ok := applyFunctionValueEdits(program.Text, edits)
+	text, ok := applyFunctionValueEditsCapacity(program.Text, edits, len(generated)+1)
 	if !ok {
 		return false
 	}
@@ -153,7 +153,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	if transient {
 		arena.DiscardBytes(program.Text)
 	}
-	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+	return reparseFunctionValueProgramMode(program, text, edits, originalLength, generatedStart, transient)
 }
 
 // Relocatable objects expose function values through the platform C ABI, where
@@ -429,9 +429,8 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 		conversion := functionValueTokenEquals(program, funcTok-1, "(") &&
 			functionValueTokenEquals(program, end, ")") && functionValueTokenEquals(program, end+1, "(")
 		accessorResult := functionValueTokenEquals(program, funcTok-1, "*") && functionValueTokenInDeclaredResult(program, funcTok)
-		variableType := funcTok >= 2 && functionValueTokenEquals(program, funcTok-2, "var") && program.Tokens[funcTok-1].KindLine&255 == unit.TokenIdent
-		inferredLocal := functionValueTokenEquals(program, funcTok-1, ":=") && functionValueTokenEquals(program, end, "{")
-		if !valid || !conversion && !accessorResult && !variableType && !inferredLocal {
+		inferredLocal := (functionValueTokenEquals(program, funcTok-1, ":=") || functionValueTokenEquals(program, funcTok-1, "=")) && functionValueTokenEquals(program, end, "{")
+		if !valid || !conversion && !accessorResult && !inferredLocal {
 			continue
 		}
 		if functionValueSignatureByShape(signatures, candidate) >= 0 {
@@ -2187,6 +2186,10 @@ func appendFunctionValuePackageEdits(program *unit.Program, edits []functionValu
 }
 
 func reparseFunctionValueProgram(original *unit.Program, text []byte, edits []functionValueEdit, originalLength int, generatedStart int) bool {
+	return reparseFunctionValueProgramMode(original, text, edits, originalLength, generatedStart, false)
+}
+
+func reparseFunctionValueProgramMode(original *unit.Program, text []byte, edits []functionValueEdit, originalLength int, generatedStart int, reuse bool) bool {
 	parseMark := arena.Mark()
 	file, lineStarts := syntax.ParseLinkedFile(text)
 	if !file.Ok {
@@ -2205,7 +2208,11 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte, edits []fu
 	if parseMark != 0 {
 		arena.Reset(parseMark)
 	}
-	out.Tokens = make([]unit.Token, 0, count)
+	if reuse && count <= cap(original.Tokens) {
+		out.Tokens = original.Tokens[:0]
+	} else {
+		out.Tokens = make([]unit.Token, 0, count)
+	}
 	out.Decls = make([]unit.Decl, 0, declCount)
 	out.Funcs = make([]unit.Func, 0, funcCount)
 	scratchMark := arena.Mark()
@@ -3007,6 +3014,10 @@ func functionValueTokenRangeEdit(program *unit.Program, start int, end int, repl
 }
 
 func applyFunctionValueEdits(src []byte, edits []functionValueEdit) ([]byte, bool) {
+	return applyFunctionValueEditsCapacity(src, edits, 0)
+}
+
+func applyFunctionValueEditsCapacity(src []byte, edits []functionValueEdit, extra int) ([]byte, bool) {
 	for i := 0; i < len(edits); i++ {
 		best := i
 		for j := i + 1; j < len(edits); j++ {
@@ -3016,8 +3027,17 @@ func applyFunctionValueEdits(src []byte, edits []functionValueEdit) ([]byte, boo
 		}
 		edits[i], edits[best] = edits[best], edits[i]
 	}
-	var out []byte
+	size := len(src) + extra
 	pos := 0
+	for _, edit := range edits {
+		if edit.start < pos || edit.end < edit.start || edit.end > len(src) {
+			return nil, false
+		}
+		size += len(edit.text) - (edit.end - edit.start)
+		pos = edit.end
+	}
+	out := make([]byte, 0, size)
+	pos = 0
 	for i := 0; i < len(edits); i++ {
 		edit := edits[i]
 		if edit.start < pos || edit.end < edit.start || edit.end > len(src) {

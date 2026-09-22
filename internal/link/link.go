@@ -420,7 +420,9 @@ func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program,
 		concurrencyCap += len(p.ConcurrencySites)
 	}
 	program.Text = make([]byte, 0, textCap)
-	program.Tokens = make([]unit.Token, 0, finalEOF+1)
+	// Leave modest space for builtin helpers so transient rewrites can reuse
+	// the linked token table instead of retaining a second whole-program table.
+	program.Tokens = make([]unit.Token, 0, finalEOF+1+finalEOF/64+128)
 	program.Decls = make([]unit.Decl, 0, declCap)
 	program.Funcs = make([]unit.Func, 0, funcCap)
 	program.ConcurrencySites = make([]unit.ConcurrencySite, 0, concurrencyCap)

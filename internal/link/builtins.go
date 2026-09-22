@@ -109,10 +109,11 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		// after reparsing their changed operands.
 		originalLength := len(program.Text)
 		edits = appendFunctionValuePackageEdits(program, edits)
-		if transient {
-			renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
+		if stringLess != "" && !stringLessEmitted {
+			generated += "func " + stringLess + "(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n"
+			stringLessEmitted = true
 		}
-		text, ok := applyFunctionValueEdits(program.Text, edits)
+		text, ok := applyFunctionValueEditsCapacity(program.Text, edits, len(generated)+1)
 		if transient {
 			arena.DiscardBytes(program.Text)
 		}
@@ -120,18 +121,18 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			return false
 		}
 		generatedStart := -1
-		if generated != "" || stringLess != "" && !stringLessEmitted {
+		if generated != "" {
 			text = append(text, '\n')
 			generatedStart = len(text)
 			text = appendFunctionValueString(text, generated)
 			generated = ""
-			if stringLess != "" && !stringLessEmitted {
-				text = appendFunctionValueString(text, "func "+stringLess+"(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n")
-				stringLessEmitted = true
-			}
 		}
-		if !reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart) {
+		oldTokens := program.Tokens
+		if !rewriteBuiltinCalls(program, text, edits, originalLength, generatedStart) {
 			return false
+		}
+		if transient {
+			renvo_runtime_ArenaDiscardLinkTokens(oldTokens)
 		}
 	}
 
