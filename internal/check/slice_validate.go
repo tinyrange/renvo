@@ -11,14 +11,14 @@ func invalidDefiniteSliceOperand(pkg load.Package, info PackageInfo, fileIndex i
 		if file.Tokens[open].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
 			continue
 		}
-		close := findTypeMatching(file, open, '[', ']')
-		if close <= open || close > fn.BodyEnd || findTypeTopLevelChar(file, open+1, close-1, ':') < 0 {
+		close := findTypeMatching(&file, open, '[', ']')
+		if close <= open || close > fn.BodyEnd || findTypeTopLevelChar(&file, open+1, close-1, ':') < 0 {
 			continue
 		}
-		start, end := stripOuterParens(file, exprOperandStartBefore(file, fn.BodyStart+1, open), open)
+		start, end := stripOuterParens(&file, exprOperandStartBefore(file, fn.BodyStart+1, open), open)
 		array := false
 		if start < end && tokCharIs(&file, end-1, '}') {
-			typeEnd := findTypeTopLevelChar(file, start, end, '{')
+			typeEnd := findTypeTopLevelChar(&file, start, end, '{')
 			array = definiteArrayType(pkg, info, file, start, typeEnd)
 		} else if end-start >= 3 && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, end-1, ')') {
 			calleeFile, callee, ok := findDefinitePackageFunc(&pkg, &info, &file, start)
@@ -46,7 +46,7 @@ func definiteArrayType(pkg load.Package, info PackageInfo, file syntax.File, sta
 		if end != start+1 {
 			return false
 		}
-		typeIndex := LookupType(info, tokenString(&file, start))
+		typeIndex := lookupType(info.Types, tokenString(&file, start))
 		if typeIndex < 0 {
 			return false
 		}

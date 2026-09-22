@@ -54,12 +54,12 @@ func buildMethodInfo(info PackageInfo, pkg load.Package, body FuncBody, bodyInde
 		pointer = receiverIsPointer(pkg, body.File, field)
 		receiver = receiverBaseName(pkg, body.File, field)
 	}
-	symbol := LookupPackageSymbol(info, body.Name)
+	symbol := lookupPackageSymbol(info.Symbols, body.Name)
 	return MethodInfo{
 		Name:      name,
 		Receiver:  receiver,
 		Pointer:   pointer,
-		Type:      LookupType(info, receiver),
+		Type:      lookupType(info.Types, receiver),
 		Symbol:    symbol,
 		Body:      bodyIndex,
 		File:      body.File,

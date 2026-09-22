@@ -281,7 +281,7 @@ func completionTypeItems(items []CompletionItem, graph load.Graph, prog Program,
 		return items
 	}
 	info := prog.Packages[typ.Package]
-	typeIndex := LookupType(info, typ.Name)
+	typeIndex := lookupType(info.Types, typ.Name)
 	if typeIndex < 0 || typeIndex >= len(info.Types) {
 		return items
 	}
@@ -426,7 +426,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 	}
 	if next < end && tokenTextIs(&file, next, "(") {
 		if owner == pkgIndex && name == "make" {
-			close := findTypeMatching(file, next, '(', ')')
+			close := findTypeMatching(&file, next, '(', ')')
 			if close < 0 || close > end {
 				close = end
 			}
@@ -598,7 +598,7 @@ func completionFieldType(graph load.Graph, prog Program, typ completionType, fie
 		return completionType{}, false
 	}
 	info := prog.Packages[typ.Package]
-	index := LookupType(info, typ.Name)
+	index := lookupType(info.Types, typ.Name)
 	if index < 0 {
 		return completionType{}, false
 	}
@@ -952,7 +952,7 @@ func completionIdentifierByte(value byte) bool {
 }
 
 func completionExported(name string) bool {
-	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+	return syntax.IdentifierExported([]byte(name), 0)
 }
 
 func completionLower(value byte) byte {
