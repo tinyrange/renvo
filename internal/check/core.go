@@ -128,6 +128,18 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 		}
 		file := &pkg.Files[decl.File].File
 		mark := arena.Mark()
+		wantInterface := interfaceNamedType(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+		if wantInterface.known && !wantInterface.pointer && info.Types[wantInterface.index].Kind == TypeInterface {
+			values := splitExprList(*file, decl.ValueStart, decl.ValueEnd)
+			if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
+				value := values[decl.ValueIndex]
+				got := interfaceExprType(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, 0)
+				if definiteInterfaceMismatch(pkg, info, wantInterface.index, got) {
+					arena.Reset(mark)
+					return false, CheckErrType, decl.File, value.StartTok
+				}
+			}
+		}
 		literals := appendExprComposites(nil, *file, decl.ValueStart, decl.ValueEnd)
 		var scope CoreScope
 		if len(literals) > 0 {
@@ -143,6 +155,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 		arena.Reset(mark)
 		if tok >= 0 {
 			return false, CheckErrStructLiteral, decl.File, tok
+		}
+	}
+	hasInterface := false
+	for i := 0; i < len(info.Types); i++ {
+		if info.Types[i].Kind == TypeInterface {
+			hasInterface = true
+			break
 		}
 	}
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
@@ -235,6 +254,14 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(operatorMark)
 				return false, CheckErrAssignTarget, fileIndex, tok
 			}
+			if hasInterface {
+				interfaceTok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+				if interfaceTok >= 0 {
+					arena.Reset(operatorMark)
+					return false, CheckErrType, fileIndex, interfaceTok
+				}
+			}
+
 			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if operatorTok >= 0 {
 				arena.Reset(operatorMark)
