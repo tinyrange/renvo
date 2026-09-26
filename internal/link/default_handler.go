@@ -43,7 +43,7 @@ func lowerDefaultHandler(program *unit.Program, names []string, transient bool) 
 	if names[0] == "" || names[1] == "" || names[2] == "" {
 		return true
 	}
-	index := findCoreFuncByName(*program, names[0])
+	index := findCoreFuncByName(program, names[0])
 	if index < 0 {
 		return false
 	}
