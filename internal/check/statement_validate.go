@@ -11,6 +11,9 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 	if code, tok := invalidBranchTarget(file, body, cSource); code != CheckOK {
 		return code, tok
 	}
+	if tok := invalidDuplicateSwitchCase(&file, &body); tok >= 0 {
+		return CheckErrDuplicate, tok
+	}
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -260,6 +263,14 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 
 func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
+	// A call result is not assignable; dereferencing a returned pointer is.
+	if end > start && tokCharIs(&file, end-1, ')') && !tokCharIs(&file, start, '*') {
+		return true
+	}
+	if end > start && file.Tokens[end-1].KindLine&255 == syntax.TokenOperator && !tokCharIs(&file, end-1, ')') && !tokCharIs(&file, end-1, ']') {
+		return true
+	}
+
 	if end-start != 1 {
 		return false
 	}
