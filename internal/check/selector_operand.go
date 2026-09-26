@@ -39,7 +39,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 				}
 			}
 			if local && !ready {
-				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				bindings = collectScopedTypeBindings(file, fn, body, signature)
 				ready = true
 			}
 			concrete = interfaceExprType(pkg, info, fileIndex, scope, bindings, dot-1, dot, dot, 0)
