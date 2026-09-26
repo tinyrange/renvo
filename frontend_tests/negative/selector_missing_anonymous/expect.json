@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-029",
+  "file": "cmd/app/main.go",
+  "line": 4,
+  "column": 25,
+  "message": "undefined identifier"
+}
