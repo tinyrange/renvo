@@ -13,7 +13,7 @@ type interfaceConcreteType struct {
 
 func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
 	file := &pkg.Files[fileIndex].File
-	bindings := collectScopedTypeBindings(*file, fn, *body, signature)
+	bindings := collectScopedTypeBindings(file, fn, body, signature)
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
 		want := interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
@@ -29,7 +29,7 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op < 0 || !tokenTextIs(file, op, "=") {
 			continue
 		}
