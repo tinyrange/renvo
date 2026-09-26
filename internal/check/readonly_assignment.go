@@ -9,8 +9,15 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	ready := false
+	hasNested := false
+	for tok := fn.BodyStart + 1; tok < fn.BodyEnd; tok++ {
+		if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+			hasNested = true
+			break
+		}
+	}
 	for _, stmt := range body.Stmts {
-		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
+		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || hasNested && numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
 			continue
 		}
 		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
@@ -20,10 +27,6 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 		if op < 0 || tokenTextIs(file, op, ":=") {
 			continue
 		}
-		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
-			ready = true
-		}
 		for _, span := range splitExprList(*file, stmt.StartTok, op) {
 			if definitelyInvalidAssignTarget(*file, span) {
 				return span.StartTok
@@ -31,6 +34,10 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 			start, end := stripOuterParens(file, span.StartTok, span.EndTok)
 			if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent || tokenTextIs(file, start, "_") {
 				continue
+			}
+			if !ready {
+				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				ready = true
 			}
 			chosen := -1
 			for i, binding := range bindings {
@@ -44,11 +51,9 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 				}
 				continue
 			}
-			name := tokenString(file, start)
-			for _, decl := range info.Decls {
-				if decl.Name == name && decl.Kind == SymbolConst {
-					return start
-				}
+			symbol := lookupPackageSymbolTextCore(info, file, start)
+			if symbol >= 0 && info.Symbols[symbol].Kind == SymbolConst {
+				return start
 			}
 		}
 	}
