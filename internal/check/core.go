@@ -170,6 +170,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return false, CheckErrAssignTarget, fileIndex, tok
+			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
@@ -214,7 +218,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 			if functionMayNeedChannelCheck(*file, fn) {
 				channelCheckArenaStart := arena.Mark()
-				channelTok := invalidDefiniteChannelOperation(*file, fn)
+				channelTok := invalidDefiniteChannelOperationWithShadow(*file, fn, lookupPackageSymbol(info.Symbols, "close") >= 0)
 				arena.Reset(channelCheckArenaStart)
 				if channelTok >= 0 {
 					return false, CheckErrChannel, fileIndex, channelTok
