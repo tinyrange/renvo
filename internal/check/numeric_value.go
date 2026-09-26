@@ -89,7 +89,8 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		}
 		return numericBuiltinValue{kind: "other"}
 	}
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || (decl.Kind != SymbolVar && decl.Kind != SymbolConst) {
 			continue
 		}
