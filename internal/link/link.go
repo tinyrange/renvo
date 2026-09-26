@@ -177,7 +177,11 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		var ok bool
 		packageActions := actions[actionOffset : actionOffset+len(programs[i].Tokens)]
 		actionOffset += len(packageActions)
-		ok, line = appendProgramCore(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient)
+		var objectExports []string
+		if object && i == root && !c11Semantics {
+			objectExports = goObjectExportsCore(programs[i])
+		}
+		ok, line = appendProgramCoreWithExports(&program, programs[i], packageActions, finalEOF, line, aliases, i+1 < len(programs), transient, objectExports)
 		if !ok {
 			appendOK = false
 			break
@@ -434,7 +438,7 @@ func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, boo
 }
 
 func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool, initNames []string) (unit.Program, bool) {
-	if src.Package != "main" || findCoreFuncByName(src, "appMain") >= 0 || findCoreFuncByName(src, "main") < 0 {
+	if src.Package != "main" || findCoreFuncByName(&src, "appMain") >= 0 || findCoreFuncByName(&src, "main") < 0 {
 		return src, true
 	}
 	if processState {
@@ -475,7 +479,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 
 func programsContainCoreFunc(programs []unit.Program, name string) bool {
 	for i := 0; i < len(programs); i++ {
-		if findCoreFuncByName(programs[i], name) >= 0 {
+		if findCoreFuncByName(&programs[i], name) >= 0 {
 			return true
 		}
 	}
@@ -543,7 +547,7 @@ func coreProgramInitFunctionNames(programs []unit.Program) []string {
 	for i := 0; i < len(programs); i++ {
 		ordinal := 0
 		for j := 0; j < len(programs[i].Funcs); j++ {
-			if coreLinkedProgramText(programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
+			if coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
 				continue
 			}
 			names = append(names, coreInitFunctionAliasName(i, ordinal))
@@ -585,6 +589,10 @@ func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line in
 }
 
 func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool) (bool, int) {
+	return appendProgramCoreWithExports(dst, src, actions, finalEOF, line, aliases, hasNext, transient, nil)
+}
+
+func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions []tokenAction, finalEOF int, line int, aliases []string, hasNext bool, transient bool, objectExports []string) (bool, int) {
 	if src.Package == "" || len(src.Text) == 0 || len(src.Tokens) == 0 || len(actions) != len(src.Tokens) {
 		return false, line
 	}
@@ -640,6 +648,16 @@ func appendProgramCore(dst *unit.Program, src unit.Program, actions []tokenActio
 			continue
 		}
 		mappedToken := len(dst.Tokens)
+		if i < len(objectExports) && objectExports[i] != "" {
+			if tokStart > pendingStart {
+				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
+			}
+			dst.Text = appendCoreStringBytes(dst.Text, "\n//export ")
+			dst.Text = appendCoreStringBytes(dst.Text, objectExports[i])
+			dst.Text = append(dst.Text, '\n')
+			pendingStart = tokStart
+			lineBase += 2
+		}
 		line = lineBase + (tok.KindLine >> 8) - 1
 		if line < lineBase {
 			line = lineBase
@@ -1566,7 +1584,7 @@ func copyCoreTokens(src []unit.Token, limit int) []unit.Token {
 	return out
 }
 
-func findCoreFuncByName(program unit.Program, name string) int {
+func findCoreFuncByName(program *unit.Program, name string) int {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
 		if coreLinkedProgramText(program, fn.NameStart, fn.NameEnd) == name {
@@ -1576,7 +1594,7 @@ func findCoreFuncByName(program unit.Program, name string) int {
 	return -1
 }
 
-func coreLinkedProgramText(program unit.Program, start int, end int) string {
+func coreLinkedProgramText(program *unit.Program, start int, end int) string {
 	if start < 0 || end < start || end > len(program.Text) {
 		return ""
 	}
