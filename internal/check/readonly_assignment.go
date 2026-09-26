@@ -40,7 +40,8 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 				ready = true
 			}
 			chosen := -1
-			for i, binding := range bindings {
+			for i := 0; i < len(bindings); i++ {
+				binding := &bindings[i]
 				if binding.visible <= op && op < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 					chosen = i
 				}
