@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "17b0a60925334f3363fc8d62e10b33b7576d04c6c943b29b82d481c517faf598"
+const CompilerSourceDigest = "7c9fb804c7d9b21d3587fa080e5cd3e38c3ec03d099a8658680d8a76f8d45c5b"
 
 // source: backend/compiler_common_impl.go
 
@@ -22334,6 +22334,19 @@ return label
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoAsmEmitText(a, "\x39\xd1")
+renvo386AsmJccLabel(a, 0x83, invalid)
+renvoAsmAddScaledTertiary(a, elemSize)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
 if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
@@ -22453,6 +22466,25 @@ return label
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+renvoAsmEmitText(a, "\x89\xc2\x39\xc8")
+renvo386AsmJccLabel(a, 0x83, invalid)
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 1)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+if !g.meta.panicEnabled {
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmRet(a)
+return
+}
 if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)

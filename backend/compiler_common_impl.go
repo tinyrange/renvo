@@ -22327,6 +22327,19 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+	if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// EAX is the base, EDX the nonnegative length, and ECX the index.
+		// An unsigned comparison also rejects every negative index.
+		renvoAsmEmitText(a, "\x39\xd1") // cmp ecx, edx
+		renvo386AsmJccLabel(a, 0x83, invalid)
+		renvoAsmAddScaledTertiary(a, elemSize)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
@@ -22446,6 +22459,25 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+	if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Preserve the original index in secondary, as the caller expects.
+		renvoAsmEmitText(a, "\x89\xc2\x39\xc8") // mov edx, eax; cmp eax, ecx
+		renvo386AsmJccLabel(a, 0x83, invalid)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		if !g.meta.panicEnabled {
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmRet(a)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
