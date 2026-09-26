@@ -44,6 +44,7 @@ func TestValidStructLiteralFieldLists(t *testing.T) {
 		"func main() { k:=1; _ = map[int]int{k:1,k:2}; _ = [4]int{2:1,2} }",
 		"type S struct { X int }; func main() { _ = []S{{X:1},{X:2}} }",
 		"type S struct { X int }; type A = S; func main() { _ = A{X:1} }",
+		"type S struct { X int }; var f = func() { type S map[int]int; k:=1; _ = S{k:1,k:2} }; func main() {}",
 		"type S struct { X int }; var f = func() { type S map[string]int; _ = S{\"key\":1,\"other\":2} }; func main() {}",
 	} {
 		t.Run(source, func(t *testing.T) {
