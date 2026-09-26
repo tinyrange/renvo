@@ -20,7 +20,7 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 	}
 	bindings := *cachedBindings
 	if bindings == nil {
-		bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+		bindings = collectScopedTypeBindings(file, fn, body, signature)
 		*cachedBindings = bindings
 	}
 	for _, stmt := range body.Stmts {

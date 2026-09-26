@@ -27,7 +27,7 @@ func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex in
 	if !possible {
 		return -1
 	}
-	bindings := collectScopedTypeBindings(file, fn, body, signature)
+	bindings := collectScopedTypeBindings(&file, fn, &body, signature)
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, bindings: bindings, strict: true}
 	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for i := 0; i < len(bindings); i++ {

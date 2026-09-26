@@ -21,7 +21,7 @@ func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syn
 			continue
 		}
 		start, end := trimExprSpan(*file, stmt.StartTok, stmt.EndTok)
-		op := findTopLevelAssignOp(*file, start, end)
+		op := findTopLevelAssignOp(file, start, end)
 		if op < 0 {
 			if end <= start || (!tokenTextIs(file, end-1, "++") && !tokenTextIs(file, end-1, "--")) {
 				continue

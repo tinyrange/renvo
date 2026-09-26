@@ -44,7 +44,7 @@ func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int,
 		if !ready {
 			bindings = *cachedBindings
 			if bindings == nil {
-				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				bindings = collectScopedTypeBindings(file, fn, body, signature)
 				*cachedBindings = bindings
 			}
 			ready = true
