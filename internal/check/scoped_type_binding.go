@@ -115,9 +115,13 @@ func appendScopedTypeBindings(bindings []scopedTypeBinding, file syntax.File, st
 		}
 		// A same-block short declaration reuses the existing variable.
 		reused := false
-		for _, old := range bindings {
-			if short && old.end == scopeEnd && old.visible <= start && coreTokensEqual(&file, old.name, name) {
-				reused = true
+		if short {
+			for i := 0; i < len(bindings); i++ {
+				old := &bindings[i]
+				if old.end == scopeEnd && old.visible <= start && coreTokensEqual(&file, old.name, name) {
+					reused = true
+					break
+				}
 			}
 		}
 		if !reused {

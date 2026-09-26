@@ -46,13 +46,14 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 		return ""
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return copySliceTypeElement(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
