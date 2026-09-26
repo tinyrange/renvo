@@ -7,7 +7,7 @@ import (
 
 // Check resolved scalar and slice conversions. Unknown expression types are
 // not evidence of an invalid conversion; they still require general typing.
-func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
+func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	ready := false
@@ -42,7 +42,11 @@ func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int,
 			return start
 		}
 		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			bindings = *cachedBindings
+			if bindings == nil {
+				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				*cachedBindings = bindings
+			}
 			ready = true
 		}
 		arg := args[0]

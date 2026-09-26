@@ -130,7 +130,7 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		}
 		return value
 	}
-	if lookupPackageSymbol(info.Symbols, name) >= 0 {
+	if lookupPackageSymbolTextCore(info, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
 	value := numericBuiltinValue{identity: name, typed: true}

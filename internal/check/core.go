@@ -139,6 +139,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				}
 			}
 		}
+		if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+			arena.Reset(mark)
+			return false, CheckErrType, decl.File, tok
+		}
 		tok := invalidStructLiterals(pkg, info, file, literals, scope)
 		arena.Reset(mark)
 		if tok >= 0 {
@@ -183,6 +187,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if len(literals) > 0 {
 				scope, ok, _ := buildFuncScopeCore(*file, fn)
 				if ok {
+					if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+						arena.Reset(functionArenaStart)
+						return false, CheckErrType, fileIndex, tok
+					}
 					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrStructLiteral, fileIndex, tok
@@ -222,20 +230,25 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 
 			operatorMark := arena.Mark()
 			var operandBindings []scopedTypeBinding
+			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			if mapCode != CheckOK {
+				arena.Reset(operatorMark)
+				return false, mapCode, fileIndex, mapTok
+			}
+
 			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if operatorTok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, operatorTok
 			}
 			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
-			arena.Reset(operatorMark)
 			if rangeTok >= 0 {
+				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, rangeTok
 			}
 
-			conversionMark := arena.Mark()
-			conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, &body, &signature, scope)
-			arena.Reset(conversionMark)
+			conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			arena.Reset(operatorMark)
 			if conversionTok >= 0 {
 				return false, CheckErrOperand, fileIndex, conversionTok
 			}
