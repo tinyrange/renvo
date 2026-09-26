@@ -109,20 +109,23 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return makeAllocationType(pkg, info, fileIndex, binding.typeStart, binding.typeEnd, scope, 0)
 		}
 		return containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
-	for _, decl := range info.Decls {
-		if decl.Name != tokenString(file, start) || decl.Kind != SymbolVar {
+	name := tokenString(file, start)
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
+		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
