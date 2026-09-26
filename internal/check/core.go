@@ -237,6 +237,9 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			operatorMark := arena.Mark()
+			// Retain immutable operand bindings through the final builtin check.
+			// They are allocated after validation scratch is released and reclaimed
+			// with the parsed body at functionArenaStart.
 			var operandBindings []scopedTypeBinding
 			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
 				arena.Reset(operatorMark)
