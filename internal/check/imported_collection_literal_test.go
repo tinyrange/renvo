@@ -53,3 +53,29 @@ func TestImportedSymbolVisibility(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditImportedVisibility(t *testing.T) {
+	for _, expression := range []string{"lib.hidden", "lib.S{hidden: 1}", "lib.S{1, 2}"} {
+		graph := checkTestGraph(t, []load.SourceFile{
+			{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main() { _ = " + expression + " }")},
+			{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nvar hidden = 2\ntype S struct { hidden int; X int }")},
+		})
+		result := CheckGraphCore(graph)
+		if result.Ok || result.Error != CheckErrUndefined {
+			t.Fatalf("%s: accepted or wrong error %d", expression, result.Error)
+		}
+	}
+}
+
+func TestUnicodeImportedVisibility(t *testing.T) {
+	for _, name := range []string{"Ω", "π", "世界"} {
+		graph := checkTestGraph(t, []load.SourceFile{
+			{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nimport \"example.com/case/lib\"\nfunc main(){_=lib." + name + "()}")},
+			{Path: "/repo/case/lib/lib.go", Src: []byte("package lib\nfunc Ω() int{return 1};func π() int{return 2};func 世界() int{return 3}")},
+		})
+		result := CheckGraphCore(graph)
+		if result.Ok != (name == "Ω") {
+			t.Fatalf("%s: ok=%v error=%d", name, result.Ok, result.Error)
+		}
+	}
+}
