@@ -32,3 +32,20 @@ func TestDecompressArchiveExtendedMatch(t *testing.T) {
 		t.Fatal("missing extended length byte was accepted")
 	}
 }
+
+func TestDecompressArchiveBackreferenceBoundaries(t *testing.T) {
+	for _, tt := range []struct{ compressed, want string }{
+		{"\x07abc\x00\x20", "abcabc"},
+		{"\x07abc\x00\x27", "abcabcabcabca"},
+		{"\x0fabcd\x00\x30", "abcdabc"},
+		{"\x01x\x00\x0f\xff", string(bytes.Repeat([]byte{'x'}, 274))},
+	} {
+		got, ok := decompressArchive(tt.compressed, len(tt.want))
+		if !ok || string(got) != tt.want {
+			t.Fatalf("decode %q = %q, %v; want %q", tt.compressed, got, ok, tt.want)
+		}
+		if _, ok := decompressArchive(tt.compressed, len(tt.want)-1); ok {
+			t.Fatalf("accepted backreference past output boundary: %q", tt.compressed)
+		}
+	}
+}
