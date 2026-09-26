@@ -50,10 +50,19 @@ func LookupType(info PackageInfo, name string) int {
 }
 
 func lookupType(types []TypeInfo, name string) int {
-	for i := 0; i < len(types); i++ {
-		if types[i].Name == name {
-			return i
+	// Package body checking sorts the type table before resolving references.
+	// Keep the first equal row, matching the previous linear lookup.
+	low, high := 0, len(types)
+	for low < high {
+		mid := low + (high-low)/2
+		if checkStringAfter(name, types[mid].Name) {
+			low = mid + 1
+		} else {
+			high = mid
 		}
+	}
+	if low < len(types) && types[low].Name == name {
+		return low
 	}
 	return -1
 }
