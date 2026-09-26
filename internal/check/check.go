@@ -47,6 +47,7 @@ const (
 	CheckErrConstantOperation
 	CheckErrArrayLength
 	CheckErrStructLiteral
+	CheckErrMapKey
 )
 
 const (
