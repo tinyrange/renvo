@@ -124,7 +124,7 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		value := numericBuiltinTypeValue(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 		if !typ.Alias {
 			value.identity = "named:" + name

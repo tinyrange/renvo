@@ -50,7 +50,7 @@ func definiteArrayType(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 		if typeIndex < 0 {
 			return false
 		}
-		typ := info.Types[typeIndex]
+		typ := &info.Types[typeIndex]
 		if typ.File < 0 || typ.File >= len(pkg.Files) {
 			return false
 		}
