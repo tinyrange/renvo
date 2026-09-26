@@ -70,7 +70,7 @@ func mapFieldPathUnaddressable(pkg *load.Package, info *PackageInfo, shape mapIn
 			if tokCharIs(file, start, '*') {
 				return false
 			}
-			if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+			if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 				break
 			}
 			index := lookupType(info.Types, tokenString(file, start))
