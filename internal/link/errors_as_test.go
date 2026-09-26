@@ -1,6 +1,8 @@
 package link
 
 import (
+	"bytes"
+	"renvo.dev/internal/load"
 	"renvo.dev/internal/unit"
 	"testing"
 )
@@ -32,5 +34,40 @@ func TestErrorsAsPackageObjectRetainsDispatch(t *testing.T) {
 	}
 	if errorsAsReferenced(&program, nil) {
 		t.Fatal("absent intrinsic cannot need dispatch")
+	}
+}
+
+func TestErrorsAsDispatchSurvivesLinkModes(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
+		{Path: "/std/errors/errors.go", Src: []byte(`package errors
+func asTarget(err error, target any) (bool,bool) { return false,false }
+func As(err error, target any) bool { _,matched := asTarget(err,target); return matched }
+`)},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+import "errors"
+type detail struct{}
+func (e *detail) Error() string { return "detail" }
+func main() { var got *detail; if !errors.As(&detail{}, &got) { panic("As") } }
+`)},
+	}
+	for _, mode := range []string{"normal", "incremental", "transient"} {
+		t.Run(mode, func(t *testing.T) {
+			input := buildFromFiles(t, files)
+			var linked Result
+			if mode == "incremental" {
+				linked = LinkBuildCoreIncremental(input)
+			} else if mode == "transient" {
+				linked = LinkBuildCoreTransient(input)
+			} else {
+				linked = LinkBuildCore(input)
+			}
+			if !linked.Ok {
+				t.Fatalf("link: %d", linked.Error)
+			}
+			if !bytes.Contains(linked.Data, []byte("target.(**detail)")) {
+				t.Fatal("missing concrete target dispatch")
+			}
+		})
 	}
 }
