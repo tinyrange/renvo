@@ -29,6 +29,7 @@ type PackageSession struct {
 	prepared        []unit.Program
 	symbolOffsets   []int
 	aliases         []string
+	defaultHandler  []string
 	plusReplacement int
 	contextA        int
 	contextB        int
@@ -87,6 +88,7 @@ func (s *PackageSession) Step() bool {
 		ensureCoreProgramSymbols(s.prepared)
 		s.symbolOffsets = corePackageSymbolOffsets(s.prepared)
 		s.aliases = corePackageSymbolAliases(s.prepared, s.build.Root, s.symbolOffsets)
+		s.defaultHandler = coreDefaultHandlerNames(s.prepared, s.aliases, s.symbolOffsets)
 		s.contextA, s.contextB = incrementalArtifactContextHash(s.prepared, s.aliases, s.build.Root)
 		s.plusReplacement = len(s.aliases)
 		s.aliases = append(s.aliases, "+")
@@ -130,7 +132,7 @@ func (s *PackageSession) Step() bool {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerIntegerRangesCore(&program, s.transient) || !lowerAnonymousTypes(&program, s.transient) || !lowerGlobalFunctionLiterals(&program, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
+	if !lowerDefaultHandler(&program, s.defaultHandler, s.transient) || !lowerIntegerRangesCore(&program, s.transient) || !lowerAnonymousTypes(&program, s.transient) || !lowerGlobalFunctionLiterals(&program, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
 		s.failUnit()
 		return true
 	}
