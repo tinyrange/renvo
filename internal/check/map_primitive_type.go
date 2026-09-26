@@ -13,7 +13,7 @@ func mapLiteralPrimitiveTypes(pkg *load.Package, info *PackageInfo, file *syntax
 		ks, ke, vs, ve := parseMapTypeShape(*file, start, end)
 		return mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, depth+1), mapLiteralPrimitiveType(pkg, info, file, vs, ve, scope, depth+1)
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return "", ""
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -25,7 +25,7 @@ func mapLiteralPrimitiveTypes(pkg *load.Package, info *PackageInfo, file *syntax
 }
 
 func mapLiteralPrimitiveType(pkg *load.Package, info *PackageInfo, file *syntax.File, start int, end int, scope CoreScope, depth int) string {
-	if start < 0 || end-start != 1 || depth > len(info.Types)+2 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if start < 0 || end-start != 1 || depth > len(info.Types)+2 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)
