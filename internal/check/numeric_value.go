@@ -65,13 +65,14 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		return numericBuiltinValue{}
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return numericBuiltinTypeValue(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
@@ -82,13 +83,14 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		return value
 	}
 	name := tokenString(file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
 		return numericBuiltinValue{kind: "other"}
 	}
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || (decl.Kind != SymbolVar && decl.Kind != SymbolConst) {
 			continue
 		}
@@ -117,13 +119,13 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}
-	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
 	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		value := numericBuiltinTypeValue(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 		if !typ.Alias {
 			value.identity = "named:" + name
