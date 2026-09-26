@@ -200,11 +200,16 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		return empty, false
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
-	if !lowerIntegerRangesCore(&program, transient) || !lowerConcurrencyCore(&program, transient) {
+	concurrencyNeeded := len(program.ConcurrencySites) > 0
+	if !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
 	if !lowerMapsCore(&program, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerInterfaceMethodExpressions(&program, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -415,7 +420,9 @@ func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program,
 		concurrencyCap += len(p.ConcurrencySites)
 	}
 	program.Text = make([]byte, 0, textCap)
-	program.Tokens = make([]unit.Token, 0, finalEOF+1)
+	// Leave modest space for builtin helpers so transient rewrites can reuse
+	// the linked token table instead of retaining a second whole-program table.
+	program.Tokens = make([]unit.Token, 0, finalEOF+1+finalEOF/64+128)
 	program.Decls = make([]unit.Decl, 0, declCap)
 	program.Funcs = make([]unit.Func, 0, funcCap)
 	program.ConcurrencySites = make([]unit.ConcurrencySite, 0, concurrencyCap)
@@ -434,7 +441,7 @@ func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, boo
 }
 
 func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool, initNames []string) (unit.Program, bool) {
-	if src.Package != "main" || findCoreFuncByName(src, "appMain") >= 0 || findCoreFuncByName(src, "main") < 0 {
+	if src.Package != "main" || findCoreFuncByName(&src, "appMain") >= 0 || findCoreFuncByName(&src, "main") < 0 {
 		return src, true
 	}
 	if processState {
@@ -475,7 +482,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 
 func programsContainCoreFunc(programs []unit.Program, name string) bool {
 	for i := 0; i < len(programs); i++ {
-		if findCoreFuncByName(programs[i], name) >= 0 {
+		if findCoreFuncByName(&programs[i], name) >= 0 {
 			return true
 		}
 	}
@@ -543,7 +550,7 @@ func coreProgramInitFunctionNames(programs []unit.Program) []string {
 	for i := 0; i < len(programs); i++ {
 		ordinal := 0
 		for j := 0; j < len(programs[i].Funcs); j++ {
-			if coreLinkedProgramText(programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
+			if coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
 				continue
 			}
 			names = append(names, coreInitFunctionAliasName(i, ordinal))
@@ -1566,7 +1573,7 @@ func copyCoreTokens(src []unit.Token, limit int) []unit.Token {
 	return out
 }
 
-func findCoreFuncByName(program unit.Program, name string) int {
+func findCoreFuncByName(program *unit.Program, name string) int {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
 		if coreLinkedProgramText(program, fn.NameStart, fn.NameEnd) == name {
@@ -1576,7 +1583,7 @@ func findCoreFuncByName(program unit.Program, name string) int {
 	return -1
 }
 
-func coreLinkedProgramText(program unit.Program, start int, end int) string {
+func coreLinkedProgramText(program *unit.Program, start int, end int) string {
 	if start < 0 || end < start || end > len(program.Text) {
 		return ""
 	}

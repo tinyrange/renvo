@@ -368,7 +368,19 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 		var undefinedTok int
-		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, CoreScope{}, out.ValueStart, out.ValueEnd, nil)
+		var scope CoreScope
+		for tok := out.ValueStart; tok < out.ValueEnd; tok++ {
+			if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
+				fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: out.ValueStart - 1, BodyEnd: out.ValueEnd + 1}
+				var ok bool
+				scope, ok, undefinedTok = buildFuncScopeCore(*file, fn)
+				if !ok {
+					return out, undefinedTok
+				}
+				break
+			}
+		}
+		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, out.ValueStart, out.ValueEnd, nil)
 		return out, undefinedTok
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(*file, typeStart, decl.EndTok)
