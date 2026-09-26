@@ -31,7 +31,7 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 			continue
 		}
 		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			bindings = collectScopedTypeBindings(file, fn, body, signature)
 			*cachedBindings = bindings
 			ready = true
 		}
@@ -108,13 +108,14 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return definiteOrderingTypeKind(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
@@ -162,6 +163,6 @@ func definiteOrderingTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if index < 0 {
 		return 0
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return definiteOrderingTypeKind(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }
