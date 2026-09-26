@@ -116,6 +116,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	ensureCoreProgramSymbols(programs)
 	symbolOffsets := corePackageSymbolOffsets(programs)
 	aliases := corePackageSymbolAliases(programs, root, symbolOffsets)
+	errorsAs := errorsAsNamesCore(programs, aliases, symbolOffsets)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
 	if transient {
@@ -202,6 +203,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
 	if !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerErrorsAsCore(&program, errorsAs, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
