@@ -170,10 +170,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
-			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
-				arena.Reset(functionArenaStart)
-				return false, CheckErrAssignTarget, fileIndex, tok
-			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
@@ -234,6 +230,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 
 			operatorMark := arena.Mark()
 			var operandBindings []scopedTypeBinding
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
+				arena.Reset(operatorMark)
+				return false, CheckErrAssignTarget, fileIndex, tok
+			}
 			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if mapCode != CheckOK {
 				arena.Reset(operatorMark)
@@ -252,8 +252,8 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
-			arena.Reset(operatorMark)
 			if conversionTok >= 0 {
+				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, conversionTok
 			}
 
@@ -280,7 +280,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, unsafeErr, fileIndex, unsafeTok
 			}
 			builtinCheckArenaStart := arena.Mark()
-			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls)
+			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls, operandBindings)
 			arena.Reset(builtinCheckArenaStart)
 			if builtinErr != CheckOK {
 				return false, builtinErr, fileIndex, builtinTok
