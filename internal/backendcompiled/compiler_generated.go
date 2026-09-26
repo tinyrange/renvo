@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "31d3a84f8a5eadc76c09567830b1fc73b4949da287b25a37e7b862c87c3facb5"
+const CompilerSourceDigest = "c72e28d8324e1c6a6f350f9faa025fa552c161e6820aa3ea8adbf534b013106a"
 
 // source: backend/compiler_common_impl.go
 
@@ -15870,7 +15870,7 @@ renvoNonNil(g)
 
 
 
-if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
+if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
 destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 count := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -15928,7 +15928,7 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 renvoNonNil(g)
 
 
-if renvoPreparedBackendActive == 0 && size >= 64 &&
+if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
 (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 (mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)

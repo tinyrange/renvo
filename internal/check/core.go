@@ -148,6 +148,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := &pkg.Files[fileIndex].File
+		mapMark := arena.Mark()
+		duplicateMapTok := invalidDuplicateMapKey(file)
+		arena.Reset(mapMark)
+		if duplicateMapTok >= 0 {
+			return false, CheckErrDuplicate, fileIndex, duplicateMapTok
+		}
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
@@ -165,6 +171,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if tok := invalidBareReturnShadow(*file, fn, body, signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
+			}
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return false, CheckErrAssignTarget, fileIndex, tok
 			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
@@ -206,7 +216,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 			if functionMayNeedChannelCheck(*file, fn) {
 				channelCheckArenaStart := arena.Mark()
-				channelTok := invalidDefiniteChannelOperation(*file, fn)
+				channelTok := invalidDefiniteChannelOperationWithShadow(*file, fn, lookupPackageSymbol(info.Symbols, "close") >= 0)
 				arena.Reset(channelCheckArenaStart)
 				if channelTok >= 0 {
 					return false, CheckErrChannel, fileIndex, channelTok
@@ -253,6 +263,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			arena.Reset(callCheckArenaStart)
 			if callTok >= 0 {
 				return false, CheckErrCallArity, fileIndex, callTok
+			}
+			operandTok := invalidCallOperandCount(graph, pkgIndex, info, checked, fileIndex, fn, out.CoreRefs, out.CoreSelectors)
+			if operandTok >= 0 {
+				return false, CheckErrOperand, fileIndex, operandTok
 			}
 			prepareDefiniteCallTargets(pkg, info, out.CoreRefs, callTargets)
 			callCheckArenaStart = arena.Mark()
