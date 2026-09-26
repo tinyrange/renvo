@@ -5,10 +5,10 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
+func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
-	var bindings []scopedTypeBinding
-	ready := false
+	bindings := *cachedBindings
+	ready := bindings != nil
 	for op := fn.BodyStart + 1; op < fn.BodyEnd-1; op++ {
 		if file.Tokens[op].KindLine&255 == syntax.TokenFunc {
 			// A literal has its own parameters and locals. Do not borrow the
@@ -32,6 +32,7 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 		}
 		if !ready {
 			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			*cachedBindings = bindings
 			ready = true
 		}
 		left := operandBoundary(file, op-1, fn.BodyStart+1, -1, false) + 1
@@ -43,19 +44,16 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 			}
 			continue
 		}
-		if definiteStructExpr(pkg, info, fileIndex, scope, bindings, left, op, op, 0) || definiteStructExpr(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) {
-			return op
-		}
-		if definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, left, op, op, 0) > 0 || definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) > 0 {
+		if definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, left, op, op, 0) != 0 || definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, op+1, right, op, 0) != 0 {
 			return op
 		}
 	}
 	return -1
 }
 
-// Zero means non-pointer or unresolved. Only positive pointer depth is
-// rejection evidence; tracking depth preserves valid comparisons of *p.
-func definiteExprPointerDepth(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) int {
+// Low bits retain pointer depth; bit 256 records a definite struct base.
+// Resolving both properties together avoids visiting each operand twice.
+func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) int {
 	if depth > 32 || start < 0 || start >= end {
 		return 0
 	}
@@ -66,36 +64,43 @@ func definiteExprPointerDepth(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	if tokCharIs(file, start, '&') {
-		return 1 + definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
+		return 1 + definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
 	}
 	if tokCharIs(file, start, '*') {
-		n := definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
-		if n > 0 {
+		n := definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, start+1, end, before, depth+1)
+		if n&255 > 0 {
 			return n - 1
 		}
 		return 0
 	}
 	if start+1 < end && tokCharIs(file, end-1, ')') {
-		if tokenTextIs(file, start, "new") && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && LookupPackageSymbol(*info, "new") < 0 {
-			return 1 + definiteTypePointerDepth(pkg, info, fileIndex, scope, start+2, end-1, 0)
+		if tokenTextIs(file, start, "new") && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "new") < 0 {
+			return 1 + definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+2, end-1, 0)
 		}
 		if tokCharIs(file, start, '(') {
 			close := findTypeMatching(file, start, '(', ')')
 			if close > start && close < end && tokCharIs(file, close, '(') && findTypeMatching(file, close, '(', ')') == end {
-				return definiteTypePointerDepth(pkg, info, fileIndex, scope, start+1, close-1, 0)
+				return definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+1, close-1, 0)
 			}
 		}
 		if file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
-			if typ := LookupType(*info, tokenString(file, start)); typ >= 0 {
-				return definiteTypePointerDepth(pkg, info, fileIndex, scope, start, start+1, 0)
+			if typ := lookupType(info.Types, tokenString(file, start)); typ >= 0 {
+				return definiteOrderingTypeKind(pkg, info, fileIndex, scope, start, start+1, 0)
 			}
 			calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 			if ok {
 				signature := buildFuncSignature(pkg.Files[calleeFile].File, callee)
 				if len(signature.Results) == 1 {
 					result := signature.Results[0]
-					return definiteTypePointerDepth(pkg, info, calleeFile, CoreScope{}, result.TypeStart, result.TypeEnd, 0)
+					return definiteOrderingTypeKind(pkg, info, calleeFile, CoreScope{}, result.TypeStart, result.TypeEnd, 0)
 				}
+			}
+		}
+	}
+	if tokCharIs(file, end-1, '}') {
+		for open := end - 2; open >= start; open-- {
+			if tokCharIs(file, open, '{') && findTypeMatching(file, open, '{', '}') == end {
+				return definiteOrderingTypeKind(pkg, info, fileIndex, scope, start, open, depth+1)
 			}
 		}
 	}
@@ -111,12 +116,12 @@ func definiteExprPointerDepth(pkg *load.Package, info *PackageInfo, fileIndex in
 	if chosen >= 0 {
 		binding := bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
-			return definiteTypePointerDepth(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
+			return definiteOrderingTypeKind(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
-		return definiteExprPointerDepth(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
+		return definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	if name == "nil" && LookupPackageSymbol(*info, name) < 0 && lookupScopeTokenNameCore(scope, file, start) < 0 {
+	if name == "nil" && lookupPackageSymbol(info.Symbols, name) < 0 && lookupScopeTokenNameCore(scope, file, start) < 0 {
 		return 1
 	}
 	for _, decl := range info.Decls {
@@ -124,18 +129,18 @@ func definiteExprPointerDepth(pkg *load.Package, info *PackageInfo, fileIndex in
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return definiteTypePointerDepth(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+			return definiteOrderingTypeKind(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
 		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return definiteExprPointerDepth(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return definiteOrderingExprKind(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return 0
 }
 
-func definiteTypePointerDepth(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) int {
+func definiteOrderingTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) int {
 	if depth > len(info.Types)+32 {
 		return 0
 	}
@@ -144,16 +149,19 @@ func definiteTypePointerDepth(pkg *load.Package, info *PackageInfo, fileIndex in
 	if start < 0 || start >= end {
 		return 0
 	}
+	if file.Tokens[start].KindLine&255 == syntax.TokenStruct && tokCharIs(file, start+1, '{') && findTypeMatching(file, start+1, '{', '}') == end {
+		return 256
+	}
 	if tokCharIs(file, start, '*') {
-		return 1 + definiteTypePointerDepth(pkg, info, fileIndex, scope, start+1, end, depth+1)
+		return 1 + definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+1, end, depth+1)
 	}
 	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return 0
 	}
-	index := LookupType(*info, tokenString(file, start))
+	index := lookupType(info.Types, tokenString(file, start))
 	if index < 0 {
 		return 0
 	}
 	typ := info.Types[index]
-	return definiteTypePointerDepth(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+	return definiteOrderingTypeKind(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }

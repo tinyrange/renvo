@@ -10,6 +10,8 @@ func TestPointerOrdering(t *testing.T) {
 		`func main(){a:=new(int);b:=new(int);_=a<b}`,
 		`func main(){a:=1;b:=2;_=&a>=&b}`,
 		`func f(a,b *int){_=a<=b}`,
+		`type S struct{x int};func f(a,b *S){_=*a<*b}`,
+		`func main(){a:=new(struct{x int});_=*a<*a}`,
 		`func main(){var a,b *int;_=a>b}`,
 		`type P *int; type Q = P; func f(a,b Q){_=a<b}`,
 		`func pointer()*int{return nil};func main(){_=pointer()<pointer()}`,

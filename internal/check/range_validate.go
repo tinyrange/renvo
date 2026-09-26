@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
+func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	// Avoid parsing and collecting bindings for functions without range loops.
 	found := false
@@ -18,14 +18,21 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 	if !found {
 		return -1
 	}
-	bindings := collectScopedTypeBindings(*file, fn, *body, signature)
+	bindings := *cachedBindings
+	if bindings == nil {
+		bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+		*cachedBindings = bindings
+	}
 	for _, stmt := range body.Stmts {
-		if stmt.Kind != syntax.StmtFor || numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
+		if stmt.Kind != syntax.StmtFor {
 			continue
 		}
 		for tok := stmt.StartTok + 1; tok < stmt.BodyStart; tok++ {
 			if file.Tokens[tok].KindLine&255 != syntax.TokenRange {
 				continue
+			}
+			if numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
+				break
 			}
 			start, end := tok+1, stmt.BodyStart
 			value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, start, end, tok, 0)
@@ -47,7 +54,7 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	file := &pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
 	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
-		if LookupType(*info, tokenString(file, start)) >= 0 {
+		if lookupType(info.Types, tokenString(file, start)) >= 0 {
 			return definiteStructType(pkg, info, fileIndex, scope, start, start+1, 0)
 		}
 		calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
@@ -111,7 +118,7 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return false
 	}
-	index := LookupType(*info, tokenString(file, start))
+	index := lookupType(info.Types, tokenString(file, start))
 	if index < 0 {
 		return false
 	}

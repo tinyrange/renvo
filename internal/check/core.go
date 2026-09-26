@@ -221,14 +221,14 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			operatorMark := arena.Mark()
-			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope)
-			arena.Reset(operatorMark)
+			var operandBindings []scopedTypeBinding
+			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if operatorTok >= 0 {
+				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, operatorTok
 			}
-			rangeMark := arena.Mark()
-			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope)
-			arena.Reset(rangeMark)
+			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			arena.Reset(operatorMark)
 			if rangeTok >= 0 {
 				return false, CheckErrOperand, fileIndex, rangeTok
 			}
