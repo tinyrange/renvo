@@ -12,6 +12,7 @@ type localRuleBinding struct {
 
 func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) (int, int) {
 	var bindings []localRuleBinding
+	var scopeEnds []int
 	for i := 0; i < len(signature.Params); i++ {
 		field := signature.Params[i]
 		if field.NameTok >= 0 {
@@ -28,8 +29,11 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 				end = op
 			}
 			start, end = trimDeclSpan(*file, start, end)
+			if len(names) > 0 && scopeEnds == nil {
+				scopeEnds = localRuleScopeEnds(*body)
+			}
 			for _, name := range names {
-				bindings = append(bindings, localRuleBinding{name, start, end, localRuleScopeEnd(*body, stmt.StartTok)})
+				bindings = append(bindings, localRuleBinding{name, start, end, scopeEnds[i]})
 			}
 			builtin := end-start == 1 && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(file, start)) < 0
 			if op >= 0 && builtin && literalIntegerOverflows(*file, op+1, stmt.EndTok, tokenString(file, start)) {
@@ -69,7 +73,10 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 		if op < 0 || !tokenTextIs(file, op, ":=") {
 			continue
 		}
-		endScope := localRuleScopeEnd(*body, stmt.StartTok)
+		if scopeEnds == nil {
+			scopeEnds = localRuleScopeEnds(*body)
+		}
+		endScope := scopeEnds[i]
 		newNames := false
 		for tok := stmt.StartTok; tok < op; tok++ {
 			if tokCharIs(file, tok, ',') {
