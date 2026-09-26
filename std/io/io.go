@@ -29,12 +29,15 @@ type StringWriter interface {
 
 type eofError struct{}
 type shortWriteError struct{}
+type unexpectedEOFError struct{}
 
-func (eofError) Error() string        { return "EOF" }
-func (shortWriteError) Error() string { return "short write" }
+func (eofError) Error() string           { return "EOF" }
+func (shortWriteError) Error() string    { return "short write" }
+func (unexpectedEOFError) Error() string { return "unexpected EOF" }
 
 var EOF error = eofError{}
 var ErrShortWrite error = shortWriteError{}
+var ErrUnexpectedEOF error = unexpectedEOFError{}
 
 func ReadAll(r Reader) ([]byte, error) {
 	var out []byte
