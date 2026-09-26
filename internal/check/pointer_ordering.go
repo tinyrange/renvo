@@ -31,7 +31,7 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 			continue
 		}
 		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			bindings = collectScopedTypeBindings(file, fn, body, signature)
 			*cachedBindings = bindings
 			ready = true
 		}
