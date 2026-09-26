@@ -49,8 +49,8 @@ func literalOrderingBoundary(file *syntax.File, at int, limit int, direction int
 			}
 			depth -= direction
 		} else if depth == 0 {
-			binary := exprBinaryOperatorKind(*file, at)
-			if ch == int(',') || ch == int(';') || ch == int(':') || isAssignOp(*file, at) || binary == exprBinaryCompare || binary == exprBinaryLogical ||
+			binary := exprBinaryOperatorKind(file, at)
+			if ch == int(',') || ch == int(';') || ch == int(':') || isAssignOp(file, at) || binary == exprBinaryCompare || binary == exprBinaryLogical ||
 				kind == syntax.TokenReturn || kind == syntax.TokenIf || kind == syntax.TokenFor || kind == syntax.TokenCase || kind == syntax.TokenSwitch {
 				return at
 			}

@@ -500,7 +500,7 @@ func completionTopLevelBinary(file syntax.File, start, end int) (int, int) {
 			continue
 		}
 		if depth == 0 && i > start {
-			if kind := exprBinaryOperatorKind(file, i); kind != exprBinaryNone {
+			if kind := exprBinaryOperatorKind(&file, i); kind != exprBinaryNone {
 				if kind == exprBinaryCompare || kind == exprBinaryLogical {
 					return i, kind
 				}
