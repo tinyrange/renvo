@@ -471,6 +471,14 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			!(file.Tokens[i+1].End-file.Tokens[i+1].Start == 1 && file.Src[int(file.Tokens[i+1].Start)] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
 			if selector.Symbol >= 0 {
+				if info.Imports[selector.BaseIndex].ImportPath != "C" {
+					if !exportedToken(file, i+1) {
+						return refs, selectors, i + 1
+					}
+					if bad := invalidImportedStructLiteral(file, i+1, &checked[selector.BasePackage], selector.Symbol); bad >= 0 {
+						return refs, selectors, bad
+					}
+				}
 				selectors = append(selectors, selector)
 			} else if selector.BasePackage >= 0 && !coreSelectorContinues(file, i+1, end) && !coreUnsafeSelector(info, fileIndex, file, i-1) && undefined < 0 {
 				undefined = i + 1
@@ -478,6 +486,97 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		}
 	}
 	return refs, selectors, undefined
+}
+
+func exportedToken(file *syntax.File, tok int) bool {
+	start := int(file.Tokens[tok].Start)
+	return syntax.IdentifierExported(file.Src, start)
+}
+
+func invalidImportedStructLiteral(file *syntax.File, name int, pkg *PackageInfo, symbol int) int {
+	if !tokCharIs(file, name+1, '{') {
+		return -1
+	}
+	// In []pkg.T{...}, [N]pkg.T{...}, or map[K]pkg.T{...}, the
+	// braces initialize the collection, not T's private fields. Pointer
+	// element types may appear between the bracket and package selector.
+	before := name - 3
+	collections := 0
+	for before >= 0 {
+		if tokCharIs(file, before, '*') {
+			before--
+			continue
+		}
+		if !tokCharIs(file, before, ']') {
+			break
+		}
+		depth := 1
+		before--
+		for before >= 0 && depth > 0 {
+			if tokCharIs(file, before, ']') {
+				depth++
+			}
+			if tokCharIs(file, before, '[') {
+				depth--
+			}
+			before--
+		}
+		if before >= 0 && tokenTextIs(file, before, "map") {
+			before--
+		}
+		collections++
+	}
+	typeIndex := lookupType(pkg.Types, pkg.Symbols[symbol].Name)
+	if typeIndex < 0 || pkg.Types[typeIndex].Kind != TypeStruct {
+		return -1
+	}
+	return invalidImportedLiteralElements(file, name+1, &pkg.Types[typeIndex], collections)
+}
+
+func invalidImportedLiteralElements(file *syntax.File, open int, typ *TypeInfo, collections int) int {
+	close := findTypeMatching(file, open, '{', '}')
+	if close <= open+1 {
+		return -1
+	}
+	for start := open + 1; start < close-1; {
+		end := nextTopLevelComma(*file, start, close-1)
+		if collections > 0 {
+			// An elided element literal still initializes the imported type.
+			// Skip a collection key, respecting brackets inside key expressions.
+			value := start
+			depth := 0
+			for at := start; at < end; at++ {
+				if depth == 0 && tokCharIs(file, at, ':') {
+					value = at + 1
+					break
+				}
+				if tokCharIs(file, at, '(') || tokCharIs(file, at, '[') || tokCharIs(file, at, '{') {
+					depth++
+				}
+				if tokCharIs(file, at, ')') || tokCharIs(file, at, ']') || tokCharIs(file, at, '}') {
+					depth--
+				}
+			}
+			if tokCharIs(file, value, '{') {
+				if bad := invalidImportedLiteralElements(file, value, typ, collections-1); bad >= 0 {
+					return bad
+				}
+			}
+		} else if start+1 < end && tokCharIs(file, start+1, ':') {
+			if !exportedToken(file, start) {
+				return start
+			}
+		} else {
+			for i := 0; i < len(typ.Fields); i++ {
+				field := typ.Fields[i].Name
+				if len(field) != 0 && !syntax.IdentifierExported([]byte(field), 0) {
+					return start
+				}
+			}
+		}
+		start = end + 1
+	}
+	return -1
 }
 
 func corePredeclaredToken(file *syntax.File, tok int) bool {
@@ -832,10 +931,9 @@ func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
 			if nameTok <= tok {
 				return i
 			}
-			// Scope collection precedes resolution. Prefer declarations already
-			// visible at this source position, but retain the historical fallback
-			// for forward labels and syntactic names in local type declarations.
-			if future < 0 {
+			// Only labels have function-wide scope before their declaration.
+			// Later locals must not hide package names or resolve earlier uses.
+			if future < 0 && scope.Names[i].Kind == NameLabel {
 				future = i
 			}
 		}
@@ -1286,7 +1384,7 @@ func collectCoreShortDeclScope(file syntax.File, start int, end int, scope *Core
 func coreLHSStart(file syntax.File, assign int, limit int) int {
 	start := assign - 1
 	for start > limit {
-		if tokCharIs(&file, start, ';') || tokCharIs(&file, start, '{') || tokCharIs(&file, start, '}') {
+		if tokCharIs(&file, start, ';') || tokCharIs(&file, start, '{') || tokCharIs(&file, start, '}') || tokCharIs(&file, start, ':') {
 			return start + 1
 		}
 		if syntax.TokenLine(file.Tokens[start]) != syntax.TokenLine(file.Tokens[assign]) {
