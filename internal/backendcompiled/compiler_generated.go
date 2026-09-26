@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c8eec2feff94392f19d254fb64bdf16a92df3c86ddbd2fd24789a46a29668cbb"
+const CompilerSourceDigest = "4168c3779cd41a22bad1ee3d22eda379f68816314b010f2fea5bd21b1bcaab64"
 
 // source: backend/compiler_common_impl.go
 
@@ -15997,8 +15997,10 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 renvoNonNil(g)
 size = renvoAlignValue(size, wordSize)
+
+
 if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
-mode == renvoPushStack && wordSize == 8 && size >= 128 {
+mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
 renvoAmd64PushStackBytes(&g.asm, offset, size)
 return
 }
