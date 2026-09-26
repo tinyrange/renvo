@@ -15990,8 +15990,10 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 	renvoNonNil(g)
 	size = renvoAlignValue(size, wordSize)
+	// Keep larger arguments on the word-push path so stack growth touches each
+	// guard page; one reservation must not skip a Windows stack guard page.
 	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
-		mode == renvoPushStack && wordSize == 8 && size >= 128 {
+		mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
 		renvoAmd64PushStackBytes(&g.asm, offset, size)
 		return
 	}
