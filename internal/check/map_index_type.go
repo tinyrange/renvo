@@ -5,9 +5,8 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) (int, int) {
+func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding, indexes []IndexExpr) (int, int) {
 	file := &pkg.Files[fileIndex].File
-	indexes := buildFuncIndexExprs(file, body)
 	if len(indexes) == 0 {
 		return CheckOK, -1
 	}
@@ -23,7 +22,8 @@ func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			break
 		}
 	}
-	for _, index := range indexes {
+	for indexPosition := 0; indexPosition < len(indexes); indexPosition++ {
+		index := &indexes[indexPosition]
 		start, end := stripOuterParens(file, index.BaseStart, index.BaseEnd)
 		// The current definite resolvers do not infer selector result types.
 		if end-start == 3 && tokCharIs(file, start+1, '.') {
@@ -51,7 +51,7 @@ func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 
 // Explicit array and slice bindings cannot be scalar operands or map elements.
 // Resolve the closest visible binding once before the more general resolvers.
-func mapIndexExplicitSequence(file *syntax.File, bindings []scopedTypeBinding, index IndexExpr) bool {
+func mapIndexExplicitSequence(file *syntax.File, bindings []scopedTypeBinding, index *IndexExpr) bool {
 	start, end := stripOuterParens(file, index.BaseStart, index.BaseEnd)
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return false

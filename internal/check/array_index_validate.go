@@ -18,12 +18,11 @@ type constantIndexContext struct {
 	strict    bool
 }
 
-func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
+func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, indexes []IndexExpr, signature *FuncSignature) int {
 	if fileIndex < 0 || fileIndex >= len(pkg.Files) {
 		return -1
 	}
 	file := &pkg.Files[fileIndex].File
-	indexes := buildFuncIndexExprs(file, body)
 	if len(indexes) == 0 {
 		return -1
 	}

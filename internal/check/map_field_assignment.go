@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syntax.File, body *syntax.Body, index IndexExpr, shape mapIndexShape) int {
+func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syntax.File, body *syntax.Body, index *IndexExpr, shape mapIndexShape) int {
 	if !shape.known {
 		return -1
 	}
