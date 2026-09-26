@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7c9fb804c7d9b21d3587fa080e5cd3e38c3ec03d099a8658680d8a76f8d45c5b"
+const CompilerSourceDigest = "c8eec2feff94392f19d254fb64bdf16a92df3c86ddbd2fd24789a46a29668cbb"
 
 // source: backend/compiler_common_impl.go
 
@@ -15997,6 +15997,11 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 renvoNonNil(g)
 size = renvoAlignValue(size, wordSize)
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+mode == renvoPushStack && wordSize == 8 && size >= 128 {
+renvoAmd64PushStackBytes(&g.asm, offset, size)
+return
+}
 for at := size - wordSize; at >= 0; at -= wordSize {
 if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
 renvoAsmPushStackWord(&g.asm, offset-at)
@@ -41098,6 +41103,19 @@ renvoAsmEmit24(a, 0x858b48)
 renvoAsmEmit32(a, 0x10+(reg-6)*8)
 renvoAsmStorePrimaryStack(a, offset)
 }
+func renvoAmd64PushStackBytes(a *renvoAsm, offset int, size int) {
+
+
+
+
+renvoAsmEmitText(a, "\x48\x81\xec")
+renvoAsmEmit32(a, size)
+renvoAsmAddressCallWord1Stack(a, offset)
+renvoAsmEmitText(a, "\x48\x89\xe7\xb9")
+renvoAsmEmit32(a, size)
+renvoAsmEmitText(a, "\xfc\xf3\xa4")
+}
+
 func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 a := &g.asm
 renvoAsmLoadPrimaryStack(a, srcPtr)
