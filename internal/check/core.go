@@ -245,6 +245,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 
+			localMark := arena.Mark()
+			localCode, localTok := invalidLocalRules(pkg, info, file, fn, &body, &signature, scope)
+			arena.Reset(localMark)
+			if localCode != CheckOK {
+				return false, localCode, fileIndex, localTok
+			}
+
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
