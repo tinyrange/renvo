@@ -52,7 +52,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				continue
 			}
 			if !numericReady {
-				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 				numericReady = true
 			}
 			if name == "append" {
@@ -71,7 +71,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				continue
 			}
 			if !numericReady {
-				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 				numericReady = true
 			}
 			if code, tok := invalidNumericBuiltinCall(pkg, info, fileIndex, scope, numericBindings, name, callee, close, args); code != CheckOK {
@@ -91,7 +91,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			}
 			if !nested {
 				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
-					numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+					numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 					numericReady = true
 				}
 				value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
@@ -182,7 +182,7 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 			brace++
 		} else if ch == int('}') {
 			brace--
-		} else if paren == 0 && bracket == 0 && brace == 0 && isExprBinaryOp(*file, i) {
+		} else if paren == 0 && bracket == 0 && brace == 0 && isExprBinaryOp(file, i) {
 			left := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, ExprSpan{StartTok: start, EndTok: i}, before, depth+1)
 			right := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, ExprSpan{StartTok: i + 1, EndTok: end}, before, depth+1)
 			if left != "" && right != "" && left != right {
@@ -250,7 +250,7 @@ func definiteBuiltinCanonicalTypeName(pkg *load.Package, info *PackageInfo, name
 	if typeIndex < 0 {
 		return ""
 	}
-	typ := info.Types[typeIndex]
+	typ := &info.Types[typeIndex]
 	if !typ.Alias {
 		return name
 	}
@@ -293,7 +293,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 		return definiteBuiltinTypeName(pkg, info, name, depth+1)
 	}
 	for i := start; i < end; i++ {
-		if isExprBinaryOp(*file, i) {
+		if isExprBinaryOp(file, i) {
 			left := definiteBuiltinExprType(pkg, info, fileIndex, signature, locals, ExprSpan{StartTok: start, EndTok: i}, before, depth+1)
 			right := definiteBuiltinExprType(pkg, info, fileIndex, signature, locals, ExprSpan{StartTok: i + 1, EndTok: end}, before, depth+1)
 			if left == right {
@@ -377,7 +377,7 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 	if typeIndex < 0 {
 		return builtinTypeUnknown
 	}
-	typ := info.Types[typeIndex]
+	typ := &info.Types[typeIndex]
 	return definiteBuiltinTypeSpan(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
