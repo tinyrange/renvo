@@ -11,6 +11,8 @@ func TestMapKeyComparability(t *testing.T) {
 		valid  bool
 	}{
 		{`var m map[[]int]int`, false},
+		{`type S struct { _ []int }; var m map[S]int`, false},
+		{`var m map[[2]func()]int`, false},
 		{`type K []int; var m map[K]int`, false},
 		{`var m map[[2][]int]int`, false},
 		{`var m map[struct{ A []int }]int`, false},
