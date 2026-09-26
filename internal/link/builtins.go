@@ -7,6 +7,10 @@ import (
 )
 
 func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
+	minShadowed := ordinaryBuiltinTopLevelObject(program, "min")
+	maxShadowed := ordinaryBuiltinTopLevelObject(program, "max")
+	clearShadowed := ordinaryBuiltinTopLevelObject(program, "clear")
+	stringShadowed := ordinaryBuiltinTopLevelObject(program, "string")
 	stringLess := ""
 	stringLessEmitted := false
 	runeString := ""
@@ -25,7 +29,8 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			}
 			mark := arena.Mark()
 			name := functionValueTokenText(program, i)
-			if ordinaryBuiltinShadowed(program, i, name) {
+			topLevel := name == "min" && minShadowed || name == "max" && maxShadowed || name == "clear" && clearShadowed || name == "string" && stringShadowed
+			if ordinaryBuiltinShadowedWithTopLevel(program, i, name, topLevel) {
 				arena.Reset(mark)
 				continue
 			}
@@ -1047,24 +1052,29 @@ func ordinaryBuiltinGeneratedName(program *unit.Program, base string) string {
 }
 
 func ordinaryBuiltinShadowed(program *unit.Program, at int, name string) bool {
-	for i := 0; i < len(program.Funcs); i++ {
-		if program.Funcs[i].NameTok == at {
-			return true
+	return ordinaryBuiltinShadowedWithTopLevel(program, at, name, ordinaryBuiltinTopLevelObject(program, name))
+}
+
+func ordinaryBuiltinShadowedWithTopLevel(program *unit.Program, at int, name string, topLevel bool) bool {
+	lo, hi := 0, len(program.Funcs)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if program.Funcs[mid].NameTok < at {
+			lo = mid + 1
+		} else {
+			hi = mid
 		}
+	}
+	if lo < len(program.Funcs) && program.Funcs[lo].NameTok == at {
+		return true
 	}
 	if at > 0 && functionValueTokenEquals(program, at-1, ".") {
 		return true
 	}
-	if ordinaryBuiltinTopLevelObject(program, name) || functionValueEnclosingLocalType(program, at, name) != "" {
+	if topLevel || functionValueEnclosingLocalType(program, at, name) != "" {
 		return true
 	}
-	fnIndex := -1
-	for i := 0; i < len(program.Funcs); i++ {
-		if program.Funcs[i].BodyStart < at && at < program.Funcs[i].BodyEnd {
-			fnIndex = i
-			break
-		}
-	}
+	fnIndex := functionValueEnclosingFunc(program, at)
 	if fnIndex < 0 {
 		return false
 	}
