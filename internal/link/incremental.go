@@ -341,7 +341,7 @@ func incrementalArtifactContextHash(programs []unit.Program, aliases []string, r
 			a, b = incrementalArtifactHashString(a, b, programs[i].Symbols[j].Name)
 		}
 		for j := 0; j < len(programs[i].Funcs); j++ {
-			name := coreLinkedProgramText(programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd)
+			name := coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd)
 			if name == "init" || name == "renvo_runtime_SetProcess" {
 				a, b = incrementalArtifactHashString(a, b, name)
 			}
