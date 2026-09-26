@@ -14,12 +14,12 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int, cachedBindings []scopedTypeBinding) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
-	var numericBindings []scopedTypeBinding
-	numericReady := false
+	numericBindings := cachedBindings
+	numericReady := cachedBindings != nil
 	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]

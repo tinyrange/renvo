@@ -172,10 +172,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
-			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
-				arena.Reset(functionArenaStart)
-				return false, CheckErrAssignTarget, fileIndex, tok
-			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
@@ -231,15 +227,22 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			operatorMark := arena.Mark()
+			// Retain immutable operand bindings through the final builtin check.
+			// They are allocated after validation scratch is released and reclaimed
+			// with the parsed body at functionArenaStart.
 			var operandBindings []scopedTypeBinding
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
+				arena.Reset(operatorMark)
+				return false, CheckErrAssignTarget, fileIndex, tok
+			}
 			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if operatorTok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, operatorTok
 			}
 			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
-			arena.Reset(operatorMark)
 			if rangeTok >= 0 {
+				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, rangeTok
 			}
 
@@ -266,7 +269,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, unsafeErr, fileIndex, unsafeTok
 			}
 			builtinCheckArenaStart := arena.Mark()
-			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls)
+			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls, operandBindings)
 			arena.Reset(builtinCheckArenaStart)
 			if builtinErr != CheckOK {
 				return false, builtinErr, fileIndex, builtinTok

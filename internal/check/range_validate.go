@@ -53,7 +53,7 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
-	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
+	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 		if lookupType(info.Types, tokenString(file, start)) >= 0 {
 			return definiteStructType(pkg, info, fileIndex, scope, start, start+1, 0)
 		}
@@ -116,7 +116,7 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if file.Tokens[start].KindLine&255 == syntax.TokenStruct && tokCharIs(file, start+1, '{') {
 		return findTypeMatching(file, start+1, '{', '}') == end
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return false
 	}
 	index := lookupType(info.Types, tokenString(file, start))
