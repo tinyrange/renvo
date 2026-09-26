@@ -77,13 +77,14 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return false
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return definiteStructType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
@@ -122,6 +123,6 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if index < 0 {
 		return false
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return definiteStructType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }
