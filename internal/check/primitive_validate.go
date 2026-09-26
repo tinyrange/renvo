@@ -18,7 +18,7 @@ const (
 const definitePrimitiveParamLimit = 10
 
 func invalidDefiniteLiteralBinary(file syntax.File, op int, left string, right string) bool {
-	kind := exprBinaryOperatorKind(file, op)
+	kind := exprBinaryOperatorKind(&file, op)
 	if kind == exprBinaryLogical {
 		return left != "bool" || right != "bool"
 	}

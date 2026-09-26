@@ -40,7 +40,7 @@ func invalidBareReturnShadow(file syntax.File, fn syntax.FuncDecl, body syntax.B
 			} else if stmt.Kind != syntax.StmtAssign {
 				continue
 			}
-			op := findTopLevelAssignOp(file, start, finish)
+			op := findTopLevelAssignOp(&file, start, finish)
 			if op < 0 || !tokenTextIs(&file, op, ":=") {
 				continue
 			}
