@@ -25,3 +25,15 @@ func TestBuiltinCallEditsMatchParsedTables(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxOnlyProgramNeedsBuiltinLowering(t *testing.T) {
+	const source = "package main\nfunc main(){a:=3;b:=4;println(max(a,b))}\n"
+	var program unit.Program
+	if !reparseFunctionValueProgram(&program, []byte(source), nil, len(source), -1) {
+		t.Fatal("parse failed")
+	}
+	_, _, builtins := functionValueProgramNeedsLowering(&program)
+	if !builtins {
+		t.Fatal("max-only program did not request builtin lowering")
+	}
+}
