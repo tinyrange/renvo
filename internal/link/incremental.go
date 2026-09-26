@@ -133,11 +133,19 @@ func (s *PackageSession) Step() bool {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerReflectionCore(&program, s.reflection, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
+	if !lowerReflectionCore(&program, s.reflection, s.transient) {
+		s.failUnit()
+		return true
+	}
+	if !lowerIntegerRangesCore(&program, s.transient) || !lowerAnonymousTypes(&program, s.transient) || !lowerGlobalFunctionLiterals(&program, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
 		s.failUnit()
 		return true
 	}
 	if !lowerMapsCore(&program, s.transient) {
+		s.failUnit()
+		return true
+	}
+	if !lowerInterfaceMethodExpressions(&program, s.transient) {
 		s.failUnit()
 		return true
 	}
@@ -148,6 +156,10 @@ func (s *PackageSession) Step() bool {
 		functionValuesOK = lowerFunctionValuesCore(&program, s.transient)
 	}
 	if !functionValuesOK {
+		s.failUnit()
+		return true
+	}
+	if !lowerUnicodeIdentifiers(&program, s.transient) {
 		s.failUnit()
 		return true
 	}
