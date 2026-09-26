@@ -171,15 +171,21 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 // remapping, so retain one cumulative token delta per edit instead of a map
 // entry for every token in the linked program.
 func mapBuiltinCallToken(index int, changes []callTokenEdit) int {
+	lo, hi := 0, len(changes)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if changes[mid].end <= index {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
 	delta := 0
-	for _, change := range changes {
-		if index < change.start {
-			break
-		}
-		if index < change.end {
-			return change.start + delta
-		}
-		delta = change.delta
+	if lo > 0 {
+		delta = changes[lo-1].delta
+	}
+	if lo < len(changes) && index >= changes[lo].start {
+		return changes[lo].start + delta
 	}
 	return index + delta
 }
