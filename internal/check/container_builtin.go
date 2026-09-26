@@ -122,8 +122,10 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
-	for _, decl := range info.Decls {
-		if decl.Name != tokenString(file, start) || decl.Kind != SymbolVar {
+	name := tokenString(file, start)
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
+		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {

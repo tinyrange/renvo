@@ -60,7 +60,8 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		return mapIndexExprShape(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
