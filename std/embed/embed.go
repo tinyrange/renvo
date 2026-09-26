@@ -254,9 +254,18 @@ func decompressArchive(compressed string, size int) ([]byte, bool) {
 			if distance > written || written+length > size {
 				return nil, false
 			}
-			for i := 0; i < length; i++ {
-				out[written] = out[written-distance]
-				written++
+			// A backreference can extend into the bytes it produces. Copy only
+			// initialized bytes, then grow the available prefix for the next
+			// chunk. This preserves repetition without a byte-at-a-time loop.
+			source := written - distance
+			for length > 0 {
+				chunk := written - source
+				if chunk > length {
+					chunk = length
+				}
+				copy(out[written:written+chunk], out[source:source+chunk])
+				written += chunk
+				length -= chunk
 			}
 		}
 	}

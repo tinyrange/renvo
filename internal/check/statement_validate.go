@@ -11,6 +11,9 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 	if code, tok := invalidBranchTarget(file, body, cSource); code != CheckOK {
 		return code, tok
 	}
+	if tok := invalidDuplicateSwitchCase(&file, &body); tok >= 0 {
+		return CheckErrDuplicate, tok
+	}
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
