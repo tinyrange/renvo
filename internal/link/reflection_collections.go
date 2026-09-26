@@ -97,7 +97,7 @@ func reflectionCollectionParts(typ string) (string, string, string) {
 	return kind, typ[end:], key
 }
 
-func reflectionCollectionEdits(program *unit.Program, names coreReflectionNames, pending []string) ([]functionValueEdit, bool) {
+func reflectionCollectionEdits(program *unit.Program, names *coreReflectionNames, pending []string) ([]functionValueEdit, bool) {
 	if names.collection == "" && names.rebuildCollection == "" && names.scalar == "" && names.scalarLike == "" && names.assign == "" {
 		return nil, true
 	}
