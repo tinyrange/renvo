@@ -59,8 +59,10 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 		}
 		return copySliceElement(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
-	for _, decl := range info.Decls {
-		if decl.Kind != SymbolVar || decl.Name != tokenString(file, start) {
+	name := tokenString(file, start)
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
+		if decl.Kind != SymbolVar || decl.Name != name {
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
