@@ -15,7 +15,7 @@ func invalidDefiniteSliceOperand(pkg *load.Package, info *PackageInfo, fileIndex
 		if close <= open || close > fn.BodyEnd || findTypeTopLevelChar(file, open+1, close-1, ':') < 0 {
 			continue
 		}
-		start, end := stripOuterParens(file, exprOperandStartBefore(*file, fn.BodyStart+1, open), open)
+		start, end := stripOuterParens(file, exprOperandStartBefore(file, fn.BodyStart+1, open), open)
 		array := false
 		if start < end && tokCharIs(file, end-1, '}') {
 			typeEnd := findTypeTopLevelChar(file, start, end, '{')

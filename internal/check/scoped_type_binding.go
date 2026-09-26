@@ -14,7 +14,7 @@ type scopedTypeBinding struct {
 	iotaValue            int
 }
 
-func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax.Body, signature *FuncSignature) []scopedTypeBinding {
+func collectScopedTypeBindings(file *syntax.File, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) []scopedTypeBinding {
 	var bindings []scopedTypeBinding
 	for group := 0; group < 3; group++ {
 		fields := signature.Params
@@ -24,12 +24,14 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 		if group == 2 {
 			fields = signature.Receiver
 		}
-		for _, field := range fields {
+		for fieldIndex := 0; fieldIndex < len(fields); fieldIndex++ {
+			field := &fields[fieldIndex]
 			bindings = append(bindings, scopedTypeBinding{name: field.NameTok, visible: fn.BodyStart, end: fn.BodyEnd, typeStart: field.TypeStart, typeEnd: field.TypeEnd, valueStart: -1, valueEnd: -1, writable: true})
 		}
 	}
-	scopeEnds := localRuleScopeEnds(body)
-	for statementIndex, stmt := range body.Stmts {
+	scopeEnds := localRuleScopeEnds(*body)
+	for statementIndex := 0; statementIndex < len(body.Stmts); statementIndex++ {
+		stmt := &body.Stmts[statementIndex]
 		start, end := stmt.StartTok, stmt.EndTok
 		scopeEnd := 0
 		if stmt.Kind == syntax.StmtDecl {
@@ -37,14 +39,14 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			kind := file.Tokens[start].KindLine & 255
 			start++
 			constant := kind == syntax.TokenConst
-			if tokCharIs(&file, start, '(') {
+			if tokCharIs(file, start, '(') {
 				ordinal, templateStart, templateEnd := 0, -1, -1
 				for pos := start + 1; pos < end-1; {
-					pos = skipLocalSeparators(file, pos, end-1)
-					if pos >= end-1 || tokCharIs(&file, pos, ')') {
+					pos = skipLocalSeparators(*file, pos, end-1)
+					if pos >= end-1 || tokCharIs(file, pos, ')') {
 						break
 					}
-					finish := statementSpecEnd(file, pos, end-1)
+					finish := statementSpecEnd(*file, pos, end-1)
 					first := len(bindings)
 					bindings = appendScopedTypeBindings(bindings, file, pos, finish, scopeEnd, kind == syntax.TokenVar, constant, false)
 					if constant {
@@ -52,7 +54,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 							templateStart, templateEnd = first, len(bindings)
 						} else if templateStart >= 0 && templateEnd-templateStart == len(bindings)-first {
 							for i := first; i < len(bindings); i++ {
-								previous := bindings[templateStart+i-first]
+								previous := &bindings[templateStart+i-first]
 								bindings[i].typeStart, bindings[i].typeEnd = previous.typeStart, previous.typeEnd
 								bindings[i].valueStart, bindings[i].valueEnd = previous.valueStart, previous.valueEnd
 							}
@@ -76,7 +78,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			start++
 			end = stmt.BodyStart
 			scopeEnd = stmt.EndTok
-			if semi := findTypeTopLevelChar(&file, start, end, ';'); semi >= 0 {
+			if semi := findTypeTopLevelChar(file, start, end, ';'); semi >= 0 {
 				end = semi
 			}
 		} else if stmt.Kind == syntax.StmtCase {
@@ -85,7 +87,7 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 			continue
 		}
 		op := findTopLevelAssignOp(file, start, end)
-		if op >= 0 && tokenTextIs(&file, op, ":=") {
+		if op >= 0 && tokenTextIs(file, op, ":=") {
 			if scopeEnd == 0 {
 				scopeEnd = scopeEnds[statementIndex]
 			}
@@ -95,15 +97,15 @@ func collectScopedTypeBindings(file syntax.File, fn syntax.FuncDecl, body syntax
 	return bindings
 }
 
-func appendScopedTypeBindings(bindings []scopedTypeBinding, file syntax.File, start, end, scopeEnd int, variable, constant, short bool) []scopedTypeBinding {
-	start, end = trimDeclSpan(file, start, end)
-	names, namesEnd := localDeclNameTokens(file, start, end)
+func appendScopedTypeBindings(bindings []scopedTypeBinding, file *syntax.File, start, end, scopeEnd int, variable, constant, short bool) []scopedTypeBinding {
+	start, end = trimDeclSpan(*file, start, end)
+	names, namesEnd := localDeclNameTokens(*file, start, end)
 	op := findTopLevelAssignOp(file, start, end)
 	typeStart, typeEnd := namesEnd, end
 	var values []ExprSpan
 	if op >= 0 {
 		typeEnd = op
-		values = splitExprList(file, op+1, end)
+		values = splitExprList(*file, op+1, end)
 	}
 	for i, name := range names {
 		binding := scopedTypeBinding{name: name, visible: end, end: scopeEnd, typeStart: -1, typeEnd: -1, valueStart: -1, valueEnd: -1, writable: variable, constant: constant}
@@ -118,7 +120,7 @@ func appendScopedTypeBindings(bindings []scopedTypeBinding, file syntax.File, st
 		if short {
 			for i := 0; i < len(bindings); i++ {
 				old := &bindings[i]
-				if old.end == scopeEnd && old.visible <= start && coreTokensEqual(&file, old.name, name) {
+				if old.end == scopeEnd && old.visible <= start && coreTokensEqual(file, old.name, name) {
 					reused = true
 					break
 				}

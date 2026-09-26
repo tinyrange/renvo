@@ -20,7 +20,7 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || hasNested && numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
 			continue
 		}
-		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op < 0 && (tokenTextIs(file, stmt.EndTok-1, "++") || tokenTextIs(file, stmt.EndTok-1, "--")) {
 			op = stmt.EndTok - 1
 		}
@@ -36,7 +36,7 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 				continue
 			}
 			if !ready {
-				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				bindings = collectScopedTypeBindings(file, fn, body, signature)
 				ready = true
 			}
 			chosen := -1

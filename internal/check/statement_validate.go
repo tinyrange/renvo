@@ -66,7 +66,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(&file, stmt.StartTok, stmt.EndTok)
 		if op < 0 {
 			continue
 		}
