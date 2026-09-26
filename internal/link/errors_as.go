@@ -80,7 +80,7 @@ func lowerErrorsAsCore(program *unit.Program, names []string, transient bool) bo
 	body += "return false,false }"
 	var edits []functionValueEdit
 	for i := 0; i < len(names); i += 2 {
-		index := findCoreFuncByName(*program, names[i])
+		index := findCoreFuncByName(program, names[i])
 		if index < 0 {
 			return false
 		}
@@ -114,7 +114,7 @@ func errorsAsReferenced(program *unit.Program, names []string) bool {
 		return true
 	}
 	for i := 1; i < len(names); i += 2 {
-		index := findCoreFuncByName(*program, names[i])
+		index := findCoreFuncByName(program, names[i])
 		if index < 0 {
 			continue
 		}
