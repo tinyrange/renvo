@@ -29,6 +29,7 @@ type PackageSession struct {
 	prepared        []unit.Program
 	symbolOffsets   []int
 	aliases         []string
+	reflection      *coreReflectionNames
 	plusReplacement int
 	contextA        int
 	contextB        int
@@ -87,6 +88,8 @@ func (s *PackageSession) Step() bool {
 		ensureCoreProgramSymbols(s.prepared)
 		s.symbolOffsets = corePackageSymbolOffsets(s.prepared)
 		s.aliases = corePackageSymbolAliases(s.prepared, s.build.Root, s.symbolOffsets)
+		s.reflection = new(coreReflectionNames)
+		reflectionNamesCore(s.prepared, s.aliases, s.symbolOffsets, s.reflection)
 		s.contextA, s.contextB = incrementalArtifactContextHash(s.prepared, s.aliases, s.build.Root)
 		s.plusReplacement = len(s.aliases)
 		s.aliases = append(s.aliases, "+")
@@ -129,7 +132,8 @@ func (s *PackageSession) Step() bool {
 	for i := 0; i < len(s.artifacts); i++ {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
-	if !lowerConcurrencyCore(&program, s.transient) {
+	concurrencyNeeded := len(program.ConcurrencySites) > 0
+	if !lowerReflectionCore(&program, s.reflection, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
 		s.failUnit()
 		return true
 	}
@@ -335,7 +339,7 @@ func incrementalArtifactContextHash(programs []unit.Program, aliases []string, r
 			a, b = incrementalArtifactHashString(a, b, programs[i].Symbols[j].Name)
 		}
 		for j := 0; j < len(programs[i].Funcs); j++ {
-			name := coreLinkedProgramText(programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd)
+			name := coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd)
 			if name == "init" || name == "renvo_runtime_SetProcess" {
 				a, b = incrementalArtifactHashString(a, b, name)
 			}

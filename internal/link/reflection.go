@@ -26,8 +26,7 @@ type coreReflectionNames struct {
 
 // Resolve the intrinsic by import identity before package namespacing and
 // transient retirement. A user package merely named reflect is not intrinsic.
-func reflectionNamesCore(programs []unit.Program, aliases []string, offsets []int) coreReflectionNames {
-	var out coreReflectionNames
+func reflectionNamesCore(programs []unit.Program, aliases []string, offsets []int, out *coreReflectionNames) {
 	for i := 0; i < len(programs); i++ {
 		if programs[i].ImportPath != "reflect" {
 			continue
@@ -79,7 +78,7 @@ func reflectionNamesCore(programs []unit.Program, aliases []string, offsets []in
 		}
 	}
 	if out.describe == "" {
-		return out
+		return
 	}
 	for i := 0; i < len(programs); i++ {
 		for j := 0; j < len(programs[i].Symbols); j++ {
@@ -91,10 +90,9 @@ func reflectionNamesCore(programs []unit.Program, aliases []string, offsets []in
 			}
 		}
 	}
-	return out
 }
 
-func reflectionOriginalName(names coreReflectionNames, name string) string {
+func reflectionOriginalName(names *coreReflectionNames, name string) string {
 	for i := 0; i < len(names.aliases); i++ {
 		if names.aliases[i] == name {
 			return names.originals[i]
@@ -103,14 +101,14 @@ func reflectionOriginalName(names coreReflectionNames, name string) string {
 	return name
 }
 
-func lowerReflectionCore(program *unit.Program, names coreReflectionNames, transient bool) bool {
+func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, transient bool) bool {
 	if names.describe == "" {
 		return true
 	}
 	if names.structType == "" || names.fieldType == "" {
 		return false
 	}
-	fnIndex := findCoreFuncByName(*program, names.describe)
+	fnIndex := findCoreFuncByName(program, names.describe)
 	if fnIndex < 0 {
 		return false
 	}
@@ -211,7 +209,7 @@ func lowerReflectionCore(program *unit.Program, names coreReflectionNames, trans
 	copyBody += "}; return nil,false }"
 	edits := []functionValueEdit{functionValueTokenRangeEdit(program, fn.BodyStart, close+1, body)}
 	if names.fieldValue != "" {
-		index := findCoreFuncByName(*program, names.fieldValue)
+		index := findCoreFuncByName(program, names.fieldValue)
 		if index < 0 {
 			return false
 		}
@@ -223,7 +221,7 @@ func lowerReflectionCore(program *unit.Program, names coreReflectionNames, trans
 		edits = append(edits, functionValueTokenRangeEdit(program, getter.BodyStart, end+1, readBody))
 	}
 	if names.setField != "" {
-		index := findCoreFuncByName(*program, names.setField)
+		index := findCoreFuncByName(program, names.setField)
 		if index < 0 {
 			return false
 		}
@@ -240,7 +238,7 @@ func lowerReflectionCore(program *unit.Program, names coreReflectionNames, trans
 	}
 	edits = append(edits, collectionEdits...)
 	if names.structCopy != "" {
-		index := findCoreFuncByName(*program, names.structCopy)
+		index := findCoreFuncByName(program, names.structCopy)
 		if index < 0 {
 			return false
 		}

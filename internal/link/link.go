@@ -116,7 +116,8 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	ensureCoreProgramSymbols(programs)
 	symbolOffsets := corePackageSymbolOffsets(programs)
 	aliases := corePackageSymbolAliases(programs, root, symbolOffsets)
-	reflection := reflectionNamesCore(programs, aliases, symbolOffsets)
+	var reflection coreReflectionNames
+	reflectionNamesCore(programs, aliases, symbolOffsets, &reflection)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
 	if transient {
@@ -202,7 +203,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerReflectionCore(&program, reflection, transient) {
+	if !lowerReflectionCore(&program, &reflection, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -446,7 +447,7 @@ func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, boo
 }
 
 func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool, initNames []string) (unit.Program, bool) {
-	if src.Package != "main" || findCoreFuncByName(src, "appMain") >= 0 || findCoreFuncByName(src, "main") < 0 {
+	if src.Package != "main" || findCoreFuncByName(&src, "appMain") >= 0 || findCoreFuncByName(&src, "main") < 0 {
 		return src, true
 	}
 	if processState {
@@ -487,7 +488,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 
 func programsContainCoreFunc(programs []unit.Program, name string) bool {
 	for i := 0; i < len(programs); i++ {
-		if findCoreFuncByName(programs[i], name) >= 0 {
+		if findCoreFuncByName(&programs[i], name) >= 0 {
 			return true
 		}
 	}
@@ -555,7 +556,7 @@ func coreProgramInitFunctionNames(programs []unit.Program) []string {
 	for i := 0; i < len(programs); i++ {
 		ordinal := 0
 		for j := 0; j < len(programs[i].Funcs); j++ {
-			if coreLinkedProgramText(programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
+			if coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
 				continue
 			}
 			names = append(names, coreInitFunctionAliasName(i, ordinal))
@@ -1355,6 +1356,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 				out[index] = alias
 			} else if directiveSize >= 0 {
 				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
+			} else if corePredeclaredAliasNeeded(name) {
+				out[index] = coreSymbolAliasName(i, name)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
 			next[index] = buckets[bucket]
@@ -1576,7 +1579,7 @@ func copyCoreTokens(src []unit.Token, limit int) []unit.Token {
 	return out
 }
 
-func findCoreFuncByName(program unit.Program, name string) int {
+func findCoreFuncByName(program *unit.Program, name string) int {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
 		if coreLinkedProgramText(program, fn.NameStart, fn.NameEnd) == name {
@@ -1586,7 +1589,7 @@ func findCoreFuncByName(program unit.Program, name string) int {
 	return -1
 }
 
-func coreLinkedProgramText(program unit.Program, start int, end int) string {
+func coreLinkedProgramText(program *unit.Program, start int, end int) string {
 	if start < 0 || end < start || end > len(program.Text) {
 		return ""
 	}

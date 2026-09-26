@@ -27,11 +27,18 @@ import "example.com/case/model"
 func main() { meta,ok:=reflect.Describe(model.Record{}); if !ok || meta.Name!="Record" { panic("metadata") } }
 `)},
 	}
-	for _, mode := range []string{"normal", "transient"} {
+	for _, mode := range []string{"normal", "incremental", "transient", "incremental_transient"} {
 		t.Run(mode, func(t *testing.T) {
 			input := buildFromFiles(t, files)
 			var linked Result
-			if mode == "transient" {
+			if mode == "incremental_transient" {
+				session := BeginPackageSession(input, true)
+				for !session.Step() {
+				}
+				linked = session.Result()
+			} else if mode == "incremental" {
+				linked = LinkBuildCoreIncremental(input)
+			} else if mode == "transient" {
 				linked = LinkBuildCoreTransient(input)
 			} else {
 				linked = LinkBuildCore(input)
