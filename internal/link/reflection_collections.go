@@ -217,7 +217,7 @@ func reflectionCollectionEdits(program *unit.Program, names *coreReflectionNames
 		if name == "" {
 			continue
 		}
-		index := findCoreFuncByName(*program, name)
+		index := findCoreFuncByName(program, name)
 		if index < 0 {
 			return nil, false
 		}

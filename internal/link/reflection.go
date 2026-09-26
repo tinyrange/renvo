@@ -108,7 +108,7 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 	if names.structType == "" || names.fieldType == "" {
 		return false
 	}
-	fnIndex := findCoreFuncByName(*program, names.describe)
+	fnIndex := findCoreFuncByName(program, names.describe)
 	if fnIndex < 0 {
 		return false
 	}
@@ -209,7 +209,7 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 	copyBody += "}; return nil,false }"
 	edits := []functionValueEdit{functionValueTokenRangeEdit(program, fn.BodyStart, close+1, body)}
 	if names.fieldValue != "" {
-		index := findCoreFuncByName(*program, names.fieldValue)
+		index := findCoreFuncByName(program, names.fieldValue)
 		if index < 0 {
 			return false
 		}
@@ -221,7 +221,7 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 		edits = append(edits, functionValueTokenRangeEdit(program, getter.BodyStart, end+1, readBody))
 	}
 	if names.setField != "" {
-		index := findCoreFuncByName(*program, names.setField)
+		index := findCoreFuncByName(program, names.setField)
 		if index < 0 {
 			return false
 		}
@@ -238,7 +238,7 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 	}
 	edits = append(edits, collectionEdits...)
 	if names.structCopy != "" {
-		index := findCoreFuncByName(*program, names.structCopy)
+		index := findCoreFuncByName(program, names.structCopy)
 		if index < 0 {
 			return false
 		}
