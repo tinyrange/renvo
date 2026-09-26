@@ -31,7 +31,14 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 			}
 		}
 		if !known && file.Tokens[dot-1].KindLine&255 == syntax.TokenIdent && !tokCharIs(file, dot-2, '.') {
-			if !ready {
+			local := lookupScopeTokenNameCore(scope, file, dot-1) >= 0
+			if !local {
+				symbol := lookupPackageSymbolTextCore(info, file, dot-1)
+				if symbol < 0 || info.Symbols[symbol].Kind != SymbolVar {
+					continue
+				}
+			}
+			if local && !ready {
 				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
 				ready = true
 			}
@@ -65,8 +72,8 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 }
 
 func knownSelectorMethod(pkg *load.Package, info *PackageInfo, index int, name string) bool {
-	for fileIndex, source := range pkg.Files {
-		file := &source.File
+	for fileIndex := range pkg.Files {
+		file := &pkg.Files[fileIndex].File
 		for _, fn := range file.Funcs {
 			if fn.ReceiverStart < 0 || !tokenTextIs(file, fn.NameTok, name) {
 				continue
