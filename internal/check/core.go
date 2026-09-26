@@ -172,10 +172,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
-			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature); tok >= 0 {
-				arena.Reset(functionArenaStart)
-				return false, CheckErrAssignTarget, fileIndex, tok
-			}
 			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, fn, body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
@@ -230,6 +226,26 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 
+			operatorMark := arena.Mark()
+			// Retain immutable operand bindings through the final builtin check.
+			// They are allocated after validation scratch is released and reclaimed
+			// with the parsed body at functionArenaStart.
+			var operandBindings []scopedTypeBinding
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
+				arena.Reset(operatorMark)
+				return false, CheckErrAssignTarget, fileIndex, tok
+			}
+			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			if operatorTok >= 0 {
+				arena.Reset(operatorMark)
+				return false, CheckErrOperand, fileIndex, operatorTok
+			}
+			rangeTok := invalidRangeOperand(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			if rangeTok >= 0 {
+				arena.Reset(operatorMark)
+				return false, CheckErrOperand, fileIndex, rangeTok
+			}
+
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
@@ -253,7 +269,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, unsafeErr, fileIndex, unsafeTok
 			}
 			builtinCheckArenaStart := arena.Mark()
-			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls)
+			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, fn, &signature, &body, scope, builtinCalls, operandBindings)
 			arena.Reset(builtinCheckArenaStart)
 			if builtinErr != CheckOK {
 				return false, builtinErr, fileIndex, builtinTok
@@ -454,11 +470,11 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			}
 		}
 		if !skipRef {
-			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
+			scopeIndex = lookupScopeTokenNameCore(&scope, file, i)
 		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokenTextIs(file, i+1, ":") {
 			// A leading identifier in a keyed map literal is an expression even
 			// though the same token shape denotes a field name in a struct literal.
-			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
+			scopeIndex = lookupScopeTokenNameCore(&scope, file, i)
 		}
 		if scopeIndex >= 0 && scope.Names[scopeIndex].Kind == NameVariable && i != scope.Names[scopeIndex].Token && !coreLocalWriteOnly(file, i, end) {
 			scope.Names[scopeIndex].Kind = NameVariableUsed
@@ -690,7 +706,7 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file *syntax.File, fileIndex int
 			i += 2
 			continue
 		}
-		if lookupScopeTokenNameCore(scope, file, i) < 0 {
+		if lookupScopeTokenNameCore(&scope, file, i) < 0 {
 			symbol := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbol >= 0 {
 				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: info.Package, Symbol: symbol})
@@ -709,7 +725,7 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 		BasePackage: -1,
 		Symbol:      -1,
 	}
-	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
+	scopeIndex := lookupScopeTokenNameCore(&scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
 		selector.BaseIndex = scopeIndex
 		return selector
@@ -742,7 +758,7 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 
 func resolveImportSelectorTypeRefCore(fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, file *syntax.File, baseTok int, dotTok int, nameTok int) CoreTypeRef {
 	ref := CoreTypeRef{Kind: TypeRefUnknown, File: fileIndex, Token: nameTok, BaseTok: baseTok, DotTok: dotTok, Package: -1, Symbol: -1}
-	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
+	scopeIndex := lookupScopeTokenNameCore(&scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
 		ref.Kind = TypeRefScope
 		return ref
@@ -792,7 +808,7 @@ func cImportDeclaredTokenCore(info *PackageInfo, fileIndex int, file *syntax.Fil
 	return false
 }
 
-func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
+func lookupScopeTokenNameCore(scope *CoreScope, file *syntax.File, tok int) int {
 	if len(scope.Names) == 0 || tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
@@ -1172,7 +1188,7 @@ func collectCoreLeadingIdentList(file syntax.File, start int, end int, scope *Co
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return
 		}
-		if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(*scope, &file, i) < 0 {
+		if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
 			addCoreScopeName(scope, file, i, NameLocal, false, false, variable)
 		}
 		i++
@@ -1288,7 +1304,7 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 func collectCoreShortDeclScope(file syntax.File, start int, end int, scope *CoreScope) {
 	for i := start; i < end; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
-			if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(*scope, &file, i) < 0 {
+			if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
 				addCoreScopeName(scope, file, i, NameLocal, false, false, true)
 			}
 		}

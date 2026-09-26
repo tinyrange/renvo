@@ -17,6 +17,15 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if stmt.Kind == syntax.StmtIf {
+			start, end := stripOuterParens(&file, stmt.ExprStart, stmt.ExprEnd)
+			if end-start == 1 {
+				kind := definiteLiteralKind(file, start)
+				if kind != "" && kind != "bool" {
+					return CheckErrOperand, start
+				}
+			}
+		}
 		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrGoroutine, stmt.ExprStart
 		}
@@ -69,7 +78,7 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(&file, stmt.StartTok, stmt.EndTok)
 		if op < 0 {
 			continue
 		}

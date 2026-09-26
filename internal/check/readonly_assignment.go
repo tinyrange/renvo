@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
+func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	ready := false
@@ -20,7 +20,7 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || hasNested && numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
 			continue
 		}
-		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op < 0 && (tokenTextIs(file, stmt.EndTok-1, "++") || tokenTextIs(file, stmt.EndTok-1, "--")) {
 			op = stmt.EndTok - 1
 		}
@@ -36,11 +36,16 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 				continue
 			}
 			if !ready {
-				bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				bindings = *cachedBindings
+				if bindings == nil {
+					bindings = collectScopedTypeBindings(file, fn, body, signature)
+					*cachedBindings = bindings
+				}
 				ready = true
 			}
 			chosen := -1
-			for i, binding := range bindings {
+			for i := 0; i < len(bindings); i++ {
+				binding := &bindings[i]
 				if binding.visible <= op && op < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 					chosen = i
 				}
