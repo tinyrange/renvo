@@ -33,7 +33,7 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 			}
 		}
 	}
-	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
+	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 		name := tokenString(file, start)
 		if name == "make" && lookupPackageSymbol(info.Symbols, name) < 0 {
 			return copySliceTypeElement(pkg, info, fileIndex, scope, start+2, nextTopLevelComma(*file, start+2, end-1), 0)
@@ -86,7 +86,7 @@ func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, s
 	if end-start >= 3 && tokCharIs(file, start, '[') && tokCharIs(file, start+1, ']') {
 		return copyElementIdentity(pkg, info, fileIndex, scope, start+2, end, 0)
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return ""
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -117,7 +117,7 @@ func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, sc
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)
