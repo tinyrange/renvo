@@ -15863,7 +15863,7 @@ func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int,
 	// straight-line bytecode. The bulk loop is primarily a native-code size
 	// optimization, so retain the compact path for the hosted targets without
 	// imposing its loop overhead on the deterministic VM frontend.
-	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
+	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 		count := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -15921,7 +15921,7 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 	renvoNonNil(g)
 	// Large aggregate loads and stores use the existing overlap-safe copy
 	// operation instead of expanding a load/store pair for every word.
-	if renvoPreparedBackendActive == 0 && size >= 64 &&
+	if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
 		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 		(mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -21149,26 +21149,24 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 		return
 	}
 	a := &g.asm
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+		// Only native WebAssembly receives this compact instruction. RNVB and
+		// prepared targets keep their existing byte-copy contract.
+		renvoAsmLoadPrimaryStack(a, srcPtr)
+		renvoAsmLoadSecondaryStack(a, destPtr)
+		renvoAsmLoadTertiaryStack(a, byteCount)
+		renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
+		renvoAsmEmit8(a, renvoWasm32RegRdx)
+		renvoAsmEmit8(a, renvoWasm32RegRax)
+		renvoAsmEmit8(a, renvoWasm32RegRcx)
+		return
+	}
 	index := renvoAddUnnamedLocal(g, renvoTypeInt)
 	copyDone := renvoAsmNewLabel(a)
 	forward := renvoAsmNewLabel(a)
 	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, destPtr)
 	renvoAsmCmpTertiaryPrimaryJump(a, 0x9e, forward)
 	renvoAsmCopyStackSlot(a, byteCount, index)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-		wordLoop := renvoAsmNewLabel(a)
-		wordDone := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, wordLoop)
-		renvoAsmJcmpStackImm(a, index, 4, wordDone, 0x9c)
-		renvoAsmLoadPrimaryStack(a, index)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmSubPrimaryTertiary(a)
-		renvoAsmStorePrimaryStack(a, index)
-		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-		renvoAsmJmpLabel(a, wordLoop)
-		renvoAsmMarkLabel(a, wordDone)
-	}
 	backward := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, backward)
 	renvoAsmJcmpStackImm(a, index, 0, copyDone, 0x9e)
@@ -21177,24 +21175,6 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmJmpLabel(a, backward)
 	renvoAsmMarkLabel(a, forward)
 	renvoAsmStoreStackImm(a, index, 0)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-		wordLoop := renvoAsmNewLabel(a)
-		wordDone := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, wordLoop)
-		renvoAsmLoadPrimaryTertiaryStack(a, byteCount, index)
-		renvoAsmSubPrimaryTertiary(a)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimaryJump(a, 0x9f, wordDone)
-		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-		renvoAsmLoadPrimaryStack(a, index)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmAddPrimaryTertiary(a)
-		renvoAsmStorePrimaryStack(a, index)
-		renvoAsmJmpLabel(a, wordLoop)
-		renvoAsmMarkLabel(a, wordDone)
-	}
 	forwardLoop := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, forwardLoop)
 	renvoAsmJgeStackStack(a, index, byteCount, copyDone)
@@ -21259,20 +21239,6 @@ func renvoEmitCopyBytesAarch64(g *renvoLinearGen, srcPtr int, destPtr int, byteC
 	renvoAsmMarkLabel(a, done)
 }
 
-func renvoEmitCopyWordAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
-	renvoNonNil(g)
-	a := &g.asm
-	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, index)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, 4)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryTertiaryStack(a, destPtr, index)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-}
 func renvoEmitCopyByteAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
 	renvoNonNil(g)
 	a := &g.asm
@@ -22361,6 +22327,19 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+	if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// EAX is the base, EDX the nonnegative length, and ECX the index.
+		// An unsigned comparison also rejects every negative index.
+		renvoAsmEmitText(a, "\x39\xd1") // cmp ecx, edx
+		renvo386AsmJccLabel(a, 0x83, invalid)
+		renvoAsmAddScaledTertiary(a, elemSize)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
@@ -22480,6 +22459,25 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+	if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Preserve the original index in secondary, as the caller expects.
+		renvoAsmEmitText(a, "\x89\xc2\x39\xc8") // mov edx, eax; cmp eax, ecx
+		renvo386AsmJccLabel(a, 0x83, invalid)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 1)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		if !g.meta.panicEnabled {
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmRet(a)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "348088d28d2a4db4f6c54c8155c4ef0fb67a536959affd5063a5cf327040696c"
+const CompilerSourceDigest = "7c9fb804c7d9b21d3587fa080e5cd3e38c3ec03d099a8658680d8a76f8d45c5b"
 
 // source: backend/compiler_common_impl.go
 
@@ -15870,7 +15870,7 @@ renvoNonNil(g)
 
 
 
-if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 {
+if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
 destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 count := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -15928,7 +15928,7 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 renvoNonNil(g)
 
 
-if renvoPreparedBackendActive == 0 && size >= 64 &&
+if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
 (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 (mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 source := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -21156,26 +21156,24 @@ renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
 return
 }
 a := &g.asm
+if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+
+
+renvoAsmLoadPrimaryStack(a, srcPtr)
+renvoAsmLoadSecondaryStack(a, destPtr)
+renvoAsmLoadTertiaryStack(a, byteCount)
+renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
+renvoAsmEmit8(a, renvoWasm32RegRdx)
+renvoAsmEmit8(a, renvoWasm32RegRax)
+renvoAsmEmit8(a, renvoWasm32RegRcx)
+return
+}
 index := renvoAddUnnamedLocal(g, renvoTypeInt)
 copyDone := renvoAsmNewLabel(a)
 forward := renvoAsmNewLabel(a)
 renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, destPtr)
 renvoAsmCmpTertiaryPrimaryJump(a, 0x9e, forward)
 renvoAsmCopyStackSlot(a, byteCount, index)
-if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-wordLoop := renvoAsmNewLabel(a)
-wordDone := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, wordLoop)
-renvoAsmJcmpStackImm(a, index, 4, wordDone, 0x9c)
-renvoAsmLoadPrimaryStack(a, index)
-renvoAsmPushImm(a, 4)
-renvoAsmPopTertiary(a)
-renvoAsmSubPrimaryTertiary(a)
-renvoAsmStorePrimaryStack(a, index)
-renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-renvoAsmJmpLabel(a, wordLoop)
-renvoAsmMarkLabel(a, wordDone)
-}
 backward := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, backward)
 renvoAsmJcmpStackImm(a, index, 0, copyDone, 0x9e)
@@ -21184,24 +21182,6 @@ renvoEmitCopyByteAt(g, srcPtr, destPtr, index)
 renvoAsmJmpLabel(a, backward)
 renvoAsmMarkLabel(a, forward)
 renvoAsmStoreStackImm(a, index, 0)
-if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-wordLoop := renvoAsmNewLabel(a)
-wordDone := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, wordLoop)
-renvoAsmLoadPrimaryTertiaryStack(a, byteCount, index)
-renvoAsmSubPrimaryTertiary(a)
-renvoAsmPushImm(a, 4)
-renvoAsmPopTertiary(a)
-renvoAsmCmpTertiaryPrimaryJump(a, 0x9f, wordDone)
-renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-renvoAsmLoadPrimaryStack(a, index)
-renvoAsmPushImm(a, 4)
-renvoAsmPopTertiary(a)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmStorePrimaryStack(a, index)
-renvoAsmJmpLabel(a, wordLoop)
-renvoAsmMarkLabel(a, wordDone)
-}
 forwardLoop := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, forwardLoop)
 renvoAsmJgeStackStack(a, index, byteCount, copyDone)
@@ -21266,20 +21246,6 @@ renvoAsmJmpLabel(a, bytes)
 renvoAsmMarkLabel(a, done)
 }
 
-func renvoEmitCopyWordAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
-renvoNonNil(g)
-a := &g.asm
-renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, index)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmCopyPrimaryToSecondary(a)
-renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, 4)
-renvoAsmPushPrimary(a)
-renvoAsmLoadPrimaryTertiaryStack(a, destPtr, index)
-renvoAsmAddPrimaryTertiary(a)
-renvoAsmCopyPrimaryToSecondary(a)
-renvoAsmPopPrimary(a)
-renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-}
 func renvoEmitCopyByteAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
 renvoNonNil(g)
 a := &g.asm
@@ -22368,6 +22334,19 @@ return label
 }
 
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+
+renvoAsmEmitText(a, "\x39\xd1")
+renvo386AsmJccLabel(a, 0x83, invalid)
+renvoAsmAddScaledTertiary(a, elemSize)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
 if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
@@ -22487,6 +22466,25 @@ return label
 }
 
 func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
+a := &g.asm
+invalid := renvoAsmNewLabel(a)
+
+renvoAsmEmitText(a, "\x89\xc2\x39\xc8")
+renvo386AsmJccLabel(a, 0x83, invalid)
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 1)
+renvoAsmRet(a)
+renvoAsmMarkLabel(a, invalid)
+if !g.meta.panicEnabled {
+renvoEmitUncaughtFaultTransfer(g, false)
+return
+}
+renvoAsmCopySecondaryToTertiary(a)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmRet(a)
+return
+}
 if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
@@ -38354,7 +38352,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xd6\x83\xc9\xd8\x33\xf5\x52\x0d\x1b\xdc\x1c\x71\x5a\x5b\x8f\x93\x92\x72\xef\xd7\x2a\x9d\xda\x57\xf7\xa2\x04\x43\xa9\xac\x12\x29", 3, true
+return "wasi/wasm32", "\xfd\x20\xc6\xb9\xf0\x63\xd0\xa3\x94\x2c\x07\xc3\x5f\x91\x76\x34\x7e\xb0\x1d\xc5\xe7\x27\x03\x4d\x2e\x60\x74\x6d\x1d\xfd\xb6\x4a", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
@@ -38366,7 +38364,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x5d\x01\x5e\xb2\xcc\x34\x31\xad\x36\x96\x8c\x6f\xba\x40\xe4\xa7\x8b\x1b\x85\x88\x13\x8c\xd6\x9e\x70\x30\xe6\xd3\x5e\xeb\x84\x5f", 3, true
+return "vm/vm32", "\xc1\x73\x8a\x77\x39\xf9\x92\xce\xe7\x89\x39\x74\xfb\xd5\xac\x50\x0d\x3a\xa2\x88\x02\x44\xbd\xe5\xf5\x93\x5b\x52\x24\x4b\x87\xfb", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -47103,7 +47101,8 @@ const renvoWasm32OpLoadMemPushReg = 51
 const renvoWasm32OpLoadStackPop = 52
 const renvoWasm32OpMovRegImmPop = 53
 const renvoWasm32OpMovRegRegPop = 54
-const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05"
+const renvoWasm32OpMemoryCopy = 55
+const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05\x04"
 const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
@@ -48498,6 +48497,18 @@ op := int(renvo_runtime_UnsafeByteAt(code, pc))
 if op == renvoWasm32OpExit {
 renvoWasmLocalGet(out, renvoWasm32LocalRax)
 renvoWasmAppendCall(out, renvoWasm32ImportProcExit)
+return
+}
+if op == renvoWasm32OpMemoryCopy {
+for argument := 1; argument <= 3; argument++ {
+renvoWasm32RegGet(out, int(renvo_runtime_UnsafeByteAt(code, pc+argument)))
+}
+
+renvoWasmAppend4(out, 0xfc, 0x0a, 0, 0)
+if loopDepth >= 0 {
+renvoWasm32SetPc(out, nextIndex)
+renvoWasmBr(out, loopDepth)
+}
 return
 }
 if op == renvoWasm32OpBuildArgsEnv {
