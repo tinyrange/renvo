@@ -233,6 +233,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrOperand, fileIndex, rangeTok
 			}
 
+			conversionMark := arena.Mark()
+			conversionTok := invalidKnownConversion(pkg, info, fileIndex, fn, &body, &signature, scope)
+			arena.Reset(conversionMark)
+			if conversionTok >= 0 {
+				return false, CheckErrOperand, fileIndex, conversionTok
+			}
+
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
