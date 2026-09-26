@@ -46,13 +46,14 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		return mapIndexShape{}
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return mapIndexTypeShape(pkg, info, fileIndex, binding.typeStart, binding.typeEnd, scope, 0)
 		}
@@ -92,6 +93,6 @@ func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, e
 	if index < 0 {
 		return mapIndexShape{}
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 }
