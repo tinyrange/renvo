@@ -245,15 +245,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 
-			if hasInterface {
-				interfaceMark := arena.Mark()
-				interfaceTok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, fn, &body, &signature, scope)
-				arena.Reset(interfaceMark)
-				if interfaceTok >= 0 {
-					return false, CheckErrType, fileIndex, interfaceTok
-				}
-			}
-
 			operatorMark := arena.Mark()
 			// Retain immutable operand bindings through the final builtin check.
 			// They are allocated after validation scratch is released and reclaimed
@@ -263,6 +254,14 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(operatorMark)
 				return false, CheckErrAssignTarget, fileIndex, tok
 			}
+			if hasInterface {
+				interfaceTok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+				if interfaceTok >= 0 {
+					arena.Reset(operatorMark)
+					return false, CheckErrType, fileIndex, interfaceTok
+				}
+			}
+
 			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
 			if operatorTok >= 0 {
 				arena.Reset(operatorMark)
