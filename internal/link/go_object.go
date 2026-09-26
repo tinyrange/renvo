@@ -20,7 +20,7 @@ func goObjectExportsCore(program unit.Program) []string {
 		if fn.ReceiverEnd > fn.ReceiverStart || fn.BodyEnd <= fn.BodyStart {
 			continue
 		}
-		name := coreLinkedProgramText(program, fn.NameStart, fn.NameEnd)
+		name := coreLinkedProgramText(&program, fn.NameStart, fn.NameEnd)
 		if name == "appMain" && program.Package == "main" {
 			if explicitMain {
 				continue
