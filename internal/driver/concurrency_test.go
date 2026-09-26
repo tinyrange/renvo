@@ -21,3 +21,27 @@ func TestSourceConcurrencyImport(t *testing.T) {
 		t.Fatal("missing implicit dependency or changed source lines")
 	}
 }
+
+func TestSourceConcurrencyCandidate(t *testing.T) {
+	for _, src := range []string{
+		"package main; var gopher, channel, selectValue, ago, πgo int",
+		"package main; /* go chan select */ var x = \"go chan select\"",
+		"package main; var x = `go chan select`; var y = 'g'",
+		"package main; var x = \"escaped \\\" go\"",
+	} {
+		if sourceConcurrencyCandidate([]byte(src)) {
+			t.Fatalf("unexpected candidate: %s", src)
+		}
+	}
+	for _, src := range []string{
+		"package main; func main(){go/* comment */f()}",
+		"package main; var c chan\nint",
+		"package main; func main(){select{}}",
+		"package main; /* chan */ var c <-chan int",
+	} {
+		out, needed := sourceConcurrencyImport([]byte(src))
+		if !needed || !bytes.Contains(out, []byte(`import _ "renvo.dev/x/runtime/serial"`)) {
+			t.Fatalf("missed concurrency: %s", src)
+		}
+	}
+}
