@@ -42,7 +42,7 @@ func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int,
 			return start
 		}
 		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			bindings = collectScopedTypeBindings(file, fn, body, signature)
 			ready = true
 		}
 		arg := args[0]
