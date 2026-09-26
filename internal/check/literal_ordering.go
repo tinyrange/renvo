@@ -53,9 +53,19 @@ func operandBoundary(file *syntax.File, at int, limit int, direction int, litera
 			}
 			depth -= direction
 		} else if depth == 0 {
-			binary := exprBinaryOperatorKind(*file, at)
-			if ch == int(',') || ch == int(';') || ch == int(':') || isAssignOp(*file, at) || binary == exprBinaryCompare || binary == exprBinaryLogical ||
-				kind == syntax.TokenReturn || kind == syntax.TokenIf || kind == syntax.TokenFor || kind == syntax.TokenCase || kind == syntax.TokenSwitch {
+			if kind == syntax.TokenReturn || kind == syntax.TokenIf || kind == syntax.TokenFor || kind == syntax.TokenCase || kind == syntax.TokenSwitch {
+				return at
+			}
+			if kind != syntax.TokenOperator {
+				continue
+			}
+			token := &file.Tokens[at]
+			size := token.End - token.Start
+			first := file.Src[token.Start]
+			if size == 1 && (first == ',' || first == ';' || first == ':' || first == '=' || first == '<' || first == '>') {
+				return at
+			}
+			if size >= 2 && size <= 3 && file.Src[token.End-1] == '=' || size == 2 && (first == '&' || first == '|') && file.Src[token.Start+1] == first {
 				return at
 			}
 		}
