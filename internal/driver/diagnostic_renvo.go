@@ -306,6 +306,8 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-040", "array length must be a nonnegative integer representable by int")
 			} else if built.Build.ErrorDetail == check.CheckErrConstantOperation {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count")
+			} else if built.Build.ErrorDetail == check.CheckErrMapKey {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-036", "map key type is not comparable")
 			} else if built.Build.ErrorDetail == check.CheckErrStructLiteral {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-039", "invalid struct literal field list")
 			} else if built.Build.ErrorDetail == check.CheckErrTypeAssertion {
