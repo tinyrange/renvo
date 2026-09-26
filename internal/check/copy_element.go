@@ -91,7 +91,7 @@ func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, s
 	if index < 0 {
 		return ""
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return copySliceTypeElement(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
@@ -120,7 +120,7 @@ func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, sc
 	}
 	name := tokenString(file, start)
 	if index := lookupType(info.Types, name); index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		if !typ.Alias {
 			return "named:" + name
 		}

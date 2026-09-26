@@ -20,7 +20,7 @@ func mapLiteralPrimitiveTypes(pkg *load.Package, info *PackageInfo, file *syntax
 	if index < 0 {
 		return "", ""
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return mapLiteralPrimitiveTypes(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 }
 
@@ -31,7 +31,7 @@ func mapLiteralPrimitiveType(pkg *load.Package, info *PackageInfo, file *syntax.
 	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		return mapLiteralPrimitiveType(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 	}
 	if lookupPackageSymbol(info.Symbols, name) >= 0 {

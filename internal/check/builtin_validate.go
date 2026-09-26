@@ -250,7 +250,7 @@ func definiteBuiltinCanonicalTypeName(pkg *load.Package, info *PackageInfo, name
 	if typeIndex < 0 {
 		return ""
 	}
-	typ := info.Types[typeIndex]
+	typ := &info.Types[typeIndex]
 	if !typ.Alias {
 		return name
 	}
@@ -377,7 +377,7 @@ func definiteBuiltinTypeName(pkg *load.Package, info *PackageInfo, name string, 
 	if typeIndex < 0 {
 		return builtinTypeUnknown
 	}
-	typ := info.Types[typeIndex]
+	typ := &info.Types[typeIndex]
 	return definiteBuiltinTypeSpan(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
