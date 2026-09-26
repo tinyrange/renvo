@@ -206,7 +206,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 			if functionMayNeedChannelCheck(*file, fn) {
 				channelCheckArenaStart := arena.Mark()
-				channelTok := invalidDefiniteChannelOperation(*file, fn)
+				channelTok := invalidDefiniteChannelOperationWithShadow(*file, fn, lookupPackageSymbol(info.Symbols, "close") >= 0)
 				arena.Reset(channelCheckArenaStart)
 				if channelTok >= 0 {
 					return false, CheckErrChannel, fileIndex, channelTok
