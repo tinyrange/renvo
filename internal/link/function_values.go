@@ -283,10 +283,10 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 		}
 		name := ""
 		if valid && token.KindLine&255 == unit.TokenIdent {
-			if token.Size == 3 && program.Text[start] == 'm' && program.Text[start+2] == 'n' {
-				if program.Text[start+1] == 'i' {
+			if token.Size == 3 && program.Text[start] == 'm' {
+				if program.Text[start+1] == 'i' && program.Text[start+2] == 'n' {
 					name = "min"
-				} else if program.Text[start+1] == 'a' {
+				} else if program.Text[start+1] == 'a' && program.Text[start+2] == 'x' {
 					name = "max"
 				}
 			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
