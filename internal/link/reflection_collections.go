@@ -214,19 +214,11 @@ func reflectionCollectionEdits(program *unit.Program, names *coreReflectionNames
 			name = names.assign
 			body = assign
 		}
-		if name == "" {
-			continue
-		}
-		index := findCoreFuncByName(program, name)
-		if index < 0 {
+		var ok bool
+		edits, ok = appendReflectionBodyEdit(program, edits, name, body)
+		if !ok {
 			return nil, false
 		}
-		fn := program.Funcs[index]
-		end := functionValueFindMatchingBrace(program, fn.BodyStart)
-		if end < 0 {
-			return nil, false
-		}
-		edits = append(edits, functionValueTokenRangeEdit(program, fn.BodyStart, end+1, body))
 	}
 	return edits, true
 }

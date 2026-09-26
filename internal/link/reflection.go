@@ -112,8 +112,8 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 	if fnIndex < 0 {
 		return false
 	}
-	fn := program.Funcs[fnIndex]
-	close := functionValueFindMatchingBrace(program, fn.BodyStart)
+	bodyStart := program.Funcs[fnIndex].BodyStart
+	close := functionValueFindMatchingBrace(program, bodyStart)
 	if close < 0 {
 		return false
 	}
@@ -207,47 +207,23 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 	readBody += "}; return nil,false }"
 	writeBody += "}; return false }"
 	copyBody += "}; return nil,false }"
-	edits := []functionValueEdit{functionValueTokenRangeEdit(program, fn.BodyStart, close+1, body)}
-	if names.fieldValue != "" {
-		index := findCoreFuncByName(program, names.fieldValue)
-		if index < 0 {
-			return false
-		}
-		getter := program.Funcs[index]
-		end := functionValueFindMatchingBrace(program, getter.BodyStart)
-		if end < 0 {
-			return false
-		}
-		edits = append(edits, functionValueTokenRangeEdit(program, getter.BodyStart, end+1, readBody))
+	edits := []functionValueEdit{functionValueTokenRangeEdit(program, bodyStart, close+1, body)}
+	edits, ok = appendReflectionBodyEdit(program, edits, names.fieldValue, readBody)
+	if !ok {
+		return false
 	}
-	if names.setField != "" {
-		index := findCoreFuncByName(program, names.setField)
-		if index < 0 {
-			return false
-		}
-		setter := program.Funcs[index]
-		end := functionValueFindMatchingBrace(program, setter.BodyStart)
-		if end < 0 {
-			return false
-		}
-		edits = append(edits, functionValueTokenRangeEdit(program, setter.BodyStart, end+1, writeBody))
+	edits, ok = appendReflectionBodyEdit(program, edits, names.setField, writeBody)
+	if !ok {
+		return false
 	}
 	collectionEdits, ok := reflectionCollectionEdits(program, names, collectionTypes)
 	if !ok {
 		return false
 	}
 	edits = append(edits, collectionEdits...)
-	if names.structCopy != "" {
-		index := findCoreFuncByName(program, names.structCopy)
-		if index < 0 {
-			return false
-		}
-		fn := program.Funcs[index]
-		end := functionValueFindMatchingBrace(program, fn.BodyStart)
-		if end < 0 {
-			return false
-		}
-		edits = append(edits, functionValueTokenRangeEdit(program, fn.BodyStart, end+1, copyBody))
+	edits, ok = appendReflectionBodyEdit(program, edits, names.structCopy, copyBody)
+	if !ok {
+		return false
 	}
 	edits = appendFunctionValuePackageEdits(program, edits)
 	originalLength := len(program.Text)
@@ -262,4 +238,22 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 		return false
 	}
 	return reparseFunctionValueProgram(program, text, edits, originalLength, len(text))
+}
+
+// All reflection intrinsics replace a parsed function body. Keep its validation
+// and source edit construction shared across struct and collection operations.
+func appendReflectionBodyEdit(program *unit.Program, edits []functionValueEdit, name string, body string) ([]functionValueEdit, bool) {
+	if name == "" {
+		return edits, true
+	}
+	index := findCoreFuncByName(program, name)
+	if index < 0 {
+		return nil, false
+	}
+	start := program.Funcs[index].BodyStart
+	end := functionValueFindMatchingBrace(program, start)
+	if end < 0 {
+		return nil, false
+	}
+	return append(edits, functionValueTokenRangeEdit(program, start, end+1, body)), true
 }
