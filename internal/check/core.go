@@ -178,6 +178,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(*file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
+			scope, scopeOK, scopeTok := buildFuncScopeCore(*file, fn)
 			validationArenaStart := arena.Mark()
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
@@ -210,13 +211,16 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 			literals := buildFuncCompositeExprs(*file, body)
 			if len(literals) > 0 {
-				scope, ok, _ := buildFuncScopeCore(*file, fn)
-				if ok {
+				if scopeOK {
 					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrStructLiteral, fileIndex, tok
 					}
 				}
+			}
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, &body, &signature, scope, scopeOK, literals); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return false, CheckErrUndefined, fileIndex, tok
 			}
 			// Keep the parsed signature and body for builtin validation; release check scratch.
 			arena.Reset(validationArenaStart)
@@ -244,8 +248,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {
 				return false, CheckErrSliceOperand, fileIndex, sliceTok
 			}
-			scope, ok, scopeTok := buildFuncScopeCore(*file, fn)
-			if !ok {
+			if !scopeOK {
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 

@@ -118,6 +118,7 @@ func TestEmbeddedGoIsTypeCheckedAgainstBackendAPI(t *testing.T) {
 	tests := []string{
 		`go backend { func emit() { missingAlgorithm() } }`,
 		`go backend { func helper(value int) {} func emit() { helper() } }`,
+		`go backend { func emit(out *RTGEmitter) { out.MissingMethod() } }`,
 	}
 	prefix := "definition 1\nunit demo\nimplements direct_emitter_v1\narch a {}\n"
 	for i := 0; i < len(tests); i++ {
@@ -126,6 +127,13 @@ func TestEmbeddedGoIsTypeCheckedAgainstBackendAPI(t *testing.T) {
 			document.Diagnostics[0].Code != "RTG-GO-009" {
 			t.Errorf("Parse case %d = ok %v diagnostics %#v", i, document.Ok, document.Diagnostics)
 		}
+	}
+}
+
+func TestEmbeddedGoObjectImageAPI(t *testing.T) {
+	document := Parse([]byte("definition 1\nunit demo\nimplements direct_emitter_v1\narch a {}\ngo backend { func image(out *RTGEmitter) []byte { return out.ObjectImage() } }"), "image.rtg")
+	if !document.Ok {
+		t.Fatalf("ObjectImage API rejected: %#v", document.Diagnostics)
 	}
 }
 
