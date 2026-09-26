@@ -14,7 +14,8 @@ type interfaceConcreteType struct {
 func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
 	file := &pkg.Files[fileIndex].File
 	bindings := collectScopedTypeBindings(*file, fn, *body, signature)
-	for _, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		want := interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		if !want.known || want.pointer || info.Types[want.index].Kind != TypeInterface || binding.valueStart < 0 {
 			continue
@@ -97,7 +98,7 @@ func interfaceNamedType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if index < 0 {
 		return interfaceConcreteType{}
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	if typ.Alias {
 		resolved := interfaceNamedType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 		if pointer && resolved.pointer {
@@ -136,13 +137,14 @@ func interfaceExprType(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		return interfaceConcreteType{}
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
@@ -162,12 +164,12 @@ func definiteInterfaceMismatch(pkg *load.Package, info *PackageInfo, want int, g
 	if !got.known || info.Types[got.index].Kind == TypeInterface {
 		return false
 	}
-	target := info.Types[want]
-	concrete := info.Types[got.index]
+	target := &info.Types[want]
+	concrete := &info.Types[got.index]
 	for _, required := range target.InterfaceMethods {
 		found := false
-		for fileIndex, source := range pkg.Files {
-			file := &source.File
+		for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+			file := &pkg.Files[fileIndex].File
 			for _, fn := range file.Funcs {
 				if fn.ReceiverStart < 0 || fn.ReceiverEnd <= fn.ReceiverStart || !tokenTextIs(file, fn.NameTok, required.Name) {
 					continue
@@ -256,7 +258,7 @@ func interfaceSignatureTypeIdentity(pkg *load.Package, info *PackageInfo, fileIn
 	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		if typ.Alias {
 			return interfaceSignatureTypeIdentity(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, depth+1)
 		}
