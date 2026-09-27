@@ -64,18 +64,18 @@ def build_compiler():
     Returns build results. Stops if the backend fails; inspect success before
     compiling. Builds only these two packages, with fixed flags and root cwd.
     """
-    if "agent-bin" not in workspace.list_dir("sandbox"):
-        workspace.mkdir(_BIN)
+    if "agent-bin" not in _work().list_dir("sandbox"):
+        _work().mkdir(_BIN)
     backend = std_go_build(
-        package = "./backend", output = workspace.path(_BIN + "/renvo-backend" + _SUFFIX),
-        cwd = workspace, timeout_ms = 180000, output_limit = 1048576,
+        package = "./backend", output = _work().path(_BIN + "/renvo-backend" + _SUFFIX),
+        cwd = _work(), timeout_ms = 180000, output_limit = 1048576,
     )
     if not backend.success:
         return [backend]
     bootstrap = std_go_build(
         package = "./cmd/renvobootstrap", tags = ["renvo_bundle"],
-        output = workspace.path(_BIN + "/renvo-bootstrap" + _SUFFIX),
-        cwd = workspace, timeout_ms = 180000, output_limit = 1048576,
+        output = _work().path(_BIN + "/renvo-bootstrap" + _SUFFIX),
+        cwd = _work(), timeout_ms = 180000, output_limit = 1048576,
     )
     return [backend, bootstrap]
 
@@ -90,19 +90,19 @@ def compile(source, name, backend = False):
     name = _name(name)
     if type(backend) != "bool":
         fail("backend must be a bool")
-    if "agent-programs" not in workspace.list_dir("sandbox"):
-        workspace.mkdir(_PROGRAMS)
+    if "agent-programs" not in _work().list_dir("sandbox"):
+        _work().mkdir(_PROGRAMS)
     artifact = _PROGRAMS + "/" + name + _SUFFIX
-    if name + _SUFFIX in workspace.list_dir(_PROGRAMS):
-        workspace.delete(artifact)
+    if name + _SUFFIX in _work().list_dir(_PROGRAMS):
+        _work().delete(artifact)
     compiler = "renvo-backend" if backend else "renvo-bootstrap"
-    args = [workspace.path(_BIN + "/" + compiler + _SUFFIX)]
+    args = [_work().path(_BIN + "/" + compiler + _SUFFIX)]
     if not backend:
         args.extend(["-tags", "renvo_bundle"])
-    args.extend(["-t", _native_target(), "-o", workspace.path(artifact), "./" + source])
-    result = privileged.run(cwd = workspace, timeout_ms = 180000, output_limit = 1048576, *args)
-    if not result.success and name + _SUFFIX in workspace.list_dir(_PROGRAMS):
-        workspace.delete(artifact)
+    args.extend(["-t", _native_target(), "-o", _work().path(artifact), "./" + source])
+    result = privileged.run(cwd = _work(), timeout_ms = 180000, output_limit = 1048576, *args)
+    if not result.success and name + _SUFFIX in _work().list_dir(_PROGRAMS):
+        _work().delete(artifact)
     return result
 
 def execute(name, args = (), stdin = None):
@@ -121,9 +121,9 @@ def execute(name, args = (), stdin = None):
     if stdin != None and type(stdin) != "string":
         fail("stdin must be text or None")
     return privileged.run(
-        cwd = workspace.path(_PROGRAMS), stdin = stdin,
+        cwd = _work().path(_PROGRAMS), stdin = stdin,
         timeout_ms = 30000, output_limit = 1048576,
-        *([workspace.path(_PROGRAMS + "/" + name + _SUFFIX)] + list(args))
+        *([_work().path(_PROGRAMS + "/" + name + _SUFFIX)] + list(args))
     )
 
 def test(package, run, bundled = False):
@@ -149,15 +149,15 @@ def test(package, run, bundled = False):
         fail("bundled must be a bool")
     return std_go_test(
         packages = [selected], run = run, count = 1, timeout = "9m",
-        tags = ["renvo_bundle"] if bundled else None, cwd = workspace,
+        tags = ["renvo_bundle"] if bundled else None, cwd = _work(),
         timeout_ms = 600000, output_limit = 2097152,
     )
 
 def preflight():
     """Run tools/check preflight with its unchanged local budget and gates."""
     return privileged.run(
-        "bash", workspace.path("tools/check"), "preflight",
-        cwd = workspace, timeout_ms = 120000, output_limit = 2097152,
+        "bash", _work().path("tools/check"), "preflight",
+        cwd = _work(), timeout_ms = 120000, output_limit = 2097152,
     )
 
 def corpus(kind, filter):
@@ -167,13 +167,13 @@ def corpus(kind, filter):
     if type(filter) != "string" or not filter:
         fail("Provide a nonempty corpus filter")
     return privileged.run(
-        "bash", workspace.path("tools/check"), kind, filter,
-        cwd = workspace, timeout_ms = 660000, output_limit = 2097152,
+        "bash", _work().path("tools/check"), kind, filter,
+        cwd = _work(), timeout_ms = 660000, output_limit = 2097152,
     )
 
 def version():
     """Inspect the host Go version; no command arguments are accepted."""
-    return std_go_version(cwd = workspace)
+    return std_go_version(cwd = _work())
 
 go = module("go", version = version, build_compiler = build_compiler, test = test)
 repo = module("repo", compile = compile, execute = execute, preflight = preflight, corpus = corpus)
@@ -184,7 +184,7 @@ _PR_REPOSITORY = "tinyrange/renvo"
 
 def _publish_git(args):
     return privileged.run(
-        cwd = workspace, timeout_ms = 120000, output_limit = 1048576,
+        cwd = _work(), timeout_ms = 120000, output_limit = 1048576,
         *(["git", "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"] + args)
     )
 
@@ -214,7 +214,7 @@ def _publish_clean_index():
 
 def _publish_gh(args):
     return privileged.run(
-        cwd = workspace, timeout_ms = 120000, output_limit = 1048576,
+        cwd = _work(), timeout_ms = 120000, output_limit = 1048576,
         env = {"GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat"},
         *(["gh"] + args)
     )
@@ -410,7 +410,7 @@ def _compiler_api(method, endpoint, payload):
     return privileged.run(
         "gh", "api", "--hostname", "github.com", "--method", method,
         endpoint, "--input", "-",
-        stdin = json.encode(payload), cwd = workspace,
+        stdin = json.encode(payload), cwd = _work(),
         env = {"GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat"},
         timeout_ms = 120000, output_limit = 2097152,
     )
@@ -520,10 +520,128 @@ compiler_pr = compiler_pr + module(
     enqueue = compiler_pr_enqueue, rerun = compiler_pr_rerun,
 )
 
+
+# User-approved existing-PR workflow. Work only in an isolated worktree.
+_pr_active = [workspace]
+_pr_selected = {}
+
+def _work():
+    return _pr_active[0]
+
+def pr_candidates():
+    """List open PRs including labels so long-term work can be excluded."""
+    return _publish_gh([
+        "pr", "list", "--repo", _PR_REPOSITORY, "--state", "open", "--limit", "100",
+        "--json", "number,title,labels,isDraft,baseRefName,headRefName,headRefOid",
+    ])
+
+def _existing_pr(number, expected_head):
+    _compiler_pr_id(number)
+    _compiler_sha(expected_head)
+    pr = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/pulls/" + str(number),
+    ]))
+    if pr["state"] != "open" or pr["draft"] or pr["head"]["sha"] != expected_head:
+        fail("PR must be open, non-draft and match the reviewed head")
+    if pr["head"]["repo"]["full_name"] != _PR_REPOSITORY or pr["base"]["ref"] != "main":
+        fail("Only same-repository PRs already targeting main are supported")
+    for label in pr["labels"]:
+        if label["name"].lower() == "long-term":
+            fail("Long-term PRs are excluded")
+    _compiler_branch(pr["head"]["ref"])
+    return pr
+
+def pr_prepare(number, expected_head, expected_main):
+    """Fetch and rebase one eligible PR in a new isolated staragent worktree.
+
+    Requires reviewed PR and main SHAs; never changes the original worktree.
+    Stops on conflicts; inspect them before continuing. No reset or stash.
+    """
+    if _pr_selected:
+        fail("A PR worktree has already been selected for this session")
+    _compiler_sha(expected_main)
+    pr = _existing_pr(number, expected_head)
+    main = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/git/ref/heads/main",
+    ]))
+    if main["object"]["sha"] != expected_main:
+        fail("Main changed since review")
+    remote = "https://github.com/" + _PR_REPOSITORY + ".git"
+    _publish_require(_publish_git(["fetch", "--no-tags", remote, "refs/heads/main"]))
+    if _publish_require(_publish_git(["rev-parse", "FETCH_HEAD"])) != expected_main:
+        fail("Fetched main no longer matches review")
+    _publish_require(_publish_git(["fetch", "--no-tags", remote, "refs/heads/" + pr["head"]["ref"]]))
+    if _publish_require(_publish_git(["rev-parse", "FETCH_HEAD"])) != expected_head:
+        fail("Fetched PR no longer matches review")
+    temp = privileged.tempdir()
+    path = temp.path("checkout")
+    branch = "staragent/pr-" + str(number) + "-rebased"
+    _publish_require(_publish_git(["worktree", "add", "-b", branch, path, expected_head]))
+    _pr_active[0] = privileged.workspace(path, readonly = False)
+    _pr_selected.update({"number": number, "old_head": expected_head, "main": expected_main, "branch": branch, "remote_branch": pr["head"]["ref"], "temp": temp})
+    return _publish_git(["rebase", "--no-autostash", expected_main])
+
+def pr_main():
+    """Read the current remote main SHA without fetching or changing files."""
+    return _publish_gh(["api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/git/ref/heads/main"])
+
+def pr_workspace():
+    """Return the selected isolated workspace for file operations and Git cwd."""
+    if not _pr_selected:
+        fail("Prepare a PR first")
+    return _work()
+
+def pr_continue(paths):
+    """Stage explicitly reviewed conflict resolutions and continue the selected rebase.
+
+    No skip, reset, abort or arbitrary command. Protected configurations cannot
+    be staged by this helper. Inspect status and every resolution first.
+    """
+    if not _pr_selected or git.current_branch(cwd = _work()) != None:
+        fail("Requires the selected worktree in a detached rebase")
+    if type(paths) not in ["list", "tuple"] or not paths:
+        fail("Provide explicit resolved file paths")
+    selected = []
+    for path in paths:
+        path = _relative(path)
+        if any([p.lower() in [".git", "agents.star"] for p in path.split("/")]):
+            fail("Protected paths cannot be staged here")
+        _work().read_file(path)
+        selected.append(path)
+    _publish_require(_publish_git(["add", "--"] + selected))
+    return privileged.run(
+        "git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+        "rebase", "--continue", cwd = _work(), env = {"GIT_EDITOR": "true"},
+        timeout_ms = 120000, output_limit = 1048576,
+    )
+
+def pr_push(expected_head):
+    """Update only the selected PR branch using an exact force-with-lease.
+
+    Review the full rebased diff and run checks first. Rejects remote changes,
+    dirty files/index, branch mismatches, and a head not descended from main.
+    """
+    if not _pr_selected:
+        fail("Prepare a PR first")
+    _publish_on_branch(_pr_selected["branch"], expected_head)
+    _existing_pr(_pr_selected["number"], _pr_selected["old_head"])
+    if _publish_require(_publish_git(["status", "--porcelain"])):
+        fail("Selected worktree must be completely clean")
+    _publish_require(_publish_git(["merge-base", "--is-ancestor", _pr_selected["main"], expected_head]))
+    ref = "refs/heads/" + _pr_selected["remote_branch"]
+    return _publish_git([
+        "push", "--force-with-lease=" + ref + ":" + _pr_selected["old_head"],
+        "https://github.com/" + _PR_REPOSITORY + ".git", expected_head + ":" + ref,
+    ])
+
+pr_work = module("pr_work", candidates = pr_candidates, main = pr_main,
+    prepare = pr_prepare, workspace = pr_workspace,
+    continue_rebase = pr_continue, push = pr_push)
+
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo,
     "propose_agents_star": propose_agents_star, "publication": publication,
-    "compiler_pr": compiler_pr,
+    "compiler_pr": compiler_pr, "pr_work": pr_work,
 }
 # This is the existing StarAgent execution environment, not an added REPL tool.
 default_repl = repl(environment)
