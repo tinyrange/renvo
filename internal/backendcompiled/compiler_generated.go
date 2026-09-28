@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1b2a5e45b9ac799a54f37eb354bb29be047435be645f1ce4f2c2e60602009e4b"
+const CompilerSourceDigest = "2432dbd9f3bdc53bbfd83dda70ef5ef6c3e8c18a472ea5da5a6853fefe98ed35"
 
 // source: backend/compiler_common_impl.go
 
@@ -22547,7 +22547,7 @@ renvoAsmPrimaryImm(a, 0)
 renvoAsmRet(a)
 return
 }
-if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
+if g.c.renvoTargetArch == renvoArchWasm32 && (renvoPreparedBackendActive == 0 || g.c.renvoTarget == renvoTargetVM32) {
 a := &g.asm
 invalid := renvoAsmNewLabel(a)
 
