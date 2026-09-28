@@ -442,8 +442,8 @@ func declAfter(left DeclInfo, right DeclInfo) bool {
 }
 
 func declIndexAfter(decls []DeclInfo, left int, right int) bool {
-	leftDecl := decls[left]
-	rightDecl := decls[right]
+	leftDecl := &decls[left]
+	rightDecl := &decls[right]
 	if leftDecl.File != rightDecl.File {
 		return leftDecl.File > rightDecl.File
 	}

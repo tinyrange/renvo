@@ -20,7 +20,7 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 	}
 	bindings := *cachedBindings
 	if bindings == nil {
-		bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+		bindings = collectScopedTypeBindings(file, fn, body, signature)
 		*cachedBindings = bindings
 	}
 	for _, stmt := range body.Stmts {
@@ -53,7 +53,7 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
-	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
+	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 		if lookupType(info.Types, tokenString(file, start)) >= 0 {
 			return definiteStructType(pkg, info, fileIndex, scope, start, start+1, 0)
 		}
@@ -77,13 +77,14 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return false
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return definiteStructType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
@@ -115,13 +116,13 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if file.Tokens[start].KindLine&255 == syntax.TokenStruct && tokCharIs(file, start+1, '{') {
 		return findTypeMatching(file, start+1, '{', '}') == end
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return false
 	}
 	index := lookupType(info.Types, tokenString(file, start))
 	if index < 0 {
 		return false
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return definiteStructType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }

@@ -320,7 +320,11 @@ go backend {
 	const renvoWasm32OpMovRegImmPop = 53
 	const renvoWasm32OpMovRegRegPop = 54
 
-	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05"
+	// Native WebAssembly-only IR: destination, source, and byte-count registers.
+	// This instruction is never emitted into an RNVB image.
+	const renvoWasm32OpMemoryCopy = 55
+
+	const renvoWasm32InstructionSizes = "\x01\x01\x0d\x06\x03\x02\x05\x02\x06\x06\x06\x08\x08\x0a\x0a\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x03\x06\x06\x02\x02\x02\x02\x02\x06\x03\x02\x05\x05\x05\x06\x09\x01\x01\x01\x03\x0e\x0a\x07\x07\x07\x07\x09\x07\x07\x05\x04"
 	const renvoWasm32RegLocals = "\x02\x03\x04\x05\x06\x07\x08\x0b"
 	const renvoWasm32CondOpcodes = "\x46\x47\x48\x4c\x4a\x4e\x49\x4f\x4d\x4b"
 	const renvoWasm32BinaryOpcodes = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6a\x6b\x6c\x6d\x6f\x71\x72\x73\x00\x74\x75\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x76"
@@ -1653,6 +1657,18 @@ go backend {
 		if op == renvoWasm32OpExit {
 			renvoWasmLocalGet(out, renvoWasm32LocalRax)
 			renvoWasmAppendCall(out, renvoWasm32ImportProcExit)
+			return
+		}
+		if op == renvoWasm32OpMemoryCopy {
+			for argument := 1; argument <= 3; argument++ {
+				renvoWasm32RegGet(out, int(RTGByteAt(code, pc+argument)))
+			}
+			// memory.copy is byte-accurate and handles either overlap direction.
+			renvoWasmAppend4(out, 0xfc, 0x0a, 0, 0)
+			if loopDepth >= 0 {
+				renvoWasm32SetPc(out, nextIndex)
+				renvoWasmBr(out, loopDepth)
+			}
 			return
 		}
 		if op == renvoWasm32OpBuildArgsEnv {
@@ -3928,6 +3944,7 @@ arch vm32 {
 		renvoWasm32OpLoadStackPop = go renvoWasm32OpLoadStackPop
 		renvoWasm32OpMovRegImmPop = go renvoWasm32OpMovRegImmPop
 		renvoWasm32OpMovRegRegPop = go renvoWasm32OpMovRegRegPop
+		renvoWasm32OpMemoryCopy = go renvoWasm32OpMemoryCopy
 		renvoWasm32OpXorRegReg = go renvoWasm32OpXorRegReg
 		renvoWasm32Patch = go renvoWasm32Patch
 		renvoWasm32PcInList = go renvoWasm32PcInList

@@ -31,7 +31,7 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 			continue
 		}
 		if !ready {
-			bindings = collectScopedTypeBindings(*file, fn, *body, signature)
+			bindings = collectScopedTypeBindings(file, fn, body, signature)
 			*cachedBindings = bindings
 			ready = true
 		}
@@ -74,7 +74,7 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	if start+1 < end && tokCharIs(file, end-1, ')') {
-		if tokenTextIs(file, start, "new") && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "new") < 0 {
+		if tokenTextIs(file, start, "new") && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "new") < 0 {
 			return 1 + definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+2, end-1, 0)
 		}
 		if tokCharIs(file, start, '(') {
@@ -83,7 +83,7 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 				return definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+1, close-1, 0)
 			}
 		}
-		if file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
+		if file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 			if typ := lookupType(info.Types, tokenString(file, start)); typ >= 0 {
 				return definiteOrderingTypeKind(pkg, info, fileIndex, scope, start, start+1, 0)
 			}
@@ -108,20 +108,21 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	chosen := -1
-	for i, binding := range bindings {
+	for i := 0; i < len(bindings); i++ {
+		binding := &bindings[i]
 		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
-		binding := bindings[chosen]
+		binding := &bindings[chosen]
 		if binding.typeEnd > binding.typeStart {
 			return definiteOrderingTypeKind(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		}
 		return definiteOrderingExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	if name == "nil" && lookupPackageSymbol(info.Symbols, name) < 0 && lookupScopeTokenNameCore(scope, file, start) < 0 {
+	if name == "nil" && lookupPackageSymbol(info.Symbols, name) < 0 && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 		return 1
 	}
 	for _, decl := range info.Decls {
@@ -155,13 +156,13 @@ func definiteOrderingTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if tokCharIs(file, start, '*') {
 		return 1 + definiteOrderingTypeKind(pkg, info, fileIndex, scope, start+1, end, depth+1)
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return 0
 	}
 	index := lookupType(info.Types, tokenString(file, start))
 	if index < 0 {
 		return 0
 	}
-	typ := info.Types[index]
+	typ := &info.Types[index]
 	return definiteOrderingTypeKind(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }

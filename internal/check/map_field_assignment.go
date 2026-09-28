@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syntax.File, body *syntax.Body, index IndexExpr, shape mapIndexShape) int {
+func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syntax.File, body *syntax.Body, index *IndexExpr, shape mapIndexShape) int {
 	if !shape.known {
 		return -1
 	}
@@ -21,7 +21,7 @@ func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syn
 			continue
 		}
 		start, end := trimExprSpan(*file, stmt.StartTok, stmt.EndTok)
-		op := findTopLevelAssignOp(*file, start, end)
+		op := findTopLevelAssignOp(file, start, end)
 		if op < 0 {
 			if end <= start || (!tokenTextIs(file, end-1, "++") && !tokenTextIs(file, end-1, "--")) {
 				continue
@@ -70,7 +70,7 @@ func mapFieldPathUnaddressable(pkg *load.Package, info *PackageInfo, shape mapIn
 			if tokCharIs(file, start, '*') {
 				return false
 			}
-			if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+			if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 				break
 			}
 			index := lookupType(info.Types, tokenString(file, start))

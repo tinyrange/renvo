@@ -15,7 +15,7 @@ func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex in
 		if index < 0 {
 			return false
 		}
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		underlying = conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, 0)
 	}
 	want := scalarAppendKind(underlying)

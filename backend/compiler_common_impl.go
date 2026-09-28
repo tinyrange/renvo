@@ -12549,7 +12549,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
 				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
-				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
+					renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15990,6 +15990,13 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 	renvoNonNil(g)
 	size = renvoAlignValue(size, wordSize)
+	// Keep larger arguments on the word-push path so stack growth touches each
+	// guard page; one reservation must not skip a Windows stack guard page.
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+		mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
+		renvoAmd64PushStackBytes(&g.asm, offset, size)
+		return
+	}
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
 			renvoAsmPushStackWord(&g.asm, offset-at)
@@ -21149,26 +21156,24 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 		return
 	}
 	a := &g.asm
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
+		// Only native WebAssembly receives this compact instruction. RNVB and
+		// prepared targets keep their existing byte-copy contract.
+		renvoAsmLoadPrimaryStack(a, srcPtr)
+		renvoAsmLoadSecondaryStack(a, destPtr)
+		renvoAsmLoadTertiaryStack(a, byteCount)
+		renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
+		renvoAsmEmit8(a, renvoWasm32RegRdx)
+		renvoAsmEmit8(a, renvoWasm32RegRax)
+		renvoAsmEmit8(a, renvoWasm32RegRcx)
+		return
+	}
 	index := renvoAddUnnamedLocal(g, renvoTypeInt)
 	copyDone := renvoAsmNewLabel(a)
 	forward := renvoAsmNewLabel(a)
 	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, destPtr)
 	renvoAsmCmpTertiaryPrimaryJump(a, 0x9e, forward)
 	renvoAsmCopyStackSlot(a, byteCount, index)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-		wordLoop := renvoAsmNewLabel(a)
-		wordDone := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, wordLoop)
-		renvoAsmJcmpStackImm(a, index, 4, wordDone, 0x9c)
-		renvoAsmLoadPrimaryStack(a, index)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmSubPrimaryTertiary(a)
-		renvoAsmStorePrimaryStack(a, index)
-		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-		renvoAsmJmpLabel(a, wordLoop)
-		renvoAsmMarkLabel(a, wordDone)
-	}
 	backward := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, backward)
 	renvoAsmJcmpStackImm(a, index, 0, copyDone, 0x9e)
@@ -21177,24 +21182,6 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmJmpLabel(a, backward)
 	renvoAsmMarkLabel(a, forward)
 	renvoAsmStoreStackImm(a, index, 0)
-	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-		wordLoop := renvoAsmNewLabel(a)
-		wordDone := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, wordLoop)
-		renvoAsmLoadPrimaryTertiaryStack(a, byteCount, index)
-		renvoAsmSubPrimaryTertiary(a)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimaryJump(a, 0x9f, wordDone)
-		renvoEmitCopyWordAt(g, srcPtr, destPtr, index)
-		renvoAsmLoadPrimaryStack(a, index)
-		renvoAsmPushImm(a, 4)
-		renvoAsmPopTertiary(a)
-		renvoAsmAddPrimaryTertiary(a)
-		renvoAsmStorePrimaryStack(a, index)
-		renvoAsmJmpLabel(a, wordLoop)
-		renvoAsmMarkLabel(a, wordDone)
-	}
 	forwardLoop := renvoAsmNewLabel(a)
 	renvoAsmMarkLabel(a, forwardLoop)
 	renvoAsmJgeStackStack(a, index, byteCount, copyDone)
@@ -21259,20 +21246,6 @@ func renvoEmitCopyBytesAarch64(g *renvoLinearGen, srcPtr int, destPtr int, byteC
 	renvoAsmMarkLabel(a, done)
 }
 
-func renvoEmitCopyWordAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
-	renvoNonNil(g)
-	a := &g.asm
-	renvoAsmLoadPrimaryTertiaryStack(a, srcPtr, index)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, 4)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryTertiaryStack(a, destPtr, index)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 4)
-}
 func renvoEmitCopyByteAt(g *renvoLinearGen, srcPtr int, destPtr int, index int) {
 	renvoNonNil(g)
 	a := &g.asm
