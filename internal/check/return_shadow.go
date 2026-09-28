@@ -28,7 +28,7 @@ func invalidBareReturnShadow(file syntax.File, fn syntax.FuncDecl, body syntax.B
 		var names CoreScope
 		end := localRuleScopeEnd(body, stmt.StartTok)
 		if stmt.Kind == syntax.StmtDecl {
-			collectCoreDeclScope(file, stmt.StartTok, stmt.EndTok, &names)
+			collectCoreDeclScope(&file, stmt.StartTok, stmt.EndTok, &names)
 		} else {
 			start, finish := stmt.StartTok, stmt.EndTok
 			if stmt.Kind == syntax.StmtIf || stmt.Kind == syntax.StmtFor || stmt.Kind == syntax.StmtSwitch {
@@ -49,7 +49,7 @@ func invalidBareReturnShadow(file syntax.File, fn syntax.FuncDecl, body syntax.B
 			if end == fn.BodyEnd {
 				continue
 			}
-			collectCoreLeadingIdentList(file, start, op, &names, false)
+			collectCoreLeadingIdentList(&file, start, op, &names, false)
 		}
 		for _, name := range names.Names {
 			for _, result := range signature.Results {

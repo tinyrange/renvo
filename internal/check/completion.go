@@ -135,7 +135,7 @@ func completionFile(graph load.Graph, path string) (int, int) {
 func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program, pkgIndex, fileIndex int, file syntax.File, offset int, prefix string) []CompletionItem {
 	fn, hasFunc := completionFunctionAt(file, offset)
 	if hasFunc {
-		scope, _, _ := buildFuncScopeCore(file, fn)
+		scope, _, _ := buildFuncScopeCore(&file, fn)
 		for i := 0; i < len(scope.Names); i++ {
 			name := tokenString(&file, scope.Names[i].Token)
 			tok := file.Tokens[scope.Names[i].Token]

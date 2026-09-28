@@ -146,7 +146,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			for tok := decl.ValueStart; tok < decl.ValueEnd; tok++ {
 				if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
 					fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: decl.ValueStart - 1, BodyEnd: decl.ValueEnd + 1}
-					scope, _, _ = buildFuncScopeCore(*file, fn)
+					scope, _, _ = buildFuncScopeCore(file, fn)
 					break
 				}
 			}
@@ -201,7 +201,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
-			scope, scopeOK, scopeTok := buildFuncScopeCore(*file, fn)
+			scope, scopeOK, scopeTok := buildFuncScopeCore(file, fn)
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
@@ -375,7 +375,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if unusedTok := unusedCoreLocalToken(scope); unusedTok >= 0 {
 				return false, CheckErrUnusedLocal, fileIndex, unusedTok
 			}
-			locals := buildFuncLocalTypeSpansCore(*file, fn)
+			locals := buildFuncLocalTypeSpansCore(file, fn)
 			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, &signature, locals, scope)
 			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(out.CoreRefs)
 			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(out.CoreSelectors)
@@ -470,7 +470,7 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 			if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
 				fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: out.ValueStart - 1, BodyEnd: out.ValueEnd + 1}
 				var ok bool
-				scope, ok, undefinedTok = buildFuncScopeCore(*file, fn)
+				scope, ok, undefinedTok = buildFuncScopeCore(file, fn)
 				if !ok {
 					return out, undefinedTok
 				}
@@ -1259,11 +1259,11 @@ func compareTokenSymbolCore(src []byte, start int, size int, name string) int {
 	return 0
 }
 
-func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, int) {
+func buildFuncScopeCore(file *syntax.File, fn syntax.FuncDecl) (CoreScope, bool, int) {
 	var scope CoreScope
 	scope.Names = make([]CoreScopeName, 0, coreScopeCapacity(fn.BodyEnd-fn.BodyStart))
 	if fn.ReceiverStart >= 0 {
-		tok := receiverNameToken(file, fn)
+		tok := receiverNameToken(*file, fn)
 		if tok >= 0 {
 			if !addCoreScopeName(&scope, file, tok, NameReceiver, true, false, false) {
 				return scope, false, tok
@@ -1276,9 +1276,9 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 			return scope, false, tok
 		}
 	}
-	if fn.ResultStart >= 0 && fn.ResultEnd > fn.ResultStart && tokCharIs(&file, fn.ResultStart, '(') {
+	if fn.ResultStart >= 0 && fn.ResultEnd > fn.ResultStart && tokCharIs(file, fn.ResultStart, '(') {
 		end := fn.ResultEnd - 1
-		if tokCharIs(&file, end, ')') {
+		if tokCharIs(file, end, ')') {
 			ok, tok := collectCoreFieldNames(file, fn.ResultStart+1, end, NameResult, &scope)
 			if !ok {
 				return scope, false, tok
@@ -1290,8 +1290,8 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 	for i := start; i < end; i++ {
 		token := file.Tokens[i]
 		kind := token.KindLine & 255
-		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(&file, i+1, '(') {
-			paramsEnd := findTypeMatching(&file, i+1, '(', ')')
+		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(file, i+1, '(') {
+			paramsEnd := findTypeMatching(file, i+1, '(', ')')
 			if paramsEnd > i+1 && paramsEnd <= end {
 				var literal CoreScope
 				ok, tok := collectCoreFieldNames(file, i+2, paramsEnd-1, NameParam, &literal)
@@ -1322,18 +1322,18 @@ func buildFuncScopeCore(file syntax.File, fn syntax.FuncDecl) (CoreScope, bool, 
 	return scope, true, -1
 }
 
-func collectCoreFieldNames(file syntax.File, start int, end int, kind int, scope *CoreScope) (bool, int) {
+func collectCoreFieldNames(file *syntax.File, start int, end int, kind int, scope *CoreScope) (bool, int) {
 	pending := make([]int, 0, 2)
 	i := start
 	for i < end {
 		segStart := i
-		segEnd := nextTopLevelComma(&file, i, end)
-		first := firstNonSeparator(file, segStart, segEnd)
+		segEnd := nextTopLevelComma(file, i, end)
+		first := firstNonSeparator(*file, segStart, segEnd)
 		if first < segEnd && file.Tokens[first].KindLine&255 == syntax.TokenIdent {
 			next := first + 1
 			if next >= segEnd {
 				pending = append(pending, first)
-			} else if tokCharIs(&file, next, '.') {
+			} else if tokCharIs(file, next, '.') {
 				pending = pending[:0]
 			} else {
 				if !addCorePendingNames(file, pending, kind, scope) {
@@ -1352,7 +1352,7 @@ func collectCoreFieldNames(file syntax.File, start int, end int, kind int, scope
 	return true, -1
 }
 
-func addCorePendingNames(file syntax.File, pending []int, kind int, scope *CoreScope) bool {
+func addCorePendingNames(file *syntax.File, pending []int, kind int, scope *CoreScope) bool {
 	for i := 0; i < len(pending); i++ {
 		if !addCoreScopeName(scope, file, pending[i], kind, true, false, false) {
 			return false
@@ -1361,17 +1361,17 @@ func addCorePendingNames(file syntax.File, pending []int, kind int, scope *CoreS
 	return true
 }
 
-func collectCoreLeadingIdentList(file syntax.File, start int, end int, scope *CoreScope, variable bool) {
+func collectCoreLeadingIdentList(file *syntax.File, start int, end int, scope *CoreScope, variable bool) {
 	i := start
 	for i < end {
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return
 		}
-		if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
+		if !tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 {
 			addCoreScopeName(scope, file, i, NameLocal, false, false, variable)
 		}
 		i++
-		if i < end && tokCharIs(&file, i, ',') {
+		if i < end && tokCharIs(file, i, ',') {
 			i++
 			continue
 		}
@@ -1379,15 +1379,15 @@ func collectCoreLeadingIdentList(file syntax.File, start int, end int, scope *Co
 	}
 }
 
-func addCoreScopeName(scope *CoreScope, file syntax.File, tok int, kind int, rejectDup bool, labelsOnly bool, variable bool) bool {
-	if tok < 0 || tok >= len(file.Tokens) || tokenTextIs(&file, tok, "_") {
+func addCoreScopeName(scope *CoreScope, file *syntax.File, tok int, kind int, rejectDup bool, labelsOnly bool, variable bool) bool {
+	if tok < 0 || tok >= len(file.Tokens) || tokenTextIs(file, tok, "_") {
 		return true
 	}
 	token := file.Tokens[tok]
 	hash := scopeTokenHash(file.Src, int(token.Start), int(token.End-token.Start))
 	if rejectDup {
 		for i := 0; i < len(scope.Names); i++ {
-			if scope.Names[i].Hash != hash || !coreTokensEqual(&file, scope.Names[i].Token, tok) {
+			if scope.Names[i].Hash != hash || !coreTokensEqual(file, scope.Names[i].Token, tok) {
 				continue
 			}
 			if labelsOnly {
@@ -1437,35 +1437,35 @@ func coreTokensEqual(file *syntax.File, left int, right int) bool {
 	return true
 }
 
-func coreTokenLooksLikeLabel(file syntax.File, tok int, start int, end int) bool {
-	if tok < start || tok+1 >= end || file.Tokens[tok].KindLine&255 != syntax.TokenIdent || !tokCharIs(&file, tok+1, ':') || tokenTextIs(&file, tok+1, ":=") {
+func coreTokenLooksLikeLabel(file *syntax.File, tok int, start int, end int) bool {
+	if tok < start || tok+1 >= end || file.Tokens[tok].KindLine&255 != syntax.TokenIdent || !tokCharIs(file, tok+1, ':') || tokenTextIs(file, tok+1, ":=") {
 		return false
 	}
 	if tok == start {
 		return true
 	}
 	prev := tok - 1
-	if tokCharIs(&file, prev, '{') || tokCharIs(&file, prev, ',') {
+	if tokCharIs(file, prev, '{') || tokCharIs(file, prev, ',') {
 		return false
 	}
-	return syntax.TokenLine(file.Tokens[prev]) != syntax.TokenLine(file.Tokens[tok]) || tokCharIs(&file, prev, ';') || tokCharIs(&file, prev, '}')
+	return syntax.TokenLine(file.Tokens[prev]) != syntax.TokenLine(file.Tokens[tok]) || tokCharIs(file, prev, ';') || tokCharIs(file, prev, '}')
 }
 
-func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope) int {
+func collectCoreDeclScope(file *syntax.File, start int, end int, scope *CoreScope) int {
 	variable := file.Tokens[start].KindLine&255 == syntax.TokenVar
 	specStart := start + 1
-	if specStart < end && tokCharIs(&file, specStart, '(') {
-		closeTok := findTypeMatching(&file, specStart, '(', ')')
+	if specStart < end && tokCharIs(file, specStart, '(') {
+		closeTok := findTypeMatching(file, specStart, '(', ')')
 		if closeTok <= specStart || closeTok > end {
 			return start
 		}
 		i := specStart + 1
 		for i < closeTok-1 {
-			i = skipLocalSeparators(&file, i, closeTok-1)
+			i = skipLocalSeparators(file, i, closeTok-1)
 			if i >= closeTok-1 {
 				break
 			}
-			specEnd := statementSpecEnd(&file, i, closeTok-1)
+			specEnd := statementSpecEnd(file, i, closeTok-1)
 			collectCoreLeadingIdentList(file, i, specEnd, scope, variable)
 			if specEnd <= i {
 				i++
@@ -1475,25 +1475,25 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 		}
 		return closeTok - 1
 	}
-	specEnd := statementSpecEnd(&file, specStart, end)
+	specEnd := statementSpecEnd(file, specStart, end)
 	collectCoreLeadingIdentList(file, specStart, specEnd, scope, variable)
 	return specEnd - 1
 }
 
-func collectCoreShortDeclScope(file syntax.File, start int, end int, scope *CoreScope) {
+func collectCoreShortDeclScope(file *syntax.File, start int, end int, scope *CoreScope) {
 	for i := start; i < end; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
-			if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
+			if !tokenTextIs(file, i, "_") && lookupScopeTokenNameCore(scope, file, i) < 0 {
 				addCoreScopeName(scope, file, i, NameLocal, false, false, true)
 			}
 		}
 	}
 }
 
-func coreLHSStart(file syntax.File, assign int, limit int) int {
+func coreLHSStart(file *syntax.File, assign int, limit int) int {
 	start := assign - 1
 	for start > limit {
-		if tokCharIs(&file, start, ';') || tokCharIs(&file, start, '{') || tokCharIs(&file, start, '}') || tokCharIs(&file, start, ':') {
+		if tokCharIs(file, start, ';') || tokCharIs(file, start, '{') || tokCharIs(file, start, '}') || tokCharIs(file, start, ':') {
 			return start + 1
 		}
 		if syntax.TokenLine(file.Tokens[start]) != syntax.TokenLine(file.Tokens[assign]) {
@@ -1504,7 +1504,7 @@ func coreLHSStart(file syntax.File, assign int, limit int) int {
 	return start
 }
 
-func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLocalTypeSpan {
+func buildFuncLocalTypeSpansCore(file *syntax.File, fn syntax.FuncDecl) []CoreLocalTypeSpan {
 	decls := make([]CoreLocalTypeSpan, 0, coreLocalTypeCapacity(fn.BodyEnd-fn.BodyStart))
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
@@ -1514,18 +1514,18 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 			continue
 		}
 		specStart := i + 1
-		if specStart < end && tokCharIs(&file, specStart, '(') {
-			closeTok := findTypeMatching(&file, specStart, '(', ')')
+		if specStart < end && tokCharIs(file, specStart, '(') {
+			closeTok := findTypeMatching(file, specStart, '(', ')')
 			if closeTok <= specStart || closeTok > end {
 				continue
 			}
 			j := specStart + 1
 			for j < closeTok-1 {
-				j = skipLocalSeparators(&file, j, closeTok-1)
+				j = skipLocalSeparators(file, j, closeTok-1)
 				if j >= closeTok-1 {
 					break
 				}
-				specEnd := statementSpecEnd(&file, j, closeTok-1)
+				specEnd := statementSpecEnd(file, j, closeTok-1)
 				decls = appendLocalTypeSpanCore(decls, file, declSymbolKind(kind), j, specEnd)
 				if specEnd <= j {
 					j++
@@ -1536,7 +1536,7 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 			i = closeTok
 			continue
 		}
-		specEnd := statementSpecEnd(&file, specStart, end)
+		specEnd := statementSpecEnd(file, specStart, end)
 		decls = appendLocalTypeSpanCore(decls, file, declSymbolKind(kind), specStart, specEnd)
 		i = specEnd
 	}
@@ -1565,8 +1565,8 @@ func coreLocalTypeCapacity(tokens int) int {
 	return capacity
 }
 
-func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file syntax.File, kind int, start int, end int) []CoreLocalTypeSpan {
-	start, end = trimDeclSpan(&file, start, end)
+func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file *syntax.File, kind int, start int, end int) []CoreLocalTypeSpan {
+	start, end = trimDeclSpan(file, start, end)
 	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return decls
 	}
@@ -1574,17 +1574,17 @@ func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file syntax.File, kind i
 	typeEnd := -1
 	if kind == SymbolType {
 		typeStart = start + 1
-		if tokenTextIs(&file, typeStart, "=") {
+		if tokenTextIs(file, typeStart, "=") {
 			typeStart++
 		}
-		typeStart, typeEnd = trimDeclSpan(&file, typeStart, end)
+		typeStart, typeEnd = trimDeclSpan(file, typeStart, end)
 	} else {
-		_, namesEnd := localDeclNameTokens(&file, start, end)
-		valueStart := findDeclAssign(&file, namesEnd, end)
+		_, namesEnd := localDeclNameTokens(file, start, end)
+		valueStart := findDeclAssign(file, namesEnd, end)
 		if valueStart >= 0 {
-			typeStart, typeEnd = trimDeclSpan(&file, namesEnd, valueStart)
+			typeStart, typeEnd = trimDeclSpan(file, namesEnd, valueStart)
 		} else {
-			typeStart, typeEnd = trimDeclSpan(&file, namesEnd, end)
+			typeStart, typeEnd = trimDeclSpan(file, namesEnd, end)
 		}
 	}
 	if typeStart < 0 || typeEnd <= typeStart {
