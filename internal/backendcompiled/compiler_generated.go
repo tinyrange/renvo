@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1b2a5e45b9ac799a54f37eb354bb29be047435be645f1ce4f2c2e60602009e4b"
+const CompilerSourceDigest = "14120267b3f5c98c782f754b4857ae74badf21b5441dcdea7b35d7e063a2fd3b"
 
 // source: backend/compiler_common_impl.go
 
@@ -22418,7 +22418,6 @@ renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
 renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 renvoAsmAddScaledTertiary(a, elemSize)
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, invalid)
@@ -22454,6 +22453,17 @@ func renvoEmitRuntimeBoundsCheck(g *renvoLinearGen) {
 renvoNonNil(g)
 a := &g.asm
 if !g.meta.panicEnabled {
+if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+
+
+fault := renvoEnsureUncaughtFaultHelper(g, false)
+renvoAsmCopyPrimaryToSecondary(a)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, fault)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, fault)
+return
+}
 if g.c.renvoTargetArch == renvoArchAmd64 {
 renvoAsmEmit24(a, 0xd4ff41)
 return
@@ -22557,15 +22567,17 @@ renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
 renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-renvoAsmCopySecondaryToTertiary(a)
+
+
+if g.meta.panicEnabled {
 renvoAsmPrimaryImm(a, 1)
+}
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, invalid)
 if !g.meta.panicEnabled {
 renvoEmitUncaughtFaultTransfer(g, false)
 return
 }
-renvoAsmCopySecondaryToTertiary(a)
 renvoAsmPrimaryImm(a, 0)
 renvoAsmRet(a)
 return
@@ -57921,7 +57933,7 @@ return 0
 func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 r := renvoUnitReader{src: data, end: len(data), ok: true}
 count := renvoUnitReadVar(&r)
-if !r.ok {
+if !r.ok || count < 0 || count > (r.end-r.pos)/4 {
 return nil, nil, false
 }
 out := make([]int32, count*renvoTokenStride)
@@ -57935,12 +57947,16 @@ kind := 0
 delta := 0
 size := 0
 lineDelta := 0
-if r.ok && r.pos+4 <= r.end &&
-r.src[r.pos]|r.src[r.pos+1]|r.src[r.pos+2]|r.src[r.pos+3] < 128 {
-kind = int(r.src[r.pos])
-delta = int(r.src[r.pos+1])
-size = int(r.src[r.pos+2])
-lineDelta = int(r.src[r.pos+3])
+fast := r.ok && r.pos <= r.end-4
+if fast {
+
+kind = int(renvo_runtime_UnsafeByteAt(data, r.pos))
+delta = int(renvo_runtime_UnsafeByteAt(data, r.pos+1))
+size = int(renvo_runtime_UnsafeByteAt(data, r.pos+2))
+lineDelta = int(renvo_runtime_UnsafeByteAt(data, r.pos+3))
+fast = kind|delta|size|lineDelta < 128
+}
+if fast {
 r.pos += 4
 } else {
 kind = renvoUnitReadVar(&r)

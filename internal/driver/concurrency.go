@@ -94,11 +94,10 @@ func sourceConcurrencyCandidate(src []byte) bool {
 			}
 			continue
 		}
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 128 {
+		if uint(c|32)-'a' < 26 || uint(c)-'0' < 10 || c == '_' || c >= 128 {
 			start := pos
-			for pos+1 < len(src) {
-				next := src[pos+1]
-				if !(next >= 'a' && next <= 'z' || next >= 'A' && next <= 'Z' || next >= '0' && next <= '9' || next == '_' || next >= 128) {
+			for _, next := range src[pos+1:] {
+				if !(uint(next|32)-'a' < 26 || uint(next)-'0' < 10 || next == '_' || next >= 128) {
 					break
 				}
 				pos++

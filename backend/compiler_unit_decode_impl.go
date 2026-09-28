@@ -48,7 +48,7 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
-	if !r.ok {
+	if !r.ok || count < 0 || count > (r.end-r.pos)/4 {
 		return nil, nil, false
 	}
 	out := make([]int32, count*renvoTokenStride)
@@ -62,12 +62,16 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		delta := 0
 		size := 0
 		lineDelta := 0
-		if r.ok && r.pos+4 <= r.end &&
-			r.src[r.pos]|r.src[r.pos+1]|r.src[r.pos+2]|r.src[r.pos+3] < 128 {
-			kind = int(r.src[r.pos])
-			delta = int(r.src[r.pos+1])
-			size = int(r.src[r.pos+2])
-			lineDelta = int(r.src[r.pos+3])
+		fast := r.ok && r.pos <= r.end-4
+		if fast {
+			// The range check covers all four bytes; load each exactly once.
+			kind = int(renvo_runtime_UnsafeByteAt(data, r.pos))
+			delta = int(renvo_runtime_UnsafeByteAt(data, r.pos+1))
+			size = int(renvo_runtime_UnsafeByteAt(data, r.pos+2))
+			lineDelta = int(renvo_runtime_UnsafeByteAt(data, r.pos+3))
+			fast = kind|delta|size|lineDelta < 128
+		}
+		if fast {
 			r.pos += 4
 		} else {
 			kind = renvoUnitReadVar(&r)

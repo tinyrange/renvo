@@ -22411,7 +22411,6 @@ func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 		renvoAsmAddScaledTertiary(a, elemSize)
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, invalid)
@@ -22447,6 +22446,17 @@ func renvoEmitRuntimeBoundsCheck(g *renvoLinearGen) {
 	renvoNonNil(g)
 	a := &g.asm
 	if !g.meta.panicEnabled {
+		if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+			// Keep the successful checked-index path inline. The original index
+			// remains in secondary; both invalid cases share the fault helper.
+			fault := renvoEnsureUncaughtFaultHelper(g, false)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, fault)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, fault)
+			return
+		}
 		if g.c.renvoTargetArch == renvoArchAmd64 {
 			renvoAsmEmit24(a, 0xd4ff41)
 			return
@@ -22550,15 +22560,17 @@ func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-		renvoAsmCopySecondaryToTertiary(a)
-		renvoAsmPrimaryImm(a, 1)
+		// Callers consume secondary as the original index. Only recoverable
+		// checks need a success flag; tertiary is restored by the caller.
+		if g.meta.panicEnabled {
+			renvoAsmPrimaryImm(a, 1)
+		}
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, invalid)
 		if !g.meta.panicEnabled {
 			renvoEmitUncaughtFaultTransfer(g, false)
 			return
 		}
-		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmPrimaryImm(a, 0)
 		renvoAsmRet(a)
 		return
