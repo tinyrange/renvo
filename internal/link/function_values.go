@@ -1056,7 +1056,7 @@ func functionValueCalledFunction(program *unit.Program, open int) (unit.Func, bo
 		}
 	}
 	for i := 0; i < len(program.Funcs); i++ {
-		fn := program.Funcs[i]
+		fn := &program.Funcs[i]
 		if !functionValueTokenEquals(program, fn.NameTok, name) {
 			continue
 		}
@@ -1065,12 +1065,12 @@ func functionValueCalledFunction(program *unit.Program, open int) (unit.Func, bo
 			continue
 		}
 		if !fallbackOK {
-			fallback = fn
+			fallback = *fn
 			fallbackOK = true
 		}
 		fallbackCount++
-		if !method || baseType != "" && functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, fn), 0) {
-			return fn, true
+		if !method || baseType != "" && functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, *fn), 0) {
+			return *fn, true
 		}
 	}
 	return fallback, fallbackOK && fallbackCount == 1
