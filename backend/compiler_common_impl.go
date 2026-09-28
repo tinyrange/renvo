@@ -20424,8 +20424,9 @@ func renvoEmitTupleArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, ty
 	for i := 0; i < tuple.count; i++ {
 		field := g.meta.fields[tuple.first+i]
 		size := renvoTypeCopySize(g.meta, field.typ)
-		renvoEmitPushWords(g, offset-field.offset, size, renvoBackendValueSlotSize, renvoPushStack)
-		wordCount += size / renvoBackendValueSlotSize
+		wordSize := renvoCallWordSize(g, field.typ)
+		renvoEmitPushWords(g, offset-field.offset, size, wordSize, renvoPushStack)
+		wordCount += renvoAlignValue(size, wordSize) / wordSize
 	}
 	return wordCount
 }
