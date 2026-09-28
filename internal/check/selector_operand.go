@@ -31,7 +31,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 			}
 		}
 		if !known && file.Tokens[dot-1].KindLine&255 == syntax.TokenIdent && !tokCharIs(file, dot-2, '.') {
-			local := lookupScopeTokenNameCore(scope, file, dot-1) >= 0
+			local := lookupScopeTokenNameCore(&scope, file, dot-1) >= 0
 			if !local {
 				symbol := lookupPackageSymbolTextCore(info, file, dot-1)
 				if symbol < 0 || info.Symbols[symbol].Kind != SymbolVar {
