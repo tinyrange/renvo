@@ -128,12 +128,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 		}
 		file := &pkg.Files[decl.File].File
 		mark := arena.Mark()
-		wantInterface := interfaceNamedType(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+		wantInterface := interfaceNamedType(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		if wantInterface.known && !wantInterface.pointer && info.Types[wantInterface.index].Kind == TypeInterface {
 			values := splitExprList(*file, decl.ValueStart, decl.ValueEnd)
 			if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 				value := values[decl.ValueIndex]
-				got := interfaceExprType(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, 0)
+				got := interfaceExprType(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, 0)
 				if definiteInterfaceMismatch(pkg, info, wantInterface.index, got) {
 					arena.Reset(mark)
 					return false, CheckErrType, decl.File, value.StartTok
@@ -179,11 +179,12 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			signature := buildFuncSignature(file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
 			scope, scopeOK, scopeTok := buildFuncScopeCore(*file, fn)
-			validationArenaStart := arena.Mark()
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
 			}
+			literals := buildFuncCompositeExprs(*file, body)
+			validationArenaStart := arena.Mark()
 			if statementErr, statementTok := invalidDefiniteStatement(*file, body, pkg.Files[fileIndex].C); statementErr != CheckOK {
 				arena.Reset(functionArenaStart)
 				return false, statementErr, fileIndex, statementTok
@@ -205,7 +206,6 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
 			}
-			literals := buildFuncCompositeExprs(*file, body)
 			if len(literals) > 0 {
 				if scopeOK {
 					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
@@ -214,12 +214,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 					}
 				}
 			}
-			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, &body, &signature, scope, scopeOK, literals); tok >= 0 {
+			// Keep parsed metadata and share operand bindings with later checks.
+			arena.Reset(validationArenaStart)
+			var operandBindings []scopedTypeBinding
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, &body, &signature, scope, scopeOK, literals, &operandBindings); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrUndefined, fileIndex, tok
 			}
-			// Keep the parsed signature and body for builtin validation; release check scratch.
-			arena.Reset(validationArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
 				// path with an empty body range. The unit builder later requires an
@@ -250,9 +251,8 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 
 			operatorMark := arena.Mark()
 			// Retain immutable operand bindings through the final builtin check.
-			// They are allocated after validation scratch is released and reclaimed
+			// They are shared with selectors after validation scratch is released and reclaimed
 			// with the parsed body at functionArenaStart.
-			var operandBindings []scopedTypeBinding
 			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrAssignTarget, fileIndex, tok

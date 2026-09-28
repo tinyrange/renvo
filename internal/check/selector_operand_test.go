@@ -9,6 +9,8 @@ import (
 func TestMissingStructSelector(t *testing.T) {
 	for _, source := range []string{
 		`type S struct{};func main(){_=S{}.X}`,
+		`type S struct{X int};type T struct{Y int};func f(s S){_=s.X;{s:=T{};_=s.Y};_=s.Y}`,
+		`type S struct{X int};func f(s S){_=s.X;_=s.Y}`,
 		`func main(){_=struct{Y int}{1}.X}`,
 		`type S struct{};func f(s S){_=s.X}`,
 		`type S struct{};func f(s *S){_=s.X}`,
@@ -24,6 +26,7 @@ func TestMissingStructSelector(t *testing.T) {
 func TestStructSelectorControls(t *testing.T) {
 	for _, source := range []string{
 		`type S struct{X int};func main(){_=S{1}.X}`,
+		`type S struct{X int};type T struct{Y int};func f(s S){_=s.X;{s:=T{};_=s.Y};_=s.X}`,
 		`type S struct{};func(S) X()int{return 1};func main(){_=S{}.X()}`,
 		`type S struct{};func(*S) X()int{return 1};func f(s *S){_=s.X()}`,
 		`type S struct{X int};type T struct{S};func main(){_=T{}.X}`,

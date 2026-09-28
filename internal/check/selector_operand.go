@@ -5,10 +5,10 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, scopeOK bool, literals []CompositeExpr) int {
+func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, scopeOK bool, literals []CompositeExpr, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
-	var bindings []scopedTypeBinding
-	ready := false
+	bindings := *cachedBindings
+	ready := bindings != nil
 	for dot := fn.BodyStart + 1; dot+1 < fn.BodyEnd; dot++ {
 		if file.Tokens[dot].KindLine&255 == syntax.TokenFunc {
 			dot = pointerOrderingNestedFunctionEnd(*file, dot, fn.BodyEnd-1)
@@ -26,7 +26,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 		for _, literal := range literals {
 			if literal.EndTok == dot {
 				fields, known = literalStructFields(pkg, info, file, literal.TypeStart, literal.TypeEnd, scope, 0)
-				concrete = interfaceNamedType(pkg, info, fileIndex, scope, literal.TypeStart, literal.TypeEnd, 0)
+				concrete = interfaceNamedType(pkg, info, fileIndex, &scope, literal.TypeStart, literal.TypeEnd, 0)
 				break
 			}
 		}
@@ -40,12 +40,20 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 			}
 			if local && !ready {
 				bindings = collectScopedTypeBindings(file, fn, body, signature)
+				*cachedBindings = bindings
 				ready = true
 			}
-			concrete = interfaceExprType(pkg, info, fileIndex, scope, bindings, dot-1, dot, dot, 0)
+			concrete = interfaceExprType(pkg, info, fileIndex, &scope, bindings, dot-1, dot, dot, 0)
 			if concrete.known {
-				typ := info.Types[concrete.index]
-				fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, 0)
+				typ := &info.Types[concrete.index]
+				if typ.Kind == TypeStruct {
+					// Package type collection already parsed these fields. Reuse
+					// them instead of reparsing the struct at every selector.
+					fields = typ.Fields
+					known = true
+				} else {
+					fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, 0)
+				}
 			}
 		}
 		if !known {
@@ -72,18 +80,24 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 }
 
 func knownSelectorMethod(pkg *load.Package, info *PackageInfo, index int, name string) bool {
+	// Direct receiver methods are already indexed in the package symbol table.
+	// Alias receivers still use the resolution path below.
+	if symbol := lookupPackageSymbol(info.Symbols, info.Types[index].Name+"."+name); symbol >= 0 && info.Symbols[symbol].Kind == SymbolMethod {
+		return true
+	}
 	for fileIndex := range pkg.Files {
 		file := &pkg.Files[fileIndex].File
-		for _, fn := range file.Funcs {
+		for funcIndex := 0; funcIndex < len(file.Funcs); funcIndex++ {
+			fn := &file.Funcs[funcIndex]
 			if fn.ReceiverStart < 0 || !tokenTextIs(file, fn.NameTok, name) {
 				continue
 			}
-			signature := buildFuncSignature(file, fn)
+			signature := buildFuncSignature(file, *fn)
 			if len(signature.Receiver) != 1 {
 				continue
 			}
 			receiver := signature.Receiver[0]
-			actual := interfaceNamedType(pkg, info, fileIndex, CoreScope{}, receiver.TypeStart, receiver.TypeEnd, 0)
+			actual := interfaceNamedType(pkg, info, fileIndex, &CoreScope{}, receiver.TypeStart, receiver.TypeEnd, 0)
 			if actual.known && actual.index == index {
 				return true
 			}
