@@ -82,7 +82,7 @@ func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, 
 	name := tokenString(&file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
 	}
 	if definiteBuiltinType(name) || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" || name == "any" || name == "error" || name == "true" || name == "false" || name == "nil" || lookupPackageSymbol(info.Symbols, name) >= 0 {
