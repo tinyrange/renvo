@@ -178,7 +178,7 @@ func definiteInterfaceMismatch(pkg *load.Package, info *PackageInfo, want int, g
 				if fn.ReceiverStart < 0 || fn.ReceiverEnd <= fn.ReceiverStart || !tokenTextIs(file, fn.NameTok, required.Name) {
 					continue
 				}
-				signature := buildFuncSignature(*file, fn)
+				signature := buildFuncSignature(file, fn)
 				if len(signature.Receiver) != 1 {
 					continue
 				}
