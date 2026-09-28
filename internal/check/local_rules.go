@@ -35,7 +35,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 			for _, name := range names {
 				bindings = append(bindings, localRuleBinding{name, start, end, scopeEnds[i]})
 			}
-			builtin := end-start == 1 && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(file, start)) < 0
+			builtin := end-start == 1 && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(file, start)) < 0
 			if op >= 0 && builtin && literalIntegerOverflows(*file, op+1, stmt.EndTok, tokenString(file, start)) {
 				return CheckErrType, op + 1
 			}
@@ -45,7 +45,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 				declared := tokenString(file, start)
 				if rightEnd-rightStart == 1 && definiteBuiltinType(declared) {
 					kind := definiteLiteralKind(*file, rightStart)
-					if file.Tokens[rightStart].KindLine&255 == syntax.TokenIdent && (lookupScopeTokenNameCore(scope, file, rightStart) >= 0 || lookupPackageSymbol(info.Symbols, tokenString(file, rightStart)) >= 0) {
+					if file.Tokens[rightStart].KindLine&255 == syntax.TokenIdent && (lookupScopeTokenNameCore(&scope, file, rightStart) >= 0 || lookupPackageSymbol(info.Symbols, tokenString(file, rightStart)) >= 0) {
 						kind = ""
 					}
 					if kind != "" && kind != declared {
@@ -57,14 +57,14 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op >= 0 && tokCharIs(file, stmt.StartTok+1, '[') {
 			for j := len(bindings) - 1; j >= 0; j-- {
 				binding := bindings[j]
 				if binding.token >= stmt.StartTok || binding.scopeEnd <= stmt.StartTok || !statementTokensEqual(file, binding.token, stmt.StartTok) {
 					continue
 				}
-				if binding.end-binding.start == 1 && (tokenTextIs(file, binding.start, "string") && lookupScopeTokenNameCore(scope, file, binding.start) < 0 && lookupPackageSymbol(info.Symbols, "string") < 0 || file.Tokens[binding.start].KindLine&255 == syntax.TokenString) {
+				if binding.end-binding.start == 1 && (tokenTextIs(file, binding.start, "string") && lookupScopeTokenNameCore(&scope, file, binding.start) < 0 && lookupPackageSymbol(info.Symbols, "string") < 0 || file.Tokens[binding.start].KindLine&255 == syntax.TokenString) {
 					return CheckErrAssignTarget, stmt.StartTok
 				}
 				break
