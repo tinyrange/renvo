@@ -155,6 +155,10 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			arena.Reset(mark)
 			return false, CheckErrArrayIndex, decl.File, tok
 		}
+		if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+			arena.Reset(mark)
+			return false, CheckErrType, decl.File, tok
+		}
 		tok := invalidStructLiterals(pkg, info, file, literals, scope)
 		arena.Reset(mark)
 		if tok >= 0 {
@@ -197,11 +201,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(*file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
-			validationArenaStart := arena.Mark()
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
 			}
+			// Both constant bounds and operand checks use the same immutable index spans.
+			indexes := buildFuncIndexExprs(file, &body)
+			validationArenaStart := arena.Mark()
 			if statementErr, statementTok := invalidDefiniteStatement(*file, body, pkg.Files[fileIndex].C); statementErr != CheckOK {
 				arena.Reset(functionArenaStart)
 				return false, statementErr, fileIndex, statementTok
@@ -214,7 +220,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
 			}
-			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, fn, &body, &signature); indexTok >= 0 {
+			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, fn, indexes, &signature); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayIndex, fileIndex, indexTok
 			}
@@ -232,13 +238,17 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 						arena.Reset(functionArenaStart)
 						return false, CheckErrArrayIndex, fileIndex, tok
 					}
+					if tok := invalidMapLiteralTypes(pkg, info, file, literals, scope); tok >= 0 {
+						arena.Reset(functionArenaStart)
+						return false, CheckErrType, fileIndex, tok
+					}
 					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrStructLiteral, fileIndex, tok
 					}
 				}
 			}
-			// Keep the parsed signature and body for builtin validation; release check scratch.
+			// Keep signature, body, and index spans; release validation scratch.
 			arena.Reset(validationArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
@@ -290,6 +300,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 					arena.Reset(operatorMark)
 					return false, CheckErrType, fileIndex, interfaceTok
 				}
+			}
+			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings, indexes)
+			if mapCode != CheckOK {
+				arena.Reset(operatorMark)
+				return false, mapCode, fileIndex, mapTok
 			}
 
 			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
