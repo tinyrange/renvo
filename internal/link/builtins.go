@@ -126,8 +126,8 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			generated += "func " + stringLess + "(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n"
 			stringLessEmitted = true
 		}
-		text, ok := applyFunctionValueEditsCapacity(program.Text, edits, len(generated)+1)
-		if transient {
+		text, ok := applyFunctionValueEditsCapacityMode(program.Text, edits, len(generated)+1, transient)
+		if transient && len(program.Text) > 0 && len(text) > 0 && &program.Text[0] != &text[0] {
 			arena.DiscardBytes(program.Text)
 		}
 		if !ok {
@@ -141,10 +141,10 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			generated = ""
 		}
 		oldTokens := program.Tokens
-		if !rewriteBuiltinCalls(program, text, edits, originalLength, generatedStart) {
+		if !rewriteBuiltinCalls(program, text, edits, originalLength, generatedStart, transient) {
 			return false
 		}
-		if transient {
+		if transient && len(oldTokens) > 0 && &oldTokens[0] != &program.Tokens[0] {
 			renvo_runtime_ArenaDiscardLinkTokens(oldTokens)
 		}
 		if !pending {
