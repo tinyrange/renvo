@@ -69,7 +69,7 @@ func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.F
 	}
 	// A top-level comma separates results or grouped result names. Commas
 	// inside a function/aggregate result type do not make it multi-valued.
-	comma := nextTopLevelComma(target, resultStart+1, resultEnd-1)
-	remainingStart, remainingEnd := trimFieldSpan(target, comma+1, resultEnd-1)
+	comma := nextTopLevelComma(&target, resultStart+1, resultEnd-1)
+	remainingStart, remainingEnd := trimFieldSpan(&target, comma+1, resultEnd-1)
 	return comma < resultEnd-1 && remainingStart < remainingEnd
 }

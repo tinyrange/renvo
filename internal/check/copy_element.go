@@ -36,7 +36,7 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
 		name := tokenString(file, start)
 		if name == "make" && lookupPackageSymbol(info.Symbols, name) < 0 {
-			return copySliceTypeElement(pkg, info, fileIndex, scope, start+2, nextTopLevelComma(*file, start+2, end-1), 0)
+			return copySliceTypeElement(pkg, info, fileIndex, scope, start+2, nextTopLevelComma(file, start+2, end-1), 0)
 		}
 		if lookupType(info.Types, name) >= 0 {
 			return copySliceTypeElement(pkg, info, fileIndex, scope, start, start+1, 0)
