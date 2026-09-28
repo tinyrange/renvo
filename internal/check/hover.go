@@ -60,7 +60,7 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 	if !ok {
 		return ""
 	}
-	signature := buildFuncSignature(file, fn)
+	signature := buildFuncSignature(&file, fn)
 	groups := [][]Field{signature.Receiver, signature.Params, signature.Results}
 	for i := 0; i < len(groups); i++ {
 		for j := 0; j < len(groups[i]); j++ {
