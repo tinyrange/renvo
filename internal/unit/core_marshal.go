@@ -20,7 +20,19 @@ func MarshalCoreTransient(program CoreProgram) ([]byte, bool) {
 	return marshalCore(program, true)
 }
 
+// MarshalCoreTransientInto transfers the encoded unit without returning a large
+// arena-backed slice through an escaping result in the self-hosted compiler.
+func MarshalCoreTransientInto(program *CoreProgram, out *[]byte) bool {
+	return marshalCoreInto(program, true, out)
+}
+
 func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
+	var out []byte
+	ok := marshalCoreInto(&program, transient, &out)
+	return out, ok
+}
+
+func marshalCoreInto(program *CoreProgram, transient bool, result *[]byte) bool {
 	assemblyCapacity := len(program.RTGAssemblyFuncs) * 4
 	for i := 0; i < len(program.RTGAssembly); i++ {
 		assemblyCapacity += len(program.RTGAssembly[i].Path) + len(program.RTGAssembly[i].Source) + 4
@@ -75,7 +87,8 @@ func marshalCore(program CoreProgram, transient bool) ([]byte, bool) {
 		out = appendNode(out, TagForeignPrograms, encodeForeignProgramsCore(program.ForeignPrograms))
 	}
 	patchUint32Core(out, rootLength, len(out)-14)
-	return out, true
+	*result = out
+	return true
 }
 
 func encodeForeignProgramsCore(programs []ForeignProgram) []byte {

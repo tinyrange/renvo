@@ -22,13 +22,13 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind == syntax.StmtDecl && (file.Tokens[stmt.StartTok].KindLine&255 == syntax.TokenVar || file.Tokens[stmt.StartTok].KindLine&255 == syntax.TokenConst) {
-			names, start := localDeclNameTokens(*file, stmt.StartTok+1, stmt.EndTok)
-			op := findDeclAssign(*file, start, stmt.EndTok)
+			names, start := localDeclNameTokens(file, stmt.StartTok+1, stmt.EndTok)
+			op := findDeclAssign(file, start, stmt.EndTok)
 			end := stmt.EndTok
 			if op >= 0 {
 				end = op
 			}
-			start, end = trimDeclSpan(*file, start, end)
+			start, end = trimDeclSpan(file, start, end)
 			if len(names) > 0 && scopeEnds == nil {
 				scopeEnds = localRuleScopeEnds(*body)
 			}
@@ -40,7 +40,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 				return CheckErrType, op + 1
 			}
 			if op >= 0 && builtin {
-				rightStart, rightEnd := trimDeclSpan(*file, op+1, stmt.EndTok)
+				rightStart, rightEnd := trimDeclSpan(file, op+1, stmt.EndTok)
 				rightStart, rightEnd = stripOuterParens(file, rightStart, rightEnd)
 				declared := tokenString(file, start)
 				if rightEnd-rightStart == 1 && definiteBuiltinType(declared) {

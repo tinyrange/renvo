@@ -135,7 +135,7 @@ func completionFile(graph load.Graph, path string) (int, int) {
 func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program, pkgIndex, fileIndex int, file syntax.File, offset int, prefix string) []CompletionItem {
 	fn, hasFunc := completionFunctionAt(file, offset)
 	if hasFunc {
-		scope, _, _ := buildFuncScopeCore(file, fn)
+		scope, _, _ := buildFuncScopeCore(&file, fn)
 		for i := 0; i < len(scope.Names); i++ {
 			name := tokenString(&file, scope.Names[i].Token)
 			tok := file.Tokens[scope.Names[i].Token]
@@ -320,7 +320,7 @@ func completionTypeItems(items []CompletionItem, graph load.Graph, prog Program,
 }
 
 func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int, file syntax.File, fn syntax.FuncDecl, name string, offset int) (completionType, bool) {
-	signature := buildFuncSignature(file, fn)
+	signature := buildFuncSignature(&file, fn)
 	groups := [][]Field{signature.Receiver, signature.Params, signature.Results}
 	for i := 0; i < len(groups); i++ {
 		for j := 0; j < len(groups[i]); j++ {
@@ -337,7 +337,7 @@ func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int,
 		}
 		if i > 0 && file.Tokens[i-1].KindLine&255 == syntax.TokenVar {
 			end := completionStatementEnd(file, i+1, fn.BodyEnd)
-			value := findDeclAssign(file, i+1, end)
+			value := findDeclAssign(&file, i+1, end)
 			typeEnd := end
 			if value >= 0 {
 				typeEnd = value
@@ -430,7 +430,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 			if close < 0 || close > end {
 				close = end
 			}
-			typeEnd := nextTopLevelComma(file, next+1, close)
+			typeEnd := nextTopLevelComma(&file, next+1, close)
 			if typeEnd > close {
 				typeEnd = close
 			}
@@ -572,7 +572,7 @@ func completionSymbolResultType(graph load.Graph, prog Program, pkg, symbolIndex
 		if file.Funcs[i].NameTok != symbol.Token {
 			continue
 		}
-		results := buildFuncSignature(file, file.Funcs[i]).Results
+		results := buildFuncSignature(&file, file.Funcs[i]).Results
 		if resultIndex >= 0 && resultIndex < len(results) {
 			return completionSpanType(graph, prog, pkg, symbol.File, results[resultIndex].TypeStart, results[resultIndex].TypeEnd)
 		}
@@ -759,7 +759,7 @@ func completionAddSymbol(items []CompletionItem, graph load.Graph, pkg int, symb
 		}
 		return append(items, CompletionItem{Name: displayName, Detail: "function", Kind: kind})
 	}
-	parameters := completionParameters(file, buildFuncSignature(file, fn).Params)
+	parameters := completionParameters(file, buildFuncSignature(&file, fn).Params)
 	label, detail := completionFunctionLabels(file, fn, displayName)
 	kind := CompletionFunction
 	if symbol.Kind == SymbolMethod {

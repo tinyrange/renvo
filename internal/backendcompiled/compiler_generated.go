@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c1c36709c392ad74566834dc14a7d3cf10dbd4eb573daacbd5f1581f198c7c36"
+const CompilerSourceDigest = "efe675fa4b716e7b4e85df091df88ba00b7780beb6d33657bcd96597aaf385a5"
 
 // source: backend/compiler_common_impl.go
 
@@ -19536,9 +19536,6 @@ if e.argCount != 1 {
 return false
 }
 argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-if g.deferReturnLabel <= 0 {
-return false
-}
 valueOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 if !renvoEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 return false
@@ -21163,9 +21160,12 @@ if g.c.renvoTargetArch == renvoArchArm {
 renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
 return
 }
+if g.c.renvoTarget == renvoTargetVM32 {
+renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+return
+}
 a := &g.asm
 if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-
 
 renvoAsmLoadPrimaryStack(a, srcPtr)
 renvoAsmLoadSecondaryStack(a, destPtr)
@@ -21197,6 +21197,50 @@ renvoEmitCopyByteAt(g, srcPtr, destPtr, index)
 renvoAsmIncStack(a, index)
 renvoAsmJmpLabel(a, forwardLoop)
 renvoAsmMarkLabel(a, copyDone)
+}
+
+
+
+
+func renvoEmitCopyBytesVM32(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+a := &g.asm
+src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, src, srcPtr)
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, dest, destPtr)
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, count, byteCount)
+forward := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, dest, src)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLe, forward)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, src, count)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, dest, count)
+for direction := 0; direction < 2; direction++ {
+if direction == 1 {
+renvoAsmMarkLabel(a, forward)
+}
+for size := 4; size > 0; size -= 3 {
+loop := renvoAsmNewLabel(a)
+tail := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, loop)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
+if direction == 0 {
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+}
+renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
+renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+if direction == 1 {
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+}
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+renvoAsmJmpLabel(a, loop)
+renvoAsmMarkLabel(a, tail)
+}
+renvoAsmJmpLabel(a, done)
+}
+renvoAsmMarkLabel(a, done)
 }
 
 

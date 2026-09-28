@@ -54,7 +54,7 @@ func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMe
 			continue
 		}
 		elemEnd := nextInterfaceElementEnd(file, i, end)
-		first, last := trimFieldSpan(file, i, elemEnd)
+		first, last := trimFieldSpan(&file, i, elemEnd)
 		if first < last {
 			if isInterfaceMethodSpec(file, first, last) {
 				methods = append(methods, parseInterfaceMethod(file, first, last))
@@ -85,7 +85,7 @@ func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod 
 	return InterfaceMethod{
 		Name:      tokenString(&file, start),
 		NameTok:   start,
-		Signature: buildSignatureFromParts(file, -1, -1, paramsStart, paramsEnd, paramsEnd, end),
+		Signature: buildSignatureFromParts(&file, -1, -1, paramsStart, paramsEnd, paramsEnd, end),
 	}
 }
 

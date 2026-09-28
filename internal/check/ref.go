@@ -67,11 +67,11 @@ func appendDeclRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
+			i = skipLocalSeparators(&file, i, end)
 			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, end)
+			specEnd := statementSpecEnd(&file, i, end)
 			refs = appendSpecInitializerRefs(refs, file, fileIndex, info, scope, i, specEnd)
 			i = specEnd
 		}
@@ -126,7 +126,36 @@ func shouldSkipIdentRef(file *syntax.File, tok int, end int) bool {
 	if tok+1 < end {
 		next := file.Tokens[tok+1]
 		if next.KindLine&255 == syntax.TokenOperator && next.End-next.Start == 1 && file.Src[int(next.Start)] == ':' {
-			return true
+			return !identEndsCaseExpression(file, tok)
+		}
+	}
+	return false
+}
+
+// A case expression's final identifier is a value reference, unlike a
+// statement label or a keyed struct field. Look back only within the current
+// expression, skipping balanced subexpressions but not enclosing literals.
+func identEndsCaseExpression(file *syntax.File, tok int) bool {
+	depth := 0
+	for i := tok - 1; i >= 0; i-- {
+		if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+			depth++
+			continue
+		}
+		if tokCharIs(file, i, '(') || tokCharIs(file, i, '[') || tokCharIs(file, i, '{') {
+			if depth == 0 {
+				return false
+			}
+			depth--
+			continue
+		}
+		if depth == 0 {
+			if file.Tokens[i].KindLine&255 == syntax.TokenCase {
+				return true
+			}
+			if tokCharIs(file, i, ':') || tokCharIs(file, i, ';') {
+				return false
+			}
 		}
 	}
 	return false
@@ -148,7 +177,7 @@ func resolveNameRef(fileIndex int, info PackageInfo, scope FuncScope, name strin
 		ref.Package = info.Imports[importIndex].Package
 		return ref
 	}
-	symbolIndex := lookupPackageSymbol(info.Symbols, name)
+	symbolIndex := LookupPackageSymbol(info, name)
 	if symbolIndex >= 0 {
 		ref.Kind = RefPackage
 		ref.Index = symbolIndex
