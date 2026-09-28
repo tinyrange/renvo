@@ -55,6 +55,16 @@ func runRenvoCommand(args []string, env []string) (int, string) {
 		}
 		return ExecuteCCompilerRequest(request, input)
 	}
+	if ObjectLinkCommandRequested(args) {
+		output, image, diagnostic := LinkObjectCommand(args, RenvoFS{})
+		if diagnostic != "" {
+			return 1, diagnostic
+		}
+		if os.WriteFile(output, image, 0755) != nil {
+			return 1, "renvo cc: failed to write executable\n"
+		}
+		return 0, ""
+	}
 	args = NormalizeCCompilerCommand(args)
 	if CAssemblyCommandRequested(args) {
 		result := CompileCAssemblyCommand(args, renvoWorkDir(env), RenvoFS{})
