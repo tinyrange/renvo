@@ -34,18 +34,18 @@ func main() {}
 	signatures := []functionValueSignature{{name: "callback", paramTypes: []string{"*T"}}}
 	for _, fn := range program.Funcs {
 		name := functionValueTokenText(&program, fn.NameTok)
-		types := functionValueFunctionParamTypes(&program, fn)
+		types := functionValueFunctionParamTypes(&program, &fn)
 		if name == "run" {
-			if functionValueParameterSignature(&program, fn, 0, types[0], signatures) != -1 {
+			if functionValueParameterSignature(&program, &fn, 0, types[0], signatures) != -1 {
 				t.Fatal("string parameter matched callback")
 			}
-			if functionValueParameterSignature(&program, fn, 1, types[1], signatures) != 0 {
+			if functionValueParameterSignature(&program, &fn, 1, types[1], signatures) != 0 {
 				t.Fatal("named callback parameter did not match")
 			}
 		}
 		if name == "grouped" {
 			for i := range types {
-				if functionValueParameterSignature(&program, fn, i, types[i], signatures) != 0 {
+				if functionValueParameterSignature(&program, &fn, i, types[i], signatures) != 0 {
 					t.Fatal("grouped callback parameter did not match")
 				}
 			}

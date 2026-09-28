@@ -66,11 +66,11 @@ func appendDeclSelectors(selectors []SelectorRef, file syntax.File, fileIndex in
 	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
+			i = skipLocalSeparators(&file, i, end)
 			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, end)
+			specEnd := statementSpecEnd(&file, i, end)
 			selectors = appendSpecInitializerSelectors(selectors, file, fileIndex, info, checked, scope, i, specEnd)
 			i = specEnd
 		}

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "4168c3779cd41a22bad1ee3d22eda379f68816314b010f2fea5bd21b1bcaab64"
+const CompilerSourceDigest = "c1c36709c392ad74566834dc14a7d3cf10dbd4eb573daacbd5f1581f198c7c36"
 
 // source: backend/compiler_common_impl.go
 
@@ -20431,8 +20431,9 @@ wordCount := 0
 for i := 0; i < tuple.count; i++ {
 field := g.meta.fields[tuple.first+i]
 size := renvoTypeCopySize(g.meta, field.typ)
-renvoEmitPushWords(g, offset-field.offset, size, renvoBackendValueSlotSize, renvoPushStack)
-wordCount += size / renvoBackendValueSlotSize
+wordSize := renvoCallWordSize(g, field.typ)
+renvoEmitPushWords(g, offset-field.offset, size, wordSize, renvoPushStack)
+wordCount += renvoAlignValue(size, wordSize) / wordSize
 }
 return wordCount
 }

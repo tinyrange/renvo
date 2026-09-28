@@ -198,7 +198,7 @@ func definiteExprListSummary(file syntax.File, start int, end int, validateTarge
 	count := 0
 	invalid := -1
 	for i := start; i >= 0 && i < end; {
-		next := nextTopLevelComma(file, i, end)
+		next := nextTopLevelComma(&file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			span := ExprSpan{StartTok: itemStart, EndTok: itemEnd}

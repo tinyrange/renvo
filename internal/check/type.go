@@ -211,7 +211,7 @@ func parseFuncTypeSignature(file syntax.File, start int, end int) FuncSignature 
 	if paramsEnd < end {
 		resultStart, resultEnd = trimTypeSpan(file, paramsEnd, end)
 	}
-	return buildSignatureFromParts(file, -1, -1, start+1, paramsEnd, resultStart, resultEnd)
+	return buildSignatureFromParts(&file, -1, -1, start+1, paramsEnd, resultStart, resultEnd)
 }
 
 func trimTypeSpan(file syntax.File, start int, end int) (int, int) {
@@ -240,12 +240,12 @@ func parseStructFields(file syntax.File, start int, end int) []Field {
 			continue
 		}
 		fieldEnd := nextStructFieldEnd(file, i, end)
-		first, last := trimFieldSpan(file, i, fieldEnd)
+		first, last := trimFieldSpan(&file, i, fieldEnd)
 		if first < last {
 			if file.Tokens[last-1].KindLine&255 == syntax.TokenString {
 				last--
 			}
-			parsed := parseFieldList(file, first, last)
+			parsed := parseFieldList(&file, first, last)
 			for j := 0; j < len(parsed); j++ {
 				fields = append(fields, parsed[j])
 			}
