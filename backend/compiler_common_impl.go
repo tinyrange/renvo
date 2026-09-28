@@ -21156,10 +21156,13 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 		renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
 		return
 	}
+	if g.c.renvoTarget == renvoTargetVM32 {
+		renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+		return
+	}
 	a := &g.asm
 	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-		// Only native WebAssembly receives this compact instruction. RNVB and
-		// prepared targets keep their existing byte-copy contract.
+		// Native WebAssembly implements the copy with its bulk-memory instruction.
 		renvoAsmLoadPrimaryStack(a, srcPtr)
 		renvoAsmLoadSecondaryStack(a, destPtr)
 		renvoAsmLoadTertiaryStack(a, byteCount)
@@ -21190,6 +21193,50 @@ func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount in
 	renvoAsmIncStack(a, index)
 	renvoAsmJmpLabel(a, forwardLoop)
 	renvoAsmMarkLabel(a, copyDone)
+}
+
+// VM memory loads support unaligned words. Keep pointers and the remaining
+// length in registers and finish with byte loads, never reading beyond the
+// source slice. Directional traversal preserves even one-byte overlaps.
+func renvoEmitCopyBytesVM32(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+	a := &g.asm
+	src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
+	renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, src, srcPtr)
+	renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, dest, destPtr)
+	renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, count, byteCount)
+	forward := renvoAsmNewLabel(a)
+	done := renvoAsmNewLabel(a)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, dest, src)
+	renvoWasm32EmitCondBranch(a, renvoWasm32CondLe, forward)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, src, count)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, dest, count)
+	for direction := 0; direction < 2; direction++ {
+		if direction == 1 {
+			renvoAsmMarkLabel(a, forward)
+		}
+		for size := 4; size > 0; size -= 3 {
+			loop := renvoAsmNewLabel(a)
+			tail := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
+			if direction == 0 {
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+			}
+			renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
+			renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+			if direction == 1 {
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+			}
+			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+			renvoAsmJmpLabel(a, loop)
+			renvoAsmMarkLabel(a, tail)
+		}
+		renvoAsmJmpLabel(a, done)
+	}
+	renvoAsmMarkLabel(a, done)
 }
 
 // Keep copy pointers and the remaining byte count in caller-saved registers.
