@@ -23,7 +23,10 @@ type concurrencyGoSite struct {
 }
 
 func lowerConcurrencyCore(program *unit.Program, transient bool) bool {
-	needed := len(program.ConcurrencySites) > 0
+	return lowerConcurrencyCoreNeeded(program, transient, len(program.ConcurrencySites) > 0)
+}
+
+func lowerConcurrencyCoreNeeded(program *unit.Program, transient bool, needed bool) bool {
 	if !needed && !transient {
 		// Hand-built linker tests may not carry checked-package metadata. Normal
 		// transient frontend builds use the compact table transported through
