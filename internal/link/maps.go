@@ -166,7 +166,7 @@ func mapLowerShortLocalType(program *unit.Program, before int, name string) stri
 			if leftEnds[item]-leftStarts[item] != 1 || functionValueTokenText(program, leftStarts[item]) != name {
 				continue
 			}
-			if !functionValueBindingInScope(program, fn, leftStarts[item], before) {
+			if !functionValueBindingInScope(program, &fn, leftStarts[item], before) {
 				continue
 			}
 			rhsStart := rightStarts[item]

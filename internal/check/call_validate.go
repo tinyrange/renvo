@@ -224,13 +224,13 @@ func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, 
 	start := fn.ParamsStart + 1
 	end := fn.ParamsEnd - 1
 	for start < end {
-		segmentEnd := nextTopLevelComma(*file, start, end)
-		first, last := trimFieldSpan(*file, start, segmentEnd)
+		segmentEnd := nextTopLevelComma(file, start, end)
+		first, last := trimFieldSpan(file, start, segmentEnd)
 		if first >= last {
 			start = segmentEnd + 1
 			continue
 		}
-		if isSingleIdent(*file, first, last) {
+		if isSingleIdent(file, first, last) {
 			pending++
 			start = segmentEnd + 1
 			continue
@@ -385,8 +385,8 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 				continue
 			}
 			for j := specStart + 1; j < close-1; {
-				j = skipLocalSeparators(file, j, close-1)
-				specEnd := statementSpecEnd(file, j, close-1)
+				j = skipLocalSeparators(&file, j, close-1)
+				specEnd := statementSpecEnd(&file, j, close-1)
 				locals = appendDefiniteLocalSpecTypes(locals, file, j, specEnd)
 				if specEnd <= j {
 					j++
@@ -397,7 +397,7 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 			i = close - 1
 			continue
 		}
-		specEnd := statementSpecEnd(file, specStart, caller.BodyEnd)
+		specEnd := statementSpecEnd(&file, specStart, caller.BodyEnd)
 		locals = appendDefiniteLocalSpecTypes(locals, file, specStart, specEnd)
 		i = specEnd - 1
 	}
@@ -405,16 +405,16 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 }
 
 func appendDefiniteLocalSpecTypes(locals []definiteLocalTypeSpan, file syntax.File, start int, end int) []definiteLocalTypeSpan {
-	start, end = trimDeclSpan(file, start, end)
+	start, end = trimDeclSpan(&file, start, end)
 	if start < 0 || end <= start {
 		return locals
 	}
-	names, namesEnd := localDeclNameTokens(file, start, end)
+	names, namesEnd := localDeclNameTokens(&file, start, end)
 	typeEnd := end
-	if valueStart := findDeclAssign(file, namesEnd, end); valueStart >= 0 {
+	if valueStart := findDeclAssign(&file, namesEnd, end); valueStart >= 0 {
 		typeEnd = valueStart
 	}
-	typeStart, typeEnd := trimDeclSpan(file, namesEnd, typeEnd)
+	typeStart, typeEnd := trimDeclSpan(&file, namesEnd, typeEnd)
 	for i := 0; i < len(names); i++ {
 		locals = append(locals, definiteLocalTypeSpan{nameTok: names[i], typeStart: typeStart, typeEnd: typeEnd, visible: end})
 	}
