@@ -42,7 +42,7 @@ func arrayLiteralLength(context constantIndexContext, start, end, depth int) (wi
 		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(*file, start, end)
 		return wideConstantExpr(&context, lengthStart, lengthEnd, 0), true
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(context.scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&context.scope, file, start) >= 0 {
 		return wideConstant{}, false
 	}
 	index := LookupType(*context.info, tokenString(file, start))
