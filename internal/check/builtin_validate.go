@@ -51,7 +51,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				continue
 			}
 			if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
-				numericBindings = collectScopedTypeBindings(*file, fn, *body, signature)
+				numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 				numericReady = true
 			}
 			// Known value operands require the expression form of new. Unknown
