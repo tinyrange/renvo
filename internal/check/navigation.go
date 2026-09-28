@@ -260,7 +260,7 @@ func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, 
 				if function.NameTok != symbol.Token {
 					continue
 				}
-				signature := buildFuncSignature(functionFile, function)
+				signature := buildFuncSignature(&functionFile, function)
 				if len(signature.Results) > 0 {
 					return completionSpanType(graph, program, owner, symbol.File, signature.Results[0].TypeStart, signature.Results[0].TypeEnd)
 				}
