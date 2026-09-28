@@ -157,7 +157,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
-			signature := buildFuncSignature(*file, fn)
+			signature := buildFuncSignature(file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
 			validationArenaStart := arena.Mark()
 			if !body.Ok {
@@ -372,14 +372,14 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 			out.Alias = true
 			typeStart++
 		}
-		out.TypeStart, out.TypeEnd = trimDeclSpan(*file, typeStart, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 		return out, -1
 	}
 	typeStart := declNameListEnd(*file, decl)
-	valueStart := findDeclAssign(*file, typeStart, decl.EndTok)
+	valueStart := findDeclAssign(file, typeStart, decl.EndTok)
 	if valueStart >= 0 {
-		out.TypeStart, out.TypeEnd = trimDeclSpan(*file, typeStart, valueStart)
-		out.ValueStart, out.ValueEnd = trimDeclSpan(*file, valueStart+1, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
+		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
 		refCount, selectorCount := resolutionCapacitiesCore(out.ValueEnd - out.ValueStart)
 		out.CoreRefs = make([]CoreNameRef, 0, refCount)
 		out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
@@ -399,7 +399,7 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, scope, out.ValueStart, out.ValueEnd, nil)
 		return out, undefinedTok
 	} else {
-		out.TypeStart, out.TypeEnd = trimDeclSpan(*file, typeStart, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
 	return out, -1
 }
@@ -1148,7 +1148,7 @@ func collectCoreFieldNames(file syntax.File, start int, end int, kind int, scope
 	i := start
 	for i < end {
 		segStart := i
-		segEnd := nextTopLevelComma(file, i, end)
+		segEnd := nextTopLevelComma(&file, i, end)
 		first := firstNonSeparator(file, segStart, segEnd)
 		if first < segEnd && file.Tokens[first].KindLine&255 == syntax.TokenIdent {
 			next := first + 1
@@ -1282,11 +1282,11 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 		}
 		i := specStart + 1
 		for i < closeTok-1 {
-			i = skipLocalSeparators(file, i, closeTok-1)
+			i = skipLocalSeparators(&file, i, closeTok-1)
 			if i >= closeTok-1 {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, closeTok-1)
+			specEnd := statementSpecEnd(&file, i, closeTok-1)
 			collectCoreLeadingIdentList(file, i, specEnd, scope, variable)
 			if specEnd <= i {
 				i++
@@ -1296,7 +1296,7 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 		}
 		return closeTok - 1
 	}
-	specEnd := statementSpecEnd(file, specStart, end)
+	specEnd := statementSpecEnd(&file, specStart, end)
 	collectCoreLeadingIdentList(file, specStart, specEnd, scope, variable)
 	return specEnd - 1
 }
@@ -1342,11 +1342,11 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 			}
 			j := specStart + 1
 			for j < closeTok-1 {
-				j = skipLocalSeparators(file, j, closeTok-1)
+				j = skipLocalSeparators(&file, j, closeTok-1)
 				if j >= closeTok-1 {
 					break
 				}
-				specEnd := statementSpecEnd(file, j, closeTok-1)
+				specEnd := statementSpecEnd(&file, j, closeTok-1)
 				decls = appendLocalTypeSpanCore(decls, file, declSymbolKind(kind), j, specEnd)
 				if specEnd <= j {
 					j++
@@ -1357,7 +1357,7 @@ func buildFuncLocalTypeSpansCore(file syntax.File, fn syntax.FuncDecl) []CoreLoc
 			i = closeTok
 			continue
 		}
-		specEnd := statementSpecEnd(file, specStart, end)
+		specEnd := statementSpecEnd(&file, specStart, end)
 		decls = appendLocalTypeSpanCore(decls, file, declSymbolKind(kind), specStart, specEnd)
 		i = specEnd
 	}
@@ -1387,7 +1387,7 @@ func coreLocalTypeCapacity(tokens int) int {
 }
 
 func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file syntax.File, kind int, start int, end int) []CoreLocalTypeSpan {
-	start, end = trimDeclSpan(file, start, end)
+	start, end = trimDeclSpan(&file, start, end)
 	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return decls
 	}
@@ -1398,14 +1398,14 @@ func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file syntax.File, kind i
 		if tokenTextIs(&file, typeStart, "=") {
 			typeStart++
 		}
-		typeStart, typeEnd = trimDeclSpan(file, typeStart, end)
+		typeStart, typeEnd = trimDeclSpan(&file, typeStart, end)
 	} else {
-		_, namesEnd := localDeclNameTokens(file, start, end)
-		valueStart := findDeclAssign(file, namesEnd, end)
+		_, namesEnd := localDeclNameTokens(&file, start, end)
+		valueStart := findDeclAssign(&file, namesEnd, end)
 		if valueStart >= 0 {
-			typeStart, typeEnd = trimDeclSpan(file, namesEnd, valueStart)
+			typeStart, typeEnd = trimDeclSpan(&file, namesEnd, valueStart)
 		} else {
-			typeStart, typeEnd = trimDeclSpan(file, namesEnd, end)
+			typeStart, typeEnd = trimDeclSpan(&file, namesEnd, end)
 		}
 	}
 	if typeStart < 0 || typeEnd <= typeStart {
