@@ -127,6 +127,11 @@ func TestTransientCoreMarshalPreservesCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Fatal("transient marshal changed the canonical unit encoding")
 	}
+	core := CoreProgramFrom(program)
+	var into []byte
+	if !MarshalCoreTransientInto(&core, &into) || !bytes.Equal(into, want) {
+		t.Fatal("transient output parameter changed the canonical unit encoding")
+	}
 }
 
 func readGoldenHex(t *testing.T, path string) []byte {
