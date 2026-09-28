@@ -67,11 +67,11 @@ func appendDeclRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
+			i = skipLocalSeparators(&file, i, end)
 			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, end)
+			specEnd := statementSpecEnd(&file, i, end)
 			refs = appendSpecInitializerRefs(refs, file, fileIndex, info, scope, i, specEnd)
 			i = specEnd
 		}
