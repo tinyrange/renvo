@@ -39,7 +39,7 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 			return mapIndexTypeShape(pkg, info, fileIndex, start, open, scope, 0)
 		}
 	}
-	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
+	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
 		return mapIndexTypeShape(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -60,7 +60,8 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		return mapIndexExprShape(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
@@ -86,7 +87,7 @@ func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, e
 		ks, ke, vs, ve := parseMapTypeShape(*file, start, end)
 		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, scope, true}
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return mapIndexShape{}
 	}
 	index := lookupType(info.Types, tokenString(file, start))

@@ -890,16 +890,23 @@ func compressSourceEmbedArchive(data []byte) []byte {
 				if length >= 18 {
 					out = append(out, byte(length-18))
 				}
-				for i := 0; i < length; i++ {
-					sourceEmbedArchiveAddPosition(data, buckets, previous, pos+i)
-				}
-				pos += length
-				continue
+			} else {
+				flags |= 1 << bit
+				out = append(out, data[pos])
+				length = 1
 			}
-			flags |= 1 << bit
-			out = append(out, data[pos])
-			sourceEmbedArchiveAddPosition(data, buckets, previous, pos)
-			pos++
+			// Both encodings consume a consecutive range. Register it here so
+			// each byte does not require a separate dictionary-update call.
+			end := pos + length
+			for pos < end {
+				if pos+2 < len(data) {
+					hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
+					bucket := hash & (bucketCount - 1)
+					previous[pos] = buckets[bucket]
+					buckets[bucket] = int32(pos + 1)
+				}
+				pos++
+			}
 		}
 		out[flagPos] = flags
 	}

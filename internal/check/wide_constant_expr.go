@@ -162,7 +162,7 @@ func wideConstantExpr(context *constantIndexContext, start int, end int, depth i
 			next.iotaKnown, next.iotaValue = true, binding.iotaValue
 			return wideConstantExpr(&next, binding.valueStart, binding.valueEnd, depth+1)
 		}
-		if context.bindings == nil && lookupScopeTokenNameCore(context.scope, file, start) >= 0 {
+		if context.bindings == nil && lookupScopeTokenNameCore(&context.scope, file, start) >= 0 {
 			return wideConstant{}
 		}
 		if context.iotaKnown && tokenTextIs(file, start, "iota") && lookupPackageSymbol(context.info.Symbols, "iota") < 0 {

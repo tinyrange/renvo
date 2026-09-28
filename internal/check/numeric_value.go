@@ -83,13 +83,14 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		return value
 	}
 	name := tokenString(file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
 		return numericBuiltinValue{kind: "other"}
 	}
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || (decl.Kind != SymbolVar && decl.Kind != SymbolConst) {
 			continue
 		}
@@ -118,7 +119,7 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}
-	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
 	name := tokenString(file, start)

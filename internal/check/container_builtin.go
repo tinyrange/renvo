@@ -102,7 +102,7 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			}
 		}
 	}
-	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
+	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
 		return makeAllocationType(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -122,8 +122,10 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
-	for _, decl := range info.Decls {
-		if decl.Name != tokenString(file, start) || decl.Kind != SymbolVar {
+	name := tokenString(file, start)
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
+		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {

@@ -11,9 +11,13 @@ type interfaceConcreteType struct {
 	known   bool
 }
 
-func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) int {
+func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
-	bindings := collectScopedTypeBindings(file, fn, body, signature)
+	bindings := *cachedBindings
+	if bindings == nil {
+		bindings = collectScopedTypeBindings(file, fn, body, signature)
+		*cachedBindings = bindings
+	}
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
 		want := interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
@@ -91,7 +95,7 @@ func interfaceNamedType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		pointer = true
 		start++
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return interfaceConcreteType{}
 	}
 	index := lookupType(info.Types, tokenString(file, start))

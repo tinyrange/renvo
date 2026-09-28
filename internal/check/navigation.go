@@ -66,7 +66,7 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 	}
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
 	if fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[token])); ok {
-		if scope, scopeOK, _ := buildFuncScopeCore(file, fn); scopeOK && lookupScopeTokenNameCore(scope, &file, token) >= 0 {
+		if scope, scopeOK, _ := buildFuncScopeCore(file, fn); scopeOK && lookupScopeTokenNameCore(&scope, &file, token) >= 0 {
 			return NavigationResult{}
 		}
 	}
@@ -180,7 +180,7 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 		if !scopeOK {
 			continue
 		}
-		index := lookupScopeTokenNameCore(scope, &file, token)
+		index := lookupScopeTokenNameCore(&scope, &file, token)
 		if index >= 0 {
 			return navigationTarget{packageIndex: pkgIndex, fileIndex: fileIndex, bodyIndex: i, scopeIndex: index, local: true}, true
 		}
@@ -457,7 +457,7 @@ func navigationLocal(graph load.Graph, program Program, target navigationTarget)
 		if file.Tokens[token].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if lookupScopeTokenNameCore(scope, &file, token) == target.scopeIndex {
+		if lookupScopeTokenNameCore(&scope, &file, token) == target.scopeIndex {
 			if location, valid := navigationLocation(graph, target.packageIndex, target.fileIndex, token); valid {
 				navigationAppend(&result.References, location)
 			}

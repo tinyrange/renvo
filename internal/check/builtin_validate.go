@@ -14,12 +14,12 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int, cachedBindings []scopedTypeBinding) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
-	var numericBindings []scopedTypeBinding
-	numericReady := false
+	numericBindings := cachedBindings
+	numericReady := cachedBindings != nil
 	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for call := 0; call < len(calls); call++ {
 		callee := calls[call]
@@ -43,6 +43,25 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		args := splitExprList(*file, open+1, close-1)
+		if name == "new" {
+			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
+				return CheckErrBuiltinArity, callee
+			}
+			if !load.GoVersionBefore(pkg.Files[fileIndex].GoVersion, "1.26") || nested {
+				continue
+			}
+			if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
+				numericBindings = collectScopedTypeBindings(file, fn, body, signature)
+				numericReady = true
+			}
+			// Known value operands require the expression form of new. Unknown
+			// operands must not turn a valid new(Type) into a version error.
+			value := numericBuiltinExprValue(pkg, info, fileIndex, scope, numericBindings, args[0].StartTok, args[0].EndTok, callee, 0)
+			if value.kind != "" {
+				return CheckErrNewVersion, callee
+			}
+			continue
+		}
 		if name == "copy" || name == "delete" || name == "append" {
 			expanded := tokenTextIs(file, close-2, "...")
 			if name == "append" && (len(args) == 0 || expanded && len(args) != 2) || name != "append" && (len(args) != 2 || expanded) {
