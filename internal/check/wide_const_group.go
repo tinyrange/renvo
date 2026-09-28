@@ -50,10 +50,10 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			previousStart = start
 			previousEnd = decl.EndTok
 			namesEnd := declNameListEnd(file, decl)
-			assign := findDeclAssign(file, namesEnd, decl.EndTok)
+			assign := findDeclAssign(&file, namesEnd, decl.EndTok)
 			if assign >= 0 {
-				typeStart, typeEnd = trimDeclSpan(file, namesEnd, assign)
-				valueStart, valueEnd = trimDeclSpan(file, assign+1, decl.EndTok)
+				typeStart, typeEnd = trimDeclSpan(&file, namesEnd, assign)
+				valueStart, valueEnd = trimDeclSpan(&file, assign+1, decl.EndTok)
 			}
 		}
 		if decl.NameTok != target.Token {

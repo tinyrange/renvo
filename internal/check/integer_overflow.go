@@ -3,7 +3,7 @@ package check
 import "renvo.dev/internal/syntax"
 
 func literalIntegerOverflows(file syntax.File, start int, end int, typ string) bool {
-	start, end = trimDeclSpan(file, start, end)
+	start, end = trimDeclSpan(&file, start, end)
 	start, end = stripOuterParens(&file, start, end)
 	negative := false
 	if start < end && (tokenTextIs(&file, start, "-") || tokenTextIs(&file, start, "+")) {

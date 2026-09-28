@@ -94,7 +94,7 @@ func collectFieldNames(file syntax.File, start int, end int, kind int, scope *Fu
 	i := start
 	for i < end {
 		segStart := i
-		segEnd := nextTopLevelComma(file, i, end)
+		segEnd := nextTopLevelComma(&file, i, end)
 		first := firstNonSeparator(file, segStart, segEnd)
 		if first < segEnd && file.Tokens[first].KindLine&255 == syntax.TokenIdent {
 			next := first + 1
@@ -137,12 +137,12 @@ func collectDeclNames(file syntax.File, stmt syntax.Stmt, scope *FuncScope) {
 	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
+			i = skipLocalSeparators(&file, i, end)
 			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
-			collectLeadingIdentList(file, i, statementSpecEnd(file, i, end), scope)
-			i = statementSpecEnd(file, i, end)
+			collectLeadingIdentList(file, i, statementSpecEnd(&file, i, end), scope)
+			i = statementSpecEnd(&file, i, end)
 		}
 		return
 	}
@@ -184,11 +184,11 @@ func collectLeadingIdentList(file syntax.File, start int, end int, scope *FuncSc
 	}
 }
 
-func statementSpecEnd(file syntax.File, start int, end int) int {
+func statementSpecEnd(file *syntax.File, start int, end int) int {
 	line := syntax.TokenLine(file.Tokens[start])
 	i := start
 	for i < end {
-		if tokCharIs(&file, i, ';') {
+		if tokCharIs(file, i, ';') {
 			return i + 1
 		}
 		if i > start && syntax.TokenLine(file.Tokens[i]) != line {
@@ -206,7 +206,7 @@ func firstNonSeparator(file syntax.File, start int, end int) int {
 	return start
 }
 
-func nextTopLevelComma(file syntax.File, start int, end int) int {
+func nextTopLevelComma(file *syntax.File, start int, end int) int {
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
@@ -240,8 +240,8 @@ func nextTopLevelComma(file syntax.File, start int, end int) int {
 	return end
 }
 
-func skipLocalSeparators(file syntax.File, start int, end int) int {
-	for start < end && tokCharIs(&file, start, ';') {
+func skipLocalSeparators(file *syntax.File, start int, end int) int {
+	for start < end && tokCharIs(file, start, ';') {
 		start++
 	}
 	return start
