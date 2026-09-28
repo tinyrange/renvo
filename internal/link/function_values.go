@@ -3222,7 +3222,7 @@ func functionValueFindMatching(program *unit.Program, open int, left string, rig
 }
 
 func functionValueTokenEquals(program *unit.Program, tok int, want string) bool {
-	if tok < 0 || tok >= len(program.Tokens) {
+	if uint(tok) >= uint(len(program.Tokens)) {
 		return false
 	}
 	token := &program.Tokens[tok]

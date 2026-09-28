@@ -271,7 +271,10 @@ func coreTextHasC11Directive(text []byte) bool {
 	marker := "// renvo:c11"
 	for start := 0; start < len(text); {
 		end := start
-		for end < len(text) && text[end] != '\n' && text[end] != '\r' {
+		for _, c := range text[start:] {
+			if c == '\n' || c == '\r' {
+				break
+			}
 			end++
 		}
 		if end-start == len(marker) {
@@ -286,10 +289,7 @@ func coreTextHasC11Directive(text []byte) bool {
 				return true
 			}
 		}
-		for end < len(text) && (text[end] == '\n' || text[end] == '\r') {
-			end++
-		}
-		start = end
+		start = end + 1
 	}
 	return false
 }

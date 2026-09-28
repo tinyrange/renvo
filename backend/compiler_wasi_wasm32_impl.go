@@ -2239,8 +2239,6 @@ func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	noGrowLabel := renvoAsmNewLabel(a)
 	capNonZeroLabel := renvoAsmNewLabel(a)
 	capReadyLabel := renvoAsmNewLabel(a)
-	copyLoopLabel := renvoAsmNewLabel(a)
-	copyDoneLabel := renvoAsmNewLabel(a)
 	returnLabel := renvoAsmNewLabel(a)
 	ptrSlotOff := g.asm.bssSize
 	lenSlotOff := ptrSlotOff + 4
@@ -2252,8 +2250,7 @@ func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	allocSizeOff := newCapOff + 4
 	copySizeOff := allocSizeOff + 4
 	destOff := copySizeOff + 4
-	copyIndexOff := destOff + 4
-	g.asm.bssSize += 44
+	g.asm.bssSize += 40
 
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRsi, 0, 4)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR9, 0, 4)
@@ -2306,33 +2303,26 @@ func renvoWasm32EnsureAppendAddrHelper(g *renvoLinearGen) int {
 	renvoAsmPopPrimary(a)
 	renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	renvoAsmStorePrimaryBss(a, copySizeOff)
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmStorePrimaryBss(a, copyIndexOff)
-	renvoAsmMarkLabel(a, copyLoopLabel)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, copySizeOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAsmJnzLabel(a, copyDoneLabel)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
+	// Growth allocates a disjoint destination. Keep the source, destination,
+	// and remaining byte count in registers, copying full words and a tail.
+	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmLoadPrimaryBss(a, oldPtrOff)
-	renvoAsmPopTertiary(a)
-	renvoAsmLoadBytePrimaryIndexTertiary(a)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmPushPrimary(a)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
 	renvoAsmLoadPrimaryBss(a, destOff)
-	renvoAsmCopyPrimaryToSecondary(a)
-	renvoAsmPopTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
-	renvoAsmLoadPrimaryBss(a, copyIndexOff)
-	renvoAsmIncPrimary(a)
-	renvoAsmStorePrimaryBss(a, copyIndexOff)
-	renvoAsmJmpMarkLabel(a, copyLoopLabel, copyDoneLabel)
+	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
+	for width := 4; width >= 1; width -= 3 {
+		loop := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, loop)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
+		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRsi, 0, width)
+		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdi, 0, width)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, width)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, width)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
+		renvoAsmJmpMarkLabel(a, loop, done)
+	}
 
 	renvoAsmLoadPrimaryBss(a, ptrSlotOff)
 	renvoAsmPushPrimary(a)

@@ -1518,16 +1518,16 @@ func renvoSourceHasC11Directive(src []byte) bool {
 	prefix := "// renvo:c11"
 	for start := 0; start < len(src); {
 		end := start
-		for end < len(src) && renvo_runtime_UnsafeByteAt(src, end) != '\n' && renvo_runtime_UnsafeByteAt(src, end) != '\r' {
+		for _, c := range src[start:] {
+			if c == '\n' || c == '\r' {
+				break
+			}
 			end++
 		}
 		if end-start == len(prefix) && renvoBytesEqualText(src, start, end, prefix) {
 			return true
 		}
-		for end < len(src) && (renvo_runtime_UnsafeByteAt(src, end) == '\n' || renvo_runtime_UnsafeByteAt(src, end) == '\r') {
-			end++
-		}
-		start = end
+		start = end + 1
 	}
 	return false
 }

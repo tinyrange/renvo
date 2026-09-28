@@ -289,7 +289,7 @@ func tokCharIs(file *syntax.File, tok int, c byte) bool {
 }
 
 func tokenTextIs(file *syntax.File, tok int, text string) bool {
-	if tok < 0 || tok >= len(file.Tokens) {
+	if uint(tok) >= uint(len(file.Tokens)) {
 		return false
 	}
 	token := file.Tokens[tok]

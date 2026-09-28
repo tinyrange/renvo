@@ -49,3 +49,11 @@ func TestPointerOrderingControls(t *testing.T) {
 		}
 	}
 }
+
+func TestTranslatedCPointerOrdering(t *testing.T) {
+	graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\nfunc f(a,b *byte)bool{return a<b};func main(){}")}})
+	graph.Packages[0].Files[0].C = true
+	if result := CheckGraphCore(graph); !result.Ok {
+		t.Fatalf("C pointer ordering: error=%d token=%d", result.Error, result.ErrorToken)
+	}
+}

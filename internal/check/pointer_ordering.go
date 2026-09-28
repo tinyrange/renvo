@@ -31,6 +31,11 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 		if !shift && size != 1 && !(size == 2 && file.Src[file.Tokens[op].Start+1] == '=') {
 			continue
 		}
+		// C translation preserves pointer ordering, which is valid for pointers
+		// into the same array. Its operands were checked by the C frontend.
+		if !shift && pkg.Files[fileIndex].C {
+			continue
+		}
 		if !ready {
 			bindings = collectScopedTypeBindings(file, fn, body, signature)
 			*cachedBindings = bindings
