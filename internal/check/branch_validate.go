@@ -94,7 +94,7 @@ func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int,
 			}
 			decl := file.Tokens[block.StartTok].KindLine&255 == syntax.TokenVar
 			if block.Kind == syntax.StmtAssign {
-				op := findTopLevelAssignOp(file, block.StartTok, block.EndTok)
+				op := findTopLevelAssignOp(&file, block.StartTok, block.EndTok)
 				decl = op >= 0 && tokenTextIs(&file, op, ":=")
 			}
 			if decl && definiteStatementScopeEnd(body, block.StartTok) > target.StartTok {

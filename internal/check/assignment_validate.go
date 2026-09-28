@@ -55,15 +55,15 @@ func invalidDefiniteAssignmentType(file syntax.File, fn syntax.FuncDecl) (int, i
 			if leftPossible && rightPossible {
 				leftKind := definiteLiteralKind(file, i-1)
 				rightKind := definiteLiteralKind(file, i+1)
-				if exprBinaryOperatorKind(file, i) == exprBinaryLogical {
-					if leftKind != "bool" && i >= 2 && isExprBinaryOp(file, i-2) {
+				if exprBinaryOperatorKind(&file, i) == exprBinaryLogical {
+					if leftKind != "bool" && i >= 2 && isExprBinaryOp(&file, i-2) {
 						continue
 					}
-					if rightKind != "bool" && i+2 < fn.BodyEnd && isExprBinaryOp(file, i+2) {
+					if rightKind != "bool" && i+2 < fn.BodyEnd && isExprBinaryOp(&file, i+2) {
 						continue
 					}
 				}
-				if leftKind != "" && rightKind != "" && isExprBinaryOp(file, i) && invalidDefiniteLiteralBinary(file, i, leftKind, rightKind) {
+				if leftKind != "" && rightKind != "" && isExprBinaryOp(&file, i) && invalidDefiniteLiteralBinary(file, i, leftKind, rightKind) {
 					return CheckErrOperand, i
 				}
 			}
