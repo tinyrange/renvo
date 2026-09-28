@@ -123,11 +123,11 @@ func sortMethods(methods []MethodInfo) {
 }
 
 func methodAfter(left *MethodInfo, right *MethodInfo) bool {
-	if left.Receiver != right.Receiver {
-		return checkStringAfter(left.Receiver, right.Receiver)
+	if order := compareCheckStrings(left.Receiver, right.Receiver); order != 0 {
+		return order > 0
 	}
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.Pointer != right.Pointer {
 		return left.Pointer && !right.Pointer

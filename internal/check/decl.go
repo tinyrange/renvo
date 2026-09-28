@@ -432,8 +432,8 @@ func appendInitVisit(order []int, decls []DeclInfo, state []int, index int) []in
 }
 
 func declAfter(left *DeclInfo, right *DeclInfo) bool {
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.File != right.File {
 		return left.File > right.File

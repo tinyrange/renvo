@@ -143,19 +143,32 @@ func interfaceExprType(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 	chosen := -1
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= before && before < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 			chosen = i
 		}
 	}
 	if chosen >= 0 {
 		binding := &bindings[chosen]
-		if binding.typeEnd > binding.typeStart {
-			return interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
+		if depth == 0 && binding.concreteReady {
+			return binding.concrete
 		}
-		return interfaceExprType(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
+		var concrete interfaceConcreteType
+		if binding.typeEnd > binding.typeStart {
+			concrete = interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
+		} else {
+			concrete = interfaceExprType(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
+		}
+		// A binding's type is fixed. Cache only a full-depth resolution so a
+		// recursive query cannot retain a result truncated by the depth limit.
+		if depth == 0 {
+			binding.concrete = concrete
+			binding.concreteReady = true
+		}
+		return concrete
 	}
 	name := tokenString(file, start)
-	for _, decl := range info.Decls {
+	for declarationIndex := 0; declarationIndex < len(info.Decls); declarationIndex++ {
+		decl := &info.Decls[declarationIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}

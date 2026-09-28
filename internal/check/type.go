@@ -377,8 +377,8 @@ func sortTypes(types []TypeInfo) {
 }
 
 func typeAfter(left *TypeInfo, right *TypeInfo) bool {
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.File != right.File {
 		return left.File > right.File
@@ -387,34 +387,30 @@ func typeAfter(left *TypeInfo, right *TypeInfo) bool {
 }
 
 func checkStringAfter(left string, right string) bool {
+	return left > right
+}
+
+func checkStringBefore(left string, right string) bool {
+	return left < right
+}
+
+// Compare shared name prefixes once when sorting metadata with tie breakers.
+func compareCheckStrings(left string, right string) int {
 	limit := len(left)
 	if len(right) < limit {
 		limit = len(right)
 	}
 	for i := 0; i < limit; i++ {
 		leftByte, rightByte := left[i], right[i]
-		if leftByte > rightByte {
-			return true
-		}
-		if leftByte < rightByte {
-			return false
+		if leftByte != rightByte {
+			return int(leftByte) - int(rightByte)
 		}
 	}
-	return len(left) > len(right)
-}
-
-func checkStringBefore(left string, right string) bool {
-	limit := len(left)
-	if len(right) < limit {
-		limit = len(right)
+	if len(left) > len(right) {
+		return 1
 	}
-	for i := 0; i < limit; i++ {
-		if left[i] < right[i] {
-			return true
-		}
-		if left[i] > right[i] {
-			return false
-		}
+	if len(left) < len(right) {
+		return -1
 	}
-	return len(left) < len(right)
+	return 0
 }

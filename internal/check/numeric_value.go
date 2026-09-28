@@ -67,7 +67,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	chosen := -1
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= before && before < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 			chosen = i
 		}
 	}

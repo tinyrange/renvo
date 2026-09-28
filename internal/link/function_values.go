@@ -1635,7 +1635,7 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 	}
 	// Search newest declarations first, including one immediately before use.
 	for i := before - 1; i > fn.BodyStart; i-- {
-		if !functionValueTokenEquals(program, i, name) {
+		if i >= len(program.Tokens) || program.Tokens[i].KindLine&255 != unit.TokenIdent || program.Tokens[i].Size != len(name) || !functionValueTokenEquals(program, i, name) {
 			continue
 		}
 		short := functionValueTokenEquals(program, i+1, ":=") || functionValueTokenEquals(program, i+1, ",") || functionValueTokenEquals(program, i-1, ",")
@@ -3226,7 +3226,7 @@ func functionValueTokenEquals(program *unit.Program, tok int, want string) bool 
 		return false
 	}
 	token := &program.Tokens[tok]
-	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
+	if token.Size != len(want) || token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return false
 	}
 	if len(want) == 1 {

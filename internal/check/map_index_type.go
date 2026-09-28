@@ -59,7 +59,7 @@ func mapIndexExplicitSequence(file *syntax.File, bindings []scopedTypeBinding, i
 	chosen := -1
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		if binding.visible <= index.OpenTok && index.OpenTok < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= index.OpenTok && index.OpenTok < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 			chosen = i
 		}
 	}

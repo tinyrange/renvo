@@ -630,8 +630,8 @@ func siftDownSymbols(symbols []Symbol, root int, end int) {
 }
 
 func symbolAfter(left *Symbol, right *Symbol) bool {
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.Kind != right.Kind {
 		return left.Kind > right.Kind
@@ -658,8 +658,8 @@ func importAfter(left Import, right Import) bool {
 	if left.File != right.File {
 		return left.File > right.File
 	}
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	return checkStringAfter(left.ImportPath, right.ImportPath)
 }

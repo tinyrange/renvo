@@ -12,6 +12,8 @@ type scopedTypeBinding struct {
 	writable             bool
 	constant             bool
 	iotaValue            int
+	concrete             interfaceConcreteType
+	concreteReady        bool
 }
 
 func collectScopedTypeBindings(file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) []scopedTypeBinding {
