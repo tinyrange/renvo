@@ -42,11 +42,11 @@ func collectScopedTypeBindings(file *syntax.File, fn syntax.FuncDecl, body *synt
 			if tokCharIs(file, start, '(') {
 				ordinal, templateStart, templateEnd := 0, -1, -1
 				for pos := start + 1; pos < end-1; {
-					pos = skipLocalSeparators(*file, pos, end-1)
+					pos = skipLocalSeparators(file, pos, end-1)
 					if pos >= end-1 || tokCharIs(file, pos, ')') {
 						break
 					}
-					finish := statementSpecEnd(*file, pos, end-1)
+					finish := statementSpecEnd(file, pos, end-1)
 					first := len(bindings)
 					bindings = appendScopedTypeBindings(bindings, file, pos, finish, scopeEnd, kind == syntax.TokenVar, constant, false)
 					if constant {
@@ -98,8 +98,8 @@ func collectScopedTypeBindings(file *syntax.File, fn syntax.FuncDecl, body *synt
 }
 
 func appendScopedTypeBindings(bindings []scopedTypeBinding, file *syntax.File, start, end, scopeEnd int, variable, constant, short bool) []scopedTypeBinding {
-	start, end = trimDeclSpan(*file, start, end)
-	names, namesEnd := localDeclNameTokens(*file, start, end)
+	start, end = trimDeclSpan(file, start, end)
+	names, namesEnd := localDeclNameTokens(file, start, end)
 	op := findTopLevelAssignOp(file, start, end)
 	typeStart, typeEnd := namesEnd, end
 	var values []ExprSpan

@@ -307,7 +307,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent && start+1 < end && tokCharIs(file, start+1, '(') {
 		name := tokenString(file, start)
 		if name == "make" && start+2 < end {
-			return definiteBuiltinTypeSpan(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), depth+1)
+			return definiteBuiltinTypeSpan(pkg, info, fileIndex, start+2, nextTopLevelComma(file, start+2, end-1), depth+1)
 		}
 		return definiteBuiltinTypeName(pkg, info, name, depth+1)
 	}
