@@ -106,7 +106,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 	}
 	for i := context.fn.BodyStart + 1; !context.strict && i+3 < before; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokenTextIs(file, i+2, "=") {
-			return constantIndexInt(context, i+3, statementSpecEnd(*file, i+1, before), before, depth+1)
+			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
 	}
 	name := tokenString(file, start)
@@ -275,7 +275,7 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 	for pos := len(shortDecls) - 1; pos >= 0; pos-- {
 		i := shortDecls[pos]
 		if i+2 < before && statementTokensEqual(file, i, start) {
-			valueStart, valueEnd := trimExprSpan(*file, i+2, statementSpecEnd(*file, i+2, before))
+			valueStart, valueEnd := trimExprSpan(*file, i+2, statementSpecEnd(file, i+2, before))
 			return constantIndexArrayLength(context, signature, locals, shortDecls, valueStart, valueEnd, i, depth+1)
 		}
 	}
