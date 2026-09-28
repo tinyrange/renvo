@@ -139,10 +139,29 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				}
 			}
 		}
+		if tok := invalidArrayLiteralBounds(pkg, info, decl.File, literals, scope, syntax.FuncDecl{}, nil); tok >= 0 {
+			arena.Reset(mark)
+			return false, CheckErrArrayIndex, decl.File, tok
+		}
 		tok := invalidStructLiterals(pkg, info, file, literals, scope)
 		arena.Reset(mark)
 		if tok >= 0 {
 			return false, CheckErrStructLiteral, decl.File, tok
+		}
+	}
+	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
+		file := &pkg.Files[fileIndex].File
+		for tok := 0; tok+2 < len(file.Tokens); tok++ {
+			if file.Tokens[tok].KindLine&255 != syntax.TokenMap || !tokCharIs(file, tok+1, '[') {
+				continue
+			}
+			close := findTypeMatching(file, tok+1, '[', ']')
+			mark := arena.Mark()
+			invalid := close > tok+2 && nonComparableTypeSpan(pkg, info, file, tok+2, close-1, 0)
+			arena.Reset(mark)
+			if invalid {
+				return false, CheckErrMapKey, fileIndex, tok + 2
+			}
 		}
 	}
 	callTargets := make([]definiteCallTarget, len(info.Symbols))
@@ -193,6 +212,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if len(literals) > 0 {
 				scope, ok, _ := buildFuncScopeCore(*file, fn)
 				if ok {
+					bindings := collectScopedTypeBindings(file, fn, &body, &signature)
+					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, scope, fn, bindings); tok >= 0 {
+						arena.Reset(functionArenaStart)
+						return false, CheckErrArrayIndex, fileIndex, tok
+					}
 					if tok := invalidStructLiterals(pkg, info, file, literals, scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrStructLiteral, fileIndex, tok
