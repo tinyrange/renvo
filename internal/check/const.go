@@ -2,21 +2,21 @@ package check
 
 import "renvo.dev/internal/syntax"
 
-func evalConstValue(file syntax.File, values []ExprSpan, valueIndex int) ConstValue {
+func evalConstValue(file *syntax.File, values []ExprSpan, valueIndex int) ConstValue {
 	if valueIndex < 0 || valueIndex >= len(values) {
 		return ConstValue{}
 	}
 	return evalConstSpan(file, values[valueIndex])
 }
 
-func evalConstSpan(file syntax.File, span ExprSpan) ConstValue {
+func evalConstSpan(file *syntax.File, span ExprSpan) ConstValue {
 	start := span.StartTok
 	end := span.EndTok
 	if start < 0 || end <= start || end > len(file.Tokens) {
 		return ConstValue{}
 	}
 	sign := 1
-	if end-start == 2 && tokenTextIs(&file, start, "-") {
+	if end-start == 2 && tokenTextIs(file, start, "-") {
 		sign = -1
 		start++
 	}
@@ -41,16 +41,16 @@ func evalConstSpan(file syntax.File, span ExprSpan) ConstValue {
 		}
 		return ConstValue{Kind: ConstString, String: value, Ok: true}
 	}
-	if tok.KindLine&255 == syntax.TokenIdent && tokenString(&file, start) == "true" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenString(file, start) == "true" {
 		return ConstValue{Kind: ConstBool, Bool: true, Ok: true}
 	}
-	if tok.KindLine&255 == syntax.TokenIdent && tokenString(&file, start) == "false" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenString(file, start) == "false" {
 		return ConstValue{Kind: ConstBool, Bool: false, Ok: true}
 	}
 	return ConstValue{}
 }
 
-func parseConstInt(file syntax.File, tok int) (int, bool) {
+func parseConstInt(file *syntax.File, tok int) (int, bool) {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return 0, false
 	}

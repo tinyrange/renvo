@@ -26,14 +26,14 @@ func shiftOperandBounds(file *syntax.File, left, op, right int) (int, int) {
 	return left, right
 }
 
-func invalidKnownShiftOperand(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before int) bool {
+func invalidKnownShiftOperand(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before int) bool {
 	file := &pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
 	value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, start, end, before, 0)
 	if value.kind == "string" || value.kind == "bool" || value.kind == "other" || value.typed && (value.kind == "float" || value.kind == "complex") {
 		return true
 	}
-	if unsafeAddFractionalDecimal(*file, start, end) {
+	if unsafeAddFractionalDecimal(file, start, end) {
 		return true
 	}
 	return false

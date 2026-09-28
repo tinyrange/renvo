@@ -10,7 +10,7 @@ type localRuleBinding struct {
 	scopeEnd int
 }
 
-func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope) (int, int) {
+func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope) (int, int) {
 	var bindings []localRuleBinding
 	var scopeEnds []int
 	for i := 0; i < len(signature.Params); i++ {
@@ -30,13 +30,13 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 			}
 			start, end = trimDeclSpan(file, start, end)
 			if len(names) > 0 && scopeEnds == nil {
-				scopeEnds = localRuleScopeEnds(*body)
+				scopeEnds = localRuleScopeEnds(body)
 			}
 			for _, name := range names {
 				bindings = append(bindings, localRuleBinding{name, start, end, scopeEnds[i]})
 			}
-			builtin := end-start == 1 && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(file, start)) < 0
-			if op >= 0 && builtin && literalIntegerOverflows(*file, op+1, stmt.EndTok, tokenString(file, start)) {
+			builtin := end-start == 1 && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(file, start)) < 0
+			if op >= 0 && builtin && literalIntegerOverflows(file, op+1, stmt.EndTok, tokenString(file, start)) {
 				return CheckErrType, op + 1
 			}
 			if op >= 0 && builtin {
@@ -44,8 +44,8 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 				rightStart, rightEnd = stripOuterParens(file, rightStart, rightEnd)
 				declared := tokenString(file, start)
 				if rightEnd-rightStart == 1 && definiteBuiltinType(declared) {
-					kind := definiteLiteralKind(*file, rightStart)
-					if file.Tokens[rightStart].KindLine&255 == syntax.TokenIdent && (lookupScopeTokenNameCore(&scope, file, rightStart) >= 0 || lookupPackageSymbol(info.Symbols, tokenString(file, rightStart)) >= 0) {
+					kind := definiteLiteralKind(file, rightStart)
+					if file.Tokens[rightStart].KindLine&255 == syntax.TokenIdent && (lookupScopeTokenNameCore(scope, file, rightStart) >= 0 || lookupPackageSymbol(info.Symbols, tokenString(file, rightStart)) >= 0) {
 						kind = ""
 					}
 					if kind != "" && kind != declared {
@@ -64,7 +64,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 				if binding.token >= stmt.StartTok || binding.scopeEnd <= stmt.StartTok || !statementTokensEqual(file, binding.token, stmt.StartTok) {
 					continue
 				}
-				if binding.end-binding.start == 1 && (tokenTextIs(file, binding.start, "string") && lookupScopeTokenNameCore(&scope, file, binding.start) < 0 && lookupPackageSymbol(info.Symbols, "string") < 0 || file.Tokens[binding.start].KindLine&255 == syntax.TokenString) {
+				if binding.end-binding.start == 1 && (tokenTextIs(file, binding.start, "string") && lookupScopeTokenNameCore(scope, file, binding.start) < 0 && lookupPackageSymbol(info.Symbols, "string") < 0 || file.Tokens[binding.start].KindLine&255 == syntax.TokenString) {
 					return CheckErrAssignTarget, stmt.StartTok
 				}
 				break
@@ -74,7 +74,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 			continue
 		}
 		if scopeEnds == nil {
-			scopeEnds = localRuleScopeEnds(*body)
+			scopeEnds = localRuleScopeEnds(body)
 		}
 		endScope := scopeEnds[i]
 		newNames := false

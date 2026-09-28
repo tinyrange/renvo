@@ -94,18 +94,23 @@ func sourceConcurrencyCandidate(src []byte) bool {
 			}
 			continue
 		}
-		size := 0
-		if c == 'g' && pos+2 <= len(src) && src[pos+1] == 'o' {
-			size = 2
-		}
-		if c == 'c' && pos+4 <= len(src) && renvoImportTextIs(src, pos, pos+4, "chan") {
-			size = 4
-		}
-		if c == 's' && pos+6 <= len(src) && renvoImportTextIs(src, pos, pos+6, "select") {
-			size = 6
-		}
-		if size > 0 && (pos == 0 || !renvoImportIdentPart(src[pos-1])) && (pos+size == len(src) || !renvoImportIdentPart(src[pos+size])) {
-			return true
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 128 {
+			start := pos
+			for pos+1 < len(src) {
+				next := src[pos+1]
+				if !(next >= 'a' && next <= 'z' || next >= 'A' && next <= 'Z' || next >= '0' && next <= '9' || next == '_' || next >= 128) {
+					break
+				}
+				pos++
+			}
+			// Skip whole identifiers, so keyword suffixes and long generated
+			// names do not repeat comment, quote, and keyword checks per byte.
+			size := pos - start + 1
+			if size == 2 && c == 'g' && src[start+1] == 'o' ||
+				size == 4 && c == 'c' && renvoImportTextIs(src, start, pos+1, "chan") ||
+				size == 6 && c == 's' && renvoImportTextIs(src, start, pos+1, "select") {
+				return true
+			}
 		}
 	}
 	return false

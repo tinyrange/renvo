@@ -66,7 +66,7 @@ func wideConstantExpr(context *constantIndexContext, start int, end int, depth i
 		return wideConstant{}
 	}
 	file := &context.pkg.Files[context.fileIndex].File
-	start, end = trimExprSpan(*file, start, end)
+	start, end = trimExprSpan(file, start, end)
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
 		return wideConstant{}

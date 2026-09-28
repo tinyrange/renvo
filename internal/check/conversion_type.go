@@ -2,7 +2,7 @@ package check
 
 import "renvo.dev/internal/load"
 
-func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) string {
+func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) string {
 	if depth > len(info.Types)+2 || start < 0 || start >= end {
 		return ""
 	}
@@ -14,7 +14,7 @@ func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return ""
 	}
 	symbol := lookupPackageSymbolTextCore(info, file, start)
@@ -24,7 +24,7 @@ func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex in
 	name := tokenString(file, start)
 	if index := lookupType(info.Types, name); index >= 0 {
 		typ := &info.Types[index]
-		return conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+		return conversionUnderlyingType(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
 	}
 	if symbol >= 0 {
 		return ""

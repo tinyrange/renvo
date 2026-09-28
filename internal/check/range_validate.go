@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
+func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	// Avoid parsing and collecting bindings for functions without range loops.
 	found := false
@@ -31,7 +31,7 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if file.Tokens[tok].KindLine&255 != syntax.TokenRange {
 				continue
 			}
-			if numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
+			if numericBuiltinInNestedFunction(file, fn, stmt.StartTok) {
 				break
 			}
 			start, end := tok+1, stmt.BodyStart
@@ -47,22 +47,22 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 
 // Resolve only definite struct values. Unknown calls, selectors, and promoted
 // types must not inherit the type of a name in a different lexical scope.
-func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) bool {
+func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) bool {
 	if depth > 32 || start < 0 || start >= end {
 		return false
 	}
 	file := &pkg.Files[fileIndex].File
 	start, end = stripOuterParens(file, start, end)
-	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
+	if start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
 		if lookupType(info.Types, tokenString(file, start)) >= 0 {
 			return definiteStructType(pkg, info, fileIndex, scope, start, start+1, 0)
 		}
 		calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 		if ok {
-			signature := buildFuncSignature(&pkg.Files[calleeFile].File, callee)
+			signature := buildFuncSignature(&pkg.Files[calleeFile].File, &(callee))
 			if len(signature.Results) == 1 {
 				result := signature.Results[0]
-				return definiteStructType(pkg, info, calleeFile, CoreScope{}, result.TypeStart, result.TypeEnd, 0)
+				return definiteStructType(pkg, info, calleeFile, &(CoreScope{}), result.TypeStart, result.TypeEnd, 0)
 			}
 		}
 	}
@@ -96,18 +96,18 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return definiteStructType(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+			return definiteStructType(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return definiteStructExpr(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return definiteStructExpr(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return false
 }
 
-func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) bool {
+func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) bool {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return false
 	}
@@ -116,7 +116,7 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 	if file.Tokens[start].KindLine&255 == syntax.TokenStruct && tokCharIs(file, start+1, '{') {
 		return findTypeMatching(file, start+1, '{', '}') == end
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return false
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -124,5 +124,5 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return false
 	}
 	typ := &info.Types[index]
-	return definiteStructType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+	return definiteStructType(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
 }

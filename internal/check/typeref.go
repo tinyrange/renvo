@@ -53,7 +53,7 @@ func buildPackageTypeRefs(pkg load.Package, info PackageInfo, checked []PackageI
 				continue
 			}
 		}
-		refs = appendDeclTypeSpanRefs(refs, file, decl.File, info, checked, FuncScope{}, i, decl.TypeStart, decl.TypeEnd)
+		refs = appendDeclTypeSpanRefs(refs, &(file), decl.File, info, checked, FuncScope{}, i, decl.TypeStart, decl.TypeEnd)
 	}
 	return refs
 }
@@ -63,26 +63,26 @@ func appendTypeInfoRefs(refs []TypeRef, pkg load.Package, info PackageInfo, chec
 	if typ.Kind == TypeStruct {
 		for i := 0; i < len(typ.Fields); i++ {
 			field := typ.Fields[i]
-			refs = appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, field.TypeStart, field.TypeEnd)
+			refs = appendDeclTypeSpanRefs(refs, &(file), typ.File, info, checked, FuncScope{}, ownerDecl, field.TypeStart, field.TypeEnd)
 		}
 		return refs
 	}
 	if typ.Kind == TypeInterface {
 		for i := 0; i < len(typ.InterfaceEmbeds); i++ {
 			embed := typ.InterfaceEmbeds[i]
-			refs = appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, embed.TypeStart, embed.TypeEnd)
+			refs = appendDeclTypeSpanRefs(refs, &(file), typ.File, info, checked, FuncScope{}, ownerDecl, embed.TypeStart, embed.TypeEnd)
 		}
 		for i := 0; i < len(typ.InterfaceMethods); i++ {
 			base := len(refs)
-			refs = appendSignatureTypeRefs(refs, file, typ.File, info, checked, FuncScope{}, typ.InterfaceMethods[i].Signature)
+			refs = appendSignatureTypeRefs(refs, &(file), typ.File, info, checked, FuncScope{}, typ.InterfaceMethods[i].Signature)
 			markTypeRefOwnerDecl(refs, base, ownerDecl)
 		}
 		return refs
 	}
-	return appendDeclTypeSpanRefs(refs, file, typ.File, info, checked, FuncScope{}, ownerDecl, typ.TypeStart, typ.TypeEnd)
+	return appendDeclTypeSpanRefs(refs, &(file), typ.File, info, checked, FuncScope{}, ownerDecl, typ.TypeStart, typ.TypeEnd)
 }
 
-func buildFuncTypeRefs(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, signature FuncSignature, locals []LocalDeclInfo, scope FuncScope) []TypeRef {
+func buildFuncTypeRefs(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, signature FuncSignature, locals []LocalDeclInfo, scope FuncScope) []TypeRef {
 	var refs []TypeRef
 	refs = appendSignatureTypeRefs(refs, file, fileIndex, info, checked, scope, signature)
 	for i := 0; i < len(locals); i++ {
@@ -94,7 +94,7 @@ func buildFuncTypeRefs(file syntax.File, fileIndex int, info PackageInfo, checke
 	return refs
 }
 
-func appendSignatureTypeRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, signature FuncSignature) []TypeRef {
+func appendSignatureTypeRefs(refs []TypeRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, signature FuncSignature) []TypeRef {
 	for i := 0; i < len(signature.Receiver); i++ {
 		field := signature.Receiver[i]
 		refs = appendTypeSpanRefs(refs, file, fileIndex, info, checked, scope, field.TypeStart, field.TypeEnd)
@@ -110,7 +110,7 @@ func appendSignatureTypeRefs(refs []TypeRef, file syntax.File, fileIndex int, in
 	return refs
 }
 
-func appendDeclTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, ownerDecl int, start int, end int) []TypeRef {
+func appendDeclTypeSpanRefs(refs []TypeRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, ownerDecl int, start int, end int) []TypeRef {
 	base := len(refs)
 	refs = appendTypeSpanRefs(refs, file, fileIndex, info, checked, scope, start, end)
 	markTypeRefOwnerDecl(refs, base, ownerDecl)
@@ -123,20 +123,20 @@ func markTypeRefOwnerDecl(refs []TypeRef, start int, ownerDecl int) {
 	}
 }
 
-func appendTypeSpanRefs(refs []TypeRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []TypeRef {
+func appendTypeSpanRefs(refs []TypeRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []TypeRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if i > start && tokenTextIs(&file, i-1, ".") {
+		if i > start && tokenTextIs(file, i-1, ".") {
 			continue
 		}
-		name := tokenString(&file, i)
+		name := tokenString(file, i)
 		if name == "_" {
 			continue
 		}
-		if i+2 < end && tokenTextIs(&file, i+1, ".") && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
-			refs = append(refs, resolveSelectorTypeRef(fileIndex, info, checked, scope, name, tokenString(&file, i+2), i, i+1, i+2))
+		if i+2 < end && tokenTextIs(file, i+1, ".") && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
+			refs = append(refs, resolveSelectorTypeRef(fileIndex, info, checked, scope, name, tokenString(file, i+2), i, i+1, i+2))
 			i += 2
 			continue
 		}

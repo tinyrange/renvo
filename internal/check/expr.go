@@ -39,7 +39,7 @@ func buildFuncIndexExprs(file *syntax.File, body *syntax.Body) []IndexExpr {
 	return indexes
 }
 
-func buildFuncCompositeExprs(file syntax.File, body syntax.Body) []CompositeExpr {
+func buildFuncCompositeExprs(file *syntax.File, body *syntax.Body) []CompositeExpr {
 	var composites []CompositeExpr
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := &body.Stmts[i]
@@ -76,20 +76,20 @@ func appendDeclIndexExprs(indexes []IndexExpr, file *syntax.File, stmt *syntax.S
 	return appendSpecInitializerIndexes(indexes, file, start, end)
 }
 
-func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt *syntax.Stmt) []CompositeExpr {
+func appendDeclCompositeExprs(composites []CompositeExpr, file *syntax.File, stmt *syntax.Stmt) []CompositeExpr {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return composites
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(&file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(&file, i, end)
+			specEnd := statementSpecEnd(file, i, end)
 			composites = appendSpecInitializerComposites(composites, file, i, specEnd)
 			i = specEnd
 		}
@@ -99,14 +99,14 @@ func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt
 }
 
 func appendSpecInitializerIndexes(indexes []IndexExpr, file *syntax.File, start int, end int) []IndexExpr {
-	assign := findTokenText(*file, start, end, "=")
+	assign := findTokenText(file, start, end, "=")
 	if assign < 0 {
 		return indexes
 	}
 	return appendExprIndexes(indexes, file, assign+1, end)
 }
 
-func appendSpecInitializerComposites(composites []CompositeExpr, file syntax.File, start int, end int) []CompositeExpr {
+func appendSpecInitializerComposites(composites []CompositeExpr, file *syntax.File, start int, end int) []CompositeExpr {
 	assign := findTokenText(file, start, end, "=")
 	if assign < 0 {
 		return composites
@@ -124,10 +124,10 @@ func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end in
 			continue
 		}
 		baseStart := exprOperandStartBefore(file, start, i)
-		if baseStart >= i || isIndexTypePrefix(*file, baseStart) {
+		if baseStart >= i || isIndexTypePrefix(file, baseStart) {
 			continue
 		}
-		indexStart, indexEnd := trimExprSpan(*file, i+1, close-1)
+		indexStart, indexEnd := trimExprSpan(file, i+1, close-1)
 		indexes = append(indexes, IndexExpr{
 			StartTok:   baseStart,
 			EndTok:     close,
@@ -143,7 +143,7 @@ func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end in
 	return indexes
 }
 
-func appendExprComposites(composites []CompositeExpr, file syntax.File, start int, end int) []CompositeExpr {
+func appendExprComposites(composites []CompositeExpr, file *syntax.File, start int, end int) []CompositeExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
 		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('{') {
 			continue
@@ -151,11 +151,11 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 		if isCompositeTypeBodyOpen(file, i) {
 			continue
 		}
-		close := findTypeMatching(&file, i, '{', '}')
+		close := findTypeMatching(file, i, '{', '}')
 		if close <= i || close > end {
 			continue
 		}
-		typeStart := exprOperandStartBefore(&file, start, i)
+		typeStart := exprOperandStartBefore(file, start, i)
 		typeStart = compositeAggregatePrefixStart(file, start, typeStart)
 		if typeStart >= i {
 			continue
@@ -180,21 +180,21 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 // '*' inside an aggregate element type is not a multiplication boundary.
 // The ordinary operand scan stops there; recover the map/array/slice prefix
 // before validating the literal's contents (map[int]*S is not an S literal).
-func compositeAggregatePrefixStart(file syntax.File, limit, start int) int {
+func compositeAggregatePrefixStart(file *syntax.File, limit, start int) int {
 	result, pos := start, start
 	for pos > limit {
-		for pos > limit && tokCharIs(&file, pos-1, '*') {
+		for pos > limit && tokCharIs(file, pos-1, '*') {
 			pos--
 		}
-		if pos <= limit || !tokCharIs(&file, pos-1, ']') {
+		if pos <= limit || !tokCharIs(file, pos-1, ']') {
 			break
 		}
 		depth, open := 0, -1
 		for i := pos - 1; i >= limit; i-- {
-			if tokCharIs(&file, i, ']') {
+			if tokCharIs(file, i, ']') {
 				depth++
 			}
-			if tokCharIs(&file, i, '[') {
+			if tokCharIs(file, i, '[') {
 				depth--
 				if depth == 0 {
 					open = i
@@ -301,14 +301,14 @@ func exprBinaryOperatorKind(file *syntax.File, tok int) int {
 	return exprBinaryNone
 }
 
-func isIndexTypePrefix(file syntax.File, start int) bool {
+func isIndexTypePrefix(file *syntax.File, start int) bool {
 	if start < 0 || start >= len(file.Tokens) {
 		return false
 	}
 	return file.Tokens[start].KindLine&255 == syntax.TokenMap
 }
 
-func isCompositeTypeBodyOpen(file syntax.File, open int) bool {
+func isCompositeTypeBodyOpen(file *syntax.File, open int) bool {
 	prev := open - 1
 	if prev < 0 || prev >= len(file.Tokens) {
 		return false

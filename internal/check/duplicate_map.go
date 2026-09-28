@@ -16,7 +16,7 @@ func invalidDuplicateMapKey(file *syntax.File) int {
 	if !hasMap {
 		return -1
 	}
-	for _, literal := range appendExprComposites(nil, *file, 0, len(file.Tokens)) {
+	for _, literal := range appendExprComposites(nil, file, 0, len(file.Tokens)) {
 		if file.Tokens[literal.TypeStart].KindLine&255 != syntax.TokenMap {
 			continue
 		}

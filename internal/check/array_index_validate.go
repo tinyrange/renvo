@@ -18,7 +18,7 @@ type constantIndexContext struct {
 	strict    bool
 }
 
-func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, indexes []IndexExpr, signature *FuncSignature) int {
+func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, indexes []IndexExpr, signature *FuncSignature) int {
 	if fileIndex < 0 || fileIndex >= len(pkg.Files) {
 		return -1
 	}
@@ -26,8 +26,8 @@ func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex i
 	if len(indexes) == 0 {
 		return -1
 	}
-	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: fn}
-	locals := collectDefiniteLocalTypes(*file, fn)
+	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: *fn}
+	locals := collectDefiniteLocalTypes(file, (*fn))
 	// Index short declarations once. Resolving each indexed base must not
 	// rescan every preceding token in a large function.
 	var shortDecls []int
@@ -55,7 +55,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		return 0, false
 	}
 	file := &context.pkg.Files[context.fileIndex].File
-	start, end = trimExprSpan(*file, start, end)
+	start, end = trimExprSpan(file, start, end)
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return 0, false
@@ -98,7 +98,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		return 0, false
 	}
 	if file.Tokens[start].KindLine&255 == syntax.TokenNumber {
-		return parseConstInt(*file, start)
+		return parseConstInt(file, start)
 	}
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
@@ -114,7 +114,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 			if context.strict && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
 				return 0, false
 			}
-			values := splitExprList(context.pkg.Files[context.info.Decls[i].File].File, context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
+			values := splitExprList(&(context.pkg.Files[context.info.Decls[i].File].File), context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
 			if context.info.Decls[i].ValueIndex >= 0 && context.info.Decls[i].ValueIndex < len(values) {
 				next := *context
 				next.fileIndex = context.info.Decls[i].File
@@ -274,7 +274,7 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 	for pos := len(shortDecls) - 1; pos >= 0; pos-- {
 		i := shortDecls[pos]
 		if i+2 < before && statementTokensEqual(file, i, start) {
-			valueStart, valueEnd := trimExprSpan(*file, i+2, statementSpecEnd(file, i+2, before))
+			valueStart, valueEnd := trimExprSpan(file, i+2, statementSpecEnd(file, i+2, before))
 			return constantIndexArrayLength(context, signature, locals, shortDecls, valueStart, valueEnd, i, depth+1)
 		}
 	}
@@ -293,13 +293,13 @@ func constantIndexTypeLength(context *constantIndexContext, start int, end int, 
 		return 0, false
 	}
 	file := &context.pkg.Files[context.fileIndex].File
-	start, end = trimTypeSpan(*file, start, end)
+	start, end = trimTypeSpan(file, start, end)
 	for start < end && tokCharIs(file, start, '*') {
 		start++
-		start, end = trimTypeSpan(*file, start, end)
+		start, end = trimTypeSpan(file, start, end)
 	}
-	if classifyType(*file, start, end) == TypeArray {
-		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(*file, start, end)
+	if classifyType(file, start, end) == TypeArray {
+		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(file, start, end)
 		length, ok := constantIndexInt(context, lengthStart, lengthEnd, before, depth+1)
 		return length, ok && length >= 0
 	}

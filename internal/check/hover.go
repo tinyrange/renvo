@@ -23,7 +23,7 @@ func HoverProgram(graph load.Graph, program Program, path string, offset int) Ho
 		return HoverInfo{}
 	}
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
-	token := navigationToken(file, offset)
+	token := navigationToken(&(file), offset)
 	if token < 0 {
 		return HoverInfo{}
 	}
@@ -56,16 +56,16 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 		return ""
 	}
 	file := graph.Packages[target.packageIndex].Files[target.fileIndex].File
-	fn, ok := completionFunctionAt(file, before)
+	fn, ok := completionFunctionAt(&(file), before)
 	if !ok {
 		return ""
 	}
-	signature := buildFuncSignature(&file, fn)
+	signature := buildFuncSignature(&file, &(fn))
 	groups := [][]Field{signature.Receiver, signature.Params, signature.Results}
 	for i := 0; i < len(groups); i++ {
 		for j := 0; j < len(groups[i]); j++ {
 			if groups[i][j].Name == name {
-				return "var " + name + " " + completionFieldTypeText(file, groups[i][j])
+				return "var " + name + " " + completionFieldTypeText(&(file), groups[i][j])
 			}
 		}
 	}
@@ -83,7 +83,7 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 			}
 			typeText := ""
 			if local.TypeStart >= 0 && local.TypeEnd > local.TypeStart {
-				typeText = hoverSpanText(file, local.TypeStart, local.TypeEnd)
+				typeText = hoverSpanText(&(file), local.TypeStart, local.TypeEnd)
 			}
 			if local.Kind == SymbolConst {
 				return hoverConstSignature(name, typeText, local.Const)
@@ -97,28 +97,28 @@ func hoverLocalSignature(graph load.Graph, program Program, target navigationTar
 				start, end = local.Values[local.ValueIndex].StartTok, local.Values[local.ValueIndex].EndTok
 				resultIndex = 0
 			}
-			if typ, found := completionExpressionType(graph, program, target.packageIndex, target.fileIndex, file, start, end, resultIndex); found {
+			if typ, found := completionExpressionType(graph, program, target.packageIndex, target.fileIndex, &(file), start, end, resultIndex); found {
 				return "var " + name + " " + hoverTypeName(program, target.packageIndex, typ)
 			}
-			if inferred := hoverLiteralType(file, start, end); inferred != "" {
+			if inferred := hoverLiteralType(&(file), start, end); inferred != "" {
 				return "var " + name + " " + inferred
 			}
 		}
 	}
 	body := syntax.ParseFuncBody(file, fn)
 	if body.Ok {
-		scope, scopeOK, _ := buildFuncScope(file, fn, body)
+		scope, scopeOK, _ := buildFuncScope(&(file), &(fn), &(body))
 		if scopeOK {
-			locals := buildFuncLocalDecls(file, target.fileIndex, info, program.Packages, body, scope)
+			locals := buildFuncLocalDecls(&(file), target.fileIndex, info, program.Packages, &(body), scope)
 			for i := len(locals) - 1; i >= 0; i-- {
 				local := locals[i]
 				if local.Name == name && local.Token >= 0 && local.Token < len(file.Tokens) && syntax.TokenStart(file.Tokens[local.Token]) <= before && local.Kind == SymbolConst {
-					return hoverConstSignature(name, hoverSpanText(file, local.TypeStart, local.TypeEnd), local.Const)
+					return hoverConstSignature(name, hoverSpanText(&(file), local.TypeStart, local.TypeEnd), local.Const)
 				}
 			}
 		}
 	}
-	if typ, found := completionNameType(graph, program, target.packageIndex, target.fileIndex, file, fn, name, before); found {
+	if typ, found := completionNameType(graph, program, target.packageIndex, target.fileIndex, &(file), &(fn), name, before); found {
 		return "var " + name + " " + hoverTypeName(program, target.packageIndex, typ)
 	}
 	return "var " + name
@@ -138,7 +138,7 @@ func hoverSymbol(graph load.Graph, program Program, pkgIndex, symbolIndex int) (
 	if symbol.Kind == SymbolFunc || symbol.Kind == SymbolMethod {
 		for i := 0; i < len(file.Funcs); i++ {
 			if file.Funcs[i].NameTok == symbol.Token {
-				label, _ := completionFunctionLabels(file, file.Funcs[i], tokenString(&file, symbol.Token))
+				label, _ := completionFunctionLabels(&(file), &(file.Funcs[i]), tokenString(&file, symbol.Token))
 				return "func " + label, documentation
 			}
 		}
@@ -156,14 +156,14 @@ func hoverSymbol(graph load.Graph, program Program, pkgIndex, symbolIndex int) (
 		}
 		text := kind + " " + symbol.Name
 		if decl.TypeStart >= 0 && decl.TypeEnd > decl.TypeStart {
-			text += " " + hoverSpanText(file, decl.TypeStart, decl.TypeEnd)
+			text += " " + hoverSpanText(&(file), decl.TypeStart, decl.TypeEnd)
 		}
 		if symbol.Kind == SymbolConst {
 			value := decl.Const
 			if !value.Ok && decl.ValueStart >= 0 && decl.ValueEnd > decl.ValueStart {
-				value = evalConstValue(file, splitExprList(file, decl.ValueStart, decl.ValueEnd), decl.ValueIndex)
+				value = evalConstValue(&(file), splitExprList(&(file), decl.ValueStart, decl.ValueEnd), decl.ValueIndex)
 			}
-			text = hoverConstSignature(symbol.Name, hoverSpanText(file, decl.TypeStart, decl.TypeEnd), value)
+			text = hoverConstSignature(symbol.Name, hoverSpanText(&(file), decl.TypeStart, decl.TypeEnd), value)
 		}
 		return text, documentation
 	}
@@ -365,10 +365,10 @@ func hoverField(graph load.Graph, program Program, target navigationTarget) (str
 	file := graph.Packages[target.packageIndex].Files[typ.File].File
 	field := typ.Fields[fieldIndex]
 	documentation := sourceDocumentation(file.Src, syntax.TokenStart(file.Tokens[field.NameTok]))
-	return "field " + field.Name + " " + hoverSpanText(file, field.TypeStart, field.TypeEnd), documentation
+	return "field " + field.Name + " " + hoverSpanText(&(file), field.TypeStart, field.TypeEnd), documentation
 }
 
-func hoverSpanText(file syntax.File, start, end int) string {
+func hoverSpanText(file *syntax.File, start, end int) string {
 	if start < 0 || end <= start || end > len(file.Tokens) {
 		return ""
 	}
@@ -403,7 +403,7 @@ func hoverSimpleTypeName(name string) bool {
 	return true
 }
 
-func hoverLiteralType(file syntax.File, start, end int) string {
+func hoverLiteralType(file *syntax.File, start, end int) string {
 	if start < 0 || start >= end || start >= len(file.Tokens) {
 		return ""
 	}
@@ -417,7 +417,7 @@ func hoverLiteralType(file syntax.File, start, end int) string {
 	if token.KindLine&255 == syntax.TokenNumber {
 		return "int"
 	}
-	if tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") {
+	if tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false") {
 		return "bool"
 	}
 	return ""

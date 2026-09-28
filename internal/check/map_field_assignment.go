@@ -20,7 +20,7 @@ func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syn
 		if stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr {
 			continue
 		}
-		start, end := trimExprSpan(*file, stmt.StartTok, stmt.EndTok)
+		start, end := trimExprSpan(file, stmt.StartTok, stmt.EndTok)
 		op := findTopLevelAssignOp(file, start, end)
 		if op < 0 {
 			if end <= start || (!tokenTextIs(file, end-1, "++") && !tokenTextIs(file, end-1, "--")) {
@@ -31,7 +31,7 @@ func invalidMapElementFieldWrite(pkg *load.Package, info *PackageInfo, file *syn
 		if index.StartTok < start || index.EndTok >= op {
 			continue
 		}
-		for _, target := range splitExprList(*file, start, op) {
+		for _, target := range splitExprList(file, start, op) {
 			first, last := stripOuterParens(file, target.StartTok, target.EndTok)
 			baseStart, baseEnd := index.StartTok, index.EndTok
 			// Parenthesizing the map element does not make it addressable.
@@ -81,14 +81,14 @@ func mapFieldPathUnaddressable(pkg *load.Package, info *PackageInfo, shape mapIn
 			fileIndex, start, end, scope = typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}
 		}
 		file := &pkg.Files[fileIndex].File
-		if classifyType(*file, start, end) != TypeStruct {
+		if classifyType(file, start, end) != TypeStruct {
 			return false
 		}
 		open := findTypeTopLevelChar(file, start, end, '{')
 		if open < 0 || findTypeMatching(file, open, '{', '}') != end {
 			return false
 		}
-		fields := parseStructFields(*file, open+1, end-1)
+		fields := parseStructFields(file, open+1, end-1)
 		fieldIndex := LookupField(fields, name)
 		// Promoted selectors need their complete embedding path, including any
 		// embedded pointers. Unknown paths must not become rejection evidence.

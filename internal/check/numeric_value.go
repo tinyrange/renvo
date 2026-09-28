@@ -10,7 +10,7 @@ type numericBuiltinValue struct {
 	typed          bool
 }
 
-func numericBuiltinInNestedFunction(file syntax.File, fn syntax.FuncDecl, callee int) bool {
+func numericBuiltinInNestedFunction(file *syntax.File, fn *syntax.FuncDecl, callee int) bool {
 	for tok := fn.BodyStart + 1; tok < callee; tok++ {
 		if file.Tokens[tok].KindLine&255 != syntax.TokenFunc {
 			continue
@@ -24,7 +24,7 @@ func numericBuiltinInNestedFunction(file syntax.File, fn syntax.FuncDecl, callee
 	return false
 }
 
-func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) numericBuiltinValue {
+func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) numericBuiltinValue {
 	if depth > 32 {
 		return numericBuiltinValue{}
 	}
@@ -83,7 +83,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		return value
 	}
 	name := tokenString(file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
@@ -95,12 +95,12 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return numericBuiltinTypeValue(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+			return numericBuiltinTypeValue(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			span := values[decl.ValueIndex]
-			value := numericBuiltinExprValue(pkg, info, decl.File, CoreScope{}, nil, span.StartTok, span.EndTok, decl.Token, depth+1)
+			value := numericBuiltinExprValue(pkg, info, decl.File, &(CoreScope{}), nil, span.StartTok, span.EndTok, decl.Token, depth+1)
 			if decl.Kind == SymbolVar {
 				value.typed = true
 			}
@@ -110,7 +110,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	return numericBuiltinValue{}
 }
 
-func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) numericBuiltinValue {
+func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) numericBuiltinValue {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return numericBuiltinValue{}
 	}
@@ -119,14 +119,14 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}
-	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
 	name := tokenString(file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := &info.Types[index]
-		value := numericBuiltinTypeValue(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+		value := numericBuiltinTypeValue(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
 		if !typ.Alias {
 			value.identity = "named:" + name
 		}

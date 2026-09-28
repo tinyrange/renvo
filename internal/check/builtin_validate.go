@@ -14,7 +14,7 @@ const (
 	builtinTypeInvalid
 )
 
-func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope CoreScope, calls []int, cachedBindings []scopedTypeBinding) (int, int) {
+func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, signature *FuncSignature, body *syntax.Body, scope *CoreScope, calls []int, cachedBindings []scopedTypeBinding) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	localsReady := false
@@ -27,7 +27,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		// once instead of rescanning the prefix for every len/cap invocation.
 		for nestedScan < callee {
 			if file.Tokens[nestedScan].KindLine&255 == syntax.TokenFunc {
-				end := pointerOrderingNestedFunctionEnd(*file, nestedScan, fn.BodyEnd-1)
+				end := pointerOrderingNestedFunctionEnd(file, nestedScan, fn.BodyEnd-1)
 				if end > nestedScan {
 					nestedEnd = end
 					nestedScan = end
@@ -42,7 +42,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		if close <= open || close > fn.BodyEnd {
 			continue
 		}
-		args := splitExprList(*file, open+1, close-1)
+		args := splitExprList(file, open+1, close-1)
 		if name == "new" {
 			if len(args) != 1 || tokenTextIs(file, close-2, "...") {
 				return CheckErrBuiltinArity, callee
@@ -50,7 +50,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if !load.GoVersionBefore(pkg.Files[fileIndex].GoVersion, "1.26") || nested {
 				continue
 			}
-			if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
+			if !numericReady && numericBuiltinNeedsBindings(file, args[0].StartTok, args[0].EndTok) {
 				numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 				numericReady = true
 			}
@@ -109,7 +109,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				return CheckErrBuiltinArity, callee
 			}
 			if !nested {
-				if !numericReady && numericBuiltinNeedsBindings(*file, args[0].StartTok, args[0].EndTok) {
+				if !numericReady && numericBuiltinNeedsBindings(file, args[0].StartTok, args[0].EndTok) {
 					numericBindings = collectScopedTypeBindings(file, fn, body, signature)
 					numericReady = true
 				}
@@ -119,14 +119,14 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 				}
 			}
 			if name == "cap" {
-				if invalidCapacityLiteral(*file, args[0]) {
+				if invalidCapacityLiteral(file, args[0]) {
 					return CheckErrBuiltinOperand, args[0].StartTok
 				}
 			}
 			continue
 		}
 		if !localsReady {
-			locals = collectDefiniteLocalTypes(*file, fn)
+			locals = collectDefiniteLocalTypes(file, (*fn))
 			localsReady = true
 		}
 		if name == "clear" {
@@ -172,7 +172,7 @@ func definiteBuiltinExprTypeName(pkg *load.Package, info *PackageInfo, fileIndex
 		return ""
 	}
 	file := &pkg.Files[fileIndex].File
-	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
+	start, end := trimExprSpan(file, span.StartTok, span.EndTok)
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return ""
@@ -251,7 +251,7 @@ func definiteBuiltinTypeSpanName(pkg *load.Package, info *PackageInfo, fileIndex
 		return ""
 	}
 	file := &pkg.Files[fileIndex].File
-	start, end = trimTypeSpan(*file, start, end)
+	start, end = trimTypeSpan(file, start, end)
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return ""
 	}
@@ -281,7 +281,7 @@ func definiteBuiltinExprType(pkg *load.Package, info *PackageInfo, fileIndex int
 		return builtinTypeUnknown
 	}
 	file := &pkg.Files[fileIndex].File
-	start, end := trimExprSpan(*file, span.StartTok, span.EndTok)
+	start, end := trimExprSpan(file, span.StartTok, span.EndTok)
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
@@ -360,7 +360,7 @@ func definiteBuiltinTypeSpan(pkg *load.Package, info *PackageInfo, fileIndex int
 		return builtinTypeUnknown
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = trimTypeSpan(file, start, end)
+	start, end = trimTypeSpan(&(file), start, end)
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
 	}
@@ -406,10 +406,10 @@ func fileForPackage(pkg *load.Package, fileIndex int) *syntax.File {
 
 // Only identifier operands consult lexical value bindings. Literals, selectors,
 // and type conversions can be classified without rebuilding the function body.
-func numericBuiltinNeedsBindings(file syntax.File, start, end int) bool {
-	start, end = stripOuterParens(&file, start, end)
-	for start < end && (tokCharIs(&file, start, '+') || tokCharIs(&file, start, '-')) {
-		start, end = stripOuterParens(&file, start+1, end)
+func numericBuiltinNeedsBindings(file *syntax.File, start, end int) bool {
+	start, end = stripOuterParens(file, start, end)
+	for start < end && (tokCharIs(file, start, '+') || tokCharIs(file, start, '-')) {
+		start, end = stripOuterParens(file, start+1, end)
 	}
 	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }

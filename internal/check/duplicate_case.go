@@ -44,7 +44,7 @@ func invalidDuplicateSwitchCase(file *syntax.File, body *syntax.Body) int {
 				typeSwitch = true
 			}
 		}
-		for _, span := range splitExprList(*file, clause.ExprStart, clause.ExprEnd) {
+		for _, span := range splitExprList(file, clause.ExprStart, clause.ExprEnd) {
 			span.StartTok, span.EndTok = stripOuterParens(file, span.StartTok, span.EndTok)
 			value := duplicateCaseLiteral(file, span)
 			if !typeSwitch && !value.Ok {
@@ -84,7 +84,7 @@ func duplicateCaseLiteral(file *syntax.File, span ExprSpan) ConstValue {
 	if span.StartTok < span.EndTok && tokenTextIs(file, span.StartTok, "+") {
 		span.StartTok++
 	}
-	value := evalConstSpan(*file, span)
+	value := evalConstSpan(file, span)
 	// Duplicate boolean cases are permitted; predeclared names can also be
 	// shadowed. This check intentionally handles only integer/string literals.
 	if value.Kind != ConstInt && value.Kind != ConstString {

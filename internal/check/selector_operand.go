@@ -5,13 +5,13 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, scopeOK bool, literals []CompositeExpr, cachedBindings *[]scopedTypeBinding) int {
+func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, scopeOK bool, literals []CompositeExpr, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	bindings := *cachedBindings
 	ready := bindings != nil
 	for dot := fn.BodyStart + 1; dot+1 < fn.BodyEnd; dot++ {
 		if file.Tokens[dot].KindLine&255 == syntax.TokenFunc {
-			dot = pointerOrderingNestedFunctionEnd(*file, dot, fn.BodyEnd-1)
+			dot = pointerOrderingNestedFunctionEnd(file, dot, fn.BodyEnd-1)
 			continue
 		}
 		if !tokCharIs(file, dot, '.') || file.Tokens[dot+1].KindLine&255 != syntax.TokenIdent {
@@ -26,12 +26,12 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 		for _, literal := range literals {
 			if literal.EndTok == dot {
 				fields, known = literalStructFields(pkg, info, file, literal.TypeStart, literal.TypeEnd, scope, 0)
-				concrete = interfaceNamedType(pkg, info, fileIndex, &scope, literal.TypeStart, literal.TypeEnd, 0)
+				concrete = interfaceNamedType(pkg, info, fileIndex, scope, literal.TypeStart, literal.TypeEnd, 0)
 				break
 			}
 		}
 		if !known && file.Tokens[dot-1].KindLine&255 == syntax.TokenIdent && !tokCharIs(file, dot-2, '.') {
-			local := lookupScopeTokenNameCore(&scope, file, dot-1) >= 0
+			local := lookupScopeTokenNameCore(scope, file, dot-1) >= 0
 			if !local {
 				symbol := lookupPackageSymbolTextCore(info, file, dot-1)
 				if symbol < 0 || info.Symbols[symbol].Kind != SymbolVar {
@@ -43,7 +43,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 				*cachedBindings = bindings
 				ready = true
 			}
-			concrete = interfaceExprType(pkg, info, fileIndex, &scope, bindings, dot-1, dot, dot, 0)
+			concrete = interfaceExprType(pkg, info, fileIndex, scope, bindings, dot-1, dot, dot, 0)
 			if concrete.known {
 				typ := &info.Types[concrete.index]
 				if typ.Kind == TypeStruct {
@@ -52,7 +52,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 					fields = typ.Fields
 					known = true
 				} else {
-					fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, 0)
+					fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &(CoreScope{}), 0)
 				}
 			}
 		}
@@ -92,7 +92,7 @@ func knownSelectorMethod(pkg *load.Package, info *PackageInfo, index int, name s
 			if fn.ReceiverStart < 0 || !tokenTextIs(file, fn.NameTok, name) {
 				continue
 			}
-			signature := buildFuncSignature(file, *fn)
+			signature := buildFuncSignature(file, fn)
 			if len(signature.Receiver) != 1 {
 				continue
 			}

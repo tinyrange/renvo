@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidDefiniteSliceOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl) int {
+func invalidDefiniteSliceOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl) int {
 	file := &pkg.Files[fileIndex].File
 	for open := fn.BodyStart + 1; open < fn.BodyEnd; open++ {
 		if file.Tokens[open].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
@@ -23,7 +23,7 @@ func invalidDefiniteSliceOperand(pkg *load.Package, info *PackageInfo, fileIndex
 		} else if end-start >= 3 && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, end-1, ')') {
 			calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 			if ok {
-				signature := buildFuncSignature(&pkg.Files[calleeFile].File, callee)
+				signature := buildFuncSignature(&pkg.Files[calleeFile].File, &(callee))
 				if len(signature.Results) == 1 {
 					result := signature.Results[0]
 					array = definiteArrayType(pkg, info, &pkg.Files[calleeFile].File, result.TypeStart, result.TypeEnd)
@@ -39,8 +39,8 @@ func invalidDefiniteSliceOperand(pkg *load.Package, info *PackageInfo, fileIndex
 
 func definiteArrayType(pkg *load.Package, info *PackageInfo, file *syntax.File, start int, end int) bool {
 	for depth := 0; depth <= len(info.Types); depth++ {
-		start, end = trimTypeSpan(*file, start, end)
-		if classifyType(*file, start, end) == TypeArray {
+		start, end = trimTypeSpan(file, start, end)
+		if classifyType(file, start, end) == TypeArray {
 			return true
 		}
 		if end != start+1 {

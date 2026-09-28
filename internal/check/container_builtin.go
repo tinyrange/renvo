@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidAppendOperands(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, args []ExprSpan, expanded bool) int {
+func invalidAppendOperands(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, before int, args []ExprSpan, expanded bool) int {
 	file := &pkg.Files[fileIndex].File
 	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, args[0].StartTok, args[0].EndTok, before, 0)
 	count := 1
@@ -51,7 +51,7 @@ func invalidAppendOperands(pkg *load.Package, info *PackageInfo, fileIndex int, 
 	return -1
 }
 
-func invalidCopyDeleteOperands(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, name string, before int, args []ExprSpan) int {
+func invalidCopyDeleteOperands(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, name string, before int, args []ExprSpan) int {
 	file := &pkg.Files[fileIndex].File
 	count := 2
 	if name == "delete" {
@@ -89,7 +89,7 @@ func invalidCopyDeleteOperands(pkg *load.Package, info *PackageInfo, fileIndex i
 
 // Reuse allocation type families to distinguish slices/maps/channels from
 // definite non-container operands. Zero remains unknown, not rejection proof.
-func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) int {
+func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) int {
 	if depth > 32 || start < 0 || start >= end {
 		return 0
 	}
@@ -102,7 +102,7 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			}
 		}
 	}
-	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
+	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
 		return makeAllocationType(pkg, info, fileIndex, start+2, nextTopLevelComma(file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -129,12 +129,12 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return makeAllocationType(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
+			return makeAllocationType(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &(CoreScope{}), 0)
 		}
-		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return containerBuiltinExprKind(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return containerBuiltinExprKind(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return 0

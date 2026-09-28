@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding, indexes []IndexExpr) (int, int) {
+func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding, indexes []IndexExpr) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	if len(indexes) == 0 {
 		return CheckOK, -1
@@ -32,7 +32,7 @@ func invalidMapIndexType(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		if mapIndexExplicitSequence(file, bindings, index) {
 			continue
 		}
-		if !hasNested || !numericBuiltinInNestedFunction(*file, fn, index.OpenTok) {
+		if !hasNested || !numericBuiltinInNestedFunction(file, fn, index.OpenTok) {
 			value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0)
 			if value.kind != "" && value.kind != "string" || definiteStructExpr(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0) || containerBuiltinExprKind(pkg, info, fileIndex, scope, bindings, index.BaseStart, index.BaseEnd, index.OpenTok, 0) == TypeChan {
 				return CheckErrOperand, index.OpenTok

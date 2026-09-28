@@ -56,14 +56,14 @@ func LookupAssignTarget(assign AssignInfo, name string) int {
 	return -1
 }
 
-func buildFuncAssignments(file syntax.File, fileIndex int, info PackageInfo, body syntax.Body, scope FuncScope) []AssignInfo {
+func buildFuncAssignments(file *syntax.File, fileIndex int, info PackageInfo, body *syntax.Body, scope FuncScope) []AssignInfo {
 	assigns := make([]AssignInfo, 0, countBodyStatements(body, syntax.StmtAssign))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		opTok := findTopLevelAssignOp(&file, stmt.StartTok, stmt.EndTok)
+		opTok := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if opTok < 0 {
 			continue
 		}
@@ -86,7 +86,7 @@ func buildFuncAssignments(file syntax.File, fileIndex int, info PackageInfo, bod
 	return assigns
 }
 
-func buildFuncReturns(file syntax.File, body syntax.Body) []ReturnInfo {
+func buildFuncReturns(file *syntax.File, body *syntax.Body) []ReturnInfo {
 	returns := make([]ReturnInfo, 0, countBodyStatements(body, syntax.StmtReturn))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -102,7 +102,7 @@ func buildFuncReturns(file syntax.File, body syntax.Body) []ReturnInfo {
 	return returns
 }
 
-func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []AssignTarget {
+func buildAssignTargets(file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []AssignTarget {
 	spans := splitExprList(file, start, end)
 	targets := make([]AssignTarget, 0, len(spans))
 	for i := 0; i < len(spans); i++ {
@@ -113,7 +113,7 @@ func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope
 		if file.Tokens[span.StartTok].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		name := tokenString(&file, span.StartTok)
+		name := tokenString(file, span.StartTok)
 		if name == "_" {
 			continue
 		}
@@ -127,7 +127,7 @@ func buildAssignTargets(file syntax.File, fileIndex int, info PackageInfo, scope
 	return targets
 }
 
-func splitExprList(file syntax.File, start int, end int) []ExprSpan {
+func splitExprList(file *syntax.File, start int, end int) []ExprSpan {
 	start, end = trimExprSpan(file, start, end)
 	var spans []ExprSpan
 	if start < 0 || end <= start {
@@ -136,7 +136,7 @@ func splitExprList(file syntax.File, start int, end int) []ExprSpan {
 	spans = make([]ExprSpan, 0, countExprListItems(file, start, end))
 	i := start
 	for i < end {
-		next := nextTopLevelComma(&file, i, end)
+		next := nextTopLevelComma(file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			spans = append(spans, ExprSpan{StartTok: itemStart, EndTok: itemEnd})
@@ -146,11 +146,11 @@ func splitExprList(file syntax.File, start int, end int) []ExprSpan {
 	return spans
 }
 
-func countExprListItems(file syntax.File, start int, end int) int {
+func countExprListItems(file *syntax.File, start int, end int) int {
 	count := 0
 	i := start
 	for i < end {
-		next := nextTopLevelComma(&file, i, end)
+		next := nextTopLevelComma(file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			count++
@@ -160,7 +160,7 @@ func countExprListItems(file syntax.File, start int, end int) int {
 	return count
 }
 
-func countBodyStatements(body syntax.Body, kind int) int {
+func countBodyStatements(body *syntax.Body, kind int) int {
 	count := 0
 	for i := 0; i < len(body.Stmts); i++ {
 		if body.Stmts[i].Kind == kind {
@@ -175,11 +175,14 @@ func findTopLevelAssignOp(file *syntax.File, start int, end int) int {
 	bracketDepth := 0
 	braceDepth := 0
 	for i := start; i < end; i++ {
-		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && isAssignOp(file, i) {
+		tok := file.Tokens[i]
+		if tok.KindLine&255 != syntax.TokenOperator {
+			continue
+		}
+		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
+		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && (c == '=' || c == 0 && isAssignOp(file, i)) {
 			return i
 		}
-		tok := file.Tokens[i]
-		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -229,41 +232,41 @@ func isAssignOp(file *syntax.File, tok int) bool {
 	return false
 }
 
-func assignKind(file syntax.File, tok int) int {
-	if tokenTextIs(&file, tok, "=") {
+func assignKind(file *syntax.File, tok int) int {
+	if tokenTextIs(file, tok, "=") {
 		return AssignSet
 	}
-	if tokenTextIs(&file, tok, ":=") {
+	if tokenTextIs(file, tok, ":=") {
 		return AssignDefine
 	}
-	if tokenTextIs(&file, tok, "+=") {
+	if tokenTextIs(file, tok, "+=") {
 		return AssignAdd
 	}
-	if tokenTextIs(&file, tok, "-=") {
+	if tokenTextIs(file, tok, "-=") {
 		return AssignSub
 	}
-	if tokenTextIs(&file, tok, "*=") {
+	if tokenTextIs(file, tok, "*=") {
 		return AssignMul
 	}
-	if tokenTextIs(&file, tok, "/=") {
+	if tokenTextIs(file, tok, "/=") {
 		return AssignDiv
 	}
-	if tokenTextIs(&file, tok, "%=") {
+	if tokenTextIs(file, tok, "%=") {
 		return AssignMod
 	}
-	if tokenTextIs(&file, tok, "&=") {
+	if tokenTextIs(file, tok, "&=") {
 		return AssignAnd
 	}
-	if tokenTextIs(&file, tok, "|=") {
+	if tokenTextIs(file, tok, "|=") {
 		return AssignOr
 	}
-	if tokenTextIs(&file, tok, "^=") {
+	if tokenTextIs(file, tok, "^=") {
 		return AssignXor
 	}
 	return AssignUnknown
 }
 
-func trimExprSpan(file syntax.File, start int, end int) (int, int) {
+func trimExprSpan(file *syntax.File, start int, end int) (int, int) {
 	for start < end {
 		ch := file.Tokens[start].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
 		if ch != int(';') && ch != int(',') {

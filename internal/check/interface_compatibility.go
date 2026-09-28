@@ -11,7 +11,7 @@ type interfaceConcreteType struct {
 	known   bool
 }
 
-func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
+func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	bindings := *cachedBindings
 	if bindings == nil {
@@ -20,11 +20,11 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 	}
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		want := interfaceNamedType(pkg, info, fileIndex, &scope, binding.typeStart, binding.typeEnd, 0)
+		want := interfaceNamedType(pkg, info, fileIndex, scope, binding.typeStart, binding.typeEnd, 0)
 		if !want.known || want.pointer || info.Types[want.index].Kind != TypeInterface || binding.valueStart < 0 {
 			continue
 		}
-		got := interfaceExprType(pkg, info, fileIndex, &scope, bindings, binding.valueStart, binding.valueEnd, binding.name, 0)
+		got := interfaceExprType(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, 0)
 		if definiteInterfaceMismatch(pkg, info, want.index, got) {
 			return binding.valueStart
 		}
@@ -37,18 +37,18 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 		if op < 0 || !tokenTextIs(file, op, "=") {
 			continue
 		}
-		left := splitExprList(*file, stmt.StartTok, op)
-		right := splitExprList(*file, op+1, stmt.EndTok)
+		left := splitExprList(file, stmt.StartTok, op)
+		right := splitExprList(file, op+1, stmt.EndTok)
 		if len(left) != len(right) {
 			continue
 		}
 		for i, target := range left {
-			want := interfaceExprType(pkg, info, fileIndex, &scope, bindings, target.StartTok, target.EndTok, op, 0)
+			want := interfaceExprType(pkg, info, fileIndex, scope, bindings, target.StartTok, target.EndTok, op, 0)
 			if !want.known || want.pointer || info.Types[want.index].Kind != TypeInterface {
 				continue
 			}
 			value := right[i]
-			got := interfaceExprType(pkg, info, fileIndex, &scope, bindings, value.StartTok, value.EndTok, op, 0)
+			got := interfaceExprType(pkg, info, fileIndex, scope, bindings, value.StartTok, value.EndTok, op, 0)
 			if definiteInterfaceMismatch(pkg, info, want.index, got) {
 				return value.StartTok
 			}
@@ -56,7 +56,7 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 	}
 	for tok := fn.BodyStart + 1; tok+3 < fn.BodyEnd; tok++ {
 		if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
-			tok = pointerOrderingNestedFunctionEnd(*file, tok, fn.BodyEnd-1)
+			tok = pointerOrderingNestedFunctionEnd(file, tok, fn.BodyEnd-1)
 			continue
 		}
 		if !tokCharIs(file, tok, '.') || !tokCharIs(file, tok+1, '(') {
@@ -69,11 +69,11 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 		if close <= tok+2 {
 			continue
 		}
-		want := interfaceExprType(pkg, info, fileIndex, &scope, bindings, tok-1, tok, tok, 0)
+		want := interfaceExprType(pkg, info, fileIndex, scope, bindings, tok-1, tok, tok, 0)
 		if !want.known || want.pointer || info.Types[want.index].Kind != TypeInterface {
 			continue
 		}
-		got := interfaceNamedType(pkg, info, fileIndex, &scope, tok+2, close-1, 0)
+		got := interfaceNamedType(pkg, info, fileIndex, scope, tok+2, close-1, 0)
 		if definiteInterfaceMismatch(pkg, info, want.index, got) {
 			return tok + 2
 		}
@@ -179,7 +179,7 @@ func definiteInterfaceMismatch(pkg *load.Package, info *PackageInfo, want int, g
 				if fn.ReceiverStart < 0 || fn.ReceiverEnd <= fn.ReceiverStart || !tokenTextIs(file, fn.NameTok, required.Name) {
 					continue
 				}
-				signature := buildFuncSignature(file, *fn)
+				signature := buildFuncSignature(file, fn)
 				if len(signature.Receiver) != 1 {
 					continue
 				}

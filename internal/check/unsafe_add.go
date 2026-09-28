@@ -6,7 +6,7 @@ import "renvo.dev/internal/syntax"
 // Unsafe intrinsics have operand rules beyond their compact runtime signatures.
 // Reject definitely invalid operands before ordinary call lowering can turn a
 // floating-point offset or length into an integer.
-func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, signature *FuncSignature, selectors []CoreSelectorRef) (int, int) {
+func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, signature *FuncSignature, selectors []CoreSelectorRef) (int, int) {
 	file := &pkg.Files[fileIndex].File
 	var locals []definiteLocalTypeSpan
 	ready := false
@@ -27,7 +27,7 @@ func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex
 		if close <= callee+1 {
 			continue
 		}
-		args := splitExprList(*file, callee+2, close-1)
+		args := splitExprList(file, callee+2, close-1)
 		arity := 2
 		if isStringData {
 			arity = 1
@@ -36,7 +36,7 @@ func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex
 			return CheckErrBuiltinArity, callee
 		}
 		if !ready {
-			locals = collectDefiniteLocalTypes(*file, fn)
+			locals = collectDefiniteLocalTypes(file, (*fn))
 			ready = true
 		}
 		if isStringData {
@@ -63,16 +63,16 @@ func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex
 			return CheckErrBuiltinOperand, offset.StartTok
 		}
 		start, end := stripOuterParens(file, offset.StartTok, offset.EndTok)
-		if unsafeAddFractionalDecimal(*file, start, end) {
+		if unsafeAddFractionalDecimal(file, start, end) {
 			return CheckErrBuiltinOperand, start
 		}
 		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || tokenTextIs(file, start, "nil") || tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false")) {
 			return CheckErrBuiltinOperand, start
 		}
-		if literalIntegerOverflows(*file, start, end, "int64") {
+		if literalIntegerOverflows(file, start, end, "int64") {
 			return CheckErrBuiltinOperand, start
 		}
-		if isString && literalIntegerOverflows(*file, start, end, "uint64") {
+		if isString && literalIntegerOverflows(file, start, end, "uint64") {
 			return CheckErrBuiltinOperand, start
 		}
 	}

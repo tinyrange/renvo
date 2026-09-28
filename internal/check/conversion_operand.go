@@ -7,13 +7,13 @@ import (
 
 // Check resolved scalar and slice conversions. Unknown expression types are
 // not evidence of an invalid conversion; they still require general typing.
-func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope CoreScope, cachedBindings *[]scopedTypeBinding) int {
+func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	ready := false
 	for name := fn.BodyStart + 1; name+1 < fn.BodyEnd; name++ {
 		if file.Tokens[name].KindLine&255 == syntax.TokenFunc {
-			name = pointerOrderingNestedFunctionEnd(*file, name, fn.BodyEnd-1)
+			name = pointerOrderingNestedFunctionEnd(file, name, fn.BodyEnd-1)
 			continue
 		}
 		if file.Tokens[name].KindLine&255 != syntax.TokenIdent || !tokCharIs(file, name+1, '(') {
@@ -37,7 +37,7 @@ func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int,
 		if close <= name+1 || close > fn.BodyEnd {
 			continue
 		}
-		args := splitExprList(*file, name+2, close-1)
+		args := splitExprList(file, name+2, close-1)
 		if len(args) != 1 || tokenTextIs(file, close-2, "...") {
 			return start
 		}

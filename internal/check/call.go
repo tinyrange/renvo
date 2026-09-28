@@ -36,7 +36,7 @@ func LookupCall(body FuncBody, base string, name string, kind int) int {
 	return -1
 }
 
-func buildFuncCalls(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body syntax.Body, scope FuncScope) []CallRef {
+func buildFuncCalls(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body *syntax.Body, scope FuncScope) []CallRef {
 	var calls []CallRef
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -51,7 +51,7 @@ func buildFuncCalls(file syntax.File, fileIndex int, info PackageInfo, checked [
 	return calls
 }
 
-func appendAssignCalls(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []CallRef {
+func appendAssignCalls(calls []CallRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []CallRef {
 	assign := findTokenText(file, stmt.StartTok, stmt.EndTok, "=")
 	shortAssign := findTokenText(file, stmt.StartTok, stmt.EndTok, ":=")
 	if shortAssign >= 0 {
@@ -64,20 +64,20 @@ func appendAssignCalls(calls []CallRef, file syntax.File, fileIndex int, info Pa
 	return appendExprCalls(calls, file, fileIndex, info, checked, scope, assign+1, stmt.EndTok)
 }
 
-func appendDeclCalls(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []CallRef {
+func appendDeclCalls(calls []CallRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []CallRef {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return calls
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(&file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(&file, i, end)
+			specEnd := statementSpecEnd(file, i, end)
 			calls = appendSpecInitializerCalls(calls, file, fileIndex, info, checked, scope, i, specEnd)
 			i = specEnd
 		}
@@ -86,7 +86,7 @@ func appendDeclCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 	return appendSpecInitializerCalls(calls, file, fileIndex, info, checked, scope, start, end)
 }
 
-func appendSpecInitializerCalls(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []CallRef {
+func appendSpecInitializerCalls(calls []CallRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []CallRef {
 	assign := findTokenText(file, start, end, "=")
 	if assign < 0 {
 		return calls
@@ -94,12 +94,12 @@ func appendSpecInitializerCalls(calls []CallRef, file syntax.File, fileIndex int
 	return appendExprCalls(calls, file, fileIndex, info, checked, scope, assign+1, end)
 }
 
-func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []CallRef {
+func appendExprCalls(calls []CallRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []CallRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if !tokCharIs(&file, i, '(') {
+		if !tokCharIs(file, i, '(') {
 			continue
 		}
-		closeTok := findTypeMatching(&file, i, '(', ')')
+		closeTok := findTypeMatching(file, i, '(', ')')
 		if closeTok <= i || closeTok > end+1 {
 			continue
 		}
@@ -107,16 +107,16 @@ func appendExprCalls(calls []CallRef, file syntax.File, fileIndex int, info Pack
 		if callee < start || file.Tokens[callee].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if callee-1 >= start && tokenTextIs(&file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].KindLine&255 == syntax.TokenIdent {
-			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(&file, callee-2), tokenString(&file, callee), callee-2, callee-1, callee, i, closeTok-1))
+		if callee-1 >= start && tokenTextIs(file, callee-1, ".") && callee-2 >= start && file.Tokens[callee-2].KindLine&255 == syntax.TokenIdent {
+			calls = append(calls, resolveSelectorCall(file, fileIndex, info, checked, scope, tokenString(file, callee-2), tokenString(file, callee), callee-2, callee-1, callee, i, closeTok-1))
 		} else {
-			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(&file, callee), callee, i, closeTok-1))
+			calls = append(calls, resolveDirectCall(file, fileIndex, info, scope, tokenString(file, callee), callee, i, closeTok-1))
 		}
 	}
 	return calls
 }
 
-func resolveDirectCall(file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, name string, callee int, argsStart int, argsEnd int) CallRef {
+func resolveDirectCall(file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, name string, callee int, argsStart int, argsEnd int) CallRef {
 	ref := resolveNameRef(fileIndex, info, scope, name, callee)
 	call := CallRef{
 		Kind:        CallUnknown,
@@ -143,7 +143,7 @@ func resolveDirectCall(file syntax.File, fileIndex int, info PackageInfo, scope 
 	return call
 }
 
-func resolveSelectorCall(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, base string, name string, baseTok int, dotTok int, callee int, argsStart int, argsEnd int) CallRef {
+func resolveSelectorCall(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, base string, name string, baseTok int, dotTok int, callee int, argsStart int, argsEnd int) CallRef {
 	selector := resolveSelector(fileIndex, info, checked, scope, base, name, baseTok, dotTok, callee)
 	call := CallRef{
 		Kind:        CallUnknown,

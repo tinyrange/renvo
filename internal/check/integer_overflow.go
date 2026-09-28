@@ -2,12 +2,12 @@ package check
 
 import "renvo.dev/internal/syntax"
 
-func literalIntegerOverflows(file syntax.File, start int, end int, typ string) bool {
-	start, end = trimDeclSpan(&file, start, end)
-	start, end = stripOuterParens(&file, start, end)
+func literalIntegerOverflows(file *syntax.File, start int, end int, typ string) bool {
+	start, end = trimDeclSpan(file, start, end)
+	start, end = stripOuterParens(file, start, end)
 	negative := false
-	if start < end && (tokenTextIs(&file, start, "-") || tokenTextIs(&file, start, "+")) {
-		negative = tokenTextIs(&file, start, "-")
+	if start < end && (tokenTextIs(file, start, "-") || tokenTextIs(file, start, "+")) {
+		negative = tokenTextIs(file, start, "-")
 		start++
 	}
 	bits := 0
@@ -36,7 +36,7 @@ func literalIntegerOverflows(file syntax.File, start int, end int, typ string) b
 	if bits == 0 || end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenNumber {
 		return false
 	}
-	text := tokenString(&file, start)
+	text := tokenString(file, start)
 	base := uint64(10)
 	i := 0
 	if len(text) > 1 && text[0] == '0' {

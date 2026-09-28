@@ -58,5 +58,5 @@ func invalidLiteralUnary(file *syntax.File, op int, end int) bool {
 	if kind == syntax.TokenString {
 		return true
 	}
-	return ch == '^' && unsafeAddFractionalDecimal(*file, start, start+1)
+	return ch == '^' && unsafeAddFractionalDecimal(file, start, start+1)
 }

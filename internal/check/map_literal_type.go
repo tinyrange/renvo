@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMapLiteralTypes(pkg *load.Package, info *PackageInfo, file *syntax.File, literals []CompositeExpr, scope CoreScope) int {
+func invalidMapLiteralTypes(pkg *load.Package, info *PackageInfo, file *syntax.File, literals []CompositeExpr, scope *CoreScope) int {
 	for _, literal := range literals {
 		key, value := mapLiteralPrimitiveTypes(pkg, info, file, literal.TypeStart, literal.TypeEnd, scope, 0)
 		if key == "" && value == "" {

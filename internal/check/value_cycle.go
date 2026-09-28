@@ -36,7 +36,7 @@ func recursiveValueTypeSpan(pkg *load.Package, info *PackageInfo, file *syntax.F
 	if start < 0 || start >= end {
 		return false
 	}
-	kind := classifyType(*file, start, end)
+	kind := classifyType(file, start, end)
 	if kind == TypeNamed && end-start == 1 {
 		index := lookupType(info.Types, tokenString(file, start))
 		return index >= 0 && recursiveValueNamedType(pkg, info, index, states)
@@ -50,7 +50,7 @@ func recursiveValueTypeSpan(pkg *load.Package, info *PackageInfo, file *syntax.F
 		if open < 0 {
 			return false
 		}
-		fields := parseStructFields(*file, open+1, end-1)
+		fields := parseStructFields(file, open+1, end-1)
 		for i := 0; i < len(fields); i++ {
 			if recursiveValueTypeSpan(pkg, info, file, fields[i].TypeStart, fields[i].TypeEnd, states) {
 				return true
