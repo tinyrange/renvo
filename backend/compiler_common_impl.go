@@ -19529,9 +19529,6 @@ func renvoEmitBuiltinPanic(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 		return false
 	}
 	argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-	if g.deferReturnLabel <= 0 {
-		return false
-	}
 	valueOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 	if !renvoEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 		return false
