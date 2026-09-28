@@ -201,6 +201,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(*file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
+			scope, scopeOK, scopeTok := buildFuncScopeCore(*file, fn)
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
@@ -231,9 +232,8 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 			literals := buildFuncCompositeExprs(*file, body)
 			if len(literals) > 0 {
-				scope, ok, _ := buildFuncScopeCore(*file, fn)
-				if ok {
-					bindings := collectScopedTypeBindings(*file, fn, body, &signature)
+				if scopeOK {
+					bindings := collectScopedTypeBindings(file, fn, &body, &signature)
 					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, scope, fn, bindings); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrArrayIndex, fileIndex, tok
@@ -248,7 +248,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 					}
 				}
 			}
-			// Keep signature, body, and index spans; release validation scratch.
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, fn, &body, &signature, scope, scopeOK, literals); tok >= 0 {
+				arena.Reset(functionArenaStart)
+				return false, CheckErrUndefined, fileIndex, tok
+			}
+			// Keep signature, body, scope, and index spans; release validation scratch.
 			arena.Reset(validationArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
@@ -274,8 +278,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, fn); sliceTok >= 0 {
 				return false, CheckErrSliceOperand, fileIndex, sliceTok
 			}
-			scope, ok, scopeTok := buildFuncScopeCore(*file, fn)
-			if !ok {
+			if !scopeOK {
 				return false, CheckErrScope, fileIndex, scopeTok
 			}
 
