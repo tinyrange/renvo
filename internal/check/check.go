@@ -327,7 +327,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			}
 			kind := SymbolFunc
 			signatureStart := arena.Mark()
-			signature := buildFuncSignature(file, fn)
+			signature := buildFuncSignature(&file, fn)
 			arity := len(signature.Params)
 			if name == "init" && fn.ReceiverStart < 0 && (arity != 0 || len(signature.Results) != 0) {
 				arena.Reset(signatureStart)
