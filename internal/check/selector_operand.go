@@ -78,7 +78,7 @@ func knownSelectorMethod(pkg *load.Package, info *PackageInfo, index int, name s
 			if fn.ReceiverStart < 0 || !tokenTextIs(file, fn.NameTok, name) {
 				continue
 			}
-			signature := buildFuncSignature(*file, fn)
+			signature := buildFuncSignature(file, fn)
 			if len(signature.Receiver) != 1 {
 				continue
 			}
