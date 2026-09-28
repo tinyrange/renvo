@@ -59,7 +59,7 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		}
 		calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 		if ok {
-			signature := buildFuncSignature(pkg.Files[calleeFile].File, callee)
+			signature := buildFuncSignature(&pkg.Files[calleeFile].File, callee)
 			if len(signature.Results) == 1 {
 				result := signature.Results[0]
 				return definiteStructType(pkg, info, calleeFile, CoreScope{}, result.TypeStart, result.TypeEnd, 0)
