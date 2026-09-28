@@ -7,22 +7,7 @@ import (
 
 func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
-	// Avoid parsing and collecting bindings for functions without range loops.
-	found := false
-	for tok := fn.BodyStart + 1; tok < fn.BodyEnd; tok++ {
-		if file.Tokens[tok].KindLine&255 == syntax.TokenRange {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return -1
-	}
 	bindings := *cachedBindings
-	if bindings == nil {
-		bindings = collectScopedTypeBindings(file, fn, body, signature)
-		*cachedBindings = bindings
-	}
 	for _, stmt := range body.Stmts {
 		if stmt.Kind != syntax.StmtFor {
 			continue
@@ -33,6 +18,12 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			}
 			if numericBuiltinInNestedFunction(file, fn, stmt.StartTok) {
 				break
+			}
+			// Collect bindings only after finding a range statement in this
+			// function; the statement tree already identifies the loop headers.
+			if bindings == nil {
+				bindings = collectScopedTypeBindings(file, fn, body, signature)
+				*cachedBindings = bindings
 			}
 			start, end := tok+1, stmt.BodyStart
 			value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, start, end, tok, 0)

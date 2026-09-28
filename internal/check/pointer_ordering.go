@@ -22,7 +22,10 @@ func invalidResolvedOperatorOperands(pkg *load.Package, info *PackageInfo, fileI
 		if kind&255 != syntax.TokenOperator {
 			continue
 		}
-		first := file.Src[file.Tokens[op].Start]
+		first := byte(kind >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
+		if first == 0 {
+			first = file.Src[file.Tokens[op].Start]
+		}
 		if first != '<' && first != '>' {
 			continue
 		}

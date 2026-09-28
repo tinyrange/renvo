@@ -270,6 +270,12 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
 		token := program.Tokens[i]
+		kind := token.KindLine & 255
+		// Defer remains an identifier in the compact unit. Other token kinds
+		// cannot introduce a function value or one of the builtin calls below.
+		if kind != unit.TokenFunc && kind != unit.TokenIdent {
+			continue
+		}
 		start := token.Start
 		valid := start >= 0 && start+token.Size <= len(program.Text)
 		if !functions && token.KindLine&255 == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
