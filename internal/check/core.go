@@ -167,11 +167,13 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			functionArenaStart := arena.Mark()
 			signature := buildFuncSignature(*file, fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
-			validationArenaStart := arena.Mark()
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
 			}
+			// Both constant bounds and operand checks use the same immutable index spans.
+			indexes := buildFuncIndexExprs(file, &body)
+			validationArenaStart := arena.Mark()
 			if statementErr, statementTok := invalidDefiniteStatement(*file, body, pkg.Files[fileIndex].C); statementErr != CheckOK {
 				arena.Reset(functionArenaStart)
 				return false, statementErr, fileIndex, statementTok
@@ -184,7 +186,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
 			}
-			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, fn, &body, &signature); indexTok >= 0 {
+			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, fn, indexes, &signature); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayIndex, fileIndex, indexTok
 			}
@@ -212,7 +214,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 					}
 				}
 			}
-			// Keep the parsed signature and body for builtin validation; release check scratch.
+			// Keep signature, body, and index spans; release validation scratch.
 			arena.Reset(validationArenaStart)
 			if fn.BodyStart < 0 {
 				// Bodyless declarations are checked through the ordinary function
@@ -244,12 +246,15 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			operatorMark := arena.Mark()
+			// Retain immutable operand bindings through the final builtin check.
+			// They are allocated after validation scratch is released and reclaimed
+			// with the parsed body at functionArenaStart.
 			var operandBindings []scopedTypeBinding
 			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, fn, &body, &signature, &operandBindings); tok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrAssignTarget, fileIndex, tok
 			}
-			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings)
+			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, fn, &body, &signature, scope, &operandBindings, indexes)
 			if mapCode != CheckOK {
 				arena.Reset(operatorMark)
 				return false, mapCode, fileIndex, mapTok
@@ -496,11 +501,11 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 			}
 		}
 		if !skipRef {
-			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
+			scopeIndex = lookupScopeTokenNameCore(&scope, file, i)
 		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokenTextIs(file, i+1, ":") {
 			// A leading identifier in a keyed map literal is an expression even
 			// though the same token shape denotes a field name in a struct literal.
-			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
+			scopeIndex = lookupScopeTokenNameCore(&scope, file, i)
 		}
 		if scopeIndex >= 0 && scope.Names[scopeIndex].Kind == NameVariable && i != scope.Names[scopeIndex].Token && !coreLocalWriteOnly(file, i, end) {
 			scope.Names[scopeIndex].Kind = NameVariableUsed
@@ -587,7 +592,7 @@ func coreUnsafeSelector(info *PackageInfo, fileIndex int, file *syntax.File, bas
 }
 
 func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
-	return tokenTextIs(file, tok, "copy") || tokenTextIs(file, tok, "delete") || tokenTextIs(file, tok, "append") || tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap") || tokenTextIs(file, tok, "make") || tokenTextIs(file, tok, "real") || tokenTextIs(file, tok, "imag") || tokenTextIs(file, tok, "complex")
+	return tokenTextIs(file, tok, "new") || tokenTextIs(file, tok, "copy") || tokenTextIs(file, tok, "delete") || tokenTextIs(file, tok, "append") || tokenTextIs(file, tok, "min") || tokenTextIs(file, tok, "max") || tokenTextIs(file, tok, "clear") || tokenTextIs(file, tok, "len") || tokenTextIs(file, tok, "cap") || tokenTextIs(file, tok, "make") || tokenTextIs(file, tok, "real") || tokenTextIs(file, tok, "imag") || tokenTextIs(file, tok, "complex")
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
@@ -732,7 +737,7 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file *syntax.File, fileIndex int
 			i += 2
 			continue
 		}
-		if lookupScopeTokenNameCore(scope, file, i) < 0 {
+		if lookupScopeTokenNameCore(&scope, file, i) < 0 {
 			symbol := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbol >= 0 {
 				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: info.Package, Symbol: symbol})
@@ -751,7 +756,7 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 		BasePackage: -1,
 		Symbol:      -1,
 	}
-	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
+	scopeIndex := lookupScopeTokenNameCore(&scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
 		selector.BaseIndex = scopeIndex
 		return selector
@@ -784,7 +789,7 @@ func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []Packa
 
 func resolveImportSelectorTypeRefCore(fileIndex int, info *PackageInfo, checked []PackageInfo, scope CoreScope, file *syntax.File, baseTok int, dotTok int, nameTok int) CoreTypeRef {
 	ref := CoreTypeRef{Kind: TypeRefUnknown, File: fileIndex, Token: nameTok, BaseTok: baseTok, DotTok: dotTok, Package: -1, Symbol: -1}
-	scopeIndex := lookupScopeTokenNameCore(scope, file, baseTok)
+	scopeIndex := lookupScopeTokenNameCore(&scope, file, baseTok)
 	if scopeIndex >= 0 && scope.Names[scopeIndex].Kind != NameLabel {
 		ref.Kind = TypeRefScope
 		return ref
@@ -834,7 +839,7 @@ func cImportDeclaredTokenCore(info *PackageInfo, fileIndex int, file *syntax.Fil
 	return false
 }
 
-func lookupScopeTokenNameCore(scope CoreScope, file *syntax.File, tok int) int {
+func lookupScopeTokenNameCore(scope *CoreScope, file *syntax.File, tok int) int {
 	if len(scope.Names) == 0 || tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
@@ -1214,7 +1219,7 @@ func collectCoreLeadingIdentList(file syntax.File, start int, end int, scope *Co
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return
 		}
-		if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(*scope, &file, i) < 0 {
+		if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
 			addCoreScopeName(scope, file, i, NameLocal, false, false, variable)
 		}
 		i++
@@ -1330,7 +1335,7 @@ func collectCoreDeclScope(file syntax.File, start int, end int, scope *CoreScope
 func collectCoreShortDeclScope(file syntax.File, start int, end int, scope *CoreScope) {
 	for i := start; i < end; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
-			if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(*scope, &file, i) < 0 {
+			if !tokenTextIs(&file, i, "_") && lookupScopeTokenNameCore(scope, &file, i) < 0 {
 				addCoreScopeName(scope, file, i, NameLocal, false, false, true)
 			}
 		}
