@@ -102,7 +102,7 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			}
 		}
 	}
-	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
+	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
 		return makeAllocationType(pkg, info, fileIndex, start+2, nextTopLevelComma(*file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {

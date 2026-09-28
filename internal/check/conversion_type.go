@@ -14,7 +14,7 @@ func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)

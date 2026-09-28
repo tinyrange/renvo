@@ -115,7 +115,7 @@ func arrayLengthVariableName(context constantIndexContext, start, end int) bool 
 	if chosen >= 0 {
 		return context.bindings[chosen].writable
 	}
-	if lookupScopeTokenNameCore(context.scope, &file, start) >= 0 {
+	if lookupScopeTokenNameCore(&context.scope, &file, start) >= 0 {
 		return false
 	}
 	index := LookupDecl(*context.info, tokenString(&file, start))
