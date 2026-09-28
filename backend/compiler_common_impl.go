@@ -12549,7 +12549,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			if assignTok > stmt.startTok && !renvoProgramUsesC11Semantics(p) &&
 				(g.constEvalIotaValid != 0 || startKind == renvoTokConst || renvoFindLocalIndex(g, nameStart, nameEnd) >= 0 ||
-				renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
+					renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokVar) >= 0 || renvoFindMetaGlobalIndex(meta, nameStart, nameEnd, renvoTokConst) >= 0) {
 				// A Go declaration enters scope after its initializer. Preserve any
 				// outer binding until the value has been completely evaluated.
 				value := renvoEvalConstExpr(g, ep, len(ep.exprs)-1)
@@ -15990,6 +15990,13 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 	renvoNonNil(g)
 	size = renvoAlignValue(size, wordSize)
+	// Keep larger arguments on the word-push path so stack growth touches each
+	// guard page; one reservation must not skip a Windows stack guard page.
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+		mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
+		renvoAmd64PushStackBytes(&g.asm, offset, size)
+		return
+	}
 	for at := size - wordSize; at >= 0; at -= wordSize {
 		if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
 			renvoAsmPushStackWord(&g.asm, offset-at)
@@ -20417,8 +20424,9 @@ func renvoEmitTupleArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, ty
 	for i := 0; i < tuple.count; i++ {
 		field := g.meta.fields[tuple.first+i]
 		size := renvoTypeCopySize(g.meta, field.typ)
-		renvoEmitPushWords(g, offset-field.offset, size, renvoBackendValueSlotSize, renvoPushStack)
-		wordCount += size / renvoBackendValueSlotSize
+		wordSize := renvoCallWordSize(g, field.typ)
+		renvoEmitPushWords(g, offset-field.offset, size, wordSize, renvoPushStack)
+		wordCount += renvoAlignValue(size, wordSize) / wordSize
 	}
 	return wordCount
 }
