@@ -8214,6 +8214,14 @@ func renvoAsmCopySecondaryToTertiary(a *renvoAsm) {
 }
 func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 	renvoNonNil(a)
+	if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchAarch64 {
+		renvoAarch64AsmMovRegReg(a, 0, 2)
+		return
+	}
+	if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchArm {
+		renvoArmAsmMovRegReg(a, 0, 2)
+		return
+	}
 	if renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		renvoAsmEmit16(a, 0xc889)
 		return
@@ -8237,6 +8245,7 @@ func renvoAsmPushPrimary(a *renvoAsm) {
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPushRax(a)
+		renvoAsmRecordRegisterPush(a, 0)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
@@ -8610,10 +8619,12 @@ func renvoAsmStorePrimaryStack(a *renvoAsm, offset int) {
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRegStack(a, 0, offset)
+		a.lastPrimaryStoreEnd = len(a.code)
+		a.lastPrimaryStoreOff = offset
 		return
 	}
 	renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
-	if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+	if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		a.lastPrimaryStoreEnd = len(a.code)
 		a.lastPrimaryStoreOff = offset
 	}
@@ -8655,7 +8666,7 @@ func renvoAsmLoadPrimaryStack(a *renvoAsm, offset int) {
 		renvoRTGAsmLoadFrame(a, renvoRTGPrimary, offset)
 		return
 	}
-	if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+	if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || a.c.renvoTargetArch == renvoArchArm || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		n := len(a.code)
 		if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
 			return
@@ -24062,6 +24073,15 @@ func renvoAsmPopCallWord0(a *renvoAsm) {
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
+		// Only fold a push recorded at this exact position. Labels and
+		// relocations invalidate the marker, preserving alternate entry paths.
+		if len(a.code) >= 4 && a.lastPrimaryStoreEnd == -(len(a.code)*32+2) {
+			a.code = a.code[:len(a.code)-4]
+			a.lastPrimaryStoreEnd = -1
+			a.lastPrimaryLoad = 0
+			renvoAarch64AsmMovRegReg(a, 3, 0)
+			return
+		}
 		renvoAarch64AsmPopRdi(a)
 		return
 	}

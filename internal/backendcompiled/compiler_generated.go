@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "97801a1f99acb967836c507e9522ee241a98dbd23ba47a145fd2dc0c5e2897a6"
+const CompilerSourceDigest = "9b6e8e01aa2aad0e5616c0c4061b2f14935e48ceee7c43abdf49de9e0f3f3c96"
 
 // source: backend/compiler_common_impl.go
 
@@ -8221,6 +8221,14 @@ renvoAsmEmit16(a, 0x5952)
 }
 func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 renvoNonNil(a)
+if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchAarch64 {
+renvoAarch64AsmMovRegReg(a, 0, 2)
+return
+}
+if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchArm {
+renvoArmAsmMovRegReg(a, 0, 2)
+return
+}
 if renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 renvoAsmEmit16(a, 0xc889)
 return
@@ -8244,6 +8252,7 @@ return
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 renvoAarch64AsmPushRax(a)
+renvoAsmRecordRegisterPush(a, 0)
 return
 }
 if a.c.renvoTargetArch == renvoArchArm {
@@ -8617,10 +8626,12 @@ return
 }
 if a.c.renvoTargetArch == renvoArchArm {
 renvoArmAsmStoreRegStack(a, 0, offset)
+a.lastPrimaryStoreEnd = len(a.code)
+a.lastPrimaryStoreOff = offset
 return
 }
 renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
-if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 a.lastPrimaryStoreEnd = len(a.code)
 a.lastPrimaryStoreOff = offset
 }
@@ -8662,7 +8673,7 @@ if renvoPreparedBackendActive != 0 {
 renvoRTGAsmLoadFrame(a, renvoRTGPrimary, offset)
 return
 }
-if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || a.c.renvoTargetArch == renvoArchArm || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 n := len(a.code)
 if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
 return
@@ -24069,6 +24080,15 @@ renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
 return
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
+
+
+if len(a.code) >= 4 && a.lastPrimaryStoreEnd == -(len(a.code)*32+2) {
+a.code = a.code[:len(a.code)-4]
+a.lastPrimaryStoreEnd = -1
+a.lastPrimaryLoad = 0
+renvoAarch64AsmMovRegReg(a, 3, 0)
+return
+}
 renvoAarch64AsmPopRdi(a)
 return
 }
@@ -38414,7 +38434,7 @@ if target == renvoTargetLinuxAarch64 {
 return "linux/aarch64", "\xf3\x34\x4f\x65\x24\xa7\x5b\xf8\xc4\x08\x89\x0c\x48\xa1\xa9\x62\x49\x30\xc9\x58\xfb\x01\x4c\x07\x9d\xd4\xd9\xc3\xd3\xb6\x06\x2a", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x84\xd9\xca\x41\xee\x61\x4e\x7c\xc4\xfa\x8b\x28\x51\x9b\xf3\x4b\xb2\xf8\x98\x67\xcd\x93\x35\x69\xba\xd7\xcb\x29\x6b\x6e\xe7\x22", 3, true
+return "linux/arm", "\x6b\xbf\x06\xf7\x8a\xc7\x4d\xa3\x23\x38\x99\xd4\x23\xdd\xa3\x53\x1d\xf2\xc3\x53\x59\x4a\x87\xfd\x6f\x44\x25\x82\x80\xbb\x8e\x10", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
 return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
@@ -45210,7 +45230,7 @@ renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRax, offset)
 func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 a := &g.asm
 if wordCount > 0 {
-renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+renvoAsmPopCallWord0(a)
 }
 if wordCount > 1 {
 renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
@@ -45823,6 +45843,10 @@ renvoArmAsmEmit(a, 0xe3400000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 func renvoArmAsmAddRegImm(a *renvoAsm, dst int, src int, imm int) {
 if imm == 0 {
 renvoArmAsmMovRegReg(a, dst, src)
+return
+}
+if imm >= -255 && imm <= 255 {
+renvoArmAsmAddRegSmallImm(a, dst, src, imm)
 return
 }
 tmp := 9

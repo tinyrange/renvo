@@ -37,6 +37,10 @@ go backend {
 			asmMovRegReg(a, dst, src)
 			return
 		}
+		if imm >= -255 && imm <= 255 {
+			asmAddRegSmallImm(a, dst, src, imm)
+			return
+		}
 		tmp := scratch.Code
 		if dst == tmp || src == tmp {
 			tmp = scratch2.Code
