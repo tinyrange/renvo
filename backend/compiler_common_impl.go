@@ -22540,7 +22540,7 @@ func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
 		renvoAsmRet(a)
 		return
 	}
-	if g.c.renvoTargetArch == renvoArchWasm32 && (renvoPreparedBackendActive == 0 || g.c.renvoTarget == renvoTargetVM32) {
+	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		a := &g.asm
 		invalid := renvoAsmNewLabel(a)
 		// Compare the original index and length without materializing each
