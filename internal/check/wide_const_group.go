@@ -19,7 +19,7 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			}
 		}
 		if !hasIota {
-			values := splitExprList(&(file), target.ValueStart, target.ValueEnd)
+			values := splitExprList(&file, target.ValueStart, target.ValueEnd)
 			if target.ValueIndex >= 0 && target.ValueIndex < len(values) {
 				context.iotaKnown = false
 				return wideConstantExpr(&context, values[target.ValueIndex].StartTok, values[target.ValueIndex].EndTok, depth)
@@ -49,7 +49,7 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			}
 			previousStart = start
 			previousEnd = decl.EndTok
-			namesEnd := declNameListEnd(&(file), decl)
+			namesEnd := declNameListEnd(&file, decl)
 			assign := findDeclAssign(&file, namesEnd, decl.EndTok)
 			if assign >= 0 {
 				typeStart, typeEnd = trimDeclSpan(&file, namesEnd, assign)
@@ -62,8 +62,8 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 		if valueStart < 0 || typeEnd > typeStart {
 			return wideConstant{}
 		}
-		values := splitExprList(&(file), valueStart, valueEnd)
-		index := declNameIndex(&(file), decl)
+		values := splitExprList(&file, valueStart, valueEnd)
+		index := declNameIndex(&file, decl)
 		if index < 0 || index >= len(values) {
 			return wideConstant{}
 		}

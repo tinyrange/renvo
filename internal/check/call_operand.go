@@ -53,11 +53,11 @@ func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.F
 		return false
 	}
 	target := pkg.Files[symbol.File].File
-	decl, ok := findDefinitePackageFuncDecl(&(target), symbol.Token)
+	decl, ok := findDefinitePackageFuncDecl(&target, symbol.Token)
 	if !ok {
 		return false
 	}
-	resultStart, resultEnd := trimTypeSpan(&(target), decl.ResultStart, decl.ResultEnd)
+	resultStart, resultEnd := trimTypeSpan(&target, decl.ResultStart, decl.ResultEnd)
 	if resultStart < 0 || resultEnd <= resultStart {
 		return true // a void call cannot supply an operand either
 	}

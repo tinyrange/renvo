@@ -5,7 +5,7 @@ import "renvo.dev/internal/syntax"
 // invalidReturnCount rejects return lists whose arity is statically certain
 // to disagree with the function signature. A single call expression is left
 // to later tuple-aware checking because it may return multiple values.
-func invalidReturnCount(file *syntax.File, fn *syntax.FuncDecl, signature FuncSignature) (int, int) {
+func invalidReturnCount(file *syntax.File, fn *syntax.FuncDecl, signature *FuncSignature) (int, int) {
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
 	if start < 0 {

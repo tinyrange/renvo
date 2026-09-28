@@ -352,10 +352,10 @@ func siftDownDecls(decls []DeclInfo, root int, end int) {
 		if child >= end {
 			return
 		}
-		if child+1 < end && declAfter(decls[child+1], decls[child]) {
+		if child+1 < end && declAfter(&decls[child+1], &decls[child]) {
 			child++
 		}
-		if !declAfter(decls[child], decls[root]) {
+		if !declAfter(&decls[child], &decls[root]) {
 			return
 		}
 		decls[root], decls[child] = decls[child], decls[root]
@@ -431,7 +431,7 @@ func appendInitVisit(order []int, decls []DeclInfo, state []int, index int) []in
 	return append(order, index)
 }
 
-func declAfter(left DeclInfo, right DeclInfo) bool {
+func declAfter(left *DeclInfo, right *DeclInfo) bool {
 	if left.Name != right.Name {
 		return checkStringAfter(left.Name, right.Name)
 	}

@@ -14,7 +14,7 @@ func invalidPackageConstantOperations(pkg *load.Package, info *PackageInfo) (int
 		context := constantIndexContext{pkg: pkg, info: info, fileIndex: decl.File, strict: true}
 		context.fn.BodyStart = -1
 		file := pkg.Files[decl.File].File
-		values := splitExprList(&(file), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&file, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			span := values[decl.ValueIndex]
 			if tok := invalidConstantSpanOperation(&context, span.StartTok, span.EndTok, 0); tok >= 0 {
@@ -59,7 +59,7 @@ func invalidConstantSpanOperation(context *constantIndexContext, start int, end 
 		if tokCharIs(&file, i, '(') {
 			close := findTypeMatching(&file, i, '(', ')')
 			if close > i && close <= end {
-				for _, arg := range splitExprList(&(file), i+1, close-1) {
+				for _, arg := range splitExprList(&file, i+1, close-1) {
 					if tok := invalidConstantSpanOperation(context, arg.StartTok, arg.EndTok, depth+1); tok >= 0 {
 						return tok
 					}

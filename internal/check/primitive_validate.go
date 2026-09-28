@@ -59,12 +59,12 @@ func prepareDefinitePrimitiveCallTarget(pkg *load.Package, info *PackageInfo, sy
 		return
 	}
 	file := pkg.Files[symbol.File].File
-	fn, ok := findDefinitePackageFuncDecl(&(file), symbol.Token)
+	fn, ok := findDefinitePackageFuncDecl(&file, symbol.Token)
 	if !ok {
 		return
 	}
 	for param := 0; param < definitePrimitiveParamLimit; param++ {
-		start, end, found := definitePrimitiveParamSpan(&(file), &(fn), param)
+		start, end, found := definitePrimitiveParamSpan(&file, &fn, param)
 		if !found {
 			break
 		}

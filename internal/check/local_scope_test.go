@@ -23,10 +23,10 @@ func TestBuiltinBindingsAcrossNestedClauses(t *testing.T) {
 			for _, source := range pkg.Files {
 				for _, fn := range source.File.Funcs {
 					body := syntax.ParseFuncBodyStatements(source.File, fn)
-					ends := localRuleScopeEnds(&(body))
+					ends := localRuleScopeEnds(&body)
 					for i, stmt := range body.Stmts {
-						if stmt.Kind != syntax.StmtBlock && ends[i] != localRuleScopeEnd(&(body), stmt.StartTok) {
-							t.Fatalf("%s: scope endpoint for token %d = %d, want %d", tc.body, stmt.StartTok, ends[i], localRuleScopeEnd(&(body), stmt.StartTok))
+						if stmt.Kind != syntax.StmtBlock && ends[i] != localRuleScopeEnd(&body, stmt.StartTok) {
+							t.Fatalf("%s: scope endpoint for token %d = %d, want %d", tc.body, stmt.StartTok, ends[i], localRuleScopeEnd(&body, stmt.StartTok))
 						}
 					}
 				}

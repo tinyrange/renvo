@@ -95,12 +95,12 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return numericBuiltinTypeValue(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
+			return numericBuiltinTypeValue(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			span := values[decl.ValueIndex]
-			value := numericBuiltinExprValue(pkg, info, decl.File, &(CoreScope{}), nil, span.StartTok, span.EndTok, decl.Token, depth+1)
+			value := numericBuiltinExprValue(pkg, info, decl.File, &CoreScope{}, nil, span.StartTok, span.EndTok, decl.Token, depth+1)
 			if decl.Kind == SymbolVar {
 				value.typed = true
 			}
@@ -126,7 +126,7 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := &info.Types[index]
-		value := numericBuiltinTypeValue(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
+		value := numericBuiltinTypeValue(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 		if !typ.Alias {
 			value.identity = "named:" + name
 		}

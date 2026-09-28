@@ -11,7 +11,7 @@ func TestReflectedStructKeepsTagsWithoutOptingInOtherTypes(t *testing.T) {
 		t.Fatal("parse fixture")
 	}
 	for i, decl := range file.Decls {
-		info := buildTypeInfo(&(file), DeclInfo{Token: decl.NameTok, TypeStart: decl.NameTok + 1, TypeEnd: decl.EndTok}, i)
+		info := buildTypeInfo(&file, DeclInfo{Token: decl.NameTok, TypeStart: decl.NameTok + 1, TypeEnd: decl.EndTok}, i)
 		if syntax.ReflectDirective(&file, decl) != (i == 0) {
 			t.Fatal("unexpected reflection opt-in")
 		}

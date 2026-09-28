@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2c3af24f65b78f244afedf959a1a29fe73f926c4df462e0cb29374c9c56bdb0f"
+const CompilerSourceDigest = "1b2a5e45b9ac799a54f37eb354bb29be047435be645f1ce4f2c2e60602009e4b"
 
 // source: backend/compiler_common_impl.go
 
@@ -7427,6 +7427,9 @@ func renvoBytesEqualRange(src []byte, aStart int, aEnd int, bStart int, bEnd int
 if aEnd-aStart != bEnd-bStart {
 return false
 }
+if aStart == bStart {
+return true
+}
 for aStart < aEnd {
 if renvo_runtime_UnsafeByteAt(src, aStart) != renvo_runtime_UnsafeByteAt(src, bStart) {
 return false
@@ -9427,14 +9430,16 @@ renvoNonNil(g)
 
 
 
-searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+data := g.asm.data
+searchStart := len(data) - renvoStringInternSearchBytes
 if searchStart < 0 {
 searchStart = 0
 }
-for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
-match := g.asm.data[off+len(msg)] == 0
+for off := searchStart; off+len(msg) < len(data); off++ {
+match := len(msg) == 0 || data[off] == msg[0]
+match = match && data[off+len(msg)] == 0
 for i := 0; match && i < len(msg); i++ {
-match = g.asm.data[off+i] == msg[i]
+match = data[off+i] == msg[i]
 }
 if match {
 return off
@@ -9462,17 +9467,19 @@ return renvoAddStringData(g, msg)
 
 
 
-searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+data := g.asm.data
+searchStart := len(data) - renvoStringInternSearchBytes
 if searchStart < 0 {
 searchStart = 0
 }
-for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
+for off := searchStart; off+len(msg) < len(data); off++ {
 if off&(alignment-1) != 0 {
 continue
 }
-match := g.asm.data[off+len(msg)] == 0
+match := len(msg) == 0 || data[off] == msg[0]
+match = match && data[off+len(msg)] == 0
 for i := 0; match && i < len(msg); i++ {
-match = g.asm.data[off+i] == msg[i]
+match = data[off+i] == msg[i]
 }
 if match {
 return off

@@ -126,7 +126,7 @@ func invalidBuiltinCalls(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			continue
 		}
 		if !localsReady {
-			locals = collectDefiniteLocalTypes(file, (*fn))
+			locals = collectDefiniteLocalTypes(file, *fn)
 			localsReady = true
 		}
 		if name == "clear" {
@@ -360,7 +360,7 @@ func definiteBuiltinTypeSpan(pkg *load.Package, info *PackageInfo, fileIndex int
 		return builtinTypeUnknown
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = trimTypeSpan(&(file), start, end)
+	start, end = trimTypeSpan(&file, start, end)
 	if start < 0 || end <= start {
 		return builtinTypeUnknown
 	}

@@ -8,7 +8,7 @@ import (
 func invalidArrayLiteralBounds(pkg *load.Package, info *PackageInfo, fileIndex int, literals []CompositeExpr, scope *CoreScope, fn *syntax.FuncDecl, bindings []scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	for _, literal := range literals {
-		context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, strict: true, scope: (*scope), before: literal.TypeStart}
+		context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, strict: true, scope: *scope, before: literal.TypeStart}
 		// Enclosing bindings do not describe a nested function's declarations.
 		if fn.BodyEnd > 0 && !numericBuiltinInNestedFunction(file, fn, literal.TypeStart) {
 			context.bindings = bindings

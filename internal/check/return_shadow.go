@@ -7,7 +7,7 @@ type returnShadowBinding struct {
 	end   int
 }
 
-func invalidBareReturnShadow(file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body, signature FuncSignature) int {
+func invalidBareReturnShadow(file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
 	if !resultsAreNamed(signature.Results) {
 		return -1
 	}

@@ -27,7 +27,7 @@ func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex i
 		return -1
 	}
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, fn: *fn}
-	locals := collectDefiniteLocalTypes(file, (*fn))
+	locals := collectDefiniteLocalTypes(file, *fn)
 	// Index short declarations once. Resolving each indexed base must not
 	// rescan every preceding token in a large function.
 	var shortDecls []int
@@ -114,7 +114,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 			if context.strict && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
 				return 0, false
 			}
-			values := splitExprList(&(context.pkg.Files[context.info.Decls[i].File].File), context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
+			values := splitExprList(&context.pkg.Files[context.info.Decls[i].File].File, context.info.Decls[i].ValueStart, context.info.Decls[i].ValueEnd)
 			if context.info.Decls[i].ValueIndex >= 0 && context.info.Decls[i].ValueIndex < len(values) {
 				next := *context
 				next.fileIndex = context.info.Decls[i].File

@@ -129,12 +129,12 @@ func containerBuiltinExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return makeAllocationType(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &(CoreScope{}), 0)
+			return makeAllocationType(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &CoreScope{}, 0)
 		}
-		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return containerBuiltinExprKind(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return containerBuiltinExprKind(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return 0

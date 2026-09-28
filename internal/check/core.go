@@ -146,20 +146,20 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			for tok := decl.ValueStart; tok < decl.ValueEnd; tok++ {
 				if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
 					fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: decl.ValueStart - 1, BodyEnd: decl.ValueEnd + 1}
-					scope, _, _ = buildFuncScopeCore(file, &(fn))
+					scope, _, _ = buildFuncScopeCore(file, &fn)
 					break
 				}
 			}
 		}
-		if tok := invalidArrayLiteralBounds(pkg, info, decl.File, literals, &(scope), &(syntax.FuncDecl{}), nil); tok >= 0 {
+		if tok := invalidArrayLiteralBounds(pkg, info, decl.File, literals, &scope, &syntax.FuncDecl{}, nil); tok >= 0 {
 			arena.Reset(mark)
 			return false, CheckErrArrayIndex, decl.File, tok
 		}
-		if tok := invalidMapLiteralTypes(pkg, info, file, literals, &(scope)); tok >= 0 {
+		if tok := invalidMapLiteralTypes(pkg, info, file, literals, &scope); tok >= 0 {
 			arena.Reset(mark)
 			return false, CheckErrType, decl.File, tok
 		}
-		tok := invalidStructLiterals(pkg, info, file, literals, &(scope))
+		tok := invalidStructLiterals(pkg, info, file, literals, &scope)
 		arena.Reset(mark)
 		if tok >= 0 {
 			return false, CheckErrStructLiteral, decl.File, tok
@@ -199,50 +199,50 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 		for i := 0; i < len(file.Funcs); i++ {
 			fn := file.Funcs[i]
 			functionArenaStart := arena.Mark()
-			signature := buildFuncSignature(file, &(fn))
+			signature := buildFuncSignature(file, &fn)
 			body := syntax.ParseFuncBodyStatements(*file, fn)
-			scope, scopeOK, scopeTok := buildFuncScopeCore(file, &(fn))
+			scope, scopeOK, scopeTok := buildFuncScopeCore(file, &fn)
 			if !body.Ok {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrBody, fileIndex, body.ErrorTok
 			}
 			// Both constant bounds and operand checks use the same immutable index spans.
 			indexes := buildFuncIndexExprs(file, &body)
-			literals := buildFuncCompositeExprs(file, &(body))
+			literals := buildFuncCompositeExprs(file, &body)
 			validationArenaStart := arena.Mark()
-			if statementErr, statementTok := invalidDefiniteStatement(file, &(body), pkg.Files[fileIndex].C); statementErr != CheckOK {
+			if statementErr, statementTok := invalidDefiniteStatement(file, &body, pkg.Files[fileIndex].C); statementErr != CheckOK {
 				arena.Reset(functionArenaStart)
 				return false, statementErr, fileIndex, statementTok
 			}
-			if tok := invalidBareReturnShadow(file, &(fn), &(body), signature); tok >= 0 {
+			if tok := invalidBareReturnShadow(file, &fn, &body, &(signature)); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrScope, fileIndex, tok
 			}
-			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, &(fn), &(body), &signature); tok >= 0 {
+			if tok := invalidLocalArrayLengths(pkg, info, fileIndex, &fn, &body, &signature); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayLength, fileIndex, tok
 			}
-			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, &(fn), indexes, &signature); indexTok >= 0 {
+			if indexTok := invalidConstantArrayIndex(pkg, info, fileIndex, &fn, indexes, &signature); indexTok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrArrayIndex, fileIndex, indexTok
 			}
 			if !pkg.Files[fileIndex].C && fn.BodyStart >= 0 && fn.ResultEnd > fn.ResultStart && len(signature.Results) > 0 &&
-				!returnBlockTerminates(file, &(body), fn.BodyStart+1, fn.BodyEnd-1, lookupPackageSymbol(info.Symbols, "panic") < 0) {
+				!returnBlockTerminates(file, &body, fn.BodyStart+1, fn.BodyEnd-1, lookupPackageSymbol(info.Symbols, "panic") < 0) {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrMissingReturn, fileIndex, fn.BodyEnd - 1
 			}
 			if len(literals) > 0 {
 				if scopeOK {
-					bindings := collectScopedTypeBindings(file, &(fn), &body, &signature)
-					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, &(scope), &(fn), bindings); tok >= 0 {
+					bindings := collectScopedTypeBindings(file, &fn, &body, &signature)
+					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, &scope, &fn, bindings); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrArrayIndex, fileIndex, tok
 					}
-					if tok := invalidMapLiteralTypes(pkg, info, file, literals, &(scope)); tok >= 0 {
+					if tok := invalidMapLiteralTypes(pkg, info, file, literals, &scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrType, fileIndex, tok
 					}
-					if tok := invalidStructLiterals(pkg, info, file, literals, &(scope)); tok >= 0 {
+					if tok := invalidStructLiterals(pkg, info, file, literals, &scope); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrStructLiteral, fileIndex, tok
 					}
@@ -251,7 +251,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			// Keep parsed metadata and share operand bindings with later checks.
 			arena.Reset(validationArenaStart)
 			var operandBindings []scopedTypeBinding
-			if tok := invalidKnownStructSelector(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), scopeOK, literals, &operandBindings); tok >= 0 {
+			if tok := invalidKnownStructSelector(pkg, info, fileIndex, &fn, &body, &signature, &scope, scopeOK, literals, &operandBindings); tok >= 0 {
 				arena.Reset(functionArenaStart)
 				return false, CheckErrUndefined, fileIndex, tok
 			}
@@ -262,21 +262,21 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 				fn.BodyStart = fn.EndTok
 				fn.BodyEnd = fn.EndTok
 			}
-			if returnErr, returnTok := invalidReturnCount(file, &(fn), signature); returnErr != CheckOK {
+			if returnErr, returnTok := invalidReturnCount(file, &fn, &(signature)); returnErr != CheckOK {
 				return false, returnErr, fileIndex, returnTok
 			}
-			if assignmentErr, assignmentTok := invalidDefiniteAssignmentType(file, &(fn)); assignmentErr != CheckOK {
+			if assignmentErr, assignmentTok := invalidDefiniteAssignmentType(file, &fn); assignmentErr != CheckOK {
 				return false, assignmentErr, fileIndex, assignmentTok
 			}
-			if functionMayNeedChannelCheck(file, &(fn)) {
+			if functionMayNeedChannelCheck(file, &fn) {
 				channelCheckArenaStart := arena.Mark()
-				channelTok := invalidDefiniteChannelOperationWithShadow(file, &(fn), lookupPackageSymbol(info.Symbols, "close") >= 0)
+				channelTok := invalidDefiniteChannelOperationWithShadow(file, &fn, lookupPackageSymbol(info.Symbols, "close") >= 0)
 				arena.Reset(channelCheckArenaStart)
 				if channelTok >= 0 {
 					return false, CheckErrChannel, fileIndex, channelTok
 				}
 			}
-			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, &(fn)); sliceTok >= 0 {
+			if sliceTok := invalidDefiniteSliceOperand(pkg, info, fileIndex, &fn); sliceTok >= 0 {
 				return false, CheckErrSliceOperand, fileIndex, sliceTok
 			}
 			if !scopeOK {
@@ -284,7 +284,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			}
 
 			localMark := arena.Mark()
-			localCode, localTok := invalidLocalRules(pkg, info, file, &(fn), &body, &signature, &(scope))
+			localCode, localTok := invalidLocalRules(pkg, info, file, &fn, &body, &signature, &scope)
 			arena.Reset(localMark)
 			if localCode != CheckOK {
 				return false, localCode, fileIndex, localTok
@@ -293,35 +293,35 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			// Retain immutable operand bindings through the final builtin check.
 			// They are shared with selectors after validation scratch is released and reclaimed
 			// with the parsed body at functionArenaStart.
-			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, &(fn), &body, &signature, &operandBindings); tok >= 0 {
+			if tok := invalidReadOnlyAssignment(pkg, info, fileIndex, &fn, &body, &signature, &operandBindings); tok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrAssignTarget, fileIndex, tok
 			}
 			if hasInterface {
-				interfaceTok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), &operandBindings)
+				interfaceTok := invalidDefiniteInterfaceCompatibility(pkg, info, fileIndex, &fn, &body, &signature, &scope, &operandBindings)
 				if interfaceTok >= 0 {
 					arena.Reset(operatorMark)
 					return false, CheckErrType, fileIndex, interfaceTok
 				}
 			}
-			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), &operandBindings, indexes)
+			mapCode, mapTok := invalidMapIndexType(pkg, info, fileIndex, &fn, &body, &signature, &scope, &operandBindings, indexes)
 			if mapCode != CheckOK {
 				arena.Reset(operatorMark)
 				return false, mapCode, fileIndex, mapTok
 			}
 
-			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), &operandBindings)
+			operatorTok := invalidResolvedOperatorOperands(pkg, info, fileIndex, &fn, &body, &signature, &scope, &operandBindings)
 			if operatorTok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, operatorTok
 			}
-			rangeTok := invalidRangeOperand(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), &operandBindings)
+			rangeTok := invalidRangeOperand(pkg, info, fileIndex, &fn, &body, &signature, &scope, &operandBindings)
 			if rangeTok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, rangeTok
 			}
 
-			conversionTok := invalidKnownConversion(pkg, info, fileIndex, &(fn), &body, &signature, &(scope), &operandBindings)
+			conversionTok := invalidKnownConversion(pkg, info, fileIndex, &fn, &body, &signature, &scope, &operandBindings)
 			if conversionTok >= 0 {
 				arena.Reset(operatorMark)
 				return false, CheckErrOperand, fileIndex, conversionTok
@@ -330,7 +330,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			bodyStart := fn.BodyStart + 1
 			bodyEnd := fn.BodyEnd - 1
 			var out CoreFuncBody
-			out.Kind = coreFuncKind(&(fn))
+			out.Kind = coreFuncKind(&fn)
 			out.File = fileIndex
 			out.Func = i
 			out.ErrorToken = fn.NameTok
@@ -339,29 +339,29 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			out.CoreSelectors = make([]CoreSelectorRef, 0, selectorCount)
 			var builtinCalls []int
 			var undefinedTok int
-			out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, &(scope), bodyStart, bodyEnd, &builtinCalls)
+			out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, &scope, bodyStart, bodyEnd, &builtinCalls)
 			if undefinedTok >= 0 {
 				return false, CheckErrUndefined, fileIndex, undefinedTok
 			}
 			unsafeCheckArenaStart := arena.Mark()
-			unsafeErr, unsafeTok := invalidUnsafeIntrinsicCalls(pkg, info, fileIndex, &(fn), &signature, out.CoreSelectors)
+			unsafeErr, unsafeTok := invalidUnsafeIntrinsicCalls(pkg, info, fileIndex, &fn, &signature, out.CoreSelectors)
 			arena.Reset(unsafeCheckArenaStart)
 			if unsafeErr != CheckOK {
 				return false, unsafeErr, fileIndex, unsafeTok
 			}
 			builtinCheckArenaStart := arena.Mark()
-			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, &(fn), &signature, &body, &(scope), builtinCalls, operandBindings)
+			builtinErr, builtinTok := invalidBuiltinCalls(pkg, info, fileIndex, &fn, &signature, &body, &scope, builtinCalls, operandBindings)
 			arena.Reset(builtinCheckArenaStart)
 			if builtinErr != CheckOK {
 				return false, builtinErr, fileIndex, builtinTok
 			}
 			callCheckArenaStart := arena.Mark()
-			callTok := invalidDefiniteCallArity(graph, pkgIndex, info, checked, fileIndex, &(fn), out.CoreRefs, out.CoreSelectors)
+			callTok := invalidDefiniteCallArity(graph, pkgIndex, info, checked, fileIndex, &fn, out.CoreRefs, out.CoreSelectors)
 			arena.Reset(callCheckArenaStart)
 			if callTok >= 0 {
 				return false, CheckErrCallArity, fileIndex, callTok
 			}
-			operandTok := invalidCallOperandCount(graph, pkgIndex, info, checked, fileIndex, &(fn), out.CoreRefs, out.CoreSelectors)
+			operandTok := invalidCallOperandCount(graph, pkgIndex, info, checked, fileIndex, &fn, out.CoreRefs, out.CoreSelectors)
 			if operandTok >= 0 {
 				return false, CheckErrOperand, fileIndex, operandTok
 			}
@@ -372,11 +372,11 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if callTypeTok >= 0 {
 				return false, CheckErrCallArgument, fileIndex, callTypeTok
 			}
-			if unusedTok := unusedCoreLocalToken(&(scope)); unusedTok >= 0 {
+			if unusedTok := unusedCoreLocalToken(&scope); unusedTok >= 0 {
 				return false, CheckErrUnusedLocal, fileIndex, unusedTok
 			}
-			locals := buildFuncLocalTypeSpansCore(file, &(fn))
-			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, &signature, locals, &(scope))
+			locals := buildFuncLocalTypeSpansCore(file, &fn)
+			out.CoreTypeRefs = buildFuncTypeRefsCore(file, fileIndex, info, checked, &signature, locals, &scope)
 			out.CoreRefs = renvo_runtime_ArenaPersistCheckNameRefs(out.CoreRefs)
 			out.CoreSelectors = renvo_runtime_ArenaPersistCheckSelectorRefs(out.CoreSelectors)
 			out.CoreTypeRefs = renvo_runtime_ArenaPersistCheckTypeRefs(out.CoreTypeRefs)
@@ -470,14 +470,14 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 			if file.Tokens[tok].KindLine&255 == syntax.TokenFunc {
 				fn := syntax.FuncDecl{ReceiverStart: -1, ReceiverEnd: -1, ParamsStart: -1, ParamsEnd: -1, ResultStart: -1, ResultEnd: -1, BodyStart: out.ValueStart - 1, BodyEnd: out.ValueEnd + 1}
 				var ok bool
-				scope, ok, undefinedTok = buildFuncScopeCore(file, &(fn))
+				scope, ok, undefinedTok = buildFuncScopeCore(file, &fn)
 				if !ok {
 					return out, undefinedTok
 				}
 				break
 			}
 		}
-		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, &(scope), out.ValueStart, out.ValueEnd, nil)
+		out.CoreRefs, out.CoreSelectors, undefinedTok = appendResolutionRefsCore(out.CoreRefs, out.CoreSelectors, file, fileIndex, info, checked, &scope, out.ValueStart, out.ValueEnd, nil)
 		return out, undefinedTok
 	} else {
 		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
@@ -792,7 +792,7 @@ func buildPackageTypeRefsCore(pkg *load.Package, info *PackageInfo, checked []Pa
 				continue
 			}
 		}
-		refs = appendDeclTypeSpanRefsCore(refs, file, decl.File, info, checked, &(CoreScope{}), i, decl.TypeStart, decl.TypeEnd)
+		refs = appendDeclTypeSpanRefsCore(refs, file, decl.File, info, checked, &CoreScope{}, i, decl.TypeStart, decl.TypeEnd)
 	}
 	return refs
 }
@@ -802,23 +802,23 @@ func appendTypeInfoRefsCore(refs []CoreTypeRef, pkg *load.Package, info *Package
 	if typ.Kind == TypeStruct {
 		for i := 0; i < len(typ.Fields); i++ {
 			field := typ.Fields[i]
-			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &(CoreScope{}), ownerDecl, field.TypeStart, field.TypeEnd)
+			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &CoreScope{}, ownerDecl, field.TypeStart, field.TypeEnd)
 		}
 		return refs
 	}
 	if typ.Kind == TypeInterface {
 		for i := 0; i < len(typ.InterfaceEmbeds); i++ {
 			embed := typ.InterfaceEmbeds[i]
-			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &(CoreScope{}), ownerDecl, embed.TypeStart, embed.TypeEnd)
+			refs = appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &CoreScope{}, ownerDecl, embed.TypeStart, embed.TypeEnd)
 		}
 		for i := 0; i < len(typ.InterfaceMethods); i++ {
 			base := len(refs)
-			refs = appendSignatureTypeRefsCore(refs, file, typ.File, info, checked, &(CoreScope{}), &typ.InterfaceMethods[i].Signature)
+			refs = appendSignatureTypeRefsCore(refs, file, typ.File, info, checked, &CoreScope{}, &typ.InterfaceMethods[i].Signature)
 			markCoreTypeRefOwnerDecl(refs, base, ownerDecl)
 		}
 		return refs
 	}
-	return appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &(CoreScope{}), ownerDecl, typ.TypeStart, typ.TypeEnd)
+	return appendDeclTypeSpanRefsCore(refs, file, typ.File, info, checked, &CoreScope{}, ownerDecl, typ.TypeStart, typ.TypeEnd)
 }
 
 type CoreLocalTypeSpan struct {

@@ -52,7 +52,7 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 					fields = typ.Fields
 					known = true
 				} else {
-					fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &(CoreScope{}), 0)
+					fields, known = literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, 0)
 				}
 			}
 		}

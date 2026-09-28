@@ -24,7 +24,7 @@ func SignatureHelpProgram(graph load.Graph, program Program, path string, offset
 	if offset > len(file.Src) {
 		offset = len(file.Src)
 	}
-	open := signatureCallOpen(&(file), offset)
+	open := signatureCallOpen(&file, offset)
 	if open <= 0 || file.Tokens[open-1].KindLine&255 != syntax.TokenIdent {
 		return SignatureHelp{}
 	}
@@ -39,7 +39,7 @@ func SignatureHelpProgram(graph load.Graph, program Program, path string, offset
 		if items[i].Name != name || items[i].Signature == "" {
 			continue
 		}
-		active := signatureActiveParameter(&(file), open, offset)
+		active := signatureActiveParameter(&file, open, offset)
 		if len(items[i].Parameters) > 0 && active >= len(items[i].Parameters) {
 			active = len(items[i].Parameters) - 1
 		}

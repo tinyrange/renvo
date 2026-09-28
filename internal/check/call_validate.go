@@ -39,7 +39,7 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}
-		if tok := invalidResolvedCallArity(file, (*fn), ref.Token, info.Symbols[ref.Index]); tok >= 0 {
+		if tok := invalidResolvedCallArity(file, *fn, ref.Token, info.Symbols[ref.Index]); tok >= 0 {
 			return tok
 		}
 	}
@@ -51,7 +51,7 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if selector.BasePackage >= len(checked) || selector.Symbol >= len(checked[selector.BasePackage].Symbols) {
 			continue
 		}
-		if tok := invalidResolvedCallArity(file, (*fn), selector.NameTok, checked[selector.BasePackage].Symbols[selector.Symbol]); tok >= 0 {
+		if tok := invalidResolvedCallArity(file, *fn, selector.NameTok, checked[selector.BasePackage].Symbols[selector.Symbol]); tok >= 0 {
 			return tok
 		}
 	}
@@ -171,10 +171,10 @@ func prepareDefiniteCallTarget(pkg *load.Package, info *PackageInfo, symbolIndex
 	}
 	file := &pkg.Files[symbol.File].File
 	fn, ok := findDefinitePackageFuncDecl(file, symbol.Token)
-	if !ok || !definiteSignatureHasPointer(file, &(fn)) {
+	if !ok || !definiteSignatureHasPointer(file, &fn) {
 		return
 	}
-	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(definitePointerParams(pkg, info, symbol.File, file, &(fn)))
+	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(definitePointerParams(pkg, info, symbol.File, file, &fn))
 }
 
 func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
@@ -287,7 +287,7 @@ func findDefinitePackageFunc(pkg *load.Package, info *PackageInfo, callerFile *s
 	if symbol.File < 0 || symbol.File >= len(pkg.Files) {
 		return -1, syntax.FuncDecl{}, false
 	}
-	fn, ok := findDefinitePackageFuncDecl(&(pkg.Files[symbol.File].File), symbol.Token)
+	fn, ok := findDefinitePackageFuncDecl(&pkg.Files[symbol.File].File, symbol.Token)
 	return symbol.File, fn, ok
 }
 
@@ -426,7 +426,7 @@ func definiteTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, start
 		return definiteTypeUnknown
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = trimTypeSpan(&(file), start, end)
+	start, end = trimTypeSpan(&file, start, end)
 	if start < 0 || end <= start {
 		return definiteTypeUnknown
 	}

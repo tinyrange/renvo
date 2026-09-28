@@ -368,7 +368,7 @@ func sortTypes(types []TypeInfo) {
 	for i := 1; i < len(types); i++ {
 		item := types[i]
 		j := i - 1
-		for j >= 0 && typeAfter(types[j], item) {
+		for j >= 0 && typeAfter(&types[j], &item) {
 			types[j+1] = types[j]
 			j--
 		}
@@ -376,7 +376,7 @@ func sortTypes(types []TypeInfo) {
 	}
 }
 
-func typeAfter(left TypeInfo, right TypeInfo) bool {
+func typeAfter(left *TypeInfo, right *TypeInfo) bool {
 	if left.Name != right.Name {
 		return checkStringAfter(left.Name, right.Name)
 	}
@@ -392,10 +392,11 @@ func checkStringAfter(left string, right string) bool {
 		limit = len(right)
 	}
 	for i := 0; i < limit; i++ {
-		if left[i] > right[i] {
+		leftByte, rightByte := left[i], right[i]
+		if leftByte > rightByte {
 			return true
 		}
-		if left[i] < right[i] {
+		if leftByte < rightByte {
 			return false
 		}
 	}

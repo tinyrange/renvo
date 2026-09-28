@@ -27,8 +27,8 @@ func TestUnsafeAddFractionalDecimal(t *testing.T) {
 				break
 			}
 		}
-		start, end = trimExprSpan(&(file), start, end)
-		if got := unsafeAddFractionalDecimal(&(file), start, end); got != tc.fractional {
+		start, end = trimExprSpan(&file, start, end)
+		if got := unsafeAddFractionalDecimal(&file, start, end); got != tc.fractional {
 			t.Errorf("%s: fractional=%v, want %v", tc.text, got, tc.fractional)
 		}
 	}

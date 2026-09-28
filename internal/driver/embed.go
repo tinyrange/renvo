@@ -923,9 +923,9 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 }
 
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
-	// Bound search work even on adversarial buckets. The best-match boundary
-	// check below avoids rescanning shared prefixes during the deeper search.
-	const maxCandidates = 256
+	// Limit dictionary search work on repetitive source. A short search keeps
+	// compression inexpensive while retaining long matches and lazy look-ahead.
+	const maxCandidates = 16
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0

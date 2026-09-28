@@ -7420,6 +7420,9 @@ func renvoBytesEqualRange(src []byte, aStart int, aEnd int, bStart int, bEnd int
 	if aEnd-aStart != bEnd-bStart {
 		return false
 	}
+	if aStart == bStart {
+		return true
+	}
 	for aStart < aEnd {
 		if renvo_runtime_UnsafeByteAt(src, aStart) != renvo_runtime_UnsafeByteAt(src, bStart) {
 			return false
@@ -9420,14 +9423,16 @@ func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 	// Keep interning bounded. Large embedded assets should not make every later
 	// literal rescan the entire static-data segment; missing an old match only
 	// emits another copy and does not change program semantics.
-	searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+	data := g.asm.data
+	searchStart := len(data) - renvoStringInternSearchBytes
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
-		match := g.asm.data[off+len(msg)] == 0
+	for off := searchStart; off+len(msg) < len(data); off++ {
+		match := len(msg) == 0 || data[off] == msg[0]
+		match = match && data[off+len(msg)] == 0
 		for i := 0; match && i < len(msg); i++ {
-			match = g.asm.data[off+i] == msg[i]
+			match = data[off+i] == msg[i]
 		}
 		if match {
 			return off
@@ -9455,17 +9460,19 @@ func renvoAddStringDataAligned(g *renvoLinearGen, msg []byte, alignment int) int
 	// Keep interning bounded. Large embedded assets should not make every later
 	// literal rescan the entire static-data segment; missing an old match only
 	// emits another copy and does not change program semantics.
-	searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+	data := g.asm.data
+	searchStart := len(data) - renvoStringInternSearchBytes
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
+	for off := searchStart; off+len(msg) < len(data); off++ {
 		if off&(alignment-1) != 0 {
 			continue
 		}
-		match := g.asm.data[off+len(msg)] == 0
+		match := len(msg) == 0 || data[off] == msg[0]
+		match = match && data[off+len(msg)] == 0
 		for i := 0; match && i < len(msg); i++ {
-			match = g.asm.data[off+i] == msg[i]
+			match = data[off+i] == msg[i]
 		}
 		if match {
 			return off

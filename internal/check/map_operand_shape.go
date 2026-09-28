@@ -67,12 +67,12 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		}
 		declFile := pkg.Files[decl.File].File
 		if decl.TypeEnd > decl.TypeStart {
-			return mapIndexTypeShape(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &(CoreScope{}), 0)
+			return mapIndexTypeShape(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &CoreScope{}, 0)
 		}
-		values := splitExprList(&(declFile), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&declFile, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return mapIndexExprShape(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return mapIndexExprShape(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return mapIndexShape{}
@@ -85,7 +85,7 @@ func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, e
 	file := &pkg.Files[fileIndex].File
 	if file.Tokens[start].KindLine&255 == syntax.TokenMap {
 		ks, ke, vs, ve := parseMapTypeShape(file, start, end)
-		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, (*scope), true}
+		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, *scope, true}
 	}
 	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return mapIndexShape{}
@@ -95,5 +95,5 @@ func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, e
 		return mapIndexShape{}
 	}
 	typ := &info.Types[index]
-	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &(CoreScope{}), depth+1)
+	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 }

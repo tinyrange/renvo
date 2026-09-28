@@ -66,12 +66,12 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return copySliceTypeElement(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
+			return copySliceTypeElement(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return copySliceElement(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return copySliceElement(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return ""
@@ -94,7 +94,7 @@ func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, s
 		return ""
 	}
 	typ := &info.Types[index]
-	return copySliceTypeElement(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
+	return copySliceTypeElement(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
 func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) string {
@@ -126,7 +126,7 @@ func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, sc
 		if !typ.Alias {
 			return "named:" + name
 		}
-		return copyElementIdentity(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
+		return copyElementIdentity(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 	}
 	if lookupPackageSymbol(info.Symbols, name) >= 0 {
 		return ""

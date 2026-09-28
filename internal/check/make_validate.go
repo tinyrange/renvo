@@ -25,7 +25,7 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
-		if unsafeAddFractionalDecimal(&(file), start, end) {
+		if unsafeAddFractionalDecimal(&file, start, end) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
 		value := arrayLiteralConstant(context, start, end, scope)
@@ -50,13 +50,13 @@ func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, 
 	}
 	file := pkg.Files[fileIndex].File
 	start, end = stripOuterParens(&file, start, end)
-	kind := classifyType(&(file), start, end)
+	kind := classifyType(&file, start, end)
 	if kind == TypeSlice || kind == TypeMap || kind == TypeChan {
 		for open := start; open < end; open++ {
 			if !tokCharIs(&file, open, '{') {
 				continue
 			}
-			if !isCompositeTypeBodyOpen(&(file), open) {
+			if !isCompositeTypeBodyOpen(&file, open) {
 				return -1
 			}
 			close := findTypeMatching(&file, open, '{', '}')
@@ -83,7 +83,7 @@ func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, 
 	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := &info.Types[index]
-		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &(CoreScope{}), depth+1)
+		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 	}
 	if definiteBuiltinType(name) || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" || name == "any" || name == "error" || name == "true" || name == "false" || name == "nil" || lookupPackageSymbol(info.Symbols, name) >= 0 {
 		return -1

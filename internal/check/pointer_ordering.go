@@ -90,10 +90,10 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			}
 			calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 			if ok {
-				signature := buildFuncSignature(&pkg.Files[calleeFile].File, &(callee))
+				signature := buildFuncSignature(&pkg.Files[calleeFile].File, &callee)
 				if len(signature.Results) == 1 {
 					result := signature.Results[0]
-					return definiteOrderingTypeKind(pkg, info, calleeFile, &(CoreScope{}), result.TypeStart, result.TypeEnd, 0)
+					return definiteOrderingTypeKind(pkg, info, calleeFile, &CoreScope{}, result.TypeStart, result.TypeEnd, 0)
 				}
 			}
 		}
@@ -131,12 +131,12 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return definiteOrderingTypeKind(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
+			return definiteOrderingTypeKind(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return definiteOrderingExprKind(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return definiteOrderingExprKind(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return 0
@@ -165,5 +165,5 @@ func definiteOrderingTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return 0
 	}
 	typ := &info.Types[index]
-	return definiteOrderingTypeKind(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
+	return definiteOrderingTypeKind(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }

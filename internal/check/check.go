@@ -303,7 +303,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	}
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
-		if excludedErr, excludedTok := excludedFileFeature(&(file)); excludedErr != CheckOK {
+		if excludedErr, excludedTok := excludedFileFeature(&file); excludedErr != CheckOK {
 			return info, false, excludedErr, fileIndex, excludedTok
 		}
 		for i := 0; i < len(file.Decls); i++ {
@@ -328,7 +328,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			}
 			kind := SymbolFunc
 			signatureStart := arena.Mark()
-			signature := buildFuncSignature(&file, &(fn))
+			signature := buildFuncSignature(&file, &fn)
 			arity := len(signature.Params)
 			if name == "init" && fn.ReceiverStart < 0 && (arity != 0 || len(signature.Results) != 0) {
 				arena.Reset(signatureStart)
@@ -339,7 +339,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 			}
 			arena.Reset(signatureStart)
 			if fn.ReceiverStart >= 0 {
-				receiver := receiverTypeName(&(file), &(fn))
+				receiver := receiverTypeName(&file, &fn)
 				if receiver == "" || !packageDeclaresReceiverType(pkg, receiver) {
 					return info, false, CheckErrMethod, fileIndex, fn.NameTok
 				}
@@ -369,7 +369,7 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 	for fileIndex := 0; fileIndex < len(pkg.Files); fileIndex++ {
 		file := pkg.Files[fileIndex].File
 		for i := 0; i < len(file.Imports); i++ {
-			imp, ok := buildImport(graph, pkgIndex, fileIndex, &(file), i)
+			imp, ok := buildImport(graph, pkgIndex, fileIndex, &file, i)
 			if !ok {
 				return info, false, CheckErrImport, fileIndex, file.Imports[i].PathTok
 			}
@@ -618,10 +618,10 @@ func siftDownSymbols(symbols []Symbol, root int, end int) {
 		if child >= end {
 			return
 		}
-		if child+1 < end && symbolAfter(symbols[child+1], symbols[child]) {
+		if child+1 < end && symbolAfter(&symbols[child+1], &symbols[child]) {
 			child++
 		}
-		if !symbolAfter(symbols[child], symbols[root]) {
+		if !symbolAfter(&symbols[child], &symbols[root]) {
 			return
 		}
 		symbols[root], symbols[child] = symbols[child], symbols[root]
@@ -629,7 +629,7 @@ func siftDownSymbols(symbols []Symbol, root int, end int) {
 	}
 }
 
-func symbolAfter(left Symbol, right Symbol) bool {
+func symbolAfter(left *Symbol, right *Symbol) bool {
 	if left.Name != right.Name {
 		return checkStringAfter(left.Name, right.Name)
 	}

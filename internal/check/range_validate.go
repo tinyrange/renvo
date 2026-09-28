@@ -59,10 +59,10 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		}
 		calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 		if ok {
-			signature := buildFuncSignature(&pkg.Files[calleeFile].File, &(callee))
+			signature := buildFuncSignature(&pkg.Files[calleeFile].File, &callee)
 			if len(signature.Results) == 1 {
 				result := signature.Results[0]
-				return definiteStructType(pkg, info, calleeFile, &(CoreScope{}), result.TypeStart, result.TypeEnd, 0)
+				return definiteStructType(pkg, info, calleeFile, &CoreScope{}, result.TypeStart, result.TypeEnd, 0)
 			}
 		}
 	}
@@ -96,12 +96,12 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return definiteStructType(pkg, info, decl.File, &(CoreScope{}), decl.TypeStart, decl.TypeEnd, 0)
+			return definiteStructType(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(&(pkg.Files[decl.File].File), decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return definiteStructExpr(pkg, info, decl.File, &(CoreScope{}), nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return definiteStructExpr(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return false
@@ -124,5 +124,5 @@ func definiteStructType(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return false
 	}
 	typ := &info.Types[index]
-	return definiteStructType(pkg, info, typ.File, &(CoreScope{}), typ.TypeStart, typ.TypeEnd, depth+1)
+	return definiteStructType(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }

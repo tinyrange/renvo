@@ -36,7 +36,7 @@ func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex
 			return CheckErrBuiltinArity, callee
 		}
 		if !ready {
-			locals = collectDefiniteLocalTypes(file, (*fn))
+			locals = collectDefiniteLocalTypes(file, *fn)
 			ready = true
 		}
 		if isStringData {

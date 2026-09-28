@@ -67,7 +67,7 @@ func literalStructFields(pkg *load.Package, info *PackageInfo, file *syntax.File
 		return literalStructFieldNames(&pkg.Files[typ.File].File, typ.Fields), true
 	}
 	if typ.Kind == TypeNamed {
-		return literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &(CoreScope{}), depth+1)
+		return literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 	}
 	return nil, false
 }

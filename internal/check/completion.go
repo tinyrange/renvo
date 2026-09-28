@@ -92,9 +92,9 @@ func CompleteProgram(graph load.Graph, prog Program, path string, offset int) []
 	var items []CompletionItem
 	if prefixStart > 0 && file.Src[prefixStart-1] == '.' {
 		components := completionSelectorComponents(file.Src, prefixStart-1)
-		items = completionSelectorItems(items, graph, prog, pkgIndex, fileIndex, &(file), offset, components, prefix)
+		items = completionSelectorItems(items, graph, prog, pkgIndex, fileIndex, &file, offset, components, prefix)
 	} else {
-		items = completionScopeItems(items, graph, prog, pkgIndex, fileIndex, &(file), offset, prefix)
+		items = completionScopeItems(items, graph, prog, pkgIndex, fileIndex, &file, offset, prefix)
 	}
 	completionSort(items, prefix)
 	return items
@@ -135,7 +135,7 @@ func completionFile(graph load.Graph, path string) (int, int) {
 func completionScopeItems(items []CompletionItem, graph load.Graph, prog Program, pkgIndex, fileIndex int, file *syntax.File, offset int, prefix string) []CompletionItem {
 	fn, hasFunc := completionFunctionAt(file, offset)
 	if hasFunc {
-		scope, _, _ := buildFuncScopeCore(file, &(fn))
+		scope, _, _ := buildFuncScopeCore(file, &fn)
 		for i := 0; i < len(scope.Names); i++ {
 			name := tokenString(file, scope.Names[i].Token)
 			tok := file.Tokens[scope.Names[i].Token]
@@ -211,7 +211,7 @@ func completionSelectorItems(items []CompletionItem, graph load.Graph, prog Prog
 	if !ok {
 		return items
 	}
-	typ, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, &(fn), components[0], offset)
+	typ, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, &fn, components[0], offset)
 	if !ok {
 		return items
 	}
@@ -240,11 +240,11 @@ func completionPackageNameType(graph load.Graph, prog Program, pkg int, name str
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(decl.Values) {
 			span := decl.Values[decl.ValueIndex]
 			file := graph.Packages[pkg].Files[decl.File].File
-			return completionExpressionType(graph, prog, pkg, decl.File, &(file), span.StartTok, span.EndTok, 0)
+			return completionExpressionType(graph, prog, pkg, decl.File, &file, span.StartTok, span.EndTok, 0)
 		}
 		if decl.ValueStart >= 0 && decl.ValueEnd > decl.ValueStart {
 			file := graph.Packages[pkg].Files[decl.File].File
-			return completionExpressionType(graph, prog, pkg, decl.File, &(file), decl.ValueStart, decl.ValueEnd, decl.ValueIndex)
+			return completionExpressionType(graph, prog, pkg, decl.File, &file, decl.ValueStart, decl.ValueEnd, decl.ValueIndex)
 		}
 	}
 	return completionType{}, false
@@ -449,7 +449,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		if !ok {
 			return completionType{}, false
 		}
-		receiver, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, &(fn), name, syntax.TokenStart(file.Tokens[start]))
+		receiver, ok := completionNameType(graph, prog, pkgIndex, fileIndex, file, &fn, name, syntax.TokenStart(file.Tokens[start]))
 		if !ok {
 			return completionType{}, false
 		}
@@ -469,7 +469,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 	}
 	if owner == pkgIndex {
 		if fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[start])); ok {
-			if typ, found := completionNameType(graph, prog, pkgIndex, fileIndex, file, &(fn), name, syntax.TokenStart(file.Tokens[start])); found {
+			if typ, found := completionNameType(graph, prog, pkgIndex, fileIndex, file, &fn, name, syntax.TokenStart(file.Tokens[start])); found {
 				if address {
 					typ.Pointer = true
 				}
@@ -572,7 +572,7 @@ func completionSymbolResultType(graph load.Graph, prog Program, pkg, symbolIndex
 		if file.Funcs[i].NameTok != symbol.Token {
 			continue
 		}
-		results := buildFuncSignature(&file, &(file.Funcs[i])).Results
+		results := buildFuncSignature(&file, &file.Funcs[i]).Results
 		if resultIndex >= 0 && resultIndex < len(results) {
 			return completionSpanType(graph, prog, pkg, symbol.File, results[resultIndex].TypeStart, results[resultIndex].TypeEnd)
 		}
@@ -616,8 +616,8 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 		return completionType{}, false
 	}
 	file := graph.Packages[pkg].Files[fileIndex].File
-	spanStart, spanEnd := trimTypeSpan(&(file), start, end)
-	if classifyType(&(file), spanStart, spanEnd) == TypeChan {
+	spanStart, spanEnd := trimTypeSpan(&file, start, end)
+	if classifyType(&file, spanStart, spanEnd) == TypeChan {
 		first := syntax.TokenStart(file.Tokens[spanStart])
 		last := syntax.TokenEnd(file.Tokens[spanEnd-1])
 		return completionType{Package: pkg, Name: string(file.Src[first:last])}, true
@@ -759,8 +759,8 @@ func completionAddSymbol(items []CompletionItem, graph load.Graph, pkg int, symb
 		}
 		return append(items, CompletionItem{Name: displayName, Detail: "function", Kind: kind})
 	}
-	parameters := completionParameters(&(file), buildFuncSignature(&file, &(fn)).Params)
-	label, detail := completionFunctionLabels(&(file), &(fn), displayName)
+	parameters := completionParameters(&file, buildFuncSignature(&file, &fn).Params)
+	label, detail := completionFunctionLabels(&file, &fn, displayName)
 	kind := CompletionFunction
 	if symbol.Kind == SymbolMethod {
 		kind = CompletionMethod

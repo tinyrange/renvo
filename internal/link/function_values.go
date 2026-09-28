@@ -3229,6 +3229,12 @@ func functionValueTokenEquals(program *unit.Program, tok int, want string) bool 
 	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
 		return false
 	}
+	if len(want) == 1 {
+		return program.Text[token.Start] == want[0]
+	}
+	if len(want) == 2 {
+		return program.Text[token.Start] == want[0] && program.Text[token.Start+1] == want[1]
+	}
 	for i := 0; i < len(want); i++ {
 		if program.Text[token.Start+i] != want[i] {
 			return false
