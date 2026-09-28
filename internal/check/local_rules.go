@@ -57,7 +57,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(*file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op >= 0 && tokCharIs(file, stmt.StartTok+1, '[') {
 			for j := len(bindings) - 1; j >= 0; j-- {
 				binding := bindings[j]
