@@ -14,12 +14,12 @@ func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)
 	if index := lookupType(info.Types, name); index >= 0 {
-		typ := info.Types[index]
+		typ := &info.Types[index]
 		return conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 	}
 	if lookupPackageSymbol(info.Symbols, name) >= 0 {

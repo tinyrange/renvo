@@ -23,7 +23,10 @@ type concurrencyGoSite struct {
 }
 
 func lowerConcurrencyCore(program *unit.Program, transient bool) bool {
-	needed := len(program.ConcurrencySites) > 0
+	return lowerConcurrencyCoreNeeded(program, transient, len(program.ConcurrencySites) > 0)
+}
+
+func lowerConcurrencyCoreNeeded(program *unit.Program, transient bool, needed bool) bool {
 	if !needed && !transient {
 		// Hand-built linker tests may not carry checked-package metadata. Normal
 		// transient frontend builds use the compact table transported through
@@ -778,7 +781,7 @@ func concurrencyCallType(program *unit.Program, start int, open int) string {
 	return ""
 }
 
-func concurrencyDeclaredCallType(program *unit.Program, fn unit.Func) string {
+func concurrencyDeclaredCallType(program *unit.Program, fn *unit.Func) string {
 	params := functionValueFunctionParamTypes(program, fn)
 	text := "func("
 	for i := 0; i < len(params); i++ {
@@ -814,8 +817,8 @@ func concurrencyInferredFunctionValueType(program *unit.Program, before int, nam
 			baseType := functionValueEnclosingLocalType(program, i, functionValueTokenText(program, rhs))
 			for index := 0; index < len(program.Funcs); index++ {
 				candidate := program.Funcs[index]
-				if candidate.ReceiverStart < candidate.ReceiverEnd && functionValueTokenText(program, candidate.NameTok) == method && (baseType == "" || functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, candidate), 0)) {
-					return concurrencyDeclaredCallType(program, candidate)
+				if candidate.ReceiverStart < candidate.ReceiverEnd && functionValueTokenText(program, candidate.NameTok) == method && (baseType == "" || functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, &candidate), 0)) {
+					return concurrencyDeclaredCallType(program, &candidate)
 				}
 			}
 			return ""
@@ -827,7 +830,7 @@ func concurrencyInferredFunctionValueType(program *unit.Program, before int, nam
 		for index := 0; index < len(program.Funcs); index++ {
 			candidate := program.Funcs[index]
 			if candidate.ReceiverStart >= candidate.ReceiverEnd && functionValueTokenText(program, candidate.NameTok) == callee {
-				return concurrencyDeclaredCallType(program, candidate)
+				return concurrencyDeclaredCallType(program, &candidate)
 			}
 		}
 		return ""
@@ -957,7 +960,7 @@ func concurrencyFunctionParameterTypes(program *unit.Program, name string) []str
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
 		if fn.ReceiverStart >= fn.ReceiverEnd && functionValueTokenText(program, fn.NameTok) == name {
-			return functionValueFunctionParamTypes(program, fn)
+			return functionValueFunctionParamTypes(program, &fn)
 		}
 	}
 	return nil

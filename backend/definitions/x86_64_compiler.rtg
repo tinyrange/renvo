@@ -372,6 +372,19 @@ go compiler {
 		renvoAsmEmit32(a, 0x10+(reg-6)*8)
 		renvoAsmStorePrimaryStack(a, offset)
 	}
+	func renvoAmd64PushStackBytes(a *renvoAsm, offset int, size int) {
+		// Reserve the same argument words as the descending PUSH sequence. Locals
+		// live in the persistent frame above the old RSP, so the new argument area
+		// is disjoint and a forward copy preserves their ascending byte order.
+		// Call argument registers are populated after all arguments are stacked.
+		renvoAsmEmitText(a, "\x48\x81\xec") // SUB RSP, size
+		renvoAsmEmit32(a, size)
+		renvoAsmAddressCallWord1Stack(a, offset) // LEA RSI, [RBP-offset]
+		renvoAsmEmitText(a, "\x48\x89\xe7\xb9")  // MOV RDI, RSP; MOV ECX, size
+		renvoAsmEmit32(a, size)
+		renvoAsmEmitText(a, "\xfc\xf3\xa4") // CLD; REP MOVSB
+	}
+
 	func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 		a := &g.asm
 		renvoAsmLoadPrimaryStack(a, srcPtr)

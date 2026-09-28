@@ -66,7 +66,7 @@ func main() {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("NewHolder(Callback{kind: 1, closure0:")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&holder.callback, 2)")) {
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(holder.callback, 2)")) {
 		t.Fatalf("closure callback argument was not lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -93,7 +93,7 @@ func main() {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("callback = Callback{kind: 1}")) ||
-		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(&holder.callback, 41)")) {
+		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(holder.callback, 41)")) {
 		t.Fatalf("named function assignment to a callback local was not lowered:\n%s", linked.Program.Text)
 	}
 }

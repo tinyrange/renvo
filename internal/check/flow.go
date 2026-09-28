@@ -63,7 +63,7 @@ func buildFuncAssignments(file syntax.File, fileIndex int, info PackageInfo, bod
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		opTok := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
+		opTok := findTopLevelAssignOp(&file, stmt.StartTok, stmt.EndTok)
 		if opTok < 0 {
 			continue
 		}
@@ -136,7 +136,7 @@ func splitExprList(file syntax.File, start int, end int) []ExprSpan {
 	spans = make([]ExprSpan, 0, countExprListItems(file, start, end))
 	i := start
 	for i < end {
-		next := nextTopLevelComma(file, i, end)
+		next := nextTopLevelComma(&file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			spans = append(spans, ExprSpan{StartTok: itemStart, EndTok: itemEnd})
@@ -150,7 +150,7 @@ func countExprListItems(file syntax.File, start int, end int) int {
 	count := 0
 	i := start
 	for i < end {
-		next := nextTopLevelComma(file, i, end)
+		next := nextTopLevelComma(&file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			count++
@@ -170,7 +170,7 @@ func countBodyStatements(body syntax.Body, kind int) int {
 	return count
 }
 
-func findTopLevelAssignOp(file syntax.File, start int, end int) int {
+func findTopLevelAssignOp(file *syntax.File, start int, end int) int {
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0
@@ -203,7 +203,7 @@ func findTopLevelAssignOp(file syntax.File, start int, end int) int {
 	return -1
 }
 
-func isAssignOp(file syntax.File, tok int) bool {
+func isAssignOp(file *syntax.File, tok int) bool {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return false
 	}

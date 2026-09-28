@@ -425,6 +425,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 			code, message = "RENVO-CHECK-038", "invalid constant operation: zero divisor or negative shift count"
 		case check.CheckErrNewVersion:
 			code, message = "RENVO-CHECK-041", "new with an expression requires go1.26 or later"
+		case check.CheckErrMapKey:
+			code, message = "RENVO-CHECK-036", "map key type is not comparable"
 		case check.CheckErrStructLiteral:
 			code, message = "RENVO-CHECK-039", "invalid struct literal field list"
 		case check.CheckErrTypeAssertion:

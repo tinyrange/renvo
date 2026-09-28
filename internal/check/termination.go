@@ -82,8 +82,8 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 			for i := 0; i < len(file.Funcs); i++ {
 				fn := file.Funcs[i]
 				if fn.BodyStart < start && fn.BodyEnd > end {
-					scope, _, _ := buildFuncScopeCore(file, fn)
-					return lookupScopeTokenNameCore(scope, &file, calleeStart) < 0
+					scope, _, _ := buildFuncScopeCore(&file, fn)
+					return lookupScopeTokenNameCore(&scope, &file, calleeStart) < 0
 				}
 			}
 		}

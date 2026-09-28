@@ -63,11 +63,11 @@ func appendDeclIndexExprs(indexes []IndexExpr, file *syntax.File, stmt *syntax.S
 	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(*file, i, end)
+			i = skipLocalSeparators(file, i, end)
 			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(*file, i, end)
+			specEnd := statementSpecEnd(file, i, end)
 			indexes = appendSpecInitializerIndexes(indexes, file, i, specEnd)
 			i = specEnd
 		}
@@ -85,11 +85,11 @@ func appendDeclCompositeExprs(composites []CompositeExpr, file syntax.File, stmt
 	if tokCharIs(&file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(file, i, end)
+			i = skipLocalSeparators(&file, i, end)
 			if i >= end || tokCharIs(&file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(file, i, end)
+			specEnd := statementSpecEnd(&file, i, end)
 			composites = appendSpecInitializerComposites(composites, file, i, specEnd)
 			i = specEnd
 		}
@@ -123,7 +123,7 @@ func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end in
 		if close <= i || close > end {
 			continue
 		}
-		baseStart := exprOperandStartBefore(*file, start, i)
+		baseStart := exprOperandStartBefore(file, start, i)
 		if baseStart >= i || isIndexTypePrefix(*file, baseStart) {
 			continue
 		}
@@ -155,7 +155,7 @@ func appendExprComposites(composites []CompositeExpr, file syntax.File, start in
 		if close <= i || close > end {
 			continue
 		}
-		typeStart := exprOperandStartBefore(file, start, i)
+		typeStart := exprOperandStartBefore(&file, start, i)
 		typeStart = compositeAggregatePrefixStart(file, start, typeStart)
 		if typeStart >= i {
 			continue
@@ -214,7 +214,7 @@ func compositeAggregatePrefixStart(file syntax.File, limit, start int) int {
 	return result
 }
 
-func exprOperandStartBefore(file syntax.File, start int, before int) int {
+func exprOperandStartBefore(file *syntax.File, start int, before int) int {
 	depth := 0
 	for i := before - 1; i >= start; i-- {
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
@@ -236,8 +236,8 @@ func exprOperandStartBefore(file syntax.File, start int, before int) int {
 	return start
 }
 
-func isExprLeftBoundary(file syntax.File, tok int) bool {
-	if tokCharIs(&file, tok, ',') || tokCharIs(&file, tok, ';') || tokCharIs(&file, tok, ':') {
+func isExprLeftBoundary(file *syntax.File, tok int) bool {
+	if tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';') || tokCharIs(file, tok, ':') {
 		return true
 	}
 	if isAssignOp(file, tok) {
@@ -246,7 +246,7 @@ func isExprLeftBoundary(file syntax.File, tok int) bool {
 	return isExprBinaryOp(file, tok)
 }
 
-func isExprBinaryOp(file syntax.File, tok int) bool {
+func isExprBinaryOp(file *syntax.File, tok int) bool {
 	return exprBinaryOperatorKind(file, tok) != exprBinaryNone
 }
 
@@ -258,7 +258,7 @@ const (
 	exprBinaryNumeric
 )
 
-func exprBinaryOperatorKind(file syntax.File, tok int) int {
+func exprBinaryOperatorKind(file *syntax.File, tok int) int {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return exprBinaryNone
 	}

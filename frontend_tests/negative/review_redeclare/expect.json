@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-006",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 25,
+  "message": "invalid name or scope"
+}

@@ -18,7 +18,7 @@ const (
 const definitePrimitiveParamLimit = 10
 
 func invalidDefiniteLiteralBinary(file syntax.File, op int, left string, right string) bool {
-	kind := exprBinaryOperatorKind(file, op)
+	kind := exprBinaryOperatorKind(&file, op)
 	if kind == exprBinaryLogical {
 		return left != "bool" || right != "bool"
 	}
@@ -83,13 +83,13 @@ func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int
 	pendingStart := start
 	pending := 0
 	for start < end {
-		segmentEnd := nextTopLevelComma(file, start, end)
-		first, last := trimFieldSpan(file, start, segmentEnd)
+		segmentEnd := nextTopLevelComma(&file, start, end)
+		first, last := trimFieldSpan(&file, start, segmentEnd)
 		if first >= last {
 			start = segmentEnd + 1
 			continue
 		}
-		if isSingleIdent(file, first, last) {
+		if isSingleIdent(&file, first, last) {
 			if pending == 0 {
 				pendingStart = first
 			}

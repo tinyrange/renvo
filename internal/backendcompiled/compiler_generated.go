@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7c9fb804c7d9b21d3587fa080e5cd3e38c3ec03d099a8658680d8a76f8d45c5b"
+const CompilerSourceDigest = "2c3af24f65b78f244afedf959a1a29fe73f926c4df462e0cb29374c9c56bdb0f"
 
 // source: backend/compiler_common_impl.go
 
@@ -15997,6 +15997,13 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 renvoNonNil(g)
 size = renvoAlignValue(size, wordSize)
+
+
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
+renvoAmd64PushStackBytes(&g.asm, offset, size)
+return
+}
 for at := size - wordSize; at >= 0; at -= wordSize {
 if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
 renvoAsmPushStackWord(&g.asm, offset-at)
@@ -20424,8 +20431,9 @@ wordCount := 0
 for i := 0; i < tuple.count; i++ {
 field := g.meta.fields[tuple.first+i]
 size := renvoTypeCopySize(g.meta, field.typ)
-renvoEmitPushWords(g, offset-field.offset, size, renvoBackendValueSlotSize, renvoPushStack)
-wordCount += size / renvoBackendValueSlotSize
+wordSize := renvoCallWordSize(g, field.typ)
+renvoEmitPushWords(g, offset-field.offset, size, wordSize, renvoPushStack)
+wordCount += renvoAlignValue(size, wordSize) / wordSize
 }
 return wordCount
 }
@@ -21155,9 +21163,12 @@ if g.c.renvoTargetArch == renvoArchArm {
 renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
 return
 }
+if g.c.renvoTarget == renvoTargetVM32 {
+renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+return
+}
 a := &g.asm
 if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 {
-
 
 renvoAsmLoadPrimaryStack(a, srcPtr)
 renvoAsmLoadSecondaryStack(a, destPtr)
@@ -21189,6 +21200,50 @@ renvoEmitCopyByteAt(g, srcPtr, destPtr, index)
 renvoAsmIncStack(a, index)
 renvoAsmJmpLabel(a, forwardLoop)
 renvoAsmMarkLabel(a, copyDone)
+}
+
+
+
+
+func renvoEmitCopyBytesVM32(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+a := &g.asm
+src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, src, srcPtr)
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, dest, destPtr)
+renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, count, byteCount)
+forward := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, dest, src)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLe, forward)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, src, count)
+renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, dest, count)
+for direction := 0; direction < 2; direction++ {
+if direction == 1 {
+renvoAsmMarkLabel(a, forward)
+}
+for size := 4; size > 0; size -= 3 {
+loop := renvoAsmNewLabel(a)
+tail := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, loop)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
+if direction == 0 {
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+}
+renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
+renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+if direction == 1 {
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+}
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+renvoAsmJmpLabel(a, loop)
+renvoAsmMarkLabel(a, tail)
+}
+renvoAsmJmpLabel(a, done)
+}
+renvoAsmMarkLabel(a, done)
 }
 
 
@@ -41098,6 +41153,19 @@ renvoAsmEmit24(a, 0x858b48)
 renvoAsmEmit32(a, 0x10+(reg-6)*8)
 renvoAsmStorePrimaryStack(a, offset)
 }
+func renvoAmd64PushStackBytes(a *renvoAsm, offset int, size int) {
+
+
+
+
+renvoAsmEmitText(a, "\x48\x81\xec")
+renvoAsmEmit32(a, size)
+renvoAsmAddressCallWord1Stack(a, offset)
+renvoAsmEmitText(a, "\x48\x89\xe7\xb9")
+renvoAsmEmit32(a, size)
+renvoAsmEmitText(a, "\xfc\xf3\xa4")
+}
+
 func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 a := &g.asm
 renvoAsmLoadPrimaryStack(a, srcPtr)
