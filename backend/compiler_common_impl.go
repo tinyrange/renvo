@@ -9439,20 +9439,29 @@ func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(data); off++ {
-		match := len(msg) == 0 || data[off] == msg[0]
-		match = match && data[off+len(msg)] == 0
-		for i := 0; match && i < len(msg); i++ {
-			match = data[off+i] == msg[i]
+	size := len(msg)
+	first := byte(0)
+	if size > 0 {
+		first = msg[0]
+	}
+	// The loop bounds cover the complete string and its trailing zero.
+	for off := searchStart; off+size < len(data); off++ {
+		if renvo_runtime_UnsafeByteAt(data, off) != first || renvo_runtime_UnsafeByteAt(data, off+size) != 0 {
+			continue
+		}
+		match := true
+		for i := 1; i < size; i++ {
+			if renvo_runtime_UnsafeByteAt(data, off+i) != renvo_runtime_UnsafeByteAt(msg, i) {
+				match = false
+				break
+			}
 		}
 		if match {
 			return off
 		}
 	}
 	msgOff := len(g.asm.data)
-	for i := 0; i < len(msg); i++ {
-		g.asm.data = append(g.asm.data, msg[i])
-	}
+	g.asm.data = append(g.asm.data, msg...)
 	g.asm.data = append(g.asm.data, 0)
 	if g.asm.objectStrings != nil {
 		g.asm.objectStrings.refs = append(g.asm.objectStrings.refs, msgOff, len(msg))
@@ -9476,14 +9485,22 @@ func renvoAddStringDataAligned(g *renvoLinearGen, msg []byte, alignment int) int
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(data); off++ {
-		if off&(alignment-1) != 0 {
+	size := len(msg)
+	first := byte(0)
+	if size > 0 {
+		first = msg[0]
+	}
+	// The loop bounds cover the complete string and its trailing zero.
+	for off := (searchStart + alignment - 1) & -alignment; off+size < len(data); off += alignment {
+		if renvo_runtime_UnsafeByteAt(data, off) != first || renvo_runtime_UnsafeByteAt(data, off+size) != 0 {
 			continue
 		}
-		match := len(msg) == 0 || data[off] == msg[0]
-		match = match && data[off+len(msg)] == 0
-		for i := 0; match && i < len(msg); i++ {
-			match = data[off+i] == msg[i]
+		match := true
+		for i := 1; i < size; i++ {
+			if renvo_runtime_UnsafeByteAt(data, off+i) != renvo_runtime_UnsafeByteAt(msg, i) {
+				match = false
+				break
+			}
 		}
 		if match {
 			return off
@@ -9493,9 +9510,7 @@ func renvoAddStringDataAligned(g *renvoLinearGen, msg []byte, alignment int) int
 		g.asm.data = append(g.asm.data, 0)
 	}
 	msgOff := len(g.asm.data)
-	for i := 0; i < len(msg); i++ {
-		g.asm.data = append(g.asm.data, msg[i])
-	}
+	g.asm.data = append(g.asm.data, msg...)
 	g.asm.data = append(g.asm.data, 0)
 	if g.asm.objectStrings != nil {
 		g.asm.objectStrings.refs = append(g.asm.objectStrings.refs, msgOff, len(msg))
