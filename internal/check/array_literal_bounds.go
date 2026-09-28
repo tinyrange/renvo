@@ -5,12 +5,12 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidArrayLiteralBounds(pkg *load.Package, info *PackageInfo, fileIndex int, literals []CompositeExpr, scope CoreScope, fn syntax.FuncDecl, bindings []scopedTypeBinding) int {
+func invalidArrayLiteralBounds(pkg *load.Package, info *PackageInfo, fileIndex int, literals []CompositeExpr, scope *CoreScope, fn *syntax.FuncDecl, bindings []scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	for _, literal := range literals {
-		context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, strict: true, scope: scope, before: literal.TypeStart}
+		context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, strict: true, scope: *scope, before: literal.TypeStart}
 		// Enclosing bindings do not describe a nested function's declarations.
-		if fn.BodyEnd > 0 && !numericBuiltinInNestedFunction(*file, fn, literal.TypeStart) {
+		if fn.BodyEnd > 0 && !numericBuiltinInNestedFunction(file, fn, literal.TypeStart) {
 			context.bindings = bindings
 		}
 		length, array := arrayLiteralLength(context, literal.TypeStart, literal.TypeEnd, 0)
@@ -38,8 +38,8 @@ func arrayLiteralLength(context constantIndexContext, start, end, depth int) (wi
 		return wideConstant{}, false
 	}
 	file := &context.pkg.Files[context.fileIndex].File
-	if classifyType(*file, start, end) == TypeArray {
-		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(*file, start, end)
+	if classifyType(file, start, end) == TypeArray {
+		lengthStart, lengthEnd, _, _ := parseArrayTypeShape(file, start, end)
 		return wideConstantExpr(&context, lengthStart, lengthEnd, 0), true
 	}
 	if end-start != 1 || lookupScopeTokenNameCore(&context.scope, file, start) >= 0 {

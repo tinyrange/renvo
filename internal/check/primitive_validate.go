@@ -17,8 +17,8 @@ const (
 // to this deliberately conservative fast-path and continue to backend checking.
 const definitePrimitiveParamLimit = 10
 
-func invalidDefiniteLiteralBinary(file syntax.File, op int, left string, right string) bool {
-	kind := exprBinaryOperatorKind(&file, op)
+func invalidDefiniteLiteralBinary(file *syntax.File, op int, left string, right string) bool {
+	kind := exprBinaryOperatorKind(file, op)
 	if kind == exprBinaryLogical {
 		return left != "bool" || right != "bool"
 	}
@@ -37,7 +37,7 @@ func invalidDefinitePrimitiveCallAt(file *syntax.File, open int, close int, targ
 		end := nextDefiniteCallComma(file, start, close-1)
 		if end-start == 1 {
 			want := target.primitiveParamCodes >> (param * 3) & 7
-			if primitiveCodeMismatch(want, definiteLiteralKind(*file, start)) {
+			if primitiveCodeMismatch(want, definiteLiteralKind(file, start)) {
 				return start
 			}
 		}
@@ -59,12 +59,12 @@ func prepareDefinitePrimitiveCallTarget(pkg *load.Package, info *PackageInfo, sy
 		return
 	}
 	file := pkg.Files[symbol.File].File
-	fn, ok := findDefinitePackageFuncDecl(file, symbol.Token)
+	fn, ok := findDefinitePackageFuncDecl(&file, symbol.Token)
 	if !ok {
 		return
 	}
 	for param := 0; param < definitePrimitiveParamLimit; param++ {
-		start, end, found := definitePrimitiveParamSpan(file, fn, param)
+		start, end, found := definitePrimitiveParamSpan(&file, &fn, param)
 		if !found {
 			break
 		}
@@ -77,19 +77,19 @@ func prepareDefinitePrimitiveCallTarget(pkg *load.Package, info *PackageInfo, sy
 // definitePrimitiveParamSpan resolves one parameter directly from the token
 // stream. Unlike buildFuncSignature it does not allocate a complete field list
 // for every call site, which is important while the compiler checks itself.
-func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int) (int, int, bool) {
+func definitePrimitiveParamSpan(file *syntax.File, fn *syntax.FuncDecl, wanted int) (int, int, bool) {
 	start := fn.ParamsStart + 1
 	end := fn.ParamsEnd - 1
 	pendingStart := start
 	pending := 0
 	for start < end {
-		segmentEnd := nextTopLevelComma(&file, start, end)
-		first, last := trimFieldSpan(&file, start, segmentEnd)
+		segmentEnd := nextTopLevelComma(file, start, end)
+		first, last := trimFieldSpan(file, start, segmentEnd)
 		if first >= last {
 			start = segmentEnd + 1
 			continue
 		}
-		if isSingleIdent(&file, first, last) {
+		if isSingleIdent(file, first, last) {
 			if pending == 0 {
 				pendingStart = first
 			}
@@ -97,7 +97,7 @@ func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int
 			start = segmentEnd + 1
 			continue
 		}
-		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
 			if wanted < pending+1 {
 				return first + 1, last, true
 			}
@@ -123,7 +123,7 @@ func definitePrimitiveParamSpan(file syntax.File, fn syntax.FuncDecl, wanted int
 	return -1, -1, false
 }
 
-func definitePendingParamSpan(file syntax.File, start int, end int, wanted int) (int, int, bool) {
+func definitePendingParamSpan(file *syntax.File, start int, end int, wanted int) (int, int, bool) {
 	for i := start; i < end; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {
 			if wanted == 0 {

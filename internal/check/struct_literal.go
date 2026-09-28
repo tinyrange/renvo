@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidStructLiterals(pkg *load.Package, info *PackageInfo, file *syntax.File, literals []CompositeExpr, scope CoreScope) int {
+func invalidStructLiterals(pkg *load.Package, info *PackageInfo, file *syntax.File, literals []CompositeExpr, scope *CoreScope) int {
 	for _, literal := range literals {
 		fields, known := literalStructFields(pkg, info, file, literal.TypeStart, literal.TypeEnd, scope, 0)
 		if !known || len(literal.Elems) == 0 {
@@ -40,22 +40,22 @@ func invalidStructLiterals(pkg *load.Package, info *PackageInfo, file *syntax.Fi
 	return -1
 }
 
-func literalStructFields(pkg *load.Package, info *PackageInfo, file *syntax.File, start int, end int, scope CoreScope, depth int) ([]Field, bool) {
+func literalStructFields(pkg *load.Package, info *PackageInfo, file *syntax.File, start int, end int, scope *CoreScope, depth int) ([]Field, bool) {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return nil, false
 	}
 	start, end = stripOuterParens(file, start, end)
-	if classifyType(*file, start, end) == TypeStruct {
+	if classifyType(file, start, end) == TypeStruct {
 		open := findTypeTopLevelChar(file, start, end, '{')
 		if open >= 0 && findTypeMatching(file, open, '{', '}') == end {
-			return literalStructFieldNames(file, parseStructFields(*file, open+1, end-1)), true
+			return literalStructFieldNames(file, parseStructFields(file, open+1, end-1)), true
 		}
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return nil, false
 	}
 	// Do not mistake a shadowed package type for a local map or array type.
-	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return nil, false
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -67,7 +67,7 @@ func literalStructFields(pkg *load.Package, info *PackageInfo, file *syntax.File
 		return literalStructFieldNames(&pkg.Files[typ.File].File, typ.Fields), true
 	}
 	if typ.Kind == TypeNamed {
-		return literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
+		return literalStructFields(pkg, info, &pkg.Files[typ.File].File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 	}
 	return nil, false
 }

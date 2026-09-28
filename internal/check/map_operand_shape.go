@@ -12,7 +12,7 @@ type mapIndexShape struct {
 	known                      bool
 }
 
-func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) mapIndexShape {
+func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) mapIndexShape {
 	if depth > 32 {
 		return mapIndexShape{}
 	}
@@ -39,7 +39,7 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 			return mapIndexTypeShape(pkg, info, fileIndex, start, open, scope, 0)
 		}
 	}
-	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
+	if tokenTextIs(file, start, "make") && start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, "make") < 0 {
 		return mapIndexTypeShape(pkg, info, fileIndex, start+2, nextTopLevelComma(file, start+2, end-1), scope, 0)
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
@@ -48,7 +48,7 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 	chosen := -1
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= before && before < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 			chosen = i
 		}
 	}
@@ -67,27 +67,27 @@ func mapIndexExprShape(pkg *load.Package, info *PackageInfo, fileIndex int, scop
 		}
 		declFile := pkg.Files[decl.File].File
 		if decl.TypeEnd > decl.TypeStart {
-			return mapIndexTypeShape(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, CoreScope{}, 0)
+			return mapIndexTypeShape(pkg, info, decl.File, decl.TypeStart, decl.TypeEnd, &CoreScope{}, 0)
 		}
-		values := splitExprList(declFile, decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&declFile, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return mapIndexExprShape(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return mapIndexExprShape(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return mapIndexShape{}
 }
 
-func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) mapIndexShape {
+func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, end int, scope *CoreScope, depth int) mapIndexShape {
 	if start < 0 || start >= end || depth > len(info.Types)+1 {
 		return mapIndexShape{}
 	}
 	file := &pkg.Files[fileIndex].File
 	if file.Tokens[start].KindLine&255 == syntax.TokenMap {
-		ks, ke, vs, ve := parseMapTypeShape(*file, start, end)
-		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, scope, true}
+		ks, ke, vs, ve := parseMapTypeShape(file, start, end)
+		return mapIndexShape{mapLiteralPrimitiveType(pkg, info, file, ks, ke, scope, 0), fileIndex, vs, ve, *scope, true}
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return mapIndexShape{}
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -95,5 +95,5 @@ func mapIndexTypeShape(pkg *load.Package, info *PackageInfo, fileIndex, start, e
 		return mapIndexShape{}
 	}
 	typ := &info.Types[index]
-	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
+	return mapIndexTypeShape(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 }

@@ -869,7 +869,7 @@ func compressSourceEmbedArchive(data []byte) []byte {
 			// A literal can expose a longer match at the next byte. Keep the
 			// same bounded dictionary search, but avoid committing to a short
 			// match when that would discard the larger saving immediately ahead.
-			if length >= 3 && length < 273 && pos+1 < len(data) {
+			if length >= 3 && length < 8 && pos+1 < len(data) {
 				_, nextLength := sourceEmbedArchiveMatch(data, buckets, previous, pos+1)
 				if nextLength > length+1 {
 					length = 0
@@ -923,9 +923,9 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 }
 
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
-	// Bound search work even on adversarial buckets. The best-match boundary
-	// check below avoids rescanning shared prefixes during the deeper search.
-	const maxCandidates = 256
+	// Limit dictionary search work on repetitive source. A short search keeps
+	// compression inexpensive while retaining long matches and lazy look-ahead.
+	const maxCandidates = 16
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0
@@ -938,7 +938,8 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 	bestDistance := 0
 	bestLength := 0
 	checked := 0
-	bucket := sourceEmbedArchiveBucket(data, pos, len(buckets))
+	// Reuse the three prefix bytes already loaded for candidate filtering.
+	bucket := ((int(first)*251+int(second))*251 + int(third)) & (len(buckets) - 1)
 	for candidate := int(buckets[bucket]) - 1; candidate >= 0 && checked < maxCandidates; candidate = int(previous[candidate]) - 1 {
 		distance := pos - candidate
 		if distance > 4096 {

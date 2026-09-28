@@ -25,7 +25,7 @@ func LookupField(fields []Field, name string) int {
 	return -1
 }
 
-func buildFuncSignature(file *syntax.File, fn syntax.FuncDecl) FuncSignature {
+func buildFuncSignature(file *syntax.File, fn *syntax.FuncDecl) FuncSignature {
 	return buildSignatureFromParts(file, fn.ReceiverStart, fn.ReceiverEnd, fn.ParamsStart, fn.ParamsEnd, fn.ResultStart, fn.ResultEnd)
 }
 

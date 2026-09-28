@@ -16,12 +16,12 @@ type InterfaceEmbed struct {
 // Explicit method names must be unique within one interface body, even if
 // their signatures agree. Embedded interfaces are separate elements: their
 // shared methods require signature compatibility, not this uniqueness rule.
-func duplicateExplicitInterfaceMethod(file syntax.File) int {
+func duplicateExplicitInterfaceMethod(file *syntax.File) int {
 	for i := 0; i+1 < len(file.Tokens); i++ {
-		if file.Tokens[i].KindLine&255 != syntax.TokenInterface || !tokCharIs(&file, i+1, '{') {
+		if file.Tokens[i].KindLine&255 != syntax.TokenInterface || !tokCharIs(file, i+1, '{') {
 			continue
 		}
-		close := findTypeMatching(&file, i+1, '{', '}')
+		close := findTypeMatching(file, i+1, '{', '}')
 		if close <= i+1 {
 			continue
 		}
@@ -44,17 +44,17 @@ func LookupInterfaceMethod(methods []InterfaceMethod, name string) int {
 	return -1
 }
 
-func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMethod, []InterfaceEmbed) {
+func parseInterfaceElements(file *syntax.File, start int, end int) ([]InterfaceMethod, []InterfaceEmbed) {
 	var methods []InterfaceMethod
 	var embeds []InterfaceEmbed
 	i := start
 	for i < end {
-		if tokCharIs(&file, i, ';') {
+		if tokCharIs(file, i, ';') {
 			i++
 			continue
 		}
 		elemEnd := nextInterfaceElementEnd(file, i, end)
-		first, last := trimFieldSpan(&file, i, elemEnd)
+		first, last := trimFieldSpan(file, i, elemEnd)
 		if first < last {
 			if isInterfaceMethodSpec(file, first, last) {
 				methods = append(methods, parseInterfaceMethod(file, first, last))
@@ -72,24 +72,24 @@ func parseInterfaceElements(file syntax.File, start int, end int) ([]InterfaceMe
 	return methods, embeds
 }
 
-func isInterfaceMethodSpec(file syntax.File, start int, end int) bool {
-	return start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, start+1, '(')
+func isInterfaceMethodSpec(file *syntax.File, start int, end int) bool {
+	return start+1 < end && file.Tokens[start].KindLine&255 == syntax.TokenIdent && tokCharIs(file, start+1, '(')
 }
 
-func parseInterfaceMethod(file syntax.File, start int, end int) InterfaceMethod {
+func parseInterfaceMethod(file *syntax.File, start int, end int) InterfaceMethod {
 	paramsStart := start + 1
-	paramsEnd := findTypeMatching(&file, paramsStart, '(', ')')
+	paramsEnd := findTypeMatching(file, paramsStart, '(', ')')
 	if paramsEnd < 0 || paramsEnd > end {
 		paramsEnd = paramsStart + 1
 	}
 	return InterfaceMethod{
-		Name:      tokenString(&file, start),
+		Name:      tokenString(file, start),
 		NameTok:   start,
-		Signature: buildSignatureFromParts(&file, -1, -1, paramsStart, paramsEnd, paramsEnd, end),
+		Signature: buildSignatureFromParts(file, -1, -1, paramsStart, paramsEnd, paramsEnd, end),
 	}
 }
 
-func nextInterfaceElementEnd(file syntax.File, start int, end int) int {
+func nextInterfaceElementEnd(file *syntax.File, start int, end int) int {
 	parenDepth := 0
 	bracketDepth := 0
 	braceDepth := 0

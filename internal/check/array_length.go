@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body syntax.Body, signature *FuncSignature) int {
+func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
 	file := pkg.Files[fileIndex].File
 	// Array lengths occur only in nonempty bracket groups followed by a type.
 	// Avoid building all local bindings for functions with no possible array type.
@@ -27,7 +27,7 @@ func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex in
 	if !possible {
 		return -1
 	}
-	bindings := collectScopedTypeBindings(&file, fn, &body, signature)
+	bindings := collectScopedTypeBindings(&file, fn, body, signature)
 	context := constantIndexContext{pkg: pkg, info: info, fileIndex: fileIndex, bindings: bindings, strict: true}
 	nestedScan, nestedEnd := fn.BodyStart+1, -1
 	for i := 0; i < len(bindings); i++ {
@@ -36,7 +36,7 @@ func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex in
 		// Advance across nested functions once for the entire binding list.
 		for nestedScan < binding.name {
 			if file.Tokens[nestedScan].KindLine&255 == syntax.TokenFunc {
-				end := pointerOrderingNestedFunctionEnd(file, nestedScan, fn.BodyEnd-1)
+				end := pointerOrderingNestedFunctionEnd(&file, nestedScan, fn.BodyEnd-1)
 				if end > nestedScan {
 					nestedEnd, nestedScan = end, end
 				}
@@ -80,11 +80,11 @@ func invalidArrayLengthTypeSpan(context constantIndexContext, start int, end int
 		if arrayLengthVariableName(context, tok+1, close-1) {
 			return tok + 1
 		}
-		operand := numericBuiltinExprValue(context.pkg, context.info, context.fileIndex, context.scope, context.bindings, tok+1, close-1, context.before, 0)
+		operand := numericBuiltinExprValue(context.pkg, context.info, context.fileIndex, &context.scope, context.bindings, tok+1, close-1, context.before, 0)
 		if operand.kind == "bool" || operand.kind == "string" || operand.kind == "other" {
 			return tok + 1
 		}
-		if unsafeAddFractionalDecimal(file, tok+1, close-1) {
+		if unsafeAddFractionalDecimal(&file, tok+1, close-1) {
 			return tok + 1
 		}
 		value := wideConstantExpr(&context, tok+1, close-1, 0)

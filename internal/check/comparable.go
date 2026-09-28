@@ -10,7 +10,7 @@ func nonComparableTypeSpan(pkg *load.Package, info *PackageInfo, file *syntax.Fi
 		return false
 	}
 	start, end = stripOuterParens(file, start, end)
-	kind := classifyType(*file, start, end)
+	kind := classifyType(file, start, end)
 	if kind == TypeSlice || kind == TypeMap || kind == TypeFunc {
 		return true
 	}
@@ -23,7 +23,7 @@ func nonComparableTypeSpan(pkg *load.Package, info *PackageInfo, file *syntax.Fi
 		if open < 0 {
 			return false
 		}
-		fields := parseStructFields(*file, open+1, end-1)
+		fields := parseStructFields(file, open+1, end-1)
 		for i := 0; i < len(fields); i++ {
 			if nonComparableTypeSpan(pkg, info, file, fields[i].TypeStart, fields[i].TypeEnd, depth+1) {
 				return true

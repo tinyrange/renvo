@@ -28,7 +28,8 @@ func TestBareReturnShadow(t *testing.T) {
 			if !file.Ok || !parsed.Ok {
 				t.Fatal("parse failed")
 			}
-			if tok := invalidBareReturnShadow(file, fn, parsed, buildFuncSignature(&file, fn)); tok < 0 {
+			signature := buildFuncSignature(&file, &fn)
+			if tok := invalidBareReturnShadow(&file, &fn, &parsed, &signature); tok < 0 {
 				t.Fatal("shadowed bare return accepted")
 			}
 		})
@@ -56,7 +57,8 @@ func TestBareReturnPreservesLexicalScopes(t *testing.T) {
 			if !file.Ok || !parsed.Ok {
 				t.Fatal("parse failed")
 			}
-			if tok := invalidBareReturnShadow(file, fn, parsed, buildFuncSignature(&file, fn)); tok >= 0 {
+			signature := buildFuncSignature(&file, &fn)
+			if tok := invalidBareReturnShadow(&file, &fn, &parsed, &signature); tok >= 0 {
 				t.Fatalf("valid return rejected at token %d", tok)
 			}
 		})

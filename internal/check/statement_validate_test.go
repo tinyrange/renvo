@@ -12,6 +12,9 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 		body string
 		want int
 	}{
+		{name: "malformed compound assignment", body: "x := 1; y := 2; x+%=y", want: CheckErrAssignTarget},
+		{name: "integer condition", body: "if 1 {}", want: CheckErrOperand},
+		{name: "string condition", body: "if (\"x\") {}", want: CheckErrOperand},
 		{name: "non-function call", body: "x := 1; x()", want: CheckErrCall},
 		{name: "assignment target", body: "1 = 2", want: CheckErrAssignTarget},
 		{name: "assignment count", body: "a, b := 1; _, _ = a, b", want: CheckErrAssignCount},
@@ -26,7 +29,7 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 				t.Fatalf("parse failed: %#v", file)
 			}
 			body := syntax.ParseFuncBody(file, file.Funcs[0])
-			got, tok := invalidDefiniteStatement(file, body, false)
+			got, tok := invalidDefiniteStatement(&file, &body, false)
 			if got != tc.want || tok < 0 {
 				t.Fatalf("validation = (%d, %d), want error %d", got, tok, tc.want)
 			}
@@ -40,7 +43,7 @@ func TestTypeAssertionValidationPreservesTypeBodies(t *testing.T) {
 		t.Fatalf("parse failed: %#v", file)
 	}
 	body := syntax.ParseFuncBody(file, file.Funcs[0])
-	if code, tok := invalidDefiniteStatement(file, body, false); code != CheckOK {
+	if code, tok := invalidDefiniteStatement(&file, &body, false); code != CheckOK {
 		t.Fatalf("type body rejected: error=%d token=%d", code, tok)
 	}
 }
@@ -80,7 +83,7 @@ func main() {
 		t.Fatalf("parse failed: %#v", file)
 	}
 	body := syntax.ParseFuncBody(file, file.Funcs[1])
-	if code, tok := invalidDefiniteStatement(file, body, false); code != CheckOK {
+	if code, tok := invalidDefiniteStatement(&file, &body, false); code != CheckOK {
 		t.Fatalf("valid statements rejected: error=%d token=%d text=%q", code, tok, syntax.TokenText(file.Src, file.Tokens[tok]))
 	}
 }
@@ -103,7 +106,7 @@ func TestInvalidConcurrencyStatements(t *testing.T) {
 				t.Fatalf("parse failed: %#v", file)
 			}
 			body := syntax.ParseFuncBody(file, file.Funcs[0])
-			got, _ := invalidDefiniteStatement(file, body, false)
+			got, _ := invalidDefiniteStatement(&file, &body, false)
 			if got != test.err {
 				t.Fatalf("error = %d, want %d", got, test.err)
 			}
@@ -116,7 +119,7 @@ func TestChannelValidationDoesNotTreatSelectorCloseAsBuiltin(t *testing.T) {
 	if !file.Ok || len(file.Funcs) != 2 {
 		t.Fatalf("parse failed: %#v", file)
 	}
-	if token := invalidDefiniteChannelOperation(file, file.Funcs[1]); token >= 0 {
+	if token := invalidDefiniteChannelOperation(&file, &file.Funcs[1]); token >= 0 {
 		t.Fatalf("selector close rejected at token %d", token)
 	}
 }
@@ -135,16 +138,16 @@ func invalid() { _ = <-global }
 	if !file.Ok || len(file.Funcs) != 4 {
 		t.Fatalf("parse failed: %#v", file)
 	}
-	if tok := invalidDefiniteChannelOperation(file, file.Funcs[0]); tok >= 0 {
+	if tok := invalidDefiniteChannelOperation(&file, &file.Funcs[0]); tok >= 0 {
 		t.Fatalf("valid send rejected at token %d", tok)
 	}
-	if tok := invalidDefiniteChannelOperation(file, file.Funcs[1]); tok >= 0 {
+	if tok := invalidDefiniteChannelOperation(&file, &file.Funcs[1]); tok >= 0 {
 		t.Fatalf("valid receive rejected at token %d", tok)
 	}
-	if tok := invalidDefiniteChannelOperation(file, file.Funcs[2]); tok >= 0 {
+	if tok := invalidDefiniteChannelOperation(&file, &file.Funcs[2]); tok >= 0 {
 		t.Fatalf("valid direction narrowing rejected at token %d", tok)
 	}
-	if tok := invalidDefiniteChannelOperation(file, file.Funcs[3]); tok < 0 {
+	if tok := invalidDefiniteChannelOperation(&file, &file.Funcs[3]); tok < 0 {
 		t.Fatal("receive from named send-only global was accepted")
 	}
 }
@@ -154,7 +157,7 @@ func TestChannelValidationPreservesIntegerCloseSyscall(t *testing.T) {
 	if !file.Ok || len(file.Funcs) != 1 {
 		t.Fatal("parse failed")
 	}
-	if tok := invalidDefiniteChannelOperation(file, file.Funcs[0]); tok >= 0 {
+	if tok := invalidDefiniteChannelOperation(&file, &file.Funcs[0]); tok >= 0 {
 		t.Fatalf("integer close syscall rejected at token %d", tok)
 	}
 }
@@ -164,10 +167,10 @@ func TestChannelValidationGateIsFunctionLocal(t *testing.T) {
 	if !file.Ok || len(file.Funcs) != 2 {
 		t.Fatal("parse failed")
 	}
-	if functionMayNeedChannelCheck(file, file.Funcs[0]) {
+	if functionMayNeedChannelCheck(&file, &file.Funcs[0]) {
 		t.Fatal("unrelated function selected for channel validation")
 	}
-	if !functionMayNeedChannelCheck(file, file.Funcs[1]) {
+	if !functionMayNeedChannelCheck(&file, &file.Funcs[1]) {
 		t.Fatal("channel operation was not selected for validation")
 	}
 }

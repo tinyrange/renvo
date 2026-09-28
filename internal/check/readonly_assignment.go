@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex int, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) int {
+func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
 	ready := false
@@ -17,7 +17,7 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 		}
 	}
 	for _, stmt := range body.Stmts {
-		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || hasNested && numericBuiltinInNestedFunction(*file, fn, stmt.StartTok) {
+		if (stmt.Kind != syntax.StmtAssign && stmt.Kind != syntax.StmtExpr) || hasNested && numericBuiltinInNestedFunction(file, fn, stmt.StartTok) {
 			continue
 		}
 		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
@@ -27,8 +27,8 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 		if op < 0 || tokenTextIs(file, op, ":=") {
 			continue
 		}
-		for _, span := range splitExprList(*file, stmt.StartTok, op) {
-			if definitelyInvalidAssignTarget(*file, span) {
+		for _, span := range splitExprList(file, stmt.StartTok, op) {
+			if definitelyInvalidAssignTarget(file, span) {
 				return span.StartTok
 			}
 			start, end := stripOuterParens(file, span.StartTok, span.EndTok)
@@ -36,13 +36,17 @@ func invalidReadOnlyAssignment(pkg *load.Package, info *PackageInfo, fileIndex i
 				continue
 			}
 			if !ready {
-				bindings = collectScopedTypeBindings(file, fn, body, signature)
+				bindings = *cachedBindings
+				if bindings == nil {
+					bindings = collectScopedTypeBindings(file, fn, body, signature)
+					*cachedBindings = bindings
+				}
 				ready = true
 			}
 			chosen := -1
 			for i := 0; i < len(bindings); i++ {
 				binding := &bindings[i]
-				if binding.visible <= op && op < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+				if binding.visible <= op && op < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 					chosen = i
 				}
 			}

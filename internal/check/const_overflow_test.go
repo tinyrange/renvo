@@ -13,7 +13,7 @@ func TestParseConstIntDoesNotWrap(t *testing.T) {
 		}
 		for i, token := range file.Tokens {
 			if token.KindLine&255 == syntax.TokenNumber {
-				if value, ok := parseConstInt(file, i); ok {
+				if value, ok := parseConstInt(&file, i); ok {
 					t.Fatalf("%s evaluated as truncated %d", text, value)
 				}
 			}

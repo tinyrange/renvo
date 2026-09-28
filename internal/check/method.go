@@ -114,7 +114,7 @@ func sortMethods(methods []MethodInfo) {
 	for i := 1; i < len(methods); i++ {
 		item := methods[i]
 		j := i - 1
-		for j >= 0 && methodAfter(methods[j], item) {
+		for j >= 0 && methodAfter(&methods[j], &item) {
 			methods[j+1] = methods[j]
 			j--
 		}
@@ -122,12 +122,12 @@ func sortMethods(methods []MethodInfo) {
 	}
 }
 
-func methodAfter(left MethodInfo, right MethodInfo) bool {
-	if left.Receiver != right.Receiver {
-		return checkStringAfter(left.Receiver, right.Receiver)
+func methodAfter(left *MethodInfo, right *MethodInfo) bool {
+	if order := compareCheckStrings(left.Receiver, right.Receiver); order != 0 {
+		return order > 0
 	}
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.Pointer != right.Pointer {
 		return left.Pointer && !right.Pointer

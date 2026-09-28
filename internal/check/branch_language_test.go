@@ -29,7 +29,7 @@ func TestGotoScopeDependsOnSourceLanguage(t *testing.T) {
 			if cSource {
 				want = tc.cError
 			}
-			got, tok := invalidDefiniteStatement(file, body, cSource)
+			got, tok := invalidDefiniteStatement(&file, &body, cSource)
 			if got != want {
 				t.Fatalf("%s (C=%v): error=%d token=%d, want %d", tc.body, cSource, got, tok, want)
 			}

@@ -63,7 +63,7 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 			i += 2
 			continue
 		}
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 128 && unicodeIdentifierWidth(src, i, true) > 0 {
+		if uint(c|32)-'a' < 26 || c == '_' || c >= 128 && unicodeIdentifierWidth(src, i, true) > 0 {
 			start := i
 			if c >= 128 {
 				i += unicodeIdentifierWidth(src, i, true)
@@ -80,7 +80,7 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 					i += width
 					continue
 				}
-				if !((part >= 'a' && part <= 'z') || (part >= 'A' && part <= 'Z') || (part >= '0' && part <= '9') || part == '_') {
+				if !(uint(part|32)-'a' < 26 || uint(part)-'0' < 10 || part == '_') {
 					break
 				}
 				i++
@@ -218,13 +218,19 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 // Escaped arbitrary bytes in interpreted strings remain valid source text.
 func validSourceEncoding(src []byte) bool {
 	for i := 0; i < len(src); {
+		// Range lowers to a single bounded byte walk for the common ASCII run.
+		for _, c := range src[i:] {
+			if c == 0 || c >= 0x80 {
+				break
+			}
+			i++
+		}
+		if i == len(src) {
+			return true
+		}
 		c := src[i]
 		if c == 0 {
 			return false
-		}
-		if c < 0x80 {
-			i++
-			continue
 		}
 		n := 0
 		value := 0
@@ -329,7 +335,7 @@ func scanTokenCapacity(src []byte) int {
 }
 
 func isIdentStart(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+	return uint(c|32)-'a' < 26 || c == '_'
 }
 
 func isIdentPart(c byte) bool {

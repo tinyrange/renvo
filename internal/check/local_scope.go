@@ -5,7 +5,7 @@ import "renvo.dev/internal/syntax"
 // Each switch/select clause introduces an implicit block, independent of its
 // siblings. The innermost enclosing owner determines which following clauses
 // can end this scope; clauses inside a nested owner cannot end it.
-func localRuleScopeEnd(body syntax.Body, tok int) int {
+func localRuleScopeEnd(body *syntax.Body, tok int) int {
 	end := definiteStatementScopeEnd(body, tok)
 	ownerIndex := -1
 	ownerStart := -1
@@ -40,7 +40,7 @@ func localRuleScopeEnd(body syntax.Body, tok int) int {
 // Precompute lexical endpoints for an ordered statement traversal. A binding
 // collector asks for many endpoints in one body; rescanning that body for every
 // declaration makes large functions unnecessarily quadratic.
-func localRuleScopeEnds(body syntax.Body) []int {
+func localRuleScopeEnds(body *syntax.Body) []int {
 	ends := make([]int, len(body.Stmts))
 	clauses := make([]int, len(body.Stmts))
 	clauseEnds := make([]int, len(body.Stmts))

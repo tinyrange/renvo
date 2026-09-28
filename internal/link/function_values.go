@@ -269,18 +269,25 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 	deferred := false
 	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		mark := arena.Mark()
 		token := program.Tokens[i]
+		kind := token.KindLine & 255
+		// Defer remains an identifier in the compact unit. Other token kinds
+		// cannot introduce a function value or one of the builtin calls below.
+		if kind != unit.TokenFunc && kind != unit.TokenIdent {
+			continue
+		}
 		start := token.Start
 		valid := start >= 0 && start+token.Size <= len(program.Text)
 		if !functions && token.KindLine&255 == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			functions = true
 		}
 		if !deferred && i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
+			mark := arena.Mark()
 			name := functionValueTokenText(program, i+1)
 			if (name == "copy" || name == "delete" || name == "panic" || name == "print" || name == "println" || name == "recover") && functionValueEnclosingLocalType(program, i, name) == "" && !functionValueDeclaredFunction(program, name) {
 				deferred = true
 			}
+			arena.Rewind(mark)
 		}
 		name := ""
 		if !builtins && valid && token.KindLine&255 == unit.TokenIdent {
@@ -293,16 +300,21 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
 				name = "clear"
 			} else if token.Size == 6 && functionValueTokenEquals(program, i, "string") && functionValueTokenEquals(program, i+1, "(") {
+				mark := arena.Mark()
 				close := functionValueFindMatchingParen(program, i+1)
 				if close > i+2 && ordinaryIntegerExpression(program, i, i+2, close) {
 					name = "string"
 				}
+				arena.Rewind(mark)
 			}
 		}
-		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
-			builtins = true
+		if name != "" && functionValueTokenEquals(program, i+1, "(") {
+			mark := arena.Mark()
+			if !ordinaryBuiltinShadowed(program, i, name) {
+				builtins = true
+			}
+			arena.Rewind(mark)
 		}
-		arena.Rewind(mark)
 	}
 	// Inferred global function values must keep the same representation when
 	// another package later introduces callbacks or ordinary builtin lowering.
@@ -1629,7 +1641,7 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 	}
 	// Search newest declarations first, including one immediately before use.
 	for i := before - 1; i > fn.BodyStart; i-- {
-		if !functionValueTokenEquals(program, i, name) {
+		if i >= len(program.Tokens) || program.Tokens[i].KindLine&255 != unit.TokenIdent || program.Tokens[i].Size != len(name) || !functionValueTokenEquals(program, i, name) {
 			continue
 		}
 		short := functionValueTokenEquals(program, i+1, ":=") || functionValueTokenEquals(program, i+1, ",") || functionValueTokenEquals(program, i-1, ",")
@@ -3216,12 +3228,18 @@ func functionValueFindMatching(program *unit.Program, open int, left string, rig
 }
 
 func functionValueTokenEquals(program *unit.Program, tok int, want string) bool {
-	if tok < 0 || tok >= len(program.Tokens) {
+	if uint(tok) >= uint(len(program.Tokens)) {
 		return false
 	}
 	token := &program.Tokens[tok]
-	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
+	if token.Size != len(want) || token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return false
+	}
+	if len(want) == 1 {
+		return program.Text[token.Start] == want[0]
+	}
+	if len(want) == 2 {
+		return program.Text[token.Start] == want[0] && program.Text[token.Start+1] == want[1]
 	}
 	for i := 0; i < len(want); i++ {
 		if program.Text[token.Start+i] != want[i] {

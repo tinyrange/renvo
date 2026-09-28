@@ -2,7 +2,7 @@ package check
 
 import "renvo.dev/internal/syntax"
 
-func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int, int) {
+func invalidBranchTarget(file *syntax.File, body *syntax.Body, cSource bool) (int, int) {
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.Kind == syntax.StmtFallthrough {
@@ -27,8 +27,8 @@ func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int,
 				}
 			}
 			for tok := body.Stmts[clause].EndTok; tok < stmt.StartTok; tok++ {
-				if tokCharIs(&file, tok, '{') {
-					end := findTypeMatching(&file, tok, '{', '}')
+				if tokCharIs(file, tok, '{') {
+					end := findTypeMatching(file, tok, '{', '}')
 					if end > stmt.StartTok {
 						return CheckErrBody, stmt.StartTok
 					}
@@ -36,7 +36,7 @@ func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int,
 				}
 			}
 			next := stmt.EndTok
-			for next < switchStmt.BodyEnd && tokCharIs(&file, next, ';') {
+			for next < switchStmt.BodyEnd && tokCharIs(file, next, ';') {
 				next++
 			}
 			if next >= switchStmt.BodyEnd || file.Tokens[next].KindLine&255 != syntax.TokenCase && file.Tokens[next].KindLine&255 != syntax.TokenDefault {
@@ -52,7 +52,7 @@ func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int,
 		label := -1
 		for j := 0; j < len(body.Stmts); j++ {
 			candidate := body.Stmts[j]
-			if candidate.Kind == syntax.StmtLabel && statementTokensEqual(&file, candidate.StartTok, stmt.StartTok+1) {
+			if candidate.Kind == syntax.StmtLabel && statementTokensEqual(file, candidate.StartTok, stmt.StartTok+1) {
 				label = j
 				break
 			}
@@ -94,8 +94,8 @@ func invalidBranchTarget(file syntax.File, body syntax.Body, cSource bool) (int,
 			}
 			decl := file.Tokens[block.StartTok].KindLine&255 == syntax.TokenVar
 			if block.Kind == syntax.StmtAssign {
-				op := findTopLevelAssignOp(&file, block.StartTok, block.EndTok)
-				decl = op >= 0 && tokenTextIs(&file, op, ":=")
+				op := findTopLevelAssignOp(file, block.StartTok, block.EndTok)
+				decl = op >= 0 && tokenTextIs(file, op, ":=")
 			}
 			if decl && definiteStatementScopeEnd(body, block.StartTok) > target.StartTok {
 				return CheckErrScope, stmt.StartTok

@@ -5,7 +5,7 @@ import "renvo.dev/internal/syntax"
 // invalidReturnCount rejects return lists whose arity is statically certain
 // to disagree with the function signature. A single call expression is left
 // to later tuple-aware checking because it may return multiple values.
-func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSignature) (int, int) {
+func invalidReturnCount(file *syntax.File, fn *syntax.FuncDecl, signature *FuncSignature) (int, int) {
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
 	if start < 0 {
@@ -26,7 +26,7 @@ func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSign
 		expected := len(signature.Results)
 		if count == expected {
 			if count == 1 && valueEnd-valueStart == 1 && signature.Results[0].TypeEnd-signature.Results[0].TypeStart == 1 {
-				want := tokenString(&file, signature.Results[0].TypeStart)
+				want := tokenString(file, signature.Results[0].TypeStart)
 				if primitiveTypeMismatch(want, definiteLiteralKind(file, valueStart)) {
 					return CheckErrReturnType, valueStart
 				}
@@ -44,14 +44,14 @@ func invalidReturnCount(file syntax.File, fn syntax.FuncDecl, signature FuncSign
 	return CheckOK, -1
 }
 
-func skipNestedFunction(file syntax.File, start int, limit int) int {
+func skipNestedFunction(file *syntax.File, start int, limit int) int {
 	open := -1
 	for i := start + 1; i < limit; i++ {
-		if tokCharIs(&file, i, '{') {
+		if tokCharIs(file, i, '{') {
 			open = i
 			break
 		}
-		if tokCharIs(&file, i, ';') {
+		if tokCharIs(file, i, ';') {
 			return start
 		}
 	}
@@ -60,9 +60,9 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 	}
 	depth := 1
 	for i := open + 1; i < limit; i++ {
-		if tokCharIs(&file, i, '{') {
+		if tokCharIs(file, i, '{') {
 			depth++
-		} else if tokCharIs(&file, i, '}') {
+		} else if tokCharIs(file, i, '}') {
 			depth--
 			if depth == 0 {
 				return i
@@ -72,9 +72,9 @@ func skipNestedFunction(file syntax.File, start int, limit int) int {
 	return start
 }
 
-func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int) {
+func returnValueList(file *syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(&file, start, ';') || tokCharIs(&file, start, '}') || syntax.TokenLine(file.Tokens[start]) > syntax.TokenLine(file.Tokens[returnTok]) {
+	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || syntax.TokenLine(file.Tokens[start]) > syntax.TokenLine(file.Tokens[returnTok]) {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -113,7 +113,7 @@ func returnValueList(file syntax.File, returnTok int, limit int) (int, int, int)
 	return start, end, count
 }
 
-func returnLineContinues(file syntax.File, tok int) bool {
+func returnLineContinues(file *syntax.File, tok int) bool {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return false
 	}
@@ -125,9 +125,9 @@ func returnLineContinues(file syntax.File, tok int) bool {
 	return last == ',' || last == '.' || last == '+' || last == '-' || last == '*' || last == '/' || last == '%' || last == '&' || last == '|' || last == '^' || last == '=' || last == '<' || last == '>' || last == '!' || last == ':'
 }
 
-func returnMayBeMultiValueCall(file syntax.File, start int, end int) bool {
+func returnMayBeMultiValueCall(file *syntax.File, start int, end int) bool {
 	for i := start; i < end; i++ {
-		if tokCharIs(&file, i, '(') {
+		if tokCharIs(file, i, '(') {
 			return true
 		}
 	}

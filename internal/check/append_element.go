@@ -8,7 +8,7 @@ import (
 // Scalar assignment requires identical types for typed operands, whereas
 // untyped constants may acquire the destination type. Unknown type identities
 // and general constant representability still require broader type checking.
-func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, destination string, source numericBuiltinValue, file *syntax.File, arg ExprSpan) bool {
+func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, before int, destination string, source numericBuiltinValue, file *syntax.File, arg ExprSpan) bool {
 	underlying := destination
 	if len(destination) > 6 && destination[:6] == "named:" {
 		index := lookupType(info.Types, destination[6:])
@@ -16,7 +16,7 @@ func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex in
 			return false
 		}
 		typ := &info.Types[index]
-		underlying = conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, 0)
+		underlying = conversionUnderlyingType(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, 0)
 	}
 	want := scalarAppendKind(underlying)
 	if want == "int" {
@@ -48,7 +48,7 @@ func invalidScalarAppendValue(pkg *load.Package, info *PackageInfo, fileIndex in
 	if want == "string" || want == "bool" || source.kind == "string" || source.kind == "bool" {
 		return want != source.kind
 	}
-	return want == "int" && unsafeAddFractionalDecimal(*file, arg.StartTok, arg.EndTok)
+	return want == "int" && unsafeAddFractionalDecimal(file, arg.StartTok, arg.EndTok)
 }
 
 // Fixed-width integer bounds are target independent. For machine-sized types,

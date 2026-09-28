@@ -66,7 +66,7 @@ func wideConstantExpr(context *constantIndexContext, start int, end int, depth i
 		return wideConstant{}
 	}
 	file := &context.pkg.Files[context.fileIndex].File
-	start, end = trimExprSpan(*file, start, end)
+	start, end = trimExprSpan(file, start, end)
 	start, end = stripOuterParens(file, start, end)
 	if start < 0 || start >= end {
 		return wideConstant{}
@@ -145,7 +145,7 @@ func wideConstantExpr(context *constantIndexContext, start int, end int, depth i
 	if file.Tokens[start].KindLine&255 == syntax.TokenIdent {
 		chosen := -1
 		for i, binding := range context.bindings {
-			if binding.visible <= context.before && context.before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > context.bindings[chosen].visible) {
+			if binding.visible <= context.before && context.before < binding.end && (chosen < 0 || binding.visible > context.bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 				chosen = i
 			}
 		}

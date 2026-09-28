@@ -78,8 +78,8 @@ func LookupLocalDeclCall(decl LocalDeclInfo, base string, name string, kind int)
 	return -1
 }
 
-func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
-	name := tokenString(&file, decl.NameTok)
+func buildDeclInfo(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, decl syntax.TopDecl) DeclInfo {
+	name := tokenString(file, decl.NameTok)
 	out := DeclInfo{
 		Name:       name,
 		Kind:       declSymbolKind(decl.Kind),
@@ -94,34 +94,34 @@ func buildDeclInfo(file syntax.File, fileIndex int, info PackageInfo, checked []
 	}
 	if decl.Kind == syntax.TokenType {
 		typeStart := decl.NameTok + 1
-		if tokenTextIs(&file, typeStart, "=") {
+		if tokenTextIs(file, typeStart, "=") {
 			out.Alias = true
 			typeStart++
 		}
-		out.TypeStart, out.TypeEnd = trimDeclSpan(&file, typeStart, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 		return out
 	}
 	typeStart := declNameListEnd(file, decl)
-	valueStart := findDeclAssign(&file, typeStart, decl.EndTok)
+	valueStart := findDeclAssign(file, typeStart, decl.EndTok)
 	if valueStart >= 0 {
-		out.TypeStart, out.TypeEnd = trimDeclSpan(&file, typeStart, valueStart)
-		out.ValueStart, out.ValueEnd = trimDeclSpan(&file, valueStart+1, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, valueStart)
+		out.ValueStart, out.ValueEnd = trimDeclSpan(file, valueStart+1, decl.EndTok)
 		out.Values = splitExprList(file, out.ValueStart, out.ValueEnd)
 		out.Refs = appendExprRefs(out.Refs, file, fileIndex, info, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Selectors = appendExprSelectors(out.Selectors, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
 		out.Calls = appendExprCalls(out.Calls, file, fileIndex, info, checked, FuncScope{}, out.ValueStart, out.ValueEnd)
-		out.Indexes = appendExprIndexes(out.Indexes, &file, out.ValueStart, out.ValueEnd)
+		out.Indexes = appendExprIndexes(out.Indexes, file, out.ValueStart, out.ValueEnd)
 		out.Composites = appendExprComposites(out.Composites, file, out.ValueStart, out.ValueEnd)
 		if out.Kind == SymbolConst {
 			out.Const = evalConstValue(file, out.Values, out.ValueIndex)
 		}
 	} else {
-		out.TypeStart, out.TypeEnd = trimDeclSpan(&file, typeStart, decl.EndTok)
+		out.TypeStart, out.TypeEnd = trimDeclSpan(file, typeStart, decl.EndTok)
 	}
 	return out
 }
 
-func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body syntax.Body, scope FuncScope) []LocalDeclInfo {
+func buildFuncLocalDecls(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body *syntax.Body, scope FuncScope) []LocalDeclInfo {
 	decls := make([]LocalDeclInfo, 0, countBodyStatements(body, syntax.StmtDecl))
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -131,14 +131,14 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, chec
 		kind := declSymbolKind(file.Tokens[stmt.StartTok].KindLine & 255)
 		start := stmt.StartTok + 1
 		end := stmt.EndTok
-		if start < end && tokCharIs(&file, start, '(') {
+		if start < end && tokCharIs(file, start, '(') {
 			j := start + 1
 			for j < end {
-				j = skipLocalSeparators(&file, j, end)
-				if j >= end || tokCharIs(&file, j, ')') {
+				j = skipLocalSeparators(file, j, end)
+				if j >= end || tokCharIs(file, j, ')') {
 					break
 				}
-				specEnd := statementSpecEnd(&file, j, end)
+				specEnd := statementSpecEnd(file, j, end)
 				decls = appendLocalDeclSpec(decls, file, fileIndex, info, checked, scope, kind, j, specEnd)
 				if specEnd <= j {
 					j++
@@ -153,37 +153,37 @@ func buildFuncLocalDecls(file syntax.File, fileIndex int, info PackageInfo, chec
 	return decls
 }
 
-func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, kind int, start int, end int) []LocalDeclInfo {
-	start, end = trimDeclSpan(&file, start, end)
+func appendLocalDeclSpec(decls []LocalDeclInfo, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, kind int, start int, end int) []LocalDeclInfo {
+	start, end = trimDeclSpan(file, start, end)
 	if start < 0 || end <= start || start >= len(file.Tokens) || file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return decls
 	}
 	if kind == SymbolType {
 		return appendLocalTypeDecl(decls, file, fileIndex, scope, start, end)
 	}
-	names, namesEnd := localDeclNameTokens(&file, start, end)
+	names, namesEnd := localDeclNameTokens(file, start, end)
 	if len(names) == 0 {
 		return decls
 	}
-	valueStart := findDeclAssign(&file, namesEnd, end)
+	valueStart := findDeclAssign(file, namesEnd, end)
 	typeStart := -1
 	typeEnd := -1
 	valueSpanStart := -1
 	valueSpanEnd := -1
 	if valueStart >= 0 {
-		typeStart, typeEnd = trimDeclSpan(&file, namesEnd, valueStart)
-		valueSpanStart, valueSpanEnd = trimDeclSpan(&file, valueStart+1, end)
+		typeStart, typeEnd = trimDeclSpan(file, namesEnd, valueStart)
+		valueSpanStart, valueSpanEnd = trimDeclSpan(file, valueStart+1, end)
 	} else {
-		typeStart, typeEnd = trimDeclSpan(&file, namesEnd, end)
+		typeStart, typeEnd = trimDeclSpan(file, namesEnd, end)
 	}
 	values := splitExprList(file, valueSpanStart, valueSpanEnd)
 	refs := appendExprRefs(nil, file, fileIndex, info, scope, valueSpanStart, valueSpanEnd)
 	selectors := appendExprSelectors(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
 	calls := appendExprCalls(nil, file, fileIndex, info, checked, scope, valueSpanStart, valueSpanEnd)
-	indexes := appendExprIndexes(nil, &file, valueSpanStart, valueSpanEnd)
+	indexes := appendExprIndexes(nil, file, valueSpanStart, valueSpanEnd)
 	composites := appendExprComposites(nil, file, valueSpanStart, valueSpanEnd)
 	for i := 0; i < len(names); i++ {
-		name := tokenString(&file, names[i])
+		name := tokenString(file, names[i])
 		if name == "_" {
 			continue
 		}
@@ -212,18 +212,18 @@ func appendLocalDeclSpec(decls []LocalDeclInfo, file syntax.File, fileIndex int,
 	return decls
 }
 
-func appendLocalTypeDecl(decls []LocalDeclInfo, file syntax.File, fileIndex int, scope FuncScope, start int, end int) []LocalDeclInfo {
-	name := tokenString(&file, start)
+func appendLocalTypeDecl(decls []LocalDeclInfo, file *syntax.File, fileIndex int, scope FuncScope, start int, end int) []LocalDeclInfo {
+	name := tokenString(file, start)
 	if name == "_" {
 		return decls
 	}
 	typeStart := start + 1
 	alias := false
-	if tokenTextIs(&file, typeStart, "=") {
+	if tokenTextIs(file, typeStart, "=") {
 		alias = true
 		typeStart++
 	}
-	typeStart, typeEnd := trimDeclSpan(&file, typeStart, end)
+	typeStart, typeEnd := trimDeclSpan(file, typeStart, end)
 	return append(decls, LocalDeclInfo{
 		Name:      name,
 		Kind:      SymbolType,
@@ -258,10 +258,10 @@ func localDeclNameTokens(file *syntax.File, start int, end int) ([]int, int) {
 	return names, i
 }
 
-func declNameListEnd(file syntax.File, decl syntax.TopDecl) int {
+func declNameListEnd(file *syntax.File, decl syntax.TopDecl) int {
 	i := decl.StartTok + 1
 	for i < decl.EndTok {
-		if !tokCharIs(&file, i, ',') {
+		if !tokCharIs(file, i, ',') {
 			return i
 		}
 		i++
@@ -273,7 +273,7 @@ func declNameListEnd(file syntax.File, decl syntax.TopDecl) int {
 	return i
 }
 
-func declNameIndex(file syntax.File, decl syntax.TopDecl) int {
+func declNameIndex(file *syntax.File, decl syntax.TopDecl) int {
 	index := 0
 	i := decl.StartTok
 	for i < decl.EndTok {
@@ -352,10 +352,10 @@ func siftDownDecls(decls []DeclInfo, root int, end int) {
 		if child >= end {
 			return
 		}
-		if child+1 < end && declAfter(decls[child+1], decls[child]) {
+		if child+1 < end && declAfter(&decls[child+1], &decls[child]) {
 			child++
 		}
-		if !declAfter(decls[child], decls[root]) {
+		if !declAfter(&decls[child], &decls[root]) {
 			return
 		}
 		decls[root], decls[child] = decls[child], decls[root]
@@ -431,9 +431,9 @@ func appendInitVisit(order []int, decls []DeclInfo, state []int, index int) []in
 	return append(order, index)
 }
 
-func declAfter(left DeclInfo, right DeclInfo) bool {
-	if left.Name != right.Name {
-		return checkStringAfter(left.Name, right.Name)
+func declAfter(left *DeclInfo, right *DeclInfo) bool {
+	if order := compareCheckStrings(left.Name, right.Name); order != 0 {
+		return order > 0
 	}
 	if left.File != right.File {
 		return left.File > right.File

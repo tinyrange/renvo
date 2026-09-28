@@ -29,7 +29,7 @@ func LookupSelector(body FuncBody, base string, name string, kind int) int {
 	return -1
 }
 
-func buildFuncSelectors(file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body syntax.Body, scope FuncScope) []SelectorRef {
+func buildFuncSelectors(file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, body *syntax.Body, scope FuncScope) []SelectorRef {
 	var selectors []SelectorRef
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -44,7 +44,7 @@ func buildFuncSelectors(file syntax.File, fileIndex int, info PackageInfo, check
 	return selectors
 }
 
-func appendAssignSelectors(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []SelectorRef {
+func appendAssignSelectors(selectors []SelectorRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []SelectorRef {
 	assign := findTokenText(file, stmt.StartTok, stmt.EndTok, "=")
 	shortAssign := findTokenText(file, stmt.StartTok, stmt.EndTok, ":=")
 	if shortAssign >= 0 {
@@ -57,20 +57,20 @@ func appendAssignSelectors(selectors []SelectorRef, file syntax.File, fileIndex 
 	return appendExprSelectors(selectors, file, fileIndex, info, checked, scope, assign+1, stmt.EndTok)
 }
 
-func appendDeclSelectors(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []SelectorRef {
+func appendDeclSelectors(selectors []SelectorRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, stmt syntax.Stmt) []SelectorRef {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return selectors
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(&file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(&file, i, end)
+			specEnd := statementSpecEnd(file, i, end)
 			selectors = appendSpecInitializerSelectors(selectors, file, fileIndex, info, checked, scope, i, specEnd)
 			i = specEnd
 		}
@@ -79,7 +79,7 @@ func appendDeclSelectors(selectors []SelectorRef, file syntax.File, fileIndex in
 	return appendSpecInitializerSelectors(selectors, file, fileIndex, info, checked, scope, start, end)
 }
 
-func appendSpecInitializerSelectors(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
+func appendSpecInitializerSelectors(selectors []SelectorRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
 	assign := findTokenText(file, start, end, "=")
 	if assign < 0 {
 		return selectors
@@ -87,16 +87,16 @@ func appendSpecInitializerSelectors(selectors []SelectorRef, file syntax.File, f
 	return appendExprSelectors(selectors, file, fileIndex, info, checked, scope, assign+1, end)
 }
 
-func appendExprSelectors(selectors []SelectorRef, file syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
+func appendExprSelectors(selectors []SelectorRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
 	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
-		if !tokenTextIs(&file, i, ".") {
+		if !tokenTextIs(file, i, ".") {
 			continue
 		}
 		if file.Tokens[i-1].KindLine&255 != syntax.TokenIdent || file.Tokens[i+1].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		baseName := tokenString(&file, i-1)
-		name := tokenString(&file, i+1)
+		baseName := tokenString(file, i-1)
+		name := tokenString(file, i+1)
 		if baseName == "_" || name == "_" {
 			continue
 		}

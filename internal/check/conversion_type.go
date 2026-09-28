@@ -2,7 +2,7 @@ package check
 
 import "renvo.dev/internal/load"
 
-func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) string {
+func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) string {
 	if depth > len(info.Types)+2 || start < 0 || start >= end {
 		return ""
 	}
@@ -14,15 +14,22 @@ func conversionUnderlyingType(pkg *load.Package, info *PackageInfo, fileIndex in
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 {
+		return ""
+	}
+	symbol := lookupPackageSymbolTextCore(info, file, start)
+	if symbol >= 0 && info.Symbols[symbol].Kind != SymbolType {
+		return ""
+	}
+	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)
 	if index := lookupType(info.Types, name); index >= 0 {
 		typ := &info.Types[index]
-		return conversionUnderlyingType(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+		return conversionUnderlyingType(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 	}
-	if lookupPackageSymbol(info.Symbols, name) >= 0 {
+	if symbol >= 0 {
 		return ""
 	}
 	if name == "string" || name == "bool" || name == "int" || name == "int8" || name == "int16" || name == "int32" || name == "int64" || name == "uint" || name == "uint8" || name == "uint16" || name == "uint32" || name == "uint64" || name == "uintptr" || name == "byte" || name == "rune" || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" {

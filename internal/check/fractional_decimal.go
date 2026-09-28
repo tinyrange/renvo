@@ -2,14 +2,14 @@ package check
 
 import "renvo.dev/internal/syntax"
 
-func unsafeAddFractionalDecimal(file syntax.File, start int, end int) bool {
-	if start < end && (tokenTextIs(&file, start, "+") || tokenTextIs(&file, start, "-")) {
+func unsafeAddFractionalDecimal(file *syntax.File, start int, end int) bool {
+	if start < end && (tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-")) {
 		start++
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenNumber {
 		return false
 	}
-	text := tokenString(&file, start)
+	text := tokenString(file, start)
 	if len(text) > 1 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X') {
 		return false
 	}

@@ -4,7 +4,7 @@ import "renvo.dev/internal/syntax"
 
 // Go requires the final statement of a result-bearing function to terminate;
 // unreachable statements after a return do not satisfy that requirement.
-func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end int, panicBuiltin bool) bool {
+func returnBlockTerminates(file *syntax.File, body *syntax.Body, start int, end int, panicBuiltin bool) bool {
 	last := -1
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -30,7 +30,7 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 		if stmt.ElseStart < 0 || !returnBlockTerminates(file, body, stmt.BodyStart+1, stmt.BodyEnd-1, panicBuiltin) {
 			return false
 		}
-		if tokCharIs(&file, stmt.ElseStart+1, '{') {
+		if tokCharIs(file, stmt.ElseStart+1, '{') {
 			return returnBlockTerminates(file, body, stmt.ElseStart+2, stmt.ElseEnd-1, panicBuiltin)
 		}
 		return returnBlockTerminates(file, body, stmt.ElseStart+1, stmt.ElseEnd, panicBuiltin)
@@ -43,8 +43,8 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 		if start == end {
 			return true
 		}
-		first := findTypeTopLevelChar(&file, start, end, ';')
-		return first >= 0 && tokCharIs(&file, first+1, ';')
+		first := findTypeTopLevelChar(file, start, end, ';')
+		return first >= 0 && tokCharIs(file, first+1, ';')
 	}
 	if stmt.Kind == syntax.StmtSwitch || stmt.Kind == syntax.StmtSelect {
 		if returnStatementHasBreak(file, body, last) {
@@ -73,17 +73,17 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 	if stmt.Kind == syntax.StmtExpr && panicBuiltin {
 		start, end := trimExprSpan(file, stmt.ExprStart, stmt.ExprEnd)
 		calleeEnd := start + 1
-		if tokCharIs(&file, start, '(') {
-			calleeEnd = findTypeMatching(&file, start, '(', ')')
+		if tokCharIs(file, start, '(') {
+			calleeEnd = findTypeMatching(file, start, '(', ')')
 		}
-		calleeStart, nameEnd := stripOuterParens(&file, start, calleeEnd)
-		if nameEnd == calleeStart+1 && tokenTextIs(&file, calleeStart, "panic") &&
-			calleeEnd < end && tokCharIs(&file, calleeEnd, '(') && findTypeMatching(&file, calleeEnd, '(', ')') == end {
+		calleeStart, nameEnd := stripOuterParens(file, start, calleeEnd)
+		if nameEnd == calleeStart+1 && tokenTextIs(file, calleeStart, "panic") &&
+			calleeEnd < end && tokCharIs(file, calleeEnd, '(') && findTypeMatching(file, calleeEnd, '(', ')') == end {
 			for i := 0; i < len(file.Funcs); i++ {
 				fn := file.Funcs[i]
 				if fn.BodyStart < start && fn.BodyEnd > end {
-					scope, _, _ := buildFuncScopeCore(&file, fn)
-					return lookupScopeTokenNameCore(&scope, &file, calleeStart) < 0
+					scope, _, _ := buildFuncScopeCore(file, &fn)
+					return lookupScopeTokenNameCore(&scope, file, calleeStart) < 0
 				}
 			}
 		}
@@ -91,11 +91,11 @@ func returnBlockTerminates(file syntax.File, body syntax.Body, start int, end in
 	return false
 }
 
-func returnClauseTerminates(file syntax.File, body syntax.Body, clause int, end int, canFallthrough bool, panicBuiltin bool) bool {
+func returnClauseTerminates(file *syntax.File, body *syntax.Body, clause int, end int, canFallthrough bool, panicBuiltin bool) bool {
 	start := body.Stmts[clause].EndTok
 	if canFallthrough {
 		last := end - 1
-		for last >= start && tokCharIs(&file, last, ';') {
+		for last >= start && tokCharIs(file, last, ';') {
 			last--
 		}
 		if last >= start && file.Tokens[last].KindLine&255 == syntax.TokenFallthrough {
@@ -105,7 +105,7 @@ func returnClauseTerminates(file syntax.File, body syntax.Body, clause int, end 
 	return returnBlockTerminates(file, body, start, end, panicBuiltin)
 }
 
-func returnStatementHasBreak(file syntax.File, body syntax.Body, owner int) bool {
+func returnStatementHasBreak(file *syntax.File, body *syntax.Body, owner int) bool {
 	stmt := body.Stmts[owner]
 	for i := owner + 1; i < len(body.Stmts); i++ {
 		branch := body.Stmts[i]
@@ -118,7 +118,7 @@ func returnStatementHasBreak(file syntax.File, body syntax.Body, owner int) bool
 		if !branchIsBare(file, branch) {
 			for j := owner - 1; j >= 0; j-- {
 				label := body.Stmts[j]
-				if label.Kind == syntax.StmtLabel && label.EndTok == stmt.StartTok && statementTokensEqual(&file, label.StartTok, branch.StartTok+1) {
+				if label.Kind == syntax.StmtLabel && label.EndTok == stmt.StartTok && statementTokensEqual(file, label.StartTok, branch.StartTok+1) {
 					return true
 				}
 			}

@@ -14,8 +14,8 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 		if token.KindLine&255 != unit.TokenIdent || token.Start < 0 || token.Size <= 0 || token.Start > len(program.Text)-token.Size {
 			continue
 		}
-		for pos := token.Start; pos < token.Start+token.Size; pos++ {
-			if program.Text[pos] >= 128 {
+		for _, value := range program.Text[token.Start : token.Start+token.Size] {
+			if value >= 128 {
 				maybeUnicode = true
 				break
 			}

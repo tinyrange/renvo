@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidCallOperandCount(graph load.Graph, pkgIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
+func invalidCallOperandCount(graph load.Graph, pkgIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn *syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
 	file := &graph.Packages[pkgIndex].Files[fileIndex].File
 	for _, ref := range refs {
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
@@ -27,7 +27,7 @@ func invalidCallOperandCount(graph load.Graph, pkgIndex int, info *PackageInfo, 
 	return -1
 }
 
-func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.File, fn syntax.FuncDecl, start int, callee int) bool {
+func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.File, fn *syntax.FuncDecl, start int, callee int) bool {
 	if symbol.Kind != SymbolFunc || callee+1 >= fn.BodyEnd || !tokCharIs(file, callee+1, '(') {
 		return false
 	}
@@ -53,11 +53,11 @@ func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.F
 		return false
 	}
 	target := pkg.Files[symbol.File].File
-	decl, ok := findDefinitePackageFuncDecl(target, symbol.Token)
+	decl, ok := findDefinitePackageFuncDecl(&target, symbol.Token)
 	if !ok {
 		return false
 	}
-	resultStart, resultEnd := trimTypeSpan(target, decl.ResultStart, decl.ResultEnd)
+	resultStart, resultEnd := trimTypeSpan(&target, decl.ResultStart, decl.ResultEnd)
 	if resultStart < 0 || resultEnd <= resultStart {
 		return true // a void call cannot supply an operand either
 	}

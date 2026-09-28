@@ -1518,16 +1518,16 @@ func renvoSourceHasC11Directive(src []byte) bool {
 	prefix := "// renvo:c11"
 	for start := 0; start < len(src); {
 		end := start
-		for end < len(src) && renvo_runtime_UnsafeByteAt(src, end) != '\n' && renvo_runtime_UnsafeByteAt(src, end) != '\r' {
+		for _, c := range src[start:] {
+			if c == '\n' || c == '\r' {
+				break
+			}
 			end++
 		}
 		if end-start == len(prefix) && renvoBytesEqualText(src, start, end, prefix) {
 			return true
 		}
-		for end < len(src) && (renvo_runtime_UnsafeByteAt(src, end) == '\n' || renvo_runtime_UnsafeByteAt(src, end) == '\r') {
-			end++
-		}
-		start = end
+		start = end + 1
 	}
 	return false
 }
@@ -7420,6 +7420,9 @@ func renvoBytesEqualRange(src []byte, aStart int, aEnd int, bStart int, bEnd int
 	if aEnd-aStart != bEnd-bStart {
 		return false
 	}
+	if aStart == bStart {
+		return true
+	}
 	for aStart < aEnd {
 		if renvo_runtime_UnsafeByteAt(src, aStart) != renvo_runtime_UnsafeByteAt(src, bStart) {
 			return false
@@ -8211,6 +8214,14 @@ func renvoAsmCopySecondaryToTertiary(a *renvoAsm) {
 }
 func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 	renvoNonNil(a)
+	if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchAarch64 {
+		renvoAarch64AsmMovRegReg(a, 0, 2)
+		return
+	}
+	if renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArchArm {
+		renvoArmAsmMovRegReg(a, 0, 2)
+		return
+	}
 	if renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		renvoAsmEmit16(a, 0xc889)
 		return
@@ -8234,6 +8245,7 @@ func renvoAsmPushPrimary(a *renvoAsm) {
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPushRax(a)
+		renvoAsmRecordRegisterPush(a, 0)
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
@@ -8607,10 +8619,12 @@ func renvoAsmStorePrimaryStack(a *renvoAsm, offset int) {
 	}
 	if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRegStack(a, 0, offset)
+		a.lastPrimaryStoreEnd = len(a.code)
+		a.lastPrimaryStoreOff = offset
 		return
 	}
 	renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
-	if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+	if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		a.lastPrimaryStoreEnd = len(a.code)
 		a.lastPrimaryStoreOff = offset
 	}
@@ -8652,7 +8666,7 @@ func renvoAsmLoadPrimaryStack(a *renvoAsm, offset int) {
 		renvoRTGAsmLoadFrame(a, renvoRTGPrimary, offset)
 		return
 	}
-	if a.c.renvoTargetArch == renvoArchAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
+	if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 || a.c.renvoTargetArch == renvoArchArm || renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
 		n := len(a.code)
 		if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
 			return
@@ -9420,23 +9434,34 @@ func renvoAddStringData(g *renvoLinearGen, msg []byte) int {
 	// Keep interning bounded. Large embedded assets should not make every later
 	// literal rescan the entire static-data segment; missing an old match only
 	// emits another copy and does not change program semantics.
-	searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+	data := g.asm.data
+	searchStart := len(data) - renvoStringInternSearchBytes
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
-		match := g.asm.data[off+len(msg)] == 0
-		for i := 0; match && i < len(msg); i++ {
-			match = g.asm.data[off+i] == msg[i]
+	size := len(msg)
+	first := byte(0)
+	if size > 0 {
+		first = msg[0]
+	}
+	// The loop bounds cover the complete string and its trailing zero.
+	for off := searchStart; off+size < len(data); off++ {
+		if renvo_runtime_UnsafeByteAt(data, off) != first || renvo_runtime_UnsafeByteAt(data, off+size) != 0 {
+			continue
+		}
+		match := true
+		for i := 1; i < size; i++ {
+			if renvo_runtime_UnsafeByteAt(data, off+i) != renvo_runtime_UnsafeByteAt(msg, i) {
+				match = false
+				break
+			}
 		}
 		if match {
 			return off
 		}
 	}
 	msgOff := len(g.asm.data)
-	for i := 0; i < len(msg); i++ {
-		g.asm.data = append(g.asm.data, msg[i])
-	}
+	g.asm.data = append(g.asm.data, msg...)
 	g.asm.data = append(g.asm.data, 0)
 	if g.asm.objectStrings != nil {
 		g.asm.objectStrings.refs = append(g.asm.objectStrings.refs, msgOff, len(msg))
@@ -9455,17 +9480,27 @@ func renvoAddStringDataAligned(g *renvoLinearGen, msg []byte, alignment int) int
 	// Keep interning bounded. Large embedded assets should not make every later
 	// literal rescan the entire static-data segment; missing an old match only
 	// emits another copy and does not change program semantics.
-	searchStart := len(g.asm.data) - renvoStringInternSearchBytes
+	data := g.asm.data
+	searchStart := len(data) - renvoStringInternSearchBytes
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	for off := searchStart; off+len(msg) < len(g.asm.data); off++ {
-		if off&(alignment-1) != 0 {
+	size := len(msg)
+	first := byte(0)
+	if size > 0 {
+		first = msg[0]
+	}
+	// The loop bounds cover the complete string and its trailing zero.
+	for off := (searchStart + alignment - 1) & -alignment; off+size < len(data); off += alignment {
+		if renvo_runtime_UnsafeByteAt(data, off) != first || renvo_runtime_UnsafeByteAt(data, off+size) != 0 {
 			continue
 		}
-		match := g.asm.data[off+len(msg)] == 0
-		for i := 0; match && i < len(msg); i++ {
-			match = g.asm.data[off+i] == msg[i]
+		match := true
+		for i := 1; i < size; i++ {
+			if renvo_runtime_UnsafeByteAt(data, off+i) != renvo_runtime_UnsafeByteAt(msg, i) {
+				match = false
+				break
+			}
 		}
 		if match {
 			return off
@@ -9475,9 +9510,7 @@ func renvoAddStringDataAligned(g *renvoLinearGen, msg []byte, alignment int) int
 		g.asm.data = append(g.asm.data, 0)
 	}
 	msgOff := len(g.asm.data)
-	for i := 0; i < len(msg); i++ {
-		g.asm.data = append(g.asm.data, msg[i])
-	}
+	g.asm.data = append(g.asm.data, msg...)
 	g.asm.data = append(g.asm.data, 0)
 	if g.asm.objectStrings != nil {
 		g.asm.objectStrings.refs = append(g.asm.objectStrings.refs, msgOff, len(msg))
@@ -22401,7 +22434,6 @@ func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 		renvoAsmAddScaledTertiary(a, elemSize)
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, invalid)
@@ -22437,6 +22469,17 @@ func renvoEmitRuntimeBoundsCheck(g *renvoLinearGen) {
 	renvoNonNil(g)
 	a := &g.asm
 	if !g.meta.panicEnabled {
+		if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+			// Keep the successful checked-index path inline. The original index
+			// remains in secondary; both invalid cases share the fault helper.
+			fault := renvoEnsureUncaughtFaultHelper(g, false)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, fault)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, fault)
+			return
+		}
 		if g.c.renvoTargetArch == renvoArchAmd64 {
 			renvoAsmEmit24(a, 0xd4ff41)
 			return
@@ -22540,15 +22583,17 @@ func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-		renvoAsmCopySecondaryToTertiary(a)
-		renvoAsmPrimaryImm(a, 1)
+		// Callers consume secondary as the original index. Only recoverable
+		// checks need a success flag; tertiary is restored by the caller.
+		if g.meta.panicEnabled {
+			renvoAsmPrimaryImm(a, 1)
+		}
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, invalid)
 		if !g.meta.panicEnabled {
 			renvoEmitUncaughtFaultTransfer(g, false)
 			return
 		}
-		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmPrimaryImm(a, 0)
 		renvoAsmRet(a)
 		return
@@ -24043,6 +24088,15 @@ func renvoAsmPopCallWord0(a *renvoAsm) {
 		return
 	}
 	if a.c.renvoTargetArch == renvoArchAarch64 {
+		// Only fold a push recorded at this exact position. Labels and
+		// relocations invalidate the marker, preserving alternate entry paths.
+		if len(a.code) >= 4 && a.lastPrimaryStoreEnd == -(len(a.code)*32+2) {
+			a.code = a.code[:len(a.code)-4]
+			a.lastPrimaryStoreEnd = -1
+			a.lastPrimaryLoad = 0
+			renvoAarch64AsmMovRegReg(a, 3, 0)
+			return
+		}
 		renvoAarch64AsmPopRdi(a)
 		return
 	}

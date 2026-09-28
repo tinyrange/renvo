@@ -31,12 +31,12 @@ func LookupScopeName(scope FuncScope, name string) int {
 	return -1
 }
 
-func buildFuncScope(file syntax.File, fn syntax.FuncDecl, body syntax.Body) (FuncScope, bool, int) {
+func buildFuncScope(file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body) (FuncScope, bool, int) {
 	var scope FuncScope
 	if fn.ReceiverStart >= 0 {
 		tok := receiverNameToken(file, fn)
 		if tok >= 0 {
-			if !addScopeName(&scope, tokenString(&file, tok), NameReceiver, tok, true, false) {
+			if !addScopeName(&scope, tokenString(file, tok), NameReceiver, tok, true, false) {
 				return scope, false, tok
 			}
 		}
@@ -47,9 +47,9 @@ func buildFuncScope(file syntax.File, fn syntax.FuncDecl, body syntax.Body) (Fun
 			return scope, false, tok
 		}
 	}
-	if fn.ResultStart >= 0 && fn.ResultEnd > fn.ResultStart && tokCharIs(&file, fn.ResultStart, '(') {
+	if fn.ResultStart >= 0 && fn.ResultEnd > fn.ResultStart && tokCharIs(file, fn.ResultStart, '(') {
 		end := fn.ResultEnd - 1
-		if tokCharIs(&file, end, ')') {
+		if tokCharIs(file, end, ')') {
 			ok, tok := collectFieldNames(file, fn.ResultStart+1, end, NameResult, &scope)
 			if !ok {
 				return scope, false, tok
@@ -64,7 +64,7 @@ func buildFuncScope(file syntax.File, fn syntax.FuncDecl, body syntax.Body) (Fun
 			collectShortDeclNames(file, stmt, &scope)
 		} else if stmt.Kind == syntax.StmtLabel {
 			if stmt.StartTok >= 0 && stmt.StartTok < len(file.Tokens) {
-				name := tokenString(&file, stmt.StartTok)
+				name := tokenString(file, stmt.StartTok)
 				if !addScopeName(&scope, name, NameLabel, stmt.StartTok, true, true) {
 					return scope, false, stmt.StartTok
 				}
@@ -74,7 +74,7 @@ func buildFuncScope(file syntax.File, fn syntax.FuncDecl, body syntax.Body) (Fun
 	return scope, true, -1
 }
 
-func receiverNameToken(file syntax.File, fn syntax.FuncDecl) int {
+func receiverNameToken(file *syntax.File, fn *syntax.FuncDecl) int {
 	start := fn.ReceiverStart
 	end := fn.ReceiverEnd
 	if start < 0 || end <= start || end > len(file.Tokens) {
@@ -89,25 +89,25 @@ func receiverNameToken(file syntax.File, fn syntax.FuncDecl) int {
 	return start
 }
 
-func collectFieldNames(file syntax.File, start int, end int, kind int, scope *FuncScope) (bool, int) {
+func collectFieldNames(file *syntax.File, start int, end int, kind int, scope *FuncScope) (bool, int) {
 	pending := make([]int, 0, 2)
 	i := start
 	for i < end {
 		segStart := i
-		segEnd := nextTopLevelComma(&file, i, end)
+		segEnd := nextTopLevelComma(file, i, end)
 		first := firstNonSeparator(file, segStart, segEnd)
 		if first < segEnd && file.Tokens[first].KindLine&255 == syntax.TokenIdent {
 			next := first + 1
 			if next >= segEnd {
 				pending = append(pending, first)
-			} else if tokCharIs(&file, next, '.') {
+			} else if tokCharIs(file, next, '.') {
 				pending = pending[:0]
 			} else {
 				if !addPendingNames(file, pending, kind, scope) {
 					return false, pending[0]
 				}
 				pending = pending[:0]
-				if !addScopeName(scope, tokenString(&file, first), kind, first, true, false) {
+				if !addScopeName(scope, tokenString(file, first), kind, first, true, false) {
 					return false, first
 				}
 			}
@@ -119,64 +119,64 @@ func collectFieldNames(file syntax.File, start int, end int, kind int, scope *Fu
 	return true, -1
 }
 
-func addPendingNames(file syntax.File, pending []int, kind int, scope *FuncScope) bool {
+func addPendingNames(file *syntax.File, pending []int, kind int, scope *FuncScope) bool {
 	for i := 0; i < len(pending); i++ {
-		if !addScopeName(scope, tokenString(&file, pending[i]), kind, pending[i], true, false) {
+		if !addScopeName(scope, tokenString(file, pending[i]), kind, pending[i], true, false) {
 			return false
 		}
 	}
 	return true
 }
 
-func collectDeclNames(file syntax.File, stmt syntax.Stmt, scope *FuncScope) {
+func collectDeclNames(file *syntax.File, stmt syntax.Stmt, scope *FuncScope) {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(&file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			collectLeadingIdentList(file, i, statementSpecEnd(&file, i, end), scope)
-			i = statementSpecEnd(&file, i, end)
+			collectLeadingIdentList(file, i, statementSpecEnd(file, i, end), scope)
+			i = statementSpecEnd(file, i, end)
 		}
 		return
 	}
 	collectLeadingIdentList(file, start, end, scope)
 }
 
-func collectShortDeclNames(file syntax.File, stmt syntax.Stmt, scope *FuncScope) {
+func collectShortDeclNames(file *syntax.File, stmt syntax.Stmt, scope *FuncScope) {
 	assign := findTokenText(file, stmt.StartTok, stmt.EndTok, ":=")
 	if assign < 0 {
 		return
 	}
 	i := stmt.StartTok
 	for i < assign {
-		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokenString(&file, i) != "_" {
-			if LookupScopeName(*scope, tokenString(&file, i)) < 0 {
-				addScopeName(scope, tokenString(&file, i), NameLocal, i, false, false)
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokenString(file, i) != "_" {
+			if LookupScopeName(*scope, tokenString(file, i)) < 0 {
+				addScopeName(scope, tokenString(file, i), NameLocal, i, false, false)
 			}
 		}
 		i++
 	}
 }
 
-func collectLeadingIdentList(file syntax.File, start int, end int, scope *FuncScope) {
+func collectLeadingIdentList(file *syntax.File, start int, end int, scope *FuncScope) {
 	i := start
 	for i < end {
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			return
 		}
-		name := tokenString(&file, i)
+		name := tokenString(file, i)
 		if name != "_" && LookupScopeName(*scope, name) < 0 {
 			addScopeName(scope, name, NameLocal, i, false, false)
 		}
 		i++
-		if i < end && tokCharIs(&file, i, ',') {
+		if i < end && tokCharIs(file, i, ',') {
 			i++
 			continue
 		}
@@ -199,8 +199,8 @@ func statementSpecEnd(file *syntax.File, start int, end int) int {
 	return end
 }
 
-func firstNonSeparator(file syntax.File, start int, end int) int {
-	for start < end && tokCharIs(&file, start, ',') {
+func firstNonSeparator(file *syntax.File, start int, end int) int {
+	for start < end && tokCharIs(file, start, ',') {
 		start++
 	}
 	return start
@@ -247,9 +247,9 @@ func skipLocalSeparators(file *syntax.File, start int, end int) int {
 	return start
 }
 
-func findTokenText(file syntax.File, start int, end int, text string) int {
+func findTokenText(file *syntax.File, start int, end int, text string) int {
 	for i := start; i < end; i++ {
-		if tokenTextIs(&file, i, text) {
+		if tokenTextIs(file, i, text) {
 			return i
 		}
 	}
@@ -289,7 +289,7 @@ func tokCharIs(file *syntax.File, tok int, c byte) bool {
 }
 
 func tokenTextIs(file *syntax.File, tok int, text string) bool {
-	if tok < 0 || tok >= len(file.Tokens) {
+	if uint(tok) >= uint(len(file.Tokens)) {
 		return false
 	}
 	token := file.Tokens[tok]

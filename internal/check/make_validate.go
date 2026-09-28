@@ -5,7 +5,7 @@ import (
 	"renvo.dev/internal/syntax"
 )
 
-func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, callee, close int, args []ExprSpan) (int, int) {
+func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, callee, close int, args []ExprSpan) (int, int) {
 	file := pkg.Files[fileIndex].File
 	if len(args) == 0 || len(args) > 3 || tokenTextIs(&file, close-2, "...") {
 		return CheckErrBuiltinArity, callee
@@ -22,10 +22,10 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		start, end := stripOuterParens(&file, arg.StartTok, arg.EndTok)
-		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(&scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
+		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
-		if unsafeAddFractionalDecimal(file, start, end) {
+		if unsafeAddFractionalDecimal(&file, start, end) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
 		value := arrayLiteralConstant(context, start, end, scope)
@@ -44,19 +44,19 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 
 // Zero denotes an unresolved type, positive values the permitted allocation
 // families, and -1 a definitely invalid first argument.
-func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, end int, scope CoreScope, depth int) int {
+func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, end int, scope *CoreScope, depth int) int {
 	if depth > len(info.Types)+1 || start < 0 || start >= end {
 		return 0
 	}
 	file := pkg.Files[fileIndex].File
 	start, end = stripOuterParens(&file, start, end)
-	kind := classifyType(file, start, end)
+	kind := classifyType(&file, start, end)
 	if kind == TypeSlice || kind == TypeMap || kind == TypeChan {
 		for open := start; open < end; open++ {
 			if !tokCharIs(&file, open, '{') {
 				continue
 			}
-			if !isCompositeTypeBodyOpen(file, open) {
+			if !isCompositeTypeBodyOpen(&file, open) {
 				return -1
 			}
 			close := findTypeMatching(&file, open, '{', '}')
@@ -76,14 +76,14 @@ func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, 
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return -1
 	}
-	if lookupScopeTokenNameCore(&scope, &file, start) >= 0 {
+	if lookupScopeTokenNameCore(scope, &file, start) >= 0 {
 		return 0
 	}
 	name := tokenString(&file, start)
 	index := lookupType(info.Types, name)
 	if index >= 0 {
 		typ := &info.Types[index]
-		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, CoreScope{}, depth+1)
+		return makeAllocationType(pkg, info, typ.File, typ.TypeStart, typ.TypeEnd, &CoreScope{}, depth+1)
 	}
 	if definiteBuiltinType(name) || name == "float32" || name == "float64" || name == "complex64" || name == "complex128" || name == "any" || name == "error" || name == "true" || name == "false" || name == "nil" || lookupPackageSymbol(info.Symbols, name) >= 0 {
 		return -1

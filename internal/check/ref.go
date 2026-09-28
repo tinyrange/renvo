@@ -28,7 +28,7 @@ func LookupBodyRef(body FuncBody, name string, kind int) int {
 	return -1
 }
 
-func buildFuncRefs(file syntax.File, fileIndex int, info PackageInfo, body syntax.Body, scope FuncScope) []NameRef {
+func buildFuncRefs(file *syntax.File, fileIndex int, info PackageInfo, body *syntax.Body, scope FuncScope) []NameRef {
 	var refs []NameRef
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -45,7 +45,7 @@ func buildFuncRefs(file syntax.File, fileIndex int, info PackageInfo, body synta
 	return refs
 }
 
-func appendAssignRefs(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, stmt syntax.Stmt) []NameRef {
+func appendAssignRefs(refs []NameRef, file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, stmt syntax.Stmt) []NameRef {
 	assign := findTokenText(file, stmt.StartTok, stmt.EndTok, "=")
 	shortAssign := findTokenText(file, stmt.StartTok, stmt.EndTok, ":=")
 	if shortAssign >= 0 {
@@ -58,20 +58,20 @@ func appendAssignRefs(refs []NameRef, file syntax.File, fileIndex int, info Pack
 	return appendExprRefs(refs, file, fileIndex, info, scope, assign+1, stmt.EndTok)
 }
 
-func appendDeclRefs(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, stmt syntax.Stmt) []NameRef {
+func appendDeclRefs(refs []NameRef, file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, stmt syntax.Stmt) []NameRef {
 	start := stmt.StartTok + 1
 	end := stmt.EndTok
 	if start >= end {
 		return refs
 	}
-	if tokCharIs(&file, start, '(') {
+	if tokCharIs(file, start, '(') {
 		i := start + 1
 		for i < end {
-			i = skipLocalSeparators(&file, i, end)
-			if i >= end || tokCharIs(&file, i, ')') {
+			i = skipLocalSeparators(file, i, end)
+			if i >= end || tokCharIs(file, i, ')') {
 				break
 			}
-			specEnd := statementSpecEnd(&file, i, end)
+			specEnd := statementSpecEnd(file, i, end)
 			refs = appendSpecInitializerRefs(refs, file, fileIndex, info, scope, i, specEnd)
 			i = specEnd
 		}
@@ -80,7 +80,7 @@ func appendDeclRefs(refs []NameRef, file syntax.File, fileIndex int, info Packag
 	return appendSpecInitializerRefs(refs, file, fileIndex, info, scope, start, end)
 }
 
-func appendSpecInitializerRefs(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
+func appendSpecInitializerRefs(refs []NameRef, file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
 	assign := findTokenText(file, start, end, "=")
 	if assign < 0 {
 		return refs
@@ -88,12 +88,12 @@ func appendSpecInitializerRefs(refs []NameRef, file syntax.File, fileIndex int, 
 	return appendExprRefs(refs, file, fileIndex, info, scope, assign+1, end)
 }
 
-func appendBranchLabelRef(refs []NameRef, file syntax.File, scope FuncScope, stmt syntax.Stmt) []NameRef {
+func appendBranchLabelRef(refs []NameRef, file *syntax.File, scope FuncScope, stmt syntax.Stmt) []NameRef {
 	tok := stmt.StartTok + 1
 	if tok >= stmt.EndTok || tok >= len(file.Tokens) || file.Tokens[tok].KindLine&255 != syntax.TokenIdent {
 		return refs
 	}
-	name := tokenString(&file, tok)
+	name := tokenString(file, tok)
 	index := lookupScopeNameKind(scope, name, NameLabel)
 	kind := RefUnknown
 	if index >= 0 {
@@ -102,12 +102,12 @@ func appendBranchLabelRef(refs []NameRef, file syntax.File, scope FuncScope, stm
 	return append(refs, NameRef{Name: name, Kind: kind, Token: tok, Index: index, Package: -1})
 }
 
-func appendExprRefs(refs []NameRef, file syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
+func appendExprRefs(refs []NameRef, file *syntax.File, fileIndex int, info PackageInfo, scope FuncScope, start int, end int) []NameRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || shouldSkipIdentRef(&file, i, end) {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || shouldSkipIdentRef(file, i, end) {
 			continue
 		}
-		name := tokenString(&file, i)
+		name := tokenString(file, i)
 		if name == "_" {
 			continue
 		}

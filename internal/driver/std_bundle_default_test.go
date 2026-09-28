@@ -3,6 +3,8 @@
 package driver
 
 import (
+	"os"
+	"path/filepath"
 	"renvo.dev/internal/load"
 	"testing"
 )
@@ -23,6 +25,21 @@ func TestBundleEnvironmentDefaults(t *testing.T) {
 	}
 	if got := ModuleCacheFromEnv([]string{"RENVO_MODCACHE=/custom/modules"}); got != "/custom/modules" {
 		t.Errorf("module cache override = %q", got)
+	}
+}
+
+func TestDefaultBundleResolvesImplicitConcurrency(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/app\n\ngo 1.22\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte("package main\nfunc main() { values:=make(chan int,1); values<-7; print(<-values) }\n")
+	if err := os.WriteFile(filepath.Join(root, "main.go"), source, 0644); err != nil {
+		t.Fatal(err)
+	}
+	result := BuildFromFSWithModuleCache([]string{"-t", "linux/amd64", "-o", "app", "."}, root, "/std", "", OSFS{})
+	if !result.Ok {
+		t.Fatalf("default bundle concurrency build failed: %#v", result.Diagnostic)
 	}
 }
 

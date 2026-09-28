@@ -117,6 +117,10 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	ensureCoreProgramSymbols(programs)
 	symbolOffsets := corePackageSymbolOffsets(programs)
 	aliases := corePackageSymbolAliases(programs, root, symbolOffsets)
+	defaultHandler := coreDefaultHandlerNames(programs, aliases, symbolOffsets)
+	errorsAs := errorsAsNamesCore(programs, aliases, symbolOffsets)
+	var reflection coreReflectionNames
+	reflectionNamesCore(programs, aliases, symbolOffsets, &reflection)
 	plusReplacement := len(aliases)
 	aliases = append(aliases, "+")
 	if transient {
@@ -206,7 +210,15 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+	if !lowerReflectionCore(&program, &reflection, transient) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+		arena.Discard(actionStart, actionEnd)
+		return empty, false
+	}
+	if !lowerErrorsAsCore(&program, errorsAs, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -259,7 +271,10 @@ func coreTextHasC11Directive(text []byte) bool {
 	marker := "// renvo:c11"
 	for start := 0; start < len(text); {
 		end := start
-		for end < len(text) && text[end] != '\n' && text[end] != '\r' {
+		for _, c := range text[start:] {
+			if c == '\n' || c == '\r' {
+				break
+			}
 			end++
 		}
 		if end-start == len(marker) {
@@ -274,10 +289,7 @@ func coreTextHasC11Directive(text []byte) bool {
 				return true
 			}
 		}
-		for end < len(text) && (text[end] == '\n' || text[end] == '\r') {
-			end++
-		}
-		start = end
+		start = end + 1
 	}
 	return false
 }

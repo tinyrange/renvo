@@ -7,16 +7,25 @@ import "renvo.dev/internal/syntax"
 // expressions may be multi-valued, and function-valued expressions remain
 // valid unless a preceding declaration gives the callee a definite literal
 // value.
-func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) (int, int) {
+func invalidDefiniteStatement(file *syntax.File, body *syntax.Body, cSource bool) (int, int) {
 	if code, tok := invalidBranchTarget(file, body, cSource); code != CheckOK {
 		return code, tok
 	}
-	if tok := invalidDuplicateSwitchCase(&file, &body); tok >= 0 {
+	if tok := invalidDuplicateSwitchCase(file, body); tok >= 0 {
 		return CheckErrDuplicate, tok
 	}
 	var literalLocals []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
+		if stmt.Kind == syntax.StmtIf {
+			start, end := stripOuterParens(file, stmt.ExprStart, stmt.ExprEnd)
+			if end-start == 1 {
+				kind := definiteLiteralKind(file, start)
+				if kind != "" && kind != "bool" {
+					return CheckErrOperand, start
+				}
+			}
+		}
 		if stmt.Kind == syntax.StmtGo && !definiteCallExpression(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrGoroutine, stmt.ExprStart
 		}
@@ -32,8 +41,8 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 		if stmt.Kind == syntax.StmtCase && enclosingClauseOwner(body, stmt.StartTok) == syntax.StmtSelect && !definiteCommunicationClause(file, stmt.ExprStart, stmt.ExprEnd) {
 			return CheckErrSelect, stmt.ExprStart
 		}
-		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].KindLine&255 == syntax.TokenIdent && tokCharIs(&file, stmt.ExprStart+1, '(') {
-			name := tokenString(&file, stmt.ExprStart)
+		if stmt.Kind == syntax.StmtDefer && stmt.ExprStart+1 < stmt.ExprEnd && file.Tokens[stmt.ExprStart].KindLine&255 == syntax.TokenIdent && tokCharIs(file, stmt.ExprStart+1, '(') {
+			name := tokenString(file, stmt.ExprStart)
 			if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" {
 				return CheckErrDeferBuiltin, stmt.ExprStart
 			}
@@ -62,14 +71,14 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 					}
 				}
 			}
-			if kindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(&file, tok+1, '(') && (tok == 0 || !tokCharIs(&file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if kindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}
 		if stmt.Kind != syntax.StmtAssign {
 			continue
 		}
-		op := findTopLevelAssignOp(&file, stmt.StartTok, stmt.EndTok)
+		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
 		if op < 0 {
 			continue
 		}
@@ -84,9 +93,9 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 		if leftCount == 1 && rightCount == 1 && leftFirst.EndTok-leftFirst.StartTok == 1 && file.Tokens[leftFirst.StartTok].KindLine&255 == syntax.TokenIdent {
 			literal := expressionIsDefiniteLiteral(file, rightFirst)
 			updated := false
-			if !tokenTextIs(&file, op, ":=") {
+			if !tokenTextIs(file, op, ":=") {
 				for j := len(literalLocals) - 3; j >= 0; j -= 3 {
-					if stmt.StartTok < literalLocals[j+1] && statementTokensEqual(&file, literalLocals[j], leftFirst.StartTok) {
+					if stmt.StartTok < literalLocals[j+1] && statementTokensEqual(file, literalLocals[j], leftFirst.StartTok) {
 						literalLocals[j+2] = 0
 						if literal {
 							literalLocals[j+2] = 1
@@ -109,28 +118,28 @@ func invalidDefiniteStatement(file syntax.File, body syntax.Body, cSource bool) 
 // x.(T{...}) and x.([]T{...}) cannot be calls: the composite literal begins
 // before the assertion's closing parenthesis. Struct and interface type bodies
 // are permitted because their braces are part of the asserted type itself.
-func malformedTypeAssertionComposite(file syntax.File, dot int, end int) int {
-	close := findTypeMatching(&file, dot+1, '(', ')')
+func malformedTypeAssertionComposite(file *syntax.File, dot int, end int) int {
+	close := findTypeMatching(file, dot+1, '(', ')')
 	if close <= dot+2 || close > end {
 		return -1
 	}
 	for tok := dot + 2; tok < close-1; tok++ {
-		if tokCharIs(&file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
+		if tokCharIs(file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
 			return tok
 		}
 	}
 	return -1
 }
 
-func definiteCallExpression(file syntax.File, start int, end int) bool {
-	start, end = stripOuterParens(&file, start, end)
-	if end-start < 2 || !tokCharIs(&file, end-1, ')') {
+func definiteCallExpression(file *syntax.File, start int, end int) bool {
+	start, end = stripOuterParens(file, start, end)
+	if end-start < 2 || !tokCharIs(file, end-1, ')') {
 		return false
 	}
 	for open := end - 2; open >= start; open-- {
-		if tokCharIs(&file, open, '(') && findTypeMatching(&file, open, '(', ')') == end {
+		if tokCharIs(file, open, '(') && findTypeMatching(file, open, '(', ')') == end {
 			if open == start+1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent {
-				name := tokenString(&file, start)
+				name := tokenString(file, start)
 				if name == "append" || name == "cap" || name == "complex" || name == "imag" || name == "len" || name == "make" || name == "max" || name == "min" || name == "new" || name == "real" || name == "recover" {
 					return false
 				}
@@ -141,16 +150,16 @@ func definiteCallExpression(file syntax.File, start int, end int) bool {
 	return false
 }
 
-func definiteCommunicationClause(file syntax.File, start int, end int) bool {
+func definiteCommunicationClause(file *syntax.File, start int, end int) bool {
 	for i := start; i >= 0 && i < end; i++ {
-		if tokenTextIs(&file, i, "<-") {
+		if tokenTextIs(file, i, "<-") {
 			return true
 		}
 	}
 	return false
 }
 
-func enclosingClauseOwner(body syntax.Body, token int) int {
+func enclosingClauseOwner(body *syntax.Body, token int) int {
 	kind := -1
 	width := 2147483647
 	for i := 0; i < len(body.Stmts); i++ {
@@ -166,7 +175,7 @@ func enclosingClauseOwner(body syntax.Body, token int) int {
 	return kind
 }
 
-func sameEnclosingStatement(body syntax.Body, kind int, left int, right int) bool {
+func sameEnclosingStatement(body *syntax.Body, kind int, left int, right int) bool {
 	best := -1
 	width := 2147483647
 	for i := 0; i < len(body.Stmts); i++ {
@@ -183,13 +192,13 @@ func sameEnclosingStatement(body syntax.Body, kind int, left int, right int) boo
 	return stmt.BodyStart < right && right < stmt.BodyEnd && enclosingClauseOwner(body, right) == kind
 }
 
-func definiteExprListSummary(file syntax.File, start int, end int, validateTargets bool) (int, ExprSpan, int) {
+func definiteExprListSummary(file *syntax.File, start int, end int, validateTargets bool) (int, ExprSpan, int) {
 	start, end = trimExprSpan(file, start, end)
 	var first ExprSpan
 	count := 0
 	invalid := -1
 	for i := start; i >= 0 && i < end; {
-		next := nextTopLevelComma(&file, i, end)
+		next := nextTopLevelComma(file, i, end)
 		itemStart, itemEnd := trimExprSpan(file, i, next)
 		if itemEnd > itemStart {
 			span := ExprSpan{StartTok: itemStart, EndTok: itemEnd}
@@ -206,16 +215,16 @@ func definiteExprListSummary(file syntax.File, start int, end int, validateTarge
 	return count, first, invalid
 }
 
-func definiteLiteralLocal(locals []int, file syntax.File, tok int) bool {
+func definiteLiteralLocal(locals []int, file *syntax.File, tok int) bool {
 	for i := len(locals) - 3; i >= 0; i -= 3 {
-		if tok < locals[i+1] && statementTokensEqual(&file, locals[i], tok) {
+		if tok < locals[i+1] && statementTokensEqual(file, locals[i], tok) {
 			return locals[i+2] != 0
 		}
 	}
 	return false
 }
 
-func definiteStatementScopeEnd(body syntax.Body, tok int) int {
+func definiteStatementScopeEnd(body *syntax.Body, tok int) int {
 	end := 2147483647
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
@@ -229,9 +238,9 @@ func definiteStatementScopeEnd(body syntax.Body, tok int) int {
 	return end
 }
 
-func branchIsBare(file syntax.File, stmt syntax.Stmt) bool {
+func branchIsBare(file *syntax.File, stmt syntax.Stmt) bool {
 	for tok := stmt.StartTok + 1; tok < stmt.EndTok; tok++ {
-		if tokCharIs(&file, tok, ';') {
+		if tokCharIs(file, tok, ';') {
 			continue
 		}
 		return false
@@ -239,7 +248,7 @@ func branchIsBare(file syntax.File, stmt syntax.Stmt) bool {
 	return true
 }
 
-func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool {
+func branchHasEnclosing(body *syntax.Body, branchTok int, continueOnly bool) bool {
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := body.Stmts[i]
 		if stmt.StartTok >= branchTok || stmt.EndTok <= branchTok {
@@ -252,13 +261,13 @@ func branchHasEnclosing(body syntax.Body, branchTok int, continueOnly bool) bool
 	return false
 }
 
-func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
+func definitelyInvalidAssignTarget(file *syntax.File, span ExprSpan) bool {
+	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
 	// A call result is not assignable; dereferencing a returned pointer is.
-	if end > start && tokCharIs(&file, end-1, ')') && !tokCharIs(&file, start, '*') {
+	if end > start && tokCharIs(file, end-1, ')') && !tokCharIs(file, start, '*') {
 		return true
 	}
-	if end > start && file.Tokens[end-1].KindLine&255 == syntax.TokenOperator && !tokCharIs(&file, end-1, ')') && !tokCharIs(&file, end-1, ']') {
+	if end > start && file.Tokens[end-1].KindLine&255 == syntax.TokenOperator && !tokCharIs(file, end-1, ')') && !tokCharIs(file, end-1, ']') {
 		return true
 	}
 
@@ -269,18 +278,18 @@ func definitelyInvalidAssignTarget(file syntax.File, span ExprSpan) bool {
 	if kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar {
 		return true
 	}
-	return tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")
+	return tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false") || tokenTextIs(file, start, "nil")
 }
 
-func expressionMayBeMultiValued(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
+func expressionMayBeMultiValued(file *syntax.File, span ExprSpan) bool {
+	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
 	if end <= start {
 		return false
 	}
-	if tokCharIs(&file, end-1, ')') || tokCharIs(&file, end-1, ']') {
+	if tokCharIs(file, end-1, ')') || tokCharIs(file, end-1, ']') {
 		return true
 	}
-	return tokenTextIs(&file, start, "<-")
+	return tokenTextIs(file, start, "<-")
 }
 
 func stripOuterParens(file *syntax.File, start int, end int) (int, int) {
@@ -314,11 +323,11 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	return true
 }
 
-func expressionIsDefiniteLiteral(file syntax.File, span ExprSpan) bool {
-	start, end := stripOuterParens(&file, span.StartTok, span.EndTok)
+func expressionIsDefiniteLiteral(file *syntax.File, span ExprSpan) bool {
+	start, end := stripOuterParens(file, span.StartTok, span.EndTok)
 	if end-start != 1 {
 		return false
 	}
 	kind := file.Tokens[start].KindLine & 255
-	return kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar || tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")
+	return kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar || tokenTextIs(file, start, "true") || tokenTextIs(file, start, "false") || tokenTextIs(file, start, "nil")
 }

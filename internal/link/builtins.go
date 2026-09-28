@@ -21,10 +21,15 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		pending := false
 		lastStart := len(program.Tokens)
 		for i := len(program.Tokens) - 2; i >= 0; i-- {
-			if program.Tokens[i].KindLine&255 != unit.TokenIdent || !functionValueTokenEquals(program, i+1, "(") {
+			token := &program.Tokens[i]
+			if token.KindLine&255 != unit.TokenIdent {
 				continue
 			}
-			if !functionValueTokenEquals(program, i, "min") && !functionValueTokenEquals(program, i, "max") && !functionValueTokenEquals(program, i, "clear") && !functionValueTokenEquals(program, i, "string") {
+			// Reject ordinary names before inspecting call syntax or spelling.
+			// Only these four builtin names can require a rewrite here.
+			size := token.Size
+			if !(size == 3 && (functionValueTokenEquals(program, i, "min") || functionValueTokenEquals(program, i, "max")) ||
+				size == 5 && functionValueTokenEquals(program, i, "clear") || size == 6 && functionValueTokenEquals(program, i, "string")) || !functionValueTokenEquals(program, i+1, "(") {
 				continue
 			}
 			mark := arena.Mark()

@@ -29,7 +29,7 @@ type definiteCallTarget struct {
 // invalidDefiniteCallArity rejects calls whose argument count cannot match the
 // declared function signature. A single argument may be a multi-valued call,
 // so leave that case uncertain when the callee requires more than one value.
-func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
+func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn *syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
 	if packageIndex < 0 || packageIndex >= len(graph.Packages) || fileIndex < 0 || fileIndex >= len(graph.Packages[packageIndex].Files) {
 		return -1
 	}
@@ -39,7 +39,7 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}
-		if tok := invalidResolvedCallArity(file, fn, ref.Token, info.Symbols[ref.Index]); tok >= 0 {
+		if tok := invalidResolvedCallArity(file, *fn, ref.Token, info.Symbols[ref.Index]); tok >= 0 {
 			return tok
 		}
 	}
@@ -51,7 +51,7 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 		if selector.BasePackage >= len(checked) || selector.Symbol >= len(checked[selector.BasePackage].Symbols) {
 			continue
 		}
-		if tok := invalidResolvedCallArity(file, fn, selector.NameTok, checked[selector.BasePackage].Symbols[selector.Symbol]); tok >= 0 {
+		if tok := invalidResolvedCallArity(file, *fn, selector.NameTok, checked[selector.BasePackage].Symbols[selector.Symbol]); tok >= 0 {
 			return tok
 		}
 	}
@@ -70,7 +70,7 @@ func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, cal
 	if close <= open || close > callerFn.BodyEnd {
 		return -1
 	}
-	got := countExprListItems(*caller, open+1, close-1)
+	got := countExprListItems(caller, open+1, close-1)
 	want := symbol.Arity
 	variadic := want < 0
 	if variadic {
@@ -88,7 +88,7 @@ func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, cal
 			return calleeTok
 		}
 	}
-	if valid || got == 1 && want > 1 && definiteCallExpression(*caller, open+1, close-1) {
+	if valid || got == 1 && want > 1 && definiteCallExpression(caller, open+1, close-1) {
 		return -1
 	}
 	return calleeTok
@@ -170,11 +170,11 @@ func prepareDefiniteCallTarget(pkg *load.Package, info *PackageInfo, symbolIndex
 		return
 	}
 	file := &pkg.Files[symbol.File].File
-	fn, ok := findDefinitePackageFuncDecl(*file, symbol.Token)
-	if !ok || !definiteSignatureHasPointer(file, fn) {
+	fn, ok := findDefinitePackageFuncDecl(file, symbol.Token)
+	if !ok || !definiteSignatureHasPointer(file, &fn) {
 		return
 	}
-	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(definitePointerParams(pkg, info, symbol.File, file, fn))
+	target.pointerParams = renvo_runtime_ArenaPersistCheckBools(definitePointerParams(pkg, info, symbol.File, file, &fn))
 }
 
 func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
@@ -209,7 +209,7 @@ func nextDefiniteCallComma(file *syntax.File, start int, end int) int {
 	return end
 }
 
-func definiteSignatureHasPointer(file *syntax.File, fn syntax.FuncDecl) bool {
+func definiteSignatureHasPointer(file *syntax.File, fn *syntax.FuncDecl) bool {
 	for i := fn.ParamsStart; i < fn.ParamsEnd; i++ {
 		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('*') {
 			return true
@@ -218,7 +218,7 @@ func definiteSignatureHasPointer(file *syntax.File, fn syntax.FuncDecl) bool {
 	return false
 }
 
-func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, file *syntax.File, fn syntax.FuncDecl) []bool {
+func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, file *syntax.File, fn *syntax.FuncDecl) []bool {
 	var params []bool
 	pending := 0
 	start := fn.ParamsStart + 1
@@ -258,7 +258,7 @@ func definitePointerParams(pkg *load.Package, info *PackageInfo, fileIndex int, 
 	return params
 }
 
-func findDefinitePackageFuncDecl(file syntax.File, token int) (syntax.FuncDecl, bool) {
+func findDefinitePackageFuncDecl(file *syntax.File, token int) (syntax.FuncDecl, bool) {
 	low := 0
 	high := len(file.Funcs)
 	for low < high {
@@ -287,7 +287,7 @@ func findDefinitePackageFunc(pkg *load.Package, info *PackageInfo, callerFile *s
 	if symbol.File < 0 || symbol.File >= len(pkg.Files) {
 		return -1, syntax.FuncDecl{}, false
 	}
-	fn, ok := findDefinitePackageFuncDecl(pkg.Files[symbol.File].File, symbol.Token)
+	fn, ok := findDefinitePackageFuncDecl(&pkg.Files[symbol.File].File, symbol.Token)
 	return symbol.File, fn, ok
 }
 
@@ -330,7 +330,7 @@ func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return kind
 	}
 	if !*localTypesReady {
-		*localTypes = collectDefiniteLocalTypes(*file, *caller)
+		*localTypes = collectDefiniteLocalTypes(file, *caller)
 		*localTypesReady = true
 	}
 	if typeStart, typeEnd, ok := findDefiniteLocalType(file, *localTypes, start, before); ok {
@@ -372,7 +372,7 @@ func findDefiniteLocalType(file *syntax.File, locals []definiteLocalTypeSpan, na
 	return foundStart, foundEnd, found
 }
 
-func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []definiteLocalTypeSpan {
+func collectDefiniteLocalTypes(file *syntax.File, caller syntax.FuncDecl) []definiteLocalTypeSpan {
 	var locals []definiteLocalTypeSpan
 	for i := caller.BodyStart + 1; i < caller.BodyEnd; i++ {
 		if file.Tokens[i].KindLine&255 != syntax.TokenVar {
@@ -380,13 +380,13 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 		}
 		specStart := i + 1
 		if specStart < caller.BodyEnd && file.Tokens[specStart].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask == int('(') {
-			close := findTypeMatching(&file, specStart, '(', ')')
+			close := findTypeMatching(file, specStart, '(', ')')
 			if close <= specStart || close > caller.BodyEnd {
 				continue
 			}
 			for j := specStart + 1; j < close-1; {
-				j = skipLocalSeparators(&file, j, close-1)
-				specEnd := statementSpecEnd(&file, j, close-1)
+				j = skipLocalSeparators(file, j, close-1)
+				specEnd := statementSpecEnd(file, j, close-1)
 				locals = appendDefiniteLocalSpecTypes(locals, file, j, specEnd)
 				if specEnd <= j {
 					j++
@@ -397,24 +397,24 @@ func collectDefiniteLocalTypes(file syntax.File, caller syntax.FuncDecl) []defin
 			i = close - 1
 			continue
 		}
-		specEnd := statementSpecEnd(&file, specStart, caller.BodyEnd)
+		specEnd := statementSpecEnd(file, specStart, caller.BodyEnd)
 		locals = appendDefiniteLocalSpecTypes(locals, file, specStart, specEnd)
 		i = specEnd - 1
 	}
 	return locals
 }
 
-func appendDefiniteLocalSpecTypes(locals []definiteLocalTypeSpan, file syntax.File, start int, end int) []definiteLocalTypeSpan {
-	start, end = trimDeclSpan(&file, start, end)
+func appendDefiniteLocalSpecTypes(locals []definiteLocalTypeSpan, file *syntax.File, start int, end int) []definiteLocalTypeSpan {
+	start, end = trimDeclSpan(file, start, end)
 	if start < 0 || end <= start {
 		return locals
 	}
-	names, namesEnd := localDeclNameTokens(&file, start, end)
+	names, namesEnd := localDeclNameTokens(file, start, end)
 	typeEnd := end
-	if valueStart := findDeclAssign(&file, namesEnd, end); valueStart >= 0 {
+	if valueStart := findDeclAssign(file, namesEnd, end); valueStart >= 0 {
 		typeEnd = valueStart
 	}
-	typeStart, typeEnd := trimDeclSpan(&file, namesEnd, typeEnd)
+	typeStart, typeEnd := trimDeclSpan(file, namesEnd, typeEnd)
 	for i := 0; i < len(names); i++ {
 		locals = append(locals, definiteLocalTypeSpan{nameTok: names[i], typeStart: typeStart, typeEnd: typeEnd, visible: end})
 	}
@@ -426,7 +426,7 @@ func definiteTypeKind(pkg *load.Package, info *PackageInfo, fileIndex int, start
 		return definiteTypeUnknown
 	}
 	file := pkg.Files[fileIndex].File
-	start, end = trimTypeSpan(file, start, end)
+	start, end = trimTypeSpan(&file, start, end)
 	if start < 0 || end <= start {
 		return definiteTypeUnknown
 	}

@@ -143,7 +143,7 @@ go compiler {
 	func renvoAarch64EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 		a := &g.asm
 		if wordCount > 0 {
-			renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+			renvoAsmPopCallWord0(a)
 		}
 		if wordCount > 1 {
 			renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)

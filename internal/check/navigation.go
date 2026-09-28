@@ -39,7 +39,7 @@ func NavigateProgram(graph load.Graph, program Program, path string, offset int)
 		return NavigationResult{}
 	}
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
-	token := navigationToken(file, offset)
+	token := navigationToken(&file, offset)
 	if token < 0 {
 		return NavigationResult{}
 	}
@@ -65,8 +65,8 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 		return NavigationResult{}
 	}
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
-	if fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[token])); ok {
-		if scope, scopeOK, _ := buildFuncScopeCore(&file, fn); scopeOK && lookupScopeTokenNameCore(&scope, &file, token) >= 0 {
+	if fn, ok := completionFunctionAt(&file, syntax.TokenStart(file.Tokens[token])); ok {
+		if scope, scopeOK, _ := buildFuncScopeCore(&file, &fn); scopeOK && lookupScopeTokenNameCore(&scope, &file, token) >= 0 {
 			return NavigationResult{}
 		}
 	}
@@ -112,7 +112,7 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 	return result
 }
 
-func navigationToken(file syntax.File, offset int) int {
+func navigationToken(file *syntax.File, offset int) int {
 	previous := -1
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
@@ -176,7 +176,7 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 		if token < fn.StartTok || token >= fn.EndTok {
 			continue
 		}
-		scope, scopeOK, _ := buildFuncScopeCore(&file, fn)
+		scope, scopeOK, _ := buildFuncScopeCore(&file, &fn)
 		if !scopeOK {
 			continue
 		}
@@ -207,13 +207,13 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 		typ, ok = completionPackageNameType(graph, program, imported, components[1])
 		start = 2
 	} else {
-		fn, found := completionFunctionAt(file, syntax.TokenStart(file.Tokens[token]))
+		fn, found := completionFunctionAt(&file, syntax.TokenStart(file.Tokens[token]))
 		if !found {
 			return navigationTarget{}, false
 		}
-		typ, ok = completionNameType(graph, program, pkgIndex, fileIndex, file, fn, components[0], syntax.TokenStart(file.Tokens[token]))
+		typ, ok = completionNameType(graph, program, pkgIndex, fileIndex, &file, &fn, components[0], syntax.TokenStart(file.Tokens[token]))
 		if !ok {
-			typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, file, fn, components[0], syntax.TokenStart(file.Tokens[token]))
+			typ, ok = navigationShortAssignType(graph, program, pkgIndex, fileIndex, &file, &fn, components[0], syntax.TokenStart(file.Tokens[token]))
 		}
 	}
 	if !ok {
@@ -232,22 +232,22 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 	return navigationFindMember(graph, program, typ, name, 0)
 }
 
-func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, fileIndex int, file syntax.File, fn syntax.FuncDecl, name string, offset int) (completionType, bool) {
+func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, fileIndex int, file *syntax.File, fn *syntax.FuncDecl, name string, offset int) (completionType, bool) {
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
-		if syntax.TokenStart(file.Tokens[i]) >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
+		if syntax.TokenStart(file.Tokens[i]) >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(file, i) != name {
 			continue
 		}
 		assign := completionFindShortAssign(file, i, fn.BodyEnd)
 		start := assign + 1
 		if assign < 0 || start+3 >= fn.BodyEnd || file.Tokens[start].KindLine&255 != syntax.TokenIdent ||
-			!tokenTextIs(&file, start+1, ".") || file.Tokens[start+2].KindLine&255 != syntax.TokenIdent || !tokenTextIs(&file, start+3, "(") {
+			!tokenTextIs(file, start+1, ".") || file.Tokens[start+2].KindLine&255 != syntax.TokenIdent || !tokenTextIs(file, start+3, "(") {
 			continue
 		}
-		owner := completionImportPackage(program.Packages[pkgIndex], fileIndex, tokenString(&file, start))
+		owner := completionImportPackage(program.Packages[pkgIndex], fileIndex, tokenString(file, start))
 		if owner < 0 || owner >= len(program.Packages) || owner >= len(graph.Packages) {
 			continue
 		}
-		functionName := tokenString(&file, start+2)
+		functionName := tokenString(file, start+2)
 		info := program.Packages[owner]
 		for symbolIndex := 0; symbolIndex < len(info.Symbols); symbolIndex++ {
 			symbol := info.Symbols[symbolIndex]
@@ -260,7 +260,7 @@ func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, 
 				if function.NameTok != symbol.Token {
 					continue
 				}
-				signature := buildFuncSignature(&functionFile, function)
+				signature := buildFuncSignature(&functionFile, &function)
 				if len(signature.Results) > 0 {
 					return completionSpanType(graph, program, owner, symbol.File, signature.Results[0].TypeStart, signature.Results[0].TypeEnd)
 				}
@@ -443,7 +443,7 @@ func navigationLocal(graph load.Graph, program Program, target navigationTarget)
 		return NavigationResult{}
 	}
 	fn := file.Funcs[body.Func]
-	scope, ok, _ := buildFuncScopeCore(&file, fn)
+	scope, ok, _ := buildFuncScopeCore(&file, &fn)
 	if !ok || target.scopeIndex < 0 || target.scopeIndex >= len(scope.Names) {
 		return NavigationResult{}
 	}

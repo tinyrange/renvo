@@ -12,9 +12,11 @@ type scopedTypeBinding struct {
 	writable             bool
 	constant             bool
 	iotaValue            int
+	concrete             interfaceConcreteType
+	concreteReady        bool
 }
 
-func collectScopedTypeBindings(file *syntax.File, fn syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) []scopedTypeBinding {
+func collectScopedTypeBindings(file *syntax.File, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature) []scopedTypeBinding {
 	var bindings []scopedTypeBinding
 	for group := 0; group < 3; group++ {
 		fields := signature.Params
@@ -29,7 +31,7 @@ func collectScopedTypeBindings(file *syntax.File, fn syntax.FuncDecl, body *synt
 			bindings = append(bindings, scopedTypeBinding{name: field.NameTok, visible: fn.BodyStart, end: fn.BodyEnd, typeStart: field.TypeStart, typeEnd: field.TypeEnd, valueStart: -1, valueEnd: -1, writable: true})
 		}
 	}
-	scopeEnds := localRuleScopeEnds(*body)
+	scopeEnds := localRuleScopeEnds(body)
 	for statementIndex := 0; statementIndex < len(body.Stmts); statementIndex++ {
 		stmt := &body.Stmts[statementIndex]
 		start, end := stmt.StartTok, stmt.EndTok
@@ -105,7 +107,7 @@ func appendScopedTypeBindings(bindings []scopedTypeBinding, file *syntax.File, s
 	var values []ExprSpan
 	if op >= 0 {
 		typeEnd = op
-		values = splitExprList(*file, op+1, end)
+		values = splitExprList(file, op+1, end)
 	}
 	for i, name := range names {
 		binding := scopedTypeBinding{name: name, visible: end, end: scopeEnd, typeStart: -1, typeEnd: -1, valueStart: -1, valueEnd: -1, writable: variable, constant: constant}

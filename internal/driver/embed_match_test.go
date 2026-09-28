@@ -39,7 +39,7 @@ func TestSourceEmbedArchiveMatchPreservesSelection(t *testing.T) {
 func referenceSourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
 	// Bound search work even on adversarial buckets. The best-match boundary
 	// check below avoids rescanning shared prefixes during the deeper search.
-	const maxCandidates = 256
+	const maxCandidates = 16
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0

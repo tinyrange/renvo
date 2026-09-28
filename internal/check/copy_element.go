@@ -8,7 +8,7 @@ import (
 // copy and append's expanded form both require a source slice with identical
 // element type, or a string source with a byte-slice destination. sourceEnd
 // excludes append's ellipsis; untyped nil stays unresolved and valid there.
-func invalidSliceTransferElements(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, before int, dst, src ExprSpan, sourceEnd int) int {
+func invalidSliceTransferElements(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, before int, dst, src ExprSpan, sourceEnd int) int {
 	destination := copySliceElement(pkg, info, fileIndex, scope, bindings, dst.StartTok, dst.EndTok, before, 0)
 	source := copySliceElement(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
 	value := numericBuiltinExprValue(pkg, info, fileIndex, scope, bindings, src.StartTok, sourceEnd, before, 0)
@@ -20,7 +20,7 @@ func invalidSliceTransferElements(pkg *load.Package, info *PackageInfo, fileInde
 
 // A known element identity is stronger than an underlying scalar kind: copy
 // permits different named slice types, but requires identical element types.
-func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) string {
+func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, bindings []scopedTypeBinding, start, end, before, depth int) string {
 	if depth > 32 || start < 0 || start >= end {
 		return ""
 	}
@@ -33,7 +33,7 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 			}
 		}
 	}
-	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(&scope, file, start) < 0 {
+	if start+1 < end && tokCharIs(file, start+1, '(') && findTypeMatching(file, start+1, '(', ')') == end && lookupScopeTokenNameCore(scope, file, start) < 0 {
 		name := tokenString(file, start)
 		if name == "make" && lookupPackageSymbol(info.Symbols, name) < 0 {
 			return copySliceTypeElement(pkg, info, fileIndex, scope, start+2, nextTopLevelComma(file, start+2, end-1), 0)
@@ -48,7 +48,7 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 	chosen := -1
 	for i := 0; i < len(bindings); i++ {
 		binding := &bindings[i]
-		if binding.visible <= before && before < binding.end && coreTokensEqual(file, binding.name, start) && (chosen < 0 || binding.visible > bindings[chosen].visible) {
+		if binding.visible <= before && before < binding.end && (chosen < 0 || binding.visible > bindings[chosen].visible) && coreTokensEqual(file, binding.name, start) {
 			chosen = i
 		}
 	}
@@ -66,18 +66,18 @@ func copySliceElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope
 			continue
 		}
 		if decl.TypeEnd > decl.TypeStart {
-			return copySliceTypeElement(pkg, info, decl.File, CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
+			return copySliceTypeElement(pkg, info, decl.File, &CoreScope{}, decl.TypeStart, decl.TypeEnd, 0)
 		}
-		values := splitExprList(pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
+		values := splitExprList(&pkg.Files[decl.File].File, decl.ValueStart, decl.ValueEnd)
 		if decl.ValueIndex >= 0 && decl.ValueIndex < len(values) {
 			value := values[decl.ValueIndex]
-			return copySliceElement(pkg, info, decl.File, CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
+			return copySliceElement(pkg, info, decl.File, &CoreScope{}, nil, value.StartTok, value.EndTok, decl.Token, depth+1)
 		}
 	}
 	return ""
 }
 
-func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) string {
+func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) string {
 	if start < 0 || start >= end || depth > len(info.Types)+2 {
 		return ""
 	}
@@ -86,7 +86,7 @@ func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, s
 	if end-start >= 3 && tokCharIs(file, start, '[') && tokCharIs(file, start+1, ']') {
 		return copyElementIdentity(pkg, info, fileIndex, scope, start+2, end, 0)
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return ""
 	}
 	index := lookupType(info.Types, tokenString(file, start))
@@ -94,10 +94,10 @@ func copySliceTypeElement(pkg *load.Package, info *PackageInfo, fileIndex int, s
 		return ""
 	}
 	typ := &info.Types[index]
-	return copySliceTypeElement(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+	return copySliceTypeElement(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 }
 
-func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, scope CoreScope, start, end, depth int) string {
+func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, scope *CoreScope, start, end, depth int) string {
 	if start < 0 || start >= end || depth > len(info.Types)+32 {
 		return ""
 	}
@@ -117,7 +117,7 @@ func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, sc
 		}
 		return ""
 	}
-	if end-start != 1 || lookupScopeTokenNameCore(&scope, file, start) >= 0 {
+	if end-start != 1 || lookupScopeTokenNameCore(scope, file, start) >= 0 {
 		return ""
 	}
 	name := tokenString(file, start)
@@ -126,7 +126,7 @@ func copyElementIdentity(pkg *load.Package, info *PackageInfo, fileIndex int, sc
 		if !typ.Alias {
 			return "named:" + name
 		}
-		return copyElementIdentity(pkg, info, typ.File, CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
+		return copyElementIdentity(pkg, info, typ.File, &CoreScope{}, typ.TypeStart, typ.TypeEnd, depth+1)
 	}
 	if lookupPackageSymbol(info.Symbols, name) >= 0 {
 		return ""
