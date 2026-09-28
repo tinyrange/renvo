@@ -55,7 +55,7 @@ func literalStructFields(pkg *load.Package, info *PackageInfo, file *syntax.File
 		return nil, false
 	}
 	// Do not mistake a shadowed package type for a local map or array type.
-	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return nil, false
 	}
 	index := lookupType(info.Types, tokenString(file, start))

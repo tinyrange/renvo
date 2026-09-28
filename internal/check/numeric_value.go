@@ -83,7 +83,7 @@ func numericBuiltinExprValue(pkg *load.Package, info *PackageInfo, fileIndex int
 		return value
 	}
 	name := tokenString(file, start)
-	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
+	if (name == "true" || name == "false" || name == "nil") && lookupScopeTokenNameCore(&scope, file, start) < 0 && lookupPackageSymbol(info.Symbols, name) < 0 {
 		if name != "nil" {
 			return numericBuiltinValue{kind: "bool"}
 		}
@@ -119,7 +119,7 @@ func numericBuiltinTypeValue(pkg *load.Package, info *PackageInfo, fileIndex int
 	if end-start != 1 {
 		return numericBuiltinValue{}
 	}
-	if lookupScopeTokenNameCore(scope, file, start) >= 0 {
+	if lookupScopeTokenNameCore(&scope, file, start) >= 0 {
 		return numericBuiltinValue{}
 	}
 	name := tokenString(file, start)

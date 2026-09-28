@@ -22,7 +22,7 @@ func invalidMakeBuiltinCall(pkg *load.Package, info *PackageInfo, fileIndex int,
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		start, end := stripOuterParens(&file, arg.StartTok, arg.EndTok)
-		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
+		if end-start == 1 && (file.Tokens[start].KindLine&255 == syntax.TokenString || (tokenTextIs(&file, start, "true") || tokenTextIs(&file, start, "false") || tokenTextIs(&file, start, "nil")) && lookupScopeTokenNameCore(&scope, &file, start) < 0 && lookupPackageSymbol(info.Symbols, tokenString(&file, start)) < 0) {
 			return CheckErrBuiltinOperand, arg.StartTok
 		}
 		if unsafeAddFractionalDecimal(file, start, end) {
@@ -76,7 +76,7 @@ func makeAllocationType(pkg *load.Package, info *PackageInfo, fileIndex, start, 
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return -1
 	}
-	if lookupScopeTokenNameCore(scope, &file, start) >= 0 {
+	if lookupScopeTokenNameCore(&scope, &file, start) >= 0 {
 		return 0
 	}
 	name := tokenString(&file, start)
