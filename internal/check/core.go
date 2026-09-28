@@ -566,7 +566,7 @@ func invalidImportedLiteralElements(file *syntax.File, open int, typ *TypeInfo, 
 		return -1
 	}
 	for start := open + 1; start < close-1; {
-		end := nextTopLevelComma(*file, start, close-1)
+		end := nextTopLevelComma(file, start, close-1)
 		if collections > 0 {
 			// An elided element literal still initializes the imported type.
 			// Skip a collection key, respecting brackets inside key expressions.
