@@ -269,20 +269,21 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 	deferred := false
 	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
+		mark := arena.Mark()
 		token := program.Tokens[i]
 		start := token.Start
 		valid := start >= 0 && start+token.Size <= len(program.Text)
-		if token.KindLine&255 == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
+		if !functions && token.KindLine&255 == unit.TokenFunc && functionValueTokenEquals(program, i+1, "(") && !functionValueIsDeclaredFunction(program, i) {
 			functions = true
 		}
-		if i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
+		if !deferred && i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
 			name := functionValueTokenText(program, i+1)
 			if (name == "copy" || name == "delete" || name == "panic" || name == "print" || name == "println" || name == "recover") && functionValueEnclosingLocalType(program, i, name) == "" && !functionValueDeclaredFunction(program, name) {
 				deferred = true
 			}
 		}
 		name := ""
-		if valid && token.KindLine&255 == unit.TokenIdent {
+		if !builtins && valid && token.KindLine&255 == unit.TokenIdent {
 			if token.Size == 3 && program.Text[start] == 'm' {
 				if program.Text[start+1] == 'i' && program.Text[start+2] == 'n' {
 					name = "min"
@@ -300,6 +301,18 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 		}
 		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
 			builtins = true
+		}
+		arena.Rewind(mark)
+	}
+	// Inferred global function values must keep the same representation when
+	// another package later introduces callbacks or ordinary builtin lowering.
+	// This also covers globals initialized by lifted function literals.
+	if !functions {
+		for i := 0; i < len(program.Decls); i++ {
+			if functionValueGlobalInitializerFunction(program, program.Decls[i]) >= 0 {
+				functions = true
+				break
+			}
 		}
 	}
 	return functions, deferred, builtins
@@ -3032,6 +3045,10 @@ func applyFunctionValueEdits(src []byte, edits []functionValueEdit) ([]byte, boo
 }
 
 func applyFunctionValueEditsCapacity(src []byte, edits []functionValueEdit, extra int) ([]byte, bool) {
+	return applyFunctionValueEditsCapacityMode(src, edits, extra, false)
+}
+
+func applyFunctionValueEditsCapacityMode(src []byte, edits []functionValueEdit, extra int, transient bool) ([]byte, bool) {
 	for i := 0; i < len(edits); i++ {
 		best := i
 		for j := i + 1; j < len(edits); j++ {
@@ -3042,15 +3059,27 @@ func applyFunctionValueEditsCapacity(src []byte, edits []functionValueEdit, extr
 		edits[i], edits[best] = edits[best], edits[i]
 	}
 	size := len(src) + extra
+	maxGrowth := 0
 	pos := 0
 	for _, edit := range edits {
 		if edit.start < pos || edit.end < edit.start || edit.end > len(src) {
 			return nil, false
 		}
 		size += len(edit.text) - (edit.end - edit.start)
+		if growth := size - len(src) - extra; growth > maxGrowth {
+			maxGrowth = growth
+		}
 		pos = edit.end
 	}
-	out := make([]byte, 0, size)
+	var out []byte
+	if transient && cap(src) >= size && cap(src) >= len(src)+maxGrowth {
+		buffer := src[:len(src)+maxGrowth]
+		copy(buffer[maxGrowth:], src)
+		src = buffer[maxGrowth:]
+		out = buffer[:0]
+	} else {
+		out = make([]byte, 0, size)
+	}
 	pos = 0
 	for i := 0; i < len(edits); i++ {
 		edit := edits[i]

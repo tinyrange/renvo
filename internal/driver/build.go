@@ -438,6 +438,12 @@ func bindBuiltInTarget(data *[]byte, options Options) {
 }
 
 func bindForeignPrograms(data *[]byte, program *unit.Program, programs []unit.ForeignProgram) bool {
+	// No foreign payload means the unit is already complete. Avoid returning
+	// its byte slice through the general binder: self-hosted callers promote
+	// escaping slices, which would copy the entire unit for this no-op.
+	if len(programs) == 0 {
+		return true
+	}
 	for i := 0; i < len(programs); i++ {
 		programs[i].Global = linkedForeignGlobal(program, programs[i].Name)
 		if programs[i].Global < 0 {

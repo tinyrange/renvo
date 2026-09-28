@@ -61,7 +61,8 @@ func linkBuildCore(result build.Result, transient bool, object bool) Result {
 	}
 	var data []byte
 	if transient {
-		data, ok = unit.MarshalCoreTransient(unit.CoreProgramFrom(program))
+		core := unit.CoreProgramFrom(program)
+		ok = unit.MarshalCoreTransientInto(&core, &data)
 	} else {
 		data, ok = unit.MarshalCore(unit.CoreProgramFrom(program))
 	}
