@@ -25,11 +25,11 @@ func LookupField(fields []Field, name string) int {
 	return -1
 }
 
-func buildFuncSignature(file syntax.File, fn syntax.FuncDecl) FuncSignature {
+func buildFuncSignature(file *syntax.File, fn syntax.FuncDecl) FuncSignature {
 	return buildSignatureFromParts(file, fn.ReceiverStart, fn.ReceiverEnd, fn.ParamsStart, fn.ParamsEnd, fn.ResultStart, fn.ResultEnd)
 }
 
-func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd int, paramsStart int, paramsEnd int, resultStart int, resultEnd int) FuncSignature {
+func buildSignatureFromParts(file *syntax.File, receiverStart int, receiverEnd int, paramsStart int, paramsEnd int, resultStart int, resultEnd int) FuncSignature {
 	var sig FuncSignature
 	if receiverStart >= 0 && receiverEnd > receiverStart {
 		sig.Receiver = parseFieldList(file, receiverStart, receiverEnd)
@@ -38,9 +38,9 @@ func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd in
 		sig.Params = parseFieldList(file, paramsStart+1, paramsEnd-1)
 	}
 	if resultStart >= 0 && resultEnd > resultStart {
-		if tokCharIs(&file, resultStart, '(') {
+		if tokCharIs(file, resultStart, '(') {
 			end := resultEnd - 1
-			if tokCharIs(&file, end, ')') {
+			if tokCharIs(file, end, ')') {
 				sig.Results = parseFieldList(file, resultStart+1, end)
 			}
 		} else {
@@ -53,7 +53,7 @@ func buildSignatureFromParts(file syntax.File, receiverStart int, receiverEnd in
 	return sig
 }
 
-func parseFieldList(file syntax.File, start int, end int) []Field {
+func parseFieldList(file *syntax.File, start int, end int) []Field {
 	capacity := 0
 	if tokens := end - start; tokens > 0 {
 		// Every additional field needs at least a separating comma, so a field
@@ -77,7 +77,7 @@ func parseFieldList(file syntax.File, start int, end int) []Field {
 			i = segEnd + 1
 			continue
 		}
-		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(&file, first+1, '.') {
+		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
 			fields = appendNamedFields(fields, file, pending, first, first+1, last)
 			pending = pending[:0]
 		} else {
@@ -90,10 +90,10 @@ func parseFieldList(file syntax.File, start int, end int) []Field {
 	return appendPendingUnnamed(fields, file, pending)
 }
 
-func appendNamedFields(fields []Field, file syntax.File, pending []int, current int, typeStart int, typeEnd int) []Field {
+func appendNamedFields(fields []Field, file *syntax.File, pending []int, current int, typeStart int, typeEnd int) []Field {
 	for i := 0; i < len(pending); i++ {
 		fields = append(fields, Field{
-			Name:      tokenString(&file, pending[i]),
+			Name:      tokenString(file, pending[i]),
 			NameTok:   pending[i],
 			TypeStart: typeStart,
 			TypeEnd:   typeEnd,
@@ -101,7 +101,7 @@ func appendNamedFields(fields []Field, file syntax.File, pending []int, current 
 		})
 	}
 	fields = append(fields, Field{
-		Name:      tokenString(&file, current),
+		Name:      tokenString(file, current),
 		NameTok:   current,
 		TypeStart: typeStart,
 		TypeEnd:   typeEnd,
@@ -110,14 +110,14 @@ func appendNamedFields(fields []Field, file syntax.File, pending []int, current 
 	return fields
 }
 
-func appendPendingUnnamed(fields []Field, file syntax.File, pending []int) []Field {
+func appendPendingUnnamed(fields []Field, file *syntax.File, pending []int) []Field {
 	for i := 0; i < len(pending); i++ {
 		fields = append(fields, Field{NameTok: -1, TypeStart: pending[i], TypeEnd: pending[i] + 1, Variadic: fieldIsVariadic(file, pending[i])})
 	}
 	return fields
 }
 
-func trimFieldSpan(file syntax.File, start int, end int) (int, int) {
+func trimFieldSpan(file *syntax.File, start int, end int) (int, int) {
 	for start < end && isFieldSeparator(file, start) {
 		start++
 	}
@@ -127,14 +127,14 @@ func trimFieldSpan(file syntax.File, start int, end int) (int, int) {
 	return start, end
 }
 
-func isFieldSeparator(file syntax.File, tok int) bool {
-	return tokCharIs(&file, tok, ',') || tokCharIs(&file, tok, ';')
+func isFieldSeparator(file *syntax.File, tok int) bool {
+	return tokCharIs(file, tok, ',') || tokCharIs(file, tok, ';')
 }
 
-func isSingleIdent(file syntax.File, start int, end int) bool {
+func isSingleIdent(file *syntax.File, start int, end int) bool {
 	return end-start == 1 && file.Tokens[start].KindLine&255 == syntax.TokenIdent
 }
 
-func fieldIsVariadic(file syntax.File, start int) bool {
-	return tokenTextIs(&file, start, "...")
+func fieldIsVariadic(file *syntax.File, start int) bool {
+	return tokenTextIs(file, start, "...")
 }
