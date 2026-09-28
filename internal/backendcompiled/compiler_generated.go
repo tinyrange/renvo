@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "14120267b3f5c98c782f754b4857ae74badf21b5441dcdea7b35d7e063a2fd3b"
+const CompilerSourceDigest = "e6e0c2c147d2846316bad4cf199267f926bd9841e570d8b281ac4cf324fc20f8"
 
 // source: backend/compiler_common_impl.go
 
@@ -19543,9 +19543,6 @@ if e.argCount != 1 {
 return false
 }
 argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-if g.deferReturnLabel <= 0 {
-return false
-}
 valueOffset := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
 if !renvoEmitInterfaceAssignToLocal(g, ep, argIndex, valueOffset) {
 return false
