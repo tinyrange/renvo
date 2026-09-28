@@ -197,7 +197,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 			if len(literals) > 0 {
 				scope, ok, _ := buildFuncScopeCore(*file, fn)
 				if ok {
-					bindings := collectScopedTypeBindings(*file, fn, body, &signature)
+					bindings := collectScopedTypeBindings(file, fn, &body, &signature)
 					if tok := invalidArrayLiteralBounds(pkg, info, fileIndex, literals, scope, fn, bindings); tok >= 0 {
 						arena.Reset(functionArenaStart)
 						return false, CheckErrArrayIndex, fileIndex, tok
