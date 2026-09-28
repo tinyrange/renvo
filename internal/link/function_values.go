@@ -269,7 +269,6 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 	deferred := false
 	builtins := false
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		mark := arena.Mark()
 		token := program.Tokens[i]
 		start := token.Start
 		valid := start >= 0 && start+token.Size <= len(program.Text)
@@ -277,10 +276,12 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 			functions = true
 		}
 		if !deferred && i+2 < len(program.Tokens) && valid && token.Size == 5 && program.Text[start] == 'd' && program.Text[start+1] == 'e' && program.Text[start+2] == 'f' && program.Text[start+3] == 'e' && program.Text[start+4] == 'r' && functionValueTokenEquals(program, i+2, "(") {
+			mark := arena.Mark()
 			name := functionValueTokenText(program, i+1)
 			if (name == "copy" || name == "delete" || name == "panic" || name == "print" || name == "println" || name == "recover") && functionValueEnclosingLocalType(program, i, name) == "" && !functionValueDeclaredFunction(program, name) {
 				deferred = true
 			}
+			arena.Rewind(mark)
 		}
 		name := ""
 		if !builtins && valid && token.KindLine&255 == unit.TokenIdent {
@@ -293,16 +294,21 @@ func functionValueProgramNeedsLowering(program *unit.Program) (bool, bool, bool)
 			} else if token.Size == 5 && program.Text[start] == 'c' && program.Text[start+1] == 'l' && program.Text[start+2] == 'e' && program.Text[start+3] == 'a' && program.Text[start+4] == 'r' {
 				name = "clear"
 			} else if token.Size == 6 && functionValueTokenEquals(program, i, "string") && functionValueTokenEquals(program, i+1, "(") {
+				mark := arena.Mark()
 				close := functionValueFindMatchingParen(program, i+1)
 				if close > i+2 && ordinaryIntegerExpression(program, i, i+2, close) {
 					name = "string"
 				}
+				arena.Rewind(mark)
 			}
 		}
-		if name != "" && functionValueTokenEquals(program, i+1, "(") && !ordinaryBuiltinShadowed(program, i, name) {
-			builtins = true
+		if name != "" && functionValueTokenEquals(program, i+1, "(") {
+			mark := arena.Mark()
+			if !ordinaryBuiltinShadowed(program, i, name) {
+				builtins = true
+			}
+			arena.Rewind(mark)
 		}
-		arena.Rewind(mark)
 	}
 	// Inferred global function values must keep the same representation when
 	// another package later introduces callbacks or ordinary builtin lowering.
