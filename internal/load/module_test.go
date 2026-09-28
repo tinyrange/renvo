@@ -230,3 +230,27 @@ func TestCleanAndRelPath(t *testing.T) {
 		t.Fatal("RelPath accepted path above relative root")
 	}
 }
+
+func TestResolveImportPrefersUndottedModulePaths(t *testing.T) {
+	module := Module{Root: "/repo/app", Path: "audit/app", Ok: true}
+	dependencies := []ModuleDependency{
+		{Path: "audit/app/nested", Root: "/cache/nested"},
+		{Path: "helper", Root: "/cache/helper"},
+	}
+	for _, tc := range []struct {
+		path, dir string
+		kind      int
+	}{
+		{"audit/app", "/repo/app", PackageInModule},
+		{"audit/app/lib", "/repo/app/lib", PackageInModule},
+		{"audit/app/nested/lib", "/cache/nested/lib", PackageDependency},
+		{"helper/lib", "/cache/helper/lib", PackageDependency},
+		{"runtime", "/std/runtime", PackageStandard},
+		{"audit/application/lib", "/std/audit/application/lib", PackageStandard},
+	} {
+		got := ResolveImportWithDependencies(module, "/std", tc.path, dependencies)
+		if !got.Ok || got.Dir != tc.dir || got.Kind != tc.kind {
+			t.Errorf("%s: %#v", tc.path, got)
+		}
+	}
+}
