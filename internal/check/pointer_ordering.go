@@ -89,7 +89,7 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 			}
 			calleeFile, callee, ok := findDefinitePackageFunc(pkg, info, file, start)
 			if ok {
-				signature := buildFuncSignature(pkg.Files[calleeFile].File, callee)
+				signature := buildFuncSignature(&pkg.Files[calleeFile].File, callee)
 				if len(signature.Results) == 1 {
 					result := signature.Results[0]
 					return definiteOrderingTypeKind(pkg, info, calleeFile, CoreScope{}, result.TypeStart, result.TypeEnd, 0)
