@@ -53,7 +53,7 @@ func ReadArchive(data []byte) ([]Input, Error) {
 			if e != nil || n < 0 || n >= len(names) {
 				return nil, Error{Message: "invalid GNU archive name"}
 			}
-			end := bytes.IndexByte(names[n:], '\n')
+			end := bytes.Index(names[n:], []byte{'\n'})
 			if end < 0 {
 				return nil, Error{Message: "unterminated GNU archive name"}
 			}
