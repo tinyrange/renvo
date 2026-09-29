@@ -167,6 +167,10 @@ func Link(inputs []Input) ([]byte, Error) {
 		}
 	}
 	mainAddress := findDefinition(definitions, "main")
+	// A linked libc owns process initialization and normal-exit callbacks.
+	if hosted := findDefinition(definitions, "__renvo_libc_start"); hosted != 0 {
+		mainAddress = hosted
+	}
 	if mainAddress == 0 {
 		return nil, Error{Message: "entry function main is undefined"}
 	}

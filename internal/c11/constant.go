@@ -170,7 +170,23 @@ func (p *constantParser) unary() (int, bool) {
 		align := !p.current("sizeof")
 		p.pos++
 		if !p.current("(") {
-			return 0, false
+			end := p.t.constantUnaryEnd(p.tokens, p.pos)
+			if end <= p.pos {
+				return 0, false
+			}
+			operand := p.tokens[p.pos:end]
+			if _, isType := p.t.typeFromTokens(operand); isType {
+				return 0, false
+			}
+			typ := p.t.typeofExpressionType(operand)
+			if typ == cTypeVoidID {
+				return 0, false
+			}
+			p.pos = end
+			if align {
+				return p.t.typeAlign(typ), true
+			}
+			return p.t.typeSize(typ), true
 		}
 		end := matchingToken(p.t.src, p.tokens, p.pos, "(", ")")
 		if end < 0 {
@@ -179,6 +195,10 @@ func (p *constantParser) unary() (int, bool) {
 		operand := p.tokens[p.pos+1 : end]
 		typeID, ok := p.t.typeFromTokens(operand)
 		if !ok {
+			if _, isType := p.t.typeFromTokens(p.t.trimExpressionParens(operand)); isType {
+				p.t.fail(TranslateErrUnsupported)
+				return 0, false
+			}
 			if align {
 				return 0, false
 			}
@@ -540,4 +560,52 @@ func boolConstant(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+// constantUnaryEnd finds the unevaluated unary operand of sizeof without
+// consuming a following binary operator. Postfix selectors bind inside it.
+func (t *translator) constantUnaryEnd(tokens []token, start int) int {
+	if start >= len(tokens) {
+		return -1
+	}
+	tok := tokens[start]
+	if t.unaryOperator(tok) || tokenIs(t.src, tok, "sizeof") || t.isAlignof(tok) {
+		return t.constantUnaryEnd(tokens, start+1)
+	}
+	end := start + 1
+	if tokenIs(t.src, tok, "(") {
+		close := matchingToken(t.src, tokens, start, "(", ")")
+		if close < 0 {
+			return -1
+		}
+		if _, ok := t.typeFromTokens(tokens[start+1 : close]); ok {
+			return t.constantUnaryEnd(tokens, close+1)
+		}
+		end = close + 1
+	} else if tokenKind(tok) != tokenIdent && tokenKind(tok) != tokenNumber && tokenKind(tok) != tokenString && tokenKind(tok) != tokenChar {
+		return -1
+	}
+	for end < len(tokens) {
+		if tokenIs(t.src, tokens[end], "[") || tokenIs(t.src, tokens[end], "(") {
+			open, close := "[", "]"
+			if tokenIs(t.src, tokens[end], "(") {
+				open, close = "(", ")"
+			}
+			at := matchingToken(t.src, tokens, end, open, close)
+			if at < 0 {
+				return -1
+			}
+			end = at + 1
+		} else if tokenIs(t.src, tokens[end], ".") || tokenIs(t.src, tokens[end], "->") {
+			if end+1 >= len(tokens) || tokenKind(tokens[end+1]) != tokenIdent {
+				return -1
+			}
+			end += 2
+		} else if tokenIs(t.src, tokens[end], "++") || tokenIs(t.src, tokens[end], "--") {
+			end++
+		} else {
+			break
+		}
+	}
+	return end
 }

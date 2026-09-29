@@ -31,7 +31,9 @@ func (r cObjectIncludeReader) ReadIncludeNext(from string, name string, _ bool) 
 	fromDir := load.DirPath(from)
 	start := 0
 	for i := 0; i < len(r.paths); i++ {
-		if load.CleanPath(r.paths[i]) == load.CleanPath(fromDir) {
+		// Includes may name subdirectories (sys/types.h), so the directory
+		// containing the current file need not itself be a search root.
+		if load.CleanPath(load.JoinPath(r.paths[i], name)) == load.CleanPath(from) || load.CleanPath(r.paths[i]) == load.CleanPath(fromDir) {
 			start = i + 1
 			break
 		}
@@ -57,7 +59,14 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 	}
 	paths := options.IncludePaths
 	if object {
-		paths = cObjectIncludePaths(workDir, paths, options.CNoStdIncludes, fs)
+		// Explicit C paths were resolved against the invocation directory,
+		// before standalone loading switched to the source directory. This
+		// also matters when the virtual API uses relative working paths.
+		includeDir := workDir
+		if options.CCompiler {
+			includeDir = options.CDependencyRoot
+		}
+		paths = cObjectIncludePaths(includeDir, paths, options.CNoStdIncludes, fs)
 	} else if !options.CNoStdIncludes {
 		copied := make([]string, len(paths), len(paths)+1)
 		copy(copied, paths)
@@ -69,10 +78,12 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 	pragmaGoFiles := make([]string, 0, 2)
 	needsRuntime := false
 	firstC := -1
+	var firstSource []byte
+	var librarySources []byte
 	// Carry the target model explicitly so translation never depends on the host
 	// Go process.
 	dataModel := c11.DataModelLP64
-	targetOS, _, pointerBits := cCompilerTarget(options.Target)
+	targetOS, targetArch, pointerBits := cCompilerTarget(options.Target)
 	if pointerBits == 32 {
 		dataModel = c11.DataModelILP32
 	} else if targetOS == "windows" {
@@ -85,6 +96,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		}
 		if firstC < 0 {
 			firstC = i
+			firstSource = result.Files[i].Src
 		}
 		options.CDependencies = appendUniquePath(options.CDependencies, result.Files[i].Path)
 		source := result.Files[i].Src
@@ -93,8 +105,8 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 			processed = c11.Preprocess(c11.PreprocessConfig{
 				Path: result.Files[i].Path, Source: source, Reader: reader,
 				Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
-				ForcedIncludes: options.CForcedInclude, EmitIncludes: executable || options.CNoStdIncludes, EmitQuotedIncludes: true,
-				SuppressForcedIncludes: object && !options.CNoStdIncludes,
+				ForcedIncludes: options.CForcedInclude, EmitIncludes: executable || options.CCompiler || options.CNoStdIncludes, EmitQuotedIncludes: true,
+				SuppressForcedIncludes: object && !options.CCompiler && !options.CNoStdIncludes,
 			})
 		}
 		if !processed.Ok {
@@ -111,7 +123,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 			return result
 		}
 		header := c11.HeaderResult{Ok: true, ErrorAt: -1}
-		if object && !options.CNoStdIncludes && !preprocessed {
+		if object && !options.CCompiler && !options.CNoStdIncludes && !preprocessed {
 			header = cObjectHeaderPrelude(result.Files[i].Path, source, processed, reader, fs)
 			if !header.Ok {
 				result = sourceFail(result, SourceErrCInclude, header.ErrorPath)
@@ -159,8 +171,10 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 						return sourceFail(result, SourceErrReadFile, libraryPath)
 					}
 					selectedLibc = append(selectedLibc, implementation)
+					librarySources = append(librarySources, '\n')
+					librarySources = append(librarySources, src...)
 					result.Files = append(result.Files, load.SourceFile{Path: load.JoinPath(workDir, "__renvo_libc_"+implementation), Src: src})
-					if implementation == "stdio.c" || implementation == "stdlib.c" || implementation == "assert.c" {
+					if implementation == "stdio.c" || implementation == "stdlib.c" || implementation == "assert.c" || implementation == "unistd.c" || implementation == "errno.c" || implementation == "fcntl.c" || implementation == "resource.c" {
 						needsRuntime = true
 					}
 				}
@@ -184,21 +198,28 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		return prepareCSourcesPass(collected, options, workDir, stdRoot, moduleCache, fs, false)
 	}
 	if executable && firstC >= 0 && len(selectedLibc) > 0 {
-		total := len(result.Files[firstC].Src)
-		for i := 0; i < len(result.Files); i++ {
-			if bundledCLibrarySource(result.Files[i].Path) {
-				total += len(result.Files[i].Src) + 1
-			}
+		// The executable path combines libc with the first C translation unit.
+		// Preprocess that combination as one unit too: independently expanding
+		// headers duplicates complete struct definitions and breaks their type
+		// identity (e.g. mbstate_t) before translation even starts.
+		merged := make([]byte, 0, len(firstSource)+len(librarySources))
+		merged = append(merged, firstSource...)
+		merged = append(merged, librarySources...)
+		processed := c11.Preprocess(c11.PreprocessConfig{
+			Path: result.Files[firstC].Path, Source: merged, Reader: reader,
+			Predefined: cCommandMacros(*options), Undefined: cCommandUndefined(*options),
+			ForcedIncludes: options.CForcedInclude, EmitIncludes: true, EmitQuotedIncludes: true,
+		})
+		if !processed.Ok {
+			result = sourceFail(result, SourceErrCPreprocess, processed.ErrorPath)
+			result.ErrorSourcePath = result.Files[firstC].Path
+			result.CPreprocessError = processed.Error
+			result.CPreprocessLine = processed.Line
+			result.CPreprocessDetail = processed.Detail
+			return result
 		}
-		merged := make([]byte, 0, total)
-		merged = append(merged, result.Files[firstC].Src...)
-		for i := 0; i < len(result.Files); i++ {
-			if bundledCLibrarySource(result.Files[i].Path) {
-				merged = append(merged, '\n')
-				merged = append(merged, result.Files[i].Src...)
-			}
-		}
-		result.Files[firstC].Src = merged
+		result.Files[firstC].Src = processed.Source
+
 		files := result.Files[:0]
 		for i := 0; i < len(result.Files); i++ {
 			if bundledCLibrarySource(result.Files[i].Path) {
@@ -211,7 +232,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 	if executable && needsRuntime {
 		result.Files = append(result.Files, load.SourceFile{
 			Path: load.JoinPath(workDir, "__renvo_c_runtime.go"),
-			Src:  []byte("package main\nfunc __renvo_c_write_byte(fd int32, ch int32) int32 { data := []byte{byte(ch)}; if write(int(fd), data, -1) != 1 { return -1 }; return ch }\nfunc __renvo_c_read_byte(fd int32) int32 { data := []byte{0}; if read(int(fd), data, -1) != 1 { return -1 }; return int32(data[0]) }\nfunc renvo_runtime_Exit(status int32) {}\nfunc __renvo_c_abort(status int32) { renvo_runtime_Exit(status) }\n"),
+			Src:  cLibcRuntime(targetOS, targetArch),
 		})
 	}
 	return result
@@ -225,6 +246,20 @@ func bundledCLibrarySource(path string) bool {
 
 func cLibcImplementation(path string) string {
 	switch load.BasePath(path) {
+	case "resource.h":
+		return "resource.c"
+	case "fcntl.h":
+		return "fcntl.c"
+	case "unistd.h":
+		return "unistd.c"
+	case "stdio_ext.h":
+		return "stdio.c"
+	case "locale.h":
+		return "locale.c"
+	case "wchar.h":
+		return "wchar.c"
+	case "errno.h":
+		return "errno.c"
 	case "string.h":
 		return "string.c"
 	case "stdlib.h":
@@ -391,6 +426,12 @@ func cObjectIncludePaths(workDir string, explicit []string, noStandard bool, fs 
 	}
 	if fs.PathExists("/usr/include") {
 		paths = appendUniquePath(paths, "/usr/include")
+	}
+	// Portable builds have no system include tree. Use their bundled libc for
+	// preprocessing and object declarations too, while retaining explicit and
+	// installed sysroot precedence. -nostdinc returns before this fallback.
+	if fs.PathExists("/libc/include") {
+		paths = appendUniquePath(paths, "/libc/include")
 	}
 	return paths
 }

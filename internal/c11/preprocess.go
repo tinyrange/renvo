@@ -305,6 +305,7 @@ __RENVO__=1
 __GNUC__=5
 __GNUC_MINOR__=1
 __GNUC_PATCHLEVEL__=0
+__GNUC_STDC_INLINE__=1
 __GCC_ASM_FLAG_OUTPUTS__=1
 __VERSION__="Renvo 5.1.0 compatible"
 __x86_64__=1
@@ -532,7 +533,8 @@ func findPPText(values []string, value string) int {
 }
 
 // ppNormalize performs line splicing before replacing comments with spaces.
-// Newlines inside block comments are retained so diagnostics remain stable.
+// A block comment is one space, including any physical newlines within it.
+// Physical line accounting is retained separately for later diagnostics.
 func ppNormalize(src []byte) ([]byte, []int, []int, bool) {
 	out := make([]byte, 0, len(src)+1)
 	lines := []int{0}
@@ -594,10 +596,7 @@ func ppNormalize(src []byte) ([]byte, []int, []int, bool) {
 					break
 				}
 				if src[i] == '\n' {
-					out = append(out, '\n')
 					physicalLine++
-					lines = append(lines, len(out))
-					lineNumbers = append(lineNumbers, physicalLine)
 				}
 				i++
 			}

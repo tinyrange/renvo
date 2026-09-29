@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdint.h>
 
+size_t __renvo_mb_cur_max = 1;
+
 #if defined(__STDC_HOSTED__) && __STDC_HOSTED__
 static unsigned char __renvo_heap[1024 * 1024];
 static size_t __renvo_heap_used;
@@ -87,4 +89,22 @@ long labs(long value) { return value < 0 ? -value : value; }
 
 extern void __renvo_c_abort(int status);
 void abort(void) { __renvo_c_abort(EXIT_FAILURE); for (;;) {} }
-void exit(int status) { __renvo_c_abort(status); for (;;) {} }
+static void (*__renvo_exit_functions[32])(void);
+static int __renvo_exit_count;
+int atexit(void (*function)(void)) {
+    if (function == NULL || __renvo_exit_count == 32) return -1;
+    __renvo_exit_functions[__renvo_exit_count++] = function;
+    return 0;
+}
+void _Exit(int status) { __renvo_c_abort(status); for (;;) {} }
+void exit(int status) {
+    while (__renvo_exit_count != 0) {
+        void (*function)(void) = __renvo_exit_functions[--__renvo_exit_count];
+        function();
+    }
+    _Exit(status);
+}
+/* The hosted C entry wrapper calls this for return from main as well. */
+void __renvo_libc_finish(int status) { exit(status); }
+extern char *__renvo_c_getenv(const char *name);
+char *getenv(const char *name) { return __renvo_c_getenv(name); }

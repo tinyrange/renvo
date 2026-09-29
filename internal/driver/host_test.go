@@ -144,8 +144,17 @@ func TestCompileAndWriteEmitsUnitWithoutBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o644 {
-		t.Fatalf("unit output mode = %v, want 0644", info.Mode().Perm())
+	// File creation must honor the caller's mask; do not assume the test
+	// runner uses 0022 (restricted runners commonly use 0077).
+	if err := os.WriteFile("mode-control", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	control, err := os.Stat("mode-control")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != control.Mode().Perm() || info.Mode().Perm()&0o111 != 0 {
+		t.Fatalf("unit output mode = %v, want masked 0644 (%v)", info.Mode().Perm(), control.Mode().Perm())
 	}
 }
 

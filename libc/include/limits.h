@@ -1,6 +1,7 @@
 #ifndef _RENVO_LIMITS_H
 #define _RENVO_LIMITS_H
 #define CHAR_BIT 8
+#define MB_LEN_MAX 4
 #ifdef __CHAR_UNSIGNED__
 #define CHAR_MIN 0
 #define CHAR_MAX 255

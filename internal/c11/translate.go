@@ -163,6 +163,7 @@ type translator struct {
 	capturingDeferred       bool
 	diagnosticErrorNames    []string
 	translationUnitDefs     []string
+	inlineExternalNames     []string
 	variadicCalls           []cVariadicCall
 	functionParams          []int
 	ordinaryNames           []int
@@ -460,10 +461,8 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		preludeScan = scan(prelude)
 	}
 	sourceScan := scan(src)
-	if object {
-		t.rememberTranslationUnitFunctionDefinitions(prelude, preludeScan.tokens)
-		t.rememberTranslationUnitFunctionDefinitions(src, sourceScan.tokens)
-	}
+	t.rememberTranslationUnitFunctionDefinitions(prelude, preludeScan.tokens)
+	t.rememberTranslationUnitFunctionDefinitions(src, sourceScan.tokens)
 	if len(prelude) > 0 && !t.translateScannedSource(prelude, preludeScan) {
 		return Result{Ok: false, Error: t.err, ErrorAt: -1}
 	}
@@ -552,6 +551,7 @@ func (t *translator) rememberTranslationUnitFunctionDefinitions(src []byte, toke
 					}
 				}
 				if name >= 0 {
+					t.rememberInlineExternalDeclaration(src, tokens[segmentStart:i])
 					t.rememberTranslationUnitFunctionDefinition(string(tokenText(src, tokens[name])))
 				}
 			}
@@ -564,6 +564,7 @@ func (t *translator) rememberTranslationUnitFunctionDefinitions(src []byte, toke
 				segmentStart = i + 1
 			}
 		} else if braceDepth == 0 && tokenIs(src, tok, ";") {
+			t.rememberInlineExternalDeclaration(src, tokens[segmentStart:i])
 			segmentStart = i + 1
 		}
 	}
@@ -921,7 +922,7 @@ func (t *translator) externalDeclaration() {
 			return
 		}
 		if t.object && t.pruneUnusedStatics && decl.attributes.inline && !decl.attributes.used &&
-			(storage == storageStatic || storage == storageExtern && decl.attributes.gnuInline) {
+			(storage == storageStatic || t.inlineLocalDefinition(decl, storage)) {
 			start := len(t.out)
 			oldDeferredStatic, oldCapturing := t.deferredStaticOut, t.capturingDeferred
 			t.deferredStaticOut = nil
@@ -9376,8 +9377,10 @@ func (t *translator) takeStaticAssert() bool {
 	if !ok || value == 0 {
 		return false
 	}
-	if len(items) == 2 && (len(items[1]) != 1 || tokenKind(items[1][0]) != tokenString) {
-		return false
+	if len(items) == 2 {
+		if _, ok := t.cStringBytes(items[1]); !ok {
+			return false
+		}
 	}
 	t.pos = end + 1
 	return t.take(";")
@@ -9445,6 +9448,10 @@ func (t *translator) parseType() (int, int, bool) {
 			} else {
 				storage = storageInvalid
 			}
+			t.pos++
+		case t.currentIs("_Noreturn"):
+			// A function specifier, not part of the return type. Like the
+			// GNU noreturn attribute it does not require optimized lowering.
 			t.pos++
 		case t.currentIs("inline") || t.currentIs("__inline") || t.currentIs("__inline__"):
 			t.baseAttributes.inline = true
@@ -10044,11 +10051,10 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 		return
 	}
 	linkageStorage := storage
-	// Under GNU inline semantics, an extern inline definition is available for
-	// inlining in this translation unit but does not provide an out-of-line
-	// external definition. Keep Renvo's implementation local so headers can
-	// define the same helper in every kernel translation unit.
-	if storage == storageExtern && decl.attributes.inline && decl.attributes.gnuInline {
+	// C11 inline-only and GNU extern-inline definitions provide a local
+	// implementation, not an external definition. C11 extern declarations
+	// anywhere in this translation unit instead require an external body.
+	if t.inlineLocalDefinition(decl, storage) {
 		linkageStorage = storageStatic
 	}
 	if t.object {
@@ -10061,12 +10067,14 @@ func (t *translator) emitFunction(decl declarator, storage int) {
 	}
 	t.appendText("func ")
 	name := tokenText(t.src, decl.name)
-	if tokenIs(t.src, decl.name, "main") && t.packageName == "main" {
-		if t.object || len(decl.params) == 0 {
+	// Relocatable C main is an ordinary exported function. Renaming it to
+	// appMain would select the hosted entry ABI instead of the object ABI.
+	if !t.object && tokenIs(t.src, decl.name, "main") && t.packageName == "main" {
+		if len(decl.params) == 0 && !t.translationUnitFunctionDefined("__renvo_libc_finish") {
 			name = []byte("appMain")
 		} else {
 			name = []byte("__c_user_main")
-			t.emitExecutableMainWrapper(len(decl.params) == 3)
+			t.emitExecutableMainWrapper(len(decl.params))
 		}
 	} else if t.object && linkageStorage != storageStatic && decl.attributes.weak {
 		// A weak definition remains interposable from its own translation unit.
@@ -10174,14 +10182,37 @@ func (t *translator) validExecutableMain(decl declarator) bool {
 	return true
 }
 
-func (t *translator) emitExecutableMainWrapper(environment bool) {
-	t.usesUnsafe = true
-	t.staticOut = append(t.staticOut, "func appMain(__c_args []string,__c_env []string) int32{__c_total:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_total+=len(__c_args[__c_i])+1};__c_text:=make([]int8,__c_total);__c_argv:=make([]uintptr,len(__c_args)+1);__c_at:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_argv[__c_i]=uintptr(__c_unsafe.Pointer(&__c_text[__c_at]));for __c_j:=0;__c_j<len(__c_args[__c_i]);__c_j++{__c_text[__c_at+__c_j]=int8(__c_args[__c_i][__c_j])};__c_at+=len(__c_args[__c_i])+1};"...)
-	if environment {
-		t.staticOut = append(t.staticOut, "__c_env_total:=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_env_total+=len(__c_env[__c_i])+1};__c_env_text:=make([]int8,__c_env_total);__c_envp:=make([]uintptr,len(__c_env)+1);__c_at=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_envp[__c_i]=uintptr(__c_unsafe.Pointer(&__c_env_text[__c_at]));for __c_j:=0;__c_j<len(__c_env[__c_i]);__c_j++{__c_env_text[__c_at+__c_j]=int8(__c_env[__c_i][__c_j])};__c_at+=len(__c_env[__c_i])+1};return __c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])),(**int8)(__c_unsafe.Pointer(&__c_envp[0])))}\n"...)
-	} else {
-		t.staticOut = append(t.staticOut, "return __c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])))}\n"...)
+func (t *translator) emitExecutableMainWrapper(parameters int) {
+	finish := t.translationUnitFunctionDefined("__renvo_libc_finish")
+	// Route hosted main returns through the actual libc exit implementation.
+	// Freestanding executables have no such dependency.
+	if parameters == 0 {
+		t.staticOut = append(t.staticOut, "func appMain(__c_args []string,__c_env []string) int32{__renvo_c_set_process(__c_args,__c_env);__c_status:=__c_user_main();__renvo_libc_finish(__c_status);return __c_status}\n"...)
+		return
 	}
+	t.usesUnsafe = true
+	t.staticOut = append(t.staticOut, "func appMain(__c_args []string,__c_env []string) int32{"...)
+	if finish {
+		t.staticOut = append(t.staticOut, "__renvo_c_set_process(__c_args,__c_env);"...)
+	}
+	t.staticOut = append(t.staticOut, "__c_total:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_total+=len(__c_args[__c_i])+1};__c_text:=make([]int8,__c_total);__c_argv:=make([]uintptr,len(__c_args)+1);__c_at:=0;for __c_i:=0;__c_i<len(__c_args);__c_i++{__c_argv[__c_i]=uintptr(__c_unsafe.Pointer(&__c_text[__c_at]));for __c_j:=0;__c_j<len(__c_args[__c_i]);__c_j++{__c_text[__c_at+__c_j]=int8(__c_args[__c_i][__c_j])};__c_at+=len(__c_args[__c_i])+1};"...)
+	resultPrefix := "return "
+	if finish {
+		resultPrefix = "__c_status:="
+	}
+	if parameters == 3 {
+		t.staticOut = append(t.staticOut, "__c_env_total:=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_env_total+=len(__c_env[__c_i])+1};__c_env_text:=make([]int8,__c_env_total);__c_envp:=make([]uintptr,len(__c_env)+1);__c_at=0;for __c_i:=0;__c_i<len(__c_env);__c_i++{__c_envp[__c_i]=uintptr(__c_unsafe.Pointer(&__c_env_text[__c_at]));for __c_j:=0;__c_j<len(__c_env[__c_i]);__c_j++{__c_env_text[__c_at+__c_j]=int8(__c_env[__c_i][__c_j])};__c_at+=len(__c_env[__c_i])+1};"+resultPrefix+"__c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])),(**int8)(__c_unsafe.Pointer(&__c_envp[0])));"...)
+	} else {
+		t.staticOut = append(t.staticOut, resultPrefix+"__c_user_main(int32(len(__c_args)),(**int8)(__c_unsafe.Pointer(&__c_argv[0])));"...)
+	}
+	if finish {
+		t.staticOut = append(t.staticOut, "__renvo_libc_finish(__c_status);"...)
+	}
+	if finish {
+		t.staticOut = append(t.staticOut, "return __c_status"...)
+	}
+	t.staticOut = append(t.staticOut, "}\n"...)
+
 }
 
 func (t *translator) emitVariable(decl declarator) {
@@ -12520,7 +12551,7 @@ func (t *translator) convertedExpression(typeID int, tokens []token) {
 			if close > 1 && close < len(stringTokens)-1 {
 				castType, castOK := t.typeFromTokens(stringTokens[1:close])
 				if castOK && t.typeInfo(castType).kind == cTypePointer {
-					stringTokens = stringTokens[close+1:]
+					stringTokens = t.trimExpressionParens(stringTokens[close+1:])
 				}
 			}
 		}
@@ -13177,7 +13208,7 @@ func (t *translator) emitExpression(tokens []token) {
 			}
 		}
 		text := tokenText(t.src, tok)
-		if t.object && tokenKind(tok) == tokenString {
+		if tokenKind(tok) == tokenString && (t.object || len(text) > 1 && text[0] == 'L') {
 			end := i + 1
 			for end < len(tokens) && tokenKind(tokens[end]) == tokenString {
 				end++
@@ -15407,6 +15438,12 @@ func (t *translator) emitSizeof(tokens []token) {
 		}
 		operand = inside
 	}
+	// Once the single type-name form was ruled out, this must be an
+	// expression. Extra parentheses do not turn a typedef name into a value.
+	if _, isType := t.typeFromTokens(t.trimExpressionParens(operand)); isType {
+		t.fail(TranslateErrUnsupported)
+		return
+	}
 	if t.isAlignof(tokens[0]) {
 		t.appendDecimal(t.typeAlign(t.expressionType(operand)))
 		return
@@ -16761,6 +16798,12 @@ func (t *translator) memberExpressionType(tokens []token) (int, bool) {
 	}
 	field, ok := t.lookupField(base, tokenText(t.src, tokens[member+1]))
 	if !ok {
+		// A recognized member expression must not fall back to the type of
+		// its first identifier. In particular, sizeof does not emit the
+		// operand and cannot rely on the backend to reject a missing field.
+		if info := t.typeInfo(base); info.kind == cTypeStruct || info.kind == cTypeUnion {
+			t.fail(TranslateErrUnsupported)
+		}
 		return cTypeVoidID, false
 	}
 	return field.typeID, true
@@ -18221,7 +18264,8 @@ func (t *translator) typeFromTokens(tokens []token) (int, bool) {
 	typeID, storage, ok := t.parseType()
 	if ok && storage == storageNone && t.pos < len(t.tokens) {
 		name, ops, _, valid := t.parseDeclaratorOps(true)
-		if valid && len(tokenText(t.src, name)) == 0 {
+		valid = valid && len(tokenText(t.src, name)) == 0
+		if valid {
 			typeID, valid = t.applyDeclaratorOps(typeID, ops)
 		}
 		ok = valid
@@ -18813,4 +18857,53 @@ func splitTopLevel(src []byte, tokens []token, separator string) [][]token {
 	}
 	out = append(out, tokens[start:])
 	return out
+}
+
+func (t *translator) rememberInlineExternalDeclaration(src []byte, tokens []token) {
+	inline, external := false, false
+	depth := 0
+	name := ""
+	for i, tok := range tokens {
+		if depth == 0 {
+			if tokenIs(src, tok, "=") || tokenIs(src, tok, "typedef") || tokenIs(src, tok, "static") {
+				return
+			}
+			if cTokenSetContains("inline,__inline,__inline__", tokenText(src, tok)) {
+				inline = true
+			}
+			if tokenIs(src, tok, "extern") {
+				external = true
+			}
+			if i+1 < len(tokens) && tokenKind(tok) == tokenIdent && tokenIs(src, tokens[i+1], "(") && !cTokenSetContains("__attribute__,__attribute,__declspec,typeof,__typeof,__typeof__", tokenText(src, tok)) {
+				name = string(tokenText(src, tok))
+			}
+		}
+		if tokenIs(src, tok, "(") {
+			depth++
+		}
+		if tokenIs(src, tok, ")") {
+			depth--
+		}
+	}
+	if name != "" && (external || !inline) {
+		t.inlineExternalNames = append(t.inlineExternalNames, arena.PersistString(name))
+	}
+}
+func (t *translator) inlineLocalDefinition(decl declarator, storage int) bool {
+	if !decl.attributes.inline {
+		return false
+	}
+	if decl.attributes.gnuInline {
+		return storage == storageExtern
+	}
+	if storage == storageExtern {
+		return false
+	}
+	name := string(tokenText(t.src, decl.name))
+	for _, external := range t.inlineExternalNames {
+		if external == name {
+			return false
+		}
+	}
+	return true
 }

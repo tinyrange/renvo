@@ -8,7 +8,6 @@ import (
 	"renvo.dev/internal/backendcompiled"
 	"renvo.dev/internal/backendjit"
 	internal "renvo.dev/internal/driver"
-	"renvo.dev/internal/elflink"
 	"renvo.dev/internal/makefile"
 	"renvo.dev/internal/rtg"
 )
@@ -119,6 +118,9 @@ func CompileCommand(request *CommandRequest) (*CommandResult, error) {
 		backend = backendjit.NewPrepared(prepared, backendcompiled.Backend{}, backendjit.MemoryRunner{})
 	}
 	r := internal.CompileFromFSWithModuleCache(args[1:], ".", "std/", ".", fs, backend)
+	if !r.Ok && definition == "" && target == "linux/amd64" && r.Build.Options.CCompiler && r.Build.Options.Mode == internal.ModeExecutable && len(r.Build.Options.Files) == 1 && r.Diagnostic.Code == "RENVO-CHECK-029" && libcObjectForSymbol(strings.TrimPrefix(r.Diagnostic.Message, "undefined identifier: ")) != "" {
+		return linkCSourceObject(args, r.Build.Options.Output, fs)
+	}
 	return commandResult(r.Ok, r.Diagnostic, r.Build.Options.Output, r.Binary, r.Build.Options.DependencyFile, internal.CDependencyOutput(r.Build.Options)), nil
 }
 
@@ -141,42 +143,40 @@ func isObjectLink(args []string) bool {
 		if arg == "-c" || strings.HasSuffix(arg, ".c") || strings.HasSuffix(arg, ".i") {
 			return false
 		}
-		object = object || strings.HasSuffix(arg, ".o")
+		object = object || strings.HasSuffix(arg, ".o") || strings.HasSuffix(arg, ".a")
 	}
 	return object
 }
 
 func linkCommand(args []string, fs SourceFS) (*CommandResult, error) {
-	output := "a.out"
-	var inputs []elflink.Input
+	target := "linux/amd64"
+	var linkArgs []string
 	for i := 2; i < len(args); i++ {
-		arg := args[i]
-		if arg == "-o" || arg == "-t" {
-			if i+1 == len(args) {
-				return nil, fmt.Errorf("%s requires a value", arg)
+		// These flags affect compilation only; object-only linking has no
+		// source to optimize or generate debug information for. Do not pass
+		// them to ld, whose option interface is separate from the cc driver.
+		switch args[i] {
+		case "-g", "-O0", "-O1", "-O2", "-O3", "-Os":
+			continue
+		case "-o":
+			linkArgs = append(linkArgs, args[i])
+			if i+1 < len(args) {
+				i++
+				linkArgs = append(linkArgs, args[i])
 			}
+			continue
+		}
+		if args[i] == "-t" {
 			i++
-			if arg == "-o" {
-				output = args[i]
-			} else if args[i] != "linux/amd64" {
-				return nil, fmt.Errorf("object linking only supports linux/amd64")
+			if i == len(args) {
+				return linkFailure("", "-t requires a value"), nil
 			}
-			continue
+			target = args[i]
+		} else {
+			linkArgs = append(linkArgs, args[i])
 		}
-		if arg == "-s" || arg == "-static" || arg == "-nostdlib" {
-			continue
-		}
-		if strings.HasPrefix(arg, "-") {
-			return nil, fmt.Errorf("unsupported linker option %s", arg)
-		}
-		data, ok := fs.ReadFile(arg)
-		if !ok {
-			return nil, fmt.Errorf("could not read object %s", arg)
-		}
-		inputs = append(inputs, elflink.Input{Name: arg, Data: data})
 	}
-	image, err := elflink.Link(inputs)
-	return commandResult(err.Message == "", Diagnostic{Phase: "linker", Code: "RENVO-LINK-001", Message: err.Message, Path: err.Input}, output, image, "", nil), nil
+	return linkCommandLibraries(&CommandRequest{Filesystem: fs, Args: linkArgs, Target: target}, true)
 }
 
 // MakeCommand is one compiler recipe in dependency order.
