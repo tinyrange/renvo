@@ -522,11 +522,24 @@ compiler_pr = compiler_pr + module(
 
 
 # User-approved existing-PR workflow. Work only in an isolated worktree.
-_pr_active = [workspace]
-_pr_selected = {}
+# Private workflow state is stored outside the model-visible workspace. Config
+# globals are frozen after evaluation, so lists/dicts cannot hold mutable state.
+_pr_session_dir = privileged.tempdir()
+_pr_session = privileged.workspace(_pr_session_dir.path(), readonly = False)
+
+def _pr_state():
+    if "state.json" not in _pr_session.list_dir(""):
+        return {}
+    return json.decode(_pr_session.read_file("state.json"))
+
+def _pr_save(state):
+    _pr_session.write_file("state.json", json.encode(state))
 
 def _work():
-    return _pr_active[0]
+    state = _pr_state()
+    if not state:
+        return workspace
+    return privileged.workspace(_pr_session.path(state["directory"]), readonly = False)
 
 def pr_candidates():
     """List open PRs including labels so long-term work can be excluded."""
@@ -557,8 +570,13 @@ def pr_prepare(number, expected_head, expected_main):
     Requires reviewed PR and main SHAs; never changes the original worktree.
     Stops on conflicts; inspect them before continuing. No reset or stash.
     """
-    if _pr_selected:
-        fail("A PR worktree has already been selected for this session")
+    previous = _pr_state()
+    if previous:
+        if not previous.get("published", False):
+            fail("Finish and push the selected PR before preparing another")
+        _publish_on_branch(previous["branch"], previous["old_head"])
+        if _publish_require(_publish_git(["status", "--porcelain"])):
+            fail("Preserve unfinished work in the selected worktree")
     _compiler_sha(expected_main)
     pr = _existing_pr(number, expected_head)
     main = _compiler_json(_publish_gh([
@@ -573,12 +591,25 @@ def pr_prepare(number, expected_head, expected_main):
     _publish_require(_publish_git(["fetch", "--no-tags", remote, "refs/heads/" + pr["head"]["ref"]]))
     if _publish_require(_publish_git(["rev-parse", "FETCH_HEAD"])) != expected_head:
         fail("Fetched PR no longer matches review")
-    temp = privileged.tempdir()
-    path = temp.path("checkout")
-    branch = "staragent/pr-" + str(number) + "-rebased"
+    # Never reuse or remove an existing branch/worktree, including an orphan
+    # left by an earlier helper failure. Use a fresh numbered branch instead.
+    branch = ""
+    for attempt in range(1000):
+        candidate = "staragent/pr-" + str(number) + "-rebased-" + str(attempt)
+        probe = _publish_git(["show-ref", "--verify", "--quiet", "refs/heads/" + candidate])
+        if probe.timed_out or probe.stdout_truncated or probe.stderr_truncated:
+            fail("Could not safely inspect existing branch")
+        if probe.exit_code == 1:
+            branch = candidate
+            break
+        if not probe.success:
+            fail("Branch inspection failed: " + str(probe))
+    if not branch:
+        fail("No unused PR worktree branch available")
+    directory = "pr-" + str(number) + "-" + str(attempt)
+    path = _pr_session.path(directory)
     _publish_require(_publish_git(["worktree", "add", "-b", branch, path, expected_head]))
-    _pr_active[0] = privileged.workspace(path, readonly = False)
-    _pr_selected.update({"number": number, "old_head": expected_head, "main": expected_main, "branch": branch, "remote_branch": pr["head"]["ref"], "temp": temp})
+    _pr_save({"number": number, "old_head": expected_head, "main": expected_main, "branch": branch, "remote_branch": pr["head"]["ref"], "directory": directory, "published": False})
     return _publish_git(["rebase", "--no-autostash", expected_main])
 
 def pr_main():
@@ -587,6 +618,7 @@ def pr_main():
 
 def pr_workspace():
     """Return the selected isolated workspace for file operations and Git cwd."""
+    _pr_selected = _pr_state()
     if not _pr_selected:
         fail("Prepare a PR first")
     return _work()
@@ -597,6 +629,7 @@ def pr_continue(paths):
     No skip, reset, abort or arbitrary command. Protected configurations cannot
     be staged by this helper. Inspect status and every resolution first.
     """
+    _pr_selected = _pr_state()
     if not _pr_selected or git.current_branch(cwd = _work()) != None:
         fail("Requires the selected worktree in a detached rebase")
     if type(paths) not in ["list", "tuple"] or not paths:
@@ -621,6 +654,7 @@ def pr_push(expected_head):
     Review the full rebased diff and run checks first. Rejects remote changes,
     dirty files/index, branch mismatches, and a head not descended from main.
     """
+    _pr_selected = _pr_state()
     if not _pr_selected:
         fail("Prepare a PR first")
     _publish_on_branch(_pr_selected["branch"], expected_head)
@@ -629,14 +663,71 @@ def pr_push(expected_head):
         fail("Selected worktree must be completely clean")
     _publish_require(_publish_git(["merge-base", "--is-ancestor", _pr_selected["main"], expected_head]))
     ref = "refs/heads/" + _pr_selected["remote_branch"]
-    return _publish_git([
+    result = _publish_git([
         "push", "--force-with-lease=" + ref + ":" + _pr_selected["old_head"],
         "https://github.com/" + _PR_REPOSITORY + ".git", expected_head + ":" + ref,
     ])
+    _publish_require(result)
+    _pr_selected["old_head"] = expected_head
+    _pr_selected["published"] = True
+    _pr_save(_pr_selected)
+    return result
+
+def _pr_eligible(number, expected_head):
+    _compiler_pr_id(number)
+    _compiler_sha(expected_head)
+    pr = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/pulls/" + str(number),
+    ]))
+    if pr["state"] != "open" or pr["head"]["sha"] != expected_head:
+        fail("PR must be open and match the reviewed head")
+    if not pr["head"]["repo"] or pr["head"]["repo"]["full_name"] != _PR_REPOSITORY:
+        fail("Only same-repository PRs are supported")
+    for label in pr["labels"]:
+        if label["name"].lower() == "long-term":
+            fail("Long-term PRs are excluded")
+    queued = _compiler_json(compiler_pr_queue_status(number))["data"]["repository"]["pullRequest"]
+    if queued["isInMergeQueue"]:
+        fail("Do not modify a queued PR")
+    return pr
+
+def pr_retarget(number, expected_head, expected_base, merged_parent):
+    """Retarget an eligible stacked PR to main only after its parent merged.
+
+    Review both PRs first. Checks and the complete new diff must be reviewed
+    again after retargeting. No arbitrary base, merge or settings changes.
+    """
+    pr = _pr_eligible(number, expected_head)
+    _compiler_branch(expected_base)
+    _compiler_pr_id(merged_parent)
+    if expected_base == "main" or pr["base"]["ref"] != expected_base:
+        fail("Stacked base changed since review")
+    parent = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/pulls/" + str(merged_parent),
+    ]))
+    if not parent["merged_at"] or parent["base"]["ref"] != "main":
+        fail("Parent must already be merged into main")
+    if parent["head"]["ref"] != expected_base or not parent["head"]["repo"] or parent["head"]["repo"]["full_name"] != _PR_REPOSITORY:
+        fail("Merged parent does not match the reviewed stacked base")
+    return _publish_gh(["pr", "edit", str(number), "--repo", _PR_REPOSITORY, "--base", "main"])
+
+def pr_ready(number, expected_head):
+    """Mark an eligible reviewed draft ready; never merges or bypasses checks.
+
+    Review the complete diff and remaining draft work before using this.
+    """
+    pr = _pr_eligible(number, expected_head)
+    if not pr["draft"]:
+        fail("PR is not a draft")
+    query = "mutation($input:MarkPullRequestReadyForReviewInput!){markPullRequestReadyForReview(input:$input){pullRequest{number isDraft headRefOid}}}"
+    return _compiler_json(_compiler_api("POST", "graphql", {
+        "query": query, "variables": {"input": {"pullRequestId": pr["node_id"]}},
+    }))
 
 pr_work = module("pr_work", candidates = pr_candidates, main = pr_main,
     prepare = pr_prepare, workspace = pr_workspace,
-    continue_rebase = pr_continue, push = pr_push)
+    continue_rebase = pr_continue, push = pr_push,
+    retarget = pr_retarget, ready = pr_ready)
 
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo,
