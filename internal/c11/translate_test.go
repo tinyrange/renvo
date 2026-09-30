@@ -153,7 +153,7 @@ func TestTranslateObjectAcceptsCMainSignature(t *testing.T) {
 	for _, want := range [][]byte{
 		[]byte("// renvo:object function main"),
 		[]byte("//export main"),
-		[]byte("func appMain()"),
+		[]byte("func main()"),
 	} {
 		if !bytes.Contains(result.Source, want) {
 			t.Fatalf("translated object source is missing %q:\n%s", want, result.Source)
@@ -6999,7 +6999,8 @@ int inspect(void) { return sizeof inferred + sizeof "xy" + inferred[0] + inferre
 		[]byte("var escape [2]int8=[2]int8{27,0}"),
 		[]byte("var exact [2]int8=[2]int8{111,107}"),
 		[]byte("var padded [4]uint8=[4]uint8{120,0}"),
-		[]byte("return 3+3+int32((*__c_array_index_"),
+		// Both unevaluated sizeof operands are now constant-folded together.
+		[]byte("return 6+int32((*__c_array_index_"),
 		[]byte("__c_unsafe.Pointer(&(inferred))"),
 	} {
 		if !bytes.Contains(result.Source, want) {

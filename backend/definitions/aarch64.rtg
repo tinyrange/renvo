@@ -349,6 +349,31 @@ go backend {
 		return 10
 	}
 
+	func asmPushReg(a *RTGEmitter, reg int) {
+		asmEmit(a, 0xf81f0fe0|reg)
+		// Remember an emitted instruction, rather than recognizing arbitrary
+		// trailing bytes. Labels and relocations clear this shared marker.
+		a.SetPrimaryLoad(-(a.Len()*32 + reg + 1))
+	}
+
+	func asmPopReg(a *RTGEmitter, reg int) {
+		end := a.Len()
+		marker := -a.PrimaryLoad() - 1
+		a.SetPrimaryLoad(0)
+		if end >= 4 && marker >= 0 && marker/32 == end {
+			source := marker & 31
+			if a.ByteAt(end-4) == byte(0xe0|source) && a.ByteAt(end-3) == 0x0f &&
+				a.ByteAt(end-2) == 0x1f && a.ByteAt(end-1) == 0xf8 {
+				// The immediately adjacent push/pop pair has no intervening
+				// stack observation. Preserve its register transfer directly.
+				a.Truncate(end - 4)
+				asmMovRegReg(a, reg, source)
+				return
+			}
+		}
+		asmEmit(a, 0xf84107e0|reg)
+	}
+
 	func asmStoreRaxMemRdxRcxSize(a *RTGEmitter, size int) {
 		shift := 3
 		if size == 1 {
@@ -503,16 +528,16 @@ go backend {
 	// generic ABI stack fallback therefore cannot adjust SP on this target.
 	// Use the architecture's pre/post-indexed load/store forms instead.
 	func aapcs64PushRegister(out *RTGEmitter, source RTGRegister) {
-		asmEmit(out, 0xf81f0fe0|source.Code)
+		asmPushReg(out, source.Code)
 	}
 
 	func aapcs64PushImmediate(out *RTGEmitter, value int) {
 		asmMovRegImm(out, scratch.Code, value)
-		asmEmit(out, 0xf81f0fe0|scratch.Code)
+		asmPushReg(out, scratch.Code)
 	}
 
 	func aapcs64PopRegister(out *RTGEmitter, destination RTGRegister) {
-		asmEmit(out, 0xf84107e0|destination.Code)
+		asmPopReg(out, destination.Code)
 	}
 
 	func aapcs64UnsignedDivide(out *RTGEmitter, remainder bool) bool {
@@ -689,8 +714,8 @@ arch aarch64 {
 		renvoAarch64AsmLoadRegStack = sequence asmLoadRegStack
 		renvoAarch64AsmStoreRegStack = sequence asmStoreRegStack
 		renvoAarch64AsmLeaRegStack = sequence asmLeaRegStack
-		renvoAarch64AsmPushReg = sequence asmPushReg
-		renvoAarch64AsmPopReg = sequence asmPopReg
+		renvoAarch64AsmPushReg = go asmPushReg
+		renvoAarch64AsmPopReg = go asmPopReg
 		renvoAarch64AsmMovRaxImm = sequence asmMovRaxImm
 		renvoAarch64AsmMovRaxImm64 = sequence asmMovRaxImm64
 		renvoAarch64AsmMovRdxImm = sequence asmMovRdxImm
@@ -936,9 +961,6 @@ arch aarch64 {
 		asmPopRdx(a:emitter) {
 			asmPopReg(a, secondary.Code)
 		}
-		asmPopReg(a:emitter, reg:int) {
-			asmEmit(a, 0xf84107e0 | reg)
-		}
 		asmPopRsi(a:emitter) {
 			asmPopReg(a, x4.Code)
 		}
@@ -954,9 +976,6 @@ arch aarch64 {
 		}
 		asmPushRdx(a:emitter) {
 			asmPushReg(a, secondary.Code)
-		}
-		asmPushReg(a:emitter, reg:int) {
-			asmEmit(a, 0xf81f0fe0 | reg)
 		}
 		asmRet(a:emitter) {
 			asmEmit(a, 0xd65f03c0)

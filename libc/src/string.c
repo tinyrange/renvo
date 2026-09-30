@@ -1,4 +1,7 @@
 #include <string.h>
+#if defined __linux__ && defined __x86_64__
+#include <stdlib.h>
+#endif
 
 void *memchr(const void *value, int ch, size_t n) {
     const unsigned char *bytes = value;
@@ -124,3 +127,56 @@ char *strrchr(const char *value, int ch) {
     do { if (*value == wanted) found = value; } while (*value++ != '\0');
     return (char *)found;
 }
+
+char *strerror(int error) {
+    switch (error) {
+    case 0: return "Success";
+    case 1: return "Operation not permitted";
+    case 2: return "No such file or directory";
+    case 4: return "Interrupted system call";
+    case 5: return "Input/output error";
+    case 9: return "Bad file descriptor";
+    case 12: return "Cannot allocate memory";
+    case 13: return "Permission denied";
+    case 17: return "File exists";
+    case 20: return "Not a directory";
+    case 21: return "Is a directory";
+    case 22: return "Invalid argument";
+    case 24: return "Too many open files";
+    case 28: return "No space left on device";
+    case 29: return "Illegal seek";
+    case 32: return "Broken pipe";
+    case 34: return "Numerical result out of range";
+    case 36: return "File name too long";
+    case 38: return "Function not implemented";
+    case 75: return "Value too large for defined data type";
+    case 84: return "Invalid or incomplete multibyte or wide character";
+    default: return "Unknown error";
+    }
+}
+
+#if defined __linux__ && defined __x86_64__
+char *strndup(const char *value, size_t n) {
+    size_t len = 0;
+    while (len < n && value[len] != 0) len++;
+    char *copy = malloc(len + 1);
+    if (copy == NULL) return NULL;
+    memcpy(copy, value, len);
+    copy[len] = 0;
+    return copy;
+}
+char *strdup(const char *value) {
+    return strndup(value, strlen(value));
+}
+#endif
+
+char *strstr(const char *haystack, const char *needle) {
+ if (!*needle) return (char *)haystack;
+ for (; *haystack; haystack++) {
+  size_t i=0;
+  while (needle[i] && haystack[i] && needle[i]==haystack[i]) i++;
+  if (!needle[i]) return (char *)haystack;
+ }
+ return NULL;
+}
+size_t strnlen(const char *text, size_t limit) { size_t i=0; while (i<limit && text[i]) i++; return i; }

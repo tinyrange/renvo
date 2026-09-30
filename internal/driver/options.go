@@ -70,6 +70,7 @@ type Options struct {
 	Tags                 []string
 	IncludePaths         []string
 	CCompiler            bool
+	CFreestanding        bool
 	CLanguage            string
 	CDefines             []string
 	CUndefines           []string
@@ -271,7 +272,7 @@ func NormalizeCCompilerCommand(args []string) []string {
 	return out
 }
 
-const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-g|-ggdb|-march=i386|-ffreestanding|-static|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-omit-frame-pointer|-foptimize-sibling-calls|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Wno-error|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wstrict-prototypes|-Wno-address-of-packed-member|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-unused-macros|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
+const cCompilerInertOptions = "-MMD|-MD|-MP|-pipe|-std=gnu11|-std=c11|-m64|-g|-ggdb|-march=i386|-static|-fno-common|-fno-pic|-fno-PIE|-fno-pie|-fno-builtin|-fno-strict-aliasing|-fno-asynchronous-unwind-tables|-fno-delete-null-pointer-checks|-fno-stack-protector|-fomit-frame-pointer|-fno-omit-frame-pointer|-foptimize-sibling-calls|-fno-strict-overflow|-fno-stack-check|-fconserve-stack|-fno-builtin-wcslen|-falign-functions=16|-fverbose-asm|-mno-sse|-mno-mmx|-mno-sse2|-mno-3dnow|-mno-avx|-mno-80387|-mtune=generic|-mno-red-zone|-Wall|-Wextra|-Wundef|-Werror|-Wno-error|-Werror=implicit-function-declaration|-Werror=implicit-int|-Werror=return-type|-Werror=strict-prototypes|-Wstrict-prototypes|-Wno-address-of-packed-member|-Wno-format-security|-Wno-trigraphs|-Wmissing-declarations|-Wmissing-prototypes|-Wframe-larger-than=2048|-Wno-main|-Wvla|-Wno-pointer-sign|-Werror=date-time|-Wunused|-Wno-unused-macros|-Wno-override-init|-Wno-missing-field-initializers|-Wno-type-limits|-Wno-shift-negative-value|-Wno-maybe-uninitialized|-Wno-sign-compare|-Wno-unused-parameter"
 
 func cCompilerInertOption(arg string) bool {
 	option, _ := cCompilerOptionIndex(cCompilerInertOptions, arg, false)
@@ -467,6 +468,11 @@ func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarg
 			i++
 			continue
 		}
+		if arg == "-ffreestanding" || arg == "-fhosted" {
+			options.CFreestanding = arg == "-ffreestanding"
+			i++
+			continue
+		}
 		if arg == "-emit-unit" {
 			options.EmitUnit = true
 			i++
@@ -594,6 +600,22 @@ func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarg
 		}
 		options.Files = append(options.Files, arg)
 		i++
+	}
+	if options.Output == "" && options.CCompiler && options.Mode == ModeObject && len(options.Files) == 1 {
+		name := options.Files[0]
+		for i := len(name) - 1; i >= 0; i-- {
+			if name[i] == '/' {
+				name = name[i+1:]
+				break
+			}
+		}
+		for i := len(name) - 1; i >= 0; i-- {
+			if name[i] == '.' {
+				name = name[:i]
+				break
+			}
+		}
+		options.Output = name + ".o"
 	}
 	if options.Output == "" {
 		return parseFail(options, ParseErrMissingOutput, "-o", len(args))

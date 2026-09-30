@@ -276,7 +276,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 					c.failAt(SourceErrCgo, "cgo", path, sourceTextOffset(src, "cgo"))
 					return
 				}
-				arena.Discard(arenaStart, arenaEnd)
+				// No source from this file escapes when its build constraints
+				// exclude it. Reuse its read and constraint scratch immediately.
+				arena.Reset(arenaStart)
 				continue
 			}
 		}

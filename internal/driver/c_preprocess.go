@@ -229,7 +229,7 @@ func cCommandMacros(options Options) []c11.Macro {
 	for i := 0; i < len(targetMacros); i++ {
 		macros = append(macros, targetMacros[i])
 	}
-	if options.CCompiler && options.Mode == ModeExecutable {
+	if options.CCompiler && !options.CFreestanding {
 		macros = append(macros, c11.Macro{Name: "__STDC_HOSTED__", Value: "1"})
 	}
 	if targetOS == "vm" && targetISA == "vm32" {

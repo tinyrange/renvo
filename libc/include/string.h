@@ -6,7 +6,12 @@ void *memmove(void *dst, const void *src, size_t n);
 void *memset(void *dst, int value, size_t n);
 int memcmp(const void *left, const void *right, size_t n);
 void *memchr(const void *value, int ch, size_t n);
+char *strerror(int error);
 size_t strlen(const char *value);
+#if defined __linux__ && defined __x86_64__
+char *strdup(const char *value);
+char *strndup(const char *value, size_t n);
+#endif
 size_t strcspn(const char *value, const char *reject);
 size_t strspn(const char *value, const char *accept);
 char *strcpy(char *restrict dst, const char *restrict src);
@@ -16,4 +21,6 @@ int strcmp(const char *left, const char *right);
 int strncmp(const char *left, const char *right, size_t n);
 char *strchr(const char *value, int ch);
 char *strrchr(const char *value, int ch);
+char *strstr(const char *haystack, const char *needle);
+size_t strnlen(const char *text, size_t limit);
 #endif
