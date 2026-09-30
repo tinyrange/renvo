@@ -609,7 +609,7 @@ func (t *translator) translateScannedSource(src []byte, scanned scanResult) bool
 	}
 	t.pos = 0
 	t.ensureNameIndex(len(t.tokens))
-	if t.checkOnly {
+	if t.checkOnly || t.object {
 		t.reserveCheckTables(len(t.tokens))
 	}
 	for t.ok && t.kind() != tokenEOF {
@@ -620,15 +620,34 @@ func (t *translator) translateScannedSource(src []byte, scanned scanResult) bool
 		if t.take(";") {
 			continue
 		}
-		if t.checkOnly {
+		if t.checkOnly || t.object && !t.assemblyOutput && t.declarationOnly() {
 			mark := t.beginCheckScratch()
 			t.externalDeclaration()
-			t.endCheckScratch(mark)
+			// Plain declarations retain only reserved semantic tables. Unlike
+			// definitions, they produce no body/helper storage that escapes.
+			if t.checkOnly || len(t.out) == len(mark.out) && cap(t.out) == cap(mark.out) &&
+				len(t.staticOut) == len(mark.staticOut) && cap(t.staticOut) == cap(mark.staticOut) {
+				t.endCheckScratch(mark)
+			}
 		} else {
 			t.externalDeclaration()
 		}
 	}
 	return t.ok
+}
+
+// declarationOnly excludes bodies and initializers from scratch retirement.
+// Attribute string tokens are retained through the persistent attribute fields.
+func (t *translator) declarationOnly() bool {
+	for i := t.pos; i < len(t.tokens); i++ {
+		if tokenIs(t.src, t.tokens[i], ";") {
+			return true
+		}
+		if tokenIs(t.src, t.tokens[i], "{") || tokenIs(t.src, t.tokens[i], "=") {
+			return false
+		}
+	}
+	return false
 }
 
 func (t *translator) ensureNameIndex(tokens int) {
@@ -3789,7 +3808,7 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				if !valid || value == "" {
 					return attributes, false
 				}
-				attributes.alias = value
+				attributes.alias = arena.PersistString(value)
 			case "visibility", "__visibility__":
 				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenString {
 					return attributes, false
@@ -3798,13 +3817,13 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				if !valid || value != "default" && value != "internal" && value != "hidden" && value != "protected" {
 					return attributes, false
 				}
-				attributes.visibility = value
+				attributes.visibility = arena.PersistString(value)
 			case "__section__", "section":
 				value, valid := t.attributeStrings(arguments)
 				if !valid || value == "" {
 					return attributes, false
 				}
-				attributes.section = value
+				attributes.section = arena.PersistString(value)
 			case "weak", "__weak__":
 				if len(arguments) != 0 {
 					return attributes, false
@@ -3824,7 +3843,7 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				if len(arguments) != 1 || tokenKind(arguments[0]) != tokenIdent {
 					return attributes, false
 				}
-				attributes.cleanup = string(tokenText(t.src, arguments[0]))
+				attributes.cleanup = arena.PersistString(string(tokenText(t.src, arguments[0])))
 			case "__gnu_inline__", "gnu_inline":
 				if len(arguments) != 0 {
 					return attributes, false
@@ -9938,7 +9957,7 @@ func (t *translator) parseDeclaratorOps(abstract bool) (token, []declaratorOp, c
 				t.fail(TranslateErrUnsupported)
 				return name, ops, attributes, false
 			}
-			attributes.asmRegister = string(operation.template)
+			attributes.asmRegister = arena.PersistString(string(operation.template))
 			continue
 		}
 		if t.take("[") {
