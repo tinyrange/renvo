@@ -216,6 +216,9 @@ go compiler {
 		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
 			data = renvoAsmImageObjectAmd64(a)
 		} else if targetIsWindows(g.c.renvoTargetOS) {
+			// The PE writer patches imports separately from the ELF path. Relax
+			// branches before it fixes section RVAs and import displacements.
+			renvoAmd64RelaxBranches(a)
 			data = renvoAsmImageWindowsAmd64(a)
 		} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 			renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2bca0a6a23416d599079d66963fcba896446c20e0257a51efd0fd5fb351b72a1"
+const CompilerSourceDigest = "959aabc1c061665a96fe956f9232a819613cdd193d0f31f9abbee4bb903639c0"
 
 // source: backend/compiler_common_impl.go
 
@@ -38446,7 +38446,7 @@ if target == renvoTargetLinux386 {
 return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\xf3\x34\x4f\x65\x24\xa7\x5b\xf8\xc4\x08\x89\x0c\x48\xa1\xa9\x62\x49\x30\xc9\x58\xfb\x01\x4c\x07\x9d\xd4\xd9\xc3\xd3\xb6\x06\x2a", 3, true
+return "linux/aarch64", "\xb3\xfd\x36\xba\x7e\xc5\x0e\x2a\xd4\x3d\xc8\x21\xa8\x59\xf2\x7c\xb1\x4b\x96\x3c\x4e\xe4\x5e\xa6\xd9\x53\x7a\x1f\x0a\x52\x69\x6d", 3, true
 }
 if target == renvoTargetLinuxArm {
 return "linux/arm", "\x6b\xbf\x06\xf7\x8a\xc7\x4d\xa3\x23\x38\x99\xd4\x23\xdd\xa3\x53\x1d\xf2\xc3\x53\x59\x4a\x87\xfd\x6f\x44\x25\x82\x80\xbb\x8e\x10", 3, true
@@ -38461,13 +38461,13 @@ if target == renvoTargetWasiWasm32 {
 return "wasi/wasm32", "\xfd\x20\xc6\xb9\xf0\x63\xd0\xa3\x94\x2c\x07\xc3\x5f\x91\x76\x34\x7e\xb0\x1d\xc5\xe7\x27\x03\x4d\x2e\x60\x74\x6d\x1d\xfd\xb6\x4a", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xeb\xb0\x3d\xcd\xbb\x5a\xa9\x25\xd8\x3d\x8a\xb1\x69\x2b\xd6\xb6\x3a\xe6\x0e\xb0\x42\x57\xb8\xc3\x41\x5d\xdc\xe7\xe6\x64\xf6\x73", 3, true
+return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
 }
 if target == renvoTargetWindowsArm64 {
-return "windows/arm64", "\x0a\xdd\x14\x75\xc7\x66\x92\x8e\x07\x64\x12\x4f\x0f\x02\x80\x95\x79\x93\x9c\xd9\x8e\xe2\xa6\xee\xb5\xe4\xa5\x65\x7c\xfd\xf5\xc6", 3, true
+return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
 return "vm/vm32", "\xc1\x73\x8a\x77\x39\xf9\x92\xce\xe7\x89\x39\x74\xfb\xd5\xac\x50\x0d\x3a\xa2\x88\x02\x44\xbd\xe5\xf5\x93\x5b\x52\x24\x4b\x87\xfb", 3, true
@@ -41048,6 +41048,9 @@ var data []byte
 if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
 data = renvoAsmImageObjectAmd64(a)
 } else if targetIsWindows(g.c.renvoTargetOS) {
+
+
+renvoAmd64RelaxBranches(a)
 data = renvoAsmImageWindowsAmd64(a)
 } else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
@@ -41236,12 +41239,6 @@ oldLen := len(a.code)
 
 
 
-if oldLen >= 1048576 {
-return
-}
-
-
-
 
 branches := make([]int32, 0, len(a.relocs)/2)
 savings := make([]int32, 0, len(a.relocs)/2)
@@ -41285,29 +41282,32 @@ branches = append(branches, int32(start*2+kind))
 savings = append(savings, int32(totalSaving))
 }
 }
+if len(branches) == 0 {
+return
+}
 read := 0
 write := 0
-branch := 0
-for read < oldLen {
-if branch < len(branches) && int(branches[branch])/2 == read {
+
+
+
+for branch := 0; branch < len(branches); branch++ {
+start := int(branches[branch]) / 2
+span := start - read
+copy(a.code[write:write+span], a.code[read:start])
+write += span
 kind := int(branches[branch]) & 1
 op := 0xeb
 size := 5
 if kind != 0 {
-op = int(a.code[read+1]) - 0x10
+op = int(a.code[start+1]) - 0x10
 size = 6
 }
 a.code[write] = byte(op)
 a.code[write+1] = 0
 write += 2
-read += size
-branch++
-continue
+read = start + size
 }
-a.code[write] = a.code[read]
-write++
-read++
-}
+write += copy(a.code[write:], a.code[read:oldLen])
 renvoTruncBytes(&a.code, write)
 for i := 0; i < len(a.labelPos); i++ {
 position := renvoAsmLabelPosition(a, i)
@@ -44744,6 +44744,29 @@ return 12
 }
 return 10
 }
+func renvoAarch64AsmPushReg(a *renvoAsm, reg int) {
+renvoAarch64AsmEmit(a, 0xf81f0fe0|reg)
+
+
+a.lastPrimaryLoad = -(len(a.code)*32 + reg + 1)
+}
+func renvoAarch64AsmPopReg(a *renvoAsm, reg int) {
+end := len(a.code)
+marker := -a.lastPrimaryLoad - 1
+a.lastPrimaryLoad = 0
+if end >= 4 && marker >= 0 && marker/32 == end {
+source := marker & 31
+if a.code[end-4] == byte(0xe0|source) && a.code[end-3] == 0x0f &&
+a.code[end-2] == 0x1f && a.code[end-1] == 0xf8 {
+
+
+renvoTruncBytes(&a.code, end - 4)
+renvoAarch64AsmMovRegReg(a, reg, source)
+return
+}
+}
+renvoAarch64AsmEmit(a, 0xf84107e0|reg)
+}
 func renvoAarch64AsmStoreRaxMemRdxRcxSize(a *renvoAsm, size int) {
 shift := 3
 if size == 1 {
@@ -44954,10 +44977,6 @@ func renvoAarch64AsmPopRdx(a *renvoAsm) {
 renvoAarch64AsmPopReg(a,1)
 }
 
-func renvoAarch64AsmPopReg(a *renvoAsm, reg int) {
-renvoAarch64AsmEmit(a,0xf84107e0|reg)
-}
-
 func renvoAarch64AsmPopRsi(a *renvoAsm) {
 renvoAarch64AsmPopReg(a,4)
 }
@@ -44977,10 +44996,6 @@ renvoAarch64AsmPushReg(a,2)
 
 func renvoAarch64AsmPushRdx(a *renvoAsm) {
 renvoAarch64AsmPushReg(a,1)
-}
-
-func renvoAarch64AsmPushReg(a *renvoAsm, reg int) {
-renvoAarch64AsmEmit(a,0xf81f0fe0|reg)
 }
 
 func renvoAarch64AsmRet(a *renvoAsm) {
