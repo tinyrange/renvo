@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "959aabc1c061665a96fe956f9232a819613cdd193d0f31f9abbee4bb903639c0"
+const CompilerSourceDigest = "b8e575ae12d20f0dfe10809496b307829ef8ab2439bbec31add273b27f77b230"
 
 // source: backend/compiler_common_impl.go
 
@@ -41285,6 +41285,18 @@ savings = append(savings, int32(totalSaving))
 if len(branches) == 0 {
 return
 }
+
+
+
+
+positionIndex := make([]int32, oldLen/256+2)
+indexedBranch := 0
+for bucket := 0; bucket < len(positionIndex); bucket++ {
+for indexedBranch < len(branches) && int(branches[indexedBranch])/2 < bucket*256 {
+indexedBranch++
+}
+positionIndex[bucket] = int32(indexedBranch)
+}
 read := 0
 write := 0
 
@@ -41312,7 +41324,7 @@ renvoTruncBytes(&a.code, write)
 for i := 0; i < len(a.labelPos); i++ {
 position := renvoAsmLabelPosition(a, i)
 if position >= 0 {
-a.labelPos[i] = int32(renvoAmd64RelaxedPosition(branches, savings, position))
+a.labelPos[i] = int32(renvoAmd64RelaxedPosition(branches, savings, positionIndex, position))
 }
 }
 relocCount := 0
@@ -41322,25 +41334,24 @@ rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
 rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
 at := rawAt & 2147483647
 label := rawLabel & 2147483647
-target := renvoAsmLabelPosition(a, label)
-if rawLabel < 0 && target >= 0 {
-start := at - 1
-if rawAt < 0 {
-start = at - 2
-}
-newAt := renvoAmd64RelaxedPosition(branches, savings, start) + 1
-disp := target - (newAt + 1)
-if disp >= -128 && disp <= 127 {
-a.code[newAt] = byte(disp)
-continue
-}
-}
 for relocBranch < len(branches) && int(branches[relocBranch])/2 < at {
 relocBranch++
 }
 newAt := at
 if relocBranch > 0 {
 newAt -= int(renvo_runtime_UnsafeInt32At(savings, relocBranch-1))
+}
+target := renvoAsmLabelPosition(a, label)
+if rawLabel < 0 && target >= 0 {
+
+
+
+shortAt := newAt + 3
+disp := target - (shortAt + 1)
+if disp >= -128 && disp <= 127 {
+a.code[shortAt] = byte(disp)
+continue
+}
 }
 a.relocs[relocCount] = int32(newAt)
 a.relocs[relocCount+1] = int32(label)
@@ -41360,9 +41371,14 @@ a.absRelocs[i] = int32(at)
 }
 }
 
-func renvoAmd64RelaxedPosition(branches []int32, savings []int32, position int) int {
+func renvoAmd64RelaxedPosition(branches []int32, savings []int32, positionIndex []int32, position int) int {
 lo := 0
 hi := len(branches)
+bucket := position / 256
+if bucket >= 0 && bucket+1 < len(positionIndex) {
+lo = int(renvo_runtime_UnsafeInt32At(positionIndex, bucket))
+hi = int(renvo_runtime_UnsafeInt32At(positionIndex, bucket+1))
+}
 for lo < hi {
 mid := lo + (hi-lo)/2
 if int(renvo_runtime_UnsafeInt32At(branches, mid))/2 < position {
