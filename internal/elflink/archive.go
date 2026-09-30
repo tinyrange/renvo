@@ -1,16 +1,35 @@
 package elflink
 
 import (
-	"bytes"
-	"fmt"
 	"strconv"
 	"strings"
 )
 
+func archiveHasPrefix(data []byte, prefix string) bool {
+	if len(data) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if data[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func archiveIndexByte(data []byte, value byte) int {
+	for i := 0; i < len(data); i++ {
+		if data[i] == value {
+			return i
+		}
+	}
+	return -1
+}
+
 // ReadArchive decodes ordinary Unix ar, including GNU and BSD long names.
 // Symbol-index members are metadata, never linker inputs.
 func ReadArchive(data []byte) ([]Input, Error) {
-	if !bytes.HasPrefix(data, []byte("!<arch>\n")) {
+	if !archiveHasPrefix(data, "!<arch>\n") {
 		return nil, Error{Message: "invalid archive magic"}
 	}
 	var members []Input
@@ -53,7 +72,7 @@ func ReadArchive(data []byte) ([]Input, Error) {
 			if e != nil || n < 0 || n >= len(names) {
 				return nil, Error{Message: "invalid GNU archive name"}
 			}
-			end := bytes.Index(names[n:], []byte{'\n'})
+			end := archiveIndexByte(names[n:], '\n')
 			if end < 0 {
 				return nil, Error{Message: "unterminated GNU archive name"}
 			}
@@ -88,7 +107,22 @@ func DefinedSymbols(input Input) ([]string, Error) {
 	return names, Error{}
 }
 func archiveHeader(name string, size int) []byte {
-	return []byte(fmt.Sprintf("%-16s%-12d%-6d%-6d%-8s%-10d`\n", name, 0, 0, 0, "100644", size))
+	out := make([]byte, 0, 60)
+	out = appendArchiveField(out, name, 16)
+	out = appendArchiveField(out, "0", 12)
+	out = appendArchiveField(out, "0", 6)
+	out = appendArchiveField(out, "0", 6)
+	out = appendArchiveField(out, "100644", 8)
+	out = appendArchiveField(out, strconv.Itoa(size), 10)
+	return append(out, '`', '\n')
+}
+func appendArchiveField(out []byte, value string, width int) []byte {
+	out = append(out, value...)
+	// Archive field widths count bytes, including in UTF-8 member names.
+	for i := len(value); i < width; i++ {
+		out = append(out, ' ')
+	}
+	return out
 }
 func appendArchiveMember(dst []byte, name string, data []byte) []byte {
 	dst = append(dst, archiveHeader(name, len(data))...)
@@ -113,11 +147,11 @@ func WriteArchive(members []Input) ([]byte, Error) {
 		}
 		encoded[i] = m
 		if len(m.Name) > 15 || strings.Contains(m.Name, " ") {
-			encoded[i] = Input{Name: fmt.Sprintf("#1/%d", len(m.Name)), Data: append(append([]byte(nil), m.Name...), m.Data...)}
+			encoded[i] = Input{Name: "#1/" + strconv.Itoa(len(m.Name)), Data: append(append([]byte(nil), m.Name...), m.Data...)}
 		} else {
 			encoded[i].Name = m.Name + "/"
 		}
-		if bytes.HasPrefix(m.Data, []byte("\x7fELF")) {
+		if archiveHasPrefix(m.Data, "\x7fELF") {
 			symbols, e := DefinedSymbols(m)
 			if e.Message != "" {
 				return nil, e
