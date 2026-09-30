@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b8e575ae12d20f0dfe10809496b307829ef8ab2439bbec31add273b27f77b230"
+const CompilerSourceDigest = "9665345637a50056d902834700eaa25eaa1dce6b0567537f9c37c8516b9e7d9f"
 
 // source: backend/compiler_common_impl.go
 
@@ -41334,6 +41334,11 @@ rawAt := int(renvo_runtime_UnsafeInt32At(a.relocs, i))
 rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
 at := rawAt & 2147483647
 label := rawLabel & 2147483647
+
+
+for relocBranch > 0 && int(branches[relocBranch-1])/2 >= at {
+relocBranch--
+}
 for relocBranch < len(branches) && int(branches[relocBranch])/2 < at {
 relocBranch++
 }
@@ -41361,6 +41366,9 @@ a.relocs = a.relocs[:relocCount]
 absBranch := 0
 for i := 0; i+2 < len(a.absRelocs); i += 3 {
 at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
+for absBranch > 0 && int(branches[absBranch-1])/2 >= at {
+absBranch--
+}
 for absBranch < len(branches) && int(branches[absBranch])/2 < at {
 absBranch++
 }

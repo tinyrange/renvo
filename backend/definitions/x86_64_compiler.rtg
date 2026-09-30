@@ -502,6 +502,11 @@ go compiler {
 			rawLabel := int(renvo_runtime_UnsafeInt32At(a.relocs, i+1))
 			at := rawAt & 2147483647
 			label := rawLabel & 2147483647
+			// Helper emission can append relocations before an earlier caller.
+			// Rewind the cursor for that out-of-order relocation.
+			for relocBranch > 0 && int(branches[relocBranch-1])/2 >= at {
+				relocBranch--
+			}
 			for relocBranch < len(branches) && int(branches[relocBranch])/2 < at {
 				relocBranch++
 			}
@@ -529,6 +534,9 @@ go compiler {
 		absBranch := 0
 		for i := 0; i+2 < len(a.absRelocs); i += 3 {
 			at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
+			for absBranch > 0 && int(branches[absBranch-1])/2 >= at {
+				absBranch--
+			}
 			for absBranch < len(branches) && int(branches[absBranch])/2 < at {
 				absBranch++
 			}

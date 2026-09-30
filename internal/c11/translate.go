@@ -64,6 +64,7 @@ type cAttributes struct {
 	asmRegister       string
 	cleanup           string
 	used              bool
+	machineMode       int
 }
 
 type cDeferredFunction struct {
@@ -853,7 +854,7 @@ func (t *translator) externalDeclaration() {
 	if t.take(";") {
 		return
 	}
-	decl, ok := t.parseDeclarator(base, true)
+	decl, ok := t.parseDeclarator(base, true, storage == storageTypedef)
 	if !ok {
 		t.fail(TranslateErrDeclaration)
 		return
@@ -862,7 +863,7 @@ func (t *translator) externalDeclaration() {
 	if storage == storageTypedef && decl.function {
 		t.rememberTypedef(string(tokenText(t.src, decl.name)), decl.functionType)
 		for t.take(",") {
-			next, valid := t.parseDeclarator(base, true)
+			next, valid := t.parseDeclarator(base, true, storage == storageTypedef)
 			if !valid || !next.function {
 				t.fail(TranslateErrDeclaration)
 				return
@@ -894,7 +895,7 @@ func (t *translator) externalDeclaration() {
 				return
 			}
 			for {
-				next, valid := t.parseDeclarator(base, true)
+				next, valid := t.parseDeclarator(base, true, storage == storageTypedef)
 				if !valid || !next.function || !t.rememberFunction(&next, false) {
 					t.fail(TranslateErrDeclaration)
 					return
@@ -953,7 +954,7 @@ func (t *translator) externalDeclaration() {
 			t.fail(TranslateErrDeclaration)
 			return
 		}
-		next, valid := t.parseDeclarator(base, false)
+		next, valid := t.parseDeclarator(base, false, storage == storageTypedef)
 		if !valid {
 			t.fail(TranslateErrDeclaration)
 			return
@@ -1948,7 +1949,7 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 			field := declarator{typeID: fieldBase}
 			valid := true
 			if !t.currentIs(":") {
-				field, valid = t.parseDeclarator(fieldBase, false)
+				field, valid = t.parseDeclarator(fieldBase, false, false)
 			}
 			if !valid {
 				return cTypeVoidID, false
@@ -2138,6 +2139,9 @@ func (t *translator) parseAggregateType(union bool) (int, bool) {
 func (attributes *cAttributes) merge(other cAttributes) {
 	if other.align > attributes.align {
 		attributes.align = other.align
+	}
+	if other.machineMode != 0 {
+		attributes.machineMode = other.machineMode
 	}
 	attributes.packed = attributes.packed || other.packed
 	attributes.transparentUnion = attributes.transparentUnion || other.transparentUnion
@@ -3756,6 +3760,17 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				if alignment > attributes.align {
 					attributes.align = alignment
 				}
+			case "mode", "__mode__":
+				if len(arguments) != 1 {
+					return attributes, false
+				}
+				if tokenIs(t.src, arguments[0], "__TC__") || tokenIs(t.src, arguments[0], "TC") {
+					attributes.machineMode = 1
+				} else if tokenIs(t.src, arguments[0], "__word__") || tokenIs(t.src, arguments[0], "word") {
+					attributes.machineMode = 2
+				} else {
+					return attributes, false
+				}
 			case "packed", "__packed__":
 				if len(arguments) != 0 {
 					return attributes, false
@@ -3831,10 +3846,11 @@ func (t *translator) parseAttributes() (cAttributes, bool) {
 				"__noinline__", "noinline",
 				"__const__", "const",
 				"__format__", "format", "__noreturn__", "noreturn", "__malloc__", "malloc",
-				"__warning__", "warning",
+				"__warning__", "warning", "__deprecated__", "deprecated",
 				"__designated_init__", "designated_init",
 				"__externally_visible__", "externally_visible",
 				"__alloc_size__", "alloc_size",
+				"__alloc_align__", "alloc_align",
 				"__assume_aligned__", "assume_aligned",
 				"__nonnull__", "nonnull",
 				"cold", "__cold__", "hot", "__hot__", "nocf_check", "__nocf_check__",
@@ -9404,6 +9420,7 @@ func (t *translator) parseType() (int, int, bool) {
 	storage := storageNone
 	qualifiers := 0
 	unsigned := false
+	complexType := false
 	longCount := 0
 	base := ""
 	typeID := cTypeVoidID
@@ -9502,6 +9519,9 @@ func (t *translator) parseType() (int, int, bool) {
 			} else {
 				qualifiers |= cQualifierAtomic
 			}
+		case t.currentIs("_Complex") || t.currentIs("__complex__"):
+			complexType = true
+			t.pos++
 		case t.currentIs("unsigned"):
 			unsigned, seen = true, true
 			t.pos++
@@ -9641,6 +9661,13 @@ done:
 		if qualifiers&cQualifierAtomic != 0 && (t.typeInfo(typeID).kind == cTypeArray || t.typeInfo(typeID).kind == cTypeFunction || t.typeInfo(typeID).qualifiers&cQualifierAtomic != 0) {
 			return cTypeVoidID, storage, false
 		}
+		if complexType {
+			info := t.typeInfo(typeID)
+			if info.kind != cTypeFloat && (info.kind != cTypeOpaque || info.size != 16 || info.align != 16) {
+				return cTypeVoidID, storage, false
+			}
+			typeID = t.opaqueFloatLayout(info.size*2, info.align)
+		}
 		return t.qualifiedType(typeID, qualifiers), storage, true
 	}
 	if base == "" {
@@ -9682,6 +9709,16 @@ done:
 		} else if unsigned {
 			typeID = cTypeUint32ID
 		}
+	}
+	if complexType {
+		if longCount != 0 {
+			return cTypeVoidID, storage, false
+		}
+		info := t.typeInfo(typeID)
+		if info.kind != cTypeFloat {
+			return cTypeVoidID, storage, false
+		}
+		typeID = t.opaqueFloatLayout(info.size*2, info.align)
 	}
 	return t.qualifiedType(typeID, qualifiers), storage, true
 }
@@ -9731,11 +9768,41 @@ func (t *translator) resolveAutoDeclarator(decl *declarator) bool {
 	return true
 }
 
-func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, bool) {
+func (t *translator) parseDeclarator(base int, allowFunction bool, allowOpaque bool) (declarator, bool) {
+	typeMode := t.baseAttributes.machineMode
 	name, ops, attributes, ok := t.parseDeclaratorOps(false)
+	if attributes.machineMode == 0 {
+		attributes.machineMode = typeMode
+	}
 	result := declarator{name: name, typeID: base, attributes: attributes}
 	if !ok {
 		return result, false
+	}
+	// Extended floating declarations retain their ABI layout, while values
+	// remain unsupported. System headers may declare unused aliases for them.
+	if attributes.machineMode == 1 {
+		info := t.typeInfo(base)
+		if info.kind != cTypeOpaque || info.size != 8 {
+			return result, false
+		}
+		base = t.opaqueFloatLayout(32, 16)
+	} else if attributes.machineMode == 2 {
+		info := t.typeInfo(base)
+		if info.kind != cTypeInt && info.kind != cTypeUint {
+			return result, false
+		}
+		if t.pointerSize == 8 {
+			base = cTypeInt64ID
+			if info.kind == cTypeUint {
+				base = cTypeUint64ID
+			}
+		} else {
+			base = cTypeInt32ID
+			if info.kind == cTypeUint {
+				base = cTypeUint32ID
+			}
+		}
+		base = t.qualifiedType(base, info.qualifiers)
 	}
 	result.typeID, ok = t.applyDeclaratorOps(base, ops)
 	if !ok {
@@ -9775,7 +9842,7 @@ func (t *translator) parseDeclarator(base int, allowFunction bool) (declarator, 
 			result.variadic = info.variadic
 		}
 		result.typeID = info.base
-	} else if info.kind == cTypeOpaque {
+	} else if info.kind == cTypeOpaque && (!allowOpaque || info.size == 1) {
 		// The ABI size of an unknown scalar typedef cannot be inferred safely
 		// from an unpreprocessed header. Opaque typedefs are exact when used
 		// behind a pointer, which is the normal system-library handle shape.
@@ -11293,7 +11360,7 @@ func (t *translator) localDeclaration() {
 		return
 	}
 	for {
-		decl, valid := t.parseDeclarator(base, storage == storageExtern)
+		decl, valid := t.parseDeclarator(base, storage == storageExtern, storage == storageTypedef)
 		if !valid {
 			t.fail(TranslateErrDeclaration)
 			return

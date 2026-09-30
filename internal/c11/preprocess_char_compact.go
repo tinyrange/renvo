@@ -37,5 +37,30 @@ func ppParseChar(text []byte) (int64, bool) {
 	case '\\', '\'', '"', '?':
 		return int64(text[start]), true
 	}
+	if text[start] >= '0' && text[start] <= '7' {
+		value, end := int64(0), start
+		for end < len(text)-1 && end < start+3 && text[end] >= '0' && text[end] <= '7' {
+			value, end = value*8+int64(text[end]-'0'), end+1
+		}
+		return value, end == len(text)-1
+	}
+	if text[start] == 'x' {
+		value, digits := int64(0), 0
+		for start++; start < len(text)-1; start++ {
+			ch, digit := text[start], int64(-1)
+			if ch >= '0' && ch <= '9' {
+				digit = int64(ch - '0')
+			} else if ch >= 'a' && ch <= 'f' {
+				digit = int64(ch-'a') + 10
+			} else if ch >= 'A' && ch <= 'F' {
+				digit = int64(ch-'A') + 10
+			}
+			if digit < 0 {
+				return 0, false
+			}
+			value, digits = value*16+digit, digits+1
+		}
+		return value, digits > 0
+	}
 	return 0, false
 }

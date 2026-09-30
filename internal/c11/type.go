@@ -412,7 +412,23 @@ func alignC(value int, alignment int) int {
 	return (value + alignment - 1) &^ (alignment - 1)
 }
 
+// opaqueFloatLayout records declaration and sizeof information without claiming
+// arithmetic support for extended floating or complex values.
+func (t *translator) opaqueFloatLayout(size int, alignment int) int {
+	for i := cTypeUintptrID + 1; i < len(t.types); i++ {
+		info := t.types[i]
+		if info.kind == cTypeOpaque && info.size == size && info.align == alignment {
+			return i
+		}
+	}
+	t.types = append(t.types, cTypeInfo{kind: cTypeOpaque, size: size, align: alignment, goName: "[" + decimalString(size) + "]uint8"})
+	return len(t.types) - 1
+}
+
 func (t *translator) builtinCType(name []byte) (int, bool) {
+	if textEquals(name, "__float128") {
+		return t.opaqueFloatLayout(16, 16), true
+	}
 	if textEquals(name, "size_t") || textEquals(name, "uintptr_t") {
 		return cTypeUintptrID, true
 	}
