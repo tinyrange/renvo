@@ -2717,8 +2717,12 @@ func indexFunctionValueLexicalScopes(program *unit.Program) {
 		if program.Tokens[at].KindLine&255 != unit.TokenFunc || !functionValueTokenEquals(program, at+1, "(") {
 			continue
 		}
-		_, body, ok := parseFunctionValueSignature(program, at, "")
-		if !ok || !functionValueTokenEquals(program, body, "{") {
+		mark := arena.Mark()
+		body := functionValueLiteralBody(program, at)
+		// Only integer token boundaries escape the scan. Grow the retained
+		// scope table after rewinding any temporary type-spelling storage.
+		arena.Rewind(mark)
+		if body < 0 {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, body)
@@ -2727,6 +2731,34 @@ func indexFunctionValueLexicalScopes(program *unit.Program) {
 		}
 	}
 	program.LexicalFuncs = index
+}
+
+// Scope indexing needs token boundaries, not normalized callable signatures.
+// Building parameter strings and dispatch storage here retains temporary data
+// for every function type, including declarations which have no literal body.
+func functionValueLiteralBody(program *unit.Program, at int) int {
+	close := functionValueFindMatchingParen(program, at+1)
+	if close < 0 {
+		return -1
+	}
+	body := close + 1
+	if functionValueTokenEquals(program, body, "(") {
+		resultClose := functionValueFindMatchingParen(program, body)
+		if resultClose < 0 {
+			return -1
+		}
+		body = resultClose + 1
+	} else if functionValueTokenCanStartType(program, body) && program.Tokens[body].KindLine>>8 == program.Tokens[close].KindLine>>8 {
+		end := functionValueTypeEnd(program, body)
+		if end <= body {
+			return -1
+		}
+		body = end
+	}
+	if !functionValueTokenEquals(program, body, "{") {
+		return -1
+	}
+	return body
 }
 
 func functionValueLexicalFunction(program *unit.Program, token int) (unit.Func, bool) {

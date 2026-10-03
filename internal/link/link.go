@@ -769,11 +769,11 @@ func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions [
 				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
 			}
 			tok.Start = len(dst.Text)
-			value, ok := syntax.StringLiteralValue(text, syntax.MakeToken(syntax.TokenString, tokStart, tokEnd, 0))
+			quoted, ok := syntax.AppendQuotedStringLiteral(dst.Text, text, syntax.MakeToken(syntax.TokenString, tokStart, tokEnd, 0))
 			if !ok {
 				return false, line
 			}
-			dst.Text = appendCoreQuotedString(dst.Text, value)
+			dst.Text = quoted
 			tok.Size = len(dst.Text) - tok.Start
 			pendingStart = tokEnd
 		} else {
