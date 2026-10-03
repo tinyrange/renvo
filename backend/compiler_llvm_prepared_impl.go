@@ -2106,6 +2106,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+renvoNonNil(g)
+if right {
+	renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, !leftUnsigned)
+} else {
+	renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftLeft, false)
+}
+return true
+}
+
 func renvoAsmReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
 renvoNonNil(a)
 if hasOffset {

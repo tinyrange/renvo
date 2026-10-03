@@ -696,6 +696,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		bounded_word_shift = renvoArmCompilerBoundedWordShift
 		read_write_file = renvoArmCompilerReadWriteFile
 		pop_read_write_offset = renvoArmCompilerPopReadWriteOffset
 		chmod_file = renvoArmCompilerChmodFile
@@ -2672,5 +2673,26 @@ go compiler {
 		}
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+		if g.c.renvoNativeIntSize == 8 {
+			mode := 0
+			if right {
+				mode = 1
+				if leftUnsigned {
+					mode = 2
+				}
+			}
+			renvoEmitBoundedWideWordShift(g, mode)
+			return true
+		}
+		if g.c.renvoNativeIntSize == 4 && right && resultUnsigned {
+			renvoEmitBoundedNarrowUnsignedShift(g, tok)
+			return true
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
 	}
 }

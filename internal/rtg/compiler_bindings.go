@@ -85,6 +85,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "bounded_word_shift", Suffix: "BoundedWordShift", Function: "renvoEmitBoundedWordShift", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"tok", "int"}, {"right", "bool"}, {"leftUnsigned", "bool"}, {"resultUnsigned", "bool"}}, Prepared: "if right {\n\trenvoRTGEmitBoundedVariableShift(\u0026g.asm, RTGShiftRight, !leftUnsigned)\n} else {\n\trenvoRTGEmitBoundedVariableShift(\u0026g.asm, RTGShiftLeft, false)\n}\nreturn true"},
 	{Name: "read_write_file", Suffix: "ReadWriteFile", Function: "renvoAsmReadWriteFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"operation", "int"}, {"hasOffset", "bool"}}, Prepared: "if hasOffset {\n\toperation += RTGRuntimeReadAt - RTGRuntimeRead\n}\nreturn renvoRTGEmitRuntimeOperation(a, operation)"},
 	{Name: "pop_read_write_offset", Suffix: "PopReadWriteOffset", Function: "renvoAsmPopReadWriteOffset", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGAsmPopRegister(a, renvoRTGCallWord3)"},
 	{Name: "chmod_file", Suffix: "ChmodFile", Function: "renvoAsmChmodFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)"},

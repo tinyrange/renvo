@@ -1300,6 +1300,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		bounded_word_shift = renvo386CompilerBoundedWordShift
 		read_write_file = renvo386CompilerReadWriteFile
 		pop_read_write_offset = renvo386CompilerPopReadWriteOffset
 		chmod_file = renvo386CompilerChmodFile
@@ -4779,5 +4780,14 @@ go compiler {
 		}
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+		if right && resultUnsigned {
+			return renvoEmitBounded386UnsignedRightShift(g, tok)
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
 	}
 }
