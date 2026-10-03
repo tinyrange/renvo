@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 118 role-based operations: register copies,
+The current migration covers 132 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -184,13 +184,19 @@ in the core; the 386 shift implementation lives with the x86 integration.
 Bulk-copy thresholds, overlap-safe copy emission, zero-helper fast paths,
 fresh-arena elision, and local-storage clearing are definition-owned. Common
 aggregate lowering retains layout, local allocation, and slice-field semantics.
+Split-word arithmetic, unsigned comparison, native wide-operation dispatch,
+logical immediate shifts and negation are supplied by the definitions, including
+their fixed-target availability policy. Token interpretation and signed-division
+fault semantics remain in the common lowering.
 Hooks may take typed parameters, an assembler or compiler-state input, and a
 validated result type. Their complete
 signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
 selected branches to avoid another call at each emission site. It snapshots the
-selector once per dispatch to avoid repeated nested context loads; generated
+selector once per dispatch to avoid repeated nested context loads. Fixed-target
+branches retain direct fact expressions so specialization can eliminate unused
+implementations rather than losing that fact through the local cache; generated
 local names cannot capture identifiers supplied by a definition. Hooks with
 noncanonical parameter names or function-scoped labels retain direct calls.
 Private projected entrypoints are omitted from the architecture source unless

@@ -1332,6 +1332,20 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		split_word_lowering_enabled = renvo386CompilerSplitWordLoweringEnabled
+		shift_primary_right_unsigned_immediate = renvo386CompilerShiftPrimaryRightUnsignedImmediate
+		negate_primary = renvo386CompilerNegatePrimary
+		wide_less_stack = renvo386CompilerWideLessStack
+		wide_add_stack = renvo386CompilerWideAddStack
+		wide_sub_stack = renvo386CompilerWideSubStack
+		wide_shift_left_one = renvo386CompilerWideShiftLeftOne
+		wide_shift_right_one = renvo386CompilerWideShiftRightOne
+		wide_shift_stack = renvo386CompilerWideShiftStack
+		wide_multiply_stack = renvo386CompilerWideMultiplyStack
+		wide_negate_stack = renvo386CompilerWideNegateStack
+		wide_unsigned_divide_stack = renvo386CompilerWideUnsignedDivideStack
+		unsigned_less_stack = renvo386CompilerUnsignedLessStack
+		native_wide_stack = renvo386CompilerNativeWideStack
 		copy_bytes = renvo386CompilerCopyBytes
 		prefer_bulk_stack_copy = renvo386CompilerPreferBulkStackCopy
 		prefer_bulk_indirect_copy = renvo386CompilerPreferBulkIndirectCopy
@@ -2637,5 +2651,199 @@ go compiler {
 			}
 		}
 
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideLessStack(g *renvoLinearGen, left int, right int, signed bool) {
+		renvoNonNil(g)
+		highEqual := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+		renvoAsmJnzPrimary(&g.asm, highEqual)
+		if signed {
+			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x9c)
+		} else {
+			renvoEmitNativeUnsignedLessStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize)
+		}
+		renvoAsmJmpMarkLabel(&g.asm, done, highEqual)
+		renvoEmitNativeUnsignedLessStack(g, left, right)
+		renvoAsmMarkLabel(&g.asm, done)
+	}
+
+	func renvo386CompilerWideAddStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmStackMem(&g.asm, right, 0x03, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x13, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideSubStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x1b, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideShiftLeftOne(g *renvoLinearGen, value int) {
+		renvoNonNil(g)
+		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, carry)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmShlPrimaryImm(&g.asm, 1)
+		renvoAsmLoadTertiaryStack(&g.asm, carry)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShlPrimaryImm(&g.asm, 1)
+		renvoAsmStorePrimaryStack(&g.asm, value)
+	}
+
+	func renvo386CompilerWideShiftRightOne(g *renvoLinearGen, value int, signed bool) {
+		renvoNonNil(g)
+		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmShlPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, carry)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShrPrimaryImm(&g.asm, 1)
+		renvoAsmLoadTertiaryStack(&g.asm, carry)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, value)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		if signed {
+			renvoAsmSarPrimaryImm(&g.asm, 1)
+		} else {
+			renvoAsmShrPrimaryImm(&g.asm, 1)
+		}
+		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+	}
+
+	func renvo386CompilerWideShiftStack(g *renvoLinearGen, dest int, left int, count int, right bool, signed bool) {
+		renvoNonNil(g)
+		renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
+		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
+		limit := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmStoreStackImm(&g.asm, limit, 64)
+		renvoAsmLoadPrimaryStack(&g.asm, count-g.c.renvoNativeIntSize)
+		clamp := renvoAsmNewLabel(&g.asm)
+		ready := renvoAsmNewLabel(&g.asm)
+		begin := renvoAsmNewLabel(&g.asm)
+		renvoAsmJnzPrimary(&g.asm, clamp)
+		renvoEmitNativeUnsignedLessStack(g, count, limit)
+		renvoAsmJnzPrimary(&g.asm, ready)
+		renvoAsmMarkLabel(&g.asm, clamp)
+		renvoAsmStoreStackImm(&g.asm, counter, 64)
+		renvoAsmJmpLabel(&g.asm, begin)
+		renvoAsmMarkLabel(&g.asm, ready)
+		renvoAsmCopyStackSlot(&g.asm, count, counter)
+		renvoAsmMarkLabel(&g.asm, begin)
+		done := renvoAsmNewLabel(&g.asm)
+		loop := renvoAsmNewLabel(&g.asm)
+		renvoAsmMarkLabel(&g.asm, loop)
+		renvoAsmLoadPrimaryStack(&g.asm, counter)
+		renvoAsmJzPrimary(&g.asm, done)
+		if right {
+			renvoEmitWideShiftRightOne(g, dest, signed)
+		} else {
+			renvoEmitWideShiftLeftOne(g, dest)
+		}
+		renvoAsmDecStack(&g.asm, counter)
+		renvoAsmJmpMarkLabel(&g.asm, loop, done)
+	}
+
+	func renvo386CompilerWideMultiplyStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmStackMem(&g.asm, right, 0xf7, 0x65, 0xa5)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmEmit16(&g.asm, 0xd189)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoAsmEmit8(&g.asm, 0x0f)
+		renvoAsmStackMem(&g.asm, right, 0xaf, 0x45, 0x85)
+		renvoAsmEmit16(&g.asm, 0xc101)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmEmit8(&g.asm, 0x0f)
+		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0xaf, 0x45, 0x85)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideNegateStack(g *renvoLinearGen, value int) {
+		renvoNonNil(g)
+		zero := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoZeroLocalAtOffset(g, zero)
+		renvoEmitWideSubStack(g, result, zero, value)
+		renvoEmitCopyStackToStack(g, result, value, renvoBackendValueSlotSize)
+	}
+
+	func renvo386CompilerWideUnsignedDivideStack(g *renvoLinearGen, quotient int, remainder int, dividendValue int, divisor int) {
+		renvoNonNil(g)
+		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoEmitCopyStackToStack(g, dividendValue, dividend, renvoBackendValueSlotSize)
+		renvoZeroLocalAtOffset(g, quotient)
+		renvoZeroLocalAtOffset(g, remainder)
+		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
+		bit := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmStoreStackImm(&g.asm, counter, 64)
+		loop := renvoAsmNewLabel(&g.asm)
+		skipSubtract := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoAsmMarkLabel(&g.asm, loop)
+		renvoAsmLoadPrimaryStack(&g.asm, counter)
+		renvoAsmJzPrimary(&g.asm, done)
+		renvoAsmLoadPrimaryStack(&g.asm, dividend-g.c.renvoNativeIntSize)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, bit)
+		renvoEmitWideShiftLeftOne(g, remainder)
+		renvoAsmLoadPrimaryStack(&g.asm, remainder)
+		renvoAsmLoadTertiaryStack(&g.asm, bit)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, remainder)
+		renvoEmitWideShiftLeftOne(g, dividend)
+		renvoEmitWideShiftLeftOne(g, quotient)
+		renvoEmitWideLessStack(g, remainder, divisor, false)
+		renvoAsmJnzPrimary(&g.asm, skipSubtract)
+		renvoEmitWideSubStack(g, remainder, remainder, divisor)
+		renvoAsmLoadPrimaryStack(&g.asm, quotient)
+		renvoAsmIncPrimary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, quotient)
+		renvoAsmMarkLabel(&g.asm, skipSubtract)
+		renvoAsmDecStack(&g.asm, counter)
+		renvoAsmJmpMarkLabel(&g.asm, loop, done)
+	}
+
+	func renvo386CompilerUnsignedLessStack(g *renvoLinearGen, left int, right int) {
+		renvoEmitNativeCompareStack(g, left, right, 0x92)
+		return
+	}
+
+	func renvo386CompilerNativeWideStack(g *renvoLinearGen, dest int, left int, right int, mode int) bool {
+		renvo386EmitWideBinaryStack(g, dest, left, right, mode)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSplitWordLoweringEnabled(a *renvoAsm) bool {
+		return true
+	}
+
+	func renvo386CompilerShiftPrimaryRightUnsignedImmediate(a *renvoAsm, imm int) {
+		renvo386AsmShrRaxImm(a, imm)
+		return
+	}
+
+	func renvo386CompilerNegatePrimary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xd8f7)
 	}
 }
