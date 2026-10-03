@@ -2114,6 +2114,42 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoLabelNotifications(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+func renvoAsmUnsupportedOperation(a *renvoAsm, code int) {
+renvoNonNil(a)
+if renvoRTGUnsupportedOperation == 0 {
+	renvoRTGUnsupportedOperation = code
+}
+}
+
+func renvoAsmLabelBoundary(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoRTGMarkLabel(a, label)
+}
+
+func renvoEmitStructuredStringEqualBody(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoRTGEmitStringEqualHelperBody(g)
+}
+
+func renvoAsmHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+renvoNonNil(a)
+if start {
+	renvoRTGFunctionStart(a, label)
+} else {
+	renvoRTGFunctionFinish(a)
+}
+}
+
+func renvoUsesStructuredFunctions(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGStructuredFunctions != 0
+}
+
 func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
 renvoNonNil(c)
 return 0

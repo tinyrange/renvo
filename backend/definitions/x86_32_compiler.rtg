@@ -952,6 +952,12 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		label_notifications = renvo386CompilerLabelNotifications
+		unsupported_operation = renvo386CompilerUnsupportedOperation
+		label_boundary = renvo386CompilerLabelBoundary
+		structured_string_equal_body = renvo386CompilerStructuredStringEqualBody
+		helper_function_boundary = renvo386CompilerHelperFunctionBoundary
+		structured_functions = renvo386CompilerStructuredFunctions
 		object_variadic_word_limit = renvo386CompilerObjectVariadicWordLimit
 		object_stack_arguments = renvo386CompilerObjectStackArguments
 		string_compare_arguments = renvo386CompilerStringCompareArguments
@@ -5083,5 +5089,41 @@ go compiler {
 go compiler {
 	func renvo386CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
 		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerStructuredFunctions(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerStructuredStringEqualBody(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLabelBoundary(a *renvoAsm, label int) {
+		return
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsupportedOperation(a *renvoAsm, code int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLabelNotifications(c *renvoCompileContext) bool {
+		return false
 	}
 }
