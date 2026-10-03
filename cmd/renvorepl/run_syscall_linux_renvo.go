@@ -6,6 +6,8 @@ import "renvo.dev/internal/driver"
 
 // renvo_runtime_Syscall is the frontend's explicit generic Linux syscall
 // intrinsic. Its body is only a source-level declaration for the frontend.
+//
+//renvo:intrinsic renvo_runtime_Syscall
 func renvo_runtime_Syscall(number int, first int, second int, third int, fourth int, fifth int, sixth int) int {
 	return 0
 }

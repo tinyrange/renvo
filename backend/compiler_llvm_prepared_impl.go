@@ -547,6 +547,8 @@ const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
+const renvoRTGPreparedVMBytecode = 0
+const renvoRTGPreparedNativeWasm = 0
 const renvoRTGPreparedIEEEFloat = 0
 
 func renvoRTGParseTargetArg(name string) int {

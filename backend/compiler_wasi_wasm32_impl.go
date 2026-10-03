@@ -1959,21 +1959,34 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	}
 	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
-		// Wide operations read and write whole frame-backed slots. Stack slots
-		// are reused across expression lifetimes, so a scalar local at the same
-		// offset cannot be proven coherent with those accesses. Keep the routine
-		// frame-backed when either operation is present.
-		if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
-			for j := 0; j < len(candidates); j++ {
-				candidates[j] = 0
-			}
-			continue
-		}
 		memoryOffsets := make([]int, 0, 3)
 		memorySizes := make([]int, 0, 3)
 		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
+		} else if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
+			// Wide operations access memory directly. Exclude every overlapping
+			// slot across all lifetimes, while retaining unrelated scalar locals.
+			lastField := 5
+			if op == renvoWasm32OpWideBinary {
+				lastField = 9
+			}
+			for field := 1; field <= lastField; field += 4 {
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, 8)
+			}
+		} else if op == renvoWasm32OpCopyFrameBlock {
+			mode := int(renvo_runtime_UnsafeByteAt(a.code, pc+1))
+			for field := 2; field <= 6; field += 4 {
+				if field == 2 && mode == renvoNativeCopyMemToStack || field == 6 && mode == renvoNativeCopyStackToMem {
+					continue
+				}
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, renvoGet32At(a.code, pc+10))
+			}
+		} else if op == renvoWasm32OpPushFrameBlock || op == renvoWasm32OpZeroFrameBlock {
+			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+1))
+			memorySizes = append(memorySizes, renvoGet32At(a.code, pc+5))
 		} else if op == renvoWasm32OpLeaStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, renvoBackendValueSlotSize)

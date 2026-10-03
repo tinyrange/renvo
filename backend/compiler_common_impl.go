@@ -273,6 +273,7 @@ type renvoAsm struct {
 	lastPrimaryStoreEnd   int
 	lastPrimaryStoreOff   int
 	lastPrimaryLoad       int
+	signedCompareLabel    int
 	replSymbols           []renvoReplSymbol
 	wasmLocalSlots        []int32
 	c                     *renvoCompileContext
@@ -581,6 +582,7 @@ func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 	a.lastPrimaryStoreEnd = -1
 	a.lastPrimaryStoreOff = 0
 	a.lastPrimaryLoad = 0
+	a.signedCompareLabel = 0
 }
 
 func renvoAsmNewLabel(a *renvoAsm) int {
@@ -4057,9 +4059,11 @@ func renvoExprIsCompilerIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int
 		return true
 	}
 	callee := &ep.exprs[idx]
-	if callee.kind != renvoExprIdent || !renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, name) {
+	if callee.kind != renvoExprIdent {
 		return false
 	}
+	// Package aliases can change the complete spelling of an intrinsic. The
+	// declaration marker carries its identity across that namespace rewrite.
 	fnIndex := renvoFuncInfoFromCall(g, ep, idx)
 	if fnIndex < 0 {
 		return false
@@ -13409,7 +13413,12 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 					renvoClearLocalFlowConstAtOffset(g, offset)
 				}
 			}
-			if declaresLocal && fieldStackOffset < 0 && renvoLocalConstTrackable(g, localType, nameStart, nameEnd, stmt.endTok) {
+			if declaresLocal && fieldStackOffset < 0 && renvoTypeIsSlice(g.meta, localType) {
+				// A zero-value slice has no stack-backed storage. Preserve this
+				// allocation fact through append/helper calls just as for make;
+				// returning it never requires copying an arena-backed result.
+				renvoSetLocalConstAtOffset(g, offset, 0, renvoResolveType(g.meta, localType).kind)
+			} else if declaresLocal && fieldStackOffset < 0 && renvoLocalConstTrackable(g, localType, nameStart, nameEnd, stmt.endTok) {
 				renvoSetLocalConstAtOffset(g, offset, 0, renvoResolveType(g.meta, localType).kind)
 			} else {
 				renvoClearLocalConstAtOffset(g, offset)
@@ -16775,6 +16784,16 @@ func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
 func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
 	a := &g.asm
 	renvoEmitMakeZeroFreshArenaReturn(g)
+	if g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 && renvoPreparedBackendActive == 0 {
+		renvoAsmEmit8(a, renvoWasm32OpMemoryFill)
+		renvoAsmEmit8(a, renvoWasm32RegRax)
+		renvoAsmEmit8(a, renvoWasm32RegRcx)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, 0)
+		renvoAsmRet(a)
+		return
+	}
 	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
 		// Keep the zero value and byte count in registers throughout each loop.
 		// The generic arithmetic path spills the count for every stored word.
@@ -17024,6 +17043,15 @@ func renvoEmitCompositeFieldToStack(g *renvoLinearGen, ep *renvoExprParse, idx i
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
 	renvoNonNil(g)
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 && size >= 16 {
+		renvoAsmEmit8(&g.asm, renvoWasm32OpCopyFrameBlock)
+		renvoAsmEmit8(&g.asm, renvoNativeCopyStackToStack)
+		renvoAsmEmit32(&g.asm, srcOffset)
+		renvoAsmEmit32(&g.asm, destOffset)
+		renvoAsmEmit32(&g.asm, size)
+		g.asm.lastPrimaryLoad = 0
+		return
+	}
 	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && size >= 32 {
 		renvo386CopyFixed(g, srcOffset, destOffset, size, renvoNativeCopyStackToStack)
 		return
@@ -17036,7 +17064,7 @@ func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int,
 	// straight-line bytecode. The bulk loop is primarily a native-code size
 	// optimization, so retain the compact path for the hosted targets without
 	// imposing its loop overhead on the deterministic VM frontend.
-	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) {
+	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && (size >= 64 || g.c.renvoTargetArch == renvoArchWasm32 && size >= 32) {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
 		count := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -17092,6 +17120,15 @@ const renvoNativeCopyBSSToStack = 5
 
 func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 	renvoNonNil(g)
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 && size >= 16 && (mode == renvoNativeCopyStackToMem || mode == renvoNativeCopyMemToStack) {
+		renvoAsmEmit8(&g.asm, renvoWasm32OpCopyFrameBlock)
+		renvoAsmEmit8(&g.asm, mode)
+		renvoAsmEmit32(&g.asm, srcOffset)
+		renvoAsmEmit32(&g.asm, destOffset)
+		renvoAsmEmit32(&g.asm, size)
+		g.asm.lastPrimaryLoad = 0
+		return
+	}
 	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && size >= 32 {
 		renvo386CopyFixed(g, srcOffset, destOffset, size, mode)
 		return
@@ -17102,8 +17139,8 @@ func renvoEmitCopyNative(g *renvoLinearGen, srcOffset int, destOffset int, size 
 	}
 	// Large aggregate loads and stores use the existing overlap-safe copy
 	// operation instead of expanding a load/store pair for every word.
-	if renvoPreparedBackendActive == 0 && size >= 64 && (size >= 128 || g.c.renvoTargetArch != renvoArchWasm32) &&
-		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 256 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
+	if renvoPreparedBackendActive == 0 && (size >= 64 || g.c.renvoTargetArch == renvoArchWasm32 && size >= 32) &&
+		(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 && size >= 64 || g.c.renvoTargetArch == renvoArchArm && size >= 128 || g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32) &&
 		(mode == renvoNativeCopyMemToStack || mode == renvoNativeCopyStackToMem) {
 		source := renvoAddUnnamedLocal(g, renvoTypeInt)
 		destination := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -17171,6 +17208,15 @@ const renvoPushBss = 2
 func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 	renvoNonNil(g)
 	size = renvoAlignValue(size, wordSize)
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 && mode == renvoPushStack && wordSize == 4 && size >= 32 {
+		// Wasm's expression stack grows upward, so arguments must be copied in
+		// reverse word order rather than with memory.copy.
+		renvoAsmEmit8(&g.asm, renvoWasm32OpPushFrameBlock)
+		renvoAsmEmit32(&g.asm, offset)
+		renvoAsmEmit32(&g.asm, size)
+		g.asm.lastPrimaryLoad = 0
+		return
+	}
 	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && wordSize == 4 && size >= 32 && size <= 4096 {
 		renvo386PushBytes(&g.asm, offset, size, mode)
 		return
@@ -24659,6 +24705,13 @@ func renvoZeroLocalAtOffset(g *renvoLinearGen, offset int) {
 	}
 	t := renvoResolveType(g.meta, typ)
 	renvoNonNil(t)
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchWasm32 && g.c.renvoTarget != renvoTargetVM32 && size >= 16 {
+		renvoAsmEmit8(a, renvoWasm32OpZeroFrameBlock)
+		renvoAsmEmit32(a, offset)
+		renvoAsmEmit32(a, size)
+		a.lastPrimaryLoad = 0
+		return
+	}
 	if t.kind == renvoTypeSlice && g.c.renvoTargetArch != renvoArchAmd64 {
 		renvoInitEmptySliceStack(g, offset)
 		return

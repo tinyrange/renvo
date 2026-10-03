@@ -1,7 +1,7 @@
 package embed
 
 type FS struct {
-	archive string
+	archive []byte
 }
 
 type Entry struct {
@@ -24,7 +24,9 @@ func NewFS(compressed string, size int) FS {
 	if !ok {
 		return FS{}
 	}
-	return FS{archive: string(archive)}
+	// Keep the owned decoded buffer instead of copying the complete archive
+	// into a string. ReadFile returns independent, writable bytes.
+	return FS{archive: archive}
 }
 
 func (f FS) ReadFile(name string) ([]byte, error) {
@@ -52,11 +54,11 @@ func (f FS) ReadFileOK(name string) ([]byte, bool) {
 		return nil, false
 	}
 	for i := 0; i < count; i++ {
-		fileName, dataStart, dataEnd, next, entryOK := archiveEntry(f.archive, pos)
+		nameStart, nameEnd, dataStart, dataEnd, next, entryOK := archiveEntry(f.archive, pos)
 		if !entryOK {
 			return nil, false
 		}
-		if fileName == name {
+		if nameEnd-nameStart == len(name) && archiveHasPrefix(f.archive, nameStart, nameEnd, name) {
 			out := make([]byte, 0, dataEnd-dataStart)
 			for j := dataStart; j < dataEnd; j++ {
 				out = append(out, f.archive[j])
@@ -83,25 +85,25 @@ func (f FS) ReadDirOK(name string) ([]Entry, bool) {
 	var out []Entry
 	found := name == "."
 	for i := 0; i < count; i++ {
-		fileName, _, _, next, entryOK := archiveEntry(f.archive, pos)
+		nameStart, nameEnd, _, _, next, entryOK := archiveEntry(f.archive, pos)
 		if !entryOK {
 			return nil, false
 		}
 		pos = next
-		if !hasPrefix(fileName, prefix) {
+		if !archiveHasPrefix(f.archive, nameStart, nameEnd, prefix) {
 			continue
 		}
-		rest := fileName[len(prefix):]
-		if rest == "" {
+		start := nameStart + len(prefix)
+		if start == nameEnd {
 			continue
 		}
 		found = true
-		end := 0
-		for end < len(rest) && rest[end] != '/' {
+		end := start
+		for end < nameEnd && f.archive[end] != '/' {
 			end++
 		}
-		entryName := rest[:end]
-		isDir := end < len(rest)
+		entryName := string(f.archive[start:end])
+		isDir := end < nameEnd
 		if !hasEntry(out, entryName) {
 			out = append(out, Entry{name: entryName, dir: isDir})
 		}
@@ -121,16 +123,16 @@ func (e Entry) IsDir() bool {
 	return e.dir
 }
 
-func archiveHeader(archive string) (int, int, bool) {
+func archiveHeader(archive []byte) (int, int, bool) {
 	if len(archive) < 4 {
 		return 0, 0, false
 	}
 	return archiveUint32(archive, 0), 4, true
 }
 
-func archiveEntry(archive string, pos int) (string, int, int, int, bool) {
+func archiveEntry(archive []byte, pos int) (int, int, int, int, int, bool) {
 	if pos < 0 || pos+8 > len(archive) {
-		return "", 0, 0, pos, false
+		return 0, 0, 0, 0, pos, false
 	}
 	nameSize := archiveUint32(archive, pos)
 	dataSize := archiveUint32(archive, pos+4)
@@ -138,12 +140,12 @@ func archiveEntry(archive string, pos int) (string, int, int, int, bool) {
 	dataStart := nameStart + nameSize
 	dataEnd := dataStart + dataSize
 	if nameSize < 0 || dataSize < 0 || dataStart < nameStart || dataEnd < dataStart || dataEnd > len(archive) {
-		return "", 0, 0, pos, false
+		return 0, 0, 0, 0, pos, false
 	}
-	return archive[nameStart:dataStart], dataStart, dataEnd, dataEnd, true
+	return nameStart, dataStart, dataStart, dataEnd, dataEnd, true
 }
 
-func archiveUint32(data string, pos int) int {
+func archiveUint32(data []byte, pos int) int {
 	return int(data[pos]) | int(data[pos+1])<<8 | int(data[pos+2])<<16 | int(data[pos+3])<<24
 }
 
@@ -167,12 +169,12 @@ func validPath(name string) bool {
 	return true
 }
 
-func hasPrefix(value string, prefix string) bool {
-	if len(prefix) > len(value) {
+func archiveHasPrefix(archive []byte, start int, end int, prefix string) bool {
+	if len(prefix) > end-start {
 		return false
 	}
 	for i := 0; i < len(prefix); i++ {
-		if value[i] != prefix[i] {
+		if archive[start+i] != prefix[i] {
 			return false
 		}
 	}

@@ -21,6 +21,12 @@ func main() {
 		print("FAIL\n")
 		return
 	}
+	fromFS[0] = 'x'
+	again, err := assets.ReadFile("assets/message.txt")
+	if err != nil || string(again) != message {
+		print("FAIL\n")
+		return
+	}
 	entries, err := assets.ReadDir("assets")
 	if err != nil || len(entries) != 2 || entries[0].Name() != "data.txt" || entries[0].IsDir() || entries[1].Name() != "message.txt" || entries[1].IsDir() {
 		print("FAIL\n")
