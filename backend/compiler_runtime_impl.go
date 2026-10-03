@@ -878,7 +878,7 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if e.argCount != 6 || g.c.renvoTargetArch == renvoArchWasm32 {
+	if e.argCount != 6 || !renvoJITCallSupported(g.c) {
 		return false
 	}
 	for i := e.argCount - 1; i >= 0; i-- {

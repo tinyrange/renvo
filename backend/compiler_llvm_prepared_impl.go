@@ -2141,6 +2141,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoJITCallSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGJITCallSupported
+}
+
 func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
 renvoNonNil(c)
 if flag == renvoOpenReadOnly { return 0 }
@@ -4781,6 +4786,7 @@ rtgLlvmLlvmAmd64PackageLlvmFunctionStart(out, label)
 func renvoRTGFunctionFinish(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmFunctionFinish(out)
 }
+const renvoRTGJITCallSupported = true
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool {
 rtgLlvmLlvmAmd64PackageLlvmJITCall(out, entry, stackTop, argsData, argsLen, envData, envLen)
 return true

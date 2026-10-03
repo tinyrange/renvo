@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		jit_call_supported = renvoAmd64CompilerJITCallSupported
 		open_flag = renvoAmd64CompilerOpenFlag
 		file_offset_sentinel = renvoAmd64CompilerFileOffsetSentinel
 		static_call_binding = renvoAmd64CompilerStaticCallBinding
@@ -4868,5 +4869,11 @@ go compiler {
 			return 512
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerJITCallSupported(c *renvoCompileContext) bool {
+		return true
 	}
 }
