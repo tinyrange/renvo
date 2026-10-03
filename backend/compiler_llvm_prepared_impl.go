@@ -543,6 +543,7 @@ func renvoRTGReloc(out *renvoAsm, label int) {
 
 const renvoRTGPreparedOS = 1
 const renvoRTGPreparedIntBits = 64
+const renvoRTGPreparedMaxAlign = 8
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0
@@ -588,6 +589,7 @@ p.pointerBits = 64
 p.codePointerBits = 64
 p.funcPointerBits = 64
 p.maxAlign = 8
+p.endian = renvoEndianLittle
 p.backendSlotSize = renvoBackendValueSlotSize
 p.addressModel = renvoAddressModelFlat
 p.runtimeCaps = 63

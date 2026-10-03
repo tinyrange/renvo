@@ -756,6 +756,7 @@ func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool { return fa
 
 const renvoRTGPreparedOS = 0
 const renvoRTGPreparedIntBits = 0
+const renvoRTGPreparedMaxAlign = 0
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0

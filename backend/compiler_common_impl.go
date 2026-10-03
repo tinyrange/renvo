@@ -7119,13 +7119,14 @@ func renvoNativeTypeLayout(m *renvoMeta, typ int) int {
 }
 
 func renvoNativeAlignment(context *renvoCompileContext, size int) int {
-	if size >= 8 && (context.renvoNativeIntSize == 8 || context.renvoTargetArch == renvoArchWasm32) {
+	maxAlign := renvoTargetMaxAlignment(context)
+	if size >= 8 && maxAlign >= 8 {
 		return 8
 	}
-	if size >= 4 {
+	if size >= 4 && maxAlign >= 4 {
 		return 4
 	}
-	if size >= 2 {
+	if size >= 2 && maxAlign >= 2 {
 		return 2
 	}
 	return 1
