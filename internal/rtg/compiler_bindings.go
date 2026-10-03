@@ -91,6 +91,9 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "object_indirect_aggregate", Suffix: "ObjectIndirectAggregate", Function: "renvoObjectIndirectAggregate", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
+	{Name: "object_word_limit", Suffix: "ObjectWordLimit", Function: "renvoObjectWordLimit", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{{"export", "bool"}}, Prepared: "if export { return 20 }\nlimit := renvoRTGObjectRegisterCount()\nif limit \u003e 20 { limit = 20 }\nreturn limit"},
+	{Name: "object_argument_word_bytes", Suffix: "ObjectArgumentWordBytes", Function: "renvoObjectArgumentWordBytes", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGStackWordBytes"},
 	{Name: "source_token_capacity", Suffix: "SourceTokenCapacity", Function: "renvoSourceTokenCapacity", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{{"length", "int"}}, Prepared: "return length/4 + 8192"},
 	{Name: "source_soft_float", Suffix: "SourceSoftFloat", Function: "renvoSourceSoftFloat", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "source_scratch", Suffix: "SourceScratch", Function: "renvoSourceScratch", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},

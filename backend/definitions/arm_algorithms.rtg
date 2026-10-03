@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		object_indirect_aggregate = renvoArmCompilerObjectIndirectAggregate
+		object_word_limit = renvoArmCompilerObjectWordLimit
+		object_argument_word_bytes = renvoArmCompilerObjectArgumentWordBytes
 		source_token_capacity = renvoArmCompilerSourceTokenCapacity
 		source_soft_float = renvoArmCompilerSourceSoftFloat
 		source_scratch = renvoArmCompilerSourceScratch
@@ -3052,5 +3055,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
 		return length/4 + 8192
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectArgumentWordBytes(c *renvoCompileContext) int {
+		return c.renvoNativeIntSize
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectWordLimit(c *renvoCompileContext, export bool) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
+		return false
 	}
 }

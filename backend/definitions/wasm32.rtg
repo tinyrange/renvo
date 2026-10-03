@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_indirect_aggregate = renvoWasm32CompilerObjectIndirectAggregate
+		object_word_limit = renvoWasm32CompilerObjectWordLimit
+		object_argument_word_bytes = renvoWasm32CompilerObjectArgumentWordBytes
 		source_token_capacity = renvoWasm32CompilerSourceTokenCapacity
 		source_soft_float = renvoWasm32CompilerSourceSoftFloat
 		source_scratch = renvoWasm32CompilerSourceScratch
@@ -6804,5 +6807,23 @@ go compiler {
 			return length/5 + 16384
 		}
 		return length/4 + 8192
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectArgumentWordBytes(c *renvoCompileContext) int {
+		return c.renvoNativeIntSize
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectWordLimit(c *renvoCompileContext, export bool) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
+		return false
 	}
 }

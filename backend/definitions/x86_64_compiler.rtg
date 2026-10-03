@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		object_indirect_aggregate = renvoAmd64CompilerObjectIndirectAggregate
+		object_word_limit = renvoAmd64CompilerObjectWordLimit
+		object_argument_word_bytes = renvoAmd64CompilerObjectArgumentWordBytes
 		source_token_capacity = renvoAmd64CompilerSourceTokenCapacity
 		source_soft_float = renvoAmd64CompilerSourceSoftFloat
 		source_scratch = renvoAmd64CompilerSourceScratch
@@ -3735,6 +3738,10 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
+		// The displacement forms in this emitter bound its physical call area.
+		if wordCount <= 6 || wordCount > 22 {
+			return false
+		}
 		// The evaluation stack presents argument zero at its top. Pop the six SysV
 		// register arguments and retain the remaining words in source order.
 		renvoAsmEmitText(a, "\x5f\x5e\x5a\x59\x41\x58\x41\x59")
@@ -4376,5 +4383,23 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
 		return length/4 + 8192
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectArgumentWordBytes(c *renvoCompileContext) int {
+		return 8
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectWordLimit(c *renvoCompileContext, export bool) int {
+		return 20
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
+		return true
 	}
 }
