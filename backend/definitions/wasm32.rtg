@@ -4150,6 +4150,13 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		install_thread_state = renvoWasm32CompilerInstallThreadState
+		load_primary_thread_state = renvoWasm32CompilerLoadPrimaryThreadState
+		store_primary_thread_state = renvoWasm32CompilerStorePrimaryThreadState
+		scalar_function = renvoWasm32CompilerScalarFunction
+		runtime_stack = renvoWasm32CompilerRuntimeStack
+		unchecked_non_nil_primary = renvoWasm32CompilerUncheckedNonNilPrimary
+		unchecked_non_nil_secondary = renvoWasm32CompilerUncheckedNonNilSecondary
 		irq_stack_call = renvoWasm32CompilerIRQStackCall
 		ms_abi_call = renvoWasm32CompilerMSABICall
 		runtime_platform_intrinsic = renvoWasm32CompilerRuntimePlatformIntrinsic
@@ -4803,5 +4810,55 @@ go compiler {
 			return 0
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerInstallThreadState(g *renvoLinearGen) {
+		return
+	}
+
+	func renvoWasm32CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvoWasm32CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvoWasm32CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+		return renvoWasm32EmitScalarFunction(g, fnInfoIndex)
+	}
+
+	func renvoWasm32CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+		if count == 5 {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		return true
+	}
+
+	func renvoWasm32CompilerUncheckedNonNilPrimary(g *renvoLinearGen) {
+		a := &g.asm
+		ok := renvoAsmNewLabel(a)
+		renvoAsmJnzPrimary(a, ok)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		renvoAsmMarkLabel(a, ok)
+	}
+
+	func renvoWasm32CompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmPopPrimary(&g.asm)
+		renvoEmitRuntimeNonNilPrimary(g)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
 	}
 }

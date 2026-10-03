@@ -7624,53 +7624,8 @@ func renvoEmitInitializeThreadState(g *renvoLinearGen) {
 	}
 	renvoEnsurePanicState(g)
 	renvoAsmPrimaryBssAddr(&g.asm, g.mainThreadStateOff)
-	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
-		// R15 is callee-saved on the supported amd64 ABIs and is excluded from
-		// ordinary value allocation. It is the native ThreadState register.
-		renvoAsmEmitText(&g.asm, "\x49\x89\xc7")
-	}
+	renvoEmitInstallThreadState(g)
 	renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
-}
-
-func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-	if renvoFixedTarget == 0 && (renvoIsHostedObjectAmd64(g.c) || renvoIsHostedObject386(g.c) && g.c.code16) {
-		// Object wrappers reserve R15 for the word-index helper. Until object
-		// output has a TLS runtime contract, retain unwind state in this object's
-		// private BSS instead of clobbering that ABI register.
-		renvoEnsurePanicState(g)
-		renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
-		return
-	}
-	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
-		renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
-		renvoAsmEmit32(&g.asm, stateOffset)
-		return
-	}
-	renvoAsmPushSecondary(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
-	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
-	renvoAsmPopSecondary(&g.asm)
-}
-
-func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
-		renvoEnsurePanicState(g)
-		renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
-		return
-	}
-	if g.c.renvoTargetArch == renvoArchAmd64 && renvoPreparedBackendActive == 0 {
-		renvoAsmEmitText(&g.asm, "\x49\x89\x87")
-		renvoAsmEmit32(&g.asm, stateOffset)
-		return
-	}
-	renvoAsmPushSecondary(&g.asm)
-	renvoAsmPushPrimary(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
-	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	renvoAsmPopPrimary(&g.asm)
-	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
-	renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoAsmCopyThreadStateToStack(g *renvoLinearGen, stateOffset int, stackOffset int) {
@@ -8096,28 +8051,6 @@ func renvoAsmRecordRegisterPush(a *renvoAsm, register int) {
 	// same value as a PUSH opcode can be immediate or displacement data; only a
 	// push emitted through the register operation is safe for the pop peephole.
 	a.lastPrimaryStoreEnd = -(len(a.code)*32 + register + 2)
-}
-
-func renvoAsmCancelAdjacentPush(a *renvoAsm, pushOpcode int) bool {
-	register := pushOpcode - 0x50
-	if register < 0 || register > 7 || a.lastPrimaryStoreEnd != -(len(a.code)*32+register+2) ||
-		len(a.code) == 0 || int(a.code[len(a.code)-1]) != pushOpcode {
-		return false
-	}
-	at := len(a.code) - 1
-	// A REX.B prefix changes PUSH rax/r9 into PUSH r8/r9.  Looking only at the
-	// final opcode made a following POP of the low register appear to cancel
-	// the push, leaving the prefix behind and losing the value entirely.
-	if at > 0 && a.c != nil && a.c.renvoTargetArch == renvoArchAmd64 &&
-		a.code[at-1] >= 0x41 && a.code[at-1] <= 0x4f && a.code[at-1]&1 != 0 {
-		return false
-	}
-	renvoTruncBytes(&a.code, at)
-	a.lastPrimaryStoreEnd = -1
-	if pushOpcode == 0x50 && a.lastPrimaryLoad < 0 {
-		a.lastPrimaryLoad = -a.lastPrimaryLoad
-	}
-	return true
 }
 
 func renvoAsmStorePrimaryStackSize(a *renvoAsm, offset int, size int) {
@@ -16525,31 +16458,7 @@ func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	if count != 2 && count != 5 {
 		return false
 	}
-	if g.c.renvoTargetArch != renvoArchAmd64 || renvoPreparedBackendActive != 0 {
-		if count == 5 {
-			renvoAsmPrimaryImm(&g.asm, 0)
-		}
-		return true
-	}
-	runner := &ep.exprs[renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+count)]
-	renvoEnsureRuntimeStackHelpers(g, renvoFindMetaFunction(g.meta, runner.nameStart, runner.nameEnd))
-	for i := 0; i < count; i++ {
-		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)) {
-			return false
-		}
-		renvoAsmPushPrimary(&g.asm)
-	}
-	renvoAsmPopCallWord0(&g.asm)
-	renvoAsmPopCallWord1(&g.asm)
-	if count == 5 {
-		renvoAsmPopSecondary(&g.asm)
-		renvoAsmPopTertiary(&g.asm)
-		renvoAsmEmit16(&g.asm, 0x5841)
-		renvoAsmCallLabel(&g.asm, g.stackInitLabel-1)
-	} else {
-		renvoAsmCallLabel(&g.asm, g.stackSwitchLabel-1)
-	}
-	return true
+	return renvoEmitTargetRuntimeStack(g, ep, e, count)
 }
 
 // Compiler-private intrinsics live in the reserved renvo_runtime namespace.
@@ -16748,16 +16657,7 @@ func renvoEmitRuntimeNonNilPrimary(g *renvoLinearGen) {
 	}
 	a := &g.asm
 	if !g.meta.panicEnabled {
-		if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAsmCallLabel(a, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
-		} else if g.c.renvoTargetArch == renvoArchWasm32 {
-			ok := renvoAsmNewLabel(a)
-			renvoAsmJnzPrimary(a, ok)
-			renvoEmitUncaughtFaultTransfer(g, false)
-			renvoAsmMarkLabel(a, ok)
-		} else {
-			renvoAsmCallLabel(a, renvoEnsureNonNilCheckHelper(g, false))
-		}
+		renvoEmitUncheckedNonNilPrimary(g)
 		return
 	}
 	ok := renvoAsmNewLabel(a)
@@ -16818,14 +16718,8 @@ func renvoEmitRuntimeNonNilSecondary(g *renvoLinearGen) {
 	}
 	a := &g.asm
 	if !g.meta.panicEnabled {
-		if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAsmEmit24(a, 0xd5ff41)
-			return
-		}
-		if g.c.renvoTargetArch != renvoArchWasm32 {
-			renvoAsmCallLabel(a, renvoEnsureNonNilCheckHelper(g, true))
-			return
-		}
+		renvoEmitUncheckedNonNilSecondary(g)
+		return
 	}
 	renvoAsmPushSecondary(a)
 	renvoAsmPopPrimary(a)
@@ -20657,24 +20551,7 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	fieldCount := len(g.meta.fields)
 	captureCount := len(g.meta.captures)
 	mark := renvo_runtime_ArenaMark()
-	ok := false
-	if renvoPreparedBackendActive != 0 {
-		ok = renvoRTGEmitScalarFunction(g, fnInfoIndex)
-	} else if g.c.renvoTargetArch == renvoArchWasm32 {
-		ok = renvoWasm32EmitScalarFunction(g, fnInfoIndex)
-	} else if g.c.renvoTargetArch == renvoArchAarch64 {
-		ok = renvoAarch64EmitScalarFunction(g, fnInfoIndex)
-	} else if g.c.renvoTargetArch == renvoArchArm {
-		ok = renvoArmEmitScalarFunction(g, fnInfoIndex)
-	} else if g.c.renvoTargetArch == renvoArch386 {
-		if renvoFixedTarget == 0 && g.c.code16 && renvo386EmitCompactCValueHelper(g, fnInfoIndex) {
-			ok = true
-		} else {
-			ok = renvo386EmitScalarFunction(g, fnInfoIndex)
-		}
-	} else {
-		ok = renvoAmd64EmitScalarFunction(g, fnInfoIndex)
-	}
+	ok := renvoEmitTargetScalarFunction(g, fnInfoIndex)
 	if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 		renvoTruncTypes(&g.meta.types, typeCount)
 		renvoTruncFields(&g.meta.fields, fieldCount)

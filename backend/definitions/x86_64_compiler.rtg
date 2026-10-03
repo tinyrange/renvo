@@ -965,6 +965,13 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		install_thread_state = renvoAmd64CompilerInstallThreadState
+		load_primary_thread_state = renvoAmd64CompilerLoadPrimaryThreadState
+		store_primary_thread_state = renvoAmd64CompilerStorePrimaryThreadState
+		scalar_function = renvoAmd64CompilerScalarFunction
+		runtime_stack = renvoAmd64CompilerRuntimeStack
+		unchecked_non_nil_primary = renvoAmd64CompilerUncheckedNonNilPrimary
+		unchecked_non_nil_secondary = renvoAmd64CompilerUncheckedNonNilSecondary
 		irq_stack_call = renvoAmd64CompilerIRQStackCall
 		ms_abi_call = renvoAmd64CompilerMSABICall
 		runtime_platform_intrinsic = renvoX86CompilerRuntimePlatformIntrinsic
@@ -1463,13 +1470,13 @@ go compiler {
 
 	func renvoAmd64CompilerPopCallWord0(a *renvoAsm) {
 		renvoNonNil(a)
-		if renvoAsmCancelAdjacentPush(a, 0x57) {
+		if renvoAmd64CancelAdjacentPush(a, 0x57) {
 			return
 		}
 		if renvoAmd64RewritePrimaryLoad(a, 7, true) {
 			return
 		}
-		if renvoAsmCancelAdjacentPush(a, 0x50) {
+		if renvoAmd64CancelAdjacentPush(a, 0x50) {
 			renvoAsmEmit24(a, 0xc78948)
 			return
 		}
@@ -2045,5 +2052,97 @@ go compiler {
 		renvoAsmEmit8(&g.asm, reserve)
 		return true
 
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerInstallThreadState(g *renvoLinearGen) {
+		// R15 is callee-saved on the supported amd64 ABIs and is excluded from
+		// ordinary value allocation. It is the native ThreadState register.
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc7")
+	}
+
+	func renvoAmd64CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+			// Object wrappers reserve R15 for the word-index helper. Until object
+			// output has a TLS runtime contract, retain unwind state in this object's
+			// private BSS instead of clobbering that ABI register.
+			renvoEnsurePanicState(g)
+			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
+		renvoAsmEmitText(&g.asm, "\x49\x8b\x87")
+		renvoAsmEmit32(&g.asm, stateOffset)
+		return
+	}
+
+	func renvoAmd64CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+			renvoEnsurePanicState(g)
+			renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
+		renvoAsmEmitText(&g.asm, "\x49\x89\x87")
+		renvoAsmEmit32(&g.asm, stateOffset)
+		return
+	}
+
+	func renvoAmd64CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+		return renvoAmd64EmitScalarFunction(g, fnInfoIndex)
+	}
+
+	func renvoAmd64CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+		runner := &ep.exprs[renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+count)]
+		renvoEnsureRuntimeStackHelpers(g, renvoFindMetaFunction(g.meta, runner.nameStart, runner.nameEnd))
+		for i := 0; i < count; i++ {
+			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)) {
+				return false
+			}
+			renvoAsmPushPrimary(&g.asm)
+		}
+		renvoAsmPopCallWord0(&g.asm)
+		renvoAsmPopCallWord1(&g.asm)
+		if count == 5 {
+			renvoAsmPopSecondary(&g.asm)
+			renvoAsmPopTertiary(&g.asm)
+			renvoAsmEmit16(&g.asm, 0x5841)
+			renvoAsmCallLabel(&g.asm, g.stackInitLabel-1)
+		} else {
+			renvoAsmCallLabel(&g.asm, g.stackSwitchLabel-1)
+		}
+		return true
+	}
+
+	func renvoAmd64CompilerUncheckedNonNilPrimary(g *renvoLinearGen) {
+		a := &g.asm
+		renvoAsmCallLabel(a, renvoAmd64EnsureRuntimeCheck(g, &g.runtimeNonNilLabel, 0, "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"))
+	}
+
+	func renvoAmd64CompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
+		renvoAsmEmit24(&g.asm, 0xd5ff41)
+	}
+}
+
+go compiler {
+	func renvoAmd64CancelAdjacentPush(a *renvoAsm, pushOpcode int) bool {
+		register := pushOpcode - 0x50
+		if register < 0 || register > 7 || a.lastPrimaryStoreEnd != -(len(a.code)*32+register+2) ||
+			len(a.code) == 0 || int(a.code[len(a.code)-1]) != pushOpcode {
+			return false
+		}
+		at := len(a.code) - 1
+		// A REX.B prefix changes PUSH rax/r9 into PUSH r8/r9.  Looking only at the
+		// final opcode made a following POP of the low register appear to cancel
+		// the push, leaving the prefix behind and losing the value entirely.
+		if at > 0 && a.c != nil &&
+			a.code[at-1] >= 0x41 && a.code[at-1] <= 0x4f && a.code[at-1]&1 != 0 {
+			return false
+		}
+		renvoTruncBytes(&a.code, at)
+		a.lastPrimaryStoreEnd = -1
+		if pushOpcode == 0x50 && a.lastPrimaryLoad < 0 {
+			a.lastPrimaryLoad = -a.lastPrimaryLoad
+		}
+		return true
 	}
 }

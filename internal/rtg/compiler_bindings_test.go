@@ -202,6 +202,14 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
 				"func "+hook+"(a *renvoAsm) { if a.patchFailed { again: a.patchFailed = false; if a.patchFailed { goto again } } }", 1)
 		}, true},
+		{"selector local does not capture a definition name", func(source, hook string) string {
+			name := "renvoCompilerSelector"
+			if hook == "secondHook" {
+				name += "_"
+			}
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"var "+name+" = true\nfunc "+hook+"(a *renvoAsm) { a.patchFailed = "+name+" }", 1)
+		}, false},
 		{"called by helper", func(source, hook string) string {
 			return source + "\ngo compiler { func " + hook + "Caller(a *renvoAsm) { " + hook + "(a) } }\n"
 		}, true},
@@ -323,17 +331,17 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 		if fn.Name.Name != "renvoAsmCopyPrimaryToSecondary" {
 			continue
 		}
-		if len(fn.Body.List) != 4 {
-			t.Fatalf("want guard, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
+		if len(fn.Body.List) != 5 {
+			t.Fatalf("want guard, selector snapshot, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
 		}
-		first := fn.Body.List[1].(*ast.IfStmt)
+		first := fn.Body.List[2].(*ast.IfStmt)
 		condition := first.Cond.(*ast.BinaryExpr)
 		if condition.Op != token.LOR ||
 			condition.X.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedOne" ||
 			condition.Y.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedThree" {
 			t.Fatal("nonadjacent equal bodies lost their explicit selectors")
 		}
-		second := fn.Body.List[2].(*ast.IfStmt)
+		second := fn.Body.List[3].(*ast.IfStmt)
 		if second.Cond.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedTwo" {
 			t.Fatal("different implementation was grouped")
 		}
@@ -346,7 +354,7 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 				t.Fatal("selected body falls through to failure")
 			}
 		}
-		failure := fn.Body.List[3].(*ast.AssignStmt)
+		failure := fn.Body.List[4].(*ast.AssignStmt)
 		if failure.Lhs[0].(*ast.SelectorExpr).Sel.Name != "patchFailed" || failure.Rhs[0].(*ast.Ident).Name != "true" {
 			t.Fatal("unknown selector no longer fails")
 		}

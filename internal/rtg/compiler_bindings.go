@@ -1,6 +1,9 @@
 package rtg
 
-import "renvo.dev/internal/syntax"
+import (
+	"renvo.dev/internal/syntax"
+	"strings"
+)
 
 // compilerEmitterOperation is the shared lowering surface migrated out of the
 // handwritten kernel. Bundled definitions bind it to compiler integration
@@ -82,6 +85,13 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "install_thread_state", Suffix: "InstallThreadState", Function: "renvoEmitInstallThreadState", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "return"},
+	{Name: "load_primary_thread_state", Suffix: "LoadPrimaryThreadState", Function: "renvoAsmLoadPrimaryThreadState", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{{"stateOffset", "int"}}, Prepared: "\trenvoAsmPushSecondary(\u0026g.asm)\n\trenvoAsmLoadPrimaryBss(\u0026g.asm, g.threadStatePointerOff)\n\trenvoAsmCopyPrimaryToSecondary(\u0026g.asm)\n\trenvoAsmLoadPrimaryMemSecondaryDisp(\u0026g.asm, stateOffset)\n\trenvoAsmPopSecondary(\u0026g.asm)"},
+	{Name: "store_primary_thread_state", Suffix: "StorePrimaryThreadState", Function: "renvoAsmStorePrimaryThreadState", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{{"stateOffset", "int"}}, Prepared: "\trenvoAsmPushSecondary(\u0026g.asm)\n\trenvoAsmPushPrimary(\u0026g.asm)\n\trenvoAsmLoadPrimaryBss(\u0026g.asm, g.threadStatePointerOff)\n\trenvoAsmCopyPrimaryToSecondary(\u0026g.asm)\n\trenvoAsmPopPrimary(\u0026g.asm)\n\trenvoAsmStorePrimaryMemSecondaryDisp(\u0026g.asm, stateOffset)\n\trenvoAsmPopSecondary(\u0026g.asm)"},
+	{Name: "scalar_function", Suffix: "ScalarFunction", Function: "renvoEmitTargetScalarFunction", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"fnInfoIndex", "int"}}, Prepared: "return renvoRTGEmitScalarFunction(g, fnInfoIndex)"},
+	{Name: "runtime_stack", Suffix: "RuntimeStack", Function: "renvoEmitTargetRuntimeStack", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"e", "*renvoExpr"}, {"count", "int"}}, Prepared: "if count == 5 { renvoAsmPrimaryImm(&g.asm, 0) }; return true"},
+	{Name: "unchecked_non_nil_primary", Suffix: "UncheckedNonNilPrimary", Function: "renvoEmitUncheckedNonNilPrimary", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, false))"},
+	{Name: "unchecked_non_nil_secondary", Suffix: "UncheckedNonNilSecondary", Function: "renvoEmitUncheckedNonNilSecondary", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))"},
 	{Name: "irq_stack_call", Suffix: "IRQStackCall", Function: "renvoEmitIRQStackCall", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"e", "*renvoExpr"}, {"helper", "*renvoFuncInfo"}}, Prepared: "return false"},
 	{Name: "ms_abi_call", Suffix: "MSABICall", Function: "renvoEmitMSABICall", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"e", "*renvoExpr"}, {"helper", "*renvoFuncInfo"}}, Prepared: "return false"},
 	{Name: "runtime_platform_intrinsic", Suffix: "RuntimePlatformIntrinsic", Function: "renvoEmitTargetPlatformIntrinsic", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"e", "*renvoExpr"}, {"fn", "*renvoFuncInfo"}}, Prepared: "if e.argCount == 0 \u0026\u0026\n(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, \"renvo_runtime_CReadStackPointer\") ||\nrenvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, \"renvo_runtime_CFrameAddress\")) {\nreturn 0\n}\nreturn -1"},
@@ -318,6 +328,28 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		out = append(out, operation.functionName()...)
 		out = append(out, operation.signature()...)
 		out = append(out, " {\nrenvoNonNil("+operation.receiver().Name+")\n"...)
+		// Snapshot selection once: repeated nested context loads otherwise add
+		// code and nil checks to every branch of this hot lowering surface.
+		// Avoid capturing any identifier used by a definition-owned body.
+		selectorLocal := "renvoCompilerSelector"
+		for {
+			collision := strings.Contains(operation.signature(), selectorLocal)
+			for j := 0; j < len(documents); j++ {
+				for k := 0; k < len(documents[j].Declarations); k++ {
+					if strings.Contains(string(documents[j].Declarations[k].GoSource), selectorLocal) {
+						collision = true
+					}
+				}
+				if strings.Contains(selectors[j], selectorLocal) {
+					collision = true
+				}
+			}
+			if !collision {
+				break
+			}
+			selectorLocal += "_"
+		}
+		out = append(out, selectorLocal+" := "+operation.receiver().Name+".c.renvoTargetArch\n"...)
 		// Share only byte-identical emitted bodies. Every selector remains explicit,
 		// so this neither invents an ISA family nor supplies an unknown-target default.
 		var bodies []string
@@ -338,7 +370,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			if operation.Result == "" && (!project || !function.EndsInReturn) {
 				body += "\nreturn\n"
 			}
-			condition := operation.receiver().Name + ".c.renvoTargetArch == " + selectors[j]
+			condition := selectorLocal + " == " + selectors[j]
 			group := stringIndex(bodies, body)
 			if group < 0 {
 				bodies = append(bodies, body)
