@@ -193,11 +193,10 @@ validated result type. Their complete
 signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
-selected branches to avoid another call at each emission site. It snapshots the
-selector once per dispatch to avoid repeated nested context loads. Fixed-target
-branches retain direct fact expressions so specialization can eliminate unused
-implementations rather than losing that fact through the local cache; generated
-local names cannot capture identifiers supplied by a definition. Hooks with
+selected branches to avoid another call at each emission site. It caches the
+context pointer to avoid repeated nested loads while retaining direct fact reads
+for fixed-target branch elimination, without duplicating selection conditions.
+Generated local names cannot capture identifiers supplied by a definition. Hooks with
 noncanonical parameter names or function-scoped labels retain direct calls.
 Private projected entrypoints are omitted from the architecture source unless
 another binding, Go body, or definition declaration still references them.
