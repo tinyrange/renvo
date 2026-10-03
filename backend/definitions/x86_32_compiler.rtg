@@ -952,6 +952,10 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		single_call_constants = renvo386CompilerSingleCallConstants
+		elide_empty_calls = renvo386CompilerElideEmptyCalls
+		pure_call_constants = renvo386CompilerPureCallConstants
+		flow_constant_propagation = renvo386CompilerFlowConstantPropagation
 		reset_program_emission = renvo386CompilerResetProgramEmission
 		function_address_layout = renvo386CompilerFunctionAddressLayout
 		reconstruct_wide_argument = renvo386CompilerReconstructWideArgument
@@ -5266,5 +5270,29 @@ go compiler {
 go compiler {
 	func renvo386CompilerResetProgramEmission(g *renvoLinearGen) {
 
+	}
+}
+
+go compiler {
+	func renvo386CompilerFlowConstantPropagation(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPureCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerElideEmptyCalls(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSingleCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
 	}
 }

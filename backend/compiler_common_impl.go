@@ -600,17 +600,6 @@ func renvoStringFromBytes(src []byte, start int, end int) string {
 	return value
 }
 
-// ObjectImage is the RTG-visible bridge to the production x86_64 relocatable
-// writer. A custom target still selects the object format in its definition;
-// the implementation is shared with the compiled-in frontend so the two paths
-// cannot drift on section, symbol, or relocation semantics.
-func (a *renvoAsm) ObjectImage() []byte {
-	if renvoFixedTarget != 0 {
-		return nil
-	}
-	return renvoAsmImageRelocatableObjectAmd64(a)
-}
-
 func renvoAsmAddObjectFuncSymbol(a *renvoAsm, src []byte, nameStart int, nameEnd int, label int, decl *renvoObjectDecl) int {
 	renvoAsmAddFuncSymbol(a, src, nameStart, nameEnd, label)
 	index := len(a.symbols) - 1
@@ -1371,23 +1360,6 @@ func renvoMetaError(m *renvoMeta) {
 func renvoExprError(ep *renvoExprParse) {
 	renvoNonNil(ep)
 	ep.ok = false
-}
-
-func renvoParseProgram(src []byte) renvoProgram {
-	var p renvoProgram
-	p.c.stripSymbols = renvoCompilerStripSymbols
-	if renvoFixedTarget == 0 {
-		p.c.renvoTarget = renvoTarget
-		p.c.renvoTargetOS = renvoTargetOS
-		p.c.renvoTargetArch = renvoTargetArch
-		p.c.renvoNativeIntSize = renvoNativeIntSize
-		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
-		p.c.emitImage = renvoCompilerEmitImage
-	} else if targetIsWindows(renvoTargetOS) {
-		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
-	}
-	renvoParseProgramInto(src, &p)
-	return p
 }
 
 func renvoParseProgramWithContext(src []byte, context *renvoCompileContext) renvoProgram {
@@ -3260,7 +3232,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 	}
 	if e.kind == renvoExprCall {
 		if renvoFixedTarget == 0 {
-			if renvoIsSysVObject(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
+			if renvoPureCallConstants(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
 				fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 				if fnIndex >= 0 {
 					fn := &g.meta.funcs[fnIndex]
@@ -8953,7 +8925,7 @@ func renvoEmitLinearIf(g *renvoLinearGen, stmt *renvoStmt) bool {
 		if fixedValue < 0 && (literalBool || !renvoRangeContainsLabel(p, stmt.bodyStart, stmt.bodyEnd) &&
 			!renvoRangeContainsLabel(p, stmt.elseStart, stmt.elseEnd)) {
 			oldFlow := g.constEvalFlow
-			g.constEvalFlow = oldFlow || renvoIsSysVObject(g.c)
+			g.constEvalFlow = oldFlow || renvoFlowConstantPropagation(g.c)
 			constant := renvoEvalConstExpr(g, ep, rootIndex)
 			g.constEvalFlow = oldFlow
 			if constant.ok {
@@ -11729,7 +11701,7 @@ func renvoClearLocalFlowConstAtOffset(g *renvoLinearGen, offset int) {
 }
 
 func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int) bool {
-	if !renvoIsSysVObject(g.c) {
+	if !renvoFlowConstantPropagation(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -11744,7 +11716,7 @@ func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nam
 // function-wide constants.
 func renvoTopLevelAssignmentDominates(g *renvoLinearGen, assignmentTok int) bool {
 	renvoNonNil(g)
-	if !renvoIsSysVObject(g.c) || g.flowControlDepth != 0 ||
+	if !renvoFlowConstantPropagation(g.c) || g.flowControlDepth != 0 ||
 		g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) {
 		return false
 	}
@@ -11794,7 +11766,7 @@ func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd
 		return false
 	}
 	renvoNonNil(g)
-	if !renvoIsSysVObject(g.c) {
+	if !renvoFlowConstantPropagation(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -14300,7 +14272,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	fn := &g.meta.funcs[fnIndex]
 	if renvoFixedTarget == 0 {
-		if renvoIsSysVObject(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
+		if renvoElideEmptyCalls(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
 			fn.linkStatic == 0 && fn.bodyStart == fn.bodyEnd &&
 			!renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_") &&
 			renvoCallArgumentsDiscardable(g, ep, e) {
@@ -22343,7 +22315,7 @@ func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 	renvoNonNil(g)
 	g.funcReachable = make([]bool, count)
 	g.funcQueue = make([]int, 0, count)
-	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+	if renvoFixedTarget == 0 && renvoSingleCallConstants(g.c) {
 		g.funcSingleCallState = make([]int, count)
 		g.paramConstValues = make([]int, len(g.meta.params))
 		g.paramConstValid = make([]bool, len(g.meta.params))
@@ -22377,7 +22349,7 @@ func renvoRecordFunctionDirectUseCounts(g *renvoLinearGen) {
 
 func renvoRecordSingleCallConstants(g *renvoLinearGen, ep *renvoExprParse, call *renvoExpr, fnIndex int) {
 	renvoNonNil(g, ep, call)
-	if !renvoIsSysVObject(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
+	if !renvoSingleCallConstants(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
 		fnIndex >= len(g.funcSingleCallState) || g.continueDepth != 0 ||
 		!renvoFunctionHasSingleDirectUse(g, fnIndex) {
 		return

@@ -98,6 +98,14 @@ func (op compilerEmitterOperation) failBody() string {
 // argument reconstruction only when the source compiler uses narrow integers.
 // Function-address layout describes object ABI storage, not function dispatch.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	// Enables shared direct-use counting and propagation of constants into singly-called private functions.
+	{Name: "single_call_constants", Suffix: "SingleCallConstants", Function: "renvoSingleCallConstants", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Allows omission of empty calls only after shared argument side-effect and function-body checks.
+	{Name: "elide_empty_calls", Suffix: "ElideEmptyCalls", Function: "renvoElideEmptyCalls", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Allows the shared evaluator to fold eligible zero-argument calls; source purity and recursion checks remain in the core.
+	{Name: "pure_call_constants", Suffix: "PureCallConstants", Function: "renvoPureCallConstants", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Controls local scalar constant tracking and flow-sensitive evaluation; does not select a calling convention.
+	{Name: "flow_constant_propagation", Suffix: "FlowConstantPropagation", Function: "renvoFlowConstantPropagation", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
 	{Name: "reset_program_emission", Suffix: "ResetProgramEmission", Function: "renvoResetProgramEmission", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGUnsupportedOperation = 0\nrenvoRTGFailureDetail = -1\nrenvoRTGImageLimitMemory = false\nrenvoRTGImageLimitNeeded = 0\nrenvoRTGImageLimit = 0"},
 	{Name: "function_address_layout", Suffix: "FunctionAddressLayout", Function: "renvoFunctionAddressLayout", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && c.objectFile"},
 	{Name: "reconstruct_wide_argument", ReachabilityGuard: "renvoMayReconstructWideArgument", Suffix: "ReconstructWideArgument", Function: "renvoReconstructWideArgument", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return c.renvoNativeIntSize == 8"},

@@ -678,3 +678,14 @@ func renvoRTGSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capS
 	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord5)
 	renvoAsmStorePrimaryStack(a, capSlot)
 }
+
+// ObjectImage is the RTG-visible bridge to the production x86_64 relocatable
+// writer. A custom target still selects the object format in its definition;
+// the implementation is shared with the compiled-in frontend so the two paths
+// cannot drift on section, symbol, or relocation semantics.
+func (a *renvoAsm) ObjectImage() []byte {
+	if renvoFixedTarget != 0 {
+		return nil
+	}
+	return renvoAsmImageRelocatableObjectAmd64(a)
+}
