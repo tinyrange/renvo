@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "2c05a809d3a8cc34e04d3316688ba3390aa4d8310e4d41aeac8105bc1265cbae"
+const CompilerSourceDigest = "3b7652179d9c1922e41e588a6e071d14a69f4c72448dff2bc5552217e1086390"
 
 // source: backend/compiler_common_impl.go
 
@@ -7292,6 +7292,12 @@ return renvoBytesEqualText(src, end-len(suffix), end, suffix)
 }
 
 
+
+func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
+return renvoMayPassStructPointers && kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
+}
+
+
 func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 renvoNonNil(g)
 meta := g.meta
@@ -7345,7 +7351,7 @@ renvoStoreIncomingCallWord(g, callWord+1, renvoComplexSecondaryStackOffset(g, pa
 callWord += 2
 continue
 }
-if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, paramType.kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, paramType.kind) {
 
 
 renvoStoreIncomingCallWord(g, callWord, offset)
@@ -7367,7 +7373,7 @@ callWord++
 
 
 
-if renvoPreparedBackendActive != 0 {
+if renvoMayPassStructPointers && renvoTargetStructArgumentByReference(g.c) {
 for at := 0; at < fn.paramCount; at++ {
 i := fn.paramCount - 1 - at
 if entry {
@@ -7375,7 +7381,7 @@ i = at
 }
 param := &meta.params[fn.firstParam+i]
 paramType := renvoResolveType(meta, param.typ)
-if !renvoStructArgByReference(g, paramType.kind) {
+if !renvoMayPassStructPointers || !renvoStructArgByReference(g, paramType.kind) {
 continue
 }
 offset := g.locals[localBase+i].offset
@@ -14137,12 +14143,12 @@ if fixed == 1 {
 arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 typ := renvoInferParsedExprType(g, ep, arg)
 if renvoTypeIsTuple(g.meta, typ) {
-if renvoPreparedBackendActive != 0 {
+if renvoMayUseTupleParameterLayout && renvoTupleParameterLayout(g.c) {
 tupleParams := fn.paramCount
 if receiverIndex >= 0 {
 tupleParams--
 }
-return renvoEmitPreparedTupleParamArgsReverse(g, ep, arg, typ, firstParam, tupleParams)
+return renvoEmitTupleParamArgsReverse(g, ep, arg, typ, firstParam, tupleParams)
 }
 return renvoEmitTupleArgReverse(g, ep, arg, typ)
 }
@@ -14166,7 +14172,7 @@ wordCount += renvoBackendSliceWordCount
 return wordCount
 }
 
-func renvoEmitPreparedTupleParamArgsReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, firstParam int, paramCount int) int {
+func renvoEmitTupleParamArgsReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, firstParam int, paramCount int) int {
 renvoNonNil(g, ep)
 e := &ep.exprs[idx]
 if e.kind != renvoExprCall {
@@ -14187,7 +14193,7 @@ field := g.meta.fields[tuple.first+i]
 paramType := g.meta.params[firstParam+i].typ
 resolved := renvoResolveType(g.meta, paramType)
 renvoNonNil(resolved)
-if renvoStructArgByReference(g, resolved.kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, resolved.kind) {
 renvoAsmAddressPrimaryStack(&g.asm, offset-field.offset)
 renvoAsmPushPrimary(&g.asm)
 wordCount++
@@ -14385,7 +14391,7 @@ typ := g.meta.params[fn.firstParam+i].typ
 resolved := renvoResolveType(g.meta, typ)
 renvoNonNil(resolved)
 callWords := 1
-if renvoPreparedBackendActive == 0 || !renvoStructArgByReference(g, resolved.kind) {
+if !renvoMayPassStructPointers || !renvoStructArgByReference(g, resolved.kind) {
 callWordSize := renvoCallWordSize(g, typ)
 callWords = renvoAlignValue(renvoTypeCopySize(g.meta, typ), callWordSize) / callWordSize
 }
@@ -14443,7 +14449,7 @@ renvoNonNil(resolved)
 callWords := 1
 if cObjectForeign && renvoTypeIsString(g.meta, typ) {
 callWords = 1
-} else if renvoPreparedBackendActive == 0 || !renvoStructArgByReference(g, resolved.kind) {
+} else if !renvoMayPassStructPointers || !renvoStructArgByReference(g, resolved.kind) {
 callWordSize := renvoCallWordSize(g, typ)
 callWords = renvoAlignValue(renvoTypeCopySize(g.meta, typ), callWordSize) / callWordSize
 }
@@ -15094,7 +15100,7 @@ func renvoEmitTypedLocalArgReverse(g *renvoLinearGen, offset int, typ int) int {
 renvoNonNil(g)
 t := renvoResolveType(g.meta, typ)
 renvoNonNil(t)
-if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, t.kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, t.kind) {
 renvoAsmAddressPrimaryStack(&g.asm, offset)
 renvoAsmPushPrimary(&g.asm)
 return 1
@@ -15956,7 +15962,7 @@ actualExprType = g.locals[localIndex].typ
 }
 actualExprResolved := renvoResolveType(meta, actualExprType)
 renvoNonNil(actualExprResolved)
-if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, receiver.kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, receiver.kind) {
 if actualExprResolved.kind == renvoTypePointer {
 if !renvoEmitIntExpr(g, ep, idx) {
 return -1
@@ -16333,7 +16339,7 @@ if size <= 0 {
 return -1
 }
 e := &ep.exprs[idx]
-if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, renvoResolveType(meta, typ).kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, renvoResolveType(meta, typ).kind) {
 if !renvoEmitAddressPrimary(g, ep, idx) {
 offset := renvoAddUnnamedLocal(g, typ)
 if !renvoEmitTypedAssign(g, ep, idx, offset) {
@@ -18891,7 +18897,7 @@ renvoEmitInterfaceReceiverMatch(g, receiverOffset, fn.receiverType, nextLabel)
 
 wordCount := 0
 receiverResolved := renvoResolveType(g.meta, fn.receiverType)
-if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, receiverResolved.kind) {
+if renvoMayPassStructPointers && renvoStructArgByReference(g, receiverResolved.kind) {
 renvoAsmPushStackWord(&g.asm, receiverOffset)
 wordCount++
 } else if renvoInterfaceValueStoredIndirect(g.meta, fn.receiverType) {
@@ -29042,7 +29048,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x66\xb5\xea\xf5\x2d\x75\xf0\x06\xdb\x67\x66\x83\xb3\xe1\xc5\xea\xb7\xf4\x7f\xb8\x66\x87\x86\x3d\xd0\x84\x24\x04\x91\x14\x35\x03", 3, true
+return "wasi/wasm32", "\x60\xe8\x78\x4c\x8b\x31\x79\xe2\xfb\x92\x76\xaa\xfd\x01\x9a\x73\xab\x63\xd9\xf2\xaf\xf3\x4f\x1a\x8c\xd8\x1b\xfd\x26\x4d\xf4\x3f", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29054,7 +29060,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xd5\x29\xe4\x45\x01\xd4\x7f\xed\x0e\xcd\x67\x02\x79\x82\x0a\x76\x6e\xf8\xe9\xfd\xc3\x99\x11\x62\x4c\x57\x2b\x3e\xb4\x3f\x80\xea", 3, true
+return "vm/vm32", "\x6d\x1b\x45\xba\xb9\x62\xe3\x3d\x6a\x8b\x10\xe6\xd0\x35\x7a\x9c\x88\xa8\x5b\x83\xfd\x0f\x5a\x0a\xa0\xdb\x6c\x52\x91\x64\x7e\xc8", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -29069,10 +29075,6 @@ return "", "", 0, false
 }
 
 // source: backend/compiler_target_impl.go
-
-func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-return kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
-}
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
@@ -30434,6 +30436,15 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTupleParameterLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseTupleParameterLayout = false
+
 func renvoTargetHostedObject(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -31291,13 +31302,10 @@ func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
-
-return true
-
-}
 return false
 }
+
+const renvoMayPassStructPointers = false
 
 func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
 renvoNonNil(c)
@@ -46404,6 +46412,8 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49240,9 +49250,12 @@ return true
 
 
 
+
 func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
 
 
 
@@ -51964,6 +51977,8 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53619,9 +53634,12 @@ return out
 
 
 
+
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
 
 
 
@@ -56853,6 +56871,8 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
 
 
 

@@ -4365,6 +4365,13 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+const renvoMayUseTupleParameterLayout = true
+
+func renvoTupleParameterLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
 func renvoTargetHostedObject(c *renvoCompileContext) bool {
 renvoNonNil(c)
 if renvoRTGPreparedObject != 0 {
@@ -4653,6 +4660,8 @@ func renvoStoreHiddenResult(g *renvoLinearGen, offset int) {
 renvoNonNil(g)
 renvoRTGStoreParamWord(g, 0, offset)
 }
+
+const renvoMayPassStructPointers = true
 
 func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
 renvoNonNil(c)

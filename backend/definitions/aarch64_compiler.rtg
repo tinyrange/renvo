@@ -392,6 +392,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		tuple_parameter_layout = renvoAarch64CompilerTupleParameterLayout
 		hosted_object = renvoAarch64CompilerHostedObject
 		retain_panic_runtime = renvoAarch64CompilerRetainPanicRuntime
 		stable_function_order = renvoAarch64CompilerStableFunctionOrder
@@ -3429,6 +3430,12 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerHostedObject(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerTupleParameterLayout(c *renvoCompileContext) bool {
 		return false
 	}
 }

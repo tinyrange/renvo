@@ -486,6 +486,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		tuple_parameter_layout = renvoArmCompilerTupleParameterLayout
 		hosted_object = renvoArmCompilerHostedObject
 		retain_panic_runtime = renvoArmCompilerRetainPanicRuntime
 		stable_function_order = renvoArmCompilerStableFunctionOrder
@@ -2924,8 +2925,9 @@ go compiler {
 }
 
 go compiler {
+	// Shared call carriers use value words; physical ABI marshalling is separate.
 	func renvoArmCompilerStructArgumentByReference(c *renvoCompileContext) bool {
-		return true
+		return false
 	}
 }
 
@@ -3197,6 +3199,12 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerHostedObject(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerTupleParameterLayout(c *renvoCompileContext) bool {
 		return false
 	}
 }

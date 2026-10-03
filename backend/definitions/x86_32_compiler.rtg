@@ -952,6 +952,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		tuple_parameter_layout = renvo386CompilerTupleParameterLayout
 		hosted_object = renvo386CompilerHostedObject
 		retain_panic_runtime = renvo386CompilerRetainPanicRuntime
 		stable_function_order = renvo386CompilerStableFunctionOrder
@@ -4845,8 +4846,9 @@ go compiler {
 }
 
 go compiler {
+	// Shared call carriers use value words; physical ABI marshalling is separate.
 	func renvo386CompilerStructArgumentByReference(c *renvoCompileContext) bool {
-		return true
+		return false
 	}
 }
 
@@ -5167,5 +5169,11 @@ go compiler {
 go compiler {
 	func renvo386CompilerHostedObject(c *renvoCompileContext) bool {
 		return renvoIsCdeclObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerTupleParameterLayout(c *renvoCompileContext) bool {
+		return false
 	}
 }

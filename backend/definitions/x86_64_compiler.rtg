@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		tuple_parameter_layout = renvoAmd64CompilerTupleParameterLayout
 		hosted_object = renvoAmd64CompilerHostedObject
 		retain_panic_runtime = renvoAmd64CompilerRetainPanicRuntime
 		stable_function_order = renvoAmd64CompilerStableFunctionOrder
@@ -4533,5 +4534,11 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerHostedObject(c *renvoCompileContext) bool {
 		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerTupleParameterLayout(c *renvoCompileContext) bool {
+		return false
 	}
 }

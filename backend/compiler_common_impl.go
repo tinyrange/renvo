@@ -7284,6 +7284,12 @@ func renvoBytesSuffixText(src []byte, start int, end int, suffix string) bool {
 	return renvoBytesEqualText(src, end-len(suffix), end, suffix)
 }
 
+// This describes the shared call carrier, not a foreign ABI's physical
+// registers. Word carriers can still be marshalled by-reference by a definition.
+func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
+	return renvoMayPassStructPointers && kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
+}
+
 // Shared scalar code generation.
 func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 	renvoNonNil(g)
@@ -7338,7 +7344,7 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 			callWord += 2
 			continue
 		}
-		if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, paramType.kind) {
+		if renvoMayPassStructPointers && renvoStructArgByReference(g, paramType.kind) {
 			// Keep the pointer in the aggregate's destination slot until every
 			// incoming call register has been saved. The later copy overwrites it.
 			renvoStoreIncomingCallWord(g, callWord, offset)
@@ -7360,7 +7366,7 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 	// Copy by-reference aggregates only after every incoming call register has
 	// been saved. The copy uses the secondary register, which can itself still
 	// contain a later parameter while the entry sequence is being bound.
-	if renvoPreparedBackendActive != 0 {
+	if renvoMayPassStructPointers && renvoTargetStructArgumentByReference(g.c) {
 		for at := 0; at < fn.paramCount; at++ {
 			i := fn.paramCount - 1 - at
 			if entry {
@@ -7368,7 +7374,7 @@ func renvoBindFunctionParams(g *renvoLinearGen, fnIndex int) {
 			}
 			param := &meta.params[fn.firstParam+i]
 			paramType := renvoResolveType(meta, param.typ)
-			if !renvoStructArgByReference(g, paramType.kind) {
+			if !renvoMayPassStructPointers || !renvoStructArgByReference(g, paramType.kind) {
 				continue
 			}
 			offset := g.locals[localBase+i].offset
@@ -14130,12 +14136,12 @@ func renvoEmitCallArgsReverse(g *renvoLinearGen, ep *renvoExprParse, e *renvoExp
 		arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 		typ := renvoInferParsedExprType(g, ep, arg)
 		if renvoTypeIsTuple(g.meta, typ) {
-			if renvoPreparedBackendActive != 0 {
+			if renvoMayUseTupleParameterLayout && renvoTupleParameterLayout(g.c) {
 				tupleParams := fn.paramCount
 				if receiverIndex >= 0 {
 					tupleParams--
 				}
-				return renvoEmitPreparedTupleParamArgsReverse(g, ep, arg, typ, firstParam, tupleParams)
+				return renvoEmitTupleParamArgsReverse(g, ep, arg, typ, firstParam, tupleParams)
 			}
 			return renvoEmitTupleArgReverse(g, ep, arg, typ)
 		}
@@ -14159,7 +14165,7 @@ func renvoEmitCallArgsReverse(g *renvoLinearGen, ep *renvoExprParse, e *renvoExp
 	return wordCount
 }
 
-func renvoEmitPreparedTupleParamArgsReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, firstParam int, paramCount int) int {
+func renvoEmitTupleParamArgsReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, typ int, firstParam int, paramCount int) int {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.kind != renvoExprCall {
@@ -14180,7 +14186,7 @@ func renvoEmitPreparedTupleParamArgsReverse(g *renvoLinearGen, ep *renvoExprPars
 		paramType := g.meta.params[firstParam+i].typ
 		resolved := renvoResolveType(g.meta, paramType)
 		renvoNonNil(resolved)
-		if renvoStructArgByReference(g, resolved.kind) {
+		if renvoMayPassStructPointers && renvoStructArgByReference(g, resolved.kind) {
 			renvoAsmAddressPrimaryStack(&g.asm, offset-field.offset)
 			renvoAsmPushPrimary(&g.asm)
 			wordCount++
@@ -14378,7 +14384,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			resolved := renvoResolveType(g.meta, typ)
 			renvoNonNil(resolved)
 			callWords := 1
-			if renvoPreparedBackendActive == 0 || !renvoStructArgByReference(g, resolved.kind) {
+			if !renvoMayPassStructPointers || !renvoStructArgByReference(g, resolved.kind) {
 				callWordSize := renvoCallWordSize(g, typ)
 				callWords = renvoAlignValue(renvoTypeCopySize(g.meta, typ), callWordSize) / callWordSize
 			}
@@ -14436,7 +14442,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 			callWords := 1
 			if cObjectForeign && renvoTypeIsString(g.meta, typ) {
 				callWords = 1
-			} else if renvoPreparedBackendActive == 0 || !renvoStructArgByReference(g, resolved.kind) {
+			} else if !renvoMayPassStructPointers || !renvoStructArgByReference(g, resolved.kind) {
 				callWordSize := renvoCallWordSize(g, typ)
 				callWords = renvoAlignValue(renvoTypeCopySize(g.meta, typ), callWordSize) / callWordSize
 			}
@@ -15087,7 +15093,7 @@ func renvoEmitTypedLocalArgReverse(g *renvoLinearGen, offset int, typ int) int {
 	renvoNonNil(g)
 	t := renvoResolveType(g.meta, typ)
 	renvoNonNil(t)
-	if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, t.kind) {
+	if renvoMayPassStructPointers && renvoStructArgByReference(g, t.kind) {
 		renvoAsmAddressPrimaryStack(&g.asm, offset)
 		renvoAsmPushPrimary(&g.asm)
 		return 1
@@ -15949,7 +15955,7 @@ func renvoEmitMethodReceiverArgReverse(g *renvoLinearGen, ep *renvoExprParse, id
 	}
 	actualExprResolved := renvoResolveType(meta, actualExprType)
 	renvoNonNil(actualExprResolved)
-	if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, receiver.kind) {
+	if renvoMayPassStructPointers && renvoStructArgByReference(g, receiver.kind) {
 		if actualExprResolved.kind == renvoTypePointer {
 			if !renvoEmitIntExpr(g, ep, idx) {
 				return -1
@@ -16326,7 +16332,7 @@ func renvoEmitStructArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, t
 		return -1
 	}
 	e := &ep.exprs[idx]
-	if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, renvoResolveType(meta, typ).kind) {
+	if renvoMayPassStructPointers && renvoStructArgByReference(g, renvoResolveType(meta, typ).kind) {
 		if !renvoEmitAddressPrimary(g, ep, idx) {
 			offset := renvoAddUnnamedLocal(g, typ)
 			if !renvoEmitTypedAssign(g, ep, idx, offset) {
@@ -18884,7 +18890,7 @@ func renvoEmitInterfaceMethodCall(g *renvoLinearGen, ep *renvoExprParse, idx int
 
 		wordCount := 0
 		receiverResolved := renvoResolveType(g.meta, fn.receiverType)
-		if renvoPreparedBackendActive != 0 && renvoStructArgByReference(g, receiverResolved.kind) {
+		if renvoMayPassStructPointers && renvoStructArgByReference(g, receiverResolved.kind) {
 			renvoAsmPushStackWord(&g.asm, receiverOffset)
 			wordCount++
 		} else if renvoInterfaceValueStoredIndirect(g.meta, fn.receiverType) {

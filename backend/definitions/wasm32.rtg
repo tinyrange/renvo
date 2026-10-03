@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		tuple_parameter_layout = renvoWasm32CompilerTupleParameterLayout
 		hosted_object = renvoWasm32CompilerHostedObject
 		retain_panic_runtime = renvoWasm32CompilerRetainPanicRuntime
 		stable_function_order = renvoWasm32CompilerStableFunctionOrder
@@ -6949,6 +6950,12 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerHostedObject(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerTupleParameterLayout(c *renvoCompileContext) bool {
 		return false
 	}
 }
