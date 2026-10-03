@@ -24,41 +24,57 @@ func GenerateCheckedInTargetProjection(
 			Message:  "definition does not export target " + targetName,
 		}}}
 	}
-	if target.Descriptor.Name == "windows/amd64" && target.Arch.Name == "x86_64" {
-		return generateCheckedInWindowsAmd64Projection(
-			resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "linux/386" && target.Arch.Name == "x86_32" {
-		return generateCheckedInLinux386Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "windows/386" && target.Arch.Name == "x86_32" {
-		return generateCheckedInWindows386Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "linux/aarch64" && target.Arch.Name == "aarch64" {
-		return generateCheckedInLinuxAarch64Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "windows/arm64" && target.Arch.Name == "aarch64" {
-		return generateCheckedInWindowsAarch64Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "darwin/arm64" && target.Arch.Name == "aarch64" {
-		return generateCheckedInDarwinAarch64Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "linux/arm" && target.Arch.Name == "arm" {
-		return generateCheckedInLinuxArmProjection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name == "linux-kernel/amd64" && target.Arch.Name == "x86_64" {
-		return generateCheckedInLinuxKernelAmd64Projection(
-			resolved, target, packageName)
-	}
-	if (target.Descriptor.Name == "freebsd/amd64" ||
-		target.Descriptor.Name == "openbsd/amd64" ||
-		target.Descriptor.Name == "netbsd/amd64") && target.Arch.Name == "x86_64" {
-		return generateCheckedInBSDAmd64Projection(resolved, target, packageName)
-	}
-	if target.Descriptor.Name != "linux/amd64" || target.Arch.Name != "x86_64" {
+	// A production recipe is an explicit definition binding to a bounded physical
+	// projection, not a property inferred from a target, OS, or architecture name.
+	// Each recipe still validates its format/runtime inputs before emitting glue.
+	binding, found := fieldValue(resolved.Document, target.Declaration, "production_projection")
+	if !found {
 		return checkedInTargetProjectionFailure(resolved.Document, target.Declaration,
-			"checked-in production projection is not implemented for "+target.Descriptor.Name)
+			"checked-in production projection requires a production_projection binding")
 	}
+	for _, recipe := range checkedInProductionRecipes {
+		if recipe.name != valueName(binding) {
+			continue
+		}
+		compatible := false
+		for _, export := range architectureExports(target.Arch) {
+			if export.External == recipe.encoderExport {
+				compatible = true
+				break
+			}
+		}
+		if !compatible {
+			return checkedInTargetProjectionFailure(resolved.Document, target.Arch,
+				"production projection "+recipe.name+" requires encoder export "+recipe.encoderExport)
+		}
+		return recipe.generate(resolved, target, packageName)
+	}
+	return checkedInTargetProjectionFailure(resolved.Document, target.Declaration,
+		"unknown production projection "+valueName(binding))
+}
+
+type checkedInProductionRecipe struct {
+	name          string
+	encoderExport string
+	generate      func(ResolveResult, ResolvedTarget, string) GenerateResult
+}
+
+var checkedInProductionRecipes = []checkedInProductionRecipe{
+	{"elf_sysv64_process", "renvoAmd64AsmMovRaxImm", generateCheckedInLinuxAmd64Projection},
+	{"pe_win64_process", "renvoAmd64AsmMovRaxImm", generateCheckedInWindowsAmd64Projection},
+	{"elf_cdecl32_process", "renvo386AsmMovRaxImm", generateCheckedInLinux386Projection},
+	{"pe_stdcall32_process", "renvo386AsmMovRaxImm", generateCheckedInWindows386Projection},
+	{"elf_aapcs64_process", "renvoAarch64AsmMovRegImm", generateCheckedInLinuxAarch64Projection},
+	{"pe_aapcs64_process", "renvoAarch64AsmMovRegImm", generateCheckedInWindowsAarch64Projection},
+	{"macho_aapcs64_process", "renvoAarch64AsmMovRegImm", generateCheckedInDarwinAarch64Projection},
+	{"elf_eabi32_process", "renvoArmAsmMovRegImm", generateCheckedInLinuxArmProjection},
+	{"elf_sysv64_module", "renvoAmd64AsmMovRaxImm", generateCheckedInLinuxKernelAmd64Projection},
+	{"elf_sysv64_carry_process", "renvoAmd64AsmMovRaxImm", generateCheckedInBSDAmd64Projection},
+}
+
+func generateCheckedInLinuxAmd64Projection(
+	resolved ResolveResult, target ResolvedTarget, packageName string,
+) GenerateResult {
 	productionImage, hasProductionImage := fieldValue(
 		resolved.Document, target.Executable, "production_image")
 	if !hasProductionImage || valueName(productionImage) != "elf_executable_symbols" {

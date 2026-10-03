@@ -54,6 +54,7 @@ format elf64_x86_64_openbsd {
 }
 
 target openbsd/amd64 {
+	production_projection = elf_sysv64_carry_process
 	family = native_v1
 	os = openbsd
 	arch = x86_64

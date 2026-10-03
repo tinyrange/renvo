@@ -609,6 +609,7 @@ runtime win32_x86_64 {
 }
 
 target windows/amd64 {
+	production_projection = pe_win64_process
 	family = native_v1
 	os = windows
 	arch = x86_64
