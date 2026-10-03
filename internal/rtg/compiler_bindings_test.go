@@ -504,8 +504,8 @@ func TestCompilerBindingSharedTailConservative(t *testing.T) {
 		"if true { return }",
 		"if { broken",
 	} {
-		prefix, _ := compilerBodyLeadingIf(body)
-		if prefix != "" {
+		options := compilerBodyTails(body)
+		if len(options) != 1 {
 			t.Fatalf("must retain original scope/control flow: %q", body)
 		}
 	}
@@ -513,5 +513,92 @@ func TestCompilerBindingSharedTailConservative(t *testing.T) {
 	output := appendCompilerBodyGroups(nil, []string{body, "a.patchFailed = true\nreturn\n"}, []string{"first", "second"})
 	if !strings.Contains(string(output), body) {
 		t.Fatal("changed a prefix without a matching complete tail")
+	}
+}
+
+// Both selected bodies have effectful prefixes; neither complete body is the
+// shared tail. A selector mutation must not run another target's prefix, and
+// an if-initializer's local must not shadow the tail's independent declaration.
+func TestCompilerBindingSharedTailAfterCalls(t *testing.T) {
+	tail := "value := 7\na.patchFailed = value != 7\nreturn\n"
+	bodies := []string{
+		"changeSelector(a)\nif value := 1; value != 1 { return }\n" + tail,
+		"observe(a)\n" + tail,
+	}
+	conditions := []string{"a.c.renvoTargetArch == selectedOne", "a.c.renvoTargetArch == selectedTwo"}
+	source := []byte(`package bindings
+const selectedOne = 41
+const selectedTwo = 73
+type context struct { renvoTargetArch int }
+type asm struct { c *context; patchFailed bool }
+func changeSelector(a *asm) { a.c.renvoTargetArch = selectedTwo }
+func observe(a *asm) { a.patchFailed = true }
+func projected(a *asm) {
+`)
+	source = appendCompilerBodyGroups(source, bodies, conditions)
+	source = append(source, "a.patchFailed = true\n}\n"...)
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "calls.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := new(types.Config).Check("bindings", fset, []*ast.File{file}, nil); err != nil {
+		t.Fatal(err)
+	}
+	fn := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
+	if len(fn.Body.List) != 2 {
+		t.Fatal("shared body or unknown-selector failure missing")
+	}
+	outer := fn.Body.List[0].(*ast.IfStmt)
+	if len(outer.Body.List) != 4 {
+		t.Fatal("tail declaration escaped its shared scope")
+	}
+	first := outer.Body.List[0].(*ast.IfStmt)
+	second, ok := first.Else.(*ast.IfStmt)
+	if !ok || second.Else != nil {
+		t.Fatal("prefix effects must execute in one exclusive chain")
+	}
+	if len(first.Body.List) != 2 || len(second.Body.List) != 1 {
+		t.Fatal("prefix calls/conditionals changed")
+	}
+	if first.Body.List[0].(*ast.ExprStmt).X.(*ast.CallExpr).Fun.(*ast.Ident).Name != "changeSelector" ||
+		second.Body.List[0].(*ast.ExprStmt).X.(*ast.CallExpr).Fun.(*ast.Ident).Name != "observe" {
+		t.Fatal("prefix effects changed order or target")
+	}
+	if first.Body.List[1].(*ast.IfStmt).Init == nil {
+		t.Fatal("scoped declaration was lost")
+	}
+	for _, selector := range []int{0, 41, 73, 99} {
+		selected := evalCompilerBindingCondition(t, outer.Cond, 0, selector) != 0
+		if selected != (selector == 41 || selector == 73) {
+			t.Fatal("unknown selector entered shared code")
+		}
+		branch := first
+		if evalCompilerBindingCondition(t, branch.Cond, 0, selector) == 0 {
+			branch = second
+		}
+		if selected && (evalCompilerBindingCondition(t, branch.Cond, 0, selector) == 0) {
+			t.Fatal("selected prefix missing")
+		}
+	}
+	if strings.Count(string(source), "value := 7") != 1 {
+		t.Fatal("tail was duplicated")
+	}
+}
+
+func TestCompilerBindingTailScopeBoundaries(t *testing.T) {
+	for _, body := range []string{
+		"local := 1\nconsume(local)\nreturn\n",
+		"var local int\nconsume(local)\nreturn\n",
+		"local = 1\nconsume(local)\nreturn\n",
+		"defer cleanup()\nconsume(1)\nreturn\n",
+		"for local := 0; local < 1; local++ { consume(local) }\nconsume(2)\nreturn\n",
+		"if true { goto done }\nconsume(1)\ndone: return\n",
+		"consume(1)\nreturn\n",
+		"consume(1)\nreturn true\n",
+	} {
+		if len(compilerBodyTails(body)) != 1 {
+			t.Fatalf("unsafe or unhelpful split: %q", body)
+		}
 	}
 }

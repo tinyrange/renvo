@@ -199,8 +199,11 @@ signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
 selected branches to avoid another call at each emission site. Identical tails
-after a leading scoped `if` share code with a complete matching body; prefix
-selection remains exclusive even when a prefix changes the context. It caches the
+after leading calls and scoped `if` statements share code, including when all
+matching bodies have a prefix. Declarations, assignments, labels and other
+control flow stop splitting, so prefix-local names cannot escape into a tail.
+Prefix selection remains exclusive even when a prefix changes the context, and
+terminal returns alone are not shared. It caches the
 context pointer to avoid repeated nested loads while retaining direct fact reads
 for fixed-target branch elimination, without duplicating selection conditions.
 The cache carries the same non-null context invariant as compiler construction.
