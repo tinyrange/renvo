@@ -2,6 +2,8 @@ definition 1
 unit x86_64_compiler
 implements direct_emitter_v1
 
+@import "x86_runtime_intrinsics.rtg"
+
 # Compiler-private lowering generated separately from the portable architecture projection.
 @import "x86_64.rtg"
 
@@ -963,6 +965,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		irq_stack_call = renvoAmd64CompilerIRQStackCall
+		ms_abi_call = renvoAmd64CompilerMSABICall
+		runtime_platform_intrinsic = renvoX86CompilerRuntimePlatformIntrinsic
 		store_incoming_call_word = renvoAmd64CompilerStoreIncomingCallWord
 		call_with_word_count = renvoAmd64CompilerCallWithWordCount
 		unsigned_divide_primary_tertiary = renvoAmd64CompilerUnsignedDividePrimaryTertiary
@@ -1895,5 +1900,150 @@ go compiler {
 
 	func renvoAmd64CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		renvoNonNil(g, ep, e, helper)
+		if !g.c.objectFile || e.argCount < 2 || e.argCount > 3 {
+			return false
+		}
+		prefix := "renvo_runtime_CIRQStackCall1_"
+		argCount := 1
+		if e.argCount == 3 {
+			prefix = "renvo_runtime_CIRQStackCall2_"
+			argCount = 2
+		}
+		nameStart := helper.nameStart + len(prefix)
+		if nameStart >= helper.nameEnd || !renvoBytesEqualText(g.prog.src, helper.nameStart, nameStart, prefix) {
+			return false
+		}
+		target := -1
+		for i := 0; i < len(g.meta.funcs); i++ {
+			candidate := &g.meta.funcs[i]
+			if candidate.receiverType == 0 && renvoBytesEqualRange(g.prog.src, candidate.nameStart, candidate.nameEnd, nameStart, helper.nameEnd) {
+				target = i
+				break
+			}
+		}
+		enter := renvoFindMetaFunctionText(g.meta, "irq_enter_rcu")
+		exit := renvoFindMetaFunctionText(g.meta, "irq_exit_rcu")
+		if target < 0 || enter < 0 || exit < 0 || g.meta.funcs[target].paramCount != argCount {
+			return false
+		}
+		offsets := make([]int, e.argCount)
+		for i := 0; i < e.argCount; i++ {
+			expression := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
+			typ := renvoInferParsedExprType(g, ep, expression)
+			resolved := renvoResolveType(g.meta, typ)
+			if resolved.kind != renvoTypePointer && resolved.kind != renvoTypeFunc && !renvoTypeKindIsScalarInt(resolved.kind) ||
+				!renvoEmitIntExpr(g, ep, expression) {
+				return false
+			}
+			offsets[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
+			renvoAsmStorePrimaryStack(&g.asm, offsets[i])
+		}
+		// Preserve the two callee-saved scratch registers on the original stack.
+		// The IRQ stack's first word receives that exact RSP, matching the source's
+		// final popq %rsp restoration sequence.
+		renvoAsmEmitText(&g.asm, "\x41\x54\x41\x55")
+		renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
+		renvoAsmLoadPrimaryStack(&g.asm, offsets[1])
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc4")
+		if argCount == 2 {
+			renvoAsmLoadPrimaryStack(&g.asm, offsets[2])
+			renvoAsmEmitText(&g.asm, "\x49\x89\xc5")
+		}
+		renvoAsmEmitText(&g.asm, "\x49\x89\x23\x4c\x89\xdc")
+		if !renvoEmitObjectRawFunctionCall(g, enter) {
+			return false
+		}
+		if argCount == 2 {
+			// The raw target is a Renvo-internal function, not a C ABI wrapper.
+			// Internal calls bind two parameters in reverse source order, so place
+			// arg1 in RSI and arg2 in RDI after switching to the IRQ stack.
+			renvoAsmEmitText(&g.asm, "\x4c\x89\xe6\x4c\x89\xef")
+		} else {
+			renvoAsmEmitText(&g.asm, "\x4c\x89\xe7")
+		}
+		if !renvoEmitObjectRawFunctionCall(g, target) || !renvoEmitObjectRawFunctionCall(g, exit) {
+			return false
+		}
+		renvoAsmEmitText(&g.asm, "\x5c\x41\x5d\x41\x5c")
+		return true
+
+	}
+
+	func renvoAmd64CompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		renvoNonNil(g, ep, e, helper)
+		if !g.c.objectFile || e.argCount < 1 || e.argCount > 9 ||
+			helper.paramCount != e.argCount {
+			return false
+		}
+		functionType := renvoResolveType(g.meta, g.meta.params[helper.firstParam].typ)
+		if functionType.kind != renvoTypeFunc || functionType.resolved != 0 || functionType.count != e.argCount-1 {
+			return false
+		}
+		if helper.resultType != 0 {
+			result := renvoResolveType(g.meta, helper.resultType)
+			if !renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer {
+				return false
+			}
+		}
+		var offsets [9]int
+		for i := 0; i < e.argCount; i++ {
+			typ := g.meta.params[helper.firstParam+i].typ
+			resolved := renvoResolveType(g.meta, typ)
+			if i == 0 {
+				if resolved.kind != renvoTypeFunc {
+					return false
+				}
+			} else if !renvoTypeKindIsScalarInt(resolved.kind) && resolved.kind != renvoTypePointer {
+				return false
+			}
+			offsets[i] = renvoAddUnnamedLocal(g, typ)
+			if !renvoEmitExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i), offsets[i]) {
+				return false
+			}
+		}
+		// Microsoft x64 passes the first four arguments in RCX, RDX, R8, and R9.
+		// Every call reserves four home slots; later positional arguments follow
+		// those slots on the stack. Round the complete reservation to 16 bytes so
+		// the object wrapper's aligned internal frame remains aligned at CALL.
+		renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
+		stackArgs := e.argCount - 5
+		if stackArgs < 0 {
+			stackArgs = 0
+		}
+		reserve := 32 + renvoAlignTo8(stackArgs*8)
+		if reserve&15 != 0 {
+			reserve += 8
+		}
+		renvoAsmEmitText(&g.asm, "\x48\x83\xec")
+		renvoAsmEmit8(&g.asm, reserve)
+		for i := 4; i < e.argCount-1; i++ {
+			renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
+			renvoAsmEmitText(&g.asm, "\x48\x89\x44\x24")
+			renvoAsmEmit8(&g.asm, 32+(i-4)*8)
+		}
+		for i := 0; i < e.argCount-1 && i < 4; i++ {
+			renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
+			if i == 0 {
+				renvoAsmEmitText(&g.asm, "\x48\x89\xc1")
+			} else if i == 1 {
+				renvoAsmEmitText(&g.asm, "\x48\x89\xc2")
+			} else if i == 2 {
+				renvoAsmEmitText(&g.asm, "\x49\x89\xc0")
+			} else {
+				renvoAsmEmitText(&g.asm, "\x49\x89\xc1")
+			}
+		}
+		renvoAsmEmitText(&g.asm, "\x41\xff\xd3\x48\x83\xc4")
+		renvoAsmEmit8(&g.asm, reserve)
+		return true
+
 	}
 }

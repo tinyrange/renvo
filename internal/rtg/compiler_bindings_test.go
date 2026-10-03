@@ -48,6 +48,9 @@ func TestBundledCompilerBindingsAreDefinitionSelected(t *testing.T) {
 	second := unfamiliarCompilerDefinition(t, "selectedTwo", "secondHook")
 	prefix := []byte(`package bindings
 
+type renvoExprParse struct {}
+type renvoExpr struct {}
+type renvoFuncInfo struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 type renvoAsm struct { c *context; patchFailed bool }
@@ -191,6 +194,14 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 			return strings.Replace(source, "func "+hook+"GlobalInitFrameStart(g *renvoLinearGen) int { return -1 }",
 				"func "+hook+"GlobalInitFrameStart(g *renvoLinearGen) int { again: if g.asm.patchFailed { g.asm.patchFailed = false; goto again }; return 17 }", 1)
 		}, false},
+		{"expression and switch colons are not labels", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { values := []int{0: 1}; values = values[0:1]; switch values[0] { case 1: a.patchFailed = true; default: a.patchFailed = false } }", 1)
+		}, false},
+		{"nested label has function scope", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { if a.patchFailed { again: a.patchFailed = false; if a.patchFailed { goto again } } }", 1)
+		}, true},
 		{"called by helper", func(source, hook string) string {
 			return source + "\ngo compiler { func " + hook + "Caller(a *renvoAsm) { " + hook + "(a) } }\n"
 		}, true},
@@ -222,7 +233,10 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 				definitions = append(definitions, ResolveResult{Document: document, Ok: true})
 			}
 			prefix := []byte(`package bindings
- type renvoLinearGen struct { c *context; asm renvoAsm }
+ type renvoExprParse struct {}
+type renvoExpr struct {}
+type renvoFuncInfo struct {}
+type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
  type renvoAsm struct { c *context; patchFailed bool }
  func renvoNonNil(values ...interface{}) {}
