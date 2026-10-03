@@ -14386,10 +14386,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return false
 	}
 	wordCount += words
-	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive != 0 ||
-		targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
-		targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
+	if fn.linkStatic != 0 && renvoTargetResolvesStaticImport(g.c, renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/') {
 		g.stackUsed = renvoAlignTo8(g.stackUsed + wordCount*renvoBackendValueSlotSize)
 		renvoRecordStackPeak(g)
 		tempBase := g.stackUsed
@@ -14445,12 +14442,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 		}
 		return renvoEmitCObjectReverseRegisterStaticCall(g, importID, wordCount)
 	}
-	if fn.linkStatic != 0 && (renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) ||
-		renvoIsHostedObject(g.c) ||
-		renvoPreparedBackendActive != 0 ||
-		targetIsDarwin(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' ||
-		targetIsWindows(g.c.renvoTargetOS) && renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/') {
+	if fn.linkStatic != 0 && renvoTargetResolvesStaticImport(g.c, renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/') {
 		g.stackUsed = renvoAlignTo8(g.stackUsed + wordCount*renvoBackendValueSlotSize)
 		renvoRecordStackPeak(g)
 		tempBase := g.stackUsed
@@ -19093,10 +19085,9 @@ func renvoLinearPersistentCapacity(g *renvoLinearGen) int {
 	// function emission begins. Only slices which can grow while a function is
 	// emitted need to prevent the scratch arena from being rewound.
 	capacity := cap(a.code) + cap(a.labelPos) + cap(a.relocs) + cap(a.absRelocs) + cap(a.symbols) + cap(a.symbolName) + cap(a.staticImports) + cap(a.darwinImports) + cap(a.darwinImportLabels) + cap(a.darwinImportUsed) + cap(a.data) + cap(a.wasmLocalSlots) + objectStringCapacity + cap(g.breakLabels) + cap(g.continueLabels) + cap(m.types) + cap(m.fields) + cap(m.captures)
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
-		capacity += cap(a.openbsdSyscalls)
-	}
+	// Unused target-owned buffers have zero capacity. Account for all growth,
+	// rather than using target identity to decide whether a reset is safe.
+	capacity += cap(a.openbsdSyscalls)
 	return capacity
 }
 

@@ -1193,6 +1193,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		resolves_static_import = renvo386CompilerResolvesStaticImport
 		entry_runtime_registers = renvo386CompilerEntryRuntimeRegisters
 		program_exit = renvo386CompilerProgramExit
 		program_entry_frame = renvo386CompilerProgramEntryFrame
@@ -5034,5 +5035,14 @@ go compiler {
 go compiler {
 	func renvo386CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
 		return
+	}
+}
+
+go compiler {
+	func renvo386CompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+		if renvoFixedTarget == 0 && renvoIsHostedObject(c) {
+			return true
+		}
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
 	}
 }

@@ -805,6 +805,40 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && (targetIsKernelModule(c) || renvoIsHostedObject(c)) {
+			return true
+		}
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && renvoIsHostedObject(c) {
+			return true
+		}
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+return false
+}
+
 func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

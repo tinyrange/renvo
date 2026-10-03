@@ -838,6 +838,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		resolves_static_import = renvoAmd64CompilerResolvesStaticImport
 		entry_runtime_registers = renvoAmd64CompilerEntryRuntimeRegisters
 		program_exit = renvoAmd64CompilerProgramExit
 		program_entry_frame = renvoAmd64CompilerProgramEntryFrame
@@ -4349,5 +4350,15 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
 		renvoAmd64InitRuntimeCheckRegs(g)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && (targetIsKernelModule(c) || renvoIsHostedObject(c)) {
+			return true
+		}
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
 	}
 }

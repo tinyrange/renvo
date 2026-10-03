@@ -91,6 +91,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "resolves_static_import", Suffix: "ResolvesStaticImport", Function: "renvoTargetResolvesStaticImport", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"absoluteLibrary", "bool"}}, Prepared: "return true"},
 	{Name: "entry_runtime_registers", Suffix: "EntryRuntimeRegisters", Function: "renvoEmitEntryRuntimeRegisters", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "return"},
 	{Name: "program_exit", Suffix: "ProgramExit", Function: "renvoEmitProgramExit", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"image", "bool"}}, Prepared: "if image { return false }; return renvoRTGEmitExit(a, renvoRTGPrimary)"},
 	{Name: "program_entry_frame", Suffix: "ProgramEntryFrame", Function: "renvoEmitProgramEntryFrame", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"image", "bool"}}, Prepared: "return !image"},

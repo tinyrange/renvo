@@ -2114,6 +2114,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+renvoNonNil(c)
+return true
+}
+
 func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
 renvoNonNil(g)
 return
