@@ -952,6 +952,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		file_offset_sentinel = renvo386CompilerFileOffsetSentinel
+		static_call_binding = renvo386CompilerStaticCallBinding
 		linked_static_import = renvo386CompilerLinkedStaticImport
 		finish_static_call_shape = renvo386CompilerFinishStaticCallShape
 		static_call_policy = renvo386CompilerStaticCallPolicy
@@ -4230,6 +4232,12 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerOpenFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoAsmEmit16(a, 0xc389)
+			renvoAsmPopPrimary(a)
+			renvoWin386EmitRuntimeOpen(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPopCallWord1(a)
@@ -4254,6 +4262,10 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerCloseFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoWin386EmitRuntimeClose(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoDarwinArm64DefinitionClose(a)
 			return true
@@ -4266,6 +4278,10 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerChmodFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoWin386EmitRuntimeChmod(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoDarwinArm64DefinitionChmod(a)
 			return true
@@ -4288,7 +4304,26 @@ go compiler {
 }
 
 go compiler {
-	func renvo386CompilerReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
+	func renvo386CompilerReadWriteFile(g *renvoLinearGen, operation int, hasOffset bool) bool {
+		if g.c.renvoTargetOS == renvoOSWindows {
+			a := &g.asm
+			renvoAsmEmit16(a, 0xc689)
+			renvoAsmEmit16(a, 0xca89)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit8(a, 0x5b)
+			if operation == RTGRuntimeWrite {
+				renvoWin386EmitRuntimeWriteAt(g)
+			} else {
+				renvoWin386EmitRuntimeReadAt(g)
+			}
+			return true
+		}
+		a := &g.asm
+		renvoAsmPrepareReadWriteBuf(a)
+		if hasOffset {
+			renvoAsmPopReadWriteOffset(a)
+		}
+		renvoAsmPopCallWord0(a)
 		isWrite := operation == RTGRuntimeWrite
 		number := renvoLinuxSysReadSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
 		if hasOffset {
@@ -5418,5 +5453,20 @@ go compiler {
 			return -1
 		}
 		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+		if c.renvoTargetOS == renvoOSWindows && libraryStart < libraryEnd && renvo_runtime_UnsafeByteAt(src, libraryStart) != '/' {
+			return 1
+		}
+		return -1
+	}
+}
+
+go compiler {
+	func renvo386CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
+		return c.renvoTargetOS == renvoOSWindows
 	}
 }

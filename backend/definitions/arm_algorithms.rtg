@@ -486,6 +486,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		file_offset_sentinel = renvoArmCompilerFileOffsetSentinel
+		static_call_binding = renvoArmCompilerStaticCallBinding
 		linked_static_import = renvoArmCompilerLinkedStaticImport
 		finish_static_call_shape = renvoArmCompilerFinishStaticCallShape
 		static_call_policy = renvoArmCompilerStaticCallPolicy
@@ -2480,7 +2482,13 @@ go compiler {
 }
 
 go compiler {
-	func renvoArmCompilerReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
+	func renvoArmCompilerReadWriteFile(g *renvoLinearGen, operation int, hasOffset bool) bool {
+		a := &g.asm
+		renvoAsmPrepareReadWriteBuf(a)
+		if hasOffset {
+			renvoAsmPopReadWriteOffset(a)
+		}
+		renvoAsmPopCallWord0(a)
 		isWrite := operation == RTGRuntimeWrite
 		number := renvoLinuxSysReadSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
 		if hasOffset {
@@ -3417,5 +3425,17 @@ go compiler {
 go compiler {
 	func renvoArmCompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFileOffsetSentinel(c *renvoCompileContext) bool {
+		return false
 	}
 }

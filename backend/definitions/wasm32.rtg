@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		file_offset_sentinel = renvoWasm32CompilerFileOffsetSentinel
+		static_call_binding = renvoWasm32CompilerStaticCallBinding
 		linked_static_import = renvoWasm32CompilerLinkedStaticImport
 		finish_static_call_shape = renvoWasm32CompilerFinishStaticCallShape
 		static_call_policy = renvoWasm32CompilerStaticCallPolicy
@@ -6271,7 +6273,13 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
+	func renvoWasm32CompilerReadWriteFile(g *renvoLinearGen, operation int, hasOffset bool) bool {
+		a := &g.asm
+		renvoAsmPrepareReadWriteBuf(a)
+		if hasOffset {
+			renvoAsmPopReadWriteOffset(a)
+		}
+		renvoAsmPopCallWord0(a)
 		isWrite := operation == RTGRuntimeWrite
 		number := renvoLinuxSysReadSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
 		if hasOffset {
@@ -7192,5 +7200,17 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
+		return false
 	}
 }
