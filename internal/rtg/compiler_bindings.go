@@ -541,29 +541,51 @@ func compilerOtherHookReferences(referenced []string, candidates []string, state
 	return referenced
 }
 
-// A leading if has its own lexical scope, so its unchanged remainder can share
-// another selected body's code. Keep the prefix inside the combined selection:
-// its condition may have side effects, and must run only for its own selectors.
-// The else-if chain prevents a prefix that changes context from selecting a
-// second prefix. No declaration is moved across its scope and no helper call is
-// introduced. Unknown selectors still reach the operation's failure path.
+// Share byte-identical tails only across statement boundaries whose prefixes
+// cannot introduce names into the tail's scope. Calls and scoped conditionals
+// retain their order and effects inside one exclusive selector chain. Declarations,
+// assignments, labels and other control flow conservatively stop splitting.
 func appendCompilerBodyGroups(out []byte, bodies []string, conditions []string) []byte {
 	owners := make([]int, len(bodies))
 	prefixes := make([]string, len(bodies))
-	tails := make([]string, len(bodies))
+	shared := make([]string, len(bodies))
+	options := make([][]compilerBodyTail, len(bodies))
 	for i := 0; i < len(bodies); i++ {
-		owners[i] = i
-		prefixes[i], tails[i] = compilerBodyLeadingIf(bodies[i])
+		owners[i] = -1
+		shared[i] = bodies[i]
+		options[i] = compilerBodyTails(bodies[i])
 	}
 	for i := 0; i < len(bodies); i++ {
-		if prefixes[i] == "" {
+		if owners[i] >= 0 {
 			continue
 		}
-		for j := 0; j < len(bodies); j++ {
-			// Use a complete, unprefixed body as the root; do not form chains.
-			if prefixes[j] == "" && tails[i] == strings.TrimSpace(bodies[j]) {
-				owners[i] = j
-				break
+		best := -1
+		bestSaving := 0
+		for k := 0; k < len(options[i]); k++ {
+			candidate := options[i][k]
+			count := 0
+			for j := i; j < len(bodies); j++ {
+				if owners[j] < 0 && compilerBodyTailIndex(options[j], candidate.tail) >= 0 {
+					count++
+				}
+			}
+			saving := (count - 1) * len(candidate.tail)
+			if count > 1 && saving > bestSaving {
+				best = k
+				bestSaving = saving
+			}
+		}
+		owners[i] = i
+		if best < 0 {
+			continue
+		}
+		shared[i] = options[i][best].tail
+		prefixes[i] = options[i][best].prefix
+		for j := i + 1; j < len(bodies); j++ {
+			k := compilerBodyTailIndex(options[j], shared[i])
+			if owners[j] < 0 && k >= 0 {
+				owners[j] = i
+				prefixes[j] = options[j][k].prefix
 			}
 		}
 	}
@@ -572,15 +594,15 @@ func appendCompilerBodyGroups(out []byte, bodies []string, conditions []string) 
 			continue
 		}
 		condition := conditions[i]
-		for j := 0; j < len(bodies); j++ {
-			if j != i && owners[j] == i {
+		for j := i + 1; j < len(bodies); j++ {
+			if owners[j] == i {
 				condition += " || " + conditions[j]
 			}
 		}
 		out = append(out, "if "+condition+" {\n"...)
 		havePrefix := false
-		for j := 0; j < len(bodies); j++ {
-			if j == i || owners[j] != i {
+		for j := i; j < len(bodies); j++ {
+			if owners[j] != i || prefixes[j] == "" {
 				continue
 			}
 			if havePrefix {
@@ -594,34 +616,64 @@ func appendCompilerBodyGroups(out []byte, bodies []string, conditions []string) 
 		if havePrefix {
 			out = append(out, '\n')
 		}
-		out = append(out, bodies[i]...)
+		out = append(out, shared[i]...)
 		out = append(out, "\n}\n"...)
 	}
 	return out
 }
 
-func compilerBodyLeadingIf(body string) (string, string) {
-	if !strings.HasPrefix(strings.TrimSpace(body), "if ") {
-		return "", ""
+type compilerBodyTail struct {
+	prefix string
+	tail   string
+}
+
+func compilerBodyTailIndex(options []compilerBodyTail, tail string) int {
+	for i := 0; i < len(options); i++ {
+		if options[i].tail == tail {
+			return i
+		}
 	}
+	return -1
+}
+
+func compilerBodyTails(body string) []compilerBodyTail {
+	options := []compilerBodyTail{{tail: strings.TrimSpace(body)}}
 	prefix := "package backend\nfunc projected() {\n"
 	source := []byte(prefix + body + "\n}")
 	file := syntax.ParseFile(source)
 	if !file.Ok || len(file.Funcs) != 1 {
-		return "", ""
+		return options
 	}
 	statements := syntax.ParseFuncBodyStatements(file, file.Funcs[0])
-	if !statements.Ok || len(statements.Stmts) < 2 || statements.Stmts[1].Kind != syntax.StmtIf {
-		return "", ""
+	if !statements.Ok {
+		return options
 	}
 	for i := 0; i < len(statements.Stmts); i++ {
 		if statements.Stmts[i].Kind == syntax.StmtLabel {
-			return "", ""
+			return options
 		}
 	}
-	end := syntax.TokenEnd(file.Tokens[statements.Stmts[1].EndTok-1]) - len(prefix)
-	if end <= 0 || end >= len(body) {
-		return "", ""
+	next := 0
+	for i := 1; i < len(statements.Stmts); i++ {
+		statement := statements.Stmts[i]
+		if statement.StartTok < next {
+			continue
+		}
+		if statement.Kind != syntax.StmtIf && statement.Kind != syntax.StmtExpr {
+			break
+		}
+		next = statement.EndTok
+		end := syntax.TokenEnd(file.Tokens[next-1]) - len(prefix)
+		if end <= 0 || end >= len(body) {
+			break
+		}
+		tail := strings.TrimSpace(body[end:])
+		// Sharing a terminal return alone adds selector tests without removing
+		// useful lowering code. It also splits call/return pairs unnecessarily.
+		if tail == "" || tail == "return" || tail == "return;" || strings.HasPrefix(tail, "return ") {
+			break
+		}
+		options = append(options, compilerBodyTail{prefix: body[:end], tail: tail})
 	}
-	return body[:end], strings.TrimSpace(body[end:])
+	return options
 }
