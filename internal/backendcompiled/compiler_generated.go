@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "547d11b65f03a9e1832e979f4f64cf3785d8c661cd911598afd75a8b14ccc2f4"
+const CompilerSourceDigest = "1467c75afb4c4e9d0b61ce6056de1d4771b608b1e21bf22dc9434cbf53d4842c"
 
 // source: backend/compiler_common_impl.go
 
@@ -25833,7 +25833,7 @@ entry.keyB = keyB
 }
 
 func renvoEmitScalarFunctionObjectCached(g *renvoLinearGen, fnIndex int) bool {
-if len(renvoObjectCacheEntries) == 0 || g.c.renvoTargetArch == renvoArchWasm32 || !g.c.stripSymbols {
+if len(renvoObjectCacheEntries) == 0 || !renvoProgramCacheSupported(g.c) || !g.c.stripSymbols {
 return renvoEmitScalarFunctionScratch(g, fnIndex)
 }
 
@@ -25965,7 +25965,7 @@ return out
 func renvoLinearPrepareReplGlobals(g *renvoLinearGen) {
 renvoNonNil(g)
 if renvoFixedTarget != 0 || !g.c.emitImage ||
-g.c.renvoTargetArch == renvoArchWasm32 {
+!renvoReplGlobalsSupported(g.c) {
 return
 }
 for i := 0; i < len(g.meta.globals); i++ {
@@ -26610,6 +26610,8 @@ func renvoReadAll(fd int, out []byte) []byte {
 var buf []byte
 for {
 base := len(out)
+
+
 if renvoFixedTarget == renvoTargetWasiWasm32 &&
 base == cap(out) && base >= 262144 {
 newCapacity := base + base/2 + 262144
@@ -27996,6 +27998,11 @@ const renvoTargetVM32 = 11
 const renvoTargetFreeBSDAmd64 = 12
 const renvoTargetOpenBSDAmd64 = 13
 const renvoTargetNetBSDAmd64 = 14
+const renvoTargetRTG = 15
+const renvoContextDefaultTarget = renvoTargetLinuxAmd64
+const renvoContextDefaultTargetOS = 1
+const renvoContextDefaultTargetArch = 1
+const renvoContextDefaultTargetIntSize = 8
 
 const renvoResolvedLinuxAmd64SysReadSeq = 0
 const renvoResolvedLinuxAmd64SysWriteSeq = 1
@@ -28010,6 +28017,7 @@ const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f"
+const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
 const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
@@ -28126,10 +28134,6 @@ const renvoOSFreeBSD = 7
 const renvoOSOpenBSD = 8
 const renvoOSNetBSD = 9
 
-
-
-const renvoTargetRTG = 15
-
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
 
@@ -28232,10 +28236,7 @@ p.runtimeCaps = int(renvoTargetRuntimeCapsTable[target])
 p.heapModel = renvoHeapNone
 p.oomModel = renvoOOMResult
 p.interruptModel = renvoInterruptNone
-p.floatModel = renvoFloatIEEESoft
-if p.arch == renvoArchAmd64 || p.arch == renvoArchAarch64 || p.arch == renvoArch386 || p.arch == renvoArchArm || target == renvoTargetWasiWasm32 {
-p.floatModel = renvoFloatIEEEHardware
-}
+p.floatModel = renvoCompilerProfileFloatModel(renvoNewCompileContext(target, false, false, false))
 return p, true
 }
 
@@ -28340,10 +28341,10 @@ return false
 return true
 }
 
-var renvoTargetArch int = renvoArchAmd64
-var renvoTargetOS int = renvoOSLinux
-var renvoNativeIntSize int = 8
-var renvoTarget int = renvoTargetLinuxAmd64
+var renvoTargetArch int = renvoContextDefaultTargetArch
+var renvoTargetOS int = renvoContextDefaultTargetOS
+var renvoNativeIntSize int = renvoContextDefaultTargetIntSize
+var renvoTarget int = renvoContextDefaultTarget
 var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
 var renvoCompilerObjectFile bool
@@ -28399,7 +28400,7 @@ context.regParm = renvoCompilerRegParm
 if windowsGUI {
 context.windowsSubsystem = 2
 }
-if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
+if target > 0 && target < len(renvoTargetIntBitsTable) {
 context.renvoTargetOS = int(targetOSTable[target])
 context.renvoTargetArch = int(targetArchTable[target])
 context.renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -28411,10 +28412,10 @@ context.renvoTargetArch = renvoArchRTG
 context.renvoNativeIntSize = renvoRTGPreparedIntBits / 8
 return context
 }
-context.renvoTarget = renvoTargetLinuxAmd64
-context.renvoTargetOS = renvoOSLinux
-context.renvoTargetArch = renvoArchAmd64
-context.renvoNativeIntSize = 8
+context.renvoTarget = renvoContextDefaultTarget
+context.renvoTargetOS = renvoContextDefaultTargetOS
+context.renvoTargetArch = renvoContextDefaultTargetArch
+context.renvoNativeIntSize = renvoContextDefaultTargetIntSize
 return context
 }
 
@@ -28477,7 +28478,7 @@ renvoNativeIntSize = renvoRTGPreparedIntBits / 8
 return
 }
 renvoTarget = target
-if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
+if target > 0 && target < len(renvoTargetIntBitsTable) {
 renvoTargetOS = int(targetOSTable[target])
 renvoTargetArch = int(targetArchTable[target])
 renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -28485,9 +28486,9 @@ return
 }
 
 
-renvoTargetOS = renvoOSLinux
-renvoTargetArch = renvoArchAmd64
-renvoNativeIntSize = 8
+renvoTargetOS = renvoContextDefaultTargetOS
+renvoTargetArch = renvoContextDefaultTargetArch
+renvoNativeIntSize = renvoContextDefaultTargetIntSize
 }
 
 func targetIsWindows(renvoTargetOS int) bool {
@@ -28498,13 +28499,11 @@ func targetIsKernelModule(context *renvoCompileContext) bool {
 if context == nil {
 return false
 }
-if context.renvoTarget == renvoTargetLinuxKernelAmd64 {
-return true
-}
-if renvoPreparedBackendActive == 0 || context.renvoTarget != renvoTargetRTG {
-return false
-}
+target := context.renvoTarget
+if target == renvoTargetRTG {
 return renvoRTGPreparedKernelModule != 0
+}
+return target > 0 && target < len(renvoTargetKernelModuleTable) && renvoTargetKernelModuleTable[target] != 0
 }
 
 func targetIsDarwin(renvoTargetOS int) bool {
@@ -28548,7 +28547,7 @@ return constant.value
 return renvoFixedTargetUnknown
 }
 if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
-fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
+fixedTarget > 0 && fixedTarget < len(renvoTargetIntBitsTable) {
 nameSize := e.nameEnd - e.nameStart
 if nameSize == 15 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
 return int(targetArchTable[fixedTarget])
@@ -28597,7 +28596,7 @@ return 0
 }
 return -1
 }
-if e.kind == renvoExprCall && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
+if e.kind == renvoExprCall && fixedTarget > 0 && fixedTarget < len(renvoTargetIntBitsTable) {
 wantOS := 0
 if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 wantOS = renvoOSWindows
@@ -28815,7 +28814,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xf3\xe1\x96\x7c\x85\x94\x80\x58\xd6\x6e\x84\xde\x02\xb8\x84\x67\x1d\x9e\xa3\xeb\x96\xab\xb1\x01\x28\xa8\x88\x17\x0c\xbb\x12\x47", 3, true
+return "wasi/wasm32", "\x2c\xf5\x61\xdb\xdb\xe2\xda\x3e\x90\x85\x28\xa5\x3f\xf0\xd7\x46\xe5\xc5\x8d\x7d\xe6\xde\x0b\x29\x45\x60\x1d\xe2\x0e\xd4\x0a\xda", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x0d\x8e\xb3\x23\x91\xde\xae\xd0\x75\x80\xed\x62\xf2\xd2\xa2\x9b\x24\x9a\xa4\x80\x19\x69\x23\x92\x62\xef\x6e\x29\x06\x78\x4c\x25", 3, true
@@ -28827,7 +28826,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xfd\x29\x37\xce\xb3\x5d\x61\xb6\x1b\x8e\x44\xcc\x19\xef\xca\xfc\x2c\x81\xa1\x4f\xce\xc0\xf2\xdd\x71\xe8\x9b\x75\xe5\x5b\x01\x3c", 3, true
+return "vm/vm32", "\x82\x3e\xd6\x36\xe1\x3a\x9f\xcf\xa0\x9d\xeb\xa1\x05\xdd\x37\xa1\xdc\x9f\x46\x00\x67\x97\x65\xdf\xe5\x52\x8e\x5e\x98\xd2\x4e\xd5", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
@@ -30283,6 +30282,38 @@ func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
 return false
 }
 func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
+func renvoReplGlobalsSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return true
+
+}
+return false
+}
+
+func renvoCompilerProfileFloatModel(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return renvoFloatIEEEHardware
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+if c.renvoTargetOS == renvoOSVM {
+return renvoFloatIEEESoft
+}
+return renvoFloatIEEEHardware
+
+}
+return 0
 }
 
 func renvoSyscallArgumentPolicy(c *renvoCompileContext) int {
@@ -47037,6 +47068,10 @@ return 0
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -50090,6 +50125,10 @@ return 0
 
 
 
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52877,6 +52916,10 @@ return 0
 
 
 
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -54699,6 +54742,10 @@ return 0x97
 }
 return 0
 }
+
+
+
+
 
 
 
@@ -58395,6 +58442,10 @@ return 0x97
 }
 return 0
 }
+
+
+
+
 
 
 

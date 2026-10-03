@@ -4400,6 +4400,17 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoReplGlobalsSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+func renvoCompilerProfileFloatModel(c *renvoCompileContext) int {
+renvoNonNil(c)
+if renvoRTGTargetHasCapability(c.renvoTarget, "ieee_float") { return renvoFloatIEEESoft }
+return renvoFloatScaledInteger
+}
+
 func renvoSyscallArgumentPolicy(c *renvoCompileContext) int {
 renvoNonNil(c)
 return renvoRTGSyscallArgumentPolicy

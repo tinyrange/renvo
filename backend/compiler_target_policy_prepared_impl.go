@@ -21,6 +21,11 @@ const renvoTargetVM32 = 11
 const renvoTargetFreeBSDAmd64 = 12
 const renvoTargetOpenBSDAmd64 = 13
 const renvoTargetNetBSDAmd64 = 14
+const renvoTargetRTG = 15
+const renvoContextDefaultTarget = renvoTargetLinuxAmd64
+const renvoContextDefaultTargetOS = 1
+const renvoContextDefaultTargetArch = 1
+const renvoContextDefaultTargetIntSize = 8
 
 const renvoResolvedLinuxAmd64SysReadSeq = 0
 const renvoResolvedLinuxAmd64SysWriteSeq = 1
@@ -35,6 +40,7 @@ const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f"
+const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
 const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
@@ -151,10 +157,6 @@ const renvoOSFreeBSD = 7
 const renvoOSOpenBSD = 8
 const renvoOSNetBSD = 9
 
-// A prepared backend is closed over exactly one external descriptor. It keeps
-// a private target identity instead of borrowing an advertised target slot.
-const renvoTargetRTG = 15
-
 const renvoEndianLittle = 1
 const renvoEndianBig = 2
 
@@ -257,10 +259,7 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	p.heapModel = renvoHeapNone
 	p.oomModel = renvoOOMResult
 	p.interruptModel = renvoInterruptNone
-	p.floatModel = renvoFloatIEEESoft
-	if p.arch == renvoArchAmd64 || p.arch == renvoArchAarch64 || p.arch == renvoArch386 || p.arch == renvoArchArm || target == renvoTargetWasiWasm32 {
-		p.floatModel = renvoFloatIEEEHardware
-	}
+	p.floatModel = renvoCompilerProfileFloatModel(renvoNewCompileContext(target, false, false, false))
 	return p, true
 }
 
@@ -365,10 +364,10 @@ func renvoProfileIsValid(p renvoTargetProfile) bool {
 	return true
 }
 
-var renvoTargetArch int = renvoArchAmd64
-var renvoTargetOS int = renvoOSLinux
-var renvoNativeIntSize int = 8
-var renvoTarget int = renvoTargetLinuxAmd64
+var renvoTargetArch int = renvoContextDefaultTargetArch
+var renvoTargetOS int = renvoContextDefaultTargetOS
+var renvoNativeIntSize int = renvoContextDefaultTargetIntSize
+var renvoTarget int = renvoContextDefaultTarget
 var renvoCompilerWindowsSubsystem int = 3
 var renvoCompilerEmitImage bool
 var renvoCompilerObjectFile bool
@@ -424,7 +423,7 @@ func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emit
 	if windowsGUI {
 		context.windowsSubsystem = 2
 	}
-	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
+	if target > 0 && target < len(renvoTargetIntBitsTable) {
 		context.renvoTargetOS = int(targetOSTable[target])
 		context.renvoTargetArch = int(targetArchTable[target])
 		context.renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -436,10 +435,10 @@ func renvoNewCompileContext(target int, stripSymbols bool, windowsGUI bool, emit
 		context.renvoNativeIntSize = renvoRTGPreparedIntBits / 8
 		return context
 	}
-	context.renvoTarget = renvoTargetLinuxAmd64
-	context.renvoTargetOS = renvoOSLinux
-	context.renvoTargetArch = renvoArchAmd64
-	context.renvoNativeIntSize = 8
+	context.renvoTarget = renvoContextDefaultTarget
+	context.renvoTargetOS = renvoContextDefaultTargetOS
+	context.renvoTargetArch = renvoContextDefaultTargetArch
+	context.renvoNativeIntSize = renvoContextDefaultTargetIntSize
 	return context
 }
 
@@ -502,7 +501,7 @@ func renvoSetTarget(target int) {
 		return
 	}
 	renvoTarget = target
-	if target >= renvoTargetLinuxAmd64 && target <= renvoTargetNetBSDAmd64 {
+	if target > 0 && target < len(renvoTargetIntBitsTable) {
 		renvoTargetOS = int(targetOSTable[target])
 		renvoTargetArch = int(targetArchTable[target])
 		renvoNativeIntSize = int(renvoTargetIntBitsTable[target]) / 8
@@ -510,9 +509,9 @@ func renvoSetTarget(target int) {
 	}
 	// Preserve the historical fallback for internal callers that pass an
 	// invalid target. Public entry points reject it before reaching this code.
-	renvoTargetOS = renvoOSLinux
-	renvoTargetArch = renvoArchAmd64
-	renvoNativeIntSize = 8
+	renvoTargetOS = renvoContextDefaultTargetOS
+	renvoTargetArch = renvoContextDefaultTargetArch
+	renvoNativeIntSize = renvoContextDefaultTargetIntSize
 }
 
 func targetIsWindows(renvoTargetOS int) bool {
@@ -523,13 +522,11 @@ func targetIsKernelModule(context *renvoCompileContext) bool {
 	if context == nil {
 		return false
 	}
-	if context.renvoTarget == renvoTargetLinuxKernelAmd64 {
-		return true
+	target := context.renvoTarget
+	if target == renvoTargetRTG {
+		return renvoRTGPreparedKernelModule != 0
 	}
-	if renvoPreparedBackendActive == 0 || context.renvoTarget != renvoTargetRTG {
-		return false
-	}
-	return renvoRTGPreparedKernelModule != 0
+	return target > 0 && target < len(renvoTargetKernelModuleTable) && renvoTargetKernelModuleTable[target] != 0
 }
 
 func targetIsDarwin(renvoTargetOS int) bool {
@@ -573,7 +570,7 @@ func renvoEvalFixedTargetInt(g *renvoLinearGen, ep *renvoExprParse, idx int, fix
 		return renvoFixedTargetUnknown
 	}
 	if (e.kind == renvoExprIdent || e.kind == renvoExprSelector) &&
-		fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
+		fixedTarget > 0 && fixedTarget < len(renvoTargetIntBitsTable) {
 		nameSize := e.nameEnd - e.nameStart
 		if nameSize == 15 && renvoBytesEqualText(p.src, e.nameStart, e.nameEnd, "renvoTargetArch") {
 			return int(targetArchTable[fixedTarget])
@@ -622,7 +619,7 @@ func renvoEvalFixedTargetBool(g *renvoLinearGen, ep *renvoExprParse, idx int, fi
 		}
 		return -1
 	}
-	if e.kind == renvoExprCall && fixedTarget >= renvoTargetLinuxAmd64 && fixedTarget <= renvoTargetNetBSDAmd64 {
+	if e.kind == renvoExprCall && fixedTarget > 0 && fixedTarget < len(renvoTargetIntBitsTable) {
 		wantOS := 0
 		if renvoExprIsIdentText(g.prog, ep, e.left, "targetIsWindows") {
 			wantOS = renvoOSWindows

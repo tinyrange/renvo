@@ -535,6 +535,18 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	if err != nil {
 		return err
 	}
+	// The first registry entry is already the driver's declared default.
+	// Keep that role independent from the syscall-number compatibility role.
+	if len(descriptors) == 0 || descriptors[0].Constant == "" {
+		return fmt.Errorf("default target requires a bundled backend projection")
+	}
+	contextDefault := descriptors[0]
+	// Keep the private prepared slot outside the generated bundled registry.
+	fmt.Fprintf(&projection, "const renvoTargetRTG = %d\n", backend[len(backend)-1].BackendID+1)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTarget = %s\n", contextDefault.Constant)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetOS = %d\n", contextDefault.OSID)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetArch = %d\n", contextDefault.ISAID)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetIntSize = %d\n", contextDefault.WordBits/8)
 	projection.WriteByte('\n')
 	for _, operation := range []struct {
 		name   string
@@ -566,6 +578,12 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 		value func(sourceDescriptor) int
 	}{
 		{"RuntimeCaps", func(d sourceDescriptor) int { return rtg.CompilerRuntimeCapabilities(d.Runtime, d.Capabilities) }},
+		{"KernelModule", func(d sourceDescriptor) int {
+			if contains(d.Capabilities, "kernel_module") {
+				return 1
+			}
+			return 0
+		}},
 		{"PointerBits", func(d sourceDescriptor) int { return d.PointerBits }},
 		{"CodePointerBits", func(d sourceDescriptor) int { return d.CodePointerBits }},
 		{"FunctionPointerBits", func(d sourceDescriptor) int { return d.FunctionPointerBits }},

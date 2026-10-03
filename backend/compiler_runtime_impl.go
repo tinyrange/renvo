@@ -4,6 +4,8 @@ func renvoReadAll(fd int, out []byte) []byte {
 	var buf []byte
 	for {
 		base := len(out)
+		// This is the running compiler's host-buffer growth policy, not the
+		// selected output target's layout or file-operation ABI.
 		if renvoFixedTarget == renvoTargetWasiWasm32 &&
 			base == cap(out) && base >= 262144 {
 			newCapacity := base + base/2 + 262144

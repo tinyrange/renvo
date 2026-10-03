@@ -486,6 +486,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		repl_globals_supported = renvoArmCompilerReplGlobalsSupported
+		profile_float_model = renvoArmCompilerProfileFloatModel
 		syscall_argument_policy = renvoArmCompilerSyscallArgumentPolicy
 		jit_call_supported = renvoArmCompilerJITCallSupported
 		open_flag = renvoArmCompilerOpenFlag
@@ -3473,5 +3475,17 @@ go compiler {
 go compiler {
 	func renvoArmCompilerSyscallArgumentPolicy(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProfileFloatModel(c *renvoCompileContext) int {
+		return renvoFloatIEEEHardware
+	}
+}
+
+go compiler {
+	func renvoArmCompilerReplGlobalsSupported(c *renvoCompileContext) bool {
+		return true
 	}
 }

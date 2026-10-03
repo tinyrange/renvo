@@ -952,6 +952,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		repl_globals_supported = renvo386CompilerReplGlobalsSupported
+		profile_float_model = renvo386CompilerProfileFloatModel
 		syscall_argument_policy = renvo386CompilerSyscallArgumentPolicy
 		jit_call_supported = renvo386CompilerJITCallSupported
 		open_flag = renvo386CompilerOpenFlag
@@ -5515,5 +5517,17 @@ go compiler {
 			return 3
 		}
 		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerProfileFloatModel(c *renvoCompileContext) int {
+		return renvoFloatIEEEHardware
+	}
+}
+
+go compiler {
+	func renvo386CompilerReplGlobalsSupported(c *renvoCompileContext) bool {
+		return true
 	}
 }
