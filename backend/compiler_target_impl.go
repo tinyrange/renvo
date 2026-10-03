@@ -1,5 +1,34 @@
 package main
 
+// renvoStoreTargetConstant keeps target object byte order out of source-level
+// constant evaluation. The profile is descriptor-derived for prepared targets.
+func renvoStoreTargetConstant(c *renvoCompileContext, data []byte, offset int, size int, bits uint64) bool {
+	target := c.renvoTarget
+	if renvoFixedTarget != 0 {
+		target = renvoFixedTarget
+	}
+	profile, ok := renvoProfileForTarget(target)
+	if !ok {
+		return false
+	}
+	return renvoStoreIntegerBytes(data, offset, size, bits, profile.endian)
+}
+
+func renvoStoreIntegerBytes(data []byte, offset int, size int, bits uint64, endian int) bool {
+	if size < 1 || size > 8 || offset < 0 || offset > len(data) || size > len(data)-offset ||
+		endian != renvoEndianLittle && endian != renvoEndianBig {
+		return false
+	}
+	for at := 0; at < size; at++ {
+		shift := at
+		if endian == renvoEndianBig {
+			shift = size - 1 - at
+		}
+		data[offset+at] = byte(bits >> (shift * 8))
+	}
+	return true
+}
+
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoNonNil(g)
 	a := &g.asm
