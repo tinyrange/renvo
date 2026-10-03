@@ -2,7 +2,9 @@ package frontend_tests
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -102,9 +104,9 @@ func TestVM32FrontendCompilesNativeCompiler(t *testing.T) {
 		Files: files,
 	})
 	if compileResult.Trap != vm.TrapNone || compileResult.ExitCode != 0 {
-		t.Fatalf("VM frontend: exit %d, trap %d at pc %d, stdout %q, stderr %q, steps %d, peak %d, files %#v",
+		t.Fatalf("VM frontend: exit %d, trap %d at pc %d, stdout %q, stderr %q, steps %d, peak %d, file count %d",
 			compileResult.ExitCode, compileResult.Trap, compileResult.TrapPC,
-			compileResult.Output, compileResult.Stderr, compileResult.Steps, compileResult.PeakMemory, compileResult.Files)
+			compileResult.Output, compileResult.Stderr, compileResult.Steps, compileResult.PeakMemory, len(compileResult.Files))
 	}
 	var output []byte
 	for _, file := range compileResult.Files {
@@ -116,6 +118,24 @@ func TestVM32FrontendCompilesNativeCompiler(t *testing.T) {
 		output[1] != 'E' || output[2] != 'L' || output[3] != 'F' {
 		t.Fatalf("VM frontend Linux output prefix = % x", output[:minBundleLength(len(output), 4)])
 	}
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		nativeCompiler := filepath.Join(t.TempDir(), "renvo-linux-amd64")
+		if err := os.WriteFile(nativeCompiler, output, 0755); err != nil {
+			t.Fatal(err)
+		}
+		fixture := filepath.Join(root, "frontend_tests", "regressions", "generic_callable_layout")
+		program := filepath.Join(t.TempDir(), "generic-program")
+		command := exec.Command(nativeCompiler, "-s", "-o", program, "./cmd/app")
+		command.Dir = fixture
+		command.Env = frontendCommandEnv(frontend.env, fixture)
+		if text, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("VM-built native frontend compiles generics: %v\n%s", err, text)
+		}
+		if text, err := exec.Command(program).CombinedOutput(); err != nil || string(text) != "PASS\n" {
+			t.Fatalf("execute generic program from VM-built native frontend: %v output=%q", err, text)
+		}
+	}
+
 	t.Logf("frontend artifact=%dB, Linux output=%dB, execution=%d steps, peak=%dB",
 		len(image), len(output), compileResult.Steps, compileResult.PeakMemory)
 }

@@ -42,13 +42,17 @@ func collectScopedTypeBindings(file *syntax.File, fn *syntax.FuncDecl, body *syn
 			start++
 			constant := kind == syntax.TokenConst
 			if tokCharIs(file, start, '(') {
+				close := findTypeMatching(file, start, '(', ')') - 1
+				if close < start || close >= end {
+					continue
+				}
 				ordinal, templateStart, templateEnd := 0, -1, -1
-				for pos := start + 1; pos < end-1; {
-					pos = skipLocalSeparators(file, pos, end-1)
-					if pos >= end-1 || tokCharIs(file, pos, ')') {
+				for pos := start + 1; pos < close; {
+					pos = skipLocalSeparators(file, pos, close)
+					if pos >= close {
 						break
 					}
-					finish := statementSpecEnd(file, pos, end-1)
+					finish := statementSpecEnd(file, pos, close)
 					first := len(bindings)
 					bindings = appendScopedTypeBindings(bindings, file, pos, finish, scopeEnd, kind == syntax.TokenVar, constant, false)
 					if constant {
@@ -85,6 +89,7 @@ func collectScopedTypeBindings(file *syntax.File, fn *syntax.FuncDecl, body *syn
 			}
 		} else if stmt.Kind == syntax.StmtCase {
 			start++
+			end = stmt.ExprEnd
 		} else if stmt.Kind != syntax.StmtAssign {
 			continue
 		}

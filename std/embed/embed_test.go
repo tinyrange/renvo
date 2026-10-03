@@ -49,3 +49,26 @@ func TestDecompressArchiveBackreferenceBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestNewFSReadFileOwnsReturnedBytes(t *testing.T) {
+	// A single file named "file", containing "abc", encoded as literal groups.
+	raw := "\x01\x00\x00\x00\x04\x00\x00\x00\x03\x00\x00\x00fileabc"
+	compressed := ""
+	for start := 0; start < len(raw); start += 8 {
+		end := start + 8
+		if end > len(raw) {
+			end = len(raw)
+		}
+		compressed += "\xff" + raw[start:end]
+	}
+	fs := NewFS(compressed, len(raw))
+	first, err := fs.ReadFile("file")
+	if err != nil || string(first) != "abc" {
+		t.Fatalf("first read = %q, %v", first, err)
+	}
+	first[0] = 'x'
+	second, err := fs.ReadFile("file")
+	if err != nil || string(second) != "abc" {
+		t.Fatalf("second read = %q, %v", second, err)
+	}
+}

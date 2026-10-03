@@ -14,13 +14,13 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 	var bindings []localRuleBinding
 	var scopeEnds []int
 	for i := 0; i < len(signature.Params); i++ {
-		field := signature.Params[i]
+		field := &signature.Params[i]
 		if field.NameTok >= 0 {
 			bindings = append(bindings, localRuleBinding{field.NameTok, field.TypeStart, field.TypeEnd, fn.BodyEnd})
 		}
 	}
 	for i := 0; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.Kind == syntax.StmtDecl && (file.Tokens[stmt.StartTok].KindLine&255 == syntax.TokenVar || file.Tokens[stmt.StartTok].KindLine&255 == syntax.TokenConst) {
 			names, start := localDeclNameTokens(file, stmt.StartTok+1, stmt.EndTok)
 			op := findDeclAssign(file, start, stmt.EndTok)
@@ -119,7 +119,7 @@ func invalidLocalRules(pkg *load.Package, info *PackageInfo, file *syntax.File, 
 		}
 	}
 	for tok := fn.BodyStart + 2; tok+1 < fn.BodyEnd; tok++ {
-		if !tokenTextIs(file, tok, "==") && !tokenTextIs(file, tok, "!=") {
+		if file.Tokens[tok].KindLine&255 != syntax.TokenOperator || !tokenTextIs(file, tok, "==") && !tokenTextIs(file, tok, "!=") {
 			continue
 		}
 		if tokenTextIs(file, tok-1, "nil") || tokenTextIs(file, tok+1, "nil") {

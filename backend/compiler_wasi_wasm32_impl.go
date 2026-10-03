@@ -698,9 +698,28 @@ func renvoAppendSoftFloatSource(src []byte) []byte {
 	return src
 }
 
+// Source and compact-unit inputs need the same VM floating-point helpers.
+// Preserve unit metadata when reparsing the original source plus those helpers.
+func renvoPrepareSoftFloatProgram(prog *renvoProgram) {
+	if prog.c.renvoTarget != renvoTargetVM32 || !renvoProgramNeedsSoftFloat(prog) {
+		return
+	}
+	for _, fn := range prog.funcs {
+		if renvoBytesEqualText(prog.src, fn.nameStart, fn.nameEnd, "__renvoSoftUnpack64") {
+			return
+		}
+	}
+	parsed := renvoParseProgramWithContext(renvoAppendSoftFloatSource(prog.src), &prog.c)
+	parsed.entryFunc = prog.entryFunc
+	parsed.packageTable = prog.packageTable
+	parsed.foreign = prog.foreign
+	parsed.c11Semantics = prog.c11Semantics
+	*prog = parsed
+}
+
 func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 	for i := 0; i < renvoTokCount(prog); i++ {
-		if renvoTokIsKind(prog, i, renvoTokFloat) {
+		if renvoTokIsKind(prog, i, renvoTokFloat) || renvoTokIsKind(prog, i, renvoTokNumber) && renvoExprTokenIsImaginary(prog, i) {
 			return true
 		}
 		if !renvoTokIsKind(prog, i, renvoTokIdent) {
@@ -708,6 +727,7 @@ func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 		}
 		tok := renvoTokAt(prog, i)
 		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
@@ -745,13 +765,6 @@ func compileWasm32Arena(input []int, output int, arenaSize int) int {
 	prog = renvoParseProgram(src)
 	if !prog.ok {
 		return 1
-	}
-	if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		src = renvoAppendSoftFloatSource(src)
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(&prog, &meta)
@@ -834,6 +847,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 			return renvoCompileResult{}
 		}
 	}
+	renvoResolveSpeculativeClosureLabels(&g)
 	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
 	var result renvoCompileResult
 	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
@@ -961,7 +975,7 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []re
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}
-			rootIndex := len(ep.exprs) - 1
+			rootIndex := ep.root
 			root := &ep.exprs[rootIndex]
 			if root.kind != renvoExprCall || root.argCount != 1 || !renvoExprIsIdentText(p, &ep, root.left, "print") {
 				return nil
@@ -988,7 +1002,7 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []re
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}
-			result := renvoEvalConstExpr(&gen, &ep, len(ep.exprs)-1)
+			result := renvoEvalConstExpr(&gen, &ep, ep.root)
 			if !result.ok {
 				return nil
 			}
@@ -1945,21 +1959,34 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	}
 	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
 		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
-		// Wide operations read and write whole frame-backed slots. Stack slots
-		// are reused across expression lifetimes, so a scalar local at the same
-		// offset cannot be proven coherent with those accesses. Keep the routine
-		// frame-backed when either operation is present.
-		if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
-			for j := 0; j < len(candidates); j++ {
-				candidates[j] = 0
-			}
-			continue
-		}
 		memoryOffsets := make([]int, 0, 3)
 		memorySizes := make([]int, 0, 3)
 		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
+		} else if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
+			// Wide operations access memory directly. Exclude every overlapping
+			// slot across all lifetimes, while retaining unrelated scalar locals.
+			lastField := 5
+			if op == renvoWasm32OpWideBinary {
+				lastField = 9
+			}
+			for field := 1; field <= lastField; field += 4 {
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, 8)
+			}
+		} else if op == renvoWasm32OpCopyFrameBlock {
+			mode := int(renvo_runtime_UnsafeByteAt(a.code, pc+1))
+			for field := 2; field <= 6; field += 4 {
+				if field == 2 && mode == renvoNativeCopyMemToStack || field == 6 && mode == renvoNativeCopyStackToMem {
+					continue
+				}
+				memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+field))
+				memorySizes = append(memorySizes, renvoGet32At(a.code, pc+10))
+			}
+		} else if op == renvoWasm32OpPushFrameBlock || op == renvoWasm32OpZeroFrameBlock {
+			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+1))
+			memorySizes = append(memorySizes, renvoGet32At(a.code, pc+5))
 		} else if op == renvoWasm32OpLeaStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, renvoBackendValueSlotSize)
@@ -2415,6 +2442,25 @@ func renvoWasm32EnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoAsmJnzLabel(a, notEqualLabel)
 	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
 	renvoAsmJzLabel(a, equalLabel)
+	if g.c.renvoTarget == renvoTargetVM32 {
+		// Compare complete words before the byte tail without reading beyond
+		// either string. VM word loads support unaligned source addresses.
+		wordLoop := renvoAsmNewLabel(a)
+		byteTail := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 4)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, byteTail)
+		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 4)
+		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 4)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, 4)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, 4)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, -4)
+		renvoAsmJmpMarkLabel(a, wordLoop, byteTail)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
+		renvoAsmJzLabel(a, equalLabel)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 1)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 1)

@@ -20,12 +20,21 @@ type Session struct {
 	transient  bool
 	cached     bool
 	object     bool
+	layout     load.TargetLayout
 	stage      int
 	loadStart  int
 	loadEnd    int
 	builder    *build.ProgramSession
 	linker     *link.PackageSession
 	result     Result
+}
+
+// SetTargetLayout must be called before the first Step. The layout belongs to
+// this session so concurrent builds cannot alter each other's target semantics.
+func (s *Session) SetTargetLayout(layout load.TargetLayout) {
+	if s != nil && s.stage == 0 {
+		s.layout = layout
+	}
 }
 
 func BeginSession(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, cached bool) *Session {
@@ -67,6 +76,7 @@ func (s *Session) Step() bool {
 	if s.stage == 0 {
 		s.loadStart = arena.Mark()
 		workspace := load.LoadWorkspace(s.workDir, s.stdRoot, s.arg, s.files)
+		workspace.Graph.Layout = s.layout
 		s.loadEnd = arena.Mark()
 		s.result.Workspace = workspace
 		if !workspace.Ok {

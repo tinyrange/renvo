@@ -150,7 +150,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		for j := 0; j < len(packageActions); j++ {
-			tok := programs[i].Tokens[j]
+			tok := &programs[i].Tokens[j]
 			if tok.KindLine&255 != unit.TokenEOF && packageActions[j] >= 0 {
 				finalEOF++
 				if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start+2 < len(programs[i].Text) && programs[i].Text[tok.Start] == '.' && programs[i].Text[tok.Start+1] == '.' && programs[i].Text[tok.Start+2] == '.' {
@@ -165,7 +165,9 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	}
 	program := unit.Program{Package: cloneCoreLinkString(rootName), ImportPath: cloneCoreLinkString(programs[root].ImportPath)}
 	reserveCompactLinkedProgram(&program, programs, finalEOF)
-	includePackageInfo := !transient
+	// Ownership is semantic metadata: private fields and methods keep their
+	// declaring package even when transient linking discards source artifacts.
+	includePackageInfo := true
 	line := 1
 	appendOK := true
 	actionOffset = 0
@@ -210,11 +212,12 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 	}
 	program.Tokens = append(program.Tokens, unit.MakeToken(unit.TokenEOF, len(program.Text), 0, line))
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerReflectionCore(&program, &reflection, transient) {
+	if !lowerVariableGroups(&program, transient) || !lowerReflectionCore(&program, &reflection, transient) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
-	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+	indexFunctionValueLexicalScopes(&program)
+	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerFunctionRangeDefers(&program, transient) || !lowerRangesCore(&program, transient, true, true) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -268,28 +271,37 @@ func coreProgramsUseC11Semantics(programs []unit.Program) bool {
 }
 
 func coreTextHasC11Directive(text []byte) bool {
-	marker := "// renvo:c11"
-	for start := 0; start < len(text); {
-		end := start
-		for _, c := range text[start:] {
-			if c == '\n' || c == '\r' {
-				break
-			}
-			end++
-		}
-		if end-start == len(marker) {
-			match := true
-			for i := 0; i < len(marker); i++ {
-				if text[start+i] != marker[i] {
-					match = false
-					break
+	const marker = "// renvo:c11"
+	if len(text) < len(marker) {
+		return false
+	}
+	// Search the complete directive using a bad-character skip table. Long
+	// generated source lines need not be walked one byte at a time.
+	var shift [256]byte
+	for i := 0; i < len(shift); i++ {
+		shift[i] = byte(len(marker))
+	}
+	for i := 0; i < len(marker)-1; i++ {
+		shift[marker[i]] = byte(len(marker) - 1 - i)
+	}
+	for start := 0; start+len(marker) <= len(text); {
+		last := text[start+len(marker)-1]
+		if last == marker[len(marker)-1] && (start == 0 || text[start-1] == '\n' || text[start-1] == '\r') {
+			end := start + len(marker)
+			if end == len(text) || text[end] == '\n' || text[end] == '\r' {
+				match := true
+				for i := 0; i < len(marker)-1; i++ {
+					if text[start+i] != marker[i] {
+						match = false
+						break
+					}
+				}
+				if match {
+					return true
 				}
 			}
-			if match {
-				return true
-			}
 		}
-		start = end + 1
+		start += int(shift[last])
 	}
 	return false
 }
@@ -330,6 +342,7 @@ func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
 	dst.Symbols = src.Symbols
 	dst.Decls = src.Decls
 	dst.Funcs = src.Funcs
+	indexFunctionValueLexicalScopes(dst)
 	dst.TypeRefs = src.TypeRefs
 	dst.Calls = src.Calls
 	dst.Refs = src.Refs
@@ -416,7 +429,7 @@ func coreText(text []byte, start int, end int) string {
 
 func coreTokenAt(program unit.Program, start int, end int) int {
 	for i := 0; i < len(program.Tokens); i++ {
-		tok := program.Tokens[i]
+		tok := &program.Tokens[i]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return i
 		}
@@ -448,8 +461,9 @@ func reserveCompactLinkedProgram(program *unit.Program, programs []unit.Program,
 func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, bool) {
 	out := make([]unit.Program, len(programs))
 	copy(out, programs)
-	initNames := coreProgramInitFunctionNames(out)
-	rootProgram, ok := addRootEntrypointCore(out[root], root, programsContainCoreFunc(out, "renvo_runtime_SetProcess"), initNames)
+	ensureCoreProgramSymbols(out)
+	initFunctions := coreProgramInitFunctionRefs(out)
+	rootProgram, ok := addRootEntrypointCore(out[root], root, programsContainCoreFunc(out, "renvo_runtime_SetProcess"), initFunctions)
 	if !ok {
 		return nil, false
 	}
@@ -457,12 +471,12 @@ func prepareProgramsCore(programs []unit.Program, root int) ([]unit.Program, boo
 	return out, true
 }
 
-func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool, initNames []string) (unit.Program, bool) {
+func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool, initFunctions []unit.NameRef) (unit.Program, bool) {
 	if src.Package != "main" || findCoreFuncByName(&src, "appMain") >= 0 || findCoreFuncByName(&src, "main") < 0 {
 		return src, true
 	}
 	if processState {
-		return addRootProcessEntrypointCore(src, packageIndex, initNames)
+		return addRootProcessEntrypointCore(src, packageIndex, initFunctions)
 	}
 	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		return src, false
@@ -481,7 +495,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenOp, start+13, 1, line))
 	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenIdent, start+15, 3, line))
 	src.Tokens = append(src.Tokens, unit.MakeToken(unit.TokenOp, start+19, 1, line))
-	mainTok, eof := appendRootEntrypointTailCore(&src, initNames, line)
+	mainTok, eof := appendRootEntrypointTailCore(&src, initFunctions, line)
 	src.Funcs = append(src.Funcs, unit.Func{
 		NameStart:     start + 5,
 		NameEnd:       start + 12,
@@ -493,7 +507,7 @@ func addRootEntrypointCore(src unit.Program, packageIndex int, processState bool
 		BodyEnd:       mainTok + 6,
 		EndTok:        eof,
 	})
-	_ = packageIndex
+	src.Symbols = append(src.Symbols, unit.Symbol{Name: "appMain", Package: packageIndex, Token: base + 1})
 	return src, true
 }
 
@@ -506,7 +520,7 @@ func programsContainCoreFunc(programs []unit.Program, name string) bool {
 	return false
 }
 
-func addRootProcessEntrypointCore(src unit.Program, packageIndex int, initNames []string) (unit.Program, bool) {
+func addRootProcessEntrypointCore(src unit.Program, packageIndex int, initFunctions []unit.NameRef) (unit.Program, bool) {
 	if len(src.Tokens) == 0 || src.Tokens[len(src.Tokens)-1].KindLine&255 != unit.TokenEOF {
 		return src, false
 	}
@@ -546,7 +560,7 @@ func addRootProcessEntrypointCore(src unit.Program, packageIndex int, initNames 
 	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenIdent, start, argsStart+6, 3, line)
 	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, argsStart+9, 1, line)
 	src.Tokens = appendRootProcessTokenCore(src.Tokens, unit.TokenOp, start, argsStart+10, 1, line)
-	mainTok, eof := appendRootEntrypointTailCore(&src, initNames, line)
+	mainTok, eof := appendRootEntrypointTailCore(&src, initFunctions, line)
 	src.Funcs = append(src.Funcs, unit.Func{
 		NameStart:     start + 5,
 		NameEnd:       start + 12,
@@ -558,23 +572,28 @@ func addRootProcessEntrypointCore(src unit.Program, packageIndex int, initNames 
 		BodyEnd:       mainTok + 6,
 		EndTok:        eof,
 	})
-	_ = packageIndex
+	src.Symbols = append(src.Symbols, unit.Symbol{Name: "appMain", Package: packageIndex, Token: base + 1})
 	return src, true
 }
 
-func coreProgramInitFunctionNames(programs []unit.Program) []string {
-	var names []string
-	for i := 0; i < len(programs); i++ {
-		ordinal := 0
-		for j := 0; j < len(programs[i].Funcs); j++ {
-			if coreLinkedProgramText(&programs[i], programs[i].Funcs[j].NameStart, programs[i].Funcs[j].NameEnd) != "init" {
+// Generated calls carry the declaration identity through ordinary linking so
+// they follow the same collision-free alias as the corresponding init body.
+func coreProgramInitFunctionRefs(programs []unit.Program) []unit.NameRef {
+	var refs []unit.NameRef
+	for i := range programs {
+		for _, fn := range programs[i].Funcs {
+			if fn.ReceiverStart < fn.ReceiverEnd || coreLinkedProgramText(&programs[i], fn.NameStart, fn.NameEnd) != "init" {
 				continue
 			}
-			names = append(names, coreInitFunctionAliasName(i, ordinal))
-			ordinal++
+			for j, symbol := range programs[i].Symbols {
+				if symbol.Token == fn.NameTok {
+					refs = append(refs, unit.NameRef{Kind: unit.RefPackage, Index: j, Package: i})
+					break
+				}
+			}
 		}
 	}
-	return names
+	return refs
 }
 
 func appendRootProcessTokenCore(tokens []unit.Token, kind int, base int, start int, size int, line int) []unit.Token {
@@ -593,9 +612,10 @@ func appendRootCallCore(src *unit.Program, name string, line int) int {
 	return callTok
 }
 
-func appendRootEntrypointTailCore(src *unit.Program, initNames []string, line int) (int, int) {
-	for i := 0; i < len(initNames); i++ {
-		appendRootCallCore(src, initNames[i], line)
+func appendRootEntrypointTailCore(src *unit.Program, initFunctions []unit.NameRef, line int) (int, int) {
+	for _, ref := range initFunctions {
+		ref.Token = appendRootCallCore(src, "init", line)
+		src.Refs = append(src.Refs, ref)
 	}
 	mainTok := appendRootCallCore(src, "main", line)
 	tailStart := len(src.Text)
@@ -618,6 +638,19 @@ func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions [
 	}
 	text := src.Text
 	tokens := src.Tokens
+	var intrinsicStarts []int
+	var intrinsicNames []string
+	if src.ImportPath == "fmt" || src.ImportPath == "os" || src.ImportPath == "renvo.dev/std/os" || src.ImportPath == "syscall" || src.ImportPath == "renvo.dev/std/syscall" {
+		for _, fn := range src.Funcs {
+			name := coreCompilerIntrinsicAlias(src.ImportPath, coreText(src.Text, fn.NameStart, fn.NameEnd))
+			index := tokenActionReplacement(actions[fn.NameTok])
+			if name != "" && index >= 0 && aliases[index] != name {
+				intrinsicStarts = append(intrinsicStarts, fn.StartTok)
+				intrinsicNames = append(intrinsicNames, name)
+			}
+		}
+	}
+	intrinsicNext := 0
 	sourceEndsNewline := text[len(text)-1] == '\n'
 	if transient && !prepareTransientCoreMappings(dst, &src, actions, finalEOF) {
 		return false, line
@@ -668,6 +701,17 @@ func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions [
 			continue
 		}
 		mappedToken := len(dst.Tokens)
+		if intrinsicNext < len(intrinsicStarts) && i == intrinsicStarts[intrinsicNext] {
+			if tokStart > pendingStart {
+				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
+			}
+			dst.Text = appendCoreStringBytes(dst.Text, "\n//renvo:intrinsic ")
+			dst.Text = appendCoreStringBytes(dst.Text, intrinsicNames[intrinsicNext])
+			dst.Text = append(dst.Text, '\n')
+			pendingStart = tokStart
+			lineBase += 2
+			intrinsicNext++
+		}
 		if i < len(objectExports) && objectExports[i] != "" {
 			if tokStart > pendingStart {
 				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
@@ -725,11 +769,11 @@ func appendProgramCoreWithExports(dst *unit.Program, src unit.Program, actions [
 				dst.Text = appendCoreBytes(dst.Text, text[pendingStart:tokStart])
 			}
 			tok.Start = len(dst.Text)
-			value, ok := syntax.StringLiteralValue(text, syntax.MakeToken(syntax.TokenString, tokStart, tokEnd, 0))
+			quoted, ok := syntax.AppendQuotedStringLiteral(dst.Text, text, syntax.MakeToken(syntax.TokenString, tokStart, tokEnd, 0))
 			if !ok {
 				return false, line
 			}
-			dst.Text = appendCoreQuotedString(dst.Text, value)
+			dst.Text = quoted
 			tok.Size = len(dst.Text) - tok.Start
 			pendingStart = tokEnd
 		} else {
@@ -943,7 +987,7 @@ func transientCoreTokenOutputCount(src *unit.Program, action tokenAction, index 
 	if action < 0 || index < 0 || index >= len(src.Tokens) || src.Tokens[index].KindLine&255 == unit.TokenEOF {
 		return 0
 	}
-	tok := src.Tokens[index]
+	tok := &src.Tokens[index]
 	if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start >= 0 && tok.Start+2 < len(src.Text) &&
 		src.Text[tok.Start] == '.' && src.Text[tok.Start+1] == '.' && src.Text[tok.Start+2] == '.' {
 		return 3
@@ -1060,16 +1104,21 @@ func markCoreImportDeclTokens(program *unit.Program, actions []tokenAction, imp 
 	if imp.PathTok < 0 || imp.PathTok >= len(program.Tokens) {
 		return
 	}
-	line := program.Tokens[imp.PathTok].KindLine >> 8
 	start := imp.PathTok
-	if imp.NameTok >= 0 && imp.NameTok < start {
-		start = imp.NameTok
-	}
-	for start > 0 && program.Tokens[start-1].KindLine>>8 == line {
+	for start >= 0 && !coreTokenTextEquals(program, start, "import") {
 		start--
 	}
+	if start < 0 {
+		return
+	}
 	end := imp.PathTok
-	for end+1 < len(program.Tokens) && program.Tokens[end+1].KindLine>>8 == line {
+	if functionValueTokenCharIs(program, start+1, '(') {
+		end = findCoreMatchingParen(program, start+1)
+		if end < imp.PathTok {
+			return
+		}
+	}
+	if functionValueTokenCharIs(program, end+1, ';') {
 		end++
 	}
 	for i := start; i <= end; i++ {
@@ -1105,7 +1154,7 @@ func markCoreUnsafePointerCallTokens(program *unit.Program, actions []tokenActio
 			continue
 		}
 		open := selector.NameTok + 1
-		if !coreTokenTextEquals(program, open, "(") {
+		if !functionValueTokenCharIs(program, open, '(') {
 			continue
 		}
 		close := findCoreMatchingParen(program, open)
@@ -1132,7 +1181,7 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 			continue
 		}
 		for tok := 0; tok+2 < len(program.Tokens); tok++ {
-			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
+			if functionValueTokenTextEquals(program, tok, name) && functionValueTokenCharIs(program, tok+1, '.') && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Alignof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
 				markCoreRedirectToken(actions, tok, tok+2)
 				markCoreRedirectToken(actions, tok+1, tok+2)
 			}
@@ -1142,17 +1191,17 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 
 func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+4 < len(program.Tokens); i++ {
-		if !coreTokenTextEquals(program, i, "(") || !coreTokenTextEquals(program, i+1, "*") {
+		if !functionValueTokenCharIs(program, i, '(') || !functionValueTokenCharIs(program, i+1, '*') {
 			continue
 		}
 		typeEnd := findCoreMatchingParen(program, i)
-		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !coreTokenTextEquals(program, typeEnd+1, "(") {
+		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !functionValueTokenCharIs(program, typeEnd+1, '(') {
 			continue
 		}
 		// Keep pointer-to-array conversions so the backend retains the element
 		// type and array bound needed for dynamic indexing. The nested
 		// unsafe.Pointer call is still erased independently.
-		if coreTokenTextEquals(program, i+2, "[") {
+		if functionValueTokenCharIs(program, i+2, '[') {
 			continue
 		}
 		// Keep a typed conversion that directly reinterprets an address. Erasing
@@ -1181,7 +1230,7 @@ func coreUnsafePointerAddressCallAt(program *unit.Program, start int) bool {
 			continue
 		}
 		open := selector.NameTok + 1
-		return coreTokenTextEquals(program, open, "(") && coreTokenTextEquals(program, open+1, "&")
+		return functionValueTokenCharIs(program, open, '(') && functionValueTokenCharIs(program, open+1, '&')
 	}
 	return false
 }
@@ -1199,14 +1248,14 @@ func coreSelectorIsUnsafePointer(program *unit.Program, selector unit.Selector) 
 		if imp.NameTok >= 0 {
 			name = coreTokenText(program, imp.NameTok)
 		}
-		return coreTokenText(program, selector.BaseTok) == name
+		return functionValueTokenTextEquals(program, selector.BaseTok, name)
 	}
 	return false
 }
 
 func markCoreEndianSelectorTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+2 < len(program.Tokens); i++ {
-		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && coreTokenTextEquals(program, i+1, ".") {
+		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && functionValueTokenCharIs(program, i+1, '.') {
 			markCoreRedirectToken(actions, i, i+2)
 			markCoreRedirectToken(actions, i+1, i+2)
 		}
@@ -1227,7 +1276,7 @@ func coreTokenText(program *unit.Program, tok int) string {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return ""
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return ""
 	}
@@ -1235,14 +1284,14 @@ func coreTokenText(program *unit.Program, tok int) string {
 }
 
 func findCoreMatchingParen(program *unit.Program, open int) int {
-	if !coreTokenTextEquals(program, open, "(") {
+	if !functionValueTokenCharIs(program, open, '(') {
 		return -1
 	}
 	depth := 0
 	for i := open; i < len(program.Tokens); i++ {
-		if coreTokenTextEquals(program, i, "(") {
+		if functionValueTokenCharIs(program, i, '(') {
 			depth++
-		} else if coreTokenTextEquals(program, i, ")") {
+		} else if functionValueTokenCharIs(program, i, ')') {
 			depth--
 			if depth == 0 {
 				return i
@@ -1256,16 +1305,17 @@ func coreTokenTextEquals(program *unit.Program, tok int, want string) bool {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return false
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
 		return false
 	}
-	for i := 0; i < len(want); i++ {
-		if program.Text[token.Start+i] != want[i] {
-			return false
-		}
+	if len(want) == 1 {
+		return program.Text[token.Start] == want[0]
 	}
-	return true
+	if len(want) > 0 && program.Text[token.Start] != want[0] {
+		return false
+	}
+	return string(program.Text[token.Start:token.Start+token.Size]) == want
 }
 
 func coreLinkedReplacementTokenKind(kind int, replacement string) int {
@@ -1381,7 +1431,7 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 				out[index] = alias
 			} else if directiveSize >= 0 {
 				out[index] = coreMemoryDirectiveAliasName(directiveSize, index)
-			} else if corePredeclaredAliasNeeded(name) {
+			} else if corePredeclaredAliasNeeded(name) || name == "renvo_runtime_FmtPrintln" || name == "renvo_runtime_Syscall" {
 				out[index] = coreSymbolAliasName(i, name)
 			}
 			bucket := coreSymbolAliasHash(name) % len(buckets)
@@ -1406,6 +1456,8 @@ func corePackageSymbolAliases(programs []unit.Program, root int, symbolOffsets [
 			}
 		}
 	}
+	coreAliasImportedBindings(programs, symbolOffsets, out, buckets, next, names)
+	coreAvoidSymbolAliasCollisions(programs, symbolOffsets, out)
 	return out
 }
 
@@ -1436,7 +1488,7 @@ func coreMemoryDirectiveSize(program *unit.Program, nameTok int, load bool) int 
 	typeTok := closeTok - 1
 	if load {
 		typeTok = closeTok + 1
-		if coreTokenText(program, typeTok) == "(" {
+		if functionValueTokenTextEquals(program, typeTok, "(") {
 			typeTok++
 		}
 	}
@@ -1458,8 +1510,8 @@ func coreMemoryDirectiveSize(program *unit.Program, nameTok int, load bool) int 
 
 // Compiler intrinsics are selected by both package identity and declaration
 // name while the linker still has semantic package information. The compact
-// backend unit intentionally omits that frontend-only metadata, so a reserved
-// alias carries only the identity needed for safe call-site specialization.
+// backend unit intentionally omits that frontend-only metadata, so an intrinsic
+// alias (and a declaration marker if renamed) carries call-site identity.
 // Calls through function values still reach the ordinary function body.
 func coreCompilerIntrinsicAlias(importPath string, name string) string {
 	if importPath == "fmt" && name == "Println" {
@@ -1553,6 +1605,12 @@ func packageSymbolAliasIndex(aliases []string, symbolOffsets []int, pkg int, sym
 
 func coreSymbolAliasName(pkg int, name string) string {
 	out := []byte("renvop")
+	// Embedded fields inherit their identifier from the type spelling. Keep
+	// exported names exported so linking does not introduce a private field
+	// identity tied to the package containing a callback signature.
+	if syntax.IdentifierExported([]byte(name), 0) {
+		out[0] = 'R'
+	}
 	out = appendCoreInt(out, pkg)
 	out = append(out, '_')
 	for i := 0; i < len(name); i++ {
@@ -1633,7 +1691,7 @@ func mapCoreTextSpanByToken(src unit.Program, dst *unit.Program, eof int, start 
 		}
 	}
 	if low < len(src.Tokens) {
-		tok := src.Tokens[low]
+		tok := &src.Tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return mappedCoreTokenTextSpan(dst, mapLinkedToken(src.Tokens, low, eof))
 		}
@@ -1653,7 +1711,7 @@ func coreTokenIndexByTextSpan(tokens []unit.Token, start int, end int) int {
 		}
 	}
 	if low < len(tokens) {
-		tok := tokens[low]
+		tok := &tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return low
 		}
@@ -1665,7 +1723,7 @@ func mappedCoreTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return 0, 0, false
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.KindLine&255 == unit.TokenEOF || token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return 0, 0, false
 	}
@@ -1714,8 +1772,8 @@ func corePackageSymbolOffsets(programs []unit.Program) []int {
 
 func countCoreNewlines(text []byte) int {
 	count := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
+	for _, value := range text {
+		if value == '\n' {
 			count++
 		}
 	}

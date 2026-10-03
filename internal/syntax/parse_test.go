@@ -169,3 +169,24 @@ func tokenString(file File, tok int) string {
 	}
 	return string(TokenText(file.Src, file.Tokens[tok]))
 }
+
+func TestDeclarationContinuationUsesSemicolonRules(t *testing.T) {
+	source := "package p\nconst text = \"a\" +\n \"b\" +\n \"c\"\nconst number =\n 40 +\n 2\nvar channel chan\n int\nconst raw = `a\nb` + \"c\"\nconst (\n first = 1 +\n 2\n second = 4\n)\nfunc main() {}\n"
+	file := ParseFile([]byte(source))
+	if !file.Ok {
+		t.Fatalf("parse error %d at %d", file.Error, file.ErrorTok)
+	}
+	names := []string{"text", "number", "channel", "raw", "first", "second"}
+	ends := []string{"\"c\"", "2", "int", "\"c\"", "2", "4"}
+	if len(file.Decls) != len(names) || len(file.Funcs) != 1 {
+		t.Fatalf("declarations=%d functions=%d", len(file.Decls), len(file.Funcs))
+	}
+	for i, d := range file.Decls {
+		if tokenString(file, d.NameTok) != names[i] || tokenString(file, d.EndTok-1) != ends[i] {
+			t.Fatalf("declaration %d spans %q through %q", i, tokenString(file, d.NameTok), tokenString(file, d.EndTok-1))
+		}
+	}
+	if parsed := ParseFile([]byte("package p\nconst x=1\n+2\n")); parsed.Ok {
+		t.Fatal("continued a declaration after an inserted semicolon")
+	}
+}

@@ -24,8 +24,14 @@ func renvoBackendTargetHasBuildTag(target string, tag string) bool {
 	return false
 }
 
+func renvoBackendTargetLayout(target string) load.TargetLayout {
+	_ = target
+	return load.TargetLayout{}
+}
+
 func resolveForeignTarget(options *Options, workDir string, target string, fs SourceFS, result *foreignTarget) {
 	if name, definition, version, ok := targetinfo.Binding(target); ok {
+		result.Layout = frontendTargetLayout(Options{Target: target})
 		result.Binding = unit.TargetBinding{Target: name, Definition: definition, DescriptorVersion: version}
 		result.InPlace = targetinfo.SupportsInPlaceEntry(target)
 		result.Ok = true
@@ -44,6 +50,7 @@ func resolveForeignTarget(options *Options, workDir string, target string, fs So
 		return
 	}
 	descriptor := resolved.Descriptor
+	result.Layout = load.TargetLayout{WordBits: descriptor.WordBits, PointerBits: descriptor.PointerBits, ScalarAlign: frontendScalarAlignment(descriptor.WordBits, "")}
 	result.Binding = unit.TargetBinding{Target: descriptor.Name, Definition: string(descriptor.Definition[:]), DescriptorVersion: descriptor.Version}
 	result.InPlace = findString(descriptor.Capabilities, "in_place_entry") >= 0
 	result.Tags = descriptor.BuildTags

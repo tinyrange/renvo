@@ -54,10 +54,16 @@ func stringEscapeValue(src []byte, slash int, end int) (int, int, bool, bool) {
 		if slash+4 > end {
 			return 0, 0, false, false
 		}
-		high, highOK := hexValue(src[slash+2])
-		low, lowOK := hexValue(src[slash+3])
-		if !highOK || !lowOK {
+		a, b := src[slash+2], src[slash+3]
+		if !(uint(a)-'0' < 10 || uint(a|32)-'a' < 6) || !(uint(b)-'0' < 10 || uint(b|32)-'a' < 6) {
 			return 0, 0, false, false
+		}
+		high, low := int(a&15), int(b&15)
+		if a > '9' {
+			high += 9
+		}
+		if b > '9' {
+			low += 9
 		}
 		return slash + 4, high*16 + low, false, true
 	}

@@ -201,6 +201,12 @@ func renvoAppendPEHeader64(out []byte, textRawSize int, textVirtualSize int, dat
 }
 
 func renvoAppendPEHeader64WithContext(context *renvoCompileContext, out []byte, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	// Section sizes determine the complete file. Avoid retaining superseded
+	// output buffers in the arena while the image writer appends its sections.
+	fileSize := renvoWinHeadersSize + textRawSize + dataRawSize
+	if len(out) == 0 && cap(out) < fileSize {
+		out = make([]byte, 0, fileSize)
+	}
 	machine := 0x8664
 	imageBase := renvoWinImageBase
 	stackReserve := 0x800000
@@ -247,6 +253,10 @@ func renvoAppendPEHeader32(out []byte, entryRVA int, textRawSize int, textVirtua
 }
 
 func renvoAppendPEHeader32WithContext(context *renvoCompileContext, out []byte, entryRVA int, textRawSize int, textVirtualSize int, dataRVA int, dataRawSize int, dataVirtualSize int, importRVA int, importSize int, iatRVA int, iatSize int) []byte {
+	fileSize := renvoWinHeadersSize + textRawSize + dataRawSize
+	if len(out) == 0 && cap(out) < fileSize {
+		out = make([]byte, 0, fileSize)
+	}
 	sizeOfImage := renvoAlignValue(dataRVA+dataVirtualSize, renvoWinSectionAlign)
 	out = renvoAppend32(out, 0x5a4d)
 	out = renvoAppendUntil(out, 0x3c)

@@ -46,13 +46,19 @@ func renvoUnitReadVar(r *renvoUnitReader) int {
 }
 
 func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
+	tokens, bases, ok, _ := renvoDecodeUnitTokensWithNumericSplit(text, data)
+	return tokens, bases, ok
+}
+
+func renvoDecodeUnitTokensWithNumericSplit(text []byte, data []byte) ([]int32, []int32, bool, bool) {
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	count := renvoUnitReadVar(&r)
 	if !r.ok || count < 0 || count > (r.end-r.pos)/4 {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	out := make([]int32, count*renvoTokenStride)
 	var lineBases []int32
+	numericSplit := false
 	start := 0
 	line := 0
 	discardStart := 0
@@ -80,21 +86,31 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 			lineDelta = renvoUnitReadVar(&r)
 		}
 		if !r.ok {
-			return nil, nil, false
+			return nil, nil, false, false
 		}
 		start = start + delta
 		line = line + lineDelta
 		if kind > 255 || start > 0xffffff || start+size > len(text) {
-			return nil, nil, false
+			return nil, nil, false, false
 		}
 		if kind == renvoTokOp {
 			if size > 255 {
-				return nil, nil, false
+				return nil, nil, false, false
 			}
 		} else if size > 0xffff {
-			return nil, nil, false
+			return nil, nil, false, false
 		}
 		base := i * renvoTokenStride
+		if i > 0 && (kind == renvoTokNumber || kind == renvoTokFloat) && size > 0 && text[start] >= '0' && text[start] <= '9' {
+			previous := int(out[base-renvoTokenStride])
+			previousSpan := int(out[base-renvoTokenStride+1])
+			if previous&255 == renvoTokOp && byte(previous>>24) == '.' && previousSpan>>24&255 == 1 && (previousSpan&0xffffff)+1 == start {
+				if size >= 65535 {
+					return nil, nil, false, false
+				}
+				numericSplit = true
+			}
+		}
 		highBits := size >> 8 << 24
 		if kind == renvoTokOp && size == 1 {
 			highBits = int(text[start]) << 24
@@ -115,10 +131,48 @@ func renvoDecodeUnitTokens(text []byte, data []byte) ([]int32, []int32, bool) {
 		}
 	}
 	if r.pos != r.end {
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	renvo_runtime_ArenaDiscardBytes(data[discardStart:r.pos])
-	return out, lineBases, true
+	return out, lineBases, true, numericSplit
+}
+
+// Unit producers can split a leading decimal point from the following numeric
+// token. Recover the source literal and remap metadata to its single token;
+// canonical frontend units keep their existing tables without an extra scan.
+func renvoUnitNormalizeNumericTokens(prog *renvoProgram) []int {
+	count := prog.toks.count
+	indices := make([]int, count+1)
+	var lineBases []int32
+	output := 0
+	for input := 0; input < count; input++ {
+		indices[input] = output
+		line := renvoTokLine(prog, input)
+		first := prog.toks.data[input*renvoTokenStride]
+		span := prog.toks.data[input*renvoTokenStride+1]
+		if input+1 < count && renvoTokCharIs(prog, input, '.') && (renvoTokIsKind(prog, input+1, renvoTokNumber) || renvoTokIsKind(prog, input+1, renvoTokFloat)) {
+			left := renvoTokAt(prog, input)
+			right := renvoTokAt(prog, input+1)
+			if left.end == left.start+1 && right.start == left.end && right.end > right.start && prog.src[right.start] >= '0' && prog.src[right.start] <= '9' {
+				size := right.end - left.start
+				first = int32(renvoTokFloat | (line&65535)<<8 | size>>8<<24)
+				span = int32(left.start | (size&255)<<24)
+				input++
+				indices[input] = output
+			}
+		}
+		if line>>16 != 0 && (len(lineBases) == 0 || line>>16 != int(lineBases[len(lineBases)-1])>>24&255) {
+			lineBases = append(lineBases, int32(output&0xffffff|line>>16<<24))
+		}
+		prog.toks.data[output*renvoTokenStride] = first
+		prog.toks.data[output*renvoTokenStride+1] = span
+		output++
+	}
+	indices[count] = output
+	prog.toks.data = prog.toks.data[:output*renvoTokenStride]
+	prog.toks.lineBases = lineBases
+	prog.toks.count = output
+	return indices
 }
 
 func renvoUnitUsesPanic(p *renvoProgram) bool {
@@ -324,7 +378,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	if len(text) == 0 || len(tokenData) == 0 {
 		return false
 	}
-	tokens, lineBases, tokensOK := renvoDecodeUnitTokens(text, tokenData)
+	tokens, lineBases, tokensOK, numericSplit := renvoDecodeUnitTokensWithNumericSplit(text, tokenData)
 	if !tokensOK {
 		return false
 	}
@@ -340,6 +394,10 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 	prog.toks.data = tokens
 	prog.toks.lineBases = lineBases
 	prog.toks.count = tokenCount
+	var tokenIndices []int
+	if numericSplit {
+		tokenIndices = renvoUnitNormalizeNumericTokens(prog)
+	}
 	prog.toks.panicEnabled = renvoUnitUsesPanic(prog)
 	declReader := renvoUnitReader{src: declData, end: len(declData), ok: true}
 	declCount := renvoUnitReadVar(&declReader)
@@ -363,6 +421,9 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		decl.endTok = decl.startTok + tokCount
 		if !renvoUnitValidRange(len(text), decl.nameStart, decl.nameEnd) || !renvoUnitValidTokenRange(tokenCount, decl.startTok, decl.endTok) {
 			return false
+		}
+		if tokenIndices != nil {
+			decl.startTok, decl.endTok = tokenIndices[decl.startTok], tokenIndices[decl.endTok]
 		}
 		prog.decls = append(prog.decls, decl)
 	}
@@ -405,6 +466,15 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 		if fn.nameTok < 0 || fn.nameTok >= tokenCount || fn.bodyStart < 0 || fn.bodyEnd >= tokenCount || fn.bodyStart > fn.bodyEnd {
 			return false
 		}
+		if tokenIndices != nil {
+			if !renvoUnitValidRange(tokenCount, fn.receiverStart, fn.receiverEnd) {
+				return false
+			}
+			fn.startTok, fn.endTok = tokenIndices[fn.startTok], tokenIndices[fn.endTok]
+			fn.nameTok = tokenIndices[fn.nameTok]
+			fn.receiverStart, fn.receiverEnd = tokenIndices[fn.receiverStart], tokenIndices[fn.receiverEnd]
+			fn.bodyStart, fn.bodyEnd = tokenIndices[fn.bodyStart], tokenIndices[fn.bodyEnd]
+		}
 		if prog.entryFunc < 0 && renvoBytesEqualText(prog.src, fn.nameStart, fn.nameEnd, "appMain") {
 			prog.entryFunc = i
 		}
@@ -434,6 +504,7 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 			return false
 		}
 		prog.packageTable.items = make([]renvoPackageInfo, 0, packageCount)
+		var pathStarts, pathEnds []int
 		for i := 0; i < packageCount; i++ {
 			nameLength := renvoUnitReadVar(&packageReader)
 			if !packageReader.ok || nameLength <= 0 || packageReader.pos+nameLength > packageReader.end {
@@ -451,6 +522,18 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 				return false
 			}
 			var item renvoPackageInfo
+			// Package helpers may be emitted as separate fragments. Compare
+			// their complete paths before discarding the unit envelope, so
+			// private-member identity is exact and independent of hashes.
+			item.origin = i + 1
+			for prior := 0; prior < len(pathStarts); prior++ {
+				if renvoBytesEqualRange(packageReader.src, pathStart, pathStart+pathLength, pathStarts[prior], pathEnds[prior]) {
+					item.origin = prog.packageTable.items[prior].origin
+					break
+				}
+			}
+			pathStarts = append(pathStarts, pathStart)
+			pathEnds = append(pathEnds, pathStart+pathLength)
 			item.graphKeyA = renvoUnitRead32(packageReader.src, packageReader.pos)
 			item.graphKeyB = renvoUnitRead32(packageReader.src, packageReader.pos+4)
 			item.sourceKeyA = renvoUnitRead32(packageReader.src, packageReader.pos+8)
@@ -476,6 +559,9 @@ func renvoDecodeUnitProgramBody(src []byte, prog *renvoProgram) bool {
 			item.funcEnd = item.funcStart + funcLength
 			if !packageReader.ok || !renvoUnitValidRange(len(text), item.textStart, item.textEnd) || !renvoUnitValidRange(tokenCount, item.tokenStart, item.tokenEnd) || !renvoUnitValidRange(len(prog.decls), item.declStart, item.declEnd) || !renvoUnitValidRange(len(prog.funcs), item.funcStart, item.funcEnd) {
 				return false
+			}
+			if tokenIndices != nil {
+				item.tokenStart, item.tokenEnd = tokenIndices[item.tokenStart], tokenIndices[item.tokenEnd]
 			}
 			prog.packageTable.items = append(prog.packageTable.items, item)
 		}

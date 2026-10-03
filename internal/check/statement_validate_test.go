@@ -21,6 +21,7 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 		{name: "bare break", body: "break", want: CheckErrBreak},
 		{name: "bare continue", body: "continue", want: CheckErrContinue},
 		{name: "composite literal in type assertion", body: "var x any; _, _ = x.([]byte{1})", want: CheckErrTypeAssertion},
+		{name: "array literal in type assertion", body: "var x any; _, _ = x.([len([2]int{})]int{})", want: CheckErrTypeAssertion},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,7 +39,7 @@ func TestInvalidDefiniteStatements(t *testing.T) {
 }
 
 func TestTypeAssertionValidationPreservesTypeBodies(t *testing.T) {
-	file := syntax.ParseFile([]byte("package main\nfunc inspect(value any) { _, _ = value.(struct{ field int }); _, _ = value.(interface{ inspect() }) }\n"))
+	file := syntax.ParseFile([]byte("package main\nfunc inspect(value any) { _, _ = value.(struct{ field int }); _, _ = value.(interface{ inspect() }); _, _ = value.([len([2]int{})]int) }\n"))
 	if !file.Ok || len(file.Funcs) != 1 {
 		t.Fatalf("parse failed: %#v", file)
 	}

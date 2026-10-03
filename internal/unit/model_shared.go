@@ -194,6 +194,9 @@ type Program struct {
 	// package-main entry selection used by existing units.
 	Entrypoint      int
 	ForeignPrograms []ForeignProgram
+	// LexicalFuncs indexes anonymous function scopes for linker resolution.
+	// It is transient metadata and is reset whenever linked text is reparsed.
+	LexicalFuncs *[]Func
 }
 
 // CoreProgram is the complete serialized contract consumed by compiler

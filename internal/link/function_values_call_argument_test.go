@@ -39,8 +39,8 @@ func main() {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("receiver0: &w")) ||
-		!bytes.Contains(linked.Program.Text, []byte("fn.receiver0.apply(")) {
+	if !bytes.Contains(linked.Program.Text, []byte("{value: &w}")) ||
+		!bytes.Contains(linked.Program.Text, []byte(").value.apply(")) {
 		t.Fatalf("bound method call argument was not lowered:\n%s", linked.Program.Text)
 	}
 }
@@ -65,7 +65,7 @@ func main() {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("NewHolder(Callback{kind: 1, closure0:")) ||
+	if !bytes.Contains(linked.Program.Text, []byte("NewHolder(Callback{kind: 1, data: &__renvo_closure_env_")) ||
 		!bytes.Contains(linked.Program.Text, []byte("__renvo_call_0(holder.callback, 2)")) {
 		t.Fatalf("closure callback argument was not lowered:\n%s", linked.Program.Text)
 	}

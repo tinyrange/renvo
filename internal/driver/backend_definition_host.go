@@ -122,6 +122,11 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 		return backendBuildOptions{options: options, hasBackend: true}
 	}
 	options.Target = resolved.Descriptor.Name
+	options.TargetWordBits = resolved.Descriptor.WordBits
+	options.TargetPointerBits = resolved.Descriptor.PointerBits
+	// Prepared definitions use renvoArchRTG, including wasm definitions. Only
+	// the legacy builtin wasm backend has the eight-byte alignment exception.
+	options.TargetScalarAlign = frontendScalarAlignment(resolved.Descriptor.WordBits, "")
 	options.BackendDefinition = backendPath
 	options.BackendBuildTags = append(options.BackendBuildTags, resolved.Descriptor.BuildTags...)
 	options.TargetExplicit = targetExplicit

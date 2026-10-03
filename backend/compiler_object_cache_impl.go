@@ -197,7 +197,7 @@ func renvoObjectGeneratorStateHash(g *renvoLinearGen) (int, int) {
 		g.runtimeFaultLabel, g.runtimeNonNilLabel, g.runtimeSecondaryLabel, g.runtimeBoundsLabel,
 		g.runtimeByteIndexLabel, g.runtimeWordIndexLabel, g.runtimeWideIndexLabel,
 		g.runtimeSliceBoundsLabel, g.divideCheckLabel, g.remainderCheckLabel, g.streqLabel,
-		g.append8Label, g.append64Label, g.appendAddrLabel, g.appendBytesLabel, g.arenaAllocLabel,
+		g.append8Label, g.append64Label, g.appendAddrLabel, g.appendBytesLabel, g.copyBytesLabel, g.arenaAllocLabel,
 		g.makeZeroLabel, g.winReadLabel, g.winWriteLabel, g.printIntLabel,
 	}
 	bools := []bool{
@@ -640,5 +640,6 @@ func renvoEmitAllQueuedFunctionsCached(g *renvoLinearGen) bool {
 			return false
 		}
 	}
+	renvoResolveSpeculativeClosureLabels(g)
 	return true
 }

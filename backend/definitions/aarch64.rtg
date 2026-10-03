@@ -685,7 +685,7 @@ arch aarch64 {
 		call = call
 		call_indirect = call_indirect
 		jump = jump
-		jump_condition = jump_condition
+		jump_condition = sequence longConditionalJump
 		set_condition = sequence setCondition
 		return = return
 		leave = leave
@@ -1030,10 +1030,15 @@ arch aarch64 {
 			asmMovRegReg(a, 3, x7.Code)
 			asmEmit(a, 0xd4000001)
 		}
+		# B.cond reaches only +/-1 MiB. Invert it over an unconditional branch
+		# so large generated comparison bodies retain the full B range.
+		longConditionalJump(out:emitter, condition:condition, target:label) {
+			asmEmit(out, 0x54000000 |(2 << 5) |(condition.Code ^ 1))
+			jump(out, target)
+		}
 		asmBCondLabel(a:emitter, label:int, cond:int) {
-			let at = a.Len()
-			asmEmit(a, 0x54000000 | cond)
-			a.RelocAt(at, label)
+			asmEmit(a, 0x54000000 |(2 << 5) |(cond ^ 1))
+			asmJmpLabel(a, label)
 		}
 		asmCallLabel(a:emitter, label:int) {
 			let at = a.Len()

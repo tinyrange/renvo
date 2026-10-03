@@ -345,7 +345,9 @@ go backend {
 		for i := 0; i < len(dylibs); i++ {
 			commandSize += machDylibCommandSize(dylibs[i])
 		}
-		header := make([]byte, 0, machCodeOffset)
+		// The signature offset and size determine the complete file size.
+		// Keep one output allocation live while appending sections and signing.
+		header := make([]byte, 0, sigOff+sigSize)
 		header = machAppend32(header, 0xfeedfacf)
 		header = machAppend32(header, 0x0100000c)
 		header = machAppend32(header, 0)
@@ -507,13 +509,17 @@ go backend {
 		if RTGSHA256(data, hardware) {
 			return hardware
 		}
-		messageSize := len(data) + 1 + 8
-		messageSize = RTGAlignValue(messageSize, 64)
+		// Hash complete blocks directly from the image. Only the final one or
+		// two padded blocks need scratch storage; retaining a page-sized copy
+		// for every signature hash otherwise exhausts the compiler arena.
+		fullSize := len(data) / 64 * 64
+		tailSize := len(data) - fullSize
+		messageSize := RTGAlignValue(tailSize+1+8, 64)
 		message := make([]byte, messageSize)
-		for i := 0; i < len(data); i++ {
-			message[i] = data[i]
+		for i := 0; i < tailSize; i++ {
+			message[i] = data[fullSize+i]
 		}
-		message[len(data)] = 0x80
+		message[tailSize] = 0x80
 		bits := len(data) * 8
 		for i := 0; i < 8; i++ {
 			message[messageSize-1-i] = byte(bits >> (i * 8))
@@ -524,6 +530,10 @@ go backend {
 		}
 		constants := machSHA256Constants()
 		words := make([]int, 64)
+		for chunk := 0; chunk < fullSize; chunk += 64 {
+			machSHA256Schedule(data, chunk, words)
+			machSHA256Rounds(words, constants, values)
+		}
 		for chunk := 0; chunk < len(message); chunk += 64 {
 			machSHA256Schedule(message, chunk, words)
 			machSHA256Rounds(words, constants, values)

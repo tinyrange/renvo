@@ -71,7 +71,7 @@ func invalidDefiniteStatement(file *syntax.File, body *syntax.Body, cSource bool
 					}
 				}
 			}
-			if kindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if kindLine&255 == syntax.TokenIdent && (file.Tokens[tok].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == (file.Tokens[tok+1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}
@@ -124,6 +124,16 @@ func malformedTypeAssertionComposite(file *syntax.File, dot int, end int) int {
 		return -1
 	}
 	for tok := dot + 2; tok < close-1; tok++ {
+		// An array bound is a constant expression and may contain a literal
+		// (for example len([2]int{})). Its braces do not turn the asserted
+		// array type into a composite value.
+		if tokCharIs(file, tok, '[') {
+			bracketEnd := findTypeMatching(file, tok, '[', ']')
+			if bracketEnd > tok && bracketEnd < close {
+				tok = bracketEnd - 1
+				continue
+			}
+		}
 		if tokCharIs(file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
 			return tok
 		}
@@ -227,7 +237,7 @@ func definiteLiteralLocal(locals []int, file *syntax.File, tok int) bool {
 func definiteStatementScopeEnd(body *syntax.Body, tok int) int {
 	end := 2147483647
 	for i := 0; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.Kind == syntax.StmtBlock && stmt.StartTok < tok && stmt.EndTok > tok && stmt.EndTok < end {
 			end = stmt.EndTok
 		}
@@ -304,8 +314,8 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	if left < 0 || left >= len(file.Tokens) || right < 0 || right >= len(file.Tokens) {
 		return false
 	}
-	leftToken := file.Tokens[left]
-	rightToken := file.Tokens[right]
+	leftToken := &file.Tokens[left]
+	rightToken := &file.Tokens[right]
 	leftStart := int(leftToken.Start)
 	rightStart := int(rightToken.Start)
 	leftSize := int(leftToken.End - leftToken.Start)
@@ -315,12 +325,10 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	if leftSize > 0 && file.Src[leftStart] != file.Src[rightStart] {
 		return false
 	}
-	for i := 1; i < leftSize; i++ {
-		if file.Src[leftStart+i] != file.Src[rightStart+i] {
-			return false
-		}
+	if leftSize == 0 {
+		return true
 	}
-	return true
+	return string(file.Src[leftStart:leftStart+leftSize]) == string(file.Src[rightStart:rightStart+leftSize])
 }
 
 func expressionIsDefiniteLiteral(file *syntax.File, span ExprSpan) bool {

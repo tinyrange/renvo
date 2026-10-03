@@ -6,8 +6,8 @@ func literalIntegerOverflows(file *syntax.File, start int, end int, typ string) 
 	start, end = trimDeclSpan(file, start, end)
 	start, end = stripOuterParens(file, start, end)
 	negative := false
-	if start < end && (tokenTextIs(file, start, "-") || tokenTextIs(file, start, "+")) {
-		negative = tokenTextIs(file, start, "-")
+	if start < end && (tokCharIs(file, start, '-') || tokCharIs(file, start, '+')) {
+		negative = tokCharIs(file, start, '-')
 		start++
 	}
 	bits := 0

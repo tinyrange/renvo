@@ -1,6 +1,8 @@
 package check
 
-import "renvo.dev/internal/syntax"
+import (
+	"renvo.dev/internal/syntax"
+)
 
 const (
 	NameReceiver = iota + 1
@@ -156,7 +158,7 @@ func collectShortDeclNames(file *syntax.File, stmt syntax.Stmt, scope *FuncScope
 	}
 	i := stmt.StartTok
 	for i < assign {
-		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokenString(file, i) != "_" {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && !tokenStringEquals(file, i, "_") {
 			if LookupScopeName(*scope, tokenString(file, i)) < 0 {
 				addScopeName(scope, tokenString(file, i), NameLocal, i, false, false)
 			}
@@ -185,18 +187,32 @@ func collectLeadingIdentList(file *syntax.File, start int, end int, scope *FuncS
 }
 
 func statementSpecEnd(file *syntax.File, start int, end int) int {
-	line := syntax.TokenLine(file.Tokens[start])
-	i := start
-	for i < end {
-		if tokCharIs(file, i, ';') {
-			return i + 1
+	depth := 0
+	for i := start; i < end; i++ {
+		if depth == 0 {
+			if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+				return i
+			}
+			if tokCharIs(file, i, ';') {
+				return i + 1
+			}
+			if i > start && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && declarationTokenEndsSpec(file, i-1) {
+				return i
+			}
 		}
-		if i > start && syntax.TokenLine(file.Tokens[i]) != line {
-			return i
+		if tokCharIs(file, i, '(') || tokCharIs(file, i, '[') || tokCharIs(file, i, '{') {
+			depth++
+		} else if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+			depth--
 		}
-		i++
 	}
 	return end
+}
+
+func declarationTokenEndsSpec(file *syntax.File, token int) bool {
+	kind := file.Tokens[token].KindLine & 255
+	return kind == syntax.TokenIdent || kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar ||
+		tokCharIs(file, token, ')') || tokCharIs(file, token, ']') || tokCharIs(file, token, '}')
 }
 
 func firstNonSeparator(file *syntax.File, start int, end int) int {
@@ -212,8 +228,8 @@ func nextTopLevelComma(file *syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		tok := file.Tokens[i]
-		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
+		packed := file.Tokens[i].KindLine
+		c := byte(packed >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -292,7 +308,7 @@ func tokenTextIs(file *syntax.File, tok int, text string) bool {
 	if uint(tok) >= uint(len(file.Tokens)) {
 		return false
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	start := int(token.Start)
 	size := int(token.End - token.Start)
 	if size != len(text) || start < 0 || start+size > len(file.Src) {
@@ -304,22 +320,15 @@ func tokenTextIs(file *syntax.File, tok int, text string) bool {
 		}
 		return file.Src[start] == text[0]
 	}
-	if len(text) == 2 {
-		return file.Src[start] == text[0] && file.Src[start+1] == text[1]
+	if size > 0 && file.Src[start] != text[0] {
+		return false
 	}
-	if len(text) == 3 {
-		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2]
+	return string(file.Src[start:start+size]) == text
+}
+
+func tokenKindIs(file *syntax.File, tok int, kind int) bool {
+	if uint(tok) >= uint(len(file.Tokens)) {
+		return false
 	}
-	if len(text) == 4 {
-		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2] && file.Src[start+3] == text[3]
-	}
-	if len(text) == 5 {
-		return file.Src[start] == text[0] && file.Src[start+1] == text[1] && file.Src[start+2] == text[2] && file.Src[start+3] == text[3] && file.Src[start+4] == text[4]
-	}
-	for i := 0; i < len(text); i++ {
-		if file.Src[start+i] != text[i] {
-			return false
-		}
-	}
-	return true
+	return file.Tokens[tok].KindLine&255 == kind
 }

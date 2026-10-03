@@ -61,6 +61,7 @@ func CheckerDiagnostic(graph load.Graph, program check.Program) Diagnostic {
 			Build: frontendbuild.Result{
 				Error:        frontendbuild.BuildErrCheck,
 				ErrorDetail:  program.Error,
+				ErrorMessage: program.ErrorMessage,
 				ErrorPackage: program.ErrorPackage,
 				ErrorFile:    program.ErrorFile,
 				ErrorToken:   program.ErrorToken,

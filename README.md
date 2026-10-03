@@ -122,7 +122,9 @@ target-specific files, `//go:embed`, and an offline module cache. Language
 coverage includes ordinary control flow, methods, maps, interfaces, closures,
 defer/panic/recover, arrays and slices, complex values, goroutines, channels,
 `select`, cgo-style explicit C package boundaries, and the builtins needed by
-Renvo itself. Generics remain out of scope.
+Renvo itself. Generic functions, types, receiver methods, and aliases are checked
+against their constraints and specialized into concrete declarations before
+backend compilation, including inference and cross-package instantiation.
 
 Release build tags are fixed to Renvo's Go 1.25 baseline: `go1.1` through
 `go1.25` are enabled independently of the host compiler and the module's `go`

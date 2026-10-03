@@ -21,7 +21,7 @@ func TestCompilerJITProjectRTGAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := os.MkdirTemp("/var/tmp", "renvo-rtgasm-test-")
+	project, err := os.MkdirTemp("", "renvo-rtgasm-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestCompilerJITProjectRTGAssemblyAcrossConstrainedTargets(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			project, err := os.MkdirTemp("/var/tmp", "renvo-rtgasm-target-")
+			project, err := os.MkdirTemp("", "renvo-rtgasm-target-")
 			if err != nil {
 				t.Fatal(err)
 			}

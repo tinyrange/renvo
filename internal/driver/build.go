@@ -73,7 +73,7 @@ func BuildUnit(args []string, workDir string, stdRoot string, files []load.Sourc
 		setBuildForeignFail(&result, foreign.Diagnostic)
 		return result
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, rootArg, filtered)
+	built := pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, filtered, pipeline.Config{Layout: frontendTargetLayout(options)})
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -114,7 +114,7 @@ func BuildPackageUnitFromFS(packageArg string, target string, tags []string, wor
 		setBuildForeignFail(&result, foreign.Diagnostic)
 		return result
 	}
-	built := pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+	built := pipeline.BuildUnitConfigured(workDir, stdRoot, packageArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(result.Options)})
 	result.Pipeline = built
 	if !built.Ok {
 		return buildFail(result, BuildErrPipeline, "", built.ErrorPath, built.ErrorOffset, built.ErrorPackage, built.ErrorFile, built.ErrorToken)
@@ -170,9 +170,9 @@ func BuildPackageUnitCompactMode(packageArg string, target string, tags []string
 	}
 	var built pipeline.Result
 	if mode == ModeObject {
-		built = pipeline.BuildObjectUnit(workDir, stdRoot, packageArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, packageArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Object: true})
 	} else {
-		built = pipeline.BuildUnit(workDir, stdRoot, packageArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, packageArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options)})
 	}
 	if !built.Ok {
 		result.Phase = BuildErrPipeline
@@ -293,20 +293,20 @@ func buildFromFSOneShotCompactWithModuleCache(args []string, workDir string, std
 	}
 	var built pipeline.Result
 	if options.Mode == ModeObject && options.EmitUnit {
-		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Object: true})
 	} else if options.Mode == ModeObject {
 		// Object linking rewrites source-token line fields as a compact mapping.
 		// Keep the source package resident until that mapping has been restored;
 		// retiring its arena pages during the link can alias a small destination
 		// unit and turn token indexes into source lines before backend decoding.
-		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Object: true})
 	} else if options.EmitUnit || len(foreign.Programs) > 0 {
 		// An emitted unit is a persistent interchange artifact. Preserve package
 		// ownership and cache-key metadata so host and self-hosted frontends emit
 		// the same canonical bytes.
-		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options)})
 	} else {
-		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Transient: true, FilesStart: sourcesStart, FilesEnd: sourcesEnd})
 	}
 	result.Pipeline = built
 	if !built.Ok {
@@ -389,21 +389,21 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		// Object linking temporarily rewrites source-token line fields. Keep the
 		// source package resident until it restores them; the ordinary transient
 		// pipeline can otherwise recycle that storage into the destination unit.
-		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Object: true})
 	} else if options.Mode == ModeObject {
-		built = pipeline.BuildObjectUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Object: true})
 	} else if compact && len(foreign.Programs) > 0 {
-		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options)})
 	} else if compact && options.CCompiler {
 		// Demand-selected libc sources are synthesized during collection rather
 		// than retained by the editor cache. Use the one-shot transient linker so
 		// their storage remains valid through serialization without being pinned
 		// for the next incremental build.
-		built = pipeline.BuildUnitWithTransientFiles(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Transient: true, FilesStart: sourcesStart, FilesEnd: sourcesEnd})
 	} else if compact {
-		built = pipeline.BuildUnitWithTransientFilesCached(workDir, stdRoot, rootArg, sources.Files, sourcesStart, sourcesEnd)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options), Transient: true, Cached: true, FilesStart: sourcesStart, FilesEnd: sourcesEnd})
 	} else {
-		built = pipeline.BuildUnit(workDir, stdRoot, rootArg, sources.Files)
+		built = pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, sources.Files, pipeline.Config{Layout: frontendTargetLayout(options)})
 	}
 	result.Pipeline = built
 	if !built.Ok {
@@ -419,6 +419,23 @@ func buildFromFSOptions(options Options, workDir string, stdRoot string, moduleC
 		result.Sources = SourceResult{}
 	}
 	return result
+}
+
+func frontendTargetLayout(options Options) load.TargetLayout {
+	if options.TargetWordBits != 0 {
+		return load.TargetLayout{WordBits: options.TargetWordBits, PointerBits: options.TargetPointerBits, ScalarAlign: options.TargetScalarAlign}
+	}
+	if descriptor, ok := targetinfo.Lookup(options.Target); ok {
+		return load.TargetLayout{WordBits: descriptor.WordBits, PointerBits: descriptor.PointerBits, ScalarAlign: frontendScalarAlignment(descriptor.WordBits, descriptor.ISA)}
+	}
+	return renvoBackendTargetLayout(options.Target)
+}
+
+func frontendScalarAlignment(wordBits int, isa string) int {
+	if wordBits == 64 || isa == "wasm32" {
+		return 8
+	}
+	return 4
 }
 
 func bindBuiltInTarget(data *[]byte, options Options) {
@@ -477,6 +494,9 @@ func embeddedBuildFingerprint(workDir string, options Options, files []load.Sour
 	a, b := 97, 193
 	a, b = embeddedBuildHashString(a, b, workDir)
 	a, b = embeddedBuildHashString(a, b, options.Target)
+	a = embeddedBuildHashInt(a, options.TargetWordBits)
+	b = embeddedBuildHashIntB(b, options.TargetPointerBits)
+	a = embeddedBuildHashInt(a, options.TargetScalarAlign)
 	a, b = embeddedBuildHashString(a, b, options.Output)
 	a, b = embeddedBuildHashString(a, b, options.ModuleLicense)
 	a, b = embeddedBuildHashString(a, b, options.SystemName)

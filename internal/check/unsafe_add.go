@@ -50,7 +50,7 @@ func invalidUnsafeIntrinsicCalls(pkg *load.Package, info *PackageInfo, fileIndex
 		pointer := args[0]
 		pointerType := definiteBuiltinExprTypeName(pkg, info, fileIndex, signature, locals, pointer, callee, 0)
 		pointerStart, pointerEnd := stripOuterParens(file, pointer.StartTok, pointer.EndTok)
-		byteAddress := isString && tokenTextIs(file, pointerStart, "&") && (pointerType == "byte" || pointerType == "uint8")
+		byteAddress := isString && tokCharIs(file, pointerStart, '&') && (pointerType == "byte" || pointerType == "uint8")
 		if pointerType != "" && pointerType != "unsafe.Pointer" && !byteAddress {
 			return CheckErrBuiltinOperand, pointer.StartTok
 		}

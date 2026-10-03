@@ -94,7 +94,7 @@ func buildDeclInfo(file *syntax.File, fileIndex int, info PackageInfo, checked [
 	}
 	if decl.Kind == syntax.TokenType {
 		typeStart := decl.NameTok + 1
-		if tokenTextIs(file, typeStart, "=") {
+		if tokCharIs(file, typeStart, '=') {
 			out.Alias = true
 			typeStart++
 		}
@@ -219,7 +219,7 @@ func appendLocalTypeDecl(decls []LocalDeclInfo, file *syntax.File, fileIndex int
 	}
 	typeStart := start + 1
 	alias := false
-	if tokenTextIs(file, typeStart, "=") {
+	if tokCharIs(file, typeStart, '=') {
 		alias = true
 		typeStart++
 	}
@@ -312,7 +312,7 @@ func findDeclAssign(file *syntax.File, start int, end int) int {
 			if braceDepth > 0 {
 				braceDepth--
 			}
-		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokenTextIs(file, i, "=") {
+		} else if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokCharIs(file, i, '=') {
 			return i
 		}
 	}

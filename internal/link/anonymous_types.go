@@ -10,13 +10,15 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	var types []string
 	var names []string
+	var owners []unit.PackageInfo
+	var lengths []int
 	generated := ""
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if (program.Tokens[i].KindLine&255 != unit.TokenStruct && !functionValueTokenEquals(program, i, "interface")) || !functionValueTokenEquals(program, i+1, "{") {
+		if (program.Tokens[i].KindLine&255 != unit.TokenStruct && !functionValueTokenEquals(program, i, "interface")) || !functionValueTokenCharIs(program, i+1, '{') {
 			continue
 		}
 		// The right-hand side of a type declaration is already supported.
-		if functionValueTokenEquals(program, i-2, "type") || functionValueTokenEquals(program, i-3, "type") {
+		if functionValueTokenKindIs(program, i-2, unit.TokenType) || functionValueTokenKindIs(program, i-3, unit.TokenType) {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, i+1)
@@ -36,13 +38,20 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 		text := functionValueTokensText(program, i, close+1)
 		key := ""
 		for tok := i; tok <= close; tok++ {
-			if !functionValueTokenEquals(program, tok, ";") {
+			if !functionValueTokenCharIs(program, tok, ';') {
 				key += functionValueTokenText(program, tok) + "\x00"
+			}
+		}
+		owner := unit.PackageInfo{}
+		for _, pkg := range program.Packages {
+			if program.Tokens[i].Start >= pkg.TextStart && program.Tokens[i].Start < pkg.TextEnd {
+				owner = pkg
+				break
 			}
 		}
 		index := -1
 		for j := 0; j < len(types); j++ {
-			if types[j] == key {
+			if types[j] == key && owners[j].ImportPath == owner.ImportPath {
 				index = j
 				break
 			}
@@ -52,7 +61,10 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 			name := ordinaryBuiltinGeneratedName(program, "__renvo_anonymous_type_"+functionValueDecimal(index))
 			types = append(types, key)
 			names = append(names, name)
-			generated += "type " + name + " = " + text + "\n"
+			declaration := "type " + name + " = " + text + "\n"
+			generated += declaration
+			owners = append(owners, owner)
+			lengths = append(lengths, len(declaration))
 		}
 		edits = append(edits, functionValueTokenRangeEdit(program, i, close+1, names[index]))
 		i = close
@@ -75,7 +87,20 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	text = append(text, '\n')
 	generatedStart := len(text)
 	text = appendFunctionValueString(text, generated)
-	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+	// Each alias keeps the package of its source type. In particular, private
+	// fields and interface methods must not acquire the root package's identity.
+	if !reparseFunctionValueProgram(program, text, edits, originalLength, -1) {
+		return false
+	}
+	for i, owner := range owners {
+		if owner.ImportPath != "" {
+			owner.TextStart, owner.TextEnd = generatedStart, generatedStart+lengths[i]
+			setFunctionValuePackageTableRanges(&owner, program)
+			program.Packages = append(program.Packages, owner)
+		}
+		generatedStart += lengths[i]
+	}
+	return true
 }
 
 func anonymousTypeLocalVariable(program *unit.Program, start int) bool {
@@ -86,11 +111,11 @@ func anonymousTypeLocalVariable(program *unit.Program, start int) bool {
 	// Walk type constructors, not initializer expressions, back to the name
 	// list. Matching brackets keeps identifiers inside array bounds separate.
 	for name >= 0 {
-		if functionValueTokenEquals(program, name, "*") {
+		if functionValueTokenCharIs(program, name, '*') {
 			name--
 			continue
 		}
-		if functionValueTokenEquals(program, name, "]") {
+		if functionValueTokenCharIs(program, name, ']') {
 			open := functionValueFindMatchingBackward(program, name, "[", "]")
 			if open < 0 {
 				return false
@@ -104,19 +129,19 @@ func anonymousTypeLocalVariable(program *unit.Program, start int) bool {
 		break
 	}
 	for name >= 0 && program.Tokens[name].KindLine&255 == unit.TokenIdent {
-		if functionValueTokenEquals(program, name-1, "var") {
+		if functionValueTokenKindIs(program, name-1, unit.TokenVar) {
 			return true
 		}
-		if !functionValueTokenEquals(program, name-1, ",") {
+		if !functionValueTokenCharIs(program, name-1, ',') {
 			// A grouped VarSpec has no repeated var keyword. Its nearest
 			// containing parenthesis must belong to var, not a call/signature.
 			depth := 0
 			for tok := name - 1; tok >= 0; tok-- {
-				if functionValueTokenEquals(program, tok, ")") {
+				if functionValueTokenCharIs(program, tok, ')') {
 					depth++
-				} else if functionValueTokenEquals(program, tok, "(") {
+				} else if functionValueTokenCharIs(program, tok, '(') {
 					if depth == 0 {
-						return functionValueTokenEquals(program, tok-1, "var")
+						return functionValueTokenKindIs(program, tok-1, unit.TokenVar)
 					}
 					depth--
 				}

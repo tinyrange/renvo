@@ -152,7 +152,7 @@ func main() {
 			t.Fatalf("linked program retained %q:\n%s", forbidden, text)
 		}
 	}
-	for _, required := range [][]byte{[]byte("namedChannel(renvo_runtime_ChanCreate"), []byte(":= channelValue(); var __renvo_chan_send_"), []byte("consume((*__renvo_go_context_0)(context).value0)"), []byte("receiver0: item"), []byte("renvo_runtime_Spawn")} {
+	for _, required := range [][]byte{[]byte("namedChannel(renvo_runtime_ChanCreate"), []byte(":= channelValue(); var __renvo_chan_send_"), []byte("consume((*__renvo_go_context_0)(context).value0)"), []byte("{value: item}"), []byte("renvo_runtime_Spawn")} {
 		if !bytes.Contains(text, required) {
 			t.Fatalf("linked program is missing %q:\n%s", required, text)
 		}

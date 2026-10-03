@@ -27,18 +27,39 @@ type Result struct {
 	ErrorOffset  int
 }
 
+// Config supplies target semantics and storage ownership for one build.
+type Config struct {
+	Layout     load.TargetLayout
+	Transient  bool
+	Cached     bool
+	Object     bool
+	FilesStart int
+	FilesEnd   int
+}
+
+func BuildUnitConfigured(workDir string, stdRoot string, arg string, files []load.SourceFile, config Config) Result {
+	if !config.Cached {
+		return buildUnitDirect(workDir, stdRoot, arg, files, config.FilesStart, config.FilesEnd, config.Transient, config.Object, config.Layout)
+	}
+	session := beginSession(workDir, stdRoot, arg, files, config.FilesStart, config.FilesEnd, config.Transient, true, config.Object)
+	session.SetTargetLayout(config.Layout)
+	for !session.Step() {
+	}
+	return session.Result()
+}
+
 func BuildUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
-	return buildUnitDirect(workDir, stdRoot, arg, files, 0, 0, false, false)
+	return BuildUnitConfigured(workDir, stdRoot, arg, files, Config{})
 }
 
 func BuildObjectUnit(workDir string, stdRoot string, arg string, files []load.SourceFile) Result {
-	return buildUnitDirect(workDir, stdRoot, arg, files, 0, 0, false, true)
+	return BuildUnitConfigured(workDir, stdRoot, arg, files, Config{Object: true})
 }
 
 // BuildUnitWithTransientFiles allows the command driver to release source
 // collection storage once lowering has copied every package into link units.
 func BuildUnitWithTransientFiles(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int) Result {
-	return buildUnitDirect(workDir, stdRoot, arg, files, filesStart, filesEnd, true, false)
+	return BuildUnitConfigured(workDir, stdRoot, arg, files, Config{Transient: true, FilesStart: filesStart, FilesEnd: filesEnd})
 }
 
 // BuildUnitWithTransientFilesCached reuses unchanged lowered dependencies for
@@ -50,7 +71,7 @@ func BuildUnitWithTransientFilesCached(workDir string, stdRoot string, arg strin
 	return session.Result()
 }
 
-func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, object bool) Result {
+func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.SourceFile, filesStart int, filesEnd int, transient bool, object bool, layout load.TargetLayout) Result {
 	result := Result{
 		Ok:           true,
 		Error:        PipelineOK,
@@ -60,6 +81,7 @@ func buildUnitDirect(workDir string, stdRoot string, arg string, files []load.So
 	}
 	loadStart := arena.Mark()
 	workspace := load.LoadWorkspace(workDir, stdRoot, arg, files)
+	workspace.Graph.Layout = layout
 	loadEnd := arena.Mark()
 	result.Workspace = workspace
 	if !workspace.Ok {

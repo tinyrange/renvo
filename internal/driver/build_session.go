@@ -125,6 +125,7 @@ func (s *FSBuildSession) Step() bool {
 				s.workDir, s.stdRoot, s.rootArg, sources.Files,
 				s.sourcesStart, s.sourcesEnd, compactPipeline, s.cached && compactPipeline)
 		}
+		s.pipeline.SetTargetLayout(frontendTargetLayout(options))
 		s.stage = 2
 		return false
 	}

@@ -375,38 +375,6 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 	c.loaded = append(c.loaded, ref.ImportPath)
 }
 
-func sourceGenericsOffset(src []byte) int {
-	for pos := 0; pos < len(src); {
-		pos = renvoImportSkipSpace(src, pos)
-		if pos >= len(src) {
-			break
-		}
-		if src[pos] == '"' || src[pos] == '\'' || src[pos] == '`' {
-			pos = sourceEmbedSkipQuoted(src, pos, src[pos])
-			continue
-		}
-		start, end, next, ok := renvoImportIdent(src, pos)
-		if !ok {
-			pos++
-			continue
-		}
-		pos = next
-		if !renvoImportTextIs(src, start, end, "func") && !renvoImportTextIs(src, start, end, "type") {
-			continue
-		}
-		pos = renvoImportSkipSpace(src, pos)
-		_, _, pos, ok = renvoImportIdent(src, pos)
-		if !ok {
-			continue
-		}
-		pos = renvoImportSkipSpace(src, pos)
-		if pos < len(src) && src[pos] == '[' {
-			return pos
-		}
-	}
-	return -1
-}
-
 func sourceRequiresCgo(src []byte, target string, tags []string) bool {
 	disabled, disabledOK := sourceConstraintsEnabled(src, target, tags)
 	with := append(tags, "cgo")

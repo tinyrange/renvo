@@ -200,6 +200,18 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
+	source = append(source, "\nconst renvoRTGPreparedVMBytecode = "...)
+	if active && descriptor.OutputKind == "rnvm" {
+		source = append(source, '1')
+	} else {
+		source = append(source, '0')
+	}
+	source = append(source, "\nconst renvoRTGPreparedNativeWasm = "...)
+	if active && (descriptor.OutputKind == "wasm" || descriptor.OutputKind == "html-wasm") {
+		source = append(source, '1')
+	} else {
+		source = append(source, '0')
+	}
 	source = append(source, "\nconst renvoRTGPreparedIEEEFloat = "...)
 	if active && stringIndex(descriptor.Capabilities, "ieee_float") >= 0 {
 		source = append(source, '1')
@@ -2256,7 +2268,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 
 func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver string, method string,
 	names []string, prefix string, document *Document, exports []embeddedExport) ([]byte, int, bool) {
-	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "ByteAt" &&
+	if method != "PrimaryLoad" && method != "SetPrimaryLoad" && method != "OptimizeRuntime" && method != "VMBytecode" && method != "NativeWasm" && method != "SignedCompareLabel" && method != "SetSignedCompareLabel" && method != "ByteAt" &&
 		method != "SetByteAt" && method != "AddByteAt" && method != "AppendByte" &&
 		method != "Truncate" && method != "Code" && method != "SetCode" &&
 		method != "Data" && method != "SetData" && method != "SetDataOffset" && method != "BSSSize" && method != "RejectImageSize" && method != "WasmLocalSlots" &&
@@ -2324,10 +2336,26 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".c.optimizeRuntime"...), end, true
 	}
+	if method == "SignedCompareLabel" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".signedCompareLabel"...), end, true
+	}
+	if method == "SetSignedCompareLabel" && len(arguments) == 1 {
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".signedCompareLabel = "...)
+		return append(replacement, arguments[0]...), end, true
+	}
+	if method == "NativeWasm" && len(arguments) == 0 {
+		replacement = append(replacement, "(renvoRTGPreparedNativeWasm != 0 || renvoPreparedBackendActive == 0 && "...)
+		replacement = append(replacement, receiver...)
+		replacement = append(replacement, ".c != nil && "...)
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".c.renvoTarget == renvoTargetWasiWasm32)"...), end, true
+	}
 	if method == "VMBytecode" && len(arguments) == 0 {
 		replacement = append(replacement, '(')
 		replacement = append(replacement, receiver...)
-		replacement = append(replacement, ".c == nil || "...)
+		replacement = append(replacement, ".c == nil || renvoRTGPreparedVMBytecode != 0 || "...)
 		replacement = append(replacement, receiver...)
 		return append(replacement, ".c.renvoTarget == renvoTargetVM32)"...), end, true
 	}

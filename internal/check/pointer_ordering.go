@@ -134,7 +134,8 @@ func definiteOrderingExprKind(pkg *load.Package, info *PackageInfo, fileIndex in
 	if name == "nil" && lookupPackageSymbol(info.Symbols, name) < 0 && lookupScopeTokenNameCore(scope, file, start) < 0 {
 		return 1
 	}
-	for _, decl := range info.Decls {
+	for declIndex := 0; declIndex < len(info.Decls); declIndex++ {
+		decl := &info.Decls[declIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}
