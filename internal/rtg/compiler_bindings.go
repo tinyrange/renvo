@@ -554,7 +554,15 @@ func appendCompilerBodyGroups(out []byte, bodies []string, conditions []string) 
 	for i := 0; i < len(bodies); i++ {
 		owners[i] = -1
 		shared[i] = bodies[i]
-		options[i] = compilerBodyTails(bodies[i])
+		options[i] = []compilerBodyTail{{tail: strings.TrimSpace(bodies[i])}}
+		// Most emitters share only their terminal return. Avoid parsing their
+		// bodies when a cheap suffix comparison proves there is no useful tail.
+		for j := 0; j < len(bodies); j++ {
+			if j != i && compilerBodiesMayShareTail(bodies[i], bodies[j]) {
+				options[i] = compilerBodyTails(bodies[i])
+				break
+			}
+		}
 	}
 	for i := 0; i < len(bodies); i++ {
 		if owners[i] >= 0 {
@@ -677,4 +685,32 @@ func compilerBodyTails(body string) []compilerBodyTail {
 		options = append(options, compilerBodyTail{prefix: body[:end], tail: tail})
 	}
 	return options
+}
+
+// This is only a rejection filter: every accepted candidate still passes the
+// statement/scope validation above. Keep full shorter bodies and otherwise
+// discard the first (possibly partial) matching line of the common suffix.
+func compilerBodiesMayShareTail(left string, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	n := 0
+	for n < len(left) && n < len(right) && left[len(left)-1-n] == right[len(right)-1-n] {
+		n++
+	}
+	tail := left[len(left)-n:]
+	if n < len(left) && n < len(right) {
+		newline := strings.Index(tail, "\n")
+		if newline < 0 {
+			return false
+		}
+		tail = tail[newline+1:]
+	}
+	tail = strings.TrimSpace(tail)
+	// A common suffix may begin inside matching nested returns, followed by
+	// the real shared tail. Only a single-line return proves rejection.
+	if strings.Contains(tail, "\n") {
+		return true
+	}
+	return tail != "" && tail != "return" && tail != "return;" &&
+		!strings.HasPrefix(tail, "return ") && !strings.HasPrefix(tail, "return\n")
 }

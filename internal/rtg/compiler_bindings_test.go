@@ -602,3 +602,15 @@ func TestCompilerBindingTailScopeBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestCompilerBindingTailFilterKeepsNestedReturnSuffix(t *testing.T) {
+	tail := "value := 7\na.patchFailed = value != 7\nreturn\n"
+	bodies := []string{
+		"if first {\nreturn\n}\n" + tail,
+		"if second {\nreturn\n}\n" + tail,
+	}
+	output := appendCompilerBodyGroups(nil, bodies, []string{"selectedOne", "selectedTwo"})
+	if strings.Count(string(output), "value := 7") != 1 {
+		t.Fatal("matching nested returns hid the shared tail")
+	}
+}
