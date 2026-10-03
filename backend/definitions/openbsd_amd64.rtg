@@ -5,6 +5,7 @@ implements direct_emitter_v1
 @import "elf_amd64.rtg"
 
 runtime openbsd_x86_64 {
+	open_flag_layout = bsd
 	entry sequence x86_64.processStackEntry {
 		max_parameters = 2
 		bss args 32768 16
@@ -25,6 +26,7 @@ runtime openbsd_x86_64 {
 		arguments = [rdi, rsi, rdx, r10, r8, r9]
 		result = rax
 		error = carry
+		site_table = address_number_pairs
 		instruction = syscall
 	}
 
@@ -54,6 +56,7 @@ format elf64_x86_64_openbsd {
 }
 
 target openbsd/amd64 {
+	production_projection = elf_sysv64_carry_process
 	family = native_v1
 	os = openbsd
 	arch = x86_64

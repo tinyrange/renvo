@@ -90,6 +90,8 @@ runtime linux_kernel_x86_64 {
 }
 
 target linux-kernel/amd64 {
+	production_projection = elf_sysv64_module
+	arena_default = 65536
 	family = native_v1
 	os = linux
 	arch = x86_64

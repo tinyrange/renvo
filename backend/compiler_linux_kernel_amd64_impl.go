@@ -1,92 +1,5 @@
 package main
 
-func renvoBeginKernelModuleAmd64(g *renvoLinearGen, appIndex int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-	for i := 0; i < len(g.kernelCallbackLabels); i++ {
-		g.kernelCallbackLabels[i] = -1
-	}
-	exitIndex := -1
-	for i := 0; i < len(g.meta.funcs); i++ {
-		if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
-			exitIndex = i
-		}
-	}
-	g.kernelInitLabel = renvoAsmNewLabel(a)
-	g.kernelExitLabel = -1
-	renvoAsmMarkLabel(a, g.kernelInitLabel)
-	// Linux/x86 indirect module entry points must be valid IBT targets.
-	renvoAmd64KernelEntryPrologue(a)
-	renvoLinearMarkFunc(g, appIndex)
-	if !g.meta.panicEnabled {
-		renvoAmd64InitRuntimeCheckRegs(g)
-	}
-	renvoEmitInitializeThreadState(g)
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		return false
-	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		return false
-	}
-	renvoAsmPrimaryImm(a, 0)
-	renvoAmd64KernelEntryEpilogue(a)
-	if exitIndex >= 0 {
-		g.kernelExitLabel = renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, g.kernelExitLabel)
-		renvoAmd64KernelEntryPrologue(a)
-		renvoLinearMarkFunc(g, exitIndex)
-		if !g.meta.panicEnabled {
-			renvoAmd64InitRuntimeCheckRegs(g)
-		}
-		renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-		renvoAmd64KernelEntryEpilogue(a)
-	}
-	return true
-}
-
-func renvoAmd64EmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
-	renvoNonNil(g, ep)
-	if idx < 0 || idx >= len(ep.exprs) {
-		return -1
-	}
-	e := &ep.exprs[idx]
-	if e.kind != renvoExprIdent {
-		return -1
-	}
-	fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-	if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-		return -1
-	}
-	renvoLinearMarkFunc(g, fnIndex)
-	a := &g.asm
-	label := g.kernelCallbackLabels[fnIndex]
-	first := label < 0
-	if first {
-		label = renvoAsmNewLabel(a)
-		g.kernelCallbackLabels[fnIndex] = label
-	}
-	// The definition-owned callback sequence uses RIP-relative LEA, so it
-	// remains valid after the relocatable module is loaded.
-	renvoAmd64KernelCallbackAddress(a, label)
-	renvoAsmPushPrimary(a)
-	if first {
-		after := renvoAsmNewLabel(a)
-		renvoAsmJmpLabel(a, after)
-		renvoAsmMarkLabel(a, label)
-		renvoAmd64KernelEntryPrologue(a)
-		if !g.meta.panicEnabled {
-			renvoAmd64InitRuntimeCheckRegs(g)
-		}
-		renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-		renvoAmd64KernelEntryEpilogue(a)
-		renvoAsmMarkLabel(a, after)
-	}
-	return 1
-}
-
 func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int) int {
 	renvoNonNil(a)
 	if nameStart < 0 || nameEnd <= nameStart || nameEnd > len(src) {
@@ -97,20 +10,6 @@ func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int
 		name = append(name, src[i])
 	}
 	return renvoAsmAddExternalImportName(a, string(name))
-}
-
-func renvoAmd64EmitKernelLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-	renvoNonNil(g, fn)
-	if wordCount < 0 || wordCount > 6 {
-		return false
-	}
-	a := &g.asm
-	importID := renvoAsmAddKernelImport(a, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-	if importID < 0 {
-		return false
-	}
-	renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
-	return true
 }
 
 func renvoKernelNameFromOutput(path string) string {

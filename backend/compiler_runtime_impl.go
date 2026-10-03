@@ -4,6 +4,8 @@ func renvoReadAll(fd int, out []byte) []byte {
 	var buf []byte
 	for {
 		base := len(out)
+		// This is the running compiler's host-buffer growth policy, not the
+		// selected output target's layout or file-operation ABI.
 		if renvoFixedTarget == renvoTargetWasiWasm32 &&
 			base == cap(out) && base >= 262144 {
 			newCapacity := base + base/2 + 262144
@@ -152,88 +154,19 @@ func renvoEmitPrintMirror(g *renvoLinearGen) {
 }
 
 func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
-	renvoNonNil(g)
-	a := &g.asm
 	renvoEmitPrintMirror(g)
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
-		renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
-		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
-		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
-	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		renvoAmd64EmitKernelPrintValue(a)
-		return true
-	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		if g.c.renvoTargetArch == renvoArch386 {
-			renvoAsmEmit16(a, 0xc689)
-			renvoAsmPrimaryImm(a, -1)
-			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmPrimaryImm(a, fd)
-			renvoAsmEmit16(a, 0xc389)
-			renvoWin386EmitRuntimeWriteAt(g)
-			return true
-		}
-		if g.c.renvoTargetArch == renvoArchAarch64 {
-			renvoAsmCopyPrimaryToCallWord1(a)
-			renvoAsmPrimaryImm(a, -1)
-			renvoAsmCopyPrimaryToTertiary(a)
-			renvoAsmPrimaryImm(a, fd)
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoWinArm64DefinitionWriteAt(g)
-			return true
-		}
-		label := renvoWinAmd64EmitReadWriteHelper(g, true)
-		renvoAsmCopyPrimaryToCallWord1(a)
-		renvoAsmPrimaryImm(a, fd)
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, -1)
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoAsmCallLabel(a, label)
-		return true
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
-		renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, fd)
-		renvoDarwinArm64DefinitionWrite(a)
-		return true
-	}
-	renvoAsmPushImm(a, fd)
-	renvoAsmPopCallWord0(a)
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
-	renvoAsmSyscall(a)
-	return true
+	return renvoEmitTargetWriteValueRegs(g, fd)
 }
 
-func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, seqSyscall int, offSyscall int) bool {
+func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, operation int) bool {
 	renvoNonNil(g, ep)
-	if renvoPreparedBackendActive != 0 {
-		operation := RTGRuntimeRead
-		if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch) ||
-			seqSyscall == renvoDarwinImportWrite {
-			operation = RTGRuntimeWrite
-		}
-		return renvoEmitPreparedReadWrite(g, ep, idx, operation)
-	}
 	a := &g.asm
-	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
 	argCount := ep.exprs[idx].argCount
 	if argCount != 3 {
 		return false
 	}
-	fdStart := ep.exprs[idx].tok + 1
-	fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
-	fdEp := renvoNewExprParse()
-	renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
-	if !fdEp.ok || len(fdEp.exprs) == 0 {
-		return false
-	}
-	fdIndex := len(fdEp.exprs) - 1
-	if !renvoEmitIntExpr(g, fdEp, fdIndex) {
+	if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
 		return false
 	}
 	renvoAsmPushPrimary(a)
@@ -243,8 +176,10 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	if offConst.ok && offConst.value < 0 {
 		offsetRead = false
 	}
-	if offsetRead {
-		if offConst.ok {
+	if offsetRead || renvoFileOffsetSentinel(g.c) {
+		if !offsetRead {
+			renvoAsmPrimaryImm(a, -1)
+		} else if offConst.ok {
 			renvoAsmPrimaryImm(a, offConst.value)
 		} else {
 			if !renvoEmitIntExpr(g, ep, offIndex) {
@@ -256,75 +191,25 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
-	renvoAsmPrepareReadWriteBuf(a)
-	if offsetRead {
-		renvoAsmPopPrimary(a)
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoAsmCopyPrimaryToTertiary(a)
-		} else {
-			renvoAsmMoveOffsetArg(a)
-		}
-	}
-	renvoAsmPopCallWord0(a)
-	if offsetRead {
-		renvoAsmPrimaryImm(a, offSyscall)
-	} else {
-		renvoAsmPrimaryImm(a, seqSyscall)
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if offsetRead {
-			if seqSyscall == renvoDarwinImportWrite {
-				renvoDarwinArm64DefinitionWriteAt(a)
-			} else {
-				renvoDarwinArm64DefinitionReadAt(a)
-			}
-		} else if seqSyscall == renvoDarwinImportWrite {
-			renvoDarwinArm64DefinitionWrite(a)
-		} else {
-			renvoDarwinArm64DefinitionRead(a)
-		}
-		return true
-	}
-	renvoAsmSyscall(a)
-	return true
+	return renvoFinishFileReadWrite(g, operation, offsetRead)
 }
 
-func renvoEmitPreparedReadWrite(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, operation int,
-) bool {
-	renvoNonNil(g, ep)
-	a := &g.asm
-	expression := &ep.exprs[idx]
-	if expression.argCount != 3 {
-		return false
+// Semantic open-flag roles; the runtime definition chooses their bit encodings.
+const (
+	renvoOpenReadOnly = iota
+	renvoOpenWriteOnly
+	renvoOpenReadWrite
+	renvoOpenCreate
+	renvoOpenTruncate
+)
+
+func renvoOpenFlagConstant(c *renvoCompileContext, flag int) renvoConstResult {
+	value := renvoTargetOpenFlag(c, flag)
+	if value >= 0 {
+		return renvoConstResultOk(value)
 	}
-	firstArg := expression.firstArg
-	if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	offsetIndex := ep.args[firstArg+2]
-	offset := renvoEvalConstExpr(g, ep, offsetIndex)
-	hasOffset := !offset.ok || offset.value >= 0
-	if hasOffset {
-		if offset.ok {
-			renvoAsmPrimaryImm(a, offset.value)
-		} else if !renvoEmitIntExpr(g, ep, offsetIndex) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-	}
-	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
-		return false
-	}
-	renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
-	renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGTertiary)
-	if hasOffset {
-		renvoRTGAsmPopRegister(a, renvoRTGCallWord3)
-		operation += RTGRuntimeReadAt - RTGRuntimeRead
-	}
-	renvoRTGAsmPopRegister(a, renvoRTGCallWord0)
-	return renvoRTGEmitRuntimeOperation(a, operation)
+	var result renvoConstResult
+	return result
 }
 
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
@@ -339,153 +224,66 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 		return renvoConstResultOk(0)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDONLY") {
-		return renvoConstResultOk(0)
+		return renvoOpenFlagConstant(g.c, renvoOpenReadOnly)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_WRONLY") {
-		return renvoConstResultOk(1)
+		return renvoOpenFlagConstant(g.c, renvoOpenWriteOnly)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDWR") {
-		return renvoConstResultOk(2)
+		return renvoOpenFlagConstant(g.c, renvoOpenReadWrite)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-			return renvoConstResultOk(512)
-		}
-		return renvoConstResultOk(64)
+		return renvoOpenFlagConstant(g.c, renvoOpenCreate)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-			return renvoConstResultOk(1024)
-		}
-		return renvoConstResultOk(512)
+		return renvoOpenFlagConstant(g.c, renvoOpenTruncate)
 	}
 	var r renvoConstResult
 	return r
 }
 
-func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
-	renvoNonNil(g, ep)
-	if renvoPreparedBackendActive != 0 {
-		return renvoEmitPreparedTargetRuntime(g, ep, idx, callee)
+// renvoEmitOpenFileCall evaluates flags before the path, preserving the
+// runtime builtin's evaluation order. Definitions own the path representation
+// and consume the primary path plus the saved flags at the call boundary.
+func renvoEmitOpenFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	if e.argCount != 2 {
+		return false
 	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		if callee == renvoIdentRead || callee == renvoIdentWrite {
-			return renvoEmitWindowsReadWrite(g, ep, idx, callee == renvoIdentWrite)
-		}
-		if callee == renvoIdentOpen {
-			return renvoEmitWindowsOpen(g, ep, idx)
-		}
-		if callee == renvoIdentClose {
-			return renvoEmitWindowsClose(g, ep, idx)
-		}
-		return renvoEmitWindowsChmod(g, ep, idx)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
 	}
-	if callee == renvoIdentRead || callee == renvoIdentWrite {
-		isWrite := callee == renvoIdentWrite
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			if isWrite {
-				return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportWrite, renvoDarwinImportPwrite)
-			}
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportRead, renvoDarwinImportPread)
+	renvoAsmPushPrimary(&g.asm)
+	pathIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	if renvoOpenPathNeedsLength(g) {
+		if !renvoEmitStringValueRegs(g, ep, pathIndex) {
+			return false
 		}
-		if isWrite {
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		}
-		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
+	} else if !renvoEmitStringPtrExpr(g, ep, pathIndex) {
+		return false
 	}
+	return renvoAsmOpenFile(&g.asm)
+}
+
+// renvoEmitDescriptorFileCall shares argument validation and ordered evaluation
+// for close and chmod. The definition consumes the descriptor in call word zero
+// and, for chmod, the mode in call word one.
+func renvoEmitDescriptorFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	e := &ep.exprs[idx]
 	a := &g.asm
-	firstArgIndex := -1
-	if e.argCount > 0 {
-		firstArgIndex = renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-	}
-	if callee == renvoIdentOpen {
-		if e.argCount != 2 {
-			return false
-		}
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPopCallWord1(a)
-			renvoAsmSecondaryImm(a, 493)
-			renvoDarwinArm64DefinitionOpen(a)
-			return true
-		}
-		if g.c.renvoTargetArch == renvoArchAarch64 {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord1(a)
-			renvoAsmPopSecondary(a)
-			renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
-			renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-			renvoAsmSyscall(a)
-			return true
-		}
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringValueRegs(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPopCallWord1(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-			renvoAsmSyscall(a)
-			return true
-		}
-		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-			return false
-		}
-		renvoAsmCopyPrimaryToCallWord0(a)
-		if g.c.renvoTargetArch == renvoArch386 {
-			renvoAsmPopTertiary(a)
-		} else {
-			renvoAsmPopCallWord1(a)
-		}
-		renvoAsmSecondaryImm(a, 493)
-		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		renvoAsmSyscall(a)
-		return true
-	}
 	if callee == renvoIdentClose {
 		if e.argCount != 1 {
 			return false
 		}
-		if !renvoEmitIntExpr(g, ep, firstArgIndex) {
-			return false
-		}
+	} else if callee != renvoIdentChmod || e.argCount != 2 {
+		return false
+	}
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	if callee == renvoIdentClose {
 		renvoAsmCopyPrimaryToCallWord0(a)
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoDarwinArm64DefinitionClose(a)
-			return true
-		}
-		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		renvoAsmSyscall(a)
-		return true
-	}
-	if e.argCount != 2 {
-		return false
-	}
-	if !renvoEmitIntExpr(g, ep, firstArgIndex) {
-		return false
+		return renvoAsmCloseFile(a)
 	}
 	renvoAsmPushPrimary(a)
 	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
@@ -493,158 +291,41 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 	}
 	renvoAsmCopyPrimaryToCallWord1(a)
 	renvoAsmPopCallWord0(a)
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		renvoDarwinArm64DefinitionChmod(a)
-		return true
-	}
-	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetOS, g.c.renvoTargetArch))
-	renvoAsmSyscall(a)
-	return true
+	return renvoAsmChmodFile(a)
 }
 
-func renvoEmitPreparedTargetRuntime(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, callee int,
-) bool {
+func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
-	expression := &ep.exprs[idx]
-	a := &g.asm
+
 	if callee == renvoIdentRead || callee == renvoIdentWrite {
 		operation := RTGRuntimeRead
 		if callee == renvoIdentWrite {
 			operation = RTGRuntimeWrite
 		}
-		return renvoEmitPreparedReadWrite(g, ep, idx, operation)
+		return renvoEmitBuiltinReadWrite(g, ep, idx, operation)
 	}
 	if callee == renvoIdentOpen {
-		if expression.argCount != 2 {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg+1]) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitStringPtrExpr(g, ep, ep.args[expression.firstArg]) {
-			return false
-		}
-		renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
-		renvoRTGAsmPopRegister(a, renvoRTGCallWord1)
-		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord2, 493)
-		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeOpen)
+		return renvoEmitOpenFileCall(g, ep, idx)
 	}
-	if callee == renvoIdentClose {
-		if expression.argCount != 1 ||
-			!renvoEmitIntExpr(g, ep, ep.args[expression.firstArg]) {
-			return false
-		}
-		renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
-		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)
-	}
-	if callee != renvoIdentChmod || expression.argCount != 2 {
-		return false
-	}
-	if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg]) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg+1]) {
-		return false
-	}
-	renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
-	renvoRTGAsmPopRegister(a, renvoRTGCallWord0)
-	return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)
+	return renvoEmitDescriptorFileCall(g, ep, idx, callee)
 }
+
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	if renvoPreparedBackendActive != 0 {
-		return renvoRTGEmitExit(a, renvoRTGPrimary)
-	}
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoAsmEmit8(a, renvoWasm32OpExit)
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoDarwinArm64DefinitionExit(a)
-		} else if targetIsWindows(g.c.renvoTargetOS) {
-			renvoWinArm64DefinitionExit(a)
-		} else {
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
-			renvoAsmSyscall(a)
-		}
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
-		renvoAsmSyscall(a)
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		if targetIsWindows(g.c.renvoTargetOS) {
-			renvoWin386EmitExit(a)
-		} else {
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
-			renvoAsmSyscall(a)
-		}
-		return true
-	}
-	if g.c.renvoTargetArch != renvoArchAmd64 {
-		return false
-	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		renvoWinAmd64EmitExit(a)
-	} else {
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(g.c.renvoTargetOS))
-		renvoAsmSyscall(a)
-	}
-	return true
+	return renvoAsmExitStatus(&g.asm)
 }
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		importID := renvoAsmAddExternalImportRange(&g.asm,
 			g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {
 			return false
 		}
-		registerWords := 0
 		variadic := fn.paramCount > 0 && g.meta.params[fn.firstParam+fn.paramCount-1].initStart != 0
-		if g.c.regParm == 3 && !variadic {
-			registerWords = wordCount
-			if registerWords > 3 {
-				registerWords = 3
-			}
-			if registerWords > 0 {
-				renvoAsmEmit8(&g.asm, 0x58) // eax
-			}
-			if registerWords > 1 {
-				renvoAsmEmit8(&g.asm, 0x5a) // edx
-			}
-			if registerWords > 2 {
-				renvoAsmEmit8(&g.asm, 0x59) // ecx
-			}
-		}
-		renvoAsmEmit8(&g.asm, 0xe8)
-		at := len(g.asm.code)
-		renvoAsmEmit32(&g.asm, 0)
-		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoImportReloc)
-		if wordCount > registerWords {
-			bytes := (wordCount - registerWords) * 4
-			if renvoAsmImmFits8Signed(bytes) {
-				renvoAsmEmit3(&g.asm, 0x83, 0xc4, bytes)
-			} else {
-				renvoAsmEmit16(&g.asm, 0xc481)
-				renvoAsmEmit32(&g.asm, bytes)
-			}
-		}
-		return true
+		return renvoAsmCdeclObjectCall(&g.asm, importID, wordCount, variadic)
 	}
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 		if memoryAggregate >= 0 {
 			return memoryAggregate != 0
@@ -659,81 +340,43 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount|vectorMask<<8)
-		return true
+		return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
-	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedKernelModule != 0 &&
-		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
-		importID := renvoAsmAddKernelImport(
-			&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-		if importID < 0 {
-			return false
-		}
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedOS == renvoOSDarwin ||
-		renvoPreparedBackendActive == 0 && targetIsDarwin(g.c.renvoTargetOS) {
-		if !renvoPrepareDarwinStaticCall(g, fn, wordCount) {
-			return false
-		}
-		importID := renvoAsmAddPreparedStaticImport(&g.asm,
-			fn.linkDLLStart, fn.linkDLLEnd,
-			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-		if importID < 0 {
-			return false
-		}
-		if renvoPreparedBackendActive != 0 {
-			return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-		}
-		renvoDarwinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
-		return true
-	}
-	if renvoPreparedBackendActive != 0 {
-		importID := renvoAsmAddPreparedStaticImport(&g.asm,
-			fn.linkDLLStart, fn.linkDLLEnd,
-			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-	}
-	if g.c.renvoTargetOS != renvoOSWindows {
+	policy := renvoTargetStaticCallPolicy(g.c)
+	if policy == renvoStaticCallUnavailable {
 		return false
 	}
-	importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-	if renvoPreparedBackendActive != 0 {
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		renvoWin386CallImport(&g.asm, importID)
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoWinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
-		return true
-	}
-	if g.c.renvoTargetArch != renvoArchAmd64 {
+	if policy == renvoStaticCallSplitRegisters && !renvoPrepareStaticCallShape(g, fn, wordCount) {
 		return false
 	}
-	renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
-	return true
+	importID := renvoAsmAddLinkedStaticImport(&g.asm,
+		fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
+	if importID < 0 {
+		return false
+	}
+	return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 }
 
+// Static-call policy selects a bounded argument protocol, never an OS/ISA.
 const (
-	renvoDarwinStaticCallInteger = iota
-	renvoDarwinStaticCallString
-	renvoDarwinStaticCallSlice
-	renvoDarwinStaticCallFloat32
-	renvoDarwinStaticCallFloat64
-	renvoDarwinStaticCallIntegerFloat64
-	renvoDarwinStaticCallIntegerFloat32
+	renvoStaticCallUnavailable = iota
+	renvoStaticCallWords
+	renvoStaticCallSplitRegisters
 )
 
-func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-	if g.c.renvoTargetArch != renvoArchAarch64 && renvoPreparedBackendActive == 0 {
-		return false
-	}
+// Semantic kinds in the static-call transport. Register assignment and result
+// register encoding belong to the selected definition, not this classifier.
+const (
+	renvoStaticCallInteger = iota
+	renvoStaticCallString
+	renvoStaticCallSlice
+	renvoStaticCallFloat32
+	renvoStaticCallFloat64
+	renvoStaticCallIntegerFloat64
+	renvoStaticCallIntegerFloat32
+)
+
+func renvoPrepareStaticCallShape(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	var kinds [16]byte
 	consumed := 0
 	integerCount := 0
@@ -743,72 +386,65 @@ func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCoun
 		renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float32")<<8
 	for i := 0; i < fn.paramCount; i++ {
 		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-		kind := renvoDarwinStaticCallInteger
+		kind := renvoStaticCallInteger
 		if abi&(1<<(i+8)) != 0 {
-			kind = renvoDarwinStaticCallIntegerFloat32
+			kind = renvoStaticCallIntegerFloat32
 		} else if abi&(1<<i) != 0 {
-			kind = renvoDarwinStaticCallIntegerFloat64
+			kind = renvoStaticCallIntegerFloat64
 		} else if typ.kind == renvoTypeFloat32 {
-			kind = renvoDarwinStaticCallFloat32
+			kind = renvoStaticCallFloat32
 		} else if typ.kind == renvoTypeFloat64 {
-			kind = renvoDarwinStaticCallFloat64
+			kind = renvoStaticCallFloat64
 		} else if typ.kind == renvoTypeString {
-			kind = renvoDarwinStaticCallString
+			kind = renvoStaticCallString
 		} else if typ.kind == renvoTypeSlice {
-			kind = renvoDarwinStaticCallSlice
+			kind = renvoStaticCallSlice
 		} else if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
 			return false
 		}
-		if kind == renvoDarwinStaticCallFloat32 || kind == renvoDarwinStaticCallFloat64 ||
-			kind == renvoDarwinStaticCallIntegerFloat64 || kind == renvoDarwinStaticCallIntegerFloat32 {
+		if kind == renvoStaticCallFloat32 || kind == renvoStaticCallFloat64 ||
+			kind == renvoStaticCallIntegerFloat64 || kind == renvoStaticCallIntegerFloat32 {
 			floatCount++
 			allInteger = false
 		} else {
 			integerCount++
-			if kind != renvoDarwinStaticCallInteger {
+			if kind != renvoStaticCallInteger {
 				allInteger = false
 			}
 		}
-		if i >= len(kinds) && kind != renvoDarwinStaticCallInteger {
+		if i >= len(kinds) && kind != renvoStaticCallInteger {
 			return false
 		}
 		if i < len(kinds) {
 			kinds[i] = byte(kind)
 		}
 		consumed++
-		if kind == renvoDarwinStaticCallString {
+		if kind == renvoStaticCallString {
 			consumed++
-		} else if kind == renvoDarwinStaticCallSlice {
+		} else if kind == renvoStaticCallSlice {
 			consumed += 2
 		}
 	}
 	if consumed != wordCount {
 		return false
 	}
-	if !allInteger && (integerCount > 8 || floatCount > 8) {
-		return false
-	}
 	resultFloat := -1
-	resultKind := renvoDarwinStaticCallInteger
+	resultKind := renvoStaticCallInteger
 	typ := renvoResolveType(g.meta, fn.resultType)
 	if renvoTypeKindIsFloat(typ.kind) {
 		resultFloat = renvoLinkStaticOption(
 			g.prog.src, fn.linkMethodEnd, fn.nameStart, "result-float64")
-		if resultFloat < 0 || resultFloat >= 8 {
-			return false
-		}
 		if typ.kind == renvoTypeFloat32 {
-			resultKind = renvoDarwinStaticCallFloat32
+			resultKind = renvoStaticCallFloat32
 		} else {
-			resultKind = renvoDarwinStaticCallFloat64
+			resultKind = renvoStaticCallFloat64
 		}
+	}
+	if !renvoAsmFinishStaticCallShape(&g.asm, integerCount, floatCount, allInteger, resultFloat, resultKind) {
+		return false
 	}
 	g.asm.staticCallParamCount = fn.paramCount
 	g.asm.staticCallParamKinds = kinds
-	if resultKind == renvoDarwinStaticCallFloat32 {
-		resultFloat += 8
-	}
-	g.asm.staticCallResultFloat = resultFloat
 	return true
 }
 
@@ -843,7 +479,7 @@ func renvoLinkStaticOption(src []byte, start int, end int, name string) int {
 // present, an aggregate must be classified as a unit while later scalar
 // parameters can continue consuming argument registers.
 func renvoEmitCObjectMemoryAggregateCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
-	if !renvoIsHostedObjectAmd64(g.c) || wordCount < 1 {
+	if !renvoIsSysVObject(g.c) || wordCount < 1 {
 		return -1
 	}
 	containsAggregate := false
@@ -854,189 +490,67 @@ func renvoEmitCObjectMemoryAggregateCall(g *renvoLinearGen, fn *renvoFuncInfo, w
 	if !containsAggregate {
 		return -1
 	}
+	wordBytes := g.c.renvoNativeIntSize
+	registerCount := renvoObjectArgumentRegisterCount(g.c)
+	aggregateRegisterBytes := renvoObjectAggregateRegisterBytes(g.c)
+	if wordBytes <= 0 || registerCount <= 0 || aggregateRegisterBytes <= 0 {
+		return 0
+	}
 	integerRegisters := 0
 	stackBytes := 0
-	totalWords := 0
-	hasAggregate := false
-	hasMemoryAggregate := false
+	var locations []int
 	for i := 0; i < fn.paramCount; i++ {
 		paramType := g.meta.params[fn.firstParam+i].typ
 		param := renvoResolveType(g.meta, paramType)
 		renvoNonNil(param)
 		words := 1
+		memory := false
 		if param.kind == renvoTypeStruct {
-			hasAggregate = true
 			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			if size <= 16 {
-				if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
-					return 0
-				}
-				if integerRegisters+words <= 6 {
-					integerRegisters += words
-				} else {
-					hasMemoryAggregate = true
-					stackBytes += words * 8
-				}
-			} else {
-				hasMemoryAggregate = true
-				stackBytes += words * 8
+			words = renvoAlignValue(size, wordBytes) / wordBytes
+			if size <= aggregateRegisterBytes && !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+				return 0
 			}
+			memory = size > aggregateRegisterBytes || integerRegisters+words > registerCount
 		} else {
 			if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc && !renvoTypeIsString(g.meta, paramType) {
 				return 0
 			}
-			if integerRegisters < 6 {
-				integerRegisters++
+			memory = integerRegisters >= registerCount
+		}
+		if words < 0 || words > 32-len(locations) {
+			return 0
+		}
+		for word := 0; word < words; word++ {
+			if memory {
+				locations = append(locations, -stackBytes-1)
+				stackBytes += wordBytes
 			} else {
-				stackBytes += 8
+				locations = append(locations, integerRegisters)
+				integerRegisters++
 			}
 		}
-		totalWords += words
 	}
-	if !hasAggregate || !hasMemoryAggregate && stackBytes == 0 {
+	if stackBytes == 0 {
 		return -1
 	}
-	if totalWords != wordCount || wordCount > 32 {
+	if len(locations) != wordCount || wordCount > 32 {
 		return 0
 	}
-
 	a := &g.asm
-	// The reordered evaluation stack starts with source argument word zero.
-	// Keep that address in caller-clobbered R11 while constructing an aligned
-	// outgoing SysV stack below it.
-	renvoAsmEmitText(a, "\x49\x89\xe3\x48\x83\xe4\xf0")
-	reserve := renvoAlignValue(stackBytes+16, 16)
-	if reserve <= 127 {
-		renvoAsmEmitText(a, "\x48\x83\xec")
-		renvoAsmEmit8(a, reserve)
-	} else {
-		renvoAsmEmitText(a, "\x48\x81\xec")
-		renvoAsmEmit32(a, reserve)
-	}
-	saveOffset := reserve - 8
-	if saveOffset <= 127 {
-		renvoAsmEmitText(a, "\x4c\x89\x5c\x24")
-		renvoAsmEmit8(a, saveOffset)
-	} else {
-		renvoAsmEmitText(a, "\x4c\x89\x9c\x24")
-		renvoAsmEmit32(a, saveOffset)
-	}
-
-	sourceWord := 0
-	stackOffset := 0
-	integerRegisters = 0
-	for i := 0; i < fn.paramCount; i++ {
-		paramType := g.meta.params[fn.firstParam+i].typ
-		param := renvoResolveType(g.meta, paramType)
-		renvoNonNil(param)
-		words := 1
-		memory := false
-		if param.kind == renvoTypeStruct {
-			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			memory = size > 16 || integerRegisters+words > 6
-			if !memory {
-				integerRegisters += words
-			}
-		} else if integerRegisters < 6 {
-			integerRegisters++
-		} else {
-			memory = true
-		}
-		if memory {
-			for word := 0; word < words; word++ {
-				renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-				renvoAmd64ObjectStoreOutgoingWord(a, stackOffset)
-				stackOffset += 8
-			}
-		}
-		sourceWord += words
-	}
-
-	sourceWord = 0
-	integerRegister := 0
-	for i := 0; i < fn.paramCount; i++ {
-		paramType := g.meta.params[fn.firstParam+i].typ
-		param := renvoResolveType(g.meta, paramType)
-		renvoNonNil(param)
-		words := 1
-		memory := false
-		if param.kind == renvoTypeStruct {
-			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			memory = size > 16 || integerRegister+words > 6
-		} else {
-			memory = integerRegister >= 6
-		}
-		if !memory {
-			for word := 0; word < words; word++ {
-				renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-				renvoAmd64ObjectMovePrimaryToIntegerArg(a, integerRegister)
-				integerRegister++
-			}
-		}
-		sourceWord += words
-	}
-	if sourceWord != wordCount || stackOffset != stackBytes {
-		return 0
-	}
-	importID := renvoAsmAddPreparedStaticImport(&g.asm,
+	importID := renvoAsmAddPreparedStaticImport(a,
 		fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 	if importID < 0 {
 		return 0
 	}
-	externalID := renvoAsmAddExternalImportName(a, a.staticImports[importID].name)
-	renvoAsmEmitText(a, "\xb0\x00\xe8")
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, externalID, 2)
-	if saveOffset <= 127 {
-		renvoAsmEmitText(a, "\x48\x8b\x64\x24")
-		renvoAsmEmit8(a, saveOffset)
-	} else {
-		renvoAsmEmitText(a, "\x48\x8b\xa4\x24")
-		renvoAsmEmit32(a, saveOffset)
-	}
-	argumentBytes := wordCount * 8
-	if argumentBytes <= 127 {
-		renvoAsmEmitText(a, "\x48\x83\xc4")
-		renvoAsmEmit8(a, argumentBytes)
-	} else {
-		renvoAsmEmitText(a, "\x48\x81\xc4")
-		renvoAsmEmit32(a, argumentBytes)
-	}
-	return 1
-}
-
-func renvoAmd64ObjectLoadSourceWord(a *renvoAsm, word int) {
-	displacement := word * 8
-	if displacement <= 127 {
-		renvoAsmEmitText(a, "\x49\x8b\x43")
-		renvoAsmEmit8(a, displacement)
-	} else {
-		renvoAsmEmitText(a, "\x49\x8b\x83")
-		renvoAsmEmit32(a, displacement)
-	}
-}
-
-func renvoAmd64ObjectStoreOutgoingWord(a *renvoAsm, displacement int) {
-	if displacement == 0 {
-		renvoAsmEmitText(a, "\x48\x89\x04\x24")
-	} else if displacement <= 127 {
-		renvoAsmEmitText(a, "\x48\x89\x44\x24")
-		renvoAsmEmit8(a, displacement)
-	} else {
-		renvoAsmEmitText(a, "\x48\x89\x84\x24")
-		renvoAsmEmit32(a, displacement)
-	}
-}
-
-func renvoAmd64ObjectMovePrimaryToIntegerArg(a *renvoAsm, register int) {
-	operations := []string{"\x48\x89\xc7", "\x48\x89\xc6", "\x48\x89\xc2", "\x48\x89\xc1", "\x49\x89\xc0", "\x49\x89\xc1"}
-	if register >= 0 && register < len(operations) {
-		renvoAsmEmitText(a, operations[register])
-	}
+	// Classification is shared; the target consumes this plan synchronously
+	// and owns stack alignment, register placement, relocation, and cleanup.
+	a.staticCallWordLocations = locations
+	a.staticCallStackBytes = stackBytes
+	ok := renvoAsmObjectRegisterCall(a, importID, wordCount, 0)
+	a.staticCallWordLocations = nil
+	a.staticCallStackBytes = 0
+	return renvoBoolInt(ok)
 }
 
 func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
@@ -1077,53 +591,16 @@ func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 // the call was emitted.
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
-	if g.c.objectFile {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
+	if !g.c.objectFile {
+		binding := renvoTargetStaticCallBinding(g.c, g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
+		if binding <= 0 {
+			return binding
 		}
-		return 0
 	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
+	if renvoEmitLinkStaticCall(g, fn, wordCount) {
+		return 1
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
-			return 0
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if renvoPreparedBackendActive != 0 {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/' {
-			return -1
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' {
-			return -1
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	return -1
+	return 0
 }
 
 func renvoAsmAddPreparedStaticImport(
@@ -1147,7 +624,7 @@ func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int
 	if e.argCount != 2 {
 		return false
 	}
-	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -1170,7 +647,7 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 	if e.argCount != 1 {
 		return false
 	}
-	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -1195,38 +672,12 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 }
 
 func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, endOff int) bool {
-	renvoNonNil(g)
-	if renvoFixedTarget != 0 &&
-		renvoFixedTarget != renvoTargetLinuxAmd64 &&
-		renvoFixedTarget != renvoTargetLinux386 &&
-		renvoFixedTarget != renvoTargetLinuxAarch64 &&
-		renvoFixedTarget != renvoTargetLinuxArm ||
-		renvoFixedTarget == 0 && g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		return true
 	}
-	a := &g.asm
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	doneLabel := renvoAsmNewLabel(a)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAmd64AsmAddRaxImm32(a, 4095)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmStorePrimaryStack(a, startOff)
-	renvoAsmLoadPrimaryStack(a, endOff)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmLoadTertiaryStack(a, startOff)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, lenOff)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAmd64AsmJccLabel(a, 0x8e, doneLabel)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAsmCopyPrimaryToCallWord0(a)
-	renvoAsmLoadPrimaryStack(a, lenOff)
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmSecondaryImm(a, 4)
-	renvoAsmPrimaryImm(a, 28)
-	renvoAsmSyscall(a)
-	renvoAsmMarkLabel(a, doneLabel)
-	renvoAsmPrimaryImm(a, 0)
+	renvoAsmDiscardArenaPages(&g.asm, startOff, endOff, lenOff)
+	renvoAsmPrimaryImm(&g.asm, 0)
 	return true
 }
 
@@ -1242,7 +693,7 @@ func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, id
 	renvoStringHeapOffsets(g)
 	renvoEmitArenaRememberReset(g, true)
 	a := &g.asm
-	if g.c.renvoTargetArch == renvoArchAmd64 && g.c.renvoTargetOS == renvoOSLinux {
+	if renvoArenaDiscardSupported(g.c) {
 		renvoEmitRuntimeArenaPersistResetMadvise(g)
 		return true
 	}
@@ -1255,44 +706,12 @@ func renvoEmitRuntimeArenaPersistResetMadvise(g *renvoLinearGen) {
 	a := &g.asm
 	markOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	oldOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	startOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmStorePrimaryStack(a, markOff)
 	renvoAsmCopyBssToStackSlot(a, g.stringHeapEndOff, oldOff)
 	renvoAsmLoadPrimaryStack(a, markOff)
 	renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
-	renvoAsmLoadPrimaryStack(a, oldOff)
-	renvoAmd64AsmAddRaxImm32(a, 4095)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmStorePrimaryStack(a, startOff)
-	renvoAsmLoadPrimaryStack(a, markOff)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmLoadTertiaryStack(a, startOff)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, lenOff)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAmd64AsmJccLabel(a, 0x8e, doneLabel)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAsmCopyPrimaryToCallWord0(a)
-	renvoAsmLoadPrimaryStack(a, lenOff)
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmSecondaryImm(a, 4)
-	renvoAsmPrimaryImm(a, 28)
-	renvoAsmSyscall(a)
-	renvoAsmMarkLabel(a, doneLabel)
-}
-
-func renvoAmd64AsmAddRaxImm32(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x0548)
-	renvoAsmEmit32(a, imm)
-}
-
-func renvoAmd64AsmAndRaxImm32(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x2548)
-	renvoAsmEmit32(a, imm)
+	renvoAsmDiscardArenaPages(a, oldOff, markOff, lenOff)
 }
 
 func renvoEmitRuntimeArenaPersistString(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -1408,23 +827,17 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
 	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if e.argCount != 4 {
-			return false
-		}
-		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
-		// The Darwin directory adapter uses one compiler-intrinsic selector,
-		// which is lowered to libc getdirentries rather than issued as a raw
-		// Darwin syscall number.
-		if !number.ok || number.value != 217 {
-			return false
-		}
+	// Policies describe argument protocols, not machine or OS identities.
+	// 1: dynamic register words; 2: constant number with site metadata;
+	// 3: the directory-entry intrinsic, not a raw host syscall number.
+	policy := renvoSyscallArgumentPolicy(g.c)
+	if policy < 1 || policy > 3 || policy == 3 && e.argCount != 4 {
+		return false
 	}
 	syscallNumber := -1
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+	if policy != 1 {
 		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
-		if !number.ok {
+		if !number.ok || policy == 2 && number.value < 0 || policy == 3 && number.value != 217 {
 			return false
 		}
 		syscallNumber = number.value
@@ -1446,7 +859,7 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
-	if e.argCount != 6 || g.c.renvoTargetArch == renvoArchWasm32 {
+	if e.argCount != 6 || !renvoJITCallSupported(g.c) {
 		return false
 	}
 	for i := e.argCount - 1; i >= 0; i-- {
@@ -1455,87 +868,7 @@ func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		}
 		renvoAsmPushPrimary(&g.asm)
 	}
-	a := &g.asm
-	if renvoPreparedBackendActive != 0 {
-		entry := renvoRTGScratch
-		stackTop := renvoRTGPrimary
-		argsData := renvoRTGCallWord0
-		argsLen := renvoRTGCallWord1
-		envData := renvoRTGTertiary
-		envLen := renvoRTGSecondary
-		renvoRTGAsmPopRegister(a, entry)
-		renvoRTGAsmPopRegister(a, stackTop)
-		renvoRTGAsmPopRegister(a, argsData)
-		renvoRTGAsmPopRegister(a, argsLen)
-		renvoRTGAsmPopRegister(a, envData)
-		renvoRTGAsmPopRegister(a, envLen)
-		return renvoRTGEmitJITCall(a, entry, stackTop, argsData, argsLen, envData, envLen)
-	}
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		renvoAsmPopCallWord0(a)
-		renvoAsmEmit8(a, 0x5e)
-		renvoAsmPopSecondary(a)
-		renvoAsmPopTertiary(a)
-		renvoAsmEmit16(a, 0x5841)
-		renvoAsmEmit16(a, 0x5941)
-		renvoAsmEmitText(a, "\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57")
-		renvoAsmEmitText(a, "\x48\x89\xf8\x49\x89\xe2\x48\x89\xf4\x48\x83\xec\x10\x4c\x89\x54\x24\x08")
-		renvoAsmEmitText(a, "\x48\x89\xd7\x48\x89\xce\x4c\x89\xc2\x4c\x89\xc9\xff\xd0")
-		renvoAsmEmitText(a, "\x49\x89\xc2\x4c\x8b\x5c\x24\x08\x4c\x89\xdc")
-		renvoAsmEmitText(a, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\x4c\x89\xd0")
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		renvoAsmEmitText(a, "\x5b\x5e\x5a\x59\x58\x5f")
-		renvoAsmEmitText(a, "\x89\x66\xfc\x89\xf4\x83\xec\x08\x57\x50\x51\x52\xff\xd3")
-		renvoAsmEmitText(a, "\x83\xc4\x10\x8b\x54\x24\x04\x89\xd4")
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
-		renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
-		renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
-		renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
-		renvoAarch64AsmPopReg(a, renvoAarch64RegR8)
-		renvoAarch64AsmPopReg(a, renvoAarch64RegR9)
-		renvoAarch64AsmMovRegReg(a, 9, renvoAarch64RegRdi)
-		renvoAarch64AsmMovRegReg(a, 10, renvoAarch64RegRsi)
-		renvoAarch64AsmEmit(a, 0x910003eb) // ADD X11, SP, #0
-		renvoAarch64AsmEmit(a, 0x9100015f) // ADD SP, X10, #0
-		renvoAarch64AsmEmit(a, 0xd10043ff) // SUB SP, SP, #16
-		renvoAarch64AsmStoreRegMem(a, 11, 31, 8, 8)
-		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRdx)
-		renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRcx)
-		renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegR8)
-		renvoAarch64AsmMovRegReg(a, 3, renvoAarch64RegR9)
-		renvoAarch64AsmEmit(a, 0xd63f0120) // BLR X9
-		renvoAarch64AsmLoadRegMem(a, 11, 31, 8, 8)
-		renvoAarch64AsmEmit(a, 0x9100017f) // ADD SP, X11, #0
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmPopReg(a, renvoArmRegRdi)
-		renvoArmAsmPopReg(a, renvoArmRegRsi)
-		renvoArmAsmPopReg(a, renvoArmRegRdx)
-		renvoArmAsmPopReg(a, renvoArmRegRcx)
-		renvoArmAsmPopReg(a, renvoArmRegR8)
-		renvoArmAsmPopReg(a, renvoArmRegR9)
-		renvoArmAsmMovRegReg(a, renvoArmRegTmp, renvoArmRegRdi)
-		renvoArmAsmMovRegReg(a, renvoArmRegTmp2, renvoArmRegRsi)
-		renvoArmAsmMovRegReg(a, renvoArmRegAddr, renvoArmRegSp)
-		renvoArmAsmMovRegReg(a, renvoArmRegSp, renvoArmRegTmp2)
-		renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -8)
-		renvoArmAsmStoreRegMem(a, renvoArmRegAddr, renvoArmRegSp, 4, 4)
-		renvoArmAsmMovRegReg(a, 0, renvoArmRegRdx)
-		renvoArmAsmMovRegReg(a, 1, renvoArmRegRcx)
-		renvoArmAsmMovRegReg(a, 2, renvoArmRegR8)
-		renvoArmAsmMovRegReg(a, 3, renvoArmRegR9)
-		renvoArmAsmEmit(a, 0xe12fff39) // BLX R9
-		renvoArmAsmLoadRegMem(a, renvoArmRegAddr, renvoArmRegSp, 4, 4)
-		renvoArmAsmMovRegReg(a, renvoArmRegSp, renvoArmRegAddr)
-		return true
-	}
-	return false
+	return renvoAsmJITCallFromStack(&g.asm)
 }
 
 func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -1554,173 +887,81 @@ func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 }
 
 func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
+	return renvoAsmSyscallFromStack(&g.asm, wordCount, syscallNumber)
+}
+
+func renvoBeginKernelModule(g *renvoLinearGen, appIndex int) bool {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoPreparedBackendActive != 0 {
-		if wordCount > 7 {
-			return false
-		}
-		registers := []RTGRegister{
-			renvoRTGSyscallNumber,
-			renvoRTGSyscallWord0, renvoRTGSyscallWord1, renvoRTGSyscallWord2,
-			renvoRTGSyscallWord3, renvoRTGSyscallWord4, renvoRTGSyscallWord5,
-		}
-		for i := 0; i < wordCount; i++ {
-			if !registers[i].Valid {
-				return false
-			}
-			renvoRTGAsmPopRegister(a, registers[i])
-		}
-		renvoRTGDirectHostSyscall(a)
-		if renvoRTGSyscallResult.Valid &&
-			renvoRTGSyscallResult.Code != renvoRTGPrimary.Code {
-			renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGSyscallResult)
-		}
-		return true
+	g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
+	for i := 0; i < len(g.kernelCallbackLabels); i++ {
+		g.kernelCallbackLabels[i] = -1
 	}
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		renvoAsmPopPrimary(a)
-		if wordCount > 1 {
-			renvoAsmPopCallWord0(a)
+	exitIndex := -1
+	for i := 0; i < len(g.meta.funcs); i++ {
+		if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
+			exitIndex = i
 		}
-		if wordCount > 2 {
-			renvoAsmEmit8(a, 0x5e)
-		}
-		if wordCount > 3 {
-			renvoAsmPopSecondary(a)
-		}
-		if wordCount > 4 {
-			renvoAsmPopTertiary(a)
-			renvoAsmEmit24(a, 0xca8949)
-		}
-		if wordCount > 5 {
-			renvoAsmEmit16(a, 0x5841)
-		}
-		if wordCount > 6 {
-			renvoAsmEmit16(a, 0x5941)
-		}
-		if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-			renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
-			a.syscallNumber = syscallNumber
-			a.syscallNumberKnown = syscallNumber >= 0
-		}
-		renvoAsmSyscall(a)
-		return true
 	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		if wordCount > 7 {
-			return false
-		}
-		renvoAsmPopPrimary(a)
-		if wordCount > 1 {
-			renvoAsmPopCallWord0(a)
-		}
-		if wordCount > 2 {
-			renvoAsmEmit8(a, 0x59)
-		}
-		if wordCount > 3 {
-			renvoAsmPopSecondary(a)
-		}
-		if wordCount > 4 {
-			renvoAsmEmit8(a, 0x5e)
-		}
-		if wordCount > 5 {
-			renvoAsmEmit8(a, 0x5f)
-		}
-		if wordCount > 6 {
-			// Linux/i386 carries the sixth syscall argument in EBP. Exchange
-			// it with the saved frame pointer at the top of the expression
-			// stack, then restore EBP after int 0x80.
-			renvoAsmEmitText(a, "\x87\x2c\x24")
-			renvoAsmSyscall(a)
-			renvoAsmEmit8(a, 0x5d)
-			return true
-		}
-		renvoAsmSyscall(a)
-		return true
+	g.kernelInitLabel = renvoAsmNewLabel(a)
+	g.kernelExitLabel = -1
+	renvoAsmMarkLabel(a, g.kernelInitLabel)
+	renvoEmitKernelEntryFrame(g)
+	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitInitializeThreadState(g)
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return false
 	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			if wordCount != 4 {
-				return false
-			}
-			renvoAarch64AsmPopReg(a, 9)
-			renvoAarch64AsmPopReg(a, 0)
-			renvoAarch64AsmPopReg(a, 1)
-			renvoAarch64AsmPopReg(a, 2)
-			baseOff := a.bssSize
-			a.bssSize += 8
-			renvoAarch64AsmMovRegAbs(a, 3, baseOff, renvoAbsBssReloc)
-			renvoDarwinArm64EmitGetdirentries(a)
-			return true
-		}
-		renvoAarch64AsmPopReg(a, renvoAarch64RegSys)
-		if wordCount > 1 {
-			renvoAarch64AsmPopReg(a, 0)
-		}
-		if wordCount > 2 {
-			renvoAarch64AsmPopReg(a, 1)
-		}
-		if wordCount > 3 {
-			renvoAarch64AsmPopReg(a, 2)
-		}
-		if wordCount > 4 {
-			renvoAarch64AsmPopReg(a, 3)
-		}
-		if wordCount > 5 {
-			renvoAarch64AsmPopReg(a, 4)
-		}
-		if wordCount > 6 {
-			renvoAarch64AsmPopReg(a, 5)
-		}
-		renvoAarch64AsmEmit(a, 0xd4000001)
-		return true
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return false
 	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmPopReg(a, renvoArmRegSys)
-		if wordCount > 1 {
-			renvoArmAsmPopReg(a, 0)
-		}
-		if wordCount > 2 {
-			renvoArmAsmPopReg(a, 1)
-		}
-		if wordCount > 3 {
-			renvoArmAsmPopReg(a, 2)
-		}
-		if wordCount > 4 {
-			renvoArmAsmPopReg(a, 3)
-		}
-		if wordCount > 5 {
-			renvoArmAsmPopReg(a, 4)
-		}
-		if wordCount > 6 {
-			renvoArmAsmPopReg(a, 5)
-		}
-		renvoArmAsmEmit(a, 0xef000000)
-		return true
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmKernelEntryReturn(a)
+	if exitIndex >= 0 {
+		g.kernelExitLabel = renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, g.kernelExitLabel)
+		renvoEmitKernelEntryFrame(g)
+		renvoLinearMarkFunc(g, exitIndex)
+		renvoAsmCallLabel(a, g.funcLabels[exitIndex])
+		renvoAsmKernelEntryReturn(a)
 	}
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-		if wordCount > 1 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
-		}
-		if wordCount > 2 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
-		}
-		if wordCount > 3 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
-		}
-		if wordCount > 4 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
-		}
-		if wordCount > 5 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-		}
-		if wordCount > 6 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
-		}
-		renvoAsmSyscall(a)
-		return true
+	return true
+}
+
+func renvoEmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
+	renvoNonNil(g, ep)
+	if idx < 0 || idx >= len(ep.exprs) {
+		return -1
 	}
-	return false
+	e := &ep.exprs[idx]
+	if e.kind != renvoExprIdent {
+		return -1
+	}
+	fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
+	if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
+		return -1
+	}
+	renvoLinearMarkFunc(g, fnIndex)
+	a := &g.asm
+	label := g.kernelCallbackLabels[fnIndex]
+	first := label < 0
+	if first {
+		label = renvoAsmNewLabel(a)
+		g.kernelCallbackLabels[fnIndex] = label
+	}
+	// The target owns the callback address relocation and entry ABI.
+	renvoAsmKernelCallbackAddress(a, label)
+	renvoAsmPushPrimary(a)
+	if first {
+		after := renvoAsmNewLabel(a)
+		renvoAsmJmpLabel(a, after)
+		renvoAsmMarkLabel(a, label)
+		renvoEmitKernelEntryFrame(g)
+		renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+		renvoAsmKernelEntryReturn(a)
+		renvoAsmMarkLabel(a, after)
+	}
+	return 1
 }

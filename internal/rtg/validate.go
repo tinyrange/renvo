@@ -10,7 +10,9 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		declaration := document.Declarations[i]
 		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
+			diagnostics = append(diagnostics, validateCompilerFamily(document, declaration)...)
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
+			diagnostics = append(diagnostics, validateCompilerBindings(document, declaration)...)
 			diagnostics = append(diagnostics, validateArchitectureSequences(document, declaration, goNames)...)
 			diagnostics = append(diagnostics, validateDirectEmitterBindings(document, declaration, goNames)...)
 		} else if declaration.Kind == DeclABI {
@@ -18,6 +20,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		} else if declaration.Kind == DeclRuntime {
 			diagnostics = append(diagnostics, validateRuntime(document, declaration)...)
 		} else if declaration.Kind == DeclFormat {
+			diagnostics = append(diagnostics, validateCompilerFamily(document, declaration)...)
 			diagnostics = append(diagnostics, validateFormat(document, declaration)...)
 		}
 	}
@@ -439,9 +442,9 @@ func declarationOwnsNamedAssignment(declaration Declaration, name string) bool {
 func declarationAllowedFields(kind string) []string {
 	if kind == DeclArch {
 		return []string{
-			"alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
+			"compiler_family", "alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
 			"stack_word_bytes", "stack_alignment", "unaligned_memory", "patch_relocations",
-			"reject",
+			"reject", "compiler_selector",
 		}
 	}
 	if kind == DeclABI {
@@ -455,12 +458,12 @@ func declarationAllowedFields(kind string) []string {
 			"pop_register", "frame_load", "frame_store", "frame_address",
 			"store_param_word", "call_word_count", "mark_label",
 			"structured_functions", "function_start", "function_finish", "jit_call",
-			"unsigned_divide",
+			"unsigned_divide", "object_call_layout",
 		}
 	}
 	if kind == DeclRuntime {
 		return []string{
-			"operations", "os", "entry", "exit", "allocator", "environment", "arguments",
+			"raw_syscall_layout", "emit_syscall_from_stack", "operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout", "open_flag_layout",
 			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
@@ -469,7 +472,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclFormat {
 		return []string{
-			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
+			"compiler_family", "byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "image_base_high", "machine", "kind", "cpu", "subsystem", "entry", "strip",
 			"image_variant", "osabi",
 			"type", "headers_size", "text_rva", "sections", "code_offset", "image",
@@ -487,7 +490,7 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"family", "arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
-			"arena_default", "subsystem", "os", "frontend_arch",
+			"arena_default", "subsystem", "os", "frontend_arch", "production_projection",
 		}
 	}
 	if kind == DeclIR {
@@ -596,13 +599,13 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 }
 
 func validateRuntime(document Document, declaration Declaration) []Diagnostic {
-	var diagnostics []Diagnostic
+	diagnostics := validateRawSyscallLayout(document, declaration)
 	hookNames := []string{
 		"emit_entry_start", "emit_entry_start_simple", "emit_entry", "emit_exit", "emit_static_call",
 		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
-		"prepare_read_write_buffer", "move_offset_argument",
+		"prepare_read_write_buffer", "move_offset_argument", "emit_syscall_from_stack",
 	}
-	hookParameters := make([][]string, 11)
+	hookParameters := make([][]string, 12)
 	hookParameters[0] = []string{"*RTGEmitter", "int"}
 	hookParameters[1] = []string{"*RTGEmitter"}
 	hookParameters[2] = []string{"*RTGEmitter", "int", "int"}
@@ -614,7 +617,8 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 	hookParameters[8] = []string{"*RTGEmitter", "RTGLabel"}
 	hookParameters[9] = []string{"*RTGEmitter"}
 	hookParameters[10] = []string{"*RTGEmitter"}
-	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", ""}
+	hookParameters[11] = []string{"*RTGEmitter", "int", "int"}
+	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", "", "bool"}
 	for i := 0; i < len(declaration.Statements); i++ {
 		left, right, assignment := statementAssignment(declaration.Statements[i])
 		if assignment && len(left) == 1 {
@@ -1006,6 +1010,11 @@ func architectureRegisterReferenceValid(document Document, arch Declaration, nam
 
 func validatePreparedABI(document Document, target ResolvedTarget) []Diagnostic {
 	var diagnostics []Diagnostic
+	layout, layoutValid := decodeObjectCallLayout(target.ABI)
+	if !layoutValid || layout && target.Descriptor.WordBits != 64 {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, target.ABI,
+			"RTG-VALIDATE-132", "ABI "+target.ABI.Name+" requires one sysv_eightbyte object_call_layout with 64-bit words"))
+	}
 	words := targetABICallWords(document, target.ABI)
 	for i := 0; i < len(words); i++ {
 		if !architectureRegisterReferenceValid(document, target.Arch, words[i]) {
@@ -1049,7 +1058,18 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 				}
 			}
 		}
-		_ = syscall
+		siteTableSeen := false
+		for i := 0; i < len(syscall.Children); i++ {
+			left, right, assignment := statementAssignment(syscall.Children[i])
+			if !assignment || len(left) != 1 || left[0] != "site_table" {
+				continue
+			}
+			if siteTableSeen || len(right) != 1 || valueName(right[0]) != "address_number_pairs" {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+					"RTG-VALIDATE-130", "runtime "+runtime.Name+" requires one address_number_pairs syscall site_table"))
+			}
+			siteTableSeen = true
+		}
 	}
 
 	needsResult := false
@@ -1072,6 +1092,25 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 						" is missing "+hook))
 			}
 		}
+	}
+	if _, valid := decodeOpenFlagLayout(runtime); !valid {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-134", "runtime "+runtime.Name+" requires one portable or bsd open_flag_layout assignment"))
+	}
+	split, splitValid := decodeStaticCallLayout(runtime)
+	_, emitsStaticCall := architectureGoHook(runtime, "emit_static_call")
+	if !splitValid || split && (!emitsStaticCall || target.Descriptor.WordBits != 64 ||
+		stringIndex(target.Descriptor.Capabilities, "kernel_module") >= 0) {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-133", "runtime "+runtime.Name+" requires one split_register_words8 static_call_layout, a static-call emitter, 64-bit words, and non-kernel composition"))
+	}
+	discard, discardValid := decodeRuntimeDiscardPolicy(runtime)
+	if !discardValid || discard.pageSize != 0 &&
+		(len(targetRuntimeRegisterList(runtime, "number")) != 1 ||
+			len(targetRuntimeRegisterList(runtime, "arguments")) < 3 ||
+			targetRuntimeSyscallField(runtime, "instruction") == "") {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-131", "runtime "+runtime.Name+" requires one complete discard_pages syscall policy with a power-of-two page_size"))
 	}
 	diagnostics = append(diagnostics, validatePreparedRuntimeTemplates(document, runtime)...)
 	return diagnostics

@@ -2,10 +2,11 @@
 // checked-in Go generated from their declarative architecture contracts.
 package definitions
 
-//go:generate go run ../../internal/rtg/cmd/rtggen -kernel -package main -o ../compiler_rtg_generated_impl.go
+//go:generate go run ../../internal/rtg/cmd/rtggen -kernel -package main -o ../compiler_rtg_generated_impl.go x86_64_compiler.rtg x86_32_compiler.rtg aarch64_compiler.rtg arm_algorithms.rtg wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch aarch64 -package main -o ../compiler_aarch64_impl.go aarch64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -compiler-integration -arch aarch64 -package main -o ../compiler_aarch64_target_impl.go aarch64_compiler.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/aarch64 -package main -o ../compiler_linux_aarch64_impl.go linux_aarch64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -t linux/aarch64 -o ../../internal/rtg/testdata/aarch64_linux.golden linux_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/arm64 -package main -o ../compiler_windows_arm64_target_impl.go windows_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t darwin/arm64 -package main -o ../compiler_darwin_arm64_target_impl.go darwin_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_64 -package main -o ../compiler_amd64_target_impl.go x86_64_algorithms.rtg
@@ -26,3 +27,4 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch vm32 -package main -o ../compiler_wasm32_impl.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -contract -arch vm32 -package main -o ../rtg_vm32_contract_generated.go wasm32.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -prepared -build-tag renvo_jvm_prepared -t jvm/vm32 -o ../compiler_jvm_prepared_impl.go ../../backends/jvm.rbe
+//go:generate go run ../../internal/rtg/cmd/rtggen -prepared -build-tag renvo_prepared -t llvm/linux-amd64 -o ../compiler_llvm_prepared_impl.go ../../backends/llvm_amd64.rtg

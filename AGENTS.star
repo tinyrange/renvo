@@ -179,6 +179,44 @@ go = module("go", version = version, build_compiler = build_compiler, test = tes
 repo = module("repo", compile = compile, execute = execute, preflight = preflight, corpus = corpus)
 
 
+# Fixed regeneration workflow for definition-owned bundled backends.
+def regenerate_backends():
+    """Regenerate backend projections, target metadata, and the compiled bundle.
+
+    Runs only the three repository-owned generator packages, in dependency
+    order. No arbitrary command, arguments, environment, or cwd is accepted.
+    Inspect generator changes before invoking; stops on the first failure.
+    """
+    results = []
+    for package in ["./backend/definitions", "./internal/targetinfo", "./internal/backendcompiled"]:
+        result = privileged.run(
+            "go", "generate", package,
+            cwd = _work(), timeout_ms = 180000, output_limit = 1048576,
+        )
+        results.append(result)
+        if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+            return results
+    return results
+
+def format_definitions(write = False):
+    """Check or canonically format only backend/definitions RTG sources.
+
+    Uses the repository's unchanged renvofmt command. The only option is a
+    boolean write flag; no arbitrary paths, arguments, environment or cwd.
+    Inspect formatter changes before invoking and review all written diffs.
+    """
+    if type(write) != "bool":
+        fail("write must be a bool")
+    return privileged.run(
+        "go", "run", "./cmd/renvofmt", "-w" if write else "-check",
+        "backend/definitions",
+        cwd = _work(), timeout_ms = 180000, output_limit = 1048576,
+    )
+
+repo = repo + module("repo", regenerate_backends = regenerate_backends,
+    format_definitions = format_definitions)
+
+
 # Repository-scoped publication; no general command runner or Git writer.
 _PR_REPOSITORY = "tinyrange/renvo"
 
@@ -539,7 +577,7 @@ def _work():
     state = _pr_state()
     if not state:
         return workspace
-    return privileged.workspace(_pr_session.path(state["directory"]), readonly = False)
+    return privileged.workspace(state.get("path", _pr_session.path(state["directory"])), readonly = False)
 
 def pr_candidates():
     """List open PRs including labels so long-term work can be excluded."""
@@ -554,8 +592,8 @@ def _existing_pr(number, expected_head):
     pr = _compiler_json(_publish_gh([
         "api", "--hostname", "github.com", "repos/" + _PR_REPOSITORY + "/pulls/" + str(number),
     ]))
-    if pr["state"] != "open" or pr["draft"] or pr["head"]["sha"] != expected_head:
-        fail("PR must be open, non-draft and match the reviewed head")
+    if pr["state"] != "open" or pr["head"]["sha"] != expected_head:
+        fail("PR must be open and match the reviewed head")
     if pr["head"]["repo"]["full_name"] != _PR_REPOSITORY or pr["base"]["ref"] != "main":
         fail("Only same-repository PRs already targeting main are supported")
     for label in pr["labels"]:
@@ -818,6 +856,80 @@ def compiler_pr_watch(run_id, expected_head):
     )
 
 compiler_pr = compiler_pr + module("compiler_pr_watch", watch = compiler_pr_watch)
+
+
+def pr_resume(number, expected_head, expected_main):
+    """Resume an existing isolated PR worktree after configuration reload.
+
+    Inspects only this repository's registered worktrees. Requires the remote
+    reviewed head, a matching generated branch, and main ancestry; never moves
+    refs, creates worktrees, or changes files in them.
+    """
+    if _pr_state():
+        fail("A PR worktree is already selected")
+    pr = _existing_pr(number, expected_head)
+    _compiler_sha(expected_main)
+    if _compiler_json(pr_main())["object"]["sha"] != expected_main:
+        fail("Main changed since review")
+    listing = _publish_require(_publish_git(["worktree", "list", "--porcelain"]))
+    matches = []
+    for block in listing.strip().split("\n\n"):
+        lines = block.splitlines()
+        if not lines or not lines[0].startswith("worktree "):
+            continue
+        path = lines[0][9:]
+        leaf = path.split("/")[-1]
+        prefix = "pr-" + str(number) + "-"
+        if not leaf.startswith(prefix) or not leaf[len(prefix):].isdigit():
+            continue
+        branch = "staragent/pr-" + str(number) + "-rebased-" + leaf[len(prefix):]
+        def inspect(args):
+            return privileged.run(cwd = path, timeout_ms = 120000, output_limit = 1048576,
+                *(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"] + args))
+        if _publish_require(inspect(["rev-parse", "refs/heads/" + branch])) != expected_head:
+            continue
+        if _publish_require(inspect(["rev-parse", "ORIG_HEAD"])) != expected_head:
+            continue
+        ancestry = inspect(["merge-base", "--is-ancestor", expected_main, "HEAD"])
+        if not ancestry.success:
+            continue
+        matches.append({"number": number, "old_head": expected_head, "main": expected_main,
+            "branch": branch, "remote_branch": pr["head"]["ref"], "directory": leaf,
+            "path": path, "published": False})
+    if len(matches) != 1:
+        fail("Expected exactly one matching isolated rebase worktree")
+    _pr_save(matches[0])
+    return _work()
+
+def pr_continue_approved_config(expected_head):
+    """Resolve AGENTS.star using only the user-approved root configuration.
+
+    Review the current conflict and root configuration first. Copies no
+    model-supplied content and accepts no file paths. Requires AGENTS.star to
+    be the only unresolved file in the selected detached rebase, then stages
+    that approved configuration and continues. Other staged rebase changes
+    are preserved. No skip, reset, abort, shell, or arbitrary command.
+    """
+    _compiler_sha(expected_head)
+    if not _pr_state() or git.current_branch(cwd = _work()) != None:
+        fail("Requires a selected detached rebase")
+    if _publish_require(_publish_git(["rev-parse", "HEAD"])) != expected_head:
+        fail("Rebase HEAD changed since conflict review")
+    if _publish_require(_publish_git(["diff", "--name-only", "--diff-filter=U"])) != "AGENTS.star":
+        fail("AGENTS.star must be the only unresolved file")
+    content = workspace.read_file("AGENTS.star")
+    validate_agents_star(content)
+    blob = _publish_require(privileged.run("git", "hash-object", "-w", "--stdin",
+        cwd = _work(), stdin = content, timeout_ms = 120000, output_limit = 1048576))
+    _compiler_sha(blob)
+    _publish_require(_publish_git(["update-index", "--add", "--cacheinfo", "100644", blob, "AGENTS.star"]))
+    _publish_require(_publish_git(["checkout-index", "-f", "--", "AGENTS.star"]))
+    return privileged.run("git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+        "rebase", "--continue", cwd = _work(), env = {"GIT_EDITOR": "true"},
+        timeout_ms = 120000, output_limit = 1048576)
+
+pr_work = pr_work + module("pr_work", resume = pr_resume,
+    continue_approved_config = pr_continue_approved_config)
 
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo,

@@ -105,6 +105,8 @@ format elf32_386 {
 }
 
 target linux/386 {
+	production_projection = elf_cdecl32_process
+	arena_default = 67108864
 	family = native_v1
 	os = linux
 	arch = x86_32

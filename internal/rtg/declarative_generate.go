@@ -3,11 +3,14 @@ package rtg
 import "renvo.dev/internal/syntax"
 
 type embeddedFunction struct {
-	Name       string
-	Signature  []byte
-	Parameters []embeddedParameter
-	Result     []byte
-	HasResult  bool
+	Name         string
+	Signature    []byte
+	Parameters   []embeddedParameter
+	Result       []byte
+	HasResult    bool
+	Body         []byte
+	HasLabels    bool
+	EndsInReturn bool
 }
 
 type embeddedParameter struct {
@@ -566,9 +569,13 @@ func declarationBlock(declaration Declaration, name string) (Statement, bool) {
 }
 
 func findEmbeddedFunction(document Document, name string) (embeddedFunction, bool) {
+	return findEmbeddedFunctionKind(document, name, "backend")
+}
+
+func findEmbeddedFunctionKind(document Document, name string, kind string) (embeddedFunction, bool) {
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo || declaration.Name != "backend" {
+		if declaration.Kind != DeclGo || declaration.Name != kind {
 			continue
 		}
 		wrapped := make([]byte, 0, len(declaration.GoSource)+16)
@@ -581,28 +588,98 @@ func findEmbeddedFunction(document Document, name string) (embeddedFunction, boo
 		for j := 0; j < len(file.Funcs); j++ {
 			fn := file.Funcs[j]
 			fnName := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
-			if fnName != name {
+			if fnName != name || fn.ReceiverStart >= 0 {
 				continue
 			}
-			start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
-			end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
-			signature := make([]byte, end-start)
-			copy(signature, wrapped[start:end])
-			for len(signature) > 0 && (signature[len(signature)-1] == ' ' ||
-				signature[len(signature)-1] == '\t' || signature[len(signature)-1] == '\n' ||
-				signature[len(signature)-1] == '\r') {
-				signature = signature[:len(signature)-1]
-			}
-			return embeddedFunction{
-				Name:       name,
-				Signature:  signature,
-				Parameters: functionParameters(file, fn),
-				Result:     functionResult(file, fn),
-				HasResult:  fn.ResultStart != fn.ResultEnd,
-			}, true
+			return embeddedFunctionFromSyntax(file, fn, name, kind == "compiler"), true
 		}
 	}
 	return embeddedFunction{}, false
+}
+
+// indexEmbeddedFunctions is local to one immutable generation input. It keeps
+// first-declaration lookup semantics and never shares entries across documents.
+// Parsing each Go block once avoids reparsing the whole preceding document for
+// every operation in a compiler binding surface.
+func indexEmbeddedFunctions(document Document, kind string) []embeddedFunction {
+	var functions []embeddedFunction
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo || declaration.Name != kind {
+			continue
+		}
+		wrapped := append([]byte("package backend\n"), declaration.GoSource...)
+		file := syntax.ParseFile(wrapped)
+		if !file.Ok {
+			continue
+		}
+		for j := 0; j < len(file.Funcs); j++ {
+			fn := file.Funcs[j]
+			if fn.ReceiverStart >= 0 {
+				continue
+			}
+			name := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
+			if _, found := indexedEmbeddedFunction(functions, name); !found {
+				functions = append(functions, embeddedFunctionFromSyntax(file, fn, name, kind == "compiler"))
+			}
+		}
+	}
+	return functions
+}
+
+// Keep the index in the same flat, self-hostable representation as the rest
+// of the definition compiler. Name lookup does not reparse source or bodies.
+func indexedEmbeddedFunction(functions []embeddedFunction, name string) (embeddedFunction, bool) {
+	for i := 0; i < len(functions); i++ {
+		if functions[i].Name == name {
+			return functions[i], true
+		}
+	}
+	return embeddedFunction{}, false
+}
+
+func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name string, projection bool) embeddedFunction {
+	wrapped := file.Src
+	start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
+	end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
+	signature := make([]byte, end-start)
+	copy(signature, wrapped[start:end])
+	for len(signature) > 0 && (signature[len(signature)-1] == ' ' ||
+		signature[len(signature)-1] == '\t' || signature[len(signature)-1] == '\n' ||
+		signature[len(signature)-1] == '\r') {
+		signature = signature[:len(signature)-1]
+	}
+	// Only compiler hooks can be projected into another function. Portable
+	// backend hook lookup needs the signature, not a second parse of every
+	// body on every lookup. Leave unclassified bodies conservatively opaque.
+	hasLabels := true
+	endsInReturn := false
+	if projection {
+		// Labels have function scope, unlike switch cases, keyed literals,
+		// and slices. Keep the statement parser's conservative failure rule.
+		body := syntax.ParseFuncBodyStatements(file, fn)
+		hasLabels = !body.Ok
+		for k := 0; k < len(body.Stmts); k++ {
+			if body.Stmts[k].Kind == syntax.StmtLabel {
+				hasLabels = true
+			}
+		}
+		last := fn.BodyEnd - 2
+		for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
+			last--
+		}
+		endsInReturn = last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
+	}
+	return embeddedFunction{
+		EndsInReturn: endsInReturn,
+		Body:         wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
+		HasLabels:    hasLabels,
+		Name:         name,
+		Signature:    signature,
+		Parameters:   functionParameters(file, fn),
+		Result:       functionResult(file, fn),
+		HasResult:    fn.ResultStart != fn.ResultEnd,
+	}
 }
 
 func findBackendFunction(document Document, name string) (embeddedFunction, bool) {

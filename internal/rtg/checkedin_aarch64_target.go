@@ -119,17 +119,13 @@ func renvoDarwinArm64Image(a *renvoAsm) []byte {
 	source = append(source, "(a, argsOff, environmentOff, stateOffset)\n}\n"...)
 	source = append(source, `
 
-func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
-	if app.paramCount == 0 { return true }
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-	if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) { return false }
+func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+	if paramCount == 0 { return true }
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoDarwinArm64ArgsBSSSize
 	envOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64EnvironmentBSSAlignment)
 	g.asm.bssSize = envOff + renvoDarwinArm64EnvironmentBSSSize
-	renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, g.darwinEntryOff)
+	renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, entryStateOffset)
 	return true
 }
 `...)
@@ -236,19 +232,9 @@ func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
 	return renvoCompileAarch64(input, output, arenaSize)
 }
 
-func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-		return false
-	}
-	if app.paramCount == 0 {
+func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, paramCount int) bool {
+	if paramCount == 0 {
 		return true
-	}
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-		return false
-	}
-	if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-		return false
 	}
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoWindowsArm64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoWindowsArm64ArgsBSSSize
@@ -569,9 +555,7 @@ func compileLinuxAarch64Arena(input []int, output int, arenaSize int) int {
 	source = append(source, "(a, argsOff, environmentOff, environmentLengthOff)\n}\n"...)
 	source = append(source, `
 
-func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
+func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, paramCount int) bool {
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoLinuxAarch64ArgsBSSSize
 	envOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentBSSAlignment)
@@ -579,9 +563,7 @@ func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
 	envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentLengthBSSAlignment)
 	g.asm.bssSize = envLenOff + renvoLinuxAarch64EnvironmentLengthBSSSize
 	renvoAsmBuildArgvEnvSlicesAarch64(&g.asm, argsOff, envOff, envLenOff)
-	if app.paramCount == 0 { return true }
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-	return app.paramCount == 1 || renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ)
+	return true
 }
 `...)
 	return source
@@ -598,14 +580,14 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 		out = append(out, a.code...); out = append(out, a.data...)
 		if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 	}
-	var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+	var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 8, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, 1048576)
 	out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	out = append(out, a.code...); out = append(out, a.data...)
 	out = renvoAppendUntil(out, sec.symtabOff); out = append(out, sec.symtab...)
 	out = renvoAppendUntil(out, sec.strtabOff); out = append(out, sec.strtab...)
 	out = renvoAppendUntil(out, sec.shstrOff); out = append(out, sec.shstrtab...)
-	out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 8, 0)
 	if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 }
 
