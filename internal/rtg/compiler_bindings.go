@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "chmod_file", Suffix: "ChmodFile", Function: "renvoAsmChmodFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)"},
+	{Name: "close_file", Suffix: "CloseFile", Function: "renvoAsmCloseFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)"},
 	{Name: "open_path_length", Suffix: "OpenPathLength", Function: "renvoOpenPathNeedsLength", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "open_file", Suffix: "OpenFile", Function: "renvoAsmOpenFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)\nrenvoRTGAsmPopRegister(a, renvoRTGCallWord1)\nrenvoRTGDirectMoveImmediate(a, renvoRTGCallWord2, 493)\nreturn renvoRTGEmitRuntimeOperation(a, RTGRuntimeOpen)"},
 	{Name: "function_word_conversion", Suffix: "FunctionWordConversion", Function: "renvoSupportsFunctionWordConversion", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
