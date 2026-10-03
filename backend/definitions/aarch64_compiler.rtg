@@ -737,6 +737,15 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		primary_tertiary_operation = renvoAarch64CompilerPrimaryTertiaryOperation
+		unsigned_shift_right = renvoAarch64CompilerUnsignedShiftRight
+		signed_division_guard = renvoAarch64CompilerSignedDivisionGuard
+		unchecked_signed_division = renvoAarch64CompilerUncheckedSignedDivision
+		unchecked_bounds_check = renvoAarch64CompilerUncheckedBoundsCheck
+		bounds_success_branch = renvoAarch64CompilerBoundsSuccessBranch
+		bounds_check_helper = renvoAarch64CompilerBoundsCheckHelper
+		non_nil_check_helper = renvoAarch64CompilerNonNilCheckHelper
+		comparison_branch = renvoAarch64CompilerComparisonBranch
 		install_thread_state = renvoAarch64CompilerInstallThreadState
 		load_primary_thread_state = renvoAarch64CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoAarch64CompilerStorePrimaryThreadState
@@ -1506,5 +1515,125 @@ go compiler {
 
 	func renvoAarch64CompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
 		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerComparisonBranch(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+		cond := 0
+		if c0 == '=' {
+			if jumpIfTrue {
+				cond = 0
+			} else {
+				cond = 1
+			}
+		} else if c0 == '!' {
+			if jumpIfTrue {
+				cond = 1
+			} else {
+				cond = 0
+			}
+		} else if c0 == '<' {
+			if c1 == '=' {
+				if jumpIfTrue {
+					cond = 13
+				} else {
+					cond = 12
+				}
+			} else {
+				if jumpIfTrue {
+					cond = 11
+				} else {
+					cond = 10
+				}
+			}
+		} else if c1 == '=' {
+			if jumpIfTrue {
+				cond = 10
+			} else {
+				cond = 11
+			}
+		} else {
+			if jumpIfTrue {
+				cond = 12
+			} else {
+				cond = 13
+			}
+		}
+		if unsigned && c0 != '=' && c0 != '!' {
+			cond = 3
+			if c0 == '>' {
+				cond = 8
+			}
+			if c1 == '=' {
+				cond = cond ^ 10
+			}
+			if !jumpIfTrue {
+				cond = cond ^ 1
+			}
+		}
+		renvoAarch64AsmBCondLabel(a, label, cond)
+		return
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerPrimaryTertiaryOperation(g *renvoLinearGen, tok int) bool {
+		return renvoAarch64EmitRaxRcxOp(g, tok)
+	}
+
+	func renvoAarch64CompilerUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, 2))
+		return true
+	}
+
+	func renvoAarch64CompilerSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+		return renvoEmitSignedDivisionOverflowGuard(g, mod)
+	}
+
+	func renvoAarch64CompilerUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+	}
+
+	func renvoAarch64CompilerUncheckedBoundsCheck(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+	}
+
+	func renvoAarch64CompilerBoundsSuccessBranch(g *renvoLinearGen, done int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+		renvoAsmJnzPrimary(&g.asm, done)
+	}
+
+	func renvoAarch64CompilerBoundsCheckHelper(g *renvoLinearGen) {
+		invalid := renvoAsmNewLabel(&g.asm)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPushTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+		renvoAsmJzPrimary(&g.asm, invalid)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+		if !g.meta.panicEnabled {
+			valid := renvoAsmNewLabel(&g.asm)
+			renvoAsmJnzPrimary(&g.asm, valid)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			renvoAsmMarkLabel(&g.asm, valid)
+			renvoAsmRet(&g.asm)
+			renvoAsmMarkLabel(&g.asm, invalid)
+			renvoAsmPopTertiary(&g.asm)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmRet(&g.asm)
+	}
+
+	func renvoAarch64CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+		return -1
 	}
 }

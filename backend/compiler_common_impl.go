@@ -10481,183 +10481,6 @@ func renvoEmitJump(g *renvoLinearGen, ep *renvoExprParse, idx int, label int, ju
 	}
 	return true
 }
-func renvoEmitCompareJumpOp(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
-	renvoNonNil(a)
-	if renvoPreparedBackendActive != 0 {
-		setcc := 0x94
-		if c0 == '=' {
-			setcc = 0x94
-		} else if c0 == '!' {
-			setcc = 0x95
-		} else if c0 == '<' {
-			if c1 == '=' {
-				setcc = 0x9e
-			} else {
-				setcc = 0x9c
-			}
-		} else if c1 == '=' {
-			setcc = 0x9d
-		} else {
-			setcc = 0x9f
-		}
-		if !jumpIfTrue {
-			setcc = setcc ^ 1
-		}
-		if unsigned && c0 != '=' && c0 != '!' {
-			setcc = 0x92
-			if c0 == '>' {
-				setcc = 0x97
-			}
-			if c1 == '=' {
-				setcc = setcc ^ 4
-			}
-			if !jumpIfTrue {
-				setcc = setcc ^ 1
-			}
-		}
-		renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchWasm32 {
-		cond := renvoWasm32CondEq
-		if c0 == '=' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondEq
-			} else {
-				cond = renvoWasm32CondNe
-			}
-		} else if c0 == '!' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondNe
-			} else {
-				cond = renvoWasm32CondEq
-			}
-		} else if c0 == '<' {
-			if c1 == '=' {
-				if jumpIfTrue {
-					cond = renvoWasm32CondLe
-				} else {
-					cond = renvoWasm32CondGt
-				}
-			} else {
-				if jumpIfTrue {
-					cond = renvoWasm32CondLt
-				} else {
-					cond = renvoWasm32CondGe
-				}
-			}
-		} else if c1 == '=' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondGe
-			} else {
-				cond = renvoWasm32CondLt
-			}
-		} else {
-			if jumpIfTrue {
-				cond = renvoWasm32CondGt
-			} else {
-				cond = renvoWasm32CondLe
-			}
-		}
-		renvoWasm32EmitCondBranch(a, cond, label)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 || a.c.renvoTargetArch == renvoArchArm {
-		cond := 0
-		if c0 == '=' {
-			if jumpIfTrue {
-				cond = 0
-			} else {
-				cond = 1
-			}
-		} else if c0 == '!' {
-			if jumpIfTrue {
-				cond = 1
-			} else {
-				cond = 0
-			}
-		} else if c0 == '<' {
-			if c1 == '=' {
-				if jumpIfTrue {
-					cond = 13
-				} else {
-					cond = 12
-				}
-			} else {
-				if jumpIfTrue {
-					cond = 11
-				} else {
-					cond = 10
-				}
-			}
-		} else if c1 == '=' {
-			if jumpIfTrue {
-				cond = 10
-			} else {
-				cond = 11
-			}
-		} else {
-			if jumpIfTrue {
-				cond = 12
-			} else {
-				cond = 13
-			}
-		}
-		if unsigned && c0 != '=' && c0 != '!' {
-			cond = 3
-			if c0 == '>' {
-				cond = 8
-			}
-			if c1 == '=' {
-				cond = cond ^ 10
-			}
-			if !jumpIfTrue {
-				cond = cond ^ 1
-			}
-		}
-		if a.c.renvoTargetArch == renvoArchArm {
-			renvoArmAsmBCondLabel(a, label, cond)
-		} else {
-			renvoAarch64AsmBCondLabel(a, label, cond)
-		}
-		return
-	}
-	cond := 0x84
-	if c0 == '=' {
-		cond = 0x84
-	} else if c0 == '!' {
-		cond = 0x85
-	} else if c0 == '<' {
-		if c1 == '=' {
-			cond = 0x8e
-		} else {
-			cond = 0x8c
-		}
-	} else if c1 == '=' {
-		cond = 0x8d
-	} else {
-		cond = 0x8f
-	}
-	if !jumpIfTrue {
-		cond = cond ^ 1
-	}
-	if unsigned && c0 != '=' && c0 != '!' {
-		cond = 0x82
-		if c0 == '>' {
-			cond = 0x87
-		}
-		if c1 == '=' {
-			cond = cond ^ 4
-		}
-		if !jumpIfTrue {
-			cond = cond ^ 1
-		}
-	}
-	renvoAsmEmit2(a, 0x0f, cond)
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddReloc(a, at, label)
-}
 
 func renvoIsComparisonChars(c0 byte, c1 byte) bool {
 	return (c0 == '=' || c0 == '!') && c1 == '=' || c0 == '<' && c1 != '<' || c0 == '>' && c1 != '>'
@@ -16668,16 +16491,13 @@ func renvoEmitRuntimeNonNilPrimary(g *renvoLinearGen) {
 
 func renvoEnsureNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 	renvoNonNil(g)
+	targetHelper := renvoEmitTargetNonNilCheckHelper(g, secondary)
+	if targetHelper >= 0 {
+		return targetHelper
+	}
 	labelSlot := &g.runtimeNonNilLabel
-	register := 0
-	code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
 	if secondary {
 		labelSlot = &g.runtimeSecondaryLabel
-		register = 1
-		code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
-	}
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
 	}
 	if *labelSlot > 0 {
 		return *labelSlot - 1
@@ -19393,40 +19213,14 @@ func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
 
 func renvoEmitRuntimeBoundsCheck(g *renvoLinearGen) {
 	renvoNonNil(g)
-	a := &g.asm
 	if !g.meta.panicEnabled {
-		if g.c.renvoTarget == renvoTargetVM32 && renvoPreparedBackendActive == 0 {
-			// Keep the successful checked-index path inline. The original index
-			// remains in secondary; both invalid cases share the fault helper.
-			fault := renvoEnsureUncaughtFaultHelper(g, false)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
-			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, fault)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-			renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, fault)
-			return
-		}
-		if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAsmEmit24(a, 0xd4ff41)
-			return
-		}
-		renvoAsmCallLabel(a, renvoEnsureBoundsCheckHelper(g))
+		renvoEmitUncheckedBoundsCheck(g)
 		return
 	}
-	done := renvoAsmNewLabel(a)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		// The index is in primary and the length is in tertiary. Keep the
-		// successful path inline: helper call/return overhead is significant in
-		// parsers and other index-heavy programs, while the uncommon failure path
-		// still enters the ordinary recoverable runtime fault machinery.
-		renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8")
-		renvoAmd64AsmJccLabel(a, 0x82, done)
-	} else {
-		renvoAsmCallLabel(a, renvoEnsureBoundsCheckHelper(g))
-		renvoAsmJnzPrimary(a, done)
-	}
+	done := renvoAsmNewLabel(&g.asm)
+	renvoEmitBoundsSuccessBranch(g, done)
 	renvoEmitRuntimeFault(g)
-	renvoAsmMarkLabel(a, done)
+	renvoAsmMarkLabel(&g.asm, done)
 }
 
 func renvoEmitSliceBoundsChecks(g *renvoLinearGen, lowOff int, highOff int, maxOff int, capOff int) {
@@ -19477,79 +19271,6 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 	renvoEmitBoundsCheckHelperBody(g)
 	renvoAsmMarkLabel(&g.asm, after)
 	return label
-}
-
-func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
-	if g.c.renvoTargetArch == renvoArch386 && !g.c.code16 && renvoPreparedBackendActive == 0 {
-		a := &g.asm
-		invalid := renvoAsmNewLabel(a)
-		// Preserve the original index in secondary, as the caller expects.
-		renvoAsmEmitText(a, "\x89\xc2\x39\xc8") // mov edx, eax; cmp eax, ecx
-		renvo386AsmJccLabel(a, 0x83, invalid)
-		renvoAsmCopySecondaryToTertiary(a)
-		renvoAsmPrimaryImm(a, 1)
-		renvoAsmRet(a)
-		renvoAsmMarkLabel(a, invalid)
-		if !g.meta.panicEnabled {
-			renvoEmitUncaughtFaultTransfer(g, false)
-			return
-		}
-		renvoAsmCopySecondaryToTertiary(a)
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmRet(a)
-		return
-	}
-	if g.c.renvoTargetArch == renvoArchWasm32 && renvoPreparedBackendActive == 0 {
-		a := &g.asm
-		invalid := renvoAsmNewLabel(a)
-		// Compare the original index and length without materializing each
-		// intermediate condition or spilling the length onto the VM stack.
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
-		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
-		// Callers consume secondary as the original index. Only recoverable
-		// checks need a success flag; tertiary is restored by the caller.
-		if g.meta.panicEnabled {
-			renvoAsmPrimaryImm(a, 1)
-		}
-		renvoAsmRet(a)
-		renvoAsmMarkLabel(a, invalid)
-		if !g.meta.panicEnabled {
-			renvoEmitUncaughtFaultTransfer(g, false)
-			return
-		}
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmRet(a)
-		return
-	}
-	invalid := renvoAsmNewLabel(&g.asm)
-	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	renvoAsmPushTertiary(&g.asm)
-	renvoAsmPrimaryImm(&g.asm, 0)
-	renvoAsmCopySecondaryToTertiary(&g.asm)
-	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
-	renvoAsmJzPrimary(&g.asm, invalid)
-	renvoAsmPopPrimary(&g.asm)
-	renvoAsmCopySecondaryToTertiary(&g.asm)
-	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
-	if !g.meta.panicEnabled {
-		valid := renvoAsmNewLabel(&g.asm)
-		renvoAsmJnzPrimary(&g.asm, valid)
-		renvoEmitUncaughtFaultTransfer(g, false)
-		renvoAsmMarkLabel(&g.asm, valid)
-		renvoAsmRet(&g.asm)
-		renvoAsmMarkLabel(&g.asm, invalid)
-		renvoAsmPopTertiary(&g.asm)
-		renvoEmitUncaughtFaultTransfer(g, false)
-		return
-	}
-	renvoAsmRet(&g.asm)
-	renvoAsmMarkLabel(&g.asm, invalid)
-	renvoAsmPopTertiary(&g.asm)
-	renvoAsmPrimaryImm(&g.asm, 0)
-	renvoAsmRet(&g.asm)
 }
 
 func renvoEmitIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -20704,21 +20425,6 @@ func renvoAsmShrPrimaryImm(a *renvoAsm, imm int) {
 	// amd64 fallback for compiler-hosted unit tests that exercise emitters.
 	renvoAsmEmit4(a, 0x48, 0xc1, 0xe8, imm)
 }
-func renvoEmitBounded386UnsignedRightShift(g *renvoLinearGen, tok int) bool {
-	a := &g.asm
-	shift := renvoAsmNewLabel(a)
-	done := renvoAsmNewLabel(a)
-	renvoAsmCmpPrimaryImm8(a, 32)
-	renvo386AsmJccLabel(a, 0x82, shift)
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmJmpLabel(a, done)
-	renvoAsmMarkLabel(a, shift)
-	if !renvo386EmitRaxRcxOp(g, tok, true) {
-		return false
-	}
-	renvoAsmMarkLabel(a, done)
-	return true
-}
 
 func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
 	renvoNonNil(g)
@@ -20745,20 +20451,7 @@ func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool 
 	// Compound right shifts retain the destination's unsigned type. The
 	// untyped machine operation defaults to arithmetic shift on a full word.
 	if (kind == renvoTypeByte || kind >= renvoTypeUint16 && kind <= renvoTypeUint64) && renvoTokStartsWith(g.prog, tok, '>') {
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)
-		} else if g.c.renvoTargetArch == renvoArch386 {
-			return renvoEmitBounded386UnsignedRightShift(g, tok)
-		} else if g.c.renvoTargetArch == renvoArchArm {
-			return renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
-		} else if g.c.renvoTargetArch == renvoArchWasm32 {
-			return renvoWasm32EmitRaxRcxOp(g, tok, true)
-		} else if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe8\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8")
-		} else {
-			renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, 2))
-		}
-		return true
+		return renvoEmitTargetUnsignedShiftRight(g, tok)
 	}
 	return renvoEmitPrimaryTertiaryOp(g, tok)
 }
@@ -20774,80 +20467,18 @@ func renvoEmitUnsignedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bo
 
 func renvoEmitPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 	renvoNonNil(g)
-	// x86 and WebAssembly mask native shift counts. Bound the signed-word
-	// path explicitly, just as the typed unsigned-right-shift path does.
-	leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
-	rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
-	if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchWasm32) && (leftShift || rightShift) {
-		a := &g.asm
-		shift := renvoAsmNewLabel(a)
-		oversized := renvoAsmNewLabel(a)
-		done := renvoAsmNewLabel(a)
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoWasm32AsmCmpRaxImm8(a, 0)
-			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
-			renvoWasm32AsmCmpRaxImm8(a, 32)
-			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
-		} else {
-			renvoAsmCmpPrimaryImm8(a, 32)
-			renvo386AsmJccLabel(a, 0x82, shift)
-		}
-		renvoAsmMarkLabel(a, oversized)
-		if rightShift {
-			renvoAsmCopyTertiaryToPrimary(a)
-			renvoAsmSarPrimaryImm(a, 31)
-		} else {
-			renvoAsmPrimaryImm(a, 0)
-		}
-		renvoAsmJmpLabel(a, done)
-		renvoAsmMarkLabel(a, shift)
-		ok := false
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
-		} else {
-			ok = renvo386EmitRaxRcxOp(g, tok, false)
-		}
-		renvoAsmMarkLabel(a, done)
-		return ok
-	}
 	divide := renvoTokCharIs(g.prog, tok, '/')
 	mod := renvoTokCharIs(g.prog, tok, '%')
 	if (divide || mod) && !g.meta.panicEnabled {
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			a := &g.asm
-			nonzero := renvoAsmNewLabel(a)
-			renvoAsmJnzPrimary(a, nonzero)
-			renvoEmitUncaughtFaultTransfer(g, false)
-			renvoAsmMarkLabel(a, nonzero)
-			done := renvoEmitSignedDivisionOverflowGuard(g, mod)
-			renvoAsmDivLeftTertiaryRightPrimary(a, mod)
-			renvoAsmMarkLabel(a, done)
-		} else {
-			renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
-		}
+		renvoEmitUncheckedSignedDivision(g, mod)
 		return true
 	}
 	done := -1
 	if divide || mod {
 		renvoEmitRuntimeNonNilPrimary(g)
-		if g.c.renvoTargetArch != renvoArchAmd64 {
-			done = renvoEmitSignedDivisionOverflowGuard(g, mod)
-		}
+		done = renvoEmitTargetSignedDivisionGuard(g, mod)
 	}
-	ok := false
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
-	} else if renvoPreparedBackendActive != 0 {
-		ok = renvoRTGEmitPrimaryTertiaryOp(g, tok)
-	} else if g.c.renvoTargetArch == renvoArchAarch64 {
-		ok = renvoAarch64EmitRaxRcxOp(g, tok)
-	} else if g.c.renvoTargetArch == renvoArchArm {
-		ok = renvoArmEmitRaxRcxOp(g, tok, 0xe1a00050)
-	} else if g.c.renvoTargetArch == renvoArch386 {
-		ok = renvo386EmitRaxRcxOp(g, tok, false)
-	} else {
-		ok = renvoAmd64EmitRaxRcxOp(g, tok)
-	}
+	ok := renvoEmitTargetPrimaryTertiaryOp(g, tok)
 	if done >= 0 {
 		renvoAsmMarkLabel(&g.asm, done)
 	}
@@ -20897,10 +20528,7 @@ func renvoEmitSignedDivisionHelperBody(g *renvoLinearGen, mod bool) {
 	renvoAsmJnzPrimary(a, nonzero)
 	renvoEmitUncaughtFaultTransfer(g, false)
 	renvoAsmMarkLabel(a, nonzero)
-	done := -1
-	if g.c.renvoTargetArch != renvoArchAmd64 {
-		done = renvoEmitSignedDivisionOverflowGuard(g, mod)
-	}
+	done := renvoEmitTargetSignedDivisionGuard(g, mod)
 	renvoAsmDivLeftTertiaryRightPrimary(a, mod)
 	if done >= 0 {
 		renvoAsmMarkLabel(a, done)

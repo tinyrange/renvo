@@ -965,6 +965,15 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		primary_tertiary_operation = renvoAmd64CompilerPrimaryTertiaryOperation
+		unsigned_shift_right = renvoAmd64CompilerUnsignedShiftRight
+		signed_division_guard = renvoAmd64CompilerSignedDivisionGuard
+		unchecked_signed_division = renvoAmd64CompilerUncheckedSignedDivision
+		unchecked_bounds_check = renvoAmd64CompilerUncheckedBoundsCheck
+		bounds_success_branch = renvoAmd64CompilerBoundsSuccessBranch
+		bounds_check_helper = renvoAmd64CompilerBoundsCheckHelper
+		non_nil_check_helper = renvoAmd64CompilerNonNilCheckHelper
+		comparison_branch = renvoAmd64CompilerComparisonBranch
 		install_thread_state = renvoAmd64CompilerInstallThreadState
 		load_primary_thread_state = renvoAmd64CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoAmd64CompilerStorePrimaryThreadState
@@ -2144,5 +2153,119 @@ go compiler {
 			a.lastPrimaryLoad = -a.lastPrimaryLoad
 		}
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerComparisonBranch(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+		cond := 0x84
+		if c0 == '=' {
+			cond = 0x84
+		} else if c0 == '!' {
+			cond = 0x85
+		} else if c0 == '<' {
+			if c1 == '=' {
+				cond = 0x8e
+			} else {
+				cond = 0x8c
+			}
+		} else if c1 == '=' {
+			cond = 0x8d
+		} else {
+			cond = 0x8f
+		}
+		if !jumpIfTrue {
+			cond = cond ^ 1
+		}
+		if unsigned && c0 != '=' && c0 != '!' {
+			cond = 0x82
+			if c0 == '>' {
+				cond = 0x87
+			}
+			if c1 == '=' {
+				cond = cond ^ 4
+			}
+			if !jumpIfTrue {
+				cond = cond ^ 1
+			}
+		}
+		renvoAsmEmit2(a, 0x0f, cond)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerPrimaryTertiaryOperation(g *renvoLinearGen, tok int) bool {
+		return renvoAmd64EmitRaxRcxOp(g, tok)
+	}
+
+	func renvoAmd64CompilerUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+		renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\x89\xc8\x48\x89\xd1\x48\xd3\xe8\x48\x83\xfa\x40\x48\x19\xc9\x48\x21\xc8")
+		return true
+	}
+
+	func renvoAmd64CompilerSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+		return -1
+	}
+
+	func renvoAmd64CompilerUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+	}
+
+	func renvoAmd64CompilerUncheckedBoundsCheck(g *renvoLinearGen) {
+		renvoAsmEmit24(&g.asm, 0xd4ff41)
+	}
+
+	func renvoAmd64CompilerBoundsSuccessBranch(g *renvoLinearGen, done int) {
+		a := &g.asm
+		// The index is in primary and the length is in tertiary. Keep the
+		// successful path inline: helper call/return overhead is significant in
+		// parsers and other index-heavy programs, while the uncommon failure path
+		// still enters the ordinary recoverable runtime fault machinery.
+		renvoAsmEmitText(a, "\x48\x89\xc2\x48\x39\xc8")
+		renvoAmd64AsmJccLabel(a, 0x82, done)
+	}
+
+	func renvoAmd64CompilerBoundsCheckHelper(g *renvoLinearGen) {
+		invalid := renvoAsmNewLabel(&g.asm)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPushTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+		renvoAsmJzPrimary(&g.asm, invalid)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+		if !g.meta.panicEnabled {
+			valid := renvoAsmNewLabel(&g.asm)
+			renvoAsmJnzPrimary(&g.asm, valid)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			renvoAsmMarkLabel(&g.asm, valid)
+			renvoAsmRet(&g.asm)
+			renvoAsmMarkLabel(&g.asm, invalid)
+			renvoAsmPopTertiary(&g.asm)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmRet(&g.asm)
+	}
+
+	func renvoAmd64CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+		labelSlot := &g.runtimeNonNilLabel
+		register := 0
+		code := "\x48\x85\xc0\x74\x01\xc3\xe9\x00\x00\x00\x00"
+		if secondary {
+			labelSlot = &g.runtimeSecondaryLabel
+			register = 1
+			code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
+		}
+		return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
 	}
 }
