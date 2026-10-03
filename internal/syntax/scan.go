@@ -12,12 +12,16 @@ func Scan(src []byte) []Token {
 	return tokens
 }
 
-func scanTokens(src []byte) ([]Token, bool) { return scanTokensMode(src, false) }
+func scanTokens(src []byte) ([]Token, bool) {
+	tokens, ok, _ := scanTokensMode(src, false)
+	return tokens, ok
+}
 
-func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
+func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
+	interfaceCandidates := false
 	tokens := make([]Token, 0, scanTokenCapacity(src))
 	if !validSourceEncoding(src) {
-		return tokens, false
+		return tokens, false, false
 	}
 	ok := true
 	i := 0
@@ -91,6 +95,11 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 			size := i - start
 			if size >= 2 && size <= 9 || size == 11 {
 				kind = keywordKind(src, start, i, c)
+			}
+			// Remember the conservative constraint candidates while spelling
+			// identifiers, so nongeneric preparation can skip ordinary files.
+			if kind == TokenInterface || c == 'c' && size == 10 && bytesEqualText(src, start, i, "comparable") {
+				interfaceCandidates = true
 			}
 			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
@@ -222,7 +231,7 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 		ok = false
 	}
 	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})
-	return tokens, ok
+	return tokens, ok, interfaceCandidates
 }
 
 // Validate the entire source, including comments and raw string literals.
