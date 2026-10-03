@@ -10,6 +10,13 @@ import (
 	"testing"
 )
 
+func compilerFixtureReturn(operation compilerEmitterOperation) string {
+	if operation.Result != "" {
+		return " return " + operation.Failure + " "
+	}
+	return ""
+}
+
 // This is deliberately not one of the compiler's known architectures. A
 // bundled operation must be selectable without adding generator-side policy.
 func unfamiliarCompilerDefinition(t *testing.T, selector string, hook string) ResolveResult {
@@ -17,15 +24,15 @@ func unfamiliarCompilerDefinition(t *testing.T, selector string, hook string) Re
 	source := "definition 1\nunit unfamiliar\nimplements direct_emitter_v1\narch unfamiliar {}\nextend arch unfamiliar {\ncompiler_selector = " + selector + "\ncompiler_bindings {\n"
 	for _, operation := range compilerEmitterOperations {
 		name := hook
-		if len(operation.Parameters) != 0 {
+		if len(operation.Parameters) != 0 || operation.Receiver.Name != "" || operation.Result != "" {
 			name += operation.Suffix
 		}
 		source += operation.Name + " = " + name + "\n"
 	}
 	source += "}\n}\ngo compiler {\nfunc " + hook + "(a *renvoAsm) {}\n"
 	for _, operation := range compilerEmitterOperations {
-		if len(operation.Parameters) != 0 {
-			source += "func " + hook + operation.Suffix + operation.signature() + " {}\n"
+		if len(operation.Parameters) != 0 || operation.Receiver.Name != "" || operation.Result != "" {
+			source += "func " + hook + operation.Suffix + operation.signature() + " {" + compilerFixtureReturn(operation) + "}\n"
 		}
 	}
 	source += "}\n"
@@ -41,18 +48,19 @@ func TestBundledCompilerBindingsAreDefinitionSelected(t *testing.T) {
 	second := unfamiliarCompilerDefinition(t, "selectedTwo", "secondHook")
 	prefix := []byte(`package bindings
 
+type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 type renvoAsm struct { c *context; patchFailed bool }
-func renvoNonNil(a *renvoAsm) {}
+func renvoNonNil(values ...interface{}) {}
 const selectedOne = 41
 const selectedTwo = 73
 func firstHook(a *renvoAsm) {}
 func secondHook(a *renvoAsm) {}
 `)
 	for _, operation := range compilerEmitterOperations {
-		if len(operation.Parameters) != 0 {
+		if len(operation.Parameters) != 0 || operation.Receiver.Name != "" || operation.Result != "" {
 			for _, hook := range []string{"firstHook", "secondHook"} {
-				prefix = append(prefix, "func "+hook+operation.Suffix+operation.signature()+" {}\n"...)
+				prefix = append(prefix, "func "+hook+operation.Suffix+operation.signature()+" {"+compilerFixtureReturn(operation)+"}\n"...)
 			}
 		}
 	}
@@ -92,6 +100,9 @@ func TestCompilerBindingsRejectIncompleteAndInvalidContracts(t *testing.T) {
 		{"wrong parameter", "imm int", "imm bool", "RTG-COMPILER-004"},
 		{"missing parameter", "(a *renvoAsm, imm int)", "(a *renvoAsm)", "RTG-COMPILER-004"},
 		{"wrong argument", "a *renvoAsm", "a int", "RTG-COMPILER-004"},
+		{"lowering wrong result", "func firstHookGlobalInitFrameStart(g *renvoLinearGen) int", "func firstHookGlobalInitFrameStart(g *renvoLinearGen) bool", "RTG-COMPILER-004"},
+		{"lowering wrong receiver", "g *renvoLinearGen", "g *renvoAsm", "RTG-COMPILER-004"},
+		{"lowering bool result", "op byte, size int) bool", "op byte, size int) int", "RTG-COMPILER-004"},
 		{"wrong result", "(a *renvoAsm) {}", "(a *renvoAsm) int { return 0 }", "RTG-COMPILER-004"},
 		{"expression selector", "compiler_selector = selectedOne", "compiler_selector = selectedOne + 1", "RTG-COMPILER-001"},
 	}
@@ -146,7 +157,7 @@ func TestMigratedCompilerOperationsAreNotHandwrittenInCore(t *testing.T) {
 			continue
 		}
 		for _, operation := range compilerEmitterOperations {
-			if fn.Name.Name == "renvoAsm"+operation.Suffix {
+			if fn.Name.Name == operation.functionName() {
 				t.Errorf("%s must be supplied by generated backend bindings", fn.Name.Name)
 			}
 		}
@@ -172,6 +183,13 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 		{"explicit return semicolon", func(source, hook string) string {
 			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
 				"func "+hook+"(a *renvoAsm) { a.patchFailed = true; return; }", 1)
+		}, false},
+		{"typed result with renamed receiver", func(source, hook string) string {
+			return strings.ReplaceAll(source, "g *renvoLinearGen", "receiver *renvoLinearGen")
+		}, false},
+		{"typed result with labels", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"GlobalInitFrameStart(g *renvoLinearGen) int { return -1 }",
+				"func "+hook+"GlobalInitFrameStart(g *renvoLinearGen) int { again: if g.asm.patchFailed { g.asm.patchFailed = false; goto again }; return 17 }", 1)
 		}, false},
 		{"called by helper", func(source, hook string) string {
 			return source + "\ngo compiler { func " + hook + "Caller(a *renvoAsm) { " + hook + "(a) } }\n"
@@ -204,9 +222,10 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 				definitions = append(definitions, ResolveResult{Document: document, Ok: true})
 			}
 			prefix := []byte(`package bindings
- type context struct { renvoTargetArch int }
+ type renvoLinearGen struct { c *context; asm renvoAsm }
+type context struct { renvoTargetArch int }
  type renvoAsm struct { c *context; patchFailed bool }
- func renvoNonNil(a *renvoAsm) {}
+ func renvoNonNil(values ...interface{}) {}
  const selectedOne = 41
  const selectedTwo = 73
 `)
@@ -224,6 +243,14 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 			generated := appendBundledCompilerBindings(prefix, definitions)
 			if !generated.Ok {
 				t.Fatalf("generate: %#v", generated.Diagnostics)
+			}
+			if strings.HasPrefix(tc.name, "typed result") {
+				if !strings.Contains(string(generated.Source), "return firstHookGlobalInitFrameStart(g)") {
+					t.Fatal("nonprojectable typed hook lost its result")
+				}
+				if !strings.Contains(string(generated.Source), "g.asm.patchFailed = true\nreturn -1") {
+					t.Fatal("unknown lowering selector must fail with the frame sentinel")
+				}
 			}
 			fset := token.NewFileSet()
 			file, err := parser.ParseFile(fset, "bindings.go", generated.Source, 0)

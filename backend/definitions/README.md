@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 76 role-based operations: register copies,
+The current migration covers 85 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -162,7 +162,10 @@ the common PC-relative data displacement helper only performs layout arithmetic.
 The 386 normalization peepholes also live with their definition-owned caller.
 Literal parsing selects ordinary or split-word materialization
 without inspecting an architecture; each backend owns its scalar-width behavior.
-Hooks may take typed parameters in addition to the assembler; their complete
+Global-initializer frame setup/teardown and stack IEEE arithmetic, conversions,
+comparisons and negation are definition-owned lowering operations as well.
+Hooks may take typed parameters, an assembler or compiler-state input, and a
+validated result type. Their complete
 signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their

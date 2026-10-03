@@ -4150,6 +4150,15 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		ieee_compare_stack = renvoWasm32CompilerIEEECompareStack
+		ieee_negate_primary = renvoWasm32CompilerIEEENegatePrimary
+		global_init_frame_start = renvoWasm32CompilerGlobalInitFrameStart
+		global_init_frame_end = renvoWasm32CompilerGlobalInitFrameEnd
+		ieee_binary_stack = renvoWasm32CompilerIEEEBinaryStack
+		ieee_convert_float_stack = renvoWasm32CompilerIEEEConvertFloatStack
+		ieee_int_to_float_stack = renvoWasm32CompilerIEEEIntToFloatStack
+		ieee_float_to_int_stack = renvoWasm32CompilerIEEEFloatToIntStack
+		ieee_negate_stack = renvoWasm32CompilerIEEENegateStack
 		patch = renvoWasm32CompilerPatch
 		mul_primary_tertiary = renvoWasm32CompilerMulPrimaryTertiary
 		primary_imm64 = renvoWasm32CompilerPrimaryImm64
@@ -4638,5 +4647,60 @@ go compiler {
 
 	func renvoWasm32CompilerMulPrimaryTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerGlobalInitFrameStart(g *renvoLinearGen) int {
+		return -1
+	}
+
+	func renvoWasm32CompilerGlobalInitFrameEnd(g *renvoLinearGen, framePatch int) {
+		if framePatch < 0 {
+			return
+		}
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		g.asm.code[framePatch+1] = byte(frame & 255)
+		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+	}
+
+	func renvoWasm32CompilerIEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+		return renvoWasm32SoftFloatBinaryStack(g, dest, left, right, op, size)
+	}
+
+	func renvoWasm32CompilerIEEEConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+		renvoWasm32SoftConvertFloatStack(g, dest, source, sourceSize, destSize)
+	}
+
+	func renvoWasm32CompilerIEEEIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+		renvoWasm32SoftIntToFloatStack(g, offset, intSize, floatSize, signed)
+	}
+
+	func renvoWasm32CompilerIEEEFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+		renvoWasm32SoftFloatToIntStack(g, dest, source, floatSize, intSize, signed)
+	}
+
+	func renvoWasm32CompilerIEEENegateStack(g *renvoLinearGen, offset int, size int) {
+		renvoWasm32SoftNegateStack(g, offset, size)
+		return
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerIEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+		return renvoWasm32SoftFloatCompareStack(g, left, right, kind, c0, c1)
+	}
+
+	func renvoWasm32CompilerIEEENegatePrimary(g *renvoLinearGen, kind int) bool {
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -2147483648)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			return true
+		}
+		return false
 	}
 }

@@ -797,6 +797,393 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+		renvoEmitAmd64IEEECompareResult(&g.asm, c0, c1, kind)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		size := 8
+		if kind == renvoTypeFloat32 {
+			size = 4
+		}
+		renvoAsmEmitText(&g.asm, "\x31\xc0\x31\xd2")
+		renvo386AsmX87CompareStack(&g.asm, left, right, size)
+		renvoEmitX86IEEECompareFlagsResult(&g.asm, c0, c1)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(&g.asm, 0x1e270040) // fmov s0, w2
+			renvoAarch64AsmEmit(&g.asm, 0x1e270001) // fmov s1, w0
+			renvoAarch64AsmEmit(&g.asm, 0x1e212000) // fcmp s0, s1
+		} else {
+			renvoAarch64AsmEmit(&g.asm, 0x9e670040) // fmov d0, x2
+			renvoAarch64AsmEmit(&g.asm, 0x9e670001) // fmov d1, x0
+			renvoAarch64AsmEmit(&g.asm, 0x1e612000) // fcmp d0, d1
+		}
+		cond := 12
+		if c0 == '=' {
+			cond = 0
+		} else if c0 == '!' {
+			cond = 1
+		} else if c0 == '<' {
+			cond = 4
+			if c1 == '=' {
+				cond = 9
+			}
+		} else if c0 == '>' && c1 == '=' {
+			cond = 10
+		}
+		renvoAarch64AsmCsetRax(&g.asm, cond)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		size := 8
+		if kind == renvoTypeFloat32 {
+			size = 4
+		}
+		renvoArmAsmVFPCompareStack(&g.asm, left, right, size)
+		cond := 12
+		if c0 == '=' {
+			cond = 0
+		} else if c0 == '!' {
+			cond = 1
+		} else if c0 == '<' {
+			cond = 4
+			if c1 == '=' {
+				cond = 9
+			}
+		} else if c0 == '>' && c1 == '=' {
+			cond = 10
+		}
+		renvoArmAsmCsetRax(&g.asm, cond)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoWasm32SoftFloatCompareStack(g, left, right, kind, c0, c1)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitIEEEFloatNegatePrimary(g *renvoLinearGen, kind int) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			// btc eax, 31 preserves the payload and clears the unused high word.
+			renvoAsmEmitText(a, "\x0f\xba\xf8\x1f")
+			return true
+		}
+		// btc rax, 63 preserves every payload bit and toggles signed zero.
+		renvoAsmEmitText(a, "\x48\x0f\xba\xf8\x3f")
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm {
+
+		if kind == renvoTypeFloat32 {
+			return renvoEmit32BitIEEEFloatNegatePrimary(g)
+		}
+		return false
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e270000) // fmov s0, w0
+			renvoAarch64AsmEmit(a, 0x1e214000) // fneg s0, s0
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+			return true
+		}
+		// fmov d0, x0; fneg d0, d0; fmov x0, d0
+		renvoAarch64AsmEmit(a, 0x9e670000)
+		renvoAarch64AsmEmit(a, 0x1e614000)
+		renvoAarch64AsmEmit(a, 0x9e660000)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -2147483648)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			return true
+		}
+		return false
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitGlobalInitFrameStart(g *renvoLinearGen) int {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 {
+
+		a := &g.asm
+		framePatch := len(a.code)
+		renvoAsmEmit32(a, 0x000000c8)
+		return framePatch
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		a := &g.asm
+		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+		renvoAarch64AsmEmit(a, 0x910003fd)
+		return renvoAarch64AsmFrameStart(a)
+	
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		a := &g.asm
+		renvoArmAsmEmit(a, 0xe92d4800)
+		renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+		return renvoArmAsmFrameStart(a)
+	
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		return -1
+	
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoEmitGlobalInitFrameEnd(g *renvoLinearGen, framePatch int) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 {
+
+		renvoAsmLeave(&g.asm)
+		if framePatch < 0 {
+			return
+		}
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		g.asm.code[framePatch+1] = byte(frame & 255)
+		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmLeave(&g.asm)
+		renvoAarch64AsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoAsmLeave(&g.asm)
+		renvoArmAsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		if framePatch < 0 {
+			return
+		}
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		g.asm.code[framePatch+1] = byte(frame & 255)
+		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvo32IEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 {
+
+		return false
+	
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		return renvo386AsmX87BinaryStack(&g.asm, dest, left, right, op, size)
+	
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		return renvoArmAsmVFPBinaryStack(&g.asm, dest, left, right, op, size)
+	
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoWasm32SoftFloatBinaryStack(g, dest, left, right, op, size)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvo32IEEEConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 {
+
+
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmX87ConvertFloatStack(&g.asm, dest, source, sourceSize, destSize)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmVFPConvertFloatStack(&g.asm, dest, source, sourceSize, destSize)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32SoftConvertFloatStack(g, dest, source, sourceSize, destSize)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvo32IEEEIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 {
+
+
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmX87IntToFloatStack(&g.asm, offset, intSize, floatSize, signed)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmVFPIntToFloatStack(&g.asm, offset, intSize, floatSize, signed)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32SoftIntToFloatStack(g, offset, intSize, floatSize, signed)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvo32IEEEFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 {
+
+
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmX87FloatToIntStack(&g.asm, dest, source, floatSize, intSize, signed)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmVFPFloatToIntStack(&g.asm, dest, source, floatSize, intSize, signed)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32SoftFloatToIntStack(g, dest, source, floatSize, intSize, signed)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvo32IEEENegateStack(g *renvoLinearGen, offset int, size int) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 {
+
+
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmX87NegateStack(&g.asm, offset, size)
+		return
+	
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		highOffset := offset
+		if size == 8 {
+			highOffset -= 4
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, highOffset)
+		renvoArmAsmEmit(&g.asm, -476016382) // mov r9, #0x80000000
+		renvoArmAsmEmit(&g.asm, -534773751) // eor r0, r0, r9
+		renvoAsmStorePrimaryStack(&g.asm, highOffset)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32SoftNegateStack(g, offset, size)
+		return
+	
+}
+g.asm.patchFailed = true
+}
+
 func renvoAsmPatch(a *renvoAsm) {
 renvoNonNil(a)
 if a.c.renvoTargetArch == renvoArchAmd64 {
