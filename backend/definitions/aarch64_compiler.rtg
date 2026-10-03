@@ -469,13 +469,8 @@ go compiler {
 		}
 		session := &renvoAarch64ProgramSession{prog: p}
 		g := &session.gen
-		g.c = meta.c
-		g.prog = p
-		g.meta = meta
-		g.arenaSize = meta.arenaSize
-		g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
+		renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
 		a := &g.asm
-		renvoAsmInitWithContext(a, g.c)
 		a.codeOffset = renvoAarch64ELFCodeOffset
 		if targetIsWindows(meta.c.renvoTargetOS) {
 			a.codeOffset = renvoWinSectionRVA
@@ -490,58 +485,9 @@ go compiler {
 				}
 			}
 		}
-		if renvoFixedTarget != 0 {
-			g.funcLabels = make([]int, 0, len(meta.funcs))
-		}
-		for i := 0; i < len(meta.funcs); i++ {
-			label := renvoAsmNewLabel(a)
-			g.funcLabels = append(g.funcLabels, label)
-		}
-		renvoInitFuncQueue(g, len(meta.funcs))
-		renvoLinearMarkFunc(g, appIndex)
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			// Give the callable image entry a normal frame and preserve its four
-			// ABI words across runtime/global initialization.
-			renvoAarch64AsmEmit(a, 0xa9bf7bfd)
-			renvoAarch64AsmEmit(a, 0x910003fd)
-			renvoAarch64AsmAddRegImm(a, 31, 31, -32)
-			renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
-			renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
-			renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
-			renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
-		}
-		renvoEmitInitializeThreadState(g)
-		renvoEmitPersistentArenaReady(g)
-		if !renvoLinearInitGlobals(g) {
+		renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+		if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 			return nil
-		}
-		entryOK := false
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			entryOK = renvoEmitImageEntryArgs(g, appIndex)
-		} else {
-			entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
-		}
-		if !entryOK {
-			return nil
-		}
-		renvoAsmCallLabel(a, g.funcLabels[appIndex])
-		if !renvoEmitProgramPanicCheck(g) {
-			return nil
-		}
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			renvoAsmLeave(a)
-			renvoAsmRet(a)
-		} else if targetIsWindows(meta.c.renvoTargetOS) {
-			renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-			renvoWinArm64DefinitionExit(a)
-			renvoAsmRet(a)
-		} else if targetIsDarwin(meta.c.renvoTargetOS) {
-			renvoDarwinArm64DefinitionExit(a)
-			renvoAsmRet(a)
-		} else {
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
-			renvoAsmSyscall(a)
 		}
 		return session
 	}
@@ -704,6 +650,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		entry_runtime_registers = renvoAarch64CompilerEntryRuntimeRegisters
+		program_exit = renvoAarch64CompilerProgramExit
+		program_entry_frame = renvoAarch64CompilerProgramEntryFrame
 		image_entry_words = renvoAarch64CompilerImageEntryWords
 		process_entry_words = renvoAarch64CompilerProcessEntryWords
 		object_reverse_register_call = renvoAarch64CompilerObjectReverseRegisterCall
@@ -3348,5 +3297,49 @@ go compiler {
 		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
 		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramEntryFrame(a *renvoAsm, image bool) bool {
+		if image {
+			// Give the callable image entry a normal frame and preserve its four
+			// ABI words across runtime/global initialization.
+			renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+			renvoAarch64AsmEmit(a, 0x910003fd)
+			renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+			renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+			renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+			renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramExit(a *renvoAsm, image bool) bool {
+		if image {
+			renvoAsmLeave(a)
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+			renvoWinArm64DefinitionExit(a)
+			renvoAsmRet(a)
+		} else if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
+		return
 	}
 }

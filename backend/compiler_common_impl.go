@@ -21522,24 +21522,69 @@ func renvoEmitImageEntryArgs(g *renvoLinearGen, appIndex int) bool {
 	return count >= 0 && renvoEmitImageEntryWords(g, count)
 }
 
+// renvoEmitApplicationEntry owns language-level startup ordering. Definitions
+// preserve physical incoming words, restore reserved registers, and terminate
+// the entry; they do not inspect parsed function metadata or initialize globals.
+func renvoEmitApplicationEntry(g *renvoLinearGen, appIndex int, image bool, entryStateOffset int) bool {
+	renvoLinearMarkFunc(g, appIndex)
+	if !renvoEmitProgramEntryFrame(&g.asm, image) {
+		return false
+	}
+	if !g.meta.panicEnabled {
+		renvoEmitEntryRuntimeRegisters(g)
+	}
+	renvoEmitInitializeThreadState(g)
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return false
+	}
+	if image {
+		if !renvoEmitImageEntryArgs(g, appIndex) {
+			return false
+		}
+	} else {
+		if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
+			return false
+		}
+		// Process argument decoding may use reserved runtime registers as scratch.
+		if !g.meta.panicEnabled {
+			renvoEmitEntryRuntimeRegisters(g)
+		}
+	}
+	renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return false
+	}
+	return renvoEmitProgramExit(&g.asm, image)
+}
+
+func renvoInitLinearProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta, optimizeRuntime bool) {
+	g.c = meta.c
+	g.prog = p
+	g.meta = meta
+	g.arenaSize = meta.arenaSize
+	g.c.optimizeRuntime = optimizeRuntime && len(p.src) >= renvoLargeProgramSourceThreshold
+	renvoAsmInitWithContext(&g.asm, g.c)
+}
+
+func renvoInitProgramFunctions(g *renvoLinearGen, reserve bool) {
+	count := len(g.meta.funcs)
+	if reserve {
+		g.funcLabels = make([]int, 0, count)
+	}
+	for i := 0; i < count; i++ {
+		g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
+	}
+	renvoInitFuncQueue(g, count)
+}
+
 func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
 	renvo_runtime_ArenaDiscardDecls(p.decls)
 	renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
-	renvoAsmInitWithContext(&g.asm, g.c)
-	if renvoFixedTarget != 0 {
-		g.funcLabels = make([]int, 0, len(meta.funcs))
-	}
-	for i := 0; i < len(meta.funcs); i++ {
-		g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
+	renvoInitProgramFunctions(g, renvoFixedTarget != 0)
 	return g
 }
 

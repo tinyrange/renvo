@@ -805,6 +805,170 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64InitRuntimeCheckRegs(g)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return
+	
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitProgramExit(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if image {
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWinAmd64EmitExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(a.c.renvoTargetOS))
+			renvoAsmSyscall(a)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if image {
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWin386EmitExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if image {
+			renvoAsmLeave(a)
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+			renvoWinArm64DefinitionExit(a)
+			renvoAsmRet(a)
+		} else if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		if image {
+			renvoAsmLeave(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if image {
+			return false
+		}
+		renvoWasm32AsmExit(a)
+		return true
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoEmitProgramEntryFrame(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+			renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSFreeBSD {
+			// FreeBSD supplies the initial process-stack pointer in RDI. Preserve
+			// it as RSP before global initializers can use the ordinary call
+			// registers.
+			renvoAsmEmitText(a, "\x48\x89\xfc")
+		}
+		if image {
+			// Preserve the four linked-image ABI words while global
+			// initialization freely uses the ordinary call registers.
+			renvoAsmEmitText(a, "\x57\x56\x52\x51")
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if image {
+			// Give the callable image entry a normal frame and preserve its four
+			// ABI words across runtime/global initialization.
+			renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+			renvoAarch64AsmEmit(a, 0x910003fd)
+			renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+			renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+			renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+			renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		if image {
+			renvoArmAsmEmit(a, 0xe92d4800)
+			renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+			renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
+			renvoArmAsmStoreRegMem(a, 0, renvoArmRegSp, 0, 4)
+			renvoArmAsmStoreRegMem(a, 1, renvoArmRegSp, 4, 4)
+			renvoArmAsmStoreRegMem(a, 2, renvoArmRegSp, 8, 4)
+			renvoArmAsmStoreRegMem(a, 3, renvoArmRegSp, 12, 4)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return !image
+	
+}
+a.patchFailed = true
+return false
+}
+
 func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

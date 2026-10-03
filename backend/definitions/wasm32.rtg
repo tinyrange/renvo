@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		entry_runtime_registers = renvoWasm32CompilerEntryRuntimeRegisters
+		program_exit = renvoWasm32CompilerProgramExit
+		program_entry_frame = renvoWasm32CompilerProgramEntryFrame
 		image_entry_words = renvoWasm32CompilerImageEntryWords
 		process_entry_words = renvoWasm32CompilerProcessEntryWords
 		object_reverse_register_call = renvoWasm32CompilerObjectReverseRegisterCall
@@ -6593,5 +6596,27 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerImageEntryWords(g *renvoLinearGen, paramCount int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramEntryFrame(a *renvoAsm, image bool) bool {
+		return !image
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramExit(a *renvoAsm, image bool) bool {
+		if image {
+			return false
+		}
+		renvoWasm32AsmExit(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
+		return
 	}
 }
