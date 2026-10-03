@@ -5219,7 +5219,7 @@ func renvoFindMetaGlobalIndex(m *renvoMeta, nameStart int, nameEnd int, kind int
 	hash := renvoHashRange(m.prog.src, nameStart, nameEnd)
 	i := int(renvo_runtime_UnsafeInt32At(m.globalBuckets, hash%len(m.globalBuckets)))
 	for i >= 0 {
-		s := m.globals[i]
+		s := &m.globals[i]
 		if s.kind == kind && renvoBytesEqualRange(m.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
 			return i
 		}
@@ -6977,7 +6977,7 @@ func renvoFindResolvedNamedTypeIndex(m *renvoMeta, typ int) int {
 		if i == typ {
 			continue
 		}
-		other := m.types[i]
+		other := &m.types[i]
 		if other.nameEnd <= other.nameStart {
 			continue
 		}
