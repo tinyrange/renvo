@@ -4357,6 +4357,79 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitDereferenceSecondary(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+}
+
+func renvoEmitSecondaryFrameAddress(g *renvoLinearGen, offset int) {
+renvoNonNil(g)
+renvoAsmAddressPrimaryStack(&g.asm, offset)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+}
+
+func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoUsesRegisterIEEEComparison(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoCanCompareWordImmediate(g *renvoLinearGen, unsigned bool) bool {
+renvoNonNil(g)
+return true
+}
+
+func renvoEmitCompareWordOperands(g *renvoLinearGen, unsigned bool) bool {
+renvoNonNil(g)
+renvoRTGDirectCompare(&g.asm, renvoRTGTertiary, renvoRTGPrimary)
+return unsigned
+}
+
+func renvoEmitObjectExternalCall(g *renvoLinearGen, fn *renvoFuncInfo) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitCheckedIndexAddress(g *renvoLinearGen, elemSize int) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureIndexAddressHelper(g, elemSize))
+}
+
+func renvoEmitIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
+renvoNonNil(g)
+a := &g.asm
+renvoAsmLoadPrimaryBss(a, globalOffset)
+renvoAsmPushImm(a, 1)
+renvoAsmPopTertiary(a)
+if inc {
+	renvoAsmAddPrimaryTertiary(a)
+} else {
+	renvoAsmSubPrimaryTertiary(a)
+}
+renvoAsmStorePrimaryBss(a, globalOffset)
+return true
+}
+
+func renvoEmitIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
+renvoNonNil(g)
+a := &g.asm
+renvoAsmLoadPrimaryStack(a, localOffset)
+renvoAsmPushImm(a, 1)
+renvoAsmPopTertiary(a)
+if inc {
+	renvoAsmAddPrimaryTertiary(a)
+} else {
+	renvoAsmSubPrimaryTertiary(a)
+}
+renvoAsmStorePrimaryStack(a, localOffset)
+return true
+}
+
 func renvoEmitBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
 renvoNonNil(g)
 renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)

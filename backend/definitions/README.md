@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 157 role-based operations: register copies,
+The current migration covers 167 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -177,6 +177,11 @@ Thread-state register installation/access, stack-runtime calls, unrecoverable
 nil-check sequences, and scalar-function ABI emission also use typed hooks.
 Common function lowering retains scratch-arena lifetime and metadata cleanup.
 The x86 adjacent-push cancellation peepholes live beside their callers.
+Local/global word mutation, checked index addresses, external object calls,
+register comparisons, and secondary frame-address/dereference emission are
+also definition-owned. The core retains expression order, type eligibility,
+nil checks, and bounds policy; folded local comparisons are optional target
+operations rather than architecture branches.
 Comparison branches, bounded scalar operations and unsigned right shifts,
 signed-division guard policy, and bounds/nil-check helper emission are also
 bound by definitions. Language-level fault selection and helper lifetime stay

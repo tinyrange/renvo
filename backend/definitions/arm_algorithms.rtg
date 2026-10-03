@@ -696,6 +696,16 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		dereference_secondary = renvoArmCompilerDereferenceSecondary
+		secondary_frame_address = renvoArmCompilerSecondaryFrameAddress
+		local_word_compare_jump = renvoArmCompilerLocalWordCompareJump
+		register_ieee_comparison = renvoArmCompilerRegisterIEEEComparison
+		immediate_word_comparison = renvoArmCompilerImmediateWordComparison
+		compare_word_operands = renvoArmCompilerCompareWordOperands
+		object_external_call = renvoArmCompilerObjectExternalCall
+		checked_index_address = renvoArmCompilerCheckedIndexAddress
+		increment_global_word = renvoArmCompilerIncrementGlobalWord
+		increment_local_word = renvoArmCompilerIncrementLocalWord
 		bounded_narrow_unsigned_shift = renvoArmCompilerBoundedNarrowUnsignedShift
 		bounded_wide_word_shift = renvoArmCompilerBoundedWideWordShift
 		optimized_native_binary_expr = renvoArmCompilerOptimizedNativeBinaryExpr
@@ -2085,5 +2095,86 @@ go compiler {
 go compiler {
 	func renvoArmCompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
 		renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
+		a := &g.asm
+		renvoAsmLoadPrimaryStack(a, localOffset)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		if inc {
+			renvoAsmAddPrimaryTertiary(a)
+		} else {
+			renvoAsmSubPrimaryTertiary(a)
+		}
+		renvoAsmStorePrimaryStack(a, localOffset)
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
+		a := &g.asm
+		renvoAsmLoadPrimaryBss(a, globalOffset)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		if inc {
+			renvoAsmAddPrimaryTertiary(a)
+		} else {
+			renvoAsmSubPrimaryTertiary(a)
+		}
+		renvoAsmStorePrimaryBss(a, globalOffset)
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCheckedIndexAddress(g *renvoLinearGen, elemSize int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureIndexAddressHelper(g, elemSize))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectExternalCall(g *renvoLinearGen, fn *renvoFuncInfo) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCompareWordOperands(g *renvoLinearGen, unsigned bool) bool {
+		renvoArmAsmCmpRegReg(&g.asm, renvoArmRegRcx, renvoArmRegRax)
+		return unsigned
+	}
+}
+
+go compiler {
+	func renvoArmCompilerImmediateWordComparison(g *renvoLinearGen, unsigned bool) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerRegisterIEEEComparison(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
+		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerDereferenceSecondary(g *renvoLinearGen) {
+		renvoArmAsmLoadRegMem(&g.asm, renvoArmRegRdx, renvoArmRegRdx, 0, 4)
 	}
 }
