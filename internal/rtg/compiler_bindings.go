@@ -455,6 +455,10 @@ func compilerBindingHook(arch Declaration, name string) string {
 }
 
 func validateCompilerBindings(document Document, arch Declaration) []Diagnostic {
+	return validateCompilerBindingsIndexed(document, arch, indexEmbeddedFunctions(document, "compiler"))
+}
+
+func validateCompilerBindingsIndexed(document Document, arch Declaration, functions map[string]embeddedFunction) []Diagnostic {
 	block, bound := declarationBlock(arch, "compiler_bindings")
 	selector, selected := fieldValue(document, arch, "compiler_selector")
 	if !bound && !selected {
@@ -490,7 +494,7 @@ func validateCompilerBindings(document Document, arch Declaration) []Diagnostic 
 			continue
 		}
 		operation := compilerEmitterOperations[operationIndex]
-		function, found := findEmbeddedFunctionKind(document, right[0], "compiler")
+		function, found := functions[right[0]]
 		if !found || !directEmitterSignatureMatches(function, operation.contract()) {
 			diagnostics = append(diagnostics, statementDiagnostic(document, child, "RTG-COMPILER-004", "compiler hook "+right[0]+" must have signature func"+operation.signature()))
 		}
@@ -525,12 +529,14 @@ func appendPreparedCompilerBindings(out []byte) []byte {
 func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) GenerateResult {
 	var architectures []Declaration
 	var documents []Document
+	var functions []map[string]embeddedFunction
 	var selectors []string
 	for i := 0; i < len(definitions); i++ {
 		definition := definitions[i]
 		if !definition.Ok {
 			return GenerateResult{Diagnostics: definition.Diagnostics}
 		}
+		indexed := indexEmbeddedFunctions(definition.Document, "compiler")
 		found := false
 		for j := 0; j < len(definition.Document.Declarations); j++ {
 			arch := definition.Document.Declarations[j]
@@ -541,7 +547,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			if !ok {
 				continue
 			}
-			if diagnostics := validateCompilerBindings(definition.Document, arch); len(diagnostics) != 0 {
+			if diagnostics := validateCompilerBindingsIndexed(definition.Document, arch, indexed); len(diagnostics) != 0 {
 				return GenerateResult{Diagnostics: diagnostics}
 			}
 			if stringIndex(selectors, selector) >= 0 {
@@ -550,6 +556,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			found = true
 			architectures = append(architectures, arch)
 			documents = append(documents, definition.Document)
+			functions = append(functions, indexed)
 			selectors = append(selectors, selector)
 		}
 		if !found {
@@ -603,7 +610,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		var conditions []string
 		for j := 0; j < len(architectures); j++ {
 			hook := compilerBindingHook(architectures[j], operation.Name)
-			function, _ := findEmbeddedFunctionKind(documents[j], hook, "compiler")
+			function, _ := functions[j][hook]
 			project := compilerBindingCanProject(function, operation)
 			body := hook + operation.arguments()
 			if operation.Result != "" {
@@ -675,6 +682,7 @@ func compilerBindingCanProject(function embeddedFunction, operation compilerEmit
 // This prevents the source bundle from carrying both a hook and its projected
 // body, while retaining real cross-hook dependencies.
 func compilerProjectedPrivateHooks(document Document) []string {
+	functions := indexEmbeddedFunctions(document, "compiler")
 	var candidates []string
 	var referenced []string
 	for i := 0; i < len(document.Declarations); i++ {
@@ -685,7 +693,7 @@ func compilerProjectedPrivateHooks(document Document) []string {
 		for j := 0; j < len(compilerEmitterOperations); j++ {
 			operation := compilerEmitterOperations[j]
 			hook := compilerBindingHook(arch, operation.Name)
-			function, found := findEmbeddedFunctionKind(document, hook, "compiler")
+			function, found := functions[hook]
 			if found && compilerBindingCanProject(function, operation) && stringIndex(candidates, hook) < 0 {
 				candidates = append(candidates, hook)
 			}
