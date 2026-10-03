@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0a68cec0c28b0b13e11304088949cdbbb2c77c0baf775d77b1571144b068755c"
+const CompilerSourceDigest = "763aca315b46cdda39a228deed6e7c1fd386d2f8ad3cf74461e838a4718a19ab"
 
 // source: backend/compiler_common_impl.go
 
@@ -21450,34 +21450,9 @@ destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 renvoAsmStorePrimaryStack(a, srcOff)
 renvoAsmCopyTertiaryToPrimary(a)
 renvoAsmStorePrimaryStack(a, lenOff)
-if g.c.renvoTargetArch != renvoArchAmd64 {
-indexOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 renvoEmitArenaAllocStackPrimary(g, lenOff)
 renvoAsmStorePrimaryStack(a, destOff)
-renvoAsmStoreStackImm(a, indexOff, 0)
-loopLabel := renvoAsmNewLabel(a)
-doneLabel := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, loopLabel)
-renvoAsmJgeStackStack(a, indexOff, lenOff, doneLabel)
-renvoAsmLoadPrimaryTertiaryStack(a, srcOff, indexOff)
-renvoAsmLoadPrimaryIndexTertiarySize(a, 1)
-renvoAsmPushPrimary(a)
-renvoAsmLoadSecondaryTertiaryStack(a, destOff, indexOff)
-renvoAsmPopPrimary(a)
-renvoAsmStorePrimaryMemSecondaryTertiarySize(a, 1)
-renvoAsmIncStack(a, indexOff)
-renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
-renvoAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
-return true
-}
-renvoEmitArenaAllocStackPrimary(g, lenOff)
-renvoAsmStorePrimaryStack(a, destOff)
-renvoAsmLoadPrimaryStack(a, destOff)
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmLoadPrimaryStack(a, srcOff)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmLoadTertiaryStack(a, lenOff)
-renvoAsmEmit16(a, 0xa4f3)
+renvoEmitCopyToFreshArena(g, srcOff, destOff, lenOff)
 renvoAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 return true
 }
