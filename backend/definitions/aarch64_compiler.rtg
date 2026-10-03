@@ -737,6 +737,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		load_indirect_field_value = renvoAarch64CompilerLoadIndirectFieldValue
+		load_frame_field_value = renvoAarch64CompilerLoadFrameFieldValue
 		direct_slice_count_selector = renvoAarch64CompilerDirectSliceCountSelector
 		slice_count_result = renvoAarch64CompilerSliceCountResult
 		move_read_write_offset = renvoAarch64CompilerMoveReadWriteOffset
@@ -2794,5 +2796,27 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLoadFrameFieldValue(a *renvoAsm, offset int, size int, nativeABI bool) {
+		if nativeABI {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+		} else {
+			renvoAsmLoadPrimaryStack(a, offset)
+		}
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
+		if nativeABI {
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+		} else {
+			renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		}
 	}
 }

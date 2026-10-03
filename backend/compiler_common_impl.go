@@ -19585,6 +19585,62 @@ func renvoEmitWordBinaryOperands(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	return true
 }
 
+// renvoEmitScalarSelectorExpr resolves field semantics once; definitions own
+// the field load width and frame-address emission for the value representation.
+func renvoEmitScalarSelectorExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	a := &g.asm
+	e := &ep.exprs[idx]
+	baseType := renvoInferParsedExprType(g, ep, e.left)
+	nativeABI := renvoTypeUsesNativeABI(g.meta, baseType)
+	fieldType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+	fieldSize := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldType.kind)
+	base := &ep.exprs[e.left]
+	if renvoEmitDirectSelectorWords(g, ep, idx, 0, -1, fieldSize) {
+		if nativeABI {
+			renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
+		}
+		return true
+	}
+	if base.kind == renvoExprCall {
+		baseResolved := renvoResolveType(g.meta, baseType)
+		if baseResolved.kind == renvoTypePointer {
+			if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+				return false
+			}
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
+			if nativeABI {
+				renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
+			}
+			return true
+		}
+		if !renvoTypeIsStruct(g.meta, baseType) {
+			return false
+		}
+		fieldOffset := renvoStructFieldOffset(g, baseType, e.nameStart, e.nameEnd)
+		if fieldOffset < 0 {
+			return false
+		}
+		offset := renvoAddTypedLocal(g, 0, 0, baseType)
+		if !renvoEmitStructCallToLocal(g, ep, e.left, baseType, offset) {
+			return false
+		}
+		renvoAsmLoadFrameFieldValue(a, offset-fieldOffset, fieldSize, nativeABI)
+	} else if base.kind == renvoExprIndex {
+		return renvoEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
+	} else if offset, ok := renvoLocalStructSelectorOffset(g, ep, idx); ok {
+		renvoAsmLoadFrameFieldValue(a, offset, fieldSize, nativeABI)
+	} else {
+		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+			return false
+		}
+		renvoAsmLoadIndirectFieldValue(a, fieldSize, nativeABI)
+	}
+	if nativeABI {
+		renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
+	}
+	return true
+}
+
 func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	p := g.prog
 	a := &g.asm
@@ -19651,56 +19707,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return renvoEmitIndexExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprSelector {
-		baseType := renvoInferParsedExprType(g, ep, e.left)
-		nativeABI := renvoTypeUsesNativeABI(g.meta, baseType)
-		fieldType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
-		fieldSize := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldType.kind)
-		base := &ep.exprs[e.left]
-		if base.kind == renvoExprCall {
-			baseResolved := renvoResolveType(g.meta, baseType)
-			if baseResolved.kind == renvoTypePointer {
-				if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-					return false
-				}
-				renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-				if nativeABI {
-					renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-				}
-				return true
-			}
-			if !renvoTypeIsStruct(g.meta, baseType) {
-				return false
-			}
-			fieldOffset := renvoStructFieldOffset(g, baseType, e.nameStart, e.nameEnd)
-			if fieldOffset < 0 {
-				return false
-			}
-			offset := renvoAddTypedLocal(g, 0, 0, baseType)
-			if !renvoEmitStructCallToLocal(g, ep, e.left, baseType, offset) {
-				return false
-			}
-			if renvoPreparedBackendActive != 0 {
-				renvoRTGAsmAddressFrame(a, renvoRTGSecondary, offset-fieldOffset)
-			} else {
-				renvoAsmStackMem(a, offset-fieldOffset, 0x8d48, 0x55, 0x95)
-			}
-			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-			if nativeABI {
-				renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-			}
-			return true
-		}
-		if base.kind == renvoExprIndex {
-			return renvoEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
-		}
-		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-			return false
-		}
-		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-		if nativeABI {
-			renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-		}
-		return true
+		return renvoEmitScalarSelectorExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary {
 		if renvoTokCharIs(p, e.tok, '&') {
@@ -24451,76 +24458,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		return renvoEmitIndexExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprSelector {
-		baseType := renvoInferParsedExprType(g, ep, e.left)
-		nativeABI := renvoTypeUsesNativeABI(meta, baseType)
-		fieldType := renvoResolveType(meta, renvoInferParsedExprType(g, ep, idx))
-		renvoNonNil(fieldType)
-		fieldSize := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldType.kind)
-		base := &ep.exprs[e.left]
-		if renvoEmitDirectSelectorWords(g, ep, idx, 0, -1, fieldSize) {
-			if nativeABI {
-				renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-			}
-			return true
-		}
-		if base.kind == renvoExprCall {
-			baseResolved := renvoResolveType(meta, baseType)
-			renvoNonNil(baseResolved)
-			if baseResolved.kind == renvoTypePointer {
-				if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-					return false
-				}
-				renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-				if nativeABI {
-					renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-				}
-				return true
-			}
-			if !renvoTypeIsStruct(meta, baseType) {
-				return false
-			}
-			fieldOffset := renvoStructFieldOffset(g, baseType, e.nameStart, e.nameEnd)
-			if fieldOffset < 0 {
-				return false
-			}
-			offset := renvoAddTypedLocal(g, 0, 0, baseType)
-			if !renvoEmitStructCallToLocal(g, ep, e.left, baseType, offset) {
-				return false
-			}
-			if nativeABI {
-				renvoAsmAddressPrimaryStack(a, offset-fieldOffset)
-				renvoAsmCopyPrimaryToSecondary(a)
-				renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-				renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-			} else {
-				renvoAsmLoadPrimaryStack(a, offset-fieldOffset)
-			}
-			return true
-		}
-		if base.kind == renvoExprIndex {
-			return renvoEmitIndexedStructField(g, ep, e.left, e.nameStart, e.nameEnd)
-		}
-		if offset, ok := renvoLocalStructSelectorOffset(g, ep, idx); ok {
-			if nativeABI {
-				renvoAsmAddressPrimaryStack(a, offset)
-				renvoAsmCopyPrimaryToSecondary(a)
-				renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-				renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-			} else {
-				renvoAsmLoadPrimaryStack(a, offset)
-			}
-			return true
-		}
-		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-			return false
-		}
-		if nativeABI {
-			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, fieldSize)
-			renvoAsmNormalizePrimaryForKind(a, fieldType.kind)
-		} else {
-			renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-		}
-		return true
+		return renvoEmitScalarSelectorExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary {
 		if renvoTokCharIs(p, e.tok, '&') {
