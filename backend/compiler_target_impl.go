@@ -1,8 +1,7 @@
 package main
 
 func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-	return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
-		(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
+	return kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {

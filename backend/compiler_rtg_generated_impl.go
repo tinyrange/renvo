@@ -805,6 +805,18 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return true
+	
+}
+return false
+}
+
 func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -829,11 +841,6 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
-	
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		return false
 	
 }
 return false
@@ -1220,11 +1227,6 @@ func renvoLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
 renvoNonNil(c)
 renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		return renvoBackendValueSlotSize
-	
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if c.code16 && compactScalar {
@@ -1309,11 +1311,6 @@ renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 		return 16
-	
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		return 0
 	
 }
 return 0
@@ -1483,11 +1480,6 @@ renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 		return c.renvoTargetOS == renvoOSLinux
-	
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		return false
 	
 }
 return false
@@ -2498,11 +2490,6 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		if c.regParm == 3 {
 			return 3
 		}
-		return 0
-	
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
 		return 0
 	
 }

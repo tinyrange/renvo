@@ -622,6 +622,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		struct_argument_by_reference = renvoArmCompilerStructArgumentByReference
 		resolves_static_import = renvoArmCompilerResolvesStaticImport
 		entry_runtime_registers = renvoArmCompilerEntryRuntimeRegisters
 		program_exit = renvoArmCompilerProgramExit
@@ -3018,5 +3019,11 @@ go compiler {
 go compiler {
 	func renvoArmCompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStructArgumentByReference(c *renvoCompileContext) bool {
+		return true
 	}
 }

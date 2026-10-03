@@ -626,3 +626,76 @@ func TestCompilerBindingTailFilterKeepsNestedReturnSuffix(t *testing.T) {
 		t.Fatal("matching nested returns hid the shared tail")
 	}
 }
+
+// Query defaults may be shared, but exceptional definitions and side effects
+// must retain selection, and emission defaults must still reject unknown ISAs.
+func TestCompilerBindingQueryDefaultSelection(t *testing.T) {
+	var definitions []ResolveResult
+	for i, pair := range [][2]string{{"selectedOne", "firstHook"}, {"selectedTwo", "secondHook"}, {"selectedThree", "thirdHook"}} {
+		fixture := unfamiliarCompilerDefinition(t, pair[0], pair[1])
+		source := string(fixture.Document.Source)
+		if i != 0 {
+			body := "return true"
+			if i == 2 {
+				body = "observe(c); return false"
+			}
+			source = strings.Replace(source,
+				"func "+pair[1]+"ArenaDiscardSupported(c *renvoCompileContext) bool { return false }",
+				"func "+pair[1]+"ArenaDiscardSupported(c *renvoCompileContext) bool { "+body+" }", 1)
+		}
+		document := Parse([]byte(source), "query-default.rtg")
+		if !document.Ok {
+			t.Fatal(document.Diagnostics)
+		}
+		definitions = append(definitions, ResolveResult{Document: document, Ok: true})
+	}
+	generated := appendBundledCompilerBindings([]byte("package bindings\n"), definitions)
+	if !generated.Ok {
+		t.Fatal(generated.Diagnostics)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "bindings.go", generated.Source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, declaration := range file.Decls {
+		fn := declaration.(*ast.FuncDecl)
+		if fn.Name.Name != "renvoArenaDiscardSupported" {
+			continue
+		}
+		found = true
+		for _, selector := range []int{0, 41, 73, 99, 101} {
+			result, observed := false, false
+			for _, statement := range fn.Body.List {
+				branch, ok := statement.(*ast.IfStmt)
+				if !ok || evalCompilerBindingCondition(t, branch.Cond, 0, selector) == 0 {
+					continue
+				}
+				for _, selected := range branch.Body.List {
+					switch s := selected.(type) {
+					case *ast.ExprStmt:
+						call := s.X.(*ast.CallExpr)
+						if call.Fun.(*ast.Ident).Name != "observe" {
+							t.Fatal("unexpected query effect")
+						}
+						observed = true
+					case *ast.ReturnStmt:
+						result = s.Results[0].(*ast.Ident).Name == "true"
+					default:
+						t.Fatalf("unexpected query statement %T", s)
+					}
+				}
+			}
+			if result != (selector == 73) || observed != (selector == 99) {
+				t.Fatalf("selector=%d result=%v observed=%v", selector, result, observed)
+			}
+		}
+		last := fn.Body.List[len(fn.Body.List)-1].(*ast.ReturnStmt)
+		if last.Results[0].(*ast.Ident).Name != "false" {
+			t.Fatal("unknown query selector lost unavailable result")
+		}
+	}
+	if !found {
+		t.Fatal("query operation missing")
+	}
+}
