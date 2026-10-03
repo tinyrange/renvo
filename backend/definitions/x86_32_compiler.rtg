@@ -1300,6 +1300,11 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		folded_indexed_scalar_load = renvo386CompilerFoldedIndexedScalarLoad
+		can_fold_indexed_scalar_load = renvo386CompilerCanFoldIndexedScalarLoad
+		local_immediate_compare_jump = renvo386CompilerLocalImmediateCompareJump
+		deref_compare_jump = renvo386CompilerDerefCompareJump
+		local_bit_test_jump = renvo386CompilerLocalBitTestJump
 		negate_primary_word = renvo386CompilerNegatePrimaryWord
 		primary_address_offset = renvo386CompilerPrimaryAddressOffset
 		word_expression_peephole = renvo386CompilerWordExpressionPeephole
@@ -4153,7 +4158,13 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
-		return false
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoAsmStackMem(&g.asm, left, 0x39, 0x45, 0x85)
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
 	}
 }
 
@@ -4262,11 +4273,11 @@ go compiler {
 }
 
 go compiler {
-	func renvo386CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+	func renvo386CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
 		if renvoFixedTarget != 0 || !g.c.code16 {
 			return -1
 		}
-		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, false)
+		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, discard)
 	}
 }
 
@@ -4322,5 +4333,80 @@ go compiler {
 go compiler {
 	func renvo386CompilerNegatePrimaryWord(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xd8f7)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitLocalBitTestJump(g, ep, idx, c0, label, jumpIfTrue)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitDerefCompareJump(g, ep, idx, value, c0, c1, label, jumpIfTrue, unsigned)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		opcode := 0x81
+		if renvoAsmImmFits8Signed(value) {
+			opcode = 0x83
+		}
+		renvoAsmStackMem(&g.asm, offset, opcode, 0x7d, 0xbd)
+		if opcode == 0x83 {
+			renvoAsmEmit8(&g.asm, value)
+		} else {
+			renvoAsmEmit32(&g.asm, value)
+		}
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+		return size >= 1 && size <= 4 && (elementSize == 1 || elementSize == 2 || elementSize == 4 || elementSize == 8) && renvo386SimpleIndexExpr(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+		scale := 0
+		if elementSize == 2 {
+			scale = 1
+		} else if elementSize == 4 {
+			scale = 2
+		} else if elementSize == 8 {
+			scale = 3
+		}
+		sib := scale<<6 | 0x02
+		if size == 1 {
+			opcode := 0xb6
+			if signed {
+				opcode = 0xbe
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else if size == 2 {
+			opcode := 0xb7
+			if signed {
+				opcode = 0xbf
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else {
+			renvoAsmEmit3(a, 0x8b, 0x04, sib)
+		}
 	}
 }

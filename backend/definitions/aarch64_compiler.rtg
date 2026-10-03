@@ -737,6 +737,11 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		folded_indexed_scalar_load = renvoAarch64CompilerFoldedIndexedScalarLoad
+		can_fold_indexed_scalar_load = renvoAarch64CompilerCanFoldIndexedScalarLoad
+		local_immediate_compare_jump = renvoAarch64CompilerLocalImmediateCompareJump
+		deref_compare_jump = renvoAarch64CompilerDerefCompareJump
+		local_bit_test_jump = renvoAarch64CompilerLocalBitTestJump
 		negate_primary_word = renvoAarch64CompilerNegatePrimaryWord
 		primary_address_offset = renvoAarch64CompilerPrimaryAddressOffset
 		word_expression_peephole = renvoAarch64CompilerWordExpressionPeephole
@@ -2567,7 +2572,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoAarch64CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+	func renvoAarch64CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
 		return -1
 	}
 }
@@ -2601,5 +2606,35 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerNegatePrimaryWord(a *renvoAsm) {
 		renvoAarch64AsmNegRax(a)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+		a.patchFailed = true
 	}
 }
