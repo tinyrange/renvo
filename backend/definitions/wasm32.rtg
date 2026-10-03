@@ -4118,7 +4118,7 @@ target wasi/wasm32 {
 	runtime = wasi
 	executable = wasm_module
 	build_tags = [wasip1, wasi, wasm32, wasm]
-	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment, function_symbols]
 }
 
 target browser/wasm32 {
@@ -4132,7 +4132,7 @@ target browser/wasm32 {
 	executable = browser_wasm
 	arena_default = 134217728
 	build_tags = [browser, wasip1, wasi, wasm32, wasm]
-	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment, function_symbols]
 }
 
 target vm/vm32 {
@@ -4146,7 +4146,7 @@ target vm/vm32 {
 	runtime = vm
 	executable = rnvb_v1
 	build_tags = [vm, vm32]
-	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment, function_symbols]
 }
 
 # Bundled lowering hooks. Prepared backends use the same semantic operations
