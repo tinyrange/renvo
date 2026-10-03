@@ -805,6 +805,48 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoStoreHiddenResult(g *renvoLinearGen, offset int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64AsmStackMem(&g.asm, offset, 0x8948, 0x7d, 0xbd)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmStackMem(&g.asm, offset, 0x89, 0x5d, 0x9d)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmStoreRegStack(&g.asm, renvoAarch64RegRdi, offset)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmStoreRegStack(&g.asm, renvoArmRegRdi, offset)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitStack(&g.asm, renvoWasm32OpStoreStack, renvoWasm32RegRdi, offset)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
 func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

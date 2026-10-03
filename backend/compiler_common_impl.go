@@ -19044,6 +19044,40 @@ func renvoCanonicalMethodReceiverType(meta *renvoMeta, typ int) int {
 	return typ
 }
 
+// Function body semantics are shared across frame encodings. Targets choose
+// only whether a void fallthrough needs a deterministic primary register.
+func renvoEmitFunctionBody(g *renvoLinearGen, fnInfoIndex int, zeroVoidResult bool) bool {
+	a := &g.asm
+	metaFn := &g.meta.funcs[fnInfoIndex]
+	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
+		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
+		renvoStoreHiddenResult(g, g.returnStruct)
+	}
+	renvoBindFunctionParams(g, fnInfoIndex)
+	if !renvoBindClosureCaptures(g, fnInfoIndex) ||
+		!renvoBindNamedResults(g, fnInfoIndex) ||
+		!renvoPrepareFunctionControl(g) ||
+		!renvoEmitLinearRange(g, metaFn.bodyStart, metaFn.bodyEnd) {
+		return false
+	}
+	if g.deferReturnLabel > 0 {
+		if !g.lastRangeReturns {
+			renvoAsmJmpLabel(a, g.deferReturnLabel)
+		}
+		if !renvoEmitFunctionControlEpilogue(g) {
+			return false
+		}
+	} else if !g.lastRangeReturns {
+		renvoMoveCapturedLocals(g, true)
+		if zeroVoidResult || metaFn.resultType != 0 {
+			renvoAsmPrimaryImm(a, 0)
+		}
+		renvoAsmLeave(a)
+		renvoAsmRet(a)
+	}
+	return true
+}
+
 func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	renvoNonNil(g)
 	g.checkedPointerLocals = 0

@@ -4365,6 +4365,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoStoreHiddenResult(g *renvoLinearGen, offset int) {
+renvoNonNil(g)
+renvoRTGStoreParamWord(g, 0, offset)
+}
+
 func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return c.renvoNativeIntSize == 4 || c.renvoNativeIntSize == 2

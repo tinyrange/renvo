@@ -91,6 +91,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "store_hidden_result", Suffix: "StoreHiddenResult", Function: "renvoStoreHiddenResult", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoRTGStoreParamWord(g, 0, offset)"},
 	{Name: "struct_argument_by_reference", Suffix: "StructArgumentByReference", Function: "renvoTargetStructArgumentByReference", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return c.renvoNativeIntSize == 4 || c.renvoNativeIntSize == 2"},
 	{Name: "resolves_static_import", Suffix: "ResolvesStaticImport", Function: "renvoTargetResolvesStaticImport", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"absoluteLibrary", "bool"}}, Prepared: "return true"},
 	{Name: "entry_runtime_registers", Suffix: "EntryRuntimeRegisters", Function: "renvoEmitEntryRuntimeRegisters", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "return"},

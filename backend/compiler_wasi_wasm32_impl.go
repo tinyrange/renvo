@@ -1968,35 +1968,8 @@ func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	g.lastRangeReturns = false
 	functionPC := len(a.code)
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, g.returnStruct)
-	}
-	renvoBindFunctionParams(g, fnInfoIndex)
-	if !renvoBindClosureCaptures(g, fnInfoIndex) {
+	if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
 		return false
-	}
-	if !renvoBindNamedResults(g, fnInfoIndex) {
-		return false
-	}
-	if !renvoPrepareFunctionControl(g) {
-		return false
-	}
-	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-		return false
-	}
-	if g.deferReturnLabel > 0 {
-		if !g.lastRangeReturns {
-			renvoAsmJmpLabel(a, g.deferReturnLabel)
-		}
-		if !renvoEmitFunctionControlEpilogue(g) {
-			return false
-		}
-	} else if !g.lastRangeReturns {
-		renvoMoveCapturedLocals(g, true)
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmLeave(a)
-		renvoAsmRet(a)
 	}
 	renvoWasm32RecordDirectLocals(g, functionPC)
 	return true
