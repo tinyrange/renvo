@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "068365136fcade7842e593921647d36b70a16345fd5a8f0b54e9a36177994cb5"
+const CompilerSourceDigest = "0490526ebc3418755b21abecf0719cf100c2eba3c6f904454962e423e1a48023"
 
 // source: backend/compiler_common_impl.go
 
@@ -10251,13 +10251,7 @@ renvoAsmJzPrimary(a, label)
 }
 return true
 }
-ok := false
-if g.c.renvoTargetArch == renvoArch386 {
-ok = renvoEmitWideCompareJump(g, ep, e, label, jumpIfTrue)
-} else {
-ok = renvoEmitNativeCompareJump(g, ep, e, label, jumpIfTrue)
-}
-if ok {
+if renvoEmitWordCompareJump(g, ep, e, label, jumpIfTrue) {
 return true
 }
 }
@@ -19468,132 +19462,6 @@ renvoAsmPrimaryImm(a, -1)
 renvoAsmMarkLabel(a, normal)
 return done
 }
-func renvoEmitWideCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, label int, jumpIfTrue bool) bool {
-p := g.prog
-if e.tok < 0 || e.tok >= renvoTokCount(p) {
-return false
-}
-start := renvoTokStart(p, e.tok)
-end := renvoTokEnd(p, e.tok)
-if start >= end {
-return false
-}
-c0 := renvo_runtime_UnsafeByteAt(p.src, start)
-var c1 byte
-if start+1 < end {
-c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
-}
-if !renvoIsComparisonChars(c0, c1) {
-return false
-}
-leftIndex := e.left
-rightIndex := e.right
-usesFloat := renvoBinaryUsesFloat(g, ep, e)
-floatKind := 0
-if usesFloat {
-floatKind = renvoBinaryFloatKind(g, ep, e)
-}
-leftType := renvoInferParsedExprType(g, ep, leftIndex)
-rightType := renvoInferParsedExprType(g, ep, rightIndex)
-unsigned := (c0 == '<' || c0 == '>') &&
-(renvoExprHasUnsignedIntType(g, ep, leftIndex) || renvoExprHasUnsignedIntType(g, ep, rightIndex) ||
-renvoResolveType(g.meta, leftType).kind == renvoTypePointer ||
-renvoResolveType(g.meta, rightType).kind == renvoTypePointer)
-right := &ep.exprs[rightIndex]
-rightConst := renvoEvalConstExpr(g, ep, rightIndex)
-if renvoFixedTarget == 0 && !usesFloat && rightConst.ok && rightConst.value == 0 && (c0 == '=' || c0 == '!') &&
-renvoEmitLocalBitTestJump(g, ep, leftIndex, c0, label, jumpIfTrue) {
-return true
-}
-if renvoFixedTarget == 0 && !usesFloat && rightConst.ok && rightConst.value == 0 && (c0 == '=' || c0 == '!') {
-left := &ep.exprs[leftIndex]
-if left.kind == renvoExprCall && left.left >= 0 && left.left < len(ep.exprs) &&
-ep.exprs[left.left].kind == renvoExprIdent {
-jumpOnValue := jumpIfTrue
-if c0 == '=' {
-jumpOnValue = !jumpOnValue
-}
-inlined := renvoEmitCInlineReturn(g, ep, leftIndex, left, &ep.exprs[left.left], label, jumpOnValue)
-if inlined >= 0 {
-return inlined != 0
-}
-}
-}
-if renvoFixedTarget == 0 && !usesFloat && rightConst.ok &&
-renvoEmitDerefCompareJump(g, ep, leftIndex, rightConst.value, c0, c1, label, jumpIfTrue, unsigned) {
-return true
-}
-if renvoFixedTarget == 0 && !usesFloat && rightConst.ok {
-left := &ep.exprs[leftIndex]
-if left.kind == renvoExprIdent {
-localIndex := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
-if localIndex >= 0 && renvoTypeSize(g.meta, g.locals[localIndex].typ) == 4 {
-if renvoEmitLocalImmediateCompareJump(g, g.locals[localIndex].offset, rightConst.value, c0, c1, label, jumpIfTrue, unsigned) {
-return true
-}
-}
-}
-}
-if !usesFloat && rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
-if !renvoEmitIntExpr(g, ep, leftIndex) {
-return false
-}
-renvoAsmCmpPrimaryImm8(&g.asm, rightConst.value)
-renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
-return true
-}
-if renvoFixedTarget == 0 && !usesFloat {
-left := &ep.exprs[leftIndex]
-if left.kind == renvoExprIdent && right.kind == renvoExprIdent {
-leftLocal := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
-rightLocal := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-if leftLocal >= 0 && rightLocal >= 0 &&
-renvoTypeSize(g.meta, g.locals[leftLocal].typ) == 4 &&
-renvoTypeSize(g.meta, g.locals[rightLocal].typ) == 4 {
-if renvoEmitLocalWordCompareJump(g, g.locals[leftLocal].offset, g.locals[rightLocal].offset, c0, c1, label, jumpIfTrue, unsigned) {
-return true
-}
-}
-}
-}
-if c0 == '=' || c0 == '!' {
-leftResolved := renvoResolveType(g.meta, leftType)
-if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
-return false
-}
-if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
-return false
-}
-if right.kind == renvoExprString {
-return false
-}
-if right.kind == renvoExprIdent {
-localIndex := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-if localIndex >= 0 && renvoTypeIsString(g.meta, g.locals[localIndex].typ) {
-return false
-}
-}
-}
-if !renvoEmitWideCompareOperand(g, ep, leftIndex, floatKind) {
-return false
-}
-renvoAsmPushPrimary(&g.asm)
-if !renvoEmitWideCompareOperand(g, ep, rightIndex, floatKind) {
-return false
-}
-renvoAsmPopTertiary(&g.asm)
-renvoAsmCopyPrimaryToSecondary(&g.asm)
-renvoAsmCopyTertiaryToPrimary(&g.asm)
-renvoAsmCopySecondaryToTertiary(&g.asm)
-unsigned = renvoEmitCompareWordOperands(g, unsigned)
-if c0 == '<' {
-c0 = '>'
-} else if c0 == '>' {
-c0 = '<'
-}
-renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
-return true
-}
 
 func renvoEmitWideCompareOperand(g *renvoLinearGen, ep *renvoExprParse, idx int, floatKind int) bool {
 if renvoTypeKindIsFloat(floatKind) {
@@ -24882,7 +24750,7 @@ renvoAsmJnzLabel(a, matchLabel)
 return true
 }
 
-func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, label int, jumpIfTrue bool) bool {
+func renvoEmitWordCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, label int, jumpIfTrue bool) bool {
 renvoNonNil(g, ep, e)
 p := g.prog
 if e.tok < 0 || e.tok >= renvoTokCount(p) {
@@ -24913,9 +24781,51 @@ rightIndex := e.right
 unsigned := (c0 == '<' || c0 == '>') &&
 (renvoExprHasUnsignedIntType(g, ep, e.left) ||
 renvoExprHasUnsignedIntType(g, ep, e.right))
+if (c0 == '<' || c0 == '>') && !unsigned && renvoUsesUnsignedPointerOrdering(g) {
+leftType := renvoInferParsedExprType(g, ep, leftIndex)
+rightType := renvoInferParsedExprType(g, ep, rightIndex)
+unsigned = renvoResolveType(g.meta, leftType).kind == renvoTypePointer ||
+renvoResolveType(g.meta, rightType).kind == renvoTypePointer
+}
 right := &ep.exprs[rightIndex]
+rightConst := renvoConstResult{}
+if !usesFloat {
+rightConst = renvoEvalConstExpr(g, ep, rightIndex)
+}
+if renvoFixedTarget == 0 && !usesFloat && rightConst.ok && rightConst.value == 0 && (c0 == '=' || c0 == '!') &&
+renvoEmitLocalBitTestJump(g, ep, leftIndex, c0, label, jumpIfTrue) {
+return true
+}
+if renvoFixedTarget == 0 && !usesFloat && rightConst.ok && rightConst.value == 0 && (c0 == '=' || c0 == '!') {
+left := &ep.exprs[leftIndex]
+if left.kind == renvoExprCall && left.left >= 0 && left.left < len(ep.exprs) &&
+ep.exprs[left.left].kind == renvoExprIdent {
+jumpOnValue := jumpIfTrue
+if c0 == '=' {
+jumpOnValue = !jumpOnValue
+}
+inlined := renvoEmitCInlineReturn(g, ep, leftIndex, left, &ep.exprs[left.left], label, jumpOnValue)
+if inlined >= 0 {
+return inlined != 0
+}
+}
+}
+if renvoFixedTarget == 0 && !usesFloat && rightConst.ok &&
+renvoEmitDerefCompareJump(g, ep, leftIndex, rightConst.value, c0, c1, label, jumpIfTrue, unsigned) {
+return true
+}
+if renvoFixedTarget == 0 && !usesFloat && rightConst.ok {
+left := &ep.exprs[leftIndex]
+if left.kind == renvoExprIdent {
+localIndex := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
+if localIndex >= 0 && renvoTypeSize(g.meta, g.locals[localIndex].typ) == 4 {
+if renvoEmitLocalImmediateCompareJump(g, g.locals[localIndex].offset, rightConst.value, c0, c1, label, jumpIfTrue, unsigned) {
+return true
+}
+}
+}
+}
 if !usesFloat && renvoCanCompareWordImmediate(g, unsigned) {
-rightConst := renvoEvalConstExpr(g, ep, rightIndex)
 if rightConst.ok && renvoAsmImmFits8Signed(rightConst.value) {
 if !renvoEmitIntExpr(g, ep, leftIndex) {
 return false
@@ -24923,8 +24833,8 @@ return false
 
 
 
-renvoNormalizeNativeExprPrimary(g, ep, leftIndex)
-renvoAsmCmpPrimaryImm8Discard(&g.asm, rightConst.value)
+leftKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, leftIndex)).kind
+renvoAsmCompareWordImmediateKind(&g.asm, rightConst.value, leftKind)
 renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 return true
 }
@@ -24933,8 +24843,14 @@ left := &ep.exprs[leftIndex]
 if left.kind == renvoExprIdent && right.kind == renvoExprIdent {
 leftLocal := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
 rightLocal := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-if leftLocal >= 0 && rightLocal >= 0 && renvoTypeIsNativeInt(g.meta, g.locals[leftLocal].typ) && renvoTypeIsNativeInt(g.meta, g.locals[rightLocal].typ) {
-if renvoEmitLocalWordCompareJump(g, g.locals[leftLocal].offset, g.locals[rightLocal].offset, c0, c1, label, jumpIfTrue, unsigned) {
+if leftLocal >= 0 && rightLocal >= 0 && !usesFloat {
+leftType := g.locals[leftLocal].typ
+rightType := g.locals[rightLocal].typ
+leftKind := renvoResolveType(g.meta, leftType).kind
+rightKind := renvoResolveType(g.meta, rightType).kind
+leftSize := renvoTypeSize(g.meta, leftType)
+rightSize := renvoTypeSize(g.meta, rightType)
+if renvoEmitLocalWordCompareJump(g, g.locals[leftLocal].offset, g.locals[rightLocal].offset, c0, c1, label, jumpIfTrue, unsigned, leftKind, rightKind, leftSize, rightSize) {
 return true
 }
 }
@@ -29975,7 +29891,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x46\xb4\x8d\x9b\x78\xf4\x96\x1b\xbc\x80\x60\xb8\x5f\xa3\xf1\x94\x9f\xed\xbc\x75\x9b\x52\x2a\x69\x01\x07\x8e\x07\xb0\x0d\xc2\xa4", 3, true
+return "wasi/wasm32", "\x79\x2a\x66\xd0\x38\x5b\x99\x00\xaf\xd3\xde\x31\x67\xec\x96\x4e\x28\xe0\x20\x41\x07\x1c\x9d\x1b\x31\x7d\x0a\x93\x5b\xd8\x55\x36", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -29987,7 +29903,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xd2\xfe\x7a\x9a\x15\x75\x0d\x80\x58\x80\x8c\xee\x87\x1d\x1a\xa7\x74\x35\x74\x9f\xc0\x3a\xfd\x62\xdc\x0c\xfc\x32\x44\x7a\xe0\x6f", 3, true
+return "vm/vm32", "\xc1\xb3\x01\x9c\x68\xed\x7d\x5c\x6d\x90\x90\x30\xaa\xfa\x13\x29\x9f\xf8\xa8\xeb\x37\xba\xca\x40\xc9\x54\x61\x47\x7f\x2b\xde\x52", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -31460,6 +31376,46 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+renvoAsmNormalizePrimaryForKind(a, kind)
+renvoAsmCmpPrimaryImm8Discard(a, imm)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+renvoAsmCmpPrimaryImm8(a, imm)
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoUsesUnsignedPointerOrdering(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+return true
+
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmLogicalShiftPrimaryWordImm(a *renvoAsm, imm int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -32563,17 +32519,23 @@ return
 g.asm.patchFailed = true
 }
 
-func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool, leftKind int, rightKind int, leftSize int, rightSize int) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+if leftKind != renvoTypeInt || rightKind != renvoTypeInt {
+return false
+}
 renvoAsmLoadPrimaryStack(&g.asm, right)
 renvoAsmStackMem(&g.asm, left, 0x3948, 0x45, 0x85)
 } else if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
+if leftSize != 4 || rightSize != 4 {
+return false
+}
 if renvoFixedTarget != 0 || !g.c.code16 {
 return false
 }
@@ -44324,6 +44286,10 @@ return true
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -47522,6 +47488,10 @@ return true
 
 
 
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -50391,6 +50361,10 @@ return label
 
 
 
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -51707,6 +51681,10 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
 
 
 
@@ -55279,6 +55257,10 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
 
 
 

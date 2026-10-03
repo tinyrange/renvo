@@ -4357,6 +4357,17 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
+renvoNonNil(a)
+renvoAsmNormalizePrimaryForKind(a, kind)
+renvoAsmCmpPrimaryImm8Discard(a, imm)
+}
+
+func renvoUsesUnsignedPointerOrdering(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoAsmLogicalShiftPrimaryWordImm(a *renvoAsm, imm int) {
 renvoNonNil(a)
 renvoRTGDirectShiftRightUnsignedImmediate(a, renvoRTGPrimary, byte(imm))
@@ -4580,7 +4591,7 @@ renvoAsmAddressPrimaryStack(&g.asm, offset)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 }
 
-func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool, leftKind int, rightKind int, leftSize int, rightSize int) bool {
 renvoNonNil(g)
 return false
 }

@@ -737,6 +737,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		compare_word_immediate_kind = renvoAarch64CompilerCompareWordImmediateKind
+		unsigned_pointer_ordering = renvoAarch64CompilerUnsignedPointerOrdering
 		logical_shift_primary_word_immediate = renvoAarch64CompilerLogicalShiftPrimaryWordImmediate
 		bitwise_primary_tertiary = renvoAarch64CompilerBitwisePrimaryTertiary
 		ensure_append_bytes_helper = renvoAarch64CompilerEnsureAppendBytesHelper
@@ -2480,7 +2482,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoAarch64CompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+	func renvoAarch64CompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool, leftKind int, rightKind int, leftSize int, rightSize int) bool {
 		return false
 	}
 }
@@ -2751,5 +2753,18 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerLogicalShiftPrimaryWordImmediate(a *renvoAsm, imm int) {
 		renvoAarch64AsmEmit(a, 0xd340fc00|(imm<<16))
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerUnsignedPointerOrdering(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
+		renvoAsmNormalizePrimaryForKind(a, kind)
+		renvoAsmCmpPrimaryImm8Discard(a, imm)
 	}
 }
