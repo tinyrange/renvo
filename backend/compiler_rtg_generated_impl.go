@@ -797,6 +797,431 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64StoreParamWord(g, word, offset)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvo386StoreParamWord(g, word, offset)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64StoreParamWord(g, word, offset)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmStoreParamWord(g, word, offset)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32StoreParamWord(g, word, offset)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitTargetCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64EmitCallWithWordCount(g, fnIndex, wordCount)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmEmitCallWithWordCount(g, fnIndex, wordCount)
+	
+return
+
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitCallWithWordCount(g, fnIndex, wordCount)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmitText(&g.asm, "\x53\x48\x89\xc3\x48\x89\xc8\x31\xd2\x48\xf7\xf3")
+		if mod {
+			renvoAsmEmitText(&g.asm, "\x48\x89\xd0")
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 {
+
+		renvoAsmEmitText(&g.asm, "\x53\x89\xc3\x89\xc8\x31\xd2\xf7\xf3")
+		if mod {
+			renvoAsmEmit16(&g.asm, 0xd089)
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmMovRegReg(&g.asm, 9, 0)
+		renvoAarch64AsmEmit(&g.asm, 0x9ac00840)
+		if mod {
+			renvoAarch64AsmEmit(&g.asm, 0x9b098800)
+		}
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMovRegReg(&g.asm, 9, 0)
+		renvoArmAsmEmit(&g.asm, 0xe730f010|(0<<16)|(0<<8)|2)
+		if mod {
+			renvoArmAsmEmit(&g.asm, 0xe0600090|(2<<12)|(9<<8)|0)
+		}
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchWasm32 {
+
+		if g.c.renvoNativeIntSize != 4 {
+			return false
+		}
+		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		divisor := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		quotient := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		remainder := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoAsmStorePrimaryStack(&g.asm, divisor)
+		renvoAsmStoreStackImm(&g.asm, divisor-g.c.renvoNativeIntSize, 0)
+		renvoAsmCopyTertiaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, dividend)
+		renvoAsmStoreStackImm(&g.asm, dividend-g.c.renvoNativeIntSize, 0)
+		renvoEmitWideUnsignedDivStack(g, quotient, remainder, dividend, divisor)
+		if mod {
+			renvoAsmLoadPrimaryStack(&g.asm, remainder)
+		} else {
+			renvoAsmLoadPrimaryStack(&g.asm, quotient)
+		}
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitIEEEFloatConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		a := &g.asm
+		if sourceKind == renvoTypeUint64 && renvoTypeKindIsFloat(destKind) {
+			positive := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoAsmEmitText(a, "\x48\x85\xc0") // test rax, rax
+			renvoAmd64AsmJccLabel(a, 0x89, positive)
+			// Convert (value>>1 | value&1), then double. This retains the
+			// discarded low bit as rounding information for uint64 values whose
+			// sign bit is set.
+			renvoAsmEmitText(a, "\x48\x89\xc1\x83\xe1\x01\x48\xd1\xe8\x48\x09\xc8")
+			if destKind == renvoTypeFloat32 {
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\xf3\x0f\x58\xc0\x66\x0f\x7e\xc0")
+			} else {
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\xf2\x0f\x58\xc0\x66\x48\x0f\x7e\xc0")
+			}
+			renvoAsmJmpLabel(a, done)
+			renvoAsmMarkLabel(a, positive)
+			if destKind == renvoTypeFloat32 {
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\x66\x0f\x7e\xc0")
+			} else {
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\x66\x48\x0f\x7e\xc0")
+			}
+			renvoAsmMarkLabel(a, done)
+		} else if renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeUint64 {
+			below := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			if sourceKind == renvoTypeFloat32 {
+				// Compare against 2^63, subtract it on the upper half, then set
+				// the integer high bit after truncation.
+				renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xb9\x00\x00\x00\x5f\x66\x0f\x6e\xc9\x0f\x2e\xc1")
+				renvoAmd64AsmJccLabel(a, 0x82, below)
+				renvoAsmEmitText(a, "\xf3\x0f\x5c\xc1\xf3\x48\x0f\x2c\xc0\x48\x0f\xba\xf8\x3f")
+				renvoAsmJmpLabel(a, done)
+				renvoAsmMarkLabel(a, below)
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2c\xc0")
+			} else {
+				renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\x48\xb9")
+				renvoAsmEmit64(a, 0x43e0000000000000)
+				renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc9\x66\x0f\x2e\xc1")
+				renvoAmd64AsmJccLabel(a, 0x82, below)
+				renvoAsmEmitText(a, "\xf2\x0f\x5c\xc1\xf2\x48\x0f\x2c\xc0\x48\x0f\xba\xf8\x3f")
+				renvoAsmJmpLabel(a, done)
+				renvoAsmMarkLabel(a, below)
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2c\xc0")
+			}
+			renvoAsmMarkLabel(a, done)
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat64 {
+			// cvtsi2sd xmm0, rax; movq rax, xmm0
+			renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\x66\x48\x0f\x7e\xc0")
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			// cvtsi2ss xmm0, rax; movd eax, xmm0
+			renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\x66\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat64 && destKind == renvoTypeFloat32 {
+			// movq xmm0, rax; cvtsd2ss xmm0, xmm0; movd eax, xmm0
+			renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\xf2\x0f\x5a\xc0\x66\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat32 && destKind == renvoTypeFloat64 {
+			// movd xmm0, eax; cvtss2sd xmm0, xmm0; movq rax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xf3\x0f\x5a\xc0\x66\x48\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat32 {
+			// movd xmm0, eax; cvttss2si rax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xf3\x48\x0f\x2c\xc0")
+		} else if sourceKind == renvoTypeFloat64 {
+			// movq xmm0, rax; cvttsd2si rax, xmm0
+			renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\xf2\x48\x0f\x2c\xc0")
+		} else {
+			return false
+		}
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+		a := &g.asm
+		temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+		renvoAsmStorePrimaryStack(a, temp)
+		if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			renvo32IEEEIntToFloatStack(g, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(sourceKind))
+		} else if sourceKind == renvoTypeFloat32 && !renvoTypeKindIsFloat(destKind) {
+			renvo32IEEEFloatToIntStack(g, temp, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(destKind))
+		} else {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, temp)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		a := &g.asm
+		if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat64 {
+			op := 0x9e620000 // scvtf d0, x0
+			if renvoTypeKindIsUnsignedInteger(sourceKind) {
+				op = 0x9e630000 // ucvtf d0, x0
+			}
+			renvoAarch64AsmEmit(a, op)
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			op := 0x9e220000 // scvtf s0, x0
+			if renvoTypeKindIsUnsignedInteger(sourceKind) {
+				op = 0x9e230000 // ucvtf s0, x0
+			}
+			renvoAarch64AsmEmit(a, op)
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else if sourceKind == renvoTypeFloat64 && destKind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x9e670000) // fmov d0, x0
+			renvoAarch64AsmEmit(a, 0x1e624000) // fcvt s0, d0
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else if sourceKind == renvoTypeFloat32 && destKind == renvoTypeFloat64 {
+			renvoAarch64AsmEmit(a, 0x1e270000) // fmov s0, w0
+			renvoAarch64AsmEmit(a, 0x1e22c000) // fcvt d0, s0
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		} else if sourceKind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e270000) // fmov s0, w0
+			op := 0x9e380000                   // fcvtzs x0, s0
+			if renvoTypeKindIsUnsignedInteger(destKind) {
+				op = 0x9e390000 // fcvtzu x0, s0
+			}
+			renvoAarch64AsmEmit(a, op)
+		} else if sourceKind == renvoTypeFloat64 {
+			renvoAarch64AsmEmit(a, 0x9e670000) // fmov d0, x0
+			op := 0x9e780000                   // fcvtzs x0, d0
+			if renvoTypeKindIsUnsignedInteger(destKind) {
+				op = 0x9e790000 // fcvtzu x0, d0
+			}
+			renvoAarch64AsmEmit(a, op)
+		} else {
+			return false
+		}
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitIEEEFloatArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		a := &g.asm
+		op := 0
+		if opChar == '+' {
+			op = 0x58
+		} else if opChar == '-' {
+			op = 0x5c
+		} else if opChar == '*' {
+			op = 0x59
+		} else if opChar == '/' {
+			op = 0x5e
+		}
+		if op == 0 {
+			return false
+		}
+		if kind == renvoTypeFloat32 {
+			// movd xmm0, ecx; movd xmm1, eax; opss xmm0, xmm1; movd eax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc1\x66\x0f\x6e\xc8\xf3\x0f")
+			renvoAsmEmit2(a, op, 0xc1)
+			renvoAsmEmitText(a, "\x66\x0f\x7e\xc0")
+			return true
+		}
+		// movq xmm0, rcx; movq xmm1, rax; opsd xmm0, xmm1; movq rax, xmm0
+		renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc1\x66\x48\x0f\x6e\xc8\xf2\x0f")
+		renvoAsmEmit2(a, op, 0xc1)
+		renvoAsmEmitText(a, "\x66\x48\x0f\x7e\xc0")
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+		a := &g.asm
+		if kind != renvoTypeFloat32 {
+			return false
+		}
+		left := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		right := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		renvoAsmStorePrimaryStack(a, right)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmStorePrimaryStack(a, left)
+		if !renvo32IEEEBinaryStack(g, result, left, right, opChar, 4) {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, result)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e270040) // fmov s0, w2
+			renvoAarch64AsmEmit(a, 0x1e270001) // fmov s1, w0
+		} else {
+			renvoAarch64AsmEmit(a, 0x9e670040) // fmov d0, x2
+			renvoAarch64AsmEmit(a, 0x9e670001) // fmov d1, x0
+		}
+		op := 0
+		if opChar == '+' {
+			op = 0x1e612800
+		} else if opChar == '-' {
+			op = 0x1e613800
+		} else if opChar == '*' {
+			op = 0x1e610800
+		} else if opChar == '/' {
+			op = 0x1e611800
+		}
+		if op == 0 {
+			return false
+		}
+		if kind == renvoTypeFloat32 {
+			op -= 0x00400000
+		}
+		renvoAarch64AsmEmit(a, op)
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else {
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		}
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoEmitAmd64IEEECompareResult(&g.asm, c0, c1, kind)
+		return true
+	
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if g.c.renvoTargetArch == renvoArchAarch64 {
+
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(&g.asm, 0x1e270040) // fmov s0, w2
+			renvoAarch64AsmEmit(&g.asm, 0x1e270001) // fmov s1, w0
+			renvoAarch64AsmEmit(&g.asm, 0x1e212000) // fcmp s0, s1
+		} else {
+			renvoAarch64AsmEmit(&g.asm, 0x9e670040) // fmov d0, x2
+			renvoAarch64AsmEmit(&g.asm, 0x9e670001) // fmov d1, x0
+			renvoAarch64AsmEmit(&g.asm, 0x1e612000) // fcmp d0, d1
+		}
+		cond := 12 // gt
+		if c0 == '=' {
+			cond = 0
+		} else if c0 == '!' {
+			cond = 1
+		} else if c0 == '<' {
+			cond = 4 // mi excludes unordered, unlike lt
+			if c1 == '=' {
+				cond = 9 // ls
+			}
+		} else if c0 == '>' && c1 == '=' {
+			cond = 10 // ge
+		}
+		renvoAarch64AsmCsetRax(&g.asm, cond)
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
 renvoNonNil(g)
 if g.c.renvoTargetArch == renvoArchAmd64 {
@@ -814,7 +1239,7 @@ if g.c.renvoTargetArch == renvoArch386 {
 		}
 		renvoAsmEmitText(&g.asm, "\x31\xc0\x31\xd2")
 		renvo386AsmX87CompareStack(&g.asm, left, right, size)
-		renvoEmitX86IEEECompareFlagsResult(&g.asm, c0, c1)
+		renvo386IEEECompareFlagsResult(&g.asm, c0, c1)
 		return true
 	
 }

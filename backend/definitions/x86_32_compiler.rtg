@@ -1330,6 +1330,12 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		store_incoming_call_word = renvo386CompilerStoreIncomingCallWord
+		call_with_word_count = renvo386CompilerCallWithWordCount
+		unsigned_divide_primary_tertiary = renvo386CompilerUnsignedDividePrimaryTertiary
+		ieee_conversion_primary = renvo386CompilerIEEEConversionPrimary
+		ieee_arithmetic_primary_tertiary = renvo386CompilerIEEEArithmeticPrimaryTertiary
+		ieee_compare_primary_tertiary = renvo386CompilerIEEEComparePrimaryTertiary
 		ieee_compare_stack = renvo386CompilerIEEECompareStack
 		ieee_negate_primary = renvo386CompilerIEEENegatePrimary
 		global_init_frame_start = renvo386CompilerGlobalInitFrameStart
@@ -2136,7 +2142,7 @@ go compiler {
 		}
 		renvoAsmEmitText(&g.asm, "\x31\xc0\x31\xd2")
 		renvo386AsmX87CompareStack(&g.asm, left, right, size)
-		renvoEmitX86IEEECompareFlagsResult(&g.asm, c0, c1)
+		renvo386IEEECompareFlagsResult(&g.asm, c0, c1)
 		return true
 	}
 
@@ -2145,5 +2151,92 @@ go compiler {
 			return renvoEmit32BitIEEEFloatNegatePrimary(g)
 		}
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerIEEEConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+		a := &g.asm
+		temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+		renvoAsmStorePrimaryStack(a, temp)
+		if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			renvo32IEEEIntToFloatStack(g, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(sourceKind))
+		} else if sourceKind == renvoTypeFloat32 && !renvoTypeKindIsFloat(destKind) {
+			renvo32IEEEFloatToIntStack(g, temp, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(destKind))
+		} else {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, temp)
+		return true
+	}
+
+	func renvo386CompilerIEEEArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+		a := &g.asm
+		if kind != renvoTypeFloat32 {
+			return false
+		}
+		left := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		right := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		renvoAsmStorePrimaryStack(a, right)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmStorePrimaryStack(a, left)
+		if !renvo32IEEEBinaryStack(g, result, left, right, opChar, 4) {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, result)
+		return true
+	}
+
+	func renvo386CompilerIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386IEEECompareFlagsResult(a *renvoAsm, c0 byte, c1 byte) {
+		first := 0x97 // seta: greater-than, unordered is false
+		second := 0
+		combine := byte(0)
+		if c0 == '=' {
+			first, second, combine = 0x94, 0x9b, 0x20 // equal and ordered
+		} else if c0 == '!' {
+			first, second, combine = 0x95, 0x9a, 0x08 // unequal or unordered
+		} else if c0 == '<' {
+			first, second, combine = 0x92, 0x9b, 0x20 // below and ordered
+			if c1 == '=' {
+				first = 0x96 // below-or-equal and ordered
+			}
+		} else if c0 == '>' && c1 == '=' {
+			first = 0x93 // above-or-equal; unordered is below
+		}
+		renvoAsmEmit3(a, 0x0f, first, 0xc0)
+		if second != 0 {
+			renvoAsmEmit3(a, 0x0f, second, 0xc2)
+			renvoAsmEmit2(a, int(combine), 0xd0)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+		renvoAsmEmitText(&g.asm, "\x53\x89\xc3\x89\xc8\x31\xd2\xf7\xf3")
+		if mod {
+			renvoAsmEmit16(&g.asm, 0xd089)
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+		renvo386StoreParamWord(g, word, offset)
+	}
+
+	func renvo386CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
 	}
 }
