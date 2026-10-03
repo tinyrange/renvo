@@ -1,5 +1,7 @@
 package rtg
 
+import "renvo.dev/internal/syntax"
+
 // compilerEmitterOperation is the shared lowering surface migrated out of the
 // handwritten kernel. Bundled definitions bind it to compiler integration
 // hooks; prepared definitions implement it through direct_emitter_v1 and the
@@ -213,6 +215,7 @@ func appendPreparedCompilerBindings(out []byte) []byte {
 // architecture list here and no default ISA for an unrecognized selector.
 func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) GenerateResult {
 	var architectures []Declaration
+	var documents []Document
 	var selectors []string
 	for i := 0; i < len(definitions); i++ {
 		definition := definitions[i]
@@ -237,6 +240,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			}
 			found = true
 			architectures = append(architectures, arch)
+			documents = append(documents, definition.Document)
 			selectors = append(selectors, selector)
 		}
 		if !found {
@@ -253,11 +257,126 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			out = append(out, "if a.c.renvoTargetArch == "...)
 			out = append(out, selectors[j]...)
 			out = append(out, " {\n"...)
-			out = append(out, compilerBindingHook(architectures[j], operation.Name)...)
-			out = append(out, operation.arguments()...)
+			hook := compilerBindingHook(architectures[j], operation.Name)
+			function, _ := findEmbeddedFunctionKind(documents[j], hook, "compiler")
+			if compilerBindingCanProject(function, operation) {
+				out = append(out, function.Body...)
+			} else {
+				out = append(out, hook...)
+				out = append(out, operation.arguments()...)
+			}
 			out = append(out, "\nreturn\n}\n"...)
 		}
 		out = append(out, "a.patchFailed = true\n}\n"...)
 	}
 	return GenerateResult{Source: out, Ok: true}
+}
+
+// Project definition-owned bodies into their selected branch rather than add a
+// second call at every emission site. Returns still leave the dispatch function.
+// Noncanonical parameter names and function-scoped labels keep the call path;
+// neither requires token substitution or changes the admitted hook contract.
+func compilerBindingCanProject(function embeddedFunction, operation compilerEmitterOperation) bool {
+	if function.HasLabels || !directEmitterSignatureMatches(function, operation.contract()) ||
+		function.Parameters[0].Name != "a" {
+		return false
+	}
+	for i := 0; i < len(operation.Parameters); i++ {
+		if function.Parameters[i+1].Name != operation.Parameters[i].Name {
+			return false
+		}
+	}
+	return true
+}
+
+// Omit only private binding entrypoints which have no other Go references.
+// Keep helpers, recursive hooks and hooks used outside the dispatch surface.
+// This prevents the source bundle from carrying both a hook and its projected
+// body, while retaining real cross-hook dependencies.
+func compilerProjectedPrivateHooks(document Document) []string {
+	var candidates []string
+	var referenced []string
+	for i := 0; i < len(document.Declarations); i++ {
+		arch := document.Declarations[i]
+		if arch.Kind != DeclArch {
+			continue
+		}
+		for j := 0; j < len(compilerEmitterOperations); j++ {
+			operation := compilerEmitterOperations[j]
+			hook := compilerBindingHook(arch, operation.Name)
+			function, found := findEmbeddedFunctionKind(document, hook, "compiler")
+			if found && compilerBindingCanProject(function, operation) && stringIndex(candidates, hook) < 0 {
+				candidates = append(candidates, hook)
+			}
+			if found && !compilerBindingCanProject(function, operation) && stringIndex(referenced, hook) < 0 {
+				referenced = append(referenced, hook)
+			}
+		}
+	}
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		referenced = compilerOtherHookReferences(referenced, candidates, declaration.Statements)
+		if declaration.Kind != DeclGo {
+			continue
+		}
+		source := append([]byte("package backend\n"), declaration.GoSource...)
+		file := syntax.ParseFile(source)
+		if !file.Ok {
+			return nil
+		}
+		for j := 0; j < len(file.Tokens); j++ {
+			name := string(syntax.TokenText(source, file.Tokens[j]))
+			if stringIndex(candidates, name) < 0 || stringIndex(referenced, name) >= 0 {
+				continue
+			}
+			if j > 0 && string(syntax.TokenText(source, file.Tokens[j-1])) == "func" {
+				continue
+			}
+			referenced = append(referenced, name)
+		}
+	}
+	var private []string
+	for i := 0; i < len(candidates); i++ {
+		if stringIndex(referenced, candidates[i]) < 0 {
+			private = append(private, candidates[i])
+		}
+	}
+	return private
+}
+
+func appendCompilerBlockWithoutPrivateHooks(out []byte, source []byte, private []string) []byte {
+	prefix := "package backend\n"
+	wrapped := append([]byte(prefix), source...)
+	file := syntax.ParseFile(wrapped)
+	if !file.Ok {
+		return append(out, source...)
+	}
+	start := len(prefix)
+	for i := 0; i < len(file.Funcs); i++ {
+		function := file.Funcs[i]
+		name := string(syntax.TokenText(wrapped, file.Tokens[function.NameTok]))
+		if stringIndex(private, name) < 0 || function.ReceiverStart >= 0 {
+			continue
+		}
+		out = append(out, wrapped[start:syntax.TokenStart(file.Tokens[function.StartTok])]...)
+		start = syntax.TokenEnd(file.Tokens[function.EndTok-1])
+	}
+	return append(out, wrapped[start:]...)
+}
+
+func compilerOtherHookReferences(referenced []string, candidates []string, statements []Statement) []string {
+	for i := 0; i < len(statements); i++ {
+		statement := statements[i]
+		if statementBlockName(statement) == "compiler_bindings" {
+			continue
+		}
+		for j := 0; j < len(statement.Tokens); j++ {
+			name := statement.Tokens[j]
+			if stringIndex(candidates, name) >= 0 && stringIndex(referenced, name) < 0 {
+				referenced = append(referenced, name)
+			}
+		}
+		referenced = compilerOtherHookReferences(referenced, candidates, statement.Children)
+	}
+	return referenced
 }

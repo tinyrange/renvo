@@ -569,13 +569,14 @@ func GenerateCheckedInArchitectureAlgorithms(resolved ResolveResult, archName st
 }
 
 func appendCompilerGoBlocks(source []byte, document Document) []byte {
+	private := compilerProjectedPrivateHooks(document)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind != DeclGo || declaration.Name != "compiler" {
 			continue
 		}
 		source = append(source, '\n')
-		source = append(source, dedentGoSource(declaration.GoSource)...)
+		source = appendCompilerBlockWithoutPrivateHooks(source, dedentGoSource(declaration.GoSource), private)
 		source = append(source, '\n')
 	}
 	return source
