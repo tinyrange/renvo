@@ -536,7 +536,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	}
 	renvoInitFuncQueue(g, len(meta.funcs))
 	if renvoRTGPreparedKernelModule != 0 {
-		if !renvoBeginKernelModuleRTG(g, appIndex) {
+		if !renvoBeginKernelModule(g, appIndex) {
 			return renvoCompileResult{}
 		}
 		if !renvoEmitAllQueuedFunctionsScratch(g) {
@@ -663,7 +663,9 @@ func renvoRTGObjectRegisters() []RTGRegister {
 func renvoRTGObjectRegisterCount() int {
 	registers := renvoRTGObjectRegisters()
 	for i := 0; i < len(registers); i++ {
-		if !registers[i].Valid { return i }
+		if !registers[i].Valid {
+			return i
+		}
 	}
 	return len(registers)
 }
@@ -810,83 +812,4 @@ func renvoRTGValidateRelocations(out *renvoAsm) {
 			}
 		}
 	}
-}
-
-func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-	for i := 0; i < len(g.kernelCallbackLabels); i++ {
-		g.kernelCallbackLabels[i] = -1
-	}
-	exitIndex := -1
-	for i := 0; i < len(g.meta.funcs); i++ {
-		fn := &g.meta.funcs[i]
-		if renvoBytesEqualText(g.meta.prog.src, fn.nameStart, fn.nameEnd, "moduleExit") {
-			exitIndex = i
-		}
-	}
-	g.kernelInitLabel = renvoAsmNewLabel(a)
-	g.kernelExitLabel = -1
-	renvoAsmMarkLabel(a, g.kernelInitLabel)
-	renvoRTGKernelEntryPrologue(a)
-	renvoLinearMarkFunc(g, appIndex)
-	renvoEmitInitializeThreadState(g)
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		return false
-	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		return false
-	}
-	renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
-	renvoRTGKernelEntryEpilogue(a)
-	if exitIndex >= 0 {
-		g.kernelExitLabel = renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, g.kernelExitLabel)
-		renvoRTGKernelEntryPrologue(a)
-		renvoLinearMarkFunc(g, exitIndex)
-		renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-		renvoRTGKernelEntryEpilogue(a)
-	}
-	return true
-}
-
-func renvoRTGEmitKernelCallbackArgReverse(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int,
-) int {
-	renvoNonNil(g, ep)
-	if idx < 0 || idx >= len(ep.exprs) {
-		return -1
-	}
-	e := &ep.exprs[idx]
-	if e.kind != renvoExprIdent {
-		return -1
-	}
-	fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-	if fnIndex < 0 ||
-		renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-		return -1
-	}
-	renvoLinearMarkFunc(g, fnIndex)
-	a := &g.asm
-	label := g.kernelCallbackLabels[fnIndex]
-	first := label < 0
-	if first {
-		label = renvoAsmNewLabel(a)
-		g.kernelCallbackLabels[fnIndex] = label
-	}
-	renvoRTGKernelCallbackAddress(a, label)
-	renvoRTGAsmPushRegister(a, renvoRTGPrimary)
-	if first {
-		after := renvoAsmNewLabel(a)
-		renvoAsmJmpLabel(a, after)
-		renvoAsmMarkLabel(a, label)
-		renvoRTGKernelEntryPrologue(a)
-		renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-		renvoRTGKernelEntryEpilogue(a)
-		renvoAsmMarkLabel(a, after)
-	}
-	return 1
 }

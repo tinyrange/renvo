@@ -4365,6 +4365,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmKernelCallbackAddress(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoRTGKernelCallbackAddress(a, label)
+}
+
+func renvoAsmKernelEntryReturn(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGKernelEntryEpilogue(a)
+}
+
+func renvoEmitKernelEntryFrame(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoRTGKernelEntryPrologue(&g.asm)
+}
+
 func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 renvoNonNil(c)
 if renvoRTGPreparedSysVX8664 != 0 { return 16 }

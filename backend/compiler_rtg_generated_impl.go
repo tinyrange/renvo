@@ -805,6 +805,72 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmKernelCallbackAddress(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64KernelCallbackAddress(a, label)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		a.patchFailed = true
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmKernelEntryReturn(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64KernelEntryEpilogue(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		a.patchFailed = true
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoEmitKernelEntryFrame(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64KernelEntryPrologue(&g.asm)
+		if !g.meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		g.asm.patchFailed = true
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
 func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -828,6 +894,13 @@ renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+		if targetIsKernelModule(a.c) {
+			if wordCount < 0 || wordCount > 6 {
+				return false
+			}
+			renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
+			return true
+		}
 		if a.c.renvoTargetOS != renvoOSWindows {
 			return false
 		}

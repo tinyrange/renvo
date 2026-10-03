@@ -15939,14 +15939,8 @@ func renvoEmitCallParamArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int
 				return 1
 			}
 		}
-		if resolved.kind == renvoTypeFunc {
-			if renvoPreparedBackendActive != 0 && targetIsKernelModule(g.c) {
-				return renvoRTGEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
-			}
-			if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-				renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-				return renvoAmd64EmitKernelCallbackArgReverse(g, ep, idx, param.typ)
-			}
+		if resolved.kind == renvoTypeFunc && targetIsKernelModule(g.c) {
+			return renvoEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 		}
 		if resolved.kind == renvoTypeInterface {
 			tempOffset := renvoAddUnnamedLocal(g, param.typ)

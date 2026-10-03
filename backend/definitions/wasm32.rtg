@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		kernel_callback_address = renvoWasm32CompilerKernelCallbackAddress
+		kernel_entry_return = renvoWasm32CompilerKernelEntryReturn
+		kernel_entry_frame = renvoWasm32CompilerKernelEntryFrame
 		object_aggregate_register_bytes = renvoWasm32CompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoWasm32CompilerHostedStaticCall
 		object_register_call = renvoWasm32CompilerObjectRegisterCall
@@ -6531,5 +6534,23 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerKernelEntryFrame(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerKernelEntryReturn(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerKernelCallbackAddress(a *renvoAsm, label int) {
+		a.patchFailed = true
 	}
 }

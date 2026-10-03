@@ -696,6 +696,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		kernel_callback_address = renvoArmCompilerKernelCallbackAddress
+		kernel_entry_return = renvoArmCompilerKernelEntryReturn
+		kernel_entry_frame = renvoArmCompilerKernelEntryFrame
 		object_aggregate_register_bytes = renvoArmCompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoArmCompilerHostedStaticCall
 		object_register_call = renvoArmCompilerObjectRegisterCall
@@ -2983,5 +2986,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerKernelEntryFrame(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerKernelEntryReturn(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerKernelCallbackAddress(a *renvoAsm, label int) {
+		a.patchFailed = true
 	}
 }

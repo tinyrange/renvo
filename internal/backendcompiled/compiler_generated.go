@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c4ac014f1234ca7771b90015372357ba8643e5f9701710dab5300b31dd186307"
+const CompilerSourceDigest = "0f91b01f89a54f48b570163f0792f68dca550bfd86899f9463a06d4b3f182aa4"
 
 // source: backend/compiler_common_impl.go
 
@@ -15946,14 +15946,8 @@ renvoAsmPushPrimary(&g.asm)
 return 1
 }
 }
-if resolved.kind == renvoTypeFunc {
-if renvoPreparedBackendActive != 0 && targetIsKernelModule(g.c) {
-return renvoRTGEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
-}
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-return renvoAmd64EmitKernelCallbackArgReverse(g, ep, idx, param.typ)
-}
+if resolved.kind == renvoTypeFunc && targetIsKernelModule(g.c) {
+return renvoEmitKernelCallbackArgReverse(g, ep, idx, param.typ)
 }
 if resolved.kind == renvoTypeInterface {
 tempOffset := renvoAddUnnamedLocal(g, param.typ)
@@ -26643,12 +26637,8 @@ return false
 }
 return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 }
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
-}
-if renvoPreparedBackendActive != 0 && renvoRTGPreparedKernelModule != 0 &&
-renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
+if targetIsKernelModule(g.c) && (renvoPreparedBackendActive == 0 ||
+renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel")) {
 importID := renvoAsmAddKernelImport(
 &g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 if importID < 0 {
@@ -27257,6 +27247,82 @@ return renvoEmitIntExpr(g, ep, idx)
 
 func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
 return renvoAsmSyscallFromStack(&g.asm, wordCount, syscallNumber)
+}
+
+func renvoBeginKernelModule(g *renvoLinearGen, appIndex int) bool {
+renvoNonNil(g)
+a := &g.asm
+g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
+for i := 0; i < len(g.kernelCallbackLabels); i++ {
+g.kernelCallbackLabels[i] = -1
+}
+exitIndex := -1
+for i := 0; i < len(g.meta.funcs); i++ {
+if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
+exitIndex = i
+}
+}
+g.kernelInitLabel = renvoAsmNewLabel(a)
+g.kernelExitLabel = -1
+renvoAsmMarkLabel(a, g.kernelInitLabel)
+renvoEmitKernelEntryFrame(g)
+renvoLinearMarkFunc(g, appIndex)
+renvoEmitInitializeThreadState(g)
+renvoEmitPersistentArenaReady(g)
+if !renvoLinearInitGlobals(g) {
+return false
+}
+renvoAsmCallLabel(a, g.funcLabels[appIndex])
+if !renvoEmitProgramPanicCheck(g) {
+return false
+}
+renvoAsmPrimaryImm(a, 0)
+renvoAsmKernelEntryReturn(a)
+if exitIndex >= 0 {
+g.kernelExitLabel = renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, g.kernelExitLabel)
+renvoEmitKernelEntryFrame(g)
+renvoLinearMarkFunc(g, exitIndex)
+renvoAsmCallLabel(a, g.funcLabels[exitIndex])
+renvoAsmKernelEntryReturn(a)
+}
+return true
+}
+
+func renvoEmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
+renvoNonNil(g, ep)
+if idx < 0 || idx >= len(ep.exprs) {
+return -1
+}
+e := &ep.exprs[idx]
+if e.kind != renvoExprIdent {
+return -1
+}
+fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
+if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
+return -1
+}
+renvoLinearMarkFunc(g, fnIndex)
+a := &g.asm
+label := g.kernelCallbackLabels[fnIndex]
+first := label < 0
+if first {
+label = renvoAsmNewLabel(a)
+g.kernelCallbackLabels[fnIndex] = label
+}
+
+renvoAsmKernelCallbackAddress(a, label)
+renvoAsmPushPrimary(a)
+if first {
+after := renvoAsmNewLabel(a)
+renvoAsmJmpLabel(a, after)
+renvoAsmMarkLabel(a, label)
+renvoEmitKernelEntryFrame(g)
+renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+renvoAsmKernelEntryReturn(a)
+renvoAsmMarkLabel(a, after)
+}
+return 1
 }
 
 // source: backend/compiler_linux_impl.go
@@ -28624,7 +28690,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x8d\xf3\x32\x38\xf8\x61\xf4\xce\x0e\xfc\x03\x5f\x4e\x93\x82\x38\xca\x04\x20\x76\x07\x36\xcc\x54\xfb\xaf\x67\x7e\x7d\x3e\xf2\x1c", 3, true
+return "wasi/wasm32", "\x0a\x4a\x8a\x8f\xa7\xe3\x6f\x80\x18\x4a\xf7\xcd\x3c\x97\xd2\x63\xe7\x4c\xc7\xe1\xbb\xc1\xc8\xec\xed\x44\x8f\xca\x9f\x51\xbe\x70", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28636,7 +28702,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x6b\xd3\x35\x93\x2d\x88\xfb\xda\x9a\x34\xa7\xb1\x08\x58\x5c\x36\x60\xee\x33\x5b\xab\x6d\xe4\xa5\x63\x72\x91\xb6\x11\x36\x33\x41", 3, true
+return "vm/vm32", "\xe4\x0d\x89\xe5\x2c\x69\xf5\x7c\xee\x1d\xeb\x16\x07\x61\x1a\xa3\x0b\x36\x3c\xcc\xb2\xe6\xd4\xb1\xbf\x38\x89\x57\xab\x12\x5d\x4d", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30117,6 +30183,72 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmKernelCallbackAddress(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64KernelCallbackAddress(a, label)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a.patchFailed = true
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmKernelEntryReturn(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64KernelEntryEpilogue(a)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a.patchFailed = true
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoEmitKernelEntryFrame(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64KernelEntryPrologue(&g.asm)
+if !g.meta.panicEnabled {
+renvoAmd64InitRuntimeCheckRegs(g)
+}
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+g.asm.patchFailed = true
+
+return
+
+}
+g.asm.patchFailed = true
+}
+
 func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -30140,6 +30272,13 @@ renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+if targetIsKernelModule(a.c) {
+if wordCount < 0 || wordCount > 6 {
+return false
+}
+renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
+return true
+}
 if a.c.renvoTargetOS != renvoOSWindows {
 return false
 }
@@ -42942,7 +43081,7 @@ g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
 }
 renvoInitFuncQueue(g, len(meta.funcs))
 if renvoRTGPreparedKernelModule != 0 {
-if !renvoBeginKernelModuleRTG(g, appIndex) {
+if !renvoBeginKernelModule(g, appIndex) {
 return renvoCompileResult{}
 }
 if !renvoEmitAllQueuedFunctionsScratch(g) {
@@ -43069,7 +43208,9 @@ renvoRTGObjectArgument6, renvoRTGObjectArgument7,
 func renvoRTGObjectRegisterCount() int {
 registers := renvoRTGObjectRegisters()
 for i := 0; i < len(registers); i++ {
-if !registers[i].Valid { return i }
+if !registers[i].Valid {
+return i
+}
 }
 return len(registers)
 }
@@ -43218,85 +43359,6 @@ renvoRTGUnsupportedOperation = 2005
 }
 }
 
-func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-for i := 0; i < len(g.kernelCallbackLabels); i++ {
-g.kernelCallbackLabels[i] = -1
-}
-exitIndex := -1
-for i := 0; i < len(g.meta.funcs); i++ {
-fn := &g.meta.funcs[i]
-if renvoBytesEqualText(g.meta.prog.src, fn.nameStart, fn.nameEnd, "moduleExit") {
-exitIndex = i
-}
-}
-g.kernelInitLabel = renvoAsmNewLabel(a)
-g.kernelExitLabel = -1
-renvoAsmMarkLabel(a, g.kernelInitLabel)
-renvoRTGKernelEntryPrologue(a)
-renvoLinearMarkFunc(g, appIndex)
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return false
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return false
-}
-renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
-renvoRTGKernelEntryEpilogue(a)
-if exitIndex >= 0 {
-g.kernelExitLabel = renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, g.kernelExitLabel)
-renvoRTGKernelEntryPrologue(a)
-renvoLinearMarkFunc(g, exitIndex)
-renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-renvoRTGKernelEntryEpilogue(a)
-}
-return true
-}
-
-func renvoRTGEmitKernelCallbackArgReverse(
-g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int,
-) int {
-renvoNonNil(g, ep)
-if idx < 0 || idx >= len(ep.exprs) {
-return -1
-}
-e := &ep.exprs[idx]
-if e.kind != renvoExprIdent {
-return -1
-}
-fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-if fnIndex < 0 ||
-renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-return -1
-}
-renvoLinearMarkFunc(g, fnIndex)
-a := &g.asm
-label := g.kernelCallbackLabels[fnIndex]
-first := label < 0
-if first {
-label = renvoAsmNewLabel(a)
-g.kernelCallbackLabels[fnIndex] = label
-}
-renvoRTGKernelCallbackAddress(a, label)
-renvoRTGAsmPushRegister(a, renvoRTGPrimary)
-if first {
-after := renvoAsmNewLabel(a)
-renvoAsmJmpLabel(a, after)
-renvoAsmMarkLabel(a, label)
-renvoRTGKernelEntryPrologue(a)
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-renvoRTGKernelEntryEpilogue(a)
-renvoAsmMarkLabel(a, after)
-}
-return 1
-}
-
 // source: backend/compiler_amd64_impl.go
 
 
@@ -43415,7 +43477,7 @@ a.codeOffset = renvoWinSectionRVA
 }
 if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
-if !renvoBeginKernelModuleAmd64(g, appIndex) {
+if !renvoBeginKernelModule(g, appIndex) {
 return nil
 }
 return g
@@ -45010,6 +45072,12 @@ renvoNonNil(a)
 renvoAsmEmit16(a, 0x2548)
 renvoAsmEmit32(a, imm)
 }
+
+
+
+
+
+
 
 
 
@@ -48319,6 +48387,12 @@ return true
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51220,6 +51294,12 @@ return label
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -52536,6 +52616,12 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
 
 
 
@@ -56477,6 +56563,12 @@ renvoAsmMarkLabel(a, done)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_linux_amd64_impl.go
 
 
@@ -58863,93 +58955,6 @@ return rtgBuiltinElf64ObjectX8664KernelImage(a, initLabel, exitLabel)
 
 // source: backend/compiler_linux_kernel_amd64_impl.go
 
-func renvoBeginKernelModuleAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-for i := 0; i < len(g.kernelCallbackLabels); i++ {
-g.kernelCallbackLabels[i] = -1
-}
-exitIndex := -1
-for i := 0; i < len(g.meta.funcs); i++ {
-if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
-exitIndex = i
-}
-}
-g.kernelInitLabel = renvoAsmNewLabel(a)
-g.kernelExitLabel = -1
-renvoAsmMarkLabel(a, g.kernelInitLabel)
-
-renvoAmd64KernelEntryPrologue(a)
-renvoLinearMarkFunc(g, appIndex)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-return false
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return false
-}
-renvoAsmPrimaryImm(a, 0)
-renvoAmd64KernelEntryEpilogue(a)
-if exitIndex >= 0 {
-g.kernelExitLabel = renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, g.kernelExitLabel)
-renvoAmd64KernelEntryPrologue(a)
-renvoLinearMarkFunc(g, exitIndex)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-renvoAmd64KernelEntryEpilogue(a)
-}
-return true
-}
-
-func renvoAmd64EmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
-renvoNonNil(g, ep)
-if idx < 0 || idx >= len(ep.exprs) {
-return -1
-}
-e := &ep.exprs[idx]
-if e.kind != renvoExprIdent {
-return -1
-}
-fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-return -1
-}
-renvoLinearMarkFunc(g, fnIndex)
-a := &g.asm
-label := g.kernelCallbackLabels[fnIndex]
-first := label < 0
-if first {
-label = renvoAsmNewLabel(a)
-g.kernelCallbackLabels[fnIndex] = label
-}
-
-
-renvoAmd64KernelCallbackAddress(a, label)
-renvoAsmPushPrimary(a)
-if first {
-after := renvoAsmNewLabel(a)
-renvoAsmJmpLabel(a, after)
-renvoAsmMarkLabel(a, label)
-renvoAmd64KernelEntryPrologue(a)
-if !g.meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-renvoAmd64KernelEntryEpilogue(a)
-renvoAsmMarkLabel(a, after)
-}
-return 1
-}
-
 func renvoAsmAddKernelImport(a *renvoAsm, src []byte, nameStart int, nameEnd int) int {
 renvoNonNil(a)
 if nameStart < 0 || nameEnd <= nameStart || nameEnd > len(src) {
@@ -58960,20 +58965,6 @@ for i := nameStart; i < nameEnd; i++ {
 name = append(name, src[i])
 }
 return renvoAsmAddExternalImportName(a, string(name))
-}
-
-func renvoAmd64EmitKernelLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-renvoNonNil(g, fn)
-if wordCount < 0 || wordCount > 6 {
-return false
-}
-a := &g.asm
-importID := renvoAsmAddKernelImport(a, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-if importID < 0 {
-return false
-}
-renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
-return true
 }
 
 func renvoKernelNameFromOutput(path string) string {
