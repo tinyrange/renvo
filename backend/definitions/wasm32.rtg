@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		string_equal_left_length = renvoWasm32CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvoWasm32CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvoWasm32CompilerCanFoldIndexedScalarLoad
 		local_immediate_compare_jump = renvoWasm32CompilerLocalImmediateCompareJump
@@ -5921,5 +5922,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStringEqualLeftLength(a *renvoAsm) {
+		renvoAsmCopyPrimaryToCallWord1(a)
 	}
 }

@@ -1300,6 +1300,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		string_equal_left_length = renvo386CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvo386CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvo386CompilerCanFoldIndexedScalarLoad
 		local_immediate_compare_jump = renvo386CompilerLocalImmediateCompareJump
@@ -4408,5 +4409,11 @@ go compiler {
 		} else {
 			renvoAsmEmit3(a, 0x8b, 0x04, sib)
 		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringEqualLeftLength(a *renvoAsm) {
+		renvoAsmMovArg1Rax(a)
 	}
 }
