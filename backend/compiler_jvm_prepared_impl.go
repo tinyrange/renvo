@@ -4357,6 +4357,17 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmMoveOffsetArg(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord3, renvoRTGPrimary)
+}
+
+func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
+renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGTertiary)
+}
+
 func renvoAsmCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
 renvoNonNil(a)
 renvoAsmNormalizePrimaryForKind(a, kind)

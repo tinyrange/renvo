@@ -696,6 +696,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		move_read_write_offset = renvoArmCompilerMoveReadWriteOffset
+		prepare_read_write_buffer = renvoArmCompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoArmCompilerCompareWordImmediateKind
 		unsigned_pointer_ordering = renvoArmCompilerUnsignedPointerOrdering
 		logical_shift_primary_word_immediate = renvoArmCompilerLogicalShiftPrimaryWordImmediate
@@ -2482,5 +2484,17 @@ go compiler {
 	func renvoArmCompilerCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
 		renvoAsmNormalizePrimaryForKind(a, kind)
 		renvoAsmCmpPrimaryImm8Discard(a, imm)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerPrepareReadWriteBuffer(a *renvoAsm) {
+		renvoArmAsmPrepareReadWriteBuf(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerMoveReadWriteOffset(a *renvoAsm) {
+		renvoArmAsmMoveOffsetArg(a)
 	}
 }

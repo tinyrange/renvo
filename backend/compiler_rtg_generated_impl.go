@@ -797,6 +797,91 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmMoveOffsetArg(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64AsmMoveOffsetArg(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmMoveOffsetArg(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmMoveOffsetArg(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMoveOffsetArg(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmPrepareReadWriteBuf(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64AsmPrepareReadWriteBuf(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmPrepareReadWriteBuf(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmPrepareReadWriteBuf(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmPrepareReadWriteBuf(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32AsmMovRsiRax(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+	
+return
+
+}
+a.patchFailed = true
+}
+
 func renvoAsmCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
