@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 252 role-based operations: register copies,
+The current migration covers 255 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -224,7 +224,10 @@ Foreign static calls use definition bindings for cdecl, register arguments, and
 hosted runtime entry. Outgoing memory aggregates use a shared word-location plan
 with definition-provided register capacity and aggregate-size policy; the target
 runtime owns aligned stack storage, physical copies, relocations, and cleanup.
-The same plan is consumed by built-in and prepared SysV definitions. Other
+The same plan is consumed by built-in and prepared SysV definitions. Kernel
+module initialization, exit discovery, and callback wrapper lifetimes also share
+one lowering path; definitions own entry frames, return sequences, callback
+addresses, and foreign call emission. Other
 aggregate classification and legacy object ABI assumptions remain migration
 work, not completed generic ABI support.
 Hooks may take typed parameters, an assembler, compiler-state input, or a

@@ -121,7 +121,7 @@ go compiler {
 		}
 		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 			renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(meta.c) {
-			if !renvoBeginKernelModuleAmd64(g, appIndex) {
+			if !renvoBeginKernelModule(g, appIndex) {
 				return nil
 			}
 			return g
@@ -977,6 +977,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		kernel_callback_address = renvoAmd64CompilerKernelCallbackAddress
+		kernel_entry_return = renvoAmd64CompilerKernelEntryReturn
+		kernel_entry_frame = renvoAmd64CompilerKernelEntryFrame
 		object_aggregate_register_bytes = renvoAmd64CompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoAmd64CompilerHostedStaticCall
 		object_register_call = renvoAmd64CompilerObjectRegisterCall
@@ -4322,6 +4325,13 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+		if targetIsKernelModule(a.c) {
+			if wordCount < 0 || wordCount > 6 {
+				return false
+			}
+			renvoAmd64EmitKernelStaticCall(a, importID, wordCount)
+			return true
+		}
 		if a.c.renvoTargetOS != renvoOSWindows {
 			return false
 		}
@@ -4333,5 +4343,26 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 		return 16
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerKernelEntryFrame(g *renvoLinearGen) {
+		renvoAmd64KernelEntryPrologue(&g.asm)
+		if !g.meta.panicEnabled {
+			renvoAmd64InitRuntimeCheckRegs(g)
+		}
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerKernelEntryReturn(a *renvoAsm) {
+		renvoAmd64KernelEntryEpilogue(a)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerKernelCallbackAddress(a *renvoAsm, label int) {
+		renvoAmd64KernelCallbackAddress(a, label)
 	}
 }

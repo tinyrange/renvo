@@ -376,12 +376,8 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		return renvoAmd64EmitKernelLinkStaticCall(g, fn, wordCount)
-	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedKernelModule != 0 &&
-		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
+	if targetIsKernelModule(g.c) && (renvoPreparedBackendActive == 0 ||
+		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel")) {
 		importID := renvoAsmAddKernelImport(
 			&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {
@@ -990,4 +986,80 @@ func renvoEmitSyscallArg(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 
 func renvoEmitSyscallFromStack(g *renvoLinearGen, wordCount int, syscallNumber int) bool {
 	return renvoAsmSyscallFromStack(&g.asm, wordCount, syscallNumber)
+}
+
+func renvoBeginKernelModule(g *renvoLinearGen, appIndex int) bool {
+	renvoNonNil(g)
+	a := &g.asm
+	g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
+	for i := 0; i < len(g.kernelCallbackLabels); i++ {
+		g.kernelCallbackLabels[i] = -1
+	}
+	exitIndex := -1
+	for i := 0; i < len(g.meta.funcs); i++ {
+		if renvoBytesEqualText(g.meta.prog.src, g.meta.funcs[i].nameStart, g.meta.funcs[i].nameEnd, "moduleExit") {
+			exitIndex = i
+		}
+	}
+	g.kernelInitLabel = renvoAsmNewLabel(a)
+	g.kernelExitLabel = -1
+	renvoAsmMarkLabel(a, g.kernelInitLabel)
+	renvoEmitKernelEntryFrame(g)
+	renvoLinearMarkFunc(g, appIndex)
+	renvoEmitInitializeThreadState(g)
+	renvoEmitPersistentArenaReady(g)
+	if !renvoLinearInitGlobals(g) {
+		return false
+	}
+	renvoAsmCallLabel(a, g.funcLabels[appIndex])
+	if !renvoEmitProgramPanicCheck(g) {
+		return false
+	}
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmKernelEntryReturn(a)
+	if exitIndex >= 0 {
+		g.kernelExitLabel = renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, g.kernelExitLabel)
+		renvoEmitKernelEntryFrame(g)
+		renvoLinearMarkFunc(g, exitIndex)
+		renvoAsmCallLabel(a, g.funcLabels[exitIndex])
+		renvoAsmKernelEntryReturn(a)
+	}
+	return true
+}
+
+func renvoEmitKernelCallbackArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int) int {
+	renvoNonNil(g, ep)
+	if idx < 0 || idx >= len(ep.exprs) {
+		return -1
+	}
+	e := &ep.exprs[idx]
+	if e.kind != renvoExprIdent {
+		return -1
+	}
+	fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
+	if fnIndex < 0 || renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
+		return -1
+	}
+	renvoLinearMarkFunc(g, fnIndex)
+	a := &g.asm
+	label := g.kernelCallbackLabels[fnIndex]
+	first := label < 0
+	if first {
+		label = renvoAsmNewLabel(a)
+		g.kernelCallbackLabels[fnIndex] = label
+	}
+	// The target owns the callback address relocation and entry ABI.
+	renvoAsmKernelCallbackAddress(a, label)
+	renvoAsmPushPrimary(a)
+	if first {
+		after := renvoAsmNewLabel(a)
+		renvoAsmJmpLabel(a, after)
+		renvoAsmMarkLabel(a, label)
+		renvoEmitKernelEntryFrame(g)
+		renvoAsmCallLabel(a, g.funcLabels[fnIndex])
+		renvoAsmKernelEntryReturn(a)
+		renvoAsmMarkLabel(a, after)
+	}
+	return 1
 }

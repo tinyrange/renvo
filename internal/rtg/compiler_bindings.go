@@ -91,6 +91,9 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "kernel_callback_address", Suffix: "KernelCallbackAddress", Function: "renvoAsmKernelCallbackAddress", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"label", "int"}}, Prepared: "renvoRTGKernelCallbackAddress(a, label)"},
+	{Name: "kernel_entry_return", Suffix: "KernelEntryReturn", Function: "renvoAsmKernelEntryReturn", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGKernelEntryEpilogue(a)"},
+	{Name: "kernel_entry_frame", Suffix: "KernelEntryFrame", Function: "renvoEmitKernelEntryFrame", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGKernelEntryPrologue(&g.asm)"},
 	{Name: "object_aggregate_register_bytes", Suffix: "ObjectAggregateRegisterBytes", Function: "renvoObjectAggregateRegisterBytes", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "if renvoRTGPreparedSysVX8664 != 0 { return 16 }\nreturn 0"},
 	{Name: "hosted_static_call", Suffix: "HostedStaticCall", Function: "renvoAsmHostedStaticCall", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"importID", "int"}, {"wordCount", "int"}}, Prepared: "return renvoRTGEmitStaticCall(a, importID, wordCount)"},
 	{Name: "object_register_call", Suffix: "ObjectRegisterCall", Function: "renvoAsmObjectRegisterCall", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"importID", "int"}, {"wordCount", "int"}, {"vectorMask", "int"}}, Prepared: "return renvoRTGEmitStaticCall(a, importID, wordCount|vectorMask<<8)"},
