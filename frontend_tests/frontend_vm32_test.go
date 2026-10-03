@@ -75,7 +75,7 @@ func TestVM32FrontendCompilesNativeCompiler(t *testing.T) {
 	imagePath := filepath.Join(t.TempDir(), "renvo-frontend.rnvb")
 	cmd := frontendCommand(frontend,
 		"-t", "vm/vm32",
-		"-arena-size", "201326592",
+		"-arena-size", "134217728",
 		"-s", "-o", imagePath,
 		"./cmd/renvo",
 	)
@@ -90,7 +90,7 @@ func TestVM32FrontendCompilesNativeCompiler(t *testing.T) {
 	}
 	files := vmFrontendSourceFiles(t, root)
 	compileResult := vm.RunConfig(image, vm.Config{
-		Limits: vm.Limits{Steps: 25 * 1000 * 1000 * 1000, Memory: 256 * 1024 * 1024},
+		Limits: vm.Limits{Steps: 15 * 1000 * 1000 * 1000, Memory: 192 * 1024 * 1024},
 		Args: []string{
 			"renvo",
 			"-system", "/workspace/systems/frontend-linux-amd64.rtg",

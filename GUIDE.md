@@ -177,7 +177,7 @@ and the offline bundle containing `std/`, `forms/`, and `device/` against the
 former 4 MiB reference. Those historical comparisons are telemetry; both payloads
 must fit the shared 8 MiB ceiling. The checked-in
 `systems/frontend-linux-amd64.rtg` profile applies that full-bundle limit and
-gives the running compiler a 224 MiB arena so cross-target REPL compilation fits:
+gives the running compiler a 192 MiB arena:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
@@ -1178,8 +1178,8 @@ Native and WASI Tier 1 targets use the bundled frontend/backend compiler to buil
 itself. VM32 measures a prepared custom backend compiling a semantic regression
 program from a compact unit.
 The shared policy lives in `internal/perfgate/policy.json`: 8 MiB compiler,
-256 MiB peak memory, and median growth limits of 60% CPU, 20% memory,
-35% artifact size, and 60% VM instructions against a pinned source reference.
+256 MiB peak memory, and median growth limits of 25% CPU, 20% memory,
+10% artifact size, and 20% VM instructions against a pinned source reference.
 Both revisions execute on the same runner. Larger increases block feature
 inclusion for maintainer evaluation case by case.
 

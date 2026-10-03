@@ -100,10 +100,10 @@ compiling a semantic regression program from a compact unit. The authoritative p
 
 | Metric | Gate |
 | --- | --- |
-| CPU time (user + kernel) | At most 60% above the pinned reference |
+| CPU time (user + kernel) | At most 25% above the pinned reference |
 | Peak memory | At most 256 MiB and 20% above the reference |
-| Stripped stage-3 compiler | At most 8 MiB and 35% above the reference |
-| VM instructions | At most 60% above the reference |
+| Stripped stage-3 compiler | At most 8 MiB and 10% above the reference |
+| VM instructions | At most 20% above the reference |
 
 Reference and candidate run on the same runner: one warm-up each, followed by
 three alternating samples and median comparisons. Wall time is telemetry and a

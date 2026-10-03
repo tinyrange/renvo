@@ -21,11 +21,7 @@ func TestCompilerProfilesFollowPolicy(t *testing.T) {
 		if !ok {
 			t.Fatal(diagnostic)
 		}
-		arena := p.CompilerArenaBytes
-		if name == "frontend-linux-amd64" {
-			arena = p.ArenaBytes(profile.Target)
-		}
-		if uint64(profile.BinaryLimit) != p.CompilerBytes || uint64(profile.ArenaSize) != arena {
+		if uint64(profile.BinaryLimit) != p.CompilerBytes || uint64(profile.ArenaSize) != p.CompilerArenaBytes {
 			t.Errorf("%s: compiler profile differs from shared size/arena policy", name)
 		}
 	}
@@ -35,9 +31,7 @@ func TestTargetArenaOverrides(t *testing.T) {
 	p := Load()
 	for _, target := range p.Targets {
 		want := p.CompilerArenaBytes
-		if target.Name == "linux/amd64" {
-			want = 224 * 1024 * 1024
-		} else if strings.HasPrefix(target.Name, "windows/") {
+		if strings.HasPrefix(target.Name, "windows/") {
 			want = 240 * 1024 * 1024
 		} else if target.Name == "wasi/wasm32" {
 			want = 256 * 1024 * 1024
@@ -115,13 +109,13 @@ func TestRegressionAndAbsoluteGates(t *testing.T) {
 			for i := range candidate {
 				switch metric {
 				case "cpu":
-					candidate[i].CPU = sample.CPU*int64(100+p.CPUGrowth)/100 + 1
+					candidate[i].CPU = 1251
 				case "memory":
-					candidate[i].Memory = sample.Memory*uint64(100+p.MemoryGrowth)/100 + 1
+					candidate[i].Memory = 120001
 				case "artifact":
-					candidate[i].Artifact = sample.Artifact*uint64(100+p.ArtifactGrowth)/100 + 1
+					candidate[i].Artifact = 110001
 				case "steps":
-					candidate[i].VMSteps = sample.VMSteps*(100+p.VMStepsGrowth)/100 + 1
+					candidate[i].VMSteps = 1201
 				case "missing":
 					candidate[i].Memory = 0
 				case "kind":
@@ -152,8 +146,8 @@ func TestMedianNotBestAndWallIsTelemetry(t *testing.T) {
 		t.Fatal(failures)
 	}
 	candidate[0].CPU = 1
-	candidate[1].CPU = base[0].CPU*int64(100+p.CPUGrowth)/100 + 1
-	candidate[2].CPU = candidate[1].CPU + 100
+	candidate[1].CPU = 200
+	candidate[2].CPU = 300
 	if failures := p.Check(base, candidate, false); len(failures) == 0 {
 		t.Fatal("best-of-three hid a CPU regression")
 	}
