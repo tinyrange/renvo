@@ -1330,6 +1330,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		patch = renvo386CompilerPatch
+		mul_primary_tertiary = renvo386CompilerMulPrimaryTertiary
 		primary_imm64 = renvo386CompilerPrimaryImm64
 		primary_imm = renvo386CompilerPrimaryImm
 		syscall = renvo386CompilerSyscall
@@ -1997,5 +1999,79 @@ go compiler {
 		// This operation materializes one native scalar. Paired-word lowering
 		// handles the high half separately on this 32-bit backend.
 		renvo386AsmMovRaxImm(a, imm)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPatch(a *renvoAsm) {
+		rtgX8632PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	}
+
+	func renvo386CompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoAsmEmit24(a, 0xc1af0f)
+	}
+}
+
+go compiler {
+	func renvo386FusePrimaryLoadNormalization(a *renvoAsm, kind int) bool {
+		load := a.lastPrimaryLoad
+		end := load >> 3
+		modrm := end - (load & 7)
+		if load <= 0 || end != len(a.code) || modrm < 2 || a.code[modrm-2] != 0x0f {
+			return false
+		}
+		opcode := a.code[modrm-1]
+		if kind == renvoTypeByte || kind == renvoTypeBool {
+			return opcode == 0xb6
+		}
+		if kind == renvoTypeInt8 && opcode == 0xb6 {
+			a.code[modrm-1] = 0xbe
+			return true
+		}
+		if kind == renvoTypeInt16 {
+			return opcode == 0xbf
+		}
+		if kind == renvoTypeUint16 && opcode == 0xbf {
+			a.code[modrm-1] = 0xb7
+			return true
+		}
+		return false
+	}
+
+	func renvo386PrimaryNormalizationRepeated(a *renvoAsm, kind int) bool {
+		opcode := 0
+		size := 0
+		if kind == renvoTypeByte || kind == renvoTypeBool {
+			opcode, size = 0xc0b60f, 3
+		} else if kind == renvoTypeInt8 {
+			opcode, size = 0xc0be0f, 3
+		} else if kind == renvoTypeInt16 {
+			opcode, size = 0x98, 1
+		} else if kind == renvoTypeUint16 {
+			opcode, size = 0xc0b70f, 3
+		} else {
+			return false
+		}
+		if len(a.code) < size {
+			return false
+		}
+		for i := 0; i < len(a.labelPos); i++ {
+			if int(a.labelPos[i]) == len(a.code) {
+				return false
+			}
+		}
+		start := len(a.code) - size
+		for i := 0; i < size; i++ {
+			if a.code[start+i] != byte(opcode>>(8*i)) {
+				return false
+			}
+		}
+		return true
 	}
 }

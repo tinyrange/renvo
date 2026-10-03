@@ -2106,6 +2106,17 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmPatch(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGPatchRelocations(a)
+renvoAsmSetDataOffsets(a)
+}
+
+func renvoAsmMulPrimaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
+}
+
 func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
 renvoNonNil(a)
 renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(uint32(imm)) | int64(high)<<32)

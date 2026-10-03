@@ -963,6 +963,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		patch = renvoAmd64CompilerPatch
+		mul_primary_tertiary = renvoAmd64CompilerMulPrimaryTertiary
 		primary_imm64 = renvoAmd64CompilerPrimaryImm64
 		primary_imm = renvoAmd64CompilerPrimaryImm
 		syscall = renvoAmd64CompilerSyscall
@@ -1635,5 +1637,22 @@ go compiler {
 		renvoAsmEmit16(a, 0xb848)
 		renvoAsmEmit32(a, imm)
 		renvoAsmEmit32(a, high)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerPatch(a *renvoAsm) {
+		renvoAmd64RelaxBranches(a)
+		rtgX8664PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	}
+
+	func renvoAmd64CompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xc1af0f48)
 	}
 }

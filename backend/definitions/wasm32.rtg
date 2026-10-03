@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		patch = renvoWasm32CompilerPatch
+		mul_primary_tertiary = renvoWasm32CompilerMulPrimaryTertiary
 		primary_imm64 = renvoWasm32CompilerPrimaryImm64
 		primary_imm = renvoWasm32CompilerPrimaryImm
 		syscall = renvoWasm32CompilerSyscall
@@ -4621,5 +4623,20 @@ go compiler {
 		// This operation materializes one native scalar. Paired-word lowering
 		// handles the high half separately on this 32-bit backend.
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPatch(a *renvoAsm) {
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	}
+
+	func renvoWasm32CompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
 }

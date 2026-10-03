@@ -737,6 +737,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		patch = renvoAarch64CompilerPatch
+		mul_primary_tertiary = renvoAarch64CompilerMulPrimaryTertiary
 		primary_imm64 = renvoAarch64CompilerPrimaryImm64
 		primary_imm = renvoAarch64CompilerPrimaryImm
 		syscall = renvoAarch64CompilerSyscall
@@ -1199,5 +1201,16 @@ go compiler {
 		if part != extension {
 			renvoAarch64AsmEmit(a, 0xf2e00000|(part<<5)|renvoAarch64RegRax)
 		}
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerPatch(a *renvoAsm) {
+		rtgAarch64PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+	}
+
+	func renvoAarch64CompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoAarch64AsmEmit(a, 0x9b007c40)
 	}
 }

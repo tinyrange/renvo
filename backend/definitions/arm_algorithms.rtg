@@ -696,6 +696,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		patch = renvoArmCompilerPatch
+		mul_primary_tertiary = renvoArmCompilerMulPrimaryTertiary
 		primary_imm64 = renvoArmCompilerPrimaryImm64
 		primary_imm = renvoArmCompilerPrimaryImm
 		syscall = renvoArmCompilerSyscall
@@ -1141,5 +1143,16 @@ go compiler {
 		// This operation materializes one native scalar. Paired-word lowering
 		// handles the high half separately on this 32-bit backend.
 		renvoArmAsmMovRaxImm(a, imm)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerPatch(a *renvoAsm) {
+		rtgArmPatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+	}
+
+	func renvoArmCompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
 	}
 }
