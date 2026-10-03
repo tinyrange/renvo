@@ -14216,11 +14216,7 @@ func renvoEmitStructCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 	if renvoFunctionValueCalleeType(g, ep, ep.exprs[idx].left) != 0 {
 		return renvoEmitFunctionValueCall(g, ep, idx, offset)
 	}
-	objectCABI := renvoFixedTarget == 0
-	if renvoPreparedBackendActive != 0 {
-		objectCABI = true
-	}
-	if objectCABI {
+	if renvoFixedTarget == 0 || renvoMayCompileFixedObjectCABI && renvoFixedObjectCABI(g.c) {
 		if renvoEmitCObjectSmallAggregateCallToLocal(g, ep, idx, destType, offset) {
 			return true
 		}
@@ -14236,10 +14232,8 @@ func renvoEmitStructCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 }
 
 func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, destType int, offset int) bool {
-	if renvoFixedTarget != 0 {
-		if renvoPreparedBackendActive == 0 {
-			return false
-		}
+	if renvoFixedTarget != 0 && (!renvoMayCompileFixedObjectCABI || !renvoFixedObjectCABI(g.c)) {
+		return false
 	}
 	renvoNonNil(g, ep)
 	if !renvoIsSysVObject(g.c) || idx < 0 || idx >= len(ep.exprs) {
@@ -21617,7 +21611,7 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	}
 	g := new(renvoLinearGen)
-	renvoInitLinearProgram(g, p, meta, renvoPreparedBackendActive != 0 || renvoFixedTarget == 0)
+	renvoInitLinearProgram(g, p, meta, renvoOptimizeProgramRuntime(meta.c))
 	// Some execution formats compile a target-specific compiler, while others
 	// preserve a source-declared selector or a dynamic command-line fallback.
 	mode := renvoProgramTargetMode(g.c)
@@ -21636,7 +21630,7 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	if g.darwinEntryOff == -2 {
 		return nil
 	}
-	renvoInitProgramFunctions(g, renvoPreparedBackendActive == 0 && renvoFixedTarget != 0 && mode == 0)
+	renvoInitProgramFunctions(g, renvoReserveFunctionLabels(g.c, mode))
 	if renvoKernelProgram(g.c) {
 		if !renvoBeginKernelModule(g, appIndex) {
 			return nil
@@ -24600,7 +24594,7 @@ func renvoEmitNativeStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx 
 		renvoAsmMulTertiaryImm(a, size)
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmAddSecondaryTertiary(a)
-		if renvoPreparedBackendActive != 0 {
+		if renvoMayCopyResultViaFrame && renvoResultCopyViaFrame(g.c) {
 			temp := renvoAddUnnamedLocal(g, resultType)
 			renvoEmitCopyMemSecondaryToStack(g, temp, size)
 			renvoAsmLoadSecondaryStack(a, g.returnStruct)

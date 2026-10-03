@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d0fb06ec77d36c6760cdf7c7f9e809ac335a572bc9a26a731ce524ee9cb9197a"
+const CompilerSourceDigest = "082580c6d8a89a87ce9c8222af2998128f0003e3a5783b31138bd2cfd5ca79d4"
 
 // source: backend/compiler_common_impl.go
 
@@ -14223,11 +14223,7 @@ return renvoEmitInterfaceMethodCall(g, ep, idx, offset, destType)
 if renvoFunctionValueCalleeType(g, ep, ep.exprs[idx].left) != 0 {
 return renvoEmitFunctionValueCall(g, ep, idx, offset)
 }
-objectCABI := renvoFixedTarget == 0
-if renvoPreparedBackendActive != 0 {
-objectCABI = true
-}
-if objectCABI {
+if renvoFixedTarget == 0 || renvoMayCompileFixedObjectCABI && renvoFixedObjectCABI(g.c) {
 if renvoEmitCObjectSmallAggregateCallToLocal(g, ep, idx, destType, offset) {
 return true
 }
@@ -14243,10 +14239,8 @@ return true
 }
 
 func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, destType int, offset int) bool {
-if renvoFixedTarget != 0 {
-if renvoPreparedBackendActive == 0 {
+if renvoFixedTarget != 0 && (!renvoMayCompileFixedObjectCABI || !renvoFixedObjectCABI(g.c)) {
 return false
-}
 }
 renvoNonNil(g, ep)
 if !renvoIsSysVObject(g.c) || idx < 0 || idx >= len(ep.exprs) {
@@ -21624,7 +21618,7 @@ renvo_runtime_ArenaDiscardDecls(p.decls)
 renvo_runtime_ArenaDiscardFuncs(p.funcs)
 }
 g := new(renvoLinearGen)
-renvoInitLinearProgram(g, p, meta, renvoPreparedBackendActive != 0 || renvoFixedTarget == 0)
+renvoInitLinearProgram(g, p, meta, renvoOptimizeProgramRuntime(meta.c))
 
 
 mode := renvoProgramTargetMode(g.c)
@@ -21643,7 +21637,7 @@ g.darwinEntryOff = renvoSetupProgramLayout(&g.asm, image, len(meta.funcs))
 if g.darwinEntryOff == -2 {
 return nil
 }
-renvoInitProgramFunctions(g, renvoPreparedBackendActive == 0 && renvoFixedTarget != 0 && mode == 0)
+renvoInitProgramFunctions(g, renvoReserveFunctionLabels(g.c, mode))
 if renvoKernelProgram(g.c) {
 if !renvoBeginKernelModule(g, appIndex) {
 return nil
@@ -24607,7 +24601,7 @@ renvoAsmPopTertiary(a)
 renvoAsmMulTertiaryImm(a, size)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmAddSecondaryTertiary(a)
-if renvoPreparedBackendActive != 0 {
+if renvoMayCopyResultViaFrame && renvoResultCopyViaFrame(g.c) {
 temp := renvoAddUnnamedLocal(g, resultType)
 renvoEmitCopyMemSecondaryToStack(g, temp, size)
 renvoAsmLoadSecondaryStack(a, g.returnStruct)
@@ -29028,7 +29022,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x4b\xfd\x35\xca\x3b\x06\x34\xdd\xf9\xf3\x62\x55\xa4\xb6\xe9\x60\xef\x39\xfc\xf4\x59\x32\x3c\x67\x12\xca\x94\xda\x1b\x9c\xf9\xe3", 3, true
+return "wasi/wasm32", "\x42\x0c\xf1\xce\xb0\xd8\xf0\x44\x35\xe4\x6e\x84\x7b\xca\xa8\x9a\x4d\x77\xff\x4a\x2e\x37\x25\xc0\xb9\x7d\x29\x70\x5b\x73\xc6\x86", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29040,7 +29034,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x17\xe5\x38\xf7\x30\xb7\x20\xe3\x62\xfa\x1c\xe8\x7a\xe7\xc4\x70\xd6\x39\xe4\x60\x25\xff\x9e\xb1\xb4\xc5\xb0\x81\x74\x52\xcb\xd5", 3, true
+return "vm/vm32", "\xee\xc8\xe0\x09\x84\xd4\x5c\x6c\xb6\xe9\x36\xdd\x84\x11\xc3\x0f\xc4\xba\x64\x8b\xf4\x54\xce\x88\xe5\x79\x05\xdb\xdc\x36\xf4\x6b", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30415,6 +30409,48 @@ return 0
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
+
+func renvoResultCopyViaFrame(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayCopyResultViaFrame = false
+
+func renvoReserveFunctionLabels(c *renvoCompileContext, mode int) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoFixedTarget != 0 && mode == 0
+
+}
+return false
+}
+
+func renvoOptimizeProgramRuntime(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoFixedTarget == 0
+
+}
+return false
+}
+
+func renvoFixedObjectCABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayCompileFixedObjectCABI = false
 
 func renvoAsmSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
 renvoNonNil(a)
@@ -46432,6 +46468,14 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49343,6 +49387,14 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52009,6 +52061,14 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53668,6 +53728,14 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
+
+
 
 
 
@@ -56907,6 +56975,14 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
 
 
 

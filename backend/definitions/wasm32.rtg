@@ -4150,6 +4150,10 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		result_copy_via_frame = renvoWasm32CompilerResultCopyViaFrame
+		reserve_function_labels = renvoWasm32CompilerReserveFunctionLabels
+		optimize_program_runtime = renvoWasm32CompilerOptimizeProgramRuntime
+		fixed_object_cabi = renvoWasm32CompilerFixedObjectCABI
 		save_slice_slot_addresses = renvoWasm32CompilerSaveSliceSlotAddresses
 		inline_append = renvoWasm32CompilerInlineAppend
 		string_arguments_from_frame = renvoWasm32CompilerStringArgumentsFromFrame
@@ -6978,5 +6982,29 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFixedObjectCABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerOptimizeProgramRuntime(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReserveFunctionLabels(c *renvoCompileContext, mode int) bool {
+		return renvoFixedTarget != 0 && mode == 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerResultCopyViaFrame(c *renvoCompileContext) bool {
+		return false
 	}
 }

@@ -392,6 +392,10 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		result_copy_via_frame = renvoAarch64CompilerResultCopyViaFrame
+		reserve_function_labels = renvoAarch64CompilerReserveFunctionLabels
+		optimize_program_runtime = renvoAarch64CompilerOptimizeProgramRuntime
+		fixed_object_cabi = renvoAarch64CompilerFixedObjectCABI
 		save_slice_slot_addresses = renvoAarch64CompilerSaveSliceSlotAddresses
 		inline_append = renvoAarch64CompilerInlineAppend
 		string_arguments_from_frame = renvoAarch64CompilerStringArgumentsFromFrame
@@ -3458,5 +3462,29 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerFixedObjectCABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerOptimizeProgramRuntime(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerReserveFunctionLabels(c *renvoCompileContext, mode int) bool {
+		return renvoFixedTarget != 0 && mode == 0
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerResultCopyViaFrame(c *renvoCompileContext) bool {
+		return false
 	}
 }
