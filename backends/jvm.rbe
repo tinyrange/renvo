@@ -5826,6 +5826,7 @@ go backend {
 }
 
 arch jvmvm32 {
+	compiler_family = structured32
 	alias = jvmvm32
 	endian = little
 	word_bits = 32
@@ -5936,6 +5937,7 @@ runtime jvm_hosted {
 }
 
 format jvm_classfile {
+	compiler_family = structured32
 	# Renvo linear memory is little-endian. The image hook writes the JVM's
 	# independently big-endian classfile structures explicitly.
 	byte_order = little
@@ -5946,6 +5948,7 @@ format jvm_classfile {
 }
 
 format android_dex {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = "android-dex"
