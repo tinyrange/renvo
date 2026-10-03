@@ -2106,6 +2106,51 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitInstallThreadState(g *renvoLinearGen) {
+renvoNonNil(g)
+return
+}
+
+func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+renvoNonNil(g)
+	renvoAsmPushSecondary(&g.asm)
+	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+	renvoAsmPopSecondary(&g.asm)
+}
+
+func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+renvoNonNil(g)
+	renvoAsmPushSecondary(&g.asm)
+	renvoAsmPushPrimary(&g.asm)
+	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+	renvoAsmPopSecondary(&g.asm)
+}
+
+func renvoEmitTargetScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+renvoNonNil(g)
+return renvoRTGEmitScalarFunction(g, fnInfoIndex)
+}
+
+func renvoEmitTargetRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+renvoNonNil(g)
+if count == 5 { renvoAsmPrimaryImm(&g.asm, 0) }; return true
+}
+
+func renvoEmitUncheckedNonNilPrimary(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, false))
+}
+
+func renvoEmitUncheckedNonNilSecondary(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
+}
+
 func renvoEmitIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
 renvoNonNil(g)
 return false

@@ -1332,6 +1332,13 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		install_thread_state = renvo386CompilerInstallThreadState
+		load_primary_thread_state = renvo386CompilerLoadPrimaryThreadState
+		store_primary_thread_state = renvo386CompilerStorePrimaryThreadState
+		scalar_function = renvo386CompilerScalarFunction
+		runtime_stack = renvo386CompilerRuntimeStack
+		unchecked_non_nil_primary = renvo386CompilerUncheckedNonNilPrimary
+		unchecked_non_nil_secondary = renvo386CompilerUncheckedNonNilSecondary
 		irq_stack_call = renvo386CompilerIRQStackCall
 		ms_abi_call = renvo386CompilerMSABICall
 		runtime_platform_intrinsic = renvoX86CompilerRuntimePlatformIntrinsic
@@ -1497,7 +1504,7 @@ go compiler {
 
 	func renvo386CompilerPopPrimary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
-			if renvoAsmCancelAdjacentPush(a, 0x50) {
+			if renvo386CancelAdjacentPush(a, 0x50) {
 				return
 			}
 			if renvo386RewritePrimaryLoad(a, 0, true) {
@@ -1508,13 +1515,13 @@ go compiler {
 	}
 	func renvo386CompilerPopSecondary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
-			if renvoAsmCancelAdjacentPush(a, 0x52) {
+			if renvo386CancelAdjacentPush(a, 0x52) {
 				return
 			}
 			if renvo386RewritePrimaryLoad(a, 2, true) {
 				return
 			}
-			if renvoAsmCancelAdjacentPush(a, 0x50) {
+			if renvo386CancelAdjacentPush(a, 0x50) {
 				renvoAsmEmit16(a, 0xc289)
 				return
 			}
@@ -1523,13 +1530,13 @@ go compiler {
 	}
 	func renvo386CompilerPopTertiary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
-			if renvoAsmCancelAdjacentPush(a, 0x51) {
+			if renvo386CancelAdjacentPush(a, 0x51) {
 				return
 			}
 			if renvo386RewritePrimaryLoad(a, 1, true) {
 				return
 			}
-			if renvoAsmCancelAdjacentPush(a, 0x50) {
+			if renvo386CancelAdjacentPush(a, 0x50) {
 				renvoAsmEmit16(a, 0xc189)
 				return
 			}
@@ -1784,7 +1791,7 @@ go compiler {
 	func renvo386CompilerPopCallWord0(a *renvoAsm) {
 		renvoNonNil(a)
 		if renvoFixedTarget == 0 && a.c.code16 {
-			if renvoAsmCancelAdjacentPush(a, 0x57) {
+			if renvo386CancelAdjacentPush(a, 0x57) {
 				return
 			}
 		}
@@ -1792,7 +1799,7 @@ go compiler {
 			if renvo386RewritePrimaryLoad(a, 7, true) {
 				return
 			}
-			if renvoAsmCancelAdjacentPush(a, 0x50) {
+			if renvo386CancelAdjacentPush(a, 0x50) {
 				renvoAsmEmit16(a, 0xc389)
 				return
 			}
@@ -1803,13 +1810,13 @@ go compiler {
 	func renvo386CompilerPopCallWord1(a *renvoAsm) {
 		renvoNonNil(a)
 		if renvoFixedTarget == 0 && a.c.code16 {
-			if renvoAsmCancelAdjacentPush(a, 0x56) {
+			if renvo386CancelAdjacentPush(a, 0x56) {
 				return
 			}
 			if renvo386RewritePrimaryLoad(a, 6, true) {
 				return
 			}
-			if renvoAsmCancelAdjacentPush(a, 0x50) {
+			if renvo386CancelAdjacentPush(a, 0x50) {
 				renvoAsmEmit16(a, 0xc689)
 				return
 			}
@@ -2253,5 +2260,76 @@ go compiler {
 
 	func renvo386CompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerInstallThreadState(g *renvoLinearGen) {
+		return
+	}
+
+	func renvo386CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && g.c.code16 {
+			// Object wrappers reserve R15 for the word-index helper. Until object
+			// output has a TLS runtime contract, retain unwind state in this object's
+			// private BSS instead of clobbering that ABI register.
+			renvoEnsurePanicState(g)
+			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvo386CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvo386CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+		if renvoFixedTarget == 0 && g.c.code16 && renvo386EmitCompactCValueHelper(g, fnInfoIndex) {
+			return true
+		}
+		return renvo386EmitScalarFunction(g, fnInfoIndex)
+	}
+
+	func renvo386CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+		if count == 5 {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		return true
+	}
+
+	func renvo386CompilerUncheckedNonNilPrimary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, false))
+	}
+
+	func renvo386CompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
+	}
+}
+
+go compiler {
+	func renvo386CancelAdjacentPush(a *renvoAsm, pushOpcode int) bool {
+		register := pushOpcode - 0x50
+		if register < 0 || register > 7 || a.lastPrimaryStoreEnd != -(len(a.code)*32+register+2) ||
+			len(a.code) == 0 || int(a.code[len(a.code)-1]) != pushOpcode {
+			return false
+		}
+		at := len(a.code) - 1
+		renvoTruncBytes(&a.code, at)
+		a.lastPrimaryStoreEnd = -1
+		if pushOpcode == 0x50 && a.lastPrimaryLoad < 0 {
+			a.lastPrimaryLoad = -a.lastPrimaryLoad
+		}
+		return true
 	}
 }

@@ -696,6 +696,13 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		install_thread_state = renvoArmCompilerInstallThreadState
+		load_primary_thread_state = renvoArmCompilerLoadPrimaryThreadState
+		store_primary_thread_state = renvoArmCompilerStorePrimaryThreadState
+		scalar_function = renvoArmCompilerScalarFunction
+		runtime_stack = renvoArmCompilerRuntimeStack
+		unchecked_non_nil_primary = renvoArmCompilerUncheckedNonNilPrimary
+		unchecked_non_nil_secondary = renvoArmCompilerUncheckedNonNilSecondary
 		irq_stack_call = renvoArmCompilerIRQStackCall
 		ms_abi_call = renvoArmCompilerMSABICall
 		runtime_platform_intrinsic = renvoArmCompilerRuntimePlatformIntrinsic
@@ -1324,5 +1331,48 @@ go compiler {
 			return 0
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerInstallThreadState(g *renvoLinearGen) {
+		return
+	}
+
+	func renvoArmCompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvoArmCompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvoArmCompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+		return renvoArmEmitScalarFunction(g, fnInfoIndex)
+	}
+
+	func renvoArmCompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+		if count == 5 {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		return true
+	}
+
+	func renvoArmCompilerUncheckedNonNilPrimary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, false))
+	}
+
+	func renvoArmCompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
 	}
 }

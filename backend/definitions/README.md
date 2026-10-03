@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 94 role-based operations: register copies,
+The current migration covers 101 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -173,12 +173,18 @@ Platform runtime intrinsics, IRQ stack calls, and Microsoft ABI indirect calls
 are definition-owned. The x86 integrations import a shared runtime fragment;
 common lowering only recognizes target-neutral string pointers and barriers
 before invoking the typed platform hook.
+Thread-state register installation/access, stack-runtime calls, unrecoverable
+nil-check sequences, and scalar-function ABI emission also use typed hooks.
+Common function lowering retains scratch-arena lifetime and metadata cleanup.
+The x86 adjacent-push cancellation peepholes live beside their callers.
 Hooks may take typed parameters, an assembler or compiler-state input, and a
 validated result type. Their complete
 signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
-selected branches to avoid another call at each emission site. Hooks with
+selected branches to avoid another call at each emission site. It snapshots the
+selector once per dispatch to avoid repeated nested context loads; generated
+local names cannot capture identifiers supplied by a definition. Hooks with
 noncanonical parameter names or function-scoped labels retain direct calls.
 Private projected entrypoints are omitted from the architecture source unless
 another binding, Go body, or definition declaration still references them.
