@@ -21689,12 +21689,25 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	}
 	g := new(renvoLinearGen)
 	renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
-	image := renvoFixedTarget == 0 && meta.c.emitImage
-	g.darwinEntryOff = renvoSetupProgramLayout(&g.asm, image)
+	// Some execution formats compile a target-specific compiler, while others
+	// preserve a source-declared selector or a dynamic command-line fallback.
+	mode := renvoProgramTargetMode(g.c)
+	if mode == 1 {
+		renvoLoadCompilerFixedTarget(g)
+		if g.fixedTargetState != 1 {
+			g.fixedTargetState = 1
+			g.fixedTargetValue = 0
+		}
+	} else if mode == 2 {
+		g.fixedTargetState = 1
+		g.fixedTargetValue = g.c.renvoTarget
+	}
+	image := renvoFixedTarget == 0 && meta.c.emitImage && renvoProgramImageEntry(g.c)
+	g.darwinEntryOff = renvoSetupProgramLayout(&g.asm, image, len(meta.funcs))
 	if g.darwinEntryOff == -2 {
 		return nil
 	}
-	renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+	renvoInitProgramFunctions(g, renvoFixedTarget != 0 && mode == 0)
 	if renvoKernelProgram(g.c) {
 		if !renvoBeginKernelModule(g, appIndex) {
 			return nil
@@ -25001,9 +25014,8 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	var result renvoCompileResult
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		result = renvoTryCompileScalarProgramRTG(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 ||
-		renvoFixedTarget == 0 && (target == renvoTargetWasiWasm32 || target == renvoTargetVM32) {
-		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
+	} else if !renvoProgramCacheSupported(meta.c) {
+		result = renvoTryCompileScalarProgramScratch(prog, &meta)
 	} else {
 		result = renvoTryCompileScalarProgramCached(prog, &meta)
 	}

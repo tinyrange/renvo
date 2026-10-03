@@ -420,6 +420,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		program_image_entry = renvoAarch64CompilerProgramImageEntry
+		program_cache_supported = renvoAarch64CompilerProgramCacheSupported
+		program_target_mode = renvoAarch64CompilerProgramTargetMode
 		kernel_program = renvoAarch64CompilerKernelProgram
 		program_image = renvoAarch64CompilerProgramImage
 		finalize_object_code = renvoAarch64CompilerFinalizeObjectCode
@@ -3177,7 +3180,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoAarch64CompilerProgramLayout(a *renvoAsm, image bool) int {
+	func renvoAarch64CompilerProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 		a.codeOffset = renvoAarch64ELFCodeOffset
 		if targetIsWindows(a.c.renvoTargetOS) {
 			a.codeOffset = renvoWinSectionRVA
@@ -3241,5 +3244,23 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerKernelProgram(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramTargetMode(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramCacheSupported(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramImageEntry(c *renvoCompileContext) bool {
+		return true
 	}
 }

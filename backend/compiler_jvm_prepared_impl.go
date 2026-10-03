@@ -4365,6 +4365,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoProgramImageEntry(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoProgramCacheSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoProgramTargetMode(c *renvoCompileContext) int {
+renvoNonNil(c)
+return 0
+}
+
 func renvoKernelProgram(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return renvoRTGPreparedKernelModule != 0 && !c.objectFile
@@ -4394,7 +4409,7 @@ renvoNonNil(c)
 return false
 }
 
-func renvoSetupProgramLayout(a *renvoAsm, image bool) int {
+func renvoSetupProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 renvoNonNil(a)
 a.codeOffset = renvoRTGCodeOffset
 offset := -1

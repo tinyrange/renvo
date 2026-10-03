@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		program_image_entry = renvoArmCompilerProgramImageEntry
+		program_cache_supported = renvoArmCompilerProgramCacheSupported
+		program_target_mode = renvoArmCompilerProgramTargetMode
 		kernel_program = renvoArmCompilerKernelProgram
 		program_image = renvoArmCompilerProgramImage
 		finalize_object_code = renvoArmCompilerFinalizeObjectCode
@@ -2941,7 +2944,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoArmCompilerProgramLayout(a *renvoAsm, image bool) int {
+	func renvoArmCompilerProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 		a.codeOffset = renvoLinuxArmCodeOffset
 		return 0
 	}
@@ -2981,5 +2984,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerKernelProgram(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramTargetMode(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramCacheSupported(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramImageEntry(c *renvoCompileContext) bool {
+		return true
 	}
 }

@@ -773,71 +773,10 @@ func compileWasm32Arena(input []int, output int, arenaSize int) int {
 	return 1
 }
 
+// Compatibility entrypoint; structured programs use the common queue and
+// definition-owned image writer, preserving ownership of the output buffer.
 func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	appIndex := p.entryFunc
-	if appIndex < 0 {
-		return renvoCompileResult{}
-	}
-	var g renvoLinearGen
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-		renvoLoadCompilerFixedTarget(&g)
-		if g.fixedTargetState != 1 {
-			// VM bytecode is an execution format, not a restriction on the targets
-			// exposed by a compiler running inside the VM. Preserve dynamic target
-			// selection so a runtime -t value remains authoritative.
-			g.fixedTargetState = 1
-			g.fixedTargetValue = 0
-		}
-	} else {
-		g.fixedTargetState = 1
-		g.fixedTargetValue = meta.c.renvoTarget
-	}
-	a := &g.asm
-	renvoAsmInitWithContext(a, g.c)
-	localSlotCapacity := len(meta.funcs) * 4
-	if localSlotCapacity < 256 {
-		localSlotCapacity = 256
-	}
-	a.wasmLocalSlots = make([]int32, 0, localSlotCapacity)
-	for i := 0; i < len(meta.funcs); i++ {
-		label := renvoAsmNewLabel(a)
-		g.funcLabels = append(g.funcLabels, label)
-	}
-	renvoInitFuncQueue(&g, len(meta.funcs))
-	if !renvoEmitApplicationEntry(&g, appIndex, false, 0) {
-		return renvoCompileResult{}
-	}
-	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		i := g.funcQueue[queueIndex]
-		if renvoDeferUnreadyQueuedClosure(&g, i) {
-			continue
-		}
-		if !renvoEmitScalarFunctionScratch(&g, i) {
-			if renvoFixedTarget == 0 {
-				renvoPrintErr("renvo: wasm32 failed in function ")
-				write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
-				renvoPrintErr("\n")
-			}
-			return renvoCompileResult{}
-		}
-	}
-	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
-	var result renvoCompileResult
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-		result.data = renvoVMImage(a)
-	} else {
-		// Keep the owned buffer in a struct across this call. Returning its slice
-		// view would copy the complete image again in a self-hosted compiler.
-		image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
-		result.data = image.data[:image.length]
-	}
-	result.ok = true
-	return result
+	return renvoTryCompileScalarProgramScratch(p, meta)
 }
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	appIndex := p.entryFunc

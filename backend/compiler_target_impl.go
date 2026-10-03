@@ -406,7 +406,7 @@ func renvoWriteCompileResult(context *renvoCompileContext, result renvoCompileRe
 }
 
 // RenvoCompileSession advances an embedded compilation in bounded phases. The
-// Darwin/arm64 backend emits a small batch of relocatable function objects per
+// cache-capable backends emit a small batch of relocatable function objects per
 // step so GUI callers can return to their event loop between batches.
 type RenvoCompileSession struct {
 	unit       []byte
@@ -474,7 +474,7 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 2 {
-		if s.target == renvoTargetDarwinArm64 {
+		if renvoProgramCacheSupported(s.context) {
 			s.program = renvoBeginProgramSession(s.prog, s.meta)
 			if s.program == nil {
 				s.done = true
@@ -543,9 +543,6 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return renvoTryCompileScalarProgramWasm32(prog, meta)
-	}
 	return renvoTryCompileScalarProgramScratch(prog, meta)
 }
 
@@ -553,10 +550,7 @@ func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return renvoTryCompileScalarProgramWasm32(prog, meta)
-	}
-	if targetIsKernelModule(meta.c) {
+	if !renvoProgramCacheSupported(meta.c) {
 		return renvoTryCompileScalarProgramScratch(prog, meta)
 	}
 	return renvoTryCompileScalarProgramCached(prog, meta)
