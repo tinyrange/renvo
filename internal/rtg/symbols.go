@@ -177,12 +177,26 @@ func architectureSymbols(document Document, arch Declaration) []generatedSymbol 
 	return symbols
 }
 
-func generatedArchitectureOutput(document Document, local string) (string, bool) {
+// Build one immutable lookup input per rewrite, not once per source token.
+// Preserve declaration groups: register-location aliases resolve within their
+// owning architecture, while output names use first-declaration precedence.
+func generatedArchitectureSymbols(document Document) [][]generatedSymbol {
+	var groups [][]generatedSymbol
 	for i := 0; i < len(document.Declarations); i++ {
-		if document.Declarations[i].Kind != DeclArch {
-			continue
+		if document.Declarations[i].Kind == DeclArch {
+			groups = append(groups, architectureSymbols(document, document.Declarations[i]))
 		}
-		symbols := architectureSymbols(document, document.Declarations[i])
+	}
+	return groups
+}
+
+func generatedArchitectureOutput(document Document, local string) (string, bool) {
+	return generatedArchitectureOutputIndexed(generatedArchitectureSymbols(document), local)
+}
+
+func generatedArchitectureOutputIndexed(groups [][]generatedSymbol, local string) (string, bool) {
+	for i := 0; i < len(groups); i++ {
+		symbols := groups[i]
 		for j := 0; j < len(symbols); j++ {
 			if symbols[j].Local == local {
 				return symbols[j].Output, true
@@ -193,11 +207,12 @@ func generatedArchitectureOutput(document Document, local string) (string, bool)
 }
 
 func generatedArchitectureCode(document Document, local string) (int, bool) {
-	for i := 0; i < len(document.Declarations); i++ {
-		if document.Declarations[i].Kind != DeclArch {
-			continue
-		}
-		symbols := architectureSymbols(document, document.Declarations[i])
+	return generatedArchitectureCodeIndexed(generatedArchitectureSymbols(document), local)
+}
+
+func generatedArchitectureCodeIndexed(groups [][]generatedSymbol, local string) (int, bool) {
+	for i := 0; i < len(groups); i++ {
+		symbols := groups[i]
 		name := local
 		for depth := 0; depth <= len(symbols); depth++ {
 			found := false

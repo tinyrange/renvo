@@ -2168,8 +2168,10 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		return out
 	}
 	var protected []bool
+	var architectureSymbols [][]generatedSymbol
 	if document != nil {
 		protected = virtualGoProtectedIdentifiers(source, tokens)
+		architectureSymbols = generatedArchitectureSymbols(*document)
 	}
 	last := 0
 	for i := 0; i < len(tokens); i++ {
@@ -2247,7 +2249,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		if nativeEmitter && document != nil && token.Kind == TokenIdent &&
 			(i >= len(protected) || !protected[i]) && i+2 < len(tokens) &&
 			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+2]) == "Code" {
-			if code, found := generatedArchitectureCode(*document, text); found {
+			if code, found := generatedArchitectureCodeIndexed(architectureSymbols, text); found {
 				out = appendDecimalFrame(out, code)
 				last = tokens[i+2].End
 				i += 2
@@ -2269,7 +2271,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		} else if external, found := embeddedExternalName(exports, text); found && token.Kind == TokenIdent {
 			out = append(out, external...)
 		} else if document != nil && token.Kind == TokenIdent {
-			replacement, found := generatedArchitectureOutput(*document, text)
+			replacement, found := generatedArchitectureOutputIndexed(architectureSymbols, text)
 			if found && (i >= len(protected) || !protected[i]) {
 				out = append(out, replacement...)
 			} else if stringIndex(names, text) >= 0 {
