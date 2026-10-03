@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "92ce91d5e53098fe84d2fe314b5eff3210eef659aa99b955ef24bac3e8691447"
+const CompilerSourceDigest = "412a60d60eaddb3ca71b1057f53f91a09b4624f60adb8dce9a37304b48544af9"
 
 // source: backend/compiler_common_impl.go
 
@@ -20869,7 +20869,7 @@ continue
 }
 if candidate.kind == renvoExprCall && candidate.argCount == 1 {
 conversionType := renvoConversionTypeFromExpr(g, ep, candidate.left)
-if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceFunction) {
 functionExpr = renvo_runtime_UnsafeIntAt(ep.args, candidate.firstArg)
 continue
 }
@@ -21037,7 +21037,7 @@ offset: objectOffset + offset, targetStart: start, targetEnd: end, typ: 1})
 return true
 }
 }
-if resolved.kind == renvoTypePointer || renvoTypeKindIsScalarInt(resolved.kind) && renvoTypeSize(g.meta, typ) == g.c.renvoNativeIntSize {
+if resolved.kind == renvoTypePointer || renvoTypeKindIsScalarInt(resolved.kind) && renvoTypeSize(g.meta, typ) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 nameStart, nameEnd, addend, ok := renvoObjectConstantPointerAddress(g, ep, idx)
 if ok {
 start, end := renvoAsmCopyObjectText(&g.asm, g.prog.src, nameStart, nameEnd)
@@ -21171,7 +21171,7 @@ return 0, false
 e := &ep.exprs[idx]
 if e.kind == renvoExprCall && e.argCount == 1 {
 conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 return renvoObjectConstantPointerValue(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 }
 }
@@ -21238,7 +21238,7 @@ return 0, 0, 0, false
 }
 if e.argCount == 1 {
 conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 return renvoObjectConstantPointerAddress(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 }
 callee := &ep.exprs[e.left]
