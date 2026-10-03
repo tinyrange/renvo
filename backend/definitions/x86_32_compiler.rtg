@@ -1300,6 +1300,13 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		negate_primary_word = renvo386CompilerNegatePrimaryWord
+		primary_address_offset = renvo386CompilerPrimaryAddressOffset
+		word_expression_peephole = renvo386CompilerWordExpressionPeephole
+		wide_ident_to_local = renvo386CompilerWideIdentToLocal
+		constant_pointer_step = renvo386CompilerConstantPointerStep
+		c_update_intrinsic = renvo386CompilerCUpdateIntrinsic
+		c_inline_return = renvo386CompilerCInlineReturn
 		slice_backing_size = renvo386CompilerSliceBackingSize
 		folded_field_addressing = renvo386CompilerFoldedFieldAddressing
 		can_store_scalar = renvo386CompilerCanStoreScalar
@@ -4242,5 +4249,78 @@ go compiler {
 			}
 		}
 		return backingSize
+	}
+}
+
+go compiler {
+	func renvo386CompilerCInlineReturn(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, label int, jumpIfTrue bool) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCInlineReturnHelper(g, ep, idx, e, callee, label, jumpIfTrue)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, false)
+	}
+}
+
+go compiler {
+	func renvo386CompilerConstantPointerStep(g *renvoLinearGen, delta int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		if delta != 0 {
+			if renvoAsmImmFits8Signed(delta) {
+				renvoAsmEmit3(&g.asm, 0x83, 0xc0, delta)
+			} else {
+				renvoAsmEmit8(&g.asm, 0x05)
+				renvoAsmEmit32(&g.asm, delta)
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitWideIdentToLocal(g, e, offset)
+	}
+}
+
+go compiler {
+	func renvo386CompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		if wide {
+			return renvo386EmitWideIntExprFast(g, ep, idx)
+		}
+		return renvo386EmitNativeIntExprFast(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPrimaryAddressOffset(a *renvoAsm, offset int) {
+		if renvoAsmImmFits8Signed(offset) {
+			renvoAsmEmit3(a, 0x83, 0xc0, offset)
+		} else {
+			renvoAsmEmit8(a, 0x05)
+			renvoAsmEmit32(a, offset)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerNegatePrimaryWord(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xd8f7)
 	}
 }

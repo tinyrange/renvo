@@ -2106,6 +2106,43 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmNegatePrimaryWord(a *renvoAsm) {
+renvoNonNil(a)
+renvoAsmPrimaryToNegative(a)
+}
+
+func renvoAsmPrimaryAddressOffset(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoAsmPushImm(a, offset)
+renvoAsmPopTertiary(a)
+renvoAsmAddPrimaryTertiary(a)
+}
+
+func renvoEmitWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitConstantPointerStep(g *renvoLinearGen, delta int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitCInlineReturn(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, label int, jumpIfTrue bool) int {
+renvoNonNil(g)
+return -1
+}
+
 func renvoAsmSliceBackingSize(a *renvoAsm, elemSize int) int {
 renvoNonNil(a)
 	backingSize := 0

@@ -696,6 +696,13 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		negate_primary_word = renvoArmCompilerNegatePrimaryWord
+		primary_address_offset = renvoArmCompilerPrimaryAddressOffset
+		word_expression_peephole = renvoArmCompilerWordExpressionPeephole
+		wide_ident_to_local = renvoArmCompilerWideIdentToLocal
+		constant_pointer_step = renvoArmCompilerConstantPointerStep
+		c_update_intrinsic = renvoArmCompilerCUpdateIntrinsic
+		c_inline_return = renvoArmCompilerCInlineReturn
 		slice_backing_size = renvoArmCompilerSliceBackingSize
 		folded_field_addressing = renvoArmCompilerFoldedFieldAddressing
 		can_store_scalar = renvoArmCompilerCanStoreScalar
@@ -2266,5 +2273,49 @@ go compiler {
 			}
 		}
 		return backingSize
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCInlineReturn(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, label int, jumpIfTrue bool) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerConstantPointerStep(g *renvoLinearGen, delta int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerPrimaryAddressOffset(a *renvoAsm, offset int) {
+		renvoAsmPushImm(a, offset)
+		renvoAsmPopTertiary(a)
+		renvoAsmAddPrimaryTertiary(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerNegatePrimaryWord(a *renvoAsm) {
+		renvoArmAsmNegRax(a)
 	}
 }

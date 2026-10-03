@@ -4150,6 +4150,13 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		negate_primary_word = renvoWasm32CompilerNegatePrimaryWord
+		primary_address_offset = renvoWasm32CompilerPrimaryAddressOffset
+		word_expression_peephole = renvoWasm32CompilerWordExpressionPeephole
+		wide_ident_to_local = renvoWasm32CompilerWideIdentToLocal
+		constant_pointer_step = renvoWasm32CompilerConstantPointerStep
+		c_update_intrinsic = renvoWasm32CompilerCUpdateIntrinsic
+		c_inline_return = renvoWasm32CompilerCInlineReturn
 		slice_backing_size = renvoWasm32CompilerSliceBackingSize
 		folded_field_addressing = renvoWasm32CompilerFoldedFieldAddressing
 		can_store_scalar = renvoWasm32CompilerCanStoreScalar
@@ -5835,5 +5842,49 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
 		return renvoWasm32FallbackSliceBackingSize
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCInlineReturn(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, label int, jumpIfTrue bool) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerConstantPointerStep(g *renvoLinearGen, delta int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPrimaryAddressOffset(a *renvoAsm, offset int) {
+		renvoAsmPushImm(a, offset)
+		renvoAsmPopTertiary(a)
+		renvoAsmAddPrimaryTertiary(a)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerNegatePrimaryWord(a *renvoAsm) {
+		renvoWasm32AsmNegRax(a)
 	}
 }

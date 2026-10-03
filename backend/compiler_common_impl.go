@@ -10272,9 +10272,9 @@ func renvoEmitJump(g *renvoLinearGen, ep *renvoExprParse, idx int, label int, ju
 	p := g.prog
 	a := &g.asm
 	e := &ep.exprs[idx]
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && e.kind == renvoExprCall &&
+	if renvoFixedTarget == 0 && e.kind == renvoExprCall &&
 		e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
-		inlined := renvo386EmitCInlineReturnHelper(g, ep, idx, e, &ep.exprs[e.left], label, jumpIfTrue)
+		inlined := renvoEmitCInlineReturn(g, ep, idx, e, &ep.exprs[e.left], label, jumpIfTrue)
 		if inlined >= 0 {
 			return inlined != 0
 		}
@@ -20136,8 +20136,8 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return true
 		}
 	}
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 {
-		fast := renvo386EmitWideIntExprFast(g, ep, idx)
+	if renvoFixedTarget == 0 {
+		fast := renvoEmitWordExpressionPeephole(g, ep, idx, true)
 		if fast >= 0 {
 			return fast != 0
 		}
@@ -20624,12 +20624,12 @@ func renvoEmitCNativeIntCall(g *renvoLinearGen, ep *renvoExprParse, idx int, e *
 	}
 	if e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
 		calleeExpr := &ep.exprs[e.left]
-		if renvoFixedTarget == 0 && g.c.code16 && g.c.renvoTargetArch == renvoArch386 {
-			inlined := renvo386EmitCInlineReturnHelper(g, ep, idx, e, calleeExpr, -1, false)
+		if renvoFixedTarget == 0 {
+			inlined := renvoEmitCInlineReturn(g, ep, idx, e, calleeExpr, -1, false)
 			if inlined >= 0 {
 				return inlined
 			}
-			update := renvo386EmitCUpdateIntrinsic(g, ep, idx, e, calleeExpr, false)
+			update := renvoEmitCUpdateIntrinsic(g, ep, idx, e, calleeExpr)
 			if update >= 0 {
 				return update
 			}
@@ -20639,18 +20639,7 @@ func renvoEmitCNativeIntCall(g *renvoLinearGen, ep *renvoExprParse, idx int, e *
 				return 0
 			}
 			if offset != 0 {
-				if g.c.renvoTargetArch == renvoArch386 {
-					if renvoAsmImmFits8Signed(offset) {
-						renvoAsmEmit3(a, 0x83, 0xc0, offset)
-					} else {
-						renvoAsmEmit8(a, 0x05)
-						renvoAsmEmit32(a, offset)
-					}
-				} else {
-					renvoAsmPushImm(a, offset)
-					renvoAsmPopTertiary(a)
-					renvoAsmAddPrimaryTertiary(a)
-				}
+				renvoAsmPrimaryAddressOffset(a, offset)
 			}
 			return 1
 		}
@@ -20684,20 +20673,14 @@ func renvoEmitCPointerStep(g *renvoLinearGen, ep *renvoExprParse, callIndex int,
 	}
 	elementSize := renvoTypeSize(g.meta, resultType.elem)
 	constant := renvoEvalConstExpr(g, ep, countArg)
-	if renvoFixedTarget == 0 && g.c.code16 && g.c.renvoTargetArch == renvoArch386 && constant.ok {
+	if renvoFixedTarget == 0 && constant.ok {
 		delta := constant.value * elementSize
 		if decrement {
 			delta = -delta
 		}
-		if delta != 0 {
-			if renvoAsmImmFits8Signed(delta) {
-				renvoAsmEmit3(&g.asm, 0x83, 0xc0, delta)
-			} else {
-				renvoAsmEmit8(&g.asm, 0x05)
-				renvoAsmEmit32(&g.asm, delta)
-			}
+		if renvoEmitConstantPointerStep(g, delta) {
+			return true
 		}
-		return true
 	}
 	renvoAsmPushPrimary(&g.asm)
 	if !renvoEmitIntExpr(g, ep, countArg) {
@@ -23862,8 +23845,7 @@ func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, of
 	if e.kind == renvoExprAssert {
 		return renvoEmitTypeAssertionToLocal(g, ep, idx, offset, 0, true)
 	}
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 &&
-		renvo386EmitWideIdentToLocal(g, e, offset) {
+	if renvoFixedTarget == 0 && renvoEmitWideIdentToLocal(g, e, offset) {
 		return true
 	}
 	if e.kind == renvoExprIdent || e.kind == renvoExprSelector || e.kind == renvoExprIndex || e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
@@ -25142,8 +25124,8 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			return true
 		}
 	}
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 {
-		fast := renvo386EmitNativeIntExprFast(g, ep, idx)
+	if renvoFixedTarget == 0 {
+		fast := renvoEmitWordExpressionPeephole(g, ep, idx, false)
 		if fast >= 0 {
 			return fast != 0
 		}
@@ -25307,12 +25289,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			if !renvoEmitSlicePtrCap(g, ep, firstArgIndex) {
 				return false
 			}
-			if renvoPreparedBackendActive != 0 || g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
-				renvoAsmPushTertiary(a)
-				renvoAsmPopPrimary(a)
-			} else {
-				renvoAsmEmit16(a, 0x5851)
-			}
+			renvoAsmCopyTertiaryToPrimary(a)
 			return true
 		}
 		if e.argCount == 1 && callee == renvoIdentLen {
@@ -25380,12 +25357,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			if !renvoEmitSlicePtrLen(g, ep, firstArgIndex) {
 				return false
 			}
-			if renvoPreparedBackendActive != 0 || g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
-				renvoAsmPushTertiary(a)
-				renvoAsmPopPrimary(a)
-			} else {
-				renvoAsmEmit16(a, 0x5851)
-			}
+			renvoAsmCopyTertiaryToPrimary(a)
 			return true
 		}
 		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
@@ -25532,17 +25504,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				}
 				return renvoEmitIEEEFloatNegatePrimary(g, result.kind)
 			}
-			if renvoPreparedBackendActive != 0 {
-				renvoAsmPrimaryToNegative(a)
-			} else if g.c.renvoTargetArch == renvoArchAarch64 {
-				renvoAarch64AsmNegRax(a)
-			} else if g.c.renvoTargetArch == renvoArchArm {
-				renvoArmAsmNegRax(a)
-			} else if g.c.renvoTargetArch == renvoArchWasm32 {
-				renvoWasm32AsmNegRax(a)
-			} else {
-				renvoAsmEmit24(a, 0xd8f748)
-			}
+			renvoAsmNegatePrimaryWord(a)
 			renvoAsmNormalizePrimaryForKind(a, result.kind)
 			return true
 		}
