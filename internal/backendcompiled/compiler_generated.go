@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7fae2a4f74deab4777bdf6137530528a8874ec8742a1e6692599e84c82582d44"
+const CompilerSourceDigest = "48fd2d15720767446a72741cf65953021093967dc0073aac8912cb69973f3948"
 
 // source: backend/compiler_common_impl.go
 
@@ -7126,13 +7126,14 @@ return size
 }
 
 func renvoNativeAlignment(context *renvoCompileContext, size int) int {
-if size >= 8 && (context.renvoNativeIntSize == 8 || context.renvoTargetArch == renvoArchWasm32) {
+maxAlign := renvoTargetMaxAlignment(context)
+if size >= 8 && maxAlign >= 8 {
 return 8
 }
-if size >= 4 {
+if size >= 4 && maxAlign >= 4 {
 return 4
 }
-if size >= 2 {
+if size >= 2 && maxAlign >= 2 {
 return 2
 }
 return 1
@@ -36156,18 +36157,8 @@ floatModel      int
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 var p renvoTargetProfile
 if target == renvoTargetRTG {
-if renvoRTGPreparedIntBits == 0 {
-return p, false
-}
-p.target = target
-p.os = renvoRTGPreparedOS
-p.arch = renvoArchRTG
-p.intBits = renvoRTGPreparedIntBits
-p.pointerBits = p.intBits
-p.codePointerBits = p.intBits
-p.funcPointerBits = p.intBits
-p.maxAlign = p.intBits / 8
-return p, true
+p = renvoRTGProfileForTarget(target)
+return p, p.intBits != 0
 }
 if target <= 0 || target >= len(renvoTargetIntBitsTable) {
 return p, false
@@ -36193,6 +36184,24 @@ if p.arch == renvoArchAmd64 || p.arch == renvoArchAarch64 || p.arch == renvoArch
 p.floatModel = renvoFloatIEEEHardware
 }
 return p, true
+}
+
+
+
+
+func renvoTargetMaxAlignment(context *renvoCompileContext) int {
+if renvoPreparedBackendActive != 0 {
+return renvoRTGPreparedMaxAlign
+}
+target := context.renvoTarget
+if renvoFixedTarget != 0 {
+target = renvoFixedTarget
+}
+alignment := renvoBundledTargetMaxAlign(target)
+if alignment != 0 {
+return alignment
+}
+return context.renvoNativeIntSize
 }
 
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {
@@ -38164,6 +38173,7 @@ func renvoRTGEmitRuntimeOperation(out *renvoAsm, operation int) bool { return fa
 
 const renvoRTGPreparedOS = 0
 const renvoRTGPreparedIntBits = 0
+const renvoRTGPreparedMaxAlign = 0
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
 const renvoRTGPreparedSysVX8664 = 0

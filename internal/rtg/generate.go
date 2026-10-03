@@ -173,6 +173,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
+	source = append(source, "\nconst renvoRTGPreparedMaxAlign = "...)
+	if active {
+		source = appendDecimalFrame(source, descriptor.MaxAlign)
+	} else {
+		source = append(source, '0')
+	}
 	source = append(source, "\nconst renvoRTGPreparedKernelModule = "...)
 	if active && stringIndex(descriptor.Capabilities, "kernel_module") >= 0 {
 		source = append(source, '1')
@@ -294,6 +300,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = appendDecimalFrame(source, descriptor.FunctionPointerBits)
 		source = append(source, "\np.maxAlign = "...)
 		source = appendDecimalFrame(source, descriptor.MaxAlign)
+		source = append(source, "\np.endian = "...)
+		if descriptor.Endian == "big" {
+			source = append(source, "renvoEndianBig"...)
+		} else {
+			source = append(source, "renvoEndianLittle"...)
+		}
 		source = append(source, "\np.backendSlotSize = renvoBackendValueSlotSize\np.addressModel = renvoAddressModelFlat\n"...)
 		source = append(source, "p.runtimeCaps = "...)
 		source = appendDecimalFrame(source, preparedRuntimeCapabilities(descriptor.RuntimeOps))

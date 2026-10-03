@@ -234,18 +234,8 @@ type renvoTargetProfile struct {
 func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	var p renvoTargetProfile
 	if target == renvoTargetRTG {
-		if renvoRTGPreparedIntBits == 0 {
-			return p, false
-		}
-		p.target = target
-		p.os = renvoRTGPreparedOS
-		p.arch = renvoArchRTG
-		p.intBits = renvoRTGPreparedIntBits
-		p.pointerBits = p.intBits
-		p.codePointerBits = p.intBits
-		p.funcPointerBits = p.intBits
-		p.maxAlign = p.intBits / 8
-		return p, true
+		p = renvoRTGProfileForTarget(target)
+		return p, p.intBits != 0
 	}
 	if target <= 0 || target >= len(renvoTargetIntBitsTable) {
 		return p, false
@@ -271,6 +261,24 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 		p.floatModel = renvoFloatIEEEHardware
 	}
 	return p, true
+}
+
+// renvoTargetMaxAlignment uses the selected descriptor for both bundled and
+// prepared backends. Identity-free contexts used by isolated emitter callers
+// retain natural integer alignment; valid selected targets never need it.
+func renvoTargetMaxAlignment(context *renvoCompileContext) int {
+	if renvoPreparedBackendActive != 0 {
+		return renvoRTGPreparedMaxAlign
+	}
+	target := context.renvoTarget
+	if renvoFixedTarget != 0 {
+		target = renvoFixedTarget
+	}
+	alignment := renvoBundledTargetMaxAlign(target)
+	if alignment != 0 {
+		return alignment
+	}
+	return context.renvoNativeIntSize
 }
 
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {
