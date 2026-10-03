@@ -4357,6 +4357,34 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmPushObjectRegisterWordKind(a *renvoAsm, register int, kind int) bool {
+renvoNonNil(a)
+if !renvoRTGPushObjectCallWord(a, register) {
+	return false
+}
+if kind != 0 {
+	renvoAsmPopPrimary(a)
+	renvoAsmNormalizePrimaryForKind(a, kind)
+	renvoAsmPushPrimary(a)
+}
+return true
+}
+
+func renvoAsmPushObjectStackWordKind(a *renvoAsm, word int, kind int) bool {
+renvoNonNil(a)
+return false
+}
+
+func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
+renvoNonNil(g)
+renvoRTGObjectExportFrame(&g.asm, reserve)
+}
+
+func renvoObjectArgumentRegisterCount(c *renvoCompileContext) int {
+renvoNonNil(c)
+return renvoRTGObjectRegisterCount()
+}
+
 func renvoTargetObjectCallABI(c *renvoCompileContext) int {
 renvoNonNil(c)
 if renvoRTGPreparedSysVX8664 != 0 {

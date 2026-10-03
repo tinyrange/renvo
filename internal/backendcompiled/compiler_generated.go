@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1c12b5020542dde3ecfcbbacce38cd74fc6bc976f4cd537c8f044559db27c9d4"
+const CompilerSourceDigest = "3d4aa4f38f62a08f08d1c9bcd68c58277149bacef98218a938f44992bfbf28a5"
 
 // source: backend/compiler_common_impl.go
 
@@ -21820,10 +21820,7 @@ return false
 symbolIndex := renvoAsmAddObjectFuncSymbol(
 &g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 renvoObjectExportFrame(g, true)
-registerWords := 6
-if renvoPreparedBackendActive != 0 {
-registerWords = renvoRTGObjectRegisterCount()
-}
+registerWords := renvoObjectArgumentRegisterCount(g.c)
 if sret {
 registerWords--
 }
@@ -21986,10 +21983,7 @@ return wordCount
 }
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
-registerLimit := 6
-if renvoPreparedBackendActive != 0 {
-registerLimit = renvoRTGObjectRegisterCount()
-}
+registerLimit := renvoObjectArgumentRegisterCount(g.c)
 integerRegister := 0
 if sret {
 integerRegister = 1
@@ -22014,7 +22008,7 @@ kind := 0
 if param.kind != renvoTypeStruct {
 kind = renvoObjectABINormalizeKind(param.kind)
 }
-if renvoPreparedBackendActive != 0 || !renvoAmd64PushObjectStackWordKind(&g.asm, stackWord, kind) {
+if !renvoAsmPushObjectStackWordKind(&g.asm, stackWord, kind) {
 return false
 }
 stackWord++
@@ -22033,16 +22027,7 @@ kind := 0
 if param.kind != renvoTypeStruct {
 kind = renvoObjectABINormalizeKind(param.kind)
 }
-if renvoPreparedBackendActive != 0 {
-if !renvoRTGPushObjectCallWord(&g.asm, register) {
-return false
-}
-if kind != 0 {
-renvoAsmPopPrimary(&g.asm)
-renvoAsmNormalizePrimaryForKind(&g.asm, kind)
-renvoAsmPushPrimary(&g.asm)
-}
-} else if !renvoAmd64PushObjectIntegerRegisterKind(&g.asm, register, kind) {
+if !renvoAsmPushObjectRegisterWordKind(&g.asm, register, kind) {
 return false
 }
 }
@@ -22328,14 +22313,6 @@ return false
 }
 decl := &g.meta.objectDecls[fn.objectDecl]
 return renvoBytesPrefixText(g.prog.src, decl.sectionStart, decl.sectionEnd, prefix)
-}
-
-func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
-if renvoPreparedBackendActive != 0 {
-renvoRTGObjectExportFrame(&g.asm, reserve)
-} else {
-renvoAmd64ObjectExportFrame(g, reserve)
-}
 }
 
 func renvoInitFuncQueue(g *renvoLinearGen, count int) {
@@ -29436,7 +29413,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x62\xfc\xf2\x74\x5b\xf1\x5d\xd3\x74\xf6\x67\x55\x43\x0c\x2b\x80\x49\x2c\x22\xd0\xf8\x87\x41\xe1\x09\x81\x09\x25\xa2\x9e\x2a\x14", 3, true
+return "wasi/wasm32", "\x62\x87\x59\x19\xd2\xe5\xa2\x3b\x83\x7c\x6c\x7b\xa1\x87\x43\xb0\x5e\xf1\xc1\x27\x04\x5e\x8c\xf8\xb8\x14\x4a\xf8\xf0\x8b\x6d\x49", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -29448,7 +29425,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xa5\xce\x4e\x7e\x06\x23\x42\x39\x4d\xda\xc3\xb0\x7f\x1c\x9e\xdc\x71\xb0\x03\xac\x4e\xbc\xd4\x67\x98\xbc\xff\x8f\xd5\x80\xfe\xfc", 3, true
+return "vm/vm32", "\x6e\xcd\x23\x2e\xb5\xc3\x88\x38\x46\xb3\x4f\xc2\x9e\xc8\x15\x88\xef\xf9\x04\xef\xab\x8f\x75\x63\x10\x27\xde\x90\x72\xd1\x28\x49", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30919,6 +30896,80 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoAsmPushObjectRegisterWordKind(a *renvoAsm, register int, kind int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoAmd64PushObjectIntegerRegisterKind(a, register, kind)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAsmPushObjectStackWordKind(a *renvoAsm, word int, kind int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoAmd64PushObjectStackWordKind(a, word, kind)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64ObjectExportFrame(g, reserve)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+g.asm.patchFailed = true
+
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoObjectArgumentRegisterCount(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return 6
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return 0
+
+}
+return 0
 }
 
 func renvoTargetObjectCallABI(c *renvoCompileContext) int {
@@ -44692,6 +44743,14 @@ return true
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -47936,6 +47995,14 @@ return true
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -50781,6 +50848,14 @@ return label
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -52097,6 +52172,14 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
+
+
 
 
 
@@ -55715,6 +55798,14 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
 
 
 
