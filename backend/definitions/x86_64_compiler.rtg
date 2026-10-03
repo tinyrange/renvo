@@ -965,6 +965,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		switch_case_peephole = renvoAmd64CompilerSwitchCasePeephole
+		register_switch = renvoAmd64CompilerRegisterSwitch
 		string_equal_left_length = renvoAmd64CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvoAmd64CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvoAmd64CompilerCanFoldIndexedScalarLoad
@@ -3503,5 +3505,17 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerStringEqualLeftLength(a *renvoAsm) {
 		renvoAsmCopyPrimaryToCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerRegisterSwitch(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+		return -1
 	}
 }

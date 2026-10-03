@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "switch_case_peephole", Suffix: "SwitchCasePeephole", Function: "renvoEmitSwitchCasePeephole", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"idx", "int"}, {"valueOffset", "int"}, {"matchLabel", "int"}, {"known", "bool"}, {"value", "int"}}, Prepared: "return -1"},
+	{Name: "register_switch", Suffix: "RegisterSwitch", Function: "renvoCanKeepSwitchPrimary", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "string_equal_left_length", Suffix: "StringEqualLeftLength", Function: "renvoAsmStringEqualLeftLength", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoAsmCopyPrimaryToCallWord1(a)"},
 	{Name: "folded_indexed_scalar_load", Suffix: "FoldedIndexedScalarLoad", Function: "renvoAsmFoldedIndexedScalarLoad", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"elementSize", "int"}, {"size", "int"}, {"signed", "bool"}}, Prepared: "a.patchFailed = true"},
 	{Name: "can_fold_indexed_scalar_load", Suffix: "CanFoldIndexedScalarLoad", Function: "renvoCanFoldIndexedScalarLoad", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"idx", "int"}, {"elementSize", "int"}, {"size", "int"}}, Prepared: "return false"},

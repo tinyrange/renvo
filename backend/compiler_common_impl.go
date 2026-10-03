@@ -9538,8 +9538,8 @@ func renvoEmitLinearSwitch(g *renvoLinearGen, stmt *renvoStmt) bool {
 		}
 	}
 	registerSwitch := false
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 {
-		if g.c.code16 && rootIndex >= 0 && !stringSwitch && !typeSwitch && !interfaceSwitch {
+	if renvoFixedTarget == 0 && renvoCanKeepSwitchPrimary(g) {
+		if rootIndex >= 0 && !stringSwitch && !typeSwitch && !interfaceSwitch {
 			registerSwitch = renvoSwitchCasesAreConstant(g, stmt)
 		}
 	}
@@ -9943,36 +9943,13 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 				return false
 			}
 		} else {
-			if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 {
+			if renvoFixedTarget == 0 && renvoCanKeepSwitchPrimary(g) {
 				constant := renvoEvalConstExpr(g, ep, rootIndex)
-				if renvoPreparedBackendActive == 0 && constant.ok && valueOffset < 0 {
-					if renvoAsmImmFits8Signed(constant.value) {
-						renvoAsmCmpPrimaryImm8(a, constant.value)
-					} else {
-						renvoAsmEmit8(a, 0x3d)
-						renvoAsmEmit32(a, constant.value)
-					}
-					renvo386AsmJccLabel(a, 0x84, matchLabel)
-					i = valueEnd
-					if renvoTokCharIs(p, i, ',') {
-						i++
-					}
-					continue
+				fast := renvoEmitSwitchCasePeephole(g, ep, rootIndex, valueOffset, matchLabel, constant.ok, constant.value)
+				if fast == 0 {
+					return false
 				}
-				if constant.ok {
-					renvoAsmJcmpStackImm(a, valueOffset, constant.value, matchLabel, 0x94)
-					i = valueEnd
-					if renvoTokCharIs(p, i, ',') {
-						i++
-					}
-					continue
-				}
-				if renvoPreparedBackendActive == 0 {
-					if !renvoEmitIntExpr(g, ep, rootIndex) {
-						return false
-					}
-					renvoAsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
-					renvo386AsmJccLabel(a, 0x84, matchLabel)
+				if fast > 0 {
 					i = valueEnd
 					if renvoTokCharIs(p, i, ',') {
 						i++
@@ -14376,10 +14353,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				}
 			}
 		}
-		if g.c.renvoTargetArch == renvoArch386 {
-			return renvoEmitWideNamedConversionCall(g, ep, idx)
-		}
-		return renvoEmitNativeNamedConversionCall(g, ep, idx)
+		return renvoEmitNamedConversionCall(g, ep, idx)
 	}
 	if fnIndex >= len(g.funcLabels) {
 		return false
@@ -19654,108 +19628,6 @@ func renvoEmitWideCompareOperand(g *renvoLinearGen, ep *renvoExprParse, idx int,
 	return true
 }
 
-func renvoEmitWideStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	meta := g.meta
-	a := &g.asm
-	e := &ep.exprs[idx]
-	if e.kind == renvoExprString {
-		msg := renvoDecodeStringToken(g.prog, e.tok)
-		msgOff := renvoAddStringData(g, msg)
-		msgLen := len(msg)
-		renvoAsmPrimaryDataAddr(a, msgOff)
-		renvoAsmSecondaryImm(a, msgLen)
-		return true
-	}
-	if e.kind == renvoExprSlice {
-		return renvoEmitStringSliceValueRegs(g, ep, idx)
-	}
-	if e.kind == renvoExprIdent {
-		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if localIndex >= 0 {
-			if !renvoTypeIsString(meta, g.locals[localIndex].typ) {
-				return false
-			}
-			renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-			renvoAsmLoadSecondaryStack(a, g.locals[localIndex].offset-8)
-			return true
-		}
-		globalOffset := renvoFindGlobalOffset(g, e.nameStart, e.nameEnd)
-		globalType := renvoFindGlobalType(g, e.nameStart, e.nameEnd)
-		if globalOffset >= 0 && renvoTypeIsString(meta, globalType) {
-			renvoAsmLoadPrimaryBss(a, globalOffset)
-			renvoAsmPushPrimary(a)
-			renvoAsmLoadPrimaryBss(a, globalOffset+8)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoAsmPopPrimary(a)
-			return true
-		}
-		constTok := renvoFindConstStringToken(g, e.nameStart, e.nameEnd)
-		if constTok >= 0 {
-			msg := renvoDecodeStringToken(g.prog, constTok)
-			msgOff := renvoAddStringData(g, msg)
-			msgLen := len(msg)
-			renvoAsmPrimaryDataAddr(a, msgOff)
-			renvoAsmSecondaryImm(a, msgLen)
-			return true
-		}
-		return false
-	}
-	if e.kind == renvoExprIndex {
-		return renvoEmitIndexedStringValueRegs(g, ep, idx)
-	}
-	if e.kind == renvoExprSelector {
-		valueType := renvoInferParsedExprType(g, ep, idx)
-		if !renvoTypeIsString(meta, valueType) {
-			return false
-		}
-		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
-			return false
-		}
-		renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-		renvoAsmPushPrimary(a)
-		renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmPopPrimary(a)
-		return true
-	}
-	if e.kind == renvoExprCall {
-		callType := renvoInferParsedExprType(g, ep, idx)
-		if !renvoTypeIsString(meta, callType) {
-			return false
-		}
-		if !renvoEmitUserCall(g, ep, idx) {
-			return false
-		}
-		return true
-	}
-	return false
-}
-
-func renvoEmitWideNamedConversionCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	e := &ep.exprs[idx]
-	if e.argCount != 1 {
-		return false
-	}
-	calleeExpr := &ep.exprs[e.left]
-	if calleeExpr.kind != renvoExprIdent {
-		return false
-	}
-	namedType := renvoFindTypeByRange(g, calleeExpr.nameStart, calleeExpr.nameEnd)
-	resolved := renvoResolveType(g.meta, namedType)
-	if resolved.kind == renvoTypeString {
-		return renvoEmitStringValueRegs(g, ep, ep.args[e.firstArg])
-	}
-	resolvedKind := resolved.kind
-	if renvoTypeKindIsScalarInt(resolvedKind) {
-		if !renvoEmitIntExpr(g, ep, ep.args[e.firstArg]) {
-			return false
-		}
-		renvoAsmNormalizePrimaryForKind(&g.asm, resolvedKind)
-		return true
-	}
-	return false
-}
-
 func renvoEmitWideFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if !renvoUsesStackIEEEFloat(&g.asm) {
 		return false
@@ -20477,9 +20349,6 @@ func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 		renvoAsmCopyPrimaryToSecondary(&g.asm)
 		renvoAsmPopPrimary(&g.asm)
 		return true
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		return renvoEmitWideStringValueRegs(g, ep, idx)
 	}
 	return renvoGenericEmitStringValueRegs(g, ep, idx)
 }
@@ -25527,7 +25396,7 @@ func renvoEmitNativeStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx 
 	return false
 }
 
-func renvoEmitNativeNamedConversionCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+func renvoEmitNamedConversionCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	e := &ep.exprs[idx]
 	if e.argCount != 1 {
