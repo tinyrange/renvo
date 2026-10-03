@@ -4365,6 +4365,30 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+const renvoMayCopyResultViaFrame = true
+
+func renvoResultCopyViaFrame(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+func renvoReserveFunctionLabels(c *renvoCompileContext, mode int) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoOptimizeProgramRuntime(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+const renvoMayCompileFixedObjectCABI = true
+
+func renvoFixedObjectCABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
 func renvoAsmSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
 renvoNonNil(a)
 renvoRTGSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
