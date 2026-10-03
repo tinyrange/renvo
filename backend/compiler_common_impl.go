@@ -19684,6 +19684,40 @@ func renvoEmitUnaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	return false
 }
 
+// renvoEmitWordCallExpr resolves conversions and builtins before ordinary calls.
+// Target-specific C call preambles have already had an opportunity to handle
+// the expression; function-word representation support is definition-owned.
+func renvoEmitWordCallExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	p := g.prog
+	e := &ep.exprs[idx]
+	if intrinsic := renvoEmitWordIntrinsicCall(g, ep, idx); intrinsic >= 0 {
+		return intrinsic != 0
+	}
+	callee := renvoExprIdentCode(p, ep, e.left)
+	if e.argCount == 1 {
+		firstArgIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+		conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
+		conversion := renvoResolveType(g.meta, conversionType)
+		if renvoIsSliceArrayConversion(g, ep, firstArgIndex, conversionType) {
+			return renvoEmitSliceArrayConversion(g, ep, firstArgIndex, conversionType, 0)
+		}
+		if renvoTypeKindIsScalarValue(conversion.kind) || conversion.kind == renvoTypePointer ||
+			g.c.objectFile && conversion.kind == renvoTypeFunc && renvoSupportsFunctionWordConversion(g) {
+			return renvoEmitScalarExprForKind(g, ep, firstArgIndex, conversion.kind)
+		}
+		if callee == renvoIdentCap || callee == renvoIdentLen {
+			return renvoEmitLengthCapacityCall(g, ep, idx)
+		}
+	}
+	if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
+		return renvoEmitTargetRuntime(g, ep, idx, callee)
+	}
+	if callee == renvoIdentCopy {
+		return renvoEmitBuiltinCopy(g, ep, idx)
+	}
+	return renvoEmitUserCall(g, ep, idx)
+}
+
 func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	p := g.prog
 	a := &g.asm
@@ -19720,31 +19754,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 				return renvoEmitCPointerDifference(g, ep, e)
 			}
 		}
-		if intrinsic := renvoEmitWordIntrinsicCall(g, ep, idx); intrinsic >= 0 {
-			return intrinsic != 0
-		}
-		callee := renvoExprIdentCode(p, ep, e.left)
-		if e.argCount == 1 {
-			conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-			conversion := renvoResolveType(g.meta, conversionType)
-			if renvoIsSliceArrayConversion(g, ep, ep.args[e.firstArg], conversionType) {
-				return renvoEmitSliceArrayConversion(g, ep, ep.args[e.firstArg], conversionType, 0)
-			}
-			if renvoTypeKindIsScalarValue(conversion.kind) || conversion.kind == renvoTypePointer ||
-				g.c.objectFile && conversion.kind == renvoTypeFunc {
-				return renvoEmitScalarExprForKind(g, ep, ep.args[e.firstArg], conversion.kind)
-			}
-		}
-		if e.argCount == 1 && (callee == renvoIdentCap || callee == renvoIdentLen) {
-			return renvoEmitLengthCapacityCall(g, ep, idx)
-		}
-		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
-			return renvoEmitTargetRuntime(g, ep, idx, callee)
-		}
-		if callee == renvoIdentCopy {
-			return renvoEmitBuiltinCopy(g, ep, idx)
-		}
-		return renvoEmitUserCall(g, ep, idx)
+		return renvoEmitWordCallExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprIndex {
 		return renvoEmitIndexExpr(g, ep, idx)
@@ -24433,35 +24443,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 				return result != 0
 			}
 		}
-		if intrinsic := renvoEmitWordIntrinsicCall(g, ep, idx); intrinsic >= 0 {
-			return intrinsic != 0
-		}
-		callee := renvoExprIdentCode(p, ep, e.left)
-		firstArgIndex := -1
-		if e.argCount > 0 {
-			firstArgIndex = renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-		}
-		if e.argCount == 1 {
-			conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-			conversion := renvoResolveType(meta, conversionType)
-			renvoNonNil(conversion)
-			if renvoIsSliceArrayConversion(g, ep, firstArgIndex, conversionType) {
-				return renvoEmitSliceArrayConversion(g, ep, firstArgIndex, conversionType, 0)
-			}
-			if renvoTypeKindIsScalarValue(conversion.kind) || conversion.kind == renvoTypePointer {
-				return renvoEmitScalarExprForKind(g, ep, firstArgIndex, conversion.kind)
-			}
-		}
-		if e.argCount == 1 && (callee == renvoIdentCap || callee == renvoIdentLen) {
-			return renvoEmitLengthCapacityCall(g, ep, idx)
-		}
-		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
-			return renvoEmitTargetRuntime(g, ep, idx, callee)
-		}
-		if callee == renvoIdentCopy {
-			return renvoEmitBuiltinCopy(g, ep, idx)
-		}
-		return renvoEmitUserCall(g, ep, idx)
+		return renvoEmitWordCallExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprIndex {
 		return renvoEmitIndexExpr(g, ep, idx)

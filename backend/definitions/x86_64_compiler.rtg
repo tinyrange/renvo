@@ -965,6 +965,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		function_word_conversion = renvoAmd64CompilerFunctionWordConversion
 		named_function_address = renvoAmd64CompilerNamedFunctionAddress
 		address_taken_local = renvoAmd64CompilerAddressTakenLocal
 		address_result_buffer = renvoAmd64CompilerAddressResultBuffer
@@ -3722,5 +3723,11 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerNamedFunctionAddress(g *renvoLinearGen) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFunctionWordConversion(g *renvoLinearGen) bool {
+		return false
 	}
 }

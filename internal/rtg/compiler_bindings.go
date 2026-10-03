@@ -85,6 +85,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "function_word_conversion", Suffix: "FunctionWordConversion", Function: "renvoSupportsFunctionWordConversion", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "named_function_address", Suffix: "NamedFunctionAddress", Function: "renvoCanTakeNamedFunctionAddress", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "address_taken_local", Suffix: "AddressTakenLocal", Function: "renvoAsmAddressTakenLocal", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoAsmAddressPrimaryStack(a, offset)"},
 	{Name: "address_result_buffer", Suffix: "AddressResultBuffer", Function: "renvoAsmAddressResultBuffer", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoAsmAddressPrimaryStack(a, offset)"},
