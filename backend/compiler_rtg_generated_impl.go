@@ -212,6 +212,14 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallWordLocations() []int {
+	return out.staticCallWordLocations
+}
+
+func (out *renvoAsm) StaticCallStackBytes() int {
+	return out.staticCallStackBytes
+}
+
 func (out *renvoAsm) StaticCallParameterCount() int {
 	return out.staticCallParamCount
 }
@@ -795,6 +803,23 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return 16
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return 0
+	
+}
+return 0
 }
 
 func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {

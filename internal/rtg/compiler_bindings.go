@@ -91,6 +91,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "object_aggregate_register_bytes", Suffix: "ObjectAggregateRegisterBytes", Function: "renvoObjectAggregateRegisterBytes", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "if renvoRTGPreparedSysVX8664 != 0 { return 16 }\nreturn 0"},
 	{Name: "hosted_static_call", Suffix: "HostedStaticCall", Function: "renvoAsmHostedStaticCall", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"importID", "int"}, {"wordCount", "int"}}, Prepared: "return renvoRTGEmitStaticCall(a, importID, wordCount)"},
 	{Name: "object_register_call", Suffix: "ObjectRegisterCall", Function: "renvoAsmObjectRegisterCall", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"importID", "int"}, {"wordCount", "int"}, {"vectorMask", "int"}}, Prepared: "return renvoRTGEmitStaticCall(a, importID, wordCount|vectorMask<<8)"},
 	{Name: "cdecl_object_call", Suffix: "CdeclObjectCall", Function: "renvoAsmCdeclObjectCall", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"importID", "int"}, {"wordCount", "int"}, {"variadic", "bool"}}, Prepared: "return false"},

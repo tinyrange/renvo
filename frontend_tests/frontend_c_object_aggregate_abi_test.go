@@ -76,6 +76,21 @@ extern protection_t external_protection(protection_t, void *);
 unsigned long call_external_protection(unsigned long value) {
 	return external_protection((protection_t){value}, (void *)0).value;
 }
+struct block { unsigned long first, second, third; };
+struct wide_block { unsigned long words[20]; };
+extern unsigned long external_block(unsigned long, struct block, unsigned long);
+extern unsigned long external_spill(unsigned long, unsigned long, unsigned long,
+    unsigned long, unsigned long, struct pair, unsigned long);
+extern unsigned long external_wide(struct wide_block, unsigned long);
+unsigned long call_external_memory(void) {
+	struct block block = { 3, 5, 7 };
+	struct pair pair = { 13, 17 };
+	struct wide_block wide = { { 19, 23 } };
+	wide.words[19] = 29;
+	return external_block(2, block, 11) +
+	    external_spill(1, 2, 3, 4, 5, pair, 31) +
+	    external_wide(wide, 37);
+}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +100,25 @@ protection_t external_protection(protection_t protection, void *context) {
 	(void)context;
 	protection.value += 1;
 	return protection;
+}
+struct pair { long first, second; };
+struct block { unsigned long first, second, third; };
+struct wide_block { unsigned long words[20]; };
+unsigned long external_block(unsigned long head, struct block block, unsigned long tail) {
+	return head == 2 && block.first == 3 && block.second == 5 &&
+	    block.third == 7 && tail == 11 ? 100 : 0;
+}
+unsigned long external_spill(unsigned long a, unsigned long b, unsigned long c,
+    unsigned long d, unsigned long e, struct pair pair, unsigned long tail) {
+	return a == 1 && b == 2 && c == 3 && d == 4 && e == 5 &&
+	    pair.first == 13 && pair.second == 17 && tail == 31 ? 200 : 0;
+}
+unsigned long external_wide(struct wide_block block, unsigned long tail) {
+	if (block.words[0] != 19 || block.words[1] != 23 || block.words[19] != 29 || tail != 37)
+		return 0;
+	for (int i = 2; i < 19; i++)
+		if (block.words[i] != 0) return 0;
+	return 400;
 }
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -97,12 +131,13 @@ extern unsigned long preserve_after_empty_assignment(void);
 typedef struct { unsigned long value; } protection_t;
 extern unsigned long preserve_compound_literal_assignment(protection_t);
 extern unsigned long call_external_protection(unsigned long);
+extern unsigned long call_external_memory(void);
 int main(void) {
 	struct pair result = add_pair((struct pair){1, 2}, (struct pair){10, 20});
 	if (result.first != 11 || result.second != 22 ||
 	    preserve_after_empty_assignment() != 0x3f8 ||
 	    preserve_compound_literal_assignment((protection_t){2}) != 2 ||
-	    call_external_protection(41) != 42)
+	    call_external_protection(41) != 42 || call_external_memory() != 700)
 		return 1;
 	puts("PASS");
 	return 0;

@@ -737,6 +737,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		object_aggregate_register_bytes = renvoAarch64CompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoAarch64CompilerHostedStaticCall
 		object_register_call = renvoAarch64CompilerObjectRegisterCall
 		cdecl_object_call = renvoAarch64CompilerCdeclObjectCall
@@ -3304,5 +3305,11 @@ go compiler {
 		}
 		renvoWinArm64DefinitionStaticCall(a, importID, wordCount)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+		return 0
 	}
 }

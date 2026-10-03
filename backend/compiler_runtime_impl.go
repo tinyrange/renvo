@@ -549,189 +549,67 @@ func renvoEmitCObjectMemoryAggregateCall(g *renvoLinearGen, fn *renvoFuncInfo, w
 	if !containsAggregate {
 		return -1
 	}
+	wordBytes := g.c.renvoNativeIntSize
+	registerCount := renvoObjectArgumentRegisterCount(g.c)
+	aggregateRegisterBytes := renvoObjectAggregateRegisterBytes(g.c)
+	if wordBytes <= 0 || registerCount <= 0 || aggregateRegisterBytes <= 0 {
+		return 0
+	}
 	integerRegisters := 0
 	stackBytes := 0
-	totalWords := 0
-	hasAggregate := false
-	hasMemoryAggregate := false
+	var locations []int
 	for i := 0; i < fn.paramCount; i++ {
 		paramType := g.meta.params[fn.firstParam+i].typ
 		param := renvoResolveType(g.meta, paramType)
 		renvoNonNil(param)
 		words := 1
+		memory := false
 		if param.kind == renvoTypeStruct {
-			hasAggregate = true
 			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			if size <= 16 {
-				if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
-					return 0
-				}
-				if integerRegisters+words <= 6 {
-					integerRegisters += words
-				} else {
-					hasMemoryAggregate = true
-					stackBytes += words * 8
-				}
-			} else {
-				hasMemoryAggregate = true
-				stackBytes += words * 8
+			words = renvoAlignValue(size, wordBytes) / wordBytes
+			if size <= aggregateRegisterBytes && !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+				return 0
 			}
+			memory = size > aggregateRegisterBytes || integerRegisters+words > registerCount
 		} else {
 			if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc && !renvoTypeIsString(g.meta, paramType) {
 				return 0
 			}
-			if integerRegisters < 6 {
-				integerRegisters++
+			memory = integerRegisters >= registerCount
+		}
+		if words < 0 || words > 32-len(locations) {
+			return 0
+		}
+		for word := 0; word < words; word++ {
+			if memory {
+				locations = append(locations, -stackBytes-1)
+				stackBytes += wordBytes
 			} else {
-				stackBytes += 8
+				locations = append(locations, integerRegisters)
+				integerRegisters++
 			}
 		}
-		totalWords += words
 	}
-	if !hasAggregate || !hasMemoryAggregate && stackBytes == 0 {
+	if stackBytes == 0 {
 		return -1
 	}
-	if totalWords != wordCount || wordCount > 32 {
+	if len(locations) != wordCount || wordCount > 32 {
 		return 0
 	}
-
 	a := &g.asm
-	// The reordered evaluation stack starts with source argument word zero.
-	// Keep that address in caller-clobbered R11 while constructing an aligned
-	// outgoing SysV stack below it.
-	renvoAsmEmitText(a, "\x49\x89\xe3\x48\x83\xe4\xf0")
-	reserve := renvoAlignValue(stackBytes+16, 16)
-	if reserve <= 127 {
-		renvoAsmEmitText(a, "\x48\x83\xec")
-		renvoAsmEmit8(a, reserve)
-	} else {
-		renvoAsmEmitText(a, "\x48\x81\xec")
-		renvoAsmEmit32(a, reserve)
-	}
-	saveOffset := reserve - 8
-	if saveOffset <= 127 {
-		renvoAsmEmitText(a, "\x4c\x89\x5c\x24")
-		renvoAsmEmit8(a, saveOffset)
-	} else {
-		renvoAsmEmitText(a, "\x4c\x89\x9c\x24")
-		renvoAsmEmit32(a, saveOffset)
-	}
-
-	sourceWord := 0
-	stackOffset := 0
-	integerRegisters = 0
-	for i := 0; i < fn.paramCount; i++ {
-		paramType := g.meta.params[fn.firstParam+i].typ
-		param := renvoResolveType(g.meta, paramType)
-		renvoNonNil(param)
-		words := 1
-		memory := false
-		if param.kind == renvoTypeStruct {
-			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			memory = size > 16 || integerRegisters+words > 6
-			if !memory {
-				integerRegisters += words
-			}
-		} else if integerRegisters < 6 {
-			integerRegisters++
-		} else {
-			memory = true
-		}
-		if memory {
-			for word := 0; word < words; word++ {
-				renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-				renvoAmd64ObjectStoreOutgoingWord(a, stackOffset)
-				stackOffset += 8
-			}
-		}
-		sourceWord += words
-	}
-
-	sourceWord = 0
-	integerRegister := 0
-	for i := 0; i < fn.paramCount; i++ {
-		paramType := g.meta.params[fn.firstParam+i].typ
-		param := renvoResolveType(g.meta, paramType)
-		renvoNonNil(param)
-		words := 1
-		memory := false
-		if param.kind == renvoTypeStruct {
-			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			memory = size > 16 || integerRegister+words > 6
-		} else {
-			memory = integerRegister >= 6
-		}
-		if !memory {
-			for word := 0; word < words; word++ {
-				renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-				renvoAmd64ObjectMovePrimaryToIntegerArg(a, integerRegister)
-				integerRegister++
-			}
-		}
-		sourceWord += words
-	}
-	if sourceWord != wordCount || stackOffset != stackBytes {
-		return 0
-	}
-	importID := renvoAsmAddPreparedStaticImport(&g.asm,
+	importID := renvoAsmAddPreparedStaticImport(a,
 		fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 	if importID < 0 {
 		return 0
 	}
-	externalID := renvoAsmAddExternalImportName(a, a.staticImports[importID].name)
-	renvoAsmEmitText(a, "\xb0\x00\xe8")
-	at := len(a.code)
-	renvoAsmEmit32(a, 0)
-	renvoAsmAddAbsReloc(a, at, externalID, 2)
-	if saveOffset <= 127 {
-		renvoAsmEmitText(a, "\x48\x8b\x64\x24")
-		renvoAsmEmit8(a, saveOffset)
-	} else {
-		renvoAsmEmitText(a, "\x48\x8b\xa4\x24")
-		renvoAsmEmit32(a, saveOffset)
-	}
-	argumentBytes := wordCount * 8
-	if argumentBytes <= 127 {
-		renvoAsmEmitText(a, "\x48\x83\xc4")
-		renvoAsmEmit8(a, argumentBytes)
-	} else {
-		renvoAsmEmitText(a, "\x48\x81\xc4")
-		renvoAsmEmit32(a, argumentBytes)
-	}
-	return 1
-}
-
-func renvoAmd64ObjectLoadSourceWord(a *renvoAsm, word int) {
-	displacement := word * 8
-	if displacement <= 127 {
-		renvoAsmEmitText(a, "\x49\x8b\x43")
-		renvoAsmEmit8(a, displacement)
-	} else {
-		renvoAsmEmitText(a, "\x49\x8b\x83")
-		renvoAsmEmit32(a, displacement)
-	}
-}
-
-func renvoAmd64ObjectStoreOutgoingWord(a *renvoAsm, displacement int) {
-	if displacement == 0 {
-		renvoAsmEmitText(a, "\x48\x89\x04\x24")
-	} else if displacement <= 127 {
-		renvoAsmEmitText(a, "\x48\x89\x44\x24")
-		renvoAsmEmit8(a, displacement)
-	} else {
-		renvoAsmEmitText(a, "\x48\x89\x84\x24")
-		renvoAsmEmit32(a, displacement)
-	}
-}
-
-func renvoAmd64ObjectMovePrimaryToIntegerArg(a *renvoAsm, register int) {
-	operations := []string{"\x48\x89\xc7", "\x48\x89\xc6", "\x48\x89\xc2", "\x48\x89\xc1", "\x49\x89\xc0", "\x49\x89\xc1"}
-	if register >= 0 && register < len(operations) {
-		renvoAsmEmitText(a, operations[register])
-	}
+	// Classification is shared; the target consumes this plan synchronously
+	// and owns stack alignment, register placement, relocation, and cleanup.
+	a.staticCallWordLocations = locations
+	a.staticCallStackBytes = stackBytes
+	ok := renvoAsmObjectRegisterCall(a, importID, wordCount, 0)
+	a.staticCallWordLocations = nil
+	a.staticCallStackBytes = 0
+	return renvoBoolInt(ok)
 }
 
 func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {

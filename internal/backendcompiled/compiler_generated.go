@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "12a9f7878bad8d64ef247c814501c37647780a0550ff2331ca4c924034053b60"
+const CompilerSourceDigest = "c4ac014f1234ca7771b90015372357ba8643e5f9701710dab5300b31dd186307"
 
 // source: backend/compiler_common_impl.go
 
@@ -281,6 +281,10 @@ objectDataValues []byte
 objectFunctions  []renvoObjectFunctionRange
 objectDataRelocs []renvoObjectDataRelocation
 objectExternals  []renvoObjectExternal
+
+
+staticCallWordLocations []int
+staticCallStackBytes    int
 }
 
 
@@ -26812,189 +26816,67 @@ containsAggregate = containsAggregate || renvoResolveType(g.meta, paramType).kin
 if !containsAggregate {
 return -1
 }
+wordBytes := g.c.renvoNativeIntSize
+registerCount := renvoObjectArgumentRegisterCount(g.c)
+aggregateRegisterBytes := renvoObjectAggregateRegisterBytes(g.c)
+if wordBytes <= 0 || registerCount <= 0 || aggregateRegisterBytes <= 0 {
+return 0
+}
 integerRegisters := 0
 stackBytes := 0
-totalWords := 0
-hasAggregate := false
-hasMemoryAggregate := false
+var locations []int
 for i := 0; i < fn.paramCount; i++ {
 paramType := g.meta.params[fn.firstParam+i].typ
 param := renvoResolveType(g.meta, paramType)
 renvoNonNil(param)
 words := 1
+memory := false
 if param.kind == renvoTypeStruct {
-hasAggregate = true
 size := renvoTypeSize(g.meta, paramType)
-words = renvoAlignValue(size, 8) / 8
-if size <= 16 {
-if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+words = renvoAlignValue(size, wordBytes) / wordBytes
+if size <= aggregateRegisterBytes && !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
 return 0
 }
-if integerRegisters+words <= 6 {
-integerRegisters += words
-} else {
-hasMemoryAggregate = true
-stackBytes += words * 8
-}
-} else {
-hasMemoryAggregate = true
-stackBytes += words * 8
-}
+memory = size > aggregateRegisterBytes || integerRegisters+words > registerCount
 } else {
 if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc && !renvoTypeIsString(g.meta, paramType) {
 return 0
 }
-if integerRegisters < 6 {
-integerRegisters++
+memory = integerRegisters >= registerCount
+}
+if words < 0 || words > 32-len(locations) {
+return 0
+}
+for word := 0; word < words; word++ {
+if memory {
+locations = append(locations, -stackBytes-1)
+stackBytes += wordBytes
 } else {
-stackBytes += 8
+locations = append(locations, integerRegisters)
+integerRegisters++
 }
 }
-totalWords += words
 }
-if !hasAggregate || !hasMemoryAggregate && stackBytes == 0 {
+if stackBytes == 0 {
 return -1
 }
-if totalWords != wordCount || wordCount > 32 {
+if len(locations) != wordCount || wordCount > 32 {
 return 0
 }
-
 a := &g.asm
-
-
-
-renvoAsmEmitText(a, "\x49\x89\xe3\x48\x83\xe4\xf0")
-reserve := renvoAlignValue(stackBytes+16, 16)
-if reserve <= 127 {
-renvoAsmEmitText(a, "\x48\x83\xec")
-renvoAsmEmit8(a, reserve)
-} else {
-renvoAsmEmitText(a, "\x48\x81\xec")
-renvoAsmEmit32(a, reserve)
-}
-saveOffset := reserve - 8
-if saveOffset <= 127 {
-renvoAsmEmitText(a, "\x4c\x89\x5c\x24")
-renvoAsmEmit8(a, saveOffset)
-} else {
-renvoAsmEmitText(a, "\x4c\x89\x9c\x24")
-renvoAsmEmit32(a, saveOffset)
-}
-
-sourceWord := 0
-stackOffset := 0
-integerRegisters = 0
-for i := 0; i < fn.paramCount; i++ {
-paramType := g.meta.params[fn.firstParam+i].typ
-param := renvoResolveType(g.meta, paramType)
-renvoNonNil(param)
-words := 1
-memory := false
-if param.kind == renvoTypeStruct {
-size := renvoTypeSize(g.meta, paramType)
-words = renvoAlignValue(size, 8) / 8
-memory = size > 16 || integerRegisters+words > 6
-if !memory {
-integerRegisters += words
-}
-} else if integerRegisters < 6 {
-integerRegisters++
-} else {
-memory = true
-}
-if memory {
-for word := 0; word < words; word++ {
-renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-renvoAmd64ObjectStoreOutgoingWord(a, stackOffset)
-stackOffset += 8
-}
-}
-sourceWord += words
-}
-
-sourceWord = 0
-integerRegister := 0
-for i := 0; i < fn.paramCount; i++ {
-paramType := g.meta.params[fn.firstParam+i].typ
-param := renvoResolveType(g.meta, paramType)
-renvoNonNil(param)
-words := 1
-memory := false
-if param.kind == renvoTypeStruct {
-size := renvoTypeSize(g.meta, paramType)
-words = renvoAlignValue(size, 8) / 8
-memory = size > 16 || integerRegister+words > 6
-} else {
-memory = integerRegister >= 6
-}
-if !memory {
-for word := 0; word < words; word++ {
-renvoAmd64ObjectLoadSourceWord(a, sourceWord+word)
-renvoAmd64ObjectMovePrimaryToIntegerArg(a, integerRegister)
-integerRegister++
-}
-}
-sourceWord += words
-}
-if sourceWord != wordCount || stackOffset != stackBytes {
-return 0
-}
-importID := renvoAsmAddPreparedStaticImport(&g.asm,
+importID := renvoAsmAddPreparedStaticImport(a,
 fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 if importID < 0 {
 return 0
 }
-externalID := renvoAsmAddExternalImportName(a, a.staticImports[importID].name)
-renvoAsmEmitText(a, "\xb0\x00\xe8")
-at := len(a.code)
-renvoAsmEmit32(a, 0)
-renvoAsmAddAbsReloc(a, at, externalID, 2)
-if saveOffset <= 127 {
-renvoAsmEmitText(a, "\x48\x8b\x64\x24")
-renvoAsmEmit8(a, saveOffset)
-} else {
-renvoAsmEmitText(a, "\x48\x8b\xa4\x24")
-renvoAsmEmit32(a, saveOffset)
-}
-argumentBytes := wordCount * 8
-if argumentBytes <= 127 {
-renvoAsmEmitText(a, "\x48\x83\xc4")
-renvoAsmEmit8(a, argumentBytes)
-} else {
-renvoAsmEmitText(a, "\x48\x81\xc4")
-renvoAsmEmit32(a, argumentBytes)
-}
-return 1
-}
 
-func renvoAmd64ObjectLoadSourceWord(a *renvoAsm, word int) {
-displacement := word * 8
-if displacement <= 127 {
-renvoAsmEmitText(a, "\x49\x8b\x43")
-renvoAsmEmit8(a, displacement)
-} else {
-renvoAsmEmitText(a, "\x49\x8b\x83")
-renvoAsmEmit32(a, displacement)
-}
-}
 
-func renvoAmd64ObjectStoreOutgoingWord(a *renvoAsm, displacement int) {
-if displacement == 0 {
-renvoAsmEmitText(a, "\x48\x89\x04\x24")
-} else if displacement <= 127 {
-renvoAsmEmitText(a, "\x48\x89\x44\x24")
-renvoAsmEmit8(a, displacement)
-} else {
-renvoAsmEmitText(a, "\x48\x89\x84\x24")
-renvoAsmEmit32(a, displacement)
-}
-}
-
-func renvoAmd64ObjectMovePrimaryToIntegerArg(a *renvoAsm, register int) {
-operations := []string{"\x48\x89\xc7", "\x48\x89\xc6", "\x48\x89\xc2", "\x48\x89\xc1", "\x49\x89\xc0", "\x49\x89\xc1"}
-if register >= 0 && register < len(operations) {
-renvoAsmEmitText(a, operations[register])
-}
+a.staticCallWordLocations = locations
+a.staticCallStackBytes = stackBytes
+ok := renvoAsmObjectRegisterCall(a, importID, wordCount, 0)
+a.staticCallWordLocations = nil
+a.staticCallStackBytes = 0
+return renvoBoolInt(ok)
 }
 
 func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
@@ -28724,7 +28606,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x77\xd3\xb7\x55\x41\x36\x35\x0b\xa9\x5f\xf6\xe3\x86\x67\xd6\x55\x4a\x70\x1c\xc3\xbe\x18\x1f\xb3\xe9\x22\x37\x54\xce\x80\x23\x2f", 3, true
+return "linux/amd64", "\x42\x59\xe6\xc6\xd4\x4b\x4b\xff\x98\xb8\x1b\x86\x30\x71\xa7\xcf\xfb\x19\xfe\xb0\xdd\x62\x00\xe2\xa2\x17\x92\xa2\xdd\xa6\x97\xfd", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x55\x8a\x3b\xee\x4b\xb5\x0d\xe2\x76\xbf\x24\x42\x99\xae\x0e\x90\x4f\xe9\x2e\xba\x94\x43\x5d\x04\x8a\x2d\x9b\xfe\x96\xb8\x14\x05", 3, true
@@ -28742,7 +28624,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xd3\x8e\xaf\x22\x28\xe2\xb5\x68\x02\x15\xb0\x6d\x4d\x4b\x71\x3c\x41\xb1\x12\x9c\xfe\xb6\x64\x71\xd6\x10\x0b\x76\x41\xc2\x6d\xcd", 3, true
+return "wasi/wasm32", "\x8d\xf3\x32\x38\xf8\x61\xf4\xce\x0e\xfc\x03\x5f\x4e\x93\x82\x38\xca\x04\x20\x76\x07\x36\xcc\x54\xfb\xaf\x67\x7e\x7d\x3e\xf2\x1c", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28754,7 +28636,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x10\x17\x46\x1e\xe6\x2e\xed\x0f\x19\xe7\x36\xbd\x89\xdf\x69\x50\x56\x50\xa6\x61\xbb\x42\xd0\x77\x62\x7c\x8d\xc2\x98\xb5\x83\xe9", 3, true
+return "vm/vm32", "\x6b\xd3\x35\x93\x2d\x88\xfb\xda\x9a\x34\xa7\xb1\x08\x58\x5c\x36\x60\xee\x33\x5b\xab\x6d\xe4\xa5\x63\x72\x91\xb6\x11\x36\x33\x41", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -29642,6 +29524,14 @@ func (out *renvoAsm) StaticImportName(index int) string {
 return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallWordLocations() []int {
+return out.staticCallWordLocations
+}
+
+func (out *renvoAsm) StaticCallStackBytes() int {
+return out.staticCallStackBytes
+}
+
 func (out *renvoAsm) StaticCallParameterCount() int {
 return out.staticCallParamCount
 }
@@ -30225,6 +30115,23 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return 16
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return 0
+
+}
+return 0
 }
 
 func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
@@ -45110,6 +45017,8 @@ renvoAsmEmit32(a, imm)
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -48408,6 +48317,8 @@ return true
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51307,6 +51218,8 @@ return label
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -52623,6 +52536,8 @@ result.data = data
 result.ok = true
 return result
 }
+
+
 
 
 
@@ -56560,12 +56475,18 @@ renvoAsmMarkLabel(a, done)
 
 
 
+
+
 // source: backend/compiler_linux_amd64_impl.go
 
 
 func rtgBuiltinLinuxAmd64PackageLinuxObjectStaticCall(
 out *renvoAsm, importID int, wordCount int,
 ) {
+if len(out.staticCallWordLocations) != 0 {
+rtgBuiltinLinuxAmd64PackageLinuxObjectMemoryCall(out, importID)
+return
+}
 vectorMask := wordCount >> 8
 wordCount &= 255
 integerCount := 0
@@ -56615,6 +56536,91 @@ renvoAsmEmit32(out, 0)
 renvoAsmAddAbsReloc(out, at, externalID, 2)
 renvoAsmEmit4(out, 0x48, 0x8b, 0x64, 0x24)
 renvoAsmEmit8(out, 0x08)
+}
+func rtgBuiltinLinuxAmd64PackageLinuxObjectLoadSourceWord(out *renvoAsm, word int) {
+displacement := word * 8
+if displacement <= 127 {
+renvoAsmEmitText(out, "\x49\x8b\x43")
+renvoAsmEmit8(out, displacement)
+} else {
+renvoAsmEmitText(out, "\x49\x8b\x83")
+renvoAsmEmit32(out, displacement)
+}
+}
+func rtgBuiltinLinuxAmd64PackageLinuxObjectStoreOutgoingWord(out *renvoAsm, displacement int) {
+if displacement == 0 {
+renvoAsmEmitText(out, "\x48\x89\x04\x24")
+} else if displacement <= 127 {
+renvoAsmEmitText(out, "\x48\x89\x44\x24")
+renvoAsmEmit8(out, displacement)
+} else {
+renvoAsmEmitText(out, "\x48\x89\x84\x24")
+renvoAsmEmit32(out, displacement)
+}
+}
+func rtgBuiltinLinuxAmd64PackageLinuxObjectMovePrimaryToIntegerArg(out *renvoAsm, register int) {
+operations := []string{"\x48\x89\xc7", "\x48\x89\xc6", "\x48\x89\xc2", "\x48\x89\xc1", "\x49\x89\xc0", "\x49\x89\xc1"}
+if register >= 0 && register < len(operations) {
+renvoAsmEmitText(out, operations[register])
+}
+}
+func rtgBuiltinLinuxAmd64PackageLinuxObjectMemoryCall(out *renvoAsm, importID int) {
+locations := out.staticCallWordLocations
+wordCount := len(locations)
+stackBytes := out.staticCallStackBytes
+
+
+
+renvoAsmEmitText(out, "\x49\x89\xe3\x48\x83\xe4\xf0")
+reserve := (stackBytes + 31) / 16 * 16
+if reserve <= 127 {
+renvoAsmEmitText(out, "\x48\x83\xec")
+renvoAsmEmit8(out, reserve)
+} else {
+renvoAsmEmitText(out, "\x48\x81\xec")
+renvoAsmEmit32(out, reserve)
+}
+saveOffset := reserve - 8
+if saveOffset <= 127 {
+renvoAsmEmitText(out, "\x4c\x89\x5c\x24")
+renvoAsmEmit8(out, saveOffset)
+} else {
+renvoAsmEmitText(out, "\x4c\x89\x9c\x24")
+renvoAsmEmit32(out, saveOffset)
+}
+
+for word := 0; word < wordCount; word++ {
+if locations[word] < 0 {
+rtgBuiltinLinuxAmd64PackageLinuxObjectLoadSourceWord(out, word)
+rtgBuiltinLinuxAmd64PackageLinuxObjectStoreOutgoingWord(out, -locations[word]-1)
+}
+}
+for word := 0; word < wordCount; word++ {
+if locations[word] >= 0 {
+rtgBuiltinLinuxAmd64PackageLinuxObjectLoadSourceWord(out, word)
+rtgBuiltinLinuxAmd64PackageLinuxObjectMovePrimaryToIntegerArg(out, locations[word])
+}
+}
+externalID := renvoAsmAddExternalImportName(out, out.staticImports[importID].name)
+renvoAsmEmitText(out, "\xb0\x00\xe8")
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, externalID, 2)
+if saveOffset <= 127 {
+renvoAsmEmitText(out, "\x48\x8b\x64\x24")
+renvoAsmEmit8(out, saveOffset)
+} else {
+renvoAsmEmitText(out, "\x48\x8b\xa4\x24")
+renvoAsmEmit32(out, saveOffset)
+}
+argumentBytes := wordCount * 8
+if argumentBytes <= 127 {
+renvoAsmEmitText(out, "\x48\x83\xc4")
+renvoAsmEmit8(out, argumentBytes)
+} else {
+renvoAsmEmitText(out, "\x48\x81\xc4")
+renvoAsmEmit32(out, argumentBytes)
+}
 }
 
 func rtgBuiltinLinuxAmd64PackageLinuxPrepareReadWriteBuffer(out *renvoAsm) {

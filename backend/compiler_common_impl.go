@@ -274,6 +274,10 @@ type renvoAsm struct {
 	objectFunctions  []renvoObjectFunctionRange
 	objectDataRelocs []renvoObjectDataRelocation
 	objectExternals  []renvoObjectExternal
+	// Per-source-word destinations: nonnegative argument-register ordinals,
+	// or -(outgoing stack byte offset + 1). Valid only during a static call.
+	staticCallWordLocations []int
+	staticCallStackBytes    int
 }
 
 // A backend object is an unpatched function fragment plus its local labels,
