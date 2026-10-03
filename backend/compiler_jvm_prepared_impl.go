@@ -4357,6 +4357,71 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
+renvoNonNil(g)
+renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)
+}
+
+func renvoEmitBoundedWideWordShift(g *renvoLinearGen, mode int) {
+renvoNonNil(g)
+if mode == 0 {
+	renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftLeft, false)
+} else {
+	renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, mode == 1)
+}
+}
+
+func renvoEmitOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitThreadStateRegisterCapability(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmPrimaryImm(&g.asm, 0)
+}
+
+func renvoEmitSwapThreadState(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmPushPrimary(&g.asm)
+renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPushPrimary(&g.asm)
+renvoAsmCopySecondaryToPrimary(&g.asm)
+renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+renvoAsmPopPrimary(&g.asm)
+}
+
+func renvoRecordLocalStorage(g *renvoLinearGen, offset int, size int, captureOff int, typ int) {
+renvoNonNil(g)
+
+}
+
+func renvoEmitWideCompareValue(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+renvoNonNil(g)
+return renvoEmitNativeWideStack(g, 0, left, right, renvoWideBinaryMode(g, tok, signed))
+}
+
+func renvoEmitWideBinaryValue(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+renvoNonNil(g)
+return renvoEmitNativeWideStack(g, dest, left, right, renvoWideBinaryMode(g, tok, signed))
+}
+
+func renvoUsesStackIEEEFloat(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGPreparedIEEEFloat != 0
+}
+
+func renvoUsesScaledFloat(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGPreparedIEEEFloat == 0
+}
+
+func renvoUsesDirectFloat64Operands(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGPreparedIEEEFloat != 0
+}
+
 func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
 renvoNonNil(g)
 renvoNonNil(g)

@@ -737,6 +737,17 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		bounded_narrow_unsigned_shift = renvoAarch64CompilerBoundedNarrowUnsignedShift
+		bounded_wide_word_shift = renvoAarch64CompilerBoundedWideWordShift
+		optimized_native_binary_expr = renvoAarch64CompilerOptimizedNativeBinaryExpr
+		thread_state_register_capability = renvoAarch64CompilerThreadStateRegisterCapability
+		swap_thread_state = renvoAarch64CompilerSwapThreadState
+		record_local_storage = renvoAarch64CompilerRecordLocalStorage
+		wide_compare_value = renvoAarch64CompilerWideCompareValue
+		wide_binary_value = renvoAarch64CompilerWideBinaryValue
+		stack_ieee_float = renvoAarch64CompilerStackIEEEFloat
+		scaled_float = renvoAarch64CompilerScaledFloat
+		direct_float64_operands = renvoAarch64CompilerDirectFloat64Operands
 		string_concat_value_regs = renvoAarch64CompilerStringConcatValueRegs
 		append_scalar_helper = renvoAarch64CompilerAppendScalarHelper
 		append_address_helper = renvoAarch64CompilerAppendAddressHelper
@@ -2249,5 +2260,114 @@ go compiler {
 		renvoAsmLoadSecondaryStack(a, offset-8)
 		renvoAsmPopPrimary(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStackIEEEFloat(a *renvoAsm) bool {
+		return false
+	}
+	func renvoAarch64CompilerScaledFloat(a *renvoAsm) bool {
+		return false
+	}
+	func renvoAarch64CompilerDirectFloat64Operands(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerWideBinaryValue(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, dest, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerWideCompareValue(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, 0, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerRecordLocalStorage(g *renvoLinearGen, offset int, size int, captureOff int, typ int) {
+
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSwapThreadState(g *renvoLinearGen) {
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmCopySecondaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopPrimary(&g.asm)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerThreadStateRegisterCapability(g *renvoLinearGen) {
+		renvoAsmPrimaryImm(&g.asm, 0)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerBoundedWideWordShift(g *renvoLinearGen, mode int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, mode))
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
+		renvoEmitBounded386UnsignedRightShift(g, tok)
+	}
+}
+
+go compiler {
+	func renvoEnsureNativeShiftHelper(g *renvoLinearGen, mode int) int {
+		if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArchAarch64 {
+			return -1
+		}
+		renvoNonNil(g)
+		slot := &g.nativeShiftLeftLabel
+		if mode == 1 {
+			slot = &g.nativeShiftSignedLabel
+		} else if mode == 2 {
+			slot = &g.nativeShiftUnsignedLabel
+		}
+		if *slot > 0 {
+			return *slot - 1
+		}
+		label := renvoAsmNewLabel(&g.asm)
+		*slot = label + 1
+		after := renvoAsmNewLabel(&g.asm)
+		renvoAsmJmpMarkLabel(&g.asm, after, label)
+		tooLarge := renvoAsmNewLabel(&g.asm)
+		renvoAarch64AsmCmpRegImm(&g.asm, renvoAarch64RegRax, 64)
+		renvoAarch64AsmBCondLabel(&g.asm, tooLarge, 2)
+		if mode == 0 {
+			renvoAarch64AsmEmit(&g.asm, 0x9ac02040)
+		} else if mode == 1 {
+			renvoAarch64AsmEmit(&g.asm, 0x9ac02840)
+		} else {
+			renvoAarch64AsmEmit(&g.asm, 0x9ac02440)
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, tooLarge)
+		if mode == 1 {
+			renvoAsmCopyTertiaryToPrimary(&g.asm)
+			renvoAsmSarPrimaryImm(&g.asm, 63)
+		} else {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, after)
+		return label
 	}
 }
