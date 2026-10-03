@@ -486,6 +486,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		open_flag = renvoArmCompilerOpenFlag
 		file_offset_sentinel = renvoArmCompilerFileOffsetSentinel
 		static_call_binding = renvoArmCompilerStaticCallBinding
 		linked_static_import = renvoArmCompilerLinkedStaticImport
@@ -3437,5 +3438,26 @@ go compiler {
 go compiler {
 	func renvoArmCompilerFileOffsetSentinel(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerOpenFlag(c *renvoCompileContext, flag int) int {
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+		if flag == renvoOpenCreate {
+			return 64
+		}
+		if flag == renvoOpenTruncate {
+			return 512
+		}
+		return -1
 	}
 }

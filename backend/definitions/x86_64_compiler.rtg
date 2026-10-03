@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		open_flag = renvoAmd64CompilerOpenFlag
 		file_offset_sentinel = renvoAmd64CompilerFileOffsetSentinel
 		static_call_binding = renvoAmd64CompilerStaticCallBinding
 		linked_static_import = renvoAmd64CompilerLinkedStaticImport
@@ -4838,5 +4839,34 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
 		return c.renvoTargetOS == renvoOSWindows
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerOpenFlag(c *renvoCompileContext, flag int) int {
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+		if targetIsDarwin(c.renvoTargetOS) || targetIsBSD(c.renvoTargetOS) {
+			if flag == renvoOpenCreate {
+				return 512
+			}
+			if flag == renvoOpenTruncate {
+				return 1024
+			}
+		}
+		if flag == renvoOpenCreate {
+			return 64
+		}
+		if flag == renvoOpenTruncate {
+			return 512
+		}
+		return -1
 	}
 }

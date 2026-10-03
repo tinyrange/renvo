@@ -422,3 +422,15 @@ names. Missing emitters disable static calls; malformed declarations fail before
 code generation. The bundled and prepared recipes expose the same bounded
 `static_call_policy`, `finish_static_call_shape`, and `linked_static_import`
 operations.
+
+### Open-flag encoding
+
+The shared builtin evaluator recognizes semantic `O_RDONLY`, `O_WRONLY`,
+`O_RDWR`, `O_CREATE`, and `O_TRUNC` roles. The definition-owned `open_flag`
+operation supplies their integer encodings; the evaluator does not inspect an
+OS name. Prepared runtimes may declare `open_flag_layout = portable` (the
+omitted-field default: 0, 1, 2, 64, 512) or `open_flag_layout = bsd` (0, 1, 2,
+512, 1024). These are closed bit-layout protocols, not target identities.
+Darwin and the BSD entrypoints declare the latter explicitly. Unknown values,
+blocks, extra values, and duplicate assignments are rejected before generation;
+renaming a runtime, target, or OS cannot change its declared bits.

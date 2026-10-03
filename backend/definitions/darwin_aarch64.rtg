@@ -877,6 +877,7 @@ extend arch aarch64 {
 }
 
 runtime darwin_arm64 {
+	open_flag_layout = bsd
 	static_call_layout = split_register_words8
 	entry sequence darwinEntry {
 		max_parameters = 2
