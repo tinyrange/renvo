@@ -104,10 +104,7 @@ func renvoIsCdeclObject(c *renvoCompileContext) bool {
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
-		return c != nil && c.objectFile && !targetIsKernelModule(c)
-	}
-	return renvoIsSysVObject(c) || renvoIsCdeclObject(c)
+	return c != nil && renvoTargetHostedObject(c)
 }
 
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
@@ -368,11 +365,11 @@ func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) 
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 	renvoNonNil(g)
+	stableOrder := renvoMayRequireStableFunctionOrder && renvoStableFunctionOrder(g.c)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		// Prepared backends are cached compiler products, so keep their complete
-		// reachable layout stable even when expression traversal discovers the
-		// same call graph in a different order.
-		if renvoPreparedBackendActive != 0 {
+		// Cacheable products may require stable reachable layout even when
+		// expression traversal discovers the same call graph in a different order.
+		if stableOrder {
 			for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 				if g.funcQueue[i] < g.funcQueue[queueIndex] {
 					g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
@@ -5126,7 +5123,7 @@ func renvoPanicReachRange(state *renvoPanicReachability, start int, end int) boo
 
 func renvoReachablePanicRequired(m *renvoMeta) bool {
 	p := m.prog
-	if m.c.objectFile || m.c.emitImage || targetIsKernelModule(m.c) || renvoPreparedBackendActive != 0 || p.entryFunc < 0 || p.entryFunc >= len(m.funcs) {
+	if m.c.objectFile || m.c.emitImage || targetIsKernelModule(m.c) || renvoRetainPanicRuntime(m.c) || p.entryFunc < 0 || p.entryFunc >= len(m.funcs) {
 		return true
 	}
 	var state renvoPanicReachability
@@ -20484,13 +20481,8 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	// Relocatable targets publish only explicit export-wrapper labels. The
 	// implementation functions and any dependencies they reach remain local to
 	// the translation unit and therefore do not enter the ELF global symtab.
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
+	if renvoObjectProgram(g.c) {
 		return
-	}
-	if renvoFixedTarget == 0 {
-		if renvoIsHostedObject(g.c) {
-			return
-		}
 	}
 	if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
 		return

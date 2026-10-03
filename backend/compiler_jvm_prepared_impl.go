@@ -4365,6 +4365,26 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoTargetHostedObject(c *renvoCompileContext) bool {
+renvoNonNil(c)
+if renvoRTGPreparedObject != 0 {
+	return c != nil && c.objectFile && !targetIsKernelModule(c)
+}
+return renvoIsSysVObject(c) || renvoIsCdeclObject(c)
+}
+
+func renvoRetainPanicRuntime(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+const renvoMayRequireStableFunctionOrder = true
+
+func renvoStableFunctionOrder(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
 func renvoProgramFailureExitCode(c *renvoCompileContext) int {
 renvoNonNil(c)
 // Preserve the image-size rejection status for command-line embedders.

@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		hosted_object = renvoArmCompilerHostedObject
+		retain_panic_runtime = renvoArmCompilerRetainPanicRuntime
+		stable_function_order = renvoArmCompilerStableFunctionOrder
 		program_failure_exit_code = renvoArmCompilerProgramFailureExitCode
 		program_result_valid = renvoArmCompilerProgramResultValid
 		program_emission_valid = renvoArmCompilerProgramEmissionValid
@@ -3177,5 +3180,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerProgramFailureExitCode(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStableFunctionOrder(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerRetainPanicRuntime(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerHostedObject(c *renvoCompileContext) bool {
+		return false
 	}
 }

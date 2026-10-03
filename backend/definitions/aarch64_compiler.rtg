@@ -392,6 +392,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		hosted_object = renvoAarch64CompilerHostedObject
+		retain_panic_runtime = renvoAarch64CompilerRetainPanicRuntime
+		stable_function_order = renvoAarch64CompilerStableFunctionOrder
 		program_failure_exit_code = renvoAarch64CompilerProgramFailureExitCode
 		program_result_valid = renvoAarch64CompilerProgramResultValid
 		program_emission_valid = renvoAarch64CompilerProgramEmissionValid
@@ -3409,5 +3412,23 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerProgramFailureExitCode(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStableFunctionOrder(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerRetainPanicRuntime(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerHostedObject(c *renvoCompileContext) bool {
+		return false
 	}
 }
