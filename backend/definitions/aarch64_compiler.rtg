@@ -737,6 +737,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		object_call_abi = renvoAarch64CompilerObjectCallABI
 		word_call_intrinsic = renvoAarch64CompilerWordCallIntrinsic
 		unsigned_word_order_result = renvoAarch64CompilerUnsignedWordOrderResult
 		word_constant_immediate = renvoAarch64CompilerWordConstantImmediate
@@ -3017,5 +3018,11 @@ go compiler {
 			return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectCallABI(c *renvoCompileContext) int {
+		return renvoObjectABIUnavailable
 	}
 }

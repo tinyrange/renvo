@@ -2106,6 +2106,14 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoTargetObjectCallABI(c *renvoCompileContext) int {
+renvoNonNil(c)
+if renvoRTGPreparedSysVX8664 != 0 {
+	return renvoObjectABISysV
+}
+return renvoObjectABIUnavailable
+}
+
 func renvoEmitWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 renvoNonNil(g)
 if renvoExprIsIdentText(g.prog, ep, ep.exprs[idx].left, "renvo_runtime_CKernelLinkAddress") {

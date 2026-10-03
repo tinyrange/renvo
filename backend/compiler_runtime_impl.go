@@ -449,7 +449,7 @@ func renvoEmitExitStatus(g *renvoLinearGen) bool {
 
 func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		importID := renvoAsmAddExternalImportRange(&g.asm,
 			g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 		if importID < 0 {
@@ -487,7 +487,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return true
 	}
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 		if memoryAggregate >= 0 {
 			return memoryAggregate != 0
@@ -686,7 +686,7 @@ func renvoLinkStaticOption(src []byte, start int, end int, name string) int {
 // present, an aggregate must be classified as a unit while later scalar
 // parameters can continue consuming argument registers.
 func renvoEmitCObjectMemoryAggregateCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
-	if !renvoIsHostedObjectAmd64(g.c) || wordCount < 1 {
+	if !renvoIsSysVObject(g.c) || wordCount < 1 {
 		return -1
 	}
 	containsAggregate := false

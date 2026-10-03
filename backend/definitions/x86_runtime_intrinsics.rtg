@@ -1884,7 +1884,7 @@ go compiler {
 			renvoAsmEmitText(&g.asm, "\x48\x8d\x05\x00\x00\x00\x00")
 			return 1
 		}
-		if e.argCount == 3 && renvoIsHostedObject386(g.c) &&
+		if e.argCount == 3 && renvoIsCdeclObject(g.c) &&
 			renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInterruptWithStack") {
 			number := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
 				renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), 0)

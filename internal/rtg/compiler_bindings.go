@@ -76,7 +76,13 @@ func (op compilerEmitterOperation) assembler() string {
 	return op.receiver().Name
 }
 
+// Context receivers are read-only target queries, not emission operations.
+// An unknown selector returns their explicit unavailable result; there is no
+// assembler on which to record an emission failure.
 func (op compilerEmitterOperation) failBody() string {
+	if op.receiver().Type == "*renvoCompileContext" {
+		return "return " + op.Failure + "\n"
+	}
 	body := op.assembler() + ".patchFailed = true\n"
 	if op.Result != "" {
 		body += "return " + op.Failure + "\n"
@@ -85,6 +91,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "object_call_abi", Suffix: "ObjectCallABI", Function: "renvoTargetObjectCallABI", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "if renvoRTGPreparedSysVX8664 != 0 {\n\treturn renvoObjectABISysV\n}\nreturn renvoObjectABIUnavailable"},
 	{Name: "word_call_intrinsic", Suffix: "WordCallIntrinsic", Function: "renvoEmitWordCallIntrinsic", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"idx", "int"}}, Prepared: "if renvoExprIsIdentText(g.prog, ep, ep.exprs[idx].left, \"renvo_runtime_CKernelLinkAddress\") {\n\treturn renvoBoolInt(renvoEmitKernelLinkAddressCall(g, ep, idx))\n}\nif renvoFixedTarget == 0 {\n\treturn renvoEmitCNativeIntCall(g, ep, idx, \u0026ep.exprs[idx])\n}\nreturn -1"},
 	{Name: "unsigned_word_order_result", Suffix: "UnsignedWordOrderResult", Function: "renvoEmitUnsignedWordOrderResult", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"op0", "byte"}, {"op1", "byte"}, {"opLen", "int"}, {"kind", "int"}}, Prepared: "if g.c.renvoNativeIntSize != 8 \u0026\u0026 g.c.renvoNativeIntSize != 4 {\n\treturn false\n}\nif !renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {\n\treturn false\n}\nrenvoAsmNormalizePrimaryForKind(\u0026g.asm, kind)\nreturn true"},
 	{Name: "word_constant_immediate", Suffix: "WordConstantImmediate", Function: "renvoAsmWordConstantImmediate", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"kind", "int"}, {"value", "int"}}, Prepared: "if kind == renvoTypeInt64 || kind == renvoTypeUint64 {\n\treturn false\n}\nrenvoAsmPrimaryImm(a, value)\nreturn true"},
@@ -473,7 +480,11 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			}
 			selectorLocal += "_"
 		}
-		out = append(out, selectorLocal+" := "+operation.receiver().Name+".c\nrenvoNonNil("+selectorLocal+")\n"...)
+		context := operation.receiver().Name
+		if operation.receiver().Type != "*renvoCompileContext" {
+			context += ".c"
+		}
+		out = append(out, selectorLocal+" := "+context+"\nrenvoNonNil("+selectorLocal+")\n"...)
 		// Share only byte-identical emitted bodies. Every selector remains explicit,
 		// so this neither invents an ISA family nor supplies an unknown-target default.
 		var bodies []string
