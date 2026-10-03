@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8426b3f87e9a1ea63298b0ada757e5369d709b10e8fad2accbbd3197c3ad4f0d"
+const CompilerSourceDigest = "b96a215fc6e34298883c13a19b2d6a2d658eb01ba17376bd8c80efd8b32925cd"
 
 // source: backend/compiler_common_impl.go
 
@@ -17443,7 +17443,7 @@ if !renvoEmitStringValueRegs(g, ep, right) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-renvoAsmStringCompareArguments(a, leftOff, rightOff)
+renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
 renvoAsmCallLabel(a, label)
 if notEqual {
 renvoAsmBoolNotPrimary(a)
@@ -17462,7 +17462,7 @@ if !renvoEmitStringValueRegs(g, ep, right) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-renvoAsmStringCompareArguments(a, leftOff, rightOff)
+renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
 renvoAsmCallLabel(a, label)
 if notEqual {
 renvoAsmBoolNotPrimary(a)
@@ -17531,7 +17531,7 @@ renvoEmitCompositeCompareAt(g, t.elem, left-i*size, right-i*size, fail)
 return
 }
 if t.kind == renvoTypeString {
-renvoAsmStringCompareArguments(a, left, right)
+renvoAsmStringCompareArguments(a, left, left-renvoBackendValueSlotSize, right, right-renvoBackendValueSlotSize)
 renvoAsmCallLabel(a, renvoEnsureStringEqualHelper(g))
 } else if t.kind == renvoTypeComplex64 {
 renvoEmit32IEEECompareStack(g, left, right, renvoTypeFloat32, '=', '=')
@@ -21954,15 +21954,15 @@ fn := &g.meta.funcs[fnIndex]
 sret := renvoObjectExportUsesSRet(g.meta, fn)
 smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
 memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
-if variadic && (wordCount < 1 || wordCount > 7 || renvoPreparedBackendActive != 0 || sret || smallAggregateResult) ||
-renvoPreparedBackendActive != 0 && (wordCount > renvoRTGObjectRegisterCount() && !sret || wordCount > renvoRTGObjectRegisterCount()-1 && sret || memoryAggregate) {
-return false
-}
-renvoObjectExportFrame(g, true)
 registerWords := renvoObjectArgumentRegisterCount(g.c)
 if sret {
 registerWords--
 }
+if variadic && (wordCount < 1 || wordCount > renvoObjectVariadicWordLimit(g.c) || sret || smallAggregateResult) ||
+!renvoObjectStackArguments(g.c) && (wordCount > registerWords || memoryAggregate) {
+return false
+}
+renvoObjectExportFrame(g, true)
 if !variadic && (wordCount > registerWords || memoryAggregate) {
 renvoBeginObjectStackArgs(&g.asm)
 }
@@ -24426,10 +24426,7 @@ if !renvoEmitStringValueRegs(g, ep, idx) {
 return false
 }
 renvoAsmStorePrimarySecondaryStack(a, caseOff, caseOff-renvoBackendValueSlotSize)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, valueOffset)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, lenOffset)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, caseOff)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, caseOff-renvoBackendValueSlotSize)
+renvoAsmStringCompareArguments(a, valueOffset, lenOffset, caseOff, caseOff-renvoBackendValueSlotSize)
 renvoAsmCallLabel(a, label)
 renvoAsmCmpPrimaryImm8(a, 0)
 renvoAsmJnzLabel(a, matchLabel)
@@ -29075,7 +29072,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xca\x8f\x26\x0b\x9d\x9a\x06\x6e\xea\x90\x39\xd6\x6e\xe2\x9b\x5d\xca\x3e\x58\x9d\x13\xff\x73\x4c\xf1\xc4\xd1\x08\xb9\xcd\xea\x0a", 3, true
+return "wasi/wasm32", "\xd0\x37\x40\xf5\x2f\xaf\x5d\x8b\x63\xe7\x3d\x68\x49\xe3\x17\x83\x88\xae\xb8\x49\xad\x3c\x4c\x79\x80\xc2\x7c\xed\x14\x51\x05\x5c", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -29087,7 +29084,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x4a\xd9\x8c\x7f\x6f\x00\x1b\xce\x58\xe2\x14\xa0\x51\x5c\xd3\x78\xd7\x2b\x70\x09\xf7\x92\x3d\xce\x09\x5e\x53\xe4\xc2\x12\x32\xff", 3, true
+return "vm/vm32", "\x1f\x24\xb2\x1a\x81\x50\x5e\x3b\x68\x89\x27\x42\xa9\x68\x12\x7e\x73\x77\xa6\xd3\x81\x3a\xa3\xd8\xb4\xce\x1f\x81\x81\xf9\x53\xd2", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30467,15 +30464,39 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
-func renvoAsmStringCompareArguments(a *renvoAsm, left int, right int) {
+func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return 7
+
+}
+return 0
+}
+
+func renvoObjectStackArguments(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return true
+
+}
+return false
+}
+
+func renvoAsmStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
-renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
 renvoAsmPushStringRegs(a)
-renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
 renvoAsmCopySecondaryToTertiary(a)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPopCallWord0(a)
@@ -46247,6 +46268,10 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49121,6 +49146,10 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51751,6 +51780,10 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53409,6 +53442,10 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
 
 
 
@@ -56612,6 +56649,10 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
 
 
 

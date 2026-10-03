@@ -392,6 +392,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		object_variadic_word_limit = renvoAarch64CompilerObjectVariadicWordLimit
+		object_stack_arguments = renvoAarch64CompilerObjectStackArguments
 		string_compare_arguments = renvoAarch64CompilerStringCompareArguments
 		object_absolute_address = renvoAarch64CompilerObjectAbsoluteAddress
 		object_fault_trap = renvoAarch64CompilerObjectFaultTrap
@@ -3324,13 +3326,25 @@ go compiler {
 }
 
 go compiler {
-	func renvoAarch64CompilerStringCompareArguments(a *renvoAsm, left int, right int) {
-		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+	func renvoAarch64CompilerStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
 		renvoAsmPushStringRegs(a)
-		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
 		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmPopCallWord0(a)
 		renvoAsmPopCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectStackArguments(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
+		return 0
 	}
 }
