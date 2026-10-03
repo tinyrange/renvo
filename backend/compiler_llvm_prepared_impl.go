@@ -618,6 +618,12 @@ if target != renvoTargetRTG { return "", "", 0, false }
 return "llvm/linux-amd64","\x9cN\xd05\x9eC\xf6J\x8d\xd6pC\xb3\xd7\x8bN(\x87\xf8NH\xfc\x86\x0e\x8b#\x0e\x18\xeb\x8dn\x83",3,true
 }
 
+const renvoRTGDiscardPageSize = 0
+const renvoRTGDiscardNumber = 0
+const renvoRTGDiscardAdvice = 0
+func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
+}
+
 var rtgLlvmRAX = RTGRegister{Code:0, Valid:true}
 
 var rtgLlvmRDX = RTGRegister{Code:1, Valid:true}
@@ -2695,15 +2701,16 @@ return false
 
 func renvoAsmDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
 renvoNonNil(a)
+if renvoRTGDiscardPageSize == 0 { renvoAsmUnsupportedOperation(a, 1930); return }
 doneLabel := renvoAsmNewLabel(a)
 	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 4095)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, renvoRTGDiscardPageSize-1)
 renvoRTGDirectAdd(a, renvoRTGPrimary, renvoRTGScratch)
-	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -4096)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -renvoRTGDiscardPageSize)
 renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGScratch)
 	renvoAsmStorePrimaryStack(a, startOff)
 	renvoAsmLoadPrimaryStack(a, endOff)
-	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -4096)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -renvoRTGDiscardPageSize)
 renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGScratch)
 	renvoAsmLoadTertiaryStack(a, startOff)
 	renvoAsmSubPrimaryTertiary(a)
@@ -2714,15 +2721,16 @@ renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGScratch)
 	renvoRTGDirectMove(a, renvoRTGSyscallWord0, renvoRTGPrimary)
 	renvoAsmLoadPrimaryStack(a, lenOff)
 	renvoRTGDirectMove(a, renvoRTGSyscallWord1, renvoRTGPrimary)
-	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallWord2, 4)
-	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallNumber, 28)
-	renvoRTGDirectHostSyscall(a)
+	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallWord2, renvoRTGDiscardAdvice)
+	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallNumber, renvoRTGDiscardNumber)
+	renvoRTGRecordDiscardSyscall(a)
+renvoRTGDirectHostSyscall(a)
 	renvoAsmMarkLabel(a, doneLabel)
 }
 
 func renvoArenaDiscardSupported(c *renvoCompileContext) bool {
 renvoNonNil(c)
-return renvoRTGPreparedSysVX8664 != 0 && renvoRTGPreparedOS == renvoOSLinux
+return renvoRTGDiscardPageSize != 0
 }
 
 func renvoEmitTargetWriteValueRegs(g *renvoLinearGen, fd int) bool {

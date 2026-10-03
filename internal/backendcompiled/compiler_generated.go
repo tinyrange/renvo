@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "78d4a55bc2c4ab7d5243188db0c31095ce3e2cca8ba6cabcb98c0fd7801409ae"
+const CompilerSourceDigest = "797ccd63bf950c9c8f64b196f6cb2aaafe39eadc5712cd0f7c3cb7fc92346334"
 
 // source: backend/compiler_common_impl.go
 
@@ -29042,7 +29042,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x78\x96\x0d\x47\xdf\x55\xe0\x3e\x75\x17\xf2\xfa\xf0\xf9\x2a\x8d\x58\xf5\x83\x2e\x2b\x7a\x2c\x9b\x2f\xbe\xbe\x0a\x2c\x74\x9e\xc9", 3, true
+return "linux/amd64", "\x4c\x4e\x09\xe7\x00\xee\x60\x96\xcb\xe7\x49\xce\xd6\x2e\xb7\x0c\xa9\x7a\xde\xe3\x4c\x16\x6a\xe7\xb0\x03\xfa\xe3\x50\x19\x57\x0f", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x03\x65\x01\xa7\xe4\x1b\x8c\x34\x43\x12\x0c\x7f\xb9\x43\xf7\x50\x9b\x7a\x8b\xd3\x48\x3b\xf3\x11\x33\x88\x47\xb4\x33\x91\x64\x7b", 3, true
@@ -30474,6 +30474,12 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+const renvoRTGDiscardPageSize = 0
+const renvoRTGDiscardNumber = 0
+const renvoRTGDiscardAdvice = 0
+func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 }
 
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {

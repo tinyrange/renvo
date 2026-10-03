@@ -382,7 +382,16 @@ tests without a numeric rejection threshold. Compiler and output performance
 acceptance remains exclusively defined by the existing hard gates in
 `backend/main_test.go`.
 
-### Syscall instruction-site metadata
+### Runtime syscall policy
+
+A runtime may opt into page reclamation with a `discard_pages` block containing
+exactly `page_size`, `number`, and `advice` integer fields. `page_size` must be a
+positive power of two no larger than 1 GiB; the syscall number and advice must be
+nonnegative. The runtime must provide a syscall number register, at least three
+argument registers (address, byte count, advice), and an instruction. Omission
+disables reclamation, regardless of the target's OS or ABI name. Prepared lowering
+aligns the requested range inward to complete pages and uses these declared
+parameters; invalid or duplicate policies fail preparation before emitting code.
 
 A runtime `syscall` block may declare `site_table = address_number_pairs`.
 The prepared runtime adapter then records each syscall instruction offset and
