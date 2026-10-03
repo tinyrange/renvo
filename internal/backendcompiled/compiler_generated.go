@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "082580c6d8a89a87ce9c8222af2998128f0003e3a5783b31138bd2cfd5ca79d4"
+const CompilerSourceDigest = "a87ed4d3175457e1d50deab71b5c7893041ab78540b18aa8c2e36da9c87d99a2"
 
 // source: backend/compiler_common_impl.go
 
@@ -6949,7 +6949,7 @@ align = m.types[t.elem].nativeAlign
 
 size = m.c.renvoNativeIntSize
 align = renvoNativeAlignment(m.c, size)
-} else if (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && m.c.objectFile && t.kind == renvoTypeFunc {
+} else if t.kind == renvoTypeFunc && renvoFunctionAddressLayout(m.c) {
 size = m.c.renvoNativeIntSize
 align = renvoNativeAlignment(m.c, size)
 }
@@ -7145,7 +7145,7 @@ func renvoTypeKindIsUnsignedInteger(kind int) bool {
 return kind == renvoTypeByte || kind == renvoTypeUint16 || kind == renvoTypeUint32 || kind == renvoTypeUint64
 }
 
-func renvoTypeKindIsWideValue(kind int) bool {
+func renvoTypeKindIsWideValue(c *renvoCompileContext, kind int) bool {
 
 
 
@@ -7156,10 +7156,7 @@ return true
 if kind != renvoTypeFloat64 {
 return false
 }
-if renvoPreparedBackendActive == 0 {
-return true
-}
-return renvoRTGPreparedIEEEFloat != 0
+return !renvoMayUseScaledFloat64Values || !renvoScaledFloat64Values(c)
 }
 
 func renvoTypeKindIsScalarValue(kind int) bool {
@@ -7225,7 +7222,7 @@ func renvoTypeUsesHiddenResult(m *renvoMeta, typ int) bool {
 renvoNonNil(m)
 t := renvoResolveType(m, typ)
 renvoNonNil(t)
-return t.kind == renvoTypeStruct || t.kind == renvoTypeArray || t.kind == renvoTypeInterface || m.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(t.kind) || t.kind == renvoTypeComplex)
+return t.kind == renvoTypeStruct || t.kind == renvoTypeArray || t.kind == renvoTypeInterface || m.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(m.c, t.kind) || t.kind == renvoTypeComplex)
 }
 
 func renvoTypeIsTuple(m *renvoMeta, typ int) bool {
@@ -7358,7 +7355,7 @@ renvoStoreIncomingCallWord(g, callWord, offset)
 callWord++
 continue
 }
-if paramType.kind == renvoTypeStruct || paramType.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(paramType.kind) || paramType.kind == renvoTypeComplex) {
+if paramType.kind == renvoTypeStruct || paramType.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(g.c, paramType.kind) || paramType.kind == renvoTypeComplex) {
 size := renvoTypeSize(meta, param.typ)
 wordSize := renvoCallWordSize(g, param.typ)
 for at := 0; at < size; at += wordSize {
@@ -10533,7 +10530,7 @@ return true
 if renvoFixedTarget == 0 && renvoEmitCompoundPointerMemoryPeephole(g, right, rightIndex, kind, assignTok) {
 return true
 }
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, kind) {
 addrOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
 valueOffset := renvoAddUnnamedLocal(g, targetType)
 renvoAsmStorePrimaryStack(a, addrOffset)
@@ -10589,7 +10586,7 @@ if !renvoEmitIndexAddressPrimary(g, lhs, lhsIndex) {
 return -1
 }
 renvoAsmStorePrimaryStack(a, addrOffset)
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elemType.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, elemType.kind) {
 valueOffset := renvoAddUnnamedLocal(g, elemTypeIndex)
 renvoAsmCopyPrimaryToSecondary(a)
 renvoEmitCopyMemSecondaryToStack(g, valueOffset, renvoTypeSize(meta, elemTypeIndex))
@@ -10635,7 +10632,7 @@ if !renvoParseExpressionOK(rhs, p, assignTok+1, stmt.endTok) {
 return -1
 }
 rhsIndex := len(rhs.exprs) - 1
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(lhsResolved.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, lhsResolved.kind) {
 valueType := renvoInferParsedExprType(g, lhs, lhsIndex)
 valueOffset := renvoAddUnnamedLocal(g, valueType)
 renvoAsmLoadSecondaryStack(a, addrOffset)
@@ -10777,7 +10774,7 @@ rhsIndex := renvoParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
 if rhsIndex < 0 {
 return false
 }
-if renvoTypeKindUsesMemory(elemType.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elemType.kind) {
+if renvoTypeKindUsesMemory(elemType.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, elemType.kind) {
 return renvoEmitTypedExprToSavedMem(g, rhs, rhsIndex, elemTypeIndex, addrOffset)
 }
 if !renvoEmitScalarExprForKind(g, rhs, rhsIndex, elemType.kind) {
@@ -10803,7 +10800,7 @@ return renvoEmitAppendAssignGeneral(g, stmt, rhs, assignTok)
 }
 return renvoEmitPointerAssignment(g, lhs, lhsRoot.left, rhs, rhsIndex, lhsType, assignTok)
 }
-if lhsRoot.kind == renvoExprSelector && (renvoTypeKindUsesMemory(lhsResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(lhsResolved.kind)) {
+if lhsRoot.kind == renvoExprSelector && (renvoTypeKindUsesMemory(lhsResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, lhsResolved.kind)) {
 rhs := renvoNewExprParse()
 renvoNonNil(rhs)
 rhsIndex := renvoParseExpressionRoot(rhs, p, assignTok+1, stmt.endTok)
@@ -11083,7 +11080,7 @@ renvoAsmStorePrimarySecondaryStack(a, offset, offset-8)
 }
 return true
 }
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(targetResolved.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, targetResolved.kind) {
 valueOffset := offset
 if globalOffset >= 0 {
 valueOffset = renvoAddUnnamedLocal(g, targetType)
@@ -11196,7 +11193,7 @@ renvoPackComplex64RegsPrimary(g)
 renvoAsmStorePrimaryBssSize(a, globalOffset, 8)
 return true
 }
-if globalOffset >= 0 && (renvoTypeIsStruct(meta, targetType) || targetResolved.kind == renvoTypeInterface || renvoTypeKindIsComplex(targetResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(targetResolved.kind)) {
+if globalOffset >= 0 && (renvoTypeIsStruct(meta, targetType) || targetResolved.kind == renvoTypeInterface || renvoTypeKindIsComplex(targetResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, targetResolved.kind)) {
 tempOffset := renvoAddUnnamedLocal(g, targetType)
 if !renvoEmitTypedAssign(g, ep, rootIndex, tempOffset) {
 return false
@@ -11665,7 +11662,7 @@ func renvoEmitTempToMapEntry(g *renvoLinearGen, tempOffset int, elemType int) {
 renvoNonNil(g)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 elem := renvoResolveType(g.meta, elemType)
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elem.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, elem.kind) {
 renvoEmitCopyStackToMemSecondary(g, tempOffset, 16, renvoTypeSize(g.meta, elemType))
 } else {
 renvoAsmLoadPrimaryStack(&g.asm, tempOffset)
@@ -12688,7 +12685,7 @@ return false
 renvoAsmStorePrimarySecondaryStack(&g.asm, offset, offset-8)
 return true
 }
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(destResolved.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, destResolved.kind) {
 return renvoEmitWideExprToLocal(g, ep, idx, offset, destResolved.kind)
 }
 if renvoTypeKindIsScalarValue(destResolved.kind) || destResolved.kind == renvoTypePointer || destResolved.kind == renvoTypeFunc {
@@ -13641,7 +13638,7 @@ return false
 }
 continue
 }
-if elemResolved.kind == renvoTypeArray || elemResolved.kind == renvoTypeSlice || elemResolved.kind == renvoTypePointer && ep.exprs[field.expr].kind == renvoExprComposite || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(elemResolved.kind) {
+if elemResolved.kind == renvoTypeArray || elemResolved.kind == renvoTypeSlice || elemResolved.kind == renvoTypePointer && ep.exprs[field.expr].kind == renvoExprComposite || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, elemResolved.kind) {
 tempOffset := renvoAddUnnamedLocal(g, elemType)
 if !renvoEmitTypedAssign(g, ep, field.expr, tempOffset) {
 return false
@@ -13937,7 +13934,7 @@ renvoPackComplex64RegsPrimary(g)
 renvoAsmStorePrimaryStack(a, destOffset)
 return true
 }
-if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || fieldResolved.kind == renvoTypePointer && ep.exprs[idx].kind == renvoExprComposite || renvoTypeKindIsComplex(fieldResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(fieldResolved.kind) {
+if fieldResolved.kind == renvoTypeStruct || fieldResolved.kind == renvoTypeInterface || fieldResolved.kind == renvoTypePointer && ep.exprs[idx].kind == renvoExprComposite || renvoTypeKindIsComplex(fieldResolved.kind) || g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, fieldResolved.kind) {
 tempOffset := renvoAddUnnamedLocal(g, fieldType)
 if !renvoEmitTypedAssign(g, ep, idx, tempOffset) {
 return false
@@ -14202,7 +14199,7 @@ continue
 size := renvoTypeCopySize(g.meta, paramType)
 wordSize := renvoBackendValueSlotSize
 usesCallWords := resolved.kind == renvoTypeArray || resolved.kind == renvoTypeStruct
-if g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(resolved.kind) || resolved.kind == renvoTypeComplex) {
+if g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(g.c, resolved.kind) || resolved.kind == renvoTypeComplex) {
 usesCallWords = true
 }
 if usesCallWords {
@@ -15112,7 +15109,7 @@ func renvoCallWordSize(g *renvoLinearGen, typ int) int {
 t := renvoResolveType(g.meta, typ)
 if t.kind == renvoTypeArray ||
 g.c.renvoNativeIntSize == 2 && t.kind == renvoTypeStruct ||
-g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeStruct && renvoTypeNeedsDenseCallWords(g.meta, typ)) {
+g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(g.c, t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeStruct && renvoTypeNeedsDenseCallWords(g.meta, typ)) {
 return g.c.renvoNativeIntSize
 }
 return renvoBackendValueSlotSize
@@ -15123,7 +15120,7 @@ if typ <= 0 || typ >= len(meta.types) {
 return false
 }
 t := renvoResolveType(meta, typ)
-return renvoTypeKindIsWideValue(t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeArray || t.kind == renvoTypeStruct && t.resolved == renvoStructLayoutDense
+return renvoTypeKindIsWideValue(meta.c, t.kind) || t.kind == renvoTypeComplex || t.kind == renvoTypeArray || t.kind == renvoTypeStruct && t.resolved == renvoStructLayoutDense
 }
 
 func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffset int, argOffsets []int, resultOffset int, directTarget int) bool {
@@ -15918,7 +15915,7 @@ renvoAsmPushSecondary(&g.asm)
 renvoAsmPushPrimary(&g.asm)
 return 2
 }
-if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(resolved.kind) || resolved.kind == renvoTypeComplex) {
+if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(g.c, resolved.kind) || resolved.kind == renvoTypeComplex) {
 return renvoEmitStructArgReverse(g, ep, idx, param.typ)
 }
 source := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
@@ -16223,13 +16220,13 @@ renvoAsmPushSecondary(a)
 renvoAsmPushPrimary(a)
 return 2
 }
-if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(resolved.kind) || resolved.kind == renvoTypeComplex) {
+if resolved.kind == renvoTypeStruct || resolved.kind == renvoTypeArray || g.c.renvoNativeIntSize == 4 && (renvoTypeKindIsWideValue(g.c, resolved.kind) || resolved.kind == renvoTypeComplex) {
 return renvoEmitStructArgReverse(g, ep, idx, typ)
 }
 e := &ep.exprs[idx]
 if e.kind == renvoExprInt {
 value := renvoParseIntToken(p, e.tok)
-if renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 8 && p.compilerInt32 && p.parsedIntHigh != value>>31 {
+if renvoMayReconstructWideArgument && renvoReconstructWideArgument(g.c) && p.compilerInt32 && p.parsedIntHigh != value>>31 {
 renvoAsmLoadPrimaryIntToken(a, p, e.tok)
 renvoAsmPushPrimary(a)
 return 1
@@ -16349,7 +16346,7 @@ wordCount := renvoAlignValue(size, wordSize) / wordSize
 if e.kind == renvoExprIdent {
 resolved := renvoResolveType(meta, typ)
 renvoNonNil(resolved)
-if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(resolved.kind) {
+if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(g.c, resolved.kind) {
 constant := renvoEvalConstExpr(g, ep, idx)
 if constant.ok {
 offset := renvoAddUnnamedLocal(g, typ)
@@ -22940,7 +22937,7 @@ return false
 }
 
 func renvoEmitWideExprToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, destKind int) bool {
-if !renvoSplitWordLoweringEnabled(&g.asm) && (renvoPreparedBackendActive == 0 || renvoRTGPreparedIEEEFloat == 0) {
+if !renvoSplitWordLoweringEnabled(&g.asm) && (!renvoMayUseWideFloatLocals || !renvoWideFloatLocals(g.c)) {
 return false
 }
 renvoNonNil(g, ep)
@@ -23081,7 +23078,7 @@ return false
 }
 
 func renvoEmitWideCompareExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-if !renvoSplitWordLoweringEnabled(&g.asm) && (renvoPreparedBackendActive == 0 || renvoRTGPreparedIEEEFloat == 0) {
+if !renvoSplitWordLoweringEnabled(&g.asm) && (!renvoMayUseWideFloatLocals || !renvoWideFloatLocals(g.c)) {
 return false
 }
 renvoNonNil(g, ep)
@@ -24962,7 +24959,7 @@ renvoAsmLoadPrimaryIntToken(a, p, e.tok)
 return true
 }
 if e.kind == renvoExprFloat {
-if renvoPreparedBackendActive != 0 {
+if renvoMayUseScaledAtomLiterals && renvoScaledAtomLiterals(g.c) {
 renvoAsmPrimaryImm(a, renvoParseFloatTokenScaledCompatibility(p, e.tok))
 return true
 }
@@ -29022,7 +29019,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x42\x0c\xf1\xce\xb0\xd8\xf0\x44\x35\xe4\x6e\x84\x7b\xca\xa8\x9a\x4d\x77\xff\x4a\x2e\x37\x25\xc0\xb9\x7d\x29\x70\x5b\x73\xc6\x86", 3, true
+return "wasi/wasm32", "\x0d\xff\xa4\x51\x5b\x0e\x0f\x54\xd5\x01\xd1\xf5\x6f\x43\xc3\x11\x03\xb6\xc3\x45\x20\x9b\xaa\x4b\x14\x77\x24\xab\x6e\xc7\x7d\x30", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29034,7 +29031,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xee\xc8\xe0\x09\x84\xd4\x5c\x6c\xb6\xe9\x36\xdd\x84\x11\xc3\x0f\xc4\xba\x64\x8b\xf4\x54\xce\x88\xe5\x79\x05\xdb\xdc\x36\xf4\x6b", 3, true
+return "vm/vm32", "\xca\x4f\xaa\xc0\x25\xdd\xe1\x07\x20\xc8\xff\x89\xdf\xd6\x48\xd3\x3e\xba\xba\xff\x19\xf4\x73\x08\x7a\x93\x40\x28\x76\x9f\x0e\x6c", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30409,6 +30406,54 @@ return 0
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
+
+func renvoFunctionAddressLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoFixedTarget == 0 && c.objectFile
+
+}
+return false
+}
+
+func renvoReconstructWideArgument(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayReconstructWideArgument = false
+
+func renvoScaledAtomLiterals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseScaledAtomLiterals = false
+
+func renvoWideFloatLocals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseWideFloatLocals = false
+
+func renvoScaledFloat64Values(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseScaledFloat64Values = false
 
 func renvoResultCopyViaFrame(c *renvoCompileContext) bool {
 renvoNonNil(c)
@@ -46476,6 +46521,16 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49395,6 +49450,16 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52069,6 +52134,16 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53728,6 +53803,16 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -56975,6 +57060,16 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

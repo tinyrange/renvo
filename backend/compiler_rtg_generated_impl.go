@@ -805,6 +805,54 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoFunctionAddressLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoFixedTarget == 0 && c.objectFile
+	
+}
+return false
+}
+
+func renvoReconstructWideArgument(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayReconstructWideArgument = false
+
+func renvoScaledAtomLiterals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseScaledAtomLiterals = false
+
+func renvoWideFloatLocals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseWideFloatLocals = false
+
+func renvoScaledFloat64Values(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseScaledFloat64Values = false
+
 func renvoResultCopyViaFrame(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

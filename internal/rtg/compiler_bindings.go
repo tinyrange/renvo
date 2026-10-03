@@ -93,7 +93,16 @@ func (op compilerEmitterOperation) failBody() string {
 	return body
 }
 
+// Representation policies are separate: a definition may support IEEE stack
+// values while retaining scaled untyped atom literals, and may require wide
+// argument reconstruction only when the source compiler uses narrow integers.
+// Function-address layout describes object ABI storage, not function dispatch.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "function_address_layout", Suffix: "FunctionAddressLayout", Function: "renvoFunctionAddressLayout", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && c.objectFile"},
+	{Name: "reconstruct_wide_argument", ReachabilityGuard: "renvoMayReconstructWideArgument", Suffix: "ReconstructWideArgument", Function: "renvoReconstructWideArgument", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return c.renvoNativeIntSize == 8"},
+	{Name: "scaled_atom_literals", ReachabilityGuard: "renvoMayUseScaledAtomLiterals", Suffix: "ScaledAtomLiterals", Function: "renvoScaledAtomLiterals", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
+	{Name: "wide_float_locals", ReachabilityGuard: "renvoMayUseWideFloatLocals", Suffix: "WideFloatLocals", Function: "renvoWideFloatLocals", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGPreparedIEEEFloat != 0"},
+	{Name: "scaled_float64_values", ReachabilityGuard: "renvoMayUseScaledFloat64Values", Suffix: "ScaledFloat64Values", Function: "renvoScaledFloat64Values", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGPreparedIEEEFloat == 0"},
 	{Name: "result_copy_via_frame", ReachabilityGuard: "renvoMayCopyResultViaFrame", Suffix: "ResultCopyViaFrame", Function: "renvoResultCopyViaFrame", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "reserve_function_labels", Suffix: "ReserveFunctionLabels", Function: "renvoReserveFunctionLabels", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"mode", "int"}}, Prepared: "return false"},
 	{Name: "optimize_program_runtime", Suffix: "OptimizeProgramRuntime", Function: "renvoOptimizeProgramRuntime", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
@@ -547,6 +556,32 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			return GenerateResult{Diagnostics: []Diagnostic{{Filename: definition.Document.Filename, Code: "RTG-COMPILER-007", Message: "bundled definition has no compiler bindings"}}}
 		}
 	}
+	// Choose a capture-free local once for the entire bundle. Definition bodies
+	// and selectors are shared across operations; rescanning them for every
+	// operation adds no safety. Include every signature in this shared choice.
+	selectorLocal := "renvoCompilerSelector"
+	for {
+		collision := false
+		for i := 0; i < len(compilerEmitterOperations); i++ {
+			if strings.Contains(compilerEmitterOperations[i].signature(), selectorLocal) {
+				collision = true
+			}
+		}
+		for j := 0; j < len(documents); j++ {
+			for k := 0; k < len(documents[j].Declarations); k++ {
+				if strings.Contains(string(documents[j].Declarations[k].GoSource), selectorLocal) {
+					collision = true
+				}
+			}
+			if strings.Contains(selectors[j], selectorLocal) {
+				collision = true
+			}
+		}
+		if !collision {
+			break
+		}
+		selectorLocal += "_"
+	}
 	for i := 0; i < len(compilerEmitterOperations); i++ {
 		operation := compilerEmitterOperations[i]
 		out = append(out, "\nfunc "...)
@@ -557,25 +592,6 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		// remain visible to fixed-target specialization without duplicating
 		// each condition into fixed and dynamic alternatives. The cache also
 		// avoids repeated nested receiver loads in multi-target compilers.
-		// Avoid capturing any identifier used by a definition-owned body.
-		selectorLocal := "renvoCompilerSelector"
-		for {
-			collision := strings.Contains(operation.signature(), selectorLocal)
-			for j := 0; j < len(documents); j++ {
-				for k := 0; k < len(documents[j].Declarations); k++ {
-					if strings.Contains(string(documents[j].Declarations[k].GoSource), selectorLocal) {
-						collision = true
-					}
-				}
-				if strings.Contains(selectors[j], selectorLocal) {
-					collision = true
-				}
-			}
-			if !collision {
-				break
-			}
-			selectorLocal += "_"
-		}
 		context := operation.receiver().Name
 		if operation.receiver().Type != "*renvoCompileContext" {
 			context += ".c"
