@@ -20862,7 +20862,7 @@ func renvoObjectStoreConstant(g *renvoLinearGen, ep *renvoExprParse, idx int, ty
 		}
 		if candidate.kind == renvoExprCall && candidate.argCount == 1 {
 			conversionType := renvoConversionTypeFromExpr(g, ep, candidate.left)
-			if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+			if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceFunction) {
 				functionExpr = renvo_runtime_UnsafeIntAt(ep.args, candidate.firstArg)
 				continue
 			}
@@ -21030,7 +21030,7 @@ func renvoObjectStoreConstant(g *renvoLinearGen, ep *renvoExprParse, idx int, ty
 			return true
 		}
 	}
-	if resolved.kind == renvoTypePointer || renvoTypeKindIsScalarInt(resolved.kind) && renvoTypeSize(g.meta, typ) == g.c.renvoNativeIntSize {
+	if resolved.kind == renvoTypePointer || renvoTypeKindIsScalarInt(resolved.kind) && renvoTypeSize(g.meta, typ) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 		nameStart, nameEnd, addend, ok := renvoObjectConstantPointerAddress(g, ep, idx)
 		if ok {
 			start, end := renvoAsmCopyObjectText(&g.asm, g.prog.src, nameStart, nameEnd)
@@ -21164,7 +21164,7 @@ func renvoObjectConstantPointerValue(g *renvoLinearGen, ep *renvoExprParse, idx 
 	e := &ep.exprs[idx]
 	if e.kind == renvoExprCall && e.argCount == 1 {
 		conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-		if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+		if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 			return renvoObjectConstantPointerValue(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 	}
@@ -21231,7 +21231,7 @@ func renvoObjectConstantPointerAddress(g *renvoLinearGen, ep *renvoExprParse, id
 	}
 	if e.argCount == 1 {
 		conversionType := renvoConversionTypeFromExpr(g, ep, e.left)
-		if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == g.c.renvoNativeIntSize {
+		if conversionType != 0 && renvoTypeSize(g.meta, conversionType) == renvoTargetAddressSize(g.c, renvoPointerSpaceData) {
 			return renvoObjectConstantPointerAddress(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 		}
 		callee := &ep.exprs[e.left]
