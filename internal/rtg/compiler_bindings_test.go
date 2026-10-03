@@ -333,11 +333,11 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 		if fn.Name.Name != "renvoAsmCopyPrimaryToSecondary" {
 			continue
 		}
-		if len(fn.Body.List) != 5 {
-			t.Fatalf("want guard, selector snapshot, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
+		if len(fn.Body.List) != 6 {
+			t.Fatalf("want receiver guard, context snapshot, context invariant, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
 		}
-		first := fn.Body.List[2].(*ast.IfStmt)
-		second := fn.Body.List[3].(*ast.IfStmt)
+		first := fn.Body.List[3].(*ast.IfStmt)
+		second := fn.Body.List[4].(*ast.IfStmt)
 		for _, fixed := range []int{0, 1, -1} {
 			for _, selector := range []int{0, 41, 73, 99, 101} {
 				for group, branch := range []*ast.IfStmt{first, second} {
@@ -361,7 +361,7 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 				t.Fatal("selected body falls through to failure")
 			}
 		}
-		failure := fn.Body.List[4].(*ast.AssignStmt)
+		failure := fn.Body.List[5].(*ast.AssignStmt)
 		if failure.Lhs[0].(*ast.SelectorExpr).Sel.Name != "patchFailed" || failure.Rhs[0].(*ast.Ident).Name != "true" {
 			t.Fatal("unknown selector no longer fails")
 		}

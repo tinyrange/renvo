@@ -4357,6 +4357,66 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+renvoNonNil(g)
+	negative := renvoAsmNewLabel(&g.asm)
+	invalid := renvoAsmNewLabel(&g.asm)
+	renvoAsmPushPrimary(&g.asm)
+	renvoAsmPushSecondary(&g.asm)
+	renvoAsmCopyTertiaryToPrimary(&g.asm)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmPrimaryImm(&g.asm, 0)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
+	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+	renvoAsmJzPrimary(&g.asm, negative)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
+	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+	renvoAsmJzPrimary(&g.asm, invalid)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
+	renvoAsmAddScaledTertiary(&g.asm, elemSize)
+	renvoAsmRet(&g.asm)
+	renvoAsmMarkLabel(&g.asm, negative)
+	renvoAsmPopTertiary(&g.asm)
+	renvoAsmMarkLabel(&g.asm, invalid)
+	renvoAsmPopTertiary(&g.asm)
+	renvoEmitUncaughtFaultTransfer(g, false)
+}
+
+func renvoEmitTargetIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitTargetBoundsCheckHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitOptimizedSliceBoundsChecks(g *renvoLinearGen, lowOff int, highOff int, maxOff int, capOff int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
+renvoNonNil(g)
+	renvoNonNil(g)
+	size = renvoAlignValue(size, wordSize)
+	// Keep larger arguments on the word-push path so stack growth touches each
+	// guard page; one reservation must not skip a Windows stack guard page.
+	for at := size - wordSize; at >= 0; at -= wordSize {
+		if mode == renvoPushStack {
+			renvoAsmLoadPrimaryStack(&g.asm, offset-at)
+		} else if mode == renvoPushBss {
+			renvoAsmLoadPrimaryBss(&g.asm, offset+at)
+		} else {
+			renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
+		}
+		renvoAsmPushPrimary(&g.asm)
+	}
+}
+
 func renvoSplitWordLoweringEnabled(a *renvoAsm) bool {
 renvoNonNil(a)
 return renvoFixedTarget == 0
