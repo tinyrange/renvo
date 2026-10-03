@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		word_call_intrinsic = renvoWasm32CompilerWordCallIntrinsic
+		unsigned_word_order_result = renvoWasm32CompilerUnsignedWordOrderResult
+		word_constant_immediate = renvoWasm32CompilerWordConstantImmediate
 		bounded_word_shift = renvoWasm32CompilerBoundedWordShift
 		read_write_file = renvoWasm32CompilerReadWriteFile
 		pop_read_write_offset = renvoWasm32CompilerPopReadWriteOffset
@@ -5909,7 +5912,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+	func renvoWasm32CompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 		return -1
 	}
 }
@@ -6263,5 +6266,40 @@ go compiler {
 			return true
 		}
 		return renvoEmitPrimaryTertiaryOp(g, tok)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWordConstantImmediate(a *renvoAsm, kind int, value int) bool {
+		if kind == renvoTypeInt64 || kind == renvoTypeUint64 {
+			return false
+		}
+		renvoAsmPrimaryImm(a, value)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerUnsignedWordOrderResult(g *renvoLinearGen, op0 byte, op1 byte, opLen int, kind int) bool {
+		if g.c.renvoNativeIntSize != 8 && g.c.renvoNativeIntSize != 4 {
+			return false
+		}
+		if !renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+			return false
+		}
+		renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if renvoExprIsIdentText(g.prog, ep, ep.exprs[idx].left, "renvo_runtime_CKernelLinkAddress") {
+			return renvoBoolInt(renvoEmitKernelLinkAddressCall(g, ep, idx))
+		}
+		if renvoFixedTarget == 0 {
+			return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
+		}
+		return -1
 	}
 }

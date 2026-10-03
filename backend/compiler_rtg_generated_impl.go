@@ -797,6 +797,79 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if renvoExprIsIdentText(g.prog, ep, ep.exprs[idx].left, "renvo_runtime_CKernelLinkAddress") {
+			return renvoBoolInt(renvoEmitKernelLinkAddressCall(g, ep, idx))
+		}
+		if renvoFixedTarget == 0 {
+			return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
+		}
+		return -1
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 {
+			result := renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
+			if result >= 0 {
+				return result
+			}
+		}
+		return renvoEmitPointerDifferenceCall(g, ep, idx)
+	
+}
+g.asm.patchFailed = true
+return 0
+}
+
+func renvoEmitUnsignedWordOrderResult(g *renvoLinearGen, op0 byte, op1 byte, opLen int, kind int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if g.c.renvoNativeIntSize != 8 && g.c.renvoNativeIntSize != 4 {
+			return false
+		}
+		if !renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+			return false
+		}
+		renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoAsmWordConstantImmediate(a *renvoAsm, kind int, value int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if kind == renvoTypeInt64 || kind == renvoTypeUint64 {
+			return false
+		}
+}
+renvoAsmPrimaryImm(a, value)
+		return true
+}
+a.patchFailed = true
+return false
+}
+
 func renvoEmitBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
@@ -2008,7 +2081,7 @@ return
 a.patchFailed = true
 }
 
-func renvoEmitWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+func renvoEmitWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
@@ -2022,10 +2095,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		if renvoFixedTarget != 0 || !g.c.code16 {
 			return -1
 		}
-		if wide {
-			return renvo386EmitWideIntExprFast(g, ep, idx)
-		}
-		return renvo386EmitNativeIntExprFast(g, ep, idx)
+		return renvo386EmitWideIntExprFast(g, ep, idx)
 	
 }
 g.asm.patchFailed = true
