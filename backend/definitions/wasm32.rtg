@@ -4150,6 +4150,15 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		finish_object_variadic_args = renvoWasm32CompilerFinishObjectVariadicArgs
+		push_object_variadic_args = renvoWasm32CompilerPushObjectVariadicArgs
+		reserve_object_variadic_args = renvoWasm32CompilerReserveObjectVariadicArgs
+		object_call_with_word_count = renvoWasm32CompilerObjectCallWithWordCount
+		finish_object_aggregate_result = renvoWasm32CompilerFinishObjectAggregateResult
+		push_object_private_result = renvoWasm32CompilerPushObjectPrivateResult
+		push_object_sret_pointer = renvoWasm32CompilerPushObjectSRetPointer
+		begin_object_aggregate_result = renvoWasm32CompilerBeginObjectAggregateResult
+		begin_object_stack_args = renvoWasm32CompilerBeginObjectStackArgs
 		push_object_register_word = renvoWasm32CompilerPushObjectRegisterWord
 		push_object_stack_word = renvoWasm32CompilerPushObjectStackWord
 		object_export_frame = renvoWasm32CompilerObjectExportFrame
@@ -6336,5 +6345,59 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerBeginObjectStackArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPushObjectSRetPointer(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPushObjectVariadicArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFinishObjectVariadicArgs(a *renvoAsm) {
+		a.patchFailed = true
 	}
 }

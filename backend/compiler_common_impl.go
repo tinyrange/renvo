@@ -21497,97 +21497,9 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 		g.objectCABINameEnds[fnIndex] = end
 		return start, end, true
 	}
-	renvoObjectExportFrame(g, true)
-	sret := renvoObjectExportUsesSRet(g.meta, fn)
-	smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
-	memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
-	registerWords := 6
-	if sret {
-		registerWords = 5
-	}
-	if renvoPreparedBackendActive != 0 && (wordCount > registerWords || memoryAggregate) {
+	if !renvoEmitObjectRegisterWrapperBody(g, fnIndex, wordCount, false) {
 		return 0, 0, false
 	}
-	if wordCount > registerWords || memoryAggregate {
-		renvoAmd64BeginObjectStackArgs(&g.asm)
-	}
-	if sret {
-		// Preserve the C hidden-result pointer in an aligned private slot. SysV
-		// shifts explicit arguments right by one register; Renvo expects its
-		// hidden result as internal call word zero.
-		if renvoPreparedBackendActive != 0 {
-			if !renvoRTGBeginObjectAggregateResult(&g.asm, true) {
-				return 0, 0, false
-			}
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x83\xec\x10\x48\x89\x3c\x24")
-		}
-		if !renvoPushObjectExportArgs(g, fn, true, fn.paramCount) {
-			return 0, 0, false
-		}
-		if renvoPreparedBackendActive != 0 {
-			if !renvoRTGPushObjectSRetPointer(&g.asm) {
-				return 0, 0, false
-			}
-		} else {
-			renvoAsmEmit8(&g.asm, 0x57)
-		}
-	} else {
-		if smallAggregateResult {
-			if renvoPreparedBackendActive != 0 {
-				if !renvoRTGBeginObjectAggregateResult(&g.asm, false) {
-					return 0, 0, false
-				}
-			} else {
-				renvoAsmEmitText(&g.asm, "\x48\x83\xec\x10")
-			}
-		}
-		if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount) {
-			return 0, 0, false
-		}
-		if smallAggregateResult {
-			if renvoPreparedBackendActive != 0 {
-				if !renvoRTGPushObjectPrivateResult(&g.asm, wordCount) {
-					return 0, 0, false
-				}
-			} else {
-				renvoAmd64PushObjectPrivateResult(&g.asm, wordCount)
-			}
-		}
-	}
-	renvoLinearMarkFunc(g, fnIndex)
-	callWords := wordCount
-	if sret || smallAggregateResult {
-		callWords++
-	}
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGEmitCallWithWordCount(g, fnIndex, callWords)
-	} else {
-		renvoAmd64EmitCallWithWordCount(g, fnIndex, callWords)
-	}
-	if sret {
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGFinishObjectAggregateResult(&g.asm, 1)
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x8b\x04\x24\x48\x83\xc4\x10")
-		}
-	} else if smallAggregateResult {
-		resultWords := 1
-		if renvoTypeSize(g.meta, fn.resultType) > 8 {
-			resultWords = 2
-		}
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGFinishObjectAggregateResult(&g.asm, resultWords)
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x8b\x04\x24")
-			if resultWords > 1 {
-				renvoAsmEmitText(&g.asm, "\x48\x8b\x54\x24\x08")
-			}
-			renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x10")
-		}
-	}
-	renvoObjectExportFrame(g, false)
-	renvoAsmRet(&g.asm)
 	endLabel := renvoAsmNewLabel(&g.asm)
 	renvoAsmMarkLabel(&g.asm, endLabel)
 	if symbolIndex >= 0 && symbolIndex < len(g.asm.symbols) {
@@ -21786,6 +21698,79 @@ func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
 	return true
 }
 
+// renvoEmitObjectRegisterWrapperBody adapts an incoming register-ABI call to
+// the compiler's internal word-based convention. Target operations own the
+// physical frame, incoming locations, and aggregate-result storage.
+func renvoEmitObjectRegisterWrapperBody(g *renvoLinearGen, fnIndex int, wordCount int, variadic bool) bool {
+	fn := &g.meta.funcs[fnIndex]
+	sret := renvoObjectExportUsesSRet(g.meta, fn)
+	smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
+	memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
+	if variadic && (wordCount < 1 || wordCount > 7 || renvoPreparedBackendActive != 0 || sret || smallAggregateResult) ||
+		renvoPreparedBackendActive != 0 && (wordCount > renvoRTGObjectRegisterCount() && !sret || wordCount > renvoRTGObjectRegisterCount()-1 && sret || memoryAggregate) {
+		return false
+	}
+	renvoObjectExportFrame(g, true)
+	registerWords := renvoObjectArgumentRegisterCount(g.c)
+	if sret {
+		registerWords--
+	}
+	if !variadic && (wordCount > registerWords || memoryAggregate) {
+		renvoBeginObjectStackArgs(&g.asm)
+	}
+	if sret {
+		if !renvoBeginObjectAggregateResult(&g.asm, true) {
+			return false
+		}
+		if !renvoPushObjectExportArgs(g, fn, true, fn.paramCount) {
+			return false
+		}
+		if !renvoPushObjectSRetPointer(&g.asm) {
+			return false
+		}
+	} else {
+		if smallAggregateResult {
+			if !renvoBeginObjectAggregateResult(&g.asm, false) {
+				return false
+			}
+		}
+		if variadic {
+			fixedCount := wordCount - 1
+			renvoReserveObjectVariadicArgs(g, fixedCount)
+			if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount-1) {
+				return false
+			}
+			renvoPushObjectVariadicArgs(&g.asm)
+		} else if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount) {
+			return false
+		}
+		if smallAggregateResult {
+			if !renvoPushObjectPrivateResult(&g.asm, wordCount) {
+				return false
+			}
+		}
+	}
+	renvoLinearMarkFunc(g, fnIndex)
+	callWords := wordCount
+	if sret || smallAggregateResult {
+		callWords++
+	}
+	renvoObjectCallWithWordCount(g, fnIndex, callWords)
+	if variadic {
+		renvoFinishObjectVariadicArgs(&g.asm)
+	}
+	if sret || smallAggregateResult {
+		resultWords := 1
+		if !sret && renvoTypeSize(g.meta, fn.resultType) > 8 {
+			resultWords = 2
+		}
+		renvoFinishObjectAggregateResult(&g.asm, resultWords)
+	}
+	renvoObjectExportFrame(g, false)
+	renvoAsmRet(&g.asm)
+	return true
+}
+
 func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	renvoNonNil(g)
 	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
@@ -21803,110 +21788,11 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		decl = &g.meta.objectDecls[fn.objectDecl]
 	}
 	variadic := decl != nil && decl.kind == renvoObjectDeclFunction && decl.relocationAddend != 0
-	sret := renvoObjectExportUsesSRet(g.meta, fn)
-	smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
-	memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
-	if variadic && (wordCount < 1 || wordCount > 7 || renvoPreparedBackendActive != 0 || sret || smallAggregateResult) ||
-		renvoPreparedBackendActive != 0 && (wordCount > renvoRTGObjectRegisterCount() && !sret || wordCount > renvoRTGObjectRegisterCount()-1 && sret || memoryAggregate) {
-		return false
-	}
 	symbolIndex := renvoAsmAddObjectFuncSymbol(
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
-	renvoObjectExportFrame(g, true)
-	registerWords := renvoObjectArgumentRegisterCount(g.c)
-	if sret {
-		registerWords--
+	if !renvoEmitObjectRegisterWrapperBody(g, fnIndex, wordCount, variadic) {
+		return false
 	}
-	if !variadic && (wordCount > registerWords || memoryAggregate) {
-		renvoAmd64BeginObjectStackArgs(&g.asm)
-	}
-	if sret {
-		if renvoPreparedBackendActive != 0 {
-			if !renvoRTGBeginObjectAggregateResult(&g.asm, true) {
-				return false
-			}
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x83\xec\x10\x48\x89\x3c\x24")
-		}
-		if !renvoPushObjectExportArgs(g, fn, true, fn.paramCount) {
-			return false
-		}
-		if renvoPreparedBackendActive != 0 {
-			if !renvoRTGPushObjectSRetPointer(&g.asm) {
-				return false
-			}
-		} else {
-			renvoAsmEmit8(&g.asm, 0x57)
-		}
-	} else {
-		if smallAggregateResult {
-			if renvoPreparedBackendActive != 0 {
-				if !renvoRTGBeginObjectAggregateResult(&g.asm, false) {
-					return false
-				}
-			} else {
-				renvoAsmEmitText(&g.asm, "\x48\x83\xec\x10")
-			}
-		}
-		if variadic {
-			fixedCount := wordCount - 1
-			renvoAmd64ReserveObjectVAList(g, fixedCount)
-			// Normalizing fixed arguments uses RAX as scratch, so retain the
-			// freshly constructed va_list pointer in caller-clobbered R10.
-			renvoAsmEmitText(&g.asm, "\x49\x89\xc2")
-			if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount-1) {
-				return false
-			}
-			renvoAsmEmitText(&g.asm, "\x41\x52")
-		} else if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount) {
-			return false
-		}
-		if smallAggregateResult {
-			if renvoPreparedBackendActive != 0 {
-				if !renvoRTGPushObjectPrivateResult(&g.asm, wordCount) {
-					return false
-				}
-			} else {
-				renvoAmd64PushObjectPrivateResult(&g.asm, wordCount)
-			}
-		}
-	}
-	renvoLinearMarkFunc(g, fnIndex)
-	callWords := wordCount
-	if sret || smallAggregateResult {
-		callWords++
-	}
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGEmitCallWithWordCount(g, fnIndex, callWords)
-	} else {
-		renvoAmd64EmitCallWithWordCount(g, fnIndex, callWords)
-	}
-	if variadic {
-		renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x48")
-	}
-	if sret {
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGFinishObjectAggregateResult(&g.asm, 1)
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x8b\x04\x24\x48\x83\xc4\x10")
-		}
-	} else if smallAggregateResult {
-		resultWords := 1
-		if renvoTypeSize(g.meta, fn.resultType) > 8 {
-			resultWords = 2
-		}
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGFinishObjectAggregateResult(&g.asm, resultWords)
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x8b\x04\x24")
-			if resultWords > 1 {
-				renvoAsmEmitText(&g.asm, "\x48\x8b\x54\x24\x08")
-			}
-			renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x10")
-		}
-	}
-	renvoObjectExportFrame(g, false)
-	renvoAsmRet(&g.asm)
 	endLabel := renvoAsmNewLabel(&g.asm)
 	renvoAsmMarkLabel(&g.asm, endLabel)
 	if symbolIndex >= 0 && symbolIndex < len(g.asm.symbols) {

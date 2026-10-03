@@ -2106,6 +2106,51 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoFinishObjectVariadicArgs(a *renvoAsm) {
+renvoNonNil(a)
+	a.patchFailed = true
+}
+
+func renvoPushObjectVariadicArgs(a *renvoAsm) {
+renvoNonNil(a)
+	a.patchFailed = true
+}
+
+func renvoReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
+renvoNonNil(g)
+	g.asm.patchFailed = true
+}
+
+func renvoObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+renvoNonNil(g)
+	renvoRTGEmitCallWithWordCount(g, fnIndex, wordCount)
+}
+
+func renvoFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+renvoNonNil(a)
+	renvoRTGFinishObjectAggregateResult(a, resultWords)
+}
+
+func renvoPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
+renvoNonNil(a)
+	return renvoRTGPushObjectPrivateResult(a, wordCount)
+}
+
+func renvoPushObjectSRetPointer(a *renvoAsm) bool {
+renvoNonNil(a)
+	return renvoRTGPushObjectSRetPointer(a)
+}
+
+func renvoBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
+renvoNonNil(a)
+	return renvoRTGBeginObjectAggregateResult(a, sret)
+}
+
+func renvoBeginObjectStackArgs(a *renvoAsm) {
+renvoNonNil(a)
+	a.patchFailed = true
+}
+
 func renvoAsmPushObjectRegisterWordKind(a *renvoAsm, register int, kind int) bool {
 renvoNonNil(a)
 if !renvoRTGPushObjectCallWord(a, register) {

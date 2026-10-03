@@ -977,6 +977,15 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		finish_object_variadic_args = renvoAmd64CompilerFinishObjectVariadicArgs
+		push_object_variadic_args = renvoAmd64CompilerPushObjectVariadicArgs
+		reserve_object_variadic_args = renvoAmd64CompilerReserveObjectVariadicArgs
+		object_call_with_word_count = renvoAmd64CompilerObjectCallWithWordCount
+		finish_object_aggregate_result = renvoAmd64CompilerFinishObjectAggregateResult
+		push_object_private_result = renvoAmd64CompilerPushObjectPrivateResult
+		push_object_sret_pointer = renvoAmd64CompilerPushObjectSRetPointer
+		begin_object_aggregate_result = renvoAmd64CompilerBeginObjectAggregateResult
+		begin_object_stack_args = renvoAmd64CompilerBeginObjectStackArgs
 		push_object_register_word = renvoAmd64CompilerPushObjectRegisterWord
 		push_object_stack_word = renvoAmd64CompilerPushObjectStackWord
 		object_export_frame = renvoAmd64CompilerObjectExportFrame
@@ -3946,5 +3955,71 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
 		return renvoAmd64PushObjectIntegerRegisterKind(a, register, kind)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerBeginObjectStackArgs(a *renvoAsm) {
+		renvoAmd64BeginObjectStackArgs(a)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
+		renvoAsmEmitText(a, "\x48\x83\xec\x10")
+		if sret {
+			renvoAsmEmitText(a, "\x48\x89\x3c\x24")
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerPushObjectSRetPointer(a *renvoAsm) bool {
+		renvoAsmEmit8(a, 0x57)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
+		renvoAmd64PushObjectPrivateResult(a, wordCount)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+		renvoAsmEmitText(a, "\x48\x8b\x04\x24")
+		if resultWords > 1 {
+			renvoAsmEmitText(a, "\x48\x8b\x54\x24\x08")
+		}
+		renvoAsmEmitText(a, "\x48\x83\xc4\x10")
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
+		renvoAmd64ReserveObjectVAList(g, fixedCount)
+		// Argument normalization uses the primary register as scratch.
+		renvoAsmEmitText(&g.asm, "\x49\x89\xc2")
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerPushObjectVariadicArgs(a *renvoAsm) {
+		renvoAsmEmitText(a, "\x41\x52")
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFinishObjectVariadicArgs(a *renvoAsm) {
+		renvoAsmEmitText(a, "\x48\x83\xc4\x48")
 	}
 }
