@@ -2114,6 +2114,24 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoObjectIndirectAggregate(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoObjectWordLimit(c *renvoCompileContext, export bool) int {
+renvoNonNil(c)
+if export { return 20 }
+limit := renvoRTGObjectRegisterCount()
+if limit > 20 { limit = 20 }
+return limit
+}
+
+func renvoObjectArgumentWordBytes(c *renvoCompileContext) int {
+renvoNonNil(c)
+return renvoRTGStackWordBytes
+}
+
 func renvoSourceTokenCapacity(c *renvoCompileContext, length int) int {
 renvoNonNil(c)
 return length/4 + 8192

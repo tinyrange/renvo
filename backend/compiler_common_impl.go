@@ -14452,7 +14452,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 		if word != wordCount {
 			return false
 		}
-		if renvoFixedTarget == 0 && cObjectForeign && wordCount > 6 && renvoIsSysVObject(g.c) {
+		if renvoFixedTarget == 0 && cObjectForeign && wordCount > renvoObjectArgumentRegisterCount(g.c) && renvoIsSysVObject(g.c) {
 			memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 			if memoryAggregate >= 0 {
 				return memoryAggregate != 0
@@ -14507,7 +14507,8 @@ func renvoEmitRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e 
 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if !renvoIsSysVObject(g.c) || wordCount > 6 {
+	wordBytes := renvoObjectArgumentWordBytes(g.c)
+	if !renvoIsSysVObject(g.c) || wordCount > renvoObjectArgumentRegisterCount(g.c) {
 		return false
 	}
 	expectedWords := 0
@@ -14522,7 +14523,7 @@ func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInf
 			if !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
 				return false
 			}
-			expectedWords += renvoAlignValue(renvoTypeSize(g.meta, paramType), 8) / 8
+			expectedWords += renvoAlignValue(renvoTypeSize(g.meta, paramType), wordBytes) / wordBytes
 			continue
 		}
 		if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc {
@@ -14583,10 +14584,7 @@ func renvoDiscardableExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 
 func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	// The compact load/store sequence below uses an unsigned displacement byte.
-	// Six register arguments plus sixteen stack words therefore fit without a
-	// wider addressing form.
-	if !renvoIsSysVObject(g.c) || wordCount != fn.paramCount || wordCount <= 6 || wordCount > 22 {
+	if !renvoIsSysVObject(g.c) || wordCount != fn.paramCount || wordCount <= renvoObjectArgumentRegisterCount(g.c) {
 		return false
 	}
 	for i := 0; i < fn.paramCount; i++ {
@@ -14958,10 +14956,11 @@ func renvoEmitFunctionValueCall(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 
 func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
+	wordBytes := renvoObjectArgumentWordBytes(g.c)
 	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		return renvoEmitCdeclObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 	}
-	if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > renvoRTGObjectRegisterCount() {
+	if functionType.resolved != 0 || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
 	}
 	wordOffsets := make([]int, 0, len(argOffsets))
@@ -14970,13 +14969,13 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 		paramType := g.meta.fields[functionType.first+i].typ
 		param := renvoResolveType(g.meta, paramType)
 		if param.kind == renvoTypeStruct {
-			if renvoPreparedBackendActive != 0 || !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
+			if !renvoObjectIndirectAggregate(g.c) || !renvoObjectCABIIntegerAggregate(g.meta, paramType) {
 				return false
 			}
 			hasAggregate = true
-			words := renvoAlignValue(renvoTypeSize(g.meta, paramType), 8) / 8
+			words := renvoAlignValue(renvoTypeSize(g.meta, paramType), wordBytes) / wordBytes
 			for word := 0; word < words; word++ {
-				wordOffsets = append(wordOffsets, argOffsets[i]-word*8)
+				wordOffsets = append(wordOffsets, argOffsets[i]-word*wordBytes)
 			}
 			continue
 		}
@@ -14988,7 +14987,7 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 	// A SysV aggregate is assigned wholly to registers or wholly to the stack.
 	// Keep register exhaustion conservative; ordinary scalar stack calls retain
 	// their existing twenty-word path.
-	if len(wordOffsets) > 20 || hasAggregate && len(wordOffsets) > 6 {
+	if len(wordOffsets) > renvoObjectWordLimit(g.c, false) || hasAggregate && len(wordOffsets) > renvoObjectArgumentRegisterCount(g.c) {
 		return false
 	}
 	registerWords := renvoObjectArgumentRegisterCount(g.c)
@@ -15016,7 +15015,7 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 
 func renvoEmitCObjectFunctionPointerIntegerStackCall(g *renvoLinearGen, handleOffset int, argOffsets []int) bool {
 	renvoNonNil(g)
-	if !renvoIsSysVObject(g.c) || len(argOffsets) <= 6 || len(argOffsets) > 20 {
+	if !renvoIsSysVObject(g.c) || len(argOffsets) <= renvoObjectArgumentRegisterCount(g.c) || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
 	}
 	return renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets)
@@ -20533,6 +20532,7 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 
 func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
 	renvoNonNil(meta, fn)
+	wordBytes := renvoObjectArgumentWordBytes(meta.c)
 	if fn.receiverType != 0 || fn.literalTok != 0 || fn.linkStatic != 0 {
 		return -1
 	}
@@ -20558,16 +20558,16 @@ func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
 		paramWords := 1
 		if param.kind == renvoTypeStruct {
 			size := renvoTypeSize(meta, paramType)
-			if size <= 16 && !renvoObjectCABIIntegerAggregate(meta, paramType) {
+			if size <= renvoObjectAggregateRegisterBytes(meta.c) && !renvoObjectCABIIntegerAggregate(meta, paramType) {
 				return -1
 			}
-			paramWords = renvoAlignValue(size, 8) / 8
+			paramWords = renvoAlignValue(size, wordBytes) / wordBytes
 		} else if !renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc {
 			return -1
 		}
 		wordCount += paramWords
 	}
-	if wordCount > 20 {
+	if wordCount > renvoObjectWordLimit(meta.c, true) {
 		return -1
 	}
 	return wordCount
@@ -20587,10 +20587,11 @@ func renvoObjectExportUsesSRet(meta *renvoMeta, fn *renvoFuncInfo) bool {
 		return false
 	}
 	result := renvoResolveType(meta, fn.resultType)
-	return result.kind == renvoTypeStruct && renvoTypeSize(meta, fn.resultType) > 16
+	return result.kind == renvoTypeStruct && renvoTypeSize(meta, fn.resultType) > renvoObjectAggregateRegisterBytes(meta.c)
 }
 
 func renvoObjectExportHasMemoryAggregate(meta *renvoMeta, fn *renvoFuncInfo) bool {
+	wordBytes := renvoObjectArgumentWordBytes(meta.c)
 	integerRegister := 0
 	if renvoObjectExportUsesSRet(meta, fn) {
 		integerRegister = 1
@@ -20600,12 +20601,12 @@ func renvoObjectExportHasMemoryAggregate(meta *renvoMeta, fn *renvoFuncInfo) boo
 		param := renvoResolveType(meta, paramType)
 		if param.kind == renvoTypeStruct {
 			size := renvoTypeSize(meta, paramType)
-			words := renvoAlignValue(size, 8) / 8
-			if size > 16 || integerRegister+words > 6 {
+			words := renvoAlignValue(size, wordBytes) / wordBytes
+			if size > renvoObjectAggregateRegisterBytes(meta.c) || integerRegister+words > renvoObjectArgumentRegisterCount(meta.c) {
 				return true
 			}
 			integerRegister += words
-		} else if integerRegister < 6 {
+		} else if integerRegister < renvoObjectArgumentRegisterCount(meta.c) {
 			integerRegister++
 		}
 	}
@@ -20619,7 +20620,7 @@ func renvoObjectCABIIntegerAggregate(meta *renvoMeta, typ int) bool {
 		return false
 	}
 	size := renvoTypeSize(meta, typ)
-	if size <= 0 || size > 16 {
+	if size <= 0 || size > renvoObjectAggregateRegisterBytes(meta.c) {
 		return false
 	}
 	for i := 0; i < resolved.count; i++ {
@@ -20627,8 +20628,8 @@ func renvoObjectCABIIntegerAggregate(meta *renvoMeta, typ int) bool {
 		fieldType := renvoResolveType(meta, field.typ)
 		fieldSize := renvoTypeSize(meta, field.typ)
 		alignment := fieldSize
-		if alignment > 8 {
-			alignment = 8
+		if alignment > renvoObjectArgumentWordBytes(meta.c) {
+			alignment = renvoObjectArgumentWordBytes(meta.c)
 		}
 		if alignment < 1 || field.offset%alignment != 0 || field.offset+fieldSize > size {
 			return false
@@ -22138,6 +22139,7 @@ func renvoObjectRegisterWordCount(wordCount int, limit int) int {
 }
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
+	wordBytes := renvoObjectArgumentWordBytes(g.c)
 	registerLimit := renvoObjectArgumentRegisterCount(g.c)
 	integerRegister := 0
 	if sret {
@@ -22152,8 +22154,8 @@ func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, 
 		memory := false
 		if param.kind == renvoTypeStruct {
 			size := renvoTypeSize(g.meta, paramType)
-			words = renvoAlignValue(size, 8) / 8
-			memory = size > 16 || integerRegister+words > registerLimit
+			words = renvoAlignValue(size, wordBytes) / wordBytes
+			memory = size > renvoObjectAggregateRegisterBytes(g.c) || integerRegister+words > registerLimit
 		} else {
 			memory = integerRegister >= registerLimit
 		}
@@ -25277,7 +25279,7 @@ func renvoEmitWordIntrinsicCall(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 
 func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
-	if functionType.resolved != 0 || len(argOffsets) > 127 {
+	if functionType.resolved != 0 || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
 	}
 	for i := 0; i < len(argOffsets); i++ {

@@ -805,6 +805,57 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoObjectIndirectAggregate(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return true
+	
+}
+return false
+}
+
+func renvoObjectWordLimit(c *renvoCompileContext, export bool) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return 20
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return 127
+	
+}
+return 0
+}
+
+func renvoObjectArgumentWordBytes(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return 8
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return 4
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return c.renvoNativeIntSize
+	
+}
+return 0
+}
+
 func renvoSourceTokenCapacity(c *renvoCompileContext, length int) int {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -2633,6 +2684,10 @@ renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+		// The displacement forms in this emitter bound its physical call area.
+		if wordCount <= 6 || wordCount > 22 {
+			return false
+		}
 		// The evaluation stack presents argument zero at its top. Pop the six SysV
 		// register arguments and retain the remaining words in source order.
 		renvoAsmEmitText(a, "\x5f\x5e\x5a\x59\x41\x58\x41\x59")
