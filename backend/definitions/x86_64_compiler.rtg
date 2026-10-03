@@ -965,6 +965,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		string_concat_value_regs = renvoAmd64CompilerStringConcatValueRegs
 		append_scalar_helper = renvoAmd64CompilerAppendScalarHelper
 		append_address_helper = renvoAmd64CompilerAppendAddressHelper
 		string_equal_helper = renvoAmd64CompilerStringEqualHelper
@@ -3008,5 +3009,18 @@ go compiler {
 		renvoAsmCopyPrimaryToCallWord1(a)
 		renvoAsmLoadTertiaryStack(a, byteCountOff)
 		renvoAsmEmit16(a, 0xa4f3)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStringConcatValueRegs(g *renvoLinearGen, offset int) bool {
+		renvoNonNil(g)
+		a := &g.asm
+		destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoEmitArenaAllocStackPrimary(g, offset-8)
+		renvoAsmStorePrimaryStack(a, destOff)
+		renvoEmitCopyToFreshArena(g, offset, destOff, offset-8)
+		renvoAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
+		return true
 	}
 }

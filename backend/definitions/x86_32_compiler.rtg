@@ -1300,6 +1300,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		string_concat_value_regs = renvo386CompilerStringConcatValueRegs
 		append_scalar_helper = renvo386CompilerAppendScalarHelper
 		append_address_helper = renvo386CompilerAppendAddressHelper
 		string_equal_helper = renvo386CompilerStringEqualHelper
@@ -3968,5 +3969,16 @@ go compiler {
 
 	func renvo386CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
 		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringConcatValueRegs(g *renvoLinearGen, offset int) bool {
+		renvoNonNil(g)
+		a := &g.asm
+		renvoAsmPushStack(a, offset)
+		renvoAsmLoadSecondaryStack(a, offset-8)
+		renvoAsmPopPrimary(a)
+		return true
 	}
 }

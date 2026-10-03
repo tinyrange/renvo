@@ -696,6 +696,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		string_concat_value_regs = renvoArmCompilerStringConcatValueRegs
 		append_scalar_helper = renvoArmCompilerAppendScalarHelper
 		append_address_helper = renvoArmCompilerAppendAddressHelper
 		string_equal_helper = renvoArmCompilerStringEqualHelper
@@ -1996,5 +1997,16 @@ go compiler {
 
 	func renvoArmCompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
 		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStringConcatValueRegs(g *renvoLinearGen, offset int) bool {
+		renvoNonNil(g)
+		a := &g.asm
+		renvoAsmPushStack(a, offset)
+		renvoAsmLoadSecondaryStack(a, offset-8)
+		renvoAsmPopPrimary(a)
+		return true
 	}
 }

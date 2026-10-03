@@ -2106,6 +2106,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
+renvoNonNil(g)
+renvoNonNil(g)
+a := &g.asm
+renvoAsmPushStack(a, offset)
+renvoAsmLoadSecondaryStack(a, offset-8)
+renvoAsmPopPrimary(a)
+return true
+}
+
 func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
 renvoNonNil(g)
 small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
