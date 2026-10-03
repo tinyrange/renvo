@@ -2,6 +2,8 @@ definition 1
 unit x86_32_compiler
 implements direct_emitter_v1
 
+@import "x86_runtime_intrinsics.rtg"
+
 # Compiler-private lowering generated separately from the portable architecture projection.
 @import "x86_32.rtg"
 
@@ -1330,6 +1332,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		irq_stack_call = renvo386CompilerIRQStackCall
+		ms_abi_call = renvo386CompilerMSABICall
+		runtime_platform_intrinsic = renvoX86CompilerRuntimePlatformIntrinsic
 		store_incoming_call_word = renvo386CompilerStoreIncomingCallWord
 		call_with_word_count = renvo386CompilerCallWithWordCount
 		unsigned_divide_primary_tertiary = renvo386CompilerUnsignedDividePrimaryTertiary
@@ -2238,5 +2243,15 @@ go compiler {
 		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
 			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
 		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvo386CompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
 	}
 }

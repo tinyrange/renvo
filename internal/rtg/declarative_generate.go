@@ -600,11 +600,13 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 				signature[len(signature)-1] == '\r') {
 				signature = signature[:len(signature)-1]
 			}
-			hasLabels := false
-			for k := fn.BodyStart + 1; k < fn.BodyEnd-1; k++ {
-				// Conservatively keep calls for labels (and other colon forms).
-				// Go labels have function scope, not the dispatch branch's scope.
-				if string(syntax.TokenText(wrapped, file.Tokens[k])) == ":" {
+			// Labels have function scope, unlike switch cases, keyed literals,
+			// and slices. Use the statement parser rather than colon tokens.
+			// If a body cannot be classified, conservatively keep its call.
+			body := syntax.ParseFuncBodyStatements(file, fn)
+			hasLabels := !body.Ok
+			for k := 0; k < len(body.Stmts); k++ {
+				if body.Stmts[k].Kind == syntax.StmtLabel {
 					hasLabels = true
 				}
 			}

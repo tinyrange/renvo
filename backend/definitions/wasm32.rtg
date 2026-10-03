@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		irq_stack_call = renvoWasm32CompilerIRQStackCall
+		ms_abi_call = renvoWasm32CompilerMSABICall
+		runtime_platform_intrinsic = renvoWasm32CompilerRuntimePlatformIntrinsic
 		store_incoming_call_word = renvoWasm32CompilerStoreIncomingCallWord
 		call_with_word_count = renvoWasm32CompilerCallWithWordCount
 		unsigned_divide_primary_tertiary = renvoWasm32CompilerUnsignedDividePrimaryTertiary
@@ -4781,5 +4784,24 @@ go compiler {
 
 	func renvoWasm32CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 		renvoWasm32EmitCallWithWordCount(g, fnIndex, wordCount)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvoWasm32CompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvoWasm32CompilerRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
+		if e.argCount == 0 &&
+			(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadStackPointer") ||
+				renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFrameAddress")) {
+			return 0
+		}
+		return -1
 	}
 }

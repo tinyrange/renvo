@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 91 role-based operations: register copies,
+The current migration covers 94 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -169,6 +169,10 @@ x86 comparison-flag helpers also live in the definitions; common lowering
 retains token interpretation and the language-level division fault check.
 Incoming call-word placement and outgoing call ABI emission are typed hooks;
 common call lowering retains reachability marking and post-call panic checks.
+Platform runtime intrinsics, IRQ stack calls, and Microsoft ABI indirect calls
+are definition-owned. The x86 integrations import a shared runtime fragment;
+common lowering only recognizes target-neutral string pointers and barriers
+before invoking the typed platform hook.
 Hooks may take typed parameters, an assembler or compiler-state input, and a
 validated result type. Their complete
 signatures are checked before generation;

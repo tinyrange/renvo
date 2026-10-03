@@ -696,6 +696,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		irq_stack_call = renvoArmCompilerIRQStackCall
+		ms_abi_call = renvoArmCompilerMSABICall
+		runtime_platform_intrinsic = renvoArmCompilerRuntimePlatformIntrinsic
 		store_incoming_call_word = renvoArmCompilerStoreIncomingCallWord
 		call_with_word_count = renvoArmCompilerCallWithWordCount
 		unsigned_divide_primary_tertiary = renvoArmCompilerUnsignedDividePrimaryTertiary
@@ -1302,5 +1305,24 @@ go compiler {
 
 	func renvoArmCompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 		renvoArmEmitCallWithWordCount(g, fnIndex, wordCount)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvoArmCompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvoArmCompilerRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
+		if e.argCount == 0 &&
+			(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadStackPointer") ||
+				renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFrameAddress")) {
+			return 0
+		}
+		return -1
 	}
 }

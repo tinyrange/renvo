@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ec999f5baa6413a07cc5e8782d076f05962059f9688e0ba14fb3ee25e3ee110a"
+const CompilerSourceDigest = "8a37fff93c2a0dc9874cf381f45cb2b13226c2fbfa81d0a94ae2f95e85cf7c1f"
 
 // source: backend/compiler_common_impl.go
 
@@ -15399,156 +15399,6 @@ return true
 }
 
 func renvoEmitRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
-segmentCompare := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSegmentComparefs") {
-segmentCompare = 0x64
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSegmentComparegs") {
-segmentCompare = 0x65
-}
-if segmentCompare != 0 && e.argCount == 3 &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x57\x56\x48\x8b\x44\x24\x20\x48\x8b\x38\x48\x8b\x44\x24\x18\x8b\x30\x48\x8b\x44\x24\x10\x8b\x08")
-renvoAsmEmit8(&g.asm, segmentCompare)
-renvoAsmEmitText(&g.asm, "\xf3\xa6\x48\x8b\x44\x24\x20\x48\x89\x38\x48\x8b\x44\x24\x18\x89\x30\x48\x8b\x44\x24\x10\x89\x08\x0f\x95\xc0\x0f\xb6\xc0\x5e\x5f\x48\x83\xc4\x18")
-return 1
-}
-renvoAsmEmitText(&g.asm, "\x57\x56\x8b\x44\x24\x10\x8b\x38\x8b\x44\x24\x0c\x8b\x30\x8b\x44\x24\x08\x8b\x08")
-renvoAsmEmit8(&g.asm, segmentCompare)
-renvoAsmEmitText(&g.asm, "\xf3\xa6\x8b\x44\x24\x10\x89\x38\x8b\x44\x24\x0c\x89\x30\x8b\x44\x24\x08\x89\x08\x0f\x95\xc0\x0f\xb6\xc0\x5e\x5f\x83\xc4\x0c")
-return 1
-}
-segmentMemory, segmentMemorySize, segmentMemoryWrite := 0, 0, false
-for candidate := 1; candidate <= 2; candidate++ {
-prefix := "renvo_runtime_CReadSegmentfs"
-writePrefix := "renvo_runtime_CWriteSegmentfs"
-if candidate == 2 {
-prefix = "renvo_runtime_CReadSegmentgs"
-writePrefix = "renvo_runtime_CWriteSegmentgs"
-}
-for sizeIndex := 0; sizeIndex < 3; sizeIndex++ {
-size := 8
-if sizeIndex == 1 {
-size = 16
-} else if sizeIndex == 2 {
-size = 32
-}
-suffix := "8"
-if size == 16 {
-suffix = "16"
-} else if size == 32 {
-suffix = "32"
-}
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, prefix+suffix) {
-segmentMemory, segmentMemorySize = candidate, size
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, writePrefix+suffix) {
-segmentMemory, segmentMemorySize, segmentMemoryWrite = candidate, size, true
-}
-}
-}
-if segmentMemory != 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-prefix := 0x64
-if segmentMemory == 2 {
-prefix = 0x65
-}
-if segmentMemoryWrite {
-if e.argCount != 2 || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-renvoAsmEmit8(&g.asm, prefix)
-if segmentMemorySize == 8 {
-renvoAsmEmitText(&g.asm, "\x88\x10")
-} else if segmentMemorySize == 16 {
-renvoAsmEmitText(&g.asm, "\x66\x89\x10")
-} else {
-renvoAsmEmitText(&g.asm, "\x89\x10")
-}
-return 1
-}
-if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmEmit8(&g.asm, prefix)
-if segmentMemorySize == 8 {
-renvoAsmEmitText(&g.asm, "\x0f\xb6\x00")
-} else if segmentMemorySize == 16 {
-renvoAsmEmitText(&g.asm, "\x0f\xb7\x00")
-} else {
-renvoAsmEmitText(&g.asm, "\x8b\x00")
-}
-return 1
-}
-safeSegment := -1
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafees") {
-safeSegment = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafess") {
-safeSegment = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafeds") {
-safeSegment = 3
-}
-if safeSegment >= 0 && e.argCount == 1 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-instructionStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x8e")
-renvoAsmEmit8(&g.asm, 0xc0+safeSegment*8)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionStart + 1})
-return 1
-}
-segment, segmentWrite := -1, false
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentes") {
-segment = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentss") {
-segment = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentds") {
-segment = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentfs") {
-segment = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentgs") {
-segment = 5
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentfs") {
-segment, segmentWrite = 4, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentgs") {
-segment, segmentWrite = 5, true
-}
-if segment >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if segmentWrite {
-if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8e")
-renvoAsmEmit8(&g.asm, 0xc0+segment*8)
-return 1
-}
-if e.argCount != 0 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x31\xc0\x8c")
-renvoAsmEmit8(&g.asm, 0xc0+segment*8)
-return 1
-}
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteStartupSegments") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8e\xd8\x8e\xd0\x8e\xc0")
-return 1
-}
 irqStackPrefix1 := "renvo_runtime_CIRQStackCall1_"
 irqStackPrefix2 := "renvo_runtime_CIRQStackCall2_"
 if renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, irqStackPrefix1) ||
@@ -15557,1107 +15407,6 @@ return renvoBoolInt(renvoEmitIRQStackCall(g, ep, e, fn))
 }
 if renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMSABICall_") {
 return renvoBoolInt(renvoEmitMSABICall(g, ep, e, fn))
-}
-if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitSet32") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-renvoAsmEmitText(&g.asm, "\x0f\xab\x10")
-return 1
-}
-byteOperation := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COrByte") {
-byteOperation = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAndByte") {
-byteOperation = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CXorByte") {
-byteOperation = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CXorByteNegative") {
-byteOperation = 4
-}
-if byteOperation != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if byteOperation == 1 {
-renvoAsmEmitText(&g.asm, "\x08\x10")
-} else if byteOperation == 2 {
-renvoAsmEmitText(&g.asm, "\x20\x10")
-} else {
-renvoAsmEmitText(&g.asm, "\x30\x10")
-}
-if byteOperation == 4 {
-renvoAsmEmitText(&g.asm, "\x0f\x98\xc0\x0f\xb6\xc0")
-}
-return 1
-}
-if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTestByte") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-renvoAsmEmitText(&g.asm, "\x84\x10\x0f\x95\xc0\x0f\xb6\xc0")
-return 1
-}
-bitOperation64 := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitSet64") {
-bitOperation64 = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitReset64") {
-bitOperation64 = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitComplement64") {
-bitOperation64 = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitTest64") {
-bitOperation64 = 4
-}
-if bitOperation64 != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-renvoAsmEmitText(&g.asm, "\x48\x0f")
-if bitOperation64 == 1 {
-renvoAsmEmit8(&g.asm, 0xab)
-} else if bitOperation64 == 2 {
-renvoAsmEmit8(&g.asm, 0xb3)
-} else if bitOperation64 == 3 {
-renvoAsmEmit8(&g.asm, 0xbb)
-} else {
-renvoAsmEmit8(&g.asm, 0xa3)
-}
-renvoAsmEmit8(&g.asm, 0x10)
-renvoAsmEmitText(&g.asm, "\x0f\x92\xc0\x0f\xb6\xc0")
-return 1
-}
-bitScan := 0
-bitScan64 := false
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanForward32") {
-bitScan = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanReverse32") {
-bitScan = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanForward64") {
-bitScan, bitScan64 = 1, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanReverse64") {
-bitScan, bitScan64 = 2, true
-}
-if bitScan != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if bitScan64 {
-renvoAsmEmitText(&g.asm, "\x48\x85\xc0\x74\x06\x48\x0f")
-} else {
-renvoAsmEmitText(&g.asm, "\x85\xc0\x74\x05\x0f")
-}
-if bitScan == 1 {
-renvoAsmEmitText(&g.asm, "\xbc\xc0")
-} else {
-renvoAsmEmitText(&g.asm, "\xbd\xc0")
-}
-if bitScan64 {
-renvoAsmEmitText(&g.asm, "\xeb\x03\x48\x89\xd0")
-} else {
-renvoAsmEmitText(&g.asm, "\xeb\x02\x89\xd0")
-}
-return 1
-}
-ioSize, ioOut := 0, false
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn8") {
-ioSize = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn16") {
-ioSize = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn32") {
-ioSize = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut8") {
-ioSize, ioOut = 1, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut16") {
-ioSize, ioOut = 2, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut32") {
-ioSize, ioOut = 4, true
-}
-if ioSize != 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if ioOut {
-if e.argCount != 2 || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if ioSize == 1 {
-renvoAsmEmit8(&g.asm, 0xee)
-} else if ioSize == 2 {
-renvoAsmEmitText(&g.asm, "\x66\xef")
-} else {
-renvoAsmEmit8(&g.asm, 0xef)
-}
-return 1
-}
-if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmCopyPrimaryToSecondary(&g.asm)
-if ioSize == 1 {
-renvoAsmEmit8(&g.asm, 0xec)
-} else if ioSize == 2 {
-renvoAsmEmitText(&g.asm, "\x66\xed")
-} else {
-renvoAsmEmit8(&g.asm, 0xed)
-}
-return 1
-}
-stringIOSize, stringIOOut := 0, false
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString8") {
-stringIOSize = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString16") {
-stringIOSize = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString32") {
-stringIOSize = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString8") {
-stringIOSize, stringIOOut = 1, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString16") {
-stringIOSize, stringIOOut = 2, true
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString32") {
-stringIOSize, stringIOOut = 4, true
-}
-if stringIOSize != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArch386 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8b\x54\x24\x08")
-if stringIOOut {
-renvoAsmEmitText(&g.asm, "\x8b\x74\x24\x04")
-} else {
-renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x04")
-}
-renvoAsmEmitText(&g.asm, "\x8b\x0c\x24\xf3")
-if stringIOSize == 2 {
-renvoAsmEmit8(&g.asm, 0x66)
-}
-if stringIOOut {
-if stringIOSize == 1 {
-renvoAsmEmit8(&g.asm, 0x6e)
-} else {
-renvoAsmEmit8(&g.asm, 0x6f)
-}
-} else if stringIOSize == 1 {
-renvoAsmEmit8(&g.asm, 0x6c)
-} else {
-renvoAsmEmit8(&g.asm, 0x6d)
-}
-renvoAsmEmitText(&g.asm, "\x83\xc4\x0c")
-return 1
-}
-if stringIOSize != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x54\x24\x10")
-if stringIOOut {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x74\x24\x08")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08")
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x0c\x24\xf3")
-if stringIOSize == 2 {
-renvoAsmEmit8(&g.asm, 0x66)
-}
-if stringIOOut {
-if stringIOSize == 1 {
-renvoAsmEmit8(&g.asm, 0x6e)
-} else {
-renvoAsmEmit8(&g.asm, 0x6f)
-}
-} else if stringIOSize == 1 {
-renvoAsmEmit8(&g.asm, 0x6c)
-} else {
-renvoAsmEmit8(&g.asm, 0x6d)
-}
-renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
-return 1
-}
-if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVDSOSyscall") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x18\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x14\x24")
-renvoAsmEmitText(&g.asm, "\x0f\x05\x48\x83\xc4\x20")
-return 1
-}
-if e.argCount == 6 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCPUID") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-wordCount := renvoEmitCallArgsReverse(g, ep, e, fn, -1)
-if wordCount != 6 {
-return 0
-}
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x53\x8b\x44\x24\x30\x8b\x4c\x24\x28\x0f\xa2")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x20\x89\x07\x48\x8b\x7c\x24\x18\x89\x1f")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x89\x0f\x48\x8b\x7c\x24\x08\x89\x17\x5b\x48\x83\xc4\x30")
-return 1
-}
-renvoAsmEmitText(&g.asm, "\x53\x57\x8b\x44\x24\x1c\x8b\x4c\x24\x18\x0f\xa2")
-renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x14\x89\x07\x8b\x7c\x24\x10\x89\x1f")
-renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x0c\x89\x0f\x8b\x7c\x24\x08\x89\x17\x5f\x5b\x83\xc4\x18")
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadMSR") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x0f\x32\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x18")
-return 1
-}
-renvoAsmEmitText(&g.asm, "\x57\x8b\x4c\x24\x0c\x0f\x32\x8b\x4c\x24\x08\x89\x01\x8b\x7c\x24\x04\x89\x17\x5f\x83\xc4\x0c")
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteMSR") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x44\x24\x08\x8b\x14\x24\x0f\x30\x48\x83\xc4\x18")
-return 1
-}
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x08\x8b\x44\x24\x04\x8b\x14\x24\x0f\x30\x83\xc4\x0c")
-return 1
-}
-if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadMSRSafe") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x18")
-instructionStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x0f\x32\x45\x31\xc0")
-instructionEnd := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x44\x89\x07\x48\x83\xc4\x20")
-if g.c.objectFile {
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-
-
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 11, 8, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
-}
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteMSRSafe") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x44\x24\x08\x8b\x14\x24")
-instructionStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x0f\x30\x31\xc0")
-instructionEnd := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
-if g.c.objectFile {
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
-}
-return 1
-}
-counterKind := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadTimestampCounter") {
-counterKind = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadTimestampCounterOrdered") {
-counterKind = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadPerformanceCounter") {
-counterKind = 3
-}
-if counterKind != 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
-((counterKind != 3 && e.argCount == 2) || (counterKind == 3 && e.argCount == 3)) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != e.argCount {
-return 0
-}
-if counterKind == 3 {
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x0f\x33")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x18")
-} else {
-if counterKind == 2 {
-renvoAsmEmitText(&g.asm, "\x0f\xae\xe8")
-}
-renvoAsmEmitText(&g.asm, "\x0f\x31\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x10")
-}
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPause") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\xf3\x90")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDelayLoop") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-loop := renvoAsmNewLabel(&g.asm)
-done := renvoAsmNewLabel(&g.asm)
-renvoAsmEmitText(&g.asm, "\x48\x85\xc0")
-renvoAsmJzLabel(&g.asm, done)
-for len(g.asm.code)&15 != 0 {
-renvoAsmEmit8(&g.asm, 0x90)
-}
-renvoAsmMarkLabel(&g.asm, loop)
-renvoAsmEmitText(&g.asm, "\x48\xff\xc8")
-renvoAsmJnzLabel(&g.asm, loop)
-renvoAsmMarkLabel(&g.asm, done)
-renvoAsmEmitText(&g.asm, "\x48\xff\xc8")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInt3Selftest") &&
-g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x48\x89\xc7")
-label := renvoAsmNewLabel(&g.asm)
-renvoAsmMarkLabel(&g.asm, label)
-nameStart := len(g.asm.symbolName)
-g.asm.symbolName = append(g.asm.symbolName, "int3_selftest_ip"...)
-g.asm.symbols = append(g.asm.symbols, renvoAsmSymbol{nameStart: nameStart, nameEnd: len(g.asm.symbolName), label: label})
-renvoAsmEmitText(&g.asm, "\xcc\x90\x90\x90\x90")
-return 1
-}
-monitorKind := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMonitor") {
-monitorKind = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMonitorExtended") {
-monitorKind = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWait") {
-monitorKind = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWaitExtended") {
-monitorKind = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterruptsAndWait") {
-monitorKind = 5
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTimedPause") {
-monitorKind = 6
-}
-if monitorKind != 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
-(((monitorKind == 3 || monitorKind == 5) && e.argCount == 2) ||
-(monitorKind != 3 && monitorKind != 5 && e.argCount == 3)) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != e.argCount {
-return 0
-}
-if monitorKind == 1 || monitorKind == 2 {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x8b\x4c\x24\x08\x8b\x14\x24\x0f\x01")
-if monitorKind == 1 {
-renvoAsmEmit8(&g.asm, 0xc8)
-} else {
-renvoAsmEmit8(&g.asm, 0xfa)
-}
-renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
-return 1
-}
-if monitorKind == 3 || monitorKind == 5 {
-renvoAsmEmitText(&g.asm, "\x8b\x44\x24\x08\x8b\x0c\x24")
-if monitorKind == 5 {
-renvoAsmEmit8(&g.asm, 0xfb)
-}
-renvoAsmEmitText(&g.asm, "\x0f\x01\xc9\x48\x83\xc4\x10")
-return 1
-}
-if monitorKind == 6 {
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x54\x24\x08\x8b\x04\x24\x66\x0f\xae\xf1\x48\x83\xc4\x18")
-return 1
-}
-
-
-renvoAsmEmitText(&g.asm, "\x53\x8b\x44\x24\x18\x8b\x5c\x24\x10\x8b\x4c\x24\x08\x0f\x01\xfb\x5b\x48\x83\xc4\x18")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadCPUNODE") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
-
-renvoAsmEmitText(&g.asm, "\x0f\x03\xc0")
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCopyBytes") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x0c\x24\xf3\xa4\x48\x83\xc4\x18")
-return 1
-}
-userCopyPrefix := "renvo_runtime_CCopyUserBytes_"
-if e.argCount == 3 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userCopyPrefix) &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x0c\x24")
-copyStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\xf3\xa4")
-copyEnd := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x48\x89\xc8\x48\x83\xc4\x18")
-if g.c.objectFile {
-sectionNameStart := fn.nameStart + len(userCopyPrefix)
-if sectionNameStart >= fn.nameEnd {
-return 0
-}
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: copyStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: copyEnd + 1})
-}
-return 1
-}
-userClearPrefix := "renvo_runtime_CClearUserBytes_"
-if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userClearPrefix) &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x48\x8b\x0c\x24\x31\xc0")
-clearStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\xf3\xaa")
-clearEnd := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x48\x89\xc8\x48\x83\xc4\x10")
-if g.c.objectFile {
-sectionNameStart := fn.nameStart + len(userClearPrefix)
-if sectionNameStart >= fn.nameEnd {
-return 0
-}
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: clearStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: clearEnd + 1})
-}
-return 1
-}
-getUserWidth, getUserName := 0, ""
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser1") {
-getUserWidth, getUserName = 1, "__get_user_1"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser2") {
-getUserWidth, getUserName = 2, "__get_user_2"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser4") {
-getUserWidth, getUserName = 4, "__get_user_4"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser8") {
-getUserWidth, getUserName = 8, "__get_user_8"
-}
-if getUserWidth != 0 && e.argCount == 2 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x08\xe8")
-externalID := renvoAsmAddExternalImportName(&g.asm, getUserName)
-if externalID < 0 {
-return 0
-}
-relocationAt := len(g.asm.code)
-renvoAsmEmit32(&g.asm, 0)
-renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
-renvoAsmEmitText(&g.asm, "\x48\x8b\x3c\x24")
-if getUserWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x88\x17")
-} else if getUserWidth == 2 {
-renvoAsmEmitText(&g.asm, "\x66\x89\x17")
-} else if getUserWidth == 4 {
-renvoAsmEmitText(&g.asm, "\x89\x17")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x89\x17")
-}
-renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x10")
-return 1
-}
-putUserWidth, putUserName := 0, ""
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser1") {
-putUserWidth, putUserName = 1, "__put_user_1"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser2") {
-putUserWidth, putUserName = 2, "__put_user_2"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser4") {
-putUserWidth, putUserName = 4, "__put_user_4"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser8") {
-putUserWidth, putUserName = 8, "__put_user_8"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck1") {
-putUserWidth, putUserName = 1, "__put_user_nocheck_1"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck2") {
-putUserWidth, putUserName = 2, "__put_user_nocheck_2"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck4") {
-putUserWidth, putUserName = 4, "__put_user_nocheck_4"
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck8") {
-putUserWidth, putUserName = 8, "__put_user_nocheck_8"
-}
-if putUserWidth != 0 && e.argCount == 2 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x4c\x24\x08\x48\x8b\x04\x24\xe8")
-externalID := renvoAsmAddExternalImportName(&g.asm, putUserName)
-if externalID < 0 {
-return 0
-}
-relocationAt := len(g.asm.code)
-renvoAsmEmit32(&g.asm, 0)
-renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
-renvoAsmEmitText(&g.asm, "\x48\x63\xc1\x48\x83\xc4\x10")
-return 1
-}
-if renvoFixedTarget == 0 && g.c.code16 && e.argCount == 4 &&
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDivide32") &&
-g.c.renvoTargetArch == renvoArch386 {
-
-
-
-
-
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x08\x8b\x54\x24\x04\xf7\xf1")
-renvoAsmEmitText(&g.asm, "\x8b\x0c\x24\x89\x11\x83\xc4\x10")
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyDivide64") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x48\xf7\x64\x24\x08\x48\xf7\x34\x24\x48\x83\xc4\x18")
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyShift32") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x48\xf7\x64\x24\x08\x48\x8b\x0c\x24\x48\x89\x11")
-renvoAsmEmitText(&g.asm, "\x48\x0f\xac\xd0\x20\x48\x83\xc4\x18")
-return 1
-}
-if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyAddShift64") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x18\x48\xf7\x64\x24\x10")
-renvoAsmEmitText(&g.asm, "\x48\x03\x44\x24\x08\x48\x83\xd2\x00\x48\x8b\x0c\x24")
-renvoAsmEmitText(&g.asm, "\x48\x83\xf9\x40\x72\x08\x48\x89\xd0\x48\xd3\xe8\xeb\x04\x48\x0f\xad\xd0")
-renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x20")
-return 1
-}
-if e.argCount == 5 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange128") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 5 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x53\x48\x8b\x7c\x24\x28\x48\x8b\x74\x24\x20\x4c\x8b\x44\x24\x18")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x5c\x24\x10\x48\x8b\x4c\x24\x08\x48\x8b\x06\x49\x8b\x10")
-renvoAsmEmitText(&g.asm, "\xf0\x48\x0f\xc7\x0f\x41\x0f\x94\xc1\x48\x89\x06\x49\x89\x10")
-renvoAsmEmitText(&g.asm, "\x41\x0f\xb6\xc1\x5b\x48\x83\xc4\x28")
-return 1
-}
-atomicArithmetic, atomicWidth := 0, 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd8") {
-atomicArithmetic, atomicWidth = 1, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd16") {
-atomicArithmetic, atomicWidth = 1, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd32") {
-atomicArithmetic, atomicWidth = 1, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd64") {
-atomicArithmetic, atomicWidth = 1, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub8") {
-atomicArithmetic, atomicWidth = 2, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub16") {
-atomicArithmetic, atomicWidth = 2, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub32") {
-atomicArithmetic, atomicWidth = 2, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub64") {
-atomicArithmetic, atomicWidth = 2, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd8") {
-atomicArithmetic, atomicWidth = 3, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd16") {
-atomicArithmetic, atomicWidth = 3, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd32") {
-atomicArithmetic, atomicWidth = 3, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd64") {
-atomicArithmetic, atomicWidth = 3, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr8") {
-atomicArithmetic, atomicWidth = 4, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr16") {
-atomicArithmetic, atomicWidth = 4, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr32") {
-atomicArithmetic, atomicWidth = 4, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr64") {
-atomicArithmetic, atomicWidth = 4, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor8") {
-atomicArithmetic, atomicWidth = 5, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor16") {
-atomicArithmetic, atomicWidth = 5, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor32") {
-atomicArithmetic, atomicWidth = 5, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor64") {
-atomicArithmetic, atomicWidth = 5, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc8") {
-atomicArithmetic, atomicWidth = 6, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc16") {
-atomicArithmetic, atomicWidth = 6, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc32") {
-atomicArithmetic, atomicWidth = 6, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc64") {
-atomicArithmetic, atomicWidth = 6, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec8") {
-atomicArithmetic, atomicWidth = 7, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec16") {
-atomicArithmetic, atomicWidth = 7, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec32") {
-atomicArithmetic, atomicWidth = 7, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec64") {
-atomicArithmetic, atomicWidth = 7, 8
-}
-if atomicArithmetic != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 && atomicWidth <= 4) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-renvoAsmEmit8(&g.asm, 0xf0)
-if atomicWidth == 2 {
-renvoAsmEmit8(&g.asm, 0x66)
-} else if atomicWidth == 8 {
-renvoAsmEmit8(&g.asm, 0x48)
-}
-if atomicArithmetic <= 5 {
-opcode := []byte{0, 0x01, 0x29, 0x21, 0x09, 0x31}[atomicArithmetic]
-if atomicWidth == 1 {
-opcode--
-}
-renvoAsmEmit8(&g.asm, int(opcode))
-renvoAsmEmit8(&g.asm, 0x10)
-} else if atomicArithmetic == 6 {
-if atomicWidth == 1 {
-renvoAsmEmitText(&g.asm, "\xfe\x00")
-} else {
-renvoAsmEmitText(&g.asm, "\xff\x00")
-}
-} else {
-if atomicWidth == 1 {
-renvoAsmEmitText(&g.asm, "\xfe\x08")
-} else {
-renvoAsmEmitText(&g.asm, "\xff\x08")
-}
-}
-renvoAsmEmitText(&g.asm, "\x0f\x94\xc2\x0f\x98\xc1\x0f\xb6\xc2\x0f\xb6\xc9\xd1\xe1\x09\xc8")
-return 1
-}
-atomicExchange, atomicExchangeWidth := 0, 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd8") {
-atomicExchange, atomicExchangeWidth = 1, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd16") {
-atomicExchange, atomicExchangeWidth = 1, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd32") {
-atomicExchange, atomicExchangeWidth = 1, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd64") {
-atomicExchange, atomicExchangeWidth = 1, 8
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange8") {
-atomicExchange, atomicExchangeWidth = 2, 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange16") {
-atomicExchange, atomicExchangeWidth = 2, 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange32") {
-atomicExchange, atomicExchangeWidth = 2, 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange64") {
-atomicExchange, atomicExchangeWidth = 2, 8
-}
-if atomicExchange != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 && atomicExchangeWidth <= 4) {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if atomicExchange == 1 {
-renvoAsmEmit8(&g.asm, 0xf0)
-}
-if atomicExchangeWidth == 2 {
-renvoAsmEmit8(&g.asm, 0x66)
-} else if atomicExchangeWidth == 8 {
-renvoAsmEmit8(&g.asm, 0x48)
-}
-if atomicExchange == 1 {
-if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x0f\xc0\x10")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\xc1\x10")
-}
-} else if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x86\x10")
-} else {
-renvoAsmEmitText(&g.asm, "\x87\x10")
-}
-if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x0f\xb6\xc2")
-} else if atomicExchangeWidth == 2 {
-renvoAsmEmitText(&g.asm, "\x0f\xb7\xc2")
-} else if atomicExchangeWidth == 4 {
-renvoAsmEmitText(&g.asm, "\x89\xd0")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x89\xd0")
-}
-return 1
-}
-if atomicExchange != 0 && atomicExchangeWidth <= 4 && e.argCount == 2 && g.c.renvoTargetArch == renvoArch386 {
-addressArg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-valueArg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)
-addressOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
-valueType := renvoInferParsedExprType(g, ep, valueArg)
-valueOffset := renvoAddUnnamedLocal(g, valueType)
-if !renvoEmitExprToLocal(g, ep, addressArg, addressOffset) ||
-!renvoEmitExprToLocal(g, ep, valueArg, valueOffset) {
-return 0
-}
-renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
-renvoAsmLoadSecondaryStack(&g.asm, addressOffset)
-if atomicExchange == 1 {
-renvoAsmEmit8(&g.asm, 0xf0)
-}
-if atomicExchangeWidth == 2 {
-renvoAsmEmit8(&g.asm, 0x66)
-}
-if atomicExchange == 1 {
-if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x0f\xc0\x02")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\xc1\x02")
-}
-} else if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x86\x02")
-} else {
-renvoAsmEmitText(&g.asm, "\x87\x02")
-}
-if atomicExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x0f\xb6\xc0")
-} else if atomicExchangeWidth == 2 {
-renvoAsmEmitText(&g.asm, "\x0f\xb7\xc0")
-}
-
-
-renvoAsmSecondaryImm(&g.asm, 0)
-return 1
-}
-compareExchangeWidth := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange8") {
-compareExchangeWidth = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange16") {
-compareExchangeWidth = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange32") {
-compareExchangeWidth = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange64") {
-compareExchangeWidth = 8
-}
-if compareExchangeWidth != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x14\x24")
-if compareExchangeWidth == 1 {
-renvoAsmEmitText(&g.asm, "\x31\xc0\x8a\x06\xf0\x0f\xb0\x17\x0f\x94\xc1\x88\x06")
-} else if compareExchangeWidth == 2 {
-renvoAsmEmitText(&g.asm, "\x31\xc0\x66\x8b\x06\xf0\x66\x0f\xb1\x17\x0f\x94\xc1\x66\x89\x06")
-} else if compareExchangeWidth == 4 {
-renvoAsmEmitText(&g.asm, "\x8b\x06\xf0\x0f\xb1\x17\x0f\x94\xc1\x89\x06")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x06\xf0\x48\x0f\xb1\x17\x0f\x94\xc1\x48\x89\x06")
-}
-renvoAsmEmitText(&g.asm, "\x0f\xb6\xc1\x48\x83\xc4\x18")
-return 1
-}
-nonTemporalStoreWidth := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CNonTemporalStore32") {
-nonTemporalStoreWidth = 4
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CNonTemporalStore64") {
-nonTemporalStoreWidth = 8
-}
-if nonTemporalStoreWidth != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if nonTemporalStoreWidth == 8 {
-renvoAsmEmit8(&g.asm, 0x48)
-}
-renvoAsmEmitText(&g.asm, "\x0f\xc3\x10")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVerifySegment") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x00\x28")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CHalt") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmit8(&g.asm, 0xf4)
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterruptsAndHalt") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\xfb\xf4")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteBackInvalidateCache") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x09")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSwapGS") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xf8")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCacheLineFlush") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x38")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPrefetch") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x18\x08")
-return 1
-}
-if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInvalidateProcessContext") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopPrimary(&g.asm)
-renvoAsmPopSecondary(&g.asm)
-renvoAsmEmitText(&g.asm, "\x66\x0f\x38\x82\x02")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInvalidatePage") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x01\x38")
-return 1
-}
-runtimePointerPrefix := "renvo_runtime_CRuntimePointer_"
-if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, runtimePointerPrefix) &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-value := renvoEvalConstExpr(g, ep, arg)
-if !value.ok {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x48\xb8")
-renvoAsmEmit64(&g.asm, value.value)
-if g.c.objectFile {
-sectionNameStart := fn.nameStart + len(runtimePointerPrefix)
-if sectionNameStart >= fn.nameEnd {
-return 0
-}
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 4
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 4, storageSize: 4,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs, renvoObjectDataRelocation{
-offset: offset, typ: 2, addend: -8, codeTarget: len(g.asm.code) + 1})
-}
-return 1
-}
-runtimeShiftPrefix := "renvo_runtime_CRuntimeShift_"
-if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, runtimeShiftPrefix) &&
-g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-instructionStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\xc1\xe8\x0c")
-if g.c.objectFile {
-sectionNameStart := fn.nameStart + len(runtimeShiftPrefix)
-if sectionNameStart >= fn.nameEnd {
-return 0
-}
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 4
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 4, storageSize: 4,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs, renvoObjectDataRelocation{
-offset: offset, typ: 2, codeTarget: instructionStart + 3})
-}
-return 1
-}
-fence := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryReadFence") {
-fence = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryFence") {
-fence = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFence") {
-fence = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFence") {
-fence = 4
-}
-if fence != 0 && e.argCount == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-if fence == 1 || fence == 2 {
-renvoAsmEmitText(&g.asm, "\x0f\xae\xf0")
-}
-if fence == 1 || fence == 3 {
-renvoAsmEmitText(&g.asm, "\x0f\xae\xe8")
-}
-if fence == 4 {
-renvoAsmEmitText(&g.asm, "\x0f\xae\xf8")
-}
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSerialize") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xe8")
-return 1
-}
-hypercall := 0
-hypercallPrefix := "renvo_runtime_CVMCall"
-if fn.nameEnd == fn.nameStart+len(hypercallPrefix)+1 &&
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+len(hypercallPrefix), hypercallPrefix) {
-hypercall = 1
-} else {
-hypercallPrefix = "renvo_runtime_CVMMCall"
-if fn.nameEnd == fn.nameStart+len(hypercallPrefix)+1 &&
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+len(hypercallPrefix), hypercallPrefix) {
-hypercall = 2
-}
-}
-if hypercall != 0 && g.c.renvoTargetArch == renvoArchAmd64 {
-argCount := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameEnd-1) - '0')
-if argCount < 1 || argCount > 5 || e.argCount != argCount || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != argCount {
-return 0
-}
-
-
-renvoAsmEmit8(&g.asm, 0x53)
-registerModRM := "\x44\x5c\x4c\x54\x74"
-for i := 0; i < argCount; i++ {
-disp := 8 + (argCount-1-i)*8
-renvoAsmEmit5(&g.asm, 0x48, 0x8b, int(registerModRM[i]), 0x24, disp)
-}
-if hypercall == 1 {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xc1")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xd9")
-}
-renvoAsmEmit8(&g.asm, 0x5b)
-renvoAsmEmit4(&g.asm, 0x48, 0x83, 0xc4, argCount*8)
-return 1
-}
-if e.argCount == 0 &&
-(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableUserAccess") ||
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess")) &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-
-
-
-
-
-renvoAsmEmitText(&g.asm, "\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess") {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xcb")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\x01\xca")
-}
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadR9") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 1 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x41\x59")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGS") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 1 {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x5f\xf2\x0f\x00\xf7")
-return 1
-}
-directMove := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDirectMove64") {
-directMove = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnqueueCommand") {
-directMove = 2
-}
-if directMove != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
-if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
-return 0
-}
-renvoAsmPopSecondary(&g.asm)
-renvoAsmPopPrimary(&g.asm)
-if directMove == 1 {
-renvoAsmEmitText(&g.asm, "\x66\x0f\x38\xf8\x02")
-} else {
-renvoAsmEmitText(&g.asm, "\xf3\x0f\x38\xf8\x02\x0f\x94\xc0\x0f\xb6\xc0")
-}
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTileRelease") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\xc4\xe2\x78\x49\xc0")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CUndefinedInstruction") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x0b")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBreakpoint") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmit8(&g.asm, 0xcc)
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIRETToSelf") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-
-
-renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xd0\x50\x54\x48\x83\x04\x24\x08\x9c")
-renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xc8\x50\x48\x8d\x05\x03\x00\x00\x00\x50\x48\xcf")
-return 1
 }
 wideStringPointer := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWideStringPointer")
 if e.argCount == 1 && (renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStringPointer") || wideStringPointer) {
@@ -16677,638 +15426,6 @@ return 0
 renvoAsmPrimaryDataAddr(&g.asm, dataOffset)
 return 1
 }
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVAArg") &&
-g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
-
-renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x08\x48\x83\xf9\x06\x73\x13")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x10\x48\x8b\x14\xca\x48\xff\xc1\x48\x89\x48\x08\x48\x89\xd0\xeb\x12")
-renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x10\x48\x8b\x11\x48\x83\xc1\x08\x48\x89\x48\x10\x48\x89\xd0")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVAArg32") &&
-g.c.renvoTargetArch == renvoArch386 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
-renvoAsmEmitText(&g.asm, "\x8b\x08\x8b\x11\x83\xc1\x04\x89\x08\x89\xd0")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFarCall16") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x66\xff\x18")
-return 1
-}
-if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFarJump32") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-address := renvoAddUnnamedLocal(g, renvoTypeInt)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, address)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-return 0
-}
-renvoAsmEmitText(&g.asm, "\x89\xc7")
-renvoAsmLoadPrimaryStack(&g.asm, address)
-renvoAsmEmitText(&g.asm, "\xff\x28")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadAccessRights") &&
-g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-
-
-
-renvoAsmEmitText(&g.asm, "\x89\xc1\x31\xc0\x0f\x02\xc1")
-return 1
-}
-randomKind := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CRDRAND64") {
-randomKind = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CRDSEED64") {
-randomKind = 2
-}
-if randomKind != 0 && e.argCount == 1 && g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-if randomKind == 1 {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\xf2")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\xfa")
-}
-renvoAsmEmitText(&g.asm, "\x48\x89\x10\x0f\x92\xc0\x0f\xb6\xc0")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CExceptionLoad64") &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-loadStart := len(g.asm.code)
-renvoAsmEmitText(&g.asm, "\x48\x8b\x00")
-loadEnd := len(g.asm.code)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: loadStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: loadEnd + 1})
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadXControl") &&
-g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x89\xc1\x0f\x01\xd0\x48\xc1\xe2\x20\x48\x09\xd0")
-return 1
-}
-if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteXControl") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-index := renvoAddUnnamedLocal(g, renvoTypeInt)
-value := renvoAddUnnamedLocal(g, renvoTypeInt)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, index)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, value)
-renvoAsmLoadPrimaryStack(&g.asm, index)
-renvoAsmEmitText(&g.asm, "\x89\xc1")
-renvoAsmLoadPrimaryStack(&g.asm, value)
-renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\xc1\xea\x20\x0f\x01\xd1")
-return 1
-}
-extendedStateOp, extendedStateMode := 0, 0
-extendedStatePrefix := "renvo_runtime_CExtendedState_"
-if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, extendedStatePrefix) &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-start := fn.nameStart + len(extendedStatePrefix)
-if start+len("SAVE_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("SAVE_"), "SAVE_") {
-extendedStateOp = 1
-start += len("SAVE_")
-} else if start+len("RESTORE_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("RESTORE_"), "RESTORE_") {
-extendedStateOp = 2
-start += len("RESTORE_")
-} else if start+len("SAVES_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("SAVES_"), "SAVES_") {
-extendedStateOp = 3
-start += len("SAVES_")
-} else if start+len("RESTORES_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("RESTORES_"), "RESTORES_") {
-extendedStateOp = 4
-start += len("RESTORES_")
-}
-if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "Fault6") {
-extendedStateMode = 6
-} else if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "User15") {
-extendedStateMode = 15
-} else if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "Safe17") {
-extendedStateMode = 17
-}
-}
-if extendedStateOp != 0 && extendedStateMode != 0 {
-address := renvoAddUnnamedLocal(g, renvoTypeInt)
-mask := renvoAddUnnamedLocal(g, renvoTypeInt)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, address)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, mask)
-renvoAsmLoadPrimaryStack(&g.asm, address)
-renvoAsmEmitText(&g.asm, "\x48\x89\xc7")
-renvoAsmLoadPrimaryStack(&g.asm, mask)
-renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\xc1\xea\x20")
-instructionStart := len(g.asm.code)
-if extendedStateOp == 1 {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xae\x27")
-} else if extendedStateOp == 2 {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xae\x2f")
-} else if extendedStateOp == 3 {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\x2f")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\x1f")
-}
-if extendedStateMode == 15 || extendedStateMode == 17 {
-renvoAsmEmitText(&g.asm, "\x31\xc0")
-}
-instructionEnd := len(g.asm.code)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-typeBytes := []byte{byte(extendedStateMode), 0, 0, 0}
-if extendedStateMode == 17 {
-typeBytes = []byte{17, 0, 242, 255}
-}
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0)
-g.asm.objectDataValues = append(g.asm.objectDataValues, typeBytes...)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
-return 1
-}
-fpuStateOp, fpuStateMode := 0, 0
-fpuStatePrefix := "renvo_runtime_CFPUState_"
-if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, fpuStatePrefix) &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-for index := 0; index < 7; index++ {
-name := "FNSAVE"
-if index == 1 {
-name = "FXSAVE"
-} else if index == 2 {
-name = "FXSAVEQ"
-} else if index == 3 {
-name = "FXRSTOR"
-} else if index == 4 {
-name = "FXRSTORQ"
-} else if index == 5 {
-name = "FRSTOR"
-} else if index == 6 {
-name = "LDMXCSR"
-}
-start := fn.nameStart + len(fpuStatePrefix)
-end := start + len(name)
-if end < fn.nameEnd && renvoBytesEqualText(g.prog.src, start, end, name) && renvo_runtime_UnsafeByteAt(g.prog.src, end) == '_' {
-fpuStateOp = index + 1
-modeStart := end + 1
-if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Plain") {
-fpuStateMode = 1
-} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Fault6") {
-fpuStateMode = 6
-} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "User15") {
-fpuStateMode = 15
-} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Safe17") {
-fpuStateMode = 17
-}
-}
-}
-}
-if fpuStateOp != 0 && fpuStateMode != 0 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-addressInDX := fpuStateMode == 15 || fpuStateMode == 17
-if addressInDX {
-renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x31\xc0")
-}
-instructionStart := len(g.asm.code)
-if fpuStateOp == 1 {
-if addressInDX {
-renvoAsmEmitText(&g.asm, "\xdd\x32\x9b")
-} else {
-renvoAsmEmitText(&g.asm, "\xdd\x30\x9b")
-}
-} else if fpuStateOp == 2 || fpuStateOp == 3 {
-if fpuStateOp == 3 {
-renvoAsmEmit8(&g.asm, 0x48)
-}
-if addressInDX {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x02")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x00")
-}
-} else if fpuStateOp == 4 || fpuStateOp == 5 {
-if fpuStateOp == 5 {
-renvoAsmEmit8(&g.asm, 0x48)
-}
-if addressInDX {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x0a")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x08")
-}
-} else if fpuStateOp == 6 {
-if addressInDX {
-renvoAsmEmitText(&g.asm, "\xdd\x22")
-} else {
-renvoAsmEmitText(&g.asm, "\xdd\x20")
-}
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\xae\x10")
-}
-instructionEnd := len(g.asm.code)
-if fpuStateMode != 1 {
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-typeBytes := []byte{byte(fpuStateMode), 0, 0, 0}
-if fpuStateMode == 17 {
-typeBytes = []byte{17, 0, 242, 255}
-}
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0)
-g.asm.objectDataValues = append(g.asm.objectDataValues, typeBytes...)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
-}
-return 1
-}
-if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFDIVBug") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-var operands [3]int
-for i := 0; i < 3; i++ {
-operands[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, operands[i])
-}
-renvoAsmEmitText(&g.asm, "\xdb\xe3")
-renvoAsmLoadPrimaryStack(&g.asm, operands[1])
-renvoAsmEmitText(&g.asm, "\xdd\x00")
-renvoAsmLoadPrimaryStack(&g.asm, operands[2])
-renvoAsmEmitText(&g.asm, "\xdc\x30\xdc\x08")
-renvoAsmLoadPrimaryStack(&g.asm, operands[1])
-renvoAsmEmitText(&g.asm, "\xdd\x00\xde\xe1")
-renvoAsmLoadPrimaryStack(&g.asm, operands[0])
-renvoAsmEmitText(&g.asm, "\xdb\x18\x9b\xdb\xe3")
-return 1
-}
-userLoadPrefix := "renvo_runtime_CUserLoad"
-if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userLoadPrefix) &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-at := fn.nameStart + len(userLoadPrefix)
-bits := 0
-for at < fn.nameEnd {
-ch := renvo_runtime_UnsafeByteAt(g.prog.src, at)
-if ch < '0' || ch > '9' {
-break
-}
-bits = bits*10 + int(ch-'0')
-at++
-}
-if at >= fn.nameEnd || renvo_runtime_UnsafeByteAt(g.prog.src, at) != '_' ||
-bits != 8 && bits != 16 && bits != 32 && bits != 64 ||
-!renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-labelStart := at + 1
-if labelStart >= fn.nameEnd {
-return 0
-}
-loadStart := len(g.asm.code)
-if bits == 8 {
-renvoAsmEmitText(&g.asm, "\x0f\xb6\x00")
-} else if bits == 16 {
-renvoAsmEmitText(&g.asm, "\x0f\xb7\x00")
-} else if bits == 32 {
-renvoAsmEmitText(&g.asm, "\x8b\x00")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x00")
-}
-fixupLabel := renvoFindOrCreateGotoLabel(g, labelStart, fn.nameEnd)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: loadStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeLabel: fixupLabel + 1})
-return 1
-}
-userStorePrefix := "renvo_runtime_CUserStore"
-if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userStorePrefix) &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-at := fn.nameStart + len(userStorePrefix)
-bits := 0
-for at < fn.nameEnd {
-ch := renvo_runtime_UnsafeByteAt(g.prog.src, at)
-if ch < '0' || ch > '9' {
-break
-}
-bits = bits*10 + int(ch-'0')
-at++
-}
-if at >= fn.nameEnd || renvo_runtime_UnsafeByteAt(g.prog.src, at) != '_' ||
-bits != 8 && bits != 16 && bits != 32 && bits != 64 {
-return 0
-}
-labelStart := at + 1
-if labelStart >= fn.nameEnd {
-return 0
-}
-address := renvoAddUnnamedLocal(g, renvoTypeInt)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-return 0
-}
-renvoAsmStorePrimaryStack(&g.asm, address)
-if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-return 0
-}
-renvoAsmLoadSecondaryStack(&g.asm, address)
-storeStart := len(g.asm.code)
-if bits == 8 {
-renvoAsmEmitText(&g.asm, "\x88\x02")
-} else if bits == 16 {
-renvoAsmEmitText(&g.asm, "\x66\x89\x02")
-} else if bits == 32 {
-renvoAsmEmitText(&g.asm, "\x89\x02")
-} else {
-renvoAsmEmitText(&g.asm, "\x48\x89\x02")
-}
-fixupLabel := renvoFindOrCreateGotoLabel(g, labelStart, fn.nameEnd)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: storeStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeLabel: fixupLabel + 1})
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableInterrupts") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmit8(&g.asm, 0xfa)
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterrupts") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmit8(&g.asm, 0xfb)
-return 1
-}
-if e.argCount == 1 &&
-(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGDT") ||
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadIDT")) &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGDT") {
-renvoAsmEmitText(&g.asm, "\x0f\x01\x10")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\x01\x18")
-}
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadTR") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x00\xd8")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreTR") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x00\xc8")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreLDT") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x00\xc0")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadLDT") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x00\xd0")
-return 1
-}
-if e.argCount == 1 &&
-(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreGDT") ||
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreIDT")) &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreGDT") {
-renvoAsmEmitText(&g.asm, "\x0f\x01\x00")
-} else {
-renvoAsmEmitText(&g.asm, "\x0f\x01\x08")
-}
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInitFPU") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\xdb\xe3")
-renvoAsmPrimaryImm(&g.asm, 0x037f0000)
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFPUPrepare") &&
-g.c.renvoTargetArch == renvoArchAmd64 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\xdb\xe2\x0f\x77\xdb\x00")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFPUWait___ex_table") &&
-g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
-instructionStart := len(g.asm.code)
-renvoAsmEmit8(&g.asm, 0x9b)
-instructionEnd := len(g.asm.code)
-sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
-offset := renvoAlignValue(g.asm.bssSize, 4)
-g.asm.bssSize = offset + 12
-valueStart := len(g.asm.objectDataValues)
-g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
-g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
-sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
-alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
-g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
-renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
-renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFlags") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x9c\x58")
-return 1
-}
-if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFlags") &&
-(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x50\x9d")
-return 1
-}
-if e.argCount == 0 {
-debug := -1
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug0") {
-debug = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug1") {
-debug = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug2") {
-debug = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug3") {
-debug = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug6") {
-debug = 6
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug7") {
-debug = 7
-}
-if debug >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x21")
-renvoAsmEmit8(&g.asm, 0xc0+debug*8)
-return 1
-}
-control := -1
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl0") {
-control = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl2") {
-control = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl3") {
-control = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl4") {
-control = 4
-}
-if control >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
-renvoAsmEmitText(&g.asm, "\x0f\x20")
-renvoAsmEmit8(&g.asm, 0xc0+control*8)
-return 1
-}
-}
-if e.argCount == 1 {
-debug := -1
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug0") {
-debug = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug1") {
-debug = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug2") {
-debug = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug3") {
-debug = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug6") {
-debug = 6
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug7") {
-debug = 7
-}
-if debug >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x23")
-renvoAsmEmit8(&g.asm, 0xc0+debug*8)
-return 1
-}
-control := -1
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl0") {
-control = 0
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl2") {
-control = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl3") {
-control = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl4") {
-control = 4
-}
-if control >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\x0f\x22")
-renvoAsmEmit8(&g.asm, 0xc0+control*8)
-return 1
-}
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadStackPointer") {
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x48\x89\xe0")
-return 1
-}
-if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmEmitText(&g.asm, "\x89\xe0")
-return 1
-}
-return 0
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFrameAddress") {
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x48\x89\xe8")
-return 1
-}
-if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmEmitText(&g.asm, "\x89\xe8")
-return 1
-}
-return 0
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCallerFrameAddress") &&
-g.c.renvoTargetArch == renvoArch386 {
-renvoAsmEmitText(&g.asm, "\x8b\x45\x00")
-return 1
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReturnAddress") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAsmEmitText(&g.asm, "\x48\x8b\x45\x08")
-return 1
-}
-baseRegister := 0
-if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFSBase") {
-baseRegister = 1
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadGSBase") {
-baseRegister = 2
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFSBase") {
-baseRegister = 3
-} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteGSBase") {
-baseRegister = 4
-}
-if baseRegister != 0 && g.c.renvoTargetArch == renvoArchAmd64 {
-if baseRegister <= 2 && e.argCount == 0 {
-renvoAsmEmitText(&g.asm, "\xf3\x48\x0f\xae")
-renvoAsmEmit8(&g.asm, 0xc0+(baseRegister-1)*8)
-return 1
-}
-if baseRegister >= 3 && e.argCount == 1 &&
-renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
-renvoAsmEmitText(&g.asm, "\xf3\x48\x0f\xae")
-renvoAsmEmit8(&g.asm, 0xd0+(baseRegister-3)*8)
-return 1
-}
-return 0
-}
-if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadInstructionPointer") &&
-g.c.renvoTargetArch == renvoArchAmd64 {
-
-
-renvoAsmEmitText(&g.asm, "\x48\x8d\x05\x00\x00\x00\x00")
-return 1
-}
 if e.argCount == 0 &&
 (renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryBarrier") ||
 renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CConditionClobber")) {
@@ -17317,27 +15434,7 @@ renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCondit
 
 return 1
 }
-if e.argCount == 3 && renvoIsHostedObject386(g.c) &&
-renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInterruptWithStack") {
-number := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
-renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), 0)
-vector := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
-renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), 0)
-if !number.ok || !vector.ok || vector.value < 0 || vector.value > 255 ||
-!renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2)) {
-return 0
-}
-
-
-
-renvoAsmEmitText(&g.asm, "\x89\xda\x89\xe3\x89\xc1\x89\xcc\xb8")
-renvoAsmEmit32(&g.asm, number.value)
-renvoAsmEmit8(&g.asm, 0xcd)
-renvoAsmEmit8(&g.asm, vector.value)
-renvoAsmEmitText(&g.asm, "\x89\xdc\x89\xd3")
-return 1
-}
-return -1
+return renvoEmitTargetPlatformIntrinsic(g, ep, e, fn)
 }
 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
@@ -26439,147 +24536,6 @@ renvoAsmEmit8(&g.asm, 0xe8)
 relocationAt := len(g.asm.code)
 renvoAsmEmit32(&g.asm, 0)
 renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
-return true
-}
-
-func renvoEmitIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
-renvoNonNil(g, ep, e, helper)
-if !g.c.objectFile || g.c.renvoTargetArch != renvoArchAmd64 || e.argCount < 2 || e.argCount > 3 {
-return false
-}
-prefix := "renvo_runtime_CIRQStackCall1_"
-argCount := 1
-if e.argCount == 3 {
-prefix = "renvo_runtime_CIRQStackCall2_"
-argCount = 2
-}
-nameStart := helper.nameStart + len(prefix)
-if nameStart >= helper.nameEnd || !renvoBytesEqualText(g.prog.src, helper.nameStart, nameStart, prefix) {
-return false
-}
-target := -1
-for i := 0; i < len(g.meta.funcs); i++ {
-candidate := &g.meta.funcs[i]
-if candidate.receiverType == 0 && renvoBytesEqualRange(g.prog.src, candidate.nameStart, candidate.nameEnd, nameStart, helper.nameEnd) {
-target = i
-break
-}
-}
-enter := renvoFindMetaFunctionText(g.meta, "irq_enter_rcu")
-exit := renvoFindMetaFunctionText(g.meta, "irq_exit_rcu")
-if target < 0 || enter < 0 || exit < 0 || g.meta.funcs[target].paramCount != argCount {
-return false
-}
-offsets := make([]int, e.argCount)
-for i := 0; i < e.argCount; i++ {
-expression := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
-typ := renvoInferParsedExprType(g, ep, expression)
-resolved := renvoResolveType(g.meta, typ)
-if resolved.kind != renvoTypePointer && resolved.kind != renvoTypeFunc && !renvoTypeKindIsScalarInt(resolved.kind) ||
-!renvoEmitIntExpr(g, ep, expression) {
-return false
-}
-offsets[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
-renvoAsmStorePrimaryStack(&g.asm, offsets[i])
-}
-
-
-
-renvoAsmEmitText(&g.asm, "\x41\x54\x41\x55")
-renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
-renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
-renvoAsmLoadPrimaryStack(&g.asm, offsets[1])
-renvoAsmEmitText(&g.asm, "\x49\x89\xc4")
-if argCount == 2 {
-renvoAsmLoadPrimaryStack(&g.asm, offsets[2])
-renvoAsmEmitText(&g.asm, "\x49\x89\xc5")
-}
-renvoAsmEmitText(&g.asm, "\x49\x89\x23\x4c\x89\xdc")
-if !renvoEmitObjectRawFunctionCall(g, enter) {
-return false
-}
-if argCount == 2 {
-
-
-
-renvoAsmEmitText(&g.asm, "\x4c\x89\xe6\x4c\x89\xef")
-} else {
-renvoAsmEmitText(&g.asm, "\x4c\x89\xe7")
-}
-if !renvoEmitObjectRawFunctionCall(g, target) || !renvoEmitObjectRawFunctionCall(g, exit) {
-return false
-}
-renvoAsmEmitText(&g.asm, "\x5c\x41\x5d\x41\x5c")
-return true
-}
-
-func renvoEmitMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
-renvoNonNil(g, ep, e, helper)
-if !g.c.objectFile || g.c.renvoTargetArch != renvoArchAmd64 || e.argCount < 1 || e.argCount > 9 ||
-helper.paramCount != e.argCount {
-return false
-}
-functionType := renvoResolveType(g.meta, g.meta.params[helper.firstParam].typ)
-if functionType.kind != renvoTypeFunc || functionType.resolved != 0 || functionType.count != e.argCount-1 {
-return false
-}
-if helper.resultType != 0 {
-result := renvoResolveType(g.meta, helper.resultType)
-if !renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer {
-return false
-}
-}
-var offsets [9]int
-for i := 0; i < e.argCount; i++ {
-typ := g.meta.params[helper.firstParam+i].typ
-resolved := renvoResolveType(g.meta, typ)
-if i == 0 {
-if resolved.kind != renvoTypeFunc {
-return false
-}
-} else if !renvoTypeKindIsScalarInt(resolved.kind) && resolved.kind != renvoTypePointer {
-return false
-}
-offsets[i] = renvoAddUnnamedLocal(g, typ)
-if !renvoEmitExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i), offsets[i]) {
-return false
-}
-}
-
-
-
-
-renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
-renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
-stackArgs := e.argCount - 5
-if stackArgs < 0 {
-stackArgs = 0
-}
-reserve := 32 + renvoAlignTo8(stackArgs*8)
-if reserve&15 != 0 {
-reserve += 8
-}
-renvoAsmEmitText(&g.asm, "\x48\x83\xec")
-renvoAsmEmit8(&g.asm, reserve)
-for i := 4; i < e.argCount-1; i++ {
-renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
-renvoAsmEmitText(&g.asm, "\x48\x89\x44\x24")
-renvoAsmEmit8(&g.asm, 32+(i-4)*8)
-}
-for i := 0; i < e.argCount-1 && i < 4; i++ {
-renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
-if i == 0 {
-renvoAsmEmitText(&g.asm, "\x48\x89\xc1")
-} else if i == 1 {
-renvoAsmEmitText(&g.asm, "\x48\x89\xc2")
-} else if i == 2 {
-renvoAsmEmitText(&g.asm, "\x49\x89\xc0")
-} else {
-renvoAsmEmitText(&g.asm, "\x49\x89\xc1")
-}
-}
-renvoAsmEmitText(&g.asm, "\x41\xff\xd3\x48\x83\xc4")
-renvoAsmEmit8(&g.asm, reserve)
 return true
 }
 
@@ -35819,7 +33775,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x80\x61\x2f\x14\xde\xe2\x6c\x48\x1c\x41\xc2\x12\x6b\x2b\x4c\x7f\xfe\x6a\xe1\xd7\xc5\xec\xe3\x67\xc9\xa3\x93\x59\x5f\x94\x54\x8e", 3, true
+return "wasi/wasm32", "\xc7\xfa\xa4\x4d\xbc\xc9\x3d\x12\xf5\x8b\x75\x82\x22\xfe\x18\x6e\x07\x58\xe2\x04\xc7\x22\x91\x03\x33\xf1\xdf\x9b\xc0\x8f\x5a\x86", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -35831,7 +33787,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x95\x17\xad\xc2\x28\x2d\xf3\x9f\xa2\x66\xf8\xa8\xda\x28\x31\xdc\x3c\x2d\x67\xda\x82\x9c\x7d\xf1\xc2\x87\x3b\x0e\xa2\x37\xff\xef", 3, true
+return "vm/vm32", "\x70\x76\xac\x05\xd9\x3d\x0b\xc7\x14\x32\xda\xd1\xba\x5b\x87\x8a\x6f\x9e\xcc\xae\xa3\xa9\xed\x29\xc3\x3b\xa4\x7b\x4c\x12\xdc\x79", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -37302,6 +35258,2097 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+renvoNonNil(g, ep, e, helper)
+if !g.c.objectFile || e.argCount < 2 || e.argCount > 3 {
+return false
+}
+prefix := "renvo_runtime_CIRQStackCall1_"
+argCount := 1
+if e.argCount == 3 {
+prefix = "renvo_runtime_CIRQStackCall2_"
+argCount = 2
+}
+nameStart := helper.nameStart + len(prefix)
+if nameStart >= helper.nameEnd || !renvoBytesEqualText(g.prog.src, helper.nameStart, nameStart, prefix) {
+return false
+}
+target := -1
+for i := 0; i < len(g.meta.funcs); i++ {
+candidate := &g.meta.funcs[i]
+if candidate.receiverType == 0 && renvoBytesEqualRange(g.prog.src, candidate.nameStart, candidate.nameEnd, nameStart, helper.nameEnd) {
+target = i
+break
+}
+}
+enter := renvoFindMetaFunctionText(g.meta, "irq_enter_rcu")
+exit := renvoFindMetaFunctionText(g.meta, "irq_exit_rcu")
+if target < 0 || enter < 0 || exit < 0 || g.meta.funcs[target].paramCount != argCount {
+return false
+}
+offsets := make([]int, e.argCount)
+for i := 0; i < e.argCount; i++ {
+expression := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
+typ := renvoInferParsedExprType(g, ep, expression)
+resolved := renvoResolveType(g.meta, typ)
+if resolved.kind != renvoTypePointer && resolved.kind != renvoTypeFunc && !renvoTypeKindIsScalarInt(resolved.kind) ||
+!renvoEmitIntExpr(g, ep, expression) {
+return false
+}
+offsets[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
+renvoAsmStorePrimaryStack(&g.asm, offsets[i])
+}
+
+
+
+renvoAsmEmitText(&g.asm, "\x41\x54\x41\x55")
+renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
+renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
+renvoAsmLoadPrimaryStack(&g.asm, offsets[1])
+renvoAsmEmitText(&g.asm, "\x49\x89\xc4")
+if argCount == 2 {
+renvoAsmLoadPrimaryStack(&g.asm, offsets[2])
+renvoAsmEmitText(&g.asm, "\x49\x89\xc5")
+}
+renvoAsmEmitText(&g.asm, "\x49\x89\x23\x4c\x89\xdc")
+if !renvoEmitObjectRawFunctionCall(g, enter) {
+return false
+}
+if argCount == 2 {
+
+
+
+renvoAsmEmitText(&g.asm, "\x4c\x89\xe6\x4c\x89\xef")
+} else {
+renvoAsmEmitText(&g.asm, "\x4c\x89\xe7")
+}
+if !renvoEmitObjectRawFunctionCall(g, target) || !renvoEmitObjectRawFunctionCall(g, exit) {
+return false
+}
+renvoAsmEmitText(&g.asm, "\x5c\x41\x5d\x41\x5c")
+return true
+
+
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+
+renvoNonNil(g, ep, e, helper)
+if !g.c.objectFile || e.argCount < 1 || e.argCount > 9 ||
+helper.paramCount != e.argCount {
+return false
+}
+functionType := renvoResolveType(g.meta, g.meta.params[helper.firstParam].typ)
+if functionType.kind != renvoTypeFunc || functionType.resolved != 0 || functionType.count != e.argCount-1 {
+return false
+}
+if helper.resultType != 0 {
+result := renvoResolveType(g.meta, helper.resultType)
+if !renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer {
+return false
+}
+}
+var offsets [9]int
+for i := 0; i < e.argCount; i++ {
+typ := g.meta.params[helper.firstParam+i].typ
+resolved := renvoResolveType(g.meta, typ)
+if i == 0 {
+if resolved.kind != renvoTypeFunc {
+return false
+}
+} else if !renvoTypeKindIsScalarInt(resolved.kind) && resolved.kind != renvoTypePointer {
+return false
+}
+offsets[i] = renvoAddUnnamedLocal(g, typ)
+if !renvoEmitExprToLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i), offsets[i]) {
+return false
+}
+}
+
+
+
+
+renvoAsmLoadPrimaryStack(&g.asm, offsets[0])
+renvoAsmEmitText(&g.asm, "\x49\x89\xc3")
+stackArgs := e.argCount - 5
+if stackArgs < 0 {
+stackArgs = 0
+}
+reserve := 32 + renvoAlignTo8(stackArgs*8)
+if reserve&15 != 0 {
+reserve += 8
+}
+renvoAsmEmitText(&g.asm, "\x48\x83\xec")
+renvoAsmEmit8(&g.asm, reserve)
+for i := 4; i < e.argCount-1; i++ {
+renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
+renvoAsmEmitText(&g.asm, "\x48\x89\x44\x24")
+renvoAsmEmit8(&g.asm, 32+(i-4)*8)
+}
+for i := 0; i < e.argCount-1 && i < 4; i++ {
+renvoAsmLoadPrimaryStack(&g.asm, offsets[i+1])
+if i == 0 {
+renvoAsmEmitText(&g.asm, "\x48\x89\xc1")
+} else if i == 1 {
+renvoAsmEmitText(&g.asm, "\x48\x89\xc2")
+} else if i == 2 {
+renvoAsmEmitText(&g.asm, "\x49\x89\xc0")
+} else {
+renvoAsmEmitText(&g.asm, "\x49\x89\xc1")
+}
+}
+renvoAsmEmitText(&g.asm, "\x41\xff\xd3\x48\x83\xc4")
+renvoAsmEmit8(&g.asm, reserve)
+return true
+
+
+}
+if g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitTargetPlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
+renvoNonNil(g)
+if g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 {
+
+segmentCompare := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSegmentComparefs") {
+segmentCompare = 0x64
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSegmentComparegs") {
+segmentCompare = 0x65
+}
+if segmentCompare != 0 && e.argCount == 3 &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x57\x56\x48\x8b\x44\x24\x20\x48\x8b\x38\x48\x8b\x44\x24\x18\x8b\x30\x48\x8b\x44\x24\x10\x8b\x08")
+renvoAsmEmit8(&g.asm, segmentCompare)
+renvoAsmEmitText(&g.asm, "\xf3\xa6\x48\x8b\x44\x24\x20\x48\x89\x38\x48\x8b\x44\x24\x18\x89\x30\x48\x8b\x44\x24\x10\x89\x08\x0f\x95\xc0\x0f\xb6\xc0\x5e\x5f\x48\x83\xc4\x18")
+return 1
+}
+renvoAsmEmitText(&g.asm, "\x57\x56\x8b\x44\x24\x10\x8b\x38\x8b\x44\x24\x0c\x8b\x30\x8b\x44\x24\x08\x8b\x08")
+renvoAsmEmit8(&g.asm, segmentCompare)
+renvoAsmEmitText(&g.asm, "\xf3\xa6\x8b\x44\x24\x10\x89\x38\x8b\x44\x24\x0c\x89\x30\x8b\x44\x24\x08\x89\x08\x0f\x95\xc0\x0f\xb6\xc0\x5e\x5f\x83\xc4\x0c")
+return 1
+}
+segmentMemory, segmentMemorySize, segmentMemoryWrite := 0, 0, false
+for candidate := 1; candidate <= 2; candidate++ {
+prefix := "renvo_runtime_CReadSegmentfs"
+writePrefix := "renvo_runtime_CWriteSegmentfs"
+if candidate == 2 {
+prefix = "renvo_runtime_CReadSegmentgs"
+writePrefix = "renvo_runtime_CWriteSegmentgs"
+}
+for sizeIndex := 0; sizeIndex < 3; sizeIndex++ {
+size := 8
+if sizeIndex == 1 {
+size = 16
+} else if sizeIndex == 2 {
+size = 32
+}
+suffix := "8"
+if size == 16 {
+suffix = "16"
+} else if size == 32 {
+suffix = "32"
+}
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, prefix+suffix) {
+segmentMemory, segmentMemorySize = candidate, size
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, writePrefix+suffix) {
+segmentMemory, segmentMemorySize, segmentMemoryWrite = candidate, size, true
+}
+}
+}
+if segmentMemory != 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+prefix := 0x64
+if segmentMemory == 2 {
+prefix = 0x65
+}
+if segmentMemoryWrite {
+if e.argCount != 2 || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmEmit8(&g.asm, prefix)
+if segmentMemorySize == 8 {
+renvoAsmEmitText(&g.asm, "\x88\x10")
+} else if segmentMemorySize == 16 {
+renvoAsmEmitText(&g.asm, "\x66\x89\x10")
+} else {
+renvoAsmEmitText(&g.asm, "\x89\x10")
+}
+return 1
+}
+if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmEmit8(&g.asm, prefix)
+if segmentMemorySize == 8 {
+renvoAsmEmitText(&g.asm, "\x0f\xb6\x00")
+} else if segmentMemorySize == 16 {
+renvoAsmEmitText(&g.asm, "\x0f\xb7\x00")
+} else {
+renvoAsmEmitText(&g.asm, "\x8b\x00")
+}
+return 1
+}
+safeSegment := -1
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafees") {
+safeSegment = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafess") {
+safeSegment = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentSafeds") {
+safeSegment = 3
+}
+if safeSegment >= 0 && e.argCount == 1 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+instructionStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x8e")
+renvoAsmEmit8(&g.asm, 0xc0+safeSegment*8)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionStart + 1})
+return 1
+}
+segment, segmentWrite := -1, false
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentes") {
+segment = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentss") {
+segment = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentds") {
+segment = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentfs") {
+segment = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadSegmentgs") {
+segment = 5
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentfs") {
+segment, segmentWrite = 4, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteSegmentgs") {
+segment, segmentWrite = 5, true
+}
+if segment >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if segmentWrite {
+if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8e")
+renvoAsmEmit8(&g.asm, 0xc0+segment*8)
+return 1
+}
+if e.argCount != 0 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x31\xc0\x8c")
+renvoAsmEmit8(&g.asm, 0xc0+segment*8)
+return 1
+}
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteStartupSegments") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8e\xd8\x8e\xd0\x8e\xc0")
+return 1
+}
+if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitSet32") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmEmitText(&g.asm, "\x0f\xab\x10")
+return 1
+}
+byteOperation := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COrByte") {
+byteOperation = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAndByte") {
+byteOperation = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CXorByte") {
+byteOperation = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CXorByteNegative") {
+byteOperation = 4
+}
+if byteOperation != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if byteOperation == 1 {
+renvoAsmEmitText(&g.asm, "\x08\x10")
+} else if byteOperation == 2 {
+renvoAsmEmitText(&g.asm, "\x20\x10")
+} else {
+renvoAsmEmitText(&g.asm, "\x30\x10")
+}
+if byteOperation == 4 {
+renvoAsmEmitText(&g.asm, "\x0f\x98\xc0\x0f\xb6\xc0")
+}
+return 1
+}
+if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTestByte") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmEmitText(&g.asm, "\x84\x10\x0f\x95\xc0\x0f\xb6\xc0")
+return 1
+}
+bitOperation64 := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitSet64") {
+bitOperation64 = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitReset64") {
+bitOperation64 = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitComplement64") {
+bitOperation64 = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitTest64") {
+bitOperation64 = 4
+}
+if bitOperation64 != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmEmitText(&g.asm, "\x48\x0f")
+if bitOperation64 == 1 {
+renvoAsmEmit8(&g.asm, 0xab)
+} else if bitOperation64 == 2 {
+renvoAsmEmit8(&g.asm, 0xb3)
+} else if bitOperation64 == 3 {
+renvoAsmEmit8(&g.asm, 0xbb)
+} else {
+renvoAsmEmit8(&g.asm, 0xa3)
+}
+renvoAsmEmit8(&g.asm, 0x10)
+renvoAsmEmitText(&g.asm, "\x0f\x92\xc0\x0f\xb6\xc0")
+return 1
+}
+bitScan := 0
+bitScan64 := false
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanForward32") {
+bitScan = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanReverse32") {
+bitScan = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanForward64") {
+bitScan, bitScan64 = 1, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBitScanReverse64") {
+bitScan, bitScan64 = 2, true
+}
+if bitScan != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if bitScan64 {
+renvoAsmEmitText(&g.asm, "\x48\x85\xc0\x74\x06\x48\x0f")
+} else {
+renvoAsmEmitText(&g.asm, "\x85\xc0\x74\x05\x0f")
+}
+if bitScan == 1 {
+renvoAsmEmitText(&g.asm, "\xbc\xc0")
+} else {
+renvoAsmEmitText(&g.asm, "\xbd\xc0")
+}
+if bitScan64 {
+renvoAsmEmitText(&g.asm, "\xeb\x03\x48\x89\xd0")
+} else {
+renvoAsmEmitText(&g.asm, "\xeb\x02\x89\xd0")
+}
+return 1
+}
+ioSize, ioOut := 0, false
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn8") {
+ioSize = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn16") {
+ioSize = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIn32") {
+ioSize = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut8") {
+ioSize, ioOut = 1, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut16") {
+ioSize, ioOut = 2, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_COut32") {
+ioSize, ioOut = 4, true
+}
+if ioSize != 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if ioOut {
+if e.argCount != 2 || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if ioSize == 1 {
+renvoAsmEmit8(&g.asm, 0xee)
+} else if ioSize == 2 {
+renvoAsmEmitText(&g.asm, "\x66\xef")
+} else {
+renvoAsmEmit8(&g.asm, 0xef)
+}
+return 1
+}
+if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+if ioSize == 1 {
+renvoAsmEmit8(&g.asm, 0xec)
+} else if ioSize == 2 {
+renvoAsmEmitText(&g.asm, "\x66\xed")
+} else {
+renvoAsmEmit8(&g.asm, 0xed)
+}
+return 1
+}
+stringIOSize, stringIOOut := 0, false
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString8") {
+stringIOSize = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString16") {
+stringIOSize = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortInString32") {
+stringIOSize = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString8") {
+stringIOSize, stringIOOut = 1, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString16") {
+stringIOSize, stringIOOut = 2, true
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPortOutString32") {
+stringIOSize, stringIOOut = 4, true
+}
+if stringIOSize != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArch386 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8b\x54\x24\x08")
+if stringIOOut {
+renvoAsmEmitText(&g.asm, "\x8b\x74\x24\x04")
+} else {
+renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x04")
+}
+renvoAsmEmitText(&g.asm, "\x8b\x0c\x24\xf3")
+if stringIOSize == 2 {
+renvoAsmEmit8(&g.asm, 0x66)
+}
+if stringIOOut {
+if stringIOSize == 1 {
+renvoAsmEmit8(&g.asm, 0x6e)
+} else {
+renvoAsmEmit8(&g.asm, 0x6f)
+}
+} else if stringIOSize == 1 {
+renvoAsmEmit8(&g.asm, 0x6c)
+} else {
+renvoAsmEmit8(&g.asm, 0x6d)
+}
+renvoAsmEmitText(&g.asm, "\x83\xc4\x0c")
+return 1
+}
+if stringIOSize != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x54\x24\x10")
+if stringIOOut {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x74\x24\x08")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08")
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x0c\x24\xf3")
+if stringIOSize == 2 {
+renvoAsmEmit8(&g.asm, 0x66)
+}
+if stringIOOut {
+if stringIOSize == 1 {
+renvoAsmEmit8(&g.asm, 0x6e)
+} else {
+renvoAsmEmit8(&g.asm, 0x6f)
+}
+} else if stringIOSize == 1 {
+renvoAsmEmit8(&g.asm, 0x6c)
+} else {
+renvoAsmEmit8(&g.asm, 0x6d)
+}
+renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
+return 1
+}
+if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVDSOSyscall") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x18\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x14\x24")
+renvoAsmEmitText(&g.asm, "\x0f\x05\x48\x83\xc4\x20")
+return 1
+}
+if e.argCount == 6 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCPUID") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+wordCount := renvoEmitCallArgsReverse(g, ep, e, fn, -1)
+if wordCount != 6 {
+return 0
+}
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x53\x8b\x44\x24\x30\x8b\x4c\x24\x28\x0f\xa2")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x20\x89\x07\x48\x8b\x7c\x24\x18\x89\x1f")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x89\x0f\x48\x8b\x7c\x24\x08\x89\x17\x5b\x48\x83\xc4\x30")
+return 1
+}
+renvoAsmEmitText(&g.asm, "\x53\x57\x8b\x44\x24\x1c\x8b\x4c\x24\x18\x0f\xa2")
+renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x14\x89\x07\x8b\x7c\x24\x10\x89\x1f")
+renvoAsmEmitText(&g.asm, "\x8b\x7c\x24\x0c\x89\x0f\x8b\x7c\x24\x08\x89\x17\x5f\x5b\x83\xc4\x18")
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadMSR") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x0f\x32\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x18")
+return 1
+}
+renvoAsmEmitText(&g.asm, "\x57\x8b\x4c\x24\x0c\x0f\x32\x8b\x4c\x24\x08\x89\x01\x8b\x7c\x24\x04\x89\x17\x5f\x83\xc4\x0c")
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteMSR") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x44\x24\x08\x8b\x14\x24\x0f\x30\x48\x83\xc4\x18")
+return 1
+}
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x08\x8b\x44\x24\x04\x8b\x14\x24\x0f\x30\x83\xc4\x0c")
+return 1
+}
+if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadMSRSafe") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x18")
+instructionStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x0f\x32\x45\x31\xc0")
+instructionEnd := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x44\x89\x07\x48\x83\xc4\x20")
+if g.c.objectFile {
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+
+
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 11, 8, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
+}
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteMSRSafe") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x44\x24\x08\x8b\x14\x24")
+instructionStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x0f\x30\x31\xc0")
+instructionEnd := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
+if g.c.objectFile {
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
+}
+return 1
+}
+counterKind := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadTimestampCounter") {
+counterKind = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadTimestampCounterOrdered") {
+counterKind = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadPerformanceCounter") {
+counterKind = 3
+}
+if counterKind != 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+((counterKind != 3 && e.argCount == 2) || (counterKind == 3 && e.argCount == 3)) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != e.argCount {
+return 0
+}
+if counterKind == 3 {
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x0f\x33")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x18")
+} else {
+if counterKind == 2 {
+renvoAsmEmitText(&g.asm, "\x0f\xae\xe8")
+}
+renvoAsmEmitText(&g.asm, "\x0f\x31\x48\x8b\x7c\x24\x08\x89\x07\x48\x8b\x3c\x24\x89\x17\x48\x83\xc4\x10")
+}
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPause") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\xf3\x90")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDelayLoop") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+loop := renvoAsmNewLabel(&g.asm)
+done := renvoAsmNewLabel(&g.asm)
+renvoAsmEmitText(&g.asm, "\x48\x85\xc0")
+renvoAsmJzLabel(&g.asm, done)
+for len(g.asm.code)&15 != 0 {
+renvoAsmEmit8(&g.asm, 0x90)
+}
+renvoAsmMarkLabel(&g.asm, loop)
+renvoAsmEmitText(&g.asm, "\x48\xff\xc8")
+renvoAsmJnzLabel(&g.asm, loop)
+renvoAsmMarkLabel(&g.asm, done)
+renvoAsmEmitText(&g.asm, "\x48\xff\xc8")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInt3Selftest") &&
+g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x48\x89\xc7")
+label := renvoAsmNewLabel(&g.asm)
+renvoAsmMarkLabel(&g.asm, label)
+nameStart := len(g.asm.symbolName)
+g.asm.symbolName = append(g.asm.symbolName, "int3_selftest_ip"...)
+g.asm.symbols = append(g.asm.symbols, renvoAsmSymbol{nameStart: nameStart, nameEnd: len(g.asm.symbolName), label: label})
+renvoAsmEmitText(&g.asm, "\xcc\x90\x90\x90\x90")
+return 1
+}
+monitorKind := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMonitor") {
+monitorKind = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMonitorExtended") {
+monitorKind = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWait") {
+monitorKind = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWaitExtended") {
+monitorKind = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterruptsAndWait") {
+monitorKind = 5
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTimedPause") {
+monitorKind = 6
+}
+if monitorKind != 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+(((monitorKind == 3 || monitorKind == 5) && e.argCount == 2) ||
+(monitorKind != 3 && monitorKind != 5 && e.argCount == 3)) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != e.argCount {
+return 0
+}
+if monitorKind == 1 || monitorKind == 2 {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x8b\x4c\x24\x08\x8b\x14\x24\x0f\x01")
+if monitorKind == 1 {
+renvoAsmEmit8(&g.asm, 0xc8)
+} else {
+renvoAsmEmit8(&g.asm, 0xfa)
+}
+renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x18")
+return 1
+}
+if monitorKind == 3 || monitorKind == 5 {
+renvoAsmEmitText(&g.asm, "\x8b\x44\x24\x08\x8b\x0c\x24")
+if monitorKind == 5 {
+renvoAsmEmit8(&g.asm, 0xfb)
+}
+renvoAsmEmitText(&g.asm, "\x0f\x01\xc9\x48\x83\xc4\x10")
+return 1
+}
+if monitorKind == 6 {
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x10\x8b\x54\x24\x08\x8b\x04\x24\x66\x0f\xae\xf1\x48\x83\xc4\x18")
+return 1
+}
+
+
+renvoAsmEmitText(&g.asm, "\x53\x8b\x44\x24\x18\x8b\x5c\x24\x10\x8b\x4c\x24\x08\x0f\x01\xfb\x5b\x48\x83\xc4\x18")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadCPUNODE") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+
+
+
+renvoAsmEmitText(&g.asm, "\x0f\x03\xc0")
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCopyBytes") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x0c\x24\xf3\xa4\x48\x83\xc4\x18")
+return 1
+}
+userCopyPrefix := "renvo_runtime_CCopyUserBytes_"
+if e.argCount == 3 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userCopyPrefix) &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x0c\x24")
+copyStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\xf3\xa4")
+copyEnd := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x48\x89\xc8\x48\x83\xc4\x18")
+if g.c.objectFile {
+sectionNameStart := fn.nameStart + len(userCopyPrefix)
+if sectionNameStart >= fn.nameEnd {
+return 0
+}
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: copyStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: copyEnd + 1})
+}
+return 1
+}
+userClearPrefix := "renvo_runtime_CClearUserBytes_"
+if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userClearPrefix) &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x08\x48\x8b\x0c\x24\x31\xc0")
+clearStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\xf3\xaa")
+clearEnd := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x48\x89\xc8\x48\x83\xc4\x10")
+if g.c.objectFile {
+sectionNameStart := fn.nameStart + len(userClearPrefix)
+if sectionNameStart >= fn.nameEnd {
+return 0
+}
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: clearStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: clearEnd + 1})
+}
+return 1
+}
+getUserWidth, getUserName := 0, ""
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser1") {
+getUserWidth, getUserName = 1, "__get_user_1"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser2") {
+getUserWidth, getUserName = 2, "__get_user_2"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser4") {
+getUserWidth, getUserName = 4, "__get_user_4"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CGetUser8") {
+getUserWidth, getUserName = 8, "__get_user_8"
+}
+if getUserWidth != 0 && e.argCount == 2 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x08\xe8")
+externalID := renvoAsmAddExternalImportName(&g.asm, getUserName)
+if externalID < 0 {
+return 0
+}
+relocationAt := len(g.asm.code)
+renvoAsmEmit32(&g.asm, 0)
+renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
+renvoAsmEmitText(&g.asm, "\x48\x8b\x3c\x24")
+if getUserWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x88\x17")
+} else if getUserWidth == 2 {
+renvoAsmEmitText(&g.asm, "\x66\x89\x17")
+} else if getUserWidth == 4 {
+renvoAsmEmitText(&g.asm, "\x89\x17")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x89\x17")
+}
+renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x10")
+return 1
+}
+putUserWidth, putUserName := 0, ""
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser1") {
+putUserWidth, putUserName = 1, "__put_user_1"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser2") {
+putUserWidth, putUserName = 2, "__put_user_2"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser4") {
+putUserWidth, putUserName = 4, "__put_user_4"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUser8") {
+putUserWidth, putUserName = 8, "__put_user_8"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck1") {
+putUserWidth, putUserName = 1, "__put_user_nocheck_1"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck2") {
+putUserWidth, putUserName = 2, "__put_user_nocheck_2"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck4") {
+putUserWidth, putUserName = 4, "__put_user_nocheck_4"
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPutUserNoCheck8") {
+putUserWidth, putUserName = 8, "__put_user_nocheck_8"
+}
+if putUserWidth != 0 && e.argCount == 2 && g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x4c\x24\x08\x48\x8b\x04\x24\xe8")
+externalID := renvoAsmAddExternalImportName(&g.asm, putUserName)
+if externalID < 0 {
+return 0
+}
+relocationAt := len(g.asm.code)
+renvoAsmEmit32(&g.asm, 0)
+renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
+renvoAsmEmitText(&g.asm, "\x48\x63\xc1\x48\x83\xc4\x10")
+return 1
+}
+if renvoFixedTarget == 0 && g.c.code16 && e.argCount == 4 &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDivide32") &&
+g.c.renvoTargetArch == renvoArch386 {
+
+
+
+
+
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x08\x8b\x54\x24\x04\xf7\xf1")
+renvoAsmEmitText(&g.asm, "\x8b\x0c\x24\x89\x11\x83\xc4\x10")
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyDivide64") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x48\xf7\x64\x24\x08\x48\xf7\x34\x24\x48\x83\xc4\x18")
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyShift32") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x10\x48\xf7\x64\x24\x08\x48\x8b\x0c\x24\x48\x89\x11")
+renvoAsmEmitText(&g.asm, "\x48\x0f\xac\xd0\x20\x48\x83\xc4\x18")
+return 1
+}
+if e.argCount == 4 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMultiplyAddShift64") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 4 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x44\x24\x18\x48\xf7\x64\x24\x10")
+renvoAsmEmitText(&g.asm, "\x48\x03\x44\x24\x08\x48\x83\xd2\x00\x48\x8b\x0c\x24")
+renvoAsmEmitText(&g.asm, "\x48\x83\xf9\x40\x72\x08\x48\x89\xd0\x48\xd3\xe8\xeb\x04\x48\x0f\xad\xd0")
+renvoAsmEmitText(&g.asm, "\x48\x83\xc4\x20")
+return 1
+}
+if e.argCount == 5 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange128") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 5 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x53\x48\x8b\x7c\x24\x28\x48\x8b\x74\x24\x20\x4c\x8b\x44\x24\x18")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x5c\x24\x10\x48\x8b\x4c\x24\x08\x48\x8b\x06\x49\x8b\x10")
+renvoAsmEmitText(&g.asm, "\xf0\x48\x0f\xc7\x0f\x41\x0f\x94\xc1\x48\x89\x06\x49\x89\x10")
+renvoAsmEmitText(&g.asm, "\x41\x0f\xb6\xc1\x5b\x48\x83\xc4\x28")
+return 1
+}
+atomicArithmetic, atomicWidth := 0, 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd8") {
+atomicArithmetic, atomicWidth = 1, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd16") {
+atomicArithmetic, atomicWidth = 1, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd32") {
+atomicArithmetic, atomicWidth = 1, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAdd64") {
+atomicArithmetic, atomicWidth = 1, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub8") {
+atomicArithmetic, atomicWidth = 2, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub16") {
+atomicArithmetic, atomicWidth = 2, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub32") {
+atomicArithmetic, atomicWidth = 2, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicSub64") {
+atomicArithmetic, atomicWidth = 2, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd8") {
+atomicArithmetic, atomicWidth = 3, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd16") {
+atomicArithmetic, atomicWidth = 3, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd32") {
+atomicArithmetic, atomicWidth = 3, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicAnd64") {
+atomicArithmetic, atomicWidth = 3, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr8") {
+atomicArithmetic, atomicWidth = 4, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr16") {
+atomicArithmetic, atomicWidth = 4, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr32") {
+atomicArithmetic, atomicWidth = 4, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicOr64") {
+atomicArithmetic, atomicWidth = 4, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor8") {
+atomicArithmetic, atomicWidth = 5, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor16") {
+atomicArithmetic, atomicWidth = 5, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor32") {
+atomicArithmetic, atomicWidth = 5, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicXor64") {
+atomicArithmetic, atomicWidth = 5, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc8") {
+atomicArithmetic, atomicWidth = 6, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc16") {
+atomicArithmetic, atomicWidth = 6, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc32") {
+atomicArithmetic, atomicWidth = 6, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicInc64") {
+atomicArithmetic, atomicWidth = 6, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec8") {
+atomicArithmetic, atomicWidth = 7, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec16") {
+atomicArithmetic, atomicWidth = 7, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec32") {
+atomicArithmetic, atomicWidth = 7, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicDec64") {
+atomicArithmetic, atomicWidth = 7, 8
+}
+if atomicArithmetic != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 && atomicWidth <= 4) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmEmit8(&g.asm, 0xf0)
+if atomicWidth == 2 {
+renvoAsmEmit8(&g.asm, 0x66)
+} else if atomicWidth == 8 {
+renvoAsmEmit8(&g.asm, 0x48)
+}
+if atomicArithmetic <= 5 {
+opcode := []byte{0, 0x01, 0x29, 0x21, 0x09, 0x31}[atomicArithmetic]
+if atomicWidth == 1 {
+opcode--
+}
+renvoAsmEmit8(&g.asm, int(opcode))
+renvoAsmEmit8(&g.asm, 0x10)
+} else if atomicArithmetic == 6 {
+if atomicWidth == 1 {
+renvoAsmEmitText(&g.asm, "\xfe\x00")
+} else {
+renvoAsmEmitText(&g.asm, "\xff\x00")
+}
+} else {
+if atomicWidth == 1 {
+renvoAsmEmitText(&g.asm, "\xfe\x08")
+} else {
+renvoAsmEmitText(&g.asm, "\xff\x08")
+}
+}
+renvoAsmEmitText(&g.asm, "\x0f\x94\xc2\x0f\x98\xc1\x0f\xb6\xc2\x0f\xb6\xc9\xd1\xe1\x09\xc8")
+return 1
+}
+atomicExchange, atomicExchangeWidth := 0, 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd8") {
+atomicExchange, atomicExchangeWidth = 1, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd16") {
+atomicExchange, atomicExchangeWidth = 1, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd32") {
+atomicExchange, atomicExchangeWidth = 1, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicFetchAdd64") {
+atomicExchange, atomicExchangeWidth = 1, 8
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange8") {
+atomicExchange, atomicExchangeWidth = 2, 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange16") {
+atomicExchange, atomicExchangeWidth = 2, 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange32") {
+atomicExchange, atomicExchangeWidth = 2, 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CAtomicExchange64") {
+atomicExchange, atomicExchangeWidth = 2, 8
+}
+if atomicExchange != 0 && e.argCount == 2 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 && atomicExchangeWidth <= 4) {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if atomicExchange == 1 {
+renvoAsmEmit8(&g.asm, 0xf0)
+}
+if atomicExchangeWidth == 2 {
+renvoAsmEmit8(&g.asm, 0x66)
+} else if atomicExchangeWidth == 8 {
+renvoAsmEmit8(&g.asm, 0x48)
+}
+if atomicExchange == 1 {
+if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x0f\xc0\x10")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\xc1\x10")
+}
+} else if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x86\x10")
+} else {
+renvoAsmEmitText(&g.asm, "\x87\x10")
+}
+if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x0f\xb6\xc2")
+} else if atomicExchangeWidth == 2 {
+renvoAsmEmitText(&g.asm, "\x0f\xb7\xc2")
+} else if atomicExchangeWidth == 4 {
+renvoAsmEmitText(&g.asm, "\x89\xd0")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x89\xd0")
+}
+return 1
+}
+if atomicExchange != 0 && atomicExchangeWidth <= 4 && e.argCount == 2 && g.c.renvoTargetArch == renvoArch386 {
+addressArg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+valueArg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)
+addressOffset := renvoAddUnnamedLocal(g, renvoTypeInt)
+valueType := renvoInferParsedExprType(g, ep, valueArg)
+valueOffset := renvoAddUnnamedLocal(g, valueType)
+if !renvoEmitExprToLocal(g, ep, addressArg, addressOffset) ||
+!renvoEmitExprToLocal(g, ep, valueArg, valueOffset) {
+return 0
+}
+renvoAsmLoadPrimaryStack(&g.asm, valueOffset)
+renvoAsmLoadSecondaryStack(&g.asm, addressOffset)
+if atomicExchange == 1 {
+renvoAsmEmit8(&g.asm, 0xf0)
+}
+if atomicExchangeWidth == 2 {
+renvoAsmEmit8(&g.asm, 0x66)
+}
+if atomicExchange == 1 {
+if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x0f\xc0\x02")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\xc1\x02")
+}
+} else if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x86\x02")
+} else {
+renvoAsmEmitText(&g.asm, "\x87\x02")
+}
+if atomicExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x0f\xb6\xc0")
+} else if atomicExchangeWidth == 2 {
+renvoAsmEmitText(&g.asm, "\x0f\xb7\xc0")
+}
+
+
+renvoAsmSecondaryImm(&g.asm, 0)
+return 1
+}
+compareExchangeWidth := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange8") {
+compareExchangeWidth = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange16") {
+compareExchangeWidth = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange32") {
+compareExchangeWidth = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCompareExchange64") {
+compareExchangeWidth = 8
+}
+if compareExchangeWidth != 0 && e.argCount == 3 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 3 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\x8b\x7c\x24\x10\x48\x8b\x74\x24\x08\x48\x8b\x14\x24")
+if compareExchangeWidth == 1 {
+renvoAsmEmitText(&g.asm, "\x31\xc0\x8a\x06\xf0\x0f\xb0\x17\x0f\x94\xc1\x88\x06")
+} else if compareExchangeWidth == 2 {
+renvoAsmEmitText(&g.asm, "\x31\xc0\x66\x8b\x06\xf0\x66\x0f\xb1\x17\x0f\x94\xc1\x66\x89\x06")
+} else if compareExchangeWidth == 4 {
+renvoAsmEmitText(&g.asm, "\x8b\x06\xf0\x0f\xb1\x17\x0f\x94\xc1\x89\x06")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x06\xf0\x48\x0f\xb1\x17\x0f\x94\xc1\x48\x89\x06")
+}
+renvoAsmEmitText(&g.asm, "\x0f\xb6\xc1\x48\x83\xc4\x18")
+return 1
+}
+nonTemporalStoreWidth := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CNonTemporalStore32") {
+nonTemporalStoreWidth = 4
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CNonTemporalStore64") {
+nonTemporalStoreWidth = 8
+}
+if nonTemporalStoreWidth != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if nonTemporalStoreWidth == 8 {
+renvoAsmEmit8(&g.asm, 0x48)
+}
+renvoAsmEmitText(&g.asm, "\x0f\xc3\x10")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVerifySegment") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x00\x28")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CHalt") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmit8(&g.asm, 0xf4)
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterruptsAndHalt") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\xfb\xf4")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteBackInvalidateCache") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x09")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSwapGS") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xf8")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCacheLineFlush") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x38")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CPrefetch") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x18\x08")
+return 1
+}
+if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInvalidateProcessContext") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopPrimary(&g.asm)
+renvoAsmPopSecondary(&g.asm)
+renvoAsmEmitText(&g.asm, "\x66\x0f\x38\x82\x02")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInvalidatePage") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x01\x38")
+return 1
+}
+runtimePointerPrefix := "renvo_runtime_CRuntimePointer_"
+if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, runtimePointerPrefix) &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+value := renvoEvalConstExpr(g, ep, arg)
+if !value.ok {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x48\xb8")
+renvoAsmEmit64(&g.asm, value.value)
+if g.c.objectFile {
+sectionNameStart := fn.nameStart + len(runtimePointerPrefix)
+if sectionNameStart >= fn.nameEnd {
+return 0
+}
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 4
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 4, storageSize: 4,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs, renvoObjectDataRelocation{
+offset: offset, typ: 2, addend: -8, codeTarget: len(g.asm.code) + 1})
+}
+return 1
+}
+runtimeShiftPrefix := "renvo_runtime_CRuntimeShift_"
+if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, runtimeShiftPrefix) &&
+g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+instructionStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\xc1\xe8\x0c")
+if g.c.objectFile {
+sectionNameStart := fn.nameStart + len(runtimeShiftPrefix)
+if sectionNameStart >= fn.nameEnd {
+return 0
+}
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, sectionNameStart, fn.nameEnd)
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 4
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 4, storageSize: 4,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs, renvoObjectDataRelocation{
+offset: offset, typ: 2, codeTarget: instructionStart + 3})
+}
+return 1
+}
+fence := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryReadFence") {
+fence = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CMemoryFence") {
+fence = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFence") {
+fence = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFence") {
+fence = 4
+}
+if fence != 0 && e.argCount == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+if fence == 1 || fence == 2 {
+renvoAsmEmitText(&g.asm, "\x0f\xae\xf0")
+}
+if fence == 1 || fence == 3 {
+renvoAsmEmitText(&g.asm, "\x0f\xae\xe8")
+}
+if fence == 4 {
+renvoAsmEmitText(&g.asm, "\x0f\xae\xf8")
+}
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CSerialize") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xe8")
+return 1
+}
+hypercall := 0
+hypercallPrefix := "renvo_runtime_CVMCall"
+if fn.nameEnd == fn.nameStart+len(hypercallPrefix)+1 &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+len(hypercallPrefix), hypercallPrefix) {
+hypercall = 1
+} else {
+hypercallPrefix = "renvo_runtime_CVMMCall"
+if fn.nameEnd == fn.nameStart+len(hypercallPrefix)+1 &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+len(hypercallPrefix), hypercallPrefix) {
+hypercall = 2
+}
+}
+if hypercall != 0 && g.c.renvoTargetArch == renvoArchAmd64 {
+argCount := int(renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameEnd-1) - '0')
+if argCount < 1 || argCount > 5 || e.argCount != argCount || renvoEmitCallArgsReverse(g, ep, e, fn, -1) != argCount {
+return 0
+}
+
+
+renvoAsmEmit8(&g.asm, 0x53)
+registerModRM := "\x44\x5c\x4c\x54\x74"
+for i := 0; i < argCount; i++ {
+disp := 8 + (argCount-1-i)*8
+renvoAsmEmit5(&g.asm, 0x48, 0x8b, int(registerModRM[i]), 0x24, disp)
+}
+if hypercall == 1 {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xc1")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xd9")
+}
+renvoAsmEmit8(&g.asm, 0x5b)
+renvoAsmEmit4(&g.asm, 0x48, 0x83, 0xc4, argCount*8)
+return 1
+}
+if e.argCount == 0 &&
+(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableUserAccess") ||
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess")) &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+
+
+
+
+
+renvoAsmEmitText(&g.asm, "\x0f\x20\xe0\x0f\xba\xe0\x15\x73\x03")
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableUserAccess") {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xcb")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\x01\xca")
+}
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadR9") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 1 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x41\x59")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGS") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 1 {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x5f\xf2\x0f\x00\xf7")
+return 1
+}
+directMove := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDirectMove64") {
+directMove = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnqueueCommand") {
+directMove = 2
+}
+if directMove != 0 && e.argCount == 2 && g.c.renvoTargetArch == renvoArchAmd64 {
+if renvoEmitCallArgsReverse(g, ep, e, fn, -1) != 2 {
+return 0
+}
+renvoAsmPopSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+if directMove == 1 {
+renvoAsmEmitText(&g.asm, "\x66\x0f\x38\xf8\x02")
+} else {
+renvoAsmEmitText(&g.asm, "\xf3\x0f\x38\xf8\x02\x0f\x94\xc0\x0f\xb6\xc0")
+}
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CTileRelease") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\xc4\xe2\x78\x49\xc0")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CUndefinedInstruction") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x0b")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CBreakpoint") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmit8(&g.asm, 0xcc)
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CIRETToSelf") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+
+
+renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xd0\x50\x54\x48\x83\x04\x24\x08\x9c")
+renvoAsmEmitText(&g.asm, "\x31\xc0\x8c\xc8\x50\x48\x8d\x05\x03\x00\x00\x00\x50\x48\xcf")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVAArg") &&
+g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+
+
+
+renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x08\x48\x83\xf9\x06\x73\x13")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x10\x48\x8b\x14\xca\x48\xff\xc1\x48\x89\x48\x08\x48\x89\xd0\xeb\x12")
+renvoAsmEmitText(&g.asm, "\x48\x8b\x48\x10\x48\x8b\x11\x48\x83\xc1\x08\x48\x89\x48\x10\x48\x89\xd0")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CVAArg32") &&
+g.c.renvoTargetArch == renvoArch386 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+
+
+renvoAsmEmitText(&g.asm, "\x8b\x08\x8b\x11\x83\xc1\x04\x89\x08\x89\xd0")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFarCall16") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x66\xff\x18")
+return 1
+}
+if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFarJump32") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+address := renvoAddUnnamedLocal(g, renvoTypeInt)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, address)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+return 0
+}
+renvoAsmEmitText(&g.asm, "\x89\xc7")
+renvoAsmLoadPrimaryStack(&g.asm, address)
+renvoAsmEmitText(&g.asm, "\xff\x28")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadAccessRights") &&
+g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+
+
+
+renvoAsmEmitText(&g.asm, "\x89\xc1\x31\xc0\x0f\x02\xc1")
+return 1
+}
+randomKind := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CRDRAND64") {
+randomKind = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CRDSEED64") {
+randomKind = 2
+}
+if randomKind != 0 && e.argCount == 1 && g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+if randomKind == 1 {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\xf2")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\xfa")
+}
+renvoAsmEmitText(&g.asm, "\x48\x89\x10\x0f\x92\xc0\x0f\xb6\xc0")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CExceptionLoad64") &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+loadStart := len(g.asm.code)
+renvoAsmEmitText(&g.asm, "\x48\x8b\x00")
+loadEnd := len(g.asm.code)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: loadStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: loadEnd + 1})
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadXControl") &&
+g.c.renvoTargetArch == renvoArchAmd64 && renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x89\xc1\x0f\x01\xd0\x48\xc1\xe2\x20\x48\x09\xd0")
+return 1
+}
+if e.argCount == 2 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteXControl") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+index := renvoAddUnnamedLocal(g, renvoTypeInt)
+value := renvoAddUnnamedLocal(g, renvoTypeInt)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, index)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, value)
+renvoAsmLoadPrimaryStack(&g.asm, index)
+renvoAsmEmitText(&g.asm, "\x89\xc1")
+renvoAsmLoadPrimaryStack(&g.asm, value)
+renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\xc1\xea\x20\x0f\x01\xd1")
+return 1
+}
+extendedStateOp, extendedStateMode := 0, 0
+extendedStatePrefix := "renvo_runtime_CExtendedState_"
+if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, extendedStatePrefix) &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+start := fn.nameStart + len(extendedStatePrefix)
+if start+len("SAVE_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("SAVE_"), "SAVE_") {
+extendedStateOp = 1
+start += len("SAVE_")
+} else if start+len("RESTORE_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("RESTORE_"), "RESTORE_") {
+extendedStateOp = 2
+start += len("RESTORE_")
+} else if start+len("SAVES_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("SAVES_"), "SAVES_") {
+extendedStateOp = 3
+start += len("SAVES_")
+} else if start+len("RESTORES_") <= fn.nameEnd && renvoBytesEqualText(g.prog.src, start, start+len("RESTORES_"), "RESTORES_") {
+extendedStateOp = 4
+start += len("RESTORES_")
+}
+if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "Fault6") {
+extendedStateMode = 6
+} else if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "User15") {
+extendedStateMode = 15
+} else if renvoBytesEqualText(g.prog.src, start, fn.nameEnd, "Safe17") {
+extendedStateMode = 17
+}
+}
+if extendedStateOp != 0 && extendedStateMode != 0 {
+address := renvoAddUnnamedLocal(g, renvoTypeInt)
+mask := renvoAddUnnamedLocal(g, renvoTypeInt)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, address)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, mask)
+renvoAsmLoadPrimaryStack(&g.asm, address)
+renvoAsmEmitText(&g.asm, "\x48\x89\xc7")
+renvoAsmLoadPrimaryStack(&g.asm, mask)
+renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x48\xc1\xea\x20")
+instructionStart := len(g.asm.code)
+if extendedStateOp == 1 {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xae\x27")
+} else if extendedStateOp == 2 {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xae\x2f")
+} else if extendedStateOp == 3 {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\x2f")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x0f\xc7\x1f")
+}
+if extendedStateMode == 15 || extendedStateMode == 17 {
+renvoAsmEmitText(&g.asm, "\x31\xc0")
+}
+instructionEnd := len(g.asm.code)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+typeBytes := []byte{byte(extendedStateMode), 0, 0, 0}
+if extendedStateMode == 17 {
+typeBytes = []byte{17, 0, 242, 255}
+}
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0)
+g.asm.objectDataValues = append(g.asm.objectDataValues, typeBytes...)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
+return 1
+}
+fpuStateOp, fpuStateMode := 0, 0
+fpuStatePrefix := "renvo_runtime_CFPUState_"
+if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, fpuStatePrefix) &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+for index := 0; index < 7; index++ {
+name := "FNSAVE"
+if index == 1 {
+name = "FXSAVE"
+} else if index == 2 {
+name = "FXSAVEQ"
+} else if index == 3 {
+name = "FXRSTOR"
+} else if index == 4 {
+name = "FXRSTORQ"
+} else if index == 5 {
+name = "FRSTOR"
+} else if index == 6 {
+name = "LDMXCSR"
+}
+start := fn.nameStart + len(fpuStatePrefix)
+end := start + len(name)
+if end < fn.nameEnd && renvoBytesEqualText(g.prog.src, start, end, name) && renvo_runtime_UnsafeByteAt(g.prog.src, end) == '_' {
+fpuStateOp = index + 1
+modeStart := end + 1
+if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Plain") {
+fpuStateMode = 1
+} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Fault6") {
+fpuStateMode = 6
+} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "User15") {
+fpuStateMode = 15
+} else if renvoBytesEqualText(g.prog.src, modeStart, fn.nameEnd, "Safe17") {
+fpuStateMode = 17
+}
+}
+}
+}
+if fpuStateOp != 0 && fpuStateMode != 0 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+addressInDX := fpuStateMode == 15 || fpuStateMode == 17
+if addressInDX {
+renvoAsmEmitText(&g.asm, "\x48\x89\xc2\x31\xc0")
+}
+instructionStart := len(g.asm.code)
+if fpuStateOp == 1 {
+if addressInDX {
+renvoAsmEmitText(&g.asm, "\xdd\x32\x9b")
+} else {
+renvoAsmEmitText(&g.asm, "\xdd\x30\x9b")
+}
+} else if fpuStateOp == 2 || fpuStateOp == 3 {
+if fpuStateOp == 3 {
+renvoAsmEmit8(&g.asm, 0x48)
+}
+if addressInDX {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x02")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x00")
+}
+} else if fpuStateOp == 4 || fpuStateOp == 5 {
+if fpuStateOp == 5 {
+renvoAsmEmit8(&g.asm, 0x48)
+}
+if addressInDX {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x0a")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x08")
+}
+} else if fpuStateOp == 6 {
+if addressInDX {
+renvoAsmEmitText(&g.asm, "\xdd\x22")
+} else {
+renvoAsmEmitText(&g.asm, "\xdd\x20")
+}
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\xae\x10")
+}
+instructionEnd := len(g.asm.code)
+if fpuStateMode != 1 {
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+typeBytes := []byte{byte(fpuStateMode), 0, 0, 0}
+if fpuStateMode == 17 {
+typeBytes = []byte{17, 0, 242, 255}
+}
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0)
+g.asm.objectDataValues = append(g.asm.objectDataValues, typeBytes...)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
+}
+return 1
+}
+if e.argCount == 3 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFDIVBug") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+var operands [3]int
+for i := 0; i < 3; i++ {
+operands[i] = renvoAddUnnamedLocal(g, renvoTypeInt)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, operands[i])
+}
+renvoAsmEmitText(&g.asm, "\xdb\xe3")
+renvoAsmLoadPrimaryStack(&g.asm, operands[1])
+renvoAsmEmitText(&g.asm, "\xdd\x00")
+renvoAsmLoadPrimaryStack(&g.asm, operands[2])
+renvoAsmEmitText(&g.asm, "\xdc\x30\xdc\x08")
+renvoAsmLoadPrimaryStack(&g.asm, operands[1])
+renvoAsmEmitText(&g.asm, "\xdd\x00\xde\xe1")
+renvoAsmLoadPrimaryStack(&g.asm, operands[0])
+renvoAsmEmitText(&g.asm, "\xdb\x18\x9b\xdb\xe3")
+return 1
+}
+userLoadPrefix := "renvo_runtime_CUserLoad"
+if e.argCount == 1 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userLoadPrefix) &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+at := fn.nameStart + len(userLoadPrefix)
+bits := 0
+for at < fn.nameEnd {
+ch := renvo_runtime_UnsafeByteAt(g.prog.src, at)
+if ch < '0' || ch > '9' {
+break
+}
+bits = bits*10 + int(ch-'0')
+at++
+}
+if at >= fn.nameEnd || renvo_runtime_UnsafeByteAt(g.prog.src, at) != '_' ||
+bits != 8 && bits != 16 && bits != 32 && bits != 64 ||
+!renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+labelStart := at + 1
+if labelStart >= fn.nameEnd {
+return 0
+}
+loadStart := len(g.asm.code)
+if bits == 8 {
+renvoAsmEmitText(&g.asm, "\x0f\xb6\x00")
+} else if bits == 16 {
+renvoAsmEmitText(&g.asm, "\x0f\xb7\x00")
+} else if bits == 32 {
+renvoAsmEmitText(&g.asm, "\x8b\x00")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x00")
+}
+fixupLabel := renvoFindOrCreateGotoLabel(g, labelStart, fn.nameEnd)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: loadStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeLabel: fixupLabel + 1})
+return 1
+}
+userStorePrefix := "renvo_runtime_CUserStore"
+if e.argCount == 2 && renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, userStorePrefix) &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+at := fn.nameStart + len(userStorePrefix)
+bits := 0
+for at < fn.nameEnd {
+ch := renvo_runtime_UnsafeByteAt(g.prog.src, at)
+if ch < '0' || ch > '9' {
+break
+}
+bits = bits*10 + int(ch-'0')
+at++
+}
+if at >= fn.nameEnd || renvo_runtime_UnsafeByteAt(g.prog.src, at) != '_' ||
+bits != 8 && bits != 16 && bits != 32 && bits != 64 {
+return 0
+}
+labelStart := at + 1
+if labelStart >= fn.nameEnd {
+return 0
+}
+address := renvoAddUnnamedLocal(g, renvoTypeInt)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+return 0
+}
+renvoAsmStorePrimaryStack(&g.asm, address)
+if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+return 0
+}
+renvoAsmLoadSecondaryStack(&g.asm, address)
+storeStart := len(g.asm.code)
+if bits == 8 {
+renvoAsmEmitText(&g.asm, "\x88\x02")
+} else if bits == 16 {
+renvoAsmEmitText(&g.asm, "\x66\x89\x02")
+} else if bits == 32 {
+renvoAsmEmitText(&g.asm, "\x89\x02")
+} else {
+renvoAsmEmitText(&g.asm, "\x48\x89\x02")
+}
+fixupLabel := renvoFindOrCreateGotoLabel(g, labelStart, fn.nameEnd)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: storeStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeLabel: fixupLabel + 1})
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CDisableInterrupts") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmit8(&g.asm, 0xfa)
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CEnableInterrupts") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmit8(&g.asm, 0xfb)
+return 1
+}
+if e.argCount == 1 &&
+(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGDT") ||
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadIDT")) &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadGDT") {
+renvoAsmEmitText(&g.asm, "\x0f\x01\x10")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\x01\x18")
+}
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadTR") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x00\xd8")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreTR") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x00\xc8")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreLDT") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x00\xc0")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CLoadLDT") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x00\xd0")
+return 1
+}
+if e.argCount == 1 &&
+(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreGDT") ||
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreIDT")) &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CStoreGDT") {
+renvoAsmEmitText(&g.asm, "\x0f\x01\x00")
+} else {
+renvoAsmEmitText(&g.asm, "\x0f\x01\x08")
+}
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInitFPU") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\xdb\xe3")
+renvoAsmPrimaryImm(&g.asm, 0x037f0000)
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFPUPrepare") &&
+g.c.renvoTargetArch == renvoArchAmd64 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\xdb\xe2\x0f\x77\xdb\x00")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFPUWait___ex_table") &&
+g.c.objectFile && g.c.renvoTargetArch == renvoArchAmd64 {
+instructionStart := len(g.asm.code)
+renvoAsmEmit8(&g.asm, 0x9b)
+instructionEnd := len(g.asm.code)
+sectionStart, sectionEnd := renvoAsmCopyObjectText(&g.asm, []byte("__ex_table"), 0, len("__ex_table"))
+offset := renvoAlignValue(g.asm.bssSize, 4)
+g.asm.bssSize = offset + 12
+valueStart := len(g.asm.objectDataValues)
+g.asm.objectDataValues = append(g.asm.objectDataValues, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
+g.asm.objectData = append(g.asm.objectData, renvoObjectDataSymbol{
+sectionStart: sectionStart, sectionEnd: sectionEnd, offset: offset, size: 12, storageSize: 12,
+alignment: 4, initialized: 1, valueStart: valueStart, valueEnd: len(g.asm.objectDataValues), kind: renvoObjectDeclVariable})
+g.asm.objectDataRelocs = append(g.asm.objectDataRelocs,
+renvoObjectDataRelocation{offset: offset, typ: 2, codeTarget: instructionStart + 1},
+renvoObjectDataRelocation{offset: offset + 4, typ: 2, codeTarget: instructionEnd + 1})
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFlags") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x9c\x58")
+return 1
+}
+if e.argCount == 1 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFlags") &&
+(g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x50\x9d")
+return 1
+}
+if e.argCount == 0 {
+debug := -1
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug0") {
+debug = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug1") {
+debug = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug2") {
+debug = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug3") {
+debug = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug6") {
+debug = 6
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadDebug7") {
+debug = 7
+}
+if debug >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x21")
+renvoAsmEmit8(&g.asm, 0xc0+debug*8)
+return 1
+}
+control := -1
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl0") {
+control = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl2") {
+control = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl3") {
+control = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadControl4") {
+control = 4
+}
+if control >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) {
+renvoAsmEmitText(&g.asm, "\x0f\x20")
+renvoAsmEmit8(&g.asm, 0xc0+control*8)
+return 1
+}
+}
+if e.argCount == 1 {
+debug := -1
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug0") {
+debug = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug1") {
+debug = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug2") {
+debug = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug3") {
+debug = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug6") {
+debug = 6
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteDebug7") {
+debug = 7
+}
+if debug >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x23")
+renvoAsmEmit8(&g.asm, 0xc0+debug*8)
+return 1
+}
+control := -1
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl0") {
+control = 0
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl2") {
+control = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl3") {
+control = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteControl4") {
+control = 4
+}
+if control >= 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386) &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\x0f\x22")
+renvoAsmEmit8(&g.asm, 0xc0+control*8)
+return 1
+}
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadStackPointer") {
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x48\x89\xe0")
+return 1
+}
+if g.c.renvoTargetArch == renvoArch386 {
+renvoAsmEmitText(&g.asm, "\x89\xe0")
+return 1
+}
+return 0
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFrameAddress") {
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x48\x89\xe8")
+return 1
+}
+if g.c.renvoTargetArch == renvoArch386 {
+renvoAsmEmitText(&g.asm, "\x89\xe8")
+return 1
+}
+return 0
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CCallerFrameAddress") &&
+g.c.renvoTargetArch == renvoArch386 {
+renvoAsmEmitText(&g.asm, "\x8b\x45\x00")
+return 1
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReturnAddress") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAsmEmitText(&g.asm, "\x48\x8b\x45\x08")
+return 1
+}
+baseRegister := 0
+if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadFSBase") {
+baseRegister = 1
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadGSBase") {
+baseRegister = 2
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteFSBase") {
+baseRegister = 3
+} else if renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CWriteGSBase") {
+baseRegister = 4
+}
+if baseRegister != 0 && g.c.renvoTargetArch == renvoArchAmd64 {
+if baseRegister <= 2 && e.argCount == 0 {
+renvoAsmEmitText(&g.asm, "\xf3\x48\x0f\xae")
+renvoAsmEmit8(&g.asm, 0xc0+(baseRegister-1)*8)
+return 1
+}
+if baseRegister >= 3 && e.argCount == 1 &&
+renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+renvoAsmEmitText(&g.asm, "\xf3\x48\x0f\xae")
+renvoAsmEmit8(&g.asm, 0xd0+(baseRegister-3)*8)
+return 1
+}
+return 0
+}
+if e.argCount == 0 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadInstructionPointer") &&
+g.c.renvoTargetArch == renvoArchAmd64 {
+
+
+renvoAsmEmitText(&g.asm, "\x48\x8d\x05\x00\x00\x00\x00")
+return 1
+}
+if e.argCount == 3 && renvoIsHostedObject386(g.c) &&
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInterruptWithStack") {
+number := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
+renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), 0)
+vector := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
+renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), 0)
+if !number.ok || !vector.ok || vector.value < 0 || vector.value > 255 ||
+!renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+2)) {
+return 0
+}
+
+
+
+renvoAsmEmitText(&g.asm, "\x89\xda\x89\xe3\x89\xc1\x89\xcc\xb8")
+renvoAsmEmit32(&g.asm, number.value)
+renvoAsmEmit8(&g.asm, 0xcd)
+renvoAsmEmit8(&g.asm, vector.value)
+renvoAsmEmitText(&g.asm, "\x89\xdc\x89\xd3")
+return 1
+}
+return -1
+
+}
+if g.c.renvoTargetArch == renvoArchAarch64 || g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchWasm32 {
+
+if e.argCount == 0 &&
+(renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CReadStackPointer") ||
+renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CFrameAddress")) {
+return 0
+}
+return -1
+
+}
+g.asm.patchFailed = true
+return 0
 }
 
 func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
@@ -40585,7 +40632,19 @@ return
 
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
-renvoAarch64CompilerPopCallWord0(a)
+
+renvoNonNil(a)
+
+
+if len(a.code) >= 4 && a.lastPrimaryStoreEnd == -(len(a.code)*32+2) {
+a.code = a.code[:len(a.code)-4]
+a.lastPrimaryStoreEnd = -1
+a.lastPrimaryLoad = 0
+renvoAarch64AsmMovRegReg(a, 3, 0)
+return
+}
+renvoAarch64AsmPopRdi(a)
+
 return
 
 }
@@ -42386,6 +42445,8 @@ return 1
 // source: backend/compiler_amd64_impl.go
 
 
+
+
 const renvoAmd64ELFCodeOffset = 0xb0
 const renvoHostedAmd64ArgsBSSSize = renvoLinuxAmd64ArgsBSSSize
 const renvoHostedAmd64ArgsBSSAlignment = renvoLinuxAmd64ArgsBSSAlignment
@@ -43605,6 +43666,10 @@ renvoAmd64IEEECompareFlagsResult(a, c0, c1)
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -43996,6 +44061,8 @@ renvoPut32At(out.code, at, target+addend-(at+4))
 }
 
 // source: backend/compiler_386_impl.go
+
+
 
 
 const renvo386ELFCodeOffset = 0x74
@@ -45568,6 +45635,10 @@ renvoAsmEmit3(a, 0x0f, second, 0xc2)
 renvoAsmEmit2(a, int(combine), 0xd0)
 }
 }
+
+
+
+
 
 
 
@@ -48043,19 +48114,13 @@ renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
 
 
 
-func renvoAarch64CompilerPopCallWord0(a *renvoAsm) {
-renvoNonNil(a)
 
 
-if len(a.code) >= 4 && a.lastPrimaryStoreEnd == -(len(a.code)*32+2) {
-a.code = a.code[:len(a.code)-4]
-a.lastPrimaryStoreEnd = -1
-a.lastPrimaryLoad = 0
-renvoAarch64AsmMovRegReg(a, 3, 0)
-return
-}
-renvoAarch64AsmPopRdi(a)
-}
+
+
+
+
+
 
 
 
@@ -49455,6 +49520,12 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
 
 
 
@@ -52524,6 +52595,12 @@ return nil, nil, false
 }
 return headers, tails, true
 }
+
+
+
+
+
+
 
 
 
