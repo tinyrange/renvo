@@ -965,6 +965,16 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		dereference_secondary = renvoAmd64CompilerDereferenceSecondary
+		secondary_frame_address = renvoAmd64CompilerSecondaryFrameAddress
+		local_word_compare_jump = renvoAmd64CompilerLocalWordCompareJump
+		register_ieee_comparison = renvoAmd64CompilerRegisterIEEEComparison
+		immediate_word_comparison = renvoAmd64CompilerImmediateWordComparison
+		compare_word_operands = renvoAmd64CompilerCompareWordOperands
+		object_external_call = renvoAmd64CompilerObjectExternalCall
+		checked_index_address = renvoAmd64CompilerCheckedIndexAddress
+		increment_global_word = renvoAmd64CompilerIncrementGlobalWord
+		increment_local_word = renvoAmd64CompilerIncrementLocalWord
 		bounded_narrow_unsigned_shift = renvoAmd64CompilerBoundedNarrowUnsignedShift
 		bounded_wide_word_shift = renvoAmd64CompilerBoundedWideWordShift
 		optimized_native_binary_expr = renvoAmd64CompilerOptimizedNativeBinaryExpr
@@ -3188,5 +3198,119 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
 		renvoEmitBounded386UnsignedRightShift(g, tok)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
+		a := &g.asm
+		renvoAsmEmit16(a, 0xff48)
+		if localOffset >= 0 && localOffset <= 128 {
+			if inc {
+				renvoAsmEmit8(a, 0x45)
+			} else {
+				renvoAsmEmit8(a, 0x4d)
+			}
+			renvoAsmEmit8(a, -localOffset)
+		} else {
+			if inc {
+				renvoAsmEmit8(a, 0x85)
+			} else {
+				renvoAsmEmit8(a, 0x8d)
+			}
+			renvoAsmEmit32(a, -localOffset)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
+		a := &g.asm
+		if inc {
+			renvoAsmEmit24(a, 0x05ff48)
+		} else {
+			renvoAsmEmit24(a, 0x0dff48)
+		}
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, globalOffset, renvoAbsBssReloc)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCheckedIndexAddress(g *renvoLinearGen, elemSize int) {
+		a := &g.asm
+		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+			fault := renvoEnsureUncaughtRuntimeFaultHelper(g)
+			renvoAsmEmit24(a, 0xd13948)
+			renvoAmd64AsmJccLabel(a, 0x83, fault)
+			if elemSize == 8 {
+				renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, 3)
+			} else if elemSize == 72 {
+				renvoAsmEmit4(a, 0x48, 0x6b, 0xc9, 72)
+			}
+			renvoAsmEmit24(a, 0xc80148)
+		} else {
+			renvoAmd64CallIndexAddressHelper(a, elemSize)
+		}
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectExternalCall(g *renvoLinearGen, fn *renvoFuncInfo) bool {
+		if !g.c.objectFile {
+			return false
+		}
+		externalID := renvoAsmAddExternalImportRange(&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+		if externalID < 0 {
+			return false
+		}
+		renvoAsmEmit8(&g.asm, 0xe8)
+		relocationAt := len(g.asm.code)
+		renvoAsmEmit32(&g.asm, 0)
+		renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCompareWordOperands(g *renvoLinearGen, unsigned bool) bool {
+		renvoAsmEmit24(&g.asm, 0xc13948)
+		return unsigned
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerImmediateWordComparison(g *renvoLinearGen, unsigned bool) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerRegisterIEEEComparison(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoAsmStackMem(&g.asm, left, 0x3948, 0x45, 0x85)
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
+		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerDereferenceSecondary(g *renvoLinearGen) {
+		renvoAsmEmit24(&g.asm, 0x128b48)
 	}
 }
