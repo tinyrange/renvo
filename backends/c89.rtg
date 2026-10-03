@@ -612,6 +612,7 @@ go backend {
 }
 
 arch c89vm32 {
+	compiler_family = structured32
 	alias = c89vm32
 	endian = little
 	word_bits = 32
@@ -727,6 +728,7 @@ runtime c89_freestanding {
 }
 
 format c89_hosted32_translation_unit {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = "c-source"
@@ -735,6 +737,7 @@ format c89_hosted32_translation_unit {
 }
 
 format c89_hosted32_auto_translation_unit {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = "c-source"
@@ -743,6 +746,7 @@ format c89_hosted32_auto_translation_unit {
 }
 
 format c89_freestanding32_translation_unit {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = "c-source"

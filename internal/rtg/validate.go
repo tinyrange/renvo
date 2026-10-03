@@ -10,6 +10,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		declaration := document.Declarations[i]
 		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
+			diagnostics = append(diagnostics, validateCompilerFamily(document, declaration)...)
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
 			diagnostics = append(diagnostics, validateCompilerBindings(document, declaration)...)
 			diagnostics = append(diagnostics, validateArchitectureSequences(document, declaration, goNames)...)
@@ -19,6 +20,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		} else if declaration.Kind == DeclRuntime {
 			diagnostics = append(diagnostics, validateRuntime(document, declaration)...)
 		} else if declaration.Kind == DeclFormat {
+			diagnostics = append(diagnostics, validateCompilerFamily(document, declaration)...)
 			diagnostics = append(diagnostics, validateFormat(document, declaration)...)
 		}
 	}
@@ -440,7 +442,7 @@ func declarationOwnsNamedAssignment(declaration Declaration, name string) bool {
 func declarationAllowedFields(kind string) []string {
 	if kind == DeclArch {
 		return []string{
-			"alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
+			"compiler_family", "alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
 			"stack_word_bytes", "stack_alignment", "unaligned_memory", "patch_relocations",
 			"reject", "compiler_selector",
 		}
@@ -470,7 +472,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclFormat {
 		return []string{
-			"byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
+			"compiler_family", "byte_order", "address_bits", "file_alignment", "section_alignment", "page_size",
 			"image_base", "image_base_high", "machine", "kind", "cpu", "subsystem", "entry", "strip",
 			"image_variant", "osabi",
 			"type", "headers_size", "text_rva", "sections", "code_offset", "image",

@@ -3634,6 +3634,7 @@ go backend {
 # The compiler's direct emitter produces Renvo VM32 instructions. Wasm is a
 # target format built from that instruction stream, not the VM's native ISA.
 arch vm32 {
+	compiler_family = structured32
 	alias = vm32
 	endian = little
 	word_bits = 32
@@ -4080,6 +4081,7 @@ runtime vm {
 }
 
 format wasm_module {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = wasm
@@ -4088,6 +4090,7 @@ format wasm_module {
 }
 
 format rnvb_v1 {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = rnvm
@@ -4096,6 +4099,7 @@ format rnvb_v1 {
 }
 
 format browser_wasm {
+	compiler_family = structured32
 	byte_order = little
 	address_bits = 32
 	kind = "html-wasm"

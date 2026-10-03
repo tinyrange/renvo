@@ -434,3 +434,16 @@ omitted-field default: 0, 1, 2, 64, 512) or `open_flag_layout = bsd` (0, 1, 2,
 Darwin and the BSD entrypoints declare the latter explicitly. Unknown values,
 blocks, extra values, and duplicate assignments are rejected before generation;
 renaming a runtime, target, or OS cannot change its declared bits.
+
+### Compiler-family composition
+
+Architecture and output-format declarations may set `compiler_family` to
+`native_v1` (the default) or `structured32`. A target's `family` must match
+its architecture and every selected output, including an optional object
+format. `structured32` additionally requires 32-bit words and pointers.
+These are explicit lowering contracts: architecture names, aliases,
+`frontend_arch`, and output-kind names neither enable nor reject a family.
+Malformed, unknown, duplicate, and incompatible contracts fail resolution
+before source generation. The bundled Wasm/VM machine and its three image
+formats explicitly declare their structured contract, as do the external JVM,
+Android, and C89 definitions.
