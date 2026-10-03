@@ -634,6 +634,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		file_offset_sentinel = renvoAmd64CompilerFileOffsetSentinel
+		static_call_binding = renvoAmd64CompilerStaticCallBinding
 		linked_static_import = renvoAmd64CompilerLinkedStaticImport
 		finish_static_call_shape = renvoAmd64CompilerFinishStaticCallShape
 		static_call_policy = renvoAmd64CompilerStaticCallPolicy
@@ -3492,6 +3494,12 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerOpenFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoWinAmd64EmitRuntimeOpen(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoAsmCopyPrimaryToCallWord0(a)
 			renvoAsmPopCallWord1(a)
@@ -3516,6 +3524,11 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerCloseFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoAsmEmit24(a, 0xf98948)
+			renvoWinAmd64EmitRuntimeClose(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoDarwinArm64DefinitionClose(a)
 			return true
@@ -3528,6 +3541,11 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerChmodFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoAsmEmit24(a, 0xf98948)
+			renvoWinAmd64EmitRuntimeChmod(a)
+			return true
+		}
 		if targetIsDarwin(a.c.renvoTargetOS) {
 			renvoDarwinArm64DefinitionChmod(a)
 			return true
@@ -3550,7 +3568,23 @@ go compiler {
 }
 
 go compiler {
-	func renvoAmd64CompilerReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
+	func renvoAmd64CompilerReadWriteFile(g *renvoLinearGen, operation int, hasOffset bool) bool {
+		if g.c.renvoTargetOS == renvoOSWindows {
+			a := &g.asm
+			label := renvoWinAmd64EmitReadWriteHelper(g, operation == RTGRuntimeWrite)
+			renvoAsmCopyPrimaryToCallWord1(a)
+			renvoAsmEmit24(a, 0xca8948)
+			renvoAsmPopTertiary(a)
+			renvoAsmPopCallWord0(a)
+			renvoAsmCallLabel(a, label)
+			return true
+		}
+		a := &g.asm
+		renvoAsmPrepareReadWriteBuf(a)
+		if hasOffset {
+			renvoAsmPopReadWriteOffset(a)
+		}
+		renvoAsmPopCallWord0(a)
 		isWrite := operation == RTGRuntimeWrite
 		number := renvoLinuxSysReadSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
 		if hasOffset {
@@ -4783,5 +4817,26 @@ go compiler {
 			return -1
 		}
 		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+		if targetIsKernelModule(c) {
+			if renvoBytesEqualText(src, libraryStart, libraryEnd, "kernel") {
+				return 1
+			}
+			return 0
+		}
+		if c.renvoTargetOS == renvoOSWindows && libraryStart < libraryEnd && renvo_runtime_UnsafeByteAt(src, libraryStart) != '/' {
+			return 1
+		}
+		return -1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
+		return c.renvoTargetOS == renvoOSWindows
 	}
 }

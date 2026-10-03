@@ -189,8 +189,10 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, o
 	if offConst.ok && offConst.value < 0 {
 		offsetRead = false
 	}
-	if offsetRead {
-		if offConst.ok {
+	if offsetRead || renvoFileOffsetSentinel(g.c) {
+		if !offsetRead {
+			renvoAsmPrimaryImm(a, -1)
+		} else if offConst.ok {
 			renvoAsmPrimaryImm(a, offConst.value)
 		} else {
 			if !renvoEmitIntExpr(g, ep, offIndex) {
@@ -202,12 +204,7 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, o
 	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
 		return false
 	}
-	renvoAsmPrepareReadWriteBuf(a)
-	if offsetRead {
-		renvoAsmPopReadWriteOffset(a)
-	}
-	renvoAsmPopCallWord0(a)
-	return renvoAsmReadWriteFile(a, operation, offsetRead)
+	return renvoFinishFileReadWrite(g, operation, offsetRead)
 }
 
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
@@ -300,21 +297,7 @@ func renvoEmitDescriptorFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int,
 
 func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
-	if renvoPreparedBackendActive != 0 {
-		return renvoEmitPreparedTargetRuntime(g, ep, idx, callee)
-	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		if callee == renvoIdentRead || callee == renvoIdentWrite {
-			return renvoEmitWindowsReadWrite(g, ep, idx, callee == renvoIdentWrite)
-		}
-		if callee == renvoIdentOpen {
-			return renvoEmitWindowsOpen(g, ep, idx)
-		}
-		if callee == renvoIdentClose {
-			return renvoEmitWindowsClose(g, ep, idx)
-		}
-		return renvoEmitWindowsChmod(g, ep, idx)
-	}
+
 	if callee == renvoIdentRead || callee == renvoIdentWrite {
 		operation := RTGRuntimeRead
 		if callee == renvoIdentWrite {
@@ -328,22 +311,6 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 	return renvoEmitDescriptorFileCall(g, ep, idx, callee)
 }
 
-func renvoEmitPreparedTargetRuntime(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, callee int,
-) bool {
-	renvoNonNil(g, ep)
-	if callee == renvoIdentRead || callee == renvoIdentWrite {
-		operation := RTGRuntimeRead
-		if callee == renvoIdentWrite {
-			operation = RTGRuntimeWrite
-		}
-		return renvoEmitBuiltinReadWrite(g, ep, idx, operation)
-	}
-	if callee == renvoIdentOpen {
-		return renvoEmitOpenFileCall(g, ep, idx)
-	}
-	return renvoEmitDescriptorFileCall(g, ep, idx, callee)
-}
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	return renvoAsmExitStatus(&g.asm)
 }
@@ -625,53 +592,16 @@ func renvoObjectCallVectorMask(g *renvoLinearGen, fn *renvoFuncInfo, wordCount i
 // the call was emitted.
 func renvoEmitTargetStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) int {
 	renvoNonNil(g, fn)
-	if g.c.objectFile {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
+	if !g.c.objectFile {
+		binding := renvoTargetStaticCallBinding(g.c, g.prog.src, fn.linkDLLStart, fn.linkDLLEnd)
+		if binding <= 0 {
+			return binding
 		}
-		return 0
 	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
+	if renvoEmitLinkStaticCall(g, fn, wordCount) {
+		return 1
 	}
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
-		if !renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel") {
-			return 0
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if renvoPreparedBackendActive != 0 {
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) != '/' {
-			return -1
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	if targetIsWindows(g.c.renvoTargetOS) {
-		if renvo_runtime_UnsafeByteAt(g.prog.src, fn.linkDLLStart) == '/' {
-			return -1
-		}
-		if renvoEmitLinkStaticCall(g, fn, wordCount) {
-			return 1
-		}
-		return 0
-	}
-	return -1
+	return 0
 }
 
 func renvoAsmAddPreparedStaticImport(

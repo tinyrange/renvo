@@ -2138,6 +2138,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoFileOffsetSentinel(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoTargetStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+renvoNonNil(c)
+return 1
+}
+
 func renvoAsmAddLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
 renvoNonNil(a)
 if targetIsKernelModule(a.c) {
@@ -2966,8 +2976,14 @@ if right {
 return true
 }
 
-func renvoAsmReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
-renvoNonNil(a)
+func renvoFinishFileReadWrite(g *renvoLinearGen, operation int, hasOffset bool) bool {
+renvoNonNil(g)
+a := &g.asm
+renvoAsmPrepareReadWriteBuf(a)
+if hasOffset {
+	renvoAsmPopReadWriteOffset(a)
+}
+renvoAsmPopCallWord0(a)
 if hasOffset {
 	operation += RTGRuntimeReadAt - RTGRuntimeRead
 }

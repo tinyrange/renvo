@@ -100,6 +100,8 @@ func (op compilerEmitterOperation) failBody() string {
 // Shared comparisons use semantic predicates. Legacy setcc operations remain
 // private compatibility inputs for physical recipes, never shared lowering.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "file_offset_sentinel", Suffix: "FileOffsetSentinel", Function: "renvoFileOffsetSentinel", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
+	{Name: "static_call_binding", Suffix: "StaticCallBinding", Function: "renvoTargetStaticCallBinding", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{{"src", "[]byte"}, {"libraryStart", "int"}, {"libraryEnd", "int"}}, Prepared: "return 1"},
 	{Name: "linked_static_import", Suffix: "LinkedStaticImport", Function: "renvoAsmAddLinkedStaticImport", Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{{"libraryStart", "int"}, {"libraryEnd", "int"}, {"nameStart", "int"}, {"nameEnd", "int"}, {"src", "[]byte"}}, Prepared: "if targetIsKernelModule(a.c) {\nif !renvoBytesEqualText(src, libraryStart, libraryEnd, \"kernel\") { return -1 }\nreturn renvoAsmAddKernelImport(a, src, nameStart, nameEnd)\n}\nreturn renvoAsmAddPreparedStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)"},
 	{Name: "finish_static_call_shape", Suffix: "FinishStaticCallShape", Function: "renvoAsmFinishStaticCallShape", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"integerCount", "int"}, {"floatCount", "int"}, {"allInteger", "bool"}, {"resultRegister", "int"}, {"resultKind", "int"}}, Prepared: "if renvoRTGStaticCallPolicy != renvoStaticCallSplitRegisters { return false }\nif !allInteger \u0026\u0026 (integerCount \u003e 8 || floatCount \u003e 8) { return false }\nif resultKind != renvoStaticCallInteger \u0026\u0026 (resultRegister \u003c 0 || resultRegister \u003e= 8) { return false }\nif resultKind == renvoStaticCallFloat32 { resultRegister += 8 }\na.staticCallResultFloat = resultRegister\nreturn true"},
 	{Name: "static_call_policy", Suffix: "StaticCallPolicy", Function: "renvoTargetStaticCallPolicy", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "renvoStaticCallUnavailable", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGStaticCallPolicy"},
@@ -236,7 +238,7 @@ var compilerEmitterOperations = []compilerEmitterOperation{
 	{Name: "unsigned_word_order_result", Suffix: "UnsignedWordOrderResult", Function: "renvoEmitUnsignedWordOrderResult", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"op0", "byte"}, {"op1", "byte"}, {"opLen", "int"}, {"kind", "int"}}, Prepared: "if g.c.renvoNativeIntSize != 8 \u0026\u0026 g.c.renvoNativeIntSize != 4 {\n\treturn false\n}\nif !renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {\n\treturn false\n}\nrenvoAsmNormalizePrimaryForKind(\u0026g.asm, kind)\nreturn true"},
 	{Name: "word_constant_immediate", Suffix: "WordConstantImmediate", Function: "renvoAsmWordConstantImmediate", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"kind", "int"}, {"value", "int"}}, Prepared: "if kind == renvoTypeInt64 || kind == renvoTypeUint64 {\n\treturn false\n}\nrenvoAsmPrimaryImm(a, value)\nreturn true"},
 	{Name: "bounded_word_shift", Suffix: "BoundedWordShift", Function: "renvoEmitBoundedWordShift", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"tok", "int"}, {"right", "bool"}, {"leftUnsigned", "bool"}, {"resultUnsigned", "bool"}}, Prepared: "if right {\n\trenvoRTGEmitBoundedVariableShift(\u0026g.asm, RTGShiftRight, !leftUnsigned)\n} else {\n\trenvoRTGEmitBoundedVariableShift(\u0026g.asm, RTGShiftLeft, false)\n}\nreturn true"},
-	{Name: "read_write_file", Suffix: "ReadWriteFile", Function: "renvoAsmReadWriteFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"operation", "int"}, {"hasOffset", "bool"}}, Prepared: "if hasOffset {\n\toperation += RTGRuntimeReadAt - RTGRuntimeRead\n}\nreturn renvoRTGEmitRuntimeOperation(a, operation)"},
+	{Name: "read_write_file", Suffix: "ReadWriteFile", Function: "renvoFinishFileReadWrite", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"operation", "int"}, {"hasOffset", "bool"}}, Prepared: "a := \u0026g.asm\nrenvoAsmPrepareReadWriteBuf(a)\nif hasOffset {\n\trenvoAsmPopReadWriteOffset(a)\n}\nrenvoAsmPopCallWord0(a)\nif hasOffset {\n\toperation += RTGRuntimeReadAt - RTGRuntimeRead\n}\nreturn renvoRTGEmitRuntimeOperation(a, operation)"},
 	{Name: "pop_read_write_offset", Suffix: "PopReadWriteOffset", Function: "renvoAsmPopReadWriteOffset", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGAsmPopRegister(a, renvoRTGCallWord3)"},
 	{Name: "chmod_file", Suffix: "ChmodFile", Function: "renvoAsmChmodFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)"},
 	{Name: "close_file", Suffix: "CloseFile", Function: "renvoAsmCloseFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)"},
@@ -739,9 +741,14 @@ func compilerProjectedPrivateHooks(document Document) []string {
 			}
 		}
 	}
+	// Candidate membership is queried for every source token. Keep a sorted
+	// local index instead of scanning every operation for punctuation, literals,
+	// and unrelated identifiers. Retain the original candidate order below.
+	candidateIndex := append([]string(nil), candidates...)
+	sortStrings(candidateIndex)
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		referenced = compilerOtherHookReferences(referenced, candidates, declaration.Statements)
+		referenced = compilerOtherHookReferences(referenced, candidateIndex, declaration.Statements)
 		if declaration.Kind != DeclGo {
 			continue
 		}
@@ -752,7 +759,7 @@ func compilerProjectedPrivateHooks(document Document) []string {
 		}
 		for j := 0; j < len(file.Tokens); j++ {
 			name := string(syntax.TokenText(source, file.Tokens[j]))
-			if stringIndex(candidates, name) < 0 || stringIndex(referenced, name) >= 0 {
+			if !compilerHookIndexContains(candidateIndex, name) || stringIndex(referenced, name) >= 0 {
 				continue
 			}
 			if j > 0 && string(syntax.TokenText(source, file.Tokens[j-1])) == "func" {
@@ -790,6 +797,21 @@ func appendCompilerBlockWithoutPrivateHooks(out []byte, source []byte, private [
 	return append(out, wrapped[start:]...)
 }
 
+// The input is a sorted local membership index, not a declaration-order list.
+func compilerHookIndexContains(names []string, name string) bool {
+	low := 0
+	high := len(names)
+	for low < high {
+		middle := low + (high-low)/2
+		if names[middle] < name {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	return low < len(names) && names[low] == name
+}
+
 func compilerOtherHookReferences(referenced []string, candidates []string, statements []Statement) []string {
 	for i := 0; i < len(statements); i++ {
 		statement := statements[i]
@@ -798,7 +820,7 @@ func compilerOtherHookReferences(referenced []string, candidates []string, state
 		}
 		for j := 0; j < len(statement.Tokens); j++ {
 			name := statement.Tokens[j]
-			if stringIndex(candidates, name) >= 0 && stringIndex(referenced, name) < 0 {
+			if compilerHookIndexContains(candidates, name) && stringIndex(referenced, name) < 0 {
 				referenced = append(referenced, name)
 			}
 		}
