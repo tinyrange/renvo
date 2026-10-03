@@ -771,31 +771,31 @@ go compiler {
 	func renvoArmCompilerCopyPrimaryToSecondary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe1a01000)
 	}
-	
+
 	func renvoArmCompilerCopyPrimaryToTertiary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe1a02000)
 	}
-	
+
 	func renvoArmCompilerCopySecondaryToTertiary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe1a02001)
 	}
-	
+
 	func renvoArmCompilerCopyTertiaryToPrimary(a *renvoAsm) {
 		renvoArmAsmMovRegReg(a, 0, 2)
 	}
-	
+
 	func renvoArmCompilerPushPrimary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe52d0004)
 	}
-	
+
 	func renvoArmCompilerPushSecondary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe52d1004)
 	}
-	
+
 	func renvoArmCompilerPushTertiary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe52d2004)
 	}
-	
+
 	func renvoArmCompilerPopPrimary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xe49d0004)
 	}
@@ -811,72 +811,71 @@ go compiler {
 	func renvoArmCompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
 		renvoArmAsmStoreAlMemRdxRcx1(a)
 	}
-	
+
 	func renvoArmCompilerIncTertiary(a *renvoAsm) {
 		renvoArmAsmIncRcx(a)
 	}
-	
+
 	func renvoArmCompilerIncPrimary(a *renvoAsm) {
 		renvoArmAsmIncRax(a)
 	}
-	
+
 	func renvoArmCompilerRet(a *renvoAsm) {
 		renvoArmAsmRet(a)
 	}
-	
+
 	func renvoArmCompilerLeave(a *renvoAsm) {
 		renvoArmAsmLeave(a)
 	}
-	
+
 	func renvoArmCompilerCopyPrimaryToCallWord0(a *renvoAsm) {
 		renvoArmAsmMovRdiRax(a)
 	}
-	
+
 	func renvoArmCompilerCopySecondaryToPrimary(a *renvoAsm) {
 		renvoArmAsmMovRaxRdx(a)
 	}
-	
+
 	func renvoArmCompilerCopyPrimaryToCallWord1(a *renvoAsm) {
 		renvoArmAsmMovRsiRax(a)
 	}
-	
+
 	func renvoArmCompilerAddSecondaryTertiary(a *renvoAsm) {
 		renvoArmAsmAddRdxRcx(a)
 	}
-	
+
 	func renvoArmCompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
 		renvoArmAsmLoadByteRaxIndexRcx(a)
 	}
-	
+
 	func renvoArmCompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
 		renvoArmAsmStoreRaxMemRdxRcx8(a)
 	}
-	
+
 	func renvoArmCompilerIncMemSecondary(a *renvoAsm) {
 		renvoArmAsmIncMemRdx(a)
 	}
-	
+
 	func renvoArmCompilerDecMemSecondary(a *renvoAsm) {
 		renvoArmAsmDecMemRdx(a)
 	}
-	
+
 	func renvoArmCompilerBoolNotPrimary(a *renvoAsm) {
 		renvoArmAsmBoolNotRax(a)
 	}
-	
+
 	func renvoArmCompilerBitwiseNotPrimary(a *renvoAsm) {
 		renvoArmAsmEmit(a, 0xe1e00000)
 	}
-	
+
 	func renvoArmCompilerAddPrimaryTertiary(a *renvoAsm) {
 		renvoArmAsmAddRaxRcx(a)
 	}
-	
+
 	func renvoArmCompilerSubPrimaryTertiary(a *renvoAsm) {
 		renvoArmAsmSubRaxRcx(a)
 	}
 }
-
 
 go compiler {
 	func renvoArmCompilerPushImm(a *renvoAsm, imm int) {
@@ -978,7 +977,6 @@ go compiler {
 		renvoArmAsmJnzLabel(a, label)
 	}
 }
-
 
 go compiler {
 	func renvoArmCompilerSecondaryImm(a *renvoAsm, imm int) {

@@ -4225,32 +4225,32 @@ go compiler {
 	func renvoWasm32CompilerCopyPrimaryToSecondary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerCopyPrimaryToTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerCopySecondaryToTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32CompilerCopyTertiaryToPrimary(a *renvoAsm) {
 		renvoAsmPushTertiary(a)
 		renvoAsmPopPrimary(a)
 	}
-	
+
 	func renvoWasm32CompilerPushPrimary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerPushSecondary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32CompilerPushTertiary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32CompilerPopPrimary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
 	}
@@ -4266,75 +4266,74 @@ go compiler {
 	func renvoWasm32CompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 1, 0, 1)
 	}
-	
+
 	func renvoWasm32CompilerIncTertiary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32CompilerIncPrimary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerRet(a *renvoAsm) {
 		renvoAsmEmit8(a, renvoWasm32OpRet)
 	}
-	
+
 	func renvoWasm32CompilerLeave(a *renvoAsm) {
-	
+
 	}
-	
+
 	func renvoWasm32CompilerCopyPrimaryToCallWord0(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerCopySecondaryToPrimary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32CompilerCopyPrimaryToCallWord1(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerAddSecondaryTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32CompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
 	}
-	
+
 	func renvoWasm32CompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 8, 0, 4)
 	}
-	
+
 	func renvoWasm32CompilerIncMemSecondary(a *renvoAsm) {
 		renvoAsmEmit8(a, renvoWasm32OpIncMem)
 		renvoAsmEmit8(a, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32CompilerDecMemSecondary(a *renvoAsm) {
 		renvoAsmEmit8(a, renvoWasm32OpDecMem)
 		renvoAsmEmit8(a, renvoWasm32RegRdx)
 	}
-	
+
 	func renvoWasm32CompilerBoolNotPrimary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
 	}
-	
+
 	func renvoWasm32CompilerBitwiseNotPrimary(a *renvoAsm) {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -1)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32CompilerAddPrimaryTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
-	
+
 	func renvoWasm32CompilerSubPrimaryTertiary(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
 }
-
 
 go compiler {
 	func renvoWasm32CompilerPushImm(a *renvoAsm, imm int) {
@@ -4431,7 +4430,6 @@ go compiler {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJnz, label)
 	}
 }
-
 
 go compiler {
 	func renvoWasm32CompilerSecondaryImm(a *renvoAsm, imm int) {

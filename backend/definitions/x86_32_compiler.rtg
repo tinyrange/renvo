@@ -1412,7 +1412,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5a50)
 	}
-	
+
 	func renvo386CompilerCopyPrimaryToTertiary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
 			if renvo386RewritePrimaryLoad(a, 1, false) {
@@ -1423,7 +1423,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5950)
 	}
-	
+
 	func renvo386CompilerCopySecondaryToTertiary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
 			renvoAsmEmit16(a, 0xd189)
@@ -1431,7 +1431,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5952)
 	}
-	
+
 	func renvo386CompilerCopyTertiaryToPrimary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
 			renvoAsmEmit16(a, 0xc889)
@@ -1440,7 +1440,7 @@ go compiler {
 		renvoAsmPushTertiary(a)
 		renvoAsmPopPrimary(a)
 	}
-	
+
 	func renvo386CompilerPushPrimary(a *renvoAsm) {
 		load := a.lastPrimaryLoad
 		fold := renvoFixedTarget == 0 && a.c.code16 && load > 0 && load/8 == len(a.code)
@@ -1452,21 +1452,21 @@ go compiler {
 			a.lastPrimaryLoad = -load
 		}
 	}
-	
+
 	func renvo386CompilerPushSecondary(a *renvoAsm) {
 		renvoAsmEmit8(a, 0x52)
 		if renvoFixedTarget == 0 && a.c.code16 {
 			a.lastPrimaryStoreEnd = -(len(a.code)*32 + 4)
 		}
 	}
-	
+
 	func renvo386CompilerPushTertiary(a *renvoAsm) {
 		renvoAsmEmit8(a, 0x51)
 		if renvoFixedTarget == 0 && a.c.code16 {
 			a.lastPrimaryStoreEnd = -(len(a.code)*32 + 3)
 		}
 	}
-	
+
 	func renvo386CompilerPopPrimary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.code16 {
 			if renvoAsmCancelAdjacentPush(a, 0x50) {
@@ -1514,72 +1514,71 @@ go compiler {
 	func renvo386CompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0x0a0488)
 	}
-	
+
 	func renvo386CompilerIncTertiary(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xc1ff)
 	}
-	
+
 	func renvo386CompilerIncPrimary(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xc0ff)
 	}
-	
+
 	func renvo386CompilerRet(a *renvoAsm) {
 		renvoAsmEmit8(a, 0xc3)
 	}
-	
+
 	func renvo386CompilerLeave(a *renvoAsm) {
 		renvoAsmEmit8(a, 0xc9)
 	}
-	
+
 	func renvo386CompilerCopyPrimaryToCallWord0(a *renvoAsm) {
 		renvo386AsmMovRdiRax(a)
 	}
-	
+
 	func renvo386CompilerCopySecondaryToPrimary(a *renvoAsm) {
 		renvo386AsmMovRaxRdx(a)
 	}
-	
+
 	func renvo386CompilerCopyPrimaryToCallWord1(a *renvoAsm) {
 		renvo386AsmMovRsiRax(a)
 	}
-	
+
 	func renvo386CompilerAddSecondaryTertiary(a *renvoAsm) {
 		renvo386AsmAddRdxRcx(a)
 	}
-	
+
 	func renvo386CompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
 		renvo386AsmLoadByteRaxIndexRcx(a)
 	}
-	
+
 	func renvo386CompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
 		renvo386AsmStoreRaxMemRdxRcx8(a)
 	}
-	
+
 	func renvo386CompilerIncMemSecondary(a *renvoAsm) {
 		renvo386AsmIncMemRdx(a)
 	}
-	
+
 	func renvo386CompilerDecMemSecondary(a *renvoAsm) {
 		renvo386AsmDecMemRdx(a)
 	}
-	
+
 	func renvo386CompilerBoolNotPrimary(a *renvoAsm) {
 		renvo386AsmBoolNotRax(a)
 	}
-	
+
 	func renvo386CompilerBitwiseNotPrimary(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xd0f7)
 	}
-	
+
 	func renvo386CompilerAddPrimaryTertiary(a *renvoAsm) {
 		renvo386AsmAddRaxRcx(a)
 	}
-	
+
 	func renvo386CompilerSubPrimaryTertiary(a *renvoAsm) {
 		renvo386AsmSubRaxRcx(a)
 	}
 }
-
 
 go compiler {
 	func renvo386CompilerPushImm(a *renvoAsm, imm int) {
@@ -1727,7 +1726,6 @@ go compiler {
 		renvoAsmAddReloc(a, at, label)
 	}
 }
-
 
 go compiler {
 	func renvo386CompilerSecondaryImm(a *renvoAsm, imm int) {
