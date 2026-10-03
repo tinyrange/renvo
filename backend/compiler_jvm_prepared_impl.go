@@ -4357,6 +4357,26 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
+renvoNonNil(a)
+if nativeABI {
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+} else {
+renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
+}
+}
+
+func renvoAsmLoadFrameFieldValue(a *renvoAsm, offset int, size int, nativeABI bool) {
+renvoNonNil(a)
+if nativeABI {
+renvoAsmAddressPrimaryStack(a, offset)
+renvoAsmCopyPrimaryToSecondary(a)
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+} else {
+renvoAsmLoadPrimaryStack(a, offset)
+}
+}
+
 func renvoCanLoadDirectSliceCountSelector(g *renvoLinearGen) bool {
 renvoNonNil(g)
 return true

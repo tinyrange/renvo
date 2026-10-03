@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		load_indirect_field_value = renvoWasm32CompilerLoadIndirectFieldValue
+		load_frame_field_value = renvoWasm32CompilerLoadFrameFieldValue
 		direct_slice_count_selector = renvoWasm32CompilerDirectSliceCountSelector
 		slice_count_result = renvoWasm32CompilerSliceCountResult
 		move_read_write_offset = renvoWasm32CompilerMoveReadWriteOffset
@@ -6080,5 +6082,27 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLoadFrameFieldValue(a *renvoAsm, offset int, size int, nativeABI bool) {
+		if nativeABI {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+		} else {
+			renvoAsmLoadPrimaryStack(a, offset)
+		}
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
+		if nativeABI {
+			renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+		} else {
+			renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
+		}
 	}
 }

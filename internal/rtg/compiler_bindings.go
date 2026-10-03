@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "load_indirect_field_value", Suffix: "LoadIndirectFieldValue", Function: "renvoAsmLoadIndirectFieldValue", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"size", "int"}, {"nativeABI", "bool"}}, Prepared: "if nativeABI {\nrenvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)\n} else {\nrenvoAsmLoadPrimaryMemSecondaryDisp(a, 0)\n}"},
+	{Name: "load_frame_field_value", Suffix: "LoadFrameFieldValue", Function: "renvoAsmLoadFrameFieldValue", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}, {"size", "int"}, {"nativeABI", "bool"}}, Prepared: "if nativeABI {\nrenvoAsmAddressPrimaryStack(a, offset)\nrenvoAsmCopyPrimaryToSecondary(a)\nrenvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)\n} else {\nrenvoAsmLoadPrimaryStack(a, offset)\n}"},
 	{Name: "direct_slice_count_selector", Suffix: "DirectSliceCountSelector", Function: "renvoCanLoadDirectSliceCountSelector", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "slice_count_result", Suffix: "SliceCountResult", Function: "renvoAsmSliceCountResult", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoAsmCopyTertiaryToPrimary(a)"},
 	{Name: "move_read_write_offset", Suffix: "MoveReadWriteOffset", Function: "renvoAsmMoveOffsetArg", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord3, renvoRTGPrimary)"},
