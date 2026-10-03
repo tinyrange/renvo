@@ -49,6 +49,7 @@ format elf32_arm {
 }
 
 target linux/arm {
+	production_projection = elf_eabi32_process
 	arena_default = 67108864
 	family = native_v1
 	os = linux

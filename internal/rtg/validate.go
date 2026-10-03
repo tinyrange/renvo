@@ -488,7 +488,7 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"family", "arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
-			"arena_default", "subsystem", "os", "frontend_arch",
+			"arena_default", "subsystem", "os", "frontend_arch", "production_projection",
 		}
 	}
 	if kind == DeclIR {

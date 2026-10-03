@@ -6,6 +6,7 @@ package definitions
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch aarch64 -package main -o ../compiler_aarch64_impl.go aarch64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -compiler-integration -arch aarch64 -package main -o ../compiler_aarch64_target_impl.go aarch64_compiler.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/aarch64 -package main -o ../compiler_linux_aarch64_impl.go linux_aarch64.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -t linux/aarch64 -o ../../internal/rtg/testdata/aarch64_linux.golden linux_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t windows/arm64 -package main -o ../compiler_windows_arm64_target_impl.go windows_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t darwin/arm64 -package main -o ../compiler_darwin_arm64_target_impl.go darwin_aarch64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch x86_64 -package main -o ../compiler_amd64_target_impl.go x86_64_algorithms.rtg

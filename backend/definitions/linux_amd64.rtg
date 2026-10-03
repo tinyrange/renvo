@@ -127,6 +127,7 @@ runtime linux_x86_64 {
 }
 
 target linux/amd64 {
+	production_projection = elf_sysv64_process
 	family = native_v1
 	os = linux
 	arch = x86_64

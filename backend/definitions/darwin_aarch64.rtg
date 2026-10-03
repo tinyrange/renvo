@@ -907,6 +907,7 @@ format macho64_arm64 {
 }
 
 target darwin/arm64 {
+	production_projection = macho_aapcs64_process
 	family = native_v1
 	os = darwin
 	arch = aarch64

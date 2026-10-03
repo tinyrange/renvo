@@ -333,6 +333,7 @@ format pe32_386 {
 }
 
 target windows/386 {
+	production_projection = pe_stdcall32_process
 	arena_default = 67108864
 	family = native_v1
 	os = windows

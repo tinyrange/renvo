@@ -113,6 +113,7 @@ format elf64_aarch64 {
 }
 
 target linux/aarch64 {
+	production_projection = elf_aapcs64_process
 	family = native_v1
 	os = linux
 	arch = aarch64

@@ -74,6 +74,24 @@ The bounded native model includes:
 The language has no macros, general evaluator, recipe interpreter, or Go
 complexity analyzer.
 
+## Checked-in production projection bindings
+
+A native target that participates in the bundled compiler declares
+`production_projection`. This binds a physical integration recipe (for example,
+`elf_sysv64_process` or `pe_aapcs64_process`) rather than selecting an algorithm
+by its public target, OS, or architecture name. The BSD compositions share
+`elf_sysv64_carry_process`; their executable `image_variant` selects the
+corresponding image layout. Renaming public identities does not change the
+emitted physical glue.
+
+These are closed host-side projection recipes, not an RTG evaluator or an
+alternate language-lowering pipeline. Each recipe requires the encoder export
+contract it calls and validates its runtime and image inputs. Missing, unknown,
+and incompatible bindings fail generation without falling back to a named
+platform. Existing compatibility symbol names remain fixed in these bounded
+physical templates. External prepared backends do not require this field and
+continue to use their typed emitter, ABI, runtime, and image hooks.
+
 ## Embedded Go boundary
 
 `go backend` blocks are parsed and checked with Renvo's Go frontend. Imports,
