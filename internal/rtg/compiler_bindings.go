@@ -85,6 +85,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "string_equal_left_length", Suffix: "StringEqualLeftLength", Function: "renvoAsmStringEqualLeftLength", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoAsmCopyPrimaryToCallWord1(a)"},
 	{Name: "folded_indexed_scalar_load", Suffix: "FoldedIndexedScalarLoad", Function: "renvoAsmFoldedIndexedScalarLoad", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"elementSize", "int"}, {"size", "int"}, {"signed", "bool"}}, Prepared: "a.patchFailed = true"},
 	{Name: "can_fold_indexed_scalar_load", Suffix: "CanFoldIndexedScalarLoad", Function: "renvoCanFoldIndexedScalarLoad", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"ep", "*renvoExprParse"}, {"idx", "int"}, {"elementSize", "int"}, {"size", "int"}}, Prepared: "return false"},
 	{Name: "local_immediate_compare_jump", Suffix: "LocalImmediateCompareJump", Function: "renvoEmitLocalImmediateCompareJump", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"offset", "int"}, {"value", "int"}, {"c0", "byte"}, {"c1", "byte"}, {"label", "int"}, {"jumpIfTrue", "bool"}, {"unsigned", "bool"}}, Prepared: "return false"},

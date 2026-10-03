@@ -571,7 +571,7 @@ go compiler {
 		return position - int(renvo_runtime_UnsafeInt32At(savings, lo-1))
 	}
 	func renvoAmd64EmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset int, ep *renvoExprParse, idx int, matchLabel int) bool {
-		return renvoEmitNativeSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
+		return renvoEmitSwitchStringCaseTest(g, valueOffset, lenOffset, ep, idx, matchLabel)
 	}
 	func renvoAmd64EmitRaxRcxOp(g *renvoLinearGen, tok int) bool {
 		renvoNonNil(g)
@@ -965,6 +965,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		string_equal_left_length = renvoAmd64CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvoAmd64CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvoAmd64CompilerCanFoldIndexedScalarLoad
 		local_immediate_compare_jump = renvoAmd64CompilerLocalImmediateCompareJump
@@ -3496,5 +3497,11 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStringEqualLeftLength(a *renvoAsm) {
+		renvoAsmCopyPrimaryToCallWord1(a)
 	}
 }

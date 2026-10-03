@@ -4357,6 +4357,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmStringEqualLeftLength(a *renvoAsm) {
+renvoNonNil(a)
+renvoAsmCopyPrimaryToCallWord1(a)
+}
+
 func renvoAsmFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
 renvoNonNil(a)
 a.patchFailed = true
