@@ -4150,6 +4150,17 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		bounded_narrow_unsigned_shift = renvoWasm32CompilerBoundedNarrowUnsignedShift
+		bounded_wide_word_shift = renvoWasm32CompilerBoundedWideWordShift
+		optimized_native_binary_expr = renvoWasm32CompilerOptimizedNativeBinaryExpr
+		thread_state_register_capability = renvoWasm32CompilerThreadStateRegisterCapability
+		swap_thread_state = renvoWasm32CompilerSwapThreadState
+		record_local_storage = renvoWasm32CompilerRecordLocalStorage
+		wide_compare_value = renvoWasm32CompilerWideCompareValue
+		wide_binary_value = renvoWasm32CompilerWideBinaryValue
+		stack_ieee_float = renvoWasm32CompilerStackIEEEFloat
+		scaled_float = renvoWasm32CompilerScaledFloat
+		direct_float64_operands = renvoWasm32CompilerDirectFloat64Operands
 		string_concat_value_regs = renvoWasm32CompilerStringConcatValueRegs
 		append_scalar_helper = renvoWasm32CompilerAppendScalarHelper
 		append_address_helper = renvoWasm32CompilerAppendAddressHelper
@@ -5592,5 +5603,76 @@ go compiler {
 		renvoAsmLoadSecondaryStack(a, offset-8)
 		renvoAsmPopPrimary(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStackIEEEFloat(a *renvoAsm) bool {
+		return true
+	}
+	func renvoWasm32CompilerScaledFloat(a *renvoAsm) bool {
+		return false
+	}
+	func renvoWasm32CompilerDirectFloat64Operands(a *renvoAsm) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWideBinaryValue(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+		return renvoWasm32EmitWideBinaryStack(g, dest, left, right, tok, signed)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWideCompareValue(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+		return renvoWasm32EmitWideCompareStack(g, left, right, tok, signed)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerRecordLocalStorage(g *renvoLinearGen, offset int, size int, captureOff int, typ int) {
+		// A later scalar may reuse an aggregate temporary's frame range.
+		// Keep memory requirements after lexical locals have been discarded.
+		if g.c.renvoTarget != renvoTargetVM32 &&
+			(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+			g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
+		}
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSwapThreadState(g *renvoLinearGen) {
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmCopySecondaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopPrimary(&g.asm)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerThreadStateRegisterCapability(g *renvoLinearGen) {
+		renvoAsmPrimaryImm(&g.asm, 0)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerBoundedWideWordShift(g *renvoLinearGen, mode int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, mode))
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
+		renvoWasm32EmitRaxRcxOp(g, tok, true)
 	}
 }

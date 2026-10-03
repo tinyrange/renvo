@@ -696,6 +696,17 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		bounded_narrow_unsigned_shift = renvoArmCompilerBoundedNarrowUnsignedShift
+		bounded_wide_word_shift = renvoArmCompilerBoundedWideWordShift
+		optimized_native_binary_expr = renvoArmCompilerOptimizedNativeBinaryExpr
+		thread_state_register_capability = renvoArmCompilerThreadStateRegisterCapability
+		swap_thread_state = renvoArmCompilerSwapThreadState
+		record_local_storage = renvoArmCompilerRecordLocalStorage
+		wide_compare_value = renvoArmCompilerWideCompareValue
+		wide_binary_value = renvoArmCompilerWideBinaryValue
+		stack_ieee_float = renvoArmCompilerStackIEEEFloat
+		scaled_float = renvoArmCompilerScaledFloat
+		direct_float64_operands = renvoArmCompilerDirectFloat64Operands
 		string_concat_value_regs = renvoArmCompilerStringConcatValueRegs
 		append_scalar_helper = renvoArmCompilerAppendScalarHelper
 		append_address_helper = renvoArmCompilerAppendAddressHelper
@@ -2008,5 +2019,71 @@ go compiler {
 		renvoAsmLoadSecondaryStack(a, offset-8)
 		renvoAsmPopPrimary(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStackIEEEFloat(a *renvoAsm) bool {
+		return true
+	}
+	func renvoArmCompilerScaledFloat(a *renvoAsm) bool {
+		return false
+	}
+	func renvoArmCompilerDirectFloat64Operands(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerWideBinaryValue(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, dest, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerWideCompareValue(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, 0, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerRecordLocalStorage(g *renvoLinearGen, offset int, size int, captureOff int, typ int) {
+
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSwapThreadState(g *renvoLinearGen) {
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmCopySecondaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopPrimary(&g.asm)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerThreadStateRegisterCapability(g *renvoLinearGen) {
+		renvoAsmPrimaryImm(&g.asm, 0)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerBoundedWideWordShift(g *renvoLinearGen, mode int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, mode))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
+		renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
 	}
 }
