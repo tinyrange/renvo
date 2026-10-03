@@ -1300,6 +1300,11 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		slice_backing_size = renvo386CompilerSliceBackingSize
+		folded_field_addressing = renvo386CompilerFoldedFieldAddressing
+		can_store_scalar = renvo386CompilerCanStoreScalar
+		store_primary_mem_tertiary_disp = renvo386CompilerStorePrimaryMemTertiaryDisp
+		load_tertiary_mem_secondary_disp = renvo386CompilerLoadTertiaryMemSecondaryDisp
 		needs_function_symbols = renvo386CompilerNeedsFunctionSymbols
 		assembler_reserves = renvo386CompilerAssemblerReserves
 		dereference_secondary = renvo386CompilerDereferenceSecondary
@@ -4182,5 +4187,60 @@ go compiler {
 go compiler {
 	func renvo386CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
 		return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStorePrimaryMemTertiaryDisp(a *renvoAsm, disp int) {
+		renvo386AsmMemDisp(a, disp, 0x8948, 0x41, 0x81)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCanStoreScalar(a *renvoAsm, size int) bool {
+		return size == 1 || size == 2 || size == 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerFoldedFieldAddressing(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
+		backingSize := 0
+		if renvoFixedTarget != 0 {
+			count := 4096
+			if elemSize == 1 {
+				count = 65536
+			}
+			backingSize = elemSize * count
+			if backingSize < 8192 {
+				backingSize = 8192
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+			if backingSize < elemSize {
+				backingSize = elemSize
+			}
+		} else {
+			backingSize = elemSize * 8192
+			if backingSize < 4096 {
+				backingSize = 4096
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+		}
+		return backingSize
 	}
 }

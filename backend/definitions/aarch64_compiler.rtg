@@ -737,6 +737,11 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		slice_backing_size = renvoAarch64CompilerSliceBackingSize
+		folded_field_addressing = renvoAarch64CompilerFoldedFieldAddressing
+		can_store_scalar = renvoAarch64CompilerCanStoreScalar
+		store_primary_mem_tertiary_disp = renvoAarch64CompilerStorePrimaryMemTertiaryDisp
+		load_tertiary_mem_secondary_disp = renvoAarch64CompilerLoadTertiaryMemSecondaryDisp
 		needs_function_symbols = renvoAarch64CompilerNeedsFunctionSymbols
 		assembler_reserves = renvoAarch64CompilerAssemblerReserves
 		dereference_secondary = renvoAarch64CompilerDereferenceSecondary
@@ -2490,5 +2495,60 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
 		return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStorePrimaryMemTertiaryDisp(a *renvoAsm, disp int) {
+		renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRcx, disp, 8)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCanStoreScalar(a *renvoAsm, size int) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerFoldedFieldAddressing(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
+		backingSize := 0
+		if renvoFixedTarget != 0 {
+			count := 4096
+			if elemSize == 1 {
+				count = 65536
+			}
+			backingSize = elemSize * count
+			if backingSize < 8192 {
+				backingSize = 8192
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+			if backingSize < elemSize {
+				backingSize = elemSize
+			}
+		} else {
+			backingSize = elemSize * 8192
+			if backingSize < 4096 {
+				backingSize = 4096
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+		}
+		return backingSize
 	}
 }
