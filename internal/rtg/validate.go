@@ -456,7 +456,7 @@ func declarationAllowedFields(kind string) []string {
 			"pop_register", "frame_load", "frame_store", "frame_address",
 			"store_param_word", "call_word_count", "mark_label",
 			"structured_functions", "function_start", "function_finish", "jit_call",
-			"unsigned_divide",
+			"unsigned_divide", "object_call_layout",
 		}
 	}
 	if kind == DeclRuntime {
@@ -1007,6 +1007,11 @@ func architectureRegisterReferenceValid(document Document, arch Declaration, nam
 
 func validatePreparedABI(document Document, target ResolvedTarget) []Diagnostic {
 	var diagnostics []Diagnostic
+	layout, layoutValid := decodeObjectCallLayout(target.ABI)
+	if !layoutValid || layout && target.Descriptor.WordBits != 64 {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, target.ABI,
+			"RTG-VALIDATE-132", "ABI "+target.ABI.Name+" requires one sysv_eightbyte object_call_layout with 64-bit words"))
+	}
 	words := targetABICallWords(document, target.ABI)
 	for i := 0; i < len(words); i++ {
 		if !architectureRegisterReferenceValid(document, target.Arch, words[i]) {

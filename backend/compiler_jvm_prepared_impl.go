@@ -554,7 +554,6 @@ const renvoRTGPreparedIntBits = 32
 const renvoRTGPreparedMaxAlign = 8
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
-const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
 const renvoRTGPreparedIEEEFloat = 1
 
@@ -623,6 +622,9 @@ const renvoRTGDiscardNumber = 0
 const renvoRTGDiscardAdvice = 0
 func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 }
+
+const renvoRTGObjectAggregateRegisterBytes = 0
+const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
 var rtgJvmRAX = RTGRegister{Code:0, Valid:true}
 
@@ -4931,8 +4933,7 @@ renvoRTGKernelEntryPrologue(&g.asm)
 
 func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
 renvoNonNil(c)
-if renvoRTGPreparedSysVX8664 != 0 { return 16 }
-return 0
+return renvoRTGObjectAggregateRegisterBytes
 }
 
 func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
@@ -5145,10 +5146,7 @@ return renvoRTGObjectRegisterCount()
 
 func renvoTargetObjectCallABI(c *renvoCompileContext) int {
 renvoNonNil(c)
-if renvoRTGPreparedSysVX8664 != 0 && c.renvoTargetOS == renvoOSLinux && !targetIsKernelModule(c) {
-	return renvoObjectABISysV
-}
-return renvoObjectABIUnavailable
+return renvoRTGObjectCallABI
 }
 
 func renvoEmitWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {

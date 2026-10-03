@@ -99,6 +99,7 @@ func GenerateArchitectureKernel(packageName string, definitions []ResolveResult)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
 	source = appendPreparedDiscardPolicy(source, Declaration{})
+	source = appendPreparedObjectCallPolicy(source, ResolvedTarget{})
 	return appendBundledCompilerBindings(source, definitions)
 }
 
@@ -136,6 +137,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendArchitectureBackendAPI(source)
 	source = appendPreparedTargetFacts(source, target.Descriptor, true)
 	source = appendPreparedDiscardPolicy(source, target.Runtime)
+	source = appendPreparedObjectCallPolicy(source, target)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	goRoots := baseTargetGoRoots(resolved.Document, target)
 	sequenceRoots := targetSequenceRoots(resolved.Document, target)
@@ -190,12 +192,6 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	source = append(source, "\nconst renvoRTGPreparedObject = "...)
 	if active && descriptor.Executable == "" && descriptor.Object != "" &&
 		stringIndex(descriptor.Capabilities, "kernel_module") < 0 {
-		source = append(source, '1')
-	} else {
-		source = append(source, '0')
-	}
-	source = append(source, "\nconst renvoRTGPreparedSysVX8664 = "...)
-	if active && descriptor.ABI == "sysv_x86_64" {
 		source = append(source, '1')
 	} else {
 		source = append(source, '0')

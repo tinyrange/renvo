@@ -814,6 +814,7 @@ abi renvo_x86_64 {
 }
 
 abi sysv_x86_64 {
+	object_call_layout = sysv_eightbyte
 	internal = renvo_x86_64
 	arguments = [rdi, rsi, rdx, rcx, r8, r9]
 	result = [rax, rdx]

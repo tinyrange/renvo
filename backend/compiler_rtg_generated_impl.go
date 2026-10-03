@@ -768,7 +768,6 @@ const renvoRTGPreparedIntBits = 0
 const renvoRTGPreparedMaxAlign = 0
 const renvoRTGPreparedKernelModule = 0
 const renvoRTGPreparedObject = 0
-const renvoRTGPreparedSysVX8664 = 0
 const renvoRTGPreparedFunctionSymbols = 0
 const renvoRTGPreparedIEEEFloat = 0
 
@@ -811,6 +810,9 @@ const renvoRTGDiscardNumber = 0
 const renvoRTGDiscardAdvice = 0
 func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 }
+
+const renvoRTGObjectAggregateRegisterBytes = 0
+const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
 renvoNonNil(c)
