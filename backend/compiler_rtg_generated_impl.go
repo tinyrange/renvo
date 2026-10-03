@@ -797,6 +797,86 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoOpenPathNeedsLength(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return !targetIsDarwin(g.c.renvoTargetOS)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoAsmOpenFile(a *renvoAsm) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPopCallWord1(a)
+		renvoAsmSecondaryImm(a, 493)
+} else if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPopTertiary(a)
+		renvoAsmSecondaryImm(a, 493)
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPopSecondary(a)
+		renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
+		renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPopCallWord1(a)
+}
+renvoAsmPrimaryImm(a, renvoLinuxSysOpen(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+}
+a.patchFailed = true
+return false
+}
+
 func renvoSupportsFunctionWordConversion(g *renvoLinearGen) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
