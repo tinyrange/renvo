@@ -1013,7 +1013,7 @@ func appendPreparedRuntimeOperationAdapter(
 			out = append(out, ", "...)
 			out = appendDecimalFrame(out, number)
 			out = append(out, ")\n"...)
-			if target.Descriptor.OS == "openbsd" {
+			if targetRuntimeSyscallField(target.Runtime, "site_table") == "address_number_pairs" {
 				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, len(out.code))\n"...)
 				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, "...)
 				out = appendDecimalFrame(out, number)

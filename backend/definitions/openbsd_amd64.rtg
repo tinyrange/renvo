@@ -25,6 +25,7 @@ runtime openbsd_x86_64 {
 		arguments = [rdi, rsi, rdx, r10, r8, r9]
 		result = rax
 		error = carry
+		site_table = address_number_pairs
 		instruction = syscall
 	}
 

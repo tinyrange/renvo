@@ -1050,7 +1050,18 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 				}
 			}
 		}
-		_ = syscall
+		siteTableSeen := false
+		for i := 0; i < len(syscall.Children); i++ {
+			left, right, assignment := statementAssignment(syscall.Children[i])
+			if !assignment || len(left) != 1 || left[0] != "site_table" {
+				continue
+			}
+			if siteTableSeen || len(right) != 1 || valueName(right[0]) != "address_number_pairs" {
+				diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+					"RTG-VALIDATE-130", "runtime "+runtime.Name+" requires one address_number_pairs syscall site_table"))
+			}
+			siteTableSeen = true
+		}
 	}
 
 	needsResult := false

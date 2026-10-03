@@ -381,3 +381,11 @@ review aids. The deduplicated native embedded-Go metric is reported by the RTG
 tests without a numeric rejection threshold. Compiler and output performance
 acceptance remains exclusively defined by the existing hard gates in
 `backend/main_test.go`.
+
+### Syscall instruction-site metadata
+
+A runtime `syscall` block may declare `site_table = address_number_pairs`.
+The prepared runtime adapter then records each syscall instruction offset and
+operation number for the image writer's syscall table. Absence means no table;
+unknown layouts fail prepared validation. The policy is independent of the
+public target and OS names. OpenBSD's runtime declares this layout explicitly.
