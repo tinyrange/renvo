@@ -669,6 +669,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		program_image_entry = renvoAmd64CompilerProgramImageEntry
+		program_cache_supported = renvoAmd64CompilerProgramCacheSupported
+		program_target_mode = renvoAmd64CompilerProgramTargetMode
 		kernel_program = renvoAmd64CompilerKernelProgram
 		program_image = renvoAmd64CompilerProgramImage
 		finalize_object_code = renvoAmd64CompilerFinalizeObjectCode
@@ -4264,7 +4267,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoAmd64CompilerProgramLayout(a *renvoAsm, image bool) int {
+	func renvoAmd64CompilerProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 		a.codeOffset = renvoAmd64ELFCodeOffset
 		if renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
 			a.codeOffset = renvoOpenBSDAmd64ELFCodeOffset
@@ -4337,5 +4340,23 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerKernelProgram(c *renvoCompileContext) bool {
 		return renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramTargetMode(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramCacheSupported(c *renvoCompileContext) bool {
+		return !targetIsKernelModule(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramImageEntry(c *renvoCompileContext) bool {
+		return true
 	}
 }

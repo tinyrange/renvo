@@ -805,6 +805,50 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoProgramImageEntry(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return true
+	
+}
+return false
+}
+
+func renvoProgramCacheSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return !targetIsKernelModule(c)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return true
+	
+}
+return false
+}
+
+func renvoProgramTargetMode(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && c.renvoTarget == renvoTargetVM32 {
+			return 1
+		}
+		return 2
+	
+}
+return 0
+}
+
 func renvoKernelProgram(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -930,7 +974,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return false
 }
 
-func renvoSetupProgramLayout(a *renvoAsm, image bool) int {
+func renvoSetupProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
@@ -986,6 +1030,11 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
+		localSlotCapacity := functionCount * 4
+		if localSlotCapacity < 256 {
+			localSlotCapacity = 256
+		}
+		a.wasmLocalSlots = make([]int32, 0, localSlotCapacity)
 		return 0
 	
 }

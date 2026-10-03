@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		program_image_entry = renvoWasm32CompilerProgramImageEntry
+		program_cache_supported = renvoWasm32CompilerProgramCacheSupported
+		program_target_mode = renvoWasm32CompilerProgramTargetMode
 		kernel_program = renvoWasm32CompilerKernelProgram
 		program_image = renvoWasm32CompilerProgramImage
 		finalize_object_code = renvoWasm32CompilerFinalizeObjectCode
@@ -6683,7 +6686,12 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerProgramLayout(a *renvoAsm, image bool) int {
+	func renvoWasm32CompilerProgramLayout(a *renvoAsm, image bool, functionCount int) int {
+		localSlotCapacity := functionCount * 4
+		if localSlotCapacity < 256 {
+			localSlotCapacity = 256
+		}
+		a.wasmLocalSlots = make([]int32, 0, localSlotCapacity)
 		return 0
 	}
 }
@@ -6721,6 +6729,27 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerKernelProgram(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramTargetMode(c *renvoCompileContext) int {
+		if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && c.renvoTarget == renvoTargetVM32 {
+			return 1
+		}
+		return 2
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramCacheSupported(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramImageEntry(c *renvoCompileContext) bool {
 		return false
 	}
 }
