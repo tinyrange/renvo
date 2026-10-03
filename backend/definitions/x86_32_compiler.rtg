@@ -655,124 +655,6 @@ go compiler {
 		renvo386EmitWideHelperCall(g, 0, left, right, mode, renvo386EnsureWideCompareHelper(g))
 	}
 
-	func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		a := &g.asm
-		metaFn := &g.meta.funcs[fnInfoIndex]
-		fn := &g.prog.funcs[metaFn.declIndex]
-		oldLocals := g.locals
-		oldLocalCount := g.localCount
-		oldBreak := g.breakDepth
-		oldContinue := g.continueDepth
-		oldCurrent := g.currentFunc
-		oldReturnStruct := g.returnStruct
-		oldClosureEnvOffset := g.closureEnvOffset
-		oldDeferHeadOffset := g.deferHeadOffset
-		oldDeferReturnLabel := g.deferReturnLabel
-		oldDeferResultOffset := g.deferResultOffset
-		oldDeferSites := g.deferSites
-		oldEmittingDefers := g.emittingDefers
-		oldSuppressPanicCheck := g.suppressPanicCheck
-		oldStackUsed := g.stackUsed
-		oldStackPeak := g.stackPeak
-		oldGotoLabels := g.gotoLabels
-		oldLastRangeReturns := g.lastRangeReturns
-		g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-		g.localCount = 0
-		g.gotoLabels = nil
-		g.breakDepth = 0
-		g.continueDepth = 0
-		g.pendingControl = 0
-		g.currentFunc = fnInfoIndex
-		g.returnStruct = 0
-		g.closureEnvOffset = 0
-		g.stackUsed = 0
-		g.stackPeak = 0
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		framePatch := len(a.code)
-		renvoAsmEmit32(a, 0x000000c8)
-		if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-			return false
-		}
-		frame := renvoAlignTo8(g.stackPeak)
-		if frame > 65528 {
-			frame = 65528
-		}
-		renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
-		g.locals = oldLocals
-		g.localCount = oldLocalCount
-		g.breakDepth = oldBreak
-		g.continueDepth = oldContinue
-		g.currentFunc = oldCurrent
-		g.returnStruct = oldReturnStruct
-		g.closureEnvOffset = oldClosureEnvOffset
-		g.deferHeadOffset = oldDeferHeadOffset
-		g.deferReturnLabel = oldDeferReturnLabel
-		g.deferResultOffset = oldDeferResultOffset
-		g.deferSites = oldDeferSites
-		g.emittingDefers = oldEmittingDefers
-		g.suppressPanicCheck = oldSuppressPanicCheck
-		g.stackUsed = oldStackUsed
-		g.stackPeak = oldStackPeak
-		g.gotoLabels = oldGotoLabels
-		g.lastRangeReturns = oldLastRangeReturns
-		return true
-	}
-
-	func renvo386EmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
-		if !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
-			return false
-		}
-		fn := &g.meta.funcs[fnInfoIndex]
-		postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
-		postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
-		if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
-			return false
-		}
-		result := renvoResolveType(g.meta, fn.resultType)
-		size := renvoTypeSize(g.meta, fn.resultType)
-		if size < 1 || size > 4 ||
-			(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
-			return false
-		}
-		a := &g.asm
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
-		// value. Advance *p, store the value through the old pointer, and leave the
-		// expression result in EAX without constructing a frame.
-		renvoAsmEmit16(a, 0x168b) // mov edx,[esi]
-		delta := size
-		if postDec {
-			delta = -delta
-		}
-		if renvoAsmImmFits8Signed(delta) {
-			renvoAsmEmit3(a, 0x8d, 0x4a, delta) // lea ecx,[edx+delta]
-		} else {
-			renvoAsmEmit16(a, 0x8a8d)
-			renvoAsmEmit32(a, delta)
-		}
-		renvoAsmEmit16(a, 0x0e89) // mov [esi],ecx
-		if size == 1 {
-			renvoAsmEmit16(a, 0x1a88) // mov [edx],bl
-			if result.kind == renvoTypeInt8 {
-				renvoAsmEmitText(a, "\x0f\xbe\xc3")
-			} else {
-				renvoAsmEmitText(a, "\x0f\xb6\xc3")
-			}
-		} else if size == 2 {
-			renvoAsmEmitText(a, "\x66\x89\x1a") // mov [edx],bx
-			if result.kind == renvoTypeInt16 {
-				renvoAsmEmitText(a, "\x0f\xbf\xc3")
-			} else {
-				renvoAsmEmitText(a, "\x0f\xb7\xc3")
-			}
-		} else {
-			renvoAsmEmit16(a, 0x1a89) // mov [edx],ebx
-			renvoAsmEmit16(a, 0xd889) // mov eax,ebx
-		}
-		renvoAsmRet(a)
-		return true
-	}
-
 	func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 		a := &g.asm
 		if reg == 0 {
@@ -1166,6 +1048,11 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		compact_c_value_helper = renvo386CompilerCompactCValueHelper
+		function_override = renvo386CompilerFunctionOverride
+		zero_void_return = renvo386CompilerZeroVoidReturn
+		function_frame_finish = renvo386CompilerFunctionFrameFinish
+		function_frame_start = renvo386CompilerFunctionFrameStart
 		store_hidden_result = renvo386CompilerStoreHiddenResult
 		struct_argument_by_reference = renvo386CompilerStructArgumentByReference
 		resolves_static_import = renvo386CompilerResolvesStaticImport
@@ -1333,7 +1220,6 @@ extend arch x86_32 {
 		install_thread_state = renvo386CompilerInstallThreadState
 		load_primary_thread_state = renvo386CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvo386CompilerStorePrimaryThreadState
-		scalar_function = renvo386CompilerScalarFunction
 		runtime_stack = renvo386CompilerRuntimeStack
 		unchecked_non_nil_primary = renvo386CompilerUncheckedNonNilPrimary
 		unchecked_non_nil_secondary = renvo386CompilerUncheckedNonNilSecondary
@@ -2290,13 +2176,6 @@ go compiler {
 		renvoAsmPopPrimary(&g.asm)
 		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 		renvoAsmPopSecondary(&g.asm)
-	}
-
-	func renvo386CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		if renvoFixedTarget == 0 && g.c.code16 && renvo386EmitCompactCValueHelper(g, fnInfoIndex) {
-			return true
-		}
-		return renvo386EmitScalarFunction(g, fnInfoIndex)
 	}
 
 	func renvo386CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -5031,5 +4910,79 @@ go compiler {
 go compiler {
 	func renvo386CompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
 		renvo386AsmStackMem(&g.asm, offset, 0x89, 0x5d, 0x9d)
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionFrameStart(g *renvoLinearGen, label int) int {
+		a := &g.asm
+		renvoAsmMarkLabel(a, label)
+		framePatch := len(a.code)
+		renvoAsmEmit32(a, 0x000000c8)
+		return framePatch
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+		a := &g.asm
+		frame := renvoAlignTo8(g.stackPeak)
+		if frame > 65528 {
+			frame = 65528
+		}
+		renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
+	}
+}
+
+go compiler {
+	func renvo386CompilerZeroVoidReturn(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		renvoAsmMarkLabel(a, label)
+		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
+		// value. Advance *p, store the value through the old pointer, and leave the
+		// expression result in EAX without constructing a frame.
+		renvoAsmEmit16(a, 0x168b) // mov edx,[esi]
+		delta := size
+		if postDec {
+			delta = -delta
+		}
+		if renvoAsmImmFits8Signed(delta) {
+			renvoAsmEmit3(a, 0x8d, 0x4a, delta) // lea ecx,[edx+delta]
+		} else {
+			renvoAsmEmit16(a, 0x8a8d)
+			renvoAsmEmit32(a, delta)
+		}
+		renvoAsmEmit16(a, 0x0e89) // mov [esi],ecx
+		if size == 1 {
+			renvoAsmEmit16(a, 0x1a88) // mov [edx],bl
+			if signedValue {
+				renvoAsmEmitText(a, "\x0f\xbe\xc3")
+			} else {
+				renvoAsmEmitText(a, "\x0f\xb6\xc3")
+			}
+		} else if size == 2 {
+			renvoAsmEmitText(a, "\x66\x89\x1a") // mov [edx],bx
+			if signedValue {
+				renvoAsmEmitText(a, "\x0f\xbf\xc3")
+			} else {
+				renvoAsmEmitText(a, "\x0f\xb7\xc3")
+			}
+		} else {
+			renvoAsmEmit16(a, 0x1a89) // mov [edx],ebx
+			renvoAsmEmit16(a, 0xd889) // mov eax,ebx
+		}
+		renvoAsmRet(a)
+		return true
 	}
 }

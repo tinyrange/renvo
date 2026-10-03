@@ -4365,6 +4365,35 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitCompactCValueHelperBody(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+renvoNonNil(a)
+return false
+}
+
+func renvoEmitFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+renvoNonNil(a)
+return renvoRTGEmitAssemblyFunction(a, declIndex, label)
+}
+
+func renvoZeroVoidReturn(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+renvoNonNil(g)
+renvoRTGFrameFinish(&g.asm, framePatch, g.stackPeak)
+renvoRTGFunctionFinish(&g.asm)
+}
+
+func renvoFunctionFrameStart(g *renvoLinearGen, label int) int {
+renvoNonNil(g)
+a := &g.asm
+renvoRTGFunctionStart(a, label)
+renvoAsmMarkLabel(a, label)
+return renvoRTGFrameStart(a)
+}
+
 func renvoStoreHiddenResult(g *renvoLinearGen, offset int) {
 renvoNonNil(g)
 renvoRTGStoreParamWord(g, 0, offset)
@@ -5811,11 +5840,6 @@ renvoNonNil(g)
 	renvoAsmPopPrimary(&g.asm)
 	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 	renvoAsmPopSecondary(&g.asm)
-}
-
-func renvoEmitTargetScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-renvoNonNil(g)
-return renvoRTGEmitScalarFunction(g, fnInfoIndex)
 }
 
 func renvoEmitTargetRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
