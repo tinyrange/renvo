@@ -410,31 +410,8 @@ func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
 	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 	framePatch := renvoRTGFrameStart(a)
-	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoRTGStoreParamWord(g, 0, g.returnStruct)
-	}
-	renvoBindFunctionParams(g, fnInfoIndex)
-	if !renvoBindClosureCaptures(g, fnInfoIndex) ||
-		!renvoBindNamedResults(g, fnInfoIndex) ||
-		!renvoPrepareFunctionControl(g) ||
-		!renvoEmitLinearRange(g, metaFn.bodyStart, metaFn.bodyEnd) {
+	if !renvoEmitFunctionBody(g, fnInfoIndex, false) {
 		return false
-	}
-	if g.deferReturnLabel > 0 {
-		if !g.lastRangeReturns {
-			renvoAsmJmpLabel(a, g.deferReturnLabel)
-		}
-		if !renvoEmitFunctionControlEpilogue(g) {
-			return false
-		}
-	} else if !g.lastRangeReturns {
-		renvoMoveCapturedLocals(g, true)
-		if metaFn.resultType != 0 {
-			renvoAsmPrimaryImm(a, 0)
-		}
-		renvoAsmLeave(a)
-		renvoAsmRet(a)
 	}
 	renvoRTGFrameFinish(a, framePatch, g.stackPeak)
 	renvoRTGFunctionFinish(a)

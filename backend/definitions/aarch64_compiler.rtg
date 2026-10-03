@@ -59,35 +59,8 @@ go compiler {
 		renvoAarch64AsmEmit(a, 0xa9bf7bfd)
 		renvoAarch64AsmEmit(a, 0x910003fd)
 		framePatch := renvoAarch64AsmFrameStart(a)
-		if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-			g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-			renvoAarch64AsmStoreRegStack(a, renvoAarch64RegRdi, g.returnStruct)
-		}
-		renvoBindFunctionParams(g, fnInfoIndex)
-		if !renvoBindClosureCaptures(g, fnInfoIndex) {
+		if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
 			return false
-		}
-		if !renvoBindNamedResults(g, fnInfoIndex) {
-			return false
-		}
-		if !renvoPrepareFunctionControl(g) {
-			return false
-		}
-		if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-			return false
-		}
-		if g.deferReturnLabel > 0 {
-			if !g.lastRangeReturns {
-				renvoAsmJmpLabel(a, g.deferReturnLabel)
-			}
-			if !renvoEmitFunctionControlEpilogue(g) {
-				return false
-			}
-		} else if !g.lastRangeReturns {
-			renvoMoveCapturedLocals(g, true)
-			renvoAsmPrimaryImm(a, 0)
-			renvoAsmLeave(a)
-			renvoAsmRet(a)
 		}
 		renvoAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
 		g.locals = oldLocals
@@ -650,6 +623,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		store_hidden_result = renvoAarch64CompilerStoreHiddenResult
 		struct_argument_by_reference = renvoAarch64CompilerStructArgumentByReference
 		resolves_static_import = renvoAarch64CompilerResolvesStaticImport
 		entry_runtime_registers = renvoAarch64CompilerEntryRuntimeRegisters
@@ -3355,5 +3329,11 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerStructArgumentByReference(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
+		renvoAarch64AsmStoreRegStack(&g.asm, renvoAarch64RegRdi, offset)
 	}
 }
