@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "763aca315b46cdda39a228deed6e7c1fd386d2f8ad3cf74461e838a4718a19ab"
+const CompilerSourceDigest = "105502a00a1185a08aeb307776e94b0387a15b40ed17deddf49f09fbd26f7d5c"
 
 // source: backend/compiler_common_impl.go
 
@@ -21584,28 +21584,6 @@ return false
 return renvoEmitStringConcatLocationValueRegs(g, offset)
 }
 
-func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
-renvoNonNil(g)
-a := &g.asm
-if g.c.renvoTargetArch == renvoArchAmd64 {
-destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-renvoEmitArenaAllocStackPrimary(g, offset-8)
-renvoAsmStorePrimaryStack(a, destOff)
-renvoAsmLoadPrimaryStack(a, destOff)
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmLoadPrimaryStack(a, offset)
-renvoAsmCopyPrimaryToCallWord1(a)
-renvoAsmLoadTertiaryStack(a, offset-8)
-renvoAsmEmit16(a, 0xa4f3)
-renvoAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
-return true
-}
-renvoAsmPushStack(a, offset)
-renvoAsmLoadSecondaryStack(a, offset-8)
-renvoAsmPopPrimary(a)
-return true
-}
-
 func renvoEmitStringConcatIntoLocation(g *renvoLinearGen, ep *renvoExprParse, idx int, loc *renvoSliceLocation) bool {
 renvoNonNil(g, ep, loc)
 e := &ep.exprs[idx]
@@ -31125,7 +31103,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x86\x95\x08\xa6\x40\x17\xab\x7b\x9f\xe8\x50\xa3\x7e\x46\x7a\xee\xa2\x56\x13\x05\xee\x95\x76\xe3\xb8\x51\x11\x17\xb5\x3c\xbb\xc1", 3, true
+return "wasi/wasm32", "\x60\x02\xf0\x21\x45\x53\x9e\x09\x0e\x32\x07\x56\x38\x19\x27\xd4\x3e\xad\xf1\xd6\xc4\x12\x93\x46\x7e\xfb\x5a\x70\xab\x01\x6e\x80", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -31137,7 +31115,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xc7\x90\xe0\x61\xfc\xa5\x66\x7b\x40\xfc\xeb\x2a\x96\xe5\xb3\x15\xcc\x23\xea\x2d\x3d\x2c\x07\x0a\xf0\x97\x6f\xbf\xfb\x5f\x62\xa6", 3, true
+return "vm/vm32", "\xf7\x8b\xf9\x67\xba\x25\xe8\x2a\x77\x83\xc2\x0f\xcc\xb8\xec\x9e\x10\xcd\x69\xc0\x5c\x29\x16\x2b\x2f\x7a\xc3\xcd\x7c\x16\x5b\x48", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -32608,6 +32586,36 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoNonNil(g)
+a := &g.asm
+destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+renvoEmitArenaAllocStackPrimary(g, offset-8)
+renvoAsmStorePrimaryStack(a, destOff)
+renvoEmitCopyToFreshArena(g, offset, destOff, offset-8)
+renvoAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+renvoNonNil(g)
+a := &g.asm
+renvoAsmPushStack(a, offset)
+renvoAsmLoadSecondaryStack(a, offset-8)
+renvoAsmPopPrimary(a)
+return true
+
+}
+g.asm.patchFailed = true
+return false
 }
 
 func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
@@ -43629,6 +43637,8 @@ return true
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -46723,6 +46733,8 @@ return true
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -49441,6 +49453,8 @@ renvoAsmMarkLabel(a, done)
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -50757,6 +50771,8 @@ result.data = data
 result.ok = true
 return result
 }
+
+
 
 
 
@@ -54219,6 +54235,8 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
 
 
 

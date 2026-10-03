@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 145 role-based operations: register copies,
+The current migration covers 146 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -191,7 +191,8 @@ fault semantics remain in the common lowering. Indexed-access helper bodies,
 reserved bounds/index helpers, slice-check fast paths and aggregate argument
 pushing are also definition-owned. Slice-header ABI addresses, append/string
 helper selection, tertiary frame stores and fresh-arena copy paths use typed
-hooks; slice location evaluation and ownership remain in common lowering. The
+hooks; concatenation result storage also follows definition-owned allocation/copy
+policy. Slice location evaluation and expression semantics remain in common lowering. The
 x86 definitions retain their C/code16 peepholes and object-ABI helper implementations rather than placing them in core.
 Hooks may take typed parameters, an assembler or compiler-state input, and a
 validated result type. Their complete

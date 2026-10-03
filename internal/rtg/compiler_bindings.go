@@ -85,6 +85,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "string_concat_value_regs", Suffix: "StringConcatValueRegs", Function: "renvoEmitStringConcatLocationValueRegs", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoNonNil(g)\na := \u0026g.asm\nrenvoAsmPushStack(a, offset)\nrenvoAsmLoadSecondaryStack(a, offset-8)\nrenvoAsmPopPrimary(a)\nreturn true"},
 	{Name: "append_scalar_helper", Suffix: "AppendScalarHelper", Function: "renvoEnsureAppendScalarHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{{"elemKind", "int"}}, Prepared: "small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1\nif small { return renvoAmd64EnsureAppend8Helper(g) }\nreturn renvoAmd64EnsureAppend64Helper(g)"},
 	{Name: "append_address_helper", Suffix: "AppendAddressHelper", Function: "renvoEnsureAppendAddrHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{}, Prepared: "return renvoAmd64EnsureAppendAddrHelper(g)"},
 	{Name: "string_equal_helper", Suffix: "StringEqualHelper", Function: "renvoEnsureStringEqualHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEnsureStringEqualHelper(g)"},

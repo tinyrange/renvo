@@ -21577,28 +21577,6 @@ func renvoEmitStringConcatPairValueRegs(g *renvoLinearGen, left *renvoExprParse,
 	return renvoEmitStringConcatLocationValueRegs(g, offset)
 }
 
-func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoEmitArenaAllocStackPrimary(g, offset-8)
-		renvoAsmStorePrimaryStack(a, destOff)
-		renvoAsmLoadPrimaryStack(a, destOff)
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmLoadPrimaryStack(a, offset)
-		renvoAsmCopyPrimaryToCallWord1(a)
-		renvoAsmLoadTertiaryStack(a, offset-8)
-		renvoAsmEmit16(a, 0xa4f3)
-		renvoAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
-		return true
-	}
-	renvoAsmPushStack(a, offset)
-	renvoAsmLoadSecondaryStack(a, offset-8)
-	renvoAsmPopPrimary(a)
-	return true
-}
-
 func renvoEmitStringConcatIntoLocation(g *renvoLinearGen, ep *renvoExprParse, idx int, loc *renvoSliceLocation) bool {
 	renvoNonNil(g, ep, loc)
 	e := &ep.exprs[idx]

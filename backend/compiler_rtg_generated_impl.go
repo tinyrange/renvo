@@ -797,6 +797,36 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitStringConcatLocationValueRegs(g *renvoLinearGen, offset int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoNonNil(g)
+		a := &g.asm
+		destOff := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoEmitArenaAllocStackPrimary(g, offset-8)
+		renvoAsmStorePrimaryStack(a, destOff)
+		renvoEmitCopyToFreshArena(g, offset, destOff, offset-8)
+		renvoAsmLoadPrimarySecondaryStack(a, destOff, offset-8)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoNonNil(g)
+		a := &g.asm
+		renvoAsmPushStack(a, offset)
+		renvoAsmLoadSecondaryStack(a, offset-8)
+		renvoAsmPopPrimary(a)
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

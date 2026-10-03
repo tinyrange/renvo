@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		string_concat_value_regs = renvoWasm32CompilerStringConcatValueRegs
 		append_scalar_helper = renvoWasm32CompilerAppendScalarHelper
 		append_address_helper = renvoWasm32CompilerAppendAddressHelper
 		string_equal_helper = renvoWasm32CompilerStringEqualHelper
@@ -5580,5 +5581,16 @@ go compiler {
 
 	func renvoWasm32CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
 		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStringConcatValueRegs(g *renvoLinearGen, offset int) bool {
+		renvoNonNil(g)
+		a := &g.asm
+		renvoAsmPushStack(a, offset)
+		renvoAsmLoadSecondaryStack(a, offset-8)
+		renvoAsmPopPrimary(a)
+		return true
 	}
 }
