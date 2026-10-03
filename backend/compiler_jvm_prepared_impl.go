@@ -4357,6 +4357,37 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
+renvoNonNil(a)
+	a.patchFailed = true
+}
+
+func renvoAsmObjectIndirectRegisterCall(a *renvoAsm, handleOffset int) {
+renvoNonNil(a)
+renvoRTGAsmLoadFrame(a, renvoRTGScratch, handleOffset)
+renvoRTGDirectCallIndirect(a, renvoRTGScratch)
+}
+
+func renvoAsmLoadObjectArgumentWord(a *renvoAsm, word int, offset int) bool {
+renvoNonNil(a)
+registers := renvoRTGObjectRegisters()
+if word < 0 || word >= len(registers) {
+	return false
+}
+renvoRTGAsmLoadFrame(a, registers[word], offset)
+return true
+}
+
+func renvoAsmObjectIndirectStackCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
+renvoNonNil(a)
+	return false
+}
+
+func renvoAsmObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+	return false
+}
+
 func renvoFinishObjectVariadicArgs(a *renvoAsm) {
 renvoNonNil(a)
 	a.patchFailed = true

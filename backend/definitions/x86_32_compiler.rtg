@@ -1300,6 +1300,11 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		runtime_stack_helpers = renvo386CompilerRuntimeStackHelpers
+		object_indirect_register_call = renvo386CompilerObjectIndirectRegisterCall
+		load_object_argument_word = renvo386CompilerLoadObjectArgumentWord
+		object_indirect_stack_call = renvo386CompilerObjectIndirectStackCall
+		object_integer_stack_call = renvo386CompilerObjectIntegerStackCall
 		finish_object_variadic_args = renvo386CompilerFinishObjectVariadicArgs
 		push_object_variadic_args = renvo386CompilerPushObjectVariadicArgs
 		reserve_object_variadic_args = renvo386CompilerReserveObjectVariadicArgs
@@ -4911,6 +4916,36 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerFinishObjectVariadicArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIndirectStackCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadObjectArgumentWord(a *renvoAsm, word int, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIndirectRegisterCall(a *renvoAsm, handleOffset int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 		a.patchFailed = true
 	}
 }
