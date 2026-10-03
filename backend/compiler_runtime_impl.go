@@ -208,16 +208,8 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 	return true
 }
 
-func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, seqSyscall int, offSyscall int) bool {
+func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, operation int) bool {
 	renvoNonNil(g, ep)
-	if renvoPreparedBackendActive != 0 {
-		operation := RTGRuntimeRead
-		if seqSyscall == renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch) ||
-			seqSyscall == renvoDarwinImportWrite {
-			operation = RTGRuntimeWrite
-		}
-		return renvoEmitPreparedReadWrite(g, ep, idx, operation)
-	}
 	a := &g.asm
 	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
@@ -225,16 +217,22 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	if argCount != 3 {
 		return false
 	}
-	fdStart := ep.exprs[idx].tok + 1
-	fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
-	fdEp := renvoNewExprParse()
-	renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
-	if !fdEp.ok || len(fdEp.exprs) == 0 {
-		return false
-	}
-	fdIndex := len(fdEp.exprs) - 1
-	if !renvoEmitIntExpr(g, fdEp, fdIndex) {
-		return false
+	if renvoPreparedBackendActive != 0 {
+		if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
+			return false
+		}
+	} else {
+		fdStart := ep.exprs[idx].tok + 1
+		fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
+		fdEp := renvoNewExprParse()
+		renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
+		if !fdEp.ok || len(fdEp.exprs) == 0 {
+			return false
+		}
+		fdIndex := len(fdEp.exprs) - 1
+		if !renvoEmitIntExpr(g, fdEp, fdIndex) {
+			return false
+		}
 	}
 	renvoAsmPushPrimary(a)
 	offIndex := ep.args[firstArg+2]
@@ -258,73 +256,10 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, s
 	}
 	renvoAsmPrepareReadWriteBuf(a)
 	if offsetRead {
-		renvoAsmPopPrimary(a)
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoAsmCopyPrimaryToTertiary(a)
-		} else {
-			renvoAsmMoveOffsetArg(a)
-		}
+		renvoAsmPopReadWriteOffset(a)
 	}
 	renvoAsmPopCallWord0(a)
-	if offsetRead {
-		renvoAsmPrimaryImm(a, offSyscall)
-	} else {
-		renvoAsmPrimaryImm(a, seqSyscall)
-	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if offsetRead {
-			if seqSyscall == renvoDarwinImportWrite {
-				renvoDarwinArm64DefinitionWriteAt(a)
-			} else {
-				renvoDarwinArm64DefinitionReadAt(a)
-			}
-		} else if seqSyscall == renvoDarwinImportWrite {
-			renvoDarwinArm64DefinitionWrite(a)
-		} else {
-			renvoDarwinArm64DefinitionRead(a)
-		}
-		return true
-	}
-	renvoAsmSyscall(a)
-	return true
-}
-
-func renvoEmitPreparedReadWrite(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, operation int,
-) bool {
-	renvoNonNil(g, ep)
-	a := &g.asm
-	expression := &ep.exprs[idx]
-	if expression.argCount != 3 {
-		return false
-	}
-	firstArg := expression.firstArg
-	if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	offsetIndex := ep.args[firstArg+2]
-	offset := renvoEvalConstExpr(g, ep, offsetIndex)
-	hasOffset := !offset.ok || offset.value >= 0
-	if hasOffset {
-		if offset.ok {
-			renvoAsmPrimaryImm(a, offset.value)
-		} else if !renvoEmitIntExpr(g, ep, offsetIndex) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-	}
-	if !renvoEmitSlicePtrLen(g, ep, ep.args[firstArg+1]) {
-		return false
-	}
-	renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
-	renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGTertiary)
-	if hasOffset {
-		renvoRTGAsmPopRegister(a, renvoRTGCallWord3)
-		operation += RTGRuntimeReadAt - RTGRuntimeRead
-	}
-	renvoRTGAsmPopRegister(a, renvoRTGCallWord0)
-	return renvoRTGEmitRuntimeOperation(a, operation)
+	return renvoAsmReadWriteFile(a, operation, offsetRead)
 }
 
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
@@ -433,17 +368,11 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		return renvoEmitWindowsChmod(g, ep, idx)
 	}
 	if callee == renvoIdentRead || callee == renvoIdentWrite {
-		isWrite := callee == renvoIdentWrite
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			if isWrite {
-				return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportWrite, renvoDarwinImportPwrite)
-			}
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoDarwinImportRead, renvoDarwinImportPread)
+		operation := RTGRuntimeRead
+		if callee == renvoIdentWrite {
+			operation = RTGRuntimeWrite
 		}
-		if isWrite {
-			return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysWriteAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		}
-		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		return renvoEmitBuiltinReadWrite(g, ep, idx, operation)
 	}
 	if callee == renvoIdentOpen {
 		return renvoEmitOpenFileCall(g, ep, idx)
@@ -460,7 +389,7 @@ func renvoEmitPreparedTargetRuntime(
 		if callee == renvoIdentWrite {
 			operation = RTGRuntimeWrite
 		}
-		return renvoEmitPreparedReadWrite(g, ep, idx, operation)
+		return renvoEmitBuiltinReadWrite(g, ep, idx, operation)
 	}
 	if callee == renvoIdentOpen {
 		return renvoEmitOpenFileCall(g, ep, idx)
