@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		linked_static_import = renvoArmCompilerLinkedStaticImport
+		finish_static_call_shape = renvoArmCompilerFinishStaticCallShape
+		static_call_policy = renvoArmCompilerStaticCallPolicy
 		compact_c_value_helpers = renvoArmCompilerCompactCValueHelpers
 		condition_branch = renvoArmCompilerConditionBranch
 		compare_stack_immediate_jump = renvoArmCompilerCompareStackImmediateJump
@@ -3396,5 +3399,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerCompactCValueHelpers(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStaticCallPolicy(c *renvoCompileContext) int {
+		return renvoStaticCallUnavailable
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+		return -1
 	}
 }

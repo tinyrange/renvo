@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		linked_static_import = renvoAmd64CompilerLinkedStaticImport
+		finish_static_call_shape = renvoAmd64CompilerFinishStaticCallShape
+		static_call_policy = renvoAmd64CompilerStaticCallPolicy
 		compact_c_value_helpers = renvoAmd64CompilerCompactCValueHelpers
 		condition_branch = renvoAmd64CompilerConditionBranch
 		compare_stack_immediate_jump = renvoAmd64CompilerCompareStackImmediateJump
@@ -4753,5 +4756,32 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStaticCallPolicy(c *renvoCompileContext) int {
+		if targetIsKernelModule(c) || c.renvoTargetOS == renvoOSWindows {
+			return renvoStaticCallWords
+		}
+		return renvoStaticCallUnavailable
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+		if targetIsKernelModule(a.c) {
+			return renvoAsmAddKernelImport(a, src, nameStart, nameEnd)
+		}
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return -1
+		}
+		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
 	}
 }

@@ -409,3 +409,16 @@ from a familiar name. The runtime must independently provide `emit_static_call`
 for outbound object calls, and kernel-module composition does not enable that
 path. Prepared generation rejects this layout with non-64-bit words. Display
 names for the ABI, target, and OS have no effect on this policy.
+
+A runtime with `emit_static_call` uses the plain word-call transport unless it
+explicitly declares `static_call_layout = split_register_words8`. This closed
+64-bit protocol carries semantic integer/string/slice/float kinds, with separate
+banks of eight integer and eight floating registers and integer-only stack
+overflow. It cannot compose with kernel-module calls. Shared lowering only
+classifies the parsed signature and counts consumed words; the selected backend
+validates register limits, encodes the result register, and routes library/import
+names. The prepared policy is independent of target, runtime, ABI, and OS display
+names. Missing emitters disable static calls; malformed declarations fail before
+code generation. The bundled and prepared recipes expose the same bounded
+`static_call_policy`, `finish_static_call_shape`, and `linked_static_import`
+operations.

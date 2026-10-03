@@ -461,7 +461,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclRuntime {
 		return []string{
-			"operations", "os", "entry", "exit", "allocator", "environment", "arguments",
+			"operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout",
 			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
@@ -1089,6 +1089,13 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 						" is missing "+hook))
 			}
 		}
+	}
+	split, splitValid := decodeStaticCallLayout(runtime)
+	_, emitsStaticCall := architectureGoHook(runtime, "emit_static_call")
+	if !splitValid || split && (!emitsStaticCall || target.Descriptor.WordBits != 64 ||
+		stringIndex(target.Descriptor.Capabilities, "kernel_module") >= 0) {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-133", "runtime "+runtime.Name+" requires one split_register_words8 static_call_layout, a static-call emitter, 64-bit words, and non-kernel composition"))
 	}
 	discard, discardValid := decodeRuntimeDiscardPolicy(runtime)
 	if !discardValid || discard.pageSize != 0 &&

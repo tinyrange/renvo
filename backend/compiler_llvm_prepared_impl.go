@@ -626,6 +626,8 @@ func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 const renvoRTGObjectAggregateRegisterBytes = 0
 const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
+const renvoRTGStaticCallPolicy = renvoStaticCallWords
+
 var rtgLlvmRAX = RTGRegister{Code:0, Valid:true}
 
 var rtgLlvmRDX = RTGRegister{Code:1, Valid:true}
@@ -2134,6 +2136,30 @@ return RTGCondition{}
 
 func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
+}
+
+func renvoAsmAddLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+renvoNonNil(a)
+if targetIsKernelModule(a.c) {
+if !renvoBytesEqualText(src, libraryStart, libraryEnd, "kernel") { return -1 }
+return renvoAsmAddKernelImport(a, src, nameStart, nameEnd)
+}
+return renvoAsmAddPreparedStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+}
+
+func renvoAsmFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+renvoNonNil(a)
+if renvoRTGStaticCallPolicy != renvoStaticCallSplitRegisters { return false }
+if !allInteger && (integerCount > 8 || floatCount > 8) { return false }
+if resultKind != renvoStaticCallInteger && (resultRegister < 0 || resultRegister >= 8) { return false }
+if resultKind == renvoStaticCallFloat32 { resultRegister += 8 }
+a.staticCallResultFloat = resultRegister
+return true
+}
+
+func renvoTargetStaticCallPolicy(c *renvoCompileContext) int {
+renvoNonNil(c)
+return renvoRTGStaticCallPolicy
 }
 
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
