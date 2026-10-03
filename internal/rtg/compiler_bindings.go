@@ -91,6 +91,7 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "struct_argument_by_reference", Suffix: "StructArgumentByReference", Function: "renvoTargetStructArgumentByReference", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return c.renvoNativeIntSize == 4 || c.renvoNativeIntSize == 2"},
 	{Name: "resolves_static_import", Suffix: "ResolvesStaticImport", Function: "renvoTargetResolvesStaticImport", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"absoluteLibrary", "bool"}}, Prepared: "return true"},
 	{Name: "entry_runtime_registers", Suffix: "EntryRuntimeRegisters", Function: "renvoEmitEntryRuntimeRegisters", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "return"},
 	{Name: "program_exit", Suffix: "ProgramExit", Function: "renvoEmitProgramExit", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"image", "bool"}}, Prepared: "if image { return false }; return renvoRTGEmitExit(a, renvoRTGPrimary)"},
@@ -543,6 +544,15 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			// compiler admits a bare return only at its block termination.
 			if operation.Result == "" && (!project || !function.EndsInReturn) {
 				body += "\nreturn\n"
+			}
+			// A read-only query may share its explicit unavailable result with
+			// known definitions. Omitting that identical branch preserves both
+			// known and unknown selectors without testing common defaults at
+			// every call site. Never do this for emission operations: even an
+			// unavailable result must still record an unknown-selector failure.
+			if operation.receiver().Type == "*renvoCompileContext" &&
+				strings.TrimSpace(body) == strings.TrimSpace(operation.failBody()) {
+				continue
 			}
 			condition := selectorLocal + ".renvoTargetArch == " + selectors[j]
 			group := stringIndex(bodies, body)

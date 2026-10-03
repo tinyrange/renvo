@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "472e68f7482670c8e199eaa62598022b36efaeb252cfb6873987dd68733f6228"
+const CompilerSourceDigest = "d1f919d515b5405ea9d9fdb105fe988a57117aa8c08294141034ca6973dbadc0"
 
 // source: backend/compiler_common_impl.go
 
@@ -28818,7 +28818,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x51\xbd\xa2\x43\xde\x6c\x2e\xf6\x95\xcc\xe8\x95\x8e\x11\xbf\xbe\x6c\x8d\x20\x67\xf3\x75\x2c\x33\xc4\x87\xaa\x55\x19\x1f\x05\x76", 3, true
+return "wasi/wasm32", "\x19\x7b\xb3\x9e\xff\xeb\x62\x28\x47\x0e\xf0\x3f\x52\xd0\xe9\xe9\x89\x41\x0e\x00\xfb\xbc\x6d\x83\x09\x61\xce\xa9\x74\x37\xf2\x03", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28830,7 +28830,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x94\x3b\x53\x6a\x77\x9a\xe9\x1e\xd5\xe3\xd3\xda\xf4\xed\x45\x6f\x10\x1e\xc1\x07\x27\xec\x73\x34\x52\x30\x7b\xc5\xb4\x30\x12\xfb", 3, true
+return "vm/vm32", "\xa9\x1c\xf7\xd3\x00\x76\x16\x25\xd8\xc5\x41\x06\xd6\x92\x69\x94\x1a\x48\xb2\xdd\xdf\x32\xf9\xc1\x28\x83\x4d\x60\x3a\x97\x5c\x1a", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -28847,8 +28847,7 @@ return "", "", 0, false
 // source: backend/compiler_target_impl.go
 
 func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
-(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
+return kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
@@ -30311,6 +30310,18 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return true
+
+}
+return false
+}
+
 func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -30335,11 +30346,6 @@ return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.r
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-return false
 
 }
 return false
@@ -30726,11 +30732,6 @@ func renvoLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
 renvoNonNil(c)
 renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-return renvoBackendValueSlotSize
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 if c.code16 && compactScalar {
@@ -30815,11 +30816,6 @@ renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 return 16
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-return 0
 
 }
 return 0
@@ -30989,11 +30985,6 @@ renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 return c.renvoTargetOS == renvoOSLinux
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-return false
 
 }
 return false
@@ -32004,11 +31995,6 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if c.regParm == 3 {
 return 3
 }
-return 0
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
 return 0
 
 }
@@ -45656,6 +45642,8 @@ renvoAsmEmit32(a, imm)
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -48710,6 +48698,8 @@ return true
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51533,6 +51523,8 @@ return label
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -52775,6 +52767,8 @@ result.data = data
 result.ok = true
 return result
 }
+
+
 
 
 
@@ -56471,6 +56465,8 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
 
 
 

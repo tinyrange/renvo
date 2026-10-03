@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		struct_argument_by_reference = renvoWasm32CompilerStructArgumentByReference
 		resolves_static_import = renvoWasm32CompilerResolvesStaticImport
 		entry_runtime_registers = renvoWasm32CompilerEntryRuntimeRegisters
 		program_exit = renvoWasm32CompilerProgramExit
@@ -6624,6 +6625,12 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStructArgumentByReference(c *renvoCompileContext) bool {
 		return false
 	}
 }

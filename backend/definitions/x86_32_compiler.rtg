@@ -1193,6 +1193,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		struct_argument_by_reference = renvo386CompilerStructArgumentByReference
 		resolves_static_import = renvo386CompilerResolvesStaticImport
 		entry_runtime_registers = renvo386CompilerEntryRuntimeRegisters
 		program_exit = renvo386CompilerProgramExit
@@ -5044,5 +5045,11 @@ go compiler {
 			return true
 		}
 		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
+	}
+}
+
+go compiler {
+	func renvo386CompilerStructArgumentByReference(c *renvoCompileContext) bool {
+		return true
 	}
 }
