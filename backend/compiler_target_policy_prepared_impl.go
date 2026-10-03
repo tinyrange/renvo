@@ -289,18 +289,30 @@ func renvoTargetAddressSize(context *renvoCompileContext, addressSpace int) int 
 	if renvoFixedTarget != 0 {
 		target = renvoFixedTarget
 	}
-	profile, ok := renvoProfileForTarget(target)
-	if !ok {
+	if target == renvoTargetRTG {
+		profile := renvoRTGProfileForTarget(target)
+		bits := profile.pointerBits
+		if addressSpace == renvoPointerSpaceCode {
+			bits = profile.codePointerBits
+		}
+		if addressSpace == renvoPointerSpaceFunction {
+			bits = profile.funcPointerBits
+		}
+		if bits != 0 {
+			return bits / 8
+		}
 		return context.renvoNativeIntSize
 	}
-	bits := profile.pointerBits
+	if target <= 0 || target >= len(renvoTargetPointerBitsTable) {
+		return context.renvoNativeIntSize
+	}
 	if addressSpace == renvoPointerSpaceCode {
-		bits = profile.codePointerBits
+		return int(renvoTargetCodePointerBitsTable[target]) / 8
 	}
 	if addressSpace == renvoPointerSpaceFunction {
-		bits = profile.funcPointerBits
+		return int(renvoTargetFunctionPointerBitsTable[target]) / 8
 	}
-	return bits / 8
+	return int(renvoTargetPointerBitsTable[target]) / 8
 }
 
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {
