@@ -805,6 +805,45 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitEmptyFunction(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoResolveUnemittedClosures(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+func renvoObjectProgram(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoFixedTarget == 0 && renvoIsSysVObject(c)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvoFixedTarget == 0 && renvoIsCdeclObject(c)
+	
+}
+return false
+}
+
 func renvoProgramImageEntry(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

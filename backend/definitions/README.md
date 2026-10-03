@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 278 role-based operations: register copies,
+The current migration covers 281 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -172,13 +172,17 @@ then own argument decoding, BSS requirements, and ABI word placement.
 Native, prepared, and structured entry paths share global initialization, entry
 invocation, and panic handling. Physical incoming frames, reserved-register
 restoration, and exit sequences remain bounded definition operations.
-Native and VM/WASI program setup, function-queue traversal, and completion are shared,
+Native, VM/WASI, and prepared program setup, function-queue traversal, and
+completion are shared,
 including bounded incremental compilation. Definitions select physical image
 layout, image encoding, object-code transforms, and scratch release lifetimes;
 image writers fill an owned result rather than returning another slice copy.
 Definitions also select compiler-target fallback semantics, linked-image entry
 availability, and object-cache support; cached native targets share the bounded
-session path without an architecture-specific scheduler.
+session path without an architecture-specific scheduler. Prepared application,
+object, and kernel outputs use that same lifecycle; speculative closure-label
+completion stays in the core and invokes only a bounded empty-function emitter.
+Relocation validation and image-limit diagnostics remain fail-closed.
 Static-import eligibility is a definition-owned policy query; common call
 lowering retains parsed arguments, evaluation order, and portable-body fallback.
 Literal parsing selects ordinary or split-word materialization

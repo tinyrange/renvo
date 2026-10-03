@@ -21676,7 +21676,7 @@ func renvoEmitApplicationEntry(g *renvoLinearGen, appIndex int, image bool, entr
 // entry setup, object-code transforms and image construction.
 func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
-	if renvoFixedTarget == 0 && (renvoIsSysVObject(meta.c) || renvoIsCdeclObject(meta.c)) {
+	if renvoObjectProgram(meta.c) {
 		return renvoBeginObjectProgram(p, meta)
 	}
 	appIndex := p.entryFunc
@@ -21688,7 +21688,7 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	}
 	g := new(renvoLinearGen)
-	renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
+	renvoInitLinearProgram(g, p, meta, renvoPreparedBackendActive != 0 || renvoFixedTarget == 0)
 	// Some execution formats compile a target-specific compiler, while others
 	// preserve a source-declared selector or a dynamic command-line fallback.
 	mode := renvoProgramTargetMode(g.c)
@@ -21707,7 +21707,7 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	if g.darwinEntryOff == -2 {
 		return nil
 	}
-	renvoInitProgramFunctions(g, renvoFixedTarget != 0 && mode == 0)
+	renvoInitProgramFunctions(g, renvoPreparedBackendActive == 0 && renvoFixedTarget != 0 && mode == 0)
 	if renvoKernelProgram(g.c) {
 		if !renvoBeginKernelModule(g, appIndex) {
 			return nil
@@ -21718,10 +21718,32 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	return g
 }
 
+// Whole-program function-value dispatch can reference a closure whose parent
+// is folded away. Backends requiring a complete label space select this repair;
+// source reachability stays shared, and definitions only emit an empty body.
+func renvoResolveSpeculativeClosureLabels(g *renvoLinearGen) {
+	for closureIndex := 0; closureIndex < len(g.meta.closures); closureIndex++ {
+		closure := &g.meta.closures[closureIndex]
+		fnIndex := closure.fnIndex
+		if closure.ready || fnIndex < 0 || fnIndex >= len(g.funcLabels) ||
+			renvoAsmLabelPosition(&g.asm, g.funcLabels[fnIndex]) >= 0 {
+			continue
+		}
+		renvoEmitEmptyFunction(&g.asm, g.funcLabels[fnIndex])
+	}
+}
+
 func renvoFinishScalarProgram(g *renvoLinearGen) renvoCompileResult {
 	renvoNonNil(g)
 	a := &g.asm
-	if renvoFixedTarget == 0 && (renvoIsSysVObject(g.c) || renvoIsCdeclObject(g.c)) {
+	if renvoResolveUnemittedClosures(g.c) {
+		renvoResolveSpeculativeClosureLabels(g)
+	}
+	if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation != 0 {
+		renvoRTGReportFailure(g)
+		return renvoCompileResult{}
+	}
+	if renvoObjectProgram(g.c) {
 		// Names and spans belong to the frontend arena: copy them before release.
 		renvoRecordObjectFunctionRanges(g)
 		if !renvoFinalizeObjectCode(a) {
@@ -21733,6 +21755,22 @@ func renvoFinishScalarProgram(g *renvoLinearGen) renvoCompileResult {
 	}
 	var result renvoCompileResult
 	renvoBuildProgramImage(a, g.kernelInitLabel, g.kernelExitLabel, &result)
+	if renvoPreparedBackendActive != 0 {
+		renvoRTGValidateRelocations(a)
+		if renvoRTGUnsupportedOperation != 0 {
+			renvoRTGReportFailure(g)
+			return renvoCompileResult{}
+		}
+		if len(result.data) == 0 && !renvoObjectProgram(g.c) && !renvoKernelProgram(g.c) {
+			if renvoRTGImageLimit > 0 {
+				renvoRTGReportImageSize(g)
+			} else {
+				renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
+			}
+			renvoRTGUnsupportedOperation = 5001
+			return renvoCompileResult{}
+		}
+	}
 	result.ok = !a.patchFailed && len(result.data) != 0
 	return result
 }

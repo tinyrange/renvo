@@ -978,6 +978,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		empty_function = renvo386CompilerEmptyFunction
+		resolve_unemitted_closures = renvo386CompilerResolveUnemittedClosures
+		object_program = renvo386CompilerObjectProgram
 		program_image_entry = renvo386CompilerProgramImageEntry
 		program_cache_supported = renvo386CompilerProgramCacheSupported
 		program_target_mode = renvo386CompilerProgramTargetMode
@@ -4994,5 +4997,24 @@ go compiler {
 go compiler {
 	func renvo386CompilerProgramImageEntry(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectProgram(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && renvoIsCdeclObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerResolveUnemittedClosures(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerEmptyFunction(a *renvoAsm, label int) {
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
 	}
 }
