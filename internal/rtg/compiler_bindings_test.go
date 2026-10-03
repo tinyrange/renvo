@@ -53,6 +53,7 @@ type renvoExpr struct {}
 type renvoFuncInfo struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
+var renvoFixedTarget int
 type renvoAsm struct { c *context; patchFailed bool }
 func renvoNonNil(values ...interface{}) {}
 const selectedOne = 41
@@ -246,6 +247,7 @@ type renvoExpr struct {}
 type renvoFuncInfo struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
+var renvoFixedTarget int
  type renvoAsm struct { c *context; patchFailed bool }
  func renvoNonNil(values ...interface{}) {}
  const selectedOne = 41
@@ -335,15 +337,20 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 			t.Fatalf("want guard, selector snapshot, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
 		}
 		first := fn.Body.List[2].(*ast.IfStmt)
-		condition := first.Cond.(*ast.BinaryExpr)
-		if condition.Op != token.LOR ||
-			condition.X.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedOne" ||
-			condition.Y.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedThree" {
-			t.Fatal("nonadjacent equal bodies lost their explicit selectors")
-		}
 		second := fn.Body.List[3].(*ast.IfStmt)
-		if second.Cond.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedTwo" {
-			t.Fatal("different implementation was grouped")
+		for _, fixed := range []int{0, 1, -1} {
+			for _, selector := range []int{0, 41, 73, 99, 101} {
+				for group, branch := range []*ast.IfStmt{first, second} {
+					want := selector == 41 || selector == 99
+					if group == 1 {
+						want = selector == 73
+					}
+					got := evalCompilerBindingCondition(t, branch.Cond, fixed, selector) != 0
+					if got != want {
+						t.Fatalf("fixed=%d selector=%d group=%d selected=%v, want %v", fixed, selector, group, got, want)
+					}
+				}
+			}
 		}
 		for i, block := range []*ast.BlockStmt{first.Body, second.Body} {
 			value := block.List[0].(*ast.AssignStmt).Rhs[0].(*ast.Ident).Name
@@ -361,4 +368,58 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 		return
 	}
 	t.Fatal("expected operation missing")
+}
+
+// Evaluate generated selection independently of branch spelling. Equal-body
+// grouping and fixed-target specialization must both preserve the truth table,
+// including selectors not present in any bundled definition.
+func evalCompilerBindingCondition(t *testing.T, expression ast.Expr, fixed, selector int) int {
+	t.Helper()
+	switch e := expression.(type) {
+	case *ast.ParenExpr:
+		return evalCompilerBindingCondition(t, e.X, fixed, selector)
+	case *ast.Ident:
+		switch e.Name {
+		case "renvoFixedTarget":
+			return fixed
+		case "renvoCompilerSelector":
+			return selector
+		case "selectedOne":
+			return 41
+		case "selectedTwo":
+			return 73
+		case "selectedThree":
+			return 99
+		}
+	case *ast.SelectorExpr:
+		if e.Sel.Name == "renvoTargetArch" {
+			return selector
+		}
+	case *ast.BasicLit:
+		if e.Kind == token.INT && e.Value == "0" {
+			return 0
+		}
+	case *ast.BinaryExpr:
+		left := evalCompilerBindingCondition(t, e.X, fixed, selector)
+		right := evalCompilerBindingCondition(t, e.Y, fixed, selector)
+		value := false
+		switch e.Op {
+		case token.EQL:
+			value = left == right
+		case token.NEQ:
+			value = left != right
+		case token.LAND:
+			value = left != 0 && right != 0
+		case token.LOR:
+			value = left != 0 || right != 0
+		default:
+			t.Fatalf("unexpected selection operator %v", e.Op)
+		}
+		if value {
+			return 1
+		}
+		return 0
+	}
+	t.Fatalf("unexpected selection expression %#v", expression)
+	return 0
 }
