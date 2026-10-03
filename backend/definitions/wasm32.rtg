@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		program_failure_exit_code = renvoWasm32CompilerProgramFailureExitCode
+		program_result_valid = renvoWasm32CompilerProgramResultValid
+		program_emission_valid = renvoWasm32CompilerProgramEmissionValid
 		label_notifications = renvoWasm32CompilerLabelNotifications
 		unsupported_operation = renvoWasm32CompilerUnsupportedOperation
 		label_boundary = renvoWasm32CompilerLabelBoundary
@@ -6908,5 +6911,23 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerLabelNotifications(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
 	}
 }

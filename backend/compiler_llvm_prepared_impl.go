@@ -2114,6 +2114,44 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoProgramFailureExitCode(c *renvoCompileContext) int {
+renvoNonNil(c)
+// Preserve the image-size rejection status for command-line embedders.
+if renvoRTGUnsupportedOperation == 5001 {
+	return 125
+}
+return 1
+}
+
+func renvoProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+renvoNonNil(g)
+a := &g.asm
+renvoRTGValidateRelocations(a)
+if renvoRTGUnsupportedOperation != 0 {
+	renvoRTGReportFailure(g)
+	return false
+}
+if len(result.data) == 0 && !renvoObjectProgram(g.c) && !renvoKernelProgram(g.c) {
+	if renvoRTGImageLimit > 0 {
+		renvoRTGReportImageSize(g)
+	} else {
+		renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
+	}
+	renvoRTGUnsupportedOperation = 5001
+	return false
+}
+return true
+}
+
+func renvoProgramEmissionValid(g *renvoLinearGen) bool {
+renvoNonNil(g)
+if renvoRTGUnsupportedOperation != 0 {
+	renvoRTGReportFailure(g)
+	return false
+}
+return true
+}
+
 func renvoLabelNotifications(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return true

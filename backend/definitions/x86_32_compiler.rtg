@@ -952,6 +952,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		program_failure_exit_code = renvo386CompilerProgramFailureExitCode
+		program_result_valid = renvo386CompilerProgramResultValid
+		program_emission_valid = renvo386CompilerProgramEmissionValid
 		label_notifications = renvo386CompilerLabelNotifications
 		unsupported_operation = renvo386CompilerUnsupportedOperation
 		label_boundary = renvo386CompilerLabelBoundary
@@ -5125,5 +5128,23 @@ go compiler {
 go compiler {
 	func renvo386CompilerLabelNotifications(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
 	}
 }

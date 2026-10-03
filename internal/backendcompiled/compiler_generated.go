@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "87862b5ff9f71efeebb0ecca0b67540a2d948a8c3456ab8be87974ab769ecb78"
+const CompilerSourceDigest = "75eceadef7049f7582f0e3cea5c86232c42a1016d3023028dd1147399585928c"
 
 // source: backend/compiler_common_impl.go
 
@@ -21697,8 +21697,7 @@ a := &g.asm
 if renvoResolveUnemittedClosures(g.c) {
 renvoResolveSpeculativeClosureLabels(g)
 }
-if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation != 0 {
-renvoRTGReportFailure(g)
+if !renvoProgramEmissionValid(g) {
 return renvoCompileResult{}
 }
 if renvoObjectProgram(g.c) {
@@ -21713,21 +21712,8 @@ renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 }
 var result renvoCompileResult
 renvoBuildProgramImage(a, g.kernelInitLabel, g.kernelExitLabel, &result)
-if renvoPreparedBackendActive != 0 {
-renvoRTGValidateRelocations(a)
-if renvoRTGUnsupportedOperation != 0 {
-renvoRTGReportFailure(g)
+if !renvoProgramResultValid(g, &result) {
 return renvoCompileResult{}
-}
-if len(result.data) == 0 && !renvoObjectProgram(g.c) && !renvoKernelProgram(g.c) {
-if renvoRTGImageLimit > 0 {
-renvoRTGReportImageSize(g)
-} else {
-renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
-}
-renvoRTGUnsupportedOperation = 5001
-return renvoCompileResult{}
-}
 }
 result.ok = !a.patchFailed && len(result.data) != 0
 return result
@@ -24951,13 +24937,7 @@ write(output, renvoCompileOutputDataWithContext(context, result.data, target), -
 return 0
 }
 renvoPrintErr("renvo: compilation failed\n")
-if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation == 5001 {
-
-
-
-return 125
-}
-return 1
+return renvoProgramFailureExitCode(context)
 }
 
 func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) int {
@@ -29070,7 +29050,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x77\xad\x50\x05\xdf\x41\xdc\x0c\x09\x76\xe0\x38\xb6\x84\x0a\xf1\x20\xf0\x38\xec\x7e\xbd\x82\x0f\x70\x71\xf4\x78\xc7\x78\x8a\x50", 3, true
+return "wasi/wasm32", "\x72\x8e\xb3\x96\x65\x76\xe9\x61\x09\x1e\x6b\x51\xec\xbe\x32\x3d\x1f\x79\x5a\x20\x0a\x81\xac\x8d\x65\x8f\x53\x8b\xb6\xdf\xb4\x78", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29082,7 +29062,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xac\x8b\xcd\xa4\x73\x4b\x59\x66\x35\x35\xdb\x90\xae\x48\x9b\x8d\x95\x49\x46\x95\x66\x60\x4d\x0b\x2a\xe0\x9d\xfe\x3c\xaa\x6a\x52", 3, true
+return "vm/vm32", "\x74\x2a\xa5\xc5\x5c\x41\xbe\x9e\x7c\x2f\x07\xa0\x44\xdc\xd4\x5b\xca\xc7\x00\x28\x96\xbc\xc9\x2b\xf5\xc6\x16\x27\xda\x85\xed\x5b", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30460,6 +30440,39 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoProgramFailureExitCode(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return 1
+}
+
+func renvoProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return true
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoProgramEmissionValid(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return true
+
+}
+g.asm.patchFailed = true
+return false
 }
 
 func renvoLabelNotifications(c *renvoCompileContext) bool {
@@ -46350,6 +46363,12 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49240,6 +49259,12 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51886,6 +51911,12 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53544,6 +53575,12 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
 
 
 
@@ -56763,6 +56800,12 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
 
 
 

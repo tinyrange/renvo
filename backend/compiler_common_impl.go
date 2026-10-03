@@ -21690,8 +21690,7 @@ func renvoFinishScalarProgram(g *renvoLinearGen) renvoCompileResult {
 	if renvoResolveUnemittedClosures(g.c) {
 		renvoResolveSpeculativeClosureLabels(g)
 	}
-	if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation != 0 {
-		renvoRTGReportFailure(g)
+	if !renvoProgramEmissionValid(g) {
 		return renvoCompileResult{}
 	}
 	if renvoObjectProgram(g.c) {
@@ -21706,21 +21705,8 @@ func renvoFinishScalarProgram(g *renvoLinearGen) renvoCompileResult {
 	}
 	var result renvoCompileResult
 	renvoBuildProgramImage(a, g.kernelInitLabel, g.kernelExitLabel, &result)
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGValidateRelocations(a)
-		if renvoRTGUnsupportedOperation != 0 {
-			renvoRTGReportFailure(g)
-			return renvoCompileResult{}
-		}
-		if len(result.data) == 0 && !renvoObjectProgram(g.c) && !renvoKernelProgram(g.c) {
-			if renvoRTGImageLimit > 0 {
-				renvoRTGReportImageSize(g)
-			} else {
-				renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
-			}
-			renvoRTGUnsupportedOperation = 5001
-			return renvoCompileResult{}
-		}
+	if !renvoProgramResultValid(g, &result) {
+		return renvoCompileResult{}
 	}
 	result.ok = !a.patchFailed && len(result.data) != 0
 	return result
@@ -24944,13 +24930,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 		return 0
 	}
 	renvoPrintErr("renvo: compilation failed\n")
-	if renvoPreparedBackendActive != 0 && renvoRTGUnsupportedOperation == 5001 {
-		// Preserve a machine-readable distinction for embedders: the target image
-		// builder rejected an otherwise-emitted program (for example because a COM
-		// image cannot fit its single segment).
-		return 125
-	}
-	return 1
+	return renvoProgramFailureExitCode(context)
 }
 
 func renvoCompileUnitInput(input []int, output int, target int, arenaSize int) int {

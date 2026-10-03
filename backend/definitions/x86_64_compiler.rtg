@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		program_failure_exit_code = renvoAmd64CompilerProgramFailureExitCode
+		program_result_valid = renvoAmd64CompilerProgramResultValid
+		program_emission_valid = renvoAmd64CompilerProgramEmissionValid
 		label_notifications = renvoAmd64CompilerLabelNotifications
 		unsupported_operation = renvoAmd64CompilerUnsupportedOperation
 		label_boundary = renvoAmd64CompilerLabelBoundary
@@ -4491,5 +4494,23 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerLabelNotifications(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
 	}
 }
