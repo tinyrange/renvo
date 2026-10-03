@@ -1179,7 +1179,7 @@ itself. VM32 measures a prepared custom backend compiling a semantic regression
 program from a compact unit.
 The shared policy lives in `internal/perfgate/policy.json`: 8 MiB compiler,
 256 MiB peak memory, and median growth limits of 60% CPU, 20% memory,
-30% artifact size, and 20% VM instructions against a pinned source reference.
+35% artifact size, and 60% VM instructions against a pinned source reference.
 Both revisions execute on the same runner. Larger increases block feature
 inclusion for maintainer evaluation case by case.
 
