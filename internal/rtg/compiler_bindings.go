@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "move_read_write_offset", Suffix: "MoveReadWriteOffset", Function: "renvoAsmMoveOffsetArg", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord3, renvoRTGPrimary)"},
+	{Name: "prepare_read_write_buffer", Suffix: "PrepareReadWriteBuffer", Function: "renvoAsmPrepareReadWriteBuf", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)\nrenvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGTertiary)"},
 	{Name: "compare_word_immediate_kind", Suffix: "CompareWordImmediateKind", Function: "renvoAsmCompareWordImmediateKind", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"imm", "int"}, {"kind", "int"}}, Prepared: "renvoAsmNormalizePrimaryForKind(a, kind)\nrenvoAsmCmpPrimaryImm8Discard(a, imm)"},
 	{Name: "unsigned_pointer_ordering", Suffix: "UnsignedPointerOrdering", Function: "renvoUsesUnsignedPointerOrdering", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "logical_shift_primary_word_immediate", Suffix: "LogicalShiftPrimaryWordImmediate", Function: "renvoAsmLogicalShiftPrimaryWordImm", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"imm", "int"}}, Prepared: "renvoRTGDirectShiftRightUnsignedImmediate(a, renvoRTGPrimary, byte(imm))"},

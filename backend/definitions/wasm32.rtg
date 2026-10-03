@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		move_read_write_offset = renvoWasm32CompilerMoveReadWriteOffset
+		prepare_read_write_buffer = renvoWasm32CompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoWasm32CompilerCompareWordImmediateKind
 		unsigned_pointer_ordering = renvoWasm32CompilerUnsignedPointerOrdering
 		logical_shift_primary_word_immediate = renvoWasm32CompilerLogicalShiftPrimaryWordImmediate
@@ -6051,5 +6053,18 @@ go compiler {
 	func renvoWasm32CompilerCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
 		renvoAsmNormalizePrimaryForKind(a, kind)
 		renvoAsmCmpPrimaryImm8Discard(a, imm)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPrepareReadWriteBuffer(a *renvoAsm) {
+		renvoWasm32AsmMovRsiRax(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerMoveReadWriteOffset(a *renvoAsm) {
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
 	}
 }

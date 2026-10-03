@@ -737,6 +737,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		move_read_write_offset = renvoAarch64CompilerMoveReadWriteOffset
+		prepare_read_write_buffer = renvoAarch64CompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoAarch64CompilerCompareWordImmediateKind
 		unsigned_pointer_ordering = renvoAarch64CompilerUnsignedPointerOrdering
 		logical_shift_primary_word_immediate = renvoAarch64CompilerLogicalShiftPrimaryWordImmediate
@@ -2766,5 +2768,17 @@ go compiler {
 	func renvoAarch64CompilerCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
 		renvoAsmNormalizePrimaryForKind(a, kind)
 		renvoAsmCmpPrimaryImm8Discard(a, imm)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerPrepareReadWriteBuffer(a *renvoAsm) {
+		renvoAarch64AsmPrepareReadWriteBuf(a)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerMoveReadWriteOffset(a *renvoAsm) {
+		renvoAarch64AsmMoveOffsetArg(a)
 	}
 }
