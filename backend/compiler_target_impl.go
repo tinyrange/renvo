@@ -551,3 +551,22 @@ func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool
 	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 	return renvoEmitPureBlock(records, stateWords, context)
 }
+
+// renvoParseProgram adapts the legacy global target selection to the shared
+// parser. Explicit-context callers use renvoParseProgramWithContext instead.
+func renvoParseProgram(src []byte) renvoProgram {
+	var p renvoProgram
+	p.c.stripSymbols = renvoCompilerStripSymbols
+	if renvoFixedTarget == 0 {
+		p.c.renvoTarget = renvoTarget
+		p.c.renvoTargetOS = renvoTargetOS
+		p.c.renvoTargetArch = renvoTargetArch
+		p.c.renvoNativeIntSize = renvoNativeIntSize
+		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+		p.c.emitImage = renvoCompilerEmitImage
+	} else if targetIsWindows(renvoTargetOS) {
+		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+	}
+	renvoParseProgramInto(src, &p)
+	return p
+}

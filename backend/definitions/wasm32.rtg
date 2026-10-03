@@ -4150,6 +4150,10 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		single_call_constants = renvoWasm32CompilerSingleCallConstants
+		elide_empty_calls = renvoWasm32CompilerElideEmptyCalls
+		pure_call_constants = renvoWasm32CompilerPureCallConstants
+		flow_constant_propagation = renvoWasm32CompilerFlowConstantPropagation
 		reset_program_emission = renvoWasm32CompilerResetProgramEmission
 		function_address_layout = renvoWasm32CompilerFunctionAddressLayout
 		reconstruct_wide_argument = renvoWasm32CompilerReconstructWideArgument
@@ -7048,5 +7052,29 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerResetProgramEmission(g *renvoLinearGen) {
 
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFlowConstantPropagation(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPureCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerElideEmptyCalls(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSingleCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
 	}
 }

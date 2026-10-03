@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e08812136f9123346bad533c4819139cf3ba677ead56b25291c7089c8aa1618c"
+const CompilerSourceDigest = "b515f569429ae11a21344fb116deb0b2c0775e81c4ec3d2a43ecfe75fcab6814"
 
 // source: backend/compiler_common_impl.go
 
@@ -605,17 +605,6 @@ if renvoFixedTarget == 0 {
 return renvo_runtime_ArenaPersistString(value)
 }
 return value
-}
-
-
-
-
-
-func (a *renvoAsm) ObjectImage() []byte {
-if renvoFixedTarget != 0 {
-return nil
-}
-return renvoAsmImageRelocatableObjectAmd64(a)
 }
 
 func renvoAsmAddObjectFuncSymbol(a *renvoAsm, src []byte, nameStart int, nameEnd int, label int, decl *renvoObjectDecl) int {
@@ -1378,23 +1367,6 @@ m.ok = false
 func renvoExprError(ep *renvoExprParse) {
 renvoNonNil(ep)
 ep.ok = false
-}
-
-func renvoParseProgram(src []byte) renvoProgram {
-var p renvoProgram
-p.c.stripSymbols = renvoCompilerStripSymbols
-if renvoFixedTarget == 0 {
-p.c.renvoTarget = renvoTarget
-p.c.renvoTargetOS = renvoTargetOS
-p.c.renvoTargetArch = renvoTargetArch
-p.c.renvoNativeIntSize = renvoNativeIntSize
-p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
-p.c.emitImage = renvoCompilerEmitImage
-} else if targetIsWindows(renvoTargetOS) {
-p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
-}
-renvoParseProgramInto(src, &p)
-return p
 }
 
 func renvoParseProgramWithContext(src []byte, context *renvoCompileContext) renvoProgram {
@@ -3267,7 +3239,7 @@ return
 }
 if e.kind == renvoExprCall {
 if renvoFixedTarget == 0 {
-if renvoIsSysVObject(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
+if renvoPureCallConstants(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
 fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 if fnIndex >= 0 {
 fn := &g.meta.funcs[fnIndex]
@@ -8960,7 +8932,7 @@ literalBool := ep.exprs[rootIndex].kind == renvoExprBool
 if fixedValue < 0 && (literalBool || !renvoRangeContainsLabel(p, stmt.bodyStart, stmt.bodyEnd) &&
 !renvoRangeContainsLabel(p, stmt.elseStart, stmt.elseEnd)) {
 oldFlow := g.constEvalFlow
-g.constEvalFlow = oldFlow || renvoIsSysVObject(g.c)
+g.constEvalFlow = oldFlow || renvoFlowConstantPropagation(g.c)
 constant := renvoEvalConstExpr(g, ep, rootIndex)
 g.constEvalFlow = oldFlow
 if constant.ok {
@@ -11736,7 +11708,7 @@ return
 }
 
 func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int) bool {
-if !renvoIsSysVObject(g.c) {
+if !renvoFlowConstantPropagation(g.c) {
 return false
 }
 resolved := renvoResolveType(g.meta, typ)
@@ -11751,7 +11723,7 @@ return renvoTypeKindIsScalarInt(resolved.kind) && !renvoLocalNameAddressTaken(g,
 
 func renvoTopLevelAssignmentDominates(g *renvoLinearGen, assignmentTok int) bool {
 renvoNonNil(g)
-if !renvoIsSysVObject(g.c) || g.flowControlDepth != 0 ||
+if !renvoFlowConstantPropagation(g.c) || g.flowControlDepth != 0 ||
 g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) {
 return false
 }
@@ -11801,7 +11773,7 @@ if renvoFixedTarget != 0 {
 return false
 }
 renvoNonNil(g)
-if !renvoIsSysVObject(g.c) {
+if !renvoFlowConstantPropagation(g.c) {
 return false
 }
 resolved := renvoResolveType(g.meta, typ)
@@ -14307,7 +14279,7 @@ return false
 }
 fn := &g.meta.funcs[fnIndex]
 if renvoFixedTarget == 0 {
-if renvoIsSysVObject(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
+if renvoElideEmptyCalls(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
 fn.linkStatic == 0 && fn.bodyStart == fn.bodyEnd &&
 !renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_") &&
 renvoCallArgumentsDiscardable(g, ep, e) {
@@ -22350,7 +22322,7 @@ func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 renvoNonNil(g)
 g.funcReachable = make([]bool, count)
 g.funcQueue = make([]int, 0, count)
-if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && renvoSingleCallConstants(g.c) {
 g.funcSingleCallState = make([]int, count)
 g.paramConstValues = make([]int, len(g.meta.params))
 g.paramConstValid = make([]bool, len(g.meta.params))
@@ -22384,7 +22356,7 @@ g.funcSingleCallState[fnIndex] = 2
 
 func renvoRecordSingleCallConstants(g *renvoLinearGen, ep *renvoExprParse, call *renvoExpr, fnIndex int) {
 renvoNonNil(g, ep, call)
-if !renvoIsSysVObject(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
+if !renvoSingleCallConstants(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
 fnIndex >= len(g.funcSingleCallState) || g.continueDepth != 0 ||
 !renvoFunctionHasSingleDirectUse(g, fnIndex) {
 return
@@ -29020,7 +28992,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x0e\x52\x83\x12\x7d\xf7\x22\x6c\x0e\xee\x56\x09\xe2\xd4\x56\x95\xdb\x24\xda\x8b\x39\xbc\x35\xd3\x31\xd6\x97\x68\x6c\x0d\x4f\x2c", 3, true
+return "wasi/wasm32", "\xb7\x11\x9b\xe3\xd2\xd3\x7b\x19\x5b\x56\x8f\x51\xb1\xc0\x96\x49\x1f\x97\x59\xdf\x10\x9f\x78\xa4\xf0\x07\xef\x8b\x48\x77\xf3\x8a", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29032,7 +29004,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x02\xd1\x38\x7a\xf0\x5a\x06\x08\x8c\x36\x8d\xc5\x2b\x4b\xdb\x9a\xe0\x16\x9c\x73\xa5\xfa\x23\x78\xcd\xf4\xd7\xeb\x07\x51\x14\x60", 3, true
+return "vm/vm32", "\xfd\x98\xb1\x46\x1e\x75\xde\xe9\x6a\x3a\x5f\x79\x80\xc0\xfe\x06\x42\x94\x5a\x39\xa3\x2a\x3a\x97\xf3\x18\x10\x62\x6c\x50\x34\x08", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -29598,6 +29570,25 @@ arch = renvoArchAarch64
 
 context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 return renvoEmitPureBlock(records, stateWords, context)
+}
+
+
+
+func renvoParseProgram(src []byte) renvoProgram {
+var p renvoProgram
+p.c.stripSymbols = renvoCompilerStripSymbols
+if renvoFixedTarget == 0 {
+p.c.renvoTarget = renvoTarget
+p.c.renvoTargetOS = renvoTargetOS
+p.c.renvoTargetArch = renvoTargetArch
+p.c.renvoNativeIntSize = renvoNativeIntSize
+p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+p.c.emitImage = renvoCompilerEmitImage
+} else if targetIsWindows(renvoTargetOS) {
+p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+}
+renvoParseProgramInto(src, &p)
+return p
 }
 
 // source: backend/compiler_rtg_generated_impl.go
@@ -30400,6 +30391,54 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoSingleCallConstants(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoElideEmptyCalls(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoPureCallConstants(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoFlowConstantPropagation(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
 }
 
 func renvoResetProgramEmission(g *renvoLinearGen) {
@@ -44996,6 +45035,17 @@ renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord5)
 renvoAsmStorePrimaryStack(a, capSlot)
 }
 
+
+
+
+
+func (a *renvoAsm) ObjectImage() []byte {
+if renvoFixedTarget != 0 {
+return nil
+}
+return renvoAsmImageRelocatableObjectAmd64(a)
+}
+
 // source: backend/compiler_amd64_impl.go
 
 
@@ -46442,6 +46492,14 @@ return renvoBeginScalarProgram(p, meta)
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 return renvoFinishScalarProgram(g)
 }
+
+
+
+
+
+
+
+
 
 
 
@@ -49464,6 +49522,14 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52150,6 +52216,14 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53809,6 +53883,14 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
+
+
 
 
 
@@ -57068,6 +57150,14 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
 
 
 

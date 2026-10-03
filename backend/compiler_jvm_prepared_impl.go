@@ -4365,6 +4365,26 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoSingleCallConstants(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoElideEmptyCalls(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoPureCallConstants(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoFlowConstantPropagation(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
 func renvoResetProgramEmission(g *renvoLinearGen) {
 renvoNonNil(g)
 renvoRTGUnsupportedOperation = 0
