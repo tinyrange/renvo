@@ -398,3 +398,14 @@ The prepared runtime adapter then records each syscall instruction offset and
 operation number for the image writer's syscall table. Absence means no table;
 unknown layouts fail prepared validation. The policy is independent of the
 public target and OS names. OpenBSD's runtime declares this layout explicitly.
+
+### Foreign object-call classification
+
+An ABI may declare `object_call_layout = sysv_eightbyte` to opt into the
+existing 64-bit SysV eightbyte aggregate-classification protocol (up to two
+register words). This is a closed protocol identifier, not the ABI declaration's
+name; absent, duplicate, malformed, or unknown policies do not infer support
+from a familiar name. The runtime must independently provide `emit_static_call`
+for outbound object calls, and kernel-module composition does not enable that
+path. Prepared generation rejects this layout with non-64-bit words. Display
+names for the ABI, target, and OS have no effect on this policy.
