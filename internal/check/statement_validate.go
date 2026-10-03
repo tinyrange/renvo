@@ -71,7 +71,7 @@ func invalidDefiniteStatement(file *syntax.File, body *syntax.Body, cSource bool
 					}
 				}
 			}
-			if kindLine&255 == syntax.TokenIdent && syntax.TokenLine(file.Tokens[tok]) == syntax.TokenLine(file.Tokens[tok+1]) && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
+			if kindLine&255 == syntax.TokenIdent && (file.Tokens[tok].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == (file.Tokens[tok+1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && tokCharIs(file, tok+1, '(') && (tok == 0 || !tokCharIs(file, tok-1, '.')) && definiteLiteralLocal(literalLocals, file, tok) {
 				return CheckErrCall, tok
 			}
 		}

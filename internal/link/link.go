@@ -150,7 +150,7 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 			break
 		}
 		for j := 0; j < len(packageActions); j++ {
-			tok := programs[i].Tokens[j]
+			tok := &programs[i].Tokens[j]
 			if tok.KindLine&255 != unit.TokenEOF && packageActions[j] >= 0 {
 				finalEOF++
 				if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start+2 < len(programs[i].Text) && programs[i].Text[tok.Start] == '.' && programs[i].Text[tok.Start+1] == '.' && programs[i].Text[tok.Start+2] == '.' {
@@ -429,7 +429,7 @@ func coreText(text []byte, start int, end int) string {
 
 func coreTokenAt(program unit.Program, start int, end int) int {
 	for i := 0; i < len(program.Tokens); i++ {
-		tok := program.Tokens[i]
+		tok := &program.Tokens[i]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return i
 		}
@@ -1276,7 +1276,7 @@ func coreTokenText(program *unit.Program, tok int) string {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return ""
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return ""
 	}
@@ -1691,7 +1691,7 @@ func mapCoreTextSpanByToken(src unit.Program, dst *unit.Program, eof int, start 
 		}
 	}
 	if low < len(src.Tokens) {
-		tok := src.Tokens[low]
+		tok := &src.Tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return mappedCoreTokenTextSpan(dst, mapLinkedToken(src.Tokens, low, eof))
 		}
@@ -1711,7 +1711,7 @@ func coreTokenIndexByTextSpan(tokens []unit.Token, start int, end int) int {
 		}
 	}
 	if low < len(tokens) {
-		tok := tokens[low]
+		tok := &tokens[low]
 		if tok.Start == start && tok.Start+tok.Size == end {
 			return low
 		}
@@ -1723,7 +1723,7 @@ func mappedCoreTokenTextSpan(program *unit.Program, tok int) (int, int, bool) {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return 0, 0, false
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.KindLine&255 == unit.TokenEOF || token.Start < 0 || token.Start+token.Size > len(program.Text) {
 		return 0, 0, false
 	}

@@ -496,11 +496,11 @@ func skipBalanced(file *File, start int, open byte, close byte) int {
 	depth := 1
 	i := start + 1
 	for i < len(file.Tokens) {
-		tok := file.Tokens[i]
-		if tok.KindLine&255 == TokenEOF {
+		packed := file.Tokens[i].KindLine
+		if packed&255 == TokenEOF {
 			break
 		}
-		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		c := byte(packed >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == open {
 			depth++
 		} else if c == close {

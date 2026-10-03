@@ -231,7 +231,7 @@ func lowerTokenTextIs(file *syntax.File, token int, wanted string) bool {
 	if token < 0 || token >= len(file.Tokens) {
 		return false
 	}
-	item := file.Tokens[token]
+	item := &file.Tokens[token]
 	start := int(item.Start)
 	end := int(item.End)
 	if start < 0 || end-start != len(wanted) || end > len(file.Src) {
@@ -335,7 +335,7 @@ func (b *coreUnitBuilder) addFileTokens(file *syntax.File, src []byte, fileIndex
 	newlines := countCoreNewlines(src)
 	needsSeparator := hasNext && (len(src) == 0 || src[len(src)-1] != '\n')
 	for i := 0; i < len(file.Tokens); i++ {
-		tok := file.Tokens[i]
+		tok := &file.Tokens[i]
 		if tok.KindLine&255 == syntax.TokenEOF {
 			continue
 		}
@@ -431,7 +431,7 @@ func (b *coreUnitBuilder) addFunc(file *syntax.File, fn syntax.FuncDecl, mapping
 		b.setErr(EmitErrToken, fileIndex, fn.BodyEnd)
 		return false
 	}
-	name := file.Tokens[fn.NameTok]
+	name := &file.Tokens[fn.NameTok]
 	if name.Start < 0 || name.End < name.Start || int(name.End) > len(file.Src) {
 		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
 		return false
@@ -765,13 +765,13 @@ func (b *coreUnitBuilder) setErr(err int, file int, tok int) {
 	b.errToken = tok
 }
 
-func coreUnitTokenKind(src []byte, tok syntax.Token) int {
+func coreUnitTokenKind(src []byte, tok *syntax.Token) int {
 	kind := tok.KindLine & 255
 	if kind >= syntax.TokenEOF && kind <= syntax.TokenIdent {
 		return kind
 	}
 	if kind == syntax.TokenNumber {
-		if syntax.NumberTokenIsFloat(src, tok) {
+		if syntax.NumberTokenIsFloat(src, *tok) {
 			return unit.TokenFloat
 		}
 		return unit.TokenNumber

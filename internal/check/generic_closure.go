@@ -21,7 +21,7 @@ func genericFunctionLiteral(file *syntax.File, start int, end int) syntax.FuncDe
 	}
 	fn.ResultStart = fn.ParamsEnd
 	for i := fn.ParamsEnd; i < end; i++ {
-		if tokCharIs(file, i, ';') || tokCharIs(file, i, ',') || tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') || tokCharIs(file, i, '=') || syntax.TokenLine(file.Tokens[i]) > syntax.TokenLine(file.Tokens[i-1]) {
+		if tokCharIs(file, i, ';') || tokCharIs(file, i, ',') || tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') || tokCharIs(file, i, '=') || (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) > (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) {
 			return fn
 		}
 		if tokCharIs(file, i, '(') {

@@ -196,7 +196,7 @@ func statementSpecEnd(file *syntax.File, start int, end int) int {
 			if tokCharIs(file, i, ';') {
 				return i + 1
 			}
-			if i > start && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && declarationTokenEndsSpec(file, i-1) {
+			if i > start && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && declarationTokenEndsSpec(file, i-1) {
 				return i
 			}
 		}
@@ -228,8 +228,8 @@ func nextTopLevelComma(file *syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		tok := file.Tokens[i]
-		c := byte(tok.KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
+		packed := file.Tokens[i].KindLine
+		c := byte(packed >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {

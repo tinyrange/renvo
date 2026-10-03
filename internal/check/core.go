@@ -705,7 +705,7 @@ func invalidImportedLiteralElements(file *syntax.File, open int, typ *TypeInfo, 
 }
 
 func corePredeclaredToken(file *syntax.File, tok int) bool {
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	// These are the Go predeclared identifiers plus Renvo's syscall surface,
 	// ordered by hash. Packing the hashes, offsets, and spelling table into
 	// constants keeps this hot lookup allocation-free in a self-hosted compiler;
@@ -756,7 +756,7 @@ func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
 		return false
 	}
 	for i := tok + 1; i < end; i++ {
-		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && !tokCharIs(file, i-1, ',') {
+		if (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && !tokCharIs(file, i-1, ',') {
 			return false
 		}
 		if tokCharIs(file, i, ';') || tokCharIs(file, i, '{') || tokCharIs(file, i, '}') {
@@ -1049,7 +1049,7 @@ func lookupScopeTokenNameCore(scope *CoreScope, file *syntax.File, tok int) int 
 	if len(scope.Names) == 0 || tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	tokenStart := int(token.Start)
 	size := int(token.End - token.Start)
 	if size < 0 || tokenStart < 0 || tokenStart+size > len(file.Src) {
@@ -1116,7 +1116,7 @@ func lookupImportTokenNameCore(info *PackageInfo, fileIndex int, file *syntax.Fi
 	if tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	tokenStart := int(token.Start)
 	size := int(token.End - token.Start)
 	if size < 0 || tokenStart < 0 || tokenStart+size > len(file.Src) {
@@ -1172,7 +1172,7 @@ func tokenMatchesCoreName(file *syntax.File, tok int, name string) bool {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return false
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	start := int(token.Start)
 	size := int(token.End - token.Start)
 	return size == len(name) && start >= 0 && start+size <= len(file.Src) && tokenMatchesCoreSymbol(file.Src, start, size, name)
@@ -1182,7 +1182,7 @@ func lookupPackageSymbolTextCore(info *PackageInfo, file *syntax.File, tok int) 
 	if tok < 0 || tok >= len(file.Tokens) {
 		return -1
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	start := int(token.Start)
 	size := int(token.End - token.Start)
 	if size < 0 || start < 0 || start+size > len(file.Src) {
@@ -1349,7 +1349,7 @@ func buildFuncScopeCore(file *syntax.File, fn *syntax.FuncDecl) (CoreScope, bool
 	start := fn.BodyStart + 1
 	end := fn.BodyEnd - 1
 	for i := start; i < end; i++ {
-		token := file.Tokens[i]
+		token := &file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(file, i+1, '(') {
 			if ok, tok := collectCoreLiteralBindings(file, i, end, &scope); !ok {
@@ -1478,7 +1478,7 @@ func addCoreScopeName(scope *CoreScope, file *syntax.File, tok int, kind int, re
 	if tok < 0 || tok >= len(file.Tokens) || tokenTextIs(file, tok, "_") {
 		return true
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	hash := scopeTokenHash(file.Src, int(token.Start), int(token.End-token.Start))
 	if rejectDup {
 		for i := 0; i < len(scope.Names); i++ {
@@ -1541,7 +1541,7 @@ func coreTokenLooksLikeLabel(file *syntax.File, tok int, start int, end int) boo
 	if tokCharIs(file, prev, '{') || tokCharIs(file, prev, ',') {
 		return false
 	}
-	return syntax.TokenLine(file.Tokens[prev]) != syntax.TokenLine(file.Tokens[tok]) || tokCharIs(file, prev, ';') || tokCharIs(file, prev, '}')
+	return (file.Tokens[prev].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[tok].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) || tokCharIs(file, prev, ';') || tokCharIs(file, prev, '}')
 }
 
 func collectCoreDeclScope(file *syntax.File, start int, end int, scope *CoreScope) int {
@@ -1589,7 +1589,7 @@ func coreLHSStart(file *syntax.File, assign int, limit int) int {
 		if tokCharIs(file, start, ';') || tokCharIs(file, start, '{') || tokCharIs(file, start, '}') || tokCharIs(file, start, ':') {
 			return start + 1
 		}
-		if syntax.TokenLine(file.Tokens[start]) != syntax.TokenLine(file.Tokens[assign]) {
+		if (file.Tokens[start].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit) != (file.Tokens[assign].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit) {
 			return start + 1
 		}
 		start--

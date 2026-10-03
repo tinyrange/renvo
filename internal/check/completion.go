@@ -583,7 +583,7 @@ func completionSymbolResultType(graph load.Graph, prog Program, pkg, symbolIndex
 func completionShortAssignValueIndex(file *syntax.File, name, assign int) int {
 	index := 0
 	for i := name - 1; i >= 0 && i < assign; i-- {
-		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[name]) || tokCharIs(file, i, ';') {
+		if (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[name].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) || tokCharIs(file, i, ';') {
 			break
 		}
 		if tokCharIs(file, i, ',') {
@@ -692,8 +692,8 @@ func completionSelectorComponents(src []byte, dot int) []string {
 }
 
 func completionFindShortAssign(file *syntax.File, name, end int) int {
-	line := syntax.TokenLine(file.Tokens[name])
-	for i := name + 1; i < end && i < len(file.Tokens) && syntax.TokenLine(file.Tokens[i]) == line; i++ {
+	line := (file.Tokens[name].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit)
+	for i := name + 1; i < end && i < len(file.Tokens) && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == line; i++ {
 		if tokenTextIs(file, i, ":=") {
 			return i
 		}
@@ -708,9 +708,9 @@ func completionStatementEnd(file *syntax.File, start, limit int) int {
 	if start >= len(file.Tokens) {
 		return start
 	}
-	line := syntax.TokenLine(file.Tokens[start])
+	line := (file.Tokens[start].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit)
 	for i := start; i < limit && i < len(file.Tokens); i++ {
-		if tokCharIs(file, i, ';') || i > start && syntax.TokenLine(file.Tokens[i]) != line {
+		if tokCharIs(file, i, ';') || i > start && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != line {
 			return i
 		}
 	}

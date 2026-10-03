@@ -18,7 +18,7 @@ func genericPrimaryStart(file *syntax.File, end int) int {
 		if start <= 0 {
 			return start
 		}
-		if open != '(' || syntax.TokenLine(file.Tokens[start-1]) == syntax.TokenLine(file.Tokens[start]) && (file.Tokens[start-1].KindLine&255 == syntax.TokenIdent || file.Tokens[start-1].KindLine&255 == syntax.TokenFunc || tokCharIs(file, start-1, ')') || tokCharIs(file, start-1, ']')) {
+		if open != '(' || (file.Tokens[start-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == (file.Tokens[start].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && (file.Tokens[start-1].KindLine&255 == syntax.TokenIdent || file.Tokens[start-1].KindLine&255 == syntax.TokenFunc || tokCharIs(file, start-1, ')') || tokCharIs(file, start-1, ']')) {
 			start = genericPrimaryStart(file, start-1)
 		}
 	}

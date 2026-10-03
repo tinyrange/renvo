@@ -54,7 +54,7 @@ func parseConstInt(file *syntax.File, tok int) (int, bool) {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return 0, false
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	start := int(token.Start)
 	end := int(token.End)
 	if token.KindLine&255 != syntax.TokenNumber || start < 0 || end > len(file.Src) || start >= end {

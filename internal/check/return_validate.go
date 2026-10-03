@@ -57,7 +57,7 @@ func skipNestedFunction(file *syntax.File, start int, limit int) int {
 
 func returnValueList(file *syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || syntax.TokenLine(file.Tokens[start]) > syntax.TokenLine(file.Tokens[returnTok]) {
+	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || (file.Tokens[start].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) > (file.Tokens[returnTok].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -66,7 +66,7 @@ func returnValueList(file *syntax.File, returnTok int, limit int) (int, int, int
 	count := 1
 	end := start
 	for i := start; i < limit; i++ {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) > syntax.TokenLine(file.Tokens[i-1]) && !returnLineContinues(file, i-1) {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) > (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && !returnLineContinues(file, i-1) {
 			break
 		}
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask

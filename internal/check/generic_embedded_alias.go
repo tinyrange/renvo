@@ -133,7 +133,7 @@ func (c *genericExpressionContext) rewriteEmbeddedType(token int) bool {
 	}
 	// An embedded type starts a field, unlike named field types and ordinary
 	// references elsewhere in a body. Avoid walking those scopes backwards.
-	if !tokCharIs(file, first-1, '{') && !tokCharIs(file, first-1, ';') && (first <= 0 || syntax.TokenLine(file.Tokens[first-1]) == syntax.TokenLine(file.Tokens[first])) {
+	if !tokCharIs(file, first-1, '{') && !tokCharIs(file, first-1, ';') && (first <= 0 || (file.Tokens[first-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == (file.Tokens[first].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit)) {
 		return false
 	}
 	depth := 0

@@ -55,7 +55,7 @@ func (e *genericEnvironment) collectLocalTypesInFunction(owner int, fn syntax.Fu
 
 func genericLocalSpecEnd(file *syntax.File, start int, end int) int {
 	for i := start; i < end; i++ {
-		if tokCharIs(file, i, ';') || i > start && syntax.TokenLine(file.Tokens[i-1]) < syntax.TokenLine(file.Tokens[i]) {
+		if tokCharIs(file, i, ';') || i > start && (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) < (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) {
 			return i
 		}
 		for _, pair := range []string{"()", "[]", "{}"} {
