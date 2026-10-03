@@ -10291,11 +10291,7 @@ func renvoIsComparisonChars(c0 byte, c1 byte) bool {
 }
 
 func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte, opLen int) bool {
-	if renvoFixedTarget != 0 && renvoPreparedBackendActive == 0 &&
-		g.c.renvoTargetArch != renvoArchAmd64 &&
-		g.c.renvoTargetArch != renvoArchAarch64 &&
-		g.c.renvoTargetArch != renvoArchWasm32 &&
-		!(g.c.renvoNativeIntSize == 4 && (g.c.renvoTargetArch == renvoArch386 || g.c.renvoTargetArch == renvoArchArm)) {
+	if renvoFixedTarget != 0 && !renvoCanCompareUnsignedWord(g) {
 		return false
 	}
 	renvoNonNil(g)
@@ -17089,7 +17085,7 @@ func renvoEmitAppendExpansionToLocation(g *renvoLinearGen, ep *renvoExprParse, l
 	// Byte expansions dominate source linking and are commonly only a handful
 	// of bytes long. Keep their overlap-safe growth and copy in one shared
 	// helper instead of repeating the full reservation sequence at every call.
-	if elemSize == 1 && g.c.renvoTargetArch == renvoArchAmd64 {
+	if elemSize == 1 && renvoHasAppendBytesHelper(g) {
 		srcPtr := renvoAddUnnamedLocal(g, renvoTypeInt)
 		srcLen := renvoAddUnnamedLocal(g, renvoTypeInt)
 		done := renvoAsmNewLabel(a)
@@ -17099,7 +17095,7 @@ func renvoEmitAppendExpansionToLocation(g *renvoLinearGen, ep *renvoExprParse, l
 		renvoAsmStorePrimarySecondaryStack(a, srcPtr, srcLen)
 		renvoAsmLoadPrimaryStack(a, srcLen)
 		renvoAsmJzPrimary(a, done)
-		label := renvoAmd64EnsureAppendBytesHelper(g)
+		label := renvoEnsureAppendBytesHelper(g)
 		if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 			return false
 		}
@@ -22910,7 +22906,7 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
-	if renvoFixedTarget == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArch386 && g.c.code16) {
+	if renvoFixedTarget == 0 && renvoCanDirectScalarDeref(g) {
 		direct := renvoEmitCDirectDeref(g, ep, idx)
 		if direct >= 0 {
 			return direct != 0

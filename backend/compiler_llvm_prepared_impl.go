@@ -2106,6 +2106,27 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEnsureAppendBytesHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+g.asm.patchFailed = true
+return 0
+}
+
+func renvoHasAppendBytesHelper(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoCanCompareUnsignedWord(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return true
+}
+
+func renvoCanDirectScalarDeref(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoEmitCompoundLocalAssignPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
 renvoNonNil(g)
 return -1
