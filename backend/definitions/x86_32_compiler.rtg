@@ -1330,6 +1330,12 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		primary_imm64 = renvo386CompilerPrimaryImm64
+		primary_imm = renvo386CompilerPrimaryImm
+		syscall = renvo386CompilerSyscall
+		push_stack_word = renvo386CompilerPushStackWord
+		jcmp_stack_stack = renvo386CompilerJcmpStackStack
+		jcmp_stack_imm = renvo386CompilerJcmpStackImm
 		secondary_imm = renvo386CompilerSecondaryImm
 		primary_data_addr = renvo386CompilerPrimaryDataAddr
 		primary_bss_addr = renvo386CompilerPrimaryBssAddr
@@ -1917,5 +1923,79 @@ go compiler {
 		renvoNonNil(a)
 		renvoAsmEmit16(a, 0xc139)
 		renvo386AsmJccLabel(a, setcc-0x10, label)
+	}
+}
+
+# Immediate, frame-branch, and runtime-boundary emission.
+go compiler {
+	func renvo386CompilerPrimaryImm(a *renvoAsm, imm int) {
+		renvo386AsmMovRaxImm(a, imm)
+	}
+
+	func renvo386CompilerSyscall(a *renvoAsm) {
+		renvo386AsmSyscall(a)
+	}
+
+	func renvo386CompilerPushStackWord(a *renvoAsm, offset int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// The 386 call adapter recognizes contiguous load/push argument words and
+			// rewrites the whole sequence into direct frame-to-register loads.  Emit
+			// the analyzable form for code16, where avoiding both PUSH and POP also
+			// removes two operand-size prefixes per argument.
+			renvoAsmPushStack(a, offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xff)
+		if offset >= 0 && offset <= 128 {
+			renvoAsmEmit8(a, 0x75)
+			renvoAsmEmit8(a, -offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xb5)
+		renvoAsmEmit32(a, -offset)
+		return
+	}
+
+	func renvo386CompilerJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// Compare the right frame value in EAX directly with the left frame
+			// value.  The stack-machine sequence used on the other compact targets
+			// adds a push, pop, and (for code16) two operand-size overrides without
+			// changing either operand.
+			renvoAsmLoadPrimaryStack(a, right)
+			renvoAsmStackMem(a, left, 0x39, 0x45, 0x85)
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+
+	func renvo386CompilerJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvoAsmImmFits8Signed(value) {
+				renvoAsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
+				renvoAsmEmit8(a, value)
+			} else {
+				renvoAsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
+				renvoAsmEmit32(a, value)
+			}
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPrimaryImm64(a *renvoAsm, imm int, high int) {
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvo386AsmMovRaxImm(a, imm)
 	}
 }

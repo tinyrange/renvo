@@ -592,7 +592,7 @@ p.maxAlign = 8
 p.endian = renvoEndianLittle
 p.backendSlotSize = renvoBackendValueSlotSize
 p.addressModel = renvoAddressModelFlat
-p.runtimeCaps = 63
+p.runtimeCaps = 127
 p.heapModel = renvoHeapNone
 p.oomModel = renvoOOMResult
 p.interruptModel = renvoInterruptNone
@@ -2104,6 +2104,42 @@ return RTGCondition{}
 
 func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
+}
+
+func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
+renvoNonNil(a)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(uint32(imm)) | int64(high)<<32)
+}
+
+func renvoAsmPrimaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))
+}
+
+func renvoAsmSyscall(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectHostSyscall(a)
+}
+
+func renvoAsmPushStackWord(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoAsmPushStack(a, offset)
+}
+
+func renvoAsmJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+renvoNonNil(a)
+renvoAsmPushStack(a, left)
+renvoAsmLoadPrimaryStack(a, right)
+renvoAsmPopTertiary(a)
+renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+}
+
+func renvoAsmJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+renvoNonNil(a)
+renvoAsmPushStack(a, offset)
+renvoAsmPrimaryImm(a, value)
+renvoAsmPopTertiary(a)
+renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
 }
 
 func renvoAsmStoreByteMemSecondaryTertiary(a *renvoAsm) {

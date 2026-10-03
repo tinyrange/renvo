@@ -308,7 +308,7 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		}
 		source = append(source, "\np.backendSlotSize = renvoBackendValueSlotSize\np.addressModel = renvoAddressModelFlat\n"...)
 		source = append(source, "p.runtimeCaps = "...)
-		source = appendDecimalFrame(source, preparedRuntimeCapabilities(descriptor.RuntimeOps))
+		source = appendDecimalFrame(source, CompilerRuntimeCapabilities(descriptor.RuntimeOps, descriptor.Capabilities))
 		source = append(source, "\np.heapModel = renvoHeapNone\np.oomModel = renvoOOMResult\np.interruptModel = renvoInterruptNone\np.floatModel = "...)
 		if stringIndex(descriptor.Capabilities, "ieee_float") >= 0 {
 			source = append(source, "renvoFloatIEEESoft"...)
@@ -372,8 +372,14 @@ func preparedTargetOS(name string) int {
 	return 6
 }
 
-func preparedRuntimeCapabilities(operations []string) int {
+// CompilerRuntimeCapabilities projects the compact compiler runtime boundary.
+// Runtime operations and hosted status are independent definition facts; a
+// target's name, architecture, or word width does not imply either.
+func CompilerRuntimeCapabilities(operations []string, capabilities []string) int {
 	result := 0
+	if stringIndex(capabilities, "hosted") >= 0 {
+		result |= 64
+	}
 	for i := 0; i < len(operations); i++ {
 		if operations[i] == "print" {
 			result |= 1

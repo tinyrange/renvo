@@ -152,27 +152,33 @@ go compiler {
 }
 ```
 
-The current migration covers 68 role-based operations: register copies,
+The current migration covers 74 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
-and return/frame teardown. Hooks may take typed parameters in addition to the
-assembler; their complete signatures are checked before generation;
+return/frame teardown, split-word immediates, frame comparisons, and the
+syscall boundary. Literal parsing selects ordinary or split-word materialization
+without inspecting an architecture; each backend owns its scalar-width behavior.
+Hooks may take typed parameters in addition to the assembler; their complete
+signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
 selected branches to avoid another call at each emission site. Hooks with
 noncanonical parameter names or function-scoped labels retain direct calls.
 Private projected entrypoints are omitted from the architecture source unless
 another binding, Go body, or definition declaration still references them.
-An unrecognized selector fails compilation rather than falling back to an ISA. Prepared backends
-provide the same compiler operation names through their direct emitter and ABI
-bindings, without depending on bundled hooks or selectors.
+An unrecognized selector fails compilation rather than falling back to an ISA.
+Prepared backends provide the same compiler operation names through their direct
+emitter and ABI bindings, without depending on bundled hooks or selectors.
 
 Compiler-binding extensions cannot override the imported machine's facts.
 Bundled compiler profiles project data, code, and function pointer widths,
 maximum alignment, endianness, and default arena sizes from the resolved
 descriptors rather than inferring them from architecture identities. Targets
 with non-default arena limits declare `arena_default` explicitly; this preserves
-the existing compiler limits when using the descriptor projection.
+the existing compiler limits when using the descriptor projection. Bundled and
+prepared profiles also derive their six runtime-operation bits and hosted bit
+from the same definition facts; a familiar target identity does not imply
+filesystem operations or hosted execution.
 
 This contract is a migration boundary, not a claim that all compiler-private
 coupling has been removed: other layout/ABI rules, calls, remaining emitter

@@ -165,6 +165,14 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
 				"func "+hook+"(a *renvoAsm) { if a.patchFailed { return }; a.patchFailed = true }", 1)
 		}, false},
+		{"terminal return with comment", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { a.patchFailed = true; return /* done */ }", 1)
+		}, false},
+		{"explicit return semicolon", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { a.patchFailed = true; return; }", 1)
+		}, false},
 		{"called by helper", func(source, hook string) string {
 			return source + "\ngo compiler { func " + hook + "Caller(a *renvoAsm) { " + hook + "(a) } }\n"
 		}, true},
@@ -225,6 +233,20 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 			if _, err := new(types.Config).Check("bindings", fset, []*ast.File{file}, nil); err != nil {
 				t.Fatal(err)
 			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				block, ok := node.(*ast.BlockStmt)
+				if !ok {
+					return true
+				}
+				for i := 1; i < len(block.List); i++ {
+					_, previousReturn := block.List[i-1].(*ast.ReturnStmt)
+					_, nextReturn := block.List[i].(*ast.ReturnStmt)
+					if previousReturn && nextReturn {
+						t.Error("projected hook contains consecutive returns rejected by compact source lowering")
+					}
+				}
+				return true
+			})
 		})
 	}
 }

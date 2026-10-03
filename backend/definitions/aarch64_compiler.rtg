@@ -737,6 +737,12 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		primary_imm64 = renvoAarch64CompilerPrimaryImm64
+		primary_imm = renvoAarch64CompilerPrimaryImm
+		syscall = renvoAarch64CompilerSyscall
+		push_stack_word = renvoAarch64CompilerPushStackWord
+		jcmp_stack_stack = renvoAarch64CompilerJcmpStackStack
+		jcmp_stack_imm = renvoAarch64CompilerJcmpStackImm
 		secondary_imm = renvoAarch64CompilerSecondaryImm
 		primary_data_addr = renvoAarch64CompilerPrimaryDataAddr
 		primary_bss_addr = renvoAarch64CompilerPrimaryBssAddr
@@ -1149,5 +1155,49 @@ go compiler {
 		renvoNonNil(a)
 		renvoAarch64AsmCmpRegReg(a, renvoAarch64RegRcx, renvoAarch64RegRax)
 		renvoAarch64AsmBCondLabel(a, label, renvoAarch64CondFromSetcc(setcc))
+	}
+}
+
+# Immediate, frame-branch, and runtime-boundary emission.
+go compiler {
+	func renvoAarch64CompilerPrimaryImm(a *renvoAsm, imm int) {
+		renvoAarch64AsmMovRaxImm(a, imm)
+	}
+
+	func renvoAarch64CompilerSyscall(a *renvoAsm) {
+		renvoAarch64AsmSyscall(a)
+	}
+
+	func renvoAarch64CompilerPushStackWord(a *renvoAsm, offset int) {
+		renvoAsmPushStack(a, offset)
+	}
+
+	func renvoAarch64CompilerJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+
+	func renvoAarch64CompilerJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerPrimaryImm64(a *renvoAsm, imm int, high int) {
+		renvoAarch64AsmMovRaxImm(a, imm)
+		part := high & 65535
+		extension := imm >> 31 & 65535
+		if part != extension {
+			renvoAarch64AsmEmit(a, 0xf2c00000|(part<<5)|renvoAarch64RegRax)
+		}
+		part = high >> 16 & 65535
+		if part != extension {
+			renvoAarch64AsmEmit(a, 0xf2e00000|(part<<5)|renvoAarch64RegRax)
+		}
 	}
 }

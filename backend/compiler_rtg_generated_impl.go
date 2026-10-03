@@ -797,6 +797,361 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit16(a, 0xb848)
+		renvoAsmEmit32(a, imm)
+		renvoAsmEmit32(a, high)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvo386AsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmMovRaxImm(a, imm)
+		part := high & 65535
+		extension := imm >> 31 & 65535
+		if part != extension {
+			renvoAarch64AsmEmit(a, 0xf2c00000|(part<<5)|renvoAarch64RegRax)
+		}
+		part = high >> 16 & 65535
+		if part != extension {
+			renvoAarch64AsmEmit(a, 0xf2e00000|(part<<5)|renvoAarch64RegRax)
+		}
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvoArmAsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmPrimaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+			renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+			a.syscallNumber = imm
+			a.syscallNumberKnown = true
+		}
+		renvoAmd64AsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMovRaxImm(a, imm)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmSyscall(a *renvoAsm) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+			renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+			if !a.syscallNumberKnown {
+				a.patchFailed = true
+				return
+			}
+			label := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, label)
+			a.openbsdSyscalls = append(a.openbsdSyscalls, label, a.syscallNumber)
+		}
+		renvoAsmEmit16(a, 0x050f)
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+			renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+			renvoFixedTarget == renvoTargetNetBSDAmd64 ||
+			renvoFixedTarget == 0 && targetIsBSD(a.c.renvoTargetOS) {
+			// BSD reports syscall errors by setting carry and returning errno.
+			// Renvo's runtime API uses Linux-style negative error results.
+			renvoAsmEmitText(a, "\x73\x03\x48\xf7\xd8")
+		}
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
+			renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+			a.syscallNumberKnown = false
+		}
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmSyscall(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmSyscall(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmSyscall(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmEmit8(a, renvoWasm32OpSyscall)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmPushStackWord(a *renvoAsm, offset int) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit8(a, 0xff)
+		if offset >= 0 && offset <= 128 {
+			renvoAsmEmit8(a, 0x75)
+			renvoAsmEmit8(a, -offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xb5)
+		renvoAsmEmit32(a, -offset)
+		return
+	
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// The 386 call adapter recognizes contiguous load/push argument words and
+			// rewrites the whole sequence into direct frame-to-register loads.  Emit
+			// the analyzable form for code16, where avoiding both PUSH and POP also
+			// removes two operand-size prefixes per argument.
+			renvoAsmPushStack(a, offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xff)
+		if offset >= 0 && offset <= 128 {
+			renvoAsmEmit8(a, 0x75)
+			renvoAsmEmit8(a, -offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xb5)
+		renvoAsmEmit32(a, -offset)
+		return
+	
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmPushStack(a, offset)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoAsmPushStack(a, offset)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmPushStack(a, offset)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// Compare the right frame value in EAX directly with the left frame
+			// value.  The stack-machine sequence used on the other compact targets
+			// adds a push, pop, and (for code16) two operand-size overrides without
+			// changing either operand.
+			renvoAsmLoadPrimaryStack(a, right)
+			renvoAsmStackMem(a, left, 0x39, 0x45, 0x85)
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvoAsmImmFits8Signed(value) {
+				renvoAsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
+				renvoAsmEmit8(a, value)
+			} else {
+				renvoAsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
+				renvoAsmEmit32(a, value)
+			}
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	
+return
+
+}
+a.patchFailed = true
+}
+
 func renvoAsmStoreByteMemSecondaryTertiary(a *renvoAsm) {
 renvoNonNil(a)
 if a.c.renvoTargetArch == renvoArchAmd64 {
@@ -804,30 +1159,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0x0a0488)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit24(a, 0x0a0488)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmStoreAlMemRdxRcx1(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmStoreAlMemRdxRcx1(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 1, 0, 1)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -839,30 +1199,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit16(a, 0xc1ff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit16(a, 0xc1ff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmIncRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmIncRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -874,30 +1239,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit16(a, 0xc0ff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit16(a, 0xc0ff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmIncRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmIncRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -909,30 +1279,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0xc3)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit8(a, 0xc3)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmRet(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmRet(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoAsmEmit8(a, renvoWasm32OpRet)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -948,30 +1323,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0xc9)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit8(a, 0xc9)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmLeave(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmLeave(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -983,30 +1363,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmMovRdiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmMovRdiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRdiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmMovRdiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1018,30 +1403,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0xd08948)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmMovRaxRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRaxRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmMovRaxRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1053,30 +1443,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmMovRsiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmMovRsiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRsiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmMovRsiRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1088,30 +1483,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0xca0148)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmAddRdxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmAddRdxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmAddRdxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1123,30 +1523,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadByteRaxIndexRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmLoadByteRaxIndexRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmLoadByteRaxIndexRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmLoadByteRaxIndexRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1158,30 +1563,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmStoreRaxMemRdxRcx8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmStoreRaxMemRdxRcx8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmStoreRaxMemRdxRcx8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmStoreRaxMemRdxRcx8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 8, 0, 4)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1193,24 +1603,28 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmIncMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmIncMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmIncMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmIncMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1218,6 +1632,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmEmit8(a, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1229,24 +1644,28 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmDecMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmDecMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmDecMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmDecMemRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1254,6 +1673,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmEmit8(a, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1265,30 +1685,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit3(a, 0x83, 0xf0, 1)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmBoolNotRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmBoolNotRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmBoolNotRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1300,24 +1725,28 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0xd0f748)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit16(a, 0xd0f7)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmEmit(a, 0xaa2003e0)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmEmit(a, 0xe1e00000)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1325,6 +1754,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1336,30 +1766,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0xc80148)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmAddRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmAddRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmAddRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1371,30 +1806,35 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit24(a, 0xc82948)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
 		renvo386AsmSubRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmSubRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmSubRaxRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1409,6 +1849,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0x58)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1423,24 +1864,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit8(a, 0x58)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmPopRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe49d0004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1455,6 +1900,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0x5a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1473,24 +1919,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit8(a, 0x5a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmPopRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe49d1004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1505,6 +1955,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0x59)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1523,24 +1974,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit8(a, 0x59)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmPopRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe49d2004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1559,6 +2014,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit16(a, 0x5a50)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1572,24 +2028,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit16(a, 0x5a50)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRdxRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe1a01000)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1608,6 +2068,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit16(a, 0x5950)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1621,24 +2082,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit16(a, 0x5950)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRcxRax(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe1a02000)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1654,6 +2119,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit16(a, 0x5952)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1664,24 +2130,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit16(a, 0x5952)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRcxRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe1a02001)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1698,6 +2168,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmPopPrimary(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1709,18 +2180,21 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmPopPrimary(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRegReg(a, 0, 2)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmMovRegReg(a, 0, 2)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1728,6 +2202,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmPopPrimary(a)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1745,6 +2220,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1759,6 +2235,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -1766,18 +2243,21 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmRecordRegisterPush(a, 0)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe52d0004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1790,6 +2270,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		a.lastPrimaryStoreEnd = -(len(a.code)*32 + 4)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1799,24 +2280,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmPushRdx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe52d1004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1829,6 +2314,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		a.lastPrimaryStoreEnd = -(len(a.code)*32 + 3)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1838,24 +2324,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmPushRcx(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoAsmEmit32(a, 0xe52d2004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1878,6 +2368,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmPushPrimary(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1895,6 +2386,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmPushPrimary(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -1902,6 +2394,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPushImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -1909,6 +2402,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmPushImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1917,6 +2411,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmEmit32(a, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1931,6 +2426,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		a.lastPrimaryStoreOff = offset
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1942,6 +2438,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -1951,6 +2448,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		a.lastPrimaryStoreOff = offset
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -1960,6 +2458,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		a.lastPrimaryStoreOff = offset
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -1967,6 +2466,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -1979,6 +2479,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -1986,6 +2487,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -1993,6 +2495,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2000,6 +2503,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRegStack(a, 1, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2007,6 +2511,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2028,6 +2533,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		a.lastPrimaryLoad = len(a.code)*8 + distance
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2048,6 +2554,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2059,6 +2566,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2070,6 +2578,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRegStack(a, 0, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2077,6 +2586,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2092,6 +2602,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0xff48, 0x45, 0x85)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2101,6 +2612,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2110,6 +2622,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2119,6 +2632,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2128,6 +2642,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2140,6 +2655,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0xff48, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2151,6 +2667,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2162,6 +2679,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2173,6 +2691,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2184,6 +2703,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStorePrimaryStack(a, offset)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2201,6 +2721,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		a.lastPrimaryLoad = len(a.code)*8 + distance
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2215,6 +2736,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2222,6 +2744,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2229,6 +2752,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLeaRegStack(a, 0, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2236,6 +2760,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2248,6 +2773,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2255,6 +2781,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2262,6 +2789,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2269,6 +2797,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLeaRegStack(a, 3, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2276,6 +2805,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2288,6 +2818,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2295,6 +2826,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2302,6 +2834,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2309,6 +2842,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLeaRegStack(a, 4, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2316,6 +2850,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2328,6 +2863,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2335,6 +2871,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2342,6 +2879,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2349,6 +2887,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRegStack(a, 1, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2356,6 +2895,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2368,6 +2908,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2375,6 +2916,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2382,6 +2924,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2389,6 +2932,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRegStack(a, 2, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2396,6 +2940,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2408,6 +2953,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2415,24 +2961,28 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmStoreSliceStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
 		renvoArmAsmStoreSliceStack(a, offset)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
 		renvoWasm32AsmStoreSliceStack(a, offset)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2453,6 +3003,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit32(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2468,6 +3019,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit32(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2478,6 +3030,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmImulRcxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2488,6 +3041,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmImulRcxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2498,6 +3052,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMulRegImm, renvoWasm32RegRcx, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2513,6 +3068,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2523,6 +3079,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2530,6 +3087,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmCallLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2537,6 +3095,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmCallLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2544,6 +3103,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitCallLabel(a, label, 0)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2559,6 +3119,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2569,6 +3130,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2576,6 +3138,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmJmpLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2583,6 +3146,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmJmpLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2590,6 +3154,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJmp, label)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2605,6 +3170,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2615,6 +3181,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2622,6 +3189,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmJzLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2629,6 +3197,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmJzLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2636,6 +3205,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJz, label)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2651,6 +3221,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2661,6 +3232,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmAddReloc(a, at, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2668,6 +3240,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmJnzLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2675,6 +3248,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmJnzLabel(a, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2682,6 +3256,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitBranch(a, renvoWasm32OpJnz, label)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2717,6 +3292,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit64(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2724,6 +3300,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmMovRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2731,6 +3308,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMovRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2738,6 +3316,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmMovRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2745,6 +3324,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2760,6 +3340,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddAbsReloc(a, at, dataOff, 0)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2767,6 +3348,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmMovRaxAddr(a, dataOff, 0)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2774,6 +3356,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMovRaxDataAddr(a, dataOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2781,6 +3364,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmMovRaxDataAddr(a, dataOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2788,6 +3372,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmMovRaxDataAddr(a, dataOff)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2803,6 +3388,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmAddAbsReloc(a, at, bssOff, renvoAbsBssReloc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2810,6 +3396,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmMovRaxAddr(a, bssOff, renvoAbsBssReloc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2817,6 +3404,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmMovRaxBssAddr(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2824,6 +3412,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmMovRaxBssAddr(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2831,6 +3420,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmMovRaxBssAddr(a, bssOff)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2843,6 +3433,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2850,6 +3441,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmLoadRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2857,6 +3449,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmLoadRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2864,6 +3457,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2871,6 +3465,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmLoadRaxBss(a, bssOff)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2883,6 +3478,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmStoreRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2890,6 +3486,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmStoreRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -2897,6 +3494,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmStoreRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2904,6 +3502,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRaxBss(a, bssOff)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2911,6 +3510,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmStoreRaxBss(a, bssOff)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2933,6 +3533,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0x5f)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -2954,10 +3555,12 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmPopRdi(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 renvoAarch64CompilerPopCallWord0(a)
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -2965,6 +3568,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmPopRdi(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -2972,6 +3576,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -2987,6 +3592,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit8(a, 0x5e)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3006,6 +3612,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmEmit8(a, 0x5e)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3013,6 +3620,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmPopRsi(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3020,6 +3628,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoAsmEmit32(a, 0xe49d4004)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3027,6 +3636,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3044,6 +3654,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit32(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3051,6 +3662,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmAddRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3058,6 +3670,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmAddRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3065,6 +3678,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmAddRdxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3072,6 +3686,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3084,6 +3699,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadQwordRaxIndexRcxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3091,6 +3707,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmLoadQwordRaxIndexRcxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3098,6 +3715,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmLoadQwordRaxIndexRcxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3105,6 +3723,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadQwordRaxIndexRcxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3112,6 +3731,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, disp, 4)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3124,6 +3744,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3141,6 +3762,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3148,6 +3770,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmLoadRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3155,6 +3778,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3162,6 +3786,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3174,6 +3799,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3191,6 +3817,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3198,6 +3825,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmLoadRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3205,6 +3833,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3212,6 +3841,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmLoadRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3224,6 +3854,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmLoadRaxIndexRcxSize(a, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3234,6 +3865,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		}
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3241,6 +3873,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmLoadRaxIndexRcxSize(a, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3248,6 +3881,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmLoadRaxIndexRcxSize(a, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3255,6 +3889,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmLoadRaxIndexRcxSize(a, size)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3267,6 +3902,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmStoreRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3274,6 +3910,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmStoreRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3281,6 +3918,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmStoreRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3288,6 +3926,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRaxMemRdxDisp(a, disp)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3295,6 +3934,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3307,6 +3947,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmStoreRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3314,6 +3955,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmStoreRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3321,6 +3963,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmStoreRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3328,6 +3971,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3335,6 +3979,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmStoreRaxMemRdxDispSize(a, disp, size)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3347,6 +3992,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmNormalizeRaxForKind(a, kind)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3360,6 +4006,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmNormalizeRaxForKind(a, kind)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3367,6 +4014,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmNormalizeRaxForKind(a, kind)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3374,6 +4022,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmNormalizeRaxForKind(a, kind)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3381,6 +4030,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmNormalizeRaxForKind(a, kind)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3393,6 +4043,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmCmpRaxImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3400,6 +4051,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmCmpRaxImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3407,6 +4059,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmCmpRaxImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3414,6 +4067,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmCmpRaxImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3421,6 +4075,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3433,6 +4088,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmCmpRaxImm8Discard(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3443,6 +4099,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmCmpPrimaryImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3450,6 +4107,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAsmCmpPrimaryImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3457,6 +4115,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoAsmCmpPrimaryImm8(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3464,6 +4123,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoAsmCmpPrimaryImm8(a, imm)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3476,6 +4136,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit4(a, 0x48, 0xc1, 0xe1, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3483,6 +4144,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmShlRcxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3490,6 +4152,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmShlRcxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3497,6 +4160,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmShlRcxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3505,6 +4169,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3517,6 +4182,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit4(a, 0x48, 0xc1, 0xe0, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3524,6 +4190,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmShlRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3531,6 +4198,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmShlRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3538,6 +4206,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmShlRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3546,6 +4215,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3558,6 +4228,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmEmit4(a, 0x48, 0xc1, 0xf8, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3565,6 +4236,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmSarRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3572,6 +4244,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmSarRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3579,6 +4252,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmSarRaxImm(a, imm)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3587,6 +4261,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3599,6 +4274,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmDivLeftRcxRightRax(a, mod)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3606,6 +4282,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmDivLeftRcxRightRax(a, mod)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3613,6 +4290,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmDivLeftRcxRightRax(a, mod)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3620,6 +4298,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmDivLeftRcxRightRax(a, mod)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3627,6 +4306,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmDivLeftRcxRightRax(a, mod)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3639,6 +4319,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmCmpRcxRaxSet(a, setcc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3646,6 +4327,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmCmpRcxRaxSet(a, setcc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3653,6 +4335,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmCmpRcxRaxSet(a, setcc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3660,6 +4343,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmCmpRcxRaxSet(a, setcc)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3667,6 +4351,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmCmpRcxRaxSet(a, setcc)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3691,6 +4376,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAsmStorePrimaryMemSecondaryTertiary8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3710,6 +4396,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvoAsmStorePrimaryMemSecondaryTertiary8(a)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3717,6 +4404,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmStoreRaxMemRdxRcxSize(a, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3724,6 +4412,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmStoreRaxMemRdxRcxSize(a, size)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3731,6 +4420,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32AsmStoreRaxMemRdxRcxSize(a, size)
 	
 return
+
 }
 a.patchFailed = true
 }
@@ -3744,6 +4434,7 @@ if a.c.renvoTargetArch == renvoArchAmd64 {
 		renvoAmd64AsmJccLabel(a, setcc-0x10, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArch386 {
 
@@ -3752,6 +4443,7 @@ if a.c.renvoTargetArch == renvoArch386 {
 		renvo386AsmJccLabel(a, setcc-0x10, label)
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchAarch64 {
 
@@ -3760,6 +4452,7 @@ if a.c.renvoTargetArch == renvoArchAarch64 {
 		renvoAarch64AsmBCondLabel(a, label, renvoAarch64CondFromSetcc(setcc))
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchArm {
 
@@ -3768,6 +4461,7 @@ if a.c.renvoTargetArch == renvoArchArm {
 		renvoArmAsmBCondLabel(a, label, renvoArmCondFromSetcc(setcc))
 	
 return
+
 }
 if a.c.renvoTargetArch == renvoArchWasm32 {
 
@@ -3800,6 +4494,7 @@ if a.c.renvoTargetArch == renvoArchWasm32 {
 		renvoWasm32EmitCondBranch(a, cond, label)
 	
 return
+
 }
 a.patchFailed = true
 }

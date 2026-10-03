@@ -696,6 +696,12 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		primary_imm64 = renvoArmCompilerPrimaryImm64
+		primary_imm = renvoArmCompilerPrimaryImm
+		syscall = renvoArmCompilerSyscall
+		push_stack_word = renvoArmCompilerPushStackWord
+		jcmp_stack_stack = renvoArmCompilerJcmpStackStack
+		jcmp_stack_imm = renvoArmCompilerJcmpStackImm
 		secondary_imm = renvoArmCompilerSecondaryImm
 		primary_data_addr = renvoArmCompilerPrimaryDataAddr
 		primary_bss_addr = renvoArmCompilerPrimaryBssAddr
@@ -1098,5 +1104,42 @@ go compiler {
 		renvoNonNil(a)
 		renvoArmAsmCmpRegReg(a, renvoArmRegRcx, renvoArmRegRax)
 		renvoArmAsmBCondLabel(a, label, renvoArmCondFromSetcc(setcc))
+	}
+}
+
+# Immediate, frame-branch, and runtime-boundary emission.
+go compiler {
+	func renvoArmCompilerPrimaryImm(a *renvoAsm, imm int) {
+		renvoArmAsmMovRaxImm(a, imm)
+	}
+
+	func renvoArmCompilerSyscall(a *renvoAsm) {
+		renvoArmAsmSyscall(a)
+	}
+
+	func renvoArmCompilerPushStackWord(a *renvoAsm, offset int) {
+		renvoAsmPushStack(a, offset)
+	}
+
+	func renvoArmCompilerJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+
+	func renvoArmCompilerJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerPrimaryImm64(a *renvoAsm, imm int, high int) {
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvoArmAsmMovRaxImm(a, imm)
 	}
 }

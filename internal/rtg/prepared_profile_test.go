@@ -22,7 +22,8 @@ func TestPreparedProfilePreservesIndependentLayout(t *testing.T) {
 		t.Run(endian, func(t *testing.T) {
 			descriptor := TargetDescriptor{Name: "unfamiliar/mixed-width", OS: "none",
 				WordBits: 32, PointerBits: 16, CodePointerBits: 24,
-				FunctionPointerBits: 64, MaxAlign: 256, Endian: endian}
+				FunctionPointerBits: 64, MaxAlign: 256, Endian: endian,
+				RuntimeOps: []string{"print", "read"}, Capabilities: []string{"hosted"}}
 			files := token.NewFileSet()
 			core, err := parser.ParseFile(files, "policy.go", policy, 0)
 			if err != nil {
@@ -95,7 +96,7 @@ func TestPreparedProfilePreservesIndependentLayout(t *testing.T) {
 			}
 			for name, want := range map[string]int64{
 				"charBits": 8, "intBits": 32, "pointerBits": 16, "codePointerBits": 24,
-				"funcPointerBits": 64, "maxAlign": 256, "endian": wantEndian,
+				"funcPointerBits": 64, "maxAlign": 256, "endian": wantEndian, "runtimeCaps": 73,
 			} {
 				if got, ok := values[name]; !ok || got != want {
 					t.Errorf("profile.%s = %d (present %v), want %d", name, got, ok, want)

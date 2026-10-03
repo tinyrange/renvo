@@ -3,13 +3,14 @@ package rtg
 import "renvo.dev/internal/syntax"
 
 type embeddedFunction struct {
-	Name       string
-	Signature  []byte
-	Parameters []embeddedParameter
-	Result     []byte
-	HasResult  bool
-	Body       []byte
-	HasLabels  bool
+	Name         string
+	Signature    []byte
+	Parameters   []embeddedParameter
+	Result       []byte
+	HasResult    bool
+	Body         []byte
+	HasLabels    bool
+	EndsInReturn bool
 }
 
 type embeddedParameter struct {
@@ -607,14 +608,20 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 					hasLabels = true
 				}
 			}
+			last := fn.BodyEnd - 2
+			for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
+				last--
+			}
+			endsInReturn := last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
 			return embeddedFunction{
-				Body:       wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
-				HasLabels:  hasLabels,
-				Name:       name,
-				Signature:  signature,
-				Parameters: functionParameters(file, fn),
-				Result:     functionResult(file, fn),
-				HasResult:  fn.ResultStart != fn.ResultEnd,
+				EndsInReturn: endsInReturn,
+				Body:         wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
+				HasLabels:    hasLabels,
+				Name:         name,
+				Signature:    signature,
+				Parameters:   functionParameters(file, fn),
+				Result:       functionResult(file, fn),
+				HasResult:    fn.ResultStart != fn.ResultEnd,
 			}, true
 		}
 	}

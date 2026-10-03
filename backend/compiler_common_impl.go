@@ -8090,19 +8090,7 @@ func renvoAsmImmFits8Signed(imm int) bool {
 func renvoAsmLoadPrimaryIntToken(a *renvoAsm, p *renvoProgram, tokIndex int) {
 	renvoNonNil(a, p)
 	value := renvoParseIntToken(p, tokIndex)
-	if renvoPreparedBackendActive != 0 {
-		immediate := int64(value)
-		if p.compilerInt32 && p.parsedIntHigh != value>>31 {
-			immediate = int64(uint32(value)) | int64(p.parsedIntHigh)<<32
-		}
-		renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, immediate)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, value)
-		return
-	}
-	if p.compilerInt32 && p.parsedIntHigh != value>>31 && (a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64) {
+	if p.compilerInt32 && p.parsedIntHigh != value>>31 {
 		renvoAsmPrimaryImm64(a, value, p.parsedIntHigh)
 		return
 	}
@@ -8116,29 +8104,6 @@ func renvoAsmPushStack(a *renvoAsm, offset int) {
 	renvoAsmPushPrimary(a)
 }
 
-func renvoAsmPushStackWord(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	if renvoFixedTarget == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
-		// The 386 call adapter recognizes contiguous load/push argument words and
-		// rewrites the whole sequence into direct frame-to-register loads.  Emit
-		// the analyzable form for code16, where avoiding both PUSH and POP also
-		// removes two operand-size prefixes per argument.
-		renvoAsmPushStack(a, offset)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArch386 {
-		renvoAsmEmit8(a, 0xff)
-		if offset >= 0 && offset <= 128 {
-			renvoAsmEmit8(a, 0x75)
-			renvoAsmEmit8(a, -offset)
-			return
-		}
-		renvoAsmEmit8(a, 0xb5)
-		renvoAsmEmit32(a, -offset)
-		return
-	}
-	renvoAsmPushStack(a, offset)
-}
 func renvoAsmPushSliceRegs(a *renvoAsm) {
 	renvoNonNil(a)
 	renvoAsmPushTertiary(a)
@@ -8227,42 +8192,7 @@ func renvoAsmCopyStackSlot(a *renvoAsm, src int, dest int) {
 
 
 
-func renvoAsmJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
-	renvoNonNil(a)
-	if renvoFixedTarget == 0 && renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
-		// Compare the right frame value in EAX directly with the left frame
-		// value.  The stack-machine sequence used on the other compact targets
-		// adds a push, pop, and (for code16) two operand-size overrides without
-		// changing either operand.
-		renvoAsmLoadPrimaryStack(a, right)
-		renvoAsmStackMem(a, left, 0x39, 0x45, 0x85)
-		renvo386AsmJccLabel(a, setcc-0x10, label)
-		return
-	}
-	renvoAsmPushStack(a, left)
-	renvoAsmLoadPrimaryStack(a, right)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
-}
 
-func renvoAsmJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
-	renvoNonNil(a)
-	if renvoFixedTarget == 0 && renvoPreparedBackendActive == 0 && a.c.renvoTargetArch == renvoArch386 && a.c.code16 {
-		if renvoAsmImmFits8Signed(value) {
-			renvoAsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
-			renvoAsmEmit8(a, value)
-		} else {
-			renvoAsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
-			renvoAsmEmit32(a, value)
-		}
-		renvo386AsmJccLabel(a, setcc-0x10, label)
-		return
-	}
-	renvoAsmPushStack(a, offset)
-	renvoAsmPrimaryImm(a, value)
-	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
-}
 
 
 func renvoAsmJgeStackStack(a *renvoAsm, left int, right int, label int) {
@@ -22789,54 +22719,6 @@ func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
 	}
 	renvoAmd64StoreParamWord(g, word, offset)
 }
-func renvoAsmPrimaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
-		a.syscallNumber = imm
-		a.syscallNumberKnown = true
-	}
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRax, imm)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmMovRaxImm(a, imm)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmMovRaxImm(a, imm)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArch386 {
-		renvo386AsmMovRaxImm(a, imm)
-		return
-	}
-	renvoAmd64AsmMovRaxImm(a, imm)
-}
-func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
-	renvoNonNil(a)
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmMovRaxImm(a, imm)
-		part := high & 65535
-		extension := imm >> 31 & 65535
-		if part != extension {
-			renvoAarch64AsmEmit(a, 0xf2c00000|(part<<5)|renvoAarch64RegRax)
-		}
-		part = high >> 16 & 65535
-		if part != extension {
-			renvoAarch64AsmEmit(a, 0xf2e00000|(part<<5)|renvoAarch64RegRax)
-		}
-		return
-	}
-	renvoAsmEmit16(a, 0xb848)
-	renvoAsmEmit32(a, imm)
-	renvoAsmEmit32(a, high)
-}
 
 func renvoEmitFloat64BitsPrimary(a *renvoAsm, bits uint64) {
 	renvoNonNil(a)
@@ -22874,52 +22756,6 @@ func renvoAsmStorePrimaryBssSize(a *renvoAsm, bssOff int, size int) {
 	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, size)
 }
 
-func renvoAsmSyscall(a *renvoAsm) {
-	renvoNonNil(a)
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGDirectHostSyscall(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchWasm32 {
-		renvoAsmEmit8(a, renvoWasm32OpSyscall)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmSyscall(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmSyscall(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArch386 {
-		renvo386AsmSyscall(a)
-		return
-	}
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
-		if !a.syscallNumberKnown {
-			a.patchFailed = true
-			return
-		}
-		label := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, label)
-		a.openbsdSyscalls = append(a.openbsdSyscalls, label, a.syscallNumber)
-	}
-	renvoAsmEmit16(a, 0x050f)
-	if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
-		renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == renvoTargetNetBSDAmd64 ||
-		renvoFixedTarget == 0 && targetIsBSD(a.c.renvoTargetOS) {
-		// BSD reports syscall errors by setting carry and returning errno.
-		// Renvo's runtime API uses Linux-style negative error results.
-		renvoAsmEmitText(a, "\x73\x03\x48\xf7\xd8")
-	}
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
-		a.syscallNumberKnown = false
-	}
-}
 func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 	renvoNonNil(a)
 	if renvoPreparedBackendActive != 0 {
