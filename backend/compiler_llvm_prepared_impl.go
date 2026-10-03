@@ -2106,6 +2106,115 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+	// Fixed-point prepared targets represent scalar floats in a native word.
+	// Interface equality also visits float metadata, even in integer-only
+	// programs; it must not fall through to the fixed x86 x87 encoder.
+	renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+	condition := 0x94
+	if c0 == '!' {
+		condition = 0x95
+	} else if c0 == '<' {
+		condition = 0x9c
+		if c1 == '=' {
+			condition = 0x9e
+		}
+	} else if c0 == '>' {
+		condition = 0x9f
+		if c1 == '=' {
+			condition = 0x9d
+		}
+	}
+	renvoAsmCmpTertiaryPrimarySet(&g.asm, condition)
+	return true
+}
+size := 8
+if kind == renvoTypeFloat32 { size = 4 }
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord2, int64(c0)|int64(c1)<<8)
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord3, int64(size))
+	renvoRTGIEEEHostSyscall(g, 0x4b02, 2, left, right, 0)
+	if renvoRTGSyscallResult.Code != renvoRTGPrimary.Code {
+		renvoRTGDirectMove(&g.asm, renvoRTGPrimary, renvoRTGSyscallResult)
+	}
+	return true
+}
+
+func renvoEmitIEEEFloatNegatePrimary(g *renvoLinearGen, kind int) bool {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+renvoAsmPrimaryToNegative(&g.asm)
+return true
+}
+if kind == renvoTypeFloat32 { return renvoEmit32BitIEEEFloatNegatePrimary(g) }
+return false
+}
+
+func renvoEmitGlobalInitFrameStart(g *renvoLinearGen) int {
+renvoNonNil(g)
+return renvoRTGFrameStart(&g.asm)
+}
+
+func renvoEmitGlobalInitFrameEnd(g *renvoLinearGen, framePatch int) {
+renvoNonNil(g)
+renvoAsmLeave(&g.asm)
+renvoRTGFrameFinish(&g.asm, framePatch, g.stackPeak)
+}
+
+func renvo32IEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+return false
+}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord3, int64(op))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord4, int64(size))
+	renvoRTGIEEEHostSyscall(g, 0x4b01, 3, dest, left, right)
+	return true
+}
+
+func renvo32IEEEConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+return
+}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord2, int64(sourceSize))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord3, int64(destSize))
+	renvoRTGIEEEHostSyscall(g, 0x4b03, 2, dest, source, 0)
+}
+
+func renvo32IEEEIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+return
+}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord1, int64(intSize))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord2, int64(floatSize))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord3, int64(renvoBoolInt(signed)))
+	renvoRTGIEEEHostSyscall(g, 0x4b04, 1, offset, 0, 0)
+}
+
+func renvo32IEEEFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+return
+}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord2, int64(floatSize))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord3, int64(intSize))
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord4, int64(renvoBoolInt(signed)))
+	renvoRTGIEEEHostSyscall(g, 0x4b05, 2, dest, source, 0)
+}
+
+func renvo32IEEENegateStack(g *renvoLinearGen, offset int, size int) {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 {
+return
+}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallWord1, int64(size))
+	renvoRTGIEEEHostSyscall(g, 0x4b06, 1, offset, 0, 0)
+	return
+}
+
 func renvoAsmPatch(a *renvoAsm) {
 renvoNonNil(a)
 renvoRTGPatchRelocations(a)

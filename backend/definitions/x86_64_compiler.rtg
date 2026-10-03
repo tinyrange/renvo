@@ -963,6 +963,15 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		ieee_compare_stack = renvoAmd64CompilerIEEECompareStack
+		ieee_negate_primary = renvoAmd64CompilerIEEENegatePrimary
+		global_init_frame_start = renvoAmd64CompilerGlobalInitFrameStart
+		global_init_frame_end = renvoAmd64CompilerGlobalInitFrameEnd
+		ieee_binary_stack = renvoAmd64CompilerIEEEBinaryStack
+		ieee_convert_float_stack = renvoAmd64CompilerIEEEConvertFloatStack
+		ieee_int_to_float_stack = renvoAmd64CompilerIEEEIntToFloatStack
+		ieee_float_to_int_stack = renvoAmd64CompilerIEEEFloatToIntStack
+		ieee_negate_stack = renvoAmd64CompilerIEEENegateStack
 		patch = renvoAmd64CompilerPatch
 		mul_primary_tertiary = renvoAmd64CompilerMulPrimaryTertiary
 		primary_imm64 = renvoAmd64CompilerPrimaryImm64
@@ -1654,5 +1663,67 @@ go compiler {
 
 	func renvoAmd64CompilerMulPrimaryTertiary(a *renvoAsm) {
 		renvoAsmEmit32(a, 0xc1af0f48)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerGlobalInitFrameStart(g *renvoLinearGen) int {
+		a := &g.asm
+		framePatch := len(a.code)
+		renvoAsmEmit32(a, 0x000000c8)
+		return framePatch
+	}
+
+	func renvoAmd64CompilerGlobalInitFrameEnd(g *renvoLinearGen, framePatch int) {
+		renvoAsmLeave(&g.asm)
+		if framePatch < 0 {
+			return
+		}
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		g.asm.code[framePatch+1] = byte(frame & 255)
+		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+	}
+
+	func renvoAmd64CompilerIEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+		return false
+	}
+
+	func renvoAmd64CompilerIEEEConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+
+	}
+
+	func renvoAmd64CompilerIEEEIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+
+	}
+
+	func renvoAmd64CompilerIEEEFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+
+	}
+
+	func renvoAmd64CompilerIEEENegateStack(g *renvoLinearGen, offset int, size int) {
+
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+		renvoAsmLoadPrimaryTertiaryStack(&g.asm, right, left)
+		renvoEmitAmd64IEEECompareResult(&g.asm, c0, c1, kind)
+		return true
+	}
+
+	func renvoAmd64CompilerIEEENegatePrimary(g *renvoLinearGen, kind int) bool {
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			// btc eax, 31 preserves the payload and clears the unused high word.
+			renvoAsmEmitText(a, "\x0f\xba\xf8\x1f")
+			return true
+		}
+		// btc rax, 63 preserves every payload bit and toggles signed zero.
+		renvoAsmEmitText(a, "\x48\x0f\xba\xf8\x3f")
+		return true
 	}
 }
