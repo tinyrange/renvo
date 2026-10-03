@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		jit_call_supported = renvoWasm32CompilerJITCallSupported
 		open_flag = renvoWasm32CompilerOpenFlag
 		file_offset_sentinel = renvoWasm32CompilerFileOffsetSentinel
 		static_call_binding = renvoWasm32CompilerStaticCallBinding
@@ -7234,5 +7235,11 @@ go compiler {
 			return 512
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerJITCallSupported(c *renvoCompileContext) bool {
+		return false
 	}
 }

@@ -748,6 +748,7 @@ func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { re
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
+const renvoRTGJITCallSupported = false
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
 func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
 const renvoRTGCodeOffset = 0
@@ -818,6 +819,18 @@ const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
 
 const renvoRTGOpenCreate = 64
 const renvoRTGOpenTruncate = 512
+
+func renvoJITCallSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return true
+	
+}
+return false
+}
 
 func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
 renvoNonNil(c)

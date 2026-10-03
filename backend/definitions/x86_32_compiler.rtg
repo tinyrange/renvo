@@ -952,6 +952,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		jit_call_supported = renvo386CompilerJITCallSupported
 		open_flag = renvo386CompilerOpenFlag
 		file_offset_sentinel = renvo386CompilerFileOffsetSentinel
 		static_call_binding = renvo386CompilerStaticCallBinding
@@ -5498,5 +5499,11 @@ go compiler {
 			return 512
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvo386CompilerJITCallSupported(c *renvoCompileContext) bool {
+		return true
 	}
 }

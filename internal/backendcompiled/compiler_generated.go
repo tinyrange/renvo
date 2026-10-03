@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1f967f3d1000c66fcaf002d19e609cd88b4b8a7642ccb6ac66fda49315e54cf1"
+const CompilerSourceDigest = "c33d171a48739aaf4e0a1511abd6ac1ae833d5cee0099c1994bf2ca7460407ad"
 
 // source: backend/compiler_common_impl.go
 
@@ -27476,7 +27476,7 @@ return renvoEmitSyscallFromStack(g, e.argCount, syscallNumber)
 func renvoEmitJITCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
 e := &ep.exprs[idx]
-if e.argCount != 6 || g.c.renvoTargetArch == renvoArchWasm32 {
+if e.argCount != 6 || !renvoJITCallSupported(g.c) {
 return false
 }
 for i := e.argCount - 1; i >= 0; i-- {
@@ -28828,7 +28828,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x48\x8a\xc5\xa8\x95\xbb\x10\x7f\x4f\x5d\x5f\x54\x1c\x46\xf8\xac\x0b\x3f\x38\x4c\xfe\xfd\xc1\xc9\xbd\xfc\xab\x56\x65\xc6\x2c\x7b", 3, true
+return "wasi/wasm32", "\x63\x02\x3c\x94\x96\xe0\xab\x00\xcf\x7a\xf2\x36\x0f\x1a\x13\x3e\xbe\xb4\x20\x96\x3f\x83\x4a\x01\x27\x2a\xe9\x4d\x49\xe1\x05\x10", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xf9\xbd\x29\x38\x37\xdb\x8f\x6c\x70\x2d\x2c\xbf\x1e\x94\xcf\xde\xe3\xec\x13\x0f\xdf\x9a\x49\x63\x52\x8a\xf4\x75\xaf\x1d\x87\xa6", 3, true
@@ -28840,7 +28840,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x8a\x18\x76\x67\x66\x69\x9a\xb7\x96\x32\x03\x2b\x48\x2a\xcb\x99\x84\x06\x3e\xe6\x7c\x82\x3a\x6d\xa3\xd6\x51\x85\x26\x4b\x1d\x1d", 3, true
+return "vm/vm32", "\x32\xe0\xa4\xa3\x53\x6f\x15\xeb\x8c\x48\xd2\x47\x5c\x56\x30\xbd\x66\x9a\xc1\x43\x70\xeb\x9f\xa1\xb9\x19\xb7\x83\xad\x3e\x33\xff", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
@@ -30218,6 +30218,7 @@ func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { re
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
+const renvoRTGJITCallSupported = false
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
 func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
 const renvoRTGCodeOffset = 0
@@ -30288,6 +30289,18 @@ const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
 
 const renvoRTGOpenCreate = 64
 const renvoRTGOpenTruncate = 512
+
+func renvoJITCallSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return true
+
+}
+return false
+}
 
 func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
 renvoNonNil(c)
@@ -46994,6 +47007,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -50043,6 +50058,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52826,6 +52843,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -54648,6 +54667,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 
@@ -58340,6 +58361,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 

@@ -455,6 +455,7 @@ func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { re
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
+const renvoRTGJITCallSupported = false
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
 func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
 const renvoRTGCodeOffset = 0
@@ -557,6 +558,14 @@ func appendPreparedABIAdapters(out []byte, document Document, target ResolvedTar
 func appendPreparedABIHook(out []byte, document Document, abi Declaration, prefix string,
 	wrapper string, field string, parameters string, arguments string) []byte {
 	algorithm, found := targetABIGoHook(document, abi, field)
+	if field == "jit_call" {
+		out = append(out, "const renvoRTGJITCallSupported = "...)
+		if found {
+			out = append(out, "true\n"...)
+		} else {
+			out = append(out, "false\n"...)
+		}
+	}
 	out = append(out, "func "...)
 	out = append(out, wrapper...)
 	out = append(out, '(')
