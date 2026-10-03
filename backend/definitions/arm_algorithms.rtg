@@ -696,6 +696,10 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		ensure_append_bytes_helper = renvoArmCompilerEnsureAppendBytesHelper
+		append_bytes_helper = renvoArmCompilerAppendBytesHelper
+		unsigned_word_comparison = renvoArmCompilerUnsignedWordComparison
+		direct_scalar_deref = renvoArmCompilerDirectScalarDeref
 		compound_local_assign = renvoArmCompilerCompoundLocalAssign
 		self_binary_local_assign = renvoArmCompilerSelfBinaryLocalAssign
 		scalar_preserves_secondary = renvoArmCompilerScalarPreservesSecondary
@@ -2415,5 +2419,30 @@ go compiler {
 go compiler {
 	func renvoArmCompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoArmCompilerDirectScalarDeref(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerUnsignedWordComparison(g *renvoLinearGen) bool {
+		return g.c.renvoNativeIntSize == 4
+	}
+}
+
+go compiler {
+	func renvoArmCompilerAppendBytesHelper(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
+		g.asm.patchFailed = true
+		return 0
 	}
 }

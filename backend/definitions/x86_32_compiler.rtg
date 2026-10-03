@@ -1300,6 +1300,10 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		ensure_append_bytes_helper = renvo386CompilerEnsureAppendBytesHelper
+		append_bytes_helper = renvo386CompilerAppendBytesHelper
+		unsigned_word_comparison = renvo386CompilerUnsignedWordComparison
+		direct_scalar_deref = renvo386CompilerDirectScalarDeref
 		compound_local_assign = renvo386CompilerCompoundLocalAssign
 		self_binary_local_assign = renvo386CompilerSelfBinaryLocalAssign
 		scalar_preserves_secondary = renvo386CompilerScalarPreservesSecondary
@@ -4529,5 +4533,30 @@ go compiler {
 			return 0
 		}
 		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerDirectScalarDeref(g *renvoLinearGen) bool {
+		return g.c.code16
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedWordComparison(g *renvoLinearGen) bool {
+		return g.c.renvoNativeIntSize == 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerAppendBytesHelper(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
+		g.asm.patchFailed = true
+		return 0
 	}
 }

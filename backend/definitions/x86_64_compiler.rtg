@@ -965,6 +965,10 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		ensure_append_bytes_helper = renvoAmd64CompilerEnsureAppendBytesHelper
+		append_bytes_helper = renvoAmd64CompilerAppendBytesHelper
+		unsigned_word_comparison = renvoAmd64CompilerUnsignedWordComparison
+		direct_scalar_deref = renvoAmd64CompilerDirectScalarDeref
 		compound_local_assign = renvoAmd64CompilerCompoundLocalAssign
 		self_binary_local_assign = renvoAmd64CompilerSelfBinaryLocalAssign
 		scalar_preserves_secondary = renvoAmd64CompilerScalarPreservesSecondary
@@ -3580,5 +3584,29 @@ go compiler {
 		}
 		renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
 		return 1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerDirectScalarDeref(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerUnsignedWordComparison(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerAppendBytesHelper(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
+		return renvoAmd64EnsureAppendBytesHelper(g)
 	}
 }

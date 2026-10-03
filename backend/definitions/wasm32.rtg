@@ -4150,6 +4150,10 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		ensure_append_bytes_helper = renvoWasm32CompilerEnsureAppendBytesHelper
+		append_bytes_helper = renvoWasm32CompilerAppendBytesHelper
+		unsigned_word_comparison = renvoWasm32CompilerUnsignedWordComparison
+		direct_scalar_deref = renvoWasm32CompilerDirectScalarDeref
 		compound_local_assign = renvoWasm32CompilerCompoundLocalAssign
 		self_binary_local_assign = renvoWasm32CompilerSelfBinaryLocalAssign
 		scalar_preserves_secondary = renvoWasm32CompilerScalarPreservesSecondary
@@ -5984,5 +5988,30 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerDirectScalarDeref(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerUnsignedWordComparison(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerAppendBytesHelper(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
+		g.asm.patchFailed = true
+		return 0
 	}
 }
