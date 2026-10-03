@@ -805,6 +805,78 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoObjectAbsoluteSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
+func renvoObjectLazyArena(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
+func renvoObjectFaultsTrap(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
+func renvoObjectHelperSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
+func renvoObjectPairResult(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
+func renvoObjectRegisterScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+return false
+}
+
 func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

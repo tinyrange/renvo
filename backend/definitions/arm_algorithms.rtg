@@ -486,6 +486,12 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		object_absolute_symbols = renvoArmCompilerObjectAbsoluteSymbols
+		object_lazy_arena = renvoArmCompilerObjectLazyArena
+		object_faults_trap = renvoArmCompilerObjectFaultsTrap
+		object_helper_symbols = renvoArmCompilerObjectHelperSymbols
+		object_pair_result = renvoArmCompilerObjectPairResult
+		object_register_scalar_abi = renvoArmCompilerObjectRegisterScalarABI
 		object_stack_scalar_abi = renvoArmCompilerObjectStackScalarABI
 		single_call_constants = renvoArmCompilerSingleCallConstants
 		elide_empty_calls = renvoArmCompilerElideEmptyCalls
@@ -3331,6 +3337,42 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerObjectStackScalarABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectRegisterScalarABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectPairResult(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectHelperSymbols(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectFaultsTrap(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectLazyArena(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectAbsoluteSymbols(c *renvoCompileContext) bool {
 		return false
 	}
 }

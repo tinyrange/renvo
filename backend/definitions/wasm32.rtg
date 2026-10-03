@@ -4150,6 +4150,12 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_absolute_symbols = renvoWasm32CompilerObjectAbsoluteSymbols
+		object_lazy_arena = renvoWasm32CompilerObjectLazyArena
+		object_faults_trap = renvoWasm32CompilerObjectFaultsTrap
+		object_helper_symbols = renvoWasm32CompilerObjectHelperSymbols
+		object_pair_result = renvoWasm32CompilerObjectPairResult
+		object_register_scalar_abi = renvoWasm32CompilerObjectRegisterScalarABI
 		object_stack_scalar_abi = renvoWasm32CompilerObjectStackScalarABI
 		single_call_constants = renvoWasm32CompilerSingleCallConstants
 		elide_empty_calls = renvoWasm32CompilerElideEmptyCalls
@@ -7082,6 +7088,42 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerObjectStackScalarABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectRegisterScalarABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectPairResult(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectHelperSymbols(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectFaultsTrap(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectLazyArena(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectAbsoluteSymbols(c *renvoCompileContext) bool {
 		return false
 	}
 }

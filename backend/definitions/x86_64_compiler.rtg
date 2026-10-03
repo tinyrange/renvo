@@ -634,6 +634,12 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		object_absolute_symbols = renvoAmd64CompilerObjectAbsoluteSymbols
+		object_lazy_arena = renvoAmd64CompilerObjectLazyArena
+		object_faults_trap = renvoAmd64CompilerObjectFaultsTrap
+		object_helper_symbols = renvoAmd64CompilerObjectHelperSymbols
+		object_pair_result = renvoAmd64CompilerObjectPairResult
+		object_register_scalar_abi = renvoAmd64CompilerObjectRegisterScalarABI
 		object_stack_scalar_abi = renvoAmd64CompilerObjectStackScalarABI
 		single_call_constants = renvoAmd64CompilerSingleCallConstants
 		elide_empty_calls = renvoAmd64CompilerElideEmptyCalls
@@ -4666,5 +4672,41 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerObjectStackScalarABI(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectRegisterScalarABI(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectPairResult(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectHelperSymbols(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectFaultsTrap(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectLazyArena(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectAbsoluteSymbols(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
 	}
 }

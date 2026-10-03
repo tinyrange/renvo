@@ -91,18 +91,6 @@ const renvoImportReloc = 2
 const renvoObjectExternalBase = 536870912
 const renvoObjectExternalStride = 1048576
 
-const renvoObjectABIUnavailable = 0
-const renvoObjectABISysV = 1
-const renvoObjectABICdecl = 2
-
-func renvoIsSysVObject(c *renvoCompileContext) bool {
-	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
-}
-
-func renvoIsCdeclObject(c *renvoCompileContext) bool {
-	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
-}
-
 func renvoIsHostedObject(c *renvoCompileContext) bool {
 	return c != nil && renvoTargetHostedObject(c)
 }
@@ -14205,7 +14193,7 @@ func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprP
 		return false
 	}
 	renvoNonNil(g, ep)
-	if !renvoIsSysVObject(g.c) || idx < 0 || idx >= len(ep.exprs) {
+	if !g.c.objectFile || !renvoObjectPairResult(g.c) || idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
 	e := &ep.exprs[idx]
@@ -14234,13 +14222,14 @@ func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprP
 		return false
 	}
 	size := renvoTypeSize(g.meta, fn.resultType)
+	wordBytes := renvoObjectArgumentWordBytes(g.c)
 	primarySize := size
-	if primarySize > 8 {
-		primarySize = 8
+	if primarySize > wordBytes {
+		primarySize = wordBytes
 	}
 	renvoAsmStorePrimaryStackSize(&g.asm, offset, primarySize)
-	if size > 8 {
-		renvoAsmStoreSecondaryStack(&g.asm, offset-8)
+	if size > wordBytes {
+		renvoAsmStoreSecondaryStack(&g.asm, offset-wordBytes)
 	}
 	return true
 }
@@ -14416,7 +14405,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 		if word != wordCount {
 			return false
 		}
-		if renvoFixedTarget == 0 && cObjectForeign && wordCount > renvoObjectArgumentRegisterCount(g.c) && renvoIsSysVObject(g.c) {
+		if renvoFixedTarget == 0 && cObjectForeign && wordCount > renvoObjectArgumentRegisterCount(g.c) && g.c.objectFile && renvoObjectRegisterScalarABI(g.c) {
 			memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 			if memoryAggregate >= 0 {
 				return memoryAggregate != 0
@@ -14472,7 +14461,7 @@ func renvoEmitRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
 	wordBytes := renvoObjectArgumentWordBytes(g.c)
-	if !renvoIsSysVObject(g.c) || wordCount > renvoObjectArgumentRegisterCount(g.c) {
+	if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || wordCount > renvoObjectArgumentRegisterCount(g.c) {
 		return false
 	}
 	expectedWords := 0
@@ -14548,7 +14537,7 @@ func renvoDiscardableExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 
 func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if !renvoIsSysVObject(g.c) || wordCount != fn.paramCount || wordCount <= renvoObjectArgumentRegisterCount(g.c) {
+	if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || wordCount != fn.paramCount || wordCount <= renvoObjectArgumentRegisterCount(g.c) {
 		return false
 	}
 	for i := 0; i < fn.paramCount; i++ {
@@ -14979,7 +14968,7 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 
 func renvoEmitCObjectFunctionPointerIntegerStackCall(g *renvoLinearGen, handleOffset int, argOffsets []int) bool {
 	renvoNonNil(g)
-	if !renvoIsSysVObject(g.c) || len(argOffsets) <= renvoObjectArgumentRegisterCount(g.c) || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
+	if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || len(argOffsets) <= renvoObjectArgumentRegisterCount(g.c) || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
 	}
 	return renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets)
@@ -15531,7 +15520,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		return label
 	}
 	after := renvoAsmNewLabel(a)
-	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+	if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectFaultsTrap(g.c) {
 		// A freestanding object has no userspace process or syscall ABI. Model an
 		// impossible checked-runtime path as a normal compiler trap that objtool
 		// and the kernel linker both understand.
@@ -15542,7 +15531,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		renvoEmitUncaughtFaultHelperBody(g, outOfMemory)
 	}
 	renvoAsmMarkLabel(a, after)
-	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+	if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectFaultsTrap(g.c) {
 		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_object_fault", label, after)
 	}
 	return label
@@ -19240,7 +19229,7 @@ func renvoEnsureSignedDivisionHelper(g *renvoLinearGen, mod bool) int {
 	renvoEmitSignedDivisionHelperBody(g, mod)
 	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, after)
-	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+	if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectHelperSymbols(g.c) {
 		name := "__renvo_signed_divide"
 		if mod {
 			name = "__renvo_signed_remainder"
@@ -20025,7 +20014,7 @@ func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) 
 	renvoEmitArenaAllocHelperBody(g, persistent)
 	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
-	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+	if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectHelperSymbols(g.c) {
 		name := "__renvo_arena_alloc"
 		if persistent {
 			name = "__renvo_persistent_alloc"
@@ -20046,7 +20035,7 @@ func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 		aboveOrEqual = 0x93
 	}
 	if renvoFixedTarget == 0 {
-		if persistent && renvoIsSysVObject(g.c) {
+		if persistent && g.c.objectFile && renvoObjectLazyArena(g.c) {
 			// Relocatable objects have no process entry at which to initialize their
 			// private arena. Preserve the requested size while the first allocation
 			// lazily establishes both bounds; later allocations take the ready branch.
@@ -21486,7 +21475,7 @@ func renvoEmitObjectFunctionAddress(g *renvoLinearGen, fnIndex int) bool {
 
 func renvoEmitObjectKernelLinkAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	if !renvoIsSysVObject(g.c) {
+	if !g.c.objectFile || !renvoObjectAbsoluteSymbols(g.c) {
 		return false
 	}
 	nameStart, nameEnd, addend, ok := renvoObjectConstantPointerAddress(g, ep, idx)
@@ -21936,7 +21925,7 @@ func renvoEmitObjectRegisterWrapperBody(g *renvoLinearGen, fnIndex int, wordCoun
 	}
 	if sret || smallAggregateResult {
 		resultWords := 1
-		if !sret && renvoTypeSize(g.meta, fn.resultType) > 8 {
+		if !sret && renvoTypeSize(g.meta, fn.resultType) > renvoObjectArgumentWordBytes(g.c) {
 			resultWords = 2
 		}
 		renvoFinishObjectAggregateResult(&g.asm, resultWords)
