@@ -19662,43 +19662,47 @@ func renvoEmitWordCallExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	return renvoEmitUserCall(g, ep, idx)
 }
 
-func renvoEmitWideWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+func renvoEmitWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) bool {
 	p := g.prog
-	a := &g.asm
 	e := &ep.exprs[idx]
+	opStart := int(renvoTokStart(p, e.tok))
+	opLen := int(renvoTokEnd(p, e.tok)) - opStart
+	op0 := renvo_runtime_UnsafeByteAt(p.src, opStart)
+	op1 := byte(0)
+	if opLen == 2 {
+		op1 = renvo_runtime_UnsafeByteAt(p.src, opStart+1)
+	}
 	if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
 		return result != 0
+	}
+	if optimized := renvoEmitOptimizedNativeBinaryExpr(g, ep, idx); optimized >= 0 {
+		return optimized != 0
 	}
 	if !renvoEmitWordBinaryOperands(g, ep, idx) {
 		return false
 	}
-	resultType := renvoInferParsedExprType(g, ep, idx)
-	result := renvoResolveType(g.meta, resultType)
-	unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
-	comparisonStart := renvoTokStart(p, e.tok)
-	comparisonEnd := renvoTokEnd(p, e.tok)
-	comparisonChar := renvo_runtime_UnsafeByteAt(p.src, comparisonStart)
-	comparisonSecond := byte(0)
-	if comparisonStart+1 < comparisonEnd {
-		comparisonSecond = renvo_runtime_UnsafeByteAt(p.src, comparisonStart+1)
-	}
-	if (comparisonChar == '<' || comparisonChar == '>') && comparisonSecond != comparisonChar &&
+	if (wide || g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) &&
 		(renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) &&
-		renvoEmitUnsignedPrimaryTertiaryCompare(g, comparisonChar, comparisonSecond, comparisonEnd-comparisonStart) {
+		renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+		if !wide {
+			renvoNormalizeNativeExprPrimary(g, ep, idx)
+		}
 		return true
 	}
-	if renvoTok2Is(p, e.tok, '>', '>') && unsignedShift {
-		if !renvoEmitBounded386UnsignedRightShift(g, e.tok) {
+	resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+	unsigned := resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64
+	if opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
+		if !renvoEmitBoundedWordShift(g, e.tok, op0 == '>', renvoExprHasUnsignedIntType(g, ep, e.left), unsigned) {
 			return false
 		}
-	} else if unsignedShift && (renvoTokCharIs(p, e.tok, '/') || renvoTokCharIs(p, e.tok, '%')) {
-		if !renvoEmitUnsignedPrimaryTertiaryOp(g, e.tok, result.kind) {
+	} else if unsigned && (op0 == '/' || op0 == '%') {
+		if !renvoEmitUnsignedPrimaryTertiaryOp(g, e.tok, resultKind) {
 			return false
 		}
 	} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
 		return false
 	}
-	renvoAsmNormalizePrimaryForKind(a, result.kind)
+	renvoAsmNormalizePrimaryForKind(&g.asm, resultKind)
 	return true
 }
 
@@ -22539,10 +22543,7 @@ func renvoEmitMachineIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) boo
 		return renvoEmitUnaryExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprBinary {
-		if wide {
-			return renvoEmitWideWordBinaryExpr(g, ep, idx)
-		}
-		return renvoEmitNativeWordBinaryExpr(g, ep, idx)
+		return renvoEmitWordBinaryExpr(g, ep, idx, wide)
 	}
 	return false
 }
@@ -24362,72 +24363,6 @@ func renvoEmitLengthCapacityCall(g *renvoLinearGen, ep *renvoExprParse, idx int)
 		return true
 	}
 	return false
-}
-
-func renvoEmitNativeWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-	p := g.prog
-	a := &g.asm
-	e := &ep.exprs[idx]
-	opStart := int(renvoTokStart(p, e.tok))
-	opLen := int(renvoTokEnd(p, e.tok)) - opStart
-	op0 := renvo_runtime_UnsafeByteAt(p.src, opStart)
-	op1 := byte(0)
-	if opLen == 2 {
-		op1 = renvo_runtime_UnsafeByteAt(p.src, opStart+1)
-	}
-	if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
-		return result != 0
-	}
-	if optimized := renvoEmitOptimizedNativeBinaryExpr(g, ep, idx); optimized >= 0 {
-		return optimized != 0
-	}
-	if !renvoEmitWordBinaryOperands(g, ep, idx) {
-		return false
-	}
-	if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
-		renvoNormalizeNativeExprPrimary(g, ep, idx)
-		return true
-	}
-	if renvoPreparedBackendActive != 0 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
-		if op0 == '<' {
-			renvoRTGEmitBoundedVariableShift(a, RTGShiftLeft, false)
-		} else {
-			renvoRTGEmitBoundedVariableShift(a, RTGShiftRight, !renvoExprHasUnsignedIntType(g, ep, e.left))
-		}
-		renvoNormalizeNativeExprPrimary(g, ep, idx)
-		return true
-	}
-	if g.c.renvoNativeIntSize == 8 && opLen == 2 && (op0 == '<' && op1 == '<' || op0 == '>' && op1 == '>') {
-		mode := 0
-		if op0 == '>' {
-			mode = 1
-			if renvoExprHasUnsignedIntType(g, ep, e.left) {
-				mode = 2
-			}
-		}
-		renvoEmitBoundedWideWordShift(g, mode)
-		renvoNormalizeNativeExprPrimary(g, ep, idx)
-		return true
-	}
-	if g.c.renvoNativeIntSize == 4 && opLen == 2 && op0 == '>' && op1 == '>' {
-		resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
-		if resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64 {
-			renvoEmitBoundedNarrowUnsignedShift(g, e.tok)
-			renvoAsmNormalizePrimaryForKind(a, resultKind)
-			return true
-		}
-	}
-	resultKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
-	unsigned := resultKind == renvoTypeByte || resultKind >= renvoTypeUint16 && resultKind <= renvoTypeUint64
-	if unsigned && (op0 == '/' || op0 == '%') {
-		if !renvoEmitUnsignedPrimaryTertiaryOp(g, e.tok, resultKind) {
-			return false
-		}
-	} else if !renvoEmitPrimaryTertiaryOp(g, e.tok) {
-		return false
-	}
-	renvoNormalizeNativeExprPrimary(g, ep, idx)
-	return true
 }
 
 func renvoNormalizeNativeExprPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) {

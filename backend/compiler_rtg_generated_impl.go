@@ -797,6 +797,42 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if g.c.renvoNativeIntSize == 8 {
+			mode := 0
+			if right {
+				mode = 1
+				if leftUnsigned {
+					mode = 2
+				}
+			}
+			renvoEmitBoundedWideWordShift(g, mode)
+			return true
+		}
+		if g.c.renvoNativeIntSize == 4 && right && resultUnsigned {
+			renvoEmitBoundedNarrowUnsignedShift(g, tok)
+			return true
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if right && resultUnsigned {
+			return renvoEmitBounded386UnsignedRightShift(g, tok)
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
 renvoNonNil(a)
 renvoCompilerSelector := a.c

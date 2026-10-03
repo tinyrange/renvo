@@ -977,6 +977,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		bounded_word_shift = renvoAmd64CompilerBoundedWordShift
 		read_write_file = renvoAmd64CompilerReadWriteFile
 		pop_read_write_offset = renvoAmd64CompilerPopReadWriteOffset
 		chmod_file = renvoAmd64CompilerChmodFile
@@ -3851,5 +3852,26 @@ go compiler {
 		}
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+		if g.c.renvoNativeIntSize == 8 {
+			mode := 0
+			if right {
+				mode = 1
+				if leftUnsigned {
+					mode = 2
+				}
+			}
+			renvoEmitBoundedWideWordShift(g, mode)
+			return true
+		}
+		if g.c.renvoNativeIntSize == 4 && right && resultUnsigned {
+			renvoEmitBoundedNarrowUnsignedShift(g, tok)
+			return true
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
 	}
 }
