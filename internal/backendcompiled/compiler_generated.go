@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1bb87af8dacc1564c6395cee879c23ece7c5b53fb559b037ab72fdde4beeb1ea"
+const CompilerSourceDigest = "e923b5c4764d2acbcb5036edbc254a0410b895f7255312ddf69021b1fe81b559"
 
 // source: backend/compiler_common_impl.go
 
@@ -19515,6 +19515,83 @@ return renvoEmitStackFloat64ExprToLocal(g, ep, e.left, left) && renvoEmitStackFl
 return renvoEmitTypedAssign(g, ep, e.left, left) && renvoEmitTypedAssign(g, ep, e.right, right)
 }
 
+
+
+
+func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+p := g.prog
+a := &g.asm
+e := &ep.exprs[idx]
+if renvoBinaryUsesFloat(g, ep, e) {
+if renvoEmitFloatBinaryExpr(g, ep, idx) {
+return 1
+}
+return 0
+}
+if renvoStringOrderingExpr(g, ep, e) {
+if renvoEmitStringOrdering(g, ep, e) {
+return 1
+}
+return 0
+}
+if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
+leftType := renvoInferParsedExprType(g, ep, e.left)
+leftResolved := renvoResolveType(g.meta, leftType)
+if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
+if renvoEmitCompositeCompare(g, ep, e, leftType) {
+return 1
+}
+return 0
+}
+rightType := renvoInferParsedExprType(g, ep, e.right)
+if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
+if renvoEmitStringCompare(g, ep, e.left, e.right, renvoTok2Is(p, e.tok, '!', '=')) {
+return 1
+}
+return 0
+}
+}
+if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+falseLabel := renvoAsmNewLabel(a)
+endLabel := renvoAsmNewLabel(a)
+if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
+return 0
+}
+renvoAsmPrimaryImm(a, 1)
+renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmMarkLabel(a, endLabel)
+return 1
+}
+return -1
+}
+
+
+
+func renvoEmitWordBinaryOperands(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+p := g.prog
+a := &g.asm
+e := &ep.exprs[idx]
+rightExpr := &ep.exprs[e.right]
+rightKind := rightExpr.kind
+rightTok := rightExpr.tok
+if !renvoEmitIntExpr(g, ep, e.left) {
+return false
+}
+renvoAsmPushPrimary(a)
+if rightKind == renvoExprInt {
+renvoAsmLoadPrimaryIntToken(a, p, rightTok)
+} else if rightKind == renvoExprChar {
+renvoAsmPrimaryImm(a, renvoParseCharToken(p, rightTok))
+} else if rightKind == renvoExprBool {
+renvoAsmPrimaryImm(a, renvoBoolTokenValue(p, rightTok))
+} else if !renvoEmitIntExpr(g, ep, e.right) {
+return false
+}
+renvoAsmPopTertiary(a)
+return true
+}
+
 func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 p := g.prog
 a := &g.asm
@@ -19670,60 +19747,12 @@ return false
 return renvoEmitUnaryValueExpr(g, ep, idx)
 }
 if e.kind == renvoExprBinary {
-if renvoBinaryUsesFloat(g, ep, e) {
-return renvoEmitFloatBinaryExpr(g, ep, idx)
+if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
+return result != 0
 }
-if renvoStringOrderingExpr(g, ep, e) {
-return renvoEmitStringOrdering(g, ep, e)
-}
-if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-leftResolved := renvoResolveType(g.meta, leftType)
-if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
-return renvoEmitCompositeCompare(g, ep, e, leftType)
-}
-}
-if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
-falseLabel := renvoAsmNewLabel(a)
-endLabel := renvoAsmNewLabel(a)
-if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
+if !renvoEmitWordBinaryOperands(g, ep, idx) {
 return false
 }
-renvoAsmPrimaryImm(a, 1)
-renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmMarkLabel(a, endLabel)
-return true
-}
-if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-rightType := renvoInferParsedExprType(g, ep, e.right)
-if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
-notEqual := renvoTok2Is(p, e.tok, '!', '=')
-return renvoEmitStringCompare(g, ep, e.left, e.right, notEqual)
-}
-}
-rightExpr := &ep.exprs[e.right]
-rightKind := rightExpr.kind
-rightTok := rightExpr.tok
-if !renvoEmitIntExpr(g, ep, e.left) {
-return false
-}
-renvoAsmPushPrimary(a)
-if rightKind == renvoExprInt {
-renvoAsmLoadPrimaryIntToken(a, p, rightExpr.tok)
-} else if rightKind == renvoExprChar {
-value := renvoParseCharToken(p, rightTok)
-renvoAsmPrimaryImm(a, value)
-} else if rightKind == renvoExprBool {
-value := renvoBoolTokenValue(p, rightTok)
-renvoAsmPrimaryImm(a, value)
-} else {
-if !renvoEmitIntExpr(g, ep, e.right) {
-return false
-}
-}
-renvoAsmPopTertiary(a)
 resultType := renvoInferParsedExprType(g, ep, idx)
 result := renvoResolveType(g.meta, resultType)
 unsignedShift := result.kind == renvoTypeByte || result.kind >= renvoTypeUint16 && result.kind <= renvoTypeUint64
@@ -24547,64 +24576,15 @@ op1 := byte(0)
 if opLen == 2 {
 op1 = renvo_runtime_UnsafeByteAt(p.src, opStart+1)
 }
-if renvoBinaryUsesFloat(g, ep, e) {
-return renvoEmitFloatBinaryExpr(g, ep, idx)
+if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
+return result != 0
 }
-if renvoStringOrderingExpr(g, ep, e) {
-return renvoEmitStringOrdering(g, ep, e)
-}
-if opLen == 2 && (op0 == '=' || op0 == '!') && op1 == '=' {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-leftResolved := renvoResolveType(meta, leftType)
-renvoNonNil(leftResolved)
-if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
-return renvoEmitCompositeCompare(g, ep, e, leftType)
-}
-}
-if opLen == 2 && (op0 == '&' && op1 == '&' || op0 == '|' && op1 == '|') {
-falseLabel := renvoAsmNewLabel(a)
-endLabel := renvoAsmNewLabel(a)
-if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
-return false
-}
-renvoAsmPrimaryImm(a, 1)
-renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmMarkLabel(a, endLabel)
-return true
-}
-if opLen == 2 && (op0 == '=' || op0 == '!') && op1 == '=' {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-rightType := renvoInferParsedExprType(g, ep, e.right)
-if renvoTypeIsString(meta, leftType) || renvoTypeIsString(meta, rightType) {
-notEqual := op0 == '!'
-return renvoEmitStringCompare(g, ep, e.left, e.right, notEqual)
-}
-}
-rightExpr := &ep.exprs[e.right]
-rightKind := rightExpr.kind
-rightTok := rightExpr.tok
 if optimized := renvoEmitOptimizedNativeBinaryExpr(g, ep, idx); optimized >= 0 {
 return optimized != 0
 }
-if !renvoEmitIntExpr(g, ep, e.left) {
+if !renvoEmitWordBinaryOperands(g, ep, idx) {
 return false
 }
-renvoAsmPushPrimary(a)
-if rightKind == renvoExprInt {
-renvoAsmLoadPrimaryIntToken(a, p, rightTok)
-} else if rightKind == renvoExprChar {
-value := renvoParseCharToken(p, rightTok)
-renvoAsmPrimaryImm(a, value)
-} else if rightKind == renvoExprBool {
-value := renvoBoolTokenValue(p, rightTok)
-renvoAsmPrimaryImm(a, value)
-} else {
-if !renvoEmitIntExpr(g, ep, e.right) {
-return false
-}
-}
-renvoAsmPopTertiary(a)
 if (g.c.renvoNativeIntSize == 8 || g.c.renvoNativeIntSize == 4) && (op0 == '<' || op0 == '>') && !(opLen == 2 && op1 == op0) && (renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)) && renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
