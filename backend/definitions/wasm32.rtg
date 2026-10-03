@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		direct_slice_count_selector = renvoWasm32CompilerDirectSliceCountSelector
+		slice_count_result = renvoWasm32CompilerSliceCountResult
 		move_read_write_offset = renvoWasm32CompilerMoveReadWriteOffset
 		prepare_read_write_buffer = renvoWasm32CompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoWasm32CompilerCompareWordImmediateKind
@@ -6066,5 +6068,17 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerMoveReadWriteOffset(a *renvoAsm) {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSliceCountResult(a *renvoAsm) {
+		renvoAsmCopyTertiaryToPrimary(a)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
+		return true
 	}
 }

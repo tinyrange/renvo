@@ -4357,6 +4357,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoCanLoadDirectSliceCountSelector(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return true
+}
+
+func renvoAsmSliceCountResult(a *renvoAsm) {
+renvoNonNil(a)
+renvoAsmCopyTertiaryToPrimary(a)
+}
+
 func renvoAsmMoveOffsetArg(a *renvoAsm) {
 renvoNonNil(a)
 renvoRTGDirectMove(a, renvoRTGCallWord3, renvoRTGPrimary)

@@ -965,6 +965,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		direct_slice_count_selector = renvoAmd64CompilerDirectSliceCountSelector
+		slice_count_result = renvoAmd64CompilerSliceCountResult
 		move_read_write_offset = renvoAmd64CompilerMoveReadWriteOffset
 		prepare_read_write_buffer = renvoAmd64CompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoAmd64CompilerCompareWordImmediateKind
@@ -3663,5 +3665,17 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerMoveReadWriteOffset(a *renvoAsm) {
 		renvoAmd64AsmMoveOffsetArg(a)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSliceCountResult(a *renvoAsm) {
+		renvoAsmCopyTertiaryToPrimary(a)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
+		return true
 	}
 }
