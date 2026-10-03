@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		compact_c_value_helpers = renvoAmd64CompilerCompactCValueHelpers
 		condition_branch = renvoAmd64CompilerConditionBranch
 		compare_stack_immediate_jump = renvoAmd64CompilerCompareStackImmediateJump
 		compare_stack_stack_jump = renvoAmd64CompilerCompareStackStackJump
@@ -4746,5 +4747,11 @@ go compiler {
 		at := len(a.code)
 		renvoAsmEmit32(a, 0)
 		renvoAsmAddReloc(a, at, label)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
+		return false
 	}
 }

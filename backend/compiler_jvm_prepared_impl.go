@@ -4379,6 +4379,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
 func renvoAsmConditionBranch(a *renvoAsm, condition int, label int) {
 renvoNonNil(a)
 renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSemantic(condition), label)

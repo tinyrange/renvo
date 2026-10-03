@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		compact_c_value_helpers = renvoWasm32CompilerCompactCValueHelpers
 		condition_branch = renvoWasm32CompilerConditionBranch
 		compare_stack_immediate_jump = renvoWasm32CompilerCompareStackImmediateJump
 		compare_stack_stack_jump = renvoWasm32CompilerCompareStackStackJump
@@ -5946,7 +5947,7 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
-		return renvoWasm32FallbackSliceBackingSize
+		return 4096
 	}
 }
 
@@ -7164,5 +7165,11 @@ go compiler {
 			cond = renvoWasm32CondGt
 		}
 		renvoWasm32EmitCondBranch(a, cond, label)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
+		return false
 	}
 }

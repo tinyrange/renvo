@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1e5c240ac362eef64f030646ade7447d54fd80e04cd17a31be7b86e3cdd3d115"
+const CompilerSourceDigest = "a41be41d2a7b81ef05cd52f25817233de767f94e2127df65a3c64a157138b096"
 
 // source: backend/compiler_common_impl.go
 
@@ -417,8 +417,6 @@ return false
 g.funcReachable[fnIndex] = false
 return true
 }
-
-const renvoWasm32FallbackSliceBackingSize = 4096
 
 const renvoLargeProgramSourceThreshold = 1048576
 
@@ -18993,7 +18991,7 @@ return typ
 }
 
 func renvoEmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
-if renvoFixedTarget != 0 || !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
+if renvoFixedTarget != 0 || !g.c.objectFile || !renvoCompactCValueHelpers(g.c) || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
 return false
 }
 fn := &g.meta.funcs[fnInfoIndex]
@@ -19004,7 +19002,7 @@ return false
 }
 result := renvoResolveType(g.meta, fn.resultType)
 size := renvoTypeSize(g.meta, fn.resultType)
-if size < 1 || size > 4 ||
+if size < 1 ||
 (!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
 return false
 }
@@ -29041,7 +29039,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xf2\x3e\xe3\xfc\xcd\x32\x5b\x7e\xca\x24\x3a\x33\xf1\xd9\xef\xc4\xea\x31\xb3\xb6\x13\x63\x0a\xce\xf9\x37\x12\x85\xac\x19\x1e\x82", 3, true
+return "wasi/wasm32", "\x7b\x7a\xe1\x77\xbc\xd2\x5c\x0c\x1b\xee\x81\x1c\x36\xdc\x33\x5c\x91\x98\x7d\x40\xb4\x62\xc1\xba\x02\x2c\x0e\xa2\x17\x83\x7b\x32", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29053,7 +29051,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x34\xa0\xbc\x1b\x70\x4f\x66\x4c\x74\xc8\x8f\xcc\x2c\x80\xfc\xb1\xc0\x1f\xc3\x1c\xbf\xba\x4b\x2e\x4a\xbf\x41\x48\x21\xeb\x63\xcb", 3, true
+return "vm/vm32", "\x52\xb0\x53\x45\xe8\x0a\x1b\x00\x27\xa9\x93\xf2\x4b\x07\x82\x25\x34\xd3\x1c\x36\xe0\x2d\x53\x6e\x6d\xf1\xc5\x1c\x80\xa3\x9e\xc0", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30457,6 +30455,18 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+return c.code16 && c.objectFile
+
+}
+return false
+}
+
 func renvoAsmConditionBranch(a *renvoAsm, condition int, label int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -31591,6 +31601,9 @@ return false
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
+if size < 1 || size > 4 {
+return false
+}
 renvoAsmMarkLabel(a, label)
 
 
@@ -34970,7 +34983,7 @@ return backingSize
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
-return renvoWasm32FallbackSliceBackingSize
+return 4096
 
 }
 a.patchFailed = true
@@ -46834,6 +46847,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49869,6 +49884,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52638,6 +52655,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -54460,6 +54479,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 
@@ -58138,6 +58159,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 
