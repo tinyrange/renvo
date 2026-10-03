@@ -797,6 +797,71 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return -1
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		a := &g.asm
+		if known {
+			if renvoPreparedBackendActive == 0 && valueOffset < 0 {
+				if renvoAsmImmFits8Signed(value) {
+					renvoAsmCmpPrimaryImm8(a, value)
+				} else {
+					renvoAsmEmit8(a, 0x3d)
+					renvoAsmEmit32(a, value)
+				}
+				renvo386AsmJccLabel(a, 0x84, matchLabel)
+			} else {
+				renvoAsmJcmpStackImm(a, valueOffset, value, matchLabel, 0x94)
+			}
+			return 1
+		}
+		if renvoPreparedBackendActive != 0 {
+			return -1
+		}
+		if !renvoEmitIntExpr(g, ep, idx) {
+			return 0
+		}
+		renvoAsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
+		renvo386AsmJccLabel(a, 0x84, matchLabel)
+		return 1
+	
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoCanKeepSwitchPrimary(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmStringEqualLeftLength(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c

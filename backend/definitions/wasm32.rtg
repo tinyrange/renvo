@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		switch_case_peephole = renvoWasm32CompilerSwitchCasePeephole
+		register_switch = renvoWasm32CompilerRegisterSwitch
 		string_equal_left_length = renvoWasm32CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvoWasm32CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvoWasm32CompilerCanFoldIndexedScalarLoad
@@ -5928,5 +5930,17 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerStringEqualLeftLength(a *renvoAsm) {
 		renvoAsmCopyPrimaryToCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerRegisterSwitch(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+		return -1
 	}
 }

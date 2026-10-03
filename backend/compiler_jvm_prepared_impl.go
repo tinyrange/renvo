@@ -4357,6 +4357,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoCanKeepSwitchPrimary(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoAsmStringEqualLeftLength(a *renvoAsm) {
 renvoNonNil(a)
 renvoAsmCopyPrimaryToCallWord1(a)

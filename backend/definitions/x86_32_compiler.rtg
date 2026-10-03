@@ -1300,6 +1300,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		switch_case_peephole = renvo386CompilerSwitchCasePeephole
+		register_switch = renvo386CompilerRegisterSwitch
 		string_equal_left_length = renvo386CompilerStringEqualLeftLength
 		folded_indexed_scalar_load = renvo386CompilerFoldedIndexedScalarLoad
 		can_fold_indexed_scalar_load = renvo386CompilerCanFoldIndexedScalarLoad
@@ -4415,5 +4417,46 @@ go compiler {
 go compiler {
 	func renvo386CompilerStringEqualLeftLength(a *renvoAsm) {
 		renvoAsmMovArg1Rax(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerRegisterSwitch(g *renvoLinearGen) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		a := &g.asm
+		if known {
+			if renvoPreparedBackendActive == 0 && valueOffset < 0 {
+				if renvoAsmImmFits8Signed(value) {
+					renvoAsmCmpPrimaryImm8(a, value)
+				} else {
+					renvoAsmEmit8(a, 0x3d)
+					renvoAsmEmit32(a, value)
+				}
+				renvo386AsmJccLabel(a, 0x84, matchLabel)
+			} else {
+				renvoAsmJcmpStackImm(a, valueOffset, value, matchLabel, 0x94)
+			}
+			return 1
+		}
+		if renvoPreparedBackendActive != 0 {
+			return -1
+		}
+		if !renvoEmitIntExpr(g, ep, idx) {
+			return 0
+		}
+		renvoAsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
+		renvo386AsmJccLabel(a, 0x84, matchLabel)
+		return 1
 	}
 }
