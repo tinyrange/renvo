@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "de820f0e6179feff49ef4603e4e9d320b296391ec3a786729cb8cd468676c306"
+const CompilerSourceDigest = "bcd7c3b660131302797570262859c86ac72174e96a4659298f52f17ab972e44e"
 
 // source: backend/compiler_common_impl.go
 
@@ -19669,54 +19669,10 @@ return renvoEmitBuiltinCopy(g, ep, idx)
 return renvoEmitUserCall(g, ep, idx)
 }
 
-func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+func renvoEmitWideWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 p := g.prog
 a := &g.asm
 e := &ep.exprs[idx]
-if e.kind == renvoExprUnary || e.kind == renvoExprBinary || e.kind == renvoExprCall {
-constResult := renvoEvalConstExpr(g, ep, idx)
-resultType := renvoInferParsedExprType(g, ep, idx)
-result := renvoResolveType(g.meta, resultType)
-exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
-if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind) {
-renvoAsmPrimaryImm(a, constResult.value)
-return true
-}
-}
-if renvoFixedTarget == 0 {
-fast := renvoEmitWordExpressionPeephole(g, ep, idx, true)
-if fast >= 0 {
-return fast != 0
-}
-}
-if e.kind == renvoExprInt || e.kind == renvoExprFloat || e.kind == renvoExprIdent || e.kind == renvoExprChar || e.kind == renvoExprBool {
-return renvoEmitAtomExpr(g, ep, idx)
-}
-if e.kind == renvoExprCall {
-if renvoFixedTarget == 0 {
-result := renvoEmitCNativeIntCall(g, ep, idx, e)
-if result >= 0 {
-return result != 0
-}
-}
-if e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
-calleeExpr := &ep.exprs[e.left]
-if renvoBytesPrefixText(p.src, calleeExpr.nameStart, calleeExpr.nameEnd, "__c_pointer_diff_") {
-return renvoEmitCPointerDifference(g, ep, e)
-}
-}
-return renvoEmitWordCallExpr(g, ep, idx)
-}
-if e.kind == renvoExprIndex {
-return renvoEmitIndexExpr(g, ep, idx)
-}
-if e.kind == renvoExprSelector {
-return renvoEmitScalarSelectorExpr(g, ep, idx)
-}
-if e.kind == renvoExprUnary {
-return renvoEmitUnaryExpr(g, ep, idx)
-}
-if e.kind == renvoExprBinary {
 if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
 return result != 0
 }
@@ -19751,8 +19707,6 @@ return false
 }
 renvoAsmNormalizePrimaryForKind(a, result.kind)
 return true
-}
-return false
 }
 
 func renvoEmitCNativeIntCall(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr) int {
@@ -22525,10 +22479,79 @@ return true
 }
 func renvoEmitMachineIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
-if g.c.renvoTargetArch == renvoArch386 {
-return renvoEmitWideIntExpr(g, ep, idx)
+p := g.prog
+renvoNonNil(p)
+meta := g.meta
+renvoNonNil(meta)
+a := &g.asm
+e := &ep.exprs[idx]
+wide := g.c.renvoTargetArch == renvoArch386
+if e.kind == renvoExprUnary || e.kind == renvoExprBinary || e.kind == renvoExprCall {
+constResult := renvoEvalConstExpr(g, ep, idx)
+resultType := renvoInferParsedExprType(g, ep, idx)
+result := renvoResolveType(meta, resultType)
+renvoNonNil(result)
+exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
+immediateKind := result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && !renvoTypeKindIsFloat(result.kind)
+if !wide && (result.kind == renvoTypeInt64 || result.kind == renvoTypeUint64) {
+immediateKind = false
 }
-return renvoEmitNativeIntExpr(g, ep, idx)
+if constResult.ok && (!ep.hasFloat || exactShift) && immediateKind {
+renvoAsmPrimaryImm(a, constResult.value)
+return true
+}
+}
+if renvoFixedTarget == 0 {
+fast := renvoEmitWordExpressionPeephole(g, ep, idx, wide)
+if fast >= 0 {
+return fast != 0
+}
+}
+if e.kind == renvoExprInt || e.kind == renvoExprFloat || e.kind == renvoExprIdent || e.kind == renvoExprChar || e.kind == renvoExprBool {
+return renvoEmitAtomExpr(g, ep, idx)
+}
+if e.kind == renvoExprCall {
+if !wide && renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_CKernelLinkAddress") {
+if e.argCount != 1 {
+return false
+}
+arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64) &&
+renvoEmitObjectKernelLinkAddress(g, ep, arg) {
+return true
+}
+return renvoEmitIntExpr(g, ep, arg)
+}
+if renvoFixedTarget == 0 {
+result := renvoEmitCNativeIntCall(g, ep, idx, e)
+if result >= 0 {
+return result != 0
+}
+}
+if wide && e.left >= 0 && e.left < len(ep.exprs) && ep.exprs[e.left].kind == renvoExprIdent {
+calleeExpr := &ep.exprs[e.left]
+if renvoBytesPrefixText(p.src, calleeExpr.nameStart, calleeExpr.nameEnd, "__c_pointer_diff_") {
+return renvoEmitCPointerDifference(g, ep, e)
+}
+}
+return renvoEmitWordCallExpr(g, ep, idx)
+}
+if e.kind == renvoExprIndex {
+return renvoEmitIndexExpr(g, ep, idx)
+}
+if e.kind == renvoExprSelector {
+return renvoEmitScalarSelectorExpr(g, ep, idx)
+}
+if e.kind == renvoExprUnary {
+return renvoEmitUnaryExpr(g, ep, idx)
+}
+if e.kind == renvoExprBinary {
+if wide {
+return renvoEmitWideWordBinaryExpr(g, ep, idx)
+}
+return renvoEmitNativeWordBinaryExpr(g, ep, idx)
+}
+return false
 }
 
 func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
@@ -24348,64 +24371,10 @@ return true
 return false
 }
 
-func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
-renvoNonNil(g, ep)
+func renvoEmitNativeWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 p := g.prog
-renvoNonNil(p)
-meta := g.meta
-renvoNonNil(meta)
 a := &g.asm
 e := &ep.exprs[idx]
-if e.kind == renvoExprUnary || e.kind == renvoExprBinary || e.kind == renvoExprCall {
-constResult := renvoEvalConstExpr(g, ep, idx)
-resultType := renvoInferParsedExprType(g, ep, idx)
-result := renvoResolveType(meta, resultType)
-renvoNonNil(result)
-exactShift := e.kind == renvoExprBinary && (renvoTok2Is(p, e.tok, '<', '<') || renvoTok2Is(p, e.tok, '>', '>'))
-if constResult.ok && (!ep.hasFloat || exactShift) && result.kind != renvoTypeByte && result.kind != renvoTypeInt8 && result.kind != renvoTypeInt16 && result.kind != renvoTypeInt32 && result.kind != renvoTypeInt64 && result.kind != renvoTypeUint16 && result.kind != renvoTypeUint32 && result.kind != renvoTypeUint64 && !renvoTypeKindIsFloat(result.kind) {
-renvoAsmPrimaryImm(a, constResult.value)
-return true
-}
-}
-if renvoFixedTarget == 0 {
-fast := renvoEmitWordExpressionPeephole(g, ep, idx, false)
-if fast >= 0 {
-return fast != 0
-}
-}
-if e.kind == renvoExprInt || e.kind == renvoExprFloat || e.kind == renvoExprIdent || e.kind == renvoExprChar || e.kind == renvoExprBool {
-return renvoEmitAtomExpr(g, ep, idx)
-}
-if e.kind == renvoExprCall {
-if renvoExprIsIdentText(p, ep, e.left, "renvo_runtime_CKernelLinkAddress") {
-if e.argCount != 1 {
-return false
-}
-arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64) &&
-renvoEmitObjectKernelLinkAddress(g, ep, arg) {
-return true
-}
-return renvoEmitIntExpr(g, ep, arg)
-}
-if renvoFixedTarget == 0 {
-result := renvoEmitCNativeIntCall(g, ep, idx, e)
-if result >= 0 {
-return result != 0
-}
-}
-return renvoEmitWordCallExpr(g, ep, idx)
-}
-if e.kind == renvoExprIndex {
-return renvoEmitIndexExpr(g, ep, idx)
-}
-if e.kind == renvoExprSelector {
-return renvoEmitScalarSelectorExpr(g, ep, idx)
-}
-if e.kind == renvoExprUnary {
-return renvoEmitUnaryExpr(g, ep, idx)
-}
-if e.kind == renvoExprBinary {
 opStart := int(renvoTokStart(p, e.tok))
 opLen := int(renvoTokEnd(p, e.tok)) - opStart
 op0 := renvo_runtime_UnsafeByteAt(p.src, opStart)
@@ -24466,8 +24435,6 @@ return false
 }
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
-}
-return false
 }
 
 func renvoNormalizeNativeExprPrimary(g *renvoLinearGen, ep *renvoExprParse, idx int) {
