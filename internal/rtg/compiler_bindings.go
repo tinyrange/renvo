@@ -727,6 +727,9 @@ func compilerBindingCanProject(function embeddedFunction, operation compilerEmit
 // body, while retaining real cross-hook dependencies.
 func compilerProjectedPrivateHooks(document Document) []string {
 	functions := indexEmbeddedFunctions(document, "compiler")
+	if len(functions) == 0 {
+		return nil
+	}
 	var candidates []string
 	var referenced []string
 	for i := 0; i < len(document.Declarations); i++ {
@@ -745,6 +748,11 @@ func compilerProjectedPrivateHooks(document Document) []string {
 				referenced = append(referenced, hook)
 			}
 		}
+	}
+	// With no projectable hook there is nothing to omit, even if other Go
+	// blocks are malformed. This helper is not the definition validator.
+	if len(candidates) == 0 {
+		return nil
 	}
 	// Candidate membership is queried for every source token. Keep a sorted
 	// local index instead of scanning every operation for punctuation, literals,
@@ -783,6 +791,9 @@ func compilerProjectedPrivateHooks(document Document) []string {
 }
 
 func appendCompilerBlockWithoutPrivateHooks(out []byte, source []byte, private []string) []byte {
+	if len(private) == 0 {
+		return append(out, source...)
+	}
 	prefix := "package backend\n"
 	wrapped := append([]byte(prefix), source...)
 	file := syntax.ParseFile(wrapped)

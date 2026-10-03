@@ -591,7 +591,7 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 			if fnName != name || fn.ReceiverStart >= 0 {
 				continue
 			}
-			return embeddedFunctionFromSyntax(file, fn, name), true
+			return embeddedFunctionFromSyntax(file, fn, name, kind == "compiler"), true
 		}
 	}
 	return embeddedFunction{}, false
@@ -620,7 +620,7 @@ func indexEmbeddedFunctions(document Document, kind string) []embeddedFunction {
 			}
 			name := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
 			if _, found := indexedEmbeddedFunction(functions, name); !found {
-				functions = append(functions, embeddedFunctionFromSyntax(file, fn, name))
+				functions = append(functions, embeddedFunctionFromSyntax(file, fn, name, kind == "compiler"))
 			}
 		}
 	}
@@ -638,7 +638,7 @@ func indexedEmbeddedFunction(functions []embeddedFunction, name string) (embedde
 	return embeddedFunction{}, false
 }
 
-func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name string) embeddedFunction {
+func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name string, projection bool) embeddedFunction {
 	wrapped := file.Src
 	start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
 	end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
@@ -649,21 +649,27 @@ func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name strin
 		signature[len(signature)-1] == '\r') {
 		signature = signature[:len(signature)-1]
 	}
-	// Labels have function scope, unlike switch cases, keyed literals,
-	// and slices. Use the statement parser rather than colon tokens.
-	// If a body cannot be classified, conservatively keep its call.
-	body := syntax.ParseFuncBodyStatements(file, fn)
-	hasLabels := !body.Ok
-	for k := 0; k < len(body.Stmts); k++ {
-		if body.Stmts[k].Kind == syntax.StmtLabel {
-			hasLabels = true
+	// Only compiler hooks can be projected into another function. Portable
+	// backend hook lookup needs the signature, not a second parse of every
+	// body on every lookup. Leave unclassified bodies conservatively opaque.
+	hasLabels := true
+	endsInReturn := false
+	if projection {
+		// Labels have function scope, unlike switch cases, keyed literals,
+		// and slices. Keep the statement parser's conservative failure rule.
+		body := syntax.ParseFuncBodyStatements(file, fn)
+		hasLabels = !body.Ok
+		for k := 0; k < len(body.Stmts); k++ {
+			if body.Stmts[k].Kind == syntax.StmtLabel {
+				hasLabels = true
+			}
 		}
+		last := fn.BodyEnd - 2
+		for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
+			last--
+		}
+		endsInReturn = last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
 	}
-	last := fn.BodyEnd - 2
-	for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
-		last--
-	}
-	endsInReturn := last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
 	return embeddedFunction{
 		EndsInReturn: endsInReturn,
 		Body:         wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
