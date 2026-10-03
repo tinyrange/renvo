@@ -13463,13 +13463,7 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	capOKLabel := renvoAsmNewLabel(a)
 	returnLabel := renvoAsmNewLabel(a)
 	renvoAsmStorePrimarySecondaryStack(a, srcOff, lenOff)
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGAsmStoreFrame(a, capOff, renvoRTGTertiary)
-	} else if a.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmStoreRegStack(a, 2, capOff)
-	} else {
-		renvoAsmStackMem(a, capOff, 0x8948, 0x4d, 0x8d)
-	}
+	renvoAsmStoreTertiaryStack(a, capOff)
 	renvoAsmLoadPrimaryStack(a, lenOff)
 	renvoAsmPushImm(a, slackCapacity)
 	renvoAsmPopTertiary(a)
@@ -13487,13 +13481,7 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	if elemSize != 1 {
 		renvoAsmCopyPrimaryToTertiary(a)
 		renvoAsmMulTertiaryImm(a, elemSize)
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGAsmStoreFrame(a, byteCountOff, renvoRTGTertiary)
-		} else if a.c.renvoTargetArch == renvoArchArm {
-			renvoArmAsmStoreRegStack(a, 2, byteCountOff)
-		} else {
-			renvoAsmStackMem(a, byteCountOff, 0x8948, 0x4d, 0x8d)
-		}
+		renvoAsmStoreTertiaryStack(a, byteCountOff)
 	} else {
 		renvoAsmStorePrimaryStack(a, byteCountOff)
 	}
@@ -13506,16 +13494,7 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	renvoAsmStorePrimaryStack(a, allocSizeOff)
 	renvoEmitArenaAllocStackPrimary(g, allocSizeOff)
 	renvoAsmStorePrimaryStack(a, destOff)
-	if g.c.renvoTargetArch == renvoArchAmd64 {
-		renvoAsmLoadPrimaryStack(a, destOff)
-		renvoAsmCopyPrimaryToCallWord0(a)
-		renvoAsmLoadPrimaryStack(a, srcOff)
-		renvoAsmCopyPrimaryToCallWord1(a)
-		renvoAsmLoadTertiaryStack(a, byteCountOff)
-		renvoAsmEmit16(a, 0xa4f3)
-	} else {
-		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
-	}
+	renvoEmitCopyToFreshArena(g, srcOff, destOff, byteCountOff)
 	renvoAsmLoadPrimarySecondaryStack(a, destOff, lenOff)
 	renvoAsmLoadTertiaryStack(a, capOff)
 	renvoAsmMarkLabel(a, returnLabel)
@@ -17560,35 +17539,6 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	return true
 }
 
-func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
-	renvoNonNil(g)
-	small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		if small {
-			return renvoWasm32EnsureAppend8Helper(g)
-		}
-		return renvoWasm32EnsureAppend64Helper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		if small {
-			return renvoAarch64EnsureAppend8Helper(g)
-		}
-		return renvoAarch64EnsureAppend64Helper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		if small {
-			return renvoArmEnsureAppend8Helper(g)
-		}
-		return renvoArmEnsureAppend64Helper(g)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		return renvo386EnsureAppendScalarHelper(g, small)
-	}
-	if small {
-		return renvoAmd64EnsureAppend8Helper(g)
-	}
-	return renvoAmd64EnsureAppend64Helper(g)
-}
 func renvoEmitAppendStringToLocation(g *renvoLinearGen, ep *renvoExprParse, locEp *renvoExprParse, loc *renvoSliceLocation, valueIndex int) bool {
 	renvoNonNil(g, ep, locEp, loc)
 	a := &g.asm
@@ -25427,70 +25377,23 @@ func renvoEmitFloatBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 	}
 	return renvoEmitNativeFloatBinaryExpr(g, ep, idx)
 }
-func renvoEmitArmSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
+
+func renvoEmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
+	renvoNonNil(g, locEp, loc)
 	a := &g.asm
 	if loc.mem {
 		if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
 			return false
 		}
-		renvoArmAsmMovRegReg(a, renvoArmRegRdi, renvoArmRegRdx)
-		renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRdx, 8)
+		renvoAsmSliceHeaderAddressesSecondary(a)
 		return true
 	}
 	if loc.global {
-		renvoArmAsmMovRegAbs(a, renvoArmRegRdi, loc.offset, renvoAbsBssReloc)
-		renvoArmAsmMovRegAbs(a, renvoArmRegRsi, loc.offset+8, renvoAbsBssReloc)
+		renvoAsmSliceHeaderAddressesBss(a, loc.offset)
 		return true
 	}
-	renvoArmAsmLeaRegStack(a, renvoArmRegRdi, loc.offset)
-	renvoArmAsmLeaRegStack(a, renvoArmRegRsi, loc.offset-8)
+	renvoAsmSliceHeaderAddressesStack(a, loc.offset)
 	return true
-}
-
-func renvoEmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-	renvoNonNil(g, locEp, loc)
-	if g.c.renvoTargetArch == renvoArchArm {
-		return renvoEmitArmSliceSlotAddrs(g, locEp, loc, elemSize)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		return renvo386EmitSliceSlotAddrs(g, locEp, loc, elemSize)
-	}
-	return renvoEmitNativeSliceSlotAddrs(g, locEp, loc, elemSize)
-}
-func renvoEnsureAppendAddrHelper(g *renvoLinearGen) int {
-	renvoNonNil(g)
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		return renvoWasm32EnsureAppendAddrHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		return renvoAarch64EnsureAppendAddrHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		return renvoArmEnsureAppendAddrHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		return renvo386EnsureAppendAddrHelper(g)
-	}
-	return renvoAmd64EnsureAppendAddrHelper(g)
-}
-func renvoEnsureStringEqualHelper(g *renvoLinearGen) int {
-	renvoNonNil(g)
-	if renvoPreparedBackendActive != 0 {
-		return renvoRTGEnsureStringEqualHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		return renvoWasm32EnsureStringEqualHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		return renvoAarch64EnsureStringEqualHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArchArm {
-		return renvoArmEnsureStringEqualHelper(g)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		return renvo386EnsureStringEqualHelper(g)
-	}
-	return renvoAmd64EnsureStringEqualHelper(g)
 }
 func renvoEmitIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {
 	renvoNonNil(g, ep)
@@ -26517,110 +26420,6 @@ func renvoEmitNativeNamedConversionCall(g *renvoLinearGen, ep *renvoExprParse, i
 		return true
 	}
 	return false
-}
-
-func renvoEmitNativeSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-	renvoNonNil(g, locEp, loc)
-	a := &g.asm
-	if renvoPreparedBackendActive != 0 {
-		if loc.mem {
-			if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-				return false
-			}
-			renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGSecondary)
-			renvoRTGDirectMove(a, renvoRTGCallWord5, renvoRTGSecondary)
-			renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 16)
-			renvoRTGDirectAdd(a, renvoRTGCallWord5, renvoRTGScratch)
-			renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGSecondary)
-			renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 8)
-			renvoRTGDirectAdd(a, renvoRTGCallWord1, renvoRTGScratch)
-			return true
-		}
-		if loc.global {
-			renvoRTGDirectAddress(a, renvoRTGCallWord0, renvoRTGAsmBSSAddress(loc.offset))
-			renvoRTGDirectAddress(a, renvoRTGCallWord1, renvoRTGAsmBSSAddress(loc.offset+8))
-			renvoRTGDirectAddress(a, renvoRTGCallWord5, renvoRTGAsmBSSAddress(loc.offset+16))
-			return true
-		}
-		renvoRTGAsmAddressFrame(a, renvoRTGCallWord0, loc.offset)
-		renvoRTGAsmAddressFrame(a, renvoRTGCallWord1, loc.offset-8)
-		renvoRTGAsmAddressFrame(a, renvoRTGCallWord5, loc.offset-16)
-		return true
-	}
-	if loc.mem {
-		if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-			return false
-		}
-		if g.c.renvoTargetArch == renvoArchAarch64 {
-			renvoAsmPushSecondary(a)
-			renvoAsmPopCallWord0(a)
-			renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRdx, 8)
-		} else if g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoAsmPushSecondary(a)
-			renvoAsmPopCallWord0(a)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRdx)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, 8)
-			renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR9, renvoWasm32RegRdx)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegR9, 16)
-		} else {
-			renvoAsmEmit16(a, 0x5f52)
-			renvoAsmEmit24(a, 0x728d48)
-			renvoAsmEmit8(a, 8)
-			renvoAsmEmit4(a, 0x4c, 0x8d, 0x4a, 16)
-		}
-		return true
-	}
-	if loc.global {
-		if g.c.renvoTargetArch == renvoArchAarch64 {
-			renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, loc.offset, renvoAbsBssReloc)
-			renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRsi, loc.offset+8, renvoAbsBssReloc)
-		} else if g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdi, 0)
-			renvoAsmAddAbsReloc(a, len(a.code)-4, loc.offset, renvoAbsBssReloc)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRsi, 0)
-			renvoAsmAddAbsReloc(a, len(a.code)-4, loc.offset+8, renvoAbsBssReloc)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR9, 0)
-			renvoAsmAddAbsReloc(a, len(a.code)-4, loc.offset+16, renvoAbsBssReloc)
-		} else {
-			renvoAsmEmit24(a, 0x3d8d48)
-			at := len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset, renvoAbsBssReloc)
-			renvoAsmEmit24(a, 0x358d48)
-			at = len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset+8, renvoAbsBssReloc)
-			renvoAsmEmit24(a, 0x0d8d4c)
-			at = len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset+16, renvoAbsBssReloc)
-		}
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRdi, loc.offset)
-		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRsi, loc.offset-8)
-		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegR9, loc.offset-16)
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRdi, loc.offset)
-		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRsi, loc.offset-8)
-		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegR9, loc.offset-16)
-		return true
-	}
-	renvoAsmAddressCallWord0Stack(a, loc.offset)
-	renvoAsmAddressCallWord1Stack(a, loc.offset-8)
-	r9Offset := loc.offset - 16
-	renvoAsmEmit16(a, 0x8d4c)
-	if r9Offset >= 0 && r9Offset <= 128 {
-		renvoAsmEmit8(a, 0x4d)
-		renvoAsmEmit8(a, -r9Offset)
-		return true
-	}
-	renvoAsmEmit8(a, 0x8d)
-	renvoAsmEmit32(a, -r9Offset)
-	return true
 }
 
 func renvoEmitNativeIndexedStructField(g *renvoLinearGen, ep *renvoExprParse, indexIdx int, fieldStart int, fieldEnd int) bool {

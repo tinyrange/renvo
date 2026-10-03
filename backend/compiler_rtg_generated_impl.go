@@ -797,39 +797,360 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
-func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
-		negative := renvoAsmNewLabel(&g.asm)
-		invalid := renvoAsmNewLabel(&g.asm)
-		renvoAsmPushPrimary(&g.asm)
-		renvoAsmPushSecondary(&g.asm)
-		renvoAsmCopyTertiaryToPrimary(&g.asm)
-		renvoAsmCopyPrimaryToSecondary(&g.asm)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
-		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
-		renvoAsmJzPrimary(&g.asm, negative)
-		renvoAsmPopPrimary(&g.asm)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
-		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
-		renvoAsmJzPrimary(&g.asm, invalid)
-		renvoAsmPopPrimary(&g.asm)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
-		renvoAsmAddScaledTertiary(&g.asm, elemSize)
-		renvoAsmRet(&g.asm)
-		renvoAsmMarkLabel(&g.asm, negative)
-		renvoAsmPopTertiary(&g.asm)
-		renvoAsmMarkLabel(&g.asm, invalid)
-		renvoAsmPopTertiary(&g.asm)
-		renvoEmitUncaughtFaultTransfer(g, false)
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoAmd64EnsureAppend8Helper(g)
+		}
+		return renvoAmd64EnsureAppend64Helper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		return renvo386EnsureAppendScalarHelper(g, small)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoAarch64EnsureAppend8Helper(g)
+		}
+		return renvoAarch64EnsureAppend64Helper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoArmEnsureAppend8Helper(g)
+		}
+		return renvoArmEnsureAppend64Helper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoWasm32EnsureAppend8Helper(g)
+		}
+		return renvoWasm32EnsureAppend64Helper(g)
+	
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoEnsureAppendAddrHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoAmd64EnsureAppendAddrHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvo386EnsureAppendAddrHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		return renvoAarch64EnsureAppendAddrHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return renvoArmEnsureAppendAddrHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoWasm32EnsureAppendAddrHelper(g)
+	
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoEnsureStringEqualHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoAmd64EnsureStringEqualHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvo386EnsureStringEqualHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		return renvoAarch64EnsureStringEqualHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return renvoArmEnsureStringEqualHelper(g)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoWasm32EnsureStringEqualHelper(g)
+	
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoEmitCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		a := &g.asm
+		renvoAsmLoadPrimaryStack(a, destOff)
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmLoadPrimaryStack(a, srcOff)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmLoadTertiaryStack(a, byteCountOff)
+		renvoAsmEmit16(a, 0xa4f3)
 	
 return
 
 }
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoAsmSliceHeaderAddressesSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit16(a, 0x5f52)
+		renvoAsmEmit24(a, 0x728d48)
+		renvoAsmEmit8(a, 8)
+		renvoAsmEmit4(a, 0x4c, 0x8d, 0x4a, 16)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvoAsmEmit16(a, 0x5f52)
+		renvoAsmEmit16(a, 0x728d)
+		renvoAsmEmit8(a, 8)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAsmPushSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRdx, 8)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMovRegReg(a, renvoArmRegRdi, renvoArmRegRdx)
+		renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRdx, 8)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmPushSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRdx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, 8)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR9, renvoWasm32RegRdx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegR9, 16)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit24(a, 0x3d8d48)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset, renvoAbsBssReloc)
+		renvoAsmEmit24(a, 0x358d48)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+8, renvoAbsBssReloc)
+		renvoAsmEmit24(a, 0x0d8d4c)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+16, renvoAbsBssReloc)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if a.c.renvoTargetOS == renvoOSLinux {
+			renvo386AsmMovRegPCRel(a, 7, offset, renvoAbsBssReloc)
+			renvo386AsmMovRegPCRel(a, 6, offset+8, renvoAbsBssReloc)
+			return
+		}
+		renvoAsmEmit16(a, 0x3d8d)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset, renvoAbsBssReloc)
+		renvoAsmEmit16(a, 0x358d)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+8, renvoAbsBssReloc)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, offset, renvoAbsBssReloc)
+		renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRsi, offset+8, renvoAbsBssReloc)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMovRegAbs(a, renvoArmRegRdi, offset, renvoAbsBssReloc)
+		renvoArmAsmMovRegAbs(a, renvoArmRegRsi, offset+8, renvoAbsBssReloc)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdi, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset, renvoAbsBssReloc)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRsi, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset+8, renvoAbsBssReloc)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR9, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset+16, renvoAbsBssReloc)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmAddressCallWord0Stack(a, offset)
+		renvoAsmAddressCallWord1Stack(a, offset-8)
+		r9Offset := offset - 16
+		renvoAsmEmit16(a, 0x8d4c)
+		if r9Offset >= 0 && r9Offset <= 128 {
+			renvoAsmEmit8(a, 0x4d)
+			renvoAsmEmit8(a, -r9Offset)
+			return
+		}
+		renvoAsmEmit8(a, 0x8d)
+		renvoAsmEmit32(a, -r9Offset)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvoAsmAddressCallWord0Stack(a, offset)
+		renvoAsmAddressCallWord1Stack(a, offset-8)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRdi, offset)
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRsi, offset-8)
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegR9, offset-16)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmLeaRegStack(a, renvoArmRegRdi, offset)
+		renvoArmAsmLeaRegStack(a, renvoArmRegRsi, offset-8)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRdi, offset)
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRsi, offset-8)
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegR9, offset-16)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmStoreTertiaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmStoreRegStack(a, 2, offset)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if !g.c.code16 {
@@ -845,6 +1166,8 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvoEmitUncaughtFaultTransfer(g, false)
 			return
 		}
+}
+
 		negative := renvoAsmNewLabel(&g.asm)
 		invalid := renvoAsmNewLabel(&g.asm)
 		renvoAsmPushPrimary(&g.asm)
@@ -1102,17 +1425,13 @@ func renvoAsmPrimaryToNegative(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoAsmEmit16(a, 0xd8f7)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit16(a, 0xd8f7)
 	
@@ -1138,29 +1457,13 @@ func renvoEmitWideLessStack(g *renvoLinearGen, left int, right int, signed bool)
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		highEqual := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
-		renvoAsmJnzPrimary(&g.asm, highEqual)
-		if signed {
-			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x9c)
-		} else {
-			renvoEmitNativeUnsignedLessStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize)
-		}
-		renvoAsmJmpMarkLabel(&g.asm, done, highEqual)
-		renvoEmitNativeUnsignedLessStack(g, left, right)
-		renvoAsmMarkLabel(&g.asm, done)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoNonNil(g)
 		highEqual := renvoAsmNewLabel(&g.asm)
@@ -1186,31 +1489,6 @@ func renvoEmitWideAddStack(g *renvoLinearGen, dest int, left int, right int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-
-		if renvoFixedTarget != 0 {
-			return
-		}
-		renvoNonNil(g)
-		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
-		leftLow := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmCopyStackSlot(&g.asm, left, leftLow)
-		renvoAsmLoadPrimaryStack(&g.asm, left)
-		renvoAsmLoadTertiaryStack(&g.asm, right)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, dest)
-		renvoEmitNativeUnsignedLessStack(g, dest, leftLow)
-		renvoAsmStorePrimaryStack(&g.asm, carry)
-		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
-		renvoAsmLoadTertiaryStack(&g.asm, right-g.c.renvoNativeIntSize)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmLoadTertiaryStack(&g.asm, carry)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
-	
-return
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoAsmLoadPrimaryStack(&g.asm, left)
@@ -1222,7 +1500,13 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		return
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if renvoFixedTarget != 0 {
+			return
+		}
+}
 
 		renvoNonNil(g)
 		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -1251,29 +1535,6 @@ func renvoEmitWideSubStack(g *renvoLinearGen, dest int, left int, right int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-
-		if renvoFixedTarget != 0 {
-			return
-		}
-		renvoNonNil(g)
-		borrow := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoEmitNativeUnsignedLessStack(g, left, right)
-		renvoAsmStorePrimaryStack(&g.asm, borrow)
-		renvoAsmLoadPrimaryStack(&g.asm, left)
-		renvoAsmLoadTertiaryStack(&g.asm, right)
-		renvoAsmSubPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, dest)
-		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
-		renvoAsmLoadTertiaryStack(&g.asm, right-g.c.renvoNativeIntSize)
-		renvoAsmSubPrimaryTertiary(&g.asm)
-		renvoAsmLoadTertiaryStack(&g.asm, borrow)
-		renvoAsmSubPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
-	
-return
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoAsmLoadPrimaryStack(&g.asm, left)
@@ -1285,7 +1546,13 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		return
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if renvoFixedTarget != 0 {
+			return
+		}
+}
 
 		renvoNonNil(g)
 		borrow := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -1312,29 +1579,13 @@ func renvoEmitWideShiftLeftOne(g *renvoLinearGen, value int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmLoadPrimaryStack(&g.asm, value)
-		renvoAsmShrPrimaryImm(&g.asm, 31)
-		renvoAsmStorePrimaryStack(&g.asm, carry)
-		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
-		renvoAsmShlPrimaryImm(&g.asm, 1)
-		renvoAsmLoadTertiaryStack(&g.asm, carry)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
-		renvoAsmLoadPrimaryStack(&g.asm, value)
-		renvoAsmShlPrimaryImm(&g.asm, 1)
-		renvoAsmStorePrimaryStack(&g.asm, value)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoNonNil(g)
 		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -1360,33 +1611,13 @@ func renvoEmitWideShiftRightOne(g *renvoLinearGen, value int, signed bool) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
-		renvoAsmShlPrimaryImm(&g.asm, 31)
-		renvoAsmStorePrimaryStack(&g.asm, carry)
-		renvoAsmLoadPrimaryStack(&g.asm, value)
-		renvoAsmShrPrimaryImm(&g.asm, 1)
-		renvoAsmLoadTertiaryStack(&g.asm, carry)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, value)
-		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
-		if signed {
-			renvoAsmSarPrimaryImm(&g.asm, 1)
-		} else {
-			renvoAsmShrPrimaryImm(&g.asm, 1)
-		}
-		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoNonNil(g)
 		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
@@ -1416,46 +1647,13 @@ func renvoEmitWideShiftStack(g *renvoLinearGen, dest int, left int, count int, r
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
-		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
-		limit := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmStoreStackImm(&g.asm, limit, 64)
-		renvoAsmLoadPrimaryStack(&g.asm, count-g.c.renvoNativeIntSize)
-		clamp := renvoAsmNewLabel(&g.asm)
-		ready := renvoAsmNewLabel(&g.asm)
-		begin := renvoAsmNewLabel(&g.asm)
-		renvoAsmJnzPrimary(&g.asm, clamp)
-		renvoEmitNativeUnsignedLessStack(g, count, limit)
-		renvoAsmJnzPrimary(&g.asm, ready)
-		renvoAsmMarkLabel(&g.asm, clamp)
-		renvoAsmStoreStackImm(&g.asm, counter, 64)
-		renvoAsmJmpLabel(&g.asm, begin)
-		renvoAsmMarkLabel(&g.asm, ready)
-		renvoAsmCopyStackSlot(&g.asm, count, counter)
-		renvoAsmMarkLabel(&g.asm, begin)
-		done := renvoAsmNewLabel(&g.asm)
-		loop := renvoAsmNewLabel(&g.asm)
-		renvoAsmMarkLabel(&g.asm, loop)
-		renvoAsmLoadPrimaryStack(&g.asm, counter)
-		renvoAsmJzPrimary(&g.asm, done)
-		if right {
-			renvoEmitWideShiftRightOne(g, dest, signed)
-		} else {
-			renvoEmitWideShiftLeftOne(g, dest)
-		}
-		renvoAsmDecStack(&g.asm, counter)
-		renvoAsmJmpMarkLabel(&g.asm, loop, done)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 
 		renvoNonNil(g)
 		renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
@@ -1538,38 +1736,6 @@ func renvoEmitWideMulStack(g *renvoLinearGen, dest int, left int, right int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-
-		if renvoFixedTarget != 0 {
-			return
-		}
-		renvoNonNil(g)
-		multiplicand := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
-		multiplier := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
-		renvoEmitCopyStackToStack(g, left, multiplicand, renvoBackendValueSlotSize)
-		renvoEmitCopyStackToStack(g, right, multiplier, renvoBackendValueSlotSize)
-		renvoZeroLocalAtOffset(g, dest)
-		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmStoreStackImm(&g.asm, counter, 64)
-		loop := renvoAsmNewLabel(&g.asm)
-		skipAdd := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoAsmMarkLabel(&g.asm, loop)
-		renvoAsmLoadPrimaryStack(&g.asm, counter)
-		renvoAsmJzPrimary(&g.asm, done)
-		renvoAsmLoadPrimaryStack(&g.asm, multiplier)
-		renvoAsmShlPrimaryImm(&g.asm, 31)
-		renvoAsmJzPrimary(&g.asm, skipAdd)
-		renvoEmitWideAddStack(g, dest, dest, multiplicand)
-		renvoAsmMarkLabel(&g.asm, skipAdd)
-		renvoEmitWideShiftLeftOne(g, multiplicand)
-		renvoEmitWideShiftRightOne(g, multiplier, false)
-		renvoAsmDecStack(&g.asm, counter)
-		renvoAsmJmpMarkLabel(&g.asm, loop, done)
-	
-return
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoAsmLoadPrimaryStack(&g.asm, left)
@@ -1588,7 +1754,13 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		return
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if renvoFixedTarget != 0 {
+			return
+		}
+}
 
 		renvoNonNil(g)
 		multiplicand := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
@@ -1624,22 +1796,13 @@ func renvoEmitWideNegateInPlace(g *renvoLinearGen, value int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		zero := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
-		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
-		renvoZeroLocalAtOffset(g, zero)
-		renvoEmitWideSubStack(g, result, zero, value)
-		renvoEmitCopyStackToStack(g, result, value, renvoBackendValueSlotSize)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoNonNil(g)
 		zero := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
@@ -1658,49 +1821,13 @@ func renvoEmitWideUnsignedDivStack(g *renvoLinearGen, quotient int, remainder in
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		if renvoFixedTarget != 0 {
 			return
 		}
-		renvoNonNil(g)
-		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
-		renvoEmitCopyStackToStack(g, dividendValue, dividend, renvoBackendValueSlotSize)
-		renvoZeroLocalAtOffset(g, quotient)
-		renvoZeroLocalAtOffset(g, remainder)
-		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
-		bit := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmStoreStackImm(&g.asm, counter, 64)
-		loop := renvoAsmNewLabel(&g.asm)
-		skipSubtract := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoAsmMarkLabel(&g.asm, loop)
-		renvoAsmLoadPrimaryStack(&g.asm, counter)
-		renvoAsmJzPrimary(&g.asm, done)
-		renvoAsmLoadPrimaryStack(&g.asm, dividend-g.c.renvoNativeIntSize)
-		renvoAsmShrPrimaryImm(&g.asm, 31)
-		renvoAsmStorePrimaryStack(&g.asm, bit)
-		renvoEmitWideShiftLeftOne(g, remainder)
-		renvoAsmLoadPrimaryStack(&g.asm, remainder)
-		renvoAsmLoadTertiaryStack(&g.asm, bit)
-		renvoAsmAddPrimaryTertiary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, remainder)
-		renvoEmitWideShiftLeftOne(g, dividend)
-		renvoEmitWideShiftLeftOne(g, quotient)
-		renvoEmitWideLessStack(g, remainder, divisor, false)
-		renvoAsmJnzPrimary(&g.asm, skipSubtract)
-		renvoEmitWideSubStack(g, remainder, remainder, divisor)
-		renvoAsmLoadPrimaryStack(&g.asm, quotient)
-		renvoAsmIncPrimary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, quotient)
-		renvoAsmMarkLabel(&g.asm, skipSubtract)
-		renvoAsmDecStack(&g.asm, counter)
-		renvoAsmJmpMarkLabel(&g.asm, loop, done)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoNonNil(g)
 		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
@@ -1746,42 +1873,19 @@ func renvoEmitNativeUnsignedLessStack(g *renvoLinearGen, left int, right int) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-
-		if renvoFixedTarget != 0 {
-			return
-		}
-		renvoNonNil(g)
-		// When the sign bits differ, the word with its sign bit clear is smaller in
-		// unsigned order. When they match, signed subtraction cannot overflow, so
-		// the ordinary comparison is safe even on wasm's flag emulation.
-		zero := renvoAddUnnamedLocal(g, renvoTypeInt)
-		leftNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
-		rightNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmStoreStackImm(&g.asm, zero, 0)
-		renvoEmitNativeCompareStack(g, left, zero, 0x9c)
-		renvoAsmStorePrimaryStack(&g.asm, leftNegative)
-		renvoEmitNativeCompareStack(g, right, zero, 0x9c)
-		renvoAsmStorePrimaryStack(&g.asm, rightNegative)
-		sameSign := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, leftNegative, rightNegative, 0x94)
-		renvoAsmJnzPrimary(&g.asm, sameSign)
-		renvoAsmLoadPrimaryStack(&g.asm, rightNegative)
-		renvoAsmJmpMarkLabel(&g.asm, done, sameSign)
-		renvoEmitNativeCompareStack(g, left, right, 0x9c)
-		renvoAsmMarkLabel(&g.asm, done)
-	
-return
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoEmitNativeCompareStack(g, left, right, 0x92)
 		return
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if renvoFixedTarget != 0 {
+			return
+		}
+}
 
 		renvoNonNil(g)
 		// When the sign bits differ, the word with its sign bit clear is smaller in
@@ -2181,6 +2285,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return true
 	
 }
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
@@ -2191,10 +2296,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
 			return true
 		}
-		return false
-	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	
@@ -2542,38 +2644,7 @@ func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
-
-		invalid := renvoAsmNewLabel(&g.asm)
-		renvoAsmCopyPrimaryToSecondary(&g.asm)
-		renvoAsmPushTertiary(&g.asm)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
-		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
-		renvoAsmJzPrimary(&g.asm, invalid)
-		renvoAsmPopPrimary(&g.asm)
-		renvoAsmCopySecondaryToTertiary(&g.asm)
-		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
-		if !g.meta.panicEnabled {
-			valid := renvoAsmNewLabel(&g.asm)
-			renvoAsmJnzPrimary(&g.asm, valid)
-			renvoEmitUncaughtFaultTransfer(g, false)
-			renvoAsmMarkLabel(&g.asm, valid)
-			renvoAsmRet(&g.asm)
-			renvoAsmMarkLabel(&g.asm, invalid)
-			renvoAsmPopTertiary(&g.asm)
-			renvoEmitUncaughtFaultTransfer(g, false)
-			return
-		}
-		renvoAsmRet(&g.asm)
-		renvoAsmMarkLabel(&g.asm, invalid)
-		renvoAsmPopTertiary(&g.asm)
-		renvoAsmPrimaryImm(&g.asm, 0)
-		renvoAsmRet(&g.asm)
-	
-return
-
-}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if !g.c.code16 {
@@ -2595,6 +2666,8 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvoAsmRet(a)
 			return
 		}
+}
+
 		invalid := renvoAsmNewLabel(&g.asm)
 		renvoAsmCopyPrimaryToSecondary(&g.asm)
 		renvoAsmPushTertiary(&g.asm)
@@ -2931,6 +3004,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return
 	
 }
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && g.c.code16 {
@@ -2941,16 +3015,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
 		}
-		renvoAsmPushSecondary(&g.asm)
-		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
-		renvoAsmCopyPrimaryToSecondary(&g.asm)
-		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
-		renvoAsmPopSecondary(&g.asm)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		renvoAsmPushSecondary(&g.asm)
 		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -6352,19 +6417,7 @@ func renvoAsmPushStackWord(a *renvoAsm, offset int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
-
-		renvoAsmEmit8(a, 0xff)
-		if offset >= 0 && offset <= 128 {
-			renvoAsmEmit8(a, 0x75)
-			renvoAsmEmit8(a, -offset)
-			return
-		}
-		renvoAsmEmit8(a, 0xb5)
-		renvoAsmEmit32(a, -offset)
-		return
-	
-}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if renvoFixedTarget == 0 && a.c.code16 {
@@ -6375,6 +6428,8 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvoAsmPushStack(a, offset)
 			return
 		}
+}
+
 		renvoAsmEmit8(a, 0xff)
 		if offset >= 0 && offset <= 128 {
 			renvoAsmEmit8(a, 0x75)
@@ -6400,16 +6455,7 @@ func renvoAsmJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc i
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		renvoAsmPushStack(a, left)
-		renvoAsmLoadPrimaryStack(a, right)
-		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
-	
-return
-
-}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if renvoFixedTarget == 0 && a.c.code16 {
@@ -6422,6 +6468,8 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvo386AsmJccLabel(a, setcc-0x10, label)
 			return
 		}
+}
+
 		renvoAsmPushStack(a, left)
 		renvoAsmLoadPrimaryStack(a, right)
 		renvoAsmPopTertiary(a)
@@ -6437,16 +6485,7 @@ func renvoAsmJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc i
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-		renvoAsmPushStack(a, offset)
-		renvoAsmPrimaryImm(a, value)
-		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
-	
-return
-
-}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		if renvoFixedTarget == 0 && a.c.code16 {
@@ -6460,6 +6499,8 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 			renvo386AsmJccLabel(a, setcc-0x10, label)
 			return
 		}
+}
+
 		renvoAsmPushStack(a, offset)
 		renvoAsmPrimaryImm(a, value)
 		renvoAsmPopTertiary(a)
@@ -6615,18 +6656,14 @@ func renvoAsmLeave(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 			renvoAsmEmitText(a, "\x48\x89\xec\x5d")
 			return
 		}
-		renvoAsmEmit8(a, 0xc9)
-	
-return
-
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
 		renvoAsmEmit8(a, 0xc9)
 	
@@ -7497,30 +7534,6 @@ func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
-
-		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
-			renvoAsmEmit24(a, 0xc88948)
-			return
-		}
-		renvoAsmPushTertiary(a)
-		renvoAsmPopPrimary(a)
-	
-return
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
-
-		if renvoFixedTarget == 0 && a.c.code16 {
-			renvoAsmEmit16(a, 0xc889)
-			return
-		}
-		renvoAsmPushTertiary(a)
-		renvoAsmPopPrimary(a)
-	
-return
-
-}
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 
 		renvoAarch64AsmMovRegReg(a, 0, 2)
@@ -7535,7 +7548,20 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 || renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
+			renvoAsmEmit24(a, 0xc88948)
+			return
+		}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && a.c.code16 {
+			renvoAsmEmit16(a, 0xc889)
+			return
+		}
+}
 
 		renvoAsmPushTertiary(a)
 		renvoAsmPopPrimary(a)

@@ -85,6 +85,14 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "append_scalar_helper", Suffix: "AppendScalarHelper", Function: "renvoEnsureAppendScalarHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{{"elemKind", "int"}}, Prepared: "small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1\nif small { return renvoAmd64EnsureAppend8Helper(g) }\nreturn renvoAmd64EnsureAppend64Helper(g)"},
+	{Name: "append_address_helper", Suffix: "AppendAddressHelper", Function: "renvoEnsureAppendAddrHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{}, Prepared: "return renvoAmd64EnsureAppendAddrHelper(g)"},
+	{Name: "string_equal_helper", Suffix: "StringEqualHelper", Function: "renvoEnsureStringEqualHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEnsureStringEqualHelper(g)"},
+	{Name: "copy_to_fresh_arena", Suffix: "CopyToFreshArena", Function: "renvoEmitCopyToFreshArena", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{{"srcOff", "int"}, {"destOff", "int"}, {"byteCountOff", "int"}}, Prepared: "renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)"},
+	{Name: "slice_header_addresses_secondary", Suffix: "SliceHeaderAddressesSecondary", Function: "renvoAsmSliceHeaderAddressesSecondary", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGSecondary)\nrenvoRTGDirectMove(a, renvoRTGCallWord5, renvoRTGSecondary)\nrenvoRTGDirectMoveImmediate(a, renvoRTGScratch, 16)\nrenvoRTGDirectAdd(a, renvoRTGCallWord5, renvoRTGScratch)\nrenvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGSecondary)\nrenvoRTGDirectMoveImmediate(a, renvoRTGScratch, 8)\nrenvoRTGDirectAdd(a, renvoRTGCallWord1, renvoRTGScratch)"},
+	{Name: "slice_header_addresses_bss", Suffix: "SliceHeaderAddressesBss", Function: "renvoAsmSliceHeaderAddressesBss", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoRTGDirectAddress(a, renvoRTGCallWord0, renvoRTGAsmBSSAddress(offset))\nrenvoRTGDirectAddress(a, renvoRTGCallWord1, renvoRTGAsmBSSAddress(offset+8))\nrenvoRTGDirectAddress(a, renvoRTGCallWord5, renvoRTGAsmBSSAddress(offset+16))"},
+	{Name: "slice_header_addresses_stack", Suffix: "SliceHeaderAddressesStack", Function: "renvoAsmSliceHeaderAddressesStack", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoRTGAsmAddressFrame(a, renvoRTGCallWord0, offset)\nrenvoRTGAsmAddressFrame(a, renvoRTGCallWord1, offset-8)\nrenvoRTGAsmAddressFrame(a, renvoRTGCallWord5, offset-16)"},
+	{Name: "store_tertiary_stack", Suffix: "StoreTertiaryStack", Function: "renvoAsmStoreTertiaryStack", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoRTGAsmStoreFrame(a, offset, renvoRTGTertiary)"},
 	{Name: "index_address_helper_body", Suffix: "IndexAddressHelperBody", Function: "renvoEmitIndexAddressHelperBody", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{{"elemSize", "int"}}, Prepared: "\tnegative := renvoAsmNewLabel(\u0026g.asm)\n\tinvalid := renvoAsmNewLabel(\u0026g.asm)\n\trenvoAsmPushPrimary(\u0026g.asm)\n\trenvoAsmPushSecondary(\u0026g.asm)\n\trenvoAsmCopyTertiaryToPrimary(\u0026g.asm)\n\trenvoAsmCopyPrimaryToSecondary(\u0026g.asm)\n\trenvoAsmPrimaryImm(\u0026g.asm, 0)\n\trenvoAsmCopySecondaryToTertiary(\u0026g.asm)\n\trenvoAsmCmpTertiaryPrimarySet(\u0026g.asm, 0x9d)\n\trenvoAsmJzPrimary(\u0026g.asm, negative)\n\trenvoAsmPopPrimary(\u0026g.asm)\n\trenvoAsmCopySecondaryToTertiary(\u0026g.asm)\n\trenvoAsmCmpTertiaryPrimarySet(\u0026g.asm, 0x9c)\n\trenvoAsmJzPrimary(\u0026g.asm, invalid)\n\trenvoAsmPopPrimary(\u0026g.asm)\n\trenvoAsmCopySecondaryToTertiary(\u0026g.asm)\n\trenvoAsmAddScaledTertiary(\u0026g.asm, elemSize)\n\trenvoAsmRet(\u0026g.asm)\n\trenvoAsmMarkLabel(\u0026g.asm, negative)\n\trenvoAsmPopTertiary(\u0026g.asm)\n\trenvoAsmMarkLabel(\u0026g.asm, invalid)\n\trenvoAsmPopTertiary(\u0026g.asm)\n\trenvoEmitUncaughtFaultTransfer(g, false)"},
 	{Name: "index_address_helper", Suffix: "IndexAddressHelper", Function: "renvoEmitTargetIndexAddressHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{{"elemSize", "int"}}, Prepared: "return -1"},
 	{Name: "reserved_bounds_check_helper", Suffix: "TargetBoundsCheckHelper", Function: "renvoEmitTargetBoundsCheckHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "-1", Parameters: []compilerBindingParameter{}, Prepared: "return -1"},
@@ -417,13 +425,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 				conditions[group] += " || " + condition
 			}
 		}
-		for j := 0; j < len(bodies); j++ {
-			out = append(out, "if "...)
-			out = append(out, conditions[j]...)
-			out = append(out, " {\n"...)
-			out = append(out, bodies[j]...)
-			out = append(out, "\n}\n"...)
-		}
+		out = appendCompilerBodyGroups(out, bodies, conditions)
 		out = append(out, operation.failBody()...)
 		out = append(out, "}\n"...)
 	}
@@ -537,4 +539,89 @@ func compilerOtherHookReferences(referenced []string, candidates []string, state
 		referenced = compilerOtherHookReferences(referenced, candidates, statement.Children)
 	}
 	return referenced
+}
+
+// A leading if has its own lexical scope, so its unchanged remainder can share
+// another selected body's code. Keep the prefix inside the combined selection:
+// its condition may have side effects, and must run only for its own selectors.
+// The else-if chain prevents a prefix that changes context from selecting a
+// second prefix. No declaration is moved across its scope and no helper call is
+// introduced. Unknown selectors still reach the operation's failure path.
+func appendCompilerBodyGroups(out []byte, bodies []string, conditions []string) []byte {
+	owners := make([]int, len(bodies))
+	prefixes := make([]string, len(bodies))
+	tails := make([]string, len(bodies))
+	for i := 0; i < len(bodies); i++ {
+		owners[i] = i
+		prefixes[i], tails[i] = compilerBodyLeadingIf(bodies[i])
+	}
+	for i := 0; i < len(bodies); i++ {
+		if prefixes[i] == "" {
+			continue
+		}
+		for j := 0; j < len(bodies); j++ {
+			// Use a complete, unprefixed body as the root; do not form chains.
+			if prefixes[j] == "" && tails[i] == strings.TrimSpace(bodies[j]) {
+				owners[i] = j
+				break
+			}
+		}
+	}
+	for i := 0; i < len(bodies); i++ {
+		if owners[i] != i {
+			continue
+		}
+		condition := conditions[i]
+		for j := 0; j < len(bodies); j++ {
+			if j != i && owners[j] == i {
+				condition += " || " + conditions[j]
+			}
+		}
+		out = append(out, "if "+condition+" {\n"...)
+		havePrefix := false
+		for j := 0; j < len(bodies); j++ {
+			if j == i || owners[j] != i {
+				continue
+			}
+			if havePrefix {
+				out = append(out, " else "...)
+			}
+			out = append(out, "if "+conditions[j]+" {\n"...)
+			out = append(out, prefixes[j]...)
+			out = append(out, "\n}"...)
+			havePrefix = true
+		}
+		if havePrefix {
+			out = append(out, '\n')
+		}
+		out = append(out, bodies[i]...)
+		out = append(out, "\n}\n"...)
+	}
+	return out
+}
+
+func compilerBodyLeadingIf(body string) (string, string) {
+	if !strings.HasPrefix(strings.TrimSpace(body), "if ") {
+		return "", ""
+	}
+	prefix := "package backend\nfunc projected() {\n"
+	source := []byte(prefix + body + "\n}")
+	file := syntax.ParseFile(source)
+	if !file.Ok || len(file.Funcs) != 1 {
+		return "", ""
+	}
+	statements := syntax.ParseFuncBodyStatements(file, file.Funcs[0])
+	if !statements.Ok || len(statements.Stmts) < 2 || statements.Stmts[1].Kind != syntax.StmtIf {
+		return "", ""
+	}
+	for i := 0; i < len(statements.Stmts); i++ {
+		if statements.Stmts[i].Kind == syntax.StmtLabel {
+			return "", ""
+		}
+	}
+	end := syntax.TokenEnd(file.Tokens[statements.Stmts[1].EndTok-1]) - len(prefix)
+	if end <= 0 || end >= len(body) {
+		return "", ""
+	}
+	return body[:end], strings.TrimSpace(body[end:])
 }

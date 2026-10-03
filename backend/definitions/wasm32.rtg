@@ -4150,6 +4150,14 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		append_scalar_helper = renvoWasm32CompilerAppendScalarHelper
+		append_address_helper = renvoWasm32CompilerAppendAddressHelper
+		string_equal_helper = renvoWasm32CompilerStringEqualHelper
+		copy_to_fresh_arena = renvoWasm32CompilerCopyToFreshArena
+		slice_header_addresses_secondary = renvoWasm32CompilerSliceHeaderAddressesSecondary
+		slice_header_addresses_bss = renvoWasm32CompilerSliceHeaderAddressesBss
+		slice_header_addresses_stack = renvoWasm32CompilerSliceHeaderAddressesStack
+		store_tertiary_stack = renvoWasm32CompilerStoreTertiaryStack
 		index_address_helper_body = renvoWasm32CompilerIndexAddressHelperBody
 		index_address_helper = renvoWasm32CompilerIndexAddressHelper
 		reserved_bounds_check_helper = renvoWasm32CompilerTargetBoundsCheckHelper
@@ -5520,5 +5528,57 @@ go compiler {
 			}
 			renvoAsmPushPrimary(&g.asm)
 		}
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSliceHeaderAddressesSecondary(a *renvoAsm) {
+		renvoAsmPushSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRdx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, 8)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR9, renvoWasm32RegRdx)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegR9, 16)
+	}
+
+	func renvoWasm32CompilerSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdi, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset, renvoAbsBssReloc)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRsi, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset+8, renvoAbsBssReloc)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegR9, 0)
+		renvoAsmAddAbsReloc(a, len(a.code)-4, offset+16, renvoAbsBssReloc)
+	}
+
+	func renvoWasm32CompilerSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRdi, offset)
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegRsi, offset-8)
+		renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, renvoWasm32RegR9, offset-16)
+	}
+
+	func renvoWasm32CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoWasm32EnsureAppend8Helper(g)
+		}
+		return renvoWasm32EnsureAppend64Helper(g)
+	}
+
+	func renvoWasm32CompilerAppendAddressHelper(g *renvoLinearGen) int {
+		return renvoWasm32EnsureAppendAddrHelper(g)
+	}
+
+	func renvoWasm32CompilerStringEqualHelper(g *renvoLinearGen) int {
+		return renvoWasm32EnsureStringEqualHelper(g)
+	}
+
+	func renvoWasm32CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
 	}
 }

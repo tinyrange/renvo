@@ -4357,6 +4357,58 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEnsureAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+renvoNonNil(g)
+small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+if small { return renvoAmd64EnsureAppend8Helper(g) }
+return renvoAmd64EnsureAppend64Helper(g)
+}
+
+func renvoEnsureAppendAddrHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+return renvoAmd64EnsureAppendAddrHelper(g)
+}
+
+func renvoEnsureStringEqualHelper(g *renvoLinearGen) int {
+renvoNonNil(g)
+return renvoRTGEnsureStringEqualHelper(g)
+}
+
+func renvoEmitCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+renvoNonNil(g)
+renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+}
+
+func renvoAsmSliceHeaderAddressesSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGSecondary)
+renvoRTGDirectMove(a, renvoRTGCallWord5, renvoRTGSecondary)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 16)
+renvoRTGDirectAdd(a, renvoRTGCallWord5, renvoRTGScratch)
+renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGSecondary)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 8)
+renvoRTGDirectAdd(a, renvoRTGCallWord1, renvoRTGScratch)
+}
+
+func renvoAsmSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoRTGDirectAddress(a, renvoRTGCallWord0, renvoRTGAsmBSSAddress(offset))
+renvoRTGDirectAddress(a, renvoRTGCallWord1, renvoRTGAsmBSSAddress(offset+8))
+renvoRTGDirectAddress(a, renvoRTGCallWord5, renvoRTGAsmBSSAddress(offset+16))
+}
+
+func renvoAsmSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoRTGAsmAddressFrame(a, renvoRTGCallWord0, offset)
+renvoRTGAsmAddressFrame(a, renvoRTGCallWord1, offset-8)
+renvoRTGAsmAddressFrame(a, renvoRTGCallWord5, offset-16)
+}
+
+func renvoAsmStoreTertiaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoRTGAsmStoreFrame(a, offset, renvoRTGTertiary)
+}
+
 func renvoEmitIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
 renvoNonNil(g)
 	negative := renvoAsmNewLabel(&g.asm)
