@@ -467,3 +467,9 @@ also declare a raw-instruction site table, whose addresses would otherwise
 be ambiguous. Unknown layouts, malformed fields, missing adapters, and
 incompatible signatures fail before generation. Runtime/OS renaming does not
 alter these argument protocols.
+
+Prepared function-symbol retention likewise requires the explicit target
+capability `function_symbols`; output-kind strings do not grant it. The VM,
+WASI, and browser compositions declare it because their images consume the
+function-symbol table. Renaming those image kinds preserves retention, while
+reusing a familiar kind without the capability does not enable it.
