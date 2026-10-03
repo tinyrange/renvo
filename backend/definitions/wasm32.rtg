@@ -4150,6 +4150,11 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		compact_c_value_helper = renvoWasm32CompilerCompactCValueHelper
+		function_override = renvoWasm32CompilerFunctionOverride
+		zero_void_return = renvoWasm32CompilerZeroVoidReturn
+		function_frame_finish = renvoWasm32CompilerFunctionFrameFinish
+		function_frame_start = renvoWasm32CompilerFunctionFrameStart
 		store_hidden_result = renvoWasm32CompilerStoreHiddenResult
 		struct_argument_by_reference = renvoWasm32CompilerStructArgumentByReference
 		resolves_static_import = renvoWasm32CompilerResolvesStaticImport
@@ -4317,7 +4322,6 @@ extend arch vm32 {
 		install_thread_state = renvoWasm32CompilerInstallThreadState
 		load_primary_thread_state = renvoWasm32CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoWasm32CompilerStorePrimaryThreadState
-		scalar_function = renvoWasm32CompilerScalarFunction
 		runtime_stack = renvoWasm32CompilerRuntimeStack
 		unchecked_non_nil_primary = renvoWasm32CompilerUncheckedNonNilPrimary
 		unchecked_non_nil_secondary = renvoWasm32CompilerUncheckedNonNilSecondary
@@ -4998,10 +5002,6 @@ go compiler {
 		renvoAsmPopPrimary(&g.asm)
 		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 		renvoAsmPopSecondary(&g.asm)
-	}
-
-	func renvoWasm32CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		return renvoWasm32EmitScalarFunction(g, fnInfoIndex)
 	}
 
 	func renvoWasm32CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -6639,5 +6639,39 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
 		renvoWasm32EmitStack(&g.asm, renvoWasm32OpStoreStack, renvoWasm32RegRdi, offset)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFunctionFrameStart(g *renvoLinearGen, label int) int {
+		a := &g.asm
+		g.wasmMemoryRanges = nil
+		functionPC := len(a.code)
+		renvoAsmMarkLabel(a, label)
+		return functionPC
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+		renvoWasm32RecordDirectLocals(g, framePatch)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerZeroVoidReturn(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
 	}
 }

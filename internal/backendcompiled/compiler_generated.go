@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bd229b072839eeaacfbc5adf4d2c6e12323b08cc267f52cb29bfd9bc135eacd4"
+const CompilerSourceDigest = "34ce327e0cde4c960634ba4d9531ae4c2a8e8beb2ba83f1c51ac6548cc36b5cc"
 
 // source: backend/compiler_common_impl.go
 
@@ -19051,6 +19051,100 @@ break
 return typ
 }
 
+func renvoEmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
+if renvoFixedTarget != 0 || !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
+return false
+}
+fn := &g.meta.funcs[fnInfoIndex]
+postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
+postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
+if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
+return false
+}
+result := renvoResolveType(g.meta, fn.resultType)
+size := renvoTypeSize(g.meta, fn.resultType)
+if size < 1 || size > 4 ||
+(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
+return false
+}
+signedValue := result.kind == renvoTypeInt8 || result.kind == renvoTypeInt16
+return renvoEmitCompactCValueHelperBody(&g.asm, g.funcLabels[fnInfoIndex], size, signedValue, postDec)
+}
+
+func renvoEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+a := &g.asm
+metaFn := &g.meta.funcs[fnInfoIndex]
+if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
+return true
+}
+override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
+if override != 0 {
+return override > 0
+}
+oldLocals := g.locals
+oldLocalCount := g.localCount
+oldBreak := g.breakDepth
+oldContinue := g.continueDepth
+oldCurrent := g.currentFunc
+oldReturnStruct := g.returnStruct
+oldClosureEnvOffset := g.closureEnvOffset
+oldDeferHeadOffset := g.deferHeadOffset
+oldDeferReturnLabel := g.deferReturnLabel
+oldDeferResultOffset := g.deferResultOffset
+oldDeferSites := g.deferSites
+oldEmittingDefers := g.emittingDefers
+oldSuppressPanicCheck := g.suppressPanicCheck
+oldStackUsed := g.stackUsed
+oldStackPeak := g.stackPeak
+oldGotoLabels := g.gotoLabels
+oldLastRangeReturns := g.lastRangeReturns
+localCapacity := 16
+if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
+localCapacity = 32
+}
+g.locals = make([]renvoLocalInfo, localCapacity)
+g.localCount = 0
+g.gotoLabels = nil
+g.breakDepth = 0
+g.continueDepth = 0
+g.pendingControl = 0
+g.currentFunc = fnInfoIndex
+g.returnStruct = 0
+g.closureEnvOffset = 0
+g.stackUsed = 0
+g.stackPeak = 0
+g.deferHeadOffset = 0
+g.deferReturnLabel = 0
+g.deferResultOffset = 0
+g.deferSites = nil
+g.emittingDefers = false
+g.suppressPanicCheck = false
+g.lastRangeReturns = false
+framePatch := renvoFunctionFrameStart(g, g.funcLabels[fnInfoIndex])
+if !renvoEmitFunctionBody(g, fnInfoIndex, renvoZeroVoidReturn(g.c)) {
+return false
+}
+renvoFunctionFrameFinish(g, framePatch)
+g.locals = oldLocals
+g.localCount = oldLocalCount
+g.breakDepth = oldBreak
+g.continueDepth = oldContinue
+g.currentFunc = oldCurrent
+g.returnStruct = oldReturnStruct
+g.closureEnvOffset = oldClosureEnvOffset
+g.deferHeadOffset = oldDeferHeadOffset
+g.deferReturnLabel = oldDeferReturnLabel
+g.deferResultOffset = oldDeferResultOffset
+g.deferSites = oldDeferSites
+g.emittingDefers = oldEmittingDefers
+g.suppressPanicCheck = oldSuppressPanicCheck
+g.stackUsed = oldStackUsed
+g.stackPeak = oldStackPeak
+g.gotoLabels = oldGotoLabels
+g.lastRangeReturns = oldLastRangeReturns
+return true
+}
+
 
 
 func renvoEmitFunctionBody(g *renvoLinearGen, fnInfoIndex int, zeroVoidResult bool) bool {
@@ -19098,7 +19192,7 @@ typeIndexVersion := g.meta.typeIndexVersion
 fieldCount := len(g.meta.fields)
 captureCount := len(g.meta.captures)
 mark := renvo_runtime_ArenaMark()
-ok := renvoEmitTargetScalarFunction(g, fnInfoIndex)
+ok := renvoEmitScalarFunction(g, fnInfoIndex)
 if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 renvoTruncTypes(&g.meta.types, typeCount)
 renvoTruncFields(&g.meta.fields, fieldCount)
@@ -28852,7 +28946,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x9c\xfb\x7b\xa0\x06\x1c\xb7\x64\xf4\x35\xdf\xdf\xb9\xf2\x28\x76\xe0\xe9\xc3\x19\xb6\x82\x1a\x21\xe9\xc5\x9b\xb7\xad\xe1\x26\x7c", 3, true
+return "wasi/wasm32", "\x44\x56\xa9\xd2\x80\x31\x10\x56\x8b\x6f\x5e\x9e\x06\xcd\x56\xc4\xc2\x5f\x39\xc2\xbc\xa4\xa4\x95\x0f\xc0\xc7\x99\xcc\x9d\xf8\x92", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28864,7 +28958,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xe9\x51\xe1\x5e\x21\x2d\xe3\x08\xe5\xd4\x66\x3a\x45\x2e\xe1\x1b\x27\x45\x76\x15\x52\x93\x87\x93\xc4\x65\x06\xcd\x75\x63\x5a\x46", 3, true
+return "vm/vm32", "\x63\xbe\x49\xec\xa2\x0a\x97\x7a\xda\x66\xd1\xe7\x53\xa1\x0d\x88\x06\xe4\x96\x2e\xbd\xfb\x21\x7a\x5e\x5a\x90\x3b\x5c\xd8\x10\x88", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30342,6 +30436,201 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitCompactCValueHelperBody(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+renvoAsmMarkLabel(a, label)
+
+
+
+renvoAsmEmit16(a, 0x168b)
+delta := size
+if postDec {
+delta = -delta
+}
+if renvoAsmImmFits8Signed(delta) {
+renvoAsmEmit3(a, 0x8d, 0x4a, delta)
+} else {
+renvoAsmEmit16(a, 0x8a8d)
+renvoAsmEmit32(a, delta)
+}
+renvoAsmEmit16(a, 0x0e89)
+if size == 1 {
+renvoAsmEmit16(a, 0x1a88)
+if signedValue {
+renvoAsmEmitText(a, "\x0f\xbe\xc3")
+} else {
+renvoAsmEmitText(a, "\x0f\xb6\xc3")
+}
+} else if size == 2 {
+renvoAsmEmitText(a, "\x66\x89\x1a")
+if signedValue {
+renvoAsmEmitText(a, "\x0f\xbf\xc3")
+} else {
+renvoAsmEmitText(a, "\x0f\xb7\xc3")
+}
+} else {
+renvoAsmEmit16(a, 0x1a89)
+renvoAsmEmit16(a, 0xd889)
+}
+renvoAsmRet(a)
+return true
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoEmitFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return 0
+
+}
+a.patchFailed = true
+return -1
+}
+
+func renvoZeroVoidReturn(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return true
+
+}
+return false
+}
+
+func renvoFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+a := &g.asm
+frame := renvoAlignValue(g.stackPeak, 16)
+if frame > 65520 {
+frame = 65520
+}
+if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
+a.code[framePatch+7] = byte(frame)
+a.code[framePatch+8] = byte(frame >> 8)
+} else {
+a.code[framePatch+1] = byte(frame)
+a.code[framePatch+2] = byte(frame >> 8)
+}
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+a := &g.asm
+frame := renvoAlignTo8(g.stackPeak)
+if frame > 65528 {
+frame = 65528
+}
+renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+renvoAarch64AsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+renvoArmAsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+renvoWasm32RecordDirectLocals(g, framePatch)
+
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoFunctionFrameStart(g *renvoLinearGen, label int) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+a := &g.asm
+renvoAsmMarkLabel(a, label)
+framePatch := len(a.code)
+if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
+renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
+} else {
+renvoAsmEmit32(a, 0x000000c8)
+}
+return framePatch
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+a := &g.asm
+renvoAsmMarkLabel(a, label)
+framePatch := len(a.code)
+renvoAsmEmit32(a, 0x000000c8)
+return framePatch
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+a := &g.asm
+renvoAarch64AsmAlign(a)
+renvoAsmMarkLabel(a, label)
+renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+renvoAarch64AsmEmit(a, 0x910003fd)
+return renvoAarch64AsmFrameStart(a)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+a := &g.asm
+renvoArmAsmAlign(a)
+renvoAsmMarkLabel(a, label)
+renvoArmAsmEmit(a, 0xe92d4800)
+renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+return renvoArmAsmFrameStart(a)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a := &g.asm
+g.wasmMemoryRanges = nil
+functionPC := len(a.code)
+renvoAsmMarkLabel(a, label)
+return functionPC
+
+}
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoStoreHiddenResult(g *renvoLinearGen, offset int) {
@@ -36671,42 +36960,6 @@ return
 
 }
 g.asm.patchFailed = true
-}
-
-func renvoEmitTargetScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-renvoNonNil(g)
-renvoCompilerSelector := g.c
-renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
-
-return renvoAmd64EmitScalarFunction(g, fnInfoIndex)
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
-
-if renvoFixedTarget == 0 && g.c.code16 && renvo386EmitCompactCValueHelper(g, fnInfoIndex) {
-return true
-}
-return renvo386EmitScalarFunction(g, fnInfoIndex)
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-
-return renvoAarch64EmitScalarFunction(g, fnInfoIndex)
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
-
-return renvoArmEmitScalarFunction(g, fnInfoIndex)
-
-}
-if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-
-return renvoWasm32EmitScalarFunction(g, fnInfoIndex)
-
-}
-g.asm.patchFailed = true
-return false
 }
 
 func renvoEmitTargetRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -43707,47 +43960,25 @@ renvoRTGDirectVariableShift(a, direction, signed)
 renvoAsmMarkLabel(a, done)
 }
 
-func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
+func renvoRTGEmitAssemblyFunction(a *renvoAsm, declIndex int, label int) int {
 for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
 binding := &renvoRTGAssembly.bindings[i]
-if binding.function != metaFn.declIndex {
+if binding.function != declIndex {
 continue
 }
 if len(binding.code) == 0 {
 renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
-return false
+return -1
 }
-renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+renvoRTGFunctionStart(a, label)
+renvoAsmMarkLabel(a, label)
 for at := 0; at < len(binding.code); at++ {
 a.code = append(a.code, binding.code[at])
 }
 renvoRTGFunctionFinish(a)
-return true
+return 1
 }
-localCapacity := 16
-if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-localCapacity = 32
-}
-g.locals = make([]renvoLocalInfo, localCapacity)
-g.localCount = 0
-g.gotoLabels = nil
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.stackUsed = 0
-g.stackPeak = 0
-renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-framePatch := renvoRTGFrameStart(a)
-if !renvoEmitFunctionBody(g, fnInfoIndex, false) {
-return false
-}
-renvoRTGFrameFinish(a, framePatch, g.stackPeak)
-renvoRTGFunctionFinish(a)
-return true
+return 0
 }
 
 func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {
@@ -44245,49 +44476,6 @@ return result
 }
 
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
-
-func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-renvoNonNil(g)
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-localCapacity := 16
-
-if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-localCapacity = 32
-}
-g.locals = make([]renvoLocalInfo, localCapacity)
-g.localCount = 0
-g.gotoLabels = nil
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-framePatch := len(a.code)
-if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-
-
-
-renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
-} else {
-renvoAsmEmit32(a, 0x000000c8)
-}
-if !renvoEmitFunctionBody(g, fnInfoIndex, false) {
-return false
-}
-frame := renvoAlignValue(g.stackPeak, 16)
-if frame > 65520 {
-frame = 65520
-}
-if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-a.code[framePatch+7] = byte(frame)
-a.code[framePatch+8] = byte(frame >> 8)
-} else {
-a.code[framePatch+1] = byte(frame)
-a.code[framePatch+2] = byte(frame >> 8)
-}
-return true
-}
 
 func renvoAmd64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 renvoNonNil(g)
@@ -45167,8 +45355,6 @@ renvoAmd64IEEECompareFlagsResult(a, c0, c1)
 
 
 
-
-
 func renvoAmd64CancelAdjacentPush(a *renvoAsm, pushOpcode int) bool {
 register := pushOpcode - 0x50
 if register < 0 || register > 7 || a.lastPrimaryStoreEnd != -(len(a.code)*32+register+2) ||
@@ -45628,6 +45814,16 @@ renvoNonNil(a)
 renvoAsmEmit16(a, 0x2548)
 renvoAsmEmit32(a, imm)
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -46712,124 +46908,6 @@ renvoNonNil(g)
 renvo386EmitWideHelperCall(g, 0, left, right, mode, renvo386EnsureWideCompareHelper(g))
 }
 
-func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-framePatch := len(a.code)
-renvoAsmEmit32(a, 0x000000c8)
-if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-return false
-}
-frame := renvoAlignTo8(g.stackPeak)
-if frame > 65528 {
-frame = 65528
-}
-renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
-}
-
-func renvo386EmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
-if !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
-return false
-}
-fn := &g.meta.funcs[fnInfoIndex]
-postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
-postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
-if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
-return false
-}
-result := renvoResolveType(g.meta, fn.resultType)
-size := renvoTypeSize(g.meta, fn.resultType)
-if size < 1 || size > 4 ||
-(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
-return false
-}
-a := &g.asm
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-
-
-
-renvoAsmEmit16(a, 0x168b)
-delta := size
-if postDec {
-delta = -delta
-}
-if renvoAsmImmFits8Signed(delta) {
-renvoAsmEmit3(a, 0x8d, 0x4a, delta)
-} else {
-renvoAsmEmit16(a, 0x8a8d)
-renvoAsmEmit32(a, delta)
-}
-renvoAsmEmit16(a, 0x0e89)
-if size == 1 {
-renvoAsmEmit16(a, 0x1a88)
-if result.kind == renvoTypeInt8 {
-renvoAsmEmitText(a, "\x0f\xbe\xc3")
-} else {
-renvoAsmEmitText(a, "\x0f\xb6\xc3")
-}
-} else if size == 2 {
-renvoAsmEmitText(a, "\x66\x89\x1a")
-if result.kind == renvoTypeInt16 {
-renvoAsmEmitText(a, "\x0f\xbf\xc3")
-} else {
-renvoAsmEmitText(a, "\x0f\xb7\xc3")
-}
-} else {
-renvoAsmEmit16(a, 0x1a89)
-renvoAsmEmit16(a, 0xd889)
-}
-renvoAsmRet(a)
-return true
-}
-
 func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 a := &g.asm
 if reg == 0 {
@@ -47469,8 +47547,6 @@ renvoAsmEmit3(a, 0x0f, second, 0xc2)
 renvoAsmEmit2(a, int(combine), 0xd0)
 }
 }
-
-
 
 
 
@@ -48634,6 +48710,16 @@ renvoAsmEmit32(a, displacement)
 renvoAsmPushPrimary(a)
 return true
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -50281,67 +50367,6 @@ const renvoAarch64RegFp = 29
 const renvoAarch64RegLr = 30
 const renvoAarch64RegZr = 31
 
-func renvoAarch64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoAarch64AsmAlign(a)
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-renvoAarch64AsmEmit(a, 0xa9bf7bfd)
-renvoAarch64AsmEmit(a, 0x910003fd)
-framePatch := renvoAarch64AsmFrameStart(a)
-if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-return false
-}
-renvoAarch64AsmPatchFrame(a, framePatch, g.stackPeak)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
-}
-
 func renvoAarch64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 a := &g.asm
 if reg == 0 {
@@ -51113,8 +51138,6 @@ renvoPut32At(a.code, at+4, 0xd10003ff|(low<<10))
 
 
 
-
-
 func renvoEmitCopyBytesAarch64(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 a := &g.asm
 renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
@@ -51284,6 +51307,16 @@ renvoAsmRet(&g.asm)
 renvoAsmMarkLabel(&g.asm, after)
 return label
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -52353,67 +52386,6 @@ renvoAsmLoadTertiaryStack(a, byteCount)
 renvoAsmEmitText(a, "\x00\x00\x51\xe1\x03\x00\x00\x9a\x02\x00\x80\xe0\x02\x10\x81\xe0\x00\x30\xe0\xe3\x02\x00\x00\xea\x01\x00\x40\xe2\x01\x10\x41\xe2\x01\x30\xa0\xe3\x00\x00\x52\xe3\x05\x00\x00\x0a\x03\x00\x80\xe0\x03\x10\x81\xe0\x00\x90\xd0\xe5\x00\x90\xc1\xe5\x01\x20\x42\xe2\xf7\xff\xff\xea")
 }
 
-func renvoArmEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-oldLocals := g.locals
-oldLocalCount := g.localCount
-oldBreak := g.breakDepth
-oldContinue := g.continueDepth
-oldCurrent := g.currentFunc
-oldReturnStruct := g.returnStruct
-oldClosureEnvOffset := g.closureEnvOffset
-oldDeferHeadOffset := g.deferHeadOffset
-oldDeferReturnLabel := g.deferReturnLabel
-oldDeferResultOffset := g.deferResultOffset
-oldDeferSites := g.deferSites
-oldEmittingDefers := g.emittingDefers
-oldSuppressPanicCheck := g.suppressPanicCheck
-oldStackUsed := g.stackUsed
-oldStackPeak := g.stackPeak
-oldGotoLabels := g.gotoLabels
-oldLastRangeReturns := g.lastRangeReturns
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.stackUsed = 0
-g.stackPeak = 0
-renvoArmAsmAlign(a)
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-renvoArmAsmEmit(a, 0xe92d4800)
-renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
-framePatch := renvoArmAsmFrameStart(a)
-if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-return false
-}
-renvoArmAsmPatchFrame(a, framePatch, g.stackPeak)
-g.locals = oldLocals
-g.localCount = oldLocalCount
-g.breakDepth = oldBreak
-g.continueDepth = oldContinue
-g.currentFunc = oldCurrent
-g.returnStruct = oldReturnStruct
-g.closureEnvOffset = oldClosureEnvOffset
-g.deferHeadOffset = oldDeferHeadOffset
-g.deferReturnLabel = oldDeferReturnLabel
-g.deferResultOffset = oldDeferResultOffset
-g.deferSites = oldDeferSites
-g.emittingDefers = oldEmittingDefers
-g.suppressPanicCheck = oldSuppressPanicCheck
-g.stackUsed = oldStackUsed
-g.stackPeak = oldStackPeak
-g.gotoLabels = oldGotoLabels
-g.lastRangeReturns = oldLastRangeReturns
-return true
-}
-
 func renvoArmStoreParamWord(g *renvoLinearGen, reg int, offset int) {
 a := &g.asm
 if reg == 0 {
@@ -52716,6 +52688,14 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
+
+
 
 
 
@@ -56374,8 +56354,6 @@ return headers, tails, true
 
 
 
-
-
 func renvoEmitCopyBytesVM32(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 a := &g.asm
 src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
@@ -56416,6 +56394,16 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -63005,38 +62993,6 @@ a.wasmLocalSlots = append(a.wasmLocalSlots, int32(candidates[i]))
 }
 }
 a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
-}
-
-func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-g.wasmMemoryRanges = nil
-a := &g.asm
-metaFn := &g.meta.funcs[fnInfoIndex]
-fn := &g.prog.funcs[metaFn.declIndex]
-g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-g.localCount = 0
-g.gotoLabels = nil
-g.breakDepth = 0
-g.continueDepth = 0
-g.pendingControl = 0
-g.currentFunc = fnInfoIndex
-g.returnStruct = 0
-g.closureEnvOffset = 0
-g.deferHeadOffset = 0
-g.deferReturnLabel = 0
-g.deferResultOffset = 0
-g.deferSites = nil
-g.emittingDefers = false
-g.suppressPanicCheck = false
-g.stackUsed = 0
-g.stackPeak = 0
-g.lastRangeReturns = false
-functionPC := len(a.code)
-renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-return false
-}
-renvoWasm32RecordDirectLocals(g, functionPC)
-return true
 }
 
 func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {

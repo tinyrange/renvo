@@ -19044,6 +19044,100 @@ func renvoCanonicalMethodReceiverType(meta *renvoMeta, typ int) int {
 	return typ
 }
 
+func renvoEmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
+	if renvoFixedTarget != 0 || !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
+		return false
+	}
+	fn := &g.meta.funcs[fnInfoIndex]
+	postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
+	postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
+	if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
+		return false
+	}
+	result := renvoResolveType(g.meta, fn.resultType)
+	size := renvoTypeSize(g.meta, fn.resultType)
+	if size < 1 || size > 4 ||
+		(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
+		return false
+	}
+	signedValue := result.kind == renvoTypeInt8 || result.kind == renvoTypeInt16
+	return renvoEmitCompactCValueHelperBody(&g.asm, g.funcLabels[fnInfoIndex], size, signedValue, postDec)
+}
+
+func renvoEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
+	a := &g.asm
+	metaFn := &g.meta.funcs[fnInfoIndex]
+	if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
+		return true
+	}
+	override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
+	if override != 0 {
+		return override > 0
+	}
+	oldLocals := g.locals
+	oldLocalCount := g.localCount
+	oldBreak := g.breakDepth
+	oldContinue := g.continueDepth
+	oldCurrent := g.currentFunc
+	oldReturnStruct := g.returnStruct
+	oldClosureEnvOffset := g.closureEnvOffset
+	oldDeferHeadOffset := g.deferHeadOffset
+	oldDeferReturnLabel := g.deferReturnLabel
+	oldDeferResultOffset := g.deferResultOffset
+	oldDeferSites := g.deferSites
+	oldEmittingDefers := g.emittingDefers
+	oldSuppressPanicCheck := g.suppressPanicCheck
+	oldStackUsed := g.stackUsed
+	oldStackPeak := g.stackPeak
+	oldGotoLabels := g.gotoLabels
+	oldLastRangeReturns := g.lastRangeReturns
+	localCapacity := 16
+	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
+		localCapacity = 32
+	}
+	g.locals = make([]renvoLocalInfo, localCapacity)
+	g.localCount = 0
+	g.gotoLabels = nil
+	g.breakDepth = 0
+	g.continueDepth = 0
+	g.pendingControl = 0
+	g.currentFunc = fnInfoIndex
+	g.returnStruct = 0
+	g.closureEnvOffset = 0
+	g.stackUsed = 0
+	g.stackPeak = 0
+	g.deferHeadOffset = 0
+	g.deferReturnLabel = 0
+	g.deferResultOffset = 0
+	g.deferSites = nil
+	g.emittingDefers = false
+	g.suppressPanicCheck = false
+	g.lastRangeReturns = false
+	framePatch := renvoFunctionFrameStart(g, g.funcLabels[fnInfoIndex])
+	if !renvoEmitFunctionBody(g, fnInfoIndex, renvoZeroVoidReturn(g.c)) {
+		return false
+	}
+	renvoFunctionFrameFinish(g, framePatch)
+	g.locals = oldLocals
+	g.localCount = oldLocalCount
+	g.breakDepth = oldBreak
+	g.continueDepth = oldContinue
+	g.currentFunc = oldCurrent
+	g.returnStruct = oldReturnStruct
+	g.closureEnvOffset = oldClosureEnvOffset
+	g.deferHeadOffset = oldDeferHeadOffset
+	g.deferReturnLabel = oldDeferReturnLabel
+	g.deferResultOffset = oldDeferResultOffset
+	g.deferSites = oldDeferSites
+	g.emittingDefers = oldEmittingDefers
+	g.suppressPanicCheck = oldSuppressPanicCheck
+	g.stackUsed = oldStackUsed
+	g.stackPeak = oldStackPeak
+	g.gotoLabels = oldGotoLabels
+	g.lastRangeReturns = oldLastRangeReturns
+	return true
+}
+
 // Function body semantics are shared across frame encodings. Targets choose
 // only whether a void fallthrough needs a deterministic primary register.
 func renvoEmitFunctionBody(g *renvoLinearGen, fnInfoIndex int, zeroVoidResult bool) bool {
@@ -19091,7 +19185,7 @@ func renvoEmitScalarFunctionScratch(g *renvoLinearGen, fnInfoIndex int) bool {
 	fieldCount := len(g.meta.fields)
 	captureCount := len(g.meta.captures)
 	mark := renvo_runtime_ArenaMark()
-	ok := renvoEmitTargetScalarFunction(g, fnInfoIndex)
+	ok := renvoEmitScalarFunction(g, fnInfoIndex)
 	if len(g.meta.captures) == captureCount && g.meta.runtimeTypeCount <= typeCount {
 		renvoTruncTypes(&g.meta.types, typeCount)
 		renvoTruncFields(&g.meta.fields, fieldCount)

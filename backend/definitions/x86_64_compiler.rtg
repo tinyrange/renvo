@@ -166,49 +166,6 @@ go compiler {
 
 	const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
 
-	func renvoAmd64EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		renvoNonNil(g)
-		a := &g.asm
-		metaFn := &g.meta.funcs[fnInfoIndex]
-		localCapacity := 16
-		// bodyStart points after the opening brace, unlike renvoFuncDecl.bodyStart.
-		if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-			localCapacity = 32
-		}
-		g.locals = make([]renvoLocalInfo, localCapacity)
-		g.localCount = 0
-		g.gotoLabels = nil
-		g.pendingControl = 0
-		g.currentFunc = fnInfoIndex
-		g.stackUsed = 0
-		g.stackPeak = 0
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		framePatch := len(a.code)
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-			// Avoid the microcoded ENTER instruction in large generated programs.
-			// Keep the frame size as an immediate placeholder until emission
-			// discovers the function's peak stack use.
-			renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
-		} else {
-			renvoAsmEmit32(a, 0x000000c8)
-		}
-		if !renvoEmitFunctionBody(g, fnInfoIndex, false) {
-			return false
-		}
-		frame := renvoAlignValue(g.stackPeak, 16)
-		if frame > 65520 {
-			frame = 65520
-		}
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-			a.code[framePatch+7] = byte(frame)
-			a.code[framePatch+8] = byte(frame >> 8)
-		} else {
-			a.code[framePatch+1] = byte(frame)
-			a.code[framePatch+2] = byte(frame >> 8)
-		}
-		return true
-	}
-
 	func renvoAmd64StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 		renvoNonNil(g)
 		a := &g.asm
@@ -809,6 +766,11 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		compact_c_value_helper = renvoAmd64CompilerCompactCValueHelper
+		function_override = renvoAmd64CompilerFunctionOverride
+		zero_void_return = renvoAmd64CompilerZeroVoidReturn
+		function_frame_finish = renvoAmd64CompilerFunctionFrameFinish
+		function_frame_start = renvoAmd64CompilerFunctionFrameStart
 		store_hidden_result = renvoAmd64CompilerStoreHiddenResult
 		struct_argument_by_reference = renvoAmd64CompilerStructArgumentByReference
 		resolves_static_import = renvoAmd64CompilerResolvesStaticImport
@@ -976,7 +938,6 @@ extend arch x86_64 {
 		install_thread_state = renvoAmd64CompilerInstallThreadState
 		load_primary_thread_state = renvoAmd64CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoAmd64CompilerStorePrimaryThreadState
-		scalar_function = renvoAmd64CompilerScalarFunction
 		runtime_stack = renvoAmd64CompilerRuntimeStack
 		unchecked_non_nil_primary = renvoAmd64CompilerUncheckedNonNilPrimary
 		unchecked_non_nil_secondary = renvoAmd64CompilerUncheckedNonNilSecondary
@@ -2098,10 +2059,6 @@ go compiler {
 		renvoAsmEmitText(&g.asm, "\x49\x89\x87")
 		renvoAsmEmit32(&g.asm, stateOffset)
 		return
-	}
-
-	func renvoAmd64CompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		return renvoAmd64EmitScalarFunction(g, fnInfoIndex)
 	}
 
 	func renvoAmd64CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -4345,5 +4302,54 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
 		renvoAmd64AsmStackMem(&g.asm, offset, 0x8948, 0x7d, 0xbd)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFunctionFrameStart(g *renvoLinearGen, label int) int {
+		a := &g.asm
+		renvoAsmMarkLabel(a, label)
+		framePatch := len(a.code)
+		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
+			renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
+		} else {
+			renvoAsmEmit32(a, 0x000000c8)
+		}
+		return framePatch
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+		a := &g.asm
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
+			a.code[framePatch+7] = byte(frame)
+			a.code[framePatch+8] = byte(frame >> 8)
+		} else {
+			a.code[framePatch+1] = byte(frame)
+			a.code[framePatch+2] = byte(frame >> 8)
+		}
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerZeroVoidReturn(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
 	}
 }

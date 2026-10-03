@@ -1943,38 +1943,6 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
 }
 
-func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-	g.wasmMemoryRanges = nil
-	a := &g.asm
-	metaFn := &g.meta.funcs[fnInfoIndex]
-	fn := &g.prog.funcs[metaFn.declIndex]
-	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-	g.localCount = 0
-	g.gotoLabels = nil
-	g.breakDepth = 0
-	g.continueDepth = 0
-	g.pendingControl = 0
-	g.currentFunc = fnInfoIndex
-	g.returnStruct = 0
-	g.closureEnvOffset = 0
-	g.deferHeadOffset = 0
-	g.deferReturnLabel = 0
-	g.deferResultOffset = 0
-	g.deferSites = nil
-	g.emittingDefers = false
-	g.suppressPanicCheck = false
-	g.stackUsed = 0
-	g.stackPeak = 0
-	g.lastRangeReturns = false
-	functionPC := len(a.code)
-	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-		return false
-	}
-	renvoWasm32RecordDirectLocals(g, functionPC)
-	return true
-}
-
 func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
 	a := &g.asm
 	renvoWasm32MarkFunc(g, fnIndex)

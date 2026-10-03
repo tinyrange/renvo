@@ -375,47 +375,25 @@ func renvoRTGEmitBoundedVariableShift(a *renvoAsm, direction RTGShiftDirection, 
 	renvoAsmMarkLabel(a, done)
 }
 
-func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	metaFn := &g.meta.funcs[fnInfoIndex]
+func renvoRTGEmitAssemblyFunction(a *renvoAsm, declIndex int, label int) int {
 	for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
 		binding := &renvoRTGAssembly.bindings[i]
-		if binding.function != metaFn.declIndex {
+		if binding.function != declIndex {
 			continue
 		}
 		if len(binding.code) == 0 {
 			renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
-			return false
+			return -1
 		}
-		renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+		renvoRTGFunctionStart(a, label)
+		renvoAsmMarkLabel(a, label)
 		for at := 0; at < len(binding.code); at++ {
 			a.code = append(a.code, binding.code[at])
 		}
 		renvoRTGFunctionFinish(a)
-		return true
+		return 1
 	}
-	localCapacity := 16
-	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-		localCapacity = 32
-	}
-	g.locals = make([]renvoLocalInfo, localCapacity)
-	g.localCount = 0
-	g.gotoLabels = nil
-	g.pendingControl = 0
-	g.currentFunc = fnInfoIndex
-	g.stackUsed = 0
-	g.stackPeak = 0
-	renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	framePatch := renvoRTGFrameStart(a)
-	if !renvoEmitFunctionBody(g, fnInfoIndex, false) {
-		return false
-	}
-	renvoRTGFrameFinish(a, framePatch, g.stackPeak)
-	renvoRTGFunctionFinish(a)
-	return true
+	return 0
 }
 
 func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {

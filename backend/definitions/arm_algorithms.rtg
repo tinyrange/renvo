@@ -225,67 +225,6 @@ go compiler {
 		renvoAsmEmitText(a, "\x00\x00\x51\xe1\x03\x00\x00\x9a\x02\x00\x80\xe0\x02\x10\x81\xe0\x00\x30\xe0\xe3\x02\x00\x00\xea\x01\x00\x40\xe2\x01\x10\x41\xe2\x01\x30\xa0\xe3\x00\x00\x52\xe3\x05\x00\x00\x0a\x03\x00\x80\xe0\x03\x10\x81\xe0\x00\x90\xd0\xe5\x00\x90\xc1\xe5\x01\x20\x42\xe2\xf7\xff\xff\xea")
 	}
 
-	func renvoArmEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		a := &g.asm
-		metaFn := &g.meta.funcs[fnInfoIndex]
-		fn := &g.prog.funcs[metaFn.declIndex]
-		oldLocals := g.locals
-		oldLocalCount := g.localCount
-		oldBreak := g.breakDepth
-		oldContinue := g.continueDepth
-		oldCurrent := g.currentFunc
-		oldReturnStruct := g.returnStruct
-		oldClosureEnvOffset := g.closureEnvOffset
-		oldDeferHeadOffset := g.deferHeadOffset
-		oldDeferReturnLabel := g.deferReturnLabel
-		oldDeferResultOffset := g.deferResultOffset
-		oldDeferSites := g.deferSites
-		oldEmittingDefers := g.emittingDefers
-		oldSuppressPanicCheck := g.suppressPanicCheck
-		oldStackUsed := g.stackUsed
-		oldStackPeak := g.stackPeak
-		oldGotoLabels := g.gotoLabels
-		oldLastRangeReturns := g.lastRangeReturns
-		g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-		g.localCount = 0
-		g.gotoLabels = nil
-		g.breakDepth = 0
-		g.continueDepth = 0
-		g.pendingControl = 0
-		g.currentFunc = fnInfoIndex
-		g.returnStruct = 0
-		g.closureEnvOffset = 0
-		g.stackUsed = 0
-		g.stackPeak = 0
-		renvoArmAsmAlign(a)
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		renvoArmAsmEmit(a, 0xe92d4800)
-		renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
-		framePatch := renvoArmAsmFrameStart(a)
-		if !renvoEmitFunctionBody(g, fnInfoIndex, true) {
-			return false
-		}
-		renvoArmAsmPatchFrame(a, framePatch, g.stackPeak)
-		g.locals = oldLocals
-		g.localCount = oldLocalCount
-		g.breakDepth = oldBreak
-		g.continueDepth = oldContinue
-		g.currentFunc = oldCurrent
-		g.returnStruct = oldReturnStruct
-		g.closureEnvOffset = oldClosureEnvOffset
-		g.deferHeadOffset = oldDeferHeadOffset
-		g.deferReturnLabel = oldDeferReturnLabel
-		g.deferResultOffset = oldDeferResultOffset
-		g.deferSites = oldDeferSites
-		g.emittingDefers = oldEmittingDefers
-		g.suppressPanicCheck = oldSuppressPanicCheck
-		g.stackUsed = oldStackUsed
-		g.stackPeak = oldStackPeak
-		g.gotoLabels = oldGotoLabels
-		g.lastRangeReturns = oldLastRangeReturns
-		return true
-	}
-
 	func renvoArmStoreParamWord(g *renvoLinearGen, reg int, offset int) {
 		a := &g.asm
 		if reg == 0 {
@@ -595,6 +534,11 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		compact_c_value_helper = renvoArmCompilerCompactCValueHelper
+		function_override = renvoArmCompilerFunctionOverride
+		zero_void_return = renvoArmCompilerZeroVoidReturn
+		function_frame_finish = renvoArmCompilerFunctionFrameFinish
+		function_frame_start = renvoArmCompilerFunctionFrameStart
 		store_hidden_result = renvoArmCompilerStoreHiddenResult
 		struct_argument_by_reference = renvoArmCompilerStructArgumentByReference
 		resolves_static_import = renvoArmCompilerResolvesStaticImport
@@ -762,7 +706,6 @@ extend arch arm {
 		install_thread_state = renvoArmCompilerInstallThreadState
 		load_primary_thread_state = renvoArmCompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoArmCompilerStorePrimaryThreadState
-		scalar_function = renvoArmCompilerScalarFunction
 		runtime_stack = renvoArmCompilerRuntimeStack
 		unchecked_non_nil_primary = renvoArmCompilerUncheckedNonNilPrimary
 		unchecked_non_nil_secondary = renvoArmCompilerUncheckedNonNilSecondary
@@ -1418,10 +1361,6 @@ go compiler {
 		renvoAsmPopPrimary(&g.asm)
 		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 		renvoAsmPopSecondary(&g.asm)
-	}
-
-	func renvoArmCompilerScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		return renvoArmEmitScalarFunction(g, fnInfoIndex)
 	}
 
 	func renvoArmCompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -3005,5 +2944,40 @@ go compiler {
 go compiler {
 	func renvoArmCompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
 		renvoArmAsmStoreRegStack(&g.asm, renvoArmRegRdi, offset)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFunctionFrameStart(g *renvoLinearGen, label int) int {
+		a := &g.asm
+		renvoArmAsmAlign(a)
+		renvoAsmMarkLabel(a, label)
+		renvoArmAsmEmit(a, 0xe92d4800)
+		renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+		return renvoArmAsmFrameStart(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+		renvoArmAsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerZeroVoidReturn(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
 	}
 }
