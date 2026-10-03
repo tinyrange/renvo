@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 262 role-based operations: register copies,
+The current migration covers 263 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -172,6 +172,8 @@ then own argument decoding, BSS requirements, and ABI word placement.
 Native, prepared, and structured entry paths share global initialization, entry
 invocation, and panic handling. Physical incoming frames, reserved-register
 restoration, and exit sequences remain bounded definition operations.
+Static-import eligibility is a definition-owned policy query; common call
+lowering retains parsed arguments, evaluation order, and portable-body fallback.
 Literal parsing selects ordinary or split-word materialization
 without inspecting an architecture; each backend owns its scalar-width behavior.
 Global-initializer frame setup/teardown and stack IEEE arithmetic, conversions,

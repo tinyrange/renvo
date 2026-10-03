@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		resolves_static_import = renvoWasm32CompilerResolvesStaticImport
 		entry_runtime_registers = renvoWasm32CompilerEntryRuntimeRegisters
 		program_exit = renvoWasm32CompilerProgramExit
 		program_entry_frame = renvoWasm32CompilerProgramEntryFrame
@@ -6618,5 +6619,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
 		return
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+		return false
 	}
 }

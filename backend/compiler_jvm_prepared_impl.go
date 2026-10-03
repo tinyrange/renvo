@@ -4365,6 +4365,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+renvoNonNil(c)
+return true
+}
+
 func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
 renvoNonNil(g)
 return
