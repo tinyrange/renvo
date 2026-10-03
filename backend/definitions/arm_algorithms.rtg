@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		program_failure_exit_code = renvoArmCompilerProgramFailureExitCode
+		program_result_valid = renvoArmCompilerProgramResultValid
+		program_emission_valid = renvoArmCompilerProgramEmissionValid
 		label_notifications = renvoArmCompilerLabelNotifications
 		unsupported_operation = renvoArmCompilerUnsupportedOperation
 		label_boundary = renvoArmCompilerLabelBoundary
@@ -3156,5 +3159,23 @@ go compiler {
 go compiler {
 	func renvoArmCompilerLabelNotifications(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
 	}
 }

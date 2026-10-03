@@ -805,6 +805,39 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoProgramFailureExitCode(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return 1
+}
+
+func renvoProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoProgramEmissionValid(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoLabelNotifications(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

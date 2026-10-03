@@ -392,6 +392,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		program_failure_exit_code = renvoAarch64CompilerProgramFailureExitCode
+		program_result_valid = renvoAarch64CompilerProgramResultValid
+		program_emission_valid = renvoAarch64CompilerProgramEmissionValid
 		label_notifications = renvoAarch64CompilerLabelNotifications
 		unsupported_operation = renvoAarch64CompilerUnsupportedOperation
 		label_boundary = renvoAarch64CompilerLabelBoundary
@@ -3388,5 +3391,23 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerLabelNotifications(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
 	}
 }
