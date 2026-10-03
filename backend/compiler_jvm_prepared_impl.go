@@ -4357,6 +4357,24 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmLogicalShiftPrimaryWordImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+renvoRTGDirectShiftRightUnsignedImmediate(a, renvoRTGPrimary, byte(imm))
+}
+
+func renvoAsmBitwisePrimaryTertiary(a *renvoAsm, op byte) {
+renvoNonNil(a)
+if op == '&' {
+renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGTertiary)
+} else if op == '|' {
+renvoRTGDirectBitOr(a, renvoRTGPrimary, renvoRTGTertiary)
+} else if op == '^' {
+renvoRTGDirectBitXor(a, renvoRTGPrimary, renvoRTGTertiary)
+} else {
+a.patchFailed = true
+}
+}
+
 func renvoEnsureAppendBytesHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
 g.asm.patchFailed = true

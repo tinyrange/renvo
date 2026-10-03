@@ -54,10 +54,8 @@ func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool
 					renvoAsmPrimaryImm(a, 0)
 				} else if op == 8 {
 					renvoAsmShlPrimaryImm(a, immediate)
-				} else if arm64 {
-					renvoAarch64AsmEmit(a, 0xd340fc00|(immediate<<16))
 				} else {
-					renvoAsmShrPrimaryImm(a, immediate)
+					renvoAsmLogicalShiftPrimaryWordImm(a, immediate)
 				}
 			} else {
 				renvoAsmLoadTertiaryStack(a, (right+2)*8)
@@ -66,27 +64,13 @@ func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool
 				} else if op == 4 {
 					renvoAsmSubPrimaryTertiary(a)
 				} else if op >= 5 && op <= 7 {
-					// These are the same typed bitwise operations used by ordinary
-					// parsed expressions, with primary and tertiary as operands.
-					if arm64 {
-						encoding := 0x8a000040
-						if op == 6 {
-							encoding = 0xaa000040
-						}
-						if op == 7 {
-							encoding = 0xca000040
-						}
-						renvoAarch64AsmEmit(a, encoding)
-					} else {
-						encoding := 0xc82148
-						if op == 6 {
-							encoding = 0xc80948
-						}
-						if op == 7 {
-							encoding = 0xc83148
-						}
-						renvoAsmEmit24(a, encoding)
+					operator := byte('&')
+					if op == 6 {
+						operator = '|'
+					} else if op == 7 {
+						operator = '^'
 					}
+					renvoAsmBitwisePrimaryTertiary(a, operator)
 				} else {
 					condition := 0x94 // equal
 					if op == 11 {
