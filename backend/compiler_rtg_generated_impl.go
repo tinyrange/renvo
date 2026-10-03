@@ -1578,7 +1578,50 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return true
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		// Stack arguments are placed right-to-left. GCC regparm consumes the first
+		// three scalar words in eax, edx, and ecx after the indirect target has been
+		// saved in the callee-saved edi register.
+		for i := len(argOffsets) - 1; i >= 0; i-- {
+			renvoAsmLoadPrimaryStack(a, argOffsets[i])
+			renvoAsmPushPrimary(a)
+		}
+		renvoAsmLoadPrimaryStack(a, handleOffset)
+		registerWords := 0
+		if a.c.regParm == 3 {
+			renvoAsmEmitText(a, "\x89\xc7")
+			registerWords = len(argOffsets)
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(a, 0x58)
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(a, 0x5a)
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(a, 0x59)
+			}
+			renvoAsmEmitText(a, "\xff\xd7")
+		} else {
+			renvoAsmEmitText(a, "\xff\xd0")
+		}
+		if len(argOffsets) > registerWords {
+			bytes := (len(argOffsets) - registerWords) * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmitText(a, "\x83\xc4")
+				renvoAsmEmit8(a, bytes)
+			} else {
+				renvoAsmEmitText(a, "\x81\xc4")
+				renvoAsmEmit32(a, bytes)
+			}
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	

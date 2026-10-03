@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0f91b01f89a54f48b570163f0792f68dca550bfd86899f9463a06d4b3f182aa4"
+const CompilerSourceDigest = "380d1537a29d602874fb3560c692b38cb72026ce09317353e98de3bf73ef3b78"
 
 // source: backend/compiler_common_impl.go
 
@@ -15008,7 +15008,7 @@ return renvoEmitFunctionValueDispatch(g, funcType, handleOffset, argOffsets, res
 func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 renvoNonNil(g, functionType)
 if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-return renvo386EmitCObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
+return renvoEmitCdeclObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 }
 if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > renvoRTGObjectRegisterCount() {
 return false
@@ -24921,6 +24921,34 @@ return renvoBoolInt(renvoEmitBuiltinNew(g, ep, idx))
 return -1
 }
 
+func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
+renvoNonNil(g, functionType)
+if functionType.resolved != 0 || len(argOffsets) > 127 {
+return false
+}
+for i := 0; i < len(argOffsets); i++ {
+paramType := g.meta.fields[functionType.first+i].typ
+param := renvoResolveType(g.meta, paramType)
+if (!renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc) ||
+renvoTypeSize(g.meta, paramType) > g.c.renvoNativeIntSize {
+return false
+}
+}
+result := renvoResolveType(g.meta, functionType.elem)
+if functionType.elem != 0 &&
+((!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
+renvoTypeSize(g.meta, functionType.elem) > g.c.renvoNativeIntSize) {
+return false
+}
+if !renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets) {
+return false
+}
+if resultOffset != 0 && functionType.elem != 0 {
+renvoAsmStorePrimaryStack(&g.asm, resultOffset)
+}
+return true
+}
+
 // source: backend/compiler_object_cache_impl.go
 
 const renvoObjectCacheCapacity = 1024
@@ -30956,7 +30984,50 @@ renvoAsmEmit8(a, saveOffset)
 return true
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+
+
+
+for i := len(argOffsets) - 1; i >= 0; i-- {
+renvoAsmLoadPrimaryStack(a, argOffsets[i])
+renvoAsmPushPrimary(a)
+}
+renvoAsmLoadPrimaryStack(a, handleOffset)
+registerWords := 0
+if a.c.regParm == 3 {
+renvoAsmEmitText(a, "\x89\xc7")
+registerWords = len(argOffsets)
+if registerWords > 3 {
+registerWords = 3
+}
+if registerWords > 0 {
+renvoAsmEmit8(a, 0x58)
+}
+if registerWords > 1 {
+renvoAsmEmit8(a, 0x5a)
+}
+if registerWords > 2 {
+renvoAsmEmit8(a, 0x59)
+}
+renvoAsmEmitText(a, "\xff\xd7")
+} else {
+renvoAsmEmitText(a, "\xff\xd0")
+}
+if len(argOffsets) > registerWords {
+bytes := (len(argOffsets) - registerWords) * 4
+if renvoAsmImmFits8Signed(bytes) {
+renvoAsmEmitText(a, "\x83\xc4")
+renvoAsmEmit8(a, bytes)
+} else {
+renvoAsmEmitText(a, "\x81\xc4")
+renvoAsmEmit32(a, bytes)
+}
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 return false
 
@@ -47342,69 +47413,6 @@ if opcode == 0 {
 return false
 }
 renvo386AsmStackMem(&g.asm, offset, opcode, 0x45, 0x85)
-return true
-}
-
-func renvo386EmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
-renvoNonNil(g, functionType)
-if functionType.resolved != 0 || len(argOffsets) > 127 {
-return false
-}
-for i := 0; i < len(argOffsets); i++ {
-paramType := g.meta.fields[functionType.first+i].typ
-param := renvoResolveType(g.meta, paramType)
-if (!renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc) ||
-renvoTypeSize(g.meta, paramType) > 4 {
-return false
-}
-}
-result := renvoResolveType(g.meta, functionType.elem)
-if functionType.elem != 0 &&
-((!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
-renvoTypeSize(g.meta, functionType.elem) > 4) {
-return false
-}
-
-
-
-for i := len(argOffsets) - 1; i >= 0; i-- {
-renvoAsmLoadPrimaryStack(&g.asm, argOffsets[i])
-renvoAsmPushPrimary(&g.asm)
-}
-renvoAsmLoadPrimaryStack(&g.asm, handleOffset)
-registerWords := 0
-if g.c.regParm == 3 {
-renvoAsmEmitText(&g.asm, "\x89\xc7")
-registerWords = len(argOffsets)
-if registerWords > 3 {
-registerWords = 3
-}
-if registerWords > 0 {
-renvoAsmEmit8(&g.asm, 0x58)
-}
-if registerWords > 1 {
-renvoAsmEmit8(&g.asm, 0x5a)
-}
-if registerWords > 2 {
-renvoAsmEmit8(&g.asm, 0x59)
-}
-renvoAsmEmitText(&g.asm, "\xff\xd7")
-} else {
-renvoAsmEmitText(&g.asm, "\xff\xd0")
-}
-if len(argOffsets) > registerWords {
-bytes := (len(argOffsets) - registerWords) * 4
-if renvoAsmImmFits8Signed(bytes) {
-renvoAsmEmitText(&g.asm, "\x83\xc4")
-renvoAsmEmit8(&g.asm, bytes)
-} else {
-renvoAsmEmitText(&g.asm, "\x81\xc4")
-renvoAsmEmit32(&g.asm, bytes)
-}
-}
-if resultOffset != 0 && functionType.elem != 0 {
-renvoAsmStorePrimaryStack(&g.asm, resultOffset)
-}
 return true
 }
 
