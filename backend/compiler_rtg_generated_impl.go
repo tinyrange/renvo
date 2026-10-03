@@ -797,6 +797,144 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		a.patchFailed = true
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		scale := 0
+		if elementSize == 2 {
+			scale = 1
+		} else if elementSize == 4 {
+			scale = 2
+		} else if elementSize == 8 {
+			scale = 3
+		}
+		sib := scale<<6 | 0x02
+		if size == 1 {
+			opcode := 0xb6
+			if signed {
+				opcode = 0xbe
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else if size == 2 {
+			opcode := 0xb7
+			if signed {
+				opcode = 0xbf
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else {
+			renvoAsmEmit3(a, 0x8b, 0x04, sib)
+		}
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return size >= 1 && size <= 4 && (elementSize == 1 || elementSize == 2 || elementSize == 4 || elementSize == 8) && renvo386SimpleIndexExpr(g, ep, idx)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		opcode := 0x81
+		if renvoAsmImmFits8Signed(value) {
+			opcode = 0x83
+		}
+		renvoAsmStackMem(&g.asm, offset, opcode, 0x7d, 0xbd)
+		if opcode == 0x83 {
+			renvoAsmEmit8(&g.asm, value)
+		} else {
+			renvoAsmEmit32(&g.asm, value)
+		}
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitDerefCompareJump(g, ep, idx, value, c0, c1, label, jumpIfTrue, unsigned)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitLocalBitTestJump(g, ep, idx, c0, label, jumpIfTrue)
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmNegatePrimaryWord(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -941,7 +1079,7 @@ g.asm.patchFailed = true
 return false
 }
 
-func renvoEmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+func renvoEmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
@@ -955,7 +1093,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 		if renvoFixedTarget != 0 || !g.c.code16 {
 			return -1
 		}
-		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, false)
+		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, discard)
 	
 }
 g.asm.patchFailed = true
@@ -1304,15 +1442,23 @@ func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 by
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
 		renvoAsmLoadPrimaryStack(&g.asm, right)
 		renvoAsmStackMem(&g.asm, left, 0x3948, 0x45, 0x85)
-		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
-		return true
-	
+} else if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvoAsmStackMem(&g.asm, left, 0x39, 0x45, 0x85)
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	

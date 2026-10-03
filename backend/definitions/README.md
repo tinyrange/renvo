@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 181 role-based operations: register copies,
+The current migration covers 186 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the

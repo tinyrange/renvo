@@ -4357,6 +4357,31 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+renvoNonNil(a)
+a.patchFailed = true
+}
+
+func renvoCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoAsmNegatePrimaryWord(a *renvoAsm) {
 renvoNonNil(a)
 renvoAsmPrimaryToNegative(a)
@@ -4384,7 +4409,7 @@ renvoNonNil(g)
 return false
 }
 
-func renvoEmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+func renvoEmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
 renvoNonNil(g)
 return -1
 }

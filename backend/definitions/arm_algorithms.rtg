@@ -696,6 +696,11 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		folded_indexed_scalar_load = renvoArmCompilerFoldedIndexedScalarLoad
+		can_fold_indexed_scalar_load = renvoArmCompilerCanFoldIndexedScalarLoad
+		local_immediate_compare_jump = renvoArmCompilerLocalImmediateCompareJump
+		deref_compare_jump = renvoArmCompilerDerefCompareJump
+		local_bit_test_jump = renvoArmCompilerLocalBitTestJump
 		negate_primary_word = renvoArmCompilerNegatePrimaryWord
 		primary_address_offset = renvoArmCompilerPrimaryAddressOffset
 		word_expression_peephole = renvoArmCompilerWordExpressionPeephole
@@ -2283,7 +2288,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoArmCompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr) int {
+	func renvoArmCompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
 		return -1
 	}
 }
@@ -2317,5 +2322,35 @@ go compiler {
 go compiler {
 	func renvoArmCompilerNegatePrimaryWord(a *renvoAsm) {
 		renvoArmAsmNegRax(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+		a.patchFailed = true
 	}
 }
