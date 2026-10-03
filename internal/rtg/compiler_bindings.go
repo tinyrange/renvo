@@ -359,8 +359,10 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		out = append(out, operation.functionName()...)
 		out = append(out, operation.signature()...)
 		out = append(out, " {\nrenvoNonNil("+operation.receiver().Name+")\n"...)
-		// Snapshot selection once: repeated nested context loads otherwise add
-		// code and nil checks to every branch of this hot lowering surface.
+		// Cache the context pointer, not its selector value. Direct fact reads
+		// remain visible to fixed-target specialization without duplicating
+		// each condition into fixed and dynamic alternatives. The cache also
+		// avoids repeated nested receiver loads in multi-target compilers.
 		// Avoid capturing any identifier used by a definition-owned body.
 		selectorLocal := "renvoCompilerSelector"
 		for {
@@ -380,7 +382,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			}
 			selectorLocal += "_"
 		}
-		out = append(out, selectorLocal+" := "+operation.receiver().Name+".c.renvoTargetArch\n"...)
+		out = append(out, selectorLocal+" := "+operation.receiver().Name+".c\n"...)
 		// Share only byte-identical emitted bodies. Every selector remains explicit,
 		// so this neither invents an ISA family nor supplies an unknown-target default.
 		var bodies []string
@@ -401,10 +403,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			if operation.Result == "" && (!project || !function.EndsInReturn) {
 				body += "\nreturn\n"
 			}
-			// Preserve direct selector expressions for fixed-target specialization.
-			// The compact compiler can eliminate these branches before emission,
-			// while a multi-target compiler still uses the single cached load.
-			condition := "(renvoFixedTarget != 0 && " + operation.receiver().Name + ".c.renvoTargetArch == " + selectors[j] + ") || (renvoFixedTarget == 0 && " + selectorLocal + " == " + selectors[j] + ")"
+			condition := selectorLocal + ".renvoTargetArch == " + selectors[j]
 			group := stringIndex(bodies, body)
 			if group < 0 {
 				bodies = append(bodies, body)
