@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "541fa53f005f2f7528071f1e6e7b09070869e1febc718d32f579583a004f2ae4"
+const CompilerSourceDigest = "547d11b65f03a9e1832e979f4f64cf3785d8c661cd911598afd75a8b14ccc2f4"
 
 // source: backend/compiler_common_impl.go
 
@@ -3622,8 +3622,9 @@ return -1
 }
 if !index.ok {
 elementSize := renvoTypeSize(g.meta, pointer.elem)
-kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
-size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+typ := renvoInferParsedExprType(g, ep, idx)
+kind := renvoResolveType(g.meta, typ).kind
+size := renvoNativeScalarStorageSize(g.meta, typ)
 if (!renvoTypeKindIsScalarValue(kind) && kind != renvoTypePointer && kind != renvoTypeFunc) ||
 !renvoCanFoldIndexedScalarLoad(g, ep, indexArg, elementSize, size) {
 return -1
@@ -3648,8 +3649,9 @@ return 0
 }
 renvoEmitRuntimeNonNilPrimary(g)
 renvoAsmCopyPrimaryToSecondary(&g.asm)
-kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
-size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+typ := renvoInferParsedExprType(g, ep, idx)
+kind := renvoResolveType(g.meta, typ).kind
+size := renvoNativeScalarStorageSize(g.meta, typ)
 renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, displacement, size)
 renvoAsmNormalizePrimaryForKind(&g.asm, kind)
 return 1
@@ -10797,7 +10799,7 @@ return false
 }
 renvoAsmNormalizePrimaryForKind(a, elemType.kind)
 renvoAsmLoadSecondaryStack(a, addrOffset)
-renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elemType.kind))
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, renvoNativeScalarStorageSize(meta, elemTypeIndex))
 return true
 }
 lhsResolved := renvoResolveType(meta, lhsType)
@@ -10851,7 +10853,7 @@ return false
 }
 renvoAsmNormalizePrimaryForKind(a, lhsResolved.kind)
 renvoAsmPopSecondary(a)
-lhsSize := renvoScalarKindSize(g.c.renvoNativeIntSize, lhsResolved.kind)
+lhsSize := renvoNativeScalarStorageSize(meta, lhsType)
 renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, lhsSize)
 return true
 }
@@ -11291,7 +11293,7 @@ renvoAsmLoadSecondaryStack(&g.asm, addrOffset)
 renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, 8)
 return true
 }
-if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, renvoScalarKindSize(g.c.renvoNativeIntSize, resolvedKind)) &&
+if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, renvoNativeScalarStorageSize(g.meta, typ)) &&
 (renvoTypeKindIsScalarValue(resolvedKind) || resolvedKind == renvoTypePointer || resolvedKind == renvoTypeFunc) &&
 renvoTypeSize(g.meta, typ) <= g.c.renvoNativeIntSize {
 if !renvoEmitScalarExprForKind(g, ep, idx, resolvedKind) {
@@ -11299,7 +11301,7 @@ return false
 }
 renvoAsmLoadSecondaryStack(&g.asm, addrOffset)
 renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0,
-renvoScalarKindSize(g.c.renvoNativeIntSize, resolvedKind))
+renvoNativeScalarStorageSize(g.meta, typ))
 return true
 }
 tempOffset := renvoAddUnnamedLocal(g, typ)
@@ -18073,7 +18075,7 @@ if !renvoEmitIndexAddressPrimary(g, ep, idx) {
 return false
 }
 renvoAsmCopyPrimaryToSecondary(a)
-renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoNativeScalarStorageSize(meta, baseResolved.elem))
 
 
 renvoAsmNormalizePrimaryForKind(a, elem.kind)
@@ -24711,7 +24713,7 @@ fieldType := renvoStructFieldType(g, sliceType.elem, fieldStart, fieldEnd)
 if !renvoEmitIndexedSelectorAddressSecondary(g, ep, indexIdx, fieldOffset) {
 return false
 }
-renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, renvoResolveType(g.meta, fieldType).kind))
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoNativeScalarStorageSize(g.meta, fieldType))
 return true
 }
 
@@ -25044,8 +25046,9 @@ return false
 }
 renvoEmitRuntimeNonNilPrimary(g)
 renvoAsmCopyPrimaryToSecondary(a)
-targetKind := renvoPointerTargetKind(g, ep, e.left)
-size := renvoScalarKindSize(g.c.renvoNativeIntSize, targetKind)
+targetType := renvoInferParsedExprType(g, ep, idx)
+targetKind := renvoResolveType(meta, targetType).kind
+size := renvoNativeScalarStorageSize(meta, targetType)
 renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
 renvoAsmNormalizePrimaryForKind(a, targetKind)
 return true
