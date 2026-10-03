@@ -62,7 +62,7 @@ go compiler {
 			return 1
 		}
 		meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-		result := renvoTryCompileScalarProgram386Scratch(&prog, &meta)
+		result := renvoTryCompileScalarProgramScratch(&prog, &meta)
 		if result.ok {
 			data := result.data
 			if renvoFixedTarget == 0 {
@@ -77,76 +77,6 @@ go compiler {
 
 	func renvoAsmImageObject386(emitter *renvoAsm) []byte {
 		return renvoAsmImageRelocatableObject386(emitter)
-	}
-
-	func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		return renvoTryCompileScalarProgram386Scratch(p, meta)
-	}
-
-	func renvoTryCompileScalarProgram386Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgram386(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgram386(g)
-	}
-
-	func renvoTryCompileScalarProgram386Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgram386(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgram386(g)
-	}
-	func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-		if renvoFixedTarget == 0 {
-			if renvoIsCdeclObject(meta.c) {
-				return renvoBeginObjectProgram(p, meta)
-			}
-		}
-		appIndex := p.entryFunc
-		if appIndex < 0 {
-			return nil
-		}
-		g := new(renvoLinearGen)
-		renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
-		a := &g.asm
-		a.codeOffset = renvo386ELFCodeOffset
-		if targetIsWindows(meta.c.renvoTargetOS) {
-			a.codeOffset = renvoWinSectionRVA
-		}
-		renvoInitProgramFunctions(g, renvoFixedTarget != 0)
-		if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
-			return nil
-		}
-		return g
-	}
-
-	func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
-		renvoNonNil(g)
-		a := &g.asm
-		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-			renvoRecordObjectFunctionRanges(g)
-			if g.c.code16 && !renvo386ApplyCode16(&g.asm) {
-				return renvoCompileResult{}
-			}
-		}
-		renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
-		var data []byte
-		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-			data = renvoAsmImageObject386(a)
-		} else if targetIsWindows(g.c.renvoTargetOS) {
-			data = renvoAsmImageWindows386(a)
-		} else {
-			data = renvoAsmImage386(a)
-		}
-		var result renvoCompileResult
-		if a.patchFailed || len(data) == 0 {
-			return result
-		}
-		result.data = data
-		result.ok = true
-		return result
 	}
 
 	func renvo386ApplyCode16(a *renvoAsm) bool {
@@ -1048,6 +978,12 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		kernel_program = renvo386CompilerKernelProgram
+		program_image = renvo386CompilerProgramImage
+		finalize_object_code = renvo386CompilerFinalizeObjectCode
+		release_program_scratch = renvo386CompilerReleaseProgramScratch
+		release_program_declarations = renvo386CompilerReleaseProgramDeclarations
+		program_layout = renvo386CompilerProgramLayout
 		compact_c_value_helper = renvo386CompilerCompactCValueHelper
 		function_override = renvo386CompilerFunctionOverride
 		zero_void_return = renvo386CompilerZeroVoidReturn
@@ -4984,5 +4920,58 @@ go compiler {
 		}
 		renvoAsmRet(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramLayout(a *renvoAsm, image bool) int {
+		a.codeOffset = renvo386ELFCodeOffset
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerReleaseProgramDeclarations(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerReleaseProgramScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinalizeObjectCode(a *renvoAsm) bool {
+		return !a.c.code16 || renvo386ApplyCode16(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(a.c) {
+			result.data = renvoAsmImageObject386(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			result.data = renvoAsmImageWindows386(a)
+		} else {
+			result.data = renvoAsmImage386(a)
+		}
+	}
+}
+
+go compiler {
+	// Compatibility entrypoint; program compilation is shared.
+	func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+		return renvoTryCompileScalarProgramScratch(p, meta)
+	}
+}
+
+go compiler {
+	func renvo386CompilerKernelProgram(c *renvoCompileContext) bool {
+		return false
 	}
 }

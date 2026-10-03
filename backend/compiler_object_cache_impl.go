@@ -629,16 +629,32 @@ func renvoEmitScalarFunctionObjectCached(g *renvoLinearGen, fnIndex int) bool {
 	}
 	return true
 }
-func renvoEmitAllQueuedFunctionsCached(g *renvoLinearGen) bool {
+
+// A zero limit drains the reachable queue; a positive limit also counts
+// deferred closures, keeping an embedded caller's step bounded.
+func renvoEmitQueuedFunctionsCached(g *renvoLinearGen, queueIndex *int, functionLimit int) int {
 	renvoNonNil(g)
-	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		fnIndex := g.funcQueue[queueIndex]
+	emitted := 0
+	for *queueIndex < len(g.funcQueue) && (functionLimit == 0 || emitted < functionLimit) {
+		fnIndex := g.funcQueue[*queueIndex]
+		*queueIndex++
+		emitted++
 		if renvoDeferUnreadyQueuedClosure(g, fnIndex) {
 			continue
 		}
 		if !renvoEmitScalarFunctionObjectCached(g, fnIndex) {
-			return false
+			return fnIndex
 		}
+	}
+	return -1
+}
+
+func renvoEmitAllQueuedFunctionsCached(g *renvoLinearGen) bool {
+	queueIndex := 0
+	failed := renvoEmitQueuedFunctionsCached(g, &queueIndex, 0)
+	if failed >= 0 {
+		renvoPrintFailedFunction(g, failed)
+		return false
 	}
 	return true
 }

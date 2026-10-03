@@ -44,7 +44,7 @@ func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	renvoBuildMetaInto(&prog, &meta)
 	if !meta.ok { return 1 }
 	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-	result := renvoTryCompileScalarProgramArmScratch(&prog, &meta)
+	result := renvoTryCompileScalarProgramScratch(&prog, &meta)
 	if !result.ok {
 		renvoPrintErr("renvo: compilation failed\n")
 		return 1

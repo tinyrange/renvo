@@ -52,6 +52,7 @@ type renvoExprParse struct {}
 type renvoExpr struct {}
 type renvoFuncInfo struct {}
 type renvoAsmReserves struct {}
+type renvoCompileResult struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 type renvoCompileContext = context
@@ -251,6 +252,7 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 type renvoExpr struct {}
 type renvoFuncInfo struct {}
 type renvoAsmReserves struct {}
+type renvoCompileResult struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 type renvoCompileContext = context

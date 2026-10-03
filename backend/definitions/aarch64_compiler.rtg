@@ -329,7 +329,7 @@ go compiler {
 		}
 		meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
 		var result renvoCompileResult
-		result = renvoTryCompileScalarProgramAarch64Scratch(&prog, &meta)
+		result = renvoTryCompileScalarProgramScratch(&prog, &meta)
 		if result.ok {
 			data := result.data
 			if renvoFixedTarget == 0 {
@@ -340,126 +340,6 @@ go compiler {
 		}
 		renvoPrintErr("renvo: compilation failed\n")
 		return 1
-	}
-
-	func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		return renvoTryCompileScalarProgramAarch64Scratch(p, meta)
-	}
-
-	func renvoTryCompileScalarProgramAarch64Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		session := renvoBeginScalarProgramAarch64(p, meta)
-		if session == nil {
-			return renvoCompileResult{}
-		}
-		for !session.stepScratch(64) {
-		}
-		return session.result
-	}
-
-	func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		session := renvoBeginScalarProgramAarch64(p, meta)
-		if session == nil {
-			return renvoCompileResult{}
-		}
-		for !session.stepCached(64) {
-		}
-		return session.result
-	}
-
-	type renvoAarch64ProgramSession struct {
-		prog       *renvoProgram
-		gen        renvoLinearGen
-		queueIndex int
-		done       bool
-		result     renvoCompileResult
-	}
-
-	func renvoBeginScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) *renvoAarch64ProgramSession {
-		appIndex := p.entryFunc
-		if appIndex < 0 {
-			return nil
-		}
-		session := &renvoAarch64ProgramSession{prog: p}
-		g := &session.gen
-		renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
-		a := &g.asm
-		a.codeOffset = renvoAarch64ELFCodeOffset
-		if targetIsWindows(meta.c.renvoTargetOS) {
-			a.codeOffset = renvoWinSectionRVA
-		}
-		if targetIsDarwin(meta.c.renvoTargetOS) {
-			a.codeOffset = renvoDarwinArm64CodeOffset
-			if !(renvoFixedTarget == 0 && meta.c.emitImage) {
-				g.darwinEntryOff = a.bssSize
-				a.bssSize += renvoDarwinArm64EntryStateBytes
-				if !renvoDarwinArm64DefinitionEntryStart(a, g.darwinEntryOff) {
-					return nil
-				}
-			}
-		}
-		renvoInitProgramFunctions(g, renvoFixedTarget != 0)
-		if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
-			return nil
-		}
-		return session
-	}
-
-	func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
-		return s.stepCached(functionLimit)
-	}
-
-	func (s *renvoAarch64ProgramSession) stepScratch(functionLimit int) bool {
-		if s == nil || s.done {
-			return true
-		}
-		if functionLimit < 1 {
-			functionLimit = 1
-		}
-		emitted := 0
-		for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
-			i := s.gen.funcQueue[s.queueIndex]
-			s.queueIndex++
-			emitted++
-			if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
-				continue
-			}
-			if !renvoEmitScalarFunctionScratch(&s.gen, i) {
-				return s.failFunction(i)
-			}
-		}
-		return s.finishStep()
-	}
-
-	func (s *renvoAarch64ProgramSession) stepCached(functionLimit int) bool {
-		if s == nil || s.done {
-			return true
-		}
-		if functionLimit < 1 {
-			functionLimit = 1
-		}
-		emitted := 0
-		for s.queueIndex < len(s.gen.funcQueue) && emitted < functionLimit {
-			i := s.gen.funcQueue[s.queueIndex]
-			s.queueIndex++
-			emitted++
-			if renvoDeferUnreadyQueuedClosure(&s.gen, i) {
-				continue
-			}
-			if !renvoEmitScalarFunctionObjectCached(&s.gen, i) {
-				return s.failFunction(i)
-			}
-		}
-		return s.finishStep()
-	}
-
-	func (s *renvoAarch64ProgramSession) failFunction(i int) bool {
-		if targetIsDarwin(s.gen.c.renvoTargetOS) {
-			renvoPrintErr("renvo: failed to emit function ")
-			write(2, s.prog.src[s.gen.meta.funcs[i].nameStart:s.gen.meta.funcs[i].nameEnd], -1)
-			renvoPrintErr("\n")
-		}
-		s.done = true
-		return true
 	}
 
 	// Image assembly is terminal: reuse spare code capacity rather than keeping
@@ -485,28 +365,6 @@ go compiler {
 		return out
 	}
 
-	func (s *renvoAarch64ProgramSession) finishStep() bool {
-		if s.queueIndex < len(s.gen.funcQueue) {
-			return false
-		}
-		a := &s.gen.asm
-		var data []byte
-		if targetIsWindows(s.gen.c.renvoTargetOS) {
-			data = renvoAsmImageWindowsArm64(a)
-		} else if targetIsDarwin(s.gen.c.renvoTargetOS) {
-			data = renvoDarwinArm64Image(a)
-		} else {
-			data = renvoAsmImageAarch64ReuseCode(a, a.code)
-		}
-		if a.patchFailed || len(data) == 0 {
-			s.done = true
-			return true
-		}
-		s.result.data = data
-		s.result.ok = true
-		s.done = true
-		return true
-	}
 	func renvoAarch64AsmFrameStart(a *renvoAsm) int {
 		at := len(a.code)
 		count := 2
@@ -562,6 +420,12 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		kernel_program = renvoAarch64CompilerKernelProgram
+		program_image = renvoAarch64CompilerProgramImage
+		finalize_object_code = renvoAarch64CompilerFinalizeObjectCode
+		release_program_scratch = renvoAarch64CompilerReleaseProgramScratch
+		release_program_declarations = renvoAarch64CompilerReleaseProgramDeclarations
+		program_layout = renvoAarch64CompilerProgramLayout
 		compact_c_value_helper = renvoAarch64CompilerCompactCValueHelper
 		function_override = renvoAarch64CompilerFunctionOverride
 		zero_void_return = renvoAarch64CompilerZeroVoidReturn
@@ -3308,6 +3172,74 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramLayout(a *renvoAsm, image bool) int {
+		a.codeOffset = renvoAarch64ELFCodeOffset
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			a.codeOffset = renvoDarwinArm64CodeOffset
+			if !image {
+				offset := a.bssSize
+				a.bssSize += renvoDarwinArm64EntryStateBytes
+				if !renvoDarwinArm64DefinitionEntryStart(a, offset) {
+					return -2
+				}
+				return offset
+			}
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerReleaseProgramDeclarations(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerReleaseProgramScratch(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerFinalizeObjectCode(a *renvoAsm) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+		if targetIsWindows(a.c.renvoTargetOS) {
+			result.data = renvoAsmImageWindowsArm64(a)
+		} else if targetIsDarwin(a.c.renvoTargetOS) {
+			result.data = renvoDarwinArm64Image(a)
+		} else {
+			result.data = renvoAsmImageAarch64ReuseCode(a, a.code)
+		}
+	}
+}
+
+go compiler {
+	// Compatibility entrypoint; program compilation is shared.
+	func renvoTryCompileScalarProgramAarch64(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+		return renvoTryCompileScalarProgramScratch(p, meta)
+	}
+
+	func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+		return renvoTryCompileScalarProgramCached(p, meta)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerKernelProgram(c *renvoCompileContext) bool {
 		return false
 	}
 }

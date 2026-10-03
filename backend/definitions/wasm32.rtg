@@ -4150,6 +4150,12 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		kernel_program = renvoWasm32CompilerKernelProgram
+		program_image = renvoWasm32CompilerProgramImage
+		finalize_object_code = renvoWasm32CompilerFinalizeObjectCode
+		release_program_scratch = renvoWasm32CompilerReleaseProgramScratch
+		release_program_declarations = renvoWasm32CompilerReleaseProgramDeclarations
+		program_layout = renvoWasm32CompilerProgramLayout
 		compact_c_value_helper = renvoWasm32CompilerCompactCValueHelper
 		function_override = renvoWasm32CompilerFunctionOverride
 		zero_void_return = renvoWasm32CompilerZeroVoidReturn
@@ -6672,6 +6678,49 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramLayout(a *renvoAsm, image bool) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReleaseProgramDeclarations(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReleaseProgramScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFinalizeObjectCode(a *renvoAsm) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+		if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && a.c.renvoTarget == renvoTargetVM32 {
+			result.data = renvoVMImage(a)
+		} else {
+			// Preserve ownership across the call: a slice return copies the whole
+			// image in a self-hosted compiler.
+			image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
+			result.data = image.data[:image.length]
+		}
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerKernelProgram(c *renvoCompileContext) bool {
 		return false
 	}
 }

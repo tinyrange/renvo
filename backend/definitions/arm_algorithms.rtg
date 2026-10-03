@@ -458,41 +458,6 @@ go compiler {
 		return g.streqLabel
 	}
 
-	func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		return renvoTryCompileScalarProgramArmScratch(p, meta)
-	}
-
-	func renvoTryCompileScalarProgramArmScratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgramArm(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgramArm(g)
-	}
-
-	func renvoTryCompileScalarProgramArmCached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgramArm(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgramArm(g)
-	}
-	func renvoBeginScalarProgramArm(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-		appIndex := p.entryFunc
-		if appIndex < 0 {
-			return nil
-		}
-		g := new(renvoLinearGen)
-		renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
-		a := &g.asm
-		a.codeOffset = renvoLinuxArmCodeOffset
-		renvoInitProgramFunctions(g, renvoFixedTarget != 0)
-		if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
-			return nil
-		}
-		return g
-	}
-
 	// Image assembly is terminal: reuse spare code capacity rather than keeping
 	// both the instruction buffer and a second executable-sized allocation live.
 	func renvoAsmImageArmReuseCode(a *renvoAsm, out []byte) []byte {
@@ -514,19 +479,6 @@ go compiler {
 		}
 		return out
 	}
-
-	func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
-		renvoNonNil(g)
-		a := &g.asm
-		data := renvoAsmImageArmReuseCode(a, a.code)
-		var result renvoCompileResult
-		if a.patchFailed || len(data) == 0 {
-			return result
-		}
-		result.data = data
-		result.ok = true
-		return result
-	}
 }
 
 # Bundled lowering hooks. Prepared backends use the same semantic operations
@@ -534,6 +486,12 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		kernel_program = renvoArmCompilerKernelProgram
+		program_image = renvoArmCompilerProgramImage
+		finalize_object_code = renvoArmCompilerFinalizeObjectCode
+		release_program_scratch = renvoArmCompilerReleaseProgramScratch
+		release_program_declarations = renvoArmCompilerReleaseProgramDeclarations
+		program_layout = renvoArmCompilerProgramLayout
 		compact_c_value_helper = renvoArmCompilerCompactCValueHelper
 		function_override = renvoArmCompilerFunctionOverride
 		zero_void_return = renvoArmCompilerZeroVoidReturn
@@ -2978,6 +2936,50 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramLayout(a *renvoAsm, image bool) int {
+		a.codeOffset = renvoLinuxArmCodeOffset
+		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerReleaseProgramDeclarations(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerReleaseProgramScratch(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerFinalizeObjectCode(a *renvoAsm) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+		result.data = renvoAsmImageArmReuseCode(a, a.code)
+	}
+}
+
+go compiler {
+	// Compatibility entrypoint; program compilation is shared.
+	func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+		return renvoTryCompileScalarProgramScratch(p, meta)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerKernelProgram(c *renvoCompileContext) bool {
 		return false
 	}
 }

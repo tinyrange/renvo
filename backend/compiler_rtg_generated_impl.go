@@ -805,6 +805,194 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoKernelProgram(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(c)
+	
+}
+return false
+}
+
+func renvoBuildProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget == 0 && renvoIsSysVObject(a.c) {
+			result.data = renvoAsmImageObjectAmd64(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			// PE imports need final branch positions before section RVAs are patched.
+			renvoAmd64RelaxBranches(a)
+			result.data = renvoAsmImageWindowsAmd64(a)
+		} else if renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			result.data = renvoAsmImageKernelModuleAmd64(a, initLabel, exitLabel)
+		} else {
+			result.data = renvoAsmImageAmd64(a)
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(a.c) {
+			result.data = renvoAsmImageObject386(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			result.data = renvoAsmImageWindows386(a)
+		} else {
+			result.data = renvoAsmImage386(a)
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsWindows(a.c.renvoTargetOS) {
+			result.data = renvoAsmImageWindowsArm64(a)
+		} else if targetIsDarwin(a.c.renvoTargetOS) {
+			result.data = renvoDarwinArm64Image(a)
+		} else {
+			result.data = renvoAsmImageAarch64ReuseCode(a, a.code)
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		result.data = renvoAsmImageArmReuseCode(a, a.code)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && a.c.renvoTarget == renvoTargetVM32 {
+			result.data = renvoVMImage(a)
+		} else {
+			// Preserve ownership across the call: a slice return copies the whole
+			// image in a self-hosted compiler.
+			image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
+			result.data = image.data[:image.length]
+		}
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoFinalizeObjectCode(a *renvoAsm) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return !a.c.code16 || renvo386ApplyCode16(a)
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoReleaseProgramScratch(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+return false
+}
+
+func renvoReleaseProgramDeclarations(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return true
+	
+}
+return false
+}
+
+func renvoSetupProgramLayout(a *renvoAsm, image bool) int {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		a.codeOffset = renvoAmd64ELFCodeOffset
+		if renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSOpenBSD {
+			a.codeOffset = renvoOpenBSDAmd64ELFCodeOffset
+		}
+		if renvoFixedTarget == renvoTargetNetBSDAmd64 || renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSNetBSD {
+			a.codeOffset = renvoNetBSDAmd64ELFCodeOffset
+		}
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		return 0
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		a.codeOffset = renvo386ELFCodeOffset
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		return 0
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		a.codeOffset = renvoAarch64ELFCodeOffset
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			a.codeOffset = renvoDarwinArm64CodeOffset
+			if !image {
+				offset := a.bssSize
+				a.bssSize += renvoDarwinArm64EntryStateBytes
+				if !renvoDarwinArm64DefinitionEntryStart(a, offset) {
+					return -2
+				}
+				return offset
+			}
+		}
+		return 0
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		a.codeOffset = renvoLinuxArmCodeOffset
+		return 0
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return 0
+	
+}
+a.patchFailed = true
+return -2
+}
+
 func renvoEmitCompactCValueHelperBody(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
