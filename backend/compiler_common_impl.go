@@ -3232,7 +3232,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 	}
 	if e.kind == renvoExprCall {
 		if renvoFixedTarget == 0 {
-			if renvoPureCallConstants(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
+			if g.c.objectFile && renvoPureCallConstants(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
 				fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 				if fnIndex >= 0 {
 					fn := &g.meta.funcs[fnIndex]
@@ -8925,7 +8925,7 @@ func renvoEmitLinearIf(g *renvoLinearGen, stmt *renvoStmt) bool {
 		if fixedValue < 0 && (literalBool || !renvoRangeContainsLabel(p, stmt.bodyStart, stmt.bodyEnd) &&
 			!renvoRangeContainsLabel(p, stmt.elseStart, stmt.elseEnd)) {
 			oldFlow := g.constEvalFlow
-			g.constEvalFlow = oldFlow || renvoFlowConstantPropagation(g.c)
+			g.constEvalFlow = oldFlow || g.c.objectFile && renvoFlowConstantPropagation(g.c)
 			constant := renvoEvalConstExpr(g, ep, rootIndex)
 			g.constEvalFlow = oldFlow
 			if constant.ok {
@@ -11701,7 +11701,7 @@ func renvoClearLocalFlowConstAtOffset(g *renvoLinearGen, offset int) {
 }
 
 func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int) bool {
-	if !renvoFlowConstantPropagation(g.c) {
+	if !g.c.objectFile || !renvoFlowConstantPropagation(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -11716,7 +11716,7 @@ func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nam
 // function-wide constants.
 func renvoTopLevelAssignmentDominates(g *renvoLinearGen, assignmentTok int) bool {
 	renvoNonNil(g)
-	if !renvoFlowConstantPropagation(g.c) || g.flowControlDepth != 0 ||
+	if !g.c.objectFile || !renvoFlowConstantPropagation(g.c) || g.flowControlDepth != 0 ||
 		g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) {
 		return false
 	}
@@ -11766,7 +11766,7 @@ func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd
 		return false
 	}
 	renvoNonNil(g)
-	if !renvoFlowConstantPropagation(g.c) {
+	if !g.c.objectFile || !renvoFlowConstantPropagation(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -14272,7 +14272,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	fn := &g.meta.funcs[fnIndex]
 	if renvoFixedTarget == 0 {
-		if renvoElideEmptyCalls(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
+		if g.c.objectFile && renvoElideEmptyCalls(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
 			fn.linkStatic == 0 && fn.bodyStart == fn.bodyEnd &&
 			!renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_") &&
 			renvoCallArgumentsDiscardable(g, ep, e) {
@@ -14921,8 +14921,8 @@ func renvoEmitFunctionValueCall(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
 	wordBytes := renvoObjectArgumentWordBytes(g.c)
-	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		return renvoEmitCdeclObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
+	if renvoFixedTarget == 0 && renvoObjectStackScalarABI(g.c) {
+		return renvoEmitObjectStackScalarFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 	}
 	if functionType.resolved != 0 || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
@@ -21351,8 +21351,8 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 	}
 	fn := &g.meta.funcs[fnIndex]
 	wordCount := renvoObjectExportWordCount(g.meta, fn)
-	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		wordCount = renvoObjectExportWordCount386(g.meta, fn)
+	if renvoFixedTarget == 0 && renvoObjectStackScalarABI(g.c) {
+		wordCount = renvoObjectScalarPairExportWordCount(g.meta, fn)
 		if wordCount < 0 {
 			wordCount = renvoObjectExportWordCount(g.meta, fn)
 		}
@@ -21372,8 +21372,8 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 		g.asm.symbols[symbolIndex].sectionEnd = sectionEnd
 		g.asm.symbols[symbolIndex].alignment = decl.alignment
 	}
-	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		if !renvoEmitCdeclObjectWrapperBody(g, fnIndex, wordCount, false) {
+	if renvoFixedTarget == 0 && renvoObjectStackScalarABI(g.c) {
+		if !renvoEmitObjectStackScalarWrapperBody(g, fnIndex, wordCount, false) {
 			return 0, 0, false
 		}
 		endLabel := renvoAsmNewLabel(&g.asm)
@@ -21753,19 +21753,25 @@ func renvoBeginLinearProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta
 	renvoInitProgramFunctions(g, renvoFixedTarget != 0)
 }
 
-func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
+func renvoObjectScalarPairExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
+	wordBytes := renvoObjectArgumentWordBytes(meta.c)
+	if wordBytes <= 0 {
+		return -1
+	}
 	if fn.receiverType != 0 || fn.literalTok != 0 || fn.linkStatic != 0 {
 		return -1
 	}
 	if fn.resultType != 0 {
 		result := renvoResolveType(meta, fn.resultType)
 		if (!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
-			renvoTypeSize(meta, fn.resultType) > 8 {
+			renvoTypeSize(meta, fn.resultType) > 2*wordBytes {
 			return -1
 		}
-		// The internal 32-bit ABI returns wide scalars through a hidden pointer;
-		// the i386 C ABI publishes the same two words in edx:eax.
-		if renvoTypeUsesHiddenResult(meta, fn.resultType) && renvoTypeSize(meta, fn.resultType) != 8 {
+		// The internal convention uses a hidden pointer for wide scalars.
+		// This adapter publishes exactly two object words through the target
+		// aggregate-result operation instead; other hidden results need a
+		// different adapter.
+		if renvoTypeUsesHiddenResult(meta, fn.resultType) && renvoTypeSize(meta, fn.resultType) != 2*wordBytes {
 			return -1
 		}
 	}
@@ -21774,7 +21780,7 @@ func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
 		typ := meta.params[fn.firstParam+i].typ
 		param := renvoResolveType(meta, typ)
 		if (!renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc) ||
-			renvoTypeKindIsScalarInt(param.kind) && renvoTypeSize(meta, typ) > 4 {
+			renvoTypeKindIsScalarInt(param.kind) && renvoTypeSize(meta, typ) > wordBytes {
 			return -1
 		}
 		words++
@@ -21782,13 +21788,13 @@ func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
 	return words
 }
 
-func renvoEmitCdeclObjectWrapperBody(g *renvoLinearGen, fnIndex int, wordCount int, variadic bool) bool {
+func renvoEmitObjectStackScalarWrapperBody(g *renvoLinearGen, fnIndex int, wordCount int, variadic bool) bool {
 	if wordCount < 0 || fnIndex < 0 || fnIndex >= len(g.meta.funcs) || variadic && wordCount < 1 {
 		return false
 	}
 	fn := &g.meta.funcs[fnIndex]
 	wideResult := fn.resultType != 0 && renvoTypeUsesHiddenResult(g.meta, fn.resultType) &&
-		renvoTypeSize(g.meta, fn.resultType) == 2*g.c.renvoNativeIntSize
+		renvoTypeSize(g.meta, fn.resultType) == 2*renvoObjectArgumentWordBytes(g.c)
 	renvoObjectExportFrame(g, true)
 	if wideResult && !renvoBeginObjectAggregateResult(&g.asm, false) {
 		return false
@@ -21838,9 +21844,9 @@ func renvoEmitCdeclObjectWrapperBody(g *renvoLinearGen, fnIndex int, wordCount i
 	return true
 }
 
-func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
+func renvoEmitObjectStackScalarExport(g *renvoLinearGen, fnIndex int) bool {
 	fn := &g.meta.funcs[fnIndex]
-	wordCount := renvoObjectExportWordCount386(g.meta, fn)
+	wordCount := renvoObjectScalarPairExportWordCount(g.meta, fn)
 	if wordCount < 0 {
 		wordCount = renvoObjectExportWordCount(g.meta, fn)
 	}
@@ -21856,7 +21862,7 @@ func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
 	variadic := decl != nil && decl.kind == renvoObjectDeclFunction && decl.relocationAddend != 0
 	symbolIndex := renvoAsmAddObjectFuncSymbol(
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
-	if !renvoEmitCdeclObjectWrapperBody(g, fnIndex, wordCount, variadic) {
+	if !renvoEmitObjectStackScalarWrapperBody(g, fnIndex, wordCount, variadic) {
 		return false
 	}
 	endLabel := renvoAsmNewLabel(&g.asm)
@@ -21942,8 +21948,8 @@ func renvoEmitObjectRegisterWrapperBody(g *renvoLinearGen, fnIndex int, wordCoun
 
 func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	renvoNonNil(g)
-	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		return renvoEmitObjectExport386(g, fnIndex)
+	if renvoFixedTarget == 0 && renvoObjectStackScalarABI(g.c) {
+		return renvoEmitObjectStackScalarExport(g, fnIndex)
 	}
 	fn := &g.meta.funcs[fnIndex]
 	wordCount := renvoObjectExportWordCount(g.meta, fn)
@@ -22315,7 +22321,7 @@ func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 	renvoNonNil(g)
 	g.funcReachable = make([]bool, count)
 	g.funcQueue = make([]int, 0, count)
-	if renvoFixedTarget == 0 && renvoSingleCallConstants(g.c) {
+	if renvoFixedTarget == 0 && g.c.objectFile && renvoSingleCallConstants(g.c) {
 		g.funcSingleCallState = make([]int, count)
 		g.paramConstValues = make([]int, len(g.meta.params))
 		g.paramConstValid = make([]bool, len(g.meta.params))
@@ -22349,7 +22355,7 @@ func renvoRecordFunctionDirectUseCounts(g *renvoLinearGen) {
 
 func renvoRecordSingleCallConstants(g *renvoLinearGen, ep *renvoExprParse, call *renvoExpr, fnIndex int) {
 	renvoNonNil(g, ep, call)
-	if !renvoSingleCallConstants(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
+	if !g.c.objectFile || !renvoSingleCallConstants(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
 		fnIndex >= len(g.funcSingleCallState) || g.continueDepth != 0 ||
 		!renvoFunctionHasSingleDirectUse(g, fnIndex) {
 		return
@@ -25095,8 +25101,9 @@ func renvoEmitWordIntrinsicCall(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 	return -1
 }
 
-func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
+func renvoEmitObjectStackScalarFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
+	wordBytes := renvoObjectArgumentWordBytes(g.c)
 	if functionType.resolved != 0 || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 		return false
 	}
@@ -25104,14 +25111,14 @@ func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *re
 		paramType := g.meta.fields[functionType.first+i].typ
 		param := renvoResolveType(g.meta, paramType)
 		if (!renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc) ||
-			renvoTypeSize(g.meta, paramType) > g.c.renvoNativeIntSize {
+			renvoTypeSize(g.meta, paramType) > wordBytes {
 			return false
 		}
 	}
 	result := renvoResolveType(g.meta, functionType.elem)
 	if functionType.elem != 0 &&
 		((!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
-			renvoTypeSize(g.meta, functionType.elem) > g.c.renvoNativeIntSize) {
+			renvoTypeSize(g.meta, functionType.elem) > wordBytes) {
 		return false
 	}
 	if !renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets) {

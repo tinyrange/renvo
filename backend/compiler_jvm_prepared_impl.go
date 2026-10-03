@@ -4365,6 +4365,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsCdeclObject(c)
+}
+
 func renvoSingleCallConstants(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return renvoIsSysVObject(c)

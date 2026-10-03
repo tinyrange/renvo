@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_stack_scalar_abi = renvoWasm32CompilerObjectStackScalarABI
 		single_call_constants = renvoWasm32CompilerSingleCallConstants
 		elide_empty_calls = renvoWasm32CompilerElideEmptyCalls
 		pure_call_constants = renvoWasm32CompilerPureCallConstants
@@ -7076,5 +7077,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerSingleCallConstants(c *renvoCompileContext) bool {
 		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectStackScalarABI(c *renvoCompileContext) bool {
+		return false
 	}
 }

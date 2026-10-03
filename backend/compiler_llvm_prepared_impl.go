@@ -2114,6 +2114,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsCdeclObject(c)
+}
+
 func renvoSingleCallConstants(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return renvoIsSysVObject(c)
