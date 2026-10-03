@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d3202b035ed67abb72c7071b38f0db1c63bb89d05eeffa5bab1842168e085a1d"
+const CompilerSourceDigest = "2c05a809d3a8cc34e04d3316688ba3390aa4d8310e4d41aeac8105bc1265cbae"
 
 // source: backend/compiler_common_impl.go
 
@@ -111,10 +111,7 @@ return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABI
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
-if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
-return c != nil && c.objectFile && !targetIsKernelModule(c)
-}
-return renvoIsSysVObject(c) || renvoIsCdeclObject(c)
+return c != nil && renvoTargetHostedObject(c)
 }
 
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
@@ -375,11 +372,11 @@ return false
 
 func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 renvoNonNil(g)
+stableOrder := renvoMayRequireStableFunctionOrder && renvoStableFunctionOrder(g.c)
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 
 
-
-if renvoPreparedBackendActive != 0 {
+if stableOrder {
 for i := queueIndex + 1; i < len(g.funcQueue); i++ {
 if g.funcQueue[i] < g.funcQueue[queueIndex] {
 g.funcQueue[i], g.funcQueue[queueIndex] = g.funcQueue[queueIndex], g.funcQueue[i]
@@ -5133,7 +5130,7 @@ return false
 
 func renvoReachablePanicRequired(m *renvoMeta) bool {
 p := m.prog
-if m.c.objectFile || m.c.emitImage || targetIsKernelModule(m.c) || renvoPreparedBackendActive != 0 || p.entryFunc < 0 || p.entryFunc >= len(m.funcs) {
+if m.c.objectFile || m.c.emitImage || targetIsKernelModule(m.c) || renvoRetainPanicRuntime(m.c) || p.entryFunc < 0 || p.entryFunc >= len(m.funcs) {
 return true
 }
 var state renvoPanicReachability
@@ -20491,13 +20488,8 @@ g.funcQueue = append(g.funcQueue, fnIndex)
 
 
 
-if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
+if renvoObjectProgram(g.c) {
 return
-}
-if renvoFixedTarget == 0 {
-if renvoIsHostedObject(g.c) {
-return
-}
 }
 if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
 return
@@ -29050,7 +29042,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x72\x8e\xb3\x96\x65\x76\xe9\x61\x09\x1e\x6b\x51\xec\xbe\x32\x3d\x1f\x79\x5a\x20\x0a\x81\xac\x8d\x65\x8f\x53\x8b\xb6\xdf\xb4\x78", 3, true
+return "wasi/wasm32", "\x66\xb5\xea\xf5\x2d\x75\xf0\x06\xdb\x67\x66\x83\xb3\xe1\xc5\xea\xb7\xf4\x7f\xb8\x66\x87\x86\x3d\xd0\x84\x24\x04\x91\x14\x35\x03", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29062,7 +29054,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x74\x2a\xa5\xc5\x5c\x41\xbe\x9e\x7c\x2f\x07\xa0\x44\xdc\xd4\x5b\xca\xc7\x00\x28\x96\xbc\xc9\x2b\xf5\xc6\x16\x27\xda\x85\xed\x5b", 3, true
+return "vm/vm32", "\xd5\x29\xe4\x45\x01\xd4\x7f\xed\x0e\xcd\x67\x02\x79\x82\x0a\x76\x6e\xf8\xe9\xfd\xc3\x99\x11\x62\x4c\x57\x2b\x3e\xb4\x3f\x80\xea", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30441,6 +30433,39 @@ return 0
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
+
+func renvoTargetHostedObject(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+return renvoIsCdeclObject(c)
+
+}
+return false
+}
+
+func renvoRetainPanicRuntime(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+func renvoStableFunctionOrder(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayRequireStableFunctionOrder = false
 
 func renvoProgramFailureExitCode(c *renvoCompileContext) int {
 renvoNonNil(c)
@@ -46373,6 +46398,12 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49269,6 +49300,12 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51921,6 +51958,12 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53579,6 +53622,12 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
 
 
 
@@ -56804,6 +56853,12 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
 
 
 

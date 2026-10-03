@@ -805,6 +805,39 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTargetHostedObject(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoIsSysVObject(c)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvoIsCdeclObject(c)
+	
+}
+return false
+}
+
+func renvoRetainPanicRuntime(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+func renvoStableFunctionOrder(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayRequireStableFunctionOrder = false
+
 func renvoProgramFailureExitCode(c *renvoCompileContext) int {
 renvoNonNil(c)
 renvoCompilerSelector := c

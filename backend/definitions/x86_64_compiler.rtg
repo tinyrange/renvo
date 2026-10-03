@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		hosted_object = renvoAmd64CompilerHostedObject
+		retain_panic_runtime = renvoAmd64CompilerRetainPanicRuntime
+		stable_function_order = renvoAmd64CompilerStableFunctionOrder
 		program_failure_exit_code = renvoAmd64CompilerProgramFailureExitCode
 		program_result_valid = renvoAmd64CompilerProgramResultValid
 		program_emission_valid = renvoAmd64CompilerProgramEmissionValid
@@ -4512,5 +4515,23 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerProgramFailureExitCode(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStableFunctionOrder(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerRetainPanicRuntime(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerHostedObject(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
 	}
 }

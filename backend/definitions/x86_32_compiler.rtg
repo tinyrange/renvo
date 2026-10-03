@@ -952,6 +952,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		hosted_object = renvo386CompilerHostedObject
+		retain_panic_runtime = renvo386CompilerRetainPanicRuntime
+		stable_function_order = renvo386CompilerStableFunctionOrder
 		program_failure_exit_code = renvo386CompilerProgramFailureExitCode
 		program_result_valid = renvo386CompilerProgramResultValid
 		program_emission_valid = renvo386CompilerProgramEmissionValid
@@ -5146,5 +5149,23 @@ go compiler {
 go compiler {
 	func renvo386CompilerProgramFailureExitCode(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerStableFunctionOrder(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerRetainPanicRuntime(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHostedObject(c *renvoCompileContext) bool {
+		return renvoIsCdeclObject(c)
 	}
 }
