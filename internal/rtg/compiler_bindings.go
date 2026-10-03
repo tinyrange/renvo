@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "read_write_file", Suffix: "ReadWriteFile", Function: "renvoAsmReadWriteFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"operation", "int"}, {"hasOffset", "bool"}}, Prepared: "if hasOffset {\n\toperation += RTGRuntimeReadAt - RTGRuntimeRead\n}\nreturn renvoRTGEmitRuntimeOperation(a, operation)"},
+	{Name: "pop_read_write_offset", Suffix: "PopReadWriteOffset", Function: "renvoAsmPopReadWriteOffset", Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGAsmPopRegister(a, renvoRTGCallWord3)"},
 	{Name: "chmod_file", Suffix: "ChmodFile", Function: "renvoAsmChmodFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)"},
 	{Name: "close_file", Suffix: "CloseFile", Function: "renvoAsmCloseFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)"},
 	{Name: "open_path_length", Suffix: "OpenPathLength", Function: "renvoOpenPathNeedsLength", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},

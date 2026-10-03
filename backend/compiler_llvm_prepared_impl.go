@@ -2106,6 +2106,19 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmReadWriteFile(a *renvoAsm, operation int, hasOffset bool) bool {
+renvoNonNil(a)
+if hasOffset {
+	operation += RTGRuntimeReadAt - RTGRuntimeRead
+}
+return renvoRTGEmitRuntimeOperation(a, operation)
+}
+
+func renvoAsmPopReadWriteOffset(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPopRegister(a, renvoRTGCallWord3)
+}
+
 func renvoAsmChmodFile(a *renvoAsm) bool {
 renvoNonNil(a)
 return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)
