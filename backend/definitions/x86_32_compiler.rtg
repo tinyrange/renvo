@@ -952,6 +952,11 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		function_address_layout = renvo386CompilerFunctionAddressLayout
+		reconstruct_wide_argument = renvo386CompilerReconstructWideArgument
+		scaled_atom_literals = renvo386CompilerScaledAtomLiterals
+		wide_float_locals = renvo386CompilerWideFloatLocals
+		scaled_float64_values = renvo386CompilerScaledFloat64Values
 		result_copy_via_frame = renvo386CompilerResultCopyViaFrame
 		reserve_function_labels = renvo386CompilerReserveFunctionLabels
 		optimize_program_runtime = renvo386CompilerOptimizeProgramRuntime
@@ -5224,5 +5229,35 @@ go compiler {
 go compiler {
 	func renvo386CompilerResultCopyViaFrame(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerScaledFloat64Values(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideFloatLocals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerScaledAtomLiterals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerReconstructWideArgument(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionAddressLayout(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && c.objectFile
 	}
 }

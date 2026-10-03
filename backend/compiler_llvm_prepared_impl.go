@@ -2114,6 +2114,39 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoFunctionAddressLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && c.objectFile
+}
+
+const renvoMayReconstructWideArgument = true
+
+func renvoReconstructWideArgument(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return c.renvoNativeIntSize == 8
+}
+
+const renvoMayUseScaledAtomLiterals = true
+
+func renvoScaledAtomLiterals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+const renvoMayUseWideFloatLocals = true
+
+func renvoWideFloatLocals(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGPreparedIEEEFloat != 0
+}
+
+const renvoMayUseScaledFloat64Values = true
+
+func renvoScaledFloat64Values(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGPreparedIEEEFloat == 0
+}
+
 const renvoMayCopyResultViaFrame = true
 
 func renvoResultCopyViaFrame(c *renvoCompileContext) bool {

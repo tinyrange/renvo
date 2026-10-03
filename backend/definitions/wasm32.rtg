@@ -4150,6 +4150,11 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		function_address_layout = renvoWasm32CompilerFunctionAddressLayout
+		reconstruct_wide_argument = renvoWasm32CompilerReconstructWideArgument
+		scaled_atom_literals = renvoWasm32CompilerScaledAtomLiterals
+		wide_float_locals = renvoWasm32CompilerWideFloatLocals
+		scaled_float64_values = renvoWasm32CompilerScaledFloat64Values
 		result_copy_via_frame = renvoWasm32CompilerResultCopyViaFrame
 		reserve_function_labels = renvoWasm32CompilerReserveFunctionLabels
 		optimize_program_runtime = renvoWasm32CompilerOptimizeProgramRuntime
@@ -7006,5 +7011,35 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerResultCopyViaFrame(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerScaledFloat64Values(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWideFloatLocals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerScaledAtomLiterals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReconstructWideArgument(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFunctionAddressLayout(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && c.objectFile
 	}
 }
