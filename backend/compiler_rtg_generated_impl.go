@@ -805,6 +805,15 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTupleParameterLayout(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayUseTupleParameterLayout = false
+
 func renvoTargetHostedObject(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -1662,13 +1671,10 @@ func renvoTargetStructArgumentByReference(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
-
-		return true
-	
-}
 return false
 }
+
+const renvoMayPassStructPointers = false
 
 func renvoTargetResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
 renvoNonNil(c)

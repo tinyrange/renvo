@@ -1,9 +1,5 @@
 package main
 
-func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-	return kind == renvoTypeStruct && renvoTargetStructArgumentByReference(g.c)
-}
-
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoNonNil(g)
 	a := &g.asm
