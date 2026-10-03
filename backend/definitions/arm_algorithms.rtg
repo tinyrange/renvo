@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		string_compare_arguments = renvoArmCompilerStringCompareArguments
+		object_absolute_address = renvoArmCompilerObjectAbsoluteAddress
+		object_fault_trap = renvoArmCompilerObjectFaultTrap
 		object_indirect_aggregate = renvoArmCompilerObjectIndirectAggregate
 		object_word_limit = renvoArmCompilerObjectWordLimit
 		object_argument_word_bytes = renvoArmCompilerObjectArgumentWordBytes
@@ -3073,5 +3076,29 @@ go compiler {
 go compiler {
 	func renvoArmCompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectFaultTrap(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStringCompareArguments(a *renvoAsm, left int, right int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+		renvoAsmPushStringRegs(a)
+		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAsmPopCallWord1(a)
 	}
 }

@@ -616,3 +616,74 @@ func renvoRTGValidateRelocations(out *renvoAsm) {
 		}
 	}
 }
+
+// Prepared physical carriers use the selected descriptor registers.
+func renvoRTGBeginObjectAggregateResult(a *renvoAsm, preserveSRet bool) bool {
+	if renvoRTGStackWordBytes != 8 || !renvoRTGStack.Valid ||
+		!renvoRTGPrimary.Valid || !renvoRTGSecondary.Valid {
+		return false
+	}
+	renvoRTGAdjustObjectStack(a, true)
+	renvoRTGAdjustObjectStack(a, true)
+	if preserveSRet {
+		if !renvoRTGCallWord0.Valid {
+			return false
+		}
+		renvoRTGDirectStoreNative(a,
+			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
+			renvoRTGCallWord0)
+	}
+	return true
+}
+
+func renvoRTGPushObjectSRetPointer(a *renvoAsm) bool {
+	if !renvoRTGCallWord0.Valid {
+		return false
+	}
+	renvoRTGAsmPushRegister(a, renvoRTGCallWord0)
+	return true
+}
+
+func renvoRTGPushObjectPrivateResult(a *renvoAsm, argumentWords int) bool {
+	if argumentWords < 0 || !renvoRTGStack.Valid || !renvoRTGPrimary.Valid {
+		return false
+	}
+	address := renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
+		argumentWords*renvoRTGStackWordBytes, 1)
+	renvoRTGDirectAddress(a, renvoRTGPrimary, address)
+	renvoRTGAsmPushRegister(a, renvoRTGPrimary)
+	return true
+}
+
+func renvoRTGFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1))
+	if resultWords > 1 {
+		renvoRTGDirectLoadNative(a, renvoRTGSecondary,
+			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
+				renvoRTGStackWordBytes, 1))
+	}
+	renvoRTGAdjustObjectStack(a, false)
+	renvoRTGAdjustObjectStack(a, false)
+}
+
+func renvoRTGIEEEHostSyscall(g *renvoLinearGen, number int, addressCount int, offset0 int, offset1 int, offset2 int) {
+	renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord0, offset0)
+	if addressCount > 1 {
+		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord1, offset1)
+	}
+	if addressCount > 2 {
+		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord2, offset2)
+	}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallNumber, int64(number))
+	renvoRTGDirectHostSyscall(&g.asm)
+}
+
+func renvoRTGSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord0)
+	renvoAsmStorePrimaryStack(a, dataSlot)
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord1)
+	renvoAsmStorePrimaryStack(a, lenSlot)
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord5)
+	renvoAsmStorePrimaryStack(a, capSlot)
+}
