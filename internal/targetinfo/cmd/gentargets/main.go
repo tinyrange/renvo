@@ -563,6 +563,32 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	projection.WriteString(strconv.Quote(byteTable(backend, func(descriptor sourceDescriptor) int { return descriptor.ISAID })))
 	projection.WriteString("\nconst renvoTargetIntBitsTable = ")
 	projection.WriteString(strconv.Quote(byteTable(backend, func(descriptor sourceDescriptor) int { return descriptor.WordBits })))
+	for _, table := range []struct {
+		name  string
+		value func(sourceDescriptor) int
+	}{
+		{"PointerBits", func(d sourceDescriptor) int { return d.PointerBits }},
+		{"CodePointerBits", func(d sourceDescriptor) int { return d.CodePointerBits }},
+		{"FunctionPointerBits", func(d sourceDescriptor) int { return d.FunctionPointerBits }},
+		{"Endian", func(d sourceDescriptor) int {
+			if d.Endian == "big" {
+				return 2
+			}
+			return 1
+		}},
+	} {
+		fmt.Fprintf(&projection, "\nconst renvoTarget%sTable = %s", table.name, strconv.Quote(byteTable(backend, table.value)))
+	}
+	projection.WriteString("\nfunc renvoBundledTargetMaxAlign(target int) int {\n")
+	for _, descriptor := range backend {
+		fmt.Fprintf(&projection, "if target == %s { return %d }\n", descriptor.Constant, descriptor.MaxAlign)
+	}
+	projection.WriteString("return 0\n}\n")
+	projection.WriteString("\nfunc renvoBundledDefaultArenaSize(target int) int {\n")
+	for _, descriptor := range backend {
+		fmt.Fprintf(&projection, "if target == %s { return %d }\n", descriptor.Constant, descriptor.DefaultArena)
+	}
+	projection.WriteString("return 0\n}\n")
 	projection.WriteByte('\n')
 	projection.WriteString(end)
 	updated := append([]byte{}, source[:start]...)
