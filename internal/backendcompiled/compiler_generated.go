@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f758f6645f79adb1aa15b9447548011b8a02748d3adf30f7e2a2b0626f65d916"
+const CompilerSourceDigest = "541fa53f005f2f7528071f1e6e7b09070869e1febc718d32f579583a004f2ae4"
 
 // source: backend/compiler_common_impl.go
 
@@ -7156,11 +7156,15 @@ return 4
 return renvoBackendValueSlotSize
 }
 
-func renvoNativeScalarStorageSize(renvoNativeIntSize int, kind int) int {
+func renvoNativeScalarStorageSize(m *renvoMeta, typ int) int {
+kind := renvoResolveType(m, typ).kind
 if kind == renvoTypePointer {
-return renvoNativeIntSize
+return renvoTargetAddressSize(m.c, renvoPointerAddressSpace(m, typ))
 }
-return renvoScalarKindSize(renvoNativeIntSize, kind)
+if kind == renvoTypeFunc && renvoFunctionAddressLayout(m.c) {
+return renvoTargetAddressSize(m.c, renvoPointerSpaceFunction)
+}
+return renvoScalarKindSize(m.c.renvoNativeIntSize, kind)
 }
 
 func renvoTypeIsStruct(m *renvoMeta, typ int) bool {
@@ -10503,7 +10507,7 @@ return false
 }
 renvoEmitRuntimeNonNilPrimary(g)
 if renvoTokCharIs(g.prog, assignTok, '=') {
-size := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, kind)
+size := renvoNativeScalarStorageSize(g.meta, targetType)
 if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, size) &&
 (renvoTypeKindIsScalarValue(kind) || kind == renvoTypePointer || kind == renvoTypeFunc) {
 simpleRight := renvoConstExprSideEffectFree(g, right, rightIndex) || renvoScalarPreservesSecondary(g, right, rightIndex)
@@ -10529,7 +10533,7 @@ if !renvoEmitScalarExprForKind(g, right, rightIndex, renvoTypeFunc) {
 return false
 }
 renvoAsmLoadSecondaryStack(a, addrOffset)
-renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, g.c.renvoNativeIntSize)
+renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, size)
 return true
 }
 }
@@ -13957,7 +13961,7 @@ return true
 if !renvoEmitScalarExprForKind(g, ep, idx, fieldResolved.kind) {
 return false
 }
-renvoAsmStorePrimaryStackSize(a, destOffset, renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldResolved.kind))
+renvoAsmStorePrimaryStackSize(a, destOffset, renvoNativeScalarStorageSize(g.meta, fieldType))
 return true
 }
 func renvoEmitCopyStackToStack(g *renvoLinearGen, srcOffset int, destOffset int, size int) {
@@ -19472,8 +19476,9 @@ a := &g.asm
 e := &ep.exprs[idx]
 baseType := renvoInferParsedExprType(g, ep, e.left)
 nativeABI := renvoTypeUsesNativeABI(g.meta, baseType)
-fieldType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
-fieldSize := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, fieldType.kind)
+fieldTypeIndex := renvoInferParsedExprType(g, ep, idx)
+fieldType := renvoResolveType(g.meta, fieldTypeIndex)
+fieldSize := renvoNativeScalarStorageSize(g.meta, fieldTypeIndex)
 base := &ep.exprs[e.left]
 if renvoEmitDirectSelectorWords(g, ep, idx, 0, -1, fieldSize) {
 if nativeABI {
