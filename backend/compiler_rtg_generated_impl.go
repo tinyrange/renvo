@@ -797,6 +797,46 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmNormalizePrimaryForKind(a, kind)
+		renvoAsmCmpPrimaryImm8Discard(a, imm)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvoAsmCmpPrimaryImm8(a, imm)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoUsesUnsignedPointerOrdering(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmLogicalShiftPrimaryWordImm(a *renvoAsm, imm int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -1900,17 +1940,23 @@ return
 g.asm.patchFailed = true
 }
 
-func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+func renvoEmitLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool, leftKind int, rightKind int, leftSize int, rightSize int) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+		if leftKind != renvoTypeInt || rightKind != renvoTypeInt {
+			return false
+		}
 		renvoAsmLoadPrimaryStack(&g.asm, right)
 		renvoAsmStackMem(&g.asm, left, 0x3948, 0x45, 0x85)
 } else if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
+		if leftSize != 4 || rightSize != 4 {
+			return false
+		}
 		if renvoFixedTarget != 0 || !g.c.code16 {
 			return false
 		}
