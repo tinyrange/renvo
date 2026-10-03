@@ -159,28 +159,13 @@ func renvoEmitWriteValueRegs(g *renvoLinearGen, fd int) bool {
 func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, operation int) bool {
 	renvoNonNil(g, ep)
 	a := &g.asm
-	p := g.prog
 	firstArg := ep.exprs[idx].firstArg
 	argCount := ep.exprs[idx].argCount
 	if argCount != 3 {
 		return false
 	}
-	if renvoPreparedBackendActive != 0 {
-		if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
-			return false
-		}
-	} else {
-		fdStart := ep.exprs[idx].tok + 1
-		fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
-		fdEp := renvoNewExprParse()
-		renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
-		if !fdEp.ok || len(fdEp.exprs) == 0 {
-			return false
-		}
-		fdIndex := len(fdEp.exprs) - 1
-		if !renvoEmitIntExpr(g, fdEp, fdIndex) {
-			return false
-		}
+	if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
+		return false
 	}
 	renvoAsmPushPrimary(a)
 	offIndex := ep.args[firstArg+2]
