@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		save_slice_slot_addresses = renvoAmd64CompilerSaveSliceSlotAddresses
+		inline_append = renvoAmd64CompilerInlineAppend
+		string_arguments_from_frame = renvoAmd64CompilerStringArgumentsFromFrame
 		tuple_parameter_layout = renvoAmd64CompilerTupleParameterLayout
 		hosted_object = renvoAmd64CompilerHostedObject
 		retain_panic_runtime = renvoAmd64CompilerRetainPanicRuntime
@@ -4540,5 +4543,23 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerTupleParameterLayout(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStringArgumentsFromFrame(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerInlineAppend(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+		a.patchFailed = true
 	}
 }

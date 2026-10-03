@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3b7652179d9c1922e41e588a6e071d14a69f4c72448dff2bc5552217e1086390"
+const CompilerSourceDigest = "d0fb06ec77d36c6760cdf7c7f9e809ac335a572bc9a26a731ce524ee9cb9197a"
 
 // source: backend/compiler_common_impl.go
 
@@ -17071,8 +17071,8 @@ return true
 }
 func renvoEmitAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
 renvoNonNil(g, locEp, loc)
-if renvoPreparedBackendActive != 0 {
-return renvoEmitRTGAppendDestPrimary(g, locEp, loc, elemSize)
+if renvoMayInlineAppend && renvoInlineAppend(g.c) {
+return renvoEmitInlineAppendDestPrimary(g, locEp, loc, elemSize)
 }
 label := renvoEnsureAppendAddrHelper(g)
 if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
@@ -17084,7 +17084,7 @@ renvoEmitArenaAllocationCheck(g)
 return true
 }
 
-func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
+func renvoEmitInlineAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
 renvoNonNil(g, locEp, loc)
 if elemSize < 1 {
 return false
@@ -17100,7 +17100,7 @@ result := renvoAddUnnamedLocal(g, renvoTypeInt)
 if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 return false
 }
-renvoRTGSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
+renvoAsmSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
 renvoAsmLoadPrimaryStackMemory(a, dataSlot, 0)
 renvoAsmStorePrimaryStack(a, data)
 renvoAsmLoadPrimaryStackMemory(a, lenSlot, 0)
@@ -17160,7 +17160,7 @@ return true
 func renvoEmitAppendStringToLocation(g *renvoLinearGen, ep *renvoExprParse, locEp *renvoExprParse, loc *renvoSliceLocation, valueIndex int) bool {
 renvoNonNil(g, ep, locEp, loc)
 a := &g.asm
-if renvoPreparedBackendActive == 0 {
+if !renvoMayInlineAppend || !renvoInlineAppend(g.c) {
 renvoEnsureAppendAddrHelper(g)
 }
 if !renvoEmitStringValueRegs(g, ep, valueIndex) {
@@ -17429,30 +17429,10 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 renvoNonNil(g, ep)
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
-if renvoPreparedBackendActive != 0 {
-
-
-
-
-leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
-rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
-if !renvoEmitStringValueRegs(g, ep, left) {
-return false
-}
-renvoAsmStorePrimarySecondaryStack(a, leftOff, leftOff-8)
-if !renvoEmitStringValueRegs(g, ep, right) {
-return false
-}
-renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
-renvoAsmCallLabel(a, label)
-if notEqual {
-renvoAsmBoolNotPrimary(a)
-}
-return true
-}
 rightExpr := &ep.exprs[right]
-if rightExpr.kind == renvoExprSelector {
+
+
+if renvoMayLoadStringArgumentsFromFrame && renvoStringArgumentsFromFrame(g.c) || rightExpr.kind == renvoExprSelector {
 leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
 rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
 if !renvoEmitStringValueRegs(g, ep, left) {
@@ -24402,7 +24382,7 @@ func renvoEmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset
 renvoNonNil(g, ep)
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
-if renvoPreparedBackendActive != 0 {
+if renvoMayLoadStringArgumentsFromFrame && renvoStringArgumentsFromFrame(g.c) {
 caseOff := renvoAddUnnamedLocal(g, renvoTypeString)
 if !renvoEmitStringValueRegs(g, ep, idx) {
 return false
@@ -29048,7 +29028,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x60\xe8\x78\x4c\x8b\x31\x79\xe2\xfb\x92\x76\xaa\xfd\x01\x9a\x73\xab\x63\xd9\xf2\xaf\xf3\x4f\x1a\x8c\xd8\x1b\xfd\x26\x4d\xf4\x3f", 3, true
+return "wasi/wasm32", "\x4b\xfd\x35\xca\x3b\x06\x34\xdd\xf9\xf3\x62\x55\xa4\xb6\xe9\x60\xef\x39\xfc\xf4\x59\x32\x3c\x67\x12\xca\x94\xda\x1b\x9c\xf9\xe3", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29060,7 +29040,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x6d\x1b\x45\xba\xb9\x62\xe3\x3d\x6a\x8b\x10\xe6\xd0\x35\x7a\x9c\x88\xa8\x5b\x83\xfd\x0f\x5a\x0a\xa0\xdb\x6c\x52\x91\x64\x7e\xc8", 3, true
+return "vm/vm32", "\x17\xe5\x38\xf7\x30\xb7\x20\xe3\x62\xfa\x1c\xe8\x7a\xe7\xc4\x70\xd6\x39\xe4\x60\x25\xff\x9e\xb1\xb4\xc5\xb0\x81\x74\x52\xcb\xd5", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30435,6 +30415,38 @@ return 0
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
+
+func renvoAsmSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a.patchFailed = true
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoInlineAppend(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayInlineAppend = false
+
+func renvoStringArgumentsFromFrame(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+const renvoMayLoadStringArgumentsFromFrame = false
 
 func renvoTupleParameterLayout(c *renvoCompileContext) bool {
 renvoNonNil(c)
@@ -46414,6 +46426,12 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49319,6 +49337,12 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51979,6 +52003,12 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53638,6 +53668,12 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
 
 
 
@@ -56871,6 +56907,12 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
 
 
 

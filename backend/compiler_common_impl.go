@@ -17064,8 +17064,8 @@ func renvoEmitAppendScalarToLocation(g *renvoLinearGen, ep *renvoExprParse, locE
 }
 func renvoEmitAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
 	renvoNonNil(g, locEp, loc)
-	if renvoPreparedBackendActive != 0 {
-		return renvoEmitRTGAppendDestPrimary(g, locEp, loc, elemSize)
+	if renvoMayInlineAppend && renvoInlineAppend(g.c) {
+		return renvoEmitInlineAppendDestPrimary(g, locEp, loc, elemSize)
 	}
 	label := renvoEnsureAppendAddrHelper(g)
 	if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
@@ -17077,7 +17077,7 @@ func renvoEmitAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *r
 	return true
 }
 
-func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
+func renvoEmitInlineAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
 	renvoNonNil(g, locEp, loc)
 	if elemSize < 1 {
 		return false
@@ -17093,7 +17093,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 		return false
 	}
-	renvoRTGSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
+	renvoAsmSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
 	renvoAsmLoadPrimaryStackMemory(a, dataSlot, 0)
 	renvoAsmStorePrimaryStack(a, data)
 	renvoAsmLoadPrimaryStackMemory(a, lenSlot, 0)
@@ -17153,7 +17153,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 func renvoEmitAppendStringToLocation(g *renvoLinearGen, ep *renvoExprParse, locEp *renvoExprParse, loc *renvoSliceLocation, valueIndex int) bool {
 	renvoNonNil(g, ep, locEp, loc)
 	a := &g.asm
-	if renvoPreparedBackendActive == 0 {
+	if !renvoMayInlineAppend || !renvoInlineAppend(g.c) {
 		renvoEnsureAppendAddrHelper(g)
 	}
 	if !renvoEmitStringValueRegs(g, ep, valueIndex) {
@@ -17422,30 +17422,10 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 	renvoNonNil(g, ep)
 	a := &g.asm
 	label := renvoEnsureStringEqualHelper(g)
-	if renvoPreparedBackendActive != 0 {
-		// A prepared target may use ABI argument registers which overlap the
-		// primary/secondary value pair. Preserve both descriptors in the frame
-		// before populating the four call words so no move can destroy a later
-		// argument (AArch64 uses x0/x1 for both roles).
-		leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
-		rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
-		if !renvoEmitStringValueRegs(g, ep, left) {
-			return false
-		}
-		renvoAsmStorePrimarySecondaryStack(a, leftOff, leftOff-8)
-		if !renvoEmitStringValueRegs(g, ep, right) {
-			return false
-		}
-		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
-		renvoAsmCallLabel(a, label)
-		if notEqual {
-			renvoAsmBoolNotPrimary(a)
-		}
-		return true
-	}
 	rightExpr := &ep.exprs[right]
-	if rightExpr.kind == renvoExprSelector {
+	// Frame-backed arguments preserve descriptors when ABI call words overlap
+	// value registers; selector evaluation also requires this stable storage.
+	if renvoMayLoadStringArgumentsFromFrame && renvoStringArgumentsFromFrame(g.c) || rightExpr.kind == renvoExprSelector {
 		leftOff := renvoAddUnnamedLocal(g, renvoTypeString)
 		rightOff := renvoAddUnnamedLocal(g, renvoTypeString)
 		if !renvoEmitStringValueRegs(g, ep, left) {
@@ -24395,7 +24375,7 @@ func renvoEmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset
 	renvoNonNil(g, ep)
 	a := &g.asm
 	label := renvoEnsureStringEqualHelper(g)
-	if renvoPreparedBackendActive != 0 {
+	if renvoMayLoadStringArgumentsFromFrame && renvoStringArgumentsFromFrame(g.c) {
 		caseOff := renvoAddUnnamedLocal(g, renvoTypeString)
 		if !renvoEmitStringValueRegs(g, ep, idx) {
 			return false

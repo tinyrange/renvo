@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		save_slice_slot_addresses = renvoWasm32CompilerSaveSliceSlotAddresses
+		inline_append = renvoWasm32CompilerInlineAppend
+		string_arguments_from_frame = renvoWasm32CompilerStringArgumentsFromFrame
 		tuple_parameter_layout = renvoWasm32CompilerTupleParameterLayout
 		hosted_object = renvoWasm32CompilerHostedObject
 		retain_panic_runtime = renvoWasm32CompilerRetainPanicRuntime
@@ -6957,5 +6960,23 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerTupleParameterLayout(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStringArgumentsFromFrame(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerInlineAppend(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+		a.patchFailed = true
 	}
 }

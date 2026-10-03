@@ -2114,6 +2114,25 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+renvoNonNil(a)
+renvoRTGSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
+}
+
+const renvoMayInlineAppend = true
+
+func renvoInlineAppend(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+const renvoMayLoadStringArgumentsFromFrame = true
+
+func renvoStringArgumentsFromFrame(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
 const renvoMayUseTupleParameterLayout = true
 
 func renvoTupleParameterLayout(c *renvoCompileContext) bool {
