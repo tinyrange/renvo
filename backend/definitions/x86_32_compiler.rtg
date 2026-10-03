@@ -1300,6 +1300,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		discard_arena_pages = renvo386CompilerDiscardArenaPages
+		arena_discard_supported = renvo386CompilerArenaDiscardSupported
 		write_value_regs = renvo386CompilerWriteValueRegs
 		exit_status = renvo386CompilerExitStatus
 		syscall_from_stack = renvo386CompilerSyscallFromStack
@@ -5029,5 +5031,17 @@ go compiler {
 		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerArenaDiscardSupported(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
+		a.patchFailed = true
 	}
 }

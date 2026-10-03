@@ -891,7 +891,7 @@ func renvoEmitRuntimeArenaDiscard(g *renvoLinearGen, ep *renvoExprParse, idx int
 	if e.argCount != 2 {
 		return false
 	}
-	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -914,7 +914,7 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 	if e.argCount != 1 {
 		return false
 	}
-	if g.c.renvoTargetArch != renvoArchAmd64 || g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		renvoAsmPrimaryImm(&g.asm, 0)
 		return true
 	}
@@ -939,38 +939,12 @@ func renvoEmitRuntimeArenaDiscardSlice(g *renvoLinearGen, ep *renvoExprParse, id
 }
 
 func renvoEmitRuntimeArenaDiscardStackRange(g *renvoLinearGen, startOff int, endOff int) bool {
-	renvoNonNil(g)
-	if renvoFixedTarget != 0 &&
-		renvoFixedTarget != renvoTargetLinuxAmd64 &&
-		renvoFixedTarget != renvoTargetLinux386 &&
-		renvoFixedTarget != renvoTargetLinuxAarch64 &&
-		renvoFixedTarget != renvoTargetLinuxArm ||
-		renvoFixedTarget == 0 && g.c.renvoTargetOS != renvoOSLinux {
+	if !renvoArenaDiscardSupported(g.c) {
 		return true
 	}
-	a := &g.asm
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	doneLabel := renvoAsmNewLabel(a)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAmd64AsmAddRaxImm32(a, 4095)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmStorePrimaryStack(a, startOff)
-	renvoAsmLoadPrimaryStack(a, endOff)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmLoadTertiaryStack(a, startOff)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, lenOff)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAmd64AsmJccLabel(a, 0x8e, doneLabel)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAsmCopyPrimaryToCallWord0(a)
-	renvoAsmLoadPrimaryStack(a, lenOff)
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmSecondaryImm(a, 4)
-	renvoAsmPrimaryImm(a, 28)
-	renvoAsmSyscall(a)
-	renvoAsmMarkLabel(a, doneLabel)
-	renvoAsmPrimaryImm(a, 0)
+	renvoAsmDiscardArenaPages(&g.asm, startOff, endOff, lenOff)
+	renvoAsmPrimaryImm(&g.asm, 0)
 	return true
 }
 
@@ -986,7 +960,7 @@ func renvoEmitRuntimeArenaPersistReset(g *renvoLinearGen, ep *renvoExprParse, id
 	renvoStringHeapOffsets(g)
 	renvoEmitArenaRememberReset(g, true)
 	a := &g.asm
-	if g.c.renvoTargetArch == renvoArchAmd64 && g.c.renvoTargetOS == renvoOSLinux {
+	if renvoArenaDiscardSupported(g.c) {
 		renvoEmitRuntimeArenaPersistResetMadvise(g)
 		return true
 	}
@@ -999,44 +973,12 @@ func renvoEmitRuntimeArenaPersistResetMadvise(g *renvoLinearGen) {
 	a := &g.asm
 	markOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	oldOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	startOff := renvoAddUnnamedLocal(g, renvoTypeInt)
 	lenOff := renvoAddUnnamedLocal(g, renvoTypeInt)
-	doneLabel := renvoAsmNewLabel(a)
 	renvoAsmStorePrimaryStack(a, markOff)
 	renvoAsmCopyBssToStackSlot(a, g.stringHeapEndOff, oldOff)
 	renvoAsmLoadPrimaryStack(a, markOff)
 	renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
-	renvoAsmLoadPrimaryStack(a, oldOff)
-	renvoAmd64AsmAddRaxImm32(a, 4095)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmStorePrimaryStack(a, startOff)
-	renvoAsmLoadPrimaryStack(a, markOff)
-	renvoAmd64AsmAndRaxImm32(a, -4096)
-	renvoAsmLoadTertiaryStack(a, startOff)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, lenOff)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoAmd64AsmJccLabel(a, 0x8e, doneLabel)
-	renvoAsmLoadPrimaryStack(a, startOff)
-	renvoAsmCopyPrimaryToCallWord0(a)
-	renvoAsmLoadPrimaryStack(a, lenOff)
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmSecondaryImm(a, 4)
-	renvoAsmPrimaryImm(a, 28)
-	renvoAsmSyscall(a)
-	renvoAsmMarkLabel(a, doneLabel)
-}
-
-func renvoAmd64AsmAddRaxImm32(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x0548)
-	renvoAsmEmit32(a, imm)
-}
-
-func renvoAmd64AsmAndRaxImm32(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit16(a, 0x2548)
-	renvoAsmEmit32(a, imm)
+	renvoAsmDiscardArenaPages(a, oldOff, markOff, lenOff)
 }
 
 func renvoEmitRuntimeArenaPersistString(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {

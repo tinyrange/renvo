@@ -4357,6 +4357,38 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
+renvoNonNil(a)
+doneLabel := renvoAsmNewLabel(a)
+	renvoAsmLoadPrimaryStack(a, startOff)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, 4095)
+renvoRTGDirectAdd(a, renvoRTGPrimary, renvoRTGScratch)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -4096)
+renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGScratch)
+	renvoAsmStorePrimaryStack(a, startOff)
+	renvoAsmLoadPrimaryStack(a, endOff)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -4096)
+renvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGScratch)
+	renvoAsmLoadTertiaryStack(a, startOff)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, lenOff)
+	renvoAsmCmpPrimaryImm8(a, 0)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x9e), doneLabel)
+	renvoAsmLoadPrimaryStack(a, startOff)
+	renvoRTGDirectMove(a, renvoRTGSyscallWord0, renvoRTGPrimary)
+	renvoAsmLoadPrimaryStack(a, lenOff)
+	renvoRTGDirectMove(a, renvoRTGSyscallWord1, renvoRTGPrimary)
+	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallWord2, 4)
+	renvoRTGDirectMoveImmediate(a, renvoRTGSyscallNumber, 28)
+	renvoRTGDirectHostSyscall(a)
+	renvoAsmMarkLabel(a, doneLabel)
+}
+
+func renvoArenaDiscardSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGPreparedSysVX8664 != 0 && renvoRTGPreparedOS == renvoOSLinux
+}
+
 func renvoEmitTargetWriteValueRegs(g *renvoLinearGen, fd int) bool {
 renvoNonNil(g)
 a := &g.asm
