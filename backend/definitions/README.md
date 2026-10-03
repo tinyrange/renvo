@@ -158,8 +158,12 @@ accesses, normalization, arithmetic and logic, comparisons and label branches,
 and return/frame teardown. Hooks may take typed parameters in addition to the
 assembler; their complete signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
-The generated dispatcher makes direct calls and fails compilation on an
-unrecognized selector rather than falling back to an ISA. Prepared backends
+The generated dispatcher projects definition-owned bodies directly into their
+selected branches to avoid another call at each emission site. Hooks with
+noncanonical parameter names or function-scoped labels retain direct calls.
+Private projected entrypoints are omitted from the architecture source unless
+another binding, Go body, or definition declaration still references them.
+An unrecognized selector fails compilation rather than falling back to an ISA. Prepared backends
 provide the same compiler operation names through their direct emitter and ABI
 bindings, without depending on bundled hooks or selectors.
 

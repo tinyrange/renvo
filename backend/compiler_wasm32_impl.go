@@ -2891,354 +2891,136 @@ func rtgWasm32Wasm32PackageRenvoWasm32RoutineStructure(code []byte, pcs []int, b
 	return headers, tails, true
 }
 
-func renvoWasm32CompilerCopyPrimaryToSecondary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerCopyPrimaryToTertiary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerCopySecondaryToTertiary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerCopyTertiaryToPrimary(a *renvoAsm) {
-	renvoAsmPushTertiary(a)
-	renvoAsmPopPrimary(a)
-}
-
-func renvoWasm32CompilerPushPrimary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerPushSecondary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerPushTertiary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerPopPrimary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-}
-func renvoWasm32CompilerPopSecondary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
-}
-func renvoWasm32CompilerPopTertiary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
-	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 1, 0, 1)
-}
-
-func renvoWasm32CompilerIncTertiary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerIncPrimary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpIncReg, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerRet(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpRet)
-}
-
-func renvoWasm32CompilerLeave(a *renvoAsm) {
-
-}
-
-func renvoWasm32CompilerCopyPrimaryToCallWord0(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRdi, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerCopySecondaryToPrimary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerCopyPrimaryToCallWord1(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRsi, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerAddSecondaryTertiary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdx, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
-	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, 0, 1)
-}
-
-func renvoWasm32CompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
-	renvoWasm32EmitIndex(a, renvoWasm32OpStoreIndex, renvoWasm32RegRax, renvoWasm32RegRdx, renvoWasm32RegRcx, 8, 0, 4)
-}
-
-func renvoWasm32CompilerIncMemSecondary(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpIncMem)
-	renvoAsmEmit8(a, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerDecMemSecondary(a *renvoAsm) {
-	renvoAsmEmit8(a, renvoWasm32OpDecMem)
-	renvoAsmEmit8(a, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerBoolNotPrimary(a *renvoAsm) {
-	renvoWasm32EmitReg(a, renvoWasm32OpBoolNot, renvoWasm32RegRax)
-}
-
-func renvoWasm32CompilerBitwiseNotPrimary(a *renvoAsm) {
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRcx, -1)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerAddPrimaryTertiary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerSubPrimaryTertiary(a *renvoAsm) {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpSubRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-}
-
-func renvoWasm32CompilerPushImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmEmit8(a, renvoWasm32OpPushImm)
-	renvoAsmEmit32(a, imm)
-}
-
-func renvoWasm32CompilerStorePrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
-}
-
-func renvoWasm32CompilerStoreSecondaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
-}
-
-func renvoWasm32CompilerLoadPrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
-}
-
-func renvoWasm32CompilerIncStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmLoadPrimaryStack(a, offset)
-	renvoAsmIncPrimary(a)
-	renvoAsmStorePrimaryStack(a, offset)
-}
-
-func renvoWasm32CompilerDecStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmLoadPrimaryStack(a, offset)
-	renvoAsmPushImm(a, 1)
-	renvoAsmPopTertiary(a)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, offset)
-}
-
-func renvoWasm32CompilerAddressPrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
-}
-
-func renvoWasm32CompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
-}
-
-func renvoWasm32CompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
-}
-
-func renvoWasm32CompilerLoadSecondaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
-}
-
-func renvoWasm32CompilerLoadTertiaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
-}
-
-func renvoWasm32CompilerStoreSliceStack(a *renvoAsm, offset int) {
-	renvoWasm32AsmStoreSliceStack(a, offset)
-}
-
-func renvoWasm32CompilerMulTertiaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if imm == 1 {
-		return
-	}
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMulRegImm, renvoWasm32RegRcx, imm)
-}
-
-func renvoWasm32CompilerCallLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoWasm32EmitCallLabel(a, label, 0)
-}
-
-func renvoWasm32CompilerJmpLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoWasm32EmitBranch(a, renvoWasm32OpJmp, label)
-}
-
-func renvoWasm32CompilerJzLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoWasm32EmitBranch(a, renvoWasm32OpJz, label)
-}
-
-func renvoWasm32CompilerJnzLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoWasm32EmitBranch(a, renvoWasm32OpJnz, label)
-}
-
-func renvoWasm32CompilerSecondaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
-}
-
-func renvoWasm32CompilerPrimaryDataAddr(a *renvoAsm, dataOff int) {
-	renvoNonNil(a)
-	renvoWasm32AsmMovRaxDataAddr(a, dataOff)
-}
-
-func renvoWasm32CompilerPrimaryBssAddr(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoWasm32AsmMovRaxBssAddr(a, bssOff)
-}
-
-func renvoWasm32CompilerLoadPrimaryBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoWasm32AsmLoadRaxBss(a, bssOff)
-}
-
-func renvoWasm32CompilerStorePrimaryBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoWasm32AsmStoreRaxBss(a, bssOff)
-}
-
-func renvoWasm32CompilerPopCallWord0(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
-}
-
-func renvoWasm32CompilerPopCallWord1(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
-}
-
-func renvoWasm32CompilerAddSecondaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, imm)
-}
-
-func renvoWasm32CompilerLoadQwordPrimaryIndexTertiaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoWasm32EmitIndex(a, renvoWasm32OpLoadIndex, renvoWasm32RegRax, renvoWasm32RegRax, renvoWasm32RegRcx, 1, disp, 4)
-}
-
-func renvoWasm32CompilerLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
-}
-
-func renvoWasm32CompilerLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	renvoWasm32AsmLoadRaxMemRdxDispSize(a, disp, size)
-}
-
-func renvoWasm32CompilerLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
-	renvoNonNil(a)
-	renvoWasm32AsmLoadRaxIndexRcxSize(a, size)
-}
-
-func renvoWasm32CompilerStorePrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRdx, disp, 4)
-}
-
-func renvoWasm32CompilerStorePrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	renvoWasm32AsmStoreRaxMemRdxDispSize(a, disp, size)
-}
-
-func renvoWasm32CompilerNormalizePrimaryForKind(a *renvoAsm, kind int) {
-	renvoNonNil(a)
-	renvoWasm32AsmNormalizeRaxForKind(a, kind)
-}
-
-func renvoWasm32CompilerCmpPrimaryImm8(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, imm)
-}
-
-func renvoWasm32CompilerCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmCmpPrimaryImm8(a, imm)
-}
-
-func renvoWasm32CompilerShlTertiaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerShlPrimaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpShlRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerSarPrimaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, imm)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpShrRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-}
-
-func renvoWasm32CompilerDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
-	renvoNonNil(a)
-	renvoWasm32AsmDivLeftRcxRightRax(a, mod)
-}
-
-func renvoWasm32CompilerCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
-	renvoNonNil(a)
-	renvoWasm32AsmCmpRcxRaxSet(a, setcc)
-}
-
-func renvoWasm32CompilerStorePrimaryMemSecondaryTertiarySize(a *renvoAsm, size int) {
-	renvoNonNil(a)
-	renvoWasm32AsmStoreRaxMemRdxRcxSize(a, size)
-}
-
-func renvoWasm32CompilerCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
-	renvoNonNil(a)
-	unsigned := setcc == 0x92 || setcc == 0x93 || setcc == 0x96 || setcc == 0x97
-	if unsigned {
-		if setcc < 0x94 {
-			setcc += 10
-		} else {
-			setcc += 8
-		}
-	}
-	cond := renvoWasm32CondEq
-	if setcc == 0x95 {
-		cond = renvoWasm32CondNe
-	} else if setcc == 0x9c {
-		cond = renvoWasm32CondLt
-	} else if setcc == 0x9d {
-		cond = renvoWasm32CondGe
-	} else if setcc == 0x9e {
-		cond = renvoWasm32CondLe
-	} else if setcc == 0x9f {
-		cond = renvoWasm32CondGt
-	}
-	if unsigned {
-		renvoWasm32CompareUnsigned(a)
-	} else {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-	}
-	renvoWasm32EmitCondBranch(a, cond, label)
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

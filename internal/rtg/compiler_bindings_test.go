@@ -152,3 +152,79 @@ func TestMigratedCompilerOperationsAreNotHandwrittenInCore(t *testing.T) {
 		}
 	}
 }
+
+// Exercise whole generated packages, including the difficult cases where an
+// entrypoint must remain callable even though another binding projects it.
+func TestBundledCompilerBindingBodyProjection(t *testing.T) {
+	cases := []struct {
+		name     string
+		rewrite  func(string, string) string
+		retained bool
+	}{
+		{"private", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { if a.patchFailed { return }; a.patchFailed = true }", 1)
+		}, false},
+		{"called by helper", func(source, hook string) string {
+			return source + "\ngo compiler { func " + hook + "Caller(a *renvoAsm) { " + hook + "(a) } }\n"
+		}, true},
+		{"recursive", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { if a.patchFailed { a.patchFailed = false; "+hook+"(a) } }", 1)
+		}, true},
+		{"labels have function scope", func(source, hook string) string {
+			return strings.Replace(source, "func "+hook+"(a *renvoAsm) {}",
+				"func "+hook+"(a *renvoAsm) { again: if a.patchFailed { a.patchFailed = false; goto again } }", 1)
+		}, true},
+		{"renamed parameters", func(source, hook string) string {
+			return strings.ReplaceAll(source, "a *renvoAsm", "receiver *renvoAsm")
+		}, true},
+		{"one hook with different binding parameter names", func(source, hook string) string {
+			return strings.Replace(source, "store_primary_stack = "+hook+"StorePrimaryStack",
+				"store_primary_stack = "+hook+"PushImm", 1)
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var definitions []ResolveResult
+			for _, pair := range [][2]string{{"selectedOne", "firstHook"}, {"selectedTwo", "secondHook"}} {
+				fixture := unfamiliarCompilerDefinition(t, pair[0], pair[1])
+				document := Parse([]byte(tc.rewrite(string(fixture.Document.Source), pair[1])), "projection.rtg")
+				if !document.Ok {
+					t.Fatalf("parse: %#v", document.Diagnostics)
+				}
+				definitions = append(definitions, ResolveResult{Document: document, Ok: true})
+			}
+			prefix := []byte(`package bindings
+ type context struct { renvoTargetArch int }
+ type renvoAsm struct { c *context; patchFailed bool }
+ func renvoNonNil(a *renvoAsm) {}
+ const selectedOne = 41
+ const selectedTwo = 73
+`)
+			for _, definition := range definitions {
+				prefix = appendCompilerGoBlocks(prefix, definition.Document)
+			}
+			retained := strings.Contains(string(prefix), "func firstHook(")
+			if retained != tc.retained {
+				t.Fatalf("entrypoint retained = %v, want %v", retained, tc.retained)
+			}
+			if tc.name == "one hook with different binding parameter names" &&
+				!strings.Contains(string(prefix), "func firstHookPushImm(") {
+				t.Fatal("pruned a hook still used by a noncanonical binding")
+			}
+			generated := appendBundledCompilerBindings(prefix, definitions)
+			if !generated.Ok {
+				t.Fatalf("generate: %#v", generated.Diagnostics)
+			}
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "bindings.go", generated.Source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := new(types.Config).Check("bindings", fset, []*ast.File{file}, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

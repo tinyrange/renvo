@@ -1319,328 +1319,136 @@ func renvoFinishScalarProgramArm(g *renvoLinearGen) renvoCompileResult {
 	return result
 }
 
-func renvoArmCompilerCopyPrimaryToSecondary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe1a01000)
-}
-
-func renvoArmCompilerCopyPrimaryToTertiary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe1a02000)
-}
-
-func renvoArmCompilerCopySecondaryToTertiary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe1a02001)
-}
-
-func renvoArmCompilerCopyTertiaryToPrimary(a *renvoAsm) {
-	renvoArmAsmMovRegReg(a, 0, 2)
-}
-
-func renvoArmCompilerPushPrimary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe52d0004)
-}
-
-func renvoArmCompilerPushSecondary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe52d1004)
-}
-
-func renvoArmCompilerPushTertiary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe52d2004)
-}
-
-func renvoArmCompilerPopPrimary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe49d0004)
-}
-func renvoArmCompilerPopSecondary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe49d1004)
-}
-func renvoArmCompilerPopTertiary(a *renvoAsm) {
-	renvoAsmEmit32(a, 0xe49d2004)
-}
-
-func renvoArmCompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
-	renvoArmAsmStoreAlMemRdxRcx1(a)
-}
-
-func renvoArmCompilerIncTertiary(a *renvoAsm) {
-	renvoArmAsmIncRcx(a)
-}
-
-func renvoArmCompilerIncPrimary(a *renvoAsm) {
-	renvoArmAsmIncRax(a)
-}
-
-func renvoArmCompilerRet(a *renvoAsm) {
-	renvoArmAsmRet(a)
-}
-
-func renvoArmCompilerLeave(a *renvoAsm) {
-	renvoArmAsmLeave(a)
-}
-
-func renvoArmCompilerCopyPrimaryToCallWord0(a *renvoAsm) {
-	renvoArmAsmMovRdiRax(a)
-}
-
-func renvoArmCompilerCopySecondaryToPrimary(a *renvoAsm) {
-	renvoArmAsmMovRaxRdx(a)
-}
-
-func renvoArmCompilerCopyPrimaryToCallWord1(a *renvoAsm) {
-	renvoArmAsmMovRsiRax(a)
-}
-
-func renvoArmCompilerAddSecondaryTertiary(a *renvoAsm) {
-	renvoArmAsmAddRdxRcx(a)
-}
-
-func renvoArmCompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
-	renvoArmAsmLoadByteRaxIndexRcx(a)
-}
-
-func renvoArmCompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
-	renvoArmAsmStoreRaxMemRdxRcx8(a)
-}
-
-func renvoArmCompilerIncMemSecondary(a *renvoAsm) {
-	renvoArmAsmIncMemRdx(a)
-}
-
-func renvoArmCompilerDecMemSecondary(a *renvoAsm) {
-	renvoArmAsmDecMemRdx(a)
-}
-
-func renvoArmCompilerBoolNotPrimary(a *renvoAsm) {
-	renvoArmAsmBoolNotRax(a)
-}
-
-func renvoArmCompilerBitwiseNotPrimary(a *renvoAsm) {
-	renvoArmAsmEmit(a, 0xe1e00000)
-}
-
-func renvoArmCompilerAddPrimaryTertiary(a *renvoAsm) {
-	renvoArmAsmAddRaxRcx(a)
-}
-
-func renvoArmCompilerSubPrimaryTertiary(a *renvoAsm) {
-	renvoArmAsmSubRaxRcx(a)
-}
-
-func renvoArmCompilerPushImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmPushImm(a, imm)
-}
-
-func renvoArmCompilerStorePrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRegStack(a, 0, offset)
-	a.lastPrimaryStoreEnd = len(a.code)
-	a.lastPrimaryStoreOff = offset
-}
-
-func renvoArmCompilerStoreSecondaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRegStack(a, 1, offset)
-}
-
-func renvoArmCompilerLoadPrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	n := len(a.code)
-	if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
-		return
-	}
-	renvoArmAsmLoadRegStack(a, 0, offset)
-}
-
-func renvoArmCompilerIncStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmLoadPrimaryStack(a, offset)
-	renvoAsmIncPrimary(a)
-	renvoAsmStorePrimaryStack(a, offset)
-}
-
-func renvoArmCompilerDecStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoAsmLoadPrimaryStack(a, offset)
-	renvoAsmPushImm(a, 1)
-	renvoAsmPopTertiary(a)
-	renvoAsmSubPrimaryTertiary(a)
-	renvoAsmStorePrimaryStack(a, offset)
-}
-
-func renvoArmCompilerAddressPrimaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmLeaRegStack(a, 0, offset)
-}
-
-func renvoArmCompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmLeaRegStack(a, 3, offset)
-}
-
-func renvoArmCompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmLeaRegStack(a, 4, offset)
-}
-
-func renvoArmCompilerLoadSecondaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRegStack(a, 1, offset)
-}
-
-func renvoArmCompilerLoadTertiaryStack(a *renvoAsm, offset int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRegStack(a, 2, offset)
-}
-
-func renvoArmCompilerStoreSliceStack(a *renvoAsm, offset int) {
-	renvoArmAsmStoreSliceStack(a, offset)
-}
-
-func renvoArmCompilerMulTertiaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	if imm == 1 {
-		return
-	}
-	renvoArmAsmImulRcxImm(a, imm)
-}
-
-func renvoArmCompilerCallLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoArmAsmCallLabel(a, label)
-}
-
-func renvoArmCompilerJmpLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoArmAsmJmpLabel(a, label)
-}
-
-func renvoArmCompilerJzLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoArmAsmJzLabel(a, label)
-}
-
-func renvoArmCompilerJnzLabel(a *renvoAsm, label int) {
-	renvoNonNil(a)
-	renvoArmAsmJnzLabel(a, label)
-}
-
-func renvoArmCompilerSecondaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmMovRdxImm(a, imm)
-}
-
-func renvoArmCompilerPrimaryDataAddr(a *renvoAsm, dataOff int) {
-	renvoNonNil(a)
-	renvoArmAsmMovRaxDataAddr(a, dataOff)
-}
-
-func renvoArmCompilerPrimaryBssAddr(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoArmAsmMovRaxBssAddr(a, bssOff)
-}
-
-func renvoArmCompilerLoadPrimaryBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRaxBss(a, bssOff)
-}
-
-func renvoArmCompilerStorePrimaryBss(a *renvoAsm, bssOff int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRaxBss(a, bssOff)
-}
-
-func renvoArmCompilerPopCallWord0(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoArmAsmPopRdi(a)
-}
-
-func renvoArmCompilerPopCallWord1(a *renvoAsm) {
-	renvoNonNil(a)
-	renvoAsmEmit32(a, 0xe49d4004)
-}
-
-func renvoArmCompilerAddSecondaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmAddRdxImm(a, imm)
-}
-
-func renvoArmCompilerLoadQwordPrimaryIndexTertiaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadQwordRaxIndexRcxDisp(a, disp)
-}
-
-func renvoArmCompilerLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRaxMemRdxDisp(a, disp)
-}
-
-func renvoArmCompilerLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRaxMemRdxDispSize(a, disp, size)
-}
-
-func renvoArmCompilerLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
-	renvoNonNil(a)
-	renvoArmAsmLoadRaxIndexRcxSize(a, size)
-}
-
-func renvoArmCompilerStorePrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRaxMemRdxDisp(a, disp)
-}
-
-func renvoArmCompilerStorePrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRaxMemRdxDispSize(a, disp, size)
-}
-
-func renvoArmCompilerNormalizePrimaryForKind(a *renvoAsm, kind int) {
-	renvoNonNil(a)
-	renvoArmAsmNormalizeRaxForKind(a, kind)
-}
-
-func renvoArmCompilerCmpPrimaryImm8(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmCmpRaxImm8(a, imm)
-}
-
-func renvoArmCompilerCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoAsmCmpPrimaryImm8(a, imm)
-}
-
-func renvoArmCompilerShlTertiaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmShlRcxImm(a, imm)
-}
-
-func renvoArmCompilerShlPrimaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmShlRaxImm(a, imm)
-}
-
-func renvoArmCompilerSarPrimaryImm(a *renvoAsm, imm int) {
-	renvoNonNil(a)
-	renvoArmAsmSarRaxImm(a, imm)
-}
-
-func renvoArmCompilerDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
-	renvoNonNil(a)
-	renvoArmAsmDivLeftRcxRightRax(a, mod)
-}
-
-func renvoArmCompilerCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
-	renvoNonNil(a)
-	renvoArmAsmCmpRcxRaxSet(a, setcc)
-}
-
-func renvoArmCompilerStorePrimaryMemSecondaryTertiarySize(a *renvoAsm, size int) {
-	renvoNonNil(a)
-	renvoArmAsmStoreRaxMemRdxRcxSize(a, size)
-}
-
-func renvoArmCompilerCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
-	renvoNonNil(a)
-	renvoArmAsmCmpRegReg(a, renvoArmRegRcx, renvoArmRegRax)
-	renvoArmAsmBCondLabel(a, label, renvoArmCondFromSetcc(setcc))
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

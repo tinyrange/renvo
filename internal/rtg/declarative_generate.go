@@ -8,6 +8,8 @@ type embeddedFunction struct {
 	Parameters []embeddedParameter
 	Result     []byte
 	HasResult  bool
+	Body       []byte
+	HasLabels  bool
 }
 
 type embeddedParameter struct {
@@ -597,7 +599,17 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 				signature[len(signature)-1] == '\r') {
 				signature = signature[:len(signature)-1]
 			}
+			hasLabels := false
+			for k := fn.BodyStart + 1; k < fn.BodyEnd-1; k++ {
+				// Conservatively keep calls for labels (and other colon forms).
+				// Go labels have function scope, not the dispatch branch's scope.
+				if string(syntax.TokenText(wrapped, file.Tokens[k])) == ":" {
+					hasLabels = true
+				}
+			}
 			return embeddedFunction{
+				Body:       wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
+				HasLabels:  hasLabels,
 				Name:       name,
 				Signature:  signature,
 				Parameters: functionParameters(file, fn),
