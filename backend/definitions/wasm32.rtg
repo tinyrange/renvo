@@ -4150,6 +4150,14 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		copy_bytes = renvoWasm32CompilerCopyBytes
+		prefer_bulk_stack_copy = renvoWasm32CompilerPreferBulkStackCopy
+		prefer_bulk_indirect_copy = renvoWasm32CompilerPreferBulkIndirectCopy
+		fresh_arena_zero_return = renvoWasm32CompilerFreshArenaZeroReturn
+		make_zero_helper_body = renvoWasm32CompilerMakeZeroHelperBody
+		optimized_make_zero_helper = renvoWasm32CompilerOptimizedMakeZeroHelper
+		make_zero = renvoWasm32CompilerMakeZero
+		zero_local_storage = renvoWasm32CompilerZeroLocalStorage
 		primary_tertiary_operation = renvoWasm32CompilerPrimaryTertiaryOperation
 		unsigned_shift_right = renvoWasm32CompilerUnsignedShiftRight
 		signed_division_guard = renvoWasm32CompilerSignedDivisionGuard
@@ -5017,5 +5025,192 @@ go compiler {
 
 	func renvoWasm32CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		if g.c.renvoTarget == renvoTargetVM32 {
+			renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+			return
+		}
+		a := &g.asm
+		// Native WebAssembly implements the copy with its bulk-memory instruction.
+		renvoAsmLoadPrimaryStack(a, srcPtr)
+		renvoAsmLoadSecondaryStack(a, destPtr)
+		renvoAsmLoadTertiaryStack(a, byteCount)
+		renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
+		renvoAsmEmit8(a, renvoWasm32RegRdx)
+		renvoAsmEmit8(a, renvoWasm32RegRax)
+		renvoAsmEmit8(a, renvoWasm32RegRcx)
+		return
+	}
+
+	// VM32 keeps fixed copies straight-line to avoid interpreter loop overhead.
+	func renvoWasm32CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+		return (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 128
+	}
+
+	func renvoWasm32CompilerPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+		return g.c.renvoTarget != renvoTargetVM32 && size >= 128
+	}
+
+	// Arena storage starts zeroed. Only ranges retired by an explicit rewind can
+	// contain old values. Avoid touching large allocations in the virgin interval;
+	// reused ranges and non-arena addresses still take the ordinary zeroing path.
+	func renvoWasm32CompilerFreshArenaZeroReturn(g *renvoLinearGen) {
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		// Structured WASM helpers assign operand-stack slots statically; the
+		// branch-specific save/restore paths below require a native operand stack.
+		if g.c.renvoTarget != renvoTargetVM32 {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	}
+
+	func renvoWasm32CompilerMakeZeroHelperBody(g *renvoLinearGen) {
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		// Keep the zero value and byte count in registers throughout each loop.
+		// The generic arithmetic path spills the count for every stored word.
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 0)
+		for width := 4; width >= 1; width -= 3 {
+			loop := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
+			renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, width)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, width)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
+			renvoAsmJmpMarkLabel(a, loop, done)
+		}
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+		return
+	}
+
+	func renvoWasm32CompilerOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+		return false
+	}
+
+	func renvoWasm32CompilerMakeZero(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	}
+
+	func renvoWasm32CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+		a := &g.asm
+		if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 256 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	}
+}
+
+go compiler {
+	// VM memory loads support unaligned words. Keep pointers and the remaining
+	// length in registers and finish with byte loads, never reading beyond the
+	// source slice. Directional traversal preserves even one-byte overlaps.
+	func renvoEmitCopyBytesVM32(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		a := &g.asm
+		src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
+		renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, src, srcPtr)
+		renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, dest, destPtr)
+		renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, count, byteCount)
+		forward := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, dest, src)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLe, forward)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, src, count)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, dest, count)
+		for direction := 0; direction < 2; direction++ {
+			if direction == 1 {
+				renvoAsmMarkLabel(a, forward)
+			}
+			for size := 4; size > 0; size -= 3 {
+				loop := renvoAsmNewLabel(a)
+				tail := renvoAsmNewLabel(a)
+				renvoAsmMarkLabel(a, loop)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+				renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
+				if direction == 0 {
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+				}
+				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
+				renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+				if direction == 1 {
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+				}
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+				renvoAsmJmpLabel(a, loop)
+				renvoAsmMarkLabel(a, tail)
+			}
+			renvoAsmJmpLabel(a, done)
+		}
+		renvoAsmMarkLabel(a, done)
 	}
 }

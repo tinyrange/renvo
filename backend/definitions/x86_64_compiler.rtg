@@ -965,6 +965,14 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		copy_bytes = renvoAmd64CompilerCopyBytes
+		prefer_bulk_stack_copy = renvoAmd64CompilerPreferBulkStackCopy
+		prefer_bulk_indirect_copy = renvoAmd64CompilerPreferBulkIndirectCopy
+		fresh_arena_zero_return = renvoAmd64CompilerFreshArenaZeroReturn
+		make_zero_helper_body = renvoAmd64CompilerMakeZeroHelperBody
+		optimized_make_zero_helper = renvoAmd64CompilerOptimizedMakeZeroHelper
+		make_zero = renvoAmd64CompilerMakeZero
+		zero_local_storage = renvoAmd64CompilerZeroLocalStorage
 		primary_tertiary_operation = renvoAmd64CompilerPrimaryTertiaryOperation
 		unsigned_shift_right = renvoAmd64CompilerUnsignedShiftRight
 		signed_division_guard = renvoAmd64CompilerSignedDivisionGuard
@@ -2267,5 +2275,183 @@ go compiler {
 			code = "\x48\x85\xd2\x74\x01\xc3\xe9\x00\x00\x00\x00"
 		}
 		return renvoAmd64EnsureRuntimeCheck(g, labelSlot, register, code)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		renvoAmd64EmitCopyBytes(g, srcPtr, destPtr, byteCount)
+	}
+
+	func renvoAmd64CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+		return renvoFixedTarget == 0 && size >= 64
+	}
+
+	func renvoAmd64CompilerPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+		return size >= 64
+	}
+
+	// Arena storage starts zeroed. Only ranges retired by an explicit rewind can
+	// contain old values. Avoid touching large allocations in the virgin interval;
+	// reused ranges and non-arena addresses still take the ordinary zeroing path.
+	func renvoAmd64CompilerFreshArenaZeroReturn(g *renvoLinearGen) {
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	}
+
+	func renvoAmd64CompilerMakeZeroHelperBody(g *renvoLinearGen) {
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		loopLabel := renvoAsmNewLabel(a)
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmJzPrimary(a, doneLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+		renvoAsmAddSecondaryImm(a, 1)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+	}
+
+	func renvoAmd64CompilerOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		if g.c.renvoTarget == renvoTargetLinuxAmd64 {
+			renvoEmitLinuxAmd64MakeZeroPages(g)
+		}
+		// Preserve the result pointer and ABI call register while REP STOSB
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
+		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
+		return true
+	}
+
+	func renvoAmd64CompilerMakeZero(g *renvoLinearGen) {
+		renvoNonNil(g)
+		if g.c.objectFile {
+			// Object code is inspected by objtool, which deliberately rejects calls
+			// to helper islands embedded inside another function. Preserve RAX and
+			// RDI around the same REP STOSB sequence without introducing a call edge.
+			renvoAsmEmitText(&g.asm, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58")
+			return
+		}
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	}
+
+	func renvoAmd64CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+		a := &g.asm
+		if size >= 64 {
+			// Large zero values are common in the compiler's parser and metadata
+			// structures.  A counted store avoids expanding each zero value into a
+			// separate frame-relative instruction.
+			renvoAsmAddressCallWord0Stack(a, offset)
+			renvoAsmPrimaryImm(a, 0)
+			renvoAsmPushImm(a, (size+7)/8)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	}
+}
+
+go compiler {
+	// Clearing complete anonymous arena pages with MADV_DONTNEED preserves zero
+	// values without faulting in unused slice capacity. Preserve neighboring page
+	// fragments and all registers except the ordinary zero-helper scratch state.
+	// A rejected advisory operation falls back to the normal byte stores.
+	func renvoEmitLinuxAmd64MakeZeroPages(g *renvoLinearGen) {
+		a := &g.asm
+		plain := renvoAsmNewLabel(a)
+		fallback := renvoAsmNewLabel(a)
+		// cmp rcx,8192; jb plain
+		renvoAsmEmitText(a, "\x48\x81\xf9\x00\x20\x00\x00")
+		renvoAmd64AsmJccLabel(a, 0x82, plain)
+		// Save pointer, ABI arguments, syscall-clobbered r11, and byte count.
+		renvoAsmEmitText(a, "\x50\x57\x56\x52\x41\x53\x51")
+		// rdi = alignUp(pointer,4096); rsi = alignDown(end,4096)-rdi.
+		renvoAsmEmitText(a, "\x48\x8d\xb8\xff\x0f\x00\x00\x48\x81\xe7\x00\xf0\xff\xff")
+		renvoAsmEmitText(a, "\x48\x8d\x34\x08\x48\x81\xe6\x00\xf0\xff\xff\x48\x29\xfe")
+		// madvise(rdi,rsi,MADV_DONTNEED).
+		renvoAsmEmitText(a, "\xba\x04\x00\x00\x00\xb8\x1c\x00\x00\x00\x0f\x05\x85\xc0")
+		renvoAmd64AsmJccLabel(a, 0x88, fallback)
+		// Clear the leading fragment, whose size is (-pointer)&4095.
+		renvoAsmEmitText(a, "\x48\x8b\x7c\x24\x28\x48\x89\xf9\x48\xf7\xd9\x81\xe1\xff\x0f\x00\x00\x31\xc0\xf3\xaa")
+		// Clear the trailing fragment, whose size is end&4095.
+		renvoAsmEmitText(a, "\x48\x8b\x7c\x24\x28\x48\x03\x3c\x24\x48\x89\xf9\x81\xe1\xff\x0f\x00\x00")
+		renvoAsmEmitText(a, "\x48\x81\xe7\x00\xf0\xff\xff\x31\xc0\xf3\xaa")
+		renvoAsmEmitText(a, "\x59\x41\x5b\x5a\x5e\x5f\x58\xc3")
+		renvoAsmMarkLabel(a, fallback)
+		renvoAsmEmitText(a, "\x59\x41\x5b\x5a\x5e\x5f\x58")
+		renvoAsmMarkLabel(a, plain)
 	}
 }

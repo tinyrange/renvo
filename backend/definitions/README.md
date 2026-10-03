@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 110 role-based operations: register copies,
+The current migration covers 118 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -181,6 +181,9 @@ Comparison branches, bounded scalar operations and unsigned right shifts,
 signed-division guard policy, and bounds/nil-check helper emission are also
 bound by definitions. Language-level fault selection and helper lifetime stay
 in the core; the 386 shift implementation lives with the x86 integration.
+Bulk-copy thresholds, overlap-safe copy emission, zero-helper fast paths,
+fresh-arena elision, and local-storage clearing are definition-owned. Common
+aggregate lowering retains layout, local allocation, and slice-field semantics.
 Hooks may take typed parameters, an assembler or compiler-state input, and a
 validated result type. Their complete
 signatures are checked before generation;

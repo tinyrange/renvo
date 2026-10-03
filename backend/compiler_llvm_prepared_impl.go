@@ -2106,6 +2106,130 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+renvoNonNil(g)
+renvoRTGEmitCopyBytes(g, srcPtr, destPtr, byteCount)
+}
+
+func renvoPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+return renvoFixedTarget == 0 && size >= 64
+}
+
+func renvoPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
+renvoNonNil(g)
+	// Object writers require relocations to name storage inside a section;
+	// the executable fast path also references the arena's one-past end.
+	// Keep ordinary zeroing for objects, including prepared object targets.
+	if g.c.objectFile {
+		return
+	}
+	renvoStringHeapOffsets(g)
+	a := &g.asm
+	small := renvoAsmNewLabel(a)
+	reusedLabel := renvoAsmNewLabel(a)
+	highReady := renvoAsmNewLabel(a)
+	plain := renvoAsmNewLabel(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmPrimaryImm(a, 256)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+	renvoAsmJnzPrimary(a, small)
+	renvoAsmPopPrimary(a)
+	renvoAsmPushSecondary(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmPushTertiary(a)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmAddPrimaryTertiary(a)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+	renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+	renvoAsmJnzPrimary(a, reusedLabel)
+	renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+	renvoAsmJzPrimary(a, highReady)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+	renvoAsmJnzPrimary(a, reusedLabel)
+	renvoAsmMarkLabel(a, highReady)
+	renvoAsmCopySecondaryToPrimary(a)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+	renvoAsmJnzPrimary(a, reusedLabel)
+	renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+	renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+	renvoAsmJnzPrimary(a, reusedLabel)
+	renvoAsmPopTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmPopSecondary(a)
+	renvoAsmPushImm(a, 0)
+	renvoAsmPopTertiary(a)
+	renvoAsmRet(a)
+	renvoAsmMarkLabel(a, reusedLabel)
+	renvoAsmPopTertiary(a)
+	renvoAsmPopPrimary(a)
+	renvoAsmPopSecondary(a)
+	renvoAsmJmpLabel(a, plain)
+	renvoAsmMarkLabel(a, small)
+	renvoAsmPopPrimary(a)
+	renvoAsmMarkLabel(a, plain)
+}
+
+func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
+renvoNonNil(g)
+	a := &g.asm
+	renvoEmitMakeZeroFreshArenaReturn(g)
+	loopLabel := renvoAsmNewLabel(a)
+	doneLabel := renvoAsmNewLabel(a)
+	renvoAsmCopyPrimaryToSecondary(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmMarkLabel(a, loopLabel)
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmJzPrimary(a, doneLabel)
+	renvoAsmPrimaryImm(a, 0)
+	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+	renvoAsmAddSecondaryImm(a, 1)
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmPushImm(a, 1)
+	renvoAsmPopTertiary(a)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmCopyPrimaryToTertiary(a)
+	renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+	renvoAsmPopPrimary(a)
+	renvoAsmRet(a)
+}
+
+func renvoEmitOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitMakeZero(g *renvoLinearGen) {
+renvoNonNil(g)
+	renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+}
+
+func renvoZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+renvoNonNil(g)
+	a := &g.asm
+	if g.c.renvoNativeIntSize == 8 && size >= 24 {
+		renvoAsmAddressPrimaryStack(a, offset)
+		renvoAsmPushImm(a, size)
+		renvoAsmPopTertiary(a)
+		renvoEmitMakeZero(g)
+	} else {
+		renvoAsmPrimaryImm(a, 0)
+		step := g.c.renvoNativeIntSize
+		for at := 0; at < size; at += step {
+			renvoAsmStorePrimaryStack(a, offset-at)
+		}
+	}
+
+}
+
 func renvoEmitTargetPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 renvoNonNil(g)
 return renvoRTGEmitPrimaryTertiaryOp(g, tok)

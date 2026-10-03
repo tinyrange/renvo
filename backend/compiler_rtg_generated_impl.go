@@ -797,6 +797,471 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 {
+
+		renvoAmd64EmitCopyBytes(g, srcPtr, destPtr, byteCount)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArch386 {
+
+		renvo386EmitCopyBytes(g, srcPtr, destPtr, byteCount)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchAarch64 {
+
+		renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchArm {
+
+		renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		if g.c.renvoTarget == renvoTargetVM32 {
+			renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+			return
+		}
+		a := &g.asm
+		// Native WebAssembly implements the copy with its bulk-memory instruction.
+		renvoAsmLoadPrimaryStack(a, srcPtr)
+		renvoAsmLoadSecondaryStack(a, destPtr)
+		renvoAsmLoadTertiaryStack(a, byteCount)
+		renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
+		renvoAsmEmit8(a, renvoWasm32RegRdx)
+		renvoAsmEmit8(a, renvoWasm32RegRax)
+		renvoAsmEmit8(a, renvoWasm32RegRcx)
+		return
+	
+}
+g.asm.patchFailed = true
+}
+
+func renvoPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 || renvoCompilerSelector == renvoArch386 || renvoCompilerSelector == renvoArchAarch64 || renvoCompilerSelector == renvoArchArm {
+
+		return renvoFixedTarget == 0 && size >= 64
+	
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		return (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetWasiWasm32) && g.c.renvoTarget != renvoTargetVM32 && size >= 128
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 || renvoCompilerSelector == renvoArch386 {
+
+		return size >= 64
+	
+}
+if renvoCompilerSelector == renvoArchAarch64 {
+
+		return size >= 256
+	
+}
+if renvoCompilerSelector == renvoArchArm {
+
+		return size >= 128
+	
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		return g.c.renvoTarget != renvoTargetVM32 && size >= 128
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitMakeZeroFreshArenaReturn(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 || renvoCompilerSelector == renvoArch386 || renvoCompilerSelector == renvoArchAarch64 || renvoCompilerSelector == renvoArchArm {
+
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		// Structured WASM helpers assign operand-stack slots statically; the
+		// branch-specific save/restore paths below require a native operand stack.
+		if g.c.renvoTarget != renvoTargetVM32 {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitMakeZeroHelperBody(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 || renvoCompilerSelector == renvoArch386 || renvoCompilerSelector == renvoArchArm {
+
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		loopLabel := renvoAsmNewLabel(a)
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmJzPrimary(a, doneLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+		renvoAsmAddSecondaryImm(a, 1)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchAarch64 {
+
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		loopLabel := renvoAsmNewLabel(a)
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		// AArch64, VM32, and WASM support unaligned word stores. Clear whole
+		// native words before the byte tail rather than looping over every byte.
+		wordSize := g.c.renvoNativeIntSize
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, wordSize)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, wordSize)
+		renvoAsmAddSecondaryImm(a, wordSize)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, wordSize)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmJzPrimary(a, doneLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+		renvoAsmAddSecondaryImm(a, 1)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		// Keep the zero value and byte count in registers throughout each loop.
+		// The generic arithmetic path spills the count for every stored word.
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 0)
+		for width := 4; width >= 1; width -= 3 {
+			loop := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
+			renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, width)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, width)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
+			renvoAsmJmpMarkLabel(a, loop, done)
+		}
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+		return
+	
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 {
+
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		if g.c.renvoTarget == renvoTargetLinuxAmd64 {
+			renvoEmitLinuxAmd64MakeZeroPages(g)
+		}
+		// Preserve the result pointer and ABI call register while REP STOSB
+		// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
+		renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
+		return true
+	
+}
+if renvoCompilerSelector == renvoArch386 {
+
+		if g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
+			a := &g.asm
+			renvoEmitMakeZeroFreshArenaReturn(g)
+			// Preserve the result pointer and ABI call register while REP STOSB
+			// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
+			renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
+			return true
+		}
+		return false
+	
+}
+if renvoCompilerSelector == renvoArchAarch64 || renvoCompilerSelector == renvoArchArm || renvoCompilerSelector == renvoArchWasm32 {
+
+		return false
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitMakeZero(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 {
+
+		renvoNonNil(g)
+		if g.c.objectFile {
+			// Object code is inspected by objtool, which deliberately rejects calls
+			// to helper islands embedded inside another function. Preserve RAX and
+			// RDI around the same REP STOSB sequence without introducing a call edge.
+			renvoAsmEmitText(&g.asm, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58")
+			return
+		}
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	
+return
+
+}
+if renvoCompilerSelector == renvoArch386 || renvoCompilerSelector == renvoArchAarch64 || renvoCompilerSelector == renvoArchArm || renvoCompilerSelector == renvoArchWasm32 {
+
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c.renvoTargetArch
+if renvoCompilerSelector == renvoArchAmd64 {
+
+		a := &g.asm
+		if size >= 64 {
+			// Large zero values are common in the compiler's parser and metadata
+			// structures.  A counted store avoids expanding each zero value into a
+			// separate frame-relative instruction.
+			renvoAsmAddressCallWord0Stack(a, offset)
+			renvoAsmPrimaryImm(a, 0)
+			renvoAsmPushImm(a, (size+7)/8)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit3(a, 0xf3, 0x48, 0xab)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	
+return
+
+}
+if renvoCompilerSelector == renvoArch386 || renvoCompilerSelector == renvoArchAarch64 || renvoCompilerSelector == renvoArchArm {
+
+		a := &g.asm
+		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	
+return
+
+}
+if renvoCompilerSelector == renvoArchWasm32 {
+
+		a := &g.asm
+		if g.c.renvoNativeIntSize == 8 && size >= 24 || g.c.renvoTarget == renvoTargetWasiWasm32 && size >= 256 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
 func renvoEmitTargetPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c.renvoTargetArch

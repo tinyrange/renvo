@@ -737,6 +737,14 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		copy_bytes = renvoAarch64CompilerCopyBytes
+		prefer_bulk_stack_copy = renvoAarch64CompilerPreferBulkStackCopy
+		prefer_bulk_indirect_copy = renvoAarch64CompilerPreferBulkIndirectCopy
+		fresh_arena_zero_return = renvoAarch64CompilerFreshArenaZeroReturn
+		make_zero_helper_body = renvoAarch64CompilerMakeZeroHelperBody
+		optimized_make_zero_helper = renvoAarch64CompilerOptimizedMakeZeroHelper
+		make_zero = renvoAarch64CompilerMakeZero
+		zero_local_storage = renvoAarch64CompilerZeroLocalStorage
 		primary_tertiary_operation = renvoAarch64CompilerPrimaryTertiaryOperation
 		unsigned_shift_right = renvoAarch64CompilerUnsignedShiftRight
 		signed_division_guard = renvoAarch64CompilerSignedDivisionGuard
@@ -1635,5 +1643,199 @@ go compiler {
 
 	func renvoAarch64CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+	}
+
+	func renvoAarch64CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+		return renvoFixedTarget == 0 && size >= 64
+	}
+
+	func renvoAarch64CompilerPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+		return size >= 256
+	}
+
+	// Arena storage starts zeroed. Only ranges retired by an explicit rewind can
+	// contain old values. Avoid touching large allocations in the virgin interval;
+	// reused ranges and non-arena addresses still take the ordinary zeroing path.
+	func renvoAarch64CompilerFreshArenaZeroReturn(g *renvoLinearGen) {
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	}
+
+	func renvoAarch64CompilerMakeZeroHelperBody(g *renvoLinearGen) {
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		loopLabel := renvoAsmNewLabel(a)
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		// AArch64, VM32, and WASM support unaligned word stores. Clear whole
+		// native words before the byte tail rather than looping over every byte.
+		wordSize := g.c.renvoNativeIntSize
+		wordLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoAsmPrimaryImm(a, wordSize)
+		renvoAsmCmpTertiaryPrimaryJump(a, 0x9c, loopLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, wordSize)
+		renvoAsmAddSecondaryImm(a, wordSize)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, wordSize)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpLabel(a, wordLoop)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmJzPrimary(a, doneLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+		renvoAsmAddSecondaryImm(a, 1)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+	}
+
+	func renvoAarch64CompilerOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+		return false
+	}
+
+	func renvoAarch64CompilerMakeZero(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	}
+
+	func renvoAarch64CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+		a := &g.asm
+		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	}
+}
+
+go compiler {
+	// Keep copy pointers and the remaining byte count in caller-saved registers.
+	// Complete each load before its store so even sub-word overlap is safe.
+	func renvoEmitCopyBytesAarch64(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		a := &g.asm
+		renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
+		renvoAarch64AsmLoadRegStack(a, 1, destPtr)
+		renvoAarch64AsmLoadRegStack(a, 2, byteCount)
+		forward := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		renvoAarch64AsmCmpRegReg(a, 1, 0)
+		renvoAarch64AsmBCondLabel(a, forward, 9)
+		renvoAarch64AsmAddRegRegShift(a, 0, 0, 2, 0)
+		renvoAarch64AsmAddRegRegShift(a, 1, 1, 2, 0)
+		for direction := 0; direction < 2; direction++ {
+			if direction == 1 {
+				renvoAsmMarkLabel(a, forward)
+			}
+			words := renvoAsmNewLabel(a)
+			tail := renvoAsmNewLabel(a)
+			bytes := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, words)
+			renvoAarch64AsmCmpRegImm(a, 2, 8)
+			renvoAarch64AsmBCondLabel(a, tail, 3)
+			if direction == 0 {
+				renvoAarch64AsmAddRegImm(a, 0, 0, -8)
+				renvoAarch64AsmAddRegImm(a, 1, 1, -8)
+			}
+			renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 8)
+			renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 8)
+			if direction == 1 {
+				renvoAarch64AsmAddRegImm(a, 0, 0, 8)
+				renvoAarch64AsmAddRegImm(a, 1, 1, 8)
+			}
+			renvoAarch64AsmAddRegImm(a, 2, 2, -8)
+			renvoAsmJmpLabel(a, words)
+			renvoAsmMarkLabel(a, tail)
+			renvoAsmMarkLabel(a, bytes)
+			renvoAarch64AsmCmpRegImm(a, 2, 0)
+			renvoAarch64AsmBCondLabel(a, done, 0)
+			if direction == 0 {
+				renvoAarch64AsmAddRegImm(a, 0, 0, -1)
+				renvoAarch64AsmAddRegImm(a, 1, 1, -1)
+			}
+			renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 1)
+			renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 1)
+			if direction == 1 {
+				renvoAarch64AsmAddRegImm(a, 0, 0, 1)
+				renvoAarch64AsmAddRegImm(a, 1, 1, 1)
+			}
+			renvoAarch64AsmAddRegImm(a, 2, 2, -1)
+			renvoAsmJmpLabel(a, bytes)
+		}
+		renvoAsmMarkLabel(a, done)
 	}
 }
