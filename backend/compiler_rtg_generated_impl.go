@@ -806,6 +806,18 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return c.code16 && c.objectFile
+	
+}
+return false
+}
+
 func renvoAsmConditionBranch(a *renvoAsm, condition int, label int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -1940,6 +1952,9 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelec
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
+		if size < 1 || size > 4 {
+			return false
+		}
 		renvoAsmMarkLabel(a, label)
 		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
 		// value. Advance *p, store the value through the old pointer, and leave the
@@ -5319,7 +5334,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelec
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
-		return renvoWasm32FallbackSliceBackingSize
+		return 4096
 	
 }
 a.patchFailed = true

@@ -411,8 +411,6 @@ func renvoDeferUnreadyQueuedClosure(g *renvoLinearGen, fnIndex int) bool {
 	return true
 }
 
-const renvoWasm32FallbackSliceBackingSize = 4096
-
 const renvoLargeProgramSourceThreshold = 1048576
 
 func renvoAsmInit(a *renvoAsm) {
@@ -18986,7 +18984,7 @@ func renvoCanonicalMethodReceiverType(meta *renvoMeta, typ int) int {
 }
 
 func renvoEmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
-	if renvoFixedTarget != 0 || !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
+	if renvoFixedTarget != 0 || !g.c.objectFile || !renvoCompactCValueHelpers(g.c) || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
 		return false
 	}
 	fn := &g.meta.funcs[fnInfoIndex]
@@ -18997,7 +18995,7 @@ func renvoEmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
 	}
 	result := renvoResolveType(g.meta, fn.resultType)
 	size := renvoTypeSize(g.meta, fn.resultType)
-	if size < 1 || size > 4 ||
+	if size < 1 ||
 		(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
 		return false
 	}

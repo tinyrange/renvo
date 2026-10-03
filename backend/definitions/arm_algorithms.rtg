@@ -486,6 +486,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		compact_c_value_helpers = renvoArmCompilerCompactCValueHelpers
 		condition_branch = renvoArmCompilerConditionBranch
 		compare_stack_immediate_jump = renvoArmCompilerCompareStackImmediateJump
 		compare_stack_stack_jump = renvoArmCompilerCompareStackStackJump
@@ -3389,5 +3390,11 @@ go compiler {
 go compiler {
 	func renvoArmCompilerConditionBranch(a *renvoAsm, condition int, label int) {
 		renvoArmAsmBCondLabel(a, label, renvoArmCondFromSetcc(renvoArmCompilerLegacyCondition(condition)))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCompactCValueHelpers(c *renvoCompileContext) bool {
+		return false
 	}
 }

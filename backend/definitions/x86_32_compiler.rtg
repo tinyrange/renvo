@@ -952,6 +952,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		compact_c_value_helpers = renvo386CompilerCompactCValueHelpers
 		condition_branch = renvo386CompilerConditionBranch
 		compare_stack_immediate_jump = renvo386CompilerCompareStackImmediateJump
 		compare_stack_stack_jump = renvo386CompilerCompareStackStackJump
@@ -4884,6 +4885,9 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		if size < 1 || size > 4 {
+			return false
+		}
 		renvoAsmMarkLabel(a, label)
 		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
 		// value. Advance *p, store the value through the old pointer, and leave the
@@ -5381,5 +5385,11 @@ go compiler {
 		at := len(a.code)
 		renvoAsmEmit32(a, 0)
 		renvoAsmAddReloc(a, at, label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
+		return c.code16 && c.objectFile
 	}
 }
