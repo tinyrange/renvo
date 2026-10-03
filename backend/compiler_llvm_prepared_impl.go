@@ -631,6 +631,14 @@ const renvoRTGStaticCallPolicy = renvoStaticCallWords
 const renvoRTGOpenCreate = 64
 const renvoRTGOpenTruncate = 512
 
+const renvoRTGSyscallArgumentPolicy = 1
+const renvoRTGCustomSyscall = false
+func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
+return false
+}
+func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
 var rtgLlvmRAX = RTGRegister{Code:0, Valid:true}
 
 var rtgLlvmRDX = RTGRegister{Code:1, Valid:true}
@@ -2141,6 +2149,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoSyscallArgumentPolicy(c *renvoCompileContext) int {
+renvoNonNil(c)
+return renvoRTGSyscallArgumentPolicy
+}
+
 func renvoJITCallSupported(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return renvoRTGJITCallSupported
@@ -2804,9 +2817,10 @@ return renvoRTGEmitExit(a, renvoRTGPrimary)
 
 func renvoAsmSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
 renvoNonNil(a)
-if wordCount > 7 {
+if wordCount < 1 || wordCount > 7 || renvoRTGSyscallArgumentPolicy == 2 && syscallNumber < 0 {
 	return false
 }
+if renvoRTGCustomSyscall { return renvoRTGEmitCustomSyscall(a, wordCount, syscallNumber) }
 registers := []RTGRegister{
 	renvoRTGSyscallNumber,
 	renvoRTGSyscallWord0, renvoRTGSyscallWord1, renvoRTGSyscallWord2,
@@ -2816,8 +2830,11 @@ for i := 0; i < wordCount; i++ {
 	if !registers[i].Valid {
 		return false
 	}
+}
+for i := 0; i < wordCount; i++ {
 	renvoRTGAsmPopRegister(a, registers[i])
 }
+renvoRTGRecordRawSyscall(a, syscallNumber)
 renvoRTGDirectHostSyscall(a)
 if renvoRTGSyscallResult.Valid &&
 	renvoRTGSyscallResult.Code != renvoRTGPrimary.Code {

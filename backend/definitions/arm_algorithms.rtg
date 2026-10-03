@@ -486,6 +486,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		syscall_argument_policy = renvoArmCompilerSyscallArgumentPolicy
 		jit_call_supported = renvoArmCompilerJITCallSupported
 		open_flag = renvoArmCompilerOpenFlag
 		file_offset_sentinel = renvoArmCompilerFileOffsetSentinel
@@ -3466,5 +3467,11 @@ go compiler {
 go compiler {
 	func renvoArmCompilerJITCallSupported(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSyscallArgumentPolicy(c *renvoCompileContext) int {
+		return 1
 	}
 }

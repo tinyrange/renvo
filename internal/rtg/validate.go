@@ -463,7 +463,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclRuntime {
 		return []string{
-			"operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout", "open_flag_layout",
+			"raw_syscall_layout", "emit_syscall_from_stack", "operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout", "open_flag_layout",
 			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
@@ -599,13 +599,13 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 }
 
 func validateRuntime(document Document, declaration Declaration) []Diagnostic {
-	var diagnostics []Diagnostic
+	diagnostics := validateRawSyscallLayout(document, declaration)
 	hookNames := []string{
 		"emit_entry_start", "emit_entry_start_simple", "emit_entry", "emit_exit", "emit_static_call",
 		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
-		"prepare_read_write_buffer", "move_offset_argument",
+		"prepare_read_write_buffer", "move_offset_argument", "emit_syscall_from_stack",
 	}
-	hookParameters := make([][]string, 11)
+	hookParameters := make([][]string, 12)
 	hookParameters[0] = []string{"*RTGEmitter", "int"}
 	hookParameters[1] = []string{"*RTGEmitter"}
 	hookParameters[2] = []string{"*RTGEmitter", "int", "int"}
@@ -617,7 +617,8 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 	hookParameters[8] = []string{"*RTGEmitter", "RTGLabel"}
 	hookParameters[9] = []string{"*RTGEmitter"}
 	hookParameters[10] = []string{"*RTGEmitter"}
-	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", ""}
+	hookParameters[11] = []string{"*RTGEmitter", "int", "int"}
+	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", "", "bool"}
 	for i := 0; i < len(declaration.Statements); i++ {
 		left, right, assignment := statementAssignment(declaration.Statements[i])
 		if assignment && len(left) == 1 {

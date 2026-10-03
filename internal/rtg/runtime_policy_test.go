@@ -56,6 +56,16 @@ func TestPreparedSyscallSiteTableIsDefinitionBound(t *testing.T) {
 				t.Fatalf("generate fixture: %#v", generated.Diagnostics)
 			}
 			text := string(generated.Source)
+			policy := "1"
+			if tc.wantSites {
+				policy = "2"
+			}
+			if !strings.Contains(text, "const renvoRTGSyscallArgumentPolicy = "+policy) {
+				t.Fatal("raw syscall constant-number policy does not follow the site table")
+			}
+			if strings.Contains(text, "out.openbsdSyscalls = append(out.openbsdSyscalls, number)") != tc.wantSites {
+				t.Fatal("raw syscall adapter does not preserve required site metadata")
+			}
 			start := strings.Index(text, "func renvoRTGEmitRuntimeOperation(")
 			if start < 0 {
 				t.Fatal("missing runtime operation adapter")
