@@ -4150,6 +4150,11 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		condition_branch = renvoWasm32CompilerConditionBranch
+		compare_stack_immediate_jump = renvoWasm32CompilerCompareStackImmediateJump
+		compare_stack_stack_jump = renvoWasm32CompilerCompareStackStackJump
+		compare_jump = renvoWasm32CompilerCompareJump
+		compare_set = renvoWasm32CompilerCompareSet
 		object_absolute_symbols = renvoWasm32CompilerObjectAbsoluteSymbols
 		object_lazy_arena = renvoWasm32CompilerObjectLazyArena
 		object_faults_trap = renvoWasm32CompilerObjectFaultsTrap
@@ -4379,7 +4384,6 @@ extend arch vm32 {
 		bounds_success_branch = renvoWasm32CompilerBoundsSuccessBranch
 		bounds_check_helper = renvoWasm32CompilerBoundsCheckHelper
 		non_nil_check_helper = renvoWasm32CompilerNonNilCheckHelper
-		comparison_branch = renvoWasm32CompilerComparisonBranch
 		install_thread_state = renvoWasm32CompilerInstallThreadState
 		load_primary_thread_state = renvoWasm32CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoWasm32CompilerStorePrimaryThreadState
@@ -5089,50 +5093,6 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerComparisonBranch(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
-		cond := renvoWasm32CondEq
-		if c0 == '=' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondEq
-			} else {
-				cond = renvoWasm32CondNe
-			}
-		} else if c0 == '!' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondNe
-			} else {
-				cond = renvoWasm32CondEq
-			}
-		} else if c0 == '<' {
-			if c1 == '=' {
-				if jumpIfTrue {
-					cond = renvoWasm32CondLe
-				} else {
-					cond = renvoWasm32CondGt
-				}
-			} else {
-				if jumpIfTrue {
-					cond = renvoWasm32CondLt
-				} else {
-					cond = renvoWasm32CondGe
-				}
-			}
-		} else if c1 == '=' {
-			if jumpIfTrue {
-				cond = renvoWasm32CondGe
-			} else {
-				cond = renvoWasm32CondLt
-			}
-		} else {
-			if jumpIfTrue {
-				cond = renvoWasm32CondGt
-			} else {
-				cond = renvoWasm32CondLe
-			}
-		}
-		renvoWasm32EmitCondBranch(a, cond, label)
-		return
-	}
 }
 
 go compiler {
@@ -5428,10 +5388,10 @@ go compiler {
 		renvoNonNil(g)
 		highEqual := renvoAsmNewLabel(&g.asm)
 		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionEqual)
 		renvoAsmJnzPrimary(&g.asm, highEqual)
 		if signed {
-			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x9c)
+			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionSignedLess)
 		} else {
 			renvoEmitNativeUnsignedLessStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize)
 		}
@@ -5629,17 +5589,17 @@ go compiler {
 		leftNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
 		rightNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
 		renvoAsmStoreStackImm(&g.asm, zero, 0)
-		renvoEmitNativeCompareStack(g, left, zero, 0x9c)
+		renvoEmitNativeCompareStack(g, left, zero, renvoConditionSignedLess)
 		renvoAsmStorePrimaryStack(&g.asm, leftNegative)
-		renvoEmitNativeCompareStack(g, right, zero, 0x9c)
+		renvoEmitNativeCompareStack(g, right, zero, renvoConditionSignedLess)
 		renvoAsmStorePrimaryStack(&g.asm, rightNegative)
 		sameSign := renvoAsmNewLabel(&g.asm)
 		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, leftNegative, rightNegative, 0x94)
+		renvoEmitNativeCompareStack(g, leftNegative, rightNegative, renvoConditionEqual)
 		renvoAsmJnzPrimary(&g.asm, sameSign)
 		renvoAsmLoadPrimaryStack(&g.asm, rightNegative)
 		renvoAsmJmpMarkLabel(&g.asm, done, sameSign)
-		renvoEmitNativeCompareStack(g, left, right, 0x9c)
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionSignedLess)
 		renvoAsmMarkLabel(&g.asm, done)
 	}
 
@@ -7125,5 +7085,84 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerObjectAbsoluteSymbols(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+# Adapter for the private legacy emitter protocol; semantic IDs are not opcodes.
+go compiler {
+	func renvoWasm32CompilerLegacyCondition(condition int) int {
+		if condition == renvoConditionEqual {
+			return 0x94
+		}
+		if condition == renvoConditionNotEqual {
+			return 0x95
+		}
+		if condition == renvoConditionSignedLess {
+			return 0x9c
+		}
+		if condition == renvoConditionSignedGreaterEqual {
+			return 0x9d
+		}
+		if condition == renvoConditionSignedLessEqual {
+			return 0x9e
+		}
+		if condition == renvoConditionSignedGreater {
+			return 0x9f
+		}
+		if condition == renvoConditionUnsignedLess {
+			return 0x92
+		}
+		if condition == renvoConditionUnsignedGreaterEqual {
+			return 0x93
+		}
+		if condition == renvoConditionUnsignedLessEqual {
+			return 0x96
+		}
+		if condition == renvoConditionUnsignedGreater {
+			return 0x97
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompareSet(a *renvoAsm, condition int) {
+		renvoWasm32CompilerCmpTertiaryPrimarySet(a, renvoWasm32CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompareJump(a *renvoAsm, condition int, label int) {
+		renvoWasm32CompilerCmpTertiaryPrimaryJump(a, renvoWasm32CompilerLegacyCondition(condition), label)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompareStackStackJump(a *renvoAsm, left int, right int, label int, condition int) {
+		renvoWasm32CompilerJcmpStackStack(a, left, right, label, renvoWasm32CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCompareStackImmediateJump(a *renvoAsm, offset int, value int, label int, condition int) {
+		renvoWasm32CompilerJcmpStackImm(a, offset, value, label, renvoWasm32CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerConditionBranch(a *renvoAsm, condition int, label int) {
+		cond := renvoWasm32CondEq
+		if condition == renvoConditionNotEqual {
+			cond = renvoWasm32CondNe
+		} else if condition == renvoConditionSignedLess || condition == renvoConditionUnsignedLess {
+			cond = renvoWasm32CondLt
+		} else if condition == renvoConditionSignedGreaterEqual || condition == renvoConditionUnsignedGreaterEqual {
+			cond = renvoWasm32CondGe
+		} else if condition == renvoConditionSignedLessEqual || condition == renvoConditionUnsignedLessEqual {
+			cond = renvoWasm32CondLe
+		} else if condition == renvoConditionSignedGreater || condition == renvoConditionUnsignedGreater {
+			cond = renvoWasm32CondGt
+		}
+		renvoWasm32EmitCondBranch(a, cond, label)
 	}
 }
