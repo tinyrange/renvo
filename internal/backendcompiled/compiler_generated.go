@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "1467c75afb4c4e9d0b61ce6056de1d4771b608b1e21bf22dc9434cbf53d4842c"
+const CompilerSourceDigest = "e64f4625eb2fb4de9e2f3e442e0bdf533885a049bda14362b4419fee9a4e932e"
 
 // source: backend/compiler_common_impl.go
 
@@ -5226,7 +5226,7 @@ renvoNonNil(m)
 hash := renvoHashRange(m.prog.src, nameStart, nameEnd)
 i := int(renvo_runtime_UnsafeInt32At(m.globalBuckets, hash%len(m.globalBuckets)))
 for i >= 0 {
-s := m.globals[i]
+s := &m.globals[i]
 if s.kind == kind && renvoBytesEqualRange(m.prog.src, s.nameStart, s.nameEnd, nameStart, nameEnd) {
 return i
 }
@@ -6984,7 +6984,7 @@ for i := 0; i < len(m.types); i++ {
 if i == typ {
 continue
 }
-other := m.types[i]
+other := &m.types[i]
 if other.nameEnd <= other.nameStart {
 continue
 }
