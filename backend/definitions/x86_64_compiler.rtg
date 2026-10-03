@@ -965,6 +965,12 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		compound_local_assign = renvoAmd64CompilerCompoundLocalAssign
+		self_binary_local_assign = renvoAmd64CompilerSelfBinaryLocalAssign
+		scalar_preserves_secondary = renvoAmd64CompilerScalarPreservesSecondary
+		direct_scalar_store = renvoAmd64CompilerDirectScalarStore
+		compound_pointer_memory = renvoAmd64CompilerCompoundPointerMemory
+		indexed_pointer_address = renvoAmd64CompilerIndexedPointerAddress
 		switch_case_peephole = renvoAmd64CompilerSwitchCasePeephole
 		register_switch = renvoAmd64CompilerRegisterSwitch
 		string_equal_left_length = renvoAmd64CompilerStringEqualLeftLength
@@ -3517,5 +3523,62 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
 		return -1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIndexedPointerAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCompoundPointerMemory(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerDirectScalarStore(g *renvoLinearGen, size int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
+		if kind != renvoTypeInt {
+			return -1
+		}
+		memoryOp := 0
+		if op == '+' {
+			memoryOp = 0x0148
+		} else if op == '-' {
+			memoryOp = 0x2948
+		} else if op == '&' {
+			memoryOp = 0x2148
+		} else if op == '|' {
+			memoryOp = 0x0948
+		} else if op == '^' {
+			memoryOp = 0x3148
+		} else {
+			return -1
+		}
+		if !renvoEmitScalarExprForKind(g, ep, idx, kind) {
+			return 0
+		}
+		renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
+		return 1
 	}
 }

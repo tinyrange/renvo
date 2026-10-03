@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "5bbc00ce66602eeb76ed704c4bba80ead3b87a9d41d8ac7abddee44046ad79f2"
+const CompilerSourceDigest = "cafe8aedf8146880534b52d7897c646c8b4e45542a3fc9892ce95e66537539a9"
 
 // source: backend/compiler_common_impl.go
 
@@ -10525,8 +10525,8 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 a := &g.asm
 kind := renvoResolveType(g.meta, targetType).kind
 directAddress := -1
-if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 {
-directAddress = renvo386EmitCIndexedPointerAddress(g, left, pointerIndex)
+if renvoFixedTarget == 0 {
+directAddress = renvoEmitIndexedPointerAddressPeephole(g, left, pointerIndex)
 }
 if directAddress == 0 || directAddress < 0 && !renvoEmitIntExpr(g, left, pointerIndex) {
 return false
@@ -10534,9 +10534,9 @@ return false
 renvoEmitRuntimeNonNilPrimary(g)
 if renvoTokCharIs(g.prog, assignTok, '=') {
 size := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, kind)
-if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && size >= 1 && size <= 4 &&
+if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, size) &&
 (renvoTypeKindIsScalarValue(kind) || kind == renvoTypePointer || kind == renvoTypeFunc) {
-simpleRight := renvoConstExprSideEffectFree(g, right, rightIndex) || renvo386SimpleScalarExpr(g, right, rightIndex)
+simpleRight := renvoConstExprSideEffectFree(g, right, rightIndex) || renvoScalarPreservesSecondary(g, right, rightIndex)
 if simpleRight {
 renvoAsmCopyPrimaryToSecondary(a)
 } else {
@@ -10568,7 +10568,7 @@ return false
 }
 return true
 }
-if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && renvo386EmitCompoundPointerMemory(g, right, rightIndex, kind, assignTok) {
+if renvoFixedTarget == 0 && renvoEmitCompoundPointerMemoryPeephole(g, right, rightIndex, kind, assignTok) {
 return true
 }
 if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(kind) {
@@ -11093,9 +11093,9 @@ renvoSetLocalConstAtOffset(g, offset, 0, targetResolved.kind)
 }
 return true
 }
-if renvoFixedTarget == 0 && !compoundAssign && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && globalOffset < 0 && fieldStackOffset < 0 &&
+if renvoFixedTarget == 0 && !compoundAssign && globalOffset < 0 && fieldStackOffset < 0 &&
 renvoTypeKindIsScalarInt(targetResolved.kind) && renvoTypeSize(meta, targetType) == 4 &&
-renvo386EmitSelfBinaryLocalAssign(g, ep, rootIndex, offset) {
+renvoEmitSelfBinaryLocalAssignPeephole(g, ep, rootIndex, offset) {
 return true
 }
 if compoundAssign {
@@ -11139,29 +11139,19 @@ renvoClearLocalConstAtOffset(g, offset)
 }
 return true
 }
-memoryOp := 0
-if renvoTok2Is(p, assignTok, '+', '=') {
-memoryOp = 0x0148
-} else if renvoTok2Is(p, assignTok, '-', '=') {
-memoryOp = 0x2948
-} else if renvoTok2Is(p, assignTok, '&', '=') {
-memoryOp = 0x2148
-} else if renvoTok2Is(p, assignTok, '|', '=') {
-memoryOp = 0x0948
-} else if renvoTok2Is(p, assignTok, '^', '=') {
-memoryOp = 0x3148
+if globalOffset < 0 && fieldStackOffset < 0 && renvoTypeKindIsScalarInt(targetResolved.kind) {
+var operation byte
+
+
+operatorStart := renvoTokStart(p, assignTok)
+if renvoTokEnd(p, assignTok)-operatorStart == 2 && renvo_runtime_UnsafeByteAt(p.src, operatorStart+1) == '=' {
+operation = renvo_runtime_UnsafeByteAt(p.src, operatorStart)
 }
-if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && memoryOp != 0 &&
-globalOffset < 0 && fieldStackOffset < 0 && renvoTypeKindIsScalarInt(targetResolved.kind) &&
-renvoTypeSize(meta, targetType) == 4 {
-return renvo386EmitDirectCompoundLocalAssign(g, ep, rootIndex, offset, assignTok, memoryOp, targetResolved.kind, compoundZero)
-}
-if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 &&
-renvoTypeIsNativeInt(meta, targetType) {
-if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
+fast := renvoEmitCompoundLocalAssignPeephole(g, ep, rootIndex, offset, assignTok, operation, targetResolved.kind, renvoTypeSize(meta, targetType))
+if fast == 0 {
 return false
 }
-renvoAsmStackMem(a, offset, memoryOp, 0x45, 0x85)
+if fast > 0 {
 if compoundZero.ok {
 if renvoFixedTarget == 0 {
 renvoSetLocalFlowConstAtOffset(g, offset, 0, targetResolved.kind)
@@ -11173,6 +11163,7 @@ renvoClearLocalFlowConstAtOffset(g, offset)
 }
 }
 return true
+}
 }
 if globalOffset >= 0 {
 if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -11326,7 +11317,7 @@ renvoAsmLoadSecondaryStack(&g.asm, addrOffset)
 renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, 8)
 return true
 }
-if renvoFixedTarget == 0 && g.c.code16 && g.c.renvoTargetArch == renvoArch386 &&
+if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, renvoScalarKindSize(g.c.renvoNativeIntSize, resolvedKind)) &&
 (renvoTypeKindIsScalarValue(resolvedKind) || resolvedKind == renvoTypePointer || resolvedKind == renvoTypeFunc) &&
 renvoTypeSize(g.meta, typ) <= g.c.renvoNativeIntSize {
 if !renvoEmitScalarExprForKind(g, ep, idx, resolvedKind) {
@@ -30119,7 +30110,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x5f\x8b\x1b\xcf\xc2\xfb\x35\x43\xba\x89\xc7\x8c\xeb\xb6\xb4\x04\x7a\x88\xa5\xb2\x8a\x8f\x33\x35\xd4\x0b\x29\xb8\x83\x1b\xd4\x45", 3, true
+return "wasi/wasm32", "\x63\xcb\x4f\x8a\xe5\x40\xd0\xc2\x7c\x56\xef\xf1\x0f\x89\xef\xfc\x03\x42\xd2\xf0\xc4\x90\x37\xad\x44\xfd\xc1\x3e\x0f\xee\x6e\xac", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -30131,7 +30122,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\xb4\xf4\x67\x5a\x2c\x6e\x71\xbd\x63\xad\x95\x54\x82\x42\x47\xb5\x8b\xf9\x7d\xfa\x2f\xb7\x0f\x92\xf7\x07\x20\x82\xb5\x05\xa4\x1f", 3, true
+return "vm/vm32", "\x4b\xb0\x72\x28\xa4\x99\xd9\x98\xd6\xa9\x44\xb1\x76\xb8\xf9\xa2\x6a\xdf\xd0\xfb\x31\x74\x3a\x2f\x7a\x6d\x19\x5e\xca\xd2\xc4\xd0", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -31602,6 +31593,175 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitCompoundLocalAssignPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if kind != renvoTypeInt {
+return -1
+}
+memoryOp := 0
+if op == '+' {
+memoryOp = 0x0148
+} else if op == '-' {
+memoryOp = 0x2948
+} else if op == '&' {
+memoryOp = 0x2148
+} else if op == '|' {
+memoryOp = 0x0948
+} else if op == '^' {
+memoryOp = 0x3148
+} else {
+return -1
+}
+if !renvoEmitScalarExprForKind(g, ep, idx, kind) {
+return 0
+}
+renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
+return 1
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 || size != 4 {
+return -1
+}
+memoryOp := 0
+if op == '+' {
+memoryOp = 0x0148
+} else if op == '-' {
+memoryOp = 0x2948
+} else if op == '&' {
+memoryOp = 0x2148
+} else if op == '|' {
+memoryOp = 0x0948
+} else if op == '^' {
+memoryOp = 0x3148
+} else {
+return -1
+}
+if !renvo386EmitDirectCompoundLocalAssign(g, ep, idx, offset, tok, memoryOp, kind) {
+return 0
+}
+return 1
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return -1
+
+}
+g.asm.patchFailed = true
+return -1
+}
+
+func renvoEmitSelfBinaryLocalAssignPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 {
+return false
+}
+return renvo386EmitSelfBinaryLocalAssign(g, ep, idx, offset)
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 {
+return false
+}
+return renvo386SimpleScalarExpr(g, ep, idx)
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoCanDirectScalarStore(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 {
+return false
+}
+return size >= 1 && size <= 4
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitCompoundPointerMemoryPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 {
+return false
+}
+return renvo386EmitCompoundPointerMemory(g, ep, idx, kind, tok)
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitIndexedPointerAddressPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return -1
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 || !g.c.code16 {
+return -1
+}
+return renvo386EmitCIndexedPointerAddress(g, ep, idx)
+
+}
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEmitSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
@@ -44068,6 +44228,18 @@ return true
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -46237,7 +46409,7 @@ renvoAsmEmit3(&g.asm, 0x8d, 0x04, scale<<6|0x02)
 return 1
 }
 
-func renvo386EmitDirectCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int, assignTok int, memoryOp int, kind int, compoundZero renvoConstResult) bool {
+func renvo386EmitDirectCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int, assignTok int, memoryOp int, kind int) bool {
 value := renvoEvalConstExpr(g, ep, rootIndex)
 if value.ok {
 group := 0
@@ -46265,12 +46437,6 @@ if !renvoEmitScalarExprForKind(g, ep, rootIndex, kind) {
 return false
 }
 renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
-}
-if compoundZero.ok {
-renvoSetLocalFlowConstAtOffset(g, offset, 0, kind)
-} else {
-renvoClearLocalConstAtOffset(g, offset)
-renvoClearLocalFlowConstAtOffset(g, offset)
 }
 return true
 }
@@ -47135,6 +47301,18 @@ renvoAsmEmit32(&g.asm, value)
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -50093,6 +50271,18 @@ return label
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -51409,6 +51599,18 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -54957,6 +55159,18 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

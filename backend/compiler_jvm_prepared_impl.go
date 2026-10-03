@@ -4357,6 +4357,36 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitCompoundLocalAssignPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitSelfBinaryLocalAssignPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoCanDirectScalarStore(g *renvoLinearGen, size int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitCompoundPointerMemoryPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitIndexedPointerAddressPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+renvoNonNil(g)
+return -1
+}
+
 func renvoEmitSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
 renvoNonNil(g)
 return -1
