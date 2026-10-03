@@ -669,6 +669,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		empty_function = renvoAmd64CompilerEmptyFunction
+		resolve_unemitted_closures = renvoAmd64CompilerResolveUnemittedClosures
+		object_program = renvoAmd64CompilerObjectProgram
 		program_image_entry = renvoAmd64CompilerProgramImageEntry
 		program_cache_supported = renvoAmd64CompilerProgramCacheSupported
 		program_target_mode = renvoAmd64CompilerProgramTargetMode
@@ -4358,5 +4361,24 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerProgramImageEntry(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectProgram(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerResolveUnemittedClosures(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerEmptyFunction(a *renvoAsm, label int) {
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
 	}
 }

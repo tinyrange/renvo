@@ -2114,6 +2114,24 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitEmptyFunction(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoRTGFunctionStart(a, label)
+renvoAsmMarkLabel(a, label)
+renvoAsmRet(a)
+renvoRTGFunctionFinish(a)
+}
+
+func renvoResolveUnemittedClosures(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return true
+}
+
+func renvoObjectProgram(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGPreparedObject != 0
+}
+
 func renvoProgramImageEntry(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return false
@@ -2136,10 +2154,16 @@ return renvoRTGPreparedKernelModule != 0 && !c.objectFile
 
 func renvoBuildProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
 renvoNonNil(a)
-if renvoRTGPreparedKernelModule != 0 && !a.c.objectFile {
+if renvoRTGPreparedObject == 0 {
+	renvoAsmPatch(a)
+}
+if renvoRTGPreparedKernelModule != 0 && renvoRTGPreparedObject == 0 {
 	result.data = renvoRTGKernelImage(a, initLabel, exitLabel)
 } else {
 	result.data = renvoRTGImage(a)
+	if renvoRTGPreparedObject == 0 && renvoFixedTarget == 0 && a.c.emitImage {
+		result.data = renvoAppendReplLinkTable(result.data, a)
+	}
 }
 }
 
@@ -2161,6 +2185,9 @@ return false
 func renvoSetupProgramLayout(a *renvoAsm, image bool, functionCount int) int {
 renvoNonNil(a)
 a.codeOffset = renvoRTGCodeOffset
+if renvoRTGPreparedKernelModule != 0 {
+	return -1
+}
 offset := -1
 if renvoRTGEntryStateBytes > 0 {
 	offset = a.ReserveBSS(renvoRTGEntryStateBytes, renvoRTGStackWordBytes)

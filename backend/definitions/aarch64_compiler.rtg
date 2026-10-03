@@ -420,6 +420,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		empty_function = renvoAarch64CompilerEmptyFunction
+		resolve_unemitted_closures = renvoAarch64CompilerResolveUnemittedClosures
+		object_program = renvoAarch64CompilerObjectProgram
 		program_image_entry = renvoAarch64CompilerProgramImageEntry
 		program_cache_supported = renvoAarch64CompilerProgramCacheSupported
 		program_target_mode = renvoAarch64CompilerProgramTargetMode
@@ -3262,5 +3265,24 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerProgramImageEntry(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectProgram(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerResolveUnemittedClosures(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerEmptyFunction(a *renvoAsm, label int) {
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
 	}
 }

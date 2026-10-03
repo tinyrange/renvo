@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		empty_function = renvoWasm32CompilerEmptyFunction
+		resolve_unemitted_closures = renvoWasm32CompilerResolveUnemittedClosures
+		object_program = renvoWasm32CompilerObjectProgram
 		program_image_entry = renvoWasm32CompilerProgramImageEntry
 		program_cache_supported = renvoWasm32CompilerProgramCacheSupported
 		program_target_mode = renvoWasm32CompilerProgramTargetMode
@@ -6751,5 +6754,24 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerProgramImageEntry(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectProgram(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerResolveUnemittedClosures(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerEmptyFunction(a *renvoAsm, label int) {
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
 	}
 }

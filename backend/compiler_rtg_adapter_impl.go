@@ -470,83 +470,7 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 	renvoRTGImageLimitMemory = false
 	renvoRTGImageLimitNeeded = 0
 	renvoRTGImageLimit = 0
-	if renvoRTGPreparedObject != 0 {
-		return renvoTryCompileObjectProgramRTG(p, meta)
-	}
-	appIndex := p.entryFunc
-	if appIndex < 0 {
-		renvoPrintErr("renvo: prepared backend could not find appMain\n")
-		return renvoCompileResult{}
-	}
-	g := new(renvoLinearGen)
-	renvoInitLinearProgram(g, p, meta, true)
-	g.asm.codeOffset = renvoRTGCodeOffset
-	renvoInitProgramFunctions(g, false)
-	if renvoRTGPreparedKernelModule != 0 {
-		if !renvoBeginKernelModule(g, appIndex) {
-			return renvoCompileResult{}
-		}
-		if !renvoEmitAllQueuedFunctionsScratch(g) {
-			return renvoCompileResult{}
-		}
-		renvoRTGResolveSpeculativeClosureLabels(g)
-		if renvoRTGUnsupportedOperation != 0 {
-			renvoRTGReportFailure(g)
-			return renvoCompileResult{}
-		}
-		renvoAsmPatch(&g.asm)
-		data := renvoRTGKernelImage(&g.asm, g.kernelInitLabel, g.kernelExitLabel)
-		renvoRTGValidateRelocations(&g.asm)
-		if renvoRTGUnsupportedOperation != 0 {
-			renvoRTGReportFailure(g)
-			return renvoCompileResult{}
-		}
-		if len(data) == 0 {
-			return renvoCompileResult{}
-		}
-		return renvoCompileResult{data: data, ok: true}
-	}
-	entryStateOffset := -1
-	if renvoRTGEntryStateBytes > 0 {
-		entryStateOffset = g.asm.ReserveBSS(renvoRTGEntryStateBytes, renvoRTGStackWordBytes)
-	}
-	if !renvoRTGEmitEntryStart(&g.asm, entryStateOffset) {
-		renvoPrintErr("renvo: prepared backend rejected entry start\n")
-		return renvoCompileResult{}
-	}
-	if !renvoEmitApplicationEntry(g, appIndex, false, entryStateOffset) {
-		renvoPrintErr("renvo: prepared backend rejected application entry\n")
-		return renvoCompileResult{}
-	}
-	if !renvoEmitAllQueuedFunctionsScratch(g) {
-		renvoPrintErr("renvo: prepared backend failed queued functions\n")
-		return renvoCompileResult{}
-	}
-	renvoRTGResolveSpeculativeClosureLabels(g)
-	if renvoRTGUnsupportedOperation != 0 {
-		renvoRTGReportFailure(g)
-		return renvoCompileResult{}
-	}
-	renvoAsmPatch(&g.asm)
-	data := renvoRTGImage(&g.asm)
-	if renvoFixedTarget == 0 && g.asm.c.emitImage {
-		data = renvoAppendReplLinkTable(data, &g.asm)
-	}
-	renvoRTGValidateRelocations(&g.asm)
-	if renvoRTGUnsupportedOperation != 0 {
-		renvoRTGReportFailure(g)
-		return renvoCompileResult{}
-	}
-	if len(data) == 0 {
-		if renvoRTGImageLimit > 0 {
-			renvoRTGReportImageSize(g)
-		} else {
-			renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
-		}
-		renvoRTGUnsupportedOperation = 5001
-		return renvoCompileResult{}
-	}
-	return renvoCompileResult{data: data, ok: true}
+	return renvoTryCompileScalarProgramScratch(p, meta)
 }
 
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
@@ -594,44 +518,8 @@ func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
 	return true
 }
 
-func renvoTryCompileObjectProgramRTG(
-	p *renvoProgram, meta *renvoMeta,
-) renvoCompileResult {
-	g := renvoBeginObjectProgram(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-		return renvoCompileResult{}
-	}
-	renvoRTGResolveSpeculativeClosureLabels(g)
-	if renvoRTGUnsupportedOperation != 0 {
-		return renvoCompileResult{}
-	}
-	renvoRecordObjectFunctionRanges(g)
-	data := renvoRTGImage(&g.asm)
-	renvoRTGValidateRelocations(&g.asm)
-	if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {
-		return renvoCompileResult{}
-	}
-	return renvoCompileResult{data: data, ok: true}
-}
-
-// Whole-program function-value dispatch may speculatively reference a closure
-// before its parent is emitted. A reachable literal requeues and emits the real
-// body; a literal folded away by constant control flow does neither. Keep this
-// prepared-only repair in the RTG adapter so fixed-target compiler binaries do
-// not retain it or the target-specific emission graph it references.
-func renvoRTGResolveSpeculativeClosureLabels(g *renvoLinearGen) {
-	for closureIndex := 0; closureIndex < len(g.meta.closures); closureIndex++ {
-		closure := &g.meta.closures[closureIndex]
-		fnIndex := closure.fnIndex
-		if closure.ready || fnIndex < 0 || fnIndex >= len(g.funcLabels) ||
-			renvoAsmLabelPosition(&g.asm, g.funcLabels[fnIndex]) >= 0 {
-			continue
-		}
-		renvoRTGFunctionStart(&g.asm, g.funcLabels[fnIndex])
-		renvoAsmMarkLabel(&g.asm, g.funcLabels[fnIndex])
-		renvoAsmRet(&g.asm)
-		renvoRTGFunctionFinish(&g.asm)
-	}
+func renvoTryCompileObjectProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramRTG(p, meta)
 }
 
 func renvoRTGReportFailure(g *renvoLinearGen) {
