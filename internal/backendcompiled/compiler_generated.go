@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "797ccd63bf950c9c8f64b196f6cb2aaafe39eadc5712cd0f7c3cb7fc92346334"
+const CompilerSourceDigest = "5c59b5cc3656cd51f5c1b005b6511083149621099b8c006c8d9b0df7a82b9929"
 
 // source: backend/compiler_common_impl.go
 
@@ -20994,7 +20994,7 @@ elementSize := renvoTypeSize(g.meta, fieldType)
 if g.c.objectFile && renvoResolveType(g.meta, fieldType).kind == renvoTypeFunc {
 
 
-elementSize = g.c.renvoNativeIntSize
+elementSize = renvoTargetAddressSize(g.c, renvoPointerSpaceFunction)
 }
 fieldOffset = at * elementSize
 next = at + 1
@@ -21050,10 +21050,7 @@ if resolved.kind == renvoTypePointer {
 value, ok := renvoObjectConstantPointerValue(g, ep, idx)
 size := renvoTypeSize(g.meta, typ)
 if ok && size >= 1 && size <= 8 && offset+size <= len(data) {
-for at := 0; at < size; at++ {
-data[offset+at] = byte(value >> (at * 8))
-}
-return true
+return renvoStoreTargetConstant(g.c, data, offset, size, uint64(value))
 }
 }
 if resolved.kind == renvoTypePointer && e.kind == renvoExprCall && e.argCount == 1 &&
@@ -21117,10 +21114,7 @@ size := renvoTypeSize(g.meta, typ)
 if !ok || size != 4 && size != 8 || offset+size > len(data) {
 return false
 }
-for at := 0; at < size; at++ {
-data[offset+at] = byte(bits >> (at * 8))
-}
-return true
+return renvoStoreTargetConstant(g.c, data, offset, size, bits)
 }
 
 
@@ -21132,10 +21126,7 @@ if e.kind == renvoExprInt && renvoTypeKindIsScalarInt(resolved.kind) &&
 renvoTypeSize(g.meta, typ) == 8 && offset+8 <= len(data) {
 low := renvoParseIntToken(g.prog, e.tok)
 bits := uint64(uint32(low)) | uint64(uint32(g.prog.parsedIntHigh))<<32
-for at := 0; at < 8; at++ {
-data[offset+at] = byte(bits >> (at * 8))
-}
-return true
+return renvoStoreTargetConstant(g.c, data, offset, 8, bits)
 }
 if !renvoTypeKindIsScalarInt(resolved.kind) && resolved.kind != renvoTypePointer && resolved.kind != renvoTypeBool {
 return false
@@ -21145,10 +21136,7 @@ size := renvoTypeSize(g.meta, typ)
 if !value.ok || size < 1 || size > 8 || offset+size > len(data) {
 return false
 }
-for at := 0; at < size; at++ {
-data[offset+at] = byte(value.value >> (at * 8))
-}
-return true
+return renvoStoreTargetConstant(g.c, data, offset, size, uint64(value.value))
 }
 
 func renvoObjectFloatConstantBits(p *renvoProgram, ep *renvoExprParse, idx int, kind int) (uint64, bool) {
@@ -29087,6 +29075,35 @@ return "", "", 0, false
 }
 
 // source: backend/compiler_target_impl.go
+
+
+
+func renvoStoreTargetConstant(c *renvoCompileContext, data []byte, offset int, size int, bits uint64) bool {
+target := c.renvoTarget
+if renvoFixedTarget != 0 {
+target = renvoFixedTarget
+}
+profile, ok := renvoProfileForTarget(target)
+if !ok {
+return false
+}
+return renvoStoreIntegerBytes(data, offset, size, bits, profile.endian)
+}
+
+func renvoStoreIntegerBytes(data []byte, offset int, size int, bits uint64, endian int) bool {
+if size < 1 || size > 8 || offset < 0 || offset > len(data) || size > len(data)-offset ||
+endian != renvoEndianLittle && endian != renvoEndianBig {
+return false
+}
+for at := 0; at < size; at++ {
+shift := at
+if endian == renvoEndianBig {
+shift = size - 1 - at
+}
+data[offset+at] = byte(bits >> (shift * 8))
+}
+return true
+}
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
