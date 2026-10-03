@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "30c918d3725d046215fbeb130de1643db9263a2f006d1e0729571a6b41faa468"
+const CompilerSourceDigest = "ee9a9ac2a4855a4dccf895fc1774ba3678d3af1d5447b8c6a04a889634969b89"
 
 // source: backend/compiler_common_impl.go
 
@@ -21529,24 +21529,69 @@ count := renvoEntryParameterCount(g, appIndex)
 return count >= 0 && renvoEmitImageEntryWords(g, count)
 }
 
+
+
+
+func renvoEmitApplicationEntry(g *renvoLinearGen, appIndex int, image bool, entryStateOffset int) bool {
+renvoLinearMarkFunc(g, appIndex)
+if !renvoEmitProgramEntryFrame(&g.asm, image) {
+return false
+}
+if !g.meta.panicEnabled {
+renvoEmitEntryRuntimeRegisters(g)
+}
+renvoEmitInitializeThreadState(g)
+renvoEmitPersistentArenaReady(g)
+if !renvoLinearInitGlobals(g) {
+return false
+}
+if image {
+if !renvoEmitImageEntryArgs(g, appIndex) {
+return false
+}
+} else {
+if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
+return false
+}
+
+if !g.meta.panicEnabled {
+renvoEmitEntryRuntimeRegisters(g)
+}
+}
+renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
+if !renvoEmitProgramPanicCheck(g) {
+return false
+}
+return renvoEmitProgramExit(&g.asm, image)
+}
+
+func renvoInitLinearProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta, optimizeRuntime bool) {
+g.c = meta.c
+g.prog = p
+g.meta = meta
+g.arenaSize = meta.arenaSize
+g.c.optimizeRuntime = optimizeRuntime && len(p.src) >= renvoLargeProgramSourceThreshold
+renvoAsmInitWithContext(&g.asm, g.c)
+}
+
+func renvoInitProgramFunctions(g *renvoLinearGen, reserve bool) {
+count := len(g.meta.funcs)
+if reserve {
+g.funcLabels = make([]int, 0, count)
+}
+for i := 0; i < count; i++ {
+g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
+}
+renvoInitFuncQueue(g, count)
+}
+
 func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 renvoNonNil(p, meta)
 renvo_runtime_ArenaDiscardDecls(p.decls)
 renvo_runtime_ArenaDiscardFuncs(p.funcs)
 g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
-renvoAsmInitWithContext(&g.asm, g.c)
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
-}
-renvoInitFuncQueue(g, len(meta.funcs))
+renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
+renvoInitProgramFunctions(g, renvoFixedTarget != 0)
 return g
 }
 
@@ -28782,7 +28827,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x44\xaa\x0f\xd4\xf2\x14\x48\xe1\x01\x05\x09\xc7\x48\x7d\xe3\xca\x59\xb3\xbb\x9c\x12\xed\x25\x7a\x65\x6d\x15\x31\x00\xdb\x8b\xfd", 3, true
+return "wasi/wasm32", "\xb8\x0c\xff\x97\x01\xf4\x2f\xc8\x0b\xdb\x0a\xd0\x05\x6b\x40\x22\x2c\x08\xe2\x69\xab\xd9\x6e\x44\x79\xd3\x32\x57\x77\xf5\x21\xc4", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28794,7 +28839,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x17\x25\x70\x7a\x39\xac\x64\xe8\x64\x21\x96\x7e\x75\x26\x13\x18\x8c\x6d\xb3\xeb\x9a\x6b\x6e\xe9\x70\x0d\xa0\x19\xe0\xab\x92\xd2", 3, true
+return "vm/vm32", "\x76\xc3\x39\xab\x1d\x2f\xf4\xbf\x9c\xf4\x12\x04\x87\x11\x61\x8f\xfb\xc4\xf1\x6f\x74\xc4\x9c\x2a\x28\xa7\x81\xf7\x2c\x2e\xc8\x99", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30273,6 +30318,170 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64InitRuntimeCheckRegs(g)
+
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoEmitProgramExit(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if image {
+renvoAsmRet(a)
+} else if targetIsWindows(a.c.renvoTargetOS) {
+renvoWinAmd64EmitExit(a)
+renvoAsmRet(a)
+} else {
+renvoAsmCopyPrimaryToCallWord0(a)
+renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(a.c.renvoTargetOS))
+renvoAsmSyscall(a)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if image {
+renvoAsmRet(a)
+} else if targetIsWindows(a.c.renvoTargetOS) {
+renvoWin386EmitExit(a)
+renvoAsmRet(a)
+} else {
+renvoAsmCopyPrimaryToCallWord0(a)
+renvoAsmPrimaryImm(a, renvoLinux386SysExit)
+renvoAsmSyscall(a)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if image {
+renvoAsmLeave(a)
+renvoAsmRet(a)
+} else if targetIsWindows(a.c.renvoTargetOS) {
+renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
+renvoWinArm64DefinitionExit(a)
+renvoAsmRet(a)
+} else if targetIsDarwin(a.c.renvoTargetOS) {
+renvoDarwinArm64DefinitionExit(a)
+renvoAsmRet(a)
+} else {
+renvoAsmCopyPrimaryToCallWord0(a)
+renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
+renvoAsmSyscall(a)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+if image {
+renvoAsmLeave(a)
+renvoAsmRet(a)
+} else {
+renvoAsmCopyPrimaryToCallWord0(a)
+renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
+renvoAsmSyscall(a)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+if image {
+return false
+}
+renvoWasm32AsmExit(a)
+return true
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoEmitProgramEntryFrame(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSFreeBSD {
+
+
+
+renvoAsmEmitText(a, "\x48\x89\xfc")
+}
+if image {
+
+
+renvoAsmEmitText(a, "\x57\x56\x52\x51")
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if image {
+
+
+renvoAarch64AsmEmit(a, 0xa9bf7bfd)
+renvoAarch64AsmEmit(a, 0x910003fd)
+renvoAarch64AsmAddRegImm(a, 31, 31, -32)
+renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
+renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
+renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
+renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+if image {
+renvoArmAsmEmit(a, 0xe92d4800)
+renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
+renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
+renvoArmAsmStoreRegMem(a, 0, renvoArmRegSp, 0, 4)
+renvoArmAsmStoreRegMem(a, 1, renvoArmRegSp, 4, 4)
+renvoArmAsmStoreRegMem(a, 2, renvoArmRegSp, 8, 4)
+renvoArmAsmStoreRegMem(a, 3, renvoArmRegSp, 12, 4)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return !image
+
+}
+a.patchFailed = true
+return false
 }
 
 func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
@@ -43560,17 +43769,9 @@ renvoPrintErr("renvo: prepared backend could not find appMain\n")
 return renvoCompileResult{}
 }
 g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
-renvoAsmInitWithContext(&g.asm, g.c)
+renvoInitLinearProgram(g, p, meta, true)
 g.asm.codeOffset = renvoRTGCodeOffset
-for i := 0; i < len(meta.funcs); i++ {
-g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
-}
-renvoInitFuncQueue(g, len(meta.funcs))
+renvoInitProgramFunctions(g, false)
 if renvoRTGPreparedKernelModule != 0 {
 if !renvoBeginKernelModule(g, appIndex) {
 return renvoCompileResult{}
@@ -43603,27 +43804,8 @@ if !renvoRTGEmitEntryStart(&g.asm, entryStateOffset) {
 renvoPrintErr("renvo: prepared backend rejected entry start\n")
 return renvoCompileResult{}
 }
-renvoLinearMarkFunc(g, appIndex)
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
-renvoPrintErr("renvo: prepared backend failed global initialization\n")
-return renvoCompileResult{}
-}
-
-
-
-if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
-renvoPrintErr("renvo: prepared backend rejected process arguments\n")
-return renvoCompileResult{}
-}
-renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-renvoPrintErr("renvo: prepared backend failed panic check\n")
-return renvoCompileResult{}
-}
-if !renvoRTGEmitExit(&g.asm, renvoRTGPrimary) {
-renvoPrintErr("renvo: prepared backend rejected process exit\n")
+if !renvoEmitApplicationEntry(g, appIndex, false, entryStateOffset) {
+renvoPrintErr("renvo: prepared backend rejected application entry\n")
 return renvoCompileResult{}
 }
 if !renvoEmitAllQueuedFunctionsScratch(g) {
@@ -43960,54 +44142,8 @@ return nil
 }
 return g
 }
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
-renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSFreeBSD {
-
-
-
-renvoAsmEmitText(a, "\x48\x89\xfc")
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-
-
-renvoAsmEmitText(a, "\x57\x56\x52\x51")
-}
-if !meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
+if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-if !renvoEmitImageEntryArgs(g, appIndex) {
-return nil
-}
-} else {
-if !renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff) {
-return nil
-}
-
-
-if !meta.panicEnabled {
-renvoAmd64InitRuntimeCheckRegs(g)
-}
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoWinAmd64EmitExit(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
-renvoAsmSyscall(a)
 }
 return g
 }
@@ -45487,6 +45623,12 @@ renvoAsmEmit32(a, imm)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -45983,53 +46125,15 @@ if appIndex < 0 {
 return nil
 }
 g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
+renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
 a := &g.asm
-renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvo386ELFCodeOffset
 if targetIsWindows(meta.c.renvoTargetOS) {
 a.codeOffset = renvoWinSectionRVA
 }
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
+renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgs(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoWin386EmitExit(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, renvoLinux386SysExit)
-renvoAsmSyscall(a)
 }
 return g
 }
@@ -48571,6 +48675,12 @@ return true
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -50598,13 +50708,8 @@ return nil
 }
 session := &renvoAarch64ProgramSession{prog: p}
 g := &session.gen
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
+renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
 a := &g.asm
-renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoAarch64ELFCodeOffset
 if targetIsWindows(meta.c.renvoTargetOS) {
 a.codeOffset = renvoWinSectionRVA
@@ -50619,58 +50724,9 @@ return nil
 }
 }
 }
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == 0 && meta.c.emitImage {
-
-
-renvoAarch64AsmEmit(a, 0xa9bf7bfd)
-renvoAarch64AsmEmit(a, 0x910003fd)
-renvoAarch64AsmAddRegImm(a, 31, 31, -32)
-renvoAarch64AsmStoreRegMem(a, 0, 31, 0, 8)
-renvoAarch64AsmStoreRegMem(a, 1, 31, 8, 8)
-renvoAarch64AsmStoreRegMem(a, 2, 31, 16, 8)
-renvoAarch64AsmStoreRegMem(a, 3, 31, 24, 8)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
+renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgs(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmLeave(a)
-renvoAsmRet(a)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRax)
-renvoWinArm64DefinitionExit(a)
-renvoAsmRet(a)
-} else if targetIsDarwin(meta.c.renvoTargetOS) {
-renvoDarwinArm64DefinitionExit(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
-renvoAsmSyscall(a)
 }
 return session
 }
@@ -51235,6 +51291,12 @@ renvoAsmRet(&g.asm)
 renvoAsmMarkLabel(&g.asm, after)
 return label
 }
+
+
+
+
+
+
 
 
 
@@ -52638,57 +52700,12 @@ if appIndex < 0 {
 return nil
 }
 g := new(renvoLinearGen)
-g.c = meta.c
-g.prog = p
-g.meta = meta
-g.arenaSize = meta.arenaSize
-g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
+renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
 a := &g.asm
-renvoAsmInitWithContext(a, g.c)
 a.codeOffset = renvoLinuxArmCodeOffset
-if renvoFixedTarget != 0 {
-g.funcLabels = make([]int, 0, len(meta.funcs))
-}
-for i := 0; i < len(meta.funcs); i++ {
-label := renvoAsmNewLabel(a)
-g.funcLabels = append(g.funcLabels, label)
-}
-renvoInitFuncQueue(g, len(meta.funcs))
-renvoLinearMarkFunc(g, appIndex)
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoArmAsmEmit(a, 0xe92d4800)
-renvoArmAsmMovRegReg(a, renvoArmRegFp, renvoArmRegSp)
-renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -16)
-renvoArmAsmStoreRegMem(a, 0, renvoArmRegSp, 0, 4)
-renvoArmAsmStoreRegMem(a, 1, renvoArmRegSp, 4, 4)
-renvoArmAsmStoreRegMem(a, 2, renvoArmRegSp, 8, 4)
-renvoArmAsmStoreRegMem(a, 3, renvoArmRegSp, 12, 4)
-}
-renvoEmitInitializeThreadState(g)
-renvoEmitPersistentArenaReady(g)
-if !renvoLinearInitGlobals(g) {
+renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 return nil
-}
-entryOK := false
-if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgs(g, appIndex)
-} else {
-entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
-}
-if !entryOK {
-return nil
-}
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(g) {
-return nil
-}
-if renvoFixedTarget == 0 && meta.c.emitImage {
-renvoAsmLeave(a)
-renvoAsmRet(a)
-} else {
-renvoAsmCopyPrimaryToCallWord0(a)
-renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
-renvoAsmSyscall(a)
 }
 return g
 }
@@ -52727,6 +52744,12 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
+
+
 
 
 
@@ -56415,6 +56438,12 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
 
 
 
@@ -61860,17 +61889,9 @@ label := renvoAsmNewLabel(a)
 g.funcLabels = append(g.funcLabels, label)
 }
 renvoInitFuncQueue(&g, len(meta.funcs))
-renvoWasm32MarkFunc(&g, appIndex)
-renvoEmitInitializeThreadState(&g)
-renvoEmitPersistentArenaReady(&g)
-if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgs(&g, appIndex, 0) {
+if !renvoEmitApplicationEntry(&g, appIndex, false, 0) {
 return renvoCompileResult{}
 }
-renvoAsmCallLabel(a, g.funcLabels[appIndex])
-if !renvoEmitProgramPanicCheck(&g) {
-return renvoCompileResult{}
-}
-renvoWasm32AsmExit(a)
 for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 i := g.funcQueue[queueIndex]
 if renvoDeferUnreadyQueuedClosure(&g, i) {

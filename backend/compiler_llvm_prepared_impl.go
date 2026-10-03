@@ -2114,6 +2114,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitEntryRuntimeRegisters(g *renvoLinearGen) {
+renvoNonNil(g)
+return
+}
+
+func renvoEmitProgramExit(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+if image { return false }; return renvoRTGEmitExit(a, renvoRTGPrimary)
+}
+
+func renvoEmitProgramEntryFrame(a *renvoAsm, image bool) bool {
+renvoNonNil(a)
+return !image
+}
+
 func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
 renvoNonNil(g)
 return false

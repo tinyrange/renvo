@@ -126,54 +126,8 @@ go compiler {
 			}
 			return g
 		}
-		renvoLinearMarkFunc(g, appIndex)
-		if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
-			renvoFixedTarget == 0 && meta.c.renvoTargetOS == renvoOSFreeBSD {
-			// FreeBSD supplies the initial process-stack pointer in RDI. Preserve
-			// it as RSP before global initializers can use the ordinary call
-			// registers.
-			renvoAsmEmitText(a, "\x48\x89\xfc")
-		}
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			// Preserve the four linked-image ABI words while global
-			// initialization freely uses the ordinary call registers.
-			renvoAsmEmitText(a, "\x57\x56\x52\x51")
-		}
-		if !meta.panicEnabled {
-			renvoAmd64InitRuntimeCheckRegs(g)
-		}
-		renvoEmitInitializeThreadState(g)
-		renvoEmitPersistentArenaReady(g)
-		if !renvoLinearInitGlobals(g) {
+		if !renvoEmitApplicationEntry(g, appIndex, renvoFixedTarget == 0 && meta.c.emitImage, g.darwinEntryOff) {
 			return nil
-		}
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			if !renvoEmitImageEntryArgs(g, appIndex) {
-				return nil
-			}
-		} else {
-			if !renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff) {
-				return nil
-			}
-			// Entry argument setup uses R12 as scratch, so restore all reserved
-			// runtime check registers after it has consumed the process stack.
-			if !meta.panicEnabled {
-				renvoAmd64InitRuntimeCheckRegs(g)
-			}
-		}
-		renvoAsmCallLabel(a, g.funcLabels[appIndex])
-		if !renvoEmitProgramPanicCheck(g) {
-			return nil
-		}
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			renvoAsmRet(a)
-		} else if targetIsWindows(meta.c.renvoTargetOS) {
-			renvoWinAmd64EmitExit(a)
-			renvoAsmRet(a)
-		} else {
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
-			renvoAsmSyscall(a)
 		}
 		return g
 	}
@@ -884,6 +838,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		entry_runtime_registers = renvoAmd64CompilerEntryRuntimeRegisters
+		program_exit = renvoAmd64CompilerProgramExit
+		program_entry_frame = renvoAmd64CompilerProgramEntryFrame
 		image_entry_words = renvoAmd64CompilerImageEntryWords
 		process_entry_words = renvoAmd64CompilerProcessEntryWords
 		object_reverse_register_call = renvoAmd64CompilerObjectReverseRegisterCall
@@ -4352,5 +4309,45 @@ go compiler {
 		// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
 		renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramEntryFrame(a *renvoAsm, image bool) bool {
+		if renvoFixedTarget == renvoTargetFreeBSDAmd64 ||
+			renvoFixedTarget == 0 && a.c.renvoTargetOS == renvoOSFreeBSD {
+			// FreeBSD supplies the initial process-stack pointer in RDI. Preserve
+			// it as RSP before global initializers can use the ordinary call
+			// registers.
+			renvoAsmEmitText(a, "\x48\x89\xfc")
+		}
+		if image {
+			// Preserve the four linked-image ABI words while global
+			// initialization freely uses the ordinary call registers.
+			renvoAsmEmitText(a, "\x57\x56\x52\x51")
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProgramExit(a *renvoAsm, image bool) bool {
+		if image {
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWinAmd64EmitExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(a.c.renvoTargetOS))
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
+		renvoAmd64InitRuntimeCheckRegs(g)
 	}
 }

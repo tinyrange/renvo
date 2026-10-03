@@ -809,17 +809,9 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 		g.funcLabels = append(g.funcLabels, label)
 	}
 	renvoInitFuncQueue(&g, len(meta.funcs))
-	renvoWasm32MarkFunc(&g, appIndex)
-	renvoEmitInitializeThreadState(&g)
-	renvoEmitPersistentArenaReady(&g)
-	if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgs(&g, appIndex, 0) {
+	if !renvoEmitApplicationEntry(&g, appIndex, false, 0) {
 		return renvoCompileResult{}
 	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(&g) {
-		return renvoCompileResult{}
-	}
-	renvoWasm32AsmExit(a)
 	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
 		i := g.funcQueue[queueIndex]
 		if renvoDeferUnreadyQueuedClosure(&g, i) {

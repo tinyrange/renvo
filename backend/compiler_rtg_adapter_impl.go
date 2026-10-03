@@ -524,17 +524,9 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		return renvoCompileResult{}
 	}
 	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
-	renvoAsmInitWithContext(&g.asm, g.c)
+	renvoInitLinearProgram(g, p, meta, true)
 	g.asm.codeOffset = renvoRTGCodeOffset
-	for i := 0; i < len(meta.funcs); i++ {
-		g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
+	renvoInitProgramFunctions(g, false)
 	if renvoRTGPreparedKernelModule != 0 {
 		if !renvoBeginKernelModule(g, appIndex) {
 			return renvoCompileResult{}
@@ -567,27 +559,8 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		renvoPrintErr("renvo: prepared backend rejected entry start\n")
 		return renvoCompileResult{}
 	}
-	renvoLinearMarkFunc(g, appIndex)
-	renvoEmitInitializeThreadState(g)
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		renvoPrintErr("renvo: prepared backend failed global initialization\n")
-		return renvoCompileResult{}
-	}
-	// Native process argument and environment decoding belongs to the selected
-	// runtime definition. The hook leaves the ordinary Renvo call words ready
-	// for appMain, so the shared lowering path does not know an OS entry ABI.
-	if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
-		renvoPrintErr("renvo: prepared backend rejected process arguments\n")
-		return renvoCompileResult{}
-	}
-	renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		renvoPrintErr("renvo: prepared backend failed panic check\n")
-		return renvoCompileResult{}
-	}
-	if !renvoRTGEmitExit(&g.asm, renvoRTGPrimary) {
-		renvoPrintErr("renvo: prepared backend rejected process exit\n")
+	if !renvoEmitApplicationEntry(g, appIndex, false, entryStateOffset) {
+		renvoPrintErr("renvo: prepared backend rejected application entry\n")
 		return renvoCompileResult{}
 	}
 	if !renvoEmitAllQueuedFunctionsScratch(g) {
