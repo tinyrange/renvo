@@ -10518,8 +10518,8 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 	a := &g.asm
 	kind := renvoResolveType(g.meta, targetType).kind
 	directAddress := -1
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 {
-		directAddress = renvo386EmitCIndexedPointerAddress(g, left, pointerIndex)
+	if renvoFixedTarget == 0 {
+		directAddress = renvoEmitIndexedPointerAddressPeephole(g, left, pointerIndex)
 	}
 	if directAddress == 0 || directAddress < 0 && !renvoEmitIntExpr(g, left, pointerIndex) {
 		return false
@@ -10527,9 +10527,9 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 	renvoEmitRuntimeNonNilPrimary(g)
 	if renvoTokCharIs(g.prog, assignTok, '=') {
 		size := renvoNativeScalarStorageSize(g.c.renvoNativeIntSize, kind)
-		if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && size >= 1 && size <= 4 &&
+		if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, size) &&
 			(renvoTypeKindIsScalarValue(kind) || kind == renvoTypePointer || kind == renvoTypeFunc) {
-			simpleRight := renvoConstExprSideEffectFree(g, right, rightIndex) || renvo386SimpleScalarExpr(g, right, rightIndex)
+			simpleRight := renvoConstExprSideEffectFree(g, right, rightIndex) || renvoScalarPreservesSecondary(g, right, rightIndex)
 			if simpleRight {
 				renvoAsmCopyPrimaryToSecondary(a)
 			} else {
@@ -10561,7 +10561,7 @@ func renvoEmitPointerAssignment(g *renvoLinearGen, left *renvoExprParse, pointer
 		}
 		return true
 	}
-	if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && renvo386EmitCompoundPointerMemory(g, right, rightIndex, kind, assignTok) {
+	if renvoFixedTarget == 0 && renvoEmitCompoundPointerMemoryPeephole(g, right, rightIndex, kind, assignTok) {
 		return true
 	}
 	if g.c.renvoNativeIntSize == 4 && renvoTypeKindIsWideValue(kind) {
@@ -11086,9 +11086,9 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 		}
 		return true
 	}
-	if renvoFixedTarget == 0 && !compoundAssign && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && globalOffset < 0 && fieldStackOffset < 0 &&
+	if renvoFixedTarget == 0 && !compoundAssign && globalOffset < 0 && fieldStackOffset < 0 &&
 		renvoTypeKindIsScalarInt(targetResolved.kind) && renvoTypeSize(meta, targetType) == 4 &&
-		renvo386EmitSelfBinaryLocalAssign(g, ep, rootIndex, offset) {
+		renvoEmitSelfBinaryLocalAssignPeephole(g, ep, rootIndex, offset) {
 		return true
 	}
 	if compoundAssign {
@@ -11132,40 +11132,31 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 			return true
 		}
-		memoryOp := 0
-		if renvoTok2Is(p, assignTok, '+', '=') {
-			memoryOp = 0x0148
-		} else if renvoTok2Is(p, assignTok, '-', '=') {
-			memoryOp = 0x2948
-		} else if renvoTok2Is(p, assignTok, '&', '=') {
-			memoryOp = 0x2148
-		} else if renvoTok2Is(p, assignTok, '|', '=') {
-			memoryOp = 0x0948
-		} else if renvoTok2Is(p, assignTok, '^', '=') {
-			memoryOp = 0x3148
-		}
-		if renvoFixedTarget == 0 && g.c.renvoTargetArch == renvoArch386 && g.c.code16 && memoryOp != 0 &&
-			globalOffset < 0 && fieldStackOffset < 0 && renvoTypeKindIsScalarInt(targetResolved.kind) &&
-			renvoTypeSize(meta, targetType) == 4 {
-			return renvo386EmitDirectCompoundLocalAssign(g, ep, rootIndex, offset, assignTok, memoryOp, targetResolved.kind, compoundZero)
-		}
-		if g.c.renvoTargetArch == renvoArchAmd64 && memoryOp != 0 && globalOffset < 0 && fieldStackOffset < 0 &&
-			renvoTypeIsNativeInt(meta, targetType) {
-			if !renvoEmitScalarExprForKind(g, ep, rootIndex, targetResolved.kind) {
+		if globalOffset < 0 && fieldStackOffset < 0 && renvoTypeKindIsScalarInt(targetResolved.kind) {
+			var operation byte
+			// Only two-character assignments map to these binary operators;
+			// shifts and &^= must retain their full operator semantics.
+			operatorStart := renvoTokStart(p, assignTok)
+			if renvoTokEnd(p, assignTok)-operatorStart == 2 && renvo_runtime_UnsafeByteAt(p.src, operatorStart+1) == '=' {
+				operation = renvo_runtime_UnsafeByteAt(p.src, operatorStart)
+			}
+			fast := renvoEmitCompoundLocalAssignPeephole(g, ep, rootIndex, offset, assignTok, operation, targetResolved.kind, renvoTypeSize(meta, targetType))
+			if fast == 0 {
 				return false
 			}
-			renvoAsmStackMem(a, offset, memoryOp, 0x45, 0x85)
-			if compoundZero.ok {
-				if renvoFixedTarget == 0 {
-					renvoSetLocalFlowConstAtOffset(g, offset, 0, targetResolved.kind)
+			if fast > 0 {
+				if compoundZero.ok {
+					if renvoFixedTarget == 0 {
+						renvoSetLocalFlowConstAtOffset(g, offset, 0, targetResolved.kind)
+					}
+				} else {
+					renvoClearLocalConstAtOffset(g, offset)
+					if renvoFixedTarget == 0 {
+						renvoClearLocalFlowConstAtOffset(g, offset)
+					}
 				}
-			} else {
-				renvoClearLocalConstAtOffset(g, offset)
-				if renvoFixedTarget == 0 {
-					renvoClearLocalFlowConstAtOffset(g, offset)
-				}
+				return true
 			}
-			return true
 		}
 		if globalOffset >= 0 {
 			if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
@@ -11319,7 +11310,7 @@ func renvoEmitTypedExprToSavedMem(g *renvoLinearGen, ep *renvoExprParse, idx int
 		renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, 8)
 		return true
 	}
-	if renvoFixedTarget == 0 && g.c.code16 && g.c.renvoTargetArch == renvoArch386 &&
+	if renvoFixedTarget == 0 && renvoCanDirectScalarStore(g, renvoScalarKindSize(g.c.renvoNativeIntSize, resolvedKind)) &&
 		(renvoTypeKindIsScalarValue(resolvedKind) || resolvedKind == renvoTypePointer || resolvedKind == renvoTypeFunc) &&
 		renvoTypeSize(g.meta, typ) <= g.c.renvoNativeIntSize {
 		if !renvoEmitScalarExprForKind(g, ep, idx, resolvedKind) {

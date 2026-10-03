@@ -737,6 +737,12 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		compound_local_assign = renvoAarch64CompilerCompoundLocalAssign
+		self_binary_local_assign = renvoAarch64CompilerSelfBinaryLocalAssign
+		scalar_preserves_secondary = renvoAarch64CompilerScalarPreservesSecondary
+		direct_scalar_store = renvoAarch64CompilerDirectScalarStore
+		compound_pointer_memory = renvoAarch64CompilerCompoundPointerMemory
+		indexed_pointer_address = renvoAarch64CompilerIndexedPointerAddress
 		switch_case_peephole = renvoAarch64CompilerSwitchCasePeephole
 		register_switch = renvoAarch64CompilerRegisterSwitch
 		string_equal_left_length = renvoAarch64CompilerStringEqualLeftLength
@@ -2656,6 +2662,42 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerIndexedPointerAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCompoundPointerMemory(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerDirectScalarStore(g *renvoLinearGen, size int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
 		return -1
 	}
 }

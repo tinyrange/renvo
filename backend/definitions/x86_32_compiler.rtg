@@ -1300,6 +1300,12 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		compound_local_assign = renvo386CompilerCompoundLocalAssign
+		self_binary_local_assign = renvo386CompilerSelfBinaryLocalAssign
+		scalar_preserves_secondary = renvo386CompilerScalarPreservesSecondary
+		direct_scalar_store = renvo386CompilerDirectScalarStore
+		compound_pointer_memory = renvo386CompilerCompoundPointerMemory
+		indexed_pointer_address = renvo386CompilerIndexedPointerAddress
 		switch_case_peephole = renvo386CompilerSwitchCasePeephole
 		register_switch = renvo386CompilerRegisterSwitch
 		string_equal_left_length = renvo386CompilerStringEqualLeftLength
@@ -2989,7 +2995,7 @@ go compiler {
 		return 1
 	}
 
-	func renvo386EmitDirectCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int, assignTok int, memoryOp int, kind int, compoundZero renvoConstResult) bool {
+	func renvo386EmitDirectCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int, assignTok int, memoryOp int, kind int) bool {
 		value := renvoEvalConstExpr(g, ep, rootIndex)
 		if value.ok {
 			group := 0
@@ -3017,12 +3023,6 @@ go compiler {
 				return false
 			}
 			renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
-		}
-		if compoundZero.ok {
-			renvoSetLocalFlowConstAtOffset(g, offset, 0, kind)
-		} else {
-			renvoClearLocalConstAtOffset(g, offset)
-			renvoClearLocalFlowConstAtOffset(g, offset)
 		}
 		return true
 	}
@@ -4457,6 +4457,77 @@ go compiler {
 		}
 		renvoAsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
 		renvo386AsmJccLabel(a, 0x84, matchLabel)
+		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerIndexedPointerAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCIndexedPointerAddress(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompoundPointerMemory(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitCompoundPointerMemory(g, ep, idx, kind, tok)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDirectScalarStore(g *renvoLinearGen, size int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return size >= 1 && size <= 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386SimpleScalarExpr(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitSelfBinaryLocalAssign(g, ep, idx, offset)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 || size != 4 {
+			return -1
+		}
+		memoryOp := 0
+		if op == '+' {
+			memoryOp = 0x0148
+		} else if op == '-' {
+			memoryOp = 0x2948
+		} else if op == '&' {
+			memoryOp = 0x2148
+		} else if op == '|' {
+			memoryOp = 0x0948
+		} else if op == '^' {
+			memoryOp = 0x3148
+		} else {
+			return -1
+		}
+		if !renvo386EmitDirectCompoundLocalAssign(g, ep, idx, offset, tok, memoryOp, kind) {
+			return 0
+		}
 		return 1
 	}
 }
