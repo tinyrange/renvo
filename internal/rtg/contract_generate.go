@@ -440,6 +440,7 @@ var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
 const renvoRTGStackWordBytes = 0
 func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
+func renvoRTGConditionFromSemantic(condition int) RTGCondition { return RTGCondition{} }
 func renvoRTGPatchRelocations(out *renvoAsm) {}
 func renvoRTGFrameStart(out *renvoAsm) int { return -1 }
 func renvoRTGFrameFinish(out *renvoAsm, framePatch int, stackUsed int) {}
@@ -1437,21 +1438,38 @@ func targetABICallWords(document Document, abi Declaration) []string {
 
 func appendPreparedConditionAdapter(out []byte, document Document, arch Declaration) []byte {
 	names := []string{"eq", "ne", "slt", "sge", "sle", "sgt", "ult", "uge", "ule", "ugt"}
+	semantic := []string{"Equal", "NotEqual", "SignedLess", "SignedGreaterEqual", "SignedLessEqual", "SignedGreater", "UnsignedLess", "UnsignedGreaterEqual", "UnsignedLessEqual", "UnsignedGreater"}
+	// Retain the private legacy adapter for existing physical emitter recipes.
 	setcc := []int{0x94, 0x95, 0x9c, 0x9d, 0x9e, 0x9f, 0x92, 0x93, 0x96, 0x97}
-	out = append(out, "func renvoRTGConditionFromSetcc(setcc int) RTGCondition {\n"...)
-	for i := 0; i < len(names); i++ {
-		local := architectureLocalPrefix(arch.Name) + upperIdentifier(names[i])
-		symbol, ok := generatedArchitectureOutput(document, local)
-		if !ok {
-			continue
+	for mode := 0; mode < 2; mode++ {
+		if mode == 0 {
+			out = append(out, "func renvoRTGConditionFromSetcc(setcc int) RTGCondition {\n"...)
+		} else {
+			out = append(out, "func renvoRTGConditionFromSemantic(condition int) RTGCondition {\n"...)
 		}
-		out = append(out, "if setcc == "...)
-		out = appendDecimalFrame(out, setcc[i])
-		out = append(out, " { return "...)
-		out = append(out, symbol...)
-		out = append(out, " }\n"...)
+		for i := 0; i < len(names); i++ {
+			local := architectureLocalPrefix(arch.Name) + upperIdentifier(names[i])
+			symbol, ok := generatedArchitectureOutput(document, local)
+			if !ok {
+				continue
+			}
+			if mode == 0 {
+				out = append(out, "if setcc == "...)
+				out = appendDecimalFrame(out, setcc[i])
+			} else {
+				out = append(out, "if condition == renvoCondition"...)
+				out = append(out, semantic[i]...)
+			}
+			out = append(out, " { return "...)
+			out = append(out, symbol...)
+			out = append(out, " }\n"...)
+		}
+		if mode == 0 {
+			out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }\n"...)
+		} else {
+			out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 2000 + condition }\n"...)
+		}
+		out = append(out, "return RTGCondition{}\n}\n"...)
 	}
-	out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }\n"...)
-	out = append(out, "return RTGCondition{}\n}\n"...)
 	return out
 }

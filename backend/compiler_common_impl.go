@@ -1,5 +1,20 @@
 package main
 
+// Comparison predicates are semantic IDs, not instruction encodings.
+// Adjacent pairs are logical complements; definitions select their encodings.
+const (
+	renvoConditionEqual                = 0
+	renvoConditionNotEqual             = 1
+	renvoConditionSignedLess           = 2
+	renvoConditionSignedGreaterEqual   = 3
+	renvoConditionSignedLessEqual      = 4
+	renvoConditionSignedGreater        = 5
+	renvoConditionUnsignedLess         = 6
+	renvoConditionUnsignedGreaterEqual = 7
+	renvoConditionUnsignedLessEqual    = 8
+	renvoConditionUnsignedGreater      = 9
+)
+
 // renvoEmitPureBlock lowers the RFE uint64 state-transform contract through the
 // existing native emitters. The caller owns executable memory and invocation.
 // Each four-word record is (operation, left value, right value, immediate).
@@ -65,11 +80,11 @@ func renvoEmitPureBlock(records []int, stateWords int, context *renvoCompileCont
 					}
 					renvoAsmBitwisePrimaryTertiary(a, operator)
 				} else {
-					condition := 0x94 // equal
+					condition := renvoConditionEqual // equal
 					if op == 11 {
-						condition = 0x97
+						condition = renvoConditionUnsignedGreater
 					} // right > left, unsigned
-					renvoAsmCmpTertiaryPrimarySet(a, condition)
+					renvoAsmCompareSet(a, condition)
 				}
 			}
 		}
@@ -7463,7 +7478,7 @@ func renvoEmitJumpIfThreadStateEqualsStack(g *renvoLinearGen, stateOffset int, s
 	renvoAsmPushPrimary(a)
 	renvoAsmLoadPrimaryStack(a, stackOffset)
 	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJnzPrimary(a, label)
 }
 
@@ -7687,7 +7702,7 @@ func renvoEmitFunctionControlEpilogue(g *renvoLinearGen) bool {
 	for i := 0; i < len(g.deferSites); i++ {
 		site := g.deferSites[i]
 		nextLabel := renvoAsmNewLabel(a)
-		renvoAsmJcmpStackImm(a, tagOffset, i+1, nextLabel, 0x95)
+		renvoAsmCompareStackImmediateJump(a, tagOffset, i+1, nextLabel, renvoConditionNotEqual)
 		handleOffset := renvoAddUnnamedLocal(g, site.funcType)
 		renvoAsmLoadPrimaryStackMemory(a, recordOffset, 2*renvoBackendValueSlotSize)
 		renvoAsmStorePrimaryStack(a, handleOffset)
@@ -7922,7 +7937,7 @@ func renvoAsmCopyStackSlot(a *renvoAsm, src int, dest int) {
 
 func renvoAsmJgeStackStack(a *renvoAsm, left int, right int, label int) {
 	renvoNonNil(a)
-	renvoAsmJcmpStackStack(a, left, right, label, 0x9d)
+	renvoAsmCompareStackStackJump(a, left, right, label, renvoConditionSignedGreaterEqual)
 }
 
 func renvoAsmJltStackStack(a *renvoAsm, left int, right int, label int) {
@@ -9195,7 +9210,7 @@ func renvoEmitLinearRangeForScoped(g *renvoLinearGen, stmt *renvoStmt, rangeTok 
 		renvoAsmLoadPrimaryStack(a, sourceLenOffset)
 	}
 	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9d)
+	renvoAsmCompareSet(a, renvoConditionSignedGreaterEqual)
 	renvoAsmJnzPrimary(a, endLabel)
 	if rangeShort {
 		for localIndex := 0; localIndex < g.localCount; localIndex++ {
@@ -9379,12 +9394,12 @@ func renvoEmitRunePart(g *renvoLinearGen, dest int, source int, bias int, scale 
 
 func renvoEmitStackLessImmJump(g *renvoLinearGen, offset int, value int, label int) {
 	renvoNonNil(g)
-	renvoAsmJcmpStackImm(&g.asm, offset, value, label, 0x9c)
+	renvoAsmCompareStackImmediateJump(&g.asm, offset, value, label, renvoConditionSignedLess)
 }
 
 func renvoEmitStackGreaterEqualImmJump(g *renvoLinearGen, offset int, value int, label int) {
 	renvoNonNil(g)
-	renvoAsmJcmpStackImm(&g.asm, offset, value, label, 0x9d)
+	renvoAsmCompareStackImmediateJump(&g.asm, offset, value, label, renvoConditionSignedGreaterEqual)
 }
 
 func renvoRangeTargetOffset(g *renvoLinearGen, start int, end int, typ int, short bool) int {
@@ -9749,7 +9764,7 @@ func renvoCopyInterfaceValueToLocal(g *renvoLinearGen, sourceOffset int, typ int
 func renvoEmitTypeMatchJump(g *renvoLinearGen, tagOffset int, typ int, matchLabel int) {
 	renvoNonNil(g)
 	if renvoResolveType(g.meta, typ).kind != renvoTypeInterface {
-		renvoAsmJcmpStackImm(&g.asm, tagOffset, renvoRuntimeTypeTag(g.meta, typ), matchLabel, 0x94)
+		renvoAsmCompareStackImmediateJump(&g.asm, tagOffset, renvoRuntimeTypeTag(g.meta, typ), matchLabel, renvoConditionEqual)
 		return
 	}
 	iface := renvoResolveType(g.meta, typ)
@@ -9769,7 +9784,7 @@ func renvoEmitTypeMatchJump(g *renvoLinearGen, tagOffset int, typ int, matchLabe
 		if tag == 0 || t.kind == renvoTypeNamed && t.first == renvoNamedTypeAlias || renvoResolveType(g.meta, candidate).kind == renvoTypeInterface || !renvoTypeImplementsInterface(g, candidate, typ) {
 			continue
 		}
-		renvoAsmJcmpStackImm(&g.asm, tagOffset, tag, matchLabel, 0x94)
+		renvoAsmCompareStackImmediateJump(&g.asm, tagOffset, tag, matchLabel, renvoConditionEqual)
 	}
 }
 
@@ -9850,7 +9865,7 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 		}
 		if typeSwitch {
 			if renvoBytesEqualText(p.src, int(renvoTokStart(p, i)), int(renvoTokEnd(p, i)), "nil") {
-				renvoAsmJcmpStackImm(a, valueOffset, 0, matchLabel, 0x94)
+				renvoAsmCompareStackImmediateJump(a, valueOffset, 0, matchLabel, renvoConditionEqual)
 			} else {
 				caseType := renvoParseType(g.meta, p, i, valueEnd)
 				if caseType.typ == 0 || caseType.next != valueEnd {
@@ -9891,7 +9906,7 @@ func renvoEmitSwitchCaseTests(g *renvoLinearGen, stmt *renvoStmt, clause int, va
 				return false
 			}
 			renvoAsmPopTertiary(a)
-			renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+			renvoAsmCompareSet(a, renvoConditionEqual)
 			renvoAsmJnzPrimary(a, matchLabel)
 		}
 		i = valueEnd
@@ -10209,6 +10224,41 @@ func renvoEmitJump(g *renvoLinearGen, ep *renvoExprParse, idx int, label int, ju
 	return true
 }
 
+// Source operators and logical inversion belong to shared lowering, not ISA recipes.
+// The backend branch consumes the comparison state established by its compare hook.
+func renvoEmitCompareJumpOp(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+	condition := renvoConditionEqual
+	if c0 == '!' {
+		condition = renvoConditionNotEqual
+	} else if c0 == '<' {
+		condition = renvoConditionSignedLess
+		if c1 == '=' {
+			condition = renvoConditionSignedLessEqual
+		}
+		if unsigned {
+			condition = renvoConditionUnsignedLess
+			if c1 == '=' {
+				condition = renvoConditionUnsignedLessEqual
+			}
+		}
+	} else if c0 != '=' {
+		condition = renvoConditionSignedGreater
+		if c1 == '=' {
+			condition = renvoConditionSignedGreaterEqual
+		}
+		if unsigned {
+			condition = renvoConditionUnsignedGreater
+			if c1 == '=' {
+				condition = renvoConditionUnsignedGreaterEqual
+			}
+		}
+	}
+	if !jumpIfTrue {
+		condition = condition ^ 1
+	}
+	renvoAsmConditionBranch(a, condition, label)
+}
+
 func renvoIsComparisonChars(c0 byte, c1 byte) bool {
 	return (c0 == '=' || c0 == '!') && c1 == '=' || c0 == '<' && c1 != '<' || c0 == '>' && c1 != '>'
 }
@@ -10224,14 +10274,17 @@ func renvoEmitUnsignedPrimaryTertiaryCompare(g *renvoLinearGen, c0 byte, c1 byte
 	if opLen == 2 && c1 != '=' {
 		return false
 	}
-	setcc := 0x92
+	condition := renvoConditionUnsignedLess
 	if c0 == '>' {
-		setcc = 0x97
+		condition = renvoConditionUnsignedGreater
 	}
 	if opLen == 2 {
-		setcc = setcc ^ 4
+		condition = renvoConditionUnsignedLessEqual
+		if c0 == '>' {
+			condition = renvoConditionUnsignedGreaterEqual
+		}
 	}
-	renvoAsmCmpTertiaryPrimarySet(&g.asm, setcc)
+	renvoAsmCompareSet(&g.asm, condition)
 	return true
 }
 
@@ -12862,11 +12915,11 @@ func renvoEmitInterfaceCompare(g *renvoLinearGen, ep *renvoExprParse, e *renvoEx
 		renvoAsmPrimaryImm(a, 0)
 		renvoAsmCopyPrimaryToTertiary(a)
 		renvoAsmLoadPrimaryStack(a, value-renvoBackendValueSlotSize)
-		setcc := 0x94
+		condition := renvoConditionEqual
 		if renvoTok2Is(g.prog, e.tok, '!', '=') {
-			setcc = 0x95
+			condition = renvoConditionNotEqual
 		}
-		renvoAsmCmpTertiaryPrimarySet(a, setcc)
+		renvoAsmCompareSet(a, condition)
 		return true
 	}
 	left := renvoAddUnnamedLocal(g, renvoBuiltinTypeInterface)
@@ -12887,14 +12940,14 @@ func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, not
 	indirect := renvoAsmNewLabel(a)
 	nonComparable := renvoAsmNewLabel(a)
 	done := renvoAsmNewLabel(a)
-	renvoAsmJcmpStackStack(a, left-renvoBackendValueSlotSize, right-renvoBackendValueSlotSize, different, 0x95)
+	renvoAsmCompareStackStackJump(a, left-renvoBackendValueSlotSize, right-renvoBackendValueSlotSize, different, renvoConditionNotEqual)
 	renvoAsmLoadPrimaryStack(a, left-renvoBackendValueSlotSize)
 	renvoAsmJnzPrimary(a, nonNil)
 	renvoAsmPrimaryImm(a, 1)
 	renvoAsmJmpLabel(a, done)
 	renvoAsmMarkLabel(a, nonNil)
-	renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, 0, nonComparable, 0x9c)
-	renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, indirectTypeBase, indirect, 0x9d)
+	renvoAsmCompareStackImmediateJump(a, left-renvoBackendValueSlotSize, 0, nonComparable, renvoConditionSignedLess)
+	renvoAsmCompareStackImmediateJump(a, left-renvoBackendValueSlotSize, indirectTypeBase, indirect, renvoConditionSignedGreaterEqual)
 	for typ := 1; typ < len(g.meta.types); typ++ {
 		tag := renvoRuntimeTypeTag(g.meta, typ)
 		kind := renvoResolveType(g.meta, typ).kind
@@ -12910,7 +12963,7 @@ func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, not
 			continue
 		}
 		next := renvoAsmNewLabel(a)
-		renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, tag, next, 0x95)
+		renvoAsmCompareStackImmediateJump(a, left-renvoBackendValueSlotSize, tag, next, renvoConditionNotEqual)
 		if renvoTypeKindIsFloat(kind) {
 			renvoEmit32IEEECompareStack(g, left, right, kind, '=', '=')
 			renvoAsmJmpLabel(a, done)
@@ -12937,7 +12990,7 @@ func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, not
 		renvoAsmMarkLabel(a, next)
 	}
 	renvoAsmLoadPrimaryTertiaryStack(a, left, right)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJmpLabel(a, done)
 	renvoAsmMarkLabel(a, indirect)
 	for typ := 1; typ < len(g.meta.types); typ++ {
@@ -12950,7 +13003,7 @@ func renvoEmitInterfaceCompareLocals(g *renvoLinearGen, left int, right int, not
 			continue
 		}
 		next := renvoAsmNewLabel(a)
-		renvoAsmJcmpStackImm(a, left-renvoBackendValueSlotSize, tag, next, 0x95)
+		renvoAsmCompareStackImmediateJump(a, left-renvoBackendValueSlotSize, tag, next, renvoConditionNotEqual)
 		leftValue := renvoAddUnnamedLocal(g, typ)
 		rightValue := renvoAddUnnamedLocal(g, typ)
 		size := renvoTypeSize(g.meta, typ)
@@ -13198,7 +13251,7 @@ func renvoEmitCopySliceRegsToArena(g *renvoLinearGen, sliceType int) bool {
 	renvoAsmPopTertiary(a)
 	renvoAsmAddPrimaryTertiary(a)
 	renvoAsmStorePrimaryStack(a, copyCapOff)
-	renvoAsmJcmpStackStack(a, capOff, copyCapOff, capOKLabel, 0x9e)
+	renvoAsmCompareStackStackJump(a, capOff, copyCapOff, capOKLabel, renvoConditionSignedLessEqual)
 	renvoAsmCopyStackSlot(a, copyCapOff, capOff)
 	renvoAsmMarkLabel(a, capOKLabel)
 	renvoAsmLoadPrimaryStack(a, srcOff)
@@ -13702,11 +13755,11 @@ func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
 	a := &g.asm
 	cursor := g.stringHeapOff
 	dirty := cursor + 16
-	condition := 0x97
+	condition := renvoConditionUnsignedGreater
 	if persistent {
 		cursor = g.stringHeapEndOff
 		dirty = g.stringHeapOff + 24
-		condition = 0x92
+		condition = renvoConditionUnsignedLess
 	}
 	done := renvoAsmNewLabel(a)
 	record := renvoAsmNewLabel(a)
@@ -13717,7 +13770,7 @@ func renvoEmitArenaRememberReset(g *renvoLinearGen, persistent bool) {
 	if persistent {
 		renvoAsmJzPrimary(a, record)
 	}
-	renvoAsmCmpTertiaryPrimarySet(a, condition)
+	renvoAsmCompareSet(a, condition)
 	renvoAsmJzPrimary(a, done)
 	renvoAsmMarkLabel(a, record)
 	renvoAsmCopyTertiaryToPrimary(a)
@@ -15141,7 +15194,7 @@ func renvoEmitFunctionValueDispatch(g *renvoLinearGen, funcType int, handleOffse
 			nextLabel := renvoAsmNewLabel(&g.asm)
 			tag := renvoFunctionValueTag(g, fnIndex)
 			if directTarget < 0 {
-				renvoAsmJcmpStackImm(&g.asm, compareOffset, tag, nextLabel, 0x95)
+				renvoAsmCompareStackImmediateJump(&g.asm, compareOffset, tag, nextLabel, renvoConditionNotEqual)
 			}
 			wordCount := 0
 			extra := 0
@@ -15727,18 +15780,18 @@ func renvoEmitProgramPanicCheck(g *renvoLinearGen) bool {
 	renvoAsmLoadPrimaryThreadState(g, renvoThreadPanicTypeOff)
 	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmPrimaryImm(a, renvoPanicOutOfMemoryTag)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJnzPrimary(a, outOfMemoryLabel)
 	renvoAsmPrimaryImm(a, renvoPanicNilTag)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJnzPrimary(a, nilLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmPrimaryImm(a, renvoPanicTypeAssertionTag)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJnzPrimary(a, assertionLabel)
 	renvoAsmCopyTertiaryToPrimary(a)
 	renvoAsmPrimaryImm(a, renvoRuntimeTypeTag(g.meta, renvoTypeString))
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJnzPrimary(a, stringLabel)
 	renvoEmitStaticWrite(g, "value", 2)
 	renvoAsmJmpMarkLabel(a, exitLabel, stringLabel)
@@ -17347,12 +17400,12 @@ func renvoEmitStringOrdering(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr
 	renvoAsmLoadPrimaryTertiaryStack(a, right, index)
 	renvoAsmLoadPrimaryIndexTertiarySize(a, 1)
 	renvoAsmStorePrimaryStack(a, rbyte)
-	renvoAsmJcmpStackStack(a, lbyte, rbyte, less, 0x9c)
-	renvoAsmJcmpStackStack(a, lbyte, rbyte, greater, 0x9f)
+	renvoAsmCompareStackStackJump(a, lbyte, rbyte, less, renvoConditionSignedLess)
+	renvoAsmCompareStackStackJump(a, lbyte, rbyte, greater, renvoConditionSignedGreater)
 	renvoAsmIncStack(a, index)
 	renvoAsmJmpMarkLabel(a, loop, lengths)
-	renvoAsmJcmpStackStack(a, left-8, right-8, less, 0x9c)
-	renvoAsmJcmpStackStack(a, left-8, right-8, greater, 0x9f)
+	renvoAsmCompareStackStackJump(a, left-8, right-8, less, renvoConditionSignedLess)
+	renvoAsmCompareStackStackJump(a, left-8, right-8, greater, renvoConditionSignedGreater)
 	equalValue := 0
 	if renvoTok2Is(g.prog, e.tok, '<', '=') || renvoTok2Is(g.prog, e.tok, '>', '=') {
 		equalValue = 1
@@ -17481,7 +17534,7 @@ func renvoEmitCompositeCompareAt(g *renvoLinearGen, typ int, left int, right int
 		renvoAsmLoadPrimaryStack(a, right)
 		renvoAsmNormalizePrimaryForKind(a, kind)
 		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+		renvoAsmCompareSet(a, renvoConditionEqual)
 	}
 	renvoAsmJzPrimary(a, fail)
 }
@@ -18874,13 +18927,13 @@ func renvoInterfaceMethodNamed(g *renvoLinearGen, fn *renvoFuncInfo, selector *r
 func renvoEmitInterfaceReceiverMatch(g *renvoLinearGen, receiverOffset int, receiverType int, nextLabel int) {
 	renvoNonNil(g)
 	if renvoResolveType(g.meta, receiverType).kind == renvoTypePointer {
-		renvoAsmJcmpStackImm(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, receiverType), nextLabel, 0x95)
+		renvoAsmCompareStackImmediateJump(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, receiverType), nextLabel, renvoConditionNotEqual)
 		return
 	}
 	pointerType := renvoAddPointerType(g.meta, receiverType, renvoPointerSpaceData)
 	matchedLabel := renvoAsmNewLabel(&g.asm)
-	renvoAsmJcmpStackImm(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, receiverType), matchedLabel, 0x94)
-	renvoAsmJcmpStackImm(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, pointerType), nextLabel, 0x95)
+	renvoAsmCompareStackImmediateJump(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, receiverType), matchedLabel, renvoConditionEqual)
+	renvoAsmCompareStackImmediateJump(&g.asm, receiverOffset-renvoBackendValueSlotSize, renvoRuntimeTypeTag(g.meta, pointerType), nextLabel, renvoConditionNotEqual)
 	if renvoTypeSize(g.meta, receiverType) <= renvoBackendValueSlotSize {
 		renvoAsmLoadSecondaryStack(&g.asm, receiverOffset)
 		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
@@ -19265,7 +19318,7 @@ func renvoEmitSignedDivisionOverflowGuard(g *renvoLinearGen, mod bool) int {
 	renvoAsmPrimaryImm(a, -1)
 	renvoAsmShlPrimaryImm(a, g.c.renvoNativeIntSize*8-1)
 	renvoAsmPopTertiary(a)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x94)
+	renvoAsmCompareSet(a, renvoConditionEqual)
 	renvoAsmJzPrimary(a, restoreDivisor)
 	if mod {
 		renvoAsmPrimaryImm(a, 0)
@@ -20026,13 +20079,13 @@ func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) 
 
 func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 	a := &g.asm
-	belowOrEqual := 0x9e
-	aboveOrEqual := 0x9d
+	belowOrEqual := renvoConditionSignedLessEqual
+	aboveOrEqual := renvoConditionSignedGreaterEqual
 	if g.c.renvoNativeIntSize == 2 {
 		// A valid compact arena can cross the native signed high bit (8000h),
 		// so its address bounds must use unsigned comparisons.
-		belowOrEqual = 0x96
-		aboveOrEqual = 0x93
+		belowOrEqual = renvoConditionUnsignedLessEqual
+		aboveOrEqual = renvoConditionUnsignedGreaterEqual
 	}
 	if renvoFixedTarget == 0 {
 		if persistent && g.c.objectFile && renvoObjectLazyArena(g.c) {
@@ -20053,12 +20106,12 @@ func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 		renvoAsmPushPrimary(a)
 		renvoAsmPopTertiary(a)
 		renvoAsmPopPrimary(a)
-		renvoAsmCmpTertiaryPrimarySet(a, belowOrEqual)
+		renvoAsmCompareSet(a, belowOrEqual)
 		renvoAsmJzPrimary(a, oomLabel)
 		renvoAsmPushTertiary(a)
 		renvoAsmLoadPrimaryBss(a, g.stringHeapOff)
 		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimarySet(a, aboveOrEqual)
+		renvoAsmCompareSet(a, aboveOrEqual)
 		renvoAsmJzPrimary(a, oomLabel)
 		renvoAsmCopyTertiaryToPrimary(a)
 		renvoAsmStorePrimaryBss(a, g.stringHeapEndOff)
@@ -20070,12 +20123,12 @@ func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 		renvoAsmPushPrimary(a)
 		renvoAsmPopTertiary(a)
 		renvoAsmPopPrimary(a)
-		renvoAsmCmpTertiaryPrimarySet(a, aboveOrEqual)
+		renvoAsmCompareSet(a, aboveOrEqual)
 		renvoAsmJzPrimary(a, oomLabel)
 		renvoAsmPushTertiary(a)
 		renvoAsmLoadPrimaryBss(a, g.stringHeapEndOff)
 		renvoAsmPopTertiary(a)
-		renvoAsmCmpTertiaryPrimarySet(a, belowOrEqual)
+		renvoAsmCompareSet(a, belowOrEqual)
 		renvoAsmJzPrimary(a, oomLabel)
 		renvoAsmCopyTertiaryToPrimary(a)
 		renvoAsmStorePrimaryBss(a, g.stringHeapOff)
@@ -20137,7 +20190,7 @@ func renvoEnsurePrintIntHelper(g *renvoLinearGen) int {
 	renvoAsmStorePrimaryBss(a, valueOff)
 	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmPrimaryImm(a, 0)
-	renvoAsmCmpTertiaryPrimarySet(a, 0x9c)
+	renvoAsmCompareSet(a, renvoConditionSignedLess)
 	renvoAsmStorePrimaryBss(a, negativeOff)
 	renvoAsmPrimaryImm(a, 0)
 	renvoAsmStorePrimaryBss(a, lenOff)
@@ -23131,9 +23184,9 @@ func renvoEmitPortableWideCompareStack(g *renvoLinearGen, left int, right int, t
 	if equality {
 		notEqual := renvoAsmNewLabel(&g.asm)
 		done := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionEqual)
 		renvoAsmJzPrimary(&g.asm, notEqual)
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionEqual)
 		renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
 		renvoAsmPrimaryImm(&g.asm, 0)
 		renvoAsmMarkLabel(&g.asm, done)
@@ -23224,9 +23277,9 @@ func renvoEmitRTGWideCompareStack(g *renvoLinearGen, left int, right int, mode i
 		different := renvoAsmNewLabel(&g.asm)
 		done := renvoAsmNewLabel(&g.asm)
 		renvoEmitNativeCompareStack(g,
-			left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x95)
+			left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionNotEqual)
 		renvoAsmJnzPrimary(&g.asm, different)
-		renvoEmitNativeCompareStack(g, left, right, 0x95)
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionNotEqual)
 		renvoAsmJmpLabel(&g.asm, done)
 		renvoAsmMarkLabel(&g.asm, different)
 		renvoAsmPrimaryImm(&g.asm, 1)
@@ -23320,14 +23373,14 @@ func renvoEmitWideCompoundLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 	return true
 }
 
-func renvoEmitNativeCompareStack(g *renvoLinearGen, left int, right int, setcc int) {
+func renvoEmitNativeCompareStack(g *renvoLinearGen, left int, right int, condition int) {
 	if !renvoSplitWordLoweringEnabled(&g.asm) {
 		return
 	}
 	renvoNonNil(g)
 	renvoAsmLoadPrimaryStack(&g.asm, right)
 	renvoAsmLoadTertiaryStack(&g.asm, left)
-	renvoAsmCmpTertiaryPrimarySet(&g.asm, setcc)
+	renvoAsmCompareSet(&g.asm, condition)
 }
 
 func renvoEmitWideDivStack(g *renvoLinearGen, dest int, left int, right int, signed bool, remainderResult bool) {
@@ -23353,13 +23406,13 @@ func renvoEmitWideDivStack(g *renvoLinearGen, dest int, left int, right int, sig
 	if signed {
 		zero := renvoAddUnnamedLocal(g, renvoTypeInt)
 		renvoAsmStoreStackImm(&g.asm, zero, 0)
-		renvoEmitNativeCompareStack(g, dividend-g.c.renvoNativeIntSize, zero, 0x9c)
+		renvoEmitNativeCompareStack(g, dividend-g.c.renvoNativeIntSize, zero, renvoConditionSignedLess)
 		renvoAsmStorePrimaryStack(&g.asm, leftNegative)
 		leftReady := renvoAsmNewLabel(&g.asm)
 		renvoAsmJzPrimary(&g.asm, leftReady)
 		renvoEmitWideNegateInPlace(g, dividend)
 		renvoAsmMarkLabel(&g.asm, leftReady)
-		renvoEmitNativeCompareStack(g, divisor-g.c.renvoNativeIntSize, zero, 0x9c)
+		renvoEmitNativeCompareStack(g, divisor-g.c.renvoNativeIntSize, zero, renvoConditionSignedLess)
 		renvoAsmStorePrimaryStack(&g.asm, rightNegative)
 		rightReady := renvoAsmNewLabel(&g.asm)
 		renvoAsmJzPrimary(&g.asm, rightReady)
@@ -23383,7 +23436,7 @@ func renvoEmitWideDivStack(g *renvoLinearGen, dest int, left int, right int, sig
 	renvoEmitCopyStackToStack(g, quotient, dest, renvoBackendValueSlotSize)
 	if signed {
 		sameSign := renvoAsmNewLabel(&g.asm)
-		renvoEmitNativeCompareStack(g, leftNegative, rightNegative, 0x94)
+		renvoEmitNativeCompareStack(g, leftNegative, rightNegative, renvoConditionEqual)
 		renvoAsmJnzPrimary(&g.asm, sameSign)
 		renvoEmitWideNegateInPlace(g, dest)
 		renvoAsmMarkLabel(&g.asm, sameSign)

@@ -2109,9 +2109,56 @@ if setcc == 151 { return rtgLlvmUGT }
 if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }
 return RTGCondition{}
 }
+func renvoRTGConditionFromSemantic(condition int) RTGCondition {
+if condition == renvoConditionEqual { return rtgLlvmEQ }
+if condition == renvoConditionNotEqual { return rtgLlvmNE }
+if condition == renvoConditionSignedLess { return rtgLlvmSLT }
+if condition == renvoConditionSignedGreaterEqual { return rtgLlvmSGE }
+if condition == renvoConditionSignedLessEqual { return rtgLlvmSLE }
+if condition == renvoConditionSignedGreater { return rtgLlvmSGT }
+if condition == renvoConditionUnsignedLess { return rtgLlvmULT }
+if condition == renvoConditionUnsignedGreaterEqual { return rtgLlvmUGE }
+if condition == renvoConditionUnsignedLessEqual { return rtgLlvmULE }
+if condition == renvoConditionUnsignedGreater { return rtgLlvmUGT }
+if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 2000 + condition }
+return RTGCondition{}
+}
 
 func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
+}
+
+func renvoAsmConditionBranch(a *renvoAsm, condition int, label int) {
+renvoNonNil(a)
+renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSemantic(condition), label)
+}
+
+func renvoAsmCompareStackImmediateJump(a *renvoAsm, offset int, value int, label int, condition int) {
+renvoNonNil(a)
+renvoAsmPushStack(a, offset)
+renvoAsmPrimaryImm(a, value)
+renvoAsmPopTertiary(a)
+renvoAsmCompareJump(a, condition, label)
+}
+
+func renvoAsmCompareStackStackJump(a *renvoAsm, left int, right int, label int, condition int) {
+renvoNonNil(a)
+renvoAsmPushStack(a, left)
+renvoAsmLoadPrimaryStack(a, right)
+renvoAsmPopTertiary(a)
+renvoAsmCompareJump(a, condition, label)
+}
+
+func renvoAsmCompareJump(a *renvoAsm, condition int, label int) {
+renvoNonNil(a)
+renvoRTGDirectCompare(a, renvoRTGTertiary, renvoRTGPrimary)
+renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSemantic(condition), label)
+}
+
+func renvoAsmCompareSet(a *renvoAsm, condition int) {
+renvoNonNil(a)
+renvoRTGDirectCompare(a, renvoRTGTertiary, renvoRTGPrimary)
+renvoRTGDirectSetCondition(a, renvoRTGConditionFromSemantic(condition), renvoRTGPrimary)
 }
 
 func renvoObjectAbsoluteSymbols(c *renvoCompileContext) bool {
@@ -3490,10 +3537,10 @@ renvoNonNil(g)
 	renvoNonNil(g)
 	highEqual := renvoAsmNewLabel(&g.asm)
 	done := renvoAsmNewLabel(&g.asm)
-	renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x94)
+	renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionEqual)
 	renvoAsmJnzPrimary(&g.asm, highEqual)
 	if signed {
-		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x9c)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionSignedLess)
 	} else {
 		renvoEmitNativeUnsignedLessStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize)
 	}
@@ -3723,17 +3770,17 @@ renvoNonNil(g)
 	leftNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
 	rightNegative := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStoreStackImm(&g.asm, zero, 0)
-	renvoEmitNativeCompareStack(g, left, zero, 0x9c)
+	renvoEmitNativeCompareStack(g, left, zero, renvoConditionSignedLess)
 	renvoAsmStorePrimaryStack(&g.asm, leftNegative)
-	renvoEmitNativeCompareStack(g, right, zero, 0x9c)
+	renvoEmitNativeCompareStack(g, right, zero, renvoConditionSignedLess)
 	renvoAsmStorePrimaryStack(&g.asm, rightNegative)
 	sameSign := renvoAsmNewLabel(&g.asm)
 	done := renvoAsmNewLabel(&g.asm)
-	renvoEmitNativeCompareStack(g, leftNegative, rightNegative, 0x94)
+	renvoEmitNativeCompareStack(g, leftNegative, rightNegative, renvoConditionEqual)
 	renvoAsmJnzPrimary(&g.asm, sameSign)
 	renvoAsmLoadPrimaryStack(&g.asm, rightNegative)
 	renvoAsmJmpMarkLabel(&g.asm, done, sameSign)
-	renvoEmitNativeCompareStack(g, left, right, 0x9c)
+	renvoEmitNativeCompareStack(g, left, right, renvoConditionSignedLess)
 	renvoAsmMarkLabel(&g.asm, done)
 }
 
@@ -3931,43 +3978,6 @@ renvoNonNil(g)
 func renvoEmitTargetNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 renvoNonNil(g)
 return -1
-}
-
-func renvoEmitCompareJumpOp(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
-renvoNonNil(a)
-	setcc := 0x94
-	if c0 == '=' {
-		setcc = 0x94
-	} else if c0 == '!' {
-		setcc = 0x95
-	} else if c0 == '<' {
-		if c1 == '=' {
-			setcc = 0x9e
-		} else {
-			setcc = 0x9c
-		}
-	} else if c1 == '=' {
-		setcc = 0x9d
-	} else {
-		setcc = 0x9f
-	}
-	if !jumpIfTrue {
-		setcc = setcc ^ 1
-	}
-	if unsigned && c0 != '=' && c0 != '!' {
-		setcc = 0x92
-		if c0 == '>' {
-			setcc = 0x97
-		}
-		if c1 == '=' {
-			setcc = setcc ^ 4
-		}
-		if !jumpIfTrue {
-			setcc = setcc ^ 1
-		}
-	}
-	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
-	return
 }
 
 func renvoEmitInstallThreadState(g *renvoLinearGen) {

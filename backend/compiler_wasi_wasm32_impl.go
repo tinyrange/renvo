@@ -1256,7 +1256,7 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 
 	renvoAsmMarkLabel(&g.asm, compare)
 	if c0 == '=' || c0 == '!' {
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionEqual)
 		if c0 == '!' {
 			renvoAsmBoolNotPrimary(&g.asm)
 		}
@@ -1285,8 +1285,8 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 		renvoAsmPrimaryImm(&g.asm, result)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, bothPositive)
-		setcc := renvoFloat32RelationSetcc(c0, c1)
-		renvoEmitNativeCompareStack(g, left, right, setcc)
+		condition := renvoFloat32RelationCondition(c0, c1)
+		renvoEmitNativeCompareStack(g, left, right, condition)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, leftNegative)
 		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
@@ -1298,7 +1298,7 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 		renvoAsmPrimaryImm(&g.asm, result)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, bothNegative)
-		renvoEmitNativeCompareStack(g, right, left, setcc)
+		renvoEmitNativeCompareStack(g, right, left, condition)
 		renvoAsmMarkLabel(&g.asm, relationalDone)
 		renvoAsmJmpLabel(&g.asm, done)
 	}
@@ -1320,17 +1320,17 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 	return true
 }
 
-func renvoFloat32RelationSetcc(c0 byte, c1 byte) int {
+func renvoFloat32RelationCondition(c0 byte, c1 byte) int {
 	if c0 == '<' {
 		if c1 == '=' {
-			return 0x96
+			return renvoConditionUnsignedLessEqual
 		}
-		return 0x92
+		return renvoConditionUnsignedLess
 	}
 	if c1 == '=' {
-		return 0x93
+		return renvoConditionUnsignedGreaterEqual
 	}
-	return 0x97
+	return renvoConditionUnsignedGreater
 }
 
 func renvoWasm32SoftConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
@@ -1572,9 +1572,9 @@ func renvoWasm32SoftFloatCompareInline(g *renvoLinearGen, left int, right int, c
 func renvoWasm32SoftFloatRawEquality(g *renvoLinearGen, left int, right int, notEqualResult bool) {
 	notEqual := renvoAsmNewLabel(&g.asm)
 	done := renvoAsmNewLabel(&g.asm)
-	renvoEmitNativeCompareStack(g, left-4, right-4, 0x94)
+	renvoEmitNativeCompareStack(g, left-4, right-4, renvoConditionEqual)
 	renvoAsmJzPrimary(&g.asm, notEqual)
-	renvoEmitNativeCompareStack(g, left, right, 0x94)
+	renvoEmitNativeCompareStack(g, left, right, renvoConditionEqual)
 	renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
 	renvoAsmPrimaryImm(&g.asm, 0)
 	renvoAsmMarkLabel(&g.asm, done)
