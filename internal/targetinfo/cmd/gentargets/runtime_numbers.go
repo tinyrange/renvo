@@ -24,18 +24,15 @@ func updateRuntimeNumbers(path string, descriptors []sourceDescriptor) error {
 		return fmt.Errorf("runtime number markers missing from %s", path)
 	}
 	var backend []sourceDescriptor
-	var fallback *sourceDescriptor
 	for i := range descriptors {
 		descriptor := descriptors[i]
 		if descriptor.Constant != "" {
 			backend = append(backend, descriptor)
 		}
-		if descriptor.Name == "linux/amd64" {
-			fallback = &descriptors[i]
-		}
 	}
-	if fallback == nil {
-		return fmt.Errorf("runtime compatibility API requires linux/amd64")
+	fallback, err := runtimeNumberDefault(descriptors)
+	if err != nil {
+		return err
 	}
 	sort.Slice(backend, func(i, j int) bool { return backend[i].BackendID < backend[j].BackendID })
 	var out bytes.Buffer
@@ -47,7 +44,7 @@ func updateRuntimeNumbers(path string, descriptors []sourceDescriptor) error {
 	} {
 		defaultNumber, ok := fallback.RuntimeNumbers[operation.name]
 		if !ok {
-			return fmt.Errorf("linux/amd64 has no %s runtime number", operation.name)
+			return fmt.Errorf("runtime number default %q has no %s runtime number", fallback.Name, operation.name)
 		}
 		hostedExit := operation.name == "exit"
 		if hostedExit {

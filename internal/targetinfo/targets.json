@@ -4,6 +4,7 @@
     "backend": "linux/amd64",
     "backend_id": 1,
     "constant": "renvoTargetLinuxAmd64",
+    "runtime_number_default": true,
     "os_id": 1,
     "isa_id": 1,
     "advertised": true,

@@ -16,7 +16,7 @@ import (
 // alignment, endianness, or arena policy from an ISA or OS identity.
 func TestPolicyProjectionKeepsIndependentDescriptorFacts(t *testing.T) {
 	descriptors := []sourceDescriptor{
-		{Name: "linux/amd64", Constant: "known", BackendID: 1, OSID: 1, ISAID: 1,
+		{Name: "linux/amd64", RuntimeNumberDefault: true, Constant: "known", BackendID: 1, OSID: 1, ISAID: 1,
 			WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64,
 			MaxAlign: 8, Endian: "little", DefaultArena: 134217728,
 			Runtime: []string{"read"}, Capabilities: []string{"hosted"},
