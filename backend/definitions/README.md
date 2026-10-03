@@ -373,6 +373,10 @@ instruction IR to satisfy these fixtures.
 
 ## Verification
 
+The [compiler-core boundary audit](CORE_BOUNDARY_AUDIT.md) records the shared
+versus definition-owned responsibilities, retained representation contracts,
+regression coverage, and full-validation boundary.
+
 Use focused definition checks while editing:
 
 ```text
@@ -380,23 +384,17 @@ go test ./internal/rtg ./internal/rtgb ./internal/targetinfo
 go test ./internal/backendjit ./internal/backendcompiled
 ```
 
-Then run the unchanged performance and self-hosting suites:
-
-```text
-systemd-run --user --scope \
-  -p MemoryMax=4G -p MemorySwapMax=0 \
-  -- go test ./backend -count=1
-
-systemd-run --user --scope \
-  -p MemoryMax=4G -p MemorySwapMax=0 \
-  -- go test ./frontend_tests -count=1
-```
+Use `./tools/check preflight` for the ordinary presubmit loop, with focused
+backend/frontend corpus filters and self-hosting checks appropriate to the
+change. The merge queue runs full validation. Run `./tools/check full` locally
+only when explicitly requested, following `AGENTS.md` and the repository's
+resource limits.
 
 The per-target metrics in `backend/docs/machine-definitions.generated.md` are
 review aids. The deduplicated native embedded-Go metric is reported by the RTG
 tests without a numeric rejection threshold. Compiler and output performance
-acceptance remains exclusively defined by the existing hard gates in
-`backend/main_test.go`.
+acceptance remains defined by `internal/perfgate/policy.json` and the unchanged
+repository check-driver and backend acceptance gates.
 
 ### Runtime syscall policy
 
