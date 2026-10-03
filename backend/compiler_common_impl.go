@@ -6909,14 +6909,14 @@ func renvoNativeTypeLayout(m *renvoMeta, typ int) int {
 		size = renvoNativeTypeLayout(m, t.elem) * t.count
 		align = m.types[t.elem].nativeAlign
 	} else if t.kind == renvoTypePointer {
-		// Pointers and C object function addresses occupy one native word. Their
-		// layout is independent of their pointee/signature; descending here can
+		// Address-space widths come from the descriptor, not the integer width.
+		// Layout is independent of the pointee/signature; descending here can
 		// encounter an aggregate already being laid out through a cyclic C type
 		// graph and freeze that aggregate at the provisional slot size.
-		size = m.c.renvoNativeIntSize
+		size = renvoTargetAddressSize(m.c, renvoPointerAddressSpace(m, typ))
 		align = renvoNativeAlignment(m.c, size)
 	} else if t.kind == renvoTypeFunc && renvoFunctionAddressLayout(m.c) {
-		size = m.c.renvoNativeIntSize
+		size = renvoTargetAddressSize(m.c, renvoPointerSpaceFunction)
 		align = renvoNativeAlignment(m.c, size)
 	}
 	if align < 1 {
