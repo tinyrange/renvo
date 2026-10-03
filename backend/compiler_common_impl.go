@@ -19261,62 +19261,6 @@ func renvoAsmStorePrimaryBssSize(a *renvoAsm, bssOff int, size int) {
 	renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, size)
 }
 
-func renvoAsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
-	renvoNonNil(a)
-	if renvoPreparedBackendActive != 0 {
-		if renvoRTGUnsupportedOperation == 0 {
-			renvoRTGUnsupportedOperation = 4001
-		}
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32AsmStackMem(a, offset, base, disp8, disp32)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmStackMem(a, offset, base, disp8, disp32)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmStackMem(a, offset, base, disp8, disp32)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArch386 {
-		renvo386AsmStackMem(a, offset, base, disp8, disp32)
-		return
-	}
-	renvoAsmEmit16(a, base)
-	if offset >= 0 && offset <= 128 {
-		renvoAsmEmit8(a, disp8)
-		renvoAsmEmit8(a, -offset)
-		return
-	}
-	renvoAsmEmit8(a, disp32)
-	renvoAsmEmit32(a, -offset)
-}
-func renvoAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
-	renvoNonNil(a)
-	if renvoPreparedBackendActive != 0 {
-		if renvoRTGUnsupportedOperation == 0 {
-			renvoRTGUnsupportedOperation = 4002
-		}
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmMemDisp(a, disp, op, disp8, disp32)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmMemDisp(a, disp, op, disp8, disp32)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArch386 {
-		renvo386AsmMemDisp(a, disp, op, disp8, disp32)
-		return
-	}
-	renvoAmd64AsmMemDisp(a, disp, op, disp8, disp32)
-}
-
 func renvoEmitTypedPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
 	renvoNonNil(g)
 	float := renvoTypeKindIsFloat(kind)

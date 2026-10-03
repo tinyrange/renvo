@@ -2221,7 +2221,7 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
-		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+		renvoArmAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
 	}
 }
 
@@ -2261,7 +2261,7 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
-		renvoAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+		renvoArmAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
 	}
 }
 
@@ -2549,7 +2549,7 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerAddressResultBuffer(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvoArmAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	}
 }
 

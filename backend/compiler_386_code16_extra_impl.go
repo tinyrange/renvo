@@ -77,9 +77,9 @@ func renvo386EmitWideIntExprFast(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	}
 	if memoryMultiply {
 		renvoAsmEmit8(&g.asm, 0x0f)
-		renvoAsmStackMem(&g.asm, g.locals[rightLocal].offset, 0xaf, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, g.locals[rightLocal].offset, 0xaf, 0x45, 0x85)
 	} else {
-		renvoAsmStackMem(&g.asm, g.locals[rightLocal].offset, memoryOpcode, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, g.locals[rightLocal].offset, memoryOpcode, 0x45, 0x85)
 	}
 	resultType := renvoInferParsedExprType(g, ep, idx)
 	result := renvoResolveType(g.meta, resultType)
