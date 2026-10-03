@@ -1085,6 +1085,14 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 			}
 		}
 	}
+	discard, discardValid := decodeRuntimeDiscardPolicy(runtime)
+	if !discardValid || discard.pageSize != 0 &&
+		(len(targetRuntimeRegisterList(runtime, "number")) != 1 ||
+			len(targetRuntimeRegisterList(runtime, "arguments")) < 3 ||
+			targetRuntimeSyscallField(runtime, "instruction") == "") {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-131", "runtime "+runtime.Name+" requires one complete discard_pages syscall policy with a power-of-two page_size"))
+	}
 	diagnostics = append(diagnostics, validatePreparedRuntimeTemplates(document, runtime)...)
 	return diagnostics
 }

@@ -806,6 +806,12 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+const renvoRTGDiscardPageSize = 0
+const renvoRTGDiscardNumber = 0
+const renvoRTGDiscardAdvice = 0
+func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
+}
+
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

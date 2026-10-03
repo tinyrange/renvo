@@ -115,6 +115,12 @@ runtime linux_x86_64 {
 		instruction = syscall
 	}
 
+	discard_pages {
+		page_size = 4096
+		number = 28
+		advice = 4
+	}
+
 	operation read { number = 0 args = [fd, buffer, count] }
 	operation write { number = 1 args = [fd, buffer, count] }
 	operation open { number = 2 args = [path, flags, mode] }

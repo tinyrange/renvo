@@ -98,6 +98,7 @@ func GenerateArchitectureKernel(packageName string, definitions []ResolveResult)
 	source = appendNativeEmitterAPI(source)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
+	source = appendPreparedDiscardPolicy(source, Declaration{})
 	return appendBundledCompilerBindings(source, definitions)
 }
 
@@ -134,6 +135,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendArchitectureBackendAPI(source)
 	source = appendPreparedTargetFacts(source, target.Descriptor, true)
+	source = appendPreparedDiscardPolicy(source, target.Runtime)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	goRoots := baseTargetGoRoots(resolved.Document, target)
 	sequenceRoots := targetSequenceRoots(resolved.Document, target)

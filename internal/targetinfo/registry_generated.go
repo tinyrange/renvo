@@ -65,7 +65,7 @@ func Lookup(name string) (Descriptor, bool) {
 
 func descriptorAt(index int) Descriptor {
 	if index == 0 {
-		return Descriptor{Name: "linux/amd64", Backend: "linux/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "linkstatic", "object"}, Definition: [32]uint8{0x78, 0x96, 0xd, 0x47, 0xdf, 0x55, 0xe0, 0x3e, 0x75, 0x17, 0xf2, 0xfa, 0xf0, 0xf9, 0x2a, 0x8d, 0x58, 0xf5, 0x83, 0x2e, 0x2b, 0x7a, 0x2c, 0x9b, 0x2f, 0xbe, 0xbe, 0xa, 0x2c, 0x74, 0x9e, 0xc9}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-linux-amd64", IDE: false}
+		return Descriptor{Name: "linux/amd64", Backend: "linux/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "linkstatic", "object"}, Definition: [32]uint8{0x4c, 0x4e, 0x9, 0xe7, 0x0, 0xee, 0x60, 0x96, 0xcb, 0xe7, 0x49, 0xce, 0xd6, 0x2e, 0xb7, 0xc, 0xa9, 0x7a, 0xde, 0xe3, 0x4c, 0x16, 0x6a, 0xe7, 0xb0, 0x3, 0xfa, 0xe3, 0x50, 0x19, 0x57, 0xf}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-linux-amd64", IDE: false}
 	}
 	if index == 1 {
 		return Descriptor{Name: "linux/386", Backend: "linux/386", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "386", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "cdecl32", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"386", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x3, 0x65, 0x1, 0xa7, 0xe4, 0x1b, 0x8c, 0x34, 0x43, 0x12, 0xc, 0x7f, 0xb9, 0x43, 0xf7, 0x50, 0x9b, 0x7a, 0x8b, 0xd3, 0x48, 0x3b, 0xf3, 0x11, 0x33, 0x88, 0x47, 0xb4, 0x33, 0x91, 0x64, 0x7b}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 67108864, ReleaseArtifact: "", IDE: false}
@@ -114,7 +114,7 @@ func descriptorAt(index int) Descriptor {
 
 func Binding(name string) (string, string, int, bool) {
 	if name == "linux/amd64" {
-		return "linux/amd64", "\x78\x96\x0d\x47\xdf\x55\xe0\x3e\x75\x17\xf2\xfa\xf0\xf9\x2a\x8d\x58\xf5\x83\x2e\x2b\x7a\x2c\x9b\x2f\xbe\xbe\x0a\x2c\x74\x9e\xc9", 3, true
+		return "linux/amd64", "\x4c\x4e\x09\xe7\x00\xee\x60\x96\xcb\xe7\x49\xce\xd6\x2e\xb7\x0c\xa9\x7a\xde\xe3\x4c\x16\x6a\xe7\xb0\x03\xfa\xe3\x50\x19\x57\x0f", 3, true
 	}
 	if name == "linux/386" {
 		return "linux/386", "\x03\x65\x01\xa7\xe4\x1b\x8c\x34\x43\x12\x0c\x7f\xb9\x43\xf7\x50\x9b\x7a\x8b\xd3\x48\x3b\xf3\x11\x33\x88\x47\xb4\x33\x91\x64\x7b", 3, true
