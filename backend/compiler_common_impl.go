@@ -21813,10 +21813,7 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	symbolIndex := renvoAsmAddObjectFuncSymbol(
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
 	renvoObjectExportFrame(g, true)
-	registerWords := 6
-	if renvoPreparedBackendActive != 0 {
-		registerWords = renvoRTGObjectRegisterCount()
-	}
+	registerWords := renvoObjectArgumentRegisterCount(g.c)
 	if sret {
 		registerWords--
 	}
@@ -21979,10 +21976,7 @@ func renvoObjectRegisterWordCount(wordCount int, limit int) int {
 }
 
 func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, paramCount int) bool {
-	registerLimit := 6
-	if renvoPreparedBackendActive != 0 {
-		registerLimit = renvoRTGObjectRegisterCount()
-	}
+	registerLimit := renvoObjectArgumentRegisterCount(g.c)
 	integerRegister := 0
 	if sret {
 		integerRegister = 1
@@ -22007,7 +22001,7 @@ func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, 
 				if param.kind != renvoTypeStruct {
 					kind = renvoObjectABINormalizeKind(param.kind)
 				}
-				if renvoPreparedBackendActive != 0 || !renvoAmd64PushObjectStackWordKind(&g.asm, stackWord, kind) {
+				if !renvoAsmPushObjectStackWordKind(&g.asm, stackWord, kind) {
 					return false
 				}
 				stackWord++
@@ -22026,16 +22020,7 @@ func renvoPushObjectExportArgs(g *renvoLinearGen, fn *renvoFuncInfo, sret bool, 
 				if param.kind != renvoTypeStruct {
 					kind = renvoObjectABINormalizeKind(param.kind)
 				}
-				if renvoPreparedBackendActive != 0 {
-					if !renvoRTGPushObjectCallWord(&g.asm, register) {
-						return false
-					}
-					if kind != 0 {
-						renvoAsmPopPrimary(&g.asm)
-						renvoAsmNormalizePrimaryForKind(&g.asm, kind)
-						renvoAsmPushPrimary(&g.asm)
-					}
-				} else if !renvoAmd64PushObjectIntegerRegisterKind(&g.asm, register, kind) {
+				if !renvoAsmPushObjectRegisterWordKind(&g.asm, register, kind) {
 					return false
 				}
 			}
@@ -22321,14 +22306,6 @@ func renvoObjectFunctionSectionHasPrefix(g *renvoLinearGen, fnIndex int, prefix 
 	}
 	decl := &g.meta.objectDecls[fn.objectDecl]
 	return renvoBytesPrefixText(g.prog.src, decl.sectionStart, decl.sectionEnd, prefix)
-}
-
-func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGObjectExportFrame(&g.asm, reserve)
-	} else {
-		renvoAmd64ObjectExportFrame(g, reserve)
-	}
 }
 
 func renvoInitFuncQueue(g *renvoLinearGen, count int) {

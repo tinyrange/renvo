@@ -1300,6 +1300,10 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		push_object_register_word = renvo386CompilerPushObjectRegisterWord
+		push_object_stack_word = renvo386CompilerPushObjectStackWord
+		object_export_frame = renvo386CompilerObjectExportFrame
+		object_argument_register_count = renvo386CompilerObjectArgumentRegisterCount
 		object_call_abi = renvo386CompilerObjectCallABI
 		word_call_intrinsic = renvo386CompilerWordCallIntrinsic
 		unsigned_word_order_result = renvo386CompilerUnsignedWordOrderResult
@@ -4821,5 +4825,29 @@ go compiler {
 go compiler {
 	func renvo386CompilerObjectCallABI(c *renvoCompileContext) int {
 		return renvoObjectABICdecl
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectArgumentRegisterCount(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectExportFrame(g *renvoLinearGen, reserve bool) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectStackWord(a *renvoAsm, word int, kind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
+		return false
 	}
 }
