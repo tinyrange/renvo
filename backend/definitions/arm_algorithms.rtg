@@ -696,6 +696,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		object_reverse_register_call = renvoArmCompilerObjectReverseRegisterCall
+		local_storage_unit = renvoArmCompilerLocalStorageUnit
 		kernel_callback_address = renvoArmCompilerKernelCallbackAddress
 		kernel_entry_return = renvoArmCompilerKernelEntryReturn
 		kernel_entry_frame = renvoArmCompilerKernelEntryFrame
@@ -2840,7 +2842,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoArmCompilerPushObjectVariadicArgs(a *renvoAsm) {
+	func renvoArmCompilerPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
 		a.patchFailed = true
 	}
 }
@@ -3004,5 +3006,17 @@ go compiler {
 go compiler {
 	func renvoArmCompilerKernelCallbackAddress(a *renvoAsm, label int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+		return renvoBackendValueSlotSize
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
 	}
 }

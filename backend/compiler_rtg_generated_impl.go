@@ -805,6 +805,45 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64EmitObjectStaticCallReverse(a, importID, wordCount)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoBackendValueSlotSize
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if c.code16 && compactScalar {
+			return 4
+		}
+		return renvoBackendValueSlotSize
+	
+}
+return renvoBackendValueSlotSize
+}
+
 func renvoAsmKernelCallbackAddress(a *renvoAsm, label int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -1700,7 +1739,14 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvoAsmEmitText(a, "\x83\xc4\x0c")
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		a.patchFailed = true
 	
@@ -1710,7 +1756,7 @@ return
 a.patchFailed = true
 }
 
-func renvoPushObjectVariadicArgs(a *renvoAsm) {
+func renvoPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
@@ -1721,7 +1767,14 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvo386CompilerPushObjectPrivateResult(a, fixedWords)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		a.patchFailed = true
 	
@@ -1744,7 +1797,17 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		// The neutral carrier holds the first unnamed stack argument in word zero.
+		renvoAsmEmitText(&g.asm, "\x83\xec\x0c\x8d\x45")
+		renvoAsmEmit8(&g.asm, 8+fixedCount*4)
+		renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x24\x08\x00\x00\x00\x00")
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		g.asm.patchFailed = true
 	
@@ -1765,7 +1828,16 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		g.asm.patchFailed = true
 	
@@ -1790,7 +1862,19 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if resultWords != 2 {
+			a.patchFailed = true
+			return
+		}
+		// Publish the private wide result in EDX:EAX before releasing its slot.
+		renvoAsmEmitText(a, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		a.patchFailed = true
 	
@@ -1810,7 +1894,23 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return true
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		displacement := wordCount * 4
+		if displacement == 0 {
+			renvoAsmEmitText(a, "\x8d\x04\x24")
+		} else if displacement <= 127 {
+			renvoAsmEmitText(a, "\x8d\x44\x24")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\x8d\x84\x24")
+			renvoAsmEmit32(a, displacement)
+		}
+		renvoAsmPushPrimary(a)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	
@@ -1851,7 +1951,16 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return true
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if sret {
+			return false
+		}
+		renvoAsmEmitText(a, "\x83\xec\x08")
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	
@@ -1890,7 +1999,24 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return renvoAmd64PushObjectIntegerRegisterKind(a, register, kind)
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if register < 0 || register >= 3 || kind != 0 {
+			return false
+		}
+		if register == 0 {
+			renvoAsmEmit8(a, 0x50)
+		}
+		if register == 1 {
+			renvoAsmEmit8(a, 0x52)
+		}
+		if register == 2 {
+			renvoAsmEmit8(a, 0x51)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	
@@ -1908,7 +2034,23 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return renvoAmd64PushObjectStackWordKind(a, word, kind)
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if word < 0 || kind != 0 {
+			return false
+		}
+		displacement := 8 + word*4
+		if displacement <= 127 {
+			renvoAsmEmitText(a, "\xff\x75")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\xff\xb5")
+			renvoAsmEmit32(a, displacement)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return false
 	
@@ -1928,7 +2070,19 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if reserve {
+			// Preserve the cdecl callee-saved registers, leaving scalar result registers live.
+			renvoAsmEmitText(&g.asm, "\x55\x89\xe5\x53\x56\x57")
+		} else {
+			renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9")
+		}
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		g.asm.patchFailed = true
 	
@@ -1947,7 +2101,15 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 		return 6
 	
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if c.regParm == 3 {
+			return 3
+		}
+		return 0
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
 		return 0
 	

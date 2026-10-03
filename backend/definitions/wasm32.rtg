@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_reverse_register_call = renvoWasm32CompilerObjectReverseRegisterCall
+		local_storage_unit = renvoWasm32CompilerLocalStorageUnit
 		kernel_callback_address = renvoWasm32CompilerKernelCallbackAddress
 		kernel_entry_return = renvoWasm32CompilerKernelEntryReturn
 		kernel_entry_frame = renvoWasm32CompilerKernelEntryFrame
@@ -6409,7 +6411,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerPushObjectVariadicArgs(a *renvoAsm) {
+	func renvoWasm32CompilerPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
 		a.patchFailed = true
 	}
 }
@@ -6552,5 +6554,17 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerKernelCallbackAddress(a *renvoAsm, label int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+		return renvoBackendValueSlotSize
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
 	}
 }

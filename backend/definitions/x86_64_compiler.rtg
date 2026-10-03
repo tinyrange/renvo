@@ -977,6 +977,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		object_reverse_register_call = renvoAmd64CompilerObjectReverseRegisterCall
+		local_storage_unit = renvoAmd64CompilerLocalStorageUnit
 		kernel_callback_address = renvoAmd64CompilerKernelCallbackAddress
 		kernel_entry_return = renvoAmd64CompilerKernelEntryReturn
 		kernel_entry_frame = renvoAmd64CompilerKernelEntryFrame
@@ -4036,7 +4038,7 @@ go compiler {
 }
 
 go compiler {
-	func renvoAmd64CompilerPushObjectVariadicArgs(a *renvoAsm) {
+	func renvoAmd64CompilerPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
 		renvoAsmEmitText(a, "\x41\x52")
 	}
 }
@@ -4364,5 +4366,18 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerKernelCallbackAddress(a *renvoAsm, label int) {
 		renvoAmd64KernelCallbackAddress(a, label)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+		return renvoBackendValueSlotSize
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+		renvoAmd64EmitObjectStaticCallReverse(a, importID, wordCount)
+		return true
 	}
 }

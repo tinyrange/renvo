@@ -14560,27 +14560,10 @@ func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInf
 
 func renvoEmitCObjectReverseRegisterStaticCall(g *renvoLinearGen, importID int, wordCount int) bool {
 	renvoNonNil(g)
-	if wordCount < 0 || wordCount > 6 || importID < 0 {
+	if wordCount < 0 || wordCount > renvoObjectArgumentRegisterCount(g.c) || importID < 0 {
 		return false
 	}
-	if renvoFixedTarget == 0 {
-		renvoAmd64EmitObjectStaticCallReverse(&g.asm, importID, wordCount)
-		return true
-	}
-	if renvoPreparedBackendActive == 0 {
-		return false
-	}
-	offsets := renvoFixedIntScratch(wordCount)
-	for i := 0; i < wordCount; i++ {
-		offset := renvoAddUnnamedLocal(g, renvoTypeInt)
-		renvoAsmPopPrimary(&g.asm)
-		renvoAsmStorePrimaryStack(&g.asm, offset)
-		offsets = append(offsets, offset)
-	}
-	for i := 0; i < wordCount; i++ {
-		renvoAsmPushStackWord(&g.asm, offsets[i])
-	}
-	return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+	return renvoAsmObjectReverseRegisterCall(&g.asm, importID, wordCount)
 }
 
 // renvoCallArgumentsDiscardable is deliberately narrower than general purity:
@@ -18628,10 +18611,15 @@ func renvoLocalCapturedInCurrentFunction(g *renvoLinearGen, nameStart int, nameE
 func renvoAddTypedLocal(g *renvoLinearGen, nameStart int, nameEnd int, typ int) int {
 	renvoNonNil(g)
 	size := renvoTypeCopySize(g.meta, typ)
-	if renvoFixedTarget == 0 {
-		size = renvo386Code16LocalSize(g, typ, size)
-	} else if size < renvoBackendValueSlotSize {
-		size = renvoBackendValueSlotSize
+	compactScalar := false
+	if renvoProgramUsesC11Semantics(g.prog) {
+		kind := renvoResolveType(g.meta, typ).kind
+		compactScalar = renvoTypeSize(g.meta, typ) <= g.c.renvoNativeIntSize &&
+			(renvoTypeKindIsScalarInt(kind) || kind == renvoTypePointer || kind == renvoTypeFunc)
+	}
+	unit := renvoLocalStorageUnit(g.c, compactScalar)
+	if compactScalar || size < unit {
+		size = unit
 	}
 	captureOff := 0
 	if renvoLocalCapturedInCurrentFunction(g, nameStart, nameEnd, typ) {
@@ -18643,15 +18631,7 @@ func renvoAddTypedLocal(g *renvoLinearGen, nameStart int, nameEnd int, typ int) 
 			renvoAllocateCapturedCell(g, captureOff, size)
 		}
 	}
-	if renvoFixedTarget == 0 {
-		align := size
-		if align > renvoBackendValueSlotSize {
-			align = renvoBackendValueSlotSize
-		}
-		g.stackUsed = renvoAlignValue(g.stackUsed+size, align)
-	} else {
-		g.stackUsed = renvoAlignTo8(g.stackUsed + size)
-	}
+	g.stackUsed = renvoAlignValue(g.stackUsed+size, unit)
 	renvoRecordStackPeak(g)
 	offset := g.stackUsed
 	renvoRecordLocalStorage(g, offset, size, captureOff, typ)
@@ -21381,7 +21361,7 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 		g.asm.symbols[symbolIndex].alignment = decl.alignment
 	}
 	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		if !renvo386EmitObjectCABIWrapperBody(g, fnIndex, wordCount) {
+		if !renvoEmitCdeclObjectWrapperBody(g, fnIndex, wordCount, false) {
 			return 0, 0, false
 		}
 		endLabel := renvoAsmNewLabel(&g.asm)
@@ -21564,6 +21544,62 @@ func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
 	return words
 }
 
+func renvoEmitCdeclObjectWrapperBody(g *renvoLinearGen, fnIndex int, wordCount int, variadic bool) bool {
+	if wordCount < 0 || fnIndex < 0 || fnIndex >= len(g.meta.funcs) || variadic && wordCount < 1 {
+		return false
+	}
+	fn := &g.meta.funcs[fnIndex]
+	wideResult := fn.resultType != 0 && renvoTypeUsesHiddenResult(g.meta, fn.resultType) &&
+		renvoTypeSize(g.meta, fn.resultType) == 2*g.c.renvoNativeIntSize
+	renvoObjectExportFrame(g, true)
+	if wideResult && !renvoBeginObjectAggregateResult(&g.asm, false) {
+		return false
+	}
+	fixedWords := wordCount
+	registerWords := renvoObjectArgumentRegisterCount(g.c)
+	if variadic {
+		fixedWords--
+		registerWords = 0
+		renvoReserveObjectVariadicArgs(g, fixedWords)
+	}
+	// The entry function binds its incoming words in source order, unlike
+	// ordinary functions. Only ordering belongs here; locations are target-owned.
+	for at := 0; at < fixedWords; at++ {
+		word := at
+		if fnIndex == g.prog.entryFunc {
+			word = fixedWords - 1 - at
+		}
+		if word < registerWords {
+			if !renvoAsmPushObjectRegisterWordKind(&g.asm, word, 0) {
+				return false
+			}
+		} else if !renvoAsmPushObjectStackWordKind(&g.asm, word-registerWords, 0) {
+			return false
+		}
+	}
+	if variadic {
+		renvoPushObjectVariadicArgs(&g.asm, fixedWords)
+	}
+	callWords := wordCount
+	if wideResult {
+		if !renvoPushObjectPrivateResult(&g.asm, wordCount) {
+			return false
+		}
+		callWords++
+	}
+	renvoLinearMarkFunc(g, fnIndex)
+	renvoObjectCallWithWordCount(g, fnIndex, callWords)
+	if variadic {
+		renvoFinishObjectVariadicArgs(&g.asm)
+	}
+	if wideResult {
+		renvoFinishObjectAggregateResult(&g.asm, 2)
+	}
+	renvoObjectExportFrame(g, false)
+	renvoAsmRet(&g.asm)
+	return true
+}
+
 func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
 	fn := &g.meta.funcs[fnIndex]
 	wordCount := renvoObjectExportWordCount386(g.meta, fn)
@@ -21582,7 +21618,7 @@ func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
 	variadic := decl != nil && decl.kind == renvoObjectDeclFunction && decl.relocationAddend != 0
 	symbolIndex := renvoAsmAddObjectFuncSymbol(
 		&g.asm, g.prog.src, fn.exportNameStart, fn.exportNameEnd, wrapper, decl)
-	if !renvo386EmitObjectCABIWrapperBodyMode(g, fnIndex, wordCount, variadic) {
+	if !renvoEmitCdeclObjectWrapperBody(g, fnIndex, wordCount, variadic) {
 		return false
 	}
 	endLabel := renvoAsmNewLabel(&g.asm)
@@ -21635,7 +21671,7 @@ func renvoEmitObjectRegisterWrapperBody(g *renvoLinearGen, fnIndex int, wordCoun
 			if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount-1) {
 				return false
 			}
-			renvoPushObjectVariadicArgs(&g.asm)
+			renvoPushObjectVariadicArgs(&g.asm, fixedCount)
 		} else if !renvoPushObjectExportArgs(g, fn, false, fn.paramCount) {
 			return false
 		}
