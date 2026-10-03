@@ -2114,6 +2114,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoSourceSoftFloat(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoSourceScratch(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoSourceCapacity(c *renvoCompileContext) int {
+renvoNonNil(c)
+return 0
+}
+
 func renvoEmitEmptyFunction(a *renvoAsm, label int) {
 renvoNonNil(a)
 renvoRTGFunctionStart(a, label)

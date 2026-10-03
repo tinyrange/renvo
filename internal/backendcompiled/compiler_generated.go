@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "48574ffa34ab11ab2758f75b5192f5c30645f5ba2b6d399b1984e7b75e537f59"
+const CompilerSourceDigest = "16094ef33bc973d89701f49eb1f16338bae9d49fe59fe1a216a126060f44f610"
 
 // source: backend/compiler_common_impl.go
 
@@ -25326,6 +25326,83 @@ renvoAsmStorePrimaryStack(&g.asm, resultOffset)
 return true
 }
 
+
+
+func renvoCompileSourceInputs(input []int, output int, arenaSize int) int {
+context := renvoLegacyCompileContext()
+capacity := renvoSourceCapacity(context)
+var src []byte
+if renvoSourceScratch(context) {
+src = renvoMakeByteScratch(capacity)
+} else {
+src = make([]byte, 0, capacity)
+}
+for i := 0; i < len(input); i++ {
+src = renvoReadAll(input[i], src)
+src = append(src, '\n')
+}
+var prog renvoProgram
+prog = renvoParseProgram(src)
+if renvoKernelProgram(&prog.c) {
+if !renvoPrepareKernelMetadata(&prog.c) {
+renvoPrintErr("renvo: kernel metadata unavailable\n")
+return 1
+}
+renvoCaptureKernelCompileContext(&prog.c)
+}
+if !prog.ok {
+return 1
+}
+if renvoSourceSoftFloat(&prog.c) && renvoProgramNeedsSoftFloat(&prog) {
+src = renvoAppendSoftFloatSource(src)
+prog = renvoParseProgram(src)
+if !prog.ok {
+return 1
+}
+}
+var meta renvoMeta
+renvoBuildMetaInto(&prog, &meta)
+if !meta.ok {
+return 1
+}
+meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+var result renvoCompileResult
+result = renvoTryCompileScalarProgramScratch(&prog, &meta)
+if result.ok {
+data := result.data
+if renvoFixedTarget == 0 {
+data = renvoCompileOutputData(data, renvoTarget)
+}
+write(output, data, -1)
+return 0
+}
+if renvoProgramTargetMode(&prog.c) != 0 {
+renvoPrintErr("renvo: wasm32 compilation failed\n")
+} else {
+renvoPrintErr("renvo: compilation failed\n")
+}
+return 1
+}
+
+func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
+for i := 0; i < renvoTokCount(prog); i++ {
+if renvoTokIsKind(prog, i, renvoTokFloat) {
+return true
+}
+if !renvoTokIsKind(prog, i, renvoTokIdent) {
+continue
+}
+tok := renvoTokAt(prog, i)
+if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
+renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
+renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
+renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
+return true
+}
+}
+return false
+}
+
 // source: backend/compiler_object_cache_impl.go
 
 const renvoObjectCacheCapacity = 1024
@@ -29111,7 +29188,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x8e\x86\xfb\x78\x15\x70\x86\x07\xd0\x90\xdd\xe2\x02\xe3\x7e\x94\x33\xc7\x1d\xbb\x1d\xd1\x28\x0c\x8e\xd6\x86\xe7\x48\x10\xa1\x63", 3, true
+return "wasi/wasm32", "\x3c\xc2\xed\xaf\x1f\xa9\xc9\xad\x74\x10\x82\xca\x1f\x4c\xc2\xf5\xd3\x01\xb9\x2f\x64\x8e\x9c\x2e\x27\x2c\xc7\x33\xb2\x19\x2d\x27", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -29123,7 +29200,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x4a\x46\x63\xe4\xbb\xa2\xd7\x3a\x67\x21\x37\x36\xde\x91\xd6\xbb\xf2\xa9\xcb\x97\x98\x16\x47\x0a\x4f\xf9\xe7\x7a\x6f\x6c\x0f\x2e", 3, true
+return "vm/vm32", "\xd8\x63\x7f\x66\xa0\x57\x9e\x72\xb0\x9e\x44\xa4\x4f\xb1\x30\xbe\x50\x51\x7d\x13\x6c\xe8\x92\x46\x74\x78\xe7\xe5\x5d\xfd\x65\xef", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -29198,8 +29275,6 @@ renvoAsmRet(a)
 
 
 
-
-
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 
@@ -29215,93 +29290,14 @@ src = renvoReadAll(input[0], src)
 prog := renvoParseProgram(src)
 return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 }
-
-
-
 if renvoFixedTarget != 0 {
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-renvoFixedTarget = renvoTargetLinuxKernelAmd64
-return compileLinuxAmd64Arena(input, output, arenaSize)
+target = renvoFixedTarget
 }
-if renvoFixedTarget == renvoTargetWindowsAmd64 {
-renvoFixedTarget = renvoTargetWindowsAmd64
-return compileWindowsAmd64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetWindows386 {
-renvoFixedTarget = renvoTargetWindows386
-return compileWindows386Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetWindowsArm64 {
-renvoFixedTarget = renvoTargetWindowsArm64
-return compileWindowsArm64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetWasiWasm32 {
-renvoFixedTarget = renvoTargetWasiWasm32
-return compileWasiWasm32Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetVM32 {
-renvoFixedTarget = renvoTargetVM32
-return compileVM32Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetDarwinArm64 {
-renvoFixedTarget = renvoTargetDarwinArm64
-return compileDarwinArm64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetLinux386 {
-renvoFixedTarget = renvoTargetLinux386
-return compileLinux386Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetLinuxAarch64 {
-renvoFixedTarget = renvoTargetLinuxAarch64
-return compileLinuxAarch64Arena(input, output, arenaSize)
-}
-if renvoFixedTarget == renvoTargetLinuxArm {
-renvoFixedTarget = renvoTargetLinuxArm
-return compileLinuxArmArena(input, output, arenaSize)
-}
-if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
-return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
-}
-renvoFixedTarget = renvoTargetLinuxAmd64
-return compileLinuxAmd64Arena(input, output, arenaSize)
-}
-if target == renvoTargetLinuxKernelAmd64 {
-return compileLinuxKernelAmd64Arena(input, output, arenaSize)
-}
-if target == renvoTargetWindowsAmd64 {
-return compileWindowsAmd64Arena(input, output, arenaSize)
-}
-if target == renvoTargetWindows386 {
-return compileWindows386Arena(input, output, arenaSize)
-}
-if target == renvoTargetWindowsArm64 {
-return compileWindowsArm64Arena(input, output, arenaSize)
-}
-if target == renvoTargetWasiWasm32 {
-return compileWasiWasm32Arena(input, output, arenaSize)
-}
-if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-return compileVM32Arena(input, output, arenaSize)
-}
-if target == renvoTargetDarwinArm64 {
-return compileDarwinArm64Arena(input, output, arenaSize)
-}
-if target == renvoTargetLinux386 {
-return compileLinux386Arena(input, output, arenaSize)
-}
-if target == renvoTargetLinuxAarch64 {
-return compileLinuxAarch64Arena(input, output, arenaSize)
-}
-if target == renvoTargetLinuxArm {
-return compileLinuxArmArena(input, output, arenaSize)
-}
-if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
-return compileBSDAmd64Arena(input, output, target, arenaSize)
-}
-if target != renvoTargetLinuxAmd64 {
+if target <= 0 || target >= len(targetArchTable) {
 return 1
 }
-return compileLinuxAmd64Arena(input, output, arenaSize)
+renvoSetTarget(target)
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
@@ -29334,7 +29330,7 @@ RegParm        int
 
 func RenvoInitializeObjectCache(targetName string) {
 target := renvoParseTargetArg(targetName)
-if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVM32 && target != renvoTargetLinuxKernelAmd64 {
+if target != 0 && renvoProgramCacheSupported(renvoNewCompileContext(target, false, false, false)) {
 renvoInitializeObjectCache()
 }
 }
@@ -30577,6 +30573,47 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoSourceSoftFloat(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return c.renvoTarget == renvoTargetVM32
+
+}
+return false
+}
+
+func renvoSourceScratch(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return true
+
+}
+return false
+}
+
+func renvoSourceCapacity(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return 786432
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return 655360
+
+}
+return 0
 }
 
 func renvoEmitEmptyFunction(a *renvoAsm, label int) {
@@ -44645,42 +44682,7 @@ const renvoHostedAmd64EnvironmentLengthBSSSize = renvoLinuxAmd64EnvironmentLengt
 const renvoHostedAmd64EnvironmentLengthBSSAlignment = renvoLinuxAmd64EnvironmentLengthBSSAlignment
 
 func renvoCompileAmd64(input []int, output int, arenaSize int) int {
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoFixedTarget == 0 && renvoTarget == renvoTargetLinuxKernelAmd64 {
-if !renvoPrepareKernelMetadata(&prog.c) {
-renvoPrintErr("renvo: kernel metadata unavailable\n")
-return 1
-}
-renvoCaptureKernelCompileContext(&prog.c)
-}
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramScratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
@@ -46115,6 +46117,12 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -46548,33 +46556,7 @@ return true
 }
 
 func renvoCompile386(input []int, output int, arenaSize int) int {
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-result := renvoTryCompileScalarProgramScratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 func renvoAsmImageObject386(emitter *renvoAsm) []byte {
@@ -48995,6 +48977,12 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -50864,35 +50852,7 @@ return g.streqLabel
 const renvoAarch64ELFCodeOffset = 0xb0
 
 func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-sourceCapacity := 786432
-src := make([]byte, 0, sourceCapacity)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramScratch(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: compilation failed\n")
-return 1
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 
@@ -51618,6 +51578,12 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 func renvoTryCompileScalarProgramAarch64Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramCached(p, meta)
 }
+
+
+
+
+
+
 
 
 
@@ -53291,6 +53257,12 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
 
 
 
@@ -56474,6 +56446,12 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
 
 
 
@@ -61016,27 +60994,7 @@ return compileLinuxArmArena(input, output, 0)
 
 func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 renvoSetTarget(renvoTargetLinuxArm)
-src := renvoMakeByteScratch(786432)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok { return 1 }
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok { return 1 }
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-result := renvoTryCompileScalarProgramScratch(&prog, &meta)
-if !result.ok {
-renvoPrintErr("renvo: compilation failed\n")
-return 1
-}
-data := result.data
-if renvoFixedTarget == 0 { data = renvoCompileOutputData(data, renvoTarget) }
-write(output, data, -1)
-return 0
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 const renvoLinuxArmArgsBSSSize = 32768
@@ -61854,25 +61812,6 @@ src = append(src, renvoSoftFloatSource[i])
 return src
 }
 
-func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
-for i := 0; i < renvoTokCount(prog); i++ {
-if renvoTokIsKind(prog, i, renvoTokFloat) {
-return true
-}
-if !renvoTokIsKind(prog, i, renvoTokIdent) {
-continue
-}
-tok := renvoTokAt(prog, i)
-if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
-renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
-renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
-renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
-return true
-}
-}
-return false
-}
-
 func compileWasiWasm32(input []int, output int) int {
 return compileWasiWasm32Arena(input, output, 0)
 }
@@ -61892,41 +61831,7 @@ return compileWasm32Arena(input, output, arenaSize)
 }
 
 func compileWasm32Arena(input []int, output int, arenaSize int) int {
-src := renvoMakeByteScratch(655360)
-for i := 0; i < len(input); i++ {
-src = renvoReadAll(input[i], src)
-src = append(src, '\n')
-}
-var prog renvoProgram
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-src = renvoAppendSoftFloatSource(src)
-prog = renvoParseProgram(src)
-if !prog.ok {
-return 1
-}
-}
-var meta renvoMeta
-renvoBuildMetaInto(&prog, &meta)
-if !meta.ok {
-return 1
-}
-meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-var result renvoCompileResult
-result = renvoTryCompileScalarProgramWasm32(&prog, &meta)
-if result.ok {
-data := result.data
-if renvoFixedTarget == 0 {
-data = renvoCompileOutputData(data, renvoTarget)
-}
-write(output, data, -1)
-return 0
-}
-renvoPrintErr("renvo: wasm32 compilation failed\n")
-return 1
+return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 

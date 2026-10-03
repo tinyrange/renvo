@@ -136,27 +136,7 @@ func compileLinuxArm(input []int, output int) int {
 
 func compileLinuxArmArena(input []int, output int, arenaSize int) int {
 	renvoSetTarget(renvoTargetLinuxArm)
-	src := renvoMakeByteScratch(786432)
-	for i := 0; i < len(input); i++ {
-		src = renvoReadAll(input[i], src)
-		src = append(src, '\n')
-	}
-	var prog renvoProgram
-	prog = renvoParseProgram(src)
-	if !prog.ok { return 1 }
-	var meta renvoMeta
-	renvoBuildMetaInto(&prog, &meta)
-	if !meta.ok { return 1 }
-	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-	result := renvoTryCompileScalarProgramScratch(&prog, &meta)
-	if !result.ok {
-		renvoPrintErr("renvo: compilation failed\n")
-		return 1
-	}
-	data := result.data
-	if renvoFixedTarget == 0 { data = renvoCompileOutputData(data, renvoTarget) }
-	write(output, data, -1)
-	return 0
+	return renvoCompileSourceInputs(input, output, arenaSize)
 }
 `
 

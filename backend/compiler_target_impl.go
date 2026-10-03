@@ -57,10 +57,8 @@ func renvoRTGEmitStringEqualHelperBody(g *renvoLinearGen) {
 	renvoAsmRet(a)
 }
 
-// compileTarget composes an OS/architecture implementation after target
-// selection. It is deliberately target-neutral: Linux runtime operations live
-// in compiler_linux_impl.go, while target-specific image builders remain in
-// their composition files until those layers are split further.
+// compileTarget validates target selection before entering the shared source
+// pipeline. Prepared adapters retain their single-input contract.
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		// renvoCompileUnitInput uses a positional header read for regular files,
@@ -76,93 +74,14 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 		prog := renvoParseProgram(src)
 		return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 	}
-	// A stage compiler is specialized while its parent is lowering this source.
-	// Keep that dispatch expressed in terms of the specialization global so the
-	// fixed-target branch pruner can remove every unrelated backend call.
 	if renvoFixedTarget != 0 {
-		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-			renvoFixedTarget = renvoTargetLinuxKernelAmd64
-			return compileLinuxAmd64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindowsAmd64 {
-			renvoFixedTarget = renvoTargetWindowsAmd64
-			return compileWindowsAmd64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindows386 {
-			renvoFixedTarget = renvoTargetWindows386
-			return compileWindows386Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindowsArm64 {
-			renvoFixedTarget = renvoTargetWindowsArm64
-			return compileWindowsArm64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWasiWasm32 {
-			renvoFixedTarget = renvoTargetWasiWasm32
-			return compileWasiWasm32Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetVM32 {
-			renvoFixedTarget = renvoTargetVM32
-			return compileVM32Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetDarwinArm64 {
-			renvoFixedTarget = renvoTargetDarwinArm64
-			return compileDarwinArm64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinux386 {
-			renvoFixedTarget = renvoTargetLinux386
-			return compileLinux386Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinuxAarch64 {
-			renvoFixedTarget = renvoTargetLinuxAarch64
-			return compileLinuxAarch64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinuxArm {
-			renvoFixedTarget = renvoTargetLinuxArm
-			return compileLinuxArmArena(input, output, arenaSize)
-		}
-		if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
-			return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
-		}
-		renvoFixedTarget = renvoTargetLinuxAmd64
-		return compileLinuxAmd64Arena(input, output, arenaSize)
+		target = renvoFixedTarget
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
-		return compileLinuxKernelAmd64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindowsAmd64 {
-		return compileWindowsAmd64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindows386 {
-		return compileWindows386Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindowsArm64 {
-		return compileWindowsArm64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWasiWasm32 {
-		return compileWasiWasm32Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return compileVM32Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetDarwinArm64 {
-		return compileDarwinArm64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinux386 {
-		return compileLinux386Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinuxAarch64 {
-		return compileLinuxAarch64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinuxArm {
-		return compileLinuxArmArena(input, output, arenaSize)
-	}
-	if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
-		return compileBSDAmd64Arena(input, output, target, arenaSize)
-	}
-	if target != renvoTargetLinuxAmd64 {
+	if target <= 0 || target >= len(targetArchTable) {
 		return 1
 	}
-	return compileLinuxAmd64Arena(input, output, arenaSize)
+	renvoSetTarget(target)
+	return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
@@ -195,7 +114,7 @@ type RenvoCompileOptions struct {
 // before taking their transient frontend arena mark.
 func RenvoInitializeObjectCache(targetName string) {
 	target := renvoParseTargetArg(targetName)
-	if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVM32 && target != renvoTargetLinuxKernelAmd64 {
+	if target != 0 && renvoProgramCacheSupported(renvoNewCompileContext(target, false, false, false)) {
 		renvoInitializeObjectCache()
 	}
 }

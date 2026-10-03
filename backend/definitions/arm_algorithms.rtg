@@ -486,6 +486,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		source_soft_float = renvoArmCompilerSourceSoftFloat
+		source_scratch = renvoArmCompilerSourceScratch
+		source_capacity = renvoArmCompilerSourceCapacity
 		empty_function = renvoArmCompilerEmptyFunction
 		resolve_unemitted_closures = renvoArmCompilerResolveUnemittedClosures
 		object_program = renvoArmCompilerObjectProgram
@@ -3024,5 +3027,23 @@ go compiler {
 	func renvoArmCompilerEmptyFunction(a *renvoAsm, label int) {
 		renvoAsmMarkLabel(a, label)
 		renvoAsmRet(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSourceCapacity(c *renvoCompileContext) int {
+		return 786432
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSourceScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSourceSoftFloat(c *renvoCompileContext) bool {
+		return false
 	}
 }
