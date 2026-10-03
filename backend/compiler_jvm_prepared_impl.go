@@ -4357,6 +4357,38 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+renvoNonNil(g)
+if renvoExprIsIdentText(g.prog, ep, ep.exprs[idx].left, "renvo_runtime_CKernelLinkAddress") {
+	return renvoBoolInt(renvoEmitKernelLinkAddressCall(g, ep, idx))
+}
+if renvoFixedTarget == 0 {
+	return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
+}
+return -1
+}
+
+func renvoEmitUnsignedWordOrderResult(g *renvoLinearGen, op0 byte, op1 byte, opLen int, kind int) bool {
+renvoNonNil(g)
+if g.c.renvoNativeIntSize != 8 && g.c.renvoNativeIntSize != 4 {
+	return false
+}
+if !renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen) {
+	return false
+}
+renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+return true
+}
+
+func renvoAsmWordConstantImmediate(a *renvoAsm, kind int, value int) bool {
+renvoNonNil(a)
+if kind == renvoTypeInt64 || kind == renvoTypeUint64 {
+	return false
+}
+renvoAsmPrimaryImm(a, value)
+return true
+}
+
 func renvoEmitBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
 renvoNonNil(g)
 if right {
@@ -4596,7 +4628,7 @@ renvoAsmPopTertiary(a)
 renvoAsmAddPrimaryTertiary(a)
 }
 
-func renvoEmitWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, wide bool) int {
+func renvoEmitWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 renvoNonNil(g)
 return -1
 }
