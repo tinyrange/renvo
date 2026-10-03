@@ -103,7 +103,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 	if file.Tokens[start].KindLine&255 != syntax.TokenIdent {
 		return 0, false
 	}
-	for i := context.fn.BodyStart + 1; !context.strict && i+3 < before; i++ {
+	for i := context.fn.BodyStart + 1; !context.strict && context.fn.BodyStart >= 0 && i+3 < before; i++ {
 		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokenTextIs(file, i+2, "=") {
 			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
@@ -118,6 +118,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 			if context.info.Decls[i].ValueIndex >= 0 && context.info.Decls[i].ValueIndex < len(values) {
 				next := *context
 				next.fileIndex = context.info.Decls[i].File
+				next.fn.BodyStart = -1 // Package declarations cannot see caller-local constants.
 				return constantIndexInt(&next, values[context.info.Decls[i].ValueIndex].StartTok, values[context.info.Decls[i].ValueIndex].EndTok, context.info.Decls[i].Token, depth+1)
 			}
 		}
@@ -233,6 +234,7 @@ func constantIndexType(context *constantIndexContext, tok int, depth int) bool {
 	}
 	next := *context
 	next.fileIndex = context.info.Types[typeIndex].File
+	next.fn.BodyStart = -1
 	return constantIndexType(&next, context.info.Types[typeIndex].TypeStart, depth+1)
 }
 
@@ -282,6 +284,7 @@ func constantIndexArrayLength(context *constantIndexContext, signature *FuncSign
 		if context.info.Decls[i].Kind == SymbolVar && context.info.Decls[i].Name == name && context.info.Decls[i].TypeStart >= 0 && context.info.Decls[i].TypeEnd > context.info.Decls[i].TypeStart {
 			next := *context
 			next.fileIndex = context.info.Decls[i].File
+			next.fn.BodyStart = -1 // Package declarations cannot see caller-local constants.
 			return constantIndexTypeLength(&next, context.info.Decls[i].TypeStart, context.info.Decls[i].TypeEnd, before, depth+1)
 		}
 	}
@@ -312,5 +315,6 @@ func constantIndexTypeLength(context *constantIndexContext, start int, end int, 
 	}
 	next := *context
 	next.fileIndex = context.info.Types[typeIndex].File
+	next.fn.BodyStart = -1
 	return constantIndexTypeLength(&next, context.info.Types[typeIndex].TypeStart, context.info.Types[typeIndex].TypeEnd, before, depth+1)
 }
