@@ -19560,79 +19560,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			}
 		}
 		if e.argCount == 1 && (callee == renvoIdentCap || callee == renvoIdentLen) {
-			count := renvoArrayBuiltinCount(g, ep, e)
-			if count >= 0 {
-				renvoAsmPrimaryImm(a, count)
-				return true
-			}
-		}
-		if e.argCount == 1 && callee == renvoIdentCap {
-			if !renvoEmitSlicePtrCap(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
-			if renvoPreparedBackendActive != 0 {
-				renvoAsmPushTertiary(a)
-				renvoAsmPopPrimary(a)
-			} else {
-				renvoAsmEmit16(a, 0x5851)
-			}
-			return true
-		}
-		if e.argCount == 1 && callee == renvoIdentLen {
-			arg := &ep.exprs[ep.args[e.firstArg]]
-			if arg.kind == renvoExprString {
-				msg := renvoDecodeStringToken(p, arg.tok)
-				msgLen := len(msg)
-				renvoAsmPrimaryImm(a, msgLen)
-				return true
-			}
-			if arg.kind == renvoExprIdent {
-				localIndex := renvoFindLocalIndex(g, arg.nameStart, arg.nameEnd)
-				if localIndex >= 0 && (renvoTypeIsSlice(g.meta, g.locals[localIndex].typ) || renvoTypeIsString(g.meta, g.locals[localIndex].typ)) {
-					renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset-8)
-					return true
-				}
-				globalOffset := renvoFindGlobalOffset(g, arg.nameStart, arg.nameEnd)
-				globalType := renvoFindGlobalType(g, arg.nameStart, arg.nameEnd)
-				if globalOffset >= 0 && (renvoTypeIsString(g.meta, globalType) || renvoTypeIsSlice(g.meta, globalType)) {
-					renvoAsmLoadPrimaryBss(a, globalOffset+8)
-					return true
-				}
-				constTok := renvoFindConstStringToken(g, arg.nameStart, arg.nameEnd)
-				if constTok >= 0 {
-					msg := renvoDecodeStringToken(p, constTok)
-					msgLen := len(msg)
-					renvoAsmPrimaryImm(a, msgLen)
-					return true
-				}
-			}
-			if arg.kind == renvoExprUnary && renvoTokCharIs(p, arg.tok, '*') {
-				if !renvoEmitIntExpr(g, ep, arg.left) {
-					return false
-				}
-				renvoAsmCopyPrimaryToSecondary(a)
-				renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-				return true
-			}
-			argIndex := ep.args[e.firstArg]
-			if renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, argIndex)) {
-				if !renvoEmitStringValueRegs(g, ep, argIndex) {
-					return false
-				}
-				renvoAsmPushSecondary(a)
-				renvoAsmPopPrimary(a)
-				return true
-			}
-			if !renvoEmitSlicePtrLen(g, ep, ep.args[e.firstArg]) {
-				return false
-			}
-			if renvoPreparedBackendActive != 0 {
-				renvoAsmPushTertiary(a)
-				renvoAsmPopPrimary(a)
-			} else {
-				renvoAsmEmit16(a, 0x5851)
-			}
-			return true
+			return renvoEmitLengthCapacityCall(g, ep, idx)
 		}
 		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
 			return renvoEmitTargetRuntime(g, ep, idx, callee)
@@ -24317,6 +24245,103 @@ func renvoTruncBytes(data *[]byte, count int) {
 	*data = (*data)[:count]
 }
 
+func renvoEmitLengthCapacityCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	p := g.prog
+	meta := g.meta
+	a := &g.asm
+	e := &ep.exprs[idx]
+	callee := renvoExprIdentCode(p, ep, e.left)
+	if e.argCount != 1 || (callee != renvoIdentCap && callee != renvoIdentLen) {
+		return false
+	}
+	firstArgIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	count := renvoArrayBuiltinCount(g, ep, e)
+	if count >= 0 {
+		renvoAsmPrimaryImm(a, count)
+		return true
+	}
+	if callee == renvoIdentCap {
+		if renvoEmitDirectSelectorWords(g, ep, firstArgIndex, 16, -1, g.c.renvoNativeIntSize) {
+			return true
+		}
+		if !renvoEmitSlicePtrCap(g, ep, firstArgIndex) {
+			return false
+		}
+		renvoAsmSliceCountResult(a)
+		return true
+	}
+	if callee == renvoIdentLen {
+		arg := &ep.exprs[firstArgIndex]
+		if arg.kind == renvoExprString {
+			msg := renvoDecodeStringToken(p, arg.tok)
+			msgLen := len(msg)
+			renvoAsmPrimaryImm(a, msgLen)
+			return true
+		}
+		if arg.kind == renvoExprIdent {
+			localIndex := renvoFindLocalIndex(g, arg.nameStart, arg.nameEnd)
+			if localIndex >= 0 && (renvoTypeIsSlice(meta, g.locals[localIndex].typ) || renvoTypeIsString(meta, g.locals[localIndex].typ)) {
+				renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset-8)
+				return true
+			}
+			globalOffset := renvoFindGlobalOffset(g, arg.nameStart, arg.nameEnd)
+			globalType := renvoFindGlobalType(g, arg.nameStart, arg.nameEnd)
+			if globalOffset >= 0 && (renvoTypeIsString(meta, globalType) || renvoTypeIsSlice(meta, globalType)) {
+				renvoAsmLoadPrimaryBss(a, globalOffset+8)
+				return true
+			}
+			constTok := renvoFindConstStringToken(g, arg.nameStart, arg.nameEnd)
+			if constTok >= 0 {
+				msg := renvoDecodeStringToken(p, constTok)
+				msgLen := len(msg)
+				renvoAsmPrimaryImm(a, msgLen)
+				return true
+			}
+		}
+		if arg.kind == renvoExprSelector && renvoCanLoadDirectSliceCountSelector(g) {
+			argType := renvoInferParsedExprType(g, ep, firstArgIndex)
+			if renvoTypeIsSlice(meta, argType) || renvoTypeIsString(meta, argType) {
+				if renvoEmitDirectSelectorWords(g, ep, firstArgIndex, 8, -1, g.c.renvoNativeIntSize) {
+					return true
+				}
+				if offset, ok := renvoLocalStructSelectorOffset(g, ep, firstArgIndex); ok {
+					renvoAsmLoadPrimaryStack(a, offset-8)
+					return true
+				}
+				if !renvoEmitSelectorAddressSecondary(g, ep, firstArgIndex) {
+					return false
+				}
+				renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
+				return true
+			}
+		}
+		if arg.kind == renvoExprUnary && renvoTokCharIs(p, arg.tok, '*') {
+			if !renvoEmitIntExpr(g, ep, arg.left) {
+				return false
+			}
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
+			return true
+		}
+		argIndex := firstArgIndex
+		if renvoTypeIsString(meta, renvoInferParsedExprType(g, ep, argIndex)) {
+			if !renvoEmitStringValueRegs(g, ep, argIndex) {
+				return false
+			}
+			renvoAsmPushSecondary(a)
+			renvoAsmPopPrimary(a)
+			return true
+		}
+		if !renvoEmitSlicePtrLen(g, ep, firstArgIndex) {
+			return false
+		}
+		renvoAsmSliceCountResult(a)
+		return true
+	}
+	return false
+}
+
 func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	p := g.prog
@@ -24383,89 +24408,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			}
 		}
 		if e.argCount == 1 && (callee == renvoIdentCap || callee == renvoIdentLen) {
-			count := renvoArrayBuiltinCount(g, ep, e)
-			if count >= 0 {
-				renvoAsmPrimaryImm(a, count)
-				return true
-			}
-		}
-		if e.argCount == 1 && callee == renvoIdentCap {
-			if renvoEmitDirectSelectorWords(g, ep, firstArgIndex, 16, -1, g.c.renvoNativeIntSize) {
-				return true
-			}
-			if !renvoEmitSlicePtrCap(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyTertiaryToPrimary(a)
-			return true
-		}
-		if e.argCount == 1 && callee == renvoIdentLen {
-			arg := &ep.exprs[firstArgIndex]
-			if arg.kind == renvoExprString {
-				msg := renvoDecodeStringToken(p, arg.tok)
-				msgLen := len(msg)
-				renvoAsmPrimaryImm(a, msgLen)
-				return true
-			}
-			if arg.kind == renvoExprIdent {
-				localIndex := renvoFindLocalIndex(g, arg.nameStart, arg.nameEnd)
-				if localIndex >= 0 && (renvoTypeIsSlice(meta, g.locals[localIndex].typ) || renvoTypeIsString(meta, g.locals[localIndex].typ)) {
-					renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset-8)
-					return true
-				}
-				globalOffset := renvoFindGlobalOffset(g, arg.nameStart, arg.nameEnd)
-				globalType := renvoFindGlobalType(g, arg.nameStart, arg.nameEnd)
-				if globalOffset >= 0 && (renvoTypeIsString(meta, globalType) || renvoTypeIsSlice(meta, globalType)) {
-					renvoAsmLoadPrimaryBss(a, globalOffset+8)
-					return true
-				}
-				constTok := renvoFindConstStringToken(g, arg.nameStart, arg.nameEnd)
-				if constTok >= 0 {
-					msg := renvoDecodeStringToken(p, constTok)
-					msgLen := len(msg)
-					renvoAsmPrimaryImm(a, msgLen)
-					return true
-				}
-			}
-			if arg.kind == renvoExprSelector {
-				argType := renvoInferParsedExprType(g, ep, firstArgIndex)
-				if renvoTypeIsSlice(meta, argType) || renvoTypeIsString(meta, argType) {
-					if renvoEmitDirectSelectorWords(g, ep, firstArgIndex, 8, -1, g.c.renvoNativeIntSize) {
-						return true
-					}
-					if offset, ok := renvoLocalStructSelectorOffset(g, ep, firstArgIndex); ok {
-						renvoAsmLoadPrimaryStack(a, offset-8)
-						return true
-					}
-					if !renvoEmitSelectorAddressSecondary(g, ep, firstArgIndex) {
-						return false
-					}
-					renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-					return true
-				}
-			}
-			if arg.kind == renvoExprUnary && renvoTokCharIs(p, arg.tok, '*') {
-				if !renvoEmitIntExpr(g, ep, arg.left) {
-					return false
-				}
-				renvoAsmCopyPrimaryToSecondary(a)
-				renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-				return true
-			}
-			argIndex := firstArgIndex
-			if renvoTypeIsString(meta, renvoInferParsedExprType(g, ep, argIndex)) {
-				if !renvoEmitStringValueRegs(g, ep, argIndex) {
-					return false
-				}
-				renvoAsmPushSecondary(a)
-				renvoAsmPopPrimary(a)
-				return true
-			}
-			if !renvoEmitSlicePtrLen(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyTertiaryToPrimary(a)
-			return true
+			return renvoEmitLengthCapacityCall(g, ep, idx)
 		}
 		if callee >= renvoIdentOpen && callee <= renvoIdentChmod {
 			return renvoEmitTargetRuntime(g, ep, idx, callee)

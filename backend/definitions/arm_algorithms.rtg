@@ -696,6 +696,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		direct_slice_count_selector = renvoArmCompilerDirectSliceCountSelector
+		slice_count_result = renvoArmCompilerSliceCountResult
 		move_read_write_offset = renvoArmCompilerMoveReadWriteOffset
 		prepare_read_write_buffer = renvoArmCompilerPrepareReadWriteBuffer
 		compare_word_immediate_kind = renvoArmCompilerCompareWordImmediateKind
@@ -2496,5 +2498,17 @@ go compiler {
 go compiler {
 	func renvoArmCompilerMoveReadWriteOffset(a *renvoAsm) {
 		renvoArmAsmMoveOffsetArg(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSliceCountResult(a *renvoAsm) {
+		renvoAsmCopyTertiaryToPrimary(a)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
+		return true
 	}
 }

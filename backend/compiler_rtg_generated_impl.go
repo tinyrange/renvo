@@ -797,6 +797,45 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoCanLoadDirectSliceCountSelector(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return false
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoAsmSliceCountResult(a *renvoAsm) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmCopyTertiaryToPrimary(a)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvoAsmEmit16(a, 0x5851)
+	
+return
+
+}
+a.patchFailed = true
+}
+
 func renvoAsmMoveOffsetArg(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
