@@ -1078,14 +1078,14 @@ go compiler {
 
 	func renvoAarch64CompilerStorePrimaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
+		renvoAarch64AsmStackMem(a, offset, 0x8948, 0x45, 0x85)
 		a.lastPrimaryStoreEnd = len(a.code)
 		a.lastPrimaryStoreOff = offset
 	}
 
 	func renvoAarch64CompilerStoreSecondaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
+		renvoAarch64AsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	}
 
 	func renvoAarch64CompilerLoadPrimaryStack(a *renvoAsm, offset int) {
@@ -1094,7 +1094,7 @@ go compiler {
 		if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
 			return
 		}
-		renvoAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
+		renvoAarch64AsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
 	}
 
 	func renvoAarch64CompilerIncStack(a *renvoAsm, offset int) {
@@ -1115,27 +1115,27 @@ go compiler {
 
 	func renvoAarch64CompilerAddressPrimaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvoAarch64AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	}
 
 	func renvoAarch64CompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
+		renvoAarch64AsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	}
 
 	func renvoAarch64CompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
+		renvoAarch64AsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	}
 
 	func renvoAarch64CompilerLoadSecondaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
+		renvoAarch64AsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	}
 
 	func renvoAarch64CompilerLoadTertiaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
+		renvoAarch64AsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	}
 
 	func renvoAarch64CompilerStoreSliceStack(a *renvoAsm, offset int) {
@@ -2288,7 +2288,7 @@ go compiler {
 	}
 
 	func renvoAarch64CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+		renvoAarch64AsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
 	}
 }
 
@@ -2505,7 +2505,7 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
-		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+		renvoAarch64AsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
 	}
 }
 
@@ -2545,7 +2545,7 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
-		renvoAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+		renvoAarch64AsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
 	}
 }
 
@@ -2833,7 +2833,7 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerAddressResultBuffer(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvoAarch64AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	}
 }
 

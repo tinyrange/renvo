@@ -526,7 +526,7 @@ go compiler {
 			loadOpcode = 0xd9
 			storeOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, left, loadOpcode, 0x45, 0x85) // fld
+		renvo386AsmStackMem(a, left, loadOpcode, 0x45, 0x85) // fld
 		opcode := 0xdc
 		shortModRM := 0x45
 		longModRM := 0x85
@@ -542,8 +542,8 @@ go compiler {
 		} else if op != '+' {
 			return false
 		}
-		renvoAsmStackMem(a, right, opcode, shortModRM, longModRM)
-		renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d) // fstp
+		renvo386AsmStackMem(a, right, opcode, shortModRM, longModRM)
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d) // fstp
 		return true
 	}
 
@@ -552,8 +552,8 @@ go compiler {
 		if size == 4 {
 			opcode = 0xd9
 		}
-		renvoAsmStackMem(a, right, opcode, 0x45, 0x85)
-		renvoAsmStackMem(a, left, opcode, 0x45, 0x85)
+		renvo386AsmStackMem(a, right, opcode, 0x45, 0x85)
+		renvo386AsmStackMem(a, left, opcode, 0x45, 0x85)
 		renvoAsmEmit16(a, 0xe9df) // fucomip st(0), st(1)
 		renvoAsmEmit16(a, 0xd8dd) // fstp st(0)
 	}
@@ -564,9 +564,9 @@ go compiler {
 			intSize = 8
 		}
 		if intSize == 8 {
-			renvoAsmStackMem(a, offset, 0xdf, 0x6d, 0xad) // fild qword
+			renvo386AsmStackMem(a, offset, 0xdf, 0x6d, 0xad) // fild qword
 		} else {
-			renvoAsmStackMem(a, offset, 0xdb, 0x45, 0x85) // fild dword
+			renvo386AsmStackMem(a, offset, 0xdb, 0x45, 0x85) // fild dword
 		}
 		if !signed && intSize == 8 {
 			converted := renvoAsmNewLabel(a)
@@ -576,13 +576,13 @@ go compiler {
 			// corresponding non-negative value before the final rounding step.
 			renvoAsmStoreStackImm(a, offset, 0)
 			renvoAsmStoreStackImm(a, offset-4, 0x43f00000)
-			renvoAsmStackMem(a, offset, 0xdc, 0x45, 0x85) // fadd qword
+			renvo386AsmStackMem(a, offset, 0xdc, 0x45, 0x85) // fadd qword
 			renvoAsmMarkLabel(a, converted)
 		}
 		if floatSize == 4 {
-			renvoAsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
 		} else {
-			renvoAsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
 		}
 	}
 
@@ -595,8 +595,8 @@ go compiler {
 		if destSize == 4 {
 			storeOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
-		renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)  // fstp
+		renvo386AsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)  // fstp
 	}
 
 	func renvo386AsmX87FloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
@@ -604,12 +604,12 @@ go compiler {
 		if floatSize == 4 {
 			loadOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
-		storeOpcode := 0xdb                                 // fisttp dword
+		renvo386AsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+		storeOpcode := 0xdb                                    // fisttp dword
 		if intSize == 8 || !signed {
 			storeOpcode = 0xdd // fisttp qword
 		}
-		renvoAsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
 	}
 
 	func renvo386AsmX87NegateStack(a *renvoAsm, offset int, size int) {
@@ -663,9 +663,9 @@ go compiler {
 
 	func renvo386EmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
 		a := &g.asm
-		renvoAsmStackMem(a, dest, 0x8d, 0x7d, 0xbd)
-		renvoAsmStackMem(a, left, 0x8d, 0x75, 0xb5)
-		renvoAsmStackMem(a, right, 0x8d, 0x5d, 0x9d)
+		renvo386AsmStackMem(a, dest, 0x8d, 0x7d, 0xbd)
+		renvo386AsmStackMem(a, left, 0x8d, 0x75, 0xb5)
+		renvo386AsmStackMem(a, right, 0x8d, 0x5d, 0x9d)
 		renvoAsmPrimaryImm(a, mode)
 		renvoAsmCallLabel(a, label)
 	}
@@ -799,7 +799,7 @@ go compiler {
 		renvoAsmEmit32(a, 0x000000c8)
 		if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
 			g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-			renvoAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
 		}
 		renvoBindFunctionParams(g, fnInfoIndex)
 		if !renvoBindClosureCaptures(g, fnInfoIndex) {
@@ -910,11 +910,11 @@ go compiler {
 	func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 		a := &g.asm
 		if reg == 0 {
-			renvoAsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
 			return
 		}
 		if reg == 1 {
-			renvoAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
+			renvo386AsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
 			return
 		}
 		if reg == 2 {
@@ -922,7 +922,7 @@ go compiler {
 			return
 		}
 		if reg == 3 {
-			renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+			renvo386AsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
 			return
 		}
 		if reg == 4 {
@@ -930,7 +930,7 @@ go compiler {
 			return
 		}
 		if reg == 5 {
-			renvoAsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
+			renvo386AsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
 			return
 		}
 		renvoAsmEmit16(a, 0x858b)
@@ -1719,7 +1719,7 @@ go compiler {
 
 	func renvo386CompilerStorePrimaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8948, 0x45, 0x85)
+		renvo386AsmStackMem(a, offset, 0x8948, 0x45, 0x85)
 		if renvoFixedTarget == 0 && a.c.code16 {
 			a.lastPrimaryStoreEnd = len(a.code)
 			a.lastPrimaryStoreOff = offset
@@ -1728,7 +1728,7 @@ go compiler {
 
 	func renvo386CompilerStoreSecondaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8948, 0x55, 0x95)
+		renvo386AsmStackMem(a, offset, 0x8948, 0x55, 0x95)
 	}
 
 	func renvo386CompilerLoadPrimaryStack(a *renvoAsm, offset int) {
@@ -1739,7 +1739,7 @@ go compiler {
 				return
 			}
 		}
-		renvoAsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
 		if renvoFixedTarget == 0 && a.c.code16 {
 			distance := 2
 			if offset < 0 || offset > 128 {
@@ -1767,7 +1767,7 @@ go compiler {
 
 	func renvo386CompilerAddressPrimaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 		if renvoFixedTarget == 0 && a.c.code16 {
 			distance := 2
 			if offset < 0 || offset > 128 {
@@ -1779,27 +1779,27 @@ go compiler {
 
 	func renvo386CompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
 	}
 
 	func renvo386CompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
 	}
 
 	func renvo386CompilerLoadSecondaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
 	}
 
 	func renvo386CompilerLoadTertiaryStack(a *renvoAsm, offset int) {
 		renvoNonNil(a)
-		renvoAsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
 	}
 
 	func renvo386CompilerStoreSliceStack(a *renvoAsm, offset int) {
 		renvoAsmStorePrimarySecondaryStack(a, offset, offset-8)
-		renvoAsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
+		renvo386AsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
 	}
 
 	func renvo386CompilerMulTertiaryImm(a *renvoAsm, imm int) {
@@ -2078,7 +2078,7 @@ go compiler {
 			// adds a push, pop, and (for code16) two operand-size overrides without
 			// changing either operand.
 			renvoAsmLoadPrimaryStack(a, right)
-			renvoAsmStackMem(a, left, 0x39, 0x45, 0x85)
+			renvo386AsmStackMem(a, left, 0x39, 0x45, 0x85)
 			renvo386AsmJccLabel(a, setcc-0x10, label)
 			return
 		}
@@ -2091,10 +2091,10 @@ go compiler {
 	func renvo386CompilerJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
 		if renvoFixedTarget == 0 && a.c.code16 {
 			if renvoAsmImmFits8Signed(value) {
-				renvoAsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
+				renvo386AsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
 				renvoAsmEmit8(a, value)
 			} else {
-				renvoAsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
+				renvo386AsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
 				renvoAsmEmit32(a, value)
 			}
 			renvo386AsmJccLabel(a, setcc-0x10, label)
@@ -2728,20 +2728,20 @@ go compiler {
 
 	func renvo386CompilerWideAddStack(g *renvoLinearGen, dest int, left int, right int) {
 		renvoAsmLoadPrimaryStack(&g.asm, left)
-		renvoAsmStackMem(&g.asm, right, 0x03, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right, 0x03, 0x45, 0x85)
 		renvoAsmStorePrimaryStack(&g.asm, dest)
 		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
-		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x13, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x13, 0x45, 0x85)
 		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
 		return
 	}
 
 	func renvo386CompilerWideSubStack(g *renvoLinearGen, dest int, left int, right int) {
 		renvoAsmLoadPrimaryStack(&g.asm, left)
-		renvoAsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
 		renvoAsmStorePrimaryStack(&g.asm, dest)
 		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
-		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x1b, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x1b, 0x45, 0x85)
 		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
 		return
 	}
@@ -2817,16 +2817,16 @@ go compiler {
 
 	func renvo386CompilerWideMultiplyStack(g *renvoLinearGen, dest int, left int, right int) {
 		renvoAsmLoadPrimaryStack(&g.asm, left)
-		renvoAsmStackMem(&g.asm, right, 0xf7, 0x65, 0xa5)
+		renvo386AsmStackMem(&g.asm, right, 0xf7, 0x65, 0xa5)
 		renvoAsmStorePrimaryStack(&g.asm, dest)
 		renvoAsmEmit16(&g.asm, 0xd189)
 		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
 		renvoAsmEmit8(&g.asm, 0x0f)
-		renvoAsmStackMem(&g.asm, right, 0xaf, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right, 0xaf, 0x45, 0x85)
 		renvoAsmEmit16(&g.asm, 0xc101)
 		renvoAsmLoadPrimaryStack(&g.asm, left)
 		renvoAsmEmit8(&g.asm, 0x0f)
-		renvoAsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0xaf, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0xaf, 0x45, 0x85)
 		renvoAsmAddPrimaryTertiary(&g.asm)
 		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
 		return
@@ -3036,7 +3036,7 @@ go compiler {
 			if renvoAsmImmFits8Signed(value.value) {
 				opcode = 0x83
 			}
-			renvoAsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
+			renvo386AsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
 			if opcode == 0x83 {
 				renvoAsmEmit8(&g.asm, value.value)
 			} else {
@@ -3046,7 +3046,7 @@ go compiler {
 			if !renvoEmitScalarExprForKind(g, ep, rootIndex, kind) {
 				return false
 			}
-			renvoAsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
+			renvo386AsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
 		}
 		return true
 	}
@@ -3084,7 +3084,7 @@ go compiler {
 			if renvoAsmImmFits8Signed(value.value) {
 				opcode = 0x83
 			}
-			renvoAsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
+			renvo386AsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
 			if opcode == 0x83 {
 				renvoAsmEmit8(&g.asm, value.value)
 			} else {
@@ -3104,7 +3104,7 @@ go compiler {
 		if opcode == 0 {
 			return false
 		}
-		renvoAsmStackMem(&g.asm, offset, opcode, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, offset, opcode, 0x45, 0x85)
 		return true
 	}
 
@@ -3200,10 +3200,10 @@ go compiler {
 			return false
 		}
 		if mask.value >= 0 && mask.value <= 255 {
-			renvoAsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf6, 0x45, 0x85)
+			renvo386AsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf6, 0x45, 0x85)
 			renvoAsmEmit8(&g.asm, mask.value)
 		} else {
-			renvoAsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf7, 0x45, 0x85)
+			renvo386AsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf7, 0x45, 0x85)
 			renvoAsmEmit32(&g.asm, mask.value)
 		}
 		wantNonzero := jumpIfTrue
@@ -3556,12 +3556,12 @@ go compiler {
 			if !renvoEmitScalarExprForKind(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), resultType.kind) {
 				return 0
 			}
-			renvoAsmStackMem(&g.asm, pointerOffset, 0x8b, 0x55, 0x95)
+			renvo386AsmStackMem(&g.asm, pointerOffset, 0x8b, 0x55, 0x95)
 			if renvoAsmImmFits8Signed(delta) {
-				renvoAsmStackMem(&g.asm, pointerOffset, 0x83, 0x45, 0x85)
+				renvo386AsmStackMem(&g.asm, pointerOffset, 0x83, 0x45, 0x85)
 				renvoAsmEmit8(&g.asm, delta)
 			} else {
-				renvoAsmStackMem(&g.asm, pointerOffset, 0x81, 0x45, 0x85)
+				renvo386AsmStackMem(&g.asm, pointerOffset, 0x81, 0x45, 0x85)
 				renvoAsmEmit32(&g.asm, delta)
 			}
 			renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, resultSize)
@@ -3621,9 +3621,9 @@ go compiler {
 				delta = -delta
 			}
 			if postDerefInc {
-				renvoAsmStackMem(&g.asm, frameOffset, 0x8b, 0x55, 0x95)
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x8b, 0x55, 0x95)
 				step := renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, idx))
-				renvoAsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
 				renvoAsmEmit8(&g.asm, step)
 				renvo386EmitCScalarLoad(&g.asm, resultType.kind, 2)
 				return 1
@@ -3635,10 +3635,10 @@ go compiler {
 				}
 			}
 			if renvoAsmImmFits8Signed(delta) {
-				renvoAsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
 				renvoAsmEmit8(&g.asm, delta)
 			} else {
-				renvoAsmStackMem(&g.asm, frameOffset, 0x81, 0x45, 0x85)
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x81, 0x45, 0x85)
 				renvoAsmEmit32(&g.asm, delta)
 			}
 			if !post && !discard {
@@ -4016,7 +4016,7 @@ go compiler {
 	}
 
 	func renvo386CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+		renvo386AsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
 	}
 }
 
@@ -4192,7 +4192,7 @@ go compiler {
 			return false
 		}
 		renvoAsmLoadPrimaryStack(&g.asm, right)
-		renvoAsmStackMem(&g.asm, left, 0x39, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, left, 0x39, 0x45, 0x85)
 		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 		return true
 	}
@@ -4200,7 +4200,7 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
-		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+		renvo386AsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
 	}
 }
 
@@ -4240,7 +4240,7 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
-		renvoAsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+		renvo386AsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
 	}
 }
 
@@ -4393,7 +4393,7 @@ go compiler {
 		if renvoAsmImmFits8Signed(value) {
 			opcode = 0x83
 		}
-		renvoAsmStackMem(&g.asm, offset, opcode, 0x7d, 0xbd)
+		renvo386AsmStackMem(&g.asm, offset, opcode, 0x7d, 0xbd)
 		if opcode == 0x83 {
 			renvoAsmEmit8(&g.asm, value)
 		} else {
@@ -4482,7 +4482,7 @@ go compiler {
 		if !renvoEmitIntExpr(g, ep, idx) {
 			return 0
 		}
-		renvoAsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
+		renvo386AsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
 		renvo386AsmJccLabel(a, 0x84, matchLabel)
 		return 1
 	}
@@ -4643,7 +4643,7 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerLoadFrameFieldValue(a *renvoAsm, offset int, size int, nativeABI bool) {
-		renvoAsmStackMem(a, offset, 0x8d48, 0x55, 0x95)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x55, 0x95)
 		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
 	}
 }
@@ -4656,13 +4656,13 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerAddressResultBuffer(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	}
 }
 
 go compiler {
 	func renvo386CompilerAddressTakenLocal(a *renvoAsm, offset int) {
-		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
 	}
 }
 
