@@ -25,9 +25,12 @@ type File struct {
 	Decls       []TopDecl
 	Funcs       []FuncDecl
 	Generics    *GenericDeclarations
-	Ok          bool
-	Error       int
-	ErrorTok    int
+	// InterfaceCandidates contains interface keywords and comparable identifiers
+	// recorded by the existing token validation walk, including function bodies.
+	InterfaceCandidates []int
+	Ok                  bool
+	Error               int
+	ErrorTok            int
 }
 
 type ImportDecl struct {
@@ -119,6 +122,11 @@ func validateDots(file *File) {
 	// Keep incomplete selectors available to editor declaration recovery;
 	// this is not a complete expression grammar validation pass.
 	for tok := 2; tok+1 < len(file.Tokens); tok++ {
+		token := &file.Tokens[tok]
+		kind := token.KindLine & 255
+		if kind == TokenInterface || kind == TokenIdent && int(token.End-token.Start) == 10 && bytesEqualText(file.Src, int(token.Start), int(token.End), "comparable") {
+			file.InterfaceCandidates = append(file.InterfaceCandidates, tok)
+		}
 		if tokCharIs(file.Tokens, tok, '.') {
 			next := file.Tokens[tok+1]
 			if next.KindLine&255 == TokenOperator && file.Src[next.Start] == '.' {

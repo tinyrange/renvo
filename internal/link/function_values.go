@@ -2226,6 +2226,19 @@ func functionValueEnclosingLocalTypeDepthMode(program *unit.Program, before int,
 	}
 	// Search newest declarations first, including one immediately before use.
 	for i := before - 1; i > fn.BodyStart; i-- {
+		// Declarations inside a completed block cannot bind this use. Skip
+		// its body, retaining control initializers before the opening brace.
+		if i >= len(program.Tokens) {
+			continue
+		}
+		item := &program.Tokens[i]
+		if item.KindLine&255 == unit.TokenOp && item.Size == 1 && program.Text[item.Start] == '}' {
+			open := functionValueFindMatchingBackward(program, i, "{", "}")
+			if open > fn.BodyStart {
+				i = open
+				continue
+			}
+		}
 		if i >= len(program.Tokens) || program.Tokens[i].KindLine&255 != unit.TokenIdent || program.Tokens[i].Size != len(name) || !functionValueTokenEquals(program, i, name) {
 			continue
 		}
@@ -2411,16 +2424,21 @@ func functionValueLocalTypeName(program *unit.Program, name int) bool {
 	}
 	depth := 0
 	for token := name - 1; token >= 0; token-- {
-		if functionValueTokenEquals(program, token, ")") || functionValueTokenEquals(program, token, "]") || functionValueTokenEquals(program, token, "}") {
+		item := &program.Tokens[token]
+		if item.KindLine&255 != unit.TokenOp || item.Size != 1 {
+			continue
+		}
+		c := program.Text[item.Start]
+		if c == ')' || c == ']' || c == '}' {
 			depth++
 			continue
 		}
-		if functionValueTokenEquals(program, token, "(") || functionValueTokenEquals(program, token, "[") || functionValueTokenEquals(program, token, "{") {
+		if c == '(' || c == '[' || c == '{' {
 			if depth > 0 {
 				depth--
 				continue
 			}
-			return functionValueTokenEquals(program, token, "(") && functionValueTokenEquals(program, token-1, "type")
+			return c == '(' && functionValueTokenEquals(program, token-1, "type")
 		}
 	}
 	return false
@@ -2545,7 +2563,8 @@ func functionValueBindingInScope(program *unit.Program, fn *unit.Func, binding i
 		return true
 	}
 	for open := fn.BodyStart; open < binding; open++ {
-		if !functionValueTokenEquals(program, open, "{") {
+		item := &program.Tokens[open]
+		if item.KindLine&255 != unit.TokenOp || item.Size != 1 || program.Text[item.Start] != '{' {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, open)
@@ -2688,23 +2707,68 @@ func functionValueNamedType(program *unit.Program, name string) bool {
 
 // Anonymous functions have lexical parameter/local scopes even though the
 // compact unit's Funcs table contains only package-level declarations.
+// Build the index when a linked program is created, outside lookup scratch
+// marks. Lazy allocation in a resolver could outlive an arena rewind.
+func indexFunctionValueLexicalScopes(program *unit.Program) {
+	index := new([]unit.Func)
+	// Token kinds cheaply reject ordinary source. Parse each literal once
+	// instead of walking back through its enclosing body at every lookup.
+	for at := 0; at < len(program.Tokens); at++ {
+		if program.Tokens[at].KindLine&255 != unit.TokenFunc || !functionValueTokenEquals(program, at+1, "(") {
+			continue
+		}
+		_, body, ok := parseFunctionValueSignature(program, at, "")
+		if !ok || !functionValueTokenEquals(program, body, "{") {
+			continue
+		}
+		close := functionValueFindMatchingBrace(program, body)
+		if close >= body {
+			*index = append(*index, unit.Func{StartTok: at, NameTok: at, BodyStart: body, BodyEnd: close + 1, EndTok: close + 1})
+		}
+	}
+	program.LexicalFuncs = index
+}
+
 func functionValueLexicalFunction(program *unit.Program, token int) (unit.Func, bool) {
 	index := functionValueEnclosingFunc(program, token)
 	if index < 0 {
 		return unit.Func{}, false
 	}
+	if program.LexicalFuncs == nil {
+		fn := program.Funcs[index]
+		for at := token - 1; at >= fn.BodyStart; at-- {
+			if program.Tokens[at].KindLine&255 != unit.TokenFunc || !functionValueTokenEquals(program, at+1, "(") {
+				continue
+			}
+			_, body, ok := parseFunctionValueSignature(program, at, "")
+			if !ok || !functionValueTokenEquals(program, body, "{") || body >= token {
+				continue
+			}
+			close := functionValueFindMatchingBrace(program, body)
+			if close >= token {
+				return unit.Func{StartTok: at, NameTok: at, BodyStart: body, BodyEnd: close + 1, EndTok: close + 1}, true
+			}
+		}
+		return fn, true
+	}
+	literals := *program.LexicalFuncs
+	low, high := 0, len(literals)
+	for low < high {
+		middle := low + (high-low)/2
+		if literals[middle].StartTok < token {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
 	fn := program.Funcs[index]
-	for at := token - 1; at >= fn.BodyStart; at-- {
-		if !functionValueTokenEquals(program, at, "func") || !functionValueTokenEquals(program, at+1, "(") {
-			continue
+	for at := low - 1; at >= 0; at-- {
+		literal := &literals[at]
+		if literal.StartTok < fn.BodyStart {
+			break
 		}
-		_, body, ok := parseFunctionValueSignature(program, at, "")
-		if !ok || !functionValueTokenEquals(program, body, "{") || body >= token {
-			continue
-		}
-		close := functionValueFindMatchingBrace(program, body)
-		if close >= token {
-			return unit.Func{StartTok: at, NameTok: at, BodyStart: body, BodyEnd: close + 1, EndTok: close + 1}, true
+		if literal.BodyStart < token && token < literal.BodyEnd {
+			return *literal, true
 		}
 	}
 	return fn, true
@@ -3359,6 +3423,25 @@ func functionValuePrimaryStart(program *unit.Program, end int) int {
 }
 
 func functionValueFindMatchingBackward(program *unit.Program, close int, openText string, closeText string) int {
+	if len(openText) == 1 && len(closeText) == 1 {
+		depth := 0
+		for i := close; i >= 0; i-- {
+			item := &program.Tokens[i]
+			if item.KindLine&255 != unit.TokenOp || item.Size != 1 {
+				continue
+			}
+			c := program.Text[item.Start]
+			if c == closeText[0] {
+				depth++
+			} else if c == openText[0] {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
+		return -1
+	}
 	depth := 0
 	for i := close; i >= 0; i-- {
 		if functionValueTokenEquals(program, i, closeText) {
@@ -4053,6 +4136,25 @@ func functionValueFindMatchingBrace(program *unit.Program, open int) int {
 
 func functionValueFindMatching(program *unit.Program, open int, left string, right string) int {
 	if !functionValueTokenEquals(program, open, left) {
+		return -1
+	}
+	if len(left) == 1 && len(right) == 1 {
+		depth := 0
+		for i := open; i < len(program.Tokens); i++ {
+			item := &program.Tokens[i]
+			if item.KindLine&255 != unit.TokenOp || item.Size != 1 {
+				continue
+			}
+			c := program.Text[item.Start]
+			if c == left[0] {
+				depth++
+			} else if c == right[0] {
+				depth--
+				if depth == 0 {
+					return i
+				}
+			}
+		}
 		return -1
 	}
 	depth := 0

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "37f19f8c7a3ca49c52c2e1de8279737df00ed4d365d3f2e4943ff78e0ed5300e"
+const CompilerSourceDigest = "cdae9154ae18a10b33925c55c723a09893233e480bd3c085eb7d1179c40a8207"
 
 // source: backend/compiler_common_impl.go
 
@@ -43059,6 +43059,39 @@ renvoAsmCopyPrimaryToCallWord0(a)
 } else {
 renvoAsmAddressCallWord0Stack(a, destOffset)
 }
+if size <= 96 {
+
+
+
+chunks := (size + 15) / 16
+for n := 0; n < chunks; n++ {
+disp := n * 16
+if disp+16 > size {
+disp = size - 16
+}
+renvoAsmEmitText(a, "\xf3\x0f\x6f")
+if disp == 0 {
+renvoAsmEmit8(a, 0x06+n*8)
+} else {
+renvoAsmEmit8(a, 0x46+n*8)
+renvoAsmEmit8(a, disp)
+}
+}
+for n := 0; n < chunks; n++ {
+disp := n * 16
+if disp+16 > size {
+disp = size - 16
+}
+renvoAsmEmitText(a, "\xf3\x0f\x7f")
+if disp == 0 {
+renvoAsmEmit8(a, 0x07+n*8)
+} else {
+renvoAsmEmit8(a, 0x47+n*8)
+renvoAsmEmit8(a, disp)
+}
+}
+return
+}
 if mode == renvoNativeCopyStackToStack && (srcOffset+size <= destOffset || destOffset+size <= srcOffset) && size%8 == 0 {
 
 
@@ -44923,7 +44956,9 @@ return at
 func renvo386AsmFrameFinish(a *renvoAsm, at int, stackUsed int) {
 frame := renvoAlignTo8(stackUsed)
 if renvoFixedTarget == 0 && a.c.code16 {
-if frame > 65528 { frame = 65528 }
+if frame > 65528 {
+frame = 65528
+}
 renvoPut32At(a.code, at, 0x000000c8|frame<<8)
 } else {
 renvoPut32At(a.code, at+5, frame)

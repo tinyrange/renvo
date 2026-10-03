@@ -216,7 +216,8 @@ func linkProgramsCore(programs []unit.Program, root int, rootName string, units 
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
-	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerFunctionRangeDefers(&program, transient) || !lowerFunctionRangesCore(&program, transient) || !lowerIntegerRangesCore(&program, transient) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
+	indexFunctionValueLexicalScopes(&program)
+	if !lowerDefaultHandler(&program, defaultHandler, transient) || !lowerFunctionRangeDefers(&program, transient) || !lowerRangesCore(&program, transient, true, true) || !lowerAnonymousTypes(&program, transient) || !lowerGlobalFunctionLiterals(&program, transient) || !lowerConcurrencyCoreNeeded(&program, transient, concurrencyNeeded) {
 		arena.Discard(actionStart, actionEnd)
 		return empty, false
 	}
@@ -341,6 +342,7 @@ func replaceFunctionValueProgram(dst *unit.Program, src *unit.Program) {
 	dst.Symbols = src.Symbols
 	dst.Decls = src.Decls
 	dst.Funcs = src.Funcs
+	indexFunctionValueLexicalScopes(dst)
 	dst.TypeRefs = src.TypeRefs
 	dst.Calls = src.Calls
 	dst.Refs = src.Refs

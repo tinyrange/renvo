@@ -8,20 +8,37 @@ import "renvo.dev/internal/unit"
 // parameters are the iteration bindings, so := creates a fresh binding on each
 // invocation, while = evaluates the authored assignment inside the callback.
 func lowerFunctionRangesCore(program *unit.Program, transient bool) bool {
+	return lowerRangesCore(program, transient, true, false)
+}
+
+// Classify each range expression once. In particular, ordinary slice ranges
+// must not repeat lexical type resolution in separate iterator/integer passes.
+func lowerRangesCore(program *unit.Program, transient bool, functions bool, integers bool) bool {
 	count := 0
 	for {
 		changed := false
 		for at := len(program.Tokens) - 1; at >= 0; at-- {
-			if !functionValueTokenEquals(program, at, "for") {
+			if program.Tokens[at].KindLine&255 != unit.TokenFor {
 				continue
 			}
 			rangeTok, open := functionRangeHeader(program, at)
 			if rangeTok < 0 || open < 0 {
 				continue
 			}
-			typ := functionRangeExpressionType(program, rangeTok, rangeTok+1, open)
+			typ := ordinaryBuiltinExprType(program, rangeTok, rangeTok+1, open)
+			if typ == "" && functions {
+				typ = functionRangeExpressionFallbackType(program, rangeTok, rangeTok+1, open)
+			}
 			underlying := ordinaryUnderlyingType(program, typ, 0)
-			if !functionValueHasPrefix(functionValueCompactTypeText(underlying), "func(") {
+			if integers && mapLowerIntegerKey(underlying) {
+				if !lowerIntegerRangeAt(program, transient, at, rangeTok, open, typ, count) {
+					return false
+				}
+				count++
+				changed = true
+				break
+			}
+			if !functions || !functionValueHasPrefix(functionValueCompactTypeText(underlying), "func(") {
 				continue
 			}
 			iterator, ok := functionValueSignatureFromTypeText(underlying)
@@ -177,6 +194,10 @@ func functionRangeExpressionType(program *unit.Program, before int, start int, e
 	if typ := ordinaryBuiltinExprType(program, before, start, end); typ != "" {
 		return typ
 	}
+	return functionRangeExpressionFallbackType(program, before, start, end)
+}
+
+func functionRangeExpressionFallbackType(program *unit.Program, before int, start int, end int) string {
 	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--

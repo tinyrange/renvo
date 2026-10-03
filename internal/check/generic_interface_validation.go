@@ -9,7 +9,7 @@ func graphHasInterfaceElements(graph *load.Graph) bool {
 	for pkg := range graph.Packages {
 		for f := range graph.Packages[pkg].Files {
 			file := &graph.Packages[pkg].Files[f].File
-			for token := 0; token+1 < len(file.Tokens); token++ {
+			for _, token := range file.InterfaceCandidates {
 				if tokenTextIs(file, token, "comparable") && !tokCharIs(file, token-1, '.') && !tokCharIs(file, token+1, ':') && file.Tokens[token+1].KindLine&255 != syntax.TokenIdent {
 					declarationName := false
 					for _, fn := range file.Funcs {

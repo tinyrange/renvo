@@ -874,7 +874,9 @@ func renvo386AsmFrameStart(a *renvoAsm) int {
 func renvo386AsmFrameFinish(a *renvoAsm, at int, stackUsed int) {
 	frame := renvoAlignTo8(stackUsed)
 	if renvoFixedTarget == 0 && a.c.code16 {
-		if frame > 65528 { frame = 65528 }
+		if frame > 65528 {
+			frame = 65528
+		}
 		renvoPut32At(a.code, at, 0x000000c8|frame<<8)
 	} else {
 		renvoPut32At(a.code, at+5, frame)

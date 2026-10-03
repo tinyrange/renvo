@@ -140,3 +140,26 @@ func TestFunctionRangeInterfaceAndParenthesizedYieldTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestMixedRangesPreserveNestedLexicalScopes(t *testing.T) {
+	files := []load.SourceFile{
+		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\ngo 1.25\n")},
+		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
+type Count int
+func main(){
+ seq:=func(yield func(int)bool){for n:=range Count(3){if !yield(n){return}}}
+ for n:=range seq {
+  f:=func(values []int){for _,v:=range values{_ = v};for m:=range n{_ = m}}
+  f([]int{n})
+ }
+ for _,v:=range []int{1,2}{_ = v}
+ for n:=range Count(2){_ = n}
+}
+`)},
+	}
+	persistent := LinkBuildCore(buildFromFiles(t, files))
+	transient := LinkBuildCoreTransient(buildFromFiles(t, files))
+	if !persistent.Ok || !transient.Ok || !bytes.Equal(persistent.Data, transient.Data) {
+		t.Fatalf("mixed ranges: persistent=%v transient=%v", persistent.Ok, transient.Ok)
+	}
+}
