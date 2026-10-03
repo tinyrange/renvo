@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "95780de3d0bb0f1e215b22942ac9c5f338e7d465ccaa13294aaecc6fc55e9e69"
+const CompilerSourceDigest = "8412c474486d7aa4375ba820f871314e884d5fff297c9b2c8c0debc99b0f8b74"
 
 // source: backend/compiler_common_impl.go
 
@@ -26757,28 +26757,13 @@ return renvoEmitTargetWriteValueRegs(g, fd)
 func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, operation int) bool {
 renvoNonNil(g, ep)
 a := &g.asm
-p := g.prog
 firstArg := ep.exprs[idx].firstArg
 argCount := ep.exprs[idx].argCount
 if argCount != 3 {
 return false
 }
-if renvoPreparedBackendActive != 0 {
 if !renvoEmitIntExpr(g, ep, ep.args[firstArg]) {
 return false
-}
-} else {
-fdStart := ep.exprs[idx].tok + 1
-fdEnd := renvoFindExprBoundary(p, fdStart, ep.end)
-fdEp := renvoNewExprParse()
-renvoParseExpressionInto(fdEp, p, fdStart, fdEnd)
-if !fdEp.ok || len(fdEp.exprs) == 0 {
-return false
-}
-fdIndex := len(fdEp.exprs) - 1
-if !renvoEmitIntExpr(g, fdEp, fdIndex) {
-return false
-}
 }
 renvoAsmPushPrimary(a)
 offIndex := ep.args[firstArg+2]
