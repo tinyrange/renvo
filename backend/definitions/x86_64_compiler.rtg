@@ -977,6 +977,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		hosted_static_call = renvoAmd64CompilerHostedStaticCall
+		object_register_call = renvoAmd64CompilerObjectRegisterCall
+		cdecl_object_call = renvoAmd64CompilerCdeclObjectCall
 		discard_arena_pages = renvoAmd64CompilerDiscardArenaPages
 		arena_discard_supported = renvoAmd64CompilerArenaDiscardSupported
 		write_value_regs = renvoAmd64CompilerWriteValueRegs
@@ -4300,5 +4303,28 @@ go compiler {
 		renvoNonNil(a)
 		renvoAsmEmit16(a, 0x2548)
 		renvoAsmEmit32(a, imm)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+		renvoAmd64EmitObjectStaticCall(a, importID, wordCount|vectorMask<<8)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWinAmd64CallStaticImport(a, importID, wordCount)
+		return true
 	}
 }

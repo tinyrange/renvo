@@ -737,6 +737,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		hosted_static_call = renvoAarch64CompilerHostedStaticCall
+		object_register_call = renvoAarch64CompilerObjectRegisterCall
+		cdecl_object_call = renvoAarch64CompilerCdeclObjectCall
 		discard_arena_pages = renvoAarch64CompilerDiscardArenaPages
 		arena_discard_supported = renvoAarch64CompilerArenaDiscardSupported
 		write_value_regs = renvoAarch64CompilerWriteValueRegs
@@ -3275,5 +3278,31 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionStaticCall(a, importID, wordCount)
+			return true
+		}
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWinArm64DefinitionStaticCall(a, importID, wordCount)
+		return true
 	}
 }

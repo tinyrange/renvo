@@ -356,37 +356,8 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		registerWords := 0
 		variadic := fn.paramCount > 0 && g.meta.params[fn.firstParam+fn.paramCount-1].initStart != 0
-		if g.c.regParm == 3 && !variadic {
-			registerWords = wordCount
-			if registerWords > 3 {
-				registerWords = 3
-			}
-			if registerWords > 0 {
-				renvoAsmEmit8(&g.asm, 0x58) // eax
-			}
-			if registerWords > 1 {
-				renvoAsmEmit8(&g.asm, 0x5a) // edx
-			}
-			if registerWords > 2 {
-				renvoAsmEmit8(&g.asm, 0x59) // ecx
-			}
-		}
-		renvoAsmEmit8(&g.asm, 0xe8)
-		at := len(g.asm.code)
-		renvoAsmEmit32(&g.asm, 0)
-		renvoAsmAddAbsReloc(&g.asm, at, importID, renvoImportReloc)
-		if wordCount > registerWords {
-			bytes := (wordCount - registerWords) * 4
-			if renvoAsmImmFits8Signed(bytes) {
-				renvoAsmEmit3(&g.asm, 0x83, 0xc4, bytes)
-			} else {
-				renvoAsmEmit16(&g.asm, 0xc481)
-				renvoAsmEmit32(&g.asm, bytes)
-			}
-		}
-		return true
+		return renvoAsmCdeclObjectCall(&g.asm, importID, wordCount, variadic)
 	}
 	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
@@ -403,8 +374,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		renvoAmd64EmitObjectStaticCall(&g.asm, importID, wordCount|vectorMask<<8)
-		return true
+		return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 	}
 	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
 		renvoPreparedBackendActive == 0 && renvoFixedTarget == 0 && targetIsKernelModule(g.c) {
@@ -417,7 +387,7 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 	}
 	if renvoPreparedBackendActive != 0 && renvoRTGPreparedOS == renvoOSDarwin ||
 		renvoPreparedBackendActive == 0 && targetIsDarwin(g.c.renvoTargetOS) {
@@ -430,38 +400,19 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		if importID < 0 {
 			return false
 		}
-		if renvoPreparedBackendActive != 0 {
-			return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-		}
-		renvoDarwinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
-		return true
+		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 	}
 	if renvoPreparedBackendActive != 0 {
 		importID := renvoAsmAddPreparedStaticImport(&g.asm,
 			fn.linkDLLStart, fn.linkDLLEnd,
 			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
+		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 	}
 	if g.c.renvoTargetOS != renvoOSWindows {
 		return false
 	}
 	importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-	if renvoPreparedBackendActive != 0 {
-		return renvoRTGEmitStaticCall(&g.asm, importID, wordCount)
-	}
-	if g.c.renvoTargetArch == renvoArch386 {
-		renvoWin386CallImport(&g.asm, importID)
-		return true
-	}
-	if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoWinArm64DefinitionStaticCall(&g.asm, importID, wordCount)
-		return true
-	}
-	if g.c.renvoTargetArch != renvoArchAmd64 {
-		return false
-	}
-	renvoWinAmd64CallStaticImport(&g.asm, importID, wordCount)
-	return true
+	return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 }
 
 const (

@@ -1300,6 +1300,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		hosted_static_call = renvo386CompilerHostedStaticCall
+		object_register_call = renvo386CompilerObjectRegisterCall
+		cdecl_object_call = renvo386CompilerCdeclObjectCall
 		discard_arena_pages = renvo386CompilerDiscardArenaPages
 		arena_discard_supported = renvo386CompilerArenaDiscardSupported
 		write_value_regs = renvo386CompilerWriteValueRegs
@@ -5043,5 +5046,56 @@ go compiler {
 go compiler {
 	func renvo386CompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+		registerWords := 0
+		if a.c.regParm == 3 && !variadic {
+			registerWords = wordCount
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(a, 0x58) // eax
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(a, 0x5a) // edx
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(a, 0x59) // ecx
+			}
+		}
+		renvoAsmEmit8(a, 0xe8)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, importID, renvoImportReloc)
+		if wordCount > registerWords {
+			bytes := (wordCount - registerWords) * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmit3(a, 0x83, 0xc4, bytes)
+			} else {
+				renvoAsmEmit16(a, 0xc481)
+				renvoAsmEmit32(a, bytes)
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWin386CallImport(a, importID)
+		return true
 	}
 }

@@ -797,6 +797,116 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWinAmd64CallStaticImport(a, importID, wordCount)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWin386CallImport(a, importID)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionStaticCall(a, importID, wordCount)
+			return true
+		}
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWinArm64DefinitionStaticCall(a, importID, wordCount)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAsmObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64EmitObjectStaticCall(a, importID, wordCount|vectorMask<<8)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAsmCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		registerWords := 0
+		if a.c.regParm == 3 && !variadic {
+			registerWords = wordCount
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(a, 0x58) // eax
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(a, 0x5a) // edx
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(a, 0x59) // ecx
+			}
+		}
+		renvoAsmEmit8(a, 0xe8)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, importID, renvoImportReloc)
+		if wordCount > registerWords {
+			bytes := (wordCount - registerWords) * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmit3(a, 0x83, 0xc4, bytes)
+			} else {
+				renvoAsmEmit16(a, 0xc481)
+				renvoAsmEmit32(a, bytes)
+			}
+		}
+		return true
+	
+}
+a.patchFailed = true
+return false
+}
+
 func renvoAsmDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c

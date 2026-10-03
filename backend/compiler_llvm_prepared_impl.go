@@ -2106,6 +2106,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+return renvoRTGEmitStaticCall(a, importID, wordCount)
+}
+
+func renvoAsmObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+renvoNonNil(a)
+return renvoRTGEmitStaticCall(a, importID, wordCount|vectorMask<<8)
+}
+
+func renvoAsmCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+renvoNonNil(a)
+return false
+}
+
 func renvoAsmDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
 renvoNonNil(a)
 doneLabel := renvoAsmNewLabel(a)
