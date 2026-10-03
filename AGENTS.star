@@ -729,10 +729,100 @@ pr_work = module("pr_work", candidates = pr_candidates, main = pr_main,
     continue_rebase = pr_continue, push = pr_push,
     retarget = pr_retarget, ready = pr_ready)
 
+# Repository-scoped stable releases through the existing tag-triggered workflow.
+def _release_version(version):
+    if type(version) != "string" or len(version) > 64:
+        fail("Expected a stable release version such as v0.1.1")
+    if not regexp.compile(r"^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$").matches(version):
+        fail("Release versions must use canonical vMAJOR.MINOR.PATCH spelling")
+    return version
+
+def release_status(version):
+    """Read a stable release's remote tag and metadata, including asset sizes.
+
+    Missing tags or releases return failed read processes; inspect both results.
+    """
+    version = _release_version(version)
+    return [
+        _publish_gh(["api", "--hostname", "github.com",
+            "repos/" + _PR_REPOSITORY + "/git/ref/tags/" + version]),
+        _publish_gh(["release", "view", version, "--repo", _PR_REPOSITORY,
+            "--json", "tagName,isDraft,isPrerelease,publishedAt,url,assets,targetCommitish"]),
+    ]
+
+def release_tag(version, expected_main):
+    """Create a stable release tag at the reviewed current main after green CI.
+
+    For user-requested releases only. Review changes since the previous release,
+    the release notes, workflow and checks before calling. Notes must already
+    exist on main. Never replaces tags, merges PRs, skips gates or edits releases.
+    The tag triggers the existing Release workflow; monitor it and verify the
+    published release and complete asset set before reporting completion.
+    """
+    version = _release_version(version)
+    _compiler_sha(expected_main)
+    main = _compiler_json(pr_work.main())
+    if main["object"]["sha"] != expected_main:
+        fail("Remote main no longer matches the reviewed release commit")
+    notes = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com",
+        "repos/" + _PR_REPOSITORY + "/contents/docs/releases/" + version + ".md?ref=" + expected_main,
+    ]))
+    if notes.get("type") != "file" or notes.get("size", 0) == 0:
+        fail("Nonempty release notes must exist at the reviewed release commit")
+    runs = _compiler_json(_publish_gh([
+        "api", "--hostname", "github.com",
+        "repos/" + _PR_REPOSITORY + "/actions/runs?head_sha=" + expected_main + "&event=push&per_page=100",
+    ]))
+    if runs["total_count"] > 100:
+        fail("Too many workflow runs to inspect safely")
+    required = ["Tests", "Performance (Linux)", "Performance (Windows)", "Performance (macOS)", "Performance (Virtual)"]
+    latest = {}
+    for run in runs["workflow_runs"]:
+        if run["head_sha"] == expected_main and run["head_branch"] == "main" and run["event"] == "push" and run["name"] in required:
+            if run["name"] not in latest or run["id"] > latest[run["name"]]["id"]:
+                latest[run["name"]] = run
+    for name in required:
+        if name not in latest or latest[name]["status"] != "completed" or latest[name]["conclusion"] != "success":
+            fail("Release requires a successful main workflow: " + name)
+    main = _compiler_json(pr_work.main())
+    if main["object"]["sha"] != expected_main:
+        fail("Remote main changed during release validation")
+    # POST creates only a new ref; GitHub rejects an existing tag. No PATCH,
+    # deletion, force update, arbitrary ref or arbitrary repository is exposed.
+    return _compiler_api("POST", "repos/" + _PR_REPOSITORY + "/git/refs", {
+        "ref": "refs/tags/" + version, "sha": expected_main,
+    })
+
+release = module("release", status = release_status, tag = release_tag)
+
+# Bounded read-only monitoring of an inspected Actions run.
+def compiler_pr_watch(run_id, expected_head):
+    """Wait up to 35 minutes for an inspected repository Actions run.
+
+    Read-only: never reruns, cancels or changes a run. Inspect the returned
+    process and then run_view for final job status, especially after a timeout.
+    """
+    _compiler_pr_id(run_id)
+    _compiler_sha(expected_head)
+    run = _compiler_json(compiler_pr_run_view(run_id))
+    if run["headSha"] != expected_head:
+        fail("Actions run no longer matches the reviewed SHA")
+    if run["status"] == "completed":
+        return compiler_pr_run_view(run_id)
+    return privileged.run(
+        "gh", "run", "watch", str(run_id), "--repo", _PR_REPOSITORY,
+        "--interval", "30", "--exit-status",
+        cwd = _work(), timeout_ms = 2100000, output_limit = 1048576,
+        env = {"GH_PROMPT_DISABLED": "1", "GH_PAGER": "cat"},
+    )
+
+compiler_pr = compiler_pr + module("compiler_pr_watch", watch = compiler_pr_watch)
+
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo,
     "propose_agents_star": propose_agents_star, "publication": publication,
-    "compiler_pr": compiler_pr, "pr_work": pr_work,
+    "compiler_pr": compiler_pr, "pr_work": pr_work, "release": release,
 }
 # This is the existing StarAgent execution environment, not an added REPL tool.
 default_repl = repl(environment)
