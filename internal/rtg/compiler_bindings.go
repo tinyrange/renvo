@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "open_path_length", Suffix: "OpenPathLength", Function: "renvoOpenPathNeedsLength", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
+	{Name: "open_file", Suffix: "OpenFile", Function: "renvoAsmOpenFile", Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)\nrenvoRTGAsmPopRegister(a, renvoRTGCallWord1)\nrenvoRTGDirectMoveImmediate(a, renvoRTGCallWord2, 493)\nreturn renvoRTGEmitRuntimeOperation(a, RTGRuntimeOpen)"},
 	{Name: "function_word_conversion", Suffix: "FunctionWordConversion", Function: "renvoSupportsFunctionWordConversion", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "named_function_address", Suffix: "NamedFunctionAddress", Function: "renvoCanTakeNamedFunctionAddress", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "address_taken_local", Suffix: "AddressTakenLocal", Function: "renvoAsmAddressTakenLocal", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoAsmAddressPrimaryStack(a, offset)"},

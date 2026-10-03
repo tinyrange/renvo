@@ -965,6 +965,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		open_path_length = renvoAmd64CompilerOpenPathLength
+		open_file = renvoAmd64CompilerOpenFile
 		function_word_conversion = renvoAmd64CompilerFunctionWordConversion
 		named_function_address = renvoAmd64CompilerNamedFunctionAddress
 		address_taken_local = renvoAmd64CompilerAddressTakenLocal
@@ -3728,6 +3730,30 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerFunctionWordConversion(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerOpenFile(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPopCallWord1(a)
+		renvoAsmSecondaryImm(a, 493)
+		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerOpenPathLength(g *renvoLinearGen) bool {
 		return false
 	}
 }

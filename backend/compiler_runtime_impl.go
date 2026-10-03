@@ -363,6 +363,29 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 	return r
 }
 
+// renvoEmitOpenFileCall evaluates flags before the path, preserving the
+// runtime builtin's evaluation order. Definitions own the path representation
+// and consume the primary path plus the saved flags at the call boundary.
+func renvoEmitOpenFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	e := &ep.exprs[idx]
+	if e.argCount != 2 {
+		return false
+	}
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	renvoAsmPushPrimary(&g.asm)
+	pathIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
+	if renvoOpenPathNeedsLength(g) {
+		if !renvoEmitStringValueRegs(g, ep, pathIndex) {
+			return false
+		}
+	} else if !renvoEmitStringPtrExpr(g, ep, pathIndex) {
+		return false
+	}
+	return renvoAsmOpenFile(&g.asm)
+}
+
 func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
 	if renvoPreparedBackendActive != 0 {
@@ -400,70 +423,7 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		firstArgIndex = renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
 	}
 	if callee == renvoIdentOpen {
-		if e.argCount != 2 {
-			return false
-		}
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPopCallWord1(a)
-			renvoAsmSecondaryImm(a, 493)
-			renvoDarwinArm64DefinitionOpen(a)
-			return true
-		}
-		if g.c.renvoTargetArch == renvoArchAarch64 {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord1(a)
-			renvoAsmPopSecondary(a)
-			renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, -100)
-			renvoAarch64AsmMovRegImm(a, renvoAarch64RegR10, 493)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-			renvoAsmSyscall(a)
-			return true
-		}
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-				return false
-			}
-			renvoAsmPushPrimary(a)
-			if !renvoEmitStringValueRegs(g, ep, firstArgIndex) {
-				return false
-			}
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPopCallWord1(a)
-			renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-			renvoAsmSyscall(a)
-			return true
-		}
-		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitStringPtrExpr(g, ep, firstArgIndex) {
-			return false
-		}
-		renvoAsmCopyPrimaryToCallWord0(a)
-		if g.c.renvoTargetArch == renvoArch386 {
-			renvoAsmPopTertiary(a)
-		} else {
-			renvoAsmPopCallWord1(a)
-		}
-		renvoAsmSecondaryImm(a, 493)
-		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		renvoAsmSyscall(a)
-		return true
+		return renvoEmitOpenFileCall(g, ep, idx)
 	}
 	if callee == renvoIdentClose {
 		if e.argCount != 1 {
@@ -516,20 +476,7 @@ func renvoEmitPreparedTargetRuntime(
 		return renvoEmitPreparedReadWrite(g, ep, idx, operation)
 	}
 	if callee == renvoIdentOpen {
-		if expression.argCount != 2 {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg+1]) {
-			return false
-		}
-		renvoAsmPushPrimary(a)
-		if !renvoEmitStringPtrExpr(g, ep, ep.args[expression.firstArg]) {
-			return false
-		}
-		renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
-		renvoRTGAsmPopRegister(a, renvoRTGCallWord1)
-		renvoRTGDirectMoveImmediate(a, renvoRTGCallWord2, 493)
-		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeOpen)
+		return renvoEmitOpenFileCall(g, ep, idx)
 	}
 	if callee == renvoIdentClose {
 		if expression.argCount != 1 ||

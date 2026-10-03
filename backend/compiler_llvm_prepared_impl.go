@@ -2106,6 +2106,19 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoOpenPathNeedsLength(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoAsmOpenFile(a *renvoAsm) bool {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
+renvoRTGAsmPopRegister(a, renvoRTGCallWord1)
+renvoRTGDirectMoveImmediate(a, renvoRTGCallWord2, 493)
+return renvoRTGEmitRuntimeOperation(a, RTGRuntimeOpen)
+}
+
 func renvoSupportsFunctionWordConversion(g *renvoLinearGen) bool {
 renvoNonNil(g)
 return false
