@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		needs_function_symbols = renvoWasm32CompilerNeedsFunctionSymbols
+		assembler_reserves = renvoWasm32CompilerAssemblerReserves
 		dereference_secondary = renvoWasm32CompilerDereferenceSecondary
 		secondary_frame_address = renvoWasm32CompilerSecondaryFrameAddress
 		local_word_compare_jump = renvoWasm32CompilerLocalWordCompareJump
@@ -5769,5 +5771,32 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerDereferenceSecondary(g *renvoLinearGen) {
 		renvoWasm32EmitMem(&g.asm, renvoWasm32OpLoadMem, renvoWasm32RegRdx, renvoWasm32RegRdx, 0, 4)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+		if renvoFixedTarget != 0 {
+			if renvoFixedTarget == renvoTargetWasiWasm32 {
+				return renvoAsmReserves{code: 655360, labels: 8192, relocs: 32768, absRelocs: 4096, symbols: 1024, data: 8192}
+			}
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			return r
+		}
+		r := renvoAsmReserves{code: 655360, labels: 32768, relocs: 131072, absRelocs: 98304, symbols: 2048, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 8388608
+		}
+		return r
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
+		return true
 	}
 }

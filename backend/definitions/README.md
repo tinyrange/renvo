@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 167 role-based operations: register copies,
+The current migration covers 169 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -182,6 +182,10 @@ register comparisons, and secondary frame-address/dereference emission are
 also definition-owned. The core retains expression order, type eligibility,
 nil checks, and bounds policy; folded local comparisons are optional target
 operations rather than architecture branches.
+Assembler reserves and function-symbol requirements are definition-owned as
+well. Shared initialization allocates each buffer once from that plan. ELF
+symbol/section serialization takes the image writer’s class width explicitly,
+rather than deriving record layouts from architecture identity.
 Comparison branches, bounded scalar operations and unsigned right shifts,
 signed-division guard policy, and bounds/nil-check helper emission are also
 bound by definitions. Language-level fault selection and helper lifetime stay

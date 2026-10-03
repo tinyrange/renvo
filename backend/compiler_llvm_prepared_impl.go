@@ -2106,6 +2106,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
+renvoNonNil(a)
+if renvoFixedTarget == 0 && renvoIsHostedObject(a.c) { return true }
+return renvoRTGPreparedFunctionSymbols != 0
+}
+
+func renvoAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+renvoNonNil(a)
+r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536, kernelImports: true, openbsdSyscalls: true}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+ r.symbols = 1024
+}
+return r
+}
+
 func renvoEmitDereferenceSecondary(g *renvoLinearGen) {
 renvoNonNil(g)
 renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)

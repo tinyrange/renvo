@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "4c493000014eddf1f3772ddabb4e35464bb854bb4f998893657085d569ce3958"
+const CompilerSourceDigest = "40eda52b748111fc9743cf42c66eae9654d35b6246f3ff3069b3e0466b37fc71"
 
 // source: backend/compiler_common_impl.go
 
@@ -448,22 +448,6 @@ return true
 
 const renvoWasm32FallbackSliceBackingSize = 4096
 
-func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
-renvoNonNil(a)
-if a.c.renvoTargetArch == renvoArchWasm32 {
-return true
-}
-if renvoFixedTarget == 0 {
-if renvoIsHostedObject(a.c) {
-return true
-}
-}
-if renvoPreparedBackendActive == 0 {
-return false
-}
-return renvoRTGPreparedFunctionSymbols != 0
-}
-
 const renvoLargeProgramSourceThreshold = 1048576
 
 func renvoAsmInit(a *renvoAsm) {
@@ -471,88 +455,49 @@ renvoNonNil(a)
 renvoAsmInitWithContext(a, renvoLegacyCompileContext())
 }
 
+
+
+
+type renvoAsmReserves struct {
+code            int
+labels          int
+relocs          int
+absRelocs       int
+symbols         int
+data            int
+kernelImports   bool
+openbsdSyscalls bool
+}
+
 func renvoAsmInitWithContext(a *renvoAsm, context *renvoCompileContext) {
 renvoNonNil(a, context)
 a.c = context
-
-
-
-codeCapacity := 0
-labelCapacity, relocCapacity, absRelocCapacity := 0, 0, 0
+reserves := renvoAssemblerReserves(a)
 a.symbols = nil
 a.symbolName = nil
 a.staticImports = nil
 a.darwinImports = nil
-if renvoFixedTarget != 0 {
-if renvoFixedTarget == renvoTargetWasiWasm32 {
-codeCapacity = 655360
-labelCapacity, relocCapacity, absRelocCapacity = 8192, 32768, 4096
-} else {
-codeCapacity = 2097152
-labelCapacity, relocCapacity, absRelocCapacity = 32768, 65536, 49152
+if reserves.symbols != 0 {
+a.symbols = make([]renvoAsmSymbol, 0, reserves.symbols)
 }
-if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-a.symbols = make([]renvoAsmSymbol, 0, 1024)
-}
-} else if a.c.renvoTargetArch == renvoArchWasm32 {
-codeCapacity = 655360
-if a.c.optimizeRuntime {
-codeCapacity = 8388608
-}
-labelCapacity, relocCapacity, absRelocCapacity = 32768, 131072, 98304
-a.symbols = make([]renvoAsmSymbol, 0, 2048)
-} else if a.c.optimizeRuntime {
-
-
-
-
-codeCapacity = 3670016
-labelCapacity, relocCapacity, absRelocCapacity = 40960, 163840, 32768
-if a.c.renvoTargetArch == renvoArch386 {
-codeCapacity = 4194304
-labelCapacity, relocCapacity = 65536, 262144
-}
-
-
-if a.c.renvoTargetArch == renvoArchArm || a.c.renvoTargetArch == renvoArchAarch64 {
-codeCapacity = 8388608
-labelCapacity, relocCapacity, absRelocCapacity = 65536, 262144, 65536
-}
-if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-a.symbols = make([]renvoAsmSymbol, 0, 4096)
-}
-} else {
-codeCapacity = 2097152
-labelCapacity, relocCapacity, absRelocCapacity = 24576, 81920, 12288
-if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
-a.symbols = make([]renvoAsmSymbol, 0, 4096)
-}
-}
-if renvoFixedTarget == renvoTargetWasiWasm32 {
-a.data = make([]byte, 0, 8192)
-} else if renvoFixedTarget == 0 && a.c.optimizeRuntime {
-a.data = make([]byte, 0, 131072)
-} else {
-a.data = make([]byte, 0, 65536)
-}
+a.data = make([]byte, 0, reserves.data)
 if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 a.symbolName = make([]byte, 0, 16384)
 }
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoFixedTarget == 0 && targetIsKernelModule(a.c) || renvoPreparedBackendActive != 0 {
+if reserves.kernelImports {
 a.kernelImportNames = make([]byte, 0, 1024)
 a.kernelImportOffsets = make([]int, 0, 128)
 }
-if renvoFixedTarget == renvoTargetOpenBSDAmd64 || renvoPreparedBackendActive != 0 {
+if reserves.openbsdSyscalls {
 a.openbsdSyscalls = make([]int, 0, 128)
 }
 if renvoFixedTarget == 0 && len(renvoObjectCacheEntries) != 0 {
 a.objectStrings = &renvoObjectStrings{refs: make([]int, 0, 2048)}
 }
-a.labelPos = make([]int32, 0, labelCapacity)
-a.relocs = make([]int32, 0, relocCapacity)
-a.absRelocs = make([]int32, 0, absRelocCapacity)
-a.code = make([]byte, 0, codeCapacity)
+a.labelPos = make([]int32, 0, reserves.labels)
+a.relocs = make([]int32, 0, reserves.relocs)
+a.absRelocs = make([]int32, 0, reserves.absRelocs)
+a.code = make([]byte, 0, reserves.code)
 a.bssSize = 0
 a.codeOffset = 0
 a.dataOffset = 0
@@ -879,10 +824,12 @@ out = append(out, 0)
 return out
 }
 
-func renvoAppendElfShdr(renvoTargetArch int, out []byte, name int, typ int, flags int, addr int, off int, size int, link int, info int, align int, entsize int) []byte {
+
+
+func renvoAppendElfShdr(wordSize int, out []byte, name int, typ int, flags int, addr int, off int, size int, link int, info int, align int, entsize int) []byte {
 out = renvoAppend32(out, name)
 out = renvoAppend32(out, typ)
-if renvoTargetArch == renvoArchAmd64 || renvoTargetArch == renvoArchAarch64 {
+if wordSize == 8 {
 out = renvoAppend64U32(out, flags)
 out = renvoAppend64U32(out, addr)
 out = renvoAppend64U32(out, off)
@@ -895,7 +842,7 @@ out = renvoAppend32(out, size)
 }
 out = renvoAppend32(out, link)
 out = renvoAppend32(out, info)
-if renvoTargetArch == renvoArchAmd64 || renvoTargetArch == renvoArchAarch64 {
+if wordSize == 8 {
 out = renvoAppend64U32(out, align)
 out = renvoAppend64U32(out, entsize)
 } else {
@@ -929,9 +876,9 @@ out = renvoAppend32(out, 0x1000)
 return out
 }
 
-func renvoAppendElfSym(renvoTargetArch int, out []byte, name int, info int, shndx int, value int, size int) []byte {
+func renvoAppendElfSym(wordSize int, out []byte, name int, info int, shndx int, value int, size int) []byte {
 out = renvoAppend32(out, name)
-if renvoTargetArch == renvoArchAmd64 || renvoTargetArch == renvoArchAarch64 {
+if wordSize == 8 {
 out = append(out, byte(info))
 out = append(out, 0)
 out = renvoAppend16(out, shndx)
@@ -947,12 +894,8 @@ out = renvoAppend16(out, shndx)
 return out
 }
 
-func renvoBuildElfSymbolSections(a *renvoAsm, base int, entryOff int, loadFileSize int, sec *renvoElfSymbolSections) {
+func renvoBuildElfSymbolSections(a *renvoAsm, wordSize int, base int, entryOff int, loadFileSize int, sec *renvoElfSymbolSections) {
 renvoNonNil(a, sec)
-wordSize := 4
-if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 {
-wordSize = 8
-}
 entrySize := wordSize*2 + 8
 sec.symtab = make([]byte, 0, (len(a.symbols)+2)*entrySize)
 sec.strtab = make([]byte, 0, len(a.symbolName)+16)
@@ -967,8 +910,8 @@ sec.strtabName = 28
 sec.shstrName = 36
 sec.strtab = append(sec.strtab, "\x00_start\x00"...)
 startName := 1
-sec.symtab = renvoAppendElfSym(a.c.renvoTargetArch, sec.symtab, 0, 0, 0, 0, 0)
-sec.symtab = renvoAppendElfSym(a.c.renvoTargetArch, sec.symtab, startName, 18, 1, base+entryOff, 0)
+sec.symtab = renvoAppendElfSym(wordSize, sec.symtab, 0, 0, 0, 0, 0)
+sec.symtab = renvoAppendElfSym(wordSize, sec.symtab, startName, 18, 1, base+entryOff, 0)
 for i := 0; i < len(a.symbols); i++ {
 s := a.symbols[i]
 label := s.label
@@ -982,7 +925,7 @@ sec.strtab = append(sec.strtab, a.symbolName[i])
 }
 sec.strtab = append(sec.strtab, 0)
 value := base + a.codeOffset + position
-sec.symtab = renvoAppendElfSym(a.c.renvoTargetArch, sec.symtab, nameOff, 18, 1, value, 0)
+sec.symtab = renvoAppendElfSym(wordSize, sec.symtab, nameOff, 18, 1, value, 0)
 }
 
 sec.symtabOff = renvoAlignValue(loadFileSize, wordSize)
@@ -991,20 +934,16 @@ sec.shstrOff = sec.strtabOff + len(sec.strtab)
 sec.shoff = renvoAlignValue(sec.shstrOff+len(sec.shstrtab), wordSize)
 }
 
-func renvoAppendElfSectionHeaders(out []byte, sec *renvoElfSymbolSections, a *renvoAsm, base int) []byte {
+func renvoAppendElfSectionHeaders(out []byte, sec *renvoElfSymbolSections, a *renvoAsm, wordSize int, base int) []byte {
 renvoNonNil(sec, a)
-wordSize := 4
-if a.c.renvoTargetArch == renvoArchAmd64 || a.c.renvoTargetArch == renvoArchAarch64 {
-wordSize = 8
-}
 
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.textName, 1, 6, base+a.codeOffset, a.codeOffset, len(a.code), 0, 0, 16, 0)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.dataName, 1, 2, base+a.dataOffset, a.dataOffset, len(a.data), 0, 0, wordSize, 0)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.bssName, 8, 3, base+renvoAsmBssOffset(a), renvoAsmBssOffset(a), a.bssSize, 0, 0, wordSize, 0)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.symtabName, 2, 0, 0, sec.symtabOff, len(sec.symtab), 5, 1, wordSize, wordSize*2+8)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.strtabName, 3, 0, 0, sec.strtabOff, len(sec.strtab), 0, 0, 1, 0)
-out = renvoAppendElfShdr(a.c.renvoTargetArch, out, sec.shstrName, 3, 0, 0, sec.shstrOff, len(sec.shstrtab), 0, 0, 1, 0)
+out = renvoAppendElfShdr(wordSize, out, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+out = renvoAppendElfShdr(wordSize, out, sec.textName, 1, 6, base+a.codeOffset, a.codeOffset, len(a.code), 0, 0, 16, 0)
+out = renvoAppendElfShdr(wordSize, out, sec.dataName, 1, 2, base+a.dataOffset, a.dataOffset, len(a.data), 0, 0, wordSize, 0)
+out = renvoAppendElfShdr(wordSize, out, sec.bssName, 8, 3, base+renvoAsmBssOffset(a), renvoAsmBssOffset(a), a.bssSize, 0, 0, wordSize, 0)
+out = renvoAppendElfShdr(wordSize, out, sec.symtabName, 2, 0, 0, sec.symtabOff, len(sec.symtab), 5, 1, wordSize, wordSize*2+8)
+out = renvoAppendElfShdr(wordSize, out, sec.strtabName, 3, 0, 0, sec.strtabOff, len(sec.strtab), 0, 0, 1, 0)
+out = renvoAppendElfShdr(wordSize, out, sec.shstrName, 3, 0, 0, sec.shstrOff, len(sec.shstrtab), 0, 0, 1, 0)
 return out
 }
 
@@ -30748,7 +30687,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x77\x4c\xb7\x67\xdf\x86\xee\x76\x6d\xa0\xeb\xe9\x17\xb3\x85\xdc\x4c\xe7\xe3\xff\x85\xeb\xae\xd7\x8e\x1a\x5d\x05\x4a\x96\x1d\x99", 3, true
+return "wasi/wasm32", "\x7c\x96\x37\x66\x47\x1e\x47\x89\x45\xf1\x35\x03\xc6\x35\x1a\x3a\xd4\xfd\x3b\xba\x31\xe5\x0a\xaa\xa8\x0d\xa7\x4c\xbd\xf3\x79\xa9", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -30760,7 +30699,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x11\xd4\xdf\xa1\xb7\xdc\x64\x00\xed\x3b\x0e\xa7\x71\x03\x78\x95\xc8\x23\x4c\x2f\x0f\x2b\x08\x3f\xdd\xc7\x41\x83\xd4\x83\x89\xcc", 3, true
+return "vm/vm32", "\xa3\x70\x40\x57\x72\x5e\x17\xa9\x6a\x51\xcc\x15\x61\x12\x7a\x09\x1d\x3c\xb2\x29\x67\xce\x19\xc8\xf0\x4d\xa7\xa4\x28\xe9\x05\x46", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -32231,6 +32170,119 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return true
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if renvoFixedTarget != 0 {
+r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 1024
+}
+r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+return r
+}
+r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+if a.c.optimizeRuntime {
+r.data = 131072
+r.code = 3670016
+r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
+}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 4096
+}
+r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+return r
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if renvoFixedTarget != 0 {
+r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 1024
+}
+return r
+}
+r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+if a.c.optimizeRuntime {
+r.data = 131072
+r.code = 4194304
+r.labels, r.relocs, r.absRelocs = 65536, 262144, 32768
+}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 4096
+}
+return r
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+if renvoFixedTarget != 0 {
+r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 1024
+}
+return r
+}
+r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+if a.c.optimizeRuntime {
+r.data = 131072
+r.code = 8388608
+r.labels, r.relocs, r.absRelocs = 65536, 262144, 65536
+}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 4096
+}
+return r
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+if renvoFixedTarget != 0 {
+if renvoFixedTarget == renvoTargetWasiWasm32 {
+return renvoAsmReserves{code: 655360, labels: 8192, relocs: 32768, absRelocs: 4096, symbols: 1024, data: 8192}
+}
+r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+r.symbols = 1024
+}
+return r
+}
+r := renvoAsmReserves{code: 655360, labels: 32768, relocs: 131072, absRelocs: 98304, symbols: 2048, data: 65536}
+if a.c.optimizeRuntime {
+r.data = 131072
+r.code = 8388608
+}
+return r
+
+}
+a.patchFailed = true
+return renvoAsmReserves{}
 }
 
 func renvoEmitDereferenceSecondary(g *renvoLinearGen) {
@@ -43974,6 +44026,10 @@ return true
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -47110,6 +47166,10 @@ return true
 
 
 
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -49911,6 +49971,10 @@ return label
 
 
 
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -51227,6 +51291,10 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
 
 
 
@@ -54828,6 +54896,10 @@ renvoAsmMarkLabel(a, done)
 
 
 
+
+
+
+
 // source: backend/compiler_linux_amd64_impl.go
 
 
@@ -54999,7 +55071,7 @@ return renvoAppendReplLinkTable(out, a)
 return out
 }
 var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+renvoBuildElfSymbolSections(a, 8, 0, a.codeOffset, loadFileSize, &sec)
 finalSize := sec.shoff + 448
 syscallTableOff := finalSize
 finalSize += syscallTableSize
@@ -55026,7 +55098,7 @@ for i := 0; i < len(sec.shstrtab); i++ {
 out = append(out, sec.shstrtab[i])
 }
 out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+out = renvoAppendElfSectionHeaders(out, &sec, a, 8, 0)
 if a.c.renvoTargetOS == renvoOSOpenBSD {
 out = renvoAppendOpenBSDSyscallTable(out, a)
 }
@@ -57623,7 +57695,7 @@ if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }
 return out
 }
 var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+renvoBuildElfSymbolSections(a, 4, 0, a.codeOffset, loadFileSize, &sec)
 out := make([]byte, 0, sec.shoff+280)
 out = renvoAppendElfHeader386(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 out = append(out, a.code...)
@@ -57635,7 +57707,7 @@ out = append(out, sec.strtab...)
 out = renvoAppendUntil(out, sec.shstrOff)
 out = append(out, sec.shstrtab...)
 out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+out = renvoAppendElfSectionHeaders(out, &sec, a, 4, 0)
 if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }
 return out
 }
@@ -58174,14 +58246,14 @@ out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.
 out = append(out, a.code...); out = append(out, a.data...)
 if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 }
-var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 8, 0, a.codeOffset, loadFileSize, &sec)
 out := make([]byte, 0, 1048576)
 out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 out = append(out, a.code...); out = append(out, a.data...)
 out = renvoAppendUntil(out, sec.symtabOff); out = append(out, sec.symtab...)
 out = renvoAppendUntil(out, sec.strtabOff); out = append(out, sec.strtab...)
 out = renvoAppendUntil(out, sec.shstrOff); out = append(out, sec.shstrtab...)
-out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 8, 0)
 if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 }
 
@@ -59139,7 +59211,7 @@ if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }
 return out
 }
 var sec renvoElfSymbolSections
-renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+renvoBuildElfSymbolSections(a, 4, 0, a.codeOffset, loadFileSize, &sec)
 out := make([]byte, 0, sec.shoff+280)
 out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 out = append(out, a.code...)
@@ -59151,7 +59223,7 @@ out = append(out, sec.strtab...)
 out = renvoAppendUntil(out, sec.shstrOff)
 out = append(out, sec.shstrtab...)
 out = renvoAppendUntil(out, sec.shoff)
-out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+out = renvoAppendElfSectionHeaders(out, &sec, a, 4, 0)
 if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }
 return out
 }
