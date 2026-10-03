@@ -566,9 +566,13 @@ func declarationBlock(declaration Declaration, name string) (Statement, bool) {
 }
 
 func findEmbeddedFunction(document Document, name string) (embeddedFunction, bool) {
+	return findEmbeddedFunctionKind(document, name, "backend")
+}
+
+func findEmbeddedFunctionKind(document Document, name string, kind string) (embeddedFunction, bool) {
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
-		if declaration.Kind != DeclGo || declaration.Name != "backend" {
+		if declaration.Kind != DeclGo || declaration.Name != kind {
 			continue
 		}
 		wrapped := make([]byte, 0, len(declaration.GoSource)+16)
@@ -581,7 +585,7 @@ func findEmbeddedFunction(document Document, name string) (embeddedFunction, boo
 		for j := 0; j < len(file.Funcs); j++ {
 			fn := file.Funcs[j]
 			fnName := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
-			if fnName != name {
+			if fnName != name || fn.ReceiverStart >= 0 {
 				continue
 			}
 			start := syntax.TokenStart(file.Tokens[fn.ParamsStart])

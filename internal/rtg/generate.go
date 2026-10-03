@@ -89,7 +89,7 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
-func GenerateArchitectureKernel(packageName string) GenerateResult {
+func GenerateArchitectureKernel(packageName string, definitions []ResolveResult) GenerateResult {
 	ensureDirectEmitterV1()
 	source := []byte("//go:build !renvo_prepared && !renvo_jvm_prepared\n\n")
 	source = append(source, generateHeaderPackage(nil, "architecture-kernel", packageName)...)
@@ -98,7 +98,7 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 	source = appendNativeEmitterAPI(source)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
-	return GenerateResult{Source: source, Ok: true}
+	return appendBundledCompilerBindings(source, definitions)
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -153,6 +153,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendPreparedDirectEmitterAdapters(source, resolved.Document, target)
+	source = appendPreparedCompilerBindings(source)
 	source = appendPreparedABIAdapters(source, resolved.Document, target)
 	source = appendPreparedFormatAdapters(source, resolved.Document, target)
 	source = appendArchitectureHooks(source, resolved.Document, target.Arch, true)

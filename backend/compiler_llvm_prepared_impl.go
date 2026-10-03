@@ -2104,6 +2104,394 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmStoreByteMemSecondaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectStoreU8(a,
+	renvoRTGAsmAddress(renvoRTGSecondary, renvoRTGTertiary, 0, 1),
+	renvoRTGPrimary)
+}
+
+func renvoAsmIncTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectIncrement(a, renvoRTGTertiary)
+}
+
+func renvoAsmIncPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectIncrement(a, renvoRTGPrimary)
+}
+
+func renvoAsmRet(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectReturn(a)
+}
+
+func renvoAsmLeave(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectLeave(a)
+}
+
+func renvoAsmCopyPrimaryToCallWord0(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
+}
+
+func renvoAsmCopySecondaryToPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGSecondary)
+}
+
+func renvoAsmCopyPrimaryToCallWord1(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
+}
+
+func renvoAsmAddSecondaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectAdd(a, renvoRTGSecondary, renvoRTGTertiary)
+}
+
+func renvoAsmLoadBytePrimaryIndexTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectLoadU8(a, renvoRTGPrimary,
+	renvoRTGAsmAddress(renvoRTGPrimary, renvoRTGTertiary, 0, 1))
+}
+
+func renvoAsmStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectStoreNative(a,
+	renvoRTGAsmAddress(renvoRTGSecondary, renvoRTGTertiary, 0, 8),
+	renvoRTGPrimary)
+}
+
+func renvoAsmIncMemSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmMemoryIncrement(a, false)
+}
+
+func renvoAsmDecMemSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmMemoryIncrement(a, true)
+}
+
+func renvoAsmBoolNotPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmBoolNot(a)
+}
+
+func renvoAsmBitwiseNotPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMoveImmediate(a, renvoRTGScratch, -1)
+renvoRTGDirectBitXor(a, renvoRTGPrimary, renvoRTGScratch)
+}
+
+func renvoAsmAddPrimaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectAdd(a, renvoRTGPrimary, renvoRTGTertiary)
+}
+
+func renvoAsmSubPrimaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectSubtract(a, renvoRTGPrimary, renvoRTGTertiary)
+}
+
+func renvoAsmPopPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPopRegister(a, renvoRTGPrimary)
+}
+
+func renvoAsmPopSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPopRegister(a, renvoRTGSecondary)
+}
+
+func renvoAsmPopTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPopRegister(a, renvoRTGTertiary)
+}
+
+func renvoAsmCopyPrimaryToSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGSecondary, renvoRTGPrimary)
+}
+
+func renvoAsmCopyPrimaryToTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGTertiary, renvoRTGPrimary)
+}
+
+func renvoAsmCopySecondaryToTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGDirectMove(a, renvoRTGTertiary, renvoRTGSecondary)
+}
+
+func renvoAsmCopyTertiaryToPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoAsmPushTertiary(a); renvoAsmPopPrimary(a)
+}
+
+func renvoAsmPushPrimary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPushRegister(a, renvoRTGPrimary)
+}
+
+func renvoAsmPushSecondary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPushRegister(a, renvoRTGSecondary)
+}
+
+func renvoAsmPushTertiary(a *renvoAsm) {
+renvoNonNil(a)
+renvoRTGAsmPushRegister(a, renvoRTGTertiary)
+}
+
+func renvoAsmPushImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGAsmPushImmediate(a, imm)
+}
+
+func renvoAsmStorePrimaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmStoreFrame(a, offset, renvoRTGPrimary)
+}
+
+func renvoAsmStoreSecondaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmStoreFrame(a, offset, renvoRTGSecondary)
+}
+
+func renvoAsmLoadPrimaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmLoadFrame(a, renvoRTGPrimary, offset)
+}
+
+func renvoAsmIncStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoAsmLoadPrimaryStack(a, offset)
+	renvoAsmIncPrimary(a)
+	renvoAsmStorePrimaryStack(a, offset)
+}
+
+func renvoAsmDecStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoAsmLoadPrimaryStack(a, offset)
+	renvoAsmPushImm(a, 1)
+	renvoAsmPopTertiary(a)
+	renvoAsmSubPrimaryTertiary(a)
+	renvoAsmStorePrimaryStack(a, offset)
+}
+
+func renvoAsmAddressPrimaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmAddressFrame(a, renvoRTGPrimary, offset)
+}
+
+func renvoAsmAddressCallWord0Stack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmAddressFrame(a, renvoRTGCallWord0, offset)
+}
+
+func renvoAsmAddressCallWord1Stack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmAddressFrame(a, renvoRTGCallWord1, offset)
+}
+
+func renvoAsmLoadSecondaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmLoadFrame(a, renvoRTGSecondary, offset)
+}
+
+func renvoAsmLoadTertiaryStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+	renvoRTGAsmLoadFrame(a, renvoRTGTertiary, offset)
+}
+
+func renvoAsmStoreSliceStack(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoAsmStorePrimarySecondaryStack(a, offset, offset-8)
+renvoRTGAsmStoreFrame(a, offset-16, renvoRTGTertiary)
+}
+
+func renvoAsmMulTertiaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	if imm == 1 {
+		return
+	}
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(imm))
+	renvoRTGDirectMultiply(a, renvoRTGTertiary, renvoRTGScratch)
+}
+
+func renvoAsmCallLabel(a *renvoAsm, label int) {
+renvoNonNil(a)
+	renvoRTGDirectCall(a, label)
+}
+
+func renvoAsmJmpLabel(a *renvoAsm, label int) {
+renvoNonNil(a)
+	renvoRTGDirectJump(a, label)
+}
+
+func renvoAsmJzLabel(a *renvoAsm, label int) {
+renvoNonNil(a)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x94), label)
+}
+
+func renvoAsmJnzLabel(a *renvoAsm, label int) {
+renvoNonNil(a)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(0x95), label)
+}
+
+func renvoAsmSecondaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGDirectMoveImmediate(a, renvoRTGSecondary, int64(imm))
+}
+
+func renvoAsmPrimaryDataAddr(a *renvoAsm, dataOff int) {
+renvoNonNil(a)
+	renvoRTGDirectAddress(a, renvoRTGPrimary, renvoRTGAsmDataAddress(dataOff))
+}
+
+func renvoAsmPrimaryBssAddr(a *renvoAsm, bssOff int) {
+renvoNonNil(a)
+	renvoRTGDirectAddress(a, renvoRTGPrimary, renvoRTGAsmBSSAddress(bssOff))
+}
+
+func renvoAsmLoadPrimaryBss(a *renvoAsm, bssOff int) {
+renvoNonNil(a)
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary, renvoRTGAsmBSSAddress(bssOff))
+}
+
+func renvoAsmStorePrimaryBss(a *renvoAsm, bssOff int) {
+renvoNonNil(a)
+	renvoRTGDirectStoreNative(a, renvoRTGAsmBSSAddress(bssOff), renvoRTGPrimary)
+}
+
+func renvoAsmPopCallWord0(a *renvoAsm) {
+renvoNonNil(a)
+	renvoRTGAsmPopRegister(a, renvoRTGCallWord0)
+}
+
+func renvoAsmPopCallWord1(a *renvoAsm) {
+renvoNonNil(a)
+	renvoRTGAsmPopRegister(a, renvoRTGCallWord1)
+}
+
+func renvoAsmAddSecondaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(imm))
+	renvoRTGDirectAdd(a, renvoRTGSecondary, renvoRTGScratch)
+}
+
+func renvoAsmLoadQwordPrimaryIndexTertiaryDisp(a *renvoAsm, disp int) {
+renvoNonNil(a)
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGPrimary, renvoRTGTertiary, disp, 1))
+}
+
+func renvoAsmLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+renvoNonNil(a)
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1))
+}
+
+func renvoAsmLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+renvoNonNil(a)
+	// Size-only scalar loads follow the built-in backend contract: bytes are
+	// zero-extended, while wider narrow integers are sign-extended before
+	// typed expression lowering applies any unsigned normalization.
+	renvoRTGAsmLoadSize(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
+		size, size != 1)
+}
+
+func renvoAsmLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
+renvoNonNil(a)
+	// Match renvoAsmLoadPrimaryMemSecondaryDispSize's scalar-load contract.
+	renvoRTGAsmLoadSize(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGPrimary, renvoRTGTertiary, 0, size),
+		size, size != 1)
+}
+
+func renvoAsmStorePrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+renvoNonNil(a)
+	renvoRTGDirectStoreNative(a,
+		renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
+		renvoRTGPrimary)
+}
+
+func renvoAsmStorePrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+renvoNonNil(a)
+	renvoRTGAsmStoreSize(a,
+		renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1),
+		renvoRTGPrimary, size)
+}
+
+func renvoAsmNormalizePrimaryForKind(a *renvoAsm, kind int) {
+renvoNonNil(a)
+	renvoRTGAsmNormalize(a, kind)
+}
+
+func renvoAsmCmpPrimaryImm8(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGAsmCompareImmediate(a, imm)
+}
+
+func renvoAsmCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoAsmCmpPrimaryImm8(a, imm)
+}
+
+func renvoAsmShlTertiaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGDirectShiftLeftImmediate(a, renvoRTGTertiary, byte(imm))
+}
+
+func renvoAsmShlPrimaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGDirectShiftLeftImmediate(a, renvoRTGPrimary, byte(imm))
+}
+
+func renvoAsmSarPrimaryImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+	renvoRTGDirectShiftRightSignedImmediate(a, renvoRTGPrimary, byte(imm))
+}
+
+func renvoAsmDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
+renvoNonNil(a)
+	if mod {
+		// Keep the divisor while producing the quotient, then construct the
+		// remainder as dividend - quotient*divisor.  This keeps prepared
+		// targets on the common RTG register contract and does not depend on
+		// a target-specific fused multiply/subtract operand order.
+		renvoRTGDirectMove(a, renvoRTGScratch, renvoRTGPrimary)
+		renvoRTGDirectSignedDivide(a, false)
+		renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGScratch)
+		renvoRTGDirectSubtract(a, renvoRTGTertiary, renvoRTGPrimary)
+		renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGTertiary)
+	} else {
+		renvoRTGDirectSignedDivide(a, false)
+	}
+}
+
+func renvoAsmCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
+renvoNonNil(a)
+	renvoRTGDirectCompare(a, renvoRTGTertiary, renvoRTGPrimary)
+	renvoRTGDirectSetCondition(a, renvoRTGConditionFromSetcc(setcc), renvoRTGPrimary)
+}
+
+func renvoAsmStorePrimaryMemSecondaryTertiarySize(a *renvoAsm, size int) {
+renvoNonNil(a)
+	renvoRTGAsmStoreSize(a,
+		renvoRTGAsmAddress(renvoRTGSecondary, renvoRTGTertiary, 0, 1),
+		renvoRTGPrimary, size)
+}
+
+func renvoAsmCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
+renvoNonNil(a)
+	renvoRTGDirectCompare(a, renvoRTGTertiary, renvoRTGPrimary)
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
+}
+
 func renvoRTGFrameStart(out *renvoAsm) int {
 return rtgLlvmLlvmAmd64PackageLlvmFrameStart(out)
 }

@@ -105,6 +105,7 @@ format elf32_386 {
 }
 
 target linux/386 {
+	arena_default = 67108864
 	family = native_v1
 	os = linux
 	arch = x86_32

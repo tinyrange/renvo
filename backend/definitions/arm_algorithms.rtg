@@ -690,3 +690,415 @@ go compiler {
 		return result
 	}
 }
+
+# Bundled lowering hooks. Prepared backends use the same semantic operations
+# through their direct emitter and ABI bindings.
+extend arch arm {
+	compiler_selector = renvoArchArm
+	compiler_bindings {
+		secondary_imm = renvoArmCompilerSecondaryImm
+		primary_data_addr = renvoArmCompilerPrimaryDataAddr
+		primary_bss_addr = renvoArmCompilerPrimaryBssAddr
+		load_primary_bss = renvoArmCompilerLoadPrimaryBss
+		store_primary_bss = renvoArmCompilerStorePrimaryBss
+		pop_call_word0 = renvoArmCompilerPopCallWord0
+		pop_call_word1 = renvoArmCompilerPopCallWord1
+		add_secondary_imm = renvoArmCompilerAddSecondaryImm
+		load_qword_primary_index_tertiary_disp = renvoArmCompilerLoadQwordPrimaryIndexTertiaryDisp
+		load_primary_mem_secondary_disp = renvoArmCompilerLoadPrimaryMemSecondaryDisp
+		load_primary_mem_secondary_disp_size = renvoArmCompilerLoadPrimaryMemSecondaryDispSize
+		load_primary_index_tertiary_size = renvoArmCompilerLoadPrimaryIndexTertiarySize
+		store_primary_mem_secondary_disp = renvoArmCompilerStorePrimaryMemSecondaryDisp
+		store_primary_mem_secondary_disp_size = renvoArmCompilerStorePrimaryMemSecondaryDispSize
+		normalize_primary_for_kind = renvoArmCompilerNormalizePrimaryForKind
+		cmp_primary_imm8 = renvoArmCompilerCmpPrimaryImm8
+		cmp_primary_imm8_discard = renvoArmCompilerCmpPrimaryImm8Discard
+		shl_tertiary_imm = renvoArmCompilerShlTertiaryImm
+		shl_primary_imm = renvoArmCompilerShlPrimaryImm
+		sar_primary_imm = renvoArmCompilerSarPrimaryImm
+		div_left_tertiary_right_primary = renvoArmCompilerDivLeftTertiaryRightPrimary
+		cmp_tertiary_primary_set = renvoArmCompilerCmpTertiaryPrimarySet
+		store_primary_mem_secondary_tertiary_size = renvoArmCompilerStorePrimaryMemSecondaryTertiarySize
+		cmp_tertiary_primary_jump = renvoArmCompilerCmpTertiaryPrimaryJump
+		push_imm = renvoArmCompilerPushImm
+		store_primary_stack = renvoArmCompilerStorePrimaryStack
+		store_secondary_stack = renvoArmCompilerStoreSecondaryStack
+		load_primary_stack = renvoArmCompilerLoadPrimaryStack
+		inc_stack = renvoArmCompilerIncStack
+		dec_stack = renvoArmCompilerDecStack
+		address_primary_stack = renvoArmCompilerAddressPrimaryStack
+		address_call_word0_stack = renvoArmCompilerAddressCallWord0Stack
+		address_call_word1_stack = renvoArmCompilerAddressCallWord1Stack
+		load_secondary_stack = renvoArmCompilerLoadSecondaryStack
+		load_tertiary_stack = renvoArmCompilerLoadTertiaryStack
+		store_slice_stack = renvoArmCompilerStoreSliceStack
+		mul_tertiary_imm = renvoArmCompilerMulTertiaryImm
+		call_label = renvoArmCompilerCallLabel
+		jmp_label = renvoArmCompilerJmpLabel
+		jz_label = renvoArmCompilerJzLabel
+		jnz_label = renvoArmCompilerJnzLabel
+		store_byte_mem_secondary_tertiary = renvoArmCompilerStoreByteMemSecondaryTertiary
+		inc_tertiary = renvoArmCompilerIncTertiary
+		inc_primary = renvoArmCompilerIncPrimary
+		ret = renvoArmCompilerRet
+		leave = renvoArmCompilerLeave
+		copy_primary_to_call_word0 = renvoArmCompilerCopyPrimaryToCallWord0
+		copy_secondary_to_primary = renvoArmCompilerCopySecondaryToPrimary
+		copy_primary_to_call_word1 = renvoArmCompilerCopyPrimaryToCallWord1
+		add_secondary_tertiary = renvoArmCompilerAddSecondaryTertiary
+		load_byte_primary_index_tertiary = renvoArmCompilerLoadBytePrimaryIndexTertiary
+		store_primary_mem_secondary_tertiary8 = renvoArmCompilerStorePrimaryMemSecondaryTertiary8
+		inc_mem_secondary = renvoArmCompilerIncMemSecondary
+		dec_mem_secondary = renvoArmCompilerDecMemSecondary
+		bool_not_primary = renvoArmCompilerBoolNotPrimary
+		bitwise_not_primary = renvoArmCompilerBitwiseNotPrimary
+		add_primary_tertiary = renvoArmCompilerAddPrimaryTertiary
+		sub_primary_tertiary = renvoArmCompilerSubPrimaryTertiary
+		pop_primary = renvoArmCompilerPopPrimary
+		pop_secondary = renvoArmCompilerPopSecondary
+		pop_tertiary = renvoArmCompilerPopTertiary
+		copy_primary_to_secondary = renvoArmCompilerCopyPrimaryToSecondary
+		copy_primary_to_tertiary = renvoArmCompilerCopyPrimaryToTertiary
+		copy_secondary_to_tertiary = renvoArmCompilerCopySecondaryToTertiary
+		copy_tertiary_to_primary = renvoArmCompilerCopyTertiaryToPrimary
+		push_primary = renvoArmCompilerPushPrimary
+		push_secondary = renvoArmCompilerPushSecondary
+		push_tertiary = renvoArmCompilerPushTertiary
+	}
+}
+
+go compiler {
+	func renvoArmCompilerCopyPrimaryToSecondary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe1a01000)
+	}
+	
+	func renvoArmCompilerCopyPrimaryToTertiary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe1a02000)
+	}
+	
+	func renvoArmCompilerCopySecondaryToTertiary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe1a02001)
+	}
+	
+	func renvoArmCompilerCopyTertiaryToPrimary(a *renvoAsm) {
+		renvoArmAsmMovRegReg(a, 0, 2)
+	}
+	
+	func renvoArmCompilerPushPrimary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe52d0004)
+	}
+	
+	func renvoArmCompilerPushSecondary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe52d1004)
+	}
+	
+	func renvoArmCompilerPushTertiary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe52d2004)
+	}
+	
+	func renvoArmCompilerPopPrimary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe49d0004)
+	}
+	func renvoArmCompilerPopSecondary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe49d1004)
+	}
+	func renvoArmCompilerPopTertiary(a *renvoAsm) {
+		renvoAsmEmit32(a, 0xe49d2004)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
+		renvoArmAsmStoreAlMemRdxRcx1(a)
+	}
+	
+	func renvoArmCompilerIncTertiary(a *renvoAsm) {
+		renvoArmAsmIncRcx(a)
+	}
+	
+	func renvoArmCompilerIncPrimary(a *renvoAsm) {
+		renvoArmAsmIncRax(a)
+	}
+	
+	func renvoArmCompilerRet(a *renvoAsm) {
+		renvoArmAsmRet(a)
+	}
+	
+	func renvoArmCompilerLeave(a *renvoAsm) {
+		renvoArmAsmLeave(a)
+	}
+	
+	func renvoArmCompilerCopyPrimaryToCallWord0(a *renvoAsm) {
+		renvoArmAsmMovRdiRax(a)
+	}
+	
+	func renvoArmCompilerCopySecondaryToPrimary(a *renvoAsm) {
+		renvoArmAsmMovRaxRdx(a)
+	}
+	
+	func renvoArmCompilerCopyPrimaryToCallWord1(a *renvoAsm) {
+		renvoArmAsmMovRsiRax(a)
+	}
+	
+	func renvoArmCompilerAddSecondaryTertiary(a *renvoAsm) {
+		renvoArmAsmAddRdxRcx(a)
+	}
+	
+	func renvoArmCompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
+		renvoArmAsmLoadByteRaxIndexRcx(a)
+	}
+	
+	func renvoArmCompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
+		renvoArmAsmStoreRaxMemRdxRcx8(a)
+	}
+	
+	func renvoArmCompilerIncMemSecondary(a *renvoAsm) {
+		renvoArmAsmIncMemRdx(a)
+	}
+	
+	func renvoArmCompilerDecMemSecondary(a *renvoAsm) {
+		renvoArmAsmDecMemRdx(a)
+	}
+	
+	func renvoArmCompilerBoolNotPrimary(a *renvoAsm) {
+		renvoArmAsmBoolNotRax(a)
+	}
+	
+	func renvoArmCompilerBitwiseNotPrimary(a *renvoAsm) {
+		renvoArmAsmEmit(a, 0xe1e00000)
+	}
+	
+	func renvoArmCompilerAddPrimaryTertiary(a *renvoAsm) {
+		renvoArmAsmAddRaxRcx(a)
+	}
+	
+	func renvoArmCompilerSubPrimaryTertiary(a *renvoAsm) {
+		renvoArmAsmSubRaxRcx(a)
+	}
+}
+
+
+go compiler {
+	func renvoArmCompilerPushImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmPushImm(a, imm)
+	}
+
+	func renvoArmCompilerStorePrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRegStack(a, 0, offset)
+		a.lastPrimaryStoreEnd = len(a.code)
+		a.lastPrimaryStoreOff = offset
+	}
+
+	func renvoArmCompilerStoreSecondaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRegStack(a, 1, offset)
+	}
+
+	func renvoArmCompilerLoadPrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		n := len(a.code)
+		if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
+			return
+		}
+		renvoArmAsmLoadRegStack(a, 0, offset)
+	}
+
+	func renvoArmCompilerIncStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoAsmLoadPrimaryStack(a, offset)
+		renvoAsmIncPrimary(a)
+		renvoAsmStorePrimaryStack(a, offset)
+	}
+
+	func renvoArmCompilerDecStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoAsmLoadPrimaryStack(a, offset)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, offset)
+	}
+
+	func renvoArmCompilerAddressPrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmLeaRegStack(a, 0, offset)
+	}
+
+	func renvoArmCompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmLeaRegStack(a, 3, offset)
+	}
+
+	func renvoArmCompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmLeaRegStack(a, 4, offset)
+	}
+
+	func renvoArmCompilerLoadSecondaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRegStack(a, 1, offset)
+	}
+
+	func renvoArmCompilerLoadTertiaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRegStack(a, 2, offset)
+	}
+
+	func renvoArmCompilerStoreSliceStack(a *renvoAsm, offset int) {
+		renvoArmAsmStoreSliceStack(a, offset)
+	}
+
+	func renvoArmCompilerMulTertiaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		if imm == 1 {
+			return
+		}
+		renvoArmAsmImulRcxImm(a, imm)
+	}
+
+	func renvoArmCompilerCallLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoArmAsmCallLabel(a, label)
+	}
+
+	func renvoArmCompilerJmpLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoArmAsmJmpLabel(a, label)
+	}
+
+	func renvoArmCompilerJzLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoArmAsmJzLabel(a, label)
+	}
+
+	func renvoArmCompilerJnzLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoArmAsmJnzLabel(a, label)
+	}
+}
+
+
+go compiler {
+	func renvoArmCompilerSecondaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmMovRdxImm(a, imm)
+	}
+
+	func renvoArmCompilerPrimaryDataAddr(a *renvoAsm, dataOff int) {
+		renvoNonNil(a)
+		renvoArmAsmMovRaxDataAddr(a, dataOff)
+	}
+
+	func renvoArmCompilerPrimaryBssAddr(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvoArmAsmMovRaxBssAddr(a, bssOff)
+	}
+
+	func renvoArmCompilerLoadPrimaryBss(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRaxBss(a, bssOff)
+	}
+
+	func renvoArmCompilerStorePrimaryBss(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRaxBss(a, bssOff)
+	}
+
+	func renvoArmCompilerPopCallWord0(a *renvoAsm) {
+		renvoNonNil(a)
+		renvoArmAsmPopRdi(a)
+	}
+
+	func renvoArmCompilerPopCallWord1(a *renvoAsm) {
+		renvoNonNil(a)
+		renvoAsmEmit32(a, 0xe49d4004)
+	}
+
+	func renvoArmCompilerAddSecondaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmAddRdxImm(a, imm)
+	}
+
+	func renvoArmCompilerLoadQwordPrimaryIndexTertiaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadQwordRaxIndexRcxDisp(a, disp)
+	}
+
+	func renvoArmCompilerLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRaxMemRdxDisp(a, disp)
+	}
+
+	func renvoArmCompilerLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRaxMemRdxDispSize(a, disp, size)
+	}
+
+	func renvoArmCompilerLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
+		renvoNonNil(a)
+		renvoArmAsmLoadRaxIndexRcxSize(a, size)
+	}
+
+	func renvoArmCompilerStorePrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRaxMemRdxDisp(a, disp)
+	}
+
+	func renvoArmCompilerStorePrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRaxMemRdxDispSize(a, disp, size)
+	}
+
+	func renvoArmCompilerNormalizePrimaryForKind(a *renvoAsm, kind int) {
+		renvoNonNil(a)
+		renvoArmAsmNormalizeRaxForKind(a, kind)
+	}
+
+	func renvoArmCompilerCmpPrimaryImm8(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmCmpRaxImm8(a, imm)
+	}
+
+	func renvoArmCompilerCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoAsmCmpPrimaryImm8(a, imm)
+	}
+
+	func renvoArmCompilerShlTertiaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmShlRcxImm(a, imm)
+	}
+
+	func renvoArmCompilerShlPrimaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmShlRaxImm(a, imm)
+	}
+
+	func renvoArmCompilerSarPrimaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoArmAsmSarRaxImm(a, imm)
+	}
+
+	func renvoArmCompilerDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
+		renvoNonNil(a)
+		renvoArmAsmDivLeftRcxRightRax(a, mod)
+	}
+
+	func renvoArmCompilerCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
+		renvoNonNil(a)
+		renvoArmAsmCmpRcxRaxSet(a, setcc)
+	}
+
+	func renvoArmCompilerStorePrimaryMemSecondaryTertiarySize(a *renvoAsm, size int) {
+		renvoNonNil(a)
+		renvoArmAsmStoreRaxMemRdxRcxSize(a, size)
+	}
+
+	func renvoArmCompilerCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
+		renvoNonNil(a)
+		renvoArmAsmCmpRegReg(a, renvoArmRegRcx, renvoArmRegRax)
+		renvoArmAsmBCondLabel(a, label, renvoArmCondFromSetcc(setcc))
+	}
+}

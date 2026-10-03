@@ -241,10 +241,16 @@ func mergeArchitectureExtensions(document *Document) {
 			}
 			sequenceBlock = statement
 		}
-		if !valid || sequenceBlock < 0 {
+		// Compiler integration roots may attach one closed binding contract,
+		// independently of target-local instruction sequences. No other ISA
+		// facts can be overridden by an extension.
+		_, compilerBlock := declarationBlock(extension, "compiler_bindings")
+		compilerExtension := compilerBlock && len(extension.Fields) == 1 &&
+			extension.Fields[0].Name == "compiler_selector" && len(extension.Statements) == 2
+		if (!valid || sequenceBlock < 0) && !compilerExtension {
 			document.Diagnostics = append(document.Diagnostics,
 				resolveDiagnostic(*document, extension, "RTG-EXTEND-002",
-					"architecture extensions require exactly one sequences block"))
+					"architecture extensions require a sequences block or a compiler selector and binding block"))
 			continue
 		}
 		baseIndex := -1
@@ -259,6 +265,11 @@ func mergeArchitectureExtensions(document *Document) {
 			document.Diagnostics = append(document.Diagnostics,
 				resolveDiagnostic(*document, extension, "RTG-EXTEND-001",
 					"extended architecture "+extension.Name+" is not declared"))
+			continue
+		}
+		if compilerExtension {
+			document.Declarations[baseIndex].Fields = append(document.Declarations[baseIndex].Fields, extension.Fields...)
+			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements...)
 			continue
 		}
 		baseBlock := -1

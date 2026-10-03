@@ -11,6 +11,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 		diagnostics = append(diagnostics, validateDeclarationFields(document, declaration)...)
 		if declaration.Kind == DeclArch {
 			diagnostics = append(diagnostics, validateArch(document, declaration, goNames)...)
+			diagnostics = append(diagnostics, validateCompilerBindings(document, declaration)...)
 			diagnostics = append(diagnostics, validateArchitectureSequences(document, declaration, goNames)...)
 			diagnostics = append(diagnostics, validateDirectEmitterBindings(document, declaration, goNames)...)
 		} else if declaration.Kind == DeclABI {
@@ -441,7 +442,7 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"alias", "endian", "word_bits", "pointer_bits", "instruction_alignment",
 			"stack_word_bytes", "stack_alignment", "unaligned_memory", "patch_relocations",
-			"reject",
+			"reject", "compiler_selector",
 		}
 	}
 	if kind == DeclABI {

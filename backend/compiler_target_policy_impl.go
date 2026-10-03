@@ -33,6 +33,102 @@ const renvoResolvedLinuxAmd64SysExit = 60
 const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
+const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
+const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
+const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
+const renvoTargetEndianTable = "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+
+func renvoBundledTargetMaxAlign(target int) int {
+	if target == renvoTargetLinuxAmd64 {
+		return 8
+	}
+	if target == renvoTargetLinux386 {
+		return 4
+	}
+	if target == renvoTargetLinuxAarch64 {
+		return 8
+	}
+	if target == renvoTargetLinuxArm {
+		return 4
+	}
+	if target == renvoTargetWindowsAmd64 {
+		return 8
+	}
+	if target == renvoTargetWindows386 {
+		return 4
+	}
+	if target == renvoTargetWasiWasm32 {
+		return 8
+	}
+	if target == renvoTargetDarwinArm64 {
+		return 8
+	}
+	if target == renvoTargetLinuxKernelAmd64 {
+		return 8
+	}
+	if target == renvoTargetWindowsArm64 {
+		return 8
+	}
+	if target == renvoTargetVM32 {
+		return 8
+	}
+	if target == renvoTargetFreeBSDAmd64 {
+		return 8
+	}
+	if target == renvoTargetOpenBSDAmd64 {
+		return 8
+	}
+	if target == renvoTargetNetBSDAmd64 {
+		return 8
+	}
+	return 0
+}
+
+func renvoBundledDefaultArenaSize(target int) int {
+	if target == renvoTargetLinuxAmd64 {
+		return 0
+	}
+	if target == renvoTargetLinux386 {
+		return 67108864
+	}
+	if target == renvoTargetLinuxAarch64 {
+		return 0
+	}
+	if target == renvoTargetLinuxArm {
+		return 67108864
+	}
+	if target == renvoTargetWindowsAmd64 {
+		return 0
+	}
+	if target == renvoTargetWindows386 {
+		return 67108864
+	}
+	if target == renvoTargetWasiWasm32 {
+		return 33554432
+	}
+	if target == renvoTargetDarwinArm64 {
+		return 0
+	}
+	if target == renvoTargetLinuxKernelAmd64 {
+		return 65536
+	}
+	if target == renvoTargetWindowsArm64 {
+		return 0
+	}
+	if target == renvoTargetVM32 {
+		return 67108864
+	}
+	if target == renvoTargetFreeBSDAmd64 {
+		return 0
+	}
+	if target == renvoTargetOpenBSDAmd64 {
+		return 0
+	}
+	if target == renvoTargetNetBSDAmd64 {
+		return 0
+	}
+	return 0
+}
 
 // END GENERATED TARGET REGISTRY
 
@@ -150,20 +246,19 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 		p.maxAlign = p.intBits / 8
 		return p, true
 	}
-	if target < renvoTargetLinuxAmd64 || target > renvoTargetNetBSDAmd64 {
+	if target <= 0 || target >= len(renvoTargetIntBitsTable) {
 		return p, false
 	}
 	p.target = target
 	p.os = int(targetOSTable[target])
 	p.arch = int(targetArchTable[target])
 	p.intBits = int(renvoTargetIntBitsTable[target])
-	p.pointerBits = p.intBits
-	p.maxAlign = p.intBits / 8
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		p.maxAlign = 8
-	}
+	p.pointerBits = int(renvoTargetPointerBitsTable[target])
+	p.codePointerBits = int(renvoTargetCodePointerBitsTable[target])
+	p.funcPointerBits = int(renvoTargetFunctionPointerBitsTable[target])
+	p.maxAlign = renvoBundledTargetMaxAlign(target)
 	p.charBits = 8
-	p.endian = renvoEndianLittle
+	p.endian = int(renvoTargetEndianTable[target])
 	p.backendSlotSize = renvoBackendValueSlotSize
 	p.addressModel = renvoAddressModelFlat
 	p.runtimeCaps = renvoRuntimePrint | renvoRuntimeOpen | renvoRuntimeClose | renvoRuntimeRead | renvoRuntimeWrite | renvoRuntimeChmod | renvoRuntimeHosted
@@ -174,8 +269,6 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	if p.arch == renvoArchAmd64 || p.arch == renvoArchAarch64 || p.arch == renvoArch386 || p.arch == renvoArchArm || target == renvoTargetWasiWasm32 {
 		p.floatModel = renvoFloatIEEEHardware
 	}
-	p.codePointerBits = p.pointerBits
-	p.funcPointerBits = p.pointerBits
 	return p, true
 }
 
@@ -342,14 +435,8 @@ func renvoDefaultArenaSize(target int) int {
 		}
 		return renvoArenaSize64BitHosted
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
-		return renvoArenaSizeKernelModule
-	}
-	if target == renvoTargetWasiWasm32 {
-		return renvoArenaSizeWasi
-	}
-	if target > 0 && target < len(renvoTargetIntBitsTable) && int(renvoTargetIntBitsTable[target]) == 32 {
-		return renvoArenaSize32BitHosted
+	if size := renvoBundledDefaultArenaSize(target); size != 0 {
+		return size
 	}
 	return renvoArenaSize64BitHosted
 }

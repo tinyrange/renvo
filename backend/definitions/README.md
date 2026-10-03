@@ -129,6 +129,53 @@ prepared output, preventing a fixed-compiler behavior change from retaining a
 stale prepared cache identity. Reserve compiler blocks for integration code
 that cannot use the typed `RTGEmitter` surface.
 
+## Bundled compiler bindings
+
+Bundled backends are generated from definitions selected by the `-kernel`
+invocation in `generate.go`. The generator does not contain an architecture
+allowlist for these bindings. An integration root attaches its selector and
+semantic hooks with a separate architecture extension:
+
+```text
+extend arch example {
+    compiler_selector = exampleSelector
+    compiler_bindings {
+        copy_primary_to_secondary = exampleCopyPrimaryToSecondary
+        # Every operation in the compiler binding contract is required.
+    }
+}
+
+go compiler {
+    func exampleCopyPrimaryToSecondary(a *renvoAsm) {
+        // Definition-owned emission and peephole optimization.
+    }
+}
+```
+
+The current migration covers 68 role-based operations: register copies,
+pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
+accesses, normalization, arithmetic and logic, comparisons and label branches,
+and return/frame teardown. Hooks may take typed parameters in addition to the
+assembler; their complete signatures are checked before generation;
+missing operations, duplicate selectors, and unknown operations are errors.
+The generated dispatcher makes direct calls and fails compilation on an
+unrecognized selector rather than falling back to an ISA. Prepared backends
+provide the same compiler operation names through their direct emitter and ABI
+bindings, without depending on bundled hooks or selectors.
+
+Compiler-binding extensions cannot override the imported machine's facts.
+Bundled compiler profiles project data, code, and function pointer widths,
+maximum alignment, endianness, and default arena sizes from the resolved
+descriptors rather than inferring them from architecture identities. Targets
+with non-default arena limits declare `arena_default` explicitly; this preserves
+the existing compiler limits when using the descriptor projection.
+
+This contract is a migration boundary, not a claim that all compiler-private
+coupling has been removed: other layout/ABI rules, calls, remaining emitter
+operations, runtime composition, and fixed-target orchestration still contain legacy architecture
+knowledge. Those must be migrated before a bundled definition list alone can
+control the compiler's complete target set.
+
 Windows/386 uses the same bounded runtime sequences for prepared and fixed
 compilers. Its checked-in projection adds only the compiler-facing names and
 runtime-helper cache state needed by the shared compiler. The resulting fixed
