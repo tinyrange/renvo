@@ -4150,6 +4150,15 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		primary_tertiary_operation = renvoWasm32CompilerPrimaryTertiaryOperation
+		unsigned_shift_right = renvoWasm32CompilerUnsignedShiftRight
+		signed_division_guard = renvoWasm32CompilerSignedDivisionGuard
+		unchecked_signed_division = renvoWasm32CompilerUncheckedSignedDivision
+		unchecked_bounds_check = renvoWasm32CompilerUncheckedBoundsCheck
+		bounds_success_branch = renvoWasm32CompilerBoundsSuccessBranch
+		bounds_check_helper = renvoWasm32CompilerBoundsCheckHelper
+		non_nil_check_helper = renvoWasm32CompilerNonNilCheckHelper
+		comparison_branch = renvoWasm32CompilerComparisonBranch
 		install_thread_state = renvoWasm32CompilerInstallThreadState
 		load_primary_thread_state = renvoWasm32CompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoWasm32CompilerStorePrimaryThreadState
@@ -4860,5 +4869,153 @@ go compiler {
 		renvoAsmPopPrimary(&g.asm)
 		renvoEmitRuntimeNonNilPrimary(g)
 		renvoAsmCopyPrimaryToSecondary(&g.asm)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerComparisonBranch(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+		cond := renvoWasm32CondEq
+		if c0 == '=' {
+			if jumpIfTrue {
+				cond = renvoWasm32CondEq
+			} else {
+				cond = renvoWasm32CondNe
+			}
+		} else if c0 == '!' {
+			if jumpIfTrue {
+				cond = renvoWasm32CondNe
+			} else {
+				cond = renvoWasm32CondEq
+			}
+		} else if c0 == '<' {
+			if c1 == '=' {
+				if jumpIfTrue {
+					cond = renvoWasm32CondLe
+				} else {
+					cond = renvoWasm32CondGt
+				}
+			} else {
+				if jumpIfTrue {
+					cond = renvoWasm32CondLt
+				} else {
+					cond = renvoWasm32CondGe
+				}
+			}
+		} else if c1 == '=' {
+			if jumpIfTrue {
+				cond = renvoWasm32CondGe
+			} else {
+				cond = renvoWasm32CondLt
+			}
+		} else {
+			if jumpIfTrue {
+				cond = renvoWasm32CondGt
+			} else {
+				cond = renvoWasm32CondLe
+			}
+		}
+		renvoWasm32EmitCondBranch(a, cond, label)
+		return
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerPrimaryTertiaryOperation(g *renvoLinearGen, tok int) bool {
+		leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
+		rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
+		if leftShift || rightShift {
+			a := &g.asm
+			shift := renvoAsmNewLabel(a)
+			oversized := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoWasm32AsmCmpRaxImm8(a, 0)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, oversized)
+			renvoWasm32AsmCmpRaxImm8(a, 32)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, shift)
+			renvoAsmMarkLabel(a, oversized)
+			if rightShift {
+				renvoAsmCopyTertiaryToPrimary(a)
+				renvoAsmSarPrimaryImm(a, 31)
+			} else {
+				renvoAsmPrimaryImm(a, 0)
+			}
+			renvoAsmJmpLabel(a, done)
+			renvoAsmMarkLabel(a, shift)
+			ok := false
+			ok = renvoWasm32EmitRaxRcxOp(g, tok, false)
+			renvoAsmMarkLabel(a, done)
+			return ok
+		}
+		return renvoWasm32EmitRaxRcxOp(g, tok, false)
+	}
+
+	func renvoWasm32CompilerUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+		return renvoWasm32EmitRaxRcxOp(g, tok, true)
+	}
+
+	func renvoWasm32CompilerSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+		return renvoEmitSignedDivisionOverflowGuard(g, mod)
+	}
+
+	func renvoWasm32CompilerUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+		a := &g.asm
+		nonzero := renvoAsmNewLabel(a)
+		renvoAsmJnzPrimary(a, nonzero)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		renvoAsmMarkLabel(a, nonzero)
+		done := renvoEmitSignedDivisionOverflowGuard(g, mod)
+		renvoAsmDivLeftTertiaryRightPrimary(a, mod)
+		renvoAsmMarkLabel(a, done)
+	}
+
+	func renvoWasm32CompilerUncheckedBoundsCheck(g *renvoLinearGen) {
+		a := &g.asm
+		if g.c.renvoTarget == renvoTargetVM32 {
+			// Keep the successful checked-index path inline. The original index
+			// remains in secondary; both invalid cases share the fault helper.
+			fault := renvoEnsureUncaughtFaultHelper(g, false)
+			renvoAsmCopyPrimaryToSecondary(a)
+			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, fault)
+			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+			renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, fault)
+			return
+		}
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+	}
+
+	func renvoWasm32CompilerBoundsSuccessBranch(g *renvoLinearGen, done int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+		renvoAsmJnzPrimary(&g.asm, done)
+	}
+
+	func renvoWasm32CompilerBoundsCheckHelper(g *renvoLinearGen) {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Compare the original index and length without materializing each
+		// intermediate condition or spilling the length onto the VM stack.
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+		// Callers consume secondary as the original index. Only recoverable
+		// checks need a success flag; tertiary is restored by the caller.
+		if g.meta.panicEnabled {
+			renvoAsmPrimaryImm(a, 1)
+		}
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		if !g.meta.panicEnabled {
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmRet(a)
+		return
+	}
+
+	func renvoWasm32CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+		return -1
 	}
 }

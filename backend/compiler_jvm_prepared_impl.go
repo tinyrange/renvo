@@ -4357,6 +4357,110 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoEmitTargetPrimaryTertiaryOp(g *renvoLinearGen, tok int) bool {
+renvoNonNil(g)
+return renvoRTGEmitPrimaryTertiaryOp(g, tok)
+}
+
+func renvoEmitTargetUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+renvoNonNil(g)
+renvoRTGEmitBoundedVariableShift(&g.asm, RTGShiftRight, false)
+return true
+}
+
+func renvoEmitTargetSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+renvoNonNil(g)
+return renvoEmitSignedDivisionOverflowGuard(g, mod)
+}
+
+func renvoEmitUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+}
+
+func renvoEmitUncheckedBoundsCheck(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+}
+
+func renvoEmitBoundsSuccessBranch(g *renvoLinearGen, done int) {
+renvoNonNil(g)
+renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+renvoAsmJnzPrimary(&g.asm, done)
+}
+
+func renvoEmitBoundsCheckHelperBody(g *renvoLinearGen) {
+renvoNonNil(g)
+	invalid := renvoAsmNewLabel(&g.asm)
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmPushTertiary(&g.asm)
+	renvoAsmPrimaryImm(&g.asm, 0)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
+	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+	renvoAsmJzPrimary(&g.asm, invalid)
+	renvoAsmPopPrimary(&g.asm)
+	renvoAsmCopySecondaryToTertiary(&g.asm)
+	renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+	if !g.meta.panicEnabled {
+		valid := renvoAsmNewLabel(&g.asm)
+		renvoAsmJnzPrimary(&g.asm, valid)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		renvoAsmMarkLabel(&g.asm, valid)
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return
+	}
+	renvoAsmRet(&g.asm)
+	renvoAsmMarkLabel(&g.asm, invalid)
+	renvoAsmPopTertiary(&g.asm)
+	renvoAsmPrimaryImm(&g.asm, 0)
+	renvoAsmRet(&g.asm)
+}
+
+func renvoEmitTargetNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+renvoNonNil(g)
+return -1
+}
+
+func renvoEmitCompareJumpOp(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+renvoNonNil(a)
+	setcc := 0x94
+	if c0 == '=' {
+		setcc = 0x94
+	} else if c0 == '!' {
+		setcc = 0x95
+	} else if c0 == '<' {
+		if c1 == '=' {
+			setcc = 0x9e
+		} else {
+			setcc = 0x9c
+		}
+	} else if c1 == '=' {
+		setcc = 0x9d
+	} else {
+		setcc = 0x9f
+	}
+	if !jumpIfTrue {
+		setcc = setcc ^ 1
+	}
+	if unsigned && c0 != '=' && c0 != '!' {
+		setcc = 0x92
+		if c0 == '>' {
+			setcc = 0x97
+		}
+		if c1 == '=' {
+			setcc = setcc ^ 4
+		}
+		if !jumpIfTrue {
+			setcc = setcc ^ 1
+		}
+	}
+	renvoRTGDirectJumpCondition(a, renvoRTGConditionFromSetcc(setcc), label)
+	return
+}
+
 func renvoEmitInstallThreadState(g *renvoLinearGen) {
 renvoNonNil(g)
 return

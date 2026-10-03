@@ -696,6 +696,15 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		primary_tertiary_operation = renvoArmCompilerPrimaryTertiaryOperation
+		unsigned_shift_right = renvoArmCompilerUnsignedShiftRight
+		signed_division_guard = renvoArmCompilerSignedDivisionGuard
+		unchecked_signed_division = renvoArmCompilerUncheckedSignedDivision
+		unchecked_bounds_check = renvoArmCompilerUncheckedBoundsCheck
+		bounds_success_branch = renvoArmCompilerBoundsSuccessBranch
+		bounds_check_helper = renvoArmCompilerBoundsCheckHelper
+		non_nil_check_helper = renvoArmCompilerNonNilCheckHelper
+		comparison_branch = renvoArmCompilerComparisonBranch
 		install_thread_state = renvoArmCompilerInstallThreadState
 		load_primary_thread_state = renvoArmCompilerLoadPrimaryThreadState
 		store_primary_thread_state = renvoArmCompilerStorePrimaryThreadState
@@ -1374,5 +1383,124 @@ go compiler {
 
 	func renvoArmCompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
 		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
+	}
+}
+
+go compiler {
+	func renvoArmCompilerComparisonBranch(a *renvoAsm, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) {
+		cond := 0
+		if c0 == '=' {
+			if jumpIfTrue {
+				cond = 0
+			} else {
+				cond = 1
+			}
+		} else if c0 == '!' {
+			if jumpIfTrue {
+				cond = 1
+			} else {
+				cond = 0
+			}
+		} else if c0 == '<' {
+			if c1 == '=' {
+				if jumpIfTrue {
+					cond = 13
+				} else {
+					cond = 12
+				}
+			} else {
+				if jumpIfTrue {
+					cond = 11
+				} else {
+					cond = 10
+				}
+			}
+		} else if c1 == '=' {
+			if jumpIfTrue {
+				cond = 10
+			} else {
+				cond = 11
+			}
+		} else {
+			if jumpIfTrue {
+				cond = 12
+			} else {
+				cond = 13
+			}
+		}
+		if unsigned && c0 != '=' && c0 != '!' {
+			cond = 3
+			if c0 == '>' {
+				cond = 8
+			}
+			if c1 == '=' {
+				cond = cond ^ 10
+			}
+			if !jumpIfTrue {
+				cond = cond ^ 1
+			}
+		}
+		renvoArmAsmBCondLabel(a, label, cond)
+		return
+	}
+}
+
+go compiler {
+	func renvoArmCompilerPrimaryTertiaryOperation(g *renvoLinearGen, tok int) bool {
+		return renvoArmEmitRaxRcxOp(g, tok, 0xe1a00050)
+	}
+
+	func renvoArmCompilerUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+		return renvoArmEmitRaxRcxOp(g, tok, 0xe1a00030)
+	}
+
+	func renvoArmCompilerSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+		return renvoEmitSignedDivisionOverflowGuard(g, mod)
+	}
+
+	func renvoArmCompilerUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+	}
+
+	func renvoArmCompilerUncheckedBoundsCheck(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+	}
+
+	func renvoArmCompilerBoundsSuccessBranch(g *renvoLinearGen, done int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+		renvoAsmJnzPrimary(&g.asm, done)
+	}
+
+	func renvoArmCompilerBoundsCheckHelper(g *renvoLinearGen) {
+		invalid := renvoAsmNewLabel(&g.asm)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPushTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+		renvoAsmJzPrimary(&g.asm, invalid)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+		if !g.meta.panicEnabled {
+			valid := renvoAsmNewLabel(&g.asm)
+			renvoAsmJnzPrimary(&g.asm, valid)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			renvoAsmMarkLabel(&g.asm, valid)
+			renvoAsmRet(&g.asm)
+			renvoAsmMarkLabel(&g.asm, invalid)
+			renvoAsmPopTertiary(&g.asm)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmRet(&g.asm)
+	}
+
+	func renvoArmCompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+		return -1
 	}
 }
