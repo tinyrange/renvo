@@ -797,6 +797,24 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoSupportsFunctionWordConversion(g *renvoLinearGen) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoCanTakeNamedFunctionAddress(g *renvoLinearGen) bool {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

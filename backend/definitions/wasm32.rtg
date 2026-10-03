@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		function_word_conversion = renvoWasm32CompilerFunctionWordConversion
 		named_function_address = renvoWasm32CompilerNamedFunctionAddress
 		address_taken_local = renvoWasm32CompilerAddressTakenLocal
 		address_result_buffer = renvoWasm32CompilerAddressResultBuffer
@@ -6125,5 +6126,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerNamedFunctionAddress(g *renvoLinearGen) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFunctionWordConversion(g *renvoLinearGen) bool {
+		return false
 	}
 }

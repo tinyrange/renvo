@@ -4357,6 +4357,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoSupportsFunctionWordConversion(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoCanTakeNamedFunctionAddress(g *renvoLinearGen) bool {
 renvoNonNil(g)
 return true
