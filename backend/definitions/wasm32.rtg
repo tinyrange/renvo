@@ -4150,6 +4150,11 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		index_address_helper_body = renvoWasm32CompilerIndexAddressHelperBody
+		index_address_helper = renvoWasm32CompilerIndexAddressHelper
+		reserved_bounds_check_helper = renvoWasm32CompilerTargetBoundsCheckHelper
+		optimized_slice_bounds_checks = renvoWasm32CompilerOptimizedSliceBoundsChecks
+		push_words = renvoWasm32CompilerPushWords
 		split_word_lowering_enabled = renvoWasm32CompilerSplitWordLoweringEnabled
 		shift_primary_right_unsigned_immediate = renvoWasm32CompilerShiftPrimaryRightUnsignedImmediate
 		negate_primary = renvoWasm32CompilerNegatePrimary
@@ -5468,5 +5473,52 @@ go compiler {
 	func renvoWasm32CompilerNegatePrimary(a *renvoAsm) {
 		renvoWasm32EmitReg(a, renvoWasm32OpNegReg, renvoWasm32RegRax)
 		return
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+		a := &g.asm
+		invalid := renvoAsmNewLabel(a)
+		// Primary holds the base, secondary the length, and tertiary the
+		// index. Keep all three in registers through the bounds checks.
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, invalid)
+		renvoAsmAddScaledTertiary(a, elemSize)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, invalid)
+		renvoEmitUncaughtFaultTransfer(g, false)
+		return
+	}
+
+	func renvoWasm32CompilerIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
+		return -1
+	}
+
+	func renvoWasm32CompilerTargetBoundsCheckHelper(g *renvoLinearGen) int {
+		return -1
+	}
+
+	func renvoWasm32CompilerOptimizedSliceBoundsChecks(g *renvoLinearGen, lowOff int, highOff int, maxOff int, capOff int) bool {
+		return false
+	}
+
+	func renvoWasm32CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
+		renvoNonNil(g)
+		size = renvoAlignValue(size, wordSize)
+		// Keep larger arguments on the word-push path so stack growth touches each
+		// guard page; one reservation must not skip a Windows stack guard page.
+		for at := size - wordSize; at >= 0; at -= wordSize {
+			if mode == renvoPushStack {
+				renvoAsmLoadPrimaryStack(&g.asm, offset-at)
+			} else if mode == renvoPushBss {
+				renvoAsmLoadPrimaryBss(&g.asm, offset+at)
+			} else {
+				renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
+			}
+			renvoAsmPushPrimary(&g.asm)
+		}
 	}
 }
