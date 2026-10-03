@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "75eceadef7049f7582f0e3cea5c86232c42a1016d3023028dd1147399585928c"
+const CompilerSourceDigest = "d3202b035ed67abb72c7071b38f0db1c63bb89d05eeffa5bab1842168e085a1d"
 
 // source: backend/compiler_common_impl.go
 
@@ -345,7 +345,7 @@ g.structuredHelperCount++
 }
 
 func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) bool {
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 renvoAsmHelperFunctionBoundary(&g.asm, label, true)
 renvoAsmMarkLabel(&g.asm, label)
 if kind == renvoStructuredHelperSignedDivide {
@@ -498,7 +498,7 @@ codeLen := len(a.code)
 a.labelPos[label] = int32(codeLen)
 a.lastPrimaryStoreEnd = -1
 a.lastPrimaryLoad = 0
-if renvoLabelNotifications(a.c) {
+if renvoMayNotifyLabels && renvoLabelNotifications(a.c) {
 renvoAsmLabelBoundary(a, label)
 }
 }
@@ -13729,7 +13729,7 @@ return g.makeZeroLabel
 }
 g.makeZeroEmitted = true
 g.makeZeroLabel = renvoAsmNewLabel(a)
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperMakeZero, 0, g.makeZeroLabel)
 return g.makeZeroLabel
 }
@@ -15539,7 +15539,7 @@ return renvoEnsureUncaughtFaultHelper(g, false)
 
 func renvoEmitUncaughtFaultTransfer(g *renvoLinearGen, outOfMemory bool) {
 label := renvoEnsureUncaughtFaultHelper(g, outOfMemory)
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 renvoAsmCallLabel(&g.asm, label)
 renvoAsmRet(&g.asm)
 return
@@ -15563,7 +15563,7 @@ g.arenaFaultLabel = label + 1
 } else {
 g.runtimeFaultLabel = label + 1
 }
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if outOfMemory {
 argument = 1
@@ -15630,7 +15630,7 @@ return *labelSlot - 1
 }
 label := renvoAsmNewLabel(&g.asm)
 *labelSlot = label + 1
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if secondary {
 argument = 1
@@ -17986,7 +17986,7 @@ g.runtimeWordIndexLabel = label + 1
 } else {
 g.runtimeWideIndexLabel = label + 1
 }
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperIndexAddress, elemSize, label)
 return label
 }
@@ -18036,7 +18036,7 @@ return g.runtimeBoundsLabel - 1
 }
 label := renvoAsmNewLabel(&g.asm)
 g.runtimeBoundsLabel = label + 1
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperBoundsCheck, 0, label)
 return label
 }
@@ -19287,7 +19287,7 @@ return *slot - 1
 }
 label := renvoAsmNewLabel(a)
 *slot = label + 1
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if mod {
 argument = 1
@@ -20072,7 +20072,7 @@ g.persistentAllocLabel = label + 1
 g.arenaAllocLabel = label + 1
 }
 renvoStringHeapOffsets(g)
-if renvoUsesStructuredFunctions(g.c) {
+if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if persistent {
 argument = 1
@@ -30482,6 +30482,8 @@ renvoNonNil(renvoCompilerSelector)
 return false
 }
 
+const renvoMayNotifyLabels = false
+
 func renvoAsmUnsupportedOperation(a *renvoAsm, code int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -30542,6 +30544,8 @@ renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
 return false
 }
+
+const renvoMayUseStructuredFunctions = false
 
 func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
 renvoNonNil(c)

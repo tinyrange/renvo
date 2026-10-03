@@ -339,7 +339,10 @@ func TestBundledCompilerBindingBodyGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, declaration := range file.Decls {
-		fn := declaration.(*ast.FuncDecl)
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue // Generated capability constants are not operation bodies.
+		}
 		if fn.Name.Name != "renvoAsmCopyPrimaryToSecondary" {
 			continue
 		}
@@ -661,7 +664,10 @@ func TestCompilerBindingQueryDefaultSelection(t *testing.T) {
 	}
 	found := false
 	for _, declaration := range file.Decls {
-		fn := declaration.(*ast.FuncDecl)
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue // Generated capability constants are not operation bodies.
+		}
 		if fn.Name.Name != "renvoArenaDiscardSupported" {
 			continue
 		}
@@ -699,5 +705,46 @@ func TestCompilerBindingQueryDefaultSelection(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("query operation missing")
+	}
+}
+
+// A disabled bundled capability must not hide a new definition's implementation.
+// Nonliteral bodies remain reachable, including observable side effects.
+func TestCompilerCapabilityReachability(t *testing.T) {
+	disabled := unfamiliarCompilerDefinition(t, "selectedOne", "firstHook")
+	for _, body := range []string{"return true", "renvoNonNil(c); return false"} {
+		original := "func secondHookLabelNotifications(c *renvoCompileContext) bool { return false }"
+		source := string(unfamiliarCompilerDefinition(t, "selectedTwo", "secondHook").Document.Source)
+		if !strings.Contains(source, original) {
+			t.Fatal("fixture hook missing")
+		}
+		source = strings.Replace(source, original, "func secondHookLabelNotifications(c *renvoCompileContext) bool { "+body+" }", 1)
+		document := Parse([]byte(source), "capability.rtg")
+		if !document.Ok {
+			t.Fatal(document.Diagnostics)
+		}
+		enabled := ResolveResult{Document: document, Ok: true}
+		for _, tc := range []struct {
+			definitions []ResolveResult
+			want        string
+		}{
+			{[]ResolveResult{disabled}, "false"},
+			{[]ResolveResult{disabled, enabled}, "true"},
+			{[]ResolveResult{enabled, disabled}, "true"},
+		} {
+			generated := appendBundledCompilerBindings(nil, tc.definitions)
+			if !generated.Ok {
+				t.Fatal(generated.Diagnostics)
+			}
+			if !strings.Contains(string(generated.Source), "const renvoMayNotifyLabels = "+tc.want) {
+				t.Fatalf("body %q: missing conservative guard %s", body, tc.want)
+			}
+		}
+	}
+	prepared := string(appendPreparedCompilerBindings(nil))
+	for _, name := range []string{"renvoMayNotifyLabels", "renvoMayUseStructuredFunctions"} {
+		if !strings.Contains(prepared, "const "+name+" = true") {
+			t.Fatalf("prepared capability %s hidden", name)
+		}
 	}
 }

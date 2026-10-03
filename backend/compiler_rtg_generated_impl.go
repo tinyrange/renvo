@@ -845,6 +845,8 @@ renvoNonNil(renvoCompilerSelector)
 return false
 }
 
+const renvoMayNotifyLabels = false
+
 func renvoAsmUnsupportedOperation(a *renvoAsm, code int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
@@ -905,6 +907,8 @@ renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
 return false
 }
+
+const renvoMayUseStructuredFunctions = false
 
 func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
 renvoNonNil(c)
