@@ -737,6 +737,14 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		append_scalar_helper = renvoAarch64CompilerAppendScalarHelper
+		append_address_helper = renvoAarch64CompilerAppendAddressHelper
+		string_equal_helper = renvoAarch64CompilerStringEqualHelper
+		copy_to_fresh_arena = renvoAarch64CompilerCopyToFreshArena
+		slice_header_addresses_secondary = renvoAarch64CompilerSliceHeaderAddressesSecondary
+		slice_header_addresses_bss = renvoAarch64CompilerSliceHeaderAddressesBss
+		slice_header_addresses_stack = renvoAarch64CompilerSliceHeaderAddressesStack
+		store_tertiary_stack = renvoAarch64CompilerStoreTertiaryStack
 		index_address_helper_body = renvoAarch64CompilerIndexAddressHelperBody
 		index_address_helper = renvoAarch64CompilerIndexAddressHelper
 		reserved_bounds_check_helper = renvoAarch64CompilerTargetBoundsCheckHelper
@@ -2184,5 +2192,50 @@ go compiler {
 			}
 			renvoAsmPushPrimary(&g.asm)
 		}
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSliceHeaderAddressesSecondary(a *renvoAsm) {
+		renvoAsmPushSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAarch64AsmAddRegImm(a, renvoAarch64RegRsi, renvoAarch64RegRdx, 8)
+	}
+
+	func renvoAarch64CompilerSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+		renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRdi, offset, renvoAbsBssReloc)
+		renvoAarch64AsmMovRegAbs(a, renvoAarch64RegRsi, offset+8, renvoAbsBssReloc)
+	}
+
+	func renvoAarch64CompilerSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRdi, offset)
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegRsi, offset-8)
+		renvoAarch64AsmLeaRegStack(a, renvoAarch64RegR9, offset-16)
+	}
+
+	func renvoAarch64CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoAarch64EnsureAppend8Helper(g)
+		}
+		return renvoAarch64EnsureAppend64Helper(g)
+	}
+
+	func renvoAarch64CompilerAppendAddressHelper(g *renvoLinearGen) int {
+		return renvoAarch64EnsureAppendAddrHelper(g)
+	}
+
+	func renvoAarch64CompilerStringEqualHelper(g *renvoLinearGen) int {
+		return renvoAarch64EnsureStringEqualHelper(g)
+	}
+
+	func renvoAarch64CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
 	}
 }

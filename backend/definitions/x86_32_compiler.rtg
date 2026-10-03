@@ -623,38 +623,6 @@ go compiler {
 		renvoAsmStorePrimaryStack(a, highOffset)
 	}
 
-	func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-		a := &g.asm
-		if loc.mem {
-			if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-				return false
-			}
-			renvoAsmEmit16(a, 0x5f52)
-			renvoAsmEmit16(a, 0x728d)
-			renvoAsmEmit8(a, 8)
-			return true
-		}
-		if loc.global {
-			if g.c.renvoTargetOS == renvoOSLinux {
-				renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
-				renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
-				return true
-			}
-			renvoAsmEmit16(a, 0x3d8d)
-			at := len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset, renvoAbsBssReloc)
-			renvoAsmEmit16(a, 0x358d)
-			at = len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset+8, renvoAbsBssReloc)
-			return true
-		}
-		renvoAsmAddressCallWord0Stack(a, loc.offset)
-		renvoAsmAddressCallWord1Stack(a, loc.offset-8)
-		return true
-	}
-
 	func renvo386EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 		a := &g.asm
 		renvoAsmLoadPrimaryStack(a, srcPtr)
@@ -1332,6 +1300,14 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		append_scalar_helper = renvo386CompilerAppendScalarHelper
+		append_address_helper = renvo386CompilerAppendAddressHelper
+		string_equal_helper = renvo386CompilerStringEqualHelper
+		copy_to_fresh_arena = renvo386CompilerCopyToFreshArena
+		slice_header_addresses_secondary = renvo386CompilerSliceHeaderAddressesSecondary
+		slice_header_addresses_bss = renvo386CompilerSliceHeaderAddressesBss
+		slice_header_addresses_stack = renvo386CompilerSliceHeaderAddressesStack
+		store_tertiary_stack = renvo386CompilerStoreTertiaryStack
 		index_address_helper_body = renvo386CompilerIndexAddressHelperBody
 		index_address_helper = renvo386CompilerIndexAddressHelper
 		reserved_bounds_check_helper = renvo386CompilerTargetBoundsCheckHelper
@@ -3940,5 +3916,57 @@ go compiler {
 			}
 			renvoAsmPushPrimary(&g.asm)
 		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerSliceHeaderAddressesSecondary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0x5f52)
+		renvoAsmEmit16(a, 0x728d)
+		renvoAsmEmit8(a, 8)
+	}
+
+	func renvo386CompilerSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+		if a.c.renvoTargetOS == renvoOSLinux {
+			renvo386AsmMovRegPCRel(a, 7, offset, renvoAbsBssReloc)
+			renvo386AsmMovRegPCRel(a, 6, offset+8, renvoAbsBssReloc)
+			return
+		}
+		renvoAsmEmit16(a, 0x3d8d)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset, renvoAbsBssReloc)
+		renvoAsmEmit16(a, 0x358d)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+8, renvoAbsBssReloc)
+	}
+
+	func renvo386CompilerSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+		renvoAsmAddressCallWord0Stack(a, offset)
+		renvoAsmAddressCallWord1Stack(a, offset-8)
+	}
+
+	func renvo386CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		return renvo386EnsureAppendScalarHelper(g, small)
+	}
+
+	func renvo386CompilerAppendAddressHelper(g *renvoLinearGen) int {
+		return renvo386EnsureAppendAddrHelper(g)
+	}
+
+	func renvo386CompilerStringEqualHelper(g *renvoLinearGen) int {
+		return renvo386EnsureStringEqualHelper(g)
+	}
+
+	func renvo386CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
 	}
 }

@@ -965,6 +965,14 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		append_scalar_helper = renvoAmd64CompilerAppendScalarHelper
+		append_address_helper = renvoAmd64CompilerAppendAddressHelper
+		string_equal_helper = renvoAmd64CompilerStringEqualHelper
+		copy_to_fresh_arena = renvoAmd64CompilerCopyToFreshArena
+		slice_header_addresses_secondary = renvoAmd64CompilerSliceHeaderAddressesSecondary
+		slice_header_addresses_bss = renvoAmd64CompilerSliceHeaderAddressesBss
+		slice_header_addresses_stack = renvoAmd64CompilerSliceHeaderAddressesStack
+		store_tertiary_stack = renvoAmd64CompilerStoreTertiaryStack
 		index_address_helper_body = renvoAmd64CompilerIndexAddressHelperBody
 		index_address_helper = renvoAmd64CompilerIndexAddressHelper
 		reserved_bounds_check_helper = renvoAmd64CompilerTargetBoundsCheckHelper
@@ -2930,5 +2938,75 @@ go compiler {
 			}
 			renvoAsmPushPrimary(&g.asm)
 		}
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSliceHeaderAddressesSecondary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0x5f52)
+		renvoAsmEmit24(a, 0x728d48)
+		renvoAsmEmit8(a, 8)
+		renvoAsmEmit4(a, 0x4c, 0x8d, 0x4a, 16)
+	}
+
+	func renvoAmd64CompilerSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+		renvoAsmEmit24(a, 0x3d8d48)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset, renvoAbsBssReloc)
+		renvoAsmEmit24(a, 0x358d48)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+8, renvoAbsBssReloc)
+		renvoAsmEmit24(a, 0x0d8d4c)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+16, renvoAbsBssReloc)
+	}
+
+	func renvoAmd64CompilerSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+		renvoAsmAddressCallWord0Stack(a, offset)
+		renvoAsmAddressCallWord1Stack(a, offset-8)
+		r9Offset := offset - 16
+		renvoAsmEmit16(a, 0x8d4c)
+		if r9Offset >= 0 && r9Offset <= 128 {
+			renvoAsmEmit8(a, 0x4d)
+			renvoAsmEmit8(a, -r9Offset)
+			return
+		}
+		renvoAsmEmit8(a, 0x8d)
+		renvoAsmEmit32(a, -r9Offset)
+	}
+
+	func renvoAmd64CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		if small {
+			return renvoAmd64EnsureAppend8Helper(g)
+		}
+		return renvoAmd64EnsureAppend64Helper(g)
+	}
+
+	func renvoAmd64CompilerAppendAddressHelper(g *renvoLinearGen) int {
+		return renvoAmd64EnsureAppendAddrHelper(g)
+	}
+
+	func renvoAmd64CompilerStringEqualHelper(g *renvoLinearGen) int {
+		return renvoAmd64EnsureStringEqualHelper(g)
+	}
+
+	func renvoAmd64CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+		a := &g.asm
+		renvoAsmLoadPrimaryStack(a, destOff)
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmLoadPrimaryStack(a, srcOff)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmLoadTertiaryStack(a, byteCountOff)
+		renvoAsmEmit16(a, 0xa4f3)
 	}
 }

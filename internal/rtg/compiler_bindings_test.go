@@ -423,3 +423,95 @@ func evalCompilerBindingCondition(t *testing.T, expression ast.Expr, fixed, sele
 	t.Fatalf("unexpected selection expression %#v", expression)
 	return 0
 }
+
+// Prefixes can return early, bind scoped variables, or mutate the selector.
+// Check the resulting control-flow tree, not just textual suffix matching.
+func TestCompilerBindingSharedTailSelection(t *testing.T) {
+	tail := "a.patchFailed = false\nreturn\n"
+	prefixes := []string{
+		"if local := renvoFixedTarget; local != 0 { return }\n",
+		"if changeSelector(a) { return }\n",
+	}
+	bodies := []string{prefixes[0] + tail, prefixes[1] + tail, tail}
+	conditions := []string{
+		"a.c.renvoTargetArch == selectedOne",
+		"a.c.renvoTargetArch == selectedTwo",
+		"a.c.renvoTargetArch == selectedThree",
+	}
+	source := []byte(`package bindings
+const selectedOne = 41
+const selectedTwo = 73
+const selectedThree = 99
+var renvoFixedTarget int
+type context struct { renvoTargetArch int }
+type asm struct { c *context; patchFailed bool }
+func changeSelector(a *asm) bool { a.c.renvoTargetArch = selectedOne; return false }
+func projected(a *asm) {
+`)
+	source = appendCompilerBodyGroups(source, bodies, conditions)
+	source = append(source, "a.patchFailed = true\n}\n"...)
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "shared.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := new(types.Config).Check("bindings", fset, []*ast.File{file}, nil); err != nil {
+		t.Fatal(err)
+	}
+	fn := file.Decls[len(file.Decls)-1].(*ast.FuncDecl)
+	if len(fn.Body.List) != 2 {
+		t.Fatal("tail was not shared, or failure path moved")
+	}
+	outer := fn.Body.List[0].(*ast.IfStmt)
+	if len(outer.Body.List) != 3 {
+		t.Fatal("want prefix selection, shared assignment and return")
+	}
+	first := outer.Body.List[0].(*ast.IfStmt)
+	second, ok := first.Else.(*ast.IfStmt)
+	if !ok || second.Else != nil {
+		t.Fatal("prefix selection must be one exclusive chain")
+	}
+	for _, selector := range []int{0, 41, 73, 99, 101} {
+		selected := evalCompilerBindingCondition(t, outer.Cond, 0, selector) != 0
+		if selected != (selector == 41 || selector == 73 || selector == 99) {
+			t.Fatalf("selector %d entered wrong shared body", selector)
+		}
+		for i, branch := range []*ast.IfStmt{first, second} {
+			if (evalCompilerBindingCondition(t, branch.Cond, 0, selector) != 0) != (selector == []int{41, 73}[i]) {
+				t.Fatalf("selector %d entered wrong prefix %d", selector, i)
+			}
+			if len(branch.Body.List) != 1 {
+				t.Fatal("prefix scope changed")
+			}
+			if _, ok := branch.Body.List[0].(*ast.IfStmt); !ok {
+				t.Fatal("prefix statement changed")
+			}
+		}
+	}
+	if _, ok := outer.Body.List[2].(*ast.ReturnStmt); !ok {
+		t.Fatal("selected tail falls through")
+	}
+	failure := fn.Body.List[1].(*ast.AssignStmt)
+	if failure.Rhs[0].(*ast.Ident).Name != "true" {
+		t.Fatal("unknown selector did not fail")
+	}
+}
+
+func TestCompilerBindingSharedTailConservative(t *testing.T) {
+	for _, body := range []string{
+		"value := 1\nif value != 0 { return }\nreturn\n",
+		"if true { goto done }\ndone: return\n",
+		"if true { return }",
+		"if { broken",
+	} {
+		prefix, _ := compilerBodyLeadingIf(body)
+		if prefix != "" {
+			t.Fatalf("must retain original scope/control flow: %q", body)
+		}
+	}
+	body := "if true { return }\na.patchFailed = false\nreturn\n"
+	output := appendCompilerBodyGroups(nil, []string{body, "a.patchFailed = true\nreturn\n"}, []string{"first", "second"})
+	if !strings.Contains(string(output), body) {
+		t.Fatal("changed a prefix without a matching complete tail")
+	}
+}
