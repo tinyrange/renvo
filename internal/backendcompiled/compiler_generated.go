@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "98a3b178df048d3f714dd7c40eeeb7e1e7e3aa13f2bb119b7c9bfcb684179948"
+const CompilerSourceDigest = "9c35888b4d9c89542b969726128f24a18fe333bb49b713a107943dbb1322164c"
 
 // source: backend/compiler_common_impl.go
 
@@ -97,18 +97,6 @@ const renvoImportReloc = 2
 
 const renvoObjectExternalBase = 536870912
 const renvoObjectExternalStride = 1048576
-
-const renvoObjectABIUnavailable = 0
-const renvoObjectABISysV = 1
-const renvoObjectABICdecl = 2
-
-func renvoIsSysVObject(c *renvoCompileContext) bool {
-return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
-}
-
-func renvoIsCdeclObject(c *renvoCompileContext) bool {
-return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
-}
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
 return c != nil && renvoTargetHostedObject(c)
@@ -14212,7 +14200,7 @@ if renvoFixedTarget != 0 && (!renvoMayCompileFixedObjectCABI || !renvoFixedObjec
 return false
 }
 renvoNonNil(g, ep)
-if !renvoIsSysVObject(g.c) || idx < 0 || idx >= len(ep.exprs) {
+if !g.c.objectFile || !renvoObjectPairResult(g.c) || idx < 0 || idx >= len(ep.exprs) {
 return false
 }
 e := &ep.exprs[idx]
@@ -14241,13 +14229,14 @@ if !renvoEmitCObjectReverseRegisterStaticCall(g, importID, wordCount) {
 return false
 }
 size := renvoTypeSize(g.meta, fn.resultType)
+wordBytes := renvoObjectArgumentWordBytes(g.c)
 primarySize := size
-if primarySize > 8 {
-primarySize = 8
+if primarySize > wordBytes {
+primarySize = wordBytes
 }
 renvoAsmStorePrimaryStackSize(&g.asm, offset, primarySize)
-if size > 8 {
-renvoAsmStoreSecondaryStack(&g.asm, offset-8)
+if size > wordBytes {
+renvoAsmStoreSecondaryStack(&g.asm, offset-wordBytes)
 }
 return true
 }
@@ -14423,7 +14412,7 @@ word += callWords
 if word != wordCount {
 return false
 }
-if renvoFixedTarget == 0 && cObjectForeign && wordCount > renvoObjectArgumentRegisterCount(g.c) && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && cObjectForeign && wordCount > renvoObjectArgumentRegisterCount(g.c) && g.c.objectFile && renvoObjectRegisterScalarABI(g.c) {
 memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 if memoryAggregate >= 0 {
 return memoryAggregate != 0
@@ -14479,7 +14468,7 @@ return renvoEmitTargetPlatformIntrinsic(g, ep, e, fn)
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
 wordBytes := renvoObjectArgumentWordBytes(g.c)
-if !renvoIsSysVObject(g.c) || wordCount > renvoObjectArgumentRegisterCount(g.c) {
+if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || wordCount > renvoObjectArgumentRegisterCount(g.c) {
 return false
 }
 expectedWords := 0
@@ -14555,7 +14544,7 @@ return false
 
 func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 renvoNonNil(g, fn)
-if !renvoIsSysVObject(g.c) || wordCount != fn.paramCount || wordCount <= renvoObjectArgumentRegisterCount(g.c) {
+if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || wordCount != fn.paramCount || wordCount <= renvoObjectArgumentRegisterCount(g.c) {
 return false
 }
 for i := 0; i < fn.paramCount; i++ {
@@ -14986,7 +14975,7 @@ return true
 
 func renvoEmitCObjectFunctionPointerIntegerStackCall(g *renvoLinearGen, handleOffset int, argOffsets []int) bool {
 renvoNonNil(g)
-if !renvoIsSysVObject(g.c) || len(argOffsets) <= renvoObjectArgumentRegisterCount(g.c) || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
+if !g.c.objectFile || !renvoObjectRegisterScalarABI(g.c) || len(argOffsets) <= renvoObjectArgumentRegisterCount(g.c) || len(argOffsets) > renvoObjectWordLimit(g.c, false) {
 return false
 }
 return renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets)
@@ -15538,7 +15527,7 @@ renvoQueueStructuredHelper(g, renvoStructuredHelperFault, argument, label)
 return label
 }
 after := renvoAsmNewLabel(a)
-if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectFaultsTrap(g.c) {
 
 
 
@@ -15549,7 +15538,7 @@ renvoAsmJmpMarkLabel(a, after, label)
 renvoEmitUncaughtFaultHelperBody(g, outOfMemory)
 }
 renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectFaultsTrap(g.c) {
 renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_object_fault", label, after)
 }
 return label
@@ -19247,7 +19236,7 @@ renvoAsmJmpMarkLabel(a, after, label)
 renvoEmitSignedDivisionHelperBody(g, mod)
 renvoAsmMarkLabel(a, helperEnd)
 renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectHelperSymbols(g.c) {
 name := "__renvo_signed_divide"
 if mod {
 name = "__renvo_signed_remainder"
@@ -20032,7 +20021,7 @@ renvoAsmJmpMarkLabel(a, afterLabel, label)
 renvoEmitArenaAllocHelperBody(g, persistent)
 renvoAsmMarkLabel(a, helperEnd)
 renvoAsmMarkLabel(a, afterLabel)
-if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
+if renvoFixedTarget == 0 && g.c.objectFile && renvoObjectHelperSymbols(g.c) {
 name := "__renvo_arena_alloc"
 if persistent {
 name = "__renvo_persistent_alloc"
@@ -20053,7 +20042,7 @@ belowOrEqual = 0x96
 aboveOrEqual = 0x93
 }
 if renvoFixedTarget == 0 {
-if persistent && renvoIsSysVObject(g.c) {
+if persistent && g.c.objectFile && renvoObjectLazyArena(g.c) {
 
 
 
@@ -21493,7 +21482,7 @@ return true
 
 func renvoEmitObjectKernelLinkAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 renvoNonNil(g, ep)
-if !renvoIsSysVObject(g.c) {
+if !g.c.objectFile || !renvoObjectAbsoluteSymbols(g.c) {
 return false
 }
 nameStart, nameEnd, addend, ok := renvoObjectConstantPointerAddress(g, ep, idx)
@@ -21943,7 +21932,7 @@ renvoFinishObjectVariadicArgs(&g.asm)
 }
 if sret || smallAggregateResult {
 resultWords := 1
-if !sret && renvoTypeSize(g.meta, fn.resultType) > 8 {
+if !sret && renvoTypeSize(g.meta, fn.resultType) > renvoObjectArgumentWordBytes(g.c) {
 resultWords = 2
 }
 renvoFinishObjectAggregateResult(&g.asm, resultWords)
@@ -28999,7 +28988,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xb9\xc0\xfa\x44\x44\x05\x17\x89\x7a\x55\x08\x2a\x1e\x8e\xbc\x95\x6a\xc0\xa2\xa1\xaa\xe8\x21\x23\x0c\x58\x76\xad\xfa\x10\xbc\xb3", 3, true
+return "wasi/wasm32", "\xfa\x40\x0e\x85\xe6\x9e\xbd\x9d\xa1\x7c\x2c\xa8\x22\x15\x16\x48\xfb\x79\x0e\x3c\x2c\xbc\x1d\x30\x61\x9f\x15\xaa\x03\xb4\x77\x0c", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29011,7 +29000,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x84\xc7\x6d\x32\xfc\x0b\xa1\x2e\xf2\x82\xb7\x66\x39\xb4\x39\x55\x55\xda\x29\x10\x24\xd8\xdd\x03\x24\x0e\x08\xf6\x4d\x9a\x05\x13", 3, true
+return "vm/vm32", "\x87\x4c\xf3\xe2\xc1\x66\x07\xf4\x83\x5d\x64\x78\xbb\x2c\x54\x4e\xd2\xa2\x8a\x55\xbc\xaa\xb8\xd4\x82\x85\xc3\xd2\xc6\xfa\x56\x0c", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -29596,6 +29585,20 @@ p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
 }
 renvoParseProgramInto(src, &p)
 return p
+}
+
+
+
+const renvoObjectABIUnavailable = 0
+const renvoObjectABISysV = 1
+const renvoObjectABICdecl = 2
+
+func renvoIsSysVObject(c *renvoCompileContext) bool {
+return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
+}
+
+func renvoIsCdeclObject(c *renvoCompileContext) bool {
+return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
 }
 
 // source: backend/compiler_rtg_generated_impl.go
@@ -30398,6 +30401,78 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoObjectAbsoluteSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoObjectLazyArena(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoObjectFaultsTrap(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoObjectHelperSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoObjectPairResult(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
+}
+
+func renvoObjectRegisterScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+return renvoIsSysVObject(c)
+
+}
+return false
 }
 
 func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
@@ -46612,6 +46687,18 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49553,6 +49640,18 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52249,6 +52348,18 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53908,6 +54019,18 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -57177,6 +57300,18 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

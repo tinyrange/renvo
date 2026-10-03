@@ -98,6 +98,18 @@ func (op compilerEmitterOperation) failBody() string {
 // argument reconstruction only when the source compiler uses narrow integers.
 // Function-address layout describes object ABI storage, not function dispatch.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	// Allows shared symbolic pointer analysis to request absolute symbol-address emission.
+	{Name: "object_absolute_symbols", Suffix: "ObjectAbsoluteSymbols", Function: "renvoObjectAbsoluteSymbols", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Initializes persistent object arena bounds at first use when no process entry initializes them.
+	{Name: "object_lazy_arena", Suffix: "ObjectLazyArena", Function: "renvoObjectLazyArena", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Uses a bounded trap helper instead of a process-oriented uncaught-fault runtime.
+	{Name: "object_faults_trap", Suffix: "ObjectFaultsTrap", Function: "renvoObjectFaultsTrap", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Requests local function symbols around separately emitted runtime helper bodies.
+	{Name: "object_helper_symbols", Suffix: "ObjectHelperSymbols", Function: "renvoObjectHelperSymbols", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Allows a small integer aggregate result in the primary/secondary object word pair.
+	{Name: "object_pair_result", Suffix: "ObjectPairResult", Function: "renvoObjectPairResult", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
+	// Selects shared integer register/overflow-stack foreign-call planning; argument locations and calls are physical operations.
+	{Name: "object_register_scalar_abi", Suffix: "ObjectRegisterScalarABI", Function: "renvoObjectRegisterScalarABI", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
 	// Selects the shared stack-word scalar adapter: one word per parameter and
 	// an optional two-word scalar result. Physical locations remain target hooks.
 	{Name: "object_stack_scalar_abi", Suffix: "ObjectStackScalarABI", Function: "renvoObjectStackScalarABI", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsCdeclObject(c)"},

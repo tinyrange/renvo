@@ -4365,6 +4365,36 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoObjectAbsoluteSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoObjectLazyArena(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoObjectFaultsTrap(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoObjectHelperSymbols(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoObjectPairResult(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
+func renvoObjectRegisterScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoIsSysVObject(c)
+}
+
 func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return renvoIsCdeclObject(c)

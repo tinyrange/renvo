@@ -570,3 +570,17 @@ func renvoParseProgram(src []byte) renvoProgram {
 	renvoParseProgramInto(src, &p)
 	return p
 }
+
+// Compatibility classification for definition-owned object policies. Shared
+// language lowering queries individual capabilities rather than these ABI IDs.
+const renvoObjectABIUnavailable = 0
+const renvoObjectABISysV = 1
+const renvoObjectABICdecl = 2
+
+func renvoIsSysVObject(c *renvoCompileContext) bool {
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
+}
+
+func renvoIsCdeclObject(c *renvoCompileContext) bool {
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
+}
