@@ -7,11 +7,14 @@ func renvoStoreTargetConstant(c *renvoCompileContext, data []byte, offset int, s
 	if renvoFixedTarget != 0 {
 		target = renvoFixedTarget
 	}
-	profile, ok := renvoProfileForTarget(target)
-	if !ok {
-		return false
+	endian := 0
+	if target == renvoTargetRTG {
+		profile := renvoRTGProfileForTarget(target)
+		endian = profile.endian
+	} else if target > 0 && target < len(renvoTargetEndianTable) {
+		endian = int(renvoTargetEndianTable[target])
 	}
-	return renvoStoreIntegerBytes(data, offset, size, bits, profile.endian)
+	return renvoStoreIntegerBytes(data, offset, size, bits, endian)
 }
 
 func renvoStoreIntegerBytes(data []byte, offset int, size int, bits uint64, endian int) bool {

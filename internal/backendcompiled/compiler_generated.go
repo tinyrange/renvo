@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "5c59b5cc3656cd51f5c1b005b6511083149621099b8c006c8d9b0df7a82b9929"
+const CompilerSourceDigest = "74791130c046033ad051cbbc2bb1ff0c5df391a50dcc400fd22abbda0fb73be6"
 
 // source: backend/compiler_common_impl.go
 
@@ -28509,10 +28509,8 @@ target := context.renvoTarget
 if renvoFixedTarget != 0 {
 target = renvoFixedTarget
 }
-profile, ok := renvoProfileForTarget(target)
-if !ok {
-return context.renvoNativeIntSize
-}
+if target == renvoTargetRTG {
+profile := renvoRTGProfileForTarget(target)
 bits := profile.pointerBits
 if addressSpace == renvoPointerSpaceCode {
 bits = profile.codePointerBits
@@ -28520,7 +28518,21 @@ bits = profile.codePointerBits
 if addressSpace == renvoPointerSpaceFunction {
 bits = profile.funcPointerBits
 }
+if bits != 0 {
 return bits / 8
+}
+return context.renvoNativeIntSize
+}
+if target <= 0 || target >= len(renvoTargetPointerBitsTable) {
+return context.renvoNativeIntSize
+}
+if addressSpace == renvoPointerSpaceCode {
+return int(renvoTargetCodePointerBitsTable[target]) / 8
+}
+if addressSpace == renvoPointerSpaceFunction {
+return int(renvoTargetFunctionPointerBitsTable[target]) / 8
+}
+return int(renvoTargetPointerBitsTable[target]) / 8
 }
 
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {
@@ -29083,11 +29095,14 @@ target := c.renvoTarget
 if renvoFixedTarget != 0 {
 target = renvoFixedTarget
 }
-profile, ok := renvoProfileForTarget(target)
-if !ok {
-return false
+endian := 0
+if target == renvoTargetRTG {
+profile := renvoRTGProfileForTarget(target)
+endian = profile.endian
+} else if target > 0 && target < len(renvoTargetEndianTable) {
+endian = int(renvoTargetEndianTable[target])
 }
-return renvoStoreIntegerBytes(data, offset, size, bits, profile.endian)
+return renvoStoreIntegerBytes(data, offset, size, bits, endian)
 }
 
 func renvoStoreIntegerBytes(data []byte, offset int, size int, bits uint64, endian int) bool {
