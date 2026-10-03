@@ -1,11 +1,11 @@
 package main
 
-// RenvoEmitPureBlock lowers the RFE uint64 state-transform contract through the
+// renvoEmitPureBlock lowers the RFE uint64 state-transform contract through the
 // existing native emitters. The caller owns executable memory and invocation.
 // Each four-word record is (operation, left value, right value, immediate).
 // Values are SSA record indices; operations 0..11 match the documented RFE IR.
 // The native entry receives its state pointer in primary and makes no calls.
-func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool) {
+func renvoEmitPureBlock(records []int, stateWords int, context *renvoCompileContext) ([]byte, bool) {
 	if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 0 || len(records) > 8192 {
 		return nil, false
 	}
@@ -22,13 +22,6 @@ func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool
 			return nil, false
 		}
 	}
-	arch := renvoArchAmd64
-	if arm64 {
-		arch = renvoArchAarch64
-	}
-	// Do not allocate the whole-program emitter's multi-megabyte reserves for a
-	// small block. No global compiler options or legacy context are consulted.
-	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 	g := renvoLinearGen{c: context, stackPeak: (count + 1) * 8}
 	g.asm.c = context
 	g.asm.code = make([]byte, 0, count*32+64)
@@ -103,13 +96,11 @@ const renvoObjectABISysV = 1
 const renvoObjectABICdecl = 2
 
 func renvoIsSysVObject(c *renvoCompileContext) bool {
-	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		!targetIsKernelModule(c) && renvoTargetObjectCallABI(c) == renvoObjectABISysV
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
 }
 
 func renvoIsCdeclObject(c *renvoCompileContext) bool {
-	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		!targetIsKernelModule(c) && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
@@ -1637,10 +1628,7 @@ func renvoScan(src []byte, toks *renvoTokens) {
 	srcLen := len(src)
 	tokenCap := 524288
 	if renvoFixedTarget != 0 {
-		tokenCap = srcLen/4 + 8192
-		if renvoFixedTarget == renvoTargetWasiWasm32 {
-			tokenCap = srcLen/5 + 16384
-		}
+		tokenCap = renvoSourceTokenCapacity(renvoLegacyCompileContext(), srcLen)
 	}
 	toks.data = make([]int32, 0, tokenCap*renvoTokenStride)
 	i := 0
@@ -10131,7 +10119,7 @@ func renvoEmitLinearIncDec(g *renvoLinearGen, start int, end int) bool {
 		if globalOffset < 0 {
 			return false
 		}
-		if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 			globalType := renvoFindGlobalType(g, root.nameStart, root.nameEnd)
 			globalSize := renvoTypeSize(g.meta, globalType)
 			if globalSize < g.c.renvoNativeIntSize {
@@ -10971,7 +10959,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if assignTok <= stmt.startTok {
 		if globalOffset >= 0 {
 			renvoAsmPrimaryImm(a, 0)
-			if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 				globalType := renvoFindGlobalType(g, nameStart, nameEnd)
 				renvoAsmStorePrimaryBssSize(a, globalOffset, renvoTypeSize(meta, globalType))
 			} else {
@@ -11132,7 +11120,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 			}
 		}
 		if globalOffset >= 0 {
-			if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 				renvoAsmLoadPrimaryBssSize(a, globalOffset, renvoTypeSize(meta, targetType))
 			} else {
 				renvoAsmLoadPrimaryBss(a, globalOffset)
@@ -11150,7 +11138,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 		}
 		renvoAsmNormalizePrimaryForKind(a, targetResolved.kind)
 		if globalOffset >= 0 {
-			if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+			if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 				renvoAsmStorePrimaryBssSize(a, globalOffset, renvoTypeSize(meta, targetType))
 			} else {
 				renvoAsmStorePrimaryBss(a, globalOffset)
@@ -11233,7 +11221,7 @@ func renvoEmitLinearAssignCore(g *renvoLinearGen, stmt *renvoStmt) bool {
 		return false
 	}
 	if globalOffset >= 0 {
-		if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 			renvoAsmStorePrimaryBssSize(a, globalOffset, renvoTypeSize(meta, targetType))
 		} else {
 			renvoAsmStorePrimaryBss(a, globalOffset)
@@ -14337,7 +14325,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if fn.nameEnd > fn.nameStart+15 &&
 		renvo_runtime_UnsafeByteAt(g.prog.src, fn.nameStart+5) == '_' &&
 		renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "renvo_runtime_") {
-		if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 			result := renvoEmitRuntimePlatformIntrinsic(g, ep, e, fn)
 			if result >= 0 {
 				return result != 0
@@ -22628,7 +22616,7 @@ func renvoEmitKernelLinkAddressCall(g *renvoLinearGen, ep *renvoExprParse, idx i
 		return false
 	}
 	arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-	if (renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64) &&
+	if (renvoFixedTarget == 0 || renvoKernelProgram(g.c)) &&
 		renvoEmitObjectKernelLinkAddress(g, ep, arg) {
 		return true
 	}
@@ -22747,7 +22735,7 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		renvoLoadCompilerFixedTarget(g)
 		value := renvoFixedTargetUnknown
 		if g.fixedTargetState == 1 &&
-			g.fixedTargetValue >= renvoTargetLinuxAmd64 && g.fixedTargetValue <= renvoTargetNetBSDAmd64 {
+			g.fixedTargetValue > 0 && g.fixedTargetValue < len(targetArchTable) {
 			nameSize := e.nameEnd - e.nameStart
 			if nameSize >= 5 && renvoBytesEqualText(g.prog.src, e.nameStart, e.nameStart+5, "renvo") {
 				if nameSize == 15 {
@@ -25035,11 +25023,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 			renvoPrintErr("renvo: kernel metadata unavailable\n")
 			return 1
 		}
-		if target == renvoTargetLinuxKernelAmd64 {
-			renvoCaptureKernelCompileContext(context)
-		} else {
-			renvoPopulateKernelCompileContext(context)
-		}
+		renvoPopulateKernelCompileContext(context)
 		prog.c = *context
 	}
 	var meta renvoMeta
@@ -25150,7 +25134,7 @@ func renvoEmitAtomExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 					return true
 				}
 				renvoAsmLoadPrimaryBss(a, globalOffset)
-				if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+				if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 					globalType := renvoFindGlobalType(g, e.nameStart, e.nameEnd)
 					globalResolved := renvoResolveType(meta, globalType)
 					renvoNonNil(globalResolved)
@@ -25162,7 +25146,7 @@ func renvoEmitAtomExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return true
 		}
 		renvoAsmLoadPrimaryStack(a, g.locals[localIndex].offset)
-		if renvoFixedTarget == 0 || renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
+		if renvoFixedTarget == 0 || renvoKernelProgram(g.c) {
 			localResolved := renvoResolveType(meta, g.locals[localIndex].typ)
 			renvoNonNil(localResolved)
 			renvoAsmNormalizePrimaryForKind(a, localResolved.kind)
@@ -25341,7 +25325,7 @@ func renvoCompileSourceInputs(input []int, output int, arenaSize int) int {
 			renvoPrintErr("renvo: kernel metadata unavailable\n")
 			return 1
 		}
-		renvoCaptureKernelCompileContext(&prog.c)
+		renvoPopulateKernelCompileContext(&prog.c)
 	}
 	if !prog.ok {
 		return 1
