@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		reset_program_emission = renvoWasm32CompilerResetProgramEmission
 		function_address_layout = renvoWasm32CompilerFunctionAddressLayout
 		reconstruct_wide_argument = renvoWasm32CompilerReconstructWideArgument
 		scaled_atom_literals = renvoWasm32CompilerScaledAtomLiterals
@@ -7041,5 +7042,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerFunctionAddressLayout(c *renvoCompileContext) bool {
 		return renvoFixedTarget == 0 && c.objectFile
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerResetProgramEmission(g *renvoLinearGen) {
+
 	}
 }

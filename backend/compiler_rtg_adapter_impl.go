@@ -464,15 +464,6 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 	renvoRTGDirectCopyBytes(&g.asm)
 }
 
-func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	renvoRTGUnsupportedOperation = 0
-	renvoRTGFailureDetail = -1
-	renvoRTGImageLimitMemory = false
-	renvoRTGImageLimitNeeded = 0
-	renvoRTGImageLimit = 0
-	return renvoTryCompileScalarProgramScratch(p, meta)
-}
-
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
 	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 	if reserve {
@@ -519,7 +510,7 @@ func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
 }
 
 func renvoTryCompileObjectProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	return renvoTryCompileScalarProgramRTG(p, meta)
+	return renvoTryCompileScalarProgramScratch(p, meta)
 }
 
 func renvoRTGReportFailure(g *renvoLinearGen) {

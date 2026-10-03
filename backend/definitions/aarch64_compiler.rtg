@@ -392,6 +392,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		reset_program_emission = renvoAarch64CompilerResetProgramEmission
 		function_address_layout = renvoAarch64CompilerFunctionAddressLayout
 		reconstruct_wide_argument = renvoAarch64CompilerReconstructWideArgument
 		scaled_atom_literals = renvoAarch64CompilerScaledAtomLiterals
@@ -3521,5 +3522,11 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerFunctionAddressLayout(c *renvoCompileContext) bool {
 		return renvoFixedTarget == 0 && c.objectFile
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerResetProgramEmission(g *renvoLinearGen) {
+
 	}
 }

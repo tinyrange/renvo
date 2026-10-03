@@ -805,6 +805,20 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoResetProgramEmission(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+
+	
+return
+
+}
+g.asm.patchFailed = true
+}
+
 func renvoFunctionAddressLayout(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
