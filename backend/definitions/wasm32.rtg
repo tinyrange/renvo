@@ -4154,6 +4154,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		repl_globals_supported = renvoWasm32CompilerReplGlobalsSupported
+		profile_float_model = renvoWasm32CompilerProfileFloatModel
 		syscall_argument_policy = renvoWasm32CompilerSyscallArgumentPolicy
 		jit_call_supported = renvoWasm32CompilerJITCallSupported
 		open_flag = renvoWasm32CompilerOpenFlag
@@ -7252,5 +7254,20 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerSyscallArgumentPolicy(c *renvoCompileContext) int {
 		return 1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerProfileFloatModel(c *renvoCompileContext) int {
+		if c.renvoTargetOS == renvoOSVM {
+			return renvoFloatIEEESoft
+		}
+		return renvoFloatIEEEHardware
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerReplGlobalsSupported(c *renvoCompileContext) bool {
+		return false
 	}
 }

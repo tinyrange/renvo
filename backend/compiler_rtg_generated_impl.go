@@ -828,6 +828,38 @@ return false
 func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
 }
 
+func renvoReplGlobalsSupported(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return true
+	
+}
+return false
+}
+
+func renvoCompilerProfileFloatModel(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return renvoFloatIEEEHardware
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if c.renvoTargetOS == renvoOSVM {
+			return renvoFloatIEEESoft
+		}
+		return renvoFloatIEEEHardware
+	
+}
+return 0
+}
+
 func renvoSyscallArgumentPolicy(c *renvoCompileContext) int {
 renvoNonNil(c)
 renvoCompilerSelector := c

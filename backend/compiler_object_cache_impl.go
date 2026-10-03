@@ -581,7 +581,7 @@ func renvoStoreFunctionObject(g *renvoLinearGen, fnIndex int, keyA int, keyB int
 }
 
 func renvoEmitScalarFunctionObjectCached(g *renvoLinearGen, fnIndex int) bool {
-	if len(renvoObjectCacheEntries) == 0 || g.c.renvoTargetArch == renvoArchWasm32 || !g.c.stripSymbols {
+	if len(renvoObjectCacheEntries) == 0 || !renvoProgramCacheSupported(g.c) || !g.c.stripSymbols {
 		return renvoEmitScalarFunctionScratch(g, fnIndex)
 	}
 	// A direct-mapped cache smaller than the function graph cannot retain one

@@ -25,7 +25,7 @@ func TestPolicyProjectionKeepsIndependentDescriptorFacts(t *testing.T) {
 		// Same identity numbers, deliberately different independent layout.
 		{Name: "unfamiliar/segmented", Constant: "unfamiliar", BackendID: 2, OSID: 1, ISAID: 1,
 			WordBits: 32, PointerBits: 16, CodePointerBits: 24, FunctionPointerBits: 32,
-			MaxAlign: 256, Endian: "big", DefaultArena: 8192, Runtime: []string{"print"}},
+			MaxAlign: 256, Endian: "big", DefaultArena: 8192, Runtime: []string{"print"}, Capabilities: []string{"kernel_module"}},
 	}
 	path := filepath.Join(t.TempDir(), "policy.go")
 	source := "package policy\n// BEGIN GENERATED TARGET REGISTRY\n// END GENERATED TARGET REGISTRY\n"
@@ -50,13 +50,26 @@ func TestPolicyProjectionKeepsIndependentDescriptorFacts(t *testing.T) {
 	}
 	for name, want := range map[string]int{
 		"IntBits": 32, "PointerBits": 16, "CodePointerBits": 24,
-		"FunctionPointerBits": 32, "Endian": 2, "RuntimeCaps": 1,
+		"FunctionPointerBits": 32, "Endian": 2, "RuntimeCaps": 1, "KernelModule": 1,
 	} {
 		value := pkg.Scope().Lookup("renvoTarget" + name + "Table").(*types.Const).Val()
 		table := constant.StringVal(value)
 		if len(table) != 3 || int(table[2]) != want {
 			t.Errorf("%s = %q, want descriptor value %d at selector 2", name, table, want)
 		}
+	}
+	for name, want := range map[string]int64{
+		"renvoTargetRTG": 3, "renvoContextDefaultTarget": 1, "renvoContextDefaultTargetOS": 1,
+		"renvoContextDefaultTargetArch": 1, "renvoContextDefaultTargetIntSize": 8,
+	} {
+		value := pkg.Scope().Lookup(name).(*types.Const).Val()
+		if got, ok := constant.Int64Val(value); !ok || got != want {
+			t.Errorf("%s = %v, want %d", name, value, want)
+		}
+	}
+	kernel := constant.StringVal(pkg.Scope().Lookup("renvoTargetKernelModuleTable").(*types.Const).Val())
+	if kernel[1] != 0 {
+		t.Fatal("familiar identity acquired an undeclared kernel capability")
 	}
 	// These fields are not bytes: alignment must not wrap at 256 and an arena
 	// must not be recomputed from the word size or the familiar ISA identity.
