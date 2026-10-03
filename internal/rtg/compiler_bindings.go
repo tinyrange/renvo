@@ -259,24 +259,37 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		out = append(out, operation.Suffix...)
 		out = append(out, operation.signature()...)
 		out = append(out, " {\nrenvoNonNil(a)\n"...)
+		// Share only byte-identical emitted bodies. Every selector remains explicit,
+		// so this neither invents an ISA family nor supplies an unknown-target default.
+		var bodies []string
+		var conditions []string
 		for j := 0; j < len(architectures); j++ {
-			out = append(out, "if a.c.renvoTargetArch == "...)
-			out = append(out, selectors[j]...)
-			out = append(out, " {\n"...)
 			hook := compilerBindingHook(architectures[j], operation.Name)
 			function, _ := findEmbeddedFunctionKind(documents[j], hook, "compiler")
 			project := compilerBindingCanProject(function, operation)
+			body := hook + operation.arguments()
 			if project {
-				out = append(out, function.Body...)
-			} else {
-				out = append(out, hook...)
-				out = append(out, operation.arguments()...)
+				body = string(function.Body)
 			}
 			// Do not create unreachable consecutive returns: the compact source
 			// compiler admits a bare return only at its block termination.
 			if !project || !function.EndsInReturn {
-				out = append(out, "\nreturn\n"...)
+				body += "\nreturn\n"
 			}
+			condition := "a.c.renvoTargetArch == " + selectors[j]
+			group := stringIndex(bodies, body)
+			if group < 0 {
+				bodies = append(bodies, body)
+				conditions = append(conditions, condition)
+			} else {
+				conditions[group] += " || " + condition
+			}
+		}
+		for j := 0; j < len(bodies); j++ {
+			out = append(out, "if "...)
+			out = append(out, conditions[j]...)
+			out = append(out, " {\n"...)
+			out = append(out, bodies[j]...)
 			out = append(out, "\n}\n"...)
 		}
 		out = append(out, "a.patchFailed = true\n}\n"...)
