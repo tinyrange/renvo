@@ -805,6 +805,26 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoSourceTokenCapacity(c *renvoCompileContext, length int) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return length/4 + 8192
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if renvoFixedTarget == renvoTargetWasiWasm32 {
+			return length/5 + 16384
+		}
+		return length/4 + 8192
+	
+}
+return 0
+}
+
 func renvoSourceSoftFloat(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c
@@ -3056,11 +3076,17 @@ renvoCompilerSelector := c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
+		if c.renvoTargetOS != renvoOSLinux || targetIsKernelModule(c) {
+			return renvoObjectABIUnavailable
+		}
 		return renvoObjectABISysV
 	
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
+		if c.renvoTargetOS != renvoOSLinux || targetIsKernelModule(c) {
+			return renvoObjectABIUnavailable
+		}
 		return renvoObjectABICdecl
 	
 }

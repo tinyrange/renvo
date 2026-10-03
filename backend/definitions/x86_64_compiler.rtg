@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		source_token_capacity = renvoAmd64CompilerSourceTokenCapacity
 		source_soft_float = renvoAmd64CompilerSourceSoftFloat
 		source_scratch = renvoAmd64CompilerSourceScratch
 		source_capacity = renvoAmd64CompilerSourceCapacity
@@ -3635,6 +3636,9 @@ go compiler {
 
 go compiler {
 	func renvoAmd64CompilerObjectCallABI(c *renvoCompileContext) int {
+		if c.renvoTargetOS != renvoOSLinux || targetIsKernelModule(c) {
+			return renvoObjectABIUnavailable
+		}
 		return renvoObjectABISysV
 	}
 }
@@ -4366,5 +4370,11 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerSourceSoftFloat(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
+		return length/4 + 8192
 	}
 }

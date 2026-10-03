@@ -2114,6 +2114,11 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoSourceTokenCapacity(c *renvoCompileContext, length int) int {
+renvoNonNil(c)
+return length/4 + 8192
+}
+
 func renvoSourceSoftFloat(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return false
@@ -2529,7 +2534,7 @@ return renvoRTGObjectRegisterCount()
 
 func renvoTargetObjectCallABI(c *renvoCompileContext) int {
 renvoNonNil(c)
-if renvoRTGPreparedSysVX8664 != 0 {
+if renvoRTGPreparedSysVX8664 != 0 && c.renvoTargetOS == renvoOSLinux && !targetIsKernelModule(c) {
 	return renvoObjectABISysV
 }
 return renvoObjectABIUnavailable

@@ -486,6 +486,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		source_token_capacity = renvoArmCompilerSourceTokenCapacity
 		source_soft_float = renvoArmCompilerSourceSoftFloat
 		source_scratch = renvoArmCompilerSourceScratch
 		source_capacity = renvoArmCompilerSourceCapacity
@@ -3045,5 +3046,11 @@ go compiler {
 go compiler {
 	func renvoArmCompilerSourceSoftFloat(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
+		return length/4 + 8192
 	}
 }

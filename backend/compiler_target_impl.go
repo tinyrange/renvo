@@ -374,12 +374,12 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 1 {
-		if s.target == renvoTargetLinuxKernelAmd64 && !s.context.objectFile {
+		if renvoKernelProgram(s.context) && !s.context.objectFile {
 			if !renvoPrepareKernelMetadata(s.context) {
 				s.done = true
 				return true
 			}
-			renvoCaptureKernelCompileContext(s.context)
+			renvoPopulateKernelCompileContext(s.context)
 			s.prog.c = *s.context
 		}
 		s.meta = new(renvoMeta)
@@ -435,19 +435,11 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	if !prog.ok {
 		return result
 	}
-	if !prog.c.objectFile && (target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
-		renvoRTGPreparedKernelModule != 0) {
+	if renvoKernelProgram(&prog.c) && !prog.c.objectFile {
 		if !renvoPrepareKernelMetadata(&prog.c) {
 			return result
 		}
-		if target == renvoTargetLinuxKernelAmd64 {
-			prog.c.renvoTarget = renvoTargetLinuxKernelAmd64
-			prog.c.renvoTargetOS = renvoOSLinux
-			prog.c.renvoTargetArch = renvoArchAmd64
-			prog.c.renvoNativeIntSize = 8
-		} else {
-			renvoPopulateKernelCompileContext(&prog.c)
-		}
+		renvoPopulateKernelCompileContext(&prog.c)
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
@@ -555,4 +547,17 @@ func renvoSetKernelLicense(license string) {
 	if license != "" {
 		renvoKernelLicense = license
 	}
+}
+
+// RenvoEmitPureBlock preserves the public two-native-target RFE adapter. The
+// record validation and lowering are target-neutral and take an explicit context.
+func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool) {
+	arch := renvoArchAmd64
+	if arm64 {
+		arch = renvoArchAarch64
+	}
+	// Do not allocate the whole-program emitter's multi-megabyte reserves for a
+	// small block. No global compiler options or legacy context are consulted.
+	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	return renvoEmitPureBlock(records, stateWords, context)
 }

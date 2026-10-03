@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		source_token_capacity = renvoWasm32CompilerSourceTokenCapacity
 		source_soft_float = renvoWasm32CompilerSourceSoftFloat
 		source_scratch = renvoWasm32CompilerSourceScratch
 		source_capacity = renvoWasm32CompilerSourceCapacity
@@ -6794,5 +6795,14 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerSourceSoftFloat(c *renvoCompileContext) bool {
 		return c.renvoTarget == renvoTargetVM32
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
+		if renvoFixedTarget == renvoTargetWasiWasm32 {
+			return length/5 + 16384
+		}
+		return length/4 + 8192
 	}
 }
