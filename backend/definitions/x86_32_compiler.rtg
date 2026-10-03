@@ -1300,6 +1300,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		named_function_address = renvo386CompilerNamedFunctionAddress
+		address_taken_local = renvo386CompilerAddressTakenLocal
+		address_result_buffer = renvo386CompilerAddressResultBuffer
 		load_indirect_field_value = renvo386CompilerLoadIndirectFieldValue
 		load_frame_field_value = renvo386CompilerLoadFrameFieldValue
 		direct_slice_count_selector = renvo386CompilerDirectSliceCountSelector
@@ -4641,5 +4644,23 @@ go compiler {
 go compiler {
 	func renvo386CompilerLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
 		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAddressResultBuffer(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAddressTakenLocal(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvo386CompilerNamedFunctionAddress(g *renvoLinearGen) bool {
+		return false
 	}
 }

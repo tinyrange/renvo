@@ -14241,11 +14241,7 @@ func renvoEmitStructCallToLocal(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 	if fnIndex < 0 {
 		return false
 	}
-	if renvoPreparedBackendActive != 0 {
-		renvoAsmAddressPrimaryStack(&g.asm, offset)
-	} else {
-		renvoAsmStackMem(&g.asm, offset, 0x8d48, 0x45, 0x85)
-	}
+	renvoAsmAddressResultBuffer(&g.asm, offset)
 	renvoAsmPushPrimary(&g.asm)
 	renvoEmitCallWithWordCount(g, fnIndex, wordCount)
 	return true
@@ -19641,6 +19637,53 @@ func renvoEmitScalarSelectorExpr(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	return true
 }
 
+// renvoEmitUnaryExpr keeps address resolution, capture handling, and pointer
+// invalidation in shared lowering; definitions select address emission support.
+func renvoEmitUnaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	p := g.prog
+	a := &g.asm
+	e := &ep.exprs[idx]
+	if !renvoTokCharIs(p, e.tok, '&') {
+		return renvoEmitUnaryValueExpr(g, ep, idx)
+	}
+	inner := &ep.exprs[e.left]
+	if inner.kind == renvoExprUnary && renvoTokCharIs(p, inner.tok, '*') {
+		if !renvoEmitIntExpr(g, ep, inner.left) {
+			return false
+		}
+		renvoEmitRuntimeNonNilPrimary(g)
+		return true
+	}
+	if inner.kind == renvoExprIdent {
+		localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
+		if localIndex >= 0 {
+			renvoInvalidateCheckedPointerLocal(g, localIndex)
+			if g.locals[localIndex].captureOff > 0 {
+				renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
+			} else {
+				renvoAsmAddressTakenLocal(a, g.locals[localIndex].offset)
+			}
+			return true
+		}
+		globalOffset := renvoFindGlobalOffset(g, inner.nameStart, inner.nameEnd)
+		if globalOffset >= 0 {
+			renvoAsmPrimaryBssAddr(a, globalOffset)
+			return true
+		}
+		if renvoCanTakeNamedFunctionAddress(g) {
+			fnIndex := renvoFindMetaFunction(g.meta, inner.nameStart, inner.nameEnd)
+			if fnIndex >= 0 && renvoIsHostedObject(g.c) {
+				return renvoEmitObjectFunctionAddress(g, fnIndex)
+			}
+		}
+		return false
+	}
+	if inner.kind == renvoExprSelector || inner.kind == renvoExprIndex {
+		return renvoEmitAddressPrimary(g, ep, e.left)
+	}
+	return false
+}
+
 func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	p := g.prog
 	a := &g.asm
@@ -19710,41 +19753,7 @@ func renvoEmitWideIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		return renvoEmitScalarSelectorExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary {
-		if renvoTokCharIs(p, e.tok, '&') {
-			inner := &ep.exprs[e.left]
-			if inner.kind == renvoExprUnary && renvoTokCharIs(p, inner.tok, '*') {
-				if !renvoEmitIntExpr(g, ep, inner.left) {
-					return false
-				}
-				renvoEmitRuntimeNonNilPrimary(g)
-				return true
-			}
-			if inner.kind == renvoExprIdent {
-				localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
-				if localIndex >= 0 {
-					renvoInvalidateCheckedPointerLocal(g, localIndex)
-					if g.locals[localIndex].captureOff > 0 {
-						renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
-					} else if renvoPreparedBackendActive != 0 {
-						renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
-					} else {
-						renvoAsmStackMem(a, g.locals[localIndex].offset, 0x8d48, 0x45, 0x85)
-					}
-					return true
-				}
-				globalOffset := renvoFindGlobalOffset(g, inner.nameStart, inner.nameEnd)
-				if globalOffset >= 0 {
-					renvoAsmPrimaryBssAddr(a, globalOffset)
-					return true
-				}
-				return false
-			}
-			if inner.kind == renvoExprSelector || inner.kind == renvoExprIndex {
-				return renvoEmitAddressPrimary(g, ep, e.left)
-			}
-			return false
-		}
-		return renvoEmitUnaryValueExpr(g, ep, idx)
+		return renvoEmitUnaryExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprBinary {
 		if result := renvoEmitNonWordBinaryExpr(g, ep, idx); result >= 0 {
@@ -24461,43 +24470,7 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 		return renvoEmitScalarSelectorExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary {
-		if renvoTokCharIs(p, e.tok, '&') {
-			inner := &ep.exprs[e.left]
-			if inner.kind == renvoExprUnary && renvoTokCharIs(p, inner.tok, '*') {
-				if !renvoEmitIntExpr(g, ep, inner.left) {
-					return false
-				}
-				renvoEmitRuntimeNonNilPrimary(g)
-				return true
-			}
-			if inner.kind == renvoExprIdent {
-				localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
-				if localIndex >= 0 {
-					renvoInvalidateCheckedPointerLocal(g, localIndex)
-					if g.locals[localIndex].captureOff > 0 {
-						renvoAsmLoadPrimaryStack(a, g.locals[localIndex].captureOff)
-					} else {
-						renvoAsmAddressPrimaryStack(a, g.locals[localIndex].offset)
-					}
-					return true
-				}
-				globalOffset := renvoFindGlobalOffset(g, inner.nameStart, inner.nameEnd)
-				if globalOffset >= 0 {
-					renvoAsmPrimaryBssAddr(a, globalOffset)
-					return true
-				}
-				fnIndex := renvoFindMetaFunction(meta, inner.nameStart, inner.nameEnd)
-				if fnIndex >= 0 && renvoIsHostedObject(g.c) {
-					return renvoEmitObjectFunctionAddress(g, fnIndex)
-				}
-				return false
-			}
-			if inner.kind == renvoExprSelector || inner.kind == renvoExprIndex {
-				return renvoEmitAddressPrimary(g, ep, e.left)
-			}
-			return false
-		}
-		return renvoEmitUnaryValueExpr(g, ep, idx)
+		return renvoEmitUnaryExpr(g, ep, idx)
 	}
 	if e.kind == renvoExprBinary {
 		opStart := int(renvoTokStart(p, e.tok))
