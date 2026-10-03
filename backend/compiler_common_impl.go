@@ -17436,7 +17436,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoAsmStringCompareArguments(a, leftOff, rightOff)
+		renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
 		renvoAsmCallLabel(a, label)
 		if notEqual {
 			renvoAsmBoolNotPrimary(a)
@@ -17455,7 +17455,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoAsmStringCompareArguments(a, leftOff, rightOff)
+		renvoAsmStringCompareArguments(a, leftOff, leftOff-renvoBackendValueSlotSize, rightOff, rightOff-renvoBackendValueSlotSize)
 		renvoAsmCallLabel(a, label)
 		if notEqual {
 			renvoAsmBoolNotPrimary(a)
@@ -17524,7 +17524,7 @@ func renvoEmitCompositeCompareAt(g *renvoLinearGen, typ int, left int, right int
 		return
 	}
 	if t.kind == renvoTypeString {
-		renvoAsmStringCompareArguments(a, left, right)
+		renvoAsmStringCompareArguments(a, left, left-renvoBackendValueSlotSize, right, right-renvoBackendValueSlotSize)
 		renvoAsmCallLabel(a, renvoEnsureStringEqualHelper(g))
 	} else if t.kind == renvoTypeComplex64 {
 		renvoEmit32IEEECompareStack(g, left, right, renvoTypeFloat32, '=', '=')
@@ -21947,15 +21947,15 @@ func renvoEmitObjectRegisterWrapperBody(g *renvoLinearGen, fnIndex int, wordCoun
 	sret := renvoObjectExportUsesSRet(g.meta, fn)
 	smallAggregateResult := renvoObjectExportUsesSmallAggregateResult(g.meta, fn)
 	memoryAggregate := renvoObjectExportHasMemoryAggregate(g.meta, fn)
-	if variadic && (wordCount < 1 || wordCount > 7 || renvoPreparedBackendActive != 0 || sret || smallAggregateResult) ||
-		renvoPreparedBackendActive != 0 && (wordCount > renvoRTGObjectRegisterCount() && !sret || wordCount > renvoRTGObjectRegisterCount()-1 && sret || memoryAggregate) {
-		return false
-	}
-	renvoObjectExportFrame(g, true)
 	registerWords := renvoObjectArgumentRegisterCount(g.c)
 	if sret {
 		registerWords--
 	}
+	if variadic && (wordCount < 1 || wordCount > renvoObjectVariadicWordLimit(g.c) || sret || smallAggregateResult) ||
+		!renvoObjectStackArguments(g.c) && (wordCount > registerWords || memoryAggregate) {
+		return false
+	}
+	renvoObjectExportFrame(g, true)
 	if !variadic && (wordCount > registerWords || memoryAggregate) {
 		renvoBeginObjectStackArgs(&g.asm)
 	}
@@ -24419,10 +24419,7 @@ func renvoEmitSwitchStringCaseTest(g *renvoLinearGen, valueOffset int, lenOffset
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(a, caseOff, caseOff-renvoBackendValueSlotSize)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, valueOffset)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, lenOffset)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, caseOff)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, caseOff-renvoBackendValueSlotSize)
+		renvoAsmStringCompareArguments(a, valueOffset, lenOffset, caseOff, caseOff-renvoBackendValueSlotSize)
 		renvoAsmCallLabel(a, label)
 		renvoAsmCmpPrimaryImm8(a, 0)
 		renvoAsmJnzLabel(a, matchLabel)

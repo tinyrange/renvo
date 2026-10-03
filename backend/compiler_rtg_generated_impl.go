@@ -805,15 +805,39 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
-func renvoAsmStringCompareArguments(a *renvoAsm, left int, right int) {
+func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return 7
+	
+}
+return 0
+}
+
+func renvoObjectStackArguments(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return true
+	
+}
+return false
+}
+
+func renvoAsmStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 
-		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+		renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
 		renvoAsmPushStringRegs(a)
-		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
 		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmPopCallWord0(a)

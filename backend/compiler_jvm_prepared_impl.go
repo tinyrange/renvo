@@ -4365,12 +4365,22 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
-func renvoAsmStringCompareArguments(a *renvoAsm, left int, right int) {
+func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
+renvoNonNil(c)
+return 0
+}
+
+func renvoObjectStackArguments(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoAsmStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
 renvoNonNil(a)
 renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, left)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, left-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, leftLength)
 renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, right)
-renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, right-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, rightLength)
 }
 
 func renvoAsmObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {

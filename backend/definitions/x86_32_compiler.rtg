@@ -952,6 +952,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		object_variadic_word_limit = renvo386CompilerObjectVariadicWordLimit
+		object_stack_arguments = renvo386CompilerObjectStackArguments
 		string_compare_arguments = renvo386CompilerStringCompareArguments
 		object_absolute_address = renvo386CompilerObjectAbsoluteAddress
 		object_fault_trap = renvo386CompilerObjectFaultTrap
@@ -5061,13 +5063,25 @@ go compiler {
 }
 
 go compiler {
-	func renvo386CompilerStringCompareArguments(a *renvoAsm, left int, right int) {
-		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+	func renvo386CompilerStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
 		renvoAsmPushStringRegs(a)
-		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
 		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmPopCallWord0(a)
 		renvoAsmPopCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectStackArguments(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
+		return 0
 	}
 }

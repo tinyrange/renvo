@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_variadic_word_limit = renvoWasm32CompilerObjectVariadicWordLimit
+		object_stack_arguments = renvoWasm32CompilerObjectStackArguments
 		string_compare_arguments = renvoWasm32CompilerStringCompareArguments
 		object_absolute_address = renvoWasm32CompilerObjectAbsoluteAddress
 		object_fault_trap = renvoWasm32CompilerObjectFaultTrap
@@ -6844,13 +6846,25 @@ go compiler {
 }
 
 go compiler {
-	func renvoWasm32CompilerStringCompareArguments(a *renvoAsm, left int, right int) {
-		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+	func renvoWasm32CompilerStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
 		renvoAsmPushStringRegs(a)
-		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
 		renvoAsmCopySecondaryToTertiary(a)
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmPopCallWord0(a)
 		renvoAsmPopCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectStackArguments(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
+		return 0
 	}
 }
