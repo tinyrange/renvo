@@ -696,6 +696,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		discard_arena_pages = renvoArmCompilerDiscardArenaPages
+		arena_discard_supported = renvoArmCompilerArenaDiscardSupported
 		write_value_regs = renvoArmCompilerWriteValueRegs
 		exit_status = renvoArmCompilerExitStatus
 		syscall_from_stack = renvoArmCompilerSyscallFromStack
@@ -2941,5 +2943,17 @@ go compiler {
 		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerArenaDiscardSupported(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
+		a.patchFailed = true
 	}
 }

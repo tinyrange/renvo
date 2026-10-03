@@ -977,6 +977,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		discard_arena_pages = renvoAmd64CompilerDiscardArenaPages
+		arena_discard_supported = renvoAmd64CompilerArenaDiscardSupported
 		write_value_regs = renvoAmd64CompilerWriteValueRegs
 		exit_status = renvoAmd64CompilerExitStatus
 		syscall_from_stack = renvoAmd64CompilerSyscallFromStack
@@ -1845,7 +1847,10 @@ go compiler {
 	func renvoAmd64CompilerGlobalInitFrameStart(g *renvoLinearGen) int {
 		a := &g.asm
 		framePatch := len(a.code)
-		renvoAsmEmit32(a, 0x000000c8)
+		// Unlike ENTER's imm16, this reservation covers the complete peak
+		// frame of large aggregate initializers without truncating it.
+		renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec")
+		renvoAsmEmit32(a, 0)
 		return framePatch
 	}
 
@@ -1855,11 +1860,13 @@ go compiler {
 			return
 		}
 		frame := renvoAlignValue(g.stackPeak, 16)
-		if frame > 65520 {
-			frame = 65520
+		if frame < 0 || frame > 2147483647 {
+			g.asm.patchFailed = true
+			return
 		}
-		g.asm.code[framePatch+1] = byte(frame & 255)
-		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+		for i := 0; i < 4; i++ {
+			g.asm.code[framePatch+7+i] = byte(frame >> uint(i*8))
+		}
 	}
 
 	func renvoAmd64CompilerIEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
@@ -4246,5 +4253,52 @@ go compiler {
 		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
 		renvoAsmSyscall(a)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerArenaDiscardSupported(c *renvoCompileContext) bool {
+		return c.renvoTargetOS == renvoOSLinux
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmLoadPrimaryStack(a, startOff)
+		renvoAmd64AsmAddRaxImm32(a, 4095)
+		renvoAmd64AsmAndRaxImm32(a, -4096)
+		renvoAsmStorePrimaryStack(a, startOff)
+		renvoAsmLoadPrimaryStack(a, endOff)
+		renvoAmd64AsmAndRaxImm32(a, -4096)
+		renvoAsmLoadTertiaryStack(a, startOff)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, lenOff)
+		renvoAsmCmpPrimaryImm8(a, 0)
+		renvoAmd64AsmJccLabel(a, 0x8e, doneLabel)
+		renvoAsmLoadPrimaryStack(a, startOff)
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmLoadPrimaryStack(a, lenOff)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmSecondaryImm(a, 4)
+		renvoAsmPrimaryImm(a, 28)
+		renvoAsmSyscall(a)
+		renvoAsmMarkLabel(a, doneLabel)
+	}
+}
+
+go compiler {
+	func renvoAmd64AsmAddRaxImm32(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoAsmEmit16(a, 0x0548)
+		renvoAsmEmit32(a, imm)
+	}
+}
+
+go compiler {
+	func renvoAmd64AsmAndRaxImm32(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvoAsmEmit16(a, 0x2548)
+		renvoAsmEmit32(a, imm)
 	}
 }
