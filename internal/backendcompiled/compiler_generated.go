@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "793a25970d63a57a5e89b2585da0a444925f7307c4e6f3cc2cee57d817a78cc2"
+const CompilerSourceDigest = "78d4a55bc2c4ab7d5243188db0c31095ce3e2cca8ba6cabcb98c0fd7801409ae"
 
 // source: backend/compiler_common_impl.go
 
@@ -6920,10 +6920,10 @@ align = m.types[t.elem].nativeAlign
 
 
 
-size = m.c.renvoNativeIntSize
+size = renvoTargetAddressSize(m.c, renvoPointerAddressSpace(m, typ))
 align = renvoNativeAlignment(m.c, size)
 } else if t.kind == renvoTypeFunc && renvoFunctionAddressLayout(m.c) {
-size = m.c.renvoNativeIntSize
+size = renvoTargetAddressSize(m.c, renvoPointerSpaceFunction)
 align = renvoNativeAlignment(m.c, size)
 }
 if align < 1 {
@@ -28512,6 +28512,27 @@ if alignment != 0 {
 return alignment
 }
 return context.renvoNativeIntSize
+}
+
+
+
+func renvoTargetAddressSize(context *renvoCompileContext, addressSpace int) int {
+target := context.renvoTarget
+if renvoFixedTarget != 0 {
+target = renvoFixedTarget
+}
+profile, ok := renvoProfileForTarget(target)
+if !ok {
+return context.renvoNativeIntSize
+}
+bits := profile.pointerBits
+if addressSpace == renvoPointerSpaceCode {
+bits = profile.codePointerBits
+}
+if addressSpace == renvoPointerSpaceFunction {
+bits = profile.funcPointerBits
+}
+return bits / 8
 }
 
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {

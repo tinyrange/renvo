@@ -282,6 +282,27 @@ func renvoTargetMaxAlignment(context *renvoCompileContext) int {
 	return context.renvoNativeIntSize
 }
 
+// renvoTargetAddressSize reads an address-space width independently of the
+// language integer width. Compiler value slots remain a separate carrier ABI.
+func renvoTargetAddressSize(context *renvoCompileContext, addressSpace int) int {
+	target := context.renvoTarget
+	if renvoFixedTarget != 0 {
+		target = renvoFixedTarget
+	}
+	profile, ok := renvoProfileForTarget(target)
+	if !ok {
+		return context.renvoNativeIntSize
+	}
+	bits := profile.pointerBits
+	if addressSpace == renvoPointerSpaceCode {
+		bits = profile.codePointerBits
+	}
+	if addressSpace == renvoPointerSpaceFunction {
+		bits = profile.funcPointerBits
+	}
+	return bits / 8
+}
+
 func renvoProfileHasRuntime(p renvoTargetProfile, capability int) bool {
 	return p.runtimeCaps&capability == capability
 }
