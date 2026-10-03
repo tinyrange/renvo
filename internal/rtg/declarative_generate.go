@@ -591,43 +591,78 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 			if fnName != name || fn.ReceiverStart >= 0 {
 				continue
 			}
-			start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
-			end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
-			signature := make([]byte, end-start)
-			copy(signature, wrapped[start:end])
-			for len(signature) > 0 && (signature[len(signature)-1] == ' ' ||
-				signature[len(signature)-1] == '\t' || signature[len(signature)-1] == '\n' ||
-				signature[len(signature)-1] == '\r') {
-				signature = signature[:len(signature)-1]
-			}
-			// Labels have function scope, unlike switch cases, keyed literals,
-			// and slices. Use the statement parser rather than colon tokens.
-			// If a body cannot be classified, conservatively keep its call.
-			body := syntax.ParseFuncBodyStatements(file, fn)
-			hasLabels := !body.Ok
-			for k := 0; k < len(body.Stmts); k++ {
-				if body.Stmts[k].Kind == syntax.StmtLabel {
-					hasLabels = true
-				}
-			}
-			last := fn.BodyEnd - 2
-			for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
-				last--
-			}
-			endsInReturn := last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
-			return embeddedFunction{
-				EndsInReturn: endsInReturn,
-				Body:         wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
-				HasLabels:    hasLabels,
-				Name:         name,
-				Signature:    signature,
-				Parameters:   functionParameters(file, fn),
-				Result:       functionResult(file, fn),
-				HasResult:    fn.ResultStart != fn.ResultEnd,
-			}, true
+			return embeddedFunctionFromSyntax(file, fn, name), true
 		}
 	}
 	return embeddedFunction{}, false
+}
+
+// indexEmbeddedFunctions is local to one immutable generation input. It keeps
+// first-declaration lookup semantics and never shares entries across documents.
+// Parsing each Go block once avoids reparsing the whole preceding document for
+// every operation in a compiler binding surface.
+func indexEmbeddedFunctions(document Document, kind string) map[string]embeddedFunction {
+	functions := make(map[string]embeddedFunction)
+	for i := 0; i < len(document.Declarations); i++ {
+		declaration := document.Declarations[i]
+		if declaration.Kind != DeclGo || declaration.Name != kind {
+			continue
+		}
+		wrapped := append([]byte("package backend\n"), declaration.GoSource...)
+		file := syntax.ParseFile(wrapped)
+		if !file.Ok {
+			continue
+		}
+		for j := 0; j < len(file.Funcs); j++ {
+			fn := file.Funcs[j]
+			if fn.ReceiverStart >= 0 {
+				continue
+			}
+			name := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
+			if _, found := functions[name]; !found {
+				functions[name] = embeddedFunctionFromSyntax(file, fn, name)
+			}
+		}
+	}
+	return functions
+}
+
+func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name string) embeddedFunction {
+	wrapped := file.Src
+	start := syntax.TokenStart(file.Tokens[fn.ParamsStart])
+	end := syntax.TokenStart(file.Tokens[fn.ResultEnd])
+	signature := make([]byte, end-start)
+	copy(signature, wrapped[start:end])
+	for len(signature) > 0 && (signature[len(signature)-1] == ' ' ||
+		signature[len(signature)-1] == '\t' || signature[len(signature)-1] == '\n' ||
+		signature[len(signature)-1] == '\r') {
+		signature = signature[:len(signature)-1]
+	}
+	// Labels have function scope, unlike switch cases, keyed literals,
+	// and slices. Use the statement parser rather than colon tokens.
+	// If a body cannot be classified, conservatively keep its call.
+	body := syntax.ParseFuncBodyStatements(file, fn)
+	hasLabels := !body.Ok
+	for k := 0; k < len(body.Stmts); k++ {
+		if body.Stmts[k].Kind == syntax.StmtLabel {
+			hasLabels = true
+		}
+	}
+	last := fn.BodyEnd - 2
+	for last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == ";" {
+		last--
+	}
+	endsInReturn := last > fn.BodyStart && string(syntax.TokenText(wrapped, file.Tokens[last])) == "return"
+	return embeddedFunction{
+		EndsInReturn: endsInReturn,
+		Body:         wrapped[syntax.TokenEnd(file.Tokens[fn.BodyStart]):syntax.TokenStart(file.Tokens[fn.BodyEnd-1])],
+		HasLabels:    hasLabels,
+		Name:         name,
+		Signature:    signature,
+		Parameters:   functionParameters(file, fn),
+		Result:       functionResult(file, fn),
+		HasResult:    fn.ResultStart != fn.ResultEnd,
+	}
 }
 
 func findBackendFunction(document Document, name string) (embeddedFunction, bool) {
