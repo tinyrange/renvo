@@ -1300,6 +1300,15 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		finish_object_variadic_args = renvo386CompilerFinishObjectVariadicArgs
+		push_object_variadic_args = renvo386CompilerPushObjectVariadicArgs
+		reserve_object_variadic_args = renvo386CompilerReserveObjectVariadicArgs
+		object_call_with_word_count = renvo386CompilerObjectCallWithWordCount
+		finish_object_aggregate_result = renvo386CompilerFinishObjectAggregateResult
+		push_object_private_result = renvo386CompilerPushObjectPrivateResult
+		push_object_sret_pointer = renvo386CompilerPushObjectSRetPointer
+		begin_object_aggregate_result = renvo386CompilerBeginObjectAggregateResult
+		begin_object_stack_args = renvo386CompilerBeginObjectStackArgs
 		push_object_register_word = renvo386CompilerPushObjectRegisterWord
 		push_object_stack_word = renvo386CompilerPushObjectStackWord
 		object_export_frame = renvo386CompilerObjectExportFrame
@@ -4849,5 +4858,59 @@ go compiler {
 go compiler {
 	func renvo386CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerBeginObjectStackArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectSRetPointer(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectVariadicArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinishObjectVariadicArgs(a *renvoAsm) {
+		a.patchFailed = true
 	}
 }
