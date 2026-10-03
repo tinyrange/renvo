@@ -392,6 +392,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		linked_static_import = renvoAarch64CompilerLinkedStaticImport
+		finish_static_call_shape = renvoAarch64CompilerFinishStaticCallShape
+		static_call_policy = renvoAarch64CompilerStaticCallPolicy
 		compact_c_value_helpers = renvoAarch64CompilerCompactCValueHelpers
 		condition_branch = renvoAarch64CompilerConditionBranch
 		compare_stack_immediate_jump = renvoAarch64CompilerCompareStackImmediateJump
@@ -3627,5 +3630,48 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStaticCallPolicy(c *renvoCompileContext) int {
+		if targetIsDarwin(c.renvoTargetOS) {
+			return renvoStaticCallSplitRegisters
+		}
+		if c.renvoTargetOS == renvoOSWindows {
+			return renvoStaticCallWords
+		}
+		return renvoStaticCallUnavailable
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+		if !targetIsDarwin(a.c.renvoTargetOS) {
+			return false
+		}
+		if !allInteger && (integerCount > 8 || floatCount > 8) {
+			return false
+		}
+		if resultKind != renvoStaticCallInteger && (resultRegister < 0 || resultRegister >= 8) {
+			return false
+		}
+		if resultKind == renvoStaticCallFloat32 {
+			resultRegister += 8
+		}
+		a.staticCallResultFloat = resultRegister
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			return renvoAsmAddPreparedStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+		}
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return -1
+		}
+		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
 	}
 }

@@ -376,55 +376,41 @@ func renvoEmitLinkStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int
 		}
 		return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 	}
-	if targetIsKernelModule(g.c) && (renvoPreparedBackendActive == 0 ||
-		renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel")) {
-		importID := renvoAsmAddKernelImport(
-			&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
-		if importID < 0 {
-			return false
-		}
-		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-	}
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedOS == renvoOSDarwin ||
-		renvoPreparedBackendActive == 0 && targetIsDarwin(g.c.renvoTargetOS) {
-		if !renvoPrepareDarwinStaticCall(g, fn, wordCount) {
-			return false
-		}
-		importID := renvoAsmAddPreparedStaticImport(&g.asm,
-			fn.linkDLLStart, fn.linkDLLEnd,
-			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-		if importID < 0 {
-			return false
-		}
-		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-	}
-	if renvoPreparedBackendActive != 0 {
-		importID := renvoAsmAddPreparedStaticImport(&g.asm,
-			fn.linkDLLStart, fn.linkDLLEnd,
-			fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-		return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-	}
-	if g.c.renvoTargetOS != renvoOSWindows {
+	policy := renvoTargetStaticCallPolicy(g.c)
+	if policy == renvoStaticCallUnavailable {
 		return false
 	}
-	importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
+	if policy == renvoStaticCallSplitRegisters && !renvoPrepareStaticCallShape(g, fn, wordCount) {
+		return false
+	}
+	importID := renvoAsmAddLinkedStaticImport(&g.asm,
+		fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
+	if importID < 0 {
+		return false
+	}
 	return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 }
 
+// Static-call policy selects a bounded argument protocol, never an OS/ISA.
 const (
-	renvoDarwinStaticCallInteger = iota
-	renvoDarwinStaticCallString
-	renvoDarwinStaticCallSlice
-	renvoDarwinStaticCallFloat32
-	renvoDarwinStaticCallFloat64
-	renvoDarwinStaticCallIntegerFloat64
-	renvoDarwinStaticCallIntegerFloat32
+	renvoStaticCallUnavailable = iota
+	renvoStaticCallWords
+	renvoStaticCallSplitRegisters
 )
 
-func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-	if g.c.renvoTargetArch != renvoArchAarch64 && renvoPreparedBackendActive == 0 {
-		return false
-	}
+// Semantic kinds in the static-call transport. Register assignment and result
+// register encoding belong to the selected definition, not this classifier.
+const (
+	renvoStaticCallInteger = iota
+	renvoStaticCallString
+	renvoStaticCallSlice
+	renvoStaticCallFloat32
+	renvoStaticCallFloat64
+	renvoStaticCallIntegerFloat64
+	renvoStaticCallIntegerFloat32
+)
+
+func renvoPrepareStaticCallShape(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	var kinds [16]byte
 	consumed := 0
 	integerCount := 0
@@ -434,72 +420,65 @@ func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCoun
 		renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float32")<<8
 	for i := 0; i < fn.paramCount; i++ {
 		typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-		kind := renvoDarwinStaticCallInteger
+		kind := renvoStaticCallInteger
 		if abi&(1<<(i+8)) != 0 {
-			kind = renvoDarwinStaticCallIntegerFloat32
+			kind = renvoStaticCallIntegerFloat32
 		} else if abi&(1<<i) != 0 {
-			kind = renvoDarwinStaticCallIntegerFloat64
+			kind = renvoStaticCallIntegerFloat64
 		} else if typ.kind == renvoTypeFloat32 {
-			kind = renvoDarwinStaticCallFloat32
+			kind = renvoStaticCallFloat32
 		} else if typ.kind == renvoTypeFloat64 {
-			kind = renvoDarwinStaticCallFloat64
+			kind = renvoStaticCallFloat64
 		} else if typ.kind == renvoTypeString {
-			kind = renvoDarwinStaticCallString
+			kind = renvoStaticCallString
 		} else if typ.kind == renvoTypeSlice {
-			kind = renvoDarwinStaticCallSlice
+			kind = renvoStaticCallSlice
 		} else if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
 			return false
 		}
-		if kind == renvoDarwinStaticCallFloat32 || kind == renvoDarwinStaticCallFloat64 ||
-			kind == renvoDarwinStaticCallIntegerFloat64 || kind == renvoDarwinStaticCallIntegerFloat32 {
+		if kind == renvoStaticCallFloat32 || kind == renvoStaticCallFloat64 ||
+			kind == renvoStaticCallIntegerFloat64 || kind == renvoStaticCallIntegerFloat32 {
 			floatCount++
 			allInteger = false
 		} else {
 			integerCount++
-			if kind != renvoDarwinStaticCallInteger {
+			if kind != renvoStaticCallInteger {
 				allInteger = false
 			}
 		}
-		if i >= len(kinds) && kind != renvoDarwinStaticCallInteger {
+		if i >= len(kinds) && kind != renvoStaticCallInteger {
 			return false
 		}
 		if i < len(kinds) {
 			kinds[i] = byte(kind)
 		}
 		consumed++
-		if kind == renvoDarwinStaticCallString {
+		if kind == renvoStaticCallString {
 			consumed++
-		} else if kind == renvoDarwinStaticCallSlice {
+		} else if kind == renvoStaticCallSlice {
 			consumed += 2
 		}
 	}
 	if consumed != wordCount {
 		return false
 	}
-	if !allInteger && (integerCount > 8 || floatCount > 8) {
-		return false
-	}
 	resultFloat := -1
-	resultKind := renvoDarwinStaticCallInteger
+	resultKind := renvoStaticCallInteger
 	typ := renvoResolveType(g.meta, fn.resultType)
 	if renvoTypeKindIsFloat(typ.kind) {
 		resultFloat = renvoLinkStaticOption(
 			g.prog.src, fn.linkMethodEnd, fn.nameStart, "result-float64")
-		if resultFloat < 0 || resultFloat >= 8 {
-			return false
-		}
 		if typ.kind == renvoTypeFloat32 {
-			resultKind = renvoDarwinStaticCallFloat32
+			resultKind = renvoStaticCallFloat32
 		} else {
-			resultKind = renvoDarwinStaticCallFloat64
+			resultKind = renvoStaticCallFloat64
 		}
+	}
+	if !renvoAsmFinishStaticCallShape(&g.asm, integerCount, floatCount, allInteger, resultFloat, resultKind) {
+		return false
 	}
 	g.asm.staticCallParamCount = fn.paramCount
 	g.asm.staticCallParamKinds = kinds
-	if resultKind == renvoDarwinStaticCallFloat32 {
-		resultFloat += 8
-	}
-	g.asm.staticCallResultFloat = resultFloat
 	return true
 }
 

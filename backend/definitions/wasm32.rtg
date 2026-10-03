@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		linked_static_import = renvoWasm32CompilerLinkedStaticImport
+		finish_static_call_shape = renvoWasm32CompilerFinishStaticCallShape
+		static_call_policy = renvoWasm32CompilerStaticCallPolicy
 		compact_c_value_helpers = renvoWasm32CompilerCompactCValueHelpers
 		condition_branch = renvoWasm32CompilerConditionBranch
 		compare_stack_immediate_jump = renvoWasm32CompilerCompareStackImmediateJump
@@ -7171,5 +7174,23 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStaticCallPolicy(c *renvoCompileContext) int {
+		return renvoStaticCallUnavailable
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+		return -1
 	}
 }

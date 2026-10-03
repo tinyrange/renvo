@@ -814,6 +814,96 @@ func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 const renvoRTGObjectAggregateRegisterBytes = 0
 const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
+const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
+
+func renvoAsmAddLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if targetIsKernelModule(a.c) {
+			return renvoAsmAddKernelImport(a, src, nameStart, nameEnd)
+		}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			return renvoAsmAddPreparedStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+		}
+}
+if a.c.renvoTargetOS != renvoOSWindows {
+			return -1
+		}
+		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return -1
+	
+}
+a.patchFailed = true
+return -1
+}
+
+func renvoAsmFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if !targetIsDarwin(a.c.renvoTargetOS) {
+			return false
+		}
+		if !allInteger && (integerCount > 8 || floatCount > 8) {
+			return false
+		}
+		if resultKind != renvoStaticCallInteger && (resultRegister < 0 || resultRegister >= 8) {
+			return false
+		}
+		if resultKind == renvoStaticCallFloat32 {
+			resultRegister += 8
+		}
+		a.staticCallResultFloat = resultRegister
+		return true
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoTargetStaticCallPolicy(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if targetIsKernelModule(c) || c.renvoTargetOS == renvoOSWindows {
+			return renvoStaticCallWords
+		}
+		return renvoStaticCallUnavailable
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsDarwin(c.renvoTargetOS) {
+			return renvoStaticCallSplitRegisters
+		}
+}
+if c.renvoTargetOS == renvoOSWindows {
+			return renvoStaticCallWords
+		}
+		return renvoStaticCallUnavailable
+}
+return renvoStaticCallUnavailable
+}
+
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

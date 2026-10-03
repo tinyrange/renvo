@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "35ee0bfc759a7c7736bedfe991cb47b1a0072451251c36f1f8519c60dd80d701"
+const CompilerSourceDigest = "92ce91d5e53098fe84d2fe314b5eff3210eef659aa99b955ef24bac3e8691447"
 
 // source: backend/compiler_common_impl.go
 
@@ -26974,55 +26974,41 @@ return false
 }
 return renvoAsmObjectRegisterCall(&g.asm, importID, wordCount, vectorMask)
 }
-if targetIsKernelModule(g.c) && (renvoPreparedBackendActive == 0 ||
-renvoBytesEqualText(g.prog.src, fn.linkDLLStart, fn.linkDLLEnd, "kernel")) {
-importID := renvoAsmAddKernelImport(
-&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
+policy := renvoTargetStaticCallPolicy(g.c)
+if policy == renvoStaticCallUnavailable {
+return false
+}
+if policy == renvoStaticCallSplitRegisters && !renvoPrepareStaticCallShape(g, fn, wordCount) {
+return false
+}
+importID := renvoAsmAddLinkedStaticImport(&g.asm,
+fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
 if importID < 0 {
 return false
 }
 return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
 }
-if renvoPreparedBackendActive != 0 && renvoRTGPreparedOS == renvoOSDarwin ||
-renvoPreparedBackendActive == 0 && targetIsDarwin(g.c.renvoTargetOS) {
-if !renvoPrepareDarwinStaticCall(g, fn, wordCount) {
-return false
-}
-importID := renvoAsmAddPreparedStaticImport(&g.asm,
-fn.linkDLLStart, fn.linkDLLEnd,
-fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-if importID < 0 {
-return false
-}
-return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-}
-if renvoPreparedBackendActive != 0 {
-importID := renvoAsmAddPreparedStaticImport(&g.asm,
-fn.linkDLLStart, fn.linkDLLEnd,
-fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-}
-if g.c.renvoTargetOS != renvoOSWindows {
-return false
-}
-importID := renvoAsmAddWinStaticImport(&g.asm, fn.linkDLLStart, fn.linkDLLEnd, fn.linkMethodStart, fn.linkMethodEnd, g.prog.src)
-return renvoAsmHostedStaticCall(&g.asm, importID, wordCount)
-}
+
 
 const (
-renvoDarwinStaticCallInteger = iota
-renvoDarwinStaticCallString
-renvoDarwinStaticCallSlice
-renvoDarwinStaticCallFloat32
-renvoDarwinStaticCallFloat64
-renvoDarwinStaticCallIntegerFloat64
-renvoDarwinStaticCallIntegerFloat32
+renvoStaticCallUnavailable = iota
+renvoStaticCallWords
+renvoStaticCallSplitRegisters
 )
 
-func renvoPrepareDarwinStaticCall(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
-if g.c.renvoTargetArch != renvoArchAarch64 && renvoPreparedBackendActive == 0 {
-return false
-}
+
+
+const (
+renvoStaticCallInteger = iota
+renvoStaticCallString
+renvoStaticCallSlice
+renvoStaticCallFloat32
+renvoStaticCallFloat64
+renvoStaticCallIntegerFloat64
+renvoStaticCallIntegerFloat32
+)
+
+func renvoPrepareStaticCallShape(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 var kinds [16]byte
 consumed := 0
 integerCount := 0
@@ -27032,72 +27018,65 @@ abi := renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float6
 renvoLinkStaticOption(g.prog.src, fn.linkMethodEnd, fn.nameStart, "float32")<<8
 for i := 0; i < fn.paramCount; i++ {
 typ := renvoResolveType(g.meta, g.meta.params[fn.firstParam+i].typ)
-kind := renvoDarwinStaticCallInteger
+kind := renvoStaticCallInteger
 if abi&(1<<(i+8)) != 0 {
-kind = renvoDarwinStaticCallIntegerFloat32
+kind = renvoStaticCallIntegerFloat32
 } else if abi&(1<<i) != 0 {
-kind = renvoDarwinStaticCallIntegerFloat64
+kind = renvoStaticCallIntegerFloat64
 } else if typ.kind == renvoTypeFloat32 {
-kind = renvoDarwinStaticCallFloat32
+kind = renvoStaticCallFloat32
 } else if typ.kind == renvoTypeFloat64 {
-kind = renvoDarwinStaticCallFloat64
+kind = renvoStaticCallFloat64
 } else if typ.kind == renvoTypeString {
-kind = renvoDarwinStaticCallString
+kind = renvoStaticCallString
 } else if typ.kind == renvoTypeSlice {
-kind = renvoDarwinStaticCallSlice
+kind = renvoStaticCallSlice
 } else if typ.kind == renvoTypeStruct || typ.kind == renvoTypeArray {
 return false
 }
-if kind == renvoDarwinStaticCallFloat32 || kind == renvoDarwinStaticCallFloat64 ||
-kind == renvoDarwinStaticCallIntegerFloat64 || kind == renvoDarwinStaticCallIntegerFloat32 {
+if kind == renvoStaticCallFloat32 || kind == renvoStaticCallFloat64 ||
+kind == renvoStaticCallIntegerFloat64 || kind == renvoStaticCallIntegerFloat32 {
 floatCount++
 allInteger = false
 } else {
 integerCount++
-if kind != renvoDarwinStaticCallInteger {
+if kind != renvoStaticCallInteger {
 allInteger = false
 }
 }
-if i >= len(kinds) && kind != renvoDarwinStaticCallInteger {
+if i >= len(kinds) && kind != renvoStaticCallInteger {
 return false
 }
 if i < len(kinds) {
 kinds[i] = byte(kind)
 }
 consumed++
-if kind == renvoDarwinStaticCallString {
+if kind == renvoStaticCallString {
 consumed++
-} else if kind == renvoDarwinStaticCallSlice {
+} else if kind == renvoStaticCallSlice {
 consumed += 2
 }
 }
 if consumed != wordCount {
 return false
 }
-if !allInteger && (integerCount > 8 || floatCount > 8) {
-return false
-}
 resultFloat := -1
-resultKind := renvoDarwinStaticCallInteger
+resultKind := renvoStaticCallInteger
 typ := renvoResolveType(g.meta, fn.resultType)
 if renvoTypeKindIsFloat(typ.kind) {
 resultFloat = renvoLinkStaticOption(
 g.prog.src, fn.linkMethodEnd, fn.nameStart, "result-float64")
-if resultFloat < 0 || resultFloat >= 8 {
-return false
-}
 if typ.kind == renvoTypeFloat32 {
-resultKind = renvoDarwinStaticCallFloat32
+resultKind = renvoStaticCallFloat32
 } else {
-resultKind = renvoDarwinStaticCallFloat64
+resultKind = renvoStaticCallFloat64
 }
+}
+if !renvoAsmFinishStaticCallShape(&g.asm, integerCount, floatCount, allInteger, resultFloat, resultKind) {
+return false
 }
 g.asm.staticCallParamCount = fn.paramCount
 g.asm.staticCallParamKinds = kinds
-if resultKind == renvoDarwinStaticCallFloat32 {
-resultFloat += 8
-}
-g.asm.staticCallResultFloat = resultFloat
 return true
 }
 
@@ -29060,10 +29039,10 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x7b\x7a\xe1\x77\xbc\xd2\x5c\x0c\x1b\xee\x81\x1c\x36\xdc\x33\x5c\x91\x98\x7d\x40\xb4\x62\xc1\xba\x02\x2c\x0e\xa2\x17\x83\x7b\x32", 3, true
+return "wasi/wasm32", "\x5e\x81\xd4\x75\xdf\xae\x74\x6a\xae\x85\x61\xe8\x31\x4e\x73\xf0\x7d\xb5\xba\x2a\x61\x27\x7b\x77\x3b\x66\xa5\x6f\x64\xf7\x68\x75", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
+return "darwin/arm64", "\xfc\x55\xf6\xae\xb8\xbd\xa5\xee\xc7\xf7\x66\xa0\xd4\xa6\xbb\x5b\xb4\xf5\xdc\x94\x11\x05\x2b\xe7\x9e\x48\x2c\x7d\x01\x60\xdd\xb9", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x00\xa0\xf9\xe3\x8a\x51\x74\xd2\xcb\x20\xc2\xd8\x67\xb7\x6e\x6d\x59\xd3\xf6\x88\xb5\x54\x1c\x00\xc2\x83\xed\xb5\x15\x6f\x6a\xe4", 3, true
@@ -29072,7 +29051,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x52\xb0\x53\x45\xe8\x0a\x1b\x00\x27\xa9\x93\xf2\x4b\x07\x82\x25\x34\xd3\x1c\x36\xe0\x2d\x53\x6e\x6d\xf1\xc5\x1c\x80\xa3\x9e\xc0", 3, true
+return "vm/vm32", "\x31\x8f\x51\x4b\x1f\xd6\xc2\xeb\x00\x73\xae\x61\x36\x65\x45\x60\x89\xdf\xe0\x01\xf7\xa7\x67\xd8\xfe\x40\x94\x06\xd1\xde\x94\xf8", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xcd\xec\xaa\xda\x7c\xe8\x46\xad\xbd\x08\x99\x11\x79\xa7\xd9\x14\x00\x04\x77\xad\x1e\x1e\x0e\xe2\x1e\x84\xb3\x53\x68\x5f\x71\x68", 3, true
@@ -30515,6 +30494,96 @@ func renvoRTGRecordDiscardSyscall(a *renvoAsm) {
 
 const renvoRTGObjectAggregateRegisterBytes = 0
 const renvoRTGObjectCallABI = renvoObjectABIUnavailable
+
+const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
+
+func renvoAsmAddLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if targetIsKernelModule(a.c) {
+return renvoAsmAddKernelImport(a, src, nameStart, nameEnd)
+}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if targetIsDarwin(a.c.renvoTargetOS) {
+return renvoAsmAddPreparedStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+}
+}
+if a.c.renvoTargetOS != renvoOSWindows {
+return -1
+}
+return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return -1
+
+}
+a.patchFailed = true
+return -1
+}
+
+func renvoAsmFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if !targetIsDarwin(a.c.renvoTargetOS) {
+return false
+}
+if !allInteger && (integerCount > 8 || floatCount > 8) {
+return false
+}
+if resultKind != renvoStaticCallInteger && (resultRegister < 0 || resultRegister >= 8) {
+return false
+}
+if resultKind == renvoStaticCallFloat32 {
+resultRegister += 8
+}
+a.staticCallResultFloat = resultRegister
+return true
+
+}
+a.patchFailed = true
+return false
+}
+
+func renvoTargetStaticCallPolicy(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+if targetIsKernelModule(c) || c.renvoTargetOS == renvoOSWindows {
+return renvoStaticCallWords
+}
+return renvoStaticCallUnavailable
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if targetIsDarwin(c.renvoTargetOS) {
+return renvoStaticCallSplitRegisters
+}
+}
+if c.renvoTargetOS == renvoOSWindows {
+return renvoStaticCallWords
+}
+return renvoStaticCallUnavailable
+}
+return renvoStaticCallUnavailable
+}
 
 func renvoCompactCValueHelpers(c *renvoCompileContext) bool {
 renvoNonNil(c)
@@ -46910,6 +46979,12 @@ return 0
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49947,6 +50022,12 @@ return 0
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52718,6 +52799,12 @@ return 0
 
 
 
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -54540,6 +54627,12 @@ return 0x97
 }
 return 0
 }
+
+
+
+
+
+
 
 
 
@@ -58220,6 +58313,12 @@ return 0x97
 }
 return 0
 }
+
+
+
+
+
+
 
 
 

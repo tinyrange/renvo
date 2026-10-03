@@ -62,6 +62,7 @@ func renvoNonNil(values ...interface{}) {}
 const selectedOne = 41
 const selectedTwo = 73
 const renvoBackendValueSlotSize = 8
+const renvoStaticCallUnavailable = 0
 func firstHook(a *renvoAsm) {}
 func secondHook(a *renvoAsm) {}
 `)
@@ -262,6 +263,7 @@ var renvoFixedTarget int
  const selectedOne = 41
  const selectedTwo = 73
  const renvoBackendValueSlotSize = 8
+const renvoStaticCallUnavailable = 0
 `)
 			for _, definition := range definitions {
 				prefix = appendCompilerGoBlocks(prefix, definition.Document)
@@ -455,6 +457,7 @@ func TestCompilerBindingSharedTailSelection(t *testing.T) {
 const selectedOne = 41
 const selectedTwo = 73
 const renvoBackendValueSlotSize = 8
+const renvoStaticCallUnavailable = 0
 const selectedThree = 99
 var renvoFixedTarget int
 type context struct { renvoTargetArch int }
@@ -545,6 +548,7 @@ func TestCompilerBindingSharedTailAfterCalls(t *testing.T) {
 const selectedOne = 41
 const selectedTwo = 73
 const renvoBackendValueSlotSize = 8
+const renvoStaticCallUnavailable = 0
 type context struct { renvoTargetArch int }
 type renvoCompileContext = context
 type asm struct { c *context; patchFailed bool }
