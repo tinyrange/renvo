@@ -634,6 +634,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		syscall_argument_policy = renvoAmd64CompilerSyscallArgumentPolicy
 		jit_call_supported = renvoAmd64CompilerJITCallSupported
 		open_flag = renvoAmd64CompilerOpenFlag
 		file_offset_sentinel = renvoAmd64CompilerFileOffsetSentinel
@@ -4875,5 +4876,17 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerJITCallSupported(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerSyscallArgumentPolicy(c *renvoCompileContext) int {
+		if targetIsDarwin(c.renvoTargetOS) {
+			return 3
+		}
+		if c.renvoTargetOS == renvoOSOpenBSD {
+			return 2
+		}
+		return 1
 	}
 }

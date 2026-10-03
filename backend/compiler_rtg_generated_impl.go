@@ -820,6 +820,45 @@ const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
 const renvoRTGOpenCreate = 64
 const renvoRTGOpenTruncate = 512
 
+const renvoRTGSyscallArgumentPolicy = 1
+const renvoRTGCustomSyscall = false
+func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
+return false
+}
+func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
+func renvoSyscallArgumentPolicy(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if targetIsDarwin(c.renvoTargetOS) {
+			return 3
+		}
+		if c.renvoTargetOS == renvoOSOpenBSD {
+			return 2
+		}
+		return 1
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsDarwin(c.renvoTargetOS) {
+			return 3
+		}
+		return 1
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return 1
+	
+}
+return 0
+}
+
 func renvoJITCallSupported(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

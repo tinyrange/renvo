@@ -102,6 +102,7 @@ func GenerateArchitectureKernel(packageName string, definitions []ResolveResult)
 	source = appendPreparedObjectCallPolicy(source, ResolvedTarget{})
 	source = appendPreparedStaticCallPolicy(source, ResolvedTarget{})
 	source = appendPreparedOpenFlags(source, Declaration{})
+	source = appendPreparedSyscallPolicy(source, Document{}, Declaration{})
 	return appendBundledCompilerBindings(source, definitions)
 }
 
@@ -142,6 +143,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendPreparedObjectCallPolicy(source, target)
 	source = appendPreparedStaticCallPolicy(source, target)
 	source = appendPreparedOpenFlags(source, target.Runtime)
+	source = appendPreparedSyscallPolicy(source, resolved.Document, target.Runtime)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	goRoots := baseTargetGoRoots(resolved.Document, target)
 	sequenceRoots := targetSequenceRoots(resolved.Document, target)

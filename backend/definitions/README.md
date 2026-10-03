@@ -447,3 +447,23 @@ Malformed, unknown, duplicate, and incompatible contracts fail resolution
 before source generation. The bundled Wasm/VM machine and its three image
 formats explicitly declare their structured contract, as do the external JVM,
 Android, and C89 definitions.
+
+### Raw syscall argument protocols
+
+The shared compiler evaluates syscall arguments without consulting target OS
+identities. Runtime declarations default to `raw_syscall_layout = register_words`.
+A declared `syscall.site_table = address_number_pairs` requires a nonnegative
+compile-time syscall number; prepared raw calls record the instruction address
+and number just like declared read/write operations. Register assignments are
+validated before any argument words are popped.
+
+`raw_syscall_layout = directory_entries` accepts the frontend's directory
+intrinsic selector (217) and three argument words, not arbitrary host syscall
+numbers. It requires `emit_syscall_from_stack = go <algorithm>` (or a bounded
+sequence) with signature `(*RTGEmitter, int, int) bool`; the two integers are
+word count and known selector. Darwin's declaration owns its libc import,
+register transfers, and base-offset storage. Custom stack adapters cannot
+also declare a raw-instruction site table, whose addresses would otherwise
+be ambiguous. Unknown layouts, malformed fields, missing adapters, and
+incompatible signatures fail before generation. Runtime/OS renaming does not
+alter these argument protocols.

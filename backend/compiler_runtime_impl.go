@@ -840,23 +840,17 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 	if e.argCount < 1 || e.argCount > 7 {
 		return false
 	}
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		if e.argCount != 4 {
-			return false
-		}
-		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
-		// The Darwin directory adapter uses one compiler-intrinsic selector,
-		// which is lowered to libc getdirentries rather than issued as a raw
-		// Darwin syscall number.
-		if !number.ok || number.value != 217 {
-			return false
-		}
+	// Policies describe argument protocols, not machine or OS identities.
+	// 1: dynamic register words; 2: constant number with site metadata;
+	// 3: the directory-entry intrinsic, not a raw host syscall number.
+	policy := renvoSyscallArgumentPolicy(g.c)
+	if policy < 1 || policy > 3 || policy == 3 && e.argCount != 4 {
+		return false
 	}
 	syscallNumber := -1
-	if renvoFixedTarget == renvoTargetOpenBSDAmd64 ||
-		renvoFixedTarget == 0 && g.c.renvoTargetOS == renvoOSOpenBSD {
+	if policy != 1 {
 		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
-		if !number.ok {
+		if !number.ok || policy == 2 && number.value < 0 || policy == 3 && number.value != 217 {
 			return false
 		}
 		syscallNumber = number.value
