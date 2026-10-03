@@ -634,6 +634,9 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		string_compare_arguments = renvoAmd64CompilerStringCompareArguments
+		object_absolute_address = renvoAmd64CompilerObjectAbsoluteAddress
+		object_fault_trap = renvoAmd64CompilerObjectFaultTrap
 		object_indirect_aggregate = renvoAmd64CompilerObjectIndirectAggregate
 		object_word_limit = renvoAmd64CompilerObjectWordLimit
 		object_argument_word_bytes = renvoAmd64CompilerObjectArgumentWordBytes
@@ -4401,5 +4404,36 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectFaultTrap(a *renvoAsm) {
+		renvoAsmEmit16(a, 0x0b0f)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {
+		// Absolute symbol value is required before the final kernel mapping is active.
+		renvoAsmEmit16(a, 0xb848)
+		sourceLabel := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, sourceLabel)
+		renvoAsmEmit64(a, 0)
+		a.objectDataRelocs = append(a.objectDataRelocs, renvoObjectDataRelocation{
+			offset: -sourceLabel - 1, targetStart: targetStart, targetEnd: targetEnd, typ: 1, addend: addend})
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStringCompareArguments(a *renvoAsm, left int, right int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+		renvoAsmPushStringRegs(a)
+		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAsmPopCallWord1(a)
 	}
 }

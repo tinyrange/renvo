@@ -2114,6 +2114,31 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoAsmStringCompareArguments(a *renvoAsm, left int, right int) {
+renvoNonNil(a)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, left)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, left-renvoBackendValueSlotSize)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, right)
+renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, right-renvoBackendValueSlotSize)
+}
+
+func renvoAsmObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {
+renvoNonNil(a)
+// Absolute symbol value is required before the final kernel mapping is active.
+renvoAsmEmit16(a, 0xb848)
+sourceLabel := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, sourceLabel)
+renvoAsmEmit64(a, 0)
+a.objectDataRelocs = append(a.objectDataRelocs, renvoObjectDataRelocation{
+	offset: -sourceLabel - 1, targetStart: targetStart, targetEnd: targetEnd, typ: 1, addend: addend})
+return true
+}
+
+func renvoAsmObjectFaultTrap(a *renvoAsm) {
+renvoNonNil(a)
+renvoAsmEmit16(a, 0x0b0f)
+}
+
 func renvoObjectIndirectAggregate(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return false

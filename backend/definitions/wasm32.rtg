@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		string_compare_arguments = renvoWasm32CompilerStringCompareArguments
+		object_absolute_address = renvoWasm32CompilerObjectAbsoluteAddress
+		object_fault_trap = renvoWasm32CompilerObjectFaultTrap
 		object_indirect_aggregate = renvoWasm32CompilerObjectIndirectAggregate
 		object_word_limit = renvoWasm32CompilerObjectWordLimit
 		object_argument_word_bytes = renvoWasm32CompilerObjectArgumentWordBytes
@@ -6825,5 +6828,29 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectFaultTrap(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStringCompareArguments(a *renvoAsm, left int, right int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, left-renvoBackendValueSlotSize)
+		renvoAsmPushStringRegs(a)
+		renvoAsmLoadPrimarySecondaryStack(a, right, right-renvoBackendValueSlotSize)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAsmPopCallWord1(a)
 	}
 }

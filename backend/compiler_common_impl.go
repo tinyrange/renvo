@@ -15572,7 +15572,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		// impossible checked-runtime path as a normal compiler trap that objtool
 		// and the kernel linker both understand.
 		renvoAsmMarkLabel(a, label)
-		renvoAsmEmit16(a, 0x0b0f)
+		renvoAsmObjectFaultTrap(a)
 	} else {
 		renvoAsmJmpMarkLabel(a, after, label)
 		renvoEmitUncaughtFaultHelperBody(g, outOfMemory)
@@ -17092,12 +17092,7 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	if !renvoEmitSliceSlotAddrs(g, locEp, loc, elemSize) {
 		return false
 	}
-	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord0)
-	renvoAsmStorePrimaryStack(a, dataSlot)
-	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord1)
-	renvoAsmStorePrimaryStack(a, lenSlot)
-	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord5)
-	renvoAsmStorePrimaryStack(a, capSlot)
+	renvoRTGSaveSliceSlotAddresses(a, dataSlot, lenSlot, capSlot)
 	renvoAsmLoadPrimaryStackMemory(a, dataSlot, 0)
 	renvoAsmStorePrimaryStack(a, data)
 	renvoAsmLoadPrimaryStackMemory(a, lenSlot, 0)
@@ -17125,14 +17120,14 @@ func renvoEmitRTGAppendDestPrimary(g *renvoLinearGen, locEp *renvoExprParse, loc
 	byteCount := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmCopyPrimaryToTertiary(a)
 	renvoAsmPrimaryImm(a, elemSize)
-	renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
+	renvoAsmMulPrimaryTertiary(a)
 	renvoAsmStorePrimaryStack(a, byteCount)
 	renvoEmitArenaAllocStackPrimary(g, byteCount)
 	newData := renvoAddUnnamedLocal(g, renvoTypeInt)
 	renvoAsmStorePrimaryStack(a, newData)
 	renvoAsmLoadTertiaryStack(a, length)
 	renvoAsmPrimaryImm(a, elemSize)
-	renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
+	renvoAsmMulPrimaryTertiary(a)
 	renvoAsmStorePrimaryStack(a, byteCount)
 	renvoEmitCopyBytes(g, data, newData, byteCount)
 	renvoAsmLoadSecondaryStack(a, dataSlot)
@@ -17441,10 +17436,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, leftOff)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, leftOff-8)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, rightOff)
-		renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, rightOff-8)
+		renvoAsmStringCompareArguments(a, leftOff, rightOff)
 		renvoAsmCallLabel(a, label)
 		if notEqual {
 			renvoAsmBoolNotPrimary(a)
@@ -17463,13 +17455,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 			return false
 		}
 		renvoAsmStorePrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoAsmLoadPrimarySecondaryStack(a, leftOff, leftOff-8)
-		renvoAsmPushStringRegs(a)
-		renvoAsmLoadPrimarySecondaryStack(a, rightOff, rightOff-8)
-		renvoAsmCopySecondaryToTertiary(a)
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmPopCallWord0(a)
-		renvoAsmPopCallWord1(a)
+		renvoAsmStringCompareArguments(a, leftOff, rightOff)
 		renvoAsmCallLabel(a, label)
 		if notEqual {
 			renvoAsmBoolNotPrimary(a)
@@ -17538,20 +17524,7 @@ func renvoEmitCompositeCompareAt(g *renvoLinearGen, typ int, left int, right int
 		return
 	}
 	if t.kind == renvoTypeString {
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, left)
-			renvoRTGAsmLoadFrame(a, renvoRTGCallWord1, left-renvoBackendValueSlotSize)
-			renvoRTGAsmLoadFrame(a, renvoRTGCallWord2, right)
-			renvoRTGAsmLoadFrame(a, renvoRTGCallWord3, right-renvoBackendValueSlotSize)
-		} else {
-			renvoAsmLoadPrimarySecondaryStack(a, left, left-8)
-			renvoAsmPushStringRegs(a)
-			renvoAsmLoadPrimarySecondaryStack(a, right, right-8)
-			renvoAsmCopySecondaryToTertiary(a)
-			renvoAsmCopyPrimaryToSecondary(a)
-			renvoAsmPopCallWord0(a)
-			renvoAsmPopCallWord1(a)
-		}
+		renvoAsmStringCompareArguments(a, left, right)
 		renvoAsmCallLabel(a, renvoEnsureStringEqualHelper(g))
 	} else if t.kind == renvoTypeComplex64 {
 		renvoEmit32IEEECompareStack(g, left, right, renvoTypeFloat32, '=', '=')
@@ -21585,16 +21558,7 @@ func renvoEmitObjectKernelLinkAddress(g *renvoLinearGen, ep *renvoExprParse, idx
 		return false
 	}
 	targetStart, targetEnd := renvoAsmCopyObjectText(&g.asm, g.prog.src, nameStart, nameEnd)
-	// The kernel code model requires the linker's absolute symbol value even
-	// while early startup is executing through an identity mapping. A normal
-	// RIP-relative LEA would instead produce the temporary physical address.
-	renvoAsmEmit16(&g.asm, 0xb848)
-	sourceLabel := renvoAsmNewLabel(&g.asm)
-	renvoAsmMarkLabel(&g.asm, sourceLabel)
-	renvoAsmEmit64(&g.asm, 0)
-	g.asm.objectDataRelocs = append(g.asm.objectDataRelocs, renvoObjectDataRelocation{
-		offset: -sourceLabel - 1, targetStart: targetStart, targetEnd: targetEnd, typ: 1, addend: addend})
-	return true
+	return renvoAsmObjectAbsoluteAddress(&g.asm, targetStart, targetEnd, addend)
 }
 
 // Entry signatures are language policy. Target hooks receive only the number
@@ -22076,59 +22040,6 @@ func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 		g.asm.symbols[symbolIndex].endLabel = endLabel
 	}
 	return true
-}
-
-// Prepared object backends express the private aggregate-result carrier using
-// the selected RTG architecture and ABI instead of embedding amd64 opcodes in
-// the shared object lowering. Two words preserve the SysV stack alignment and
-// accommodate every integer aggregate returned in registers.
-func renvoRTGBeginObjectAggregateResult(a *renvoAsm, preserveSRet bool) bool {
-	if renvoRTGStackWordBytes != 8 || !renvoRTGStack.Valid ||
-		!renvoRTGPrimary.Valid || !renvoRTGSecondary.Valid {
-		return false
-	}
-	renvoRTGAdjustObjectStack(a, true)
-	renvoRTGAdjustObjectStack(a, true)
-	if preserveSRet {
-		if !renvoRTGCallWord0.Valid {
-			return false
-		}
-		renvoRTGDirectStoreNative(a,
-			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
-			renvoRTGCallWord0)
-	}
-	return true
-}
-
-func renvoRTGPushObjectSRetPointer(a *renvoAsm) bool {
-	if !renvoRTGCallWord0.Valid {
-		return false
-	}
-	renvoRTGAsmPushRegister(a, renvoRTGCallWord0)
-	return true
-}
-
-func renvoRTGPushObjectPrivateResult(a *renvoAsm, argumentWords int) bool {
-	if argumentWords < 0 || !renvoRTGStack.Valid || !renvoRTGPrimary.Valid {
-		return false
-	}
-	address := renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
-		argumentWords*renvoRTGStackWordBytes, 1)
-	renvoRTGDirectAddress(a, renvoRTGPrimary, address)
-	renvoRTGAsmPushRegister(a, renvoRTGPrimary)
-	return true
-}
-
-func renvoRTGFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
-	renvoRTGDirectLoadNative(a, renvoRTGPrimary,
-		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1))
-	if resultWords > 1 {
-		renvoRTGDirectLoadNative(a, renvoRTGSecondary,
-			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
-				renvoRTGStackWordBytes, 1))
-	}
-	renvoRTGAdjustObjectStack(a, false)
-	renvoRTGAdjustObjectStack(a, false)
 }
 
 func renvoObjectRegisterWordCount(wordCount int, limit int) int {
@@ -23368,15 +23279,17 @@ func renvoEmitRTGWideBitwiseStack(g *renvoLinearGen, dest int, left int, right i
 		renvoAsmLoadPrimaryStack(&g.asm, leftWord)
 		renvoAsmLoadTertiaryStack(&g.asm, rightWord)
 		if mode == 10 {
-			renvoRTGDirectBitAnd(&g.asm, renvoRTGPrimary, renvoRTGTertiary)
+			renvoAsmBitwisePrimaryTertiary(&g.asm, '&')
 		} else if mode == 11 {
-			renvoRTGDirectBitOr(&g.asm, renvoRTGPrimary, renvoRTGTertiary)
+			renvoAsmBitwisePrimaryTertiary(&g.asm, '|')
 		} else if mode == 12 {
-			renvoRTGDirectBitXor(&g.asm, renvoRTGPrimary, renvoRTGTertiary)
+			renvoAsmBitwisePrimaryTertiary(&g.asm, '^')
 		} else {
-			renvoRTGDirectMoveImmediate(&g.asm, renvoRTGScratch, -1)
-			renvoRTGDirectBitXor(&g.asm, renvoRTGTertiary, renvoRTGScratch)
-			renvoRTGDirectBitAnd(&g.asm, renvoRTGPrimary, renvoRTGTertiary)
+			renvoAsmLoadPrimaryStack(&g.asm, rightWord)
+			renvoAsmBitwiseNotPrimary(&g.asm)
+			renvoAsmCopyPrimaryToTertiary(&g.asm)
+			renvoAsmLoadPrimaryStack(&g.asm, leftWord)
+			renvoAsmBitwisePrimaryTertiary(&g.asm, '&')
 		}
 		renvoAsmStorePrimaryStack(&g.asm, destWord)
 	}
@@ -23396,7 +23309,7 @@ func renvoEmitRTGWideCompareStack(g *renvoLinearGen, left int, right int, mode i
 		renvoAsmPrimaryImm(&g.asm, 1)
 		renvoAsmMarkLabel(&g.asm, done)
 		if mode == 14 {
-			renvoRTGAsmBoolNot(&g.asm)
+			renvoAsmBoolNotPrimary(&g.asm)
 		}
 		return
 	}
@@ -23409,7 +23322,7 @@ func renvoEmitRTGWideCompareStack(g *renvoLinearGen, left int, right int, mode i
 		renvoEmitWideLessStack(g, right, left, signed)
 	}
 	if inclusive {
-		renvoRTGAsmBoolNot(&g.asm)
+		renvoAsmBoolNotPrimary(&g.asm)
 	}
 }
 
@@ -24233,18 +24146,6 @@ func renvoFloatComparisonChars(p *renvoProgram, tok int) (byte, byte, bool) {
 		c1 = renvo_runtime_UnsafeByteAt(p.src, start+1)
 	}
 	return c0, c1, renvoIsComparisonChars(c0, c1)
-}
-
-func renvoRTGIEEEHostSyscall(g *renvoLinearGen, number int, addressCount int, offset0 int, offset1 int, offset2 int) {
-	renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord0, offset0)
-	if addressCount > 1 {
-		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord1, offset1)
-	}
-	if addressCount > 2 {
-		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord2, offset2)
-	}
-	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallNumber, int64(number))
-	renvoRTGDirectHostSyscall(&g.asm)
 }
 
 func renvoEmitIEEEFloatPrimaryTertiaryOp(g *renvoLinearGen, tok int, kind int) bool {
