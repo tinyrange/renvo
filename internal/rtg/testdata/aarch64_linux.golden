@@ -275,6 +275,14 @@ func (out *RTGEmitter) StaticImportName(index int) string {
 	return out.asm.staticImports[index].name
 }
 
+func (out *RTGEmitter) StaticCallWordLocations() []int {
+	return out.asm.staticCallWordLocations
+}
+
+func (out *RTGEmitter) StaticCallStackBytes() int {
+	return out.asm.staticCallStackBytes
+}
+
 func (out *RTGEmitter) StaticCallParameterCount() int {
 	return out.asm.staticCallParamCount
 }

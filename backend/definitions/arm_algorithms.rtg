@@ -696,6 +696,7 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		object_aggregate_register_bytes = renvoArmCompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoArmCompilerHostedStaticCall
 		object_register_call = renvoArmCompilerObjectRegisterCall
 		cdecl_object_call = renvoArmCompilerCdeclObjectCall
@@ -2976,5 +2977,11 @@ go compiler {
 go compiler {
 	func renvoArmCompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+		return 0
 	}
 }

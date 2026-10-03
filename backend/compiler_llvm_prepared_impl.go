@@ -215,6 +215,14 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallWordLocations() []int {
+	return out.staticCallWordLocations
+}
+
+func (out *renvoAsm) StaticCallStackBytes() int {
+	return out.staticCallStackBytes
+}
+
 func (out *renvoAsm) StaticCallParameterCount() int {
 	return out.staticCallParamCount
 }
@@ -2104,6 +2112,12 @@ return RTGCondition{}
 
 func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
+}
+
+func renvoObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+renvoNonNil(c)
+if renvoRTGPreparedSysVX8664 != 0 { return 16 }
+return 0
 }
 
 func renvoAsmHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {

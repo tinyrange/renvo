@@ -702,6 +702,14 @@ func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
 }
 
+func (out *renvoAsm) StaticCallWordLocations() []int {
+	return out.staticCallWordLocations
+}
+
+func (out *renvoAsm) StaticCallStackBytes() int {
+	return out.staticCallStackBytes
+}
+
 func (out *renvoAsm) StaticCallParameterCount() int {
 	return out.staticCallParamCount
 }
@@ -1302,6 +1310,14 @@ func (out *RTGEmitter) StaticImportDLL(index int) string {
 
 func (out *RTGEmitter) StaticImportName(index int) string {
 	return out.asm.staticImports[index].name
+}
+
+func (out *RTGEmitter) StaticCallWordLocations() []int {
+	return out.asm.staticCallWordLocations
+}
+
+func (out *RTGEmitter) StaticCallStackBytes() int {
+	return out.asm.staticCallStackBytes
 }
 
 func (out *RTGEmitter) StaticCallParameterCount() int {
@@ -2283,6 +2299,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		method != "StaticImportDLL" && method != "StaticImportName" &&
 		method != "StaticCallParameterCount" && method != "StaticCallParameterKind" &&
 		method != "StaticCallResultFloatRegister" &&
+		method != "StaticCallWordLocations" && method != "StaticCallStackBytes" &&
 		method != "RelocationCount" &&
 		method != "RelocationAt" && method != "RelocationOffset" &&
 		method != "RelocationLabel" && method != "RelocationWordCount" &&
@@ -2410,6 +2427,14 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		replacement = append(replacement, ".staticImports["...)
 		replacement = append(replacement, arguments[0]...)
 		return append(replacement, "].name"...), end, true
+	}
+	if method == "StaticCallWordLocations" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallWordLocations"...), end, true
+	}
+	if method == "StaticCallStackBytes" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallStackBytes"...), end, true
 	}
 	if method == "StaticCallParameterCount" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

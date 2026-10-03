@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_aggregate_register_bytes = renvoWasm32CompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvoWasm32CompilerHostedStaticCall
 		object_register_call = renvoWasm32CompilerObjectRegisterCall
 		cdecl_object_call = renvoWasm32CompilerCdeclObjectCall
@@ -6524,5 +6525,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+		return 0
 	}
 }

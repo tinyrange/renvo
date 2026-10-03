@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 251 role-based operations: register copies,
+The current migration covers 252 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -220,8 +220,13 @@ assignment also use definition-owned operations. Arena discard uses a capability
 query and a shared page-discard operation rather than architecture tests in
 language lowering. The x86-64 global-initializer frame reserves its complete peak
 size, including aggregate temporaries beyond the 16-bit ENTER limit.
-Aggregate classification, outgoing memory-aggregate calls, and other legacy
-object ABI assumptions remain migration work, not completed generic ABI support.
+Foreign static calls use definition bindings for cdecl, register arguments, and
+hosted runtime entry. Outgoing memory aggregates use a shared word-location plan
+with definition-provided register capacity and aggregate-size policy; the target
+runtime owns aligned stack storage, physical copies, relocations, and cleanup.
+The same plan is consumed by built-in and prepared SysV definitions. Other
+aggregate classification and legacy object ABI assumptions remain migration
+work, not completed generic ABI support.
 Hooks may take typed parameters, an assembler, compiler-state input, or a
 read-only compile-context query, and a validated result type. Context queries
 return an explicit unavailable value for an unknown selector; emission operations

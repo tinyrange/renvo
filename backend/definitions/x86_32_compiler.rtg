@@ -1300,6 +1300,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		object_aggregate_register_bytes = renvo386CompilerObjectAggregateRegisterBytes
 		hosted_static_call = renvo386CompilerHostedStaticCall
 		object_register_call = renvo386CompilerObjectRegisterCall
 		cdecl_object_call = renvo386CompilerCdeclObjectCall
@@ -5097,5 +5098,11 @@ go compiler {
 		}
 		renvoWin386CallImport(a, importID)
 		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+		return 0
 	}
 }
