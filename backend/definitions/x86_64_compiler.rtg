@@ -1045,7 +1045,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5a50)
 	}
-	
+
 	func renvoAmd64CompilerCopyPrimaryToTertiary(a *renvoAsm) {
 		if renvoAmd64RewritePrimaryLoad(a, 1, false) {
 			return
@@ -1056,7 +1056,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5950)
 	}
-	
+
 	func renvoAmd64CompilerCopySecondaryToTertiary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 			renvoAsmEmit24(a, 0xd18948)
@@ -1064,7 +1064,7 @@ go compiler {
 		}
 		renvoAsmEmit16(a, 0x5952)
 	}
-	
+
 	func renvoAmd64CompilerCopyTertiaryToPrimary(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 			renvoAsmEmit24(a, 0xc88948)
@@ -1073,7 +1073,7 @@ go compiler {
 		renvoAsmPushTertiary(a)
 		renvoAsmPopPrimary(a)
 	}
-	
+
 	func renvoAmd64CompilerPushPrimary(a *renvoAsm) {
 		load := a.lastPrimaryLoad
 		fold := load > 0 && load/8 == len(a.code)
@@ -1083,17 +1083,17 @@ go compiler {
 			a.lastPrimaryLoad = -load
 		}
 	}
-	
+
 	func renvoAmd64CompilerPushSecondary(a *renvoAsm) {
 		renvoAsmEmit8(a, 0x52)
 		a.lastPrimaryStoreEnd = -(len(a.code)*32 + 4)
 	}
-	
+
 	func renvoAmd64CompilerPushTertiary(a *renvoAsm) {
 		renvoAsmEmit8(a, 0x51)
 		a.lastPrimaryStoreEnd = -(len(a.code)*32 + 3)
 	}
-	
+
 	func renvoAmd64CompilerPopPrimary(a *renvoAsm) {
 		if renvoAmd64OptimizePop(a, 0) {
 			return
@@ -1112,7 +1112,7 @@ go compiler {
 		}
 		renvoAsmEmit8(a, 0x59)
 	}
-	
+
 	func renvoAmd64OptimizePop(a *renvoAsm, register int) bool {
 		end := len(a.code)
 		marker := a.lastPrimaryStoreEnd
@@ -1172,19 +1172,19 @@ go compiler {
 	func renvoAmd64CompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0x0a0488)
 	}
-	
+
 	func renvoAmd64CompilerIncTertiary(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xc1ff)
 	}
-	
+
 	func renvoAmd64CompilerIncPrimary(a *renvoAsm) {
 		renvoAsmEmit16(a, 0xc0ff)
 	}
-	
+
 	func renvoAmd64CompilerRet(a *renvoAsm) {
 		renvoAsmEmit8(a, 0xc3)
 	}
-	
+
 	func renvoAmd64CompilerLeave(a *renvoAsm) {
 		if renvoFixedTarget == 0 && a.c.optimizeRuntime {
 			renvoAsmEmitText(a, "\x48\x89\xec\x5d")
@@ -1192,56 +1192,55 @@ go compiler {
 		}
 		renvoAsmEmit8(a, 0xc9)
 	}
-	
+
 	func renvoAmd64CompilerCopyPrimaryToCallWord0(a *renvoAsm) {
 		renvoAmd64AsmMovRdiRax(a)
 	}
-	
+
 	func renvoAmd64CompilerCopySecondaryToPrimary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0xd08948)
 	}
-	
+
 	func renvoAmd64CompilerCopyPrimaryToCallWord1(a *renvoAsm) {
 		renvoAmd64AsmMovRsiRax(a)
 	}
-	
+
 	func renvoAmd64CompilerAddSecondaryTertiary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0xca0148)
 	}
-	
+
 	func renvoAmd64CompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
 		renvoAmd64AsmLoadByteRaxIndexRcx(a)
 	}
-	
+
 	func renvoAmd64CompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
 		renvoAmd64AsmStoreRaxMemRdxRcx8(a)
 	}
-	
+
 	func renvoAmd64CompilerIncMemSecondary(a *renvoAsm) {
 		renvoAmd64AsmIncMemRdx(a)
 	}
-	
+
 	func renvoAmd64CompilerDecMemSecondary(a *renvoAsm) {
 		renvoAmd64AsmDecMemRdx(a)
 	}
-	
+
 	func renvoAmd64CompilerBoolNotPrimary(a *renvoAsm) {
 		renvoAsmEmit3(a, 0x83, 0xf0, 1)
 	}
-	
+
 	func renvoAmd64CompilerBitwiseNotPrimary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0xd0f748)
 	}
-	
+
 	func renvoAmd64CompilerAddPrimaryTertiary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0xc80148)
 	}
-	
+
 	func renvoAmd64CompilerSubPrimaryTertiary(a *renvoAsm) {
 		renvoAsmEmit24(a, 0xc82948)
 	}
 }
-
 
 go compiler {
 	func renvoAmd64CompilerPushImm(a *renvoAsm, imm int) {
@@ -1378,7 +1377,6 @@ go compiler {
 		renvoAsmAddReloc(a, at, label)
 	}
 }
-
 
 go compiler {
 	func renvoAmd64CompilerSecondaryImm(a *renvoAsm, imm int) {
