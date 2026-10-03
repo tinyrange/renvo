@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 255 role-based operations: register copies,
+The current migration covers 257 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -160,6 +160,12 @@ syscall boundary, scalar multiplication, and relocation finalization. The latter
 keeps branch relaxation, layout, and target relocation order in the definitions;
 the common PC-relative data displacement helper only performs layout arithmetic.
 The 386 normalization peepholes also live with their definition-owned caller.
+Local storage units are definition-owned; shared allocation classifies scalar
+values, records captured locals, and applies the selected alignment. Cdecl export
+and callback wrappers share type classification, argument ordering, and function
+reachability in the core; bounded frame, argument, variadic, and private-result
+operations own their physical ABI. Reverse-order external register calls are
+also definition-owned, without per-call temporary locals in prepared backends.
 Literal parsing selects ordinary or split-word materialization
 without inspecting an architecture; each backend owns its scalar-width behavior.
 Global-initializer frame setup/teardown and stack IEEE arithmetic, conversions,

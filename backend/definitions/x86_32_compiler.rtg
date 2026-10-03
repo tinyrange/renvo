@@ -1300,6 +1300,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		object_reverse_register_call = renvo386CompilerObjectReverseRegisterCall
+		local_storage_unit = renvo386CompilerLocalStorageUnit
 		kernel_callback_address = renvo386CompilerKernelCallbackAddress
 		kernel_entry_return = renvo386CompilerKernelEntryReturn
 		kernel_entry_frame = renvo386CompilerKernelEntryFrame
@@ -3740,117 +3742,6 @@ go compiler {
 		}
 	}
 
-	func renvo386EmitObjectCABIWrapperBody(g *renvoLinearGen, fnIndex int, wordCount int) bool {
-		return renvo386EmitObjectCABIWrapperBodyMode(g, fnIndex, wordCount, false)
-	}
-
-	func renvo386EmitObjectCABIWrapperBodyMode(g *renvoLinearGen, fnIndex int, wordCount int, variadic bool) bool {
-		if wordCount < 0 || fnIndex < 0 || fnIndex >= len(g.meta.funcs) {
-			return false
-		}
-		// Establish a stable argument base and retain the i386 callee-saved
-		// registers while the implementation uses Renvo's register-first ABI.
-		// Saving only the ABI-required registers leaves EAX and EDX live for scalar
-		// and wide C results and avoids PUSHAD's real-mode stack-address quirks.
-		renvoAsmEmitText(&g.asm, "\x55\x89\xe5\x53\x56\x57")
-		fn := &g.meta.funcs[fnIndex]
-		wideResult := fn.resultType != 0 && renvoTypeUsesHiddenResult(g.meta, fn.resultType) &&
-			renvoTypeSize(g.meta, fn.resultType) == 8
-		if wideResult {
-			// Reserve the internal hidden-result destination. Its address is pushed
-			// after the explicit arguments so it becomes internal call word zero.
-			renvoAsmEmitText(&g.asm, "\x83\xec\x08")
-		}
-		fixedWords := wordCount
-		if variadic {
-			if wordCount < 1 {
-				return false
-			}
-			fixedWords--
-			// i386 SysV va_list is a pointer to the first unnamed stack argument.
-			// The frontend's target-neutral carrier stores that pointer in word zero.
-			renvoAsmEmitText(&g.asm, "\x83\xec\x0c\x8d\x45")
-			renvoAsmEmit8(&g.asm, 8+fixedWords*4)
-			renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x24\x08\x00\x00\x00\x00")
-		}
-		// Ordinary Renvo functions bind incoming call words from the final source
-		// parameter toward the first. appMain is the deliberate exception because
-		// its arguments arrive from the operating-system entry contract.
-		entry := fnIndex == g.prog.entryFunc
-		for at := 0; at < fixedWords; at++ {
-			word := at
-			if entry {
-				word = fixedWords - 1 - at
-			}
-			if g.c.regParm == 3 && !variadic && word < 3 {
-				if word == 0 {
-					renvoAsmEmit8(&g.asm, 0x50)
-				}
-				if word == 1 {
-					renvoAsmEmit8(&g.asm, 0x52)
-				}
-				if word == 2 {
-					renvoAsmEmit8(&g.asm, 0x51)
-				}
-			} else {
-				stackWord := word
-				if g.c.regParm == 3 && !variadic {
-					stackWord -= 3
-				}
-				displacement := 8 + stackWord*4
-				if displacement <= 127 {
-					renvoAsmEmitText(&g.asm, "\xff\x75")
-					renvoAsmEmit8(&g.asm, displacement)
-				} else {
-					renvoAsmEmitText(&g.asm, "\xff\xb5")
-					renvoAsmEmit32(&g.asm, displacement)
-				}
-			}
-		}
-		if variadic {
-			carrierOffset := fixedWords * 4
-			if carrierOffset == 0 {
-				renvoAsmEmitText(&g.asm, "\x8d\x04\x24")
-			} else if carrierOffset <= 127 {
-				renvoAsmEmitText(&g.asm, "\x8d\x44\x24")
-				renvoAsmEmit8(&g.asm, carrierOffset)
-			} else {
-				renvoAsmEmitText(&g.asm, "\x8d\x84\x24")
-				renvoAsmEmit32(&g.asm, carrierOffset)
-			}
-			renvoAsmPushPrimary(&g.asm)
-		}
-		callWords := wordCount
-		if wideResult {
-			displacement := wordCount * 4
-			if displacement == 0 {
-				renvoAsmEmitText(&g.asm, "\x8d\x04\x24")
-			} else if displacement <= 127 {
-				renvoAsmEmitText(&g.asm, "\x8d\x44\x24")
-				renvoAsmEmit8(&g.asm, displacement)
-			} else {
-				renvoAsmEmitText(&g.asm, "\x8d\x84\x24")
-				renvoAsmEmit32(&g.asm, displacement)
-			}
-			renvoAsmPushPrimary(&g.asm)
-			callWords++
-		}
-		renvoLinearMarkFunc(g, fnIndex)
-		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, callWords)) {
-			renvo386EmitCallWithWordCount(g, fnIndex, callWords)
-		}
-		if variadic {
-			renvoAsmEmitText(&g.asm, "\x83\xc4\x0c")
-		}
-		if wideResult {
-			// i386 returns a 64-bit integer with its low word in eax and high word
-			// in edx. Load both before releasing the private result slot.
-			renvoAsmEmitText(&g.asm, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
-		}
-		renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9\xc3")
-		return true
-	}
-
 	func renvo386TryLoadInlineLocal(g *renvoLinearGen, localIndex int) bool {
 		local := &g.locals[localIndex]
 		if local.flowConstValid == -1 {
@@ -4794,25 +4685,56 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerObjectArgumentRegisterCount(c *renvoCompileContext) int {
+		if c.regParm == 3 {
+			return 3
+		}
 		return 0
 	}
 }
 
 go compiler {
 	func renvo386CompilerObjectExportFrame(g *renvoLinearGen, reserve bool) {
-		g.asm.patchFailed = true
+		if reserve {
+			// Preserve the cdecl callee-saved registers, leaving scalar result registers live.
+			renvoAsmEmitText(&g.asm, "\x55\x89\xe5\x53\x56\x57")
+		} else {
+			renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9")
+		}
 	}
 }
 
 go compiler {
 	func renvo386CompilerPushObjectStackWord(a *renvoAsm, word int, kind int) bool {
-		return false
+		if word < 0 || kind != 0 {
+			return false
+		}
+		displacement := 8 + word*4
+		if displacement <= 127 {
+			renvoAsmEmitText(a, "\xff\x75")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\xff\xb5")
+			renvoAsmEmit32(a, displacement)
+		}
+		return true
 	}
 }
 
 go compiler {
 	func renvo386CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
-		return false
+		if register < 0 || register >= 3 || kind != 0 {
+			return false
+		}
+		if register == 0 {
+			renvoAsmEmit8(a, 0x50)
+		}
+		if register == 1 {
+			renvoAsmEmit8(a, 0x52)
+		}
+		if register == 2 {
+			renvoAsmEmit8(a, 0x51)
+		}
+		return true
 	}
 }
 
@@ -4824,7 +4746,11 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
-		return false
+		if sret {
+			return false
+		}
+		renvoAsmEmitText(a, "\x83\xec\x08")
+		return true
 	}
 }
 
@@ -4836,37 +4762,58 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
-		return false
+		displacement := wordCount * 4
+		if displacement == 0 {
+			renvoAsmEmitText(a, "\x8d\x04\x24")
+		} else if displacement <= 127 {
+			renvoAsmEmitText(a, "\x8d\x44\x24")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\x8d\x84\x24")
+			renvoAsmEmit32(a, displacement)
+		}
+		renvoAsmPushPrimary(a)
+		return true
 	}
 }
 
 go compiler {
 	func renvo386CompilerFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
-		a.patchFailed = true
+		if resultWords != 2 {
+			a.patchFailed = true
+			return
+		}
+		// Publish the private wide result in EDX:EAX before releasing its slot.
+		renvoAsmEmitText(a, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
 	}
 }
 
 go compiler {
 	func renvo386CompilerObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
-		g.asm.patchFailed = true
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
 	}
 }
 
 go compiler {
 	func renvo386CompilerReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
-		g.asm.patchFailed = true
+		// The neutral carrier holds the first unnamed stack argument in word zero.
+		renvoAsmEmitText(&g.asm, "\x83\xec\x0c\x8d\x45")
+		renvoAsmEmit8(&g.asm, 8+fixedCount*4)
+		renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x24\x08\x00\x00\x00\x00")
 	}
 }
 
 go compiler {
-	func renvo386CompilerPushObjectVariadicArgs(a *renvoAsm) {
-		a.patchFailed = true
+	func renvo386CompilerPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
+		renvo386CompilerPushObjectPrivateResult(a, fixedWords)
 	}
 }
 
 go compiler {
 	func renvo386CompilerFinishObjectVariadicArgs(a *renvoAsm) {
-		a.patchFailed = true
+		renvoAsmEmitText(a, "\x83\xc4\x0c")
 	}
 }
 
@@ -5100,5 +5047,20 @@ go compiler {
 go compiler {
 	func renvo386CompilerKernelCallbackAddress(a *renvoAsm, label int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+		if c.code16 && compactScalar {
+			return 4
+		}
+		return renvoBackendValueSlotSize
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
 	}
 }

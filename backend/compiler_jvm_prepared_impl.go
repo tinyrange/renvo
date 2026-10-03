@@ -4365,6 +4365,24 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+for i := 0; i < wordCount/2; i++ {
+	left := renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, i*renvoRTGStackWordBytes, 1)
+	right := renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, (wordCount-1-i)*renvoRTGStackWordBytes, 1)
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary, left)
+	renvoRTGDirectLoadNative(a, renvoRTGTertiary, right)
+	renvoRTGDirectStoreNative(a, left, renvoRTGTertiary)
+	renvoRTGDirectStoreNative(a, right, renvoRTGPrimary)
+}
+return renvoRTGEmitStaticCall(a, importID, wordCount)
+}
+
+func renvoLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+renvoNonNil(c)
+return renvoBackendValueSlotSize
+}
+
 func renvoAsmKernelCallbackAddress(a *renvoAsm, label int) {
 renvoNonNil(a)
 renvoRTGKernelCallbackAddress(a, label)
@@ -4524,7 +4542,7 @@ renvoNonNil(a)
 	a.patchFailed = true
 }
 
-func renvoPushObjectVariadicArgs(a *renvoAsm) {
+func renvoPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
 renvoNonNil(a)
 	a.patchFailed = true
 }

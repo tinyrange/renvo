@@ -1,18 +1,5 @@
 package main
 
-func renvo386Code16LocalSize(g *renvoLinearGen, typ int, size int) int {
-	if g.c.code16 && renvoProgramUsesC11Semantics(g.prog) && renvoTypeSize(g.meta, typ) <= 4 {
-		kind := renvoResolveType(g.meta, typ).kind
-		if renvoTypeKindIsScalarInt(kind) || kind == renvoTypePointer || kind == renvoTypeFunc {
-			return 4
-		}
-	}
-	if size < renvoBackendValueSlotSize {
-		return renvoBackendValueSlotSize
-	}
-	return size
-}
-
 func renvo386EmitWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
 	if e.kind != renvoExprIdent {
 		return false
