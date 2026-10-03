@@ -250,3 +250,66 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
 		})
 	}
 }
+
+// Identical implementations may share code even across unrelated selectors;
+// a different body must remain separate and unknown selectors must still fail.
+func TestBundledCompilerBindingBodyGroups(t *testing.T) {
+	var definitions []ResolveResult
+	for i, pair := range [][2]string{{"selectedOne", "firstHook"}, {"selectedTwo", "secondHook"}, {"selectedThree", "thirdHook"}} {
+		fixture := unfamiliarCompilerDefinition(t, pair[0], pair[1])
+		body := "a.patchFailed = false"
+		if i == 1 {
+			body = "a.patchFailed = true"
+		}
+		source := strings.Replace(string(fixture.Document.Source), "func "+pair[1]+"(a *renvoAsm) {}",
+			"func "+pair[1]+"(a *renvoAsm) { "+body+" }", 1)
+		document := Parse([]byte(source), "groups.rtg")
+		if !document.Ok {
+			t.Fatal(document.Diagnostics)
+		}
+		definitions = append(definitions, ResolveResult{Document: document, Ok: true})
+	}
+	generated := appendBundledCompilerBindings([]byte("package bindings\n"), definitions)
+	if !generated.Ok {
+		t.Fatal(generated.Diagnostics)
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), "bindings.go", generated.Source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range file.Decls {
+		fn := declaration.(*ast.FuncDecl)
+		if fn.Name.Name != "renvoAsmCopyPrimaryToSecondary" {
+			continue
+		}
+		if len(fn.Body.List) != 4 {
+			t.Fatalf("want guard, two body groups, and unknown-selector failure; got %d statements", len(fn.Body.List))
+		}
+		first := fn.Body.List[1].(*ast.IfStmt)
+		condition := first.Cond.(*ast.BinaryExpr)
+		if condition.Op != token.LOR ||
+			condition.X.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedOne" ||
+			condition.Y.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedThree" {
+			t.Fatal("nonadjacent equal bodies lost their explicit selectors")
+		}
+		second := fn.Body.List[2].(*ast.IfStmt)
+		if second.Cond.(*ast.BinaryExpr).Y.(*ast.Ident).Name != "selectedTwo" {
+			t.Fatal("different implementation was grouped")
+		}
+		for i, block := range []*ast.BlockStmt{first.Body, second.Body} {
+			value := block.List[0].(*ast.AssignStmt).Rhs[0].(*ast.Ident).Name
+			if value != []string{"false", "true"}[i] {
+				t.Fatal("selector body changed")
+			}
+			if _, ok := block.List[1].(*ast.ReturnStmt); !ok {
+				t.Fatal("selected body falls through to failure")
+			}
+		}
+		failure := fn.Body.List[3].(*ast.AssignStmt)
+		if failure.Lhs[0].(*ast.SelectorExpr).Sel.Name != "patchFailed" || failure.Rhs[0].(*ast.Ident).Name != "true" {
+			t.Fatal("unknown selector no longer fails")
+		}
+		return
+	}
+	t.Fatal("expected operation missing")
+}
