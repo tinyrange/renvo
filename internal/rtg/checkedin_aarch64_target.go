@@ -598,14 +598,14 @@ func renvoAsmImageAarch64(a *renvoAsm) []byte {
 		out = append(out, a.code...); out = append(out, a.data...)
 		if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 	}
-	var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+	var sec renvoElfSymbolSections; renvoBuildElfSymbolSections(a, 8, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, 1048576)
 	out = renvoAppendElfHeaderAarch64(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	out = append(out, a.code...); out = append(out, a.data...)
 	out = renvoAppendUntil(out, sec.symtabOff); out = append(out, sec.symtab...)
 	out = renvoAppendUntil(out, sec.strtabOff); out = append(out, sec.strtab...)
 	out = renvoAppendUntil(out, sec.shstrOff); out = append(out, sec.shstrtab...)
-	out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	out = renvoAppendUntil(out, sec.shoff); out = renvoAppendElfSectionHeaders(out, &sec, a, 8, 0)
 	if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }; return out
 }
 

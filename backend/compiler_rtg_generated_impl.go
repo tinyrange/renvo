@@ -797,6 +797,119 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return true
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		if renvoFixedTarget != 0 {
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+			r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+			return r
+		}
+		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 3670016
+			r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
+		}
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			r.symbols = 4096
+		}
+		r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+		r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+		return r
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if renvoFixedTarget != 0 {
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			return r
+		}
+		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 4194304
+			r.labels, r.relocs, r.absRelocs = 65536, 262144, 32768
+		}
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			r.symbols = 4096
+		}
+		return r
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		if renvoFixedTarget != 0 {
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			return r
+		}
+		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 8388608
+			r.labels, r.relocs, r.absRelocs = 65536, 262144, 65536
+		}
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			r.symbols = 4096
+		}
+		return r
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if renvoFixedTarget != 0 {
+			if renvoFixedTarget == renvoTargetWasiWasm32 {
+				return renvoAsmReserves{code: 655360, labels: 8192, relocs: 32768, absRelocs: 4096, symbols: 1024, data: 8192}
+			}
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			return r
+		}
+		r := renvoAsmReserves{code: 655360, labels: 32768, relocs: 131072, absRelocs: 98304, symbols: 2048, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 8388608
+		}
+		return r
+	
+}
+a.patchFailed = true
+return renvoAsmReserves{}
+}
+
 func renvoEmitDereferenceSecondary(g *renvoLinearGen) {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

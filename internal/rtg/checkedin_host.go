@@ -448,7 +448,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		return out
 	}
 	var sec renvoElfSymbolSections
-	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+	renvoBuildElfSymbolSections(a, 8, 0, a.codeOffset, loadFileSize, &sec)
 	finalSize := sec.shoff + 448
 	syscallTableOff := finalSize
 	finalSize += syscallTableSize
@@ -475,7 +475,7 @@ func renvoAsmImageAmd64(a *renvoAsm) []byte {
 		out = append(out, sec.shstrtab[i])
 	}
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 8, 0)
 	if a.c.renvoTargetOS == renvoOSOpenBSD {
 		out = renvoAppendOpenBSDSyscallTable(out, a)
 	}

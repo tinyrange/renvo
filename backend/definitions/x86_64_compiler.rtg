@@ -965,6 +965,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		needs_function_symbols = renvoAmd64CompilerNeedsFunctionSymbols
+		assembler_reserves = renvoAmd64CompilerAssemblerReserves
 		dereference_secondary = renvoAmd64CompilerDereferenceSecondary
 		secondary_frame_address = renvoAmd64CompilerSecondaryFrameAddress
 		local_word_compare_jump = renvoAmd64CompilerLocalWordCompareJump
@@ -3312,5 +3314,37 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerDereferenceSecondary(g *renvoLinearGen) {
 		renvoAsmEmit24(&g.asm, 0x128b48)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+		if renvoFixedTarget != 0 {
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+			r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+			return r
+		}
+		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 3670016
+			r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
+		}
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			r.symbols = 4096
+		}
+		r.kernelImports = renvoFixedTarget == renvoTargetLinuxKernelAmd64 || renvoFixedTarget == 0 && targetIsKernelModule(a.c)
+		r.openbsdSyscalls = renvoFixedTarget == renvoTargetOpenBSDAmd64
+		return r
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
+		return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
 	}
 }

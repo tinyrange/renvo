@@ -102,7 +102,7 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 		return out
 	}
 	var sec renvoElfSymbolSections
-	renvoBuildElfSymbolSections(a, 0, a.codeOffset, loadFileSize, &sec)
+	renvoBuildElfSymbolSections(a, 4, 0, a.codeOffset, loadFileSize, &sec)
 	out := make([]byte, 0, sec.shoff+280)
 	out = renvoAppendElfHeaderArm(out, a.codeOffset, loadFileSize, bssOffset, a.bssSize, sec.shoff)
 	out = append(out, a.code...)
@@ -114,7 +114,7 @@ func renvoAsmImageArm(a *renvoAsm) []byte {
 	out = renvoAppendUntil(out, sec.shstrOff)
 	out = append(out, sec.shstrtab...)
 	out = renvoAppendUntil(out, sec.shoff)
-	out = renvoAppendElfSectionHeaders(out, &sec, a, 0)
+	out = renvoAppendElfSectionHeaders(out, &sec, a, 4, 0)
 	if renvoFixedTarget == 0 { return renvoAppendReplLinkTable(out, a) }
 	return out
 }

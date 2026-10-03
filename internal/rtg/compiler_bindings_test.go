@@ -51,6 +51,7 @@ func TestBundledCompilerBindingsAreDefinitionSelected(t *testing.T) {
 type renvoExprParse struct {}
 type renvoExpr struct {}
 type renvoFuncInfo struct {}
+type renvoAsmReserves struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 var renvoFixedTarget int
@@ -245,6 +246,7 @@ func TestBundledCompilerBindingBodyProjection(t *testing.T) {
  type renvoExprParse struct {}
 type renvoExpr struct {}
 type renvoFuncInfo struct {}
+type renvoAsmReserves struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
 var renvoFixedTarget int
