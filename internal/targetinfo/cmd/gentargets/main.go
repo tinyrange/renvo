@@ -567,6 +567,7 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 		name  string
 		value func(sourceDescriptor) int
 	}{
+		{"RuntimeCaps", func(d sourceDescriptor) int { return rtg.CompilerRuntimeCapabilities(d.Runtime, d.Capabilities) }},
 		{"PointerBits", func(d sourceDescriptor) int { return d.PointerBits }},
 		{"CodePointerBits", func(d sourceDescriptor) int { return d.CodePointerBits }},
 		{"FunctionPointerBits", func(d sourceDescriptor) int { return d.FunctionPointerBits }},

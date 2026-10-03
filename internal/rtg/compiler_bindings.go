@@ -43,6 +43,12 @@ func (op compilerEmitterOperation) contract() directEmitterOperation {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{"primary_imm64", "PrimaryImm64", "renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(uint32(imm)) | int64(high)<<32)", []compilerBindingParameter{{"imm", "int"}, {"high", "int"}}},
+	{"primary_imm", "PrimaryImm", "renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))", []compilerBindingParameter{{"imm", "int"}}},
+	{"syscall", "Syscall", "renvoRTGDirectHostSyscall(a)", nil},
+	{"push_stack_word", "PushStackWord", "renvoAsmPushStack(a, offset)", []compilerBindingParameter{{"offset", "int"}}},
+	{"jcmp_stack_stack", "JcmpStackStack", "renvoAsmPushStack(a, left)\nrenvoAsmLoadPrimaryStack(a, right)\nrenvoAsmPopTertiary(a)\nrenvoAsmCmpTertiaryPrimaryJump(a, setcc, label)", []compilerBindingParameter{{"left", "int"}, {"right", "int"}, {"label", "int"}, {"setcc", "int"}}},
+	{"jcmp_stack_imm", "JcmpStackImm", "renvoAsmPushStack(a, offset)\nrenvoAsmPrimaryImm(a, value)\nrenvoAsmPopTertiary(a)\nrenvoAsmCmpTertiaryPrimaryJump(a, setcc, label)", []compilerBindingParameter{{"offset", "int"}, {"value", "int"}, {"label", "int"}, {"setcc", "int"}}},
 	{"store_byte_mem_secondary_tertiary", "StoreByteMemSecondaryTertiary", "renvoRTGDirectStoreU8(a,\n\trenvoRTGAsmAddress(renvoRTGSecondary, renvoRTGTertiary, 0, 1),\n\trenvoRTGPrimary)", nil},
 	{"inc_tertiary", "IncTertiary", "renvoRTGDirectIncrement(a, renvoRTGTertiary)", nil},
 	{"inc_primary", "IncPrimary", "renvoRTGDirectIncrement(a, renvoRTGPrimary)", nil},
@@ -259,13 +265,19 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 			out = append(out, " {\n"...)
 			hook := compilerBindingHook(architectures[j], operation.Name)
 			function, _ := findEmbeddedFunctionKind(documents[j], hook, "compiler")
-			if compilerBindingCanProject(function, operation) {
+			project := compilerBindingCanProject(function, operation)
+			if project {
 				out = append(out, function.Body...)
 			} else {
 				out = append(out, hook...)
 				out = append(out, operation.arguments()...)
 			}
-			out = append(out, "\nreturn\n}\n"...)
+			// Do not create unreachable consecutive returns: the compact source
+			// compiler admits a bare return only at its block termination.
+			if !project || !function.EndsInReturn {
+				out = append(out, "\nreturn\n"...)
+			}
+			out = append(out, "\n}\n"...)
 		}
 		out = append(out, "a.patchFailed = true\n}\n"...)
 	}

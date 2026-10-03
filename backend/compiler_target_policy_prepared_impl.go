@@ -34,6 +34,7 @@ const renvoResolvedLinuxAmd64SysExit = 60
 const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
 const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
 const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
+const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f"
 const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
 const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
@@ -252,7 +253,7 @@ func renvoProfileForTarget(target int) (renvoTargetProfile, bool) {
 	p.endian = int(renvoTargetEndianTable[target])
 	p.backendSlotSize = renvoBackendValueSlotSize
 	p.addressModel = renvoAddressModelFlat
-	p.runtimeCaps = renvoRuntimePrint | renvoRuntimeOpen | renvoRuntimeClose | renvoRuntimeRead | renvoRuntimeWrite | renvoRuntimeChmod | renvoRuntimeHosted
+	p.runtimeCaps = int(renvoTargetRuntimeCapsTable[target])
 	p.heapModel = renvoHeapNone
 	p.oomModel = renvoOOMResult
 	p.interruptModel = renvoInterruptNone
