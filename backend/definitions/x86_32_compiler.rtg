@@ -100,7 +100,7 @@ go compiler {
 	}
 	func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		if renvoFixedTarget == 0 {
-			if renvoIsHostedObject386(meta.c) {
+			if renvoIsCdeclObject(meta.c) {
 				return renvoBeginObjectProgram(p, meta)
 			}
 		}
@@ -187,7 +187,7 @@ go compiler {
 	func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
 		renvoNonNil(g)
 		a := &g.asm
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 			renvoRecordObjectFunctionRanges(g)
 			if g.c.code16 && !renvo386ApplyCode16(&g.asm) {
 				return renvoCompileResult{}
@@ -195,7 +195,7 @@ go compiler {
 		}
 		renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 		var data []byte
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 			data = renvoAsmImageObject386(a)
 		} else if targetIsWindows(g.c.renvoTargetOS) {
 			data = renvoAsmImageWindows386(a)
@@ -1300,6 +1300,7 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		object_call_abi = renvo386CompilerObjectCallABI
 		word_call_intrinsic = renvo386CompilerWordCallIntrinsic
 		unsigned_word_order_result = renvo386CompilerUnsignedWordOrderResult
 		word_constant_immediate = renvo386CompilerWordConstantImmediate
@@ -2359,7 +2360,7 @@ go compiler {
 	}
 
 	func renvo386CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && g.c.code16 {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
 			// Object wrappers reserve R15 for the word-index helper. Until object
 			// output has a TLS runtime contract, retain unwind state in this object's
 			// private BSS instead of clobbering that ABI register.
@@ -4814,5 +4815,11 @@ go compiler {
 			}
 		}
 		return renvoEmitPointerDifferenceCall(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectCallABI(c *renvoCompileContext) int {
+		return renvoObjectABICdecl
 	}
 }

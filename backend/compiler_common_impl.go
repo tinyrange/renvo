@@ -98,25 +98,25 @@ const renvoImportReloc = 2
 const renvoObjectExternalBase = 536870912
 const renvoObjectExternalStride = 1048576
 
-func renvoIsHostedObjectAmd64(c *renvoCompileContext) bool {
-	amd64ABI := c != nil && c.renvoTargetArch == renvoArchAmd64
-	if renvoPreparedBackendActive != 0 && renvoRTGPreparedSysVX8664 != 0 {
-		amd64ABI = true
-	}
+const renvoObjectABIUnavailable = 0
+const renvoObjectABISysV = 1
+const renvoObjectABICdecl = 2
+
+func renvoIsSysVObject(c *renvoCompileContext) bool {
 	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		amd64ABI && !targetIsKernelModule(c)
+		!targetIsKernelModule(c) && renvoTargetObjectCallABI(c) == renvoObjectABISysV
 }
 
-func renvoIsHostedObject386(c *renvoCompileContext) bool {
+func renvoIsCdeclObject(c *renvoCompileContext) bool {
 	return c != nil && c.objectFile && c.renvoTargetOS == renvoOSLinux &&
-		c.renvoTargetArch == renvoArch386 && !targetIsKernelModule(c)
+		!targetIsKernelModule(c) && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
 }
 
 func renvoIsHostedObject(c *renvoCompileContext) bool {
 	if renvoPreparedBackendActive != 0 && renvoRTGPreparedObject != 0 {
 		return c != nil && c.objectFile && !targetIsKernelModule(c)
 	}
-	return renvoIsHostedObjectAmd64(c) || renvoIsHostedObject386(c)
+	return renvoIsSysVObject(c) || renvoIsCdeclObject(c)
 }
 
 func renvoAsmAddExternalImportName(a *renvoAsm, name string) int {
@@ -3278,7 +3278,7 @@ func renvoEvalConstExprInto(g *renvoLinearGen, ep *renvoExprParse, idx int, out 
 	}
 	if e.kind == renvoExprCall {
 		if renvoFixedTarget == 0 {
-			if renvoIsHostedObjectAmd64(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
+			if renvoIsSysVObject(g.c) && e.argCount == 0 && g.constCallDepth < 8 {
 				fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
 				if fnIndex >= 0 {
 					fn := &g.meta.funcs[fnIndex]
@@ -8968,7 +8968,7 @@ func renvoEmitLinearIf(g *renvoLinearGen, stmt *renvoStmt) bool {
 		if fixedValue < 0 && (literalBool || !renvoRangeContainsLabel(p, stmt.bodyStart, stmt.bodyEnd) &&
 			!renvoRangeContainsLabel(p, stmt.elseStart, stmt.elseEnd)) {
 			oldFlow := g.constEvalFlow
-			g.constEvalFlow = oldFlow || renvoIsHostedObjectAmd64(g.c)
+			g.constEvalFlow = oldFlow || renvoIsSysVObject(g.c)
 			constant := renvoEvalConstExpr(g, ep, rootIndex)
 			g.constEvalFlow = oldFlow
 			if constant.ok {
@@ -11744,7 +11744,7 @@ func renvoClearLocalFlowConstAtOffset(g *renvoLinearGen, offset int) {
 }
 
 func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd int) bool {
-	if !renvoIsHostedObjectAmd64(g.c) {
+	if !renvoIsSysVObject(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -11759,7 +11759,7 @@ func renvoLocalFlowConstTrackable(g *renvoLinearGen, typ int, nameStart int, nam
 // function-wide constants.
 func renvoTopLevelAssignmentDominates(g *renvoLinearGen, assignmentTok int) bool {
 	renvoNonNil(g)
-	if !renvoIsHostedObjectAmd64(g.c) || g.flowControlDepth != 0 ||
+	if !renvoIsSysVObject(g.c) || g.flowControlDepth != 0 ||
 		g.currentFunc < 0 || g.currentFunc >= len(g.meta.funcs) {
 		return false
 	}
@@ -11809,7 +11809,7 @@ func renvoLocalConstTrackable(g *renvoLinearGen, typ int, nameStart int, nameEnd
 		return false
 	}
 	renvoNonNil(g)
-	if !renvoIsHostedObjectAmd64(g.c) {
+	if !renvoIsSysVObject(g.c) {
 		return false
 	}
 	resolved := renvoResolveType(g.meta, typ)
@@ -14254,7 +14254,7 @@ func renvoEmitCObjectSmallAggregateCallToLocal(g *renvoLinearGen, ep *renvoExprP
 		}
 	}
 	renvoNonNil(g, ep)
-	if !renvoIsHostedObjectAmd64(g.c) || idx < 0 || idx >= len(ep.exprs) {
+	if !renvoIsSysVObject(g.c) || idx < 0 || idx >= len(ep.exprs) {
 		return false
 	}
 	e := &ep.exprs[idx]
@@ -14321,7 +14321,7 @@ func renvoEmitUserCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	}
 	fn := &g.meta.funcs[fnIndex]
 	if renvoFixedTarget == 0 {
-		if renvoIsHostedObjectAmd64(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
+		if renvoIsSysVObject(g.c) && fn.resultCount == 0 && fn.literalTok <= 0 &&
 			fn.linkStatic == 0 && fn.bodyStart == fn.bodyEnd &&
 			!renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_") &&
 			renvoCallArgumentsDiscardable(g, ep, e) {
@@ -14473,7 +14473,7 @@ func renvoEmitDynamicUserCallTail(g *renvoLinearGen, ep *renvoExprParse, e *renv
 		if word != wordCount {
 			return false
 		}
-		if renvoFixedTarget == 0 && cObjectForeign && wordCount > 6 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && cObjectForeign && wordCount > 6 && renvoIsSysVObject(g.c) {
 			memoryAggregate := renvoEmitCObjectMemoryAggregateCall(g, fn, wordCount)
 			if memoryAggregate >= 0 {
 				return memoryAggregate != 0
@@ -14528,7 +14528,7 @@ func renvoEmitRuntimePlatformIntrinsic(g *renvoLinearGen, ep *renvoExprParse, e 
 
 func renvoCObjectReverseRegisterCallEligible(g *renvoLinearGen, fn *renvoFuncInfo, wordCount int) bool {
 	renvoNonNil(g, fn)
-	if !renvoIsHostedObjectAmd64(g.c) || wordCount > 6 {
+	if !renvoIsSysVObject(g.c) || wordCount > 6 {
 		return false
 	}
 	expectedWords := 0
@@ -14624,7 +14624,7 @@ func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, word
 	// The compact load/store sequence below uses an unsigned displacement byte.
 	// Six register arguments plus sixteen stack words therefore fit without a
 	// wider addressing form.
-	if !renvoIsHostedObjectAmd64(g.c) || wordCount != fn.paramCount || wordCount <= 6 || wordCount > 22 {
+	if !renvoIsSysVObject(g.c) || wordCount != fn.paramCount || wordCount <= 6 || wordCount > 22 {
 		return false
 	}
 	for i := 0; i < fn.paramCount; i++ {
@@ -15037,7 +15037,7 @@ func renvoEmitFunctionValueCall(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 
 func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		return renvo386EmitCObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 	}
 	if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > renvoRTGObjectRegisterCount() {
@@ -15118,7 +15118,7 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 
 func renvoEmitCObjectFunctionPointerIntegerStackCall(g *renvoLinearGen, handleOffset int, argOffsets []int) bool {
 	renvoNonNil(g)
-	if !renvoIsHostedObjectAmd64(g.c) || len(argOffsets) <= 6 || len(argOffsets) > 20 {
+	if !renvoIsSysVObject(g.c) || len(argOffsets) <= 6 || len(argOffsets) > 20 {
 		return false
 	}
 	// R11 retains the indirect target while R10 records the exact Renvo stack.
@@ -15709,7 +15709,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		return label
 	}
 	after := renvoAsmNewLabel(a)
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		// A freestanding object has no userspace process or syscall ABI. Model an
 		// impossible checked-runtime path as a normal compiler trap that objtool
 		// and the kernel linker both understand.
@@ -15720,7 +15720,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 		renvoEmitUncaughtFaultHelperBody(g, outOfMemory)
 	}
 	renvoAsmMarkLabel(a, after)
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_object_fault", label, after)
 	}
 	return label
@@ -19347,7 +19347,7 @@ func renvoEnsureSignedDivisionHelper(g *renvoLinearGen, mod bool) int {
 	renvoEmitSignedDivisionHelperBody(g, mod)
 	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, after)
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		name := "__renvo_signed_divide"
 		if mod {
 			name = "__renvo_signed_remainder"
@@ -20132,7 +20132,7 @@ func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) 
 	renvoEmitArenaAllocHelperBody(g, persistent)
 	renvoAsmMarkLabel(a, helperEnd)
 	renvoAsmMarkLabel(a, afterLabel)
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		name := "__renvo_arena_alloc"
 		if persistent {
 			name = "__renvo_persistent_alloc"
@@ -20153,7 +20153,7 @@ func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
 		aboveOrEqual = 0x93
 	}
 	if renvoFixedTarget == 0 {
-		if persistent && renvoIsHostedObjectAmd64(g.c) {
+		if persistent && renvoIsSysVObject(g.c) {
 			// Relocatable objects have no process entry at which to initialize their
 			// private arena. Preserve the requested size while the first allocation
 			// lazily establishes both bounds; later allocations take the ready branch.
@@ -21464,7 +21464,7 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 	}
 	fn := &g.meta.funcs[fnIndex]
 	wordCount := renvoObjectExportWordCount(g.meta, fn)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		wordCount = renvoObjectExportWordCount386(g.meta, fn)
 		if wordCount < 0 {
 			wordCount = renvoObjectExportWordCount(g.meta, fn)
@@ -21485,7 +21485,7 @@ func renvoEnsureCObjectFunctionPointerWrapper(g *renvoLinearGen, fnIndex int) (i
 		g.asm.symbols[symbolIndex].sectionEnd = sectionEnd
 		g.asm.symbols[symbolIndex].alignment = decl.alignment
 	}
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		if !renvo386EmitObjectCABIWrapperBody(g, fnIndex, wordCount) {
 			return 0, 0, false
 		}
@@ -21687,7 +21687,7 @@ func renvoEmitObjectFunctionAddress(g *renvoLinearGen, fnIndex int) bool {
 
 func renvoEmitObjectKernelLinkAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
-	if !renvoIsHostedObjectAmd64(g.c) {
+	if !renvoIsSysVObject(g.c) {
 		return false
 	}
 	nameStart, nameEnd, addend, ok := renvoObjectConstantPointerAddress(g, ep, idx)
@@ -21788,7 +21788,7 @@ func renvoEmitObjectExport386(g *renvoLinearGen, fnIndex int) bool {
 
 func renvoEmitObjectExport(g *renvoLinearGen, fnIndex int) bool {
 	renvoNonNil(g)
-	if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
+	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 		return renvoEmitObjectExport386(g, fnIndex)
 	}
 	fn := &g.meta.funcs[fnIndex]
@@ -22335,7 +22335,7 @@ func renvoInitFuncQueue(g *renvoLinearGen, count int) {
 	renvoNonNil(g)
 	g.funcReachable = make([]bool, count)
 	g.funcQueue = make([]int, 0, count)
-	if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+	if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		g.funcSingleCallState = make([]int, count)
 		g.paramConstValues = make([]int, len(g.meta.params))
 		g.paramConstValid = make([]bool, len(g.meta.params))
@@ -22369,7 +22369,7 @@ func renvoRecordFunctionDirectUseCounts(g *renvoLinearGen) {
 
 func renvoRecordSingleCallConstants(g *renvoLinearGen, ep *renvoExprParse, call *renvoExpr, fnIndex int) {
 	renvoNonNil(g, ep, call)
-	if !renvoIsHostedObjectAmd64(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
+	if !renvoIsSysVObject(g.c) || fnIndex < 0 || fnIndex >= len(g.meta.funcs) ||
 		fnIndex >= len(g.funcSingleCallState) || g.continueDepth != 0 ||
 		!renvoFunctionHasSingleDirectUse(g, fnIndex) {
 		return

@@ -797,6 +797,28 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoTargetObjectCallABI(c *renvoCompileContext) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		return renvoObjectABISysV
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvoObjectABICdecl
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return renvoObjectABIUnavailable
+	
+}
+return 0
+}
+
 func renvoEmitWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c
@@ -5303,7 +5325,7 @@ renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			// Object wrappers reserve R15 for the word-index helper. Until object
 			// output has a TLS runtime contract, retain unwind state in this object's
 			// private BSS instead of clobbering that ABI register.
@@ -5319,7 +5341,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) && g.c.code16 {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
 			// Object wrappers reserve R15 for the word-index helper. Until object
 			// output has a TLS runtime contract, retain unwind state in this object's
 			// private BSS instead of clobbering that ABI register.
@@ -5345,7 +5367,7 @@ renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoEnsurePanicState(g)
 			renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
@@ -7570,7 +7592,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelec
 			renvoAsmEmitText(&g.asm, "\x48\x8d\x05\x00\x00\x00\x00")
 			return 1
 		}
-		if e.argCount == 3 && renvoIsHostedObject386(g.c) &&
+		if e.argCount == 3 && renvoIsCdeclObject(g.c) &&
 			renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameEnd, "renvo_runtime_CInterruptWithStack") {
 			number := renvoEvalMetaParsedConstExpr(g.meta, g.prog, ep,
 				renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), 0)

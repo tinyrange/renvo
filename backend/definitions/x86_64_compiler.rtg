@@ -94,7 +94,7 @@ go compiler {
 	func renvoBeginScalarProgramAmd64(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		renvoNonNil(p, meta)
 		if renvoFixedTarget == 0 {
-			if renvoIsHostedObjectAmd64(meta.c) {
+			if renvoIsSysVObject(meta.c) {
 				return renvoBeginObjectProgram(p, meta)
 			}
 		}
@@ -220,14 +220,14 @@ go compiler {
 	func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
 		renvoNonNil(g)
 		a := &g.asm
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			// Copy implementation names and placement metadata before a self-hosted
 			// compiler releases the frontend scratch arena that owns their spans.
 			renvoRecordObjectFunctionRanges(g)
 		}
 		renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
 		var data []byte
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			data = renvoAsmImageObjectAmd64(a)
 		} else if targetIsWindows(g.c.renvoTargetOS) {
 			// The PE writer patches imports separately from the ELF path. Relax
@@ -323,7 +323,7 @@ go compiler {
 		g.stackPeak = 0
 		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
 		framePatch := len(a.code)
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
+		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
 			// Avoid the microcoded ENTER instruction in large generated programs.
 			// Keep the frame size as an immediate placeholder until emission
 			// discovers the function's peak stack use.
@@ -367,7 +367,7 @@ go compiler {
 		if frame > 65520 {
 			frame = 65520
 		}
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsHostedObjectAmd64(a.c)) {
+		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
 			a.code[framePatch+7] = byte(frame)
 			a.code[framePatch+8] = byte(frame >> 8)
 		} else {
@@ -796,7 +796,7 @@ go compiler {
 			renvoAsmMarkLabel(a, helperEnd)
 		}
 		renvoAsmMarkLabel(a, after)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			name := "__renvo_check_non_nil"
 			if kind == 1 {
 				name = "__renvo_check_secondary"
@@ -859,7 +859,7 @@ go compiler {
 		renvoAsmEmitText(a, "\x48\x8b\x0e\x48\x8b\x07\x48\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x0e\x48\xff\xc1\x48\x89\x0e\xc3")
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_addr", g.appendAddrLabel, helperEnd)
 		}
 		return g.appendAddrLabel
@@ -879,7 +879,7 @@ go compiler {
 		renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x41\x88\x14\x08\x48\xff\xc1\x48\x89\x0e\xc3")
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_byte", g.append8Label, helperEnd)
 		}
 		return g.append8Label
@@ -898,7 +898,7 @@ go compiler {
 		renvoAsmEmitText(a, "\x48\x8b\x0e\x4c\x8b\x07\x49\x89\x14\xc8\x48\xff\xc1\x48\x89\x0e\xc3")
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_word", g.append64Label, helperEnd)
 		}
 		return g.append64Label
@@ -924,7 +924,7 @@ go compiler {
 		renvoAsmAddReloc(a, len(a.code)-139, arenaAllocLabel)
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_append_bytes", g.appendBytesLabel, helperEnd)
 		}
 		return g.appendBytesLabel
@@ -965,7 +965,7 @@ go compiler {
 		renvoAsmEmitText(a, "\xc3")
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_equal", g.streqLabel, helperEnd)
 		}
 		return g.streqLabel
@@ -977,6 +977,7 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		object_call_abi = renvoAmd64CompilerObjectCallABI
 		word_call_intrinsic = renvoAmd64CompilerWordCallIntrinsic
 		unsigned_word_order_result = renvoAmd64CompilerUnsignedWordOrderResult
 		word_constant_immediate = renvoAmd64CompilerWordConstantImmediate
@@ -2197,7 +2198,7 @@ go compiler {
 	}
 
 	func renvoAmd64CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			// Object wrappers reserve R15 for the word-index helper. Until object
 			// output has a TLS runtime contract, retain unwind state in this object's
 			// private BSS instead of clobbering that ABI register.
@@ -2211,7 +2212,7 @@ go compiler {
 	}
 
 	func renvoAmd64CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-		if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {
+		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 			renvoEnsurePanicState(g)
 			renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
@@ -3911,5 +3912,11 @@ go compiler {
 			return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerObjectCallABI(c *renvoCompileContext) int {
+		return renvoObjectABISysV
 	}
 }

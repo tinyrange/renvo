@@ -54,6 +54,7 @@ type renvoFuncInfo struct {}
 type renvoAsmReserves struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
+type renvoCompileContext = context
 var renvoFixedTarget int
 type renvoAsm struct { c *context; patchFailed bool }
 func renvoNonNil(values ...interface{}) {}
@@ -106,6 +107,8 @@ func TestCompilerBindingsRejectIncompleteAndInvalidContracts(t *testing.T) {
 		{"missing parameter", "(a *renvoAsm, imm int)", "(a *renvoAsm)", "RTG-COMPILER-004"},
 		{"wrong argument", "a *renvoAsm", "a int", "RTG-COMPILER-004"},
 		{"lowering wrong result", "func firstHookGlobalInitFrameStart(g *renvoLinearGen) int", "func firstHookGlobalInitFrameStart(g *renvoLinearGen) bool", "RTG-COMPILER-004"},
+		{"context wrong receiver", "func firstHookObjectCallABI(c *renvoCompileContext) int", "func firstHookObjectCallABI(c *renvoAsm) int", "RTG-COMPILER-004"},
+		{"context wrong result", "func firstHookObjectCallABI(c *renvoCompileContext) int", "func firstHookObjectCallABI(c *renvoCompileContext) bool", "RTG-COMPILER-004"},
 		{"lowering wrong receiver", "g *renvoLinearGen", "g *renvoAsm", "RTG-COMPILER-004"},
 		{"lowering bool result", "op byte, size int) bool", "op byte, size int) int", "RTG-COMPILER-004"},
 		{"wrong result", "(a *renvoAsm) {}", "(a *renvoAsm) int { return 0 }", "RTG-COMPILER-004"},
@@ -249,6 +252,7 @@ type renvoFuncInfo struct {}
 type renvoAsmReserves struct {}
 type renvoLinearGen struct { c *context; asm renvoAsm }
 type context struct { renvoTargetArch int }
+type renvoCompileContext = context
 var renvoFixedTarget int
  type renvoAsm struct { c *context; patchFailed bool }
  func renvoNonNil(values ...interface{}) {}
@@ -446,6 +450,7 @@ const selectedTwo = 73
 const selectedThree = 99
 var renvoFixedTarget int
 type context struct { renvoTargetArch int }
+type renvoCompileContext = context
 type asm struct { c *context; patchFailed bool }
 func changeSelector(a *asm) bool { a.c.renvoTargetArch = selectedOne; return false }
 func projected(a *asm) {
@@ -532,6 +537,7 @@ func TestCompilerBindingSharedTailAfterCalls(t *testing.T) {
 const selectedOne = 41
 const selectedTwo = 73
 type context struct { renvoTargetArch int }
+type renvoCompileContext = context
 type asm struct { c *context; patchFailed bool }
 func changeSelector(a *asm) { a.c.renvoTargetArch = selectedTwo }
 func observe(a *asm) { a.patchFailed = true }

@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		object_call_abi = renvoWasm32CompilerObjectCallABI
 		word_call_intrinsic = renvoWasm32CompilerWordCallIntrinsic
 		unsigned_word_order_result = renvoWasm32CompilerUnsignedWordOrderResult
 		word_constant_immediate = renvoWasm32CompilerWordConstantImmediate
@@ -6301,5 +6302,11 @@ go compiler {
 			return renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
 		}
 		return -1
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerObjectCallABI(c *renvoCompileContext) int {
+		return renvoObjectABIUnavailable
 	}
 }
