@@ -805,6 +805,18 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		return renvoIsCdeclObject(c)
+	
+}
+return false
+}
+
 func renvoSingleCallConstants(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

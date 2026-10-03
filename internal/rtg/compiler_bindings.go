@@ -98,6 +98,12 @@ func (op compilerEmitterOperation) failBody() string {
 // argument reconstruction only when the source compiler uses narrow integers.
 // Function-address layout describes object ABI storage, not function dispatch.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	// Selects the shared stack-word scalar adapter: one word per parameter and
+	// an optional two-word scalar result. Physical locations remain target hooks.
+	{Name: "object_stack_scalar_abi", Suffix: "ObjectStackScalarABI", Function: "renvoObjectStackScalarABI", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsCdeclObject(c)"},
+	// These optimization policies are queried only for object compilation. Keep
+	// the cheap mode rejection at shared call sites: executable compilation does
+	// not need target dispatch or object-specific analysis bookkeeping.
 	// Enables shared direct-use counting and propagation of constants into singly-called private functions.
 	{Name: "single_call_constants", Suffix: "SingleCallConstants", Function: "renvoSingleCallConstants", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoIsSysVObject(c)"},
 	// Allows omission of empty calls only after shared argument side-effect and function-body checks.

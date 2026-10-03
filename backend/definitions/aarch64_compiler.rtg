@@ -392,6 +392,7 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		object_stack_scalar_abi = renvoAarch64CompilerObjectStackScalarABI
 		single_call_constants = renvoAarch64CompilerSingleCallConstants
 		elide_empty_calls = renvoAarch64CompilerElideEmptyCalls
 		pure_call_constants = renvoAarch64CompilerPureCallConstants
@@ -3556,5 +3557,11 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerSingleCallConstants(c *renvoCompileContext) bool {
 		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerObjectStackScalarABI(c *renvoCompileContext) bool {
+		return false
 	}
 }
