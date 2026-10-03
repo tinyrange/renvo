@@ -447,16 +447,10 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 }
 
 func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		return renvoTryCompileScalarProgramRTG(prog, meta)
-	}
 	return renvoTryCompileScalarProgramScratch(prog, meta)
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		return renvoTryCompileScalarProgramRTG(prog, meta)
-	}
 	if !renvoProgramCacheSupported(meta.c) {
 		return renvoTryCompileScalarProgramScratch(prog, meta)
 	}

@@ -2114,6 +2114,15 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoResetProgramEmission(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoRTGUnsupportedOperation = 0
+renvoRTGFailureDetail = -1
+renvoRTGImageLimitMemory = false
+renvoRTGImageLimitNeeded = 0
+renvoRTGImageLimit = 0
+}
+
 func renvoFunctionAddressLayout(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && c.objectFile

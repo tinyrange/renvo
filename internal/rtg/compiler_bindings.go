@@ -98,6 +98,7 @@ func (op compilerEmitterOperation) failBody() string {
 // argument reconstruction only when the source compiler uses narrow integers.
 // Function-address layout describes object ABI storage, not function dispatch.
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "reset_program_emission", Suffix: "ResetProgramEmission", Function: "renvoResetProgramEmission", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGUnsupportedOperation = 0\nrenvoRTGFailureDetail = -1\nrenvoRTGImageLimitMemory = false\nrenvoRTGImageLimitNeeded = 0\nrenvoRTGImageLimit = 0"},
 	{Name: "function_address_layout", Suffix: "FunctionAddressLayout", Function: "renvoFunctionAddressLayout", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return (renvoFixedTarget == 0 || renvoRTGPreparedObject != 0) && c.objectFile"},
 	{Name: "reconstruct_wide_argument", ReachabilityGuard: "renvoMayReconstructWideArgument", Suffix: "ReconstructWideArgument", Function: "renvoReconstructWideArgument", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return c.renvoNativeIntSize == 8"},
 	{Name: "scaled_atom_literals", ReachabilityGuard: "renvoMayUseScaledAtomLiterals", Suffix: "ScaledAtomLiterals", Function: "renvoScaledAtomLiterals", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
@@ -458,7 +459,7 @@ func validateCompilerBindings(document Document, arch Declaration) []Diagnostic 
 	return validateCompilerBindingsIndexed(document, arch, indexEmbeddedFunctions(document, "compiler"))
 }
 
-func validateCompilerBindingsIndexed(document Document, arch Declaration, functions map[string]embeddedFunction) []Diagnostic {
+func validateCompilerBindingsIndexed(document Document, arch Declaration, functions []embeddedFunction) []Diagnostic {
 	block, bound := declarationBlock(arch, "compiler_bindings")
 	selector, selected := fieldValue(document, arch, "compiler_selector")
 	if !bound && !selected {
@@ -494,7 +495,7 @@ func validateCompilerBindingsIndexed(document Document, arch Declaration, functi
 			continue
 		}
 		operation := compilerEmitterOperations[operationIndex]
-		function, found := functions[right[0]]
+		function, found := indexedEmbeddedFunction(functions, right[0])
 		if !found || !directEmitterSignatureMatches(function, operation.contract()) {
 			diagnostics = append(diagnostics, statementDiagnostic(document, child, "RTG-COMPILER-004", "compiler hook "+right[0]+" must have signature func"+operation.signature()))
 		}
@@ -529,7 +530,7 @@ func appendPreparedCompilerBindings(out []byte) []byte {
 func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) GenerateResult {
 	var architectures []Declaration
 	var documents []Document
-	var functions []map[string]embeddedFunction
+	var functions [][]embeddedFunction
 	var selectors []string
 	for i := 0; i < len(definitions); i++ {
 		definition := definitions[i]
@@ -610,7 +611,7 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		var conditions []string
 		for j := 0; j < len(architectures); j++ {
 			hook := compilerBindingHook(architectures[j], operation.Name)
-			function, _ := functions[j][hook]
+			function, _ := indexedEmbeddedFunction(functions[j], hook)
 			project := compilerBindingCanProject(function, operation)
 			body := hook + operation.arguments()
 			if operation.Result != "" {
@@ -693,7 +694,7 @@ func compilerProjectedPrivateHooks(document Document) []string {
 		for j := 0; j < len(compilerEmitterOperations); j++ {
 			operation := compilerEmitterOperations[j]
 			hook := compilerBindingHook(arch, operation.Name)
-			function, found := functions[hook]
+			function, found := indexedEmbeddedFunction(functions, hook)
 			if found && compilerBindingCanProject(function, operation) && stringIndex(candidates, hook) < 0 {
 				candidates = append(candidates, hook)
 			}

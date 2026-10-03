@@ -20585,11 +20585,8 @@ func renvoObjectCABIIntegerAggregate(meta *renvoMeta, typ int) bool {
 	return true
 }
 
-func renvoBeginObjectProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-	g := renvoBeginLinearProgram(p, meta)
-	if g == nil {
-		return nil
-	}
+func renvoBeginObjectProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	renvoBeginLinearProgram(g, p, meta)
 	// Relocatable objects have no process entrypoint that can run the ordinary
 	// global initializer function. Allocate each declaration directly into its
 	// requested ELF storage and retain a compact virtual-BSS offset for common
@@ -21596,8 +21593,17 @@ func renvoEmitApplicationEntry(g *renvoLinearGen, appIndex int, image bool, entr
 // entry setup, object-code transforms and image construction.
 func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
+	g := new(renvoLinearGen)
+	g.c = meta.c
+	g.asm.c = meta.c
+	// Reset only definition-owned diagnostics before any early program failure.
+	// The hook sees the selected context, but no initialized emission buffer.
+	renvoResetProgramEmission(g)
+	if g.asm.patchFailed {
+		return nil
+	}
 	if renvoObjectProgram(meta.c) {
-		return renvoBeginObjectProgram(p, meta)
+		return renvoBeginObjectProgram(g, p, meta)
 	}
 	appIndex := p.entryFunc
 	if appIndex < 0 {
@@ -21607,7 +21613,6 @@ func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 		renvo_runtime_ArenaDiscardDecls(p.decls)
 		renvo_runtime_ArenaDiscardFuncs(p.funcs)
 	}
-	g := new(renvoLinearGen)
 	renvoInitLinearProgram(g, p, meta, renvoOptimizeProgramRuntime(meta.c))
 	// Some execution formats compile a target-specific compiler, while others
 	// preserve a source-declared selector or a dynamic command-line fallback.
@@ -21768,14 +21773,12 @@ func renvoInitProgramFunctions(g *renvoLinearGen, reserve bool) {
 	renvoInitFuncQueue(g, count)
 }
 
-func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+func renvoBeginLinearProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta) {
 	renvoNonNil(p, meta)
 	renvo_runtime_ArenaDiscardDecls(p.decls)
 	renvo_runtime_ArenaDiscardFuncs(p.funcs)
-	g := new(renvoLinearGen)
 	renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
 	renvoInitProgramFunctions(g, renvoFixedTarget != 0)
-	return g
 }
 
 func renvoObjectExportWordCount386(meta *renvoMeta, fn *renvoFuncInfo) int {
@@ -24887,9 +24890,7 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	}
 	meta.arenaSize = renvoResolveArenaSize(target, arenaSize)
 	var result renvoCompileResult
-	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		result = renvoTryCompileScalarProgramRTG(prog, &meta)
-	} else if !renvoProgramCacheSupported(meta.c) {
+	if !renvoProgramCacheSupported(meta.c) {
 		result = renvoTryCompileScalarProgramScratch(prog, &meta)
 	} else {
 		result = renvoTryCompileScalarProgramCached(prog, &meta)

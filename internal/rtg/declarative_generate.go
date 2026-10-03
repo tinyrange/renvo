@@ -601,8 +601,8 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 // first-declaration lookup semantics and never shares entries across documents.
 // Parsing each Go block once avoids reparsing the whole preceding document for
 // every operation in a compiler binding surface.
-func indexEmbeddedFunctions(document Document, kind string) map[string]embeddedFunction {
-	functions := make(map[string]embeddedFunction)
+func indexEmbeddedFunctions(document Document, kind string) []embeddedFunction {
+	var functions []embeddedFunction
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind != DeclGo || declaration.Name != kind {
@@ -619,12 +619,23 @@ func indexEmbeddedFunctions(document Document, kind string) map[string]embeddedF
 				continue
 			}
 			name := string(syntax.TokenText(wrapped, file.Tokens[fn.NameTok]))
-			if _, found := functions[name]; !found {
-				functions[name] = embeddedFunctionFromSyntax(file, fn, name)
+			if _, found := indexedEmbeddedFunction(functions, name); !found {
+				functions = append(functions, embeddedFunctionFromSyntax(file, fn, name))
 			}
 		}
 	}
 	return functions
+}
+
+// Keep the index in the same flat, self-hostable representation as the rest
+// of the definition compiler. Name lookup does not reparse source or bodies.
+func indexedEmbeddedFunction(functions []embeddedFunction, name string) (embeddedFunction, bool) {
+	for i := 0; i < len(functions); i++ {
+		if functions[i].Name == name {
+			return functions[i], true
+		}
+	}
+	return embeddedFunction{}, false
 }
 
 func embeddedFunctionFromSyntax(file syntax.File, fn syntax.FuncDecl, name string) embeddedFunction {
