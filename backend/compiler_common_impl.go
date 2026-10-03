@@ -25318,3 +25318,80 @@ func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *re
 	}
 	return true
 }
+
+// renvoCompileSourceInputs owns the shared raw-source pipeline. Target policy
+// chooses source storage and optional runtime support, not language traversal.
+func renvoCompileSourceInputs(input []int, output int, arenaSize int) int {
+	context := renvoLegacyCompileContext()
+	capacity := renvoSourceCapacity(context)
+	var src []byte
+	if renvoSourceScratch(context) {
+		src = renvoMakeByteScratch(capacity)
+	} else {
+		src = make([]byte, 0, capacity)
+	}
+	for i := 0; i < len(input); i++ {
+		src = renvoReadAll(input[i], src)
+		src = append(src, '\n')
+	}
+	var prog renvoProgram
+	prog = renvoParseProgram(src)
+	if renvoKernelProgram(&prog.c) {
+		if !renvoPrepareKernelMetadata(&prog.c) {
+			renvoPrintErr("renvo: kernel metadata unavailable\n")
+			return 1
+		}
+		renvoCaptureKernelCompileContext(&prog.c)
+	}
+	if !prog.ok {
+		return 1
+	}
+	if renvoSourceSoftFloat(&prog.c) && renvoProgramNeedsSoftFloat(&prog) {
+		src = renvoAppendSoftFloatSource(src)
+		prog = renvoParseProgram(src)
+		if !prog.ok {
+			return 1
+		}
+	}
+	var meta renvoMeta
+	renvoBuildMetaInto(&prog, &meta)
+	if !meta.ok {
+		return 1
+	}
+	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
+	var result renvoCompileResult
+	result = renvoTryCompileScalarProgramScratch(&prog, &meta)
+	if result.ok {
+		data := result.data
+		if renvoFixedTarget == 0 {
+			data = renvoCompileOutputData(data, renvoTarget)
+		}
+		write(output, data, -1)
+		return 0
+	}
+	if renvoProgramTargetMode(&prog.c) != 0 {
+		renvoPrintErr("renvo: wasm32 compilation failed\n")
+	} else {
+		renvoPrintErr("renvo: compilation failed\n")
+	}
+	return 1
+}
+
+func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
+	for i := 0; i < renvoTokCount(prog); i++ {
+		if renvoTokIsKind(prog, i, renvoTokFloat) {
+			return true
+		}
+		if !renvoTokIsKind(prog, i, renvoTokIdent) {
+			continue
+		}
+		tok := renvoTokAt(prog, i)
+		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
+			return true
+		}
+	}
+	return false
+}

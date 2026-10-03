@@ -46,33 +46,7 @@ go compiler {
 	}
 
 	func renvoCompile386(input []int, output int, arenaSize int) int {
-		src := renvoMakeByteScratch(786432)
-		for i := 0; i < len(input); i++ {
-			src = renvoReadAll(input[i], src)
-			src = append(src, '\n')
-		}
-		var prog renvoProgram
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
-		var meta renvoMeta
-		renvoBuildMetaInto(&prog, &meta)
-		if !meta.ok {
-			return 1
-		}
-		meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-		result := renvoTryCompileScalarProgramScratch(&prog, &meta)
-		if result.ok {
-			data := result.data
-			if renvoFixedTarget == 0 {
-				data = renvoCompileOutputData(data, renvoTarget)
-			}
-			write(output, data, -1)
-			return 0
-		}
-		renvoPrintErr("renvo: compilation failed\n")
-		return 1
+		return renvoCompileSourceInputs(input, output, arenaSize)
 	}
 
 	func renvoAsmImageObject386(emitter *renvoAsm) []byte {
@@ -978,6 +952,9 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		source_soft_float = renvo386CompilerSourceSoftFloat
+		source_scratch = renvo386CompilerSourceScratch
+		source_capacity = renvo386CompilerSourceCapacity
 		empty_function = renvo386CompilerEmptyFunction
 		resolve_unemitted_closures = renvo386CompilerResolveUnemittedClosures
 		object_program = renvo386CompilerObjectProgram
@@ -5016,5 +4993,23 @@ go compiler {
 	func renvo386CompilerEmptyFunction(a *renvoAsm, label int) {
 		renvoAsmMarkLabel(a, label)
 		renvoAsmRet(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceCapacity(c *renvoCompileContext) int {
+		return 786432
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceSoftFloat(c *renvoCompileContext) bool {
+		return false
 	}
 }

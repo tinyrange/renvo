@@ -311,35 +311,7 @@ go compiler {
 	const renvoAarch64ELFCodeOffset = 0xb0
 
 	func renvoCompileAarch64(input []int, output int, arenaSize int) int {
-		sourceCapacity := 786432
-		src := make([]byte, 0, sourceCapacity)
-		for i := 0; i < len(input); i++ {
-			src = renvoReadAll(input[i], src)
-			src = append(src, '\n')
-		}
-		var prog renvoProgram
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
-		var meta renvoMeta
-		renvoBuildMetaInto(&prog, &meta)
-		if !meta.ok {
-			return 1
-		}
-		meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-		var result renvoCompileResult
-		result = renvoTryCompileScalarProgramScratch(&prog, &meta)
-		if result.ok {
-			data := result.data
-			if renvoFixedTarget == 0 {
-				data = renvoCompileOutputData(data, renvoTarget)
-			}
-			write(output, data, -1)
-			return 0
-		}
-		renvoPrintErr("renvo: compilation failed\n")
-		return 1
+		return renvoCompileSourceInputs(input, output, arenaSize)
 	}
 
 	// Image assembly is terminal: reuse spare code capacity rather than keeping
@@ -420,6 +392,9 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		source_soft_float = renvoAarch64CompilerSourceSoftFloat
+		source_scratch = renvoAarch64CompilerSourceScratch
+		source_capacity = renvoAarch64CompilerSourceCapacity
 		empty_function = renvoAarch64CompilerEmptyFunction
 		resolve_unemitted_closures = renvoAarch64CompilerResolveUnemittedClosures
 		object_program = renvoAarch64CompilerObjectProgram
@@ -3284,5 +3259,23 @@ go compiler {
 	func renvoAarch64CompilerEmptyFunction(a *renvoAsm, label int) {
 		renvoAsmMarkLabel(a, label)
 		renvoAsmRet(a)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSourceCapacity(c *renvoCompileContext) int {
+		return 786432
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSourceScratch(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSourceSoftFloat(c *renvoCompileContext) bool {
+		return false
 	}
 }

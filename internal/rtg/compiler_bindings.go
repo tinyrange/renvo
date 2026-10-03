@@ -91,6 +91,9 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "source_soft_float", Suffix: "SourceSoftFloat", Function: "renvoSourceSoftFloat", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
+	{Name: "source_scratch", Suffix: "SourceScratch", Function: "renvoSourceScratch", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
+	{Name: "source_capacity", Suffix: "SourceCapacity", Function: "renvoSourceCapacity", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "return 0"},
 	{Name: "empty_function", Suffix: "EmptyFunction", Function: "renvoEmitEmptyFunction", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"label", "int"}}, Prepared: "renvoRTGFunctionStart(a, label)\nrenvoAsmMarkLabel(a, label)\nrenvoAsmRet(a)\nrenvoRTGFunctionFinish(a)"},
 	{Name: "resolve_unemitted_closures", Suffix: "ResolveUnemittedClosures", Function: "renvoResolveUnemittedClosures", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "object_program", Suffix: "ObjectProgram", Function: "renvoObjectProgram", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGPreparedObject != 0"},

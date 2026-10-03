@@ -698,25 +698,6 @@ func renvoAppendSoftFloatSource(src []byte) []byte {
 	return src
 }
 
-func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
-	for i := 0; i < renvoTokCount(prog); i++ {
-		if renvoTokIsKind(prog, i, renvoTokFloat) {
-			return true
-		}
-		if !renvoTokIsKind(prog, i, renvoTokIdent) {
-			continue
-		}
-		tok := renvoTokAt(prog, i)
-		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
-			return true
-		}
-	}
-	return false
-}
-
 func compileWasiWasm32(input []int, output int) int {
 	return compileWasiWasm32Arena(input, output, 0)
 }
@@ -736,41 +717,7 @@ func compileVM32Arena(input []int, output int, arenaSize int) int {
 }
 
 func compileWasm32Arena(input []int, output int, arenaSize int) int {
-	src := renvoMakeByteScratch(655360)
-	for i := 0; i < len(input); i++ {
-		src = renvoReadAll(input[i], src)
-		src = append(src, '\n')
-	}
-	var prog renvoProgram
-	prog = renvoParseProgram(src)
-	if !prog.ok {
-		return 1
-	}
-	if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		src = renvoAppendSoftFloatSource(src)
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
-	}
-	var meta renvoMeta
-	renvoBuildMetaInto(&prog, &meta)
-	if !meta.ok {
-		return 1
-	}
-	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-	var result renvoCompileResult
-	result = renvoTryCompileScalarProgramWasm32(&prog, &meta)
-	if result.ok {
-		data := result.data
-		if renvoFixedTarget == 0 {
-			data = renvoCompileOutputData(data, renvoTarget)
-		}
-		write(output, data, -1)
-		return 0
-	}
-	renvoPrintErr("renvo: wasm32 compilation failed\n")
-	return 1
+	return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 // Compatibility entrypoint; structured programs use the common queue and
