@@ -63,6 +63,7 @@ func main() {
 	must(writeFormatted(filepath.Join(root, "internal", "targetinfo", "registry_generated.go"), frontendSource(descriptors)))
 	must(writeFormatted(filepath.Join(root, "internal", "driver", "target_help_generated.go"), driverHelpSource(descriptors)))
 	must(updatePolicyProjection(filepath.Join(root, "backend", "compiler_target_policy_impl.go"), descriptors))
+	must(updateRuntimeNumbers(filepath.Join(root, "backend", "compiler_linux_impl.go"), descriptors))
 	must(writeFormatted(filepath.Join(root, "backend", "compiler_target_registry_impl.go"), backendSource(descriptors)))
 	must(os.WriteFile(filepath.Join(root, "backend", "docs", "machine-definitions.generated.md"), documentationSource(descriptors), 0o644))
 }
