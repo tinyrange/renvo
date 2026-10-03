@@ -812,7 +812,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	renvoWasm32MarkFunc(&g, appIndex)
 	renvoEmitInitializeThreadState(&g)
 	renvoEmitPersistentArenaReady(&g)
-	if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgsWasm32(&g, appIndex) {
+	if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgs(&g, appIndex, 0) {
 		return renvoCompileResult{}
 	}
 	renvoAsmCallLabel(a, g.funcLabels[appIndex])
@@ -847,44 +847,6 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 	result.ok = true
 	return result
 }
-func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-		return false
-	}
-	argsOff := g.asm.bssSize
-	envDataOff := argsOff
-	envLenOff := argsOff
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
-		// VM execution receives arguments from the VM host.
-	} else {
-		g.asm.bssSize += 32768
-		envDataOff = g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff = g.asm.bssSize
-		g.asm.bssSize += 8
-	}
-	renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
-	if app.paramCount == 0 {
-		return true
-	}
-	if app.paramCount > 2 {
-		return false
-	}
-	first := &g.meta.params[app.firstParam]
-	if !renvoTypeIsStringSlice(g.meta, first.typ) {
-		return false
-	}
-	if app.paramCount == 1 {
-		return true
-	}
-	second := &g.meta.params[app.firstParam+1]
-	if !renvoTypeIsStringSlice(g.meta, second.typ) {
-		return false
-	}
-	return true
-}
-
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	appIndex := p.entryFunc
 	if appIndex < 0 {

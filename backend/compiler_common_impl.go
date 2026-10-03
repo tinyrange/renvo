@@ -21494,6 +21494,34 @@ func renvoEmitObjectKernelLinkAddress(g *renvoLinearGen, ep *renvoExprParse, idx
 	return true
 }
 
+// Entry signatures are language policy. Target hooks receive only the number
+// of validated slices and the runtime's entry-state location.
+func renvoEntryParameterCount(g *renvoLinearGen, appIndex int) int {
+	if appIndex < 0 || appIndex >= len(g.meta.funcs) {
+		return -1
+	}
+	app := &g.meta.funcs[appIndex]
+	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) || app.paramCount > 2 {
+		return -1
+	}
+	for i := 0; i < app.paramCount; i++ {
+		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+i].typ) {
+			return -1
+		}
+	}
+	return app.paramCount
+}
+
+func renvoEmitProgramEntryArgs(g *renvoLinearGen, appIndex int, entryStateOffset int) bool {
+	count := renvoEntryParameterCount(g, appIndex)
+	return count >= 0 && renvoEmitProcessEntryWords(g, count, entryStateOffset)
+}
+
+func renvoEmitImageEntryArgs(g *renvoLinearGen, appIndex int) bool {
+	count := renvoEntryParameterCount(g, appIndex)
+	return count >= 0 && renvoEmitImageEntryWords(g, count)
+}
+
 func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 	renvoNonNil(p, meta)
 	renvo_runtime_ArenaDiscardDecls(p.decls)

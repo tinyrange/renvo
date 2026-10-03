@@ -2114,6 +2114,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+renvoNonNil(g)
+return false
+}
+
+func renvoEmitProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+renvoNonNil(g)
+return renvoRTGEmitEntry(&g.asm, paramCount, entryStateOffset)
+}
+
 func renvoAsmObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
 renvoNonNil(a)
 for i := 0; i < wordCount/2; i++ {

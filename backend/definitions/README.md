@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 257 role-based operations: register copies,
+The current migration covers 259 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -166,6 +166,9 @@ and callback wrappers share type classification, argument ordering, and function
 reachability in the core; bounded frame, argument, variadic, and private-result
 operations own their physical ABI. Reverse-order external register calls are
 also definition-owned, without per-call temporary locals in prepared backends.
+Process and linked-image entry lowering share one language-level signature check;
+definitions receive only validated slice counts and runtime entry-state locations,
+then own argument decoding, BSS requirements, and ABI word placement.
 Literal parsing selects ordinary or split-word materialization
 without inspecting an architecture; each backend owns its scalar-width behavior.
 Global-initializer frame setup/teardown and stack IEEE arithmetic, conversions,

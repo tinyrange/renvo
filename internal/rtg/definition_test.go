@@ -893,7 +893,7 @@ func TestWindowsArm64ParameterlessEntrySkipsArgvRuntime(t *testing.T) {
 	if entry < 0 {
 		t.Fatal("windows/arm64 projection omitted its entry adapter")
 	}
-	guard := strings.Index(source[entry:], "if app.paramCount == 0")
+	guard := strings.Index(source[entry:], "if paramCount == 0")
 	allocation := strings.Index(source[entry:], "renvoWindowsArm64ArgsBSSAlignment")
 	if guard < 0 || allocation < 0 || guard > allocation {
 		t.Fatalf("parameterless entry guard does not precede argv runtime allocation")

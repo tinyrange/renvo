@@ -604,9 +604,9 @@ go compiler {
 		}
 		entryOK := false
 		if renvoFixedTarget == 0 && meta.c.emitImage {
-			entryOK = renvoEmitImageEntryArgsArm(g, appIndex)
+			entryOK = renvoEmitImageEntryArgs(g, appIndex)
 		} else {
-			entryOK = renvoEmitProgramEntryArgsArm(g, appIndex)
+			entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
 		}
 		if !entryOK {
 			return nil
@@ -624,35 +624,6 @@ go compiler {
 			renvoAsmSyscall(a)
 		}
 		return g
-	}
-
-	func renvoEmitImageEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
-		renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
-		renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
-		renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-			return false
-		}
-		// Native entry ABI: R0=argsData, R1=argsLen, R2=envData,
-		// R3=envLen. Renvo slice words use R3/R4/R1 and R2/R5/R6.
-		if app.paramCount == 2 {
-			if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-				return false
-			}
-			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
-			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
-		}
-		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
-		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
-		return true
 	}
 
 	// Image assembly is terminal: reuse spare code capacity rather than keeping
@@ -696,6 +667,8 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		image_entry_words = renvoArmCompilerImageEntryWords
+		process_entry_words = renvoArmCompilerProcessEntryWords
 		object_reverse_register_call = renvoArmCompilerObjectReverseRegisterCall
 		local_storage_unit = renvoArmCompilerLocalStorageUnit
 		kernel_callback_address = renvoArmCompilerKernelCallbackAddress
@@ -3018,5 +2991,32 @@ go compiler {
 go compiler {
 	func renvoArmCompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+		return renvoEmitProgramEntryArgsArm(g, paramCount)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+		renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
+		if paramCount == 0 {
+			return true
+		}
+		// Native entry ABI: R0=argsData, R1=argsLen, R2=envData,
+		// R3=envLen. Renvo slice words use R3/R4/R1 and R2/R5/R6.
+		if paramCount == 2 {
+			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
+			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
+		}
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
+		return true
 	}
 }

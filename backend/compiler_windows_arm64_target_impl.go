@@ -740,19 +740,9 @@ func compileWindowsArm64Arena(input []int, output int, arenaSize int) int {
 	return renvoCompileAarch64(input, output, arenaSize)
 }
 
-func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-		return false
-	}
-	if app.paramCount == 0 {
+func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, paramCount int) bool {
+	if paramCount == 0 {
 		return true
-	}
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-		return false
-	}
-	if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-		return false
 	}
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoWindowsArm64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoWindowsArm64ArgsBSSSize

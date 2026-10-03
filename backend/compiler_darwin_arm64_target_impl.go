@@ -942,16 +942,12 @@ func renvoDarwinArm64DefinitionEntry(a *renvoAsm, argsOff int, environmentOff in
 }
 
 
-func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
-	if app.paramCount == 0 { return true }
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-	if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) { return false }
+func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+	if paramCount == 0 { return true }
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoDarwinArm64ArgsBSSSize
 	envOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64EnvironmentBSSAlignment)
 	g.asm.bssSize = envOff + renvoDarwinArm64EnvironmentBSSSize
-	renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, g.darwinEntryOff)
+	renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, entryStateOffset)
 	return true
 }
