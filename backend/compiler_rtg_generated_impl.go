@@ -805,6 +805,200 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoNonNil(g)
+		// Restore argsData, argsLen, envData, envLen.
+		renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+		if paramCount == 0 {
+			return true
+		}
+		if paramCount == 1 {
+			// RDX = args capacity = args length.
+			renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+			return true
+		}
+		// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
+		renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if paramCount == 0 {
+			return true
+		}
+		// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
+		if paramCount == 1 {
+			return true
+		}
+		// ECX/EAX/EDI, the second Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
+		renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
+		renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
+		renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
+		if paramCount == 0 {
+			return true
+		}
+		// Native entry ABI: X0=argsData, X1=argsLen, X2=envData,
+		// X3=envLen. Renvo slice words use X3/X4/X1 and X2/X5/X6.
+		if paramCount == 2 {
+			renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
+			renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
+		}
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
+		renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
+		renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
+		if paramCount == 0 {
+			return true
+		}
+		// Native entry ABI: R0=argsData, R1=argsLen, R2=envData,
+		// R3=envLen. Renvo slice words use R3/R4/R1 and R2/R5/R6.
+		if paramCount == 2 {
+			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
+			renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
+		}
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
+		renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoNonNil(g)
+		if paramCount == 0 {
+			return true
+		}
+		argsOff := g.asm.bssSize
+		if targetIsWindows(g.c.renvoTargetOS) {
+			argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+			argsTextOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+			g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+			argsLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+			g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+			envDataOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+			envLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
+			renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+		} else {
+			argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
+			envDataOff := renvoAlignValue(
+				g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
+			envLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
+			renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		if paramCount == 0 {
+			return true
+		}
+		if targetIsWindows(g.c.renvoTargetOS) {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
+			argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
+			g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
+			argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
+			g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
+			renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+		} else {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
+			renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if targetIsWindows(g.c.renvoTargetOS) {
+			return renvoEmitProgramEntryArgsWindowsArm64(g, paramCount)
+		}
+		if targetIsDarwin(g.c.renvoTargetOS) {
+			return renvoEmitProgramEntryArgsDarwinArm64(g, paramCount, entryStateOffset)
+		}
+		return renvoEmitProgramEntryArgsAarch64(g, paramCount)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		return renvoEmitProgramEntryArgsArm(g, paramCount)
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		argsOff := g.asm.bssSize
+		envDataOff := argsOff
+		envLenOff := argsOff
+		if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
+			// VM execution receives arguments from the VM host.
+		} else {
+			g.asm.bssSize += 32768
+			envDataOff = g.asm.bssSize
+			g.asm.bssSize += 32768
+			envLenOff = g.asm.bssSize
+			g.asm.bssSize += 8
+		}
+		renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
+		return true
+	
+}
+g.asm.patchFailed = true
+return false
+}
+
 func renvoAsmObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
 renvoNonNil(a)
 renvoCompilerSelector := a.c

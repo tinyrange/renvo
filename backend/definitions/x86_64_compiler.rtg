@@ -148,11 +148,11 @@ go compiler {
 			return nil
 		}
 		if renvoFixedTarget == 0 && meta.c.emitImage {
-			if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
+			if !renvoEmitImageEntryArgs(g, appIndex) {
 				return nil
 			}
 		} else {
-			if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
+			if !renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff) {
 				return nil
 			}
 			// Entry argument setup uses R12 as scratch, so restore all reserved
@@ -176,45 +176,6 @@ go compiler {
 			renvoAsmSyscall(a)
 		}
 		return g
-	}
-
-	// A Linux linked image is entered as
-	//
-	//	entry(argsData, argsLen, envData, envLen) int
-	//
-	// where argsData and envData address Renvo []string backing arrays. The SysV
-	// register order already matches the compiler calling convention for the first
-	// two slice words; only the capacities and second slice need reshuffling.
-	func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-		renvoNonNil(g)
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		// Restore argsData, argsLen, envData, envLen.
-		renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 {
-			return false
-		}
-		first := &g.meta.params[app.firstParam]
-		if !renvoTypeIsStringSlice(g.meta, first.typ) {
-			return false
-		}
-		if app.paramCount == 1 {
-			// RDX = args capacity = args length.
-			renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
-			return true
-		}
-		second := &g.meta.params[app.firstParam+1]
-		if !renvoTypeIsStringSlice(g.meta, second.typ) {
-			return false
-		}
-		// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
-		renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
-		return true
 	}
 
 	func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
@@ -247,60 +208,6 @@ go compiler {
 		result.data = data
 		result.ok = true
 		return result
-	}
-
-	func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-		renvoNonNil(g)
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 {
-			return false
-		}
-		first := &g.meta.params[app.firstParam]
-		if !renvoTypeIsStringSlice(g.meta, first.typ) {
-			return false
-		}
-		argsOff := g.asm.bssSize
-		if targetIsWindows(g.c.renvoTargetOS) {
-			argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
-			argsTextOff := renvoAlignValue(
-				g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
-			g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
-			argsLenOff := renvoAlignValue(
-				g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
-			g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
-			envDataOff := renvoAlignValue(
-				g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
-			envLenOff := renvoAlignValue(
-				g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
-			renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-		} else {
-			argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
-			envDataOff := renvoAlignValue(
-				g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
-			envLenOff := renvoAlignValue(
-				g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
-			renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
-		}
-		if app.paramCount == 1 {
-			return true
-		}
-		second := &g.meta.params[app.firstParam+1]
-		if !renvoTypeIsStringSlice(g.meta, second.typ) {
-			return false
-		}
-		return true
 	}
 
 	const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
@@ -977,6 +884,8 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		image_entry_words = renvoAmd64CompilerImageEntryWords
+		process_entry_words = renvoAmd64CompilerProcessEntryWords
 		object_reverse_register_call = renvoAmd64CompilerObjectReverseRegisterCall
 		local_storage_unit = renvoAmd64CompilerLocalStorageUnit
 		kernel_callback_address = renvoAmd64CompilerKernelCallbackAddress
@@ -4378,6 +4287,70 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
 		renvoAmd64EmitObjectStaticCallReverse(a, importID, wordCount)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+		renvoNonNil(g)
+		if paramCount == 0 {
+			return true
+		}
+		argsOff := g.asm.bssSize
+		if targetIsWindows(g.c.renvoTargetOS) {
+			argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+			argsTextOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+			g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+			argsLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+			g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+			envDataOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+			envLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
+			renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+		} else {
+			argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
+			envDataOff := renvoAlignValue(
+				g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
+			envLenOff := renvoAlignValue(
+				g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
+			renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
+		}
+		return true
+	}
+}
+
+go compiler {
+	// A Linux linked image is entered as
+	//
+	//	entry(argsData, argsLen, envData, envLen) int
+	//
+	// where argsData and envData address Renvo []string backing arrays. The SysV
+	// register order already matches the compiler calling convention for the first
+	// two slice words; only the capacities and second slice need reshuffling.
+	func renvoAmd64CompilerImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+		renvoNonNil(g)
+		// Restore argsData, argsLen, envData, envLen.
+		renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+		if paramCount == 0 {
+			return true
+		}
+		if paramCount == 1 {
+			// RDX = args capacity = args length.
+			renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+			return true
+		}
+		// R9=envLen, RCX=envData, RDX=argsLen, R8=envLen.
+		renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
 		return true
 	}
 }

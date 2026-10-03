@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b0ee13fe657a384a8ac0338c0f65abb7880105cbfe52723f4cc6e554a5dd5622"
+const CompilerSourceDigest = "30c918d3725d046215fbeb130de1643db9263a2f006d1e0729571a6b41faa468"
 
 // source: backend/compiler_common_impl.go
 
@@ -21501,6 +21501,34 @@ offset: -sourceLabel - 1, targetStart: targetStart, targetEnd: targetEnd, typ: 1
 return true
 }
 
+
+
+func renvoEntryParameterCount(g *renvoLinearGen, appIndex int) int {
+if appIndex < 0 || appIndex >= len(g.meta.funcs) {
+return -1
+}
+app := &g.meta.funcs[appIndex]
+if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) || app.paramCount > 2 {
+return -1
+}
+for i := 0; i < app.paramCount; i++ {
+if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+i].typ) {
+return -1
+}
+}
+return app.paramCount
+}
+
+func renvoEmitProgramEntryArgs(g *renvoLinearGen, appIndex int, entryStateOffset int) bool {
+count := renvoEntryParameterCount(g, appIndex)
+return count >= 0 && renvoEmitProcessEntryWords(g, count, entryStateOffset)
+}
+
+func renvoEmitImageEntryArgs(g *renvoLinearGen, appIndex int) bool {
+count := renvoEntryParameterCount(g, appIndex)
+return count >= 0 && renvoEmitImageEntryWords(g, count)
+}
+
 func renvoBeginLinearProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
 renvoNonNil(p, meta)
 renvo_runtime_ArenaDiscardDecls(p.decls)
@@ -28754,7 +28782,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xd0\x21\x52\xda\x13\x17\xb4\x52\x8f\x06\x67\x65\xb7\xe0\x4a\x6a\xdc\x0e\x95\x61\x59\xc8\x4f\x94\x4d\x90\x88\xe6\x4d\xeb\x3f\xc0", 3, true
+return "wasi/wasm32", "\x44\xaa\x0f\xd4\xf2\x14\x48\xe1\x01\x05\x09\xc7\x48\x7d\xe3\xca\x59\xb3\xbb\x9c\x12\xed\x25\x7a\x65\x6d\x15\x31\x00\xdb\x8b\xfd", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -28766,7 +28794,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x76\xc9\x4e\x7f\x22\xe4\x7d\xcd\xc9\xaa\x25\x38\x76\xd0\x2c\xa5\xa5\xdb\x97\x6d\x6a\x99\x72\x77\xba\x42\x9c\x27\x0b\xb8\xb2\x4d", 3, true
+return "vm/vm32", "\x17\x25\x70\x7a\x39\xac\x64\xe8\x64\x21\x96\x7e\x75\x26\x13\x18\x8c\x6d\xb3\xeb\x9a\x6b\x6e\xe9\x70\x0d\xa0\x19\xe0\xab\x92\xd2", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -30245,6 +30273,200 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoEmitImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoNonNil(g)
+
+renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
+if paramCount == 0 {
+return true
+}
+if paramCount == 1 {
+
+renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
+return true
+}
+
+renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if paramCount == 0 {
+return true
+}
+
+renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
+if paramCount == 1 {
+return true
+}
+
+renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
+renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
+renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
+renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
+if paramCount == 0 {
+return true
+}
+
+
+if paramCount == 2 {
+renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
+renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
+}
+renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
+renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
+renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
+renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
+renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
+if paramCount == 0 {
+return true
+}
+
+
+if paramCount == 2 {
+renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
+renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
+}
+renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
+renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return false
+
+}
+g.asm.patchFailed = true
+return false
+}
+
+func renvoEmitProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+renvoNonNil(g)
+if paramCount == 0 {
+return true
+}
+argsOff := g.asm.bssSize
+if targetIsWindows(g.c.renvoTargetOS) {
+argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
+argsTextOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
+g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
+argsLenOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
+g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
+envDataOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
+envLenOff := renvoAlignValue(
+g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
+renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+} else {
+argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
+envDataOff := renvoAlignValue(
+g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
+envLenOff := renvoAlignValue(
+g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
+renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+if paramCount == 0 {
+return true
+}
+if targetIsWindows(g.c.renvoTargetOS) {
+argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
+argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
+g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
+argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
+g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
+envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
+envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
+renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+} else {
+argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
+g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
+envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
+g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
+envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
+g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
+renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+}
+return true
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if targetIsWindows(g.c.renvoTargetOS) {
+return renvoEmitProgramEntryArgsWindowsArm64(g, paramCount)
+}
+if targetIsDarwin(g.c.renvoTargetOS) {
+return renvoEmitProgramEntryArgsDarwinArm64(g, paramCount, entryStateOffset)
+}
+return renvoEmitProgramEntryArgsAarch64(g, paramCount)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+return renvoEmitProgramEntryArgsArm(g, paramCount)
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+argsOff := g.asm.bssSize
+envDataOff := argsOff
+envLenOff := argsOff
+if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
+
+} else {
+g.asm.bssSize += 32768
+envDataOff = g.asm.bssSize
+g.asm.bssSize += 32768
+envLenOff = g.asm.bssSize
+g.asm.bssSize += 8
+}
+renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
+return true
+
+}
+g.asm.patchFailed = true
+return false
 }
 
 func renvoAsmObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
@@ -43388,23 +43610,10 @@ if !renvoLinearInitGlobals(g) {
 renvoPrintErr("renvo: prepared backend failed global initialization\n")
 return renvoCompileResult{}
 }
-app := &meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(meta, app.resultType) {
-return renvoCompileResult{}
-}
-if app.paramCount > 2 {
-return renvoCompileResult{}
-}
-for i := 0; i < app.paramCount; i++ {
-param := &meta.params[app.firstParam+i]
-if !renvoTypeIsStringSlice(meta, param.typ) {
-return renvoCompileResult{}
-}
-}
 
 
 
-if !renvoRTGEmitEntry(&g.asm, app.paramCount, entryStateOffset) {
+if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
 renvoPrintErr("renvo: prepared backend rejected process arguments\n")
 return renvoCompileResult{}
 }
@@ -43773,11 +43982,11 @@ if !renvoLinearInitGlobals(g) {
 return nil
 }
 if renvoFixedTarget == 0 && meta.c.emitImage {
-if !renvoEmitImageEntryArgsAmd64(g, appIndex) {
+if !renvoEmitImageEntryArgs(g, appIndex) {
 return nil
 }
 } else {
-if !renvoEmitProgramEntryArgsAmd64(g, appIndex) {
+if !renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff) {
 return nil
 }
 
@@ -43801,45 +44010,6 @@ renvoAsmPrimaryImm(a, renvoHostedAmd64SysExit(meta.c.renvoTargetOS))
 renvoAsmSyscall(a)
 }
 return g
-}
-
-
-
-
-
-
-
-
-func renvoEmitImageEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x59\x5a\x5e\x5f")
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 1 {
-
-renvoAsmEmitText(&g.asm, "\x48\x89\xf2")
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x4c\x89\xc9\x48\x89\xd1\x48\x89\xf2\x4d\x89\xc8")
-return true
 }
 
 func renvoFinishScalarProgramAmd64(g *renvoLinearGen) renvoCompileResult {
@@ -43872,60 +44042,6 @@ return result
 result.data = data
 result.ok = true
 return result
-}
-
-func renvoEmitProgramEntryArgsAmd64(g *renvoLinearGen, appIndex int) bool {
-renvoNonNil(g)
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-argsOff := g.asm.bssSize
-if targetIsWindows(g.c.renvoTargetOS) {
-argsOff = renvoAlignValue(g.asm.bssSize, renvoWindowsAmd64ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoWindowsAmd64ArgsBSSSize
-argsTextOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64ArgsTextBSSAlignment)
-g.asm.bssSize = argsTextOff + renvoWindowsAmd64ArgsTextBSSSize
-argsLenOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64ArgsLengthBSSAlignment)
-g.asm.bssSize = argsLenOff + renvoWindowsAmd64ArgsLengthBSSSize
-envDataOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoWindowsAmd64EnvironmentBSSSize
-envLenOff := renvoAlignValue(
-g.asm.bssSize, renvoWindowsAmd64EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoWindowsAmd64EnvironmentLengthBSSSize
-renvoAsmBuildWindowsArgvEnvSlicesAmd64(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-} else {
-argsOff = renvoAlignValue(g.asm.bssSize, renvoHostedAmd64ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoHostedAmd64ArgsBSSSize
-envDataOff := renvoAlignValue(
-g.asm.bssSize, renvoHostedAmd64EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoHostedAmd64EnvironmentBSSSize
-envLenOff := renvoAlignValue(
-g.asm.bssSize, renvoHostedAmd64EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoHostedAmd64EnvironmentLengthBSSSize
-renvoAsmBuildArgvEnvSlicesAmd64(&g.asm, argsOff, envDataOff, envLenOff)
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
 }
 
 const renvoAmd64ParamStoreRecipes = "\x48\x89\x7d\xbd\x48\x89\x75\xb5\x48\x89\x55\x95\x48\x89\x4d\x8d\x4c\x89\x45\x85\x4c\x89\x4d\x8d"
@@ -45360,6 +45476,17 @@ renvoAsmEmit32(a, imm)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -45883,9 +46010,9 @@ return nil
 }
 entryOK := false
 if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgs386(g, appIndex)
+entryOK = renvoEmitImageEntryArgs(g, appIndex)
 } else {
-entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
+entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
 }
 if !entryOK {
 return nil
@@ -45905,30 +46032,6 @@ renvoAsmPrimaryImm(a, renvoLinux386SysExit)
 renvoAsmSyscall(a)
 }
 return g
-}
-
-func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
-if app.paramCount == 1 {
-return true
-}
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-
-renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
-return true
 }
 
 func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
@@ -46173,51 +46276,6 @@ a.code[field+1] = 0
 return true
 }
 
-func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if targetIsWindows(g.c.renvoTargetOS) {
-argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
-argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
-g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
-argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
-g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
-envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
-envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
-renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-} else {
-argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
-g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
-envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
-g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
-envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
-g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
-renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
-}
 func renvo386AsmMovRaxAddr(a *renvoAsm, offset int, relocKind int) {
 if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
 renvo386AsmMovRegPCRel(a, 0, offset, relocKind)
@@ -48509,6 +48567,10 @@ return true
 
 
 
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -50584,13 +50646,9 @@ return nil
 }
 entryOK := false
 if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgsAarch64(g, appIndex)
-} else if targetIsWindows(meta.c.renvoTargetOS) {
-entryOK = renvoEmitProgramEntryArgsWindowsArm64(g, appIndex)
-} else if targetIsDarwin(meta.c.renvoTargetOS) {
-entryOK = renvoEmitProgramEntryArgsDarwinArm64(g, appIndex)
+entryOK = renvoEmitImageEntryArgs(g, appIndex)
 } else {
-entryOK = renvoEmitProgramEntryArgsAarch64(g, appIndex)
+entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
 }
 if !entryOK {
 return nil
@@ -50615,35 +50673,6 @@ renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
 renvoAsmSyscall(a)
 }
 return session
-}
-
-func renvoEmitImageEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-renvoAarch64AsmLoadRegMem(&g.asm, 0, 31, 0, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 1, 31, 8, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 2, 31, 16, 8)
-renvoAarch64AsmLoadRegMem(&g.asm, 3, 31, 24, 8)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-
-if app.paramCount == 2 {
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR8, 3)
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegR9, 3)
-}
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRdi, 0)
-renvoAarch64AsmMovRegReg(&g.asm, renvoAarch64RegRsi, 1)
-return true
 }
 
 func (s *renvoAarch64ProgramSession) step(functionLimit int) bool {
@@ -51206,6 +51235,10 @@ renvoAsmRet(&g.asm)
 renvoAsmMarkLabel(&g.asm, after)
 return label
 }
+
+
+
+
 
 
 
@@ -52638,9 +52671,9 @@ return nil
 }
 entryOK := false
 if renvoFixedTarget == 0 && meta.c.emitImage {
-entryOK = renvoEmitImageEntryArgsArm(g, appIndex)
+entryOK = renvoEmitImageEntryArgs(g, appIndex)
 } else {
-entryOK = renvoEmitProgramEntryArgsArm(g, appIndex)
+entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
 }
 if !entryOK {
 return nil
@@ -52658,35 +52691,6 @@ renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
 renvoAsmSyscall(a)
 }
 return g
-}
-
-func renvoEmitImageEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-renvoArmAsmLoadRegMem(&g.asm, 0, renvoArmRegSp, 0, 4)
-renvoArmAsmLoadRegMem(&g.asm, 1, renvoArmRegSp, 4, 4)
-renvoArmAsmLoadRegMem(&g.asm, 2, renvoArmRegSp, 8, 4)
-renvoArmAsmLoadRegMem(&g.asm, 3, renvoArmRegSp, 12, 4)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-
-
-if app.paramCount == 2 {
-if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
-}
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegR8, 3)
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegR9, 3)
-}
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegRdi, 0)
-renvoArmAsmMovRegReg(&g.asm, renvoArmRegRsi, 1)
-return true
 }
 
 
@@ -52723,6 +52727,10 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
 
 
 
@@ -56684,6 +56692,10 @@ renvoAsmMarkLabel(a, done)
 
 
 
+
+
+
+
 // source: backend/compiler_linux_amd64_impl.go
 
 
@@ -59993,9 +60005,7 @@ rtgBuiltinLinuxAarch64PackageLinuxEntry(a, argsOff, environmentOff, environmentL
 }
 
 
-func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
+func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, paramCount int) bool {
 argsOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64ArgsBSSAlignment)
 g.asm.bssSize = argsOff + renvoLinuxAarch64ArgsBSSSize
 envOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentBSSAlignment)
@@ -60003,9 +60013,7 @@ g.asm.bssSize = envOff + renvoLinuxAarch64EnvironmentBSSSize
 envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentLengthBSSAlignment)
 g.asm.bssSize = envLenOff + renvoLinuxAarch64EnvironmentLengthBSSSize
 renvoAsmBuildArgvEnvSlicesAarch64(&g.asm, argsOff, envOff, envLenOff)
-if app.paramCount == 0 { return true }
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-return app.paramCount == 1 || renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ)
+return true
 }
 
 
@@ -60791,19 +60799,9 @@ renvoSetTarget(renvoTargetWindowsArm64)
 return renvoCompileAarch64(input, output, arenaSize)
 }
 
-func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-if app.paramCount == 0 {
+func renvoEmitProgramEntryArgsWindowsArm64(g *renvoLinearGen, paramCount int) bool {
+if paramCount == 0 {
 return true
-}
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-return false
-}
-if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-return false
 }
 argsOff := renvoAlignValue(g.asm.bssSize, renvoWindowsArm64ArgsBSSAlignment)
 g.asm.bssSize = argsOff + renvoWindowsArm64ArgsBSSSize
@@ -60954,9 +60952,7 @@ renvoAsmAddAbsReloc(a, base+268, environmentOff, renvoAbsBssReloc)
 }
 
 
-func renvoEmitProgramEntryArgsArm(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
+func renvoEmitProgramEntryArgsArm(g *renvoLinearGen, paramCount int) bool {
 argsOff := renvoAlignValue(g.asm.bssSize, renvoLinuxArmArgsBSSAlignment)
 g.asm.bssSize = argsOff + renvoLinuxArmArgsBSSSize
 environmentOff := renvoAlignValue(g.asm.bssSize, renvoLinuxArmEnvironmentBSSAlignment)
@@ -60964,9 +60960,7 @@ g.asm.bssSize = environmentOff + renvoLinuxArmEnvironmentBSSSize
 environmentLengthOff := renvoAlignValue(g.asm.bssSize, renvoLinuxArmEnvironmentLengthBSSAlignment)
 g.asm.bssSize = environmentLengthOff + renvoLinuxArmEnvironmentLengthBSSSize
 renvoAsmBuildArgvEnvSlicesArm(&g.asm, argsOff, environmentOff, environmentLengthOff)
-if app.paramCount == 0 { return true }
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-return app.paramCount == 1 || renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ)
+return true
 }
 
 
@@ -61869,7 +61863,7 @@ renvoInitFuncQueue(&g, len(meta.funcs))
 renvoWasm32MarkFunc(&g, appIndex)
 renvoEmitInitializeThreadState(&g)
 renvoEmitPersistentArenaReady(&g)
-if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgsWasm32(&g, appIndex) {
+if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgs(&g, appIndex, 0) {
 return renvoCompileResult{}
 }
 renvoAsmCallLabel(a, g.funcLabels[appIndex])
@@ -61904,44 +61898,6 @@ result.data = image.data[:image.length]
 result.ok = true
 return result
 }
-func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-return false
-}
-argsOff := g.asm.bssSize
-envDataOff := argsOff
-envLenOff := argsOff
-if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
-
-} else {
-g.asm.bssSize += 32768
-envDataOff = g.asm.bssSize
-g.asm.bssSize += 32768
-envLenOff = g.asm.bssSize
-g.asm.bssSize += 8
-}
-renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
-if app.paramCount == 0 {
-return true
-}
-if app.paramCount > 2 {
-return false
-}
-first := &g.meta.params[app.firstParam]
-if !renvoTypeIsStringSlice(g.meta, first.typ) {
-return false
-}
-if app.paramCount == 1 {
-return true
-}
-second := &g.meta.params[app.firstParam+1]
-if !renvoTypeIsStringSlice(g.meta, second.typ) {
-return false
-}
-return true
-}
-
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 appIndex := p.entryFunc
 if appIndex < 0 {
@@ -64476,17 +64432,13 @@ rtgBuiltinDarwinAarch64PackageDarwinEntry(a, argsOff, environmentOff, stateOffse
 }
 
 
-func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, appIndex int) bool {
-app := &g.meta.funcs[appIndex]
-if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
-if app.paramCount == 0 { return true }
-if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-if app.paramCount == 2 && !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) { return false }
+func renvoEmitProgramEntryArgsDarwinArm64(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+if paramCount == 0 { return true }
 argsOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64ArgsBSSAlignment)
 g.asm.bssSize = argsOff + renvoDarwinArm64ArgsBSSSize
 envOff := renvoAlignValue(g.asm.bssSize, renvoDarwinArm64EnvironmentBSSAlignment)
 g.asm.bssSize = envOff + renvoDarwinArm64EnvironmentBSSSize
-renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, g.darwinEntryOff)
+renvoDarwinArm64DefinitionEntry(&g.asm, argsOff, envOff, entryStateOffset)
 return true
 }
 

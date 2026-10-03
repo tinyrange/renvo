@@ -574,23 +574,10 @@ func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoComp
 		renvoPrintErr("renvo: prepared backend failed global initialization\n")
 		return renvoCompileResult{}
 	}
-	app := &meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(meta, app.resultType) {
-		return renvoCompileResult{}
-	}
-	if app.paramCount > 2 {
-		return renvoCompileResult{}
-	}
-	for i := 0; i < app.paramCount; i++ {
-		param := &meta.params[app.firstParam+i]
-		if !renvoTypeIsStringSlice(meta, param.typ) {
-			return renvoCompileResult{}
-		}
-	}
 	// Native process argument and environment decoding belongs to the selected
 	// runtime definition. The hook leaves the ordinary Renvo call words ready
 	// for appMain, so the shared lowering path does not know an OS entry ABI.
-	if !renvoRTGEmitEntry(&g.asm, app.paramCount, entryStateOffset) {
+	if !renvoEmitProgramEntryArgs(g, appIndex, entryStateOffset) {
 		renvoPrintErr("renvo: prepared backend rejected process arguments\n")
 		return renvoCompileResult{}
 	}

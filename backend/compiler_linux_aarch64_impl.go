@@ -108,9 +108,7 @@ func renvoAsmBuildArgvEnvSlicesAarch64(a *renvoAsm, argsOff int, environmentOff 
 }
 
 
-func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) { return false }
+func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, paramCount int) bool {
 	argsOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64ArgsBSSAlignment)
 	g.asm.bssSize = argsOff + renvoLinuxAarch64ArgsBSSSize
 	envOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentBSSAlignment)
@@ -118,9 +116,7 @@ func renvoEmitProgramEntryArgsAarch64(g *renvoLinearGen, appIndex int) bool {
 	envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinuxAarch64EnvironmentLengthBSSAlignment)
 	g.asm.bssSize = envLenOff + renvoLinuxAarch64EnvironmentLengthBSSSize
 	renvoAsmBuildArgvEnvSlicesAarch64(&g.asm, argsOff, envOff, envLenOff)
-	if app.paramCount == 0 { return true }
-	if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) { return false }
-	return app.paramCount == 1 || renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ)
+	return true
 }
 
 

@@ -136,9 +136,9 @@ go compiler {
 		}
 		entryOK := false
 		if renvoFixedTarget == 0 && meta.c.emitImage {
-			entryOK = renvoEmitImageEntryArgs386(g, appIndex)
+			entryOK = renvoEmitImageEntryArgs(g, appIndex)
 		} else {
-			entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
+			entryOK = renvoEmitProgramEntryArgs(g, appIndex, g.darwinEntryOff)
 		}
 		if !entryOK {
 			return nil
@@ -158,30 +158,6 @@ go compiler {
 			renvoAsmSyscall(a)
 		}
 		return g
-	}
-
-	func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-			return false
-		}
-		// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
-		renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
-		if app.paramCount == 1 {
-			return true
-		}
-		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-			return false
-		}
-		// ECX/EAX/EDI, the second Renvo slice.
-		renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
-		return true
 	}
 
 	func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
@@ -426,51 +402,6 @@ go compiler {
 		return true
 	}
 
-	func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 {
-			return false
-		}
-		first := &g.meta.params[app.firstParam]
-		if !renvoTypeIsStringSlice(g.meta, first.typ) {
-			return false
-		}
-		if targetIsWindows(g.c.renvoTargetOS) {
-			argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
-			argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
-			g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
-			argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
-			g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
-			envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
-			envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
-			renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-		} else {
-			argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
-			envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
-			envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
-			renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
-		}
-		if app.paramCount == 1 {
-			return true
-		}
-		second := &g.meta.params[app.firstParam+1]
-		if !renvoTypeIsStringSlice(g.meta, second.typ) {
-			return false
-		}
-		return true
-	}
 	func renvo386AsmMovRaxAddr(a *renvoAsm, offset int, relocKind int) {
 		if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
 			renvo386AsmMovRegPCRel(a, 0, offset, relocKind)
@@ -1300,6 +1231,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		image_entry_words = renvo386CompilerImageEntryWords
+		process_entry_words = renvo386CompilerProcessEntryWords
 		object_reverse_register_call = renvo386CompilerObjectReverseRegisterCall
 		local_storage_unit = renvo386CompilerLocalStorageUnit
 		kernel_callback_address = renvo386CompilerKernelCallbackAddress
@@ -5062,5 +4995,51 @@ go compiler {
 go compiler {
 	func renvo386CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+		if paramCount == 0 {
+			return true
+		}
+		if targetIsWindows(g.c.renvoTargetOS) {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
+			argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
+			g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
+			argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
+			g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
+			renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+		} else {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
+			renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+		if paramCount == 0 {
+			return true
+		}
+		// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
+		if paramCount == 1 {
+			return true
+		}
+		// ECX/EAX/EDI, the second Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
+		return true
 	}
 }
