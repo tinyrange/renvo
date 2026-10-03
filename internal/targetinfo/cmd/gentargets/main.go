@@ -49,6 +49,8 @@ type sourceDescriptor struct {
 	ReachableGoDecls    int            `json:"-"`
 	CatalogGoDecls      int            `json:"-"`
 	RuntimeNumbers      map[string]int `json:"-"`
+
+	RuntimeNumberDefault bool `json:"runtime_number_default"`
 }
 
 func main() {
@@ -319,7 +321,8 @@ func validate(descriptors []sourceDescriptor) error {
 			return fmt.Errorf("backend target IDs are not dense at %d", id)
 		}
 	}
-	return nil
+	_, err := runtimeNumberDefault(descriptors)
+	return err
 }
 
 func frontendSource(descriptors []sourceDescriptor) []byte {
@@ -528,15 +531,9 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	for _, descriptor := range backend {
 		fmt.Fprintf(&projection, "const %s = %d\n", descriptor.Constant, descriptor.BackendID)
 	}
-	var linuxAmd64 *sourceDescriptor
-	for i := range backend {
-		if backend[i].Name == "linux/amd64" {
-			linuxAmd64 = &backend[i]
-			break
-		}
-	}
-	if linuxAmd64 == nil {
-		return fmt.Errorf("target registry has no linux/amd64 definition")
+	fallback, err := runtimeNumberDefault(descriptors)
+	if err != nil {
+		return err
 	}
 	projection.WriteByte('\n')
 	for _, operation := range []struct {
@@ -552,9 +549,9 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 		{"chmod", "Fchmod"},
 		{"exit", "Exit"},
 	} {
-		number, ok := linuxAmd64.RuntimeNumbers[operation.name]
+		number, ok := fallback.RuntimeNumbers[operation.name]
 		if !ok {
-			return fmt.Errorf("linux/amd64 definition has no %s runtime number", operation.name)
+			return fmt.Errorf("runtime number default %q has no %s runtime number", fallback.Name, operation.name)
 		}
 		fmt.Fprintf(&projection, "const renvoResolvedLinuxAmd64Sys%s = %d\n", operation.suffix, number)
 	}
