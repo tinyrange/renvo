@@ -16,7 +16,7 @@ func evalConstSpan(file *syntax.File, span ExprSpan) ConstValue {
 		return ConstValue{}
 	}
 	sign := 1
-	if end-start == 2 && tokenTextIs(file, start, "-") {
+	if end-start == 2 && tokCharIs(file, start, '-') {
 		sign = -1
 		start++
 	}
@@ -41,10 +41,10 @@ func evalConstSpan(file *syntax.File, span ExprSpan) ConstValue {
 		}
 		return ConstValue{Kind: ConstString, String: value, Ok: true}
 	}
-	if tok.KindLine&255 == syntax.TokenIdent && tokenString(file, start) == "true" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenStringEquals(file, start, "true") {
 		return ConstValue{Kind: ConstBool, Bool: true, Ok: true}
 	}
-	if tok.KindLine&255 == syntax.TokenIdent && tokenString(file, start) == "false" {
+	if tok.KindLine&255 == syntax.TokenIdent && tokenStringEquals(file, start, "false") {
 		return ConstValue{Kind: ConstBool, Bool: false, Ok: true}
 	}
 	return ConstValue{}

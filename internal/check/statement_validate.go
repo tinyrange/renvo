@@ -237,7 +237,7 @@ func definiteLiteralLocal(locals []int, file *syntax.File, tok int) bool {
 func definiteStatementScopeEnd(body *syntax.Body, tok int) int {
 	end := 2147483647
 	for i := 0; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.Kind == syntax.StmtBlock && stmt.StartTok < tok && stmt.EndTok > tok && stmt.EndTok < end {
 			end = stmt.EndTok
 		}
@@ -314,8 +314,8 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	if left < 0 || left >= len(file.Tokens) || right < 0 || right >= len(file.Tokens) {
 		return false
 	}
-	leftToken := file.Tokens[left]
-	rightToken := file.Tokens[right]
+	leftToken := &file.Tokens[left]
+	rightToken := &file.Tokens[right]
 	leftStart := int(leftToken.Start)
 	rightStart := int(rightToken.Start)
 	leftSize := int(leftToken.End - leftToken.Start)
@@ -325,12 +325,10 @@ func statementTokensEqual(file *syntax.File, left int, right int) bool {
 	if leftSize > 0 && file.Src[leftStart] != file.Src[rightStart] {
 		return false
 	}
-	for i := 1; i < leftSize; i++ {
-		if file.Src[leftStart+i] != file.Src[rightStart+i] {
-			return false
-		}
+	if leftSize == 0 {
+		return true
 	}
-	return true
+	return string(file.Src[leftStart:leftStart+leftSize]) == string(file.Src[rightStart:rightStart+leftSize])
 }
 
 func expressionIsDefiniteLiteral(file *syntax.File, span ExprSpan) bool {

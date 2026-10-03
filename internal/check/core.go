@@ -459,7 +459,7 @@ func buildDeclInfoCore(file *syntax.File, fileIndex int, info *PackageInfo, chec
 	}
 	if decl.Kind == syntax.TokenType {
 		typeStart := decl.NameTok + 1
-		if tokenTextIs(file, typeStart, "=") {
+		if tokCharIs(file, typeStart, '=') {
 			out.Alias = true
 			typeStart++
 		}
@@ -523,7 +523,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 	undefined := -1
 	var aggregateNames []int
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		token := file.Tokens[i]
+		token := &file.Tokens[i]
 		if (token.KindLine&255 == syntax.TokenStruct || token.KindLine&255 == syntax.TokenInterface) && tokCharIs(file, i+1, '{') {
 			close := findTypeMatching(file, i+1, '{', '}')
 			if close > i+1 && close <= end {
@@ -563,7 +563,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		}
 		if !skipRef {
 			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
-		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokenTextIs(file, i+1, ":") {
+		} else if token.KindLine&255 == syntax.TokenIdent && !blank && i+1 < end && tokCharIs(file, i+1, ':') {
 			// A leading identifier in a keyed map literal is an expression even
 			// though the same token shape denotes a field name in a struct literal.
 			scopeIndex = lookupScopeTokenNameCore(scope, file, i)
@@ -591,7 +591,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		dot := token.KindLine&255 == syntax.TokenOperator && token.End-token.Start == 1 && file.Src[int(token.Start)] == '.'
 		if i > start && i+1 < end && i+1 < len(file.Tokens) && dot &&
 			file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent &&
-			!(i >= start+2 && tokenTextIs(file, i-2, ".")) &&
+			!(i >= start+2 && tokCharIs(file, i-2, '.')) &&
 			!(file.Tokens[i-1].End-file.Tokens[i-1].Start == 1 && file.Src[int(file.Tokens[i-1].Start)] == '_') &&
 			!(file.Tokens[i+1].End-file.Tokens[i+1].Start == 1 && file.Src[int(file.Tokens[i+1].Start)] == '_') {
 			selector := resolveImportSelectorCore(fileIndex, info, checked, scope, file, i-1, i, i+1)
@@ -646,7 +646,7 @@ func invalidImportedStructLiteral(file *syntax.File, base int, name int, pkg *Pa
 			}
 			before--
 		}
-		if before >= 0 && tokenTextIs(file, before, "map") {
+		if before >= 0 && tokenKindIs(file, before, syntax.TokenMap) {
 			before--
 		}
 		collections++
@@ -752,21 +752,21 @@ func coreOrdinaryBuiltinToken(file *syntax.File, tok int) bool {
 }
 
 func coreLocalWriteOnly(file *syntax.File, tok int, end int) bool {
-	if tok > 0 && tokenTextIs(file, tok-1, "*") {
+	if tok > 0 && tokCharIs(file, tok-1, '*') {
 		return false
 	}
 	for i := tok + 1; i < end; i++ {
-		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && !tokenTextIs(file, i-1, ",") {
+		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && !tokCharIs(file, i-1, ',') {
 			return false
 		}
-		if tokenTextIs(file, i, ";") || tokenTextIs(file, i, "{") || tokenTextIs(file, i, "}") {
+		if tokCharIs(file, i, ';') || tokCharIs(file, i, '{') || tokCharIs(file, i, '}') {
 			return false
 		}
-		if !tokenTextIs(file, i, "=") && !tokenTextIs(file, i, ":=") {
+		if !tokCharIs(file, i, '=') && !tokenTextIs(file, i, ":=") {
 			continue
 		}
 		for j := tok + 1; j < i; j++ {
-			if file.Tokens[j].KindLine&255 != syntax.TokenIdent && !tokenTextIs(file, j, ",") {
+			if file.Tokens[j].KindLine&255 != syntax.TokenIdent && !tokCharIs(file, j, ',') {
 				return false
 			}
 		}
@@ -902,13 +902,13 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file *syntax.File, fileIndex int
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if i > start && tokenTextIs(file, i-1, ".") {
+		if i > start && tokCharIs(file, i-1, '.') {
 			continue
 		}
 		if tokenTextIs(file, i, "_") {
 			continue
 		}
-		if i+2 < end && tokenTextIs(file, i+1, ".") && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
+		if i+2 < end && tokCharIs(file, i+1, '.') && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
 			ref := resolveImportSelectorTypeRefCore(fileIndex, info, checked, scope, file, i, i+1, i+2)
 			if ref.Kind == TypeRefImportSelector {
 				refs = append(refs, ref)
@@ -1513,11 +1513,11 @@ func addCoreScopeName(scope *CoreScope, file *syntax.File, tok int, kind int, re
 }
 
 func coreTokensEqual(file *syntax.File, left int, right int) bool {
-	if left < 0 || left >= len(file.Tokens) || right < 0 || right >= len(file.Tokens) {
+	if uint(left) >= uint(len(file.Tokens)) || uint(right) >= uint(len(file.Tokens)) {
 		return false
 	}
-	leftTok := file.Tokens[left]
-	rightTok := file.Tokens[right]
+	leftTok := &file.Tokens[left]
+	rightTok := &file.Tokens[right]
 	leftStart := int(leftTok.Start)
 	rightStart := int(rightTok.Start)
 	size := int(leftTok.End - leftTok.Start)
@@ -1527,12 +1527,7 @@ func coreTokensEqual(file *syntax.File, left int, right int) bool {
 	if size > 0 && file.Src[leftStart] != file.Src[rightStart] {
 		return false
 	}
-	for i := 1; i < size; i++ {
-		if file.Src[leftStart+i] != file.Src[rightStart+i] {
-			return false
-		}
-	}
-	return true
+	return string(file.Src[leftStart:leftStart+size]) == string(file.Src[rightStart:rightStart+size])
 }
 
 func coreTokenLooksLikeLabel(file *syntax.File, tok int, start int, end int) bool {
@@ -1675,7 +1670,7 @@ func appendLocalTypeSpanCore(decls []CoreLocalTypeSpan, file *syntax.File, kind 
 	typeEnd := -1
 	if kind == SymbolType {
 		typeStart = start + 1
-		if tokenTextIs(file, typeStart, "=") {
+		if tokCharIs(file, typeStart, '=') {
 			typeStart++
 		}
 		typeStart, typeEnd = trimDeclSpan(file, typeStart, end)

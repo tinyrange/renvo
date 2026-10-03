@@ -74,7 +74,7 @@ func lowerMapsCore(program *unit.Program, transient bool) bool {
 func discoverMapLowerSpecs(program *unit.Program) []mapLowerSpec {
 	var specs []mapLowerSpec
 	for i := 0; i+3 < len(program.Tokens); i++ {
-		if !functionValueTokenEquals(program, i, "map") || !functionValueTokenEquals(program, i+1, "[") {
+		if !functionValueTokenEquals(program, i, "map") || !functionValueTokenCharIs(program, i+1, '[') {
 			continue
 		}
 		close := functionValueFindMatching(program, i+1, "[", "]")
@@ -150,20 +150,20 @@ func mapLowerShortLocalType(program *unit.Program, before int, name string) stri
 		}
 		line := program.Tokens[assign].KindLine >> 8
 		start := assign - 1
-		for start > fn.BodyStart && program.Tokens[start-1].KindLine>>8 == line && !functionValueTokenEquals(program, start-1, ";") && !functionValueTokenEquals(program, start-1, "{") && !functionValueTokenEquals(program, start-1, "}") {
+		for start > fn.BodyStart && program.Tokens[start-1].KindLine>>8 == line && !functionValueTokenCharIs(program, start-1, ';') && !functionValueTokenCharIs(program, start-1, '{') && !functionValueTokenCharIs(program, start-1, '}') {
 			start--
 		}
 		end := assign + 1
 		// Braces on the right hand side usually belong to composite literals.
 		// The line boundary is the statement boundary here; stopping at the
 		// first literal brace loses every item in a multi-value declaration.
-		for end < fn.BodyEnd && program.Tokens[end].KindLine>>8 == line && !functionValueTokenEquals(program, end, ";") {
+		for end < fn.BodyEnd && program.Tokens[end].KindLine>>8 == line && !functionValueTokenCharIs(program, end, ';') {
 			end++
 		}
 		leftStarts, leftEnds := ordinaryBuiltinArguments(program, start, assign)
 		rightStarts, rightEnds := ordinaryBuiltinArguments(program, assign+1, end)
 		for item := 0; item < len(leftStarts) && item < len(rightStarts); item++ {
-			if leftEnds[item]-leftStarts[item] != 1 || functionValueTokenText(program, leftStarts[item]) != name {
+			if leftEnds[item]-leftStarts[item] != 1 || !functionValueTokenTextEquals(program, leftStarts[item], name) {
 				continue
 			}
 			if !functionValueBindingInScope(program, &fn, leftStarts[item], before) {
@@ -172,7 +172,7 @@ func mapLowerShortLocalType(program *unit.Program, before int, name string) stri
 			rhsStart := rightStarts[item]
 			rhsEnd := rightEnds[item]
 			typeEnd := functionValueTypeEnd(program, rhsStart)
-			if typeEnd > rhsStart && typeEnd < rhsEnd && functionValueTokenEquals(program, typeEnd, "{") {
+			if typeEnd > rhsStart && typeEnd < rhsEnd && functionValueTokenCharIs(program, typeEnd, '{') {
 				return functionValueTokensText(program, rhsStart, typeEnd)
 			}
 			if typ := ordinaryBuiltinExprType(program, assign, rhsStart, rhsEnd); typ != "" {
@@ -212,11 +212,11 @@ func mapLowerEdits(program *unit.Program, specs []mapLowerSpec) ([]functionValue
 			continue
 		}
 		start := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd) + 1
-		if functionValueTokenEquals(program, start, "=") {
+		if functionValueTokenCharIs(program, start, '=') {
 			start++
 		}
 		end := decl.EndTok
-		for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+		for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 			edits = append(edits, functionValueTokenRangeEdit(program, start, start+1, ""))
 			edits = append(edits, functionValueTokenRangeEdit(program, end-1, end, ""))
 			start++
@@ -224,7 +224,7 @@ func mapLowerEdits(program *unit.Program, specs []mapLowerSpec) ([]functionValue
 		}
 	}
 	for i := 0; i < len(program.Tokens); i++ {
-		if covered[i] || !functionValueTokenEquals(program, i, "map") || !functionValueTokenEquals(program, i+1, "[") {
+		if covered[i] || !functionValueTokenEquals(program, i, "map") || !functionValueTokenCharIs(program, i+1, '[') {
 			continue
 		}
 		end := functionValueTypeEnd(program, i)
@@ -376,7 +376,7 @@ func mapLowerAssignmentStart(program *unit.Program, assign int) int {
 		} else if text == "(" || text == "[" || text == "{" {
 			depth--
 		}
-		if i > 0 && program.Tokens[i-1].KindLine>>8 != program.Tokens[i].KindLine>>8 && depth == 0 && !functionValueTokenEquals(program, i-1, ",") {
+		if i > 0 && program.Tokens[i-1].KindLine>>8 != program.Tokens[i].KindLine>>8 && depth == 0 && !functionValueTokenCharIs(program, i-1, ',') {
 			break
 		}
 	}
@@ -419,7 +419,7 @@ func mapLowerCompoundOperator(operator string) string {
 }
 
 func mapLowerAssignmentTarget(program *unit.Program, specs []mapLowerSpec, start int, end int) (int, int) {
-	if end-start < 4 || !functionValueTokenEquals(program, end-1, "]") {
+	if end-start < 4 || !functionValueTokenCharIs(program, end-1, ']') {
 		return -1, -1
 	}
 	open := functionValueFindMatchingBackward(program, end-1, "[", "]")
@@ -435,10 +435,10 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			continue
 		}
 		forTok := rangeTok - 1
-		for forTok >= 0 && !functionValueTokenEquals(program, forTok, "for") && !functionValueTokenEquals(program, forTok, "{") && !functionValueTokenEquals(program, forTok, "}") && !functionValueTokenEquals(program, forTok, ";") {
+		for forTok >= 0 && !functionValueTokenKindIs(program, forTok, unit.TokenFor) && !functionValueTokenCharIs(program, forTok, '{') && !functionValueTokenCharIs(program, forTok, '}') && !functionValueTokenCharIs(program, forTok, ';') {
 			forTok--
 		}
-		if forTok < 0 || !functionValueTokenEquals(program, forTok, "for") {
+		if forTok < 0 || !functionValueTokenKindIs(program, forTok, unit.TokenFor) {
 			continue
 		}
 		bodyOpen := rangeTok + 1
@@ -449,7 +449,7 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 		// the header does not hide it from the construction-lowering pass.
 		typeEnd := functionValueTypeEnd(program, rangeTok+1)
 		if functionValueTokenEquals(program, rangeTok+1, "map") &&
-			typeEnd > rangeTok+1 && functionValueTokenEquals(program, typeEnd, "{") {
+			typeEnd > rangeTok+1 && functionValueTokenCharIs(program, typeEnd, '{') {
 			literalOpen = typeEnd
 			literalClose = functionValueFindMatchingBrace(program, literalOpen)
 			if literalClose < 0 {
@@ -457,7 +457,7 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			}
 			bodyOpen = literalClose + 1
 		}
-		for bodyOpen < len(program.Tokens) && !functionValueTokenEquals(program, bodyOpen, "{") {
+		for bodyOpen < len(program.Tokens) && !functionValueTokenCharIs(program, bodyOpen, '{') {
 			bodyOpen++
 		}
 		if bodyOpen >= len(program.Tokens) {
@@ -532,7 +532,7 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		if covered[i] {
 			continue
 		}
-		if functionValueTokenEquals(program, i, "make") && functionValueTokenEquals(program, i+1, "(") {
+		if functionValueTokenEquals(program, i, "make") && functionValueTokenCharIs(program, i+1, '(') {
 			close := functionValueFindMatchingParen(program, i+1)
 			starts, ends := ordinaryBuiltinArguments(program, i+2, close)
 			if close < 0 || len(starts) < 1 || len(starts) > 2 {
@@ -561,7 +561,7 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 			i = close
 			continue
 		}
-		if !functionValueTokenEquals(program, i, "{") {
+		if !functionValueTokenCharIs(program, i, '{') {
 			continue
 		}
 		typeStart := literalStarts[i]
@@ -591,7 +591,7 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 			return nil, nil, false
 		}
 		replacementEnd := close + 1
-		if replacementEnd < len(program.Tokens) && functionValueTokenEquals(program, replacementEnd, "[") {
+		if replacementEnd < len(program.Tokens) && functionValueTokenCharIs(program, replacementEnd, '[') {
 			indexClose := functionValueFindMatching(program, replacementEnd, "[", "]")
 			if indexClose < 0 {
 				return nil, nil, false
@@ -656,13 +656,13 @@ func mapLowerLiteralTypeStarts(program *unit.Program) []int {
 		mark := arena.Mark()
 		end := functionValueTypeEnd(program, i)
 		arena.Rewind(mark)
-		if end > i && end < len(starts) && starts[end] < 0 && functionValueTokenEquals(program, end, "{") {
+		if end > i && end < len(starts) && starts[end] < 0 && functionValueTokenCharIs(program, end, '{') {
 			// The earliest start owns nested types such as []map[K]V.
 			starts[end] = i
 		}
 	}
 	for i := 0; i < len(starts); i++ {
-		if starts[i] < 0 && functionValueTokenEquals(program, i, "{") {
+		if starts[i] < 0 && functionValueTokenCharIs(program, i, '{') {
 			starts[i] = functionValuePrimaryStart(program, i-1)
 		}
 	}
@@ -675,11 +675,11 @@ func mapLowerLiteralTypeStarts(program *unit.Program) []int {
 		}
 	}
 	for tok := 0; tok+1 < len(program.Tokens); tok++ {
-		if functionValueTokenEquals(program, tok, "func") && functionValueTokenEquals(program, tok+1, "(") {
+		if functionValueTokenKindIs(program, tok, unit.TokenFunc) && functionValueTokenCharIs(program, tok+1, '(') {
 			mark := arena.Mark()
 			_, body, ok := parseFunctionValueSignature(program, tok, "")
 			arena.Rewind(mark)
-			if ok && body >= 0 && body < len(starts) && functionValueTokenEquals(program, body, "{") && !functionValueLiteralTypePosition(program, tok, body) {
+			if ok && body >= 0 && body < len(starts) && functionValueTokenCharIs(program, body, '{') && !functionValueLiteralTypePosition(program, tok, body) {
 				starts[body] = -1
 			}
 		}
@@ -689,7 +689,7 @@ func mapLowerLiteralTypeStarts(program *unit.Program) []int {
 
 func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool) {
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if covered[i] || !functionValueTokenEquals(program, i+1, "(") {
+		if covered[i] || !functionValueTokenCharIs(program, i+1, '(') {
 			continue
 		}
 		name := functionValueTokenText(program, i)
@@ -730,7 +730,7 @@ func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []f
 func mapLowerIndexEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool, bool) {
 	indexEditStart := len(edits)
 	for open := len(program.Tokens) - 1; open >= 0; open-- {
-		if covered[open] || !functionValueTokenEquals(program, open, "[") {
+		if covered[open] || !functionValueTokenCharIs(program, open, '[') {
 			continue
 		}
 		close := functionValueFindMatching(program, open, "[", "]")
@@ -811,7 +811,7 @@ func mapLowerLiteralValue(program *unit.Program, specs []mapLowerSpec, start int
 	if start >= end {
 		return "", false
 	}
-	if functionValueTokenEquals(program, start, "{") {
+	if functionValueTokenCharIs(program, start, '{') {
 		close := functionValueFindMatchingBrace(program, start)
 		spec := mapLowerSpecIndex(specs, ordinaryUnderlyingType(program, expected, 0))
 		if close == end-1 && spec >= 0 {
@@ -820,7 +820,7 @@ func mapLowerLiteralValue(program *unit.Program, specs []mapLowerSpec, start int
 		return expected + mapLowerReadText(program, specs, start, end), true
 	}
 	typeEnd := functionValueTypeEnd(program, start)
-	if typeEnd > start && typeEnd < end && functionValueTokenEquals(program, typeEnd, "{") {
+	if typeEnd > start && typeEnd < end && functionValueTokenCharIs(program, typeEnd, '{') {
 		close := functionValueFindMatchingBrace(program, typeEnd)
 		spec := mapLowerSpecIndex(specs, ordinaryUnderlyingType(program, functionValueTokensText(program, start, typeEnd), 0))
 		if close == end-1 && spec >= 0 {
@@ -845,7 +845,7 @@ func mapLowerReadText(program *unit.Program, specs []mapLowerSpec, start int, en
 	}
 	var candidates []mapLowerReadCandidate
 	for open := start; open < end; open++ {
-		if !functionValueTokenEquals(program, open, "[") {
+		if !functionValueTokenCharIs(program, open, '[') {
 			continue
 		}
 		close := functionValueFindMatching(program, open, "[", "]")
@@ -862,7 +862,7 @@ func mapLowerReadText(program *unit.Program, specs []mapLowerSpec, start int, en
 		}
 	}
 	for call := start; call+2 < end; call++ {
-		if !functionValueTokenEquals(program, call, "len") || !functionValueTokenEquals(program, call+1, "(") {
+		if !functionValueTokenEquals(program, call, "len") || !functionValueTokenCharIs(program, call+1, '(') {
 			continue
 		}
 		close := functionValueFindMatchingParen(program, call+1)
@@ -973,7 +973,7 @@ func mapLowerIndexIsCommaOK(program *unit.Program, start int, close int) bool {
 		return false
 	}
 	for i := assign + 1; i < start; i++ {
-		if functionValueTokenText(program, i) != "(" {
+		if !functionValueTokenTextEquals(program, i, "(") {
 			return false
 		}
 	}

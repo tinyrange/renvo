@@ -13,7 +13,7 @@ func graphHasInterfaceElements(graph *load.Graph) bool {
 				continue
 			}
 			for token := 0; token+1 < len(file.Tokens); token++ {
-				if tokenTextIs(file, token, "comparable") && !tokCharIs(file, token-1, '.') && !tokCharIs(file, token+1, ':') && file.Tokens[token+1].KindLine&255 != syntax.TokenIdent {
+				if file.Tokens[token].KindLine&255 == syntax.TokenIdent && tokenTextIs(file, token, "comparable") && !tokCharIs(file, token-1, '.') && !tokCharIs(file, token+1, ':') && file.Tokens[token+1].KindLine&255 != syntax.TokenIdent {
 					declarationName := false
 					for _, fn := range file.Funcs {
 						if fn.NameTok == token {

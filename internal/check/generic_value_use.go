@@ -194,7 +194,7 @@ func (c *genericExpressionContext) valueExpressionTypeEnd(start, end int) int {
 	if genericBasicName(name) || name == "any" || name == "error" || name == "comparable" {
 		for _, source := range e.graph.Packages[c.scope.pkg].Files {
 			for _, decl := range source.File.Decls {
-				if decl.Kind != syntax.TokenType && tokenString(&source.File, decl.NameTok) == name {
+				if decl.Kind != syntax.TokenType && tokenStringEquals(&source.File, decl.NameTok, name) {
 					return -1
 				}
 			}

@@ -674,6 +674,10 @@ go compiler {
 		} else {
 			renvoAsmAddressCallWord0Stack(a, destination)
 		}
+		if size == 16 || size == 24 {
+			renvoAsmCallLabel(a, renvo386EnsureSmallCopy(g, size))
+			return
+		}
 		if mode == renvoNativeCopyStackToStack && (source+size <= destination || destination+size <= source) && size%4 == 0 {
 			renvoAsmEmit8(a, 0xb9)
 			renvoAsmEmit32(a, size/4)
@@ -683,6 +687,35 @@ go compiler {
 		renvoAsmEmit8(a, 0xb9)
 		renvoAsmEmit32(a, size)
 		renvoAsmCallLabel(a, renvo386EnsureCopyBytesHelper(g))
+	}
+
+	func renvo386EnsureSmallCopy(g *renvoLinearGen, size int) int {
+		slot := (size - 16) / 8
+		if len(g.copyVectorLabels) == 0 {
+			g.copyVectorLabels = make([]int, 11)
+		}
+		if g.copyVectorLabels[slot] != 0 {
+			return g.copyVectorLabels[slot] - 1
+		}
+		a := &g.asm
+		label := renvoAsmNewLabel(a)
+		g.copyVectorLabels[slot] = label + 1
+		after := renvoAsmNewLabel(a)
+		renvoAsmJmpMarkLabel(a, after, label)
+		// Snapshot every source word before storing so overlapping copies retain
+		// memmove semantics. Avoid REP's setup cost for small descriptors.
+		renvoAsmEmitText(a, "\x52\x53\x51") // PUSH EDX; PUSH EBX; PUSH ECX
+		if size == 24 {
+			renvoAsmEmitText(a, "\xff\x76\x10\xff\x76\x14")
+		}
+		renvoAsmEmitText(a, "\x8b\x06\x8b\x5e\x04\x8b\x4e\x08\x8b\x56\x0c")
+		renvoAsmEmitText(a, "\x89\x07\x89\x5f\x04\x89\x4f\x08\x89\x57\x0c")
+		if size == 24 {
+			renvoAsmEmitText(a, "\x59\x89\x4f\x14\x59\x89\x4f\x10")
+		}
+		renvoAsmEmitText(a, "\x59\x5b\x5a\xc3")
+		renvoAsmMarkLabel(a, after)
+		return label
 	}
 
 	func renvo386EnsureCopyBytesHelper(g *renvoLinearGen) int {

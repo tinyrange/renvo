@@ -355,8 +355,7 @@ go backend {
 
 	func renvoWasm32EmitRegImm(a *RTGEmitter, op int, reg int, imm int) {
 		if !a.VMBytecode() {
-			a.SetCode(append(a.Code(), byte(op)))
-			a.SetCode(append(a.Code(), byte(reg)))
+			a.SetCode(append(a.Code(), byte(op), byte(reg)))
 			a.SetCode(RTGAppend32(a.Code(), imm))
 			return
 		}
@@ -373,8 +372,7 @@ go backend {
 				return
 			}
 		}
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(reg)))
+		a.SetCode(append(a.Code(), byte(op), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), imm))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpMovRegImm {
@@ -392,9 +390,7 @@ go backend {
 
 	func renvoWasm32EmitRegReg(a *RTGEmitter, op int, dst int, src int) {
 		if !a.VMBytecode() {
-			a.SetCode(append(a.Code(), byte(op)))
-			a.SetCode(append(a.Code(), byte(dst)))
-			a.SetCode(append(a.Code(), byte(src)))
+			a.SetCode(append(a.Code(), byte(op), byte(dst), byte(src)))
 			return
 		}
 		end := len(a.Code())
@@ -409,9 +405,7 @@ go backend {
 			a.SetPrimaryLoad(0)
 			return
 		}
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(dst)))
-		a.SetCode(append(a.Code(), byte(src)))
+		a.SetCode(append(a.Code(), byte(op), byte(dst), byte(src)))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpMovRegReg {
 			a.SetPrimaryLoad(len(a.Code())*32 + dst + 10)
@@ -420,8 +414,7 @@ go backend {
 
 	func renvoWasm32EmitReg(a *RTGEmitter, op int, reg int) {
 		if !a.VMBytecode() {
-			a.SetCode(append(a.Code(), byte(op)))
-			a.SetCode(append(a.Code(), byte(reg)))
+			a.SetCode(append(a.Code(), byte(op), byte(reg)))
 			return
 		}
 		if op == renvoWasm32OpPopReg {
@@ -510,8 +503,7 @@ go backend {
 				}
 			}
 		}
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(reg)))
+		a.SetCode(append(a.Code(), byte(op), byte(reg)))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpPushReg {
 			a.SetPrimaryLoad(-(len(a.Code())*32 + reg + 2))
@@ -520,8 +512,7 @@ go backend {
 
 	func renvoWasm32EmitStack(a *RTGEmitter, op int, reg int, offset int) {
 		if !a.VMBytecode() {
-			a.SetCode(append(a.Code(), byte(op)))
-			a.SetCode(append(a.Code(), byte(reg)))
+			a.SetCode(append(a.Code(), byte(op), byte(reg)))
 			a.SetCode(RTGAppend32(a.Code(), offset))
 			return
 		}
@@ -538,8 +529,7 @@ go backend {
 				return
 			}
 		}
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(reg)))
+		a.SetCode(append(a.Code(), byte(op), byte(reg)))
 		a.SetCode(RTGAppend32(a.Code(), offset))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpLoadStack {
@@ -558,9 +548,7 @@ go backend {
 	}
 
 	func renvoWasm32EmitMem(a *RTGEmitter, op int, reg int, base int, disp int, size int) {
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(reg)))
-		a.SetCode(append(a.Code(), byte(base)))
+		a.SetCode(append(a.Code(), byte(op), byte(reg), byte(base)))
 		a.SetCode(RTGAppend32(a.Code(), disp))
 		a.SetCode(append(a.Code(), byte(size)))
 		if !a.VMBytecode() {
@@ -573,11 +561,7 @@ go backend {
 	}
 
 	func renvoWasm32EmitIndex(a *RTGEmitter, op int, reg int, base int, index int, scale int, disp int, size int) {
-		a.SetCode(append(a.Code(), byte(op)))
-		a.SetCode(append(a.Code(), byte(reg)))
-		a.SetCode(append(a.Code(), byte(base)))
-		a.SetCode(append(a.Code(), byte(index)))
-		a.SetCode(append(a.Code(), byte(scale)))
+		a.SetCode(append(a.Code(), byte(op), byte(reg), byte(base), byte(index), byte(scale)))
 		a.SetCode(RTGAppend32(a.Code(), disp))
 		a.SetCode(append(a.Code(), byte(size)))
 	}
@@ -590,8 +574,7 @@ go backend {
 	}
 
 	func renvoWasm32EmitCondBranch(a *RTGEmitter, cond int, label int) {
-		a.SetCode(append(a.Code(), byte(renvoWasm32OpJCond)))
-		a.SetCode(append(a.Code(), byte(cond)))
+		a.SetCode(append(a.Code(), byte(renvoWasm32OpJCond), byte(cond)))
 		at := len(a.Code())
 		a.SetCode(RTGAppend32(a.Code(), 0))
 		a.RelocAt(at, label)
@@ -995,34 +978,34 @@ go backend {
 		}
 	}
 
-	// Compare unsigned 32-bit words without changing the VM comparison format.
-	// Their upper 31-bit halves have a signed-safe difference. Only equal halves
-	// need a second comparison of the low bits. Preserve all operand registers.
+	// Equal-sign bit patterns have a signed-safe difference. Opposite signs
+	// order in reverse as unsigned words; flip the left sign bit and force its
+	// low bit to keep zero strictly below every high-bit right operand.
 	func renvoWasm32CompareUnsigned(a *RTGEmitter) {
 		if a.NativeWasm() {
 			renvoWasm32EmitRegReg(a, renvoWasm32OpCompareUnsigned, renvoWasm32RegRcx, renvoWasm32RegRax)
 			return
 		}
+		sameSign := a.NewLabel()
 		done := a.NewLabel()
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
-		renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, renvoWasm32RegRdx, 1)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpShrUnsignedRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-		renvoWasm32EmitCondBranch(a, renvoWasm32CondNe, RTGLabelIndex(done))
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRax)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRcx)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRax, renvoWasm32RegRdx)
-		renvoWasm32EmitRegReg(a, renvoWasm32OpAndRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRcx)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, renvoWasm32RegR10, renvoWasm32RegRax)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegR10, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, RTGLabelIndex(sameSign))
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegR10, renvoWasm32RegRcx)
+		a.Int8(renvoWasm32OpBinaryRegImm)
+		a.Int8(renvoWasm32RegR10)
+		a.Int32(-2147483648)
+		a.Int8(renvoWasm32OpXorRegReg)
+		a.Int8(renvoWasm32OpBinaryRegImm)
+		a.Int8(renvoWasm32RegR10)
+		a.Int32(1)
+		a.Int8(renvoWasm32OpOrRegReg)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegR10, 0)
+		renvoWasm32AsmJmpLabel(a, RTGLabelIndex(done))
+		a.Mark(sameSign)
 		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 		a.Mark(done)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 	}
 
 	func renvoWasm32AsmCmpRcxRaxSet(a *RTGEmitter, setcc int) {
@@ -3703,9 +3686,9 @@ go backend {
 			stack = stack[:0]
 			for i := starts[block]; i < end; i++ {
 				op := int(RTGByteAt(code, pcs[i]))
-				if op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
-					// Fused instructions retain their physical VM stack effects. Do
-					// not match local-stack substitutions across one of them.
+				if op == renvoWasm32OpPushFrameBlock || op >= renvoWasm32OpPushRegLoadStack && op <= renvoWasm32OpMovRegRegPop {
+					// Compound pushes and fused instructions retain their physical
+					// stack effects. Do not match substitutions across one of them.
 					stack = stack[:0]
 					continue
 				}

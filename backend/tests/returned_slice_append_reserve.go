@@ -8,7 +8,7 @@ func returnedSliceWithExcessCapacity() ([]byte, bool) {
 
 func appMain() int {
 	value, ok := returnedSliceWithExcessCapacity()
-	if !ok || len(value) != 4 || cap(value)-len(value) != 80 || value[0] != 1 {
+	if !ok || len(value) != 4 || cap(value) != 256 || value[0] != 1 {
 		return 1
 	}
 	print("PASS\n")

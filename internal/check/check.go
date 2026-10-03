@@ -397,7 +397,7 @@ func packageDeclaresReceiverType(pkg load.Package, name string) bool {
 		file := pkg.Files[i].File
 		for j := 0; j < len(file.Decls); j++ {
 			decl := file.Decls[j]
-			if decl.Kind == syntax.TokenType && tokenString(&file, decl.NameTok) == name {
+			if decl.Kind == syntax.TokenType && tokenStringEquals(&file, decl.NameTok, name) {
 				start := decl.NameTok + 1
 				if tokCharIs(&file, start, '=') {
 					start++
@@ -618,6 +618,25 @@ func tokenString(file *syntax.File, tok int) string {
 		return ""
 	}
 	return string(syntax.TokenText(file.Src, file.Tokens[tok]))
+}
+
+func tokenStringEquals(file *syntax.File, tok int, want string) bool {
+	if uint(tok) >= uint(len(file.Tokens)) {
+		return want == ""
+	}
+	token := &file.Tokens[tok]
+	start := int(token.Start)
+	end := int(token.End)
+	if start < 0 || end < start || end > len(file.Src) {
+		return want == ""
+	}
+	if end-start != len(want) {
+		return false
+	}
+	if start < end && file.Src[start] != want[0] {
+		return false
+	}
+	return string(file.Src[start:end]) == want
 }
 
 func sortSymbols(symbols []Symbol) {

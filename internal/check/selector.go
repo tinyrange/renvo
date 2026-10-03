@@ -89,7 +89,7 @@ func appendSpecInitializerSelectors(selectors []SelectorRef, file *syntax.File, 
 
 func appendExprSelectors(selectors []SelectorRef, file *syntax.File, fileIndex int, info PackageInfo, checked []PackageInfo, scope FuncScope, start int, end int) []SelectorRef {
 	for i := start + 1; i+1 < end && i+1 < len(file.Tokens); i++ {
-		if !tokenTextIs(file, i, ".") {
+		if !tokCharIs(file, i, '.') {
 			continue
 		}
 		if file.Tokens[i-1].KindLine&255 != syntax.TokenIdent || file.Tokens[i+1].KindLine&255 != syntax.TokenIdent {

@@ -13,7 +13,7 @@ func (c *genericExpressionContext) constantNameShadowed(text string, before int)
 		}
 	}
 	for _, binding := range c.bindings {
-		if binding.name >= 0 && binding.visible <= before && before < binding.end && tokenString(file, binding.name) == text {
+		if binding.name >= 0 && binding.visible <= before && before < binding.end && tokenStringEquals(file, binding.name, text) {
 			shadowed = true
 		}
 	}

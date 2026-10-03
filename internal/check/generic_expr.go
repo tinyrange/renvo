@@ -512,7 +512,7 @@ func (c *genericExpressionContext) globalValue(pkg int, name string) genericArgu
 	for f := 0; f < len(e.graph.Packages[pkg].Files); f++ {
 		file := &e.graph.Packages[pkg].Files[f].File
 		for _, d := range file.Decls {
-			if tokenString(file, d.NameTok) != name || d.Kind == syntax.TokenType {
+			if !tokenStringEquals(file, d.NameTok, name) || d.Kind == syntax.TokenType {
 				continue
 			}
 			info := buildDeclInfo(file, f, PackageInfo{}, nil, d)

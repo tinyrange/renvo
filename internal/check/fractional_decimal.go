@@ -3,7 +3,7 @@ package check
 import "renvo.dev/internal/syntax"
 
 func unsafeAddFractionalDecimal(file *syntax.File, start int, end int) bool {
-	if start < end && (tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-")) {
+	if start < end && (tokCharIs(file, start, '+') || tokCharIs(file, start, '-')) {
 		start++
 	}
 	if end-start != 1 || file.Tokens[start].KindLine&255 != syntax.TokenNumber {

@@ -102,7 +102,7 @@ func literalNumericKind(file *syntax.File, start int, end int, depth int) int {
 		if op < 0 {
 			continue
 		}
-		if !tokenTextIs(file, op, "+") && !tokenTextIs(file, op, "-") && !tokenTextIs(file, op, "*") && !tokenTextIs(file, op, "/") {
+		if !tokCharIs(file, op, '+') && !tokCharIs(file, op, '-') && !tokCharIs(file, op, '*') && !tokCharIs(file, op, '/') {
 			return 0
 		}
 		left := literalNumericKind(file, start, op, depth+1)

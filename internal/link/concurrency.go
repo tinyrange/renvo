@@ -61,7 +61,7 @@ func lowerChannelRangeCore(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	count := 0
 	for i := 0; i+3 < len(program.Tokens); i++ {
-		if !functionValueTokenEquals(program, i, "for") {
+		if !functionValueTokenKindIs(program, i, unit.TokenFor) {
 			continue
 		}
 		open := concurrencyTopLevelToken(program, i+1, len(program.Tokens), "{")
@@ -148,7 +148,7 @@ func lowerSelectSyntaxCore(program *unit.Program, transient bool) bool {
 			continue
 		}
 		open := i + 1
-		if !functionValueTokenEquals(program, open, "{") {
+		if !functionValueTokenCharIs(program, open, '{') {
 			return false
 		}
 		close := functionValueFindMatchingBrace(program, open)
@@ -219,7 +219,7 @@ func concurrencyParseSelectCases(program *unit.Program, open int, close int) ([]
 			return nil, false
 		}
 		item := concurrencySelectCase{index: operation, body: functionValueTokensText(program, colon+1, limit)}
-		if functionValueTokenEquals(program, start, "default") {
+		if functionValueTokenKindIs(program, start, unit.TokenDefault) {
 			if defaultSeen {
 				return nil, false
 			}
@@ -348,7 +348,7 @@ func concurrencyTopLevelToken(program *unit.Program, start int, end int, wanted 
 
 func concurrencyTopLevelAssignment(program *unit.Program, start int, end int) int {
 	for i := start; i < end; i++ {
-		if functionValueTokenEquals(program, i, ":=") || functionValueTokenEquals(program, i, "=") {
+		if functionValueTokenEquals(program, i, ":=") || functionValueTokenCharIs(program, i, '=') {
 			return i
 		}
 	}
@@ -371,7 +371,7 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 
 	// Construction must be discovered before channel type tokens are erased.
 	for i := 0; i+2 < len(program.Tokens); i++ {
-		if !functionValueTokenEquals(program, i, "make") || !functionValueTokenEquals(program, i+1, "(") {
+		if !functionValueTokenEquals(program, i, "make") || !functionValueTokenCharIs(program, i+1, '(') {
 			continue
 		}
 		close := functionValueFindMatchingParen(program, i+1)
@@ -459,7 +459,7 @@ func lowerChannelSyntaxCore(program *unit.Program, transient bool) bool {
 
 	// close, len, and cap retain their source evaluation but use the handler.
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if covered[i] || !functionValueTokenEquals(program, i+1, "(") {
+		if covered[i] || !functionValueTokenCharIs(program, i+1, '(') {
 			continue
 		}
 		name := functionValueTokenText(program, i)
@@ -585,7 +585,7 @@ func lowerGoroutineSyntaxCore(program *unit.Program, transient bool) bool {
 	}
 	callIndex := -1
 	for i := 0; i < len(program.Funcs); i++ {
-		if functionValueTokenText(program, program.Funcs[i].NameTok) == "renvo_runtime_Call" {
+		if functionValueTokenTextEquals(program, program.Funcs[i].NameTok, "renvo_runtime_Call") {
 			callIndex = i
 			break
 		}
@@ -623,7 +623,7 @@ func lowerGoroutineSyntaxCore(program *unit.Program, transient bool) bool {
 }
 
 func concurrencyDirectGoCall(program *unit.Program, start int, end int, context string, spawn string, entry int) (string, string, string, bool) {
-	if end-start < 3 || !functionValueTokenEquals(program, end-1, ")") {
+	if end-start < 3 || !functionValueTokenCharIs(program, end-1, ')') {
 		return "", "", "", false
 	}
 	open := functionValueFindMatchingBackward(program, end-1, "(", ")")
@@ -759,7 +759,7 @@ func concurrencyCallParameterTypes(program *unit.Program, open int) []string {
 }
 
 func concurrencyCallType(program *unit.Program, start int, open int) string {
-	if functionValueTokenEquals(program, start, "func") {
+	if functionValueTokenKindIs(program, start, unit.TokenFunc) {
 		paramsClose := functionValueFindMatchingParen(program, start+1)
 		bodyOpen := concurrencyTopLevelToken(program, paramsClose+1, open, "{")
 		if paramsClose > start && bodyOpen > paramsClose {
@@ -812,12 +812,12 @@ func concurrencyInferredFunctionValueType(program *unit.Program, before int, nam
 			continue
 		}
 		rhs := i + 2
-		if rhs+2 < before && program.Tokens[rhs].KindLine&255 == unit.TokenIdent && functionValueTokenEquals(program, rhs+1, ".") && program.Tokens[rhs+2].KindLine&255 == unit.TokenIdent {
+		if rhs+2 < before && program.Tokens[rhs].KindLine&255 == unit.TokenIdent && functionValueTokenCharIs(program, rhs+1, '.') && program.Tokens[rhs+2].KindLine&255 == unit.TokenIdent {
 			method := functionValueTokenText(program, rhs+2)
 			baseType := functionValueEnclosingLocalType(program, i, functionValueTokenText(program, rhs))
 			for index := 0; index < len(program.Funcs); index++ {
 				candidate := program.Funcs[index]
-				if candidate.ReceiverStart < candidate.ReceiverEnd && functionValueTokenText(program, candidate.NameTok) == method && (baseType == "" || functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, &candidate), 0)) {
+				if candidate.ReceiverStart < candidate.ReceiverEnd && functionValueTokenTextEquals(program, candidate.NameTok, method) && (baseType == "" || functionValueTypeEmbeds(program, baseType, functionValueReceiverType(program, &candidate), 0)) {
 					return concurrencyDeclaredCallType(program, &candidate)
 				}
 			}
@@ -829,7 +829,7 @@ func concurrencyInferredFunctionValueType(program *unit.Program, before int, nam
 		callee := functionValueTokenText(program, rhs)
 		for index := 0; index < len(program.Funcs); index++ {
 			candidate := program.Funcs[index]
-			if candidate.ReceiverStart >= candidate.ReceiverEnd && functionValueTokenText(program, candidate.NameTok) == callee {
+			if candidate.ReceiverStart >= candidate.ReceiverEnd && functionValueTokenTextEquals(program, candidate.NameTok, callee) {
 				return concurrencyDeclaredCallType(program, &candidate)
 			}
 		}
@@ -839,17 +839,17 @@ func concurrencyInferredFunctionValueType(program *unit.Program, before int, nam
 }
 
 func concurrencyGoLiteral(program *unit.Program, start int, end int, context string, spawn string, entry int) (string, string, string, bool) {
-	if !functionValueTokenEquals(program, start, "func") || !functionValueTokenEquals(program, start+1, "(") {
+	if !functionValueTokenKindIs(program, start, unit.TokenFunc) || !functionValueTokenCharIs(program, start+1, '(') {
 		return "", "", "", false
 	}
 	paramsClose := functionValueFindMatchingParen(program, start+1)
-	if paramsClose < 0 || paramsClose+1 >= end || !functionValueTokenEquals(program, paramsClose+1, "{") {
+	if paramsClose < 0 || paramsClose+1 >= end || !functionValueTokenCharIs(program, paramsClose+1, '{') {
 		return "", "", "", false
 	}
 	bodyOpen := paramsClose + 1
 	bodyClose := functionValueFindMatchingBrace(program, bodyOpen)
 	callOpen := bodyClose + 1
-	if bodyClose < 0 || callOpen >= end || !functionValueTokenEquals(program, callOpen, "(") || functionValueFindMatchingParen(program, callOpen) != end-1 {
+	if bodyClose < 0 || callOpen >= end || !functionValueTokenCharIs(program, callOpen, '(') || functionValueFindMatchingParen(program, callOpen) != end-1 {
 		return "", "", "", false
 	}
 	_, paramNames, _, ok := normalizedFunctionValueParams(program, start+2, paramsClose)
@@ -959,7 +959,7 @@ func concurrencyLiteralParameterTypes(program *unit.Program, start int, end int)
 func concurrencyFunctionParameterTypes(program *unit.Program, name string) []string {
 	for i := 0; i < len(program.Funcs); i++ {
 		fn := program.Funcs[i]
-		if fn.ReceiverStart >= fn.ReceiverEnd && functionValueTokenText(program, fn.NameTok) == name {
+		if fn.ReceiverStart >= fn.ReceiverEnd && functionValueTokenTextEquals(program, fn.NameTok, name) {
 			return functionValueFunctionParamTypes(program, &fn)
 		}
 	}
@@ -1041,7 +1041,7 @@ func concurrencyPrimaryEnd(program *unit.Program, start int) int {
 		return start
 	}
 	end := start + 1
-	if functionValueTokenEquals(program, start, "(") {
+	if functionValueTokenCharIs(program, start, '(') {
 		close := functionValueFindMatchingParen(program, start)
 		if close < 0 {
 			return start
@@ -1049,11 +1049,11 @@ func concurrencyPrimaryEnd(program *unit.Program, start int) int {
 		end = close + 1
 	}
 	for end < len(program.Tokens) {
-		if functionValueTokenEquals(program, end, ".") && end+1 < len(program.Tokens) {
+		if functionValueTokenCharIs(program, end, '.') && end+1 < len(program.Tokens) {
 			end += 2
 			continue
 		}
-		if functionValueTokenEquals(program, end, "[") {
+		if functionValueTokenCharIs(program, end, '[') {
 			close := functionValueFindMatching(program, end, "[", "]")
 			if close < 0 {
 				return start
@@ -1061,7 +1061,7 @@ func concurrencyPrimaryEnd(program *unit.Program, start int) int {
 			end = close + 1
 			continue
 		}
-		if functionValueTokenEquals(program, end, "(") {
+		if functionValueTokenCharIs(program, end, '(') {
 			close := functionValueFindMatchingParen(program, end)
 			if close < 0 {
 				return start
@@ -1081,7 +1081,7 @@ func concurrencyReceiveNeedsOpen(program *unit.Program, arrow int) bool {
 		return false
 	}
 	for i := start; i < assign; i++ {
-		if functionValueTokenEquals(program, i, ",") {
+		if functionValueTokenCharIs(program, i, ',') {
 			return true
 		}
 	}

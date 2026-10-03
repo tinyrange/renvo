@@ -2442,6 +2442,25 @@ func renvoWasm32EnsureStringEqualHelper(g *renvoLinearGen) int {
 	renvoAsmJnzLabel(a, notEqualLabel)
 	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
 	renvoAsmJzLabel(a, equalLabel)
+	if g.c.renvoTarget == renvoTargetVM32 {
+		// Compare complete words before the byte tail without reading beyond
+		// either string. VM word loads support unaligned source addresses.
+		wordLoop := renvoAsmNewLabel(a)
+		byteTail := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, wordLoop)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 4)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, byteTail)
+		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 4)
+		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 4)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, 4)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, 4)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, -4)
+		renvoAsmJmpMarkLabel(a, wordLoop, byteTail)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
+		renvoAsmJzLabel(a, equalLabel)
+	}
 	renvoAsmMarkLabel(a, loopLabel)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 1)
 	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 1)

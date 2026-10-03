@@ -58,7 +58,7 @@ func coreAliasImportedBindings(programs []unit.Program, offsets []int, aliases [
 		}
 		for tok, token := range program.Tokens {
 			if token.KindLine&255 != unit.TokenIdent || skip[tok] ||
-				(tok > 0 && (program.Tokens[tok-1].KindLine&255 == unit.TokenPackage || coreTokenTextEquals(program, tok-1, "."))) {
+				(tok > 0 && (program.Tokens[tok-1].KindLine&255 == unit.TokenPackage || functionValueTokenCharIs(program, tok-1, '.'))) {
 				continue
 			}
 			bucket := coreAliasTokenHash(program, tok) % len(buckets)
@@ -76,10 +76,10 @@ func coreAliasImportedBindings(programs []unit.Program, offsets []int, aliases [
 
 func coreAliasLocalBinding(program *unit.Program, token int) bool {
 	first, last := token, token
-	for first >= 2 && coreTokenTextEquals(program, first-1, ",") && program.Tokens[first-2].KindLine&255 == unit.TokenIdent {
+	for first >= 2 && functionValueTokenCharIs(program, first-1, ',') && program.Tokens[first-2].KindLine&255 == unit.TokenIdent {
 		first -= 2
 	}
-	for last+2 < len(program.Tokens) && coreTokenTextEquals(program, last+1, ",") && program.Tokens[last+2].KindLine&255 == unit.TokenIdent {
+	for last+2 < len(program.Tokens) && functionValueTokenCharIs(program, last+1, ',') && program.Tokens[last+2].KindLine&255 == unit.TokenIdent {
 		last += 2
 	}
 	if coreTokenTextEquals(program, last+1, ":=") {
@@ -95,14 +95,14 @@ func coreAliasLocalBinding(program *unit.Program, token int) bool {
 	// bindings. A parameter name is followed by its type; unnamed parameter
 	// types instead end at a comma or closing parenthesis.
 	typed := functionValueTokenCanStartType(program, last+1)
-	if !typed && !coreTokenTextEquals(program, last+1, "=") {
+	if !typed && !functionValueTokenCharIs(program, last+1, '=') {
 		return false
 	}
 	depth := 0
 	for i := first - 1; i >= 0; i-- {
-		if coreTokenTextEquals(program, i, ")") {
+		if functionValueTokenCharIs(program, i, ')') {
 			depth++
-		} else if coreTokenTextEquals(program, i, "(") {
+		} else if functionValueTokenCharIs(program, i, '(') {
 			if depth > 0 {
 				depth--
 				continue
@@ -114,7 +114,7 @@ func coreAliasLocalBinding(program *unit.Program, token int) bool {
 				}
 			}
 			return typed && coreAliasParameterParen(program, i)
-		} else if depth == 0 && (coreTokenTextEquals(program, i, "{") || coreTokenTextEquals(program, i, "}")) {
+		} else if depth == 0 && (functionValueTokenCharIs(program, i, '{') || functionValueTokenCharIs(program, i, '}')) {
 			return false
 		}
 	}
@@ -131,7 +131,7 @@ func coreAliasParameterParen(program *unit.Program, open int) bool {
 				return true
 			}
 		}
-		if !coreTokenTextEquals(program, open-1, ")") {
+		if !functionValueTokenCharIs(program, open-1, ')') {
 			return false
 		}
 		open = functionValueFindMatchingBackward(program, open-1, "(", ")")

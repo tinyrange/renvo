@@ -203,7 +203,7 @@ func (ctx *genericExpressionContext) validateBody(signature *genericType) {
 			// bindings. The header is not an ordinary variable initializer.
 			continue
 		}
-		if binding.valueStart < 0 || tokenTextIs(file, binding.valueEnd-2, "type") {
+		if binding.valueStart < 0 || tokenKindIs(file, binding.valueEnd-2, syntax.TokenType) {
 			ctx.validateTupleInitializer(binding)
 			continue
 		}

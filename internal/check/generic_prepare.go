@@ -79,7 +79,7 @@ func PrepareGenerics(graph load.Graph) GenericPreparation {
 		} else if start > 0 && file.Tokens[start-1].KindLine&255 == syntax.TokenType {
 			start--
 		}
-		if end < len(file.Tokens) && tokenTextIs(file, end, ";") {
+		if end < len(file.Tokens) && tokCharIs(file, end, ';') {
 			end++
 		}
 		prepared[d.pkg].files[d.file].changes = append(prepared[d.pkg].files[d.file].changes, genericReplacement{start: int(file.Tokens[start].Start), end: int(file.Tokens[end-1].End)})
@@ -204,10 +204,10 @@ func PrepareGenerics(graph load.Graph) GenericPreparation {
 					continue
 				}
 				for _, next := range parsed.Imports {
-					if tokenString(&parsed, next.PathTok) != path {
+					if !tokenStringEquals(&parsed, next.PathTok, path) {
 						continue
 					}
-					if next.NameTok >= 0 && tokenString(&parsed, next.NameTok) != alias {
+					if next.NameTok >= 0 && !tokenStringEquals(&parsed, next.NameTok, alias) {
 						continue
 					}
 					if next.NameTok < 0 {
@@ -238,7 +238,7 @@ func PrepareGenerics(graph load.Graph) GenericPreparation {
 
 func genericFileUsesSelector(file *syntax.File, name string) bool {
 	for i := 0; i+1 < len(file.Tokens); i++ {
-		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokCharIs(file, i+1, '.') && tokenString(file, i) == name {
+		if file.Tokens[i].KindLine&255 == syntax.TokenIdent && tokCharIs(file, i+1, '.') && tokenStringEquals(file, i, name) {
 			return true
 		}
 	}
@@ -247,7 +247,7 @@ func genericFileUsesSelector(file *syntax.File, name string) bool {
 
 func genericFileUsesName(file *syntax.File, name string) bool {
 	for i, tok := range file.Tokens {
-		if tok.KindLine&255 == syntax.TokenIdent && tokenString(file, i) == name {
+		if tok.KindLine&255 == syntax.TokenIdent && tokenStringEquals(file, i, name) {
 			return true
 		}
 	}

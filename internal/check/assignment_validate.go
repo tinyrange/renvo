@@ -19,7 +19,7 @@ func functionMayNeedChannelCheck(file *syntax.File, fn *syntax.FuncDecl) bool {
 		end = len(file.Tokens)
 	}
 	for i := start; i < end; i++ {
-		token := file.Tokens[i]
+		token := &file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenChan {
 			return true
@@ -46,8 +46,8 @@ func invalidDefiniteAssignmentType(file *syntax.File, fn *syntax.FuncDecl) (int,
 			if invalidLiteralUnary(file, i, fn.BodyEnd) || invalidLiteralOrdering(file, i, fn.BodyStart+1, fn.BodyEnd-1) {
 				return CheckErrOperand, i
 			}
-			leftToken := file.Tokens[i-1]
-			rightToken := file.Tokens[i+1]
+			leftToken := &file.Tokens[i-1]
+			rightToken := &file.Tokens[i+1]
 			leftSize := leftToken.End - leftToken.Start
 			rightSize := rightToken.End - rightToken.Start
 			leftPossible := leftToken.KindLine&255 == syntax.TokenNumber || leftToken.KindLine&255 == syntax.TokenString || leftToken.KindLine&255 == syntax.TokenIdent && (leftSize == 4 || leftSize == 5)
@@ -80,7 +80,7 @@ func invalidDefiniteAssignmentType(file *syntax.File, fn *syntax.FuncDecl) (int,
 		}
 		name := tokenString(file, i-1)
 		for j := i - 2; j >= fn.BodyStart+1; j-- {
-			if file.Tokens[j].KindLine&255 != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].KindLine&255 != syntax.TokenIdent || tokenString(file, j+1) != name {
+			if file.Tokens[j].KindLine&255 != syntax.TokenVar || j+2 >= i || file.Tokens[j+1].KindLine&255 != syntax.TokenIdent || !tokenStringEquals(file, j+1, name) {
 				continue
 			}
 			declared := tokenString(file, j+2)
@@ -168,7 +168,7 @@ func invalidDefiniteChannelOperationWithShadow(file *syntax.File, fn *syntax.Fun
 		return -1
 	}
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
-		if tokenTextIs(file, i, "=") && i > fn.BodyStart+1 && i+1 < fn.BodyEnd && file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent {
+		if tokCharIs(file, i, '=') && i > fn.BodyStart+1 && i+1 < fn.BodyEnd && file.Tokens[i-1].KindLine&255 == syntax.TokenIdent && file.Tokens[i+1].KindLine&255 == syntax.TokenIdent {
 			left, leftFound := definiteChannelBindingAt(channels, tokenString(file, i-1), i)
 			right, rightFound := definiteChannelBindingAt(channels, tokenString(file, i+1), i)
 			if leftFound && rightFound {
@@ -280,7 +280,7 @@ func invalidDefiniteChannelOperationWithShadow(file *syntax.File, fn *syntax.Fun
 
 func definiteNonChannelBindingKind(file *syntax.File, fn *syntax.FuncDecl, name string, before int) string {
 	for i := before - 1; i >= fn.StartTok; i-- {
-		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(file, i) != name {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || !tokenStringEquals(file, i, name) {
 			continue
 		}
 		if i+2 < before && tokenTextIs(file, i+1, ":=") {
@@ -311,7 +311,7 @@ func invalidDefiniteChannelCapacity(file *syntax.File, span ExprSpan) bool {
 	if start >= end {
 		return true
 	}
-	if tokenTextIs(file, start, "-") && start+1 < end && file.Tokens[start+1].KindLine&255 == syntax.TokenNumber {
+	if tokCharIs(file, start, '-') && start+1 < end && file.Tokens[start+1].KindLine&255 == syntax.TokenNumber {
 		return true
 	}
 	kind := definiteLiteralKind(file, start)
@@ -381,11 +381,11 @@ func definiteChannelShapeDepth(file *syntax.File, start int, end int, depth int)
 		name := tokenString(file, start)
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
-			if decl.Kind != syntax.TokenType || tokenString(file, decl.NameTok) != name {
+			if decl.Kind != syntax.TokenType || !tokenStringEquals(file, decl.NameTok, name) {
 				continue
 			}
 			typeStart := decl.NameTok + 1
-			if tokenTextIs(file, typeStart, "=") {
+			if tokCharIs(file, typeStart, '=') {
 				typeStart++
 			}
 			if typeStart != start {

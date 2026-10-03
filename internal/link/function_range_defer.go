@@ -34,7 +34,7 @@ func lowerFunctionRangeDefers(program *unit.Program, transient bool) bool {
 				continue
 			}
 			end := functionRangeStatementEnd(program, tok, fn.BodyEnd-1)
-			if !functionValueTokenEquals(program, end-1, ")") {
+			if !functionValueTokenCharIs(program, end-1, ')') {
 				return false
 			}
 			open := functionValueFindMatchingBackward(program, end-1, "(", ")")
@@ -115,7 +115,7 @@ func functionRangeDeferOwners(program *unit.Program) []unit.Func {
 		return owners
 	}
 	for tok := 0; tok < len(program.Tokens); tok++ {
-		if !functionValueTokenEquals(program, tok, "for") {
+		if !functionValueTokenKindIs(program, tok, unit.TokenFor) {
 			continue
 		}
 		mark := arena.Mark()
@@ -168,10 +168,10 @@ func functionRangeDeferLexicalOwner(program *unit.Program, tok int) (unit.Func, 
 	// Original compact declarations delimit the body contents; reparsed
 	// declarations and literals delimit the braces. Normalize from the tokens
 	// so the first statement and final call argument are never dropped.
-	if !functionValueTokenEquals(program, fn.BodyStart, "{") {
+	if !functionValueTokenCharIs(program, fn.BodyStart, '{') {
 		fn.BodyStart--
 	}
-	if !functionValueTokenEquals(program, fn.BodyStart, "{") {
+	if !functionValueTokenCharIs(program, fn.BodyStart, '{') {
 		return fn, false
 	}
 	close := functionValueFindMatchingBrace(program, fn.BodyStart)
@@ -187,13 +187,13 @@ func functionRangeDeferLexicalOwner(program *unit.Program, tok int) (unit.Func, 
 // the yield signature's parameters, rather than the iterator's result types.
 func functionRangeBindingType(program *unit.Program, name int) string {
 	first, last := name, name
-	for functionValueTokenEquals(program, first-1, ",") && first >= 2 && program.Tokens[first-2].KindLine&255 == unit.TokenIdent {
+	for functionValueTokenCharIs(program, first-1, ',') && first >= 2 && program.Tokens[first-2].KindLine&255 == unit.TokenIdent {
 		first -= 2
 	}
-	for functionValueTokenEquals(program, last+1, ",") && last+2 < len(program.Tokens) && program.Tokens[last+2].KindLine&255 == unit.TokenIdent {
+	for functionValueTokenCharIs(program, last+1, ',') && last+2 < len(program.Tokens) && program.Tokens[last+2].KindLine&255 == unit.TokenIdent {
 		last += 2
 	}
-	if !functionValueTokenEquals(program, first-1, "for") || !functionValueTokenEquals(program, last+1, ":=") || !functionValueTokenEquals(program, last+2, "range") {
+	if !functionValueTokenKindIs(program, first-1, unit.TokenFor) || !functionValueTokenEquals(program, last+1, ":=") || !functionValueTokenEquals(program, last+2, "range") {
 		return ""
 	}
 	rangeTok, open := functionRangeHeader(program, first-1)

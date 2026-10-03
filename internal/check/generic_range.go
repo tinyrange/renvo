@@ -87,7 +87,7 @@ func (c *genericExpressionContext) validateFor(stmt syntax.Stmt) {
 					e.fail(c.scope, i-1, "range declaration has no new variables")
 				}
 			}
-			if tokenTextIs(file, i-1, "=") {
+			if tokCharIs(file, i-1, '=') {
 				for j, span := range left {
 					if j < len(types) && !tokenTextIs(file, span.StartTok, "_") && !e.argumentAssignable(genericArgument{typ: types[j]}, c.expression(span.StartTok, span.EndTok, i).typ) {
 						e.fail(c.scope, i, "range variable is not assignable")

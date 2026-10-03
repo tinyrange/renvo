@@ -29,7 +29,7 @@ func lowerIntegerRangeAt(program *unit.Program, transient bool, i int, rangeTok 
 		if name != "_" {
 			prefix = name + " " + functionValueTokenText(program, assign) + " " + index + "; "
 		}
-		if functionValueTokenEquals(program, assign, "=") && ordinaryUntypedExpression(program, rangeTok+1, open) {
+		if functionValueTokenCharIs(program, assign, '=') && ordinaryUntypedExpression(program, rangeTok+1, open) {
 			candidate := ordinaryBuiltinExprType(program, i, i+1, assign)
 			if candidate != "" {
 				typ = candidate

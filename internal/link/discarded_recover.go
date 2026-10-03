@@ -15,7 +15,7 @@ func lowerDiscardedRecoverCalls(program *unit.Program, transient bool) bool {
 		return true
 	}
 	for tok := 0; tok+2 < len(program.Tokens); tok++ {
-		if !functionValueTokenEquals(program, tok, "recover") || !functionValueTokenEquals(program, tok+1, "(") || !functionValueTokenEquals(program, tok+2, ")") {
+		if !functionValueTokenEquals(program, tok, "recover") || !functionValueTokenCharIs(program, tok+1, '(') || !functionValueTokenCharIs(program, tok+2, ')') {
 			continue
 		}
 		fn, ok := functionRangeDeferLexicalOwner(program, tok)

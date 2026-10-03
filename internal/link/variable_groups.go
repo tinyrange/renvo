@@ -8,7 +8,7 @@ import "renvo.dev/internal/unit"
 func lowerVariableGroups(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	for token := 0; token+1 < len(program.Tokens); token++ {
-		if program.Tokens[token].KindLine&255 != unit.TokenVar || !functionValueTokenEquals(program, token+1, "(") {
+		if program.Tokens[token].KindLine&255 != unit.TokenVar || !functionValueTokenCharIs(program, token+1, '(') {
 			continue
 		}
 		close := functionValueFindMatchingParen(program, token+1)
@@ -16,11 +16,11 @@ func lowerVariableGroups(program *unit.Program, transient bool) bool {
 			return false
 		}
 		edits = append(edits, functionValueTokenEdit(program, token, ""), functionValueTokenEdit(program, token+1, ""), functionValueTokenEdit(program, close, "\n"))
-		if functionValueTokenEquals(program, close+1, ";") {
+		if functionValueTokenCharIs(program, close+1, ';') {
 			edits = append(edits, functionValueTokenEdit(program, close+1, ""))
 		}
 		for pos := token + 2; pos < close; {
-			if functionValueTokenEquals(program, pos, ";") {
+			if functionValueTokenCharIs(program, pos, ';') {
 				pos++
 				continue
 			}
@@ -42,16 +42,16 @@ func variableGroupSpecEnd(program *unit.Program, start int, end int) int {
 	depth := 0
 	for token := start; token < end; token++ {
 		if depth == 0 {
-			if functionValueTokenEquals(program, token, ";") {
+			if functionValueTokenCharIs(program, token, ';') {
 				return token + 1
 			}
 			if token > start && program.Tokens[token].KindLine>>8 != program.Tokens[token-1].KindLine>>8 && variableGroupTokenEndsSpec(program, token-1) {
 				return token
 			}
 		}
-		if functionValueTokenEquals(program, token, "(") || functionValueTokenEquals(program, token, "[") || functionValueTokenEquals(program, token, "{") {
+		if functionValueTokenCharIs(program, token, '(') || functionValueTokenCharIs(program, token, '[') || functionValueTokenCharIs(program, token, '{') {
 			depth++
-		} else if functionValueTokenEquals(program, token, ")") || functionValueTokenEquals(program, token, "]") || functionValueTokenEquals(program, token, "}") {
+		} else if functionValueTokenCharIs(program, token, ')') || functionValueTokenCharIs(program, token, ']') || functionValueTokenCharIs(program, token, '}') {
 			depth--
 		}
 	}
@@ -61,5 +61,5 @@ func variableGroupSpecEnd(program *unit.Program, start int, end int) int {
 func variableGroupTokenEndsSpec(program *unit.Program, token int) bool {
 	kind := program.Tokens[token].KindLine & 255
 	return kind == unit.TokenIdent || kind == unit.TokenNumber || kind == unit.TokenString || kind == unit.TokenChar ||
-		functionValueTokenEquals(program, token, ")") || functionValueTokenEquals(program, token, "]") || functionValueTokenEquals(program, token, "}")
+		functionValueTokenCharIs(program, token, ')') || functionValueTokenCharIs(program, token, ']') || functionValueTokenCharIs(program, token, '}')
 }

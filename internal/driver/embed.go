@@ -739,19 +739,7 @@ func sortSourceEmbedStrings(values []string) {
 }
 
 func sourceEmbedStringAfter(left string, right string) bool {
-	limit := len(left)
-	if len(right) < limit {
-		limit = len(right)
-	}
-	for i := 0; i < limit; i++ {
-		if left[i] > right[i] {
-			return true
-		}
-		if left[i] < right[i] {
-			return false
-		}
-	}
-	return len(left) > len(right)
+	return left > right
 }
 
 func sourceEmbedInitializer(spec sourceEmbedSpec, files []sourceEmbedFile) ([]byte, bool) {

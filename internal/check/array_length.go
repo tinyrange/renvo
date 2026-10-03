@@ -52,7 +52,7 @@ func invalidLocalArrayLengths(pkg *load.Package, info *PackageInfo, fileIndex in
 			// Local type names enter scope at their identifier, unlike values.
 			// Their body follows the name and an optional alias equals sign.
 			start, end = binding.name+1, binding.visible
-			if tokenTextIs(&file, start, "=") {
+			if tokCharIs(&file, start, '=') {
 				start++
 			}
 			context.before = binding.visible

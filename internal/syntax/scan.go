@@ -36,11 +36,10 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
 		}
 		c := src[i]
 		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			for i < len(src) {
-				c = src[i]
-				if c == '\n' {
+			for _, space := range src[i:] {
+				if space == '\n' {
 					line++
-				} else if c != ' ' && c != '\t' && c != '\r' {
+				} else if space != ' ' && space != '\t' && space != '\r' {
 					break
 				}
 				i++
@@ -49,7 +48,10 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
 		}
 		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
 			i += 2
-			for i < len(src) && src[i] != '\n' {
+			for _, comment := range src[i:] {
+				if comment == '\n' {
+					break
+				}
 				i++
 			}
 			continue
@@ -77,8 +79,15 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
 				i++
 			}
 			for i < len(src) {
-				part := src[i]
-				if part >= 128 {
+				// Walk ASCII bytes with one range bound, then resume at a Unicode
+				// rune if present. The outer loop handles its variable width.
+				for _, part := range src[i:] {
+					if !(uint(part|32)-'a' < 26 || uint(part)-'0' < 10 || part == '_') {
+						break
+					}
+					i++
+				}
+				if i < len(src) && src[i] >= 128 {
 					width := unicodeIdentifierWidth(src, i, false)
 					if width == 0 {
 						break
@@ -86,10 +95,7 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
 					i += width
 					continue
 				}
-				if !(uint(part|32)-'a' < 26 || uint(part)-'0' < 10 || part == '_') {
-					break
-				}
-				i++
+				break
 			}
 			kind := TokenIdent
 			size := i - start

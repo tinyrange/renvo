@@ -39,7 +39,7 @@ func lowerErrorsAsCore(program *unit.Program, names []string, transient bool) bo
 	}
 	receivers := []string{"error"}
 	for _, fn := range program.Funcs {
-		if fn.ReceiverStart < fn.ReceiverEnd && functionValueTokenText(program, fn.NameTok) == "Error" {
+		if fn.ReceiverStart < fn.ReceiverEnd && functionValueTokenTextEquals(program, fn.NameTok, "Error") {
 			receivers = append(receivers, functionValueBareType(functionValueReceiverType(program, &fn)))
 		}
 	}

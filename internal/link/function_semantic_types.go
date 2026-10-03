@@ -12,7 +12,7 @@ func functionValueSemanticType(program *unit.Program, start int, end int, depth 
 		if start < 0 || start >= end || end > len(program.Tokens) {
 			return start, end, -1, ""
 		}
-		if functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+		if functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 			start++
 			end--
 			depth++
@@ -33,7 +33,7 @@ func functionValueSemanticType(program *unit.Program, start int, end int, depth 
 			}
 		}
 		if declaration >= 0 {
-			if !functionValueTokenEquals(program, declaration+1, "=") {
+			if !functionValueTokenCharIs(program, declaration+1, '=') {
 				return start, end, declaration, ""
 			}
 			start = declaration + 2
@@ -92,13 +92,13 @@ func functionValueSameSemanticType(program *unit.Program, left int, leftEnd int,
 	if token == "*" || token == "..." {
 		return functionValueSameSemanticType(program, left+1, leftEnd, right+1, rightEnd, depth+1)
 	}
-	if token == "." && functionValueTokenEquals(program, left+1, ".") && functionValueTokenEquals(program, left+2, ".") && functionValueTokenEquals(program, right+1, ".") && functionValueTokenEquals(program, right+2, ".") {
+	if token == "." && functionValueTokenCharIs(program, left+1, '.') && functionValueTokenCharIs(program, left+2, '.') && functionValueTokenCharIs(program, right+1, '.') && functionValueTokenCharIs(program, right+2, '.') {
 		return functionValueSameSemanticType(program, left+3, leftEnd, right+3, rightEnd, depth+1)
 	}
 	if token == "struct" || token == "interface" {
 		return functionValueSameAggregateMembersAt(program, left, leftEnd, right, rightEnd, depth+1)
 	}
-	if token == "func" || program.Tokens[left].KindLine&255 == unit.TokenIdent && functionValueTokenEquals(program, left+1, "(") {
+	if token == "func" || program.Tokens[left].KindLine&255 == unit.TokenIdent && functionValueTokenCharIs(program, left+1, '(') {
 		return functionValueSameCallableTypes(program, left, leftEnd, right, rightEnd, depth+1)
 	}
 	if token == "[" || token == "map" {
@@ -213,7 +213,7 @@ func functionValueSemanticCallable(program *unit.Program, start int, end int) ([
 	var results []functionValueSemanticRange
 	next := close + 1
 	if next < end {
-		if functionValueTokenEquals(program, next, "(") && functionValueFindMatchingParen(program, next) == end-1 {
+		if functionValueTokenCharIs(program, next, '(') && functionValueFindMatchingParen(program, next) == end-1 {
 			results = functionValueSemanticFields(program, next+1, end-1)
 		} else {
 			results = append(results, functionValueSemanticRange{start: next, end: end})

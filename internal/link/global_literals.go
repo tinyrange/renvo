@@ -11,14 +11,14 @@ func lowerGlobalFunctionLiterals(program *unit.Program, transient bool) bool {
 	generated := ""
 	count := 0
 	for i := 0; i+1 < len(program.Tokens); i++ {
-		if program.Tokens[i].KindLine&255 != unit.TokenFunc || !functionValueTokenEquals(program, i+1, "(") || functionValueEnclosingFunc(program, i) >= 0 || functionValueIsDeclaredFunction(program, i) || functionValueTokenInDeclaredSignature(program, i) {
+		if program.Tokens[i].KindLine&255 != unit.TokenFunc || !functionValueTokenCharIs(program, i+1, '(') || functionValueEnclosingFunc(program, i) >= 0 || functionValueIsDeclaredFunction(program, i) || functionValueTokenInDeclaredSignature(program, i) {
 			continue
 		}
-		if functionValueTokenEquals(program, i-1, "]") {
+		if functionValueTokenCharIs(program, i-1, ']') {
 			continue
 		}
 		sig, open, ok := parseFunctionValueSignature(program, i, "")
-		if !ok || !functionValueTokenEquals(program, open, "{") {
+		if !ok || !functionValueTokenCharIs(program, open, '{') {
 			continue
 		}
 		close := functionValueFindMatchingBrace(program, open)

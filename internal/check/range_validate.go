@@ -8,7 +8,8 @@ import (
 func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	bindings := *cachedBindings
-	for _, stmt := range body.Stmts {
+	for stmtIndex := 0; stmtIndex < len(body.Stmts); stmtIndex++ {
+		stmt := &body.Stmts[stmtIndex]
 		if stmt.Kind != syntax.StmtFor {
 			continue
 		}
@@ -78,7 +79,8 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return definiteStructExpr(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	for _, decl := range info.Decls {
+	for declIndex := 0; declIndex < len(info.Decls); declIndex++ {
+		decl := &info.Decls[declIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}

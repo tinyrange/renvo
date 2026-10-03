@@ -10,7 +10,7 @@ type genericLexicalBindings struct {
 func (e *genericEnvironment) packageValueName(pkg int, name string) bool {
 	for _, source := range e.graph.Packages[pkg].Files {
 		for _, decl := range source.File.Decls {
-			if (decl.Kind == syntax.TokenVar || decl.Kind == syntax.TokenConst) && tokenString(&source.File, decl.NameTok) == name {
+			if (decl.Kind == syntax.TokenVar || decl.Kind == syntax.TokenConst) && tokenStringEquals(&source.File, decl.NameTok, name) {
 				return true
 			}
 		}
@@ -25,7 +25,7 @@ func (e *genericEnvironment) dotImportedValuePackage(scope genericTypeScope, nam
 	file := &e.graph.Packages[scope.pkg].Files[scope.file].File
 	found := -1
 	for _, imp := range file.Imports {
-		if imp.NameTok < 0 || !tokenTextIs(file, imp.NameTok, ".") {
+		if imp.NameTok < 0 || !tokCharIs(file, imp.NameTok, '.') {
 			continue
 		}
 		path, _ := syntax.StringLiteralValue(file.Src, file.Tokens[imp.PathTok])

@@ -10,7 +10,7 @@ func functionValueCanonicalCallableFields(program *unit.Program, start int, end 
 	for _, field := range functionValueSemanticFields(program, start, end) {
 		first := field.start
 		prefix := ""
-		if functionValueTokenEquals(program, first, ".") && functionValueTokenEquals(program, first+1, ".") && functionValueTokenEquals(program, first+2, ".") {
+		if functionValueTokenCharIs(program, first, '.') && functionValueTokenCharIs(program, first+1, '.') && functionValueTokenCharIs(program, first+2, '.') {
 			prefix, first = "...", first+3
 		}
 		types = append(types, prefix+functionValueCanonicalSignatureType(program, first, field.end, 0))
@@ -24,7 +24,7 @@ func functionValueCanonicalCallableFields(program *unit.Program, start int, end 
 func lowerFunctionSignatureAliases(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	for token := 0; token+1 < len(program.Tokens); token++ {
-		if !functionValueTokenEquals(program, token, "func") || !functionValueTokenEquals(program, token+1, "(") || functionValueIsDeclaredFunction(program, token) {
+		if !functionValueTokenKindIs(program, token, unit.TokenFunc) || !functionValueTokenCharIs(program, token+1, '(') || functionValueIsDeclaredFunction(program, token) {
 			continue
 		}
 		end := functionValueTypeEnd(program, token)
@@ -67,7 +67,7 @@ func functionValueCanonicalSignature(program *unit.Program, start int, end int, 
 	}
 	edits = functionValueCanonicalFields(program, start+2, close, depth, edits)
 	result := close + 1
-	if functionValueTokenEquals(program, result, "(") {
+	if functionValueTokenCharIs(program, result, '(') {
 		resultClose := functionValueFindMatchingParen(program, result)
 		if resultClose >= 0 && resultClose < end {
 			edits = functionValueCanonicalFields(program, result+1, resultClose, depth, edits)
@@ -102,7 +102,7 @@ func functionValueCanonicalFields(program *unit.Program, start int, end int, dep
 			typ++
 		}
 		element := typ
-		if functionValueTokenEquals(program, typ, ".") && functionValueTokenEquals(program, typ+1, ".") && functionValueTokenEquals(program, typ+2, ".") {
+		if functionValueTokenCharIs(program, typ, '.') && functionValueTokenCharIs(program, typ+1, '.') && functionValueTokenCharIs(program, typ+2, '.') {
 			element += 3
 		}
 		if functionValueTypeEnd(program, element) != ends[i] && !functionValueTokenEquals(program, typ, "...") {
@@ -140,7 +140,7 @@ func functionValueCanonicalSignatureTypeAt(program *unit.Program, start int, end
 		return original
 	}
 	token := functionValueTokenText(program, start)
-	if token == "." && functionValueTokenEquals(program, start+1, ".") && functionValueTokenEquals(program, start+2, ".") {
+	if token == "." && functionValueTokenCharIs(program, start+1, '.') && functionValueTokenCharIs(program, start+2, '.') {
 		return "..." + functionValueCanonicalSignatureTypeAt(program, start+3, end, depth+1, use)
 	}
 	if token == "*" || token == "..." {
@@ -180,7 +180,7 @@ func functionValueCanonicalSignatureTypeAt(program *unit.Program, start int, end
 		return original
 	}
 	if name := functionValueSignatureLocalType(program, use, token); name >= 0 {
-		if !functionValueTokenEquals(program, name+1, "=") {
+		if !functionValueTokenCharIs(program, name+1, '=') {
 			return original
 		}
 		finish := functionValueTypeEnd(program, name+2)
@@ -195,13 +195,13 @@ func functionValueCanonicalSignatureTypeAt(program *unit.Program, start int, end
 			continue
 		}
 		name := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if !functionValueTokenEquals(program, name+1, "=") {
+		if !functionValueTokenCharIs(program, name+1, '=') {
 			return original
 		}
 		target := name + 2
 		// Keep aggregate aliases at their declaration site, where private field and
 		// method identities belong to the original package.
-		if functionValueTokenEquals(program, target, "struct") || functionValueTokenEquals(program, target, "interface") {
+		if functionValueTokenKindIs(program, target, unit.TokenStruct) || functionValueTokenEquals(program, target, "interface") {
 			finish := functionValueTypeEnd(program, target)
 			if finish > target {
 				if name := functionValueMatchingAggregateAlias(program, target, finish, use); name != "" {

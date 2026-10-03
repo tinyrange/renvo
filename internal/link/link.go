@@ -987,7 +987,7 @@ func transientCoreTokenOutputCount(src *unit.Program, action tokenAction, index 
 	if action < 0 || index < 0 || index >= len(src.Tokens) || src.Tokens[index].KindLine&255 == unit.TokenEOF {
 		return 0
 	}
-	tok := src.Tokens[index]
+	tok := &src.Tokens[index]
 	if tok.KindLine&255 == unit.TokenOp && tok.Size == 3 && tok.Start >= 0 && tok.Start+2 < len(src.Text) &&
 		src.Text[tok.Start] == '.' && src.Text[tok.Start+1] == '.' && src.Text[tok.Start+2] == '.' {
 		return 3
@@ -1112,13 +1112,13 @@ func markCoreImportDeclTokens(program *unit.Program, actions []tokenAction, imp 
 		return
 	}
 	end := imp.PathTok
-	if coreTokenTextEquals(program, start+1, "(") {
+	if functionValueTokenCharIs(program, start+1, '(') {
 		end = findCoreMatchingParen(program, start+1)
 		if end < imp.PathTok {
 			return
 		}
 	}
-	if coreTokenTextEquals(program, end+1, ";") {
+	if functionValueTokenCharIs(program, end+1, ';') {
 		end++
 	}
 	for i := start; i <= end; i++ {
@@ -1154,7 +1154,7 @@ func markCoreUnsafePointerCallTokens(program *unit.Program, actions []tokenActio
 			continue
 		}
 		open := selector.NameTok + 1
-		if !coreTokenTextEquals(program, open, "(") {
+		if !functionValueTokenCharIs(program, open, '(') {
 			continue
 		}
 		close := findCoreMatchingParen(program, open)
@@ -1181,7 +1181,7 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 			continue
 		}
 		for tok := 0; tok+2 < len(program.Tokens); tok++ {
-			if coreTokenText(program, tok) == name && coreTokenTextEquals(program, tok+1, ".") && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Alignof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
+			if functionValueTokenTextEquals(program, tok, name) && functionValueTokenCharIs(program, tok+1, '.') && (coreTokenTextEquals(program, tok+2, "Sizeof") || coreTokenTextEquals(program, tok+2, "Alignof") || coreTokenTextEquals(program, tok+2, "Offsetof")) {
 				markCoreRedirectToken(actions, tok, tok+2)
 				markCoreRedirectToken(actions, tok+1, tok+2)
 			}
@@ -1191,17 +1191,17 @@ func markCoreUnsafeLayoutTokens(program *unit.Program, actions []tokenAction) {
 
 func markCoreUnsafePointerConversionTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+4 < len(program.Tokens); i++ {
-		if !coreTokenTextEquals(program, i, "(") || !coreTokenTextEquals(program, i+1, "*") {
+		if !functionValueTokenCharIs(program, i, '(') || !functionValueTokenCharIs(program, i+1, '*') {
 			continue
 		}
 		typeEnd := findCoreMatchingParen(program, i)
-		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !coreTokenTextEquals(program, typeEnd+1, "(") {
+		if typeEnd <= i+2 || typeEnd+1 >= len(program.Tokens) || !functionValueTokenCharIs(program, typeEnd+1, '(') {
 			continue
 		}
 		// Keep pointer-to-array conversions so the backend retains the element
 		// type and array bound needed for dynamic indexing. The nested
 		// unsafe.Pointer call is still erased independently.
-		if coreTokenTextEquals(program, i+2, "[") {
+		if functionValueTokenCharIs(program, i+2, '[') {
 			continue
 		}
 		// Keep a typed conversion that directly reinterprets an address. Erasing
@@ -1230,7 +1230,7 @@ func coreUnsafePointerAddressCallAt(program *unit.Program, start int) bool {
 			continue
 		}
 		open := selector.NameTok + 1
-		return coreTokenTextEquals(program, open, "(") && coreTokenTextEquals(program, open+1, "&")
+		return functionValueTokenCharIs(program, open, '(') && functionValueTokenCharIs(program, open+1, '&')
 	}
 	return false
 }
@@ -1248,14 +1248,14 @@ func coreSelectorIsUnsafePointer(program *unit.Program, selector unit.Selector) 
 		if imp.NameTok >= 0 {
 			name = coreTokenText(program, imp.NameTok)
 		}
-		return coreTokenText(program, selector.BaseTok) == name
+		return functionValueTokenTextEquals(program, selector.BaseTok, name)
 	}
 	return false
 }
 
 func markCoreEndianSelectorTokens(program *unit.Program, actions []tokenAction) {
 	for i := 0; i+2 < len(program.Tokens); i++ {
-		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && coreTokenTextEquals(program, i+1, ".") {
+		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && functionValueTokenCharIs(program, i+1, '.') {
 			markCoreRedirectToken(actions, i, i+2)
 			markCoreRedirectToken(actions, i+1, i+2)
 		}
@@ -1284,14 +1284,14 @@ func coreTokenText(program *unit.Program, tok int) string {
 }
 
 func findCoreMatchingParen(program *unit.Program, open int) int {
-	if !coreTokenTextEquals(program, open, "(") {
+	if !functionValueTokenCharIs(program, open, '(') {
 		return -1
 	}
 	depth := 0
 	for i := open; i < len(program.Tokens); i++ {
-		if coreTokenTextEquals(program, i, "(") {
+		if functionValueTokenCharIs(program, i, '(') {
 			depth++
-		} else if coreTokenTextEquals(program, i, ")") {
+		} else if functionValueTokenCharIs(program, i, ')') {
 			depth--
 			if depth == 0 {
 				return i
@@ -1305,16 +1305,17 @@ func coreTokenTextEquals(program *unit.Program, tok int, want string) bool {
 	if tok < 0 || tok >= len(program.Tokens) {
 		return false
 	}
-	token := program.Tokens[tok]
+	token := &program.Tokens[tok]
 	if token.Start < 0 || token.Size != len(want) || token.Start+token.Size > len(program.Text) {
 		return false
 	}
-	for i := 0; i < len(want); i++ {
-		if program.Text[token.Start+i] != want[i] {
-			return false
-		}
+	if len(want) == 1 {
+		return program.Text[token.Start] == want[0]
 	}
-	return true
+	if len(want) > 0 && program.Text[token.Start] != want[0] {
+		return false
+	}
+	return string(program.Text[token.Start:token.Start+token.Size]) == want
 }
 
 func coreLinkedReplacementTokenKind(kind int, replacement string) int {
@@ -1487,7 +1488,7 @@ func coreMemoryDirectiveSize(program *unit.Program, nameTok int, load bool) int 
 	typeTok := closeTok - 1
 	if load {
 		typeTok = closeTok + 1
-		if coreTokenText(program, typeTok) == "(" {
+		if functionValueTokenTextEquals(program, typeTok, "(") {
 			typeTok++
 		}
 	}
@@ -1771,8 +1772,8 @@ func corePackageSymbolOffsets(programs []unit.Program) []int {
 
 func countCoreNewlines(text []byte) int {
 	count := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\n' {
+	for _, value := range text {
+		if value == '\n' {
 			count++
 		}
 	}

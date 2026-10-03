@@ -54,7 +54,7 @@ func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.F
 	// an unrelated pointer assignment rather than multiply this call's result.
 	operand := end < fn.BodyEnd && syntax.TokenLine(file.Tokens[end]) == syntax.TokenLine(file.Tokens[end-1]) && (isExprBinaryOp(file, end) || tokCharIs(file, end, '[') || tokCharIs(file, end, '.') || tokCharIs(file, end, '('))
 	if start > fn.BodyStart+1 {
-		operand = operand || isExprBinaryOp(file, start-1) || tokenTextIs(file, start-1, "!") || tokenTextIs(file, start-1, "<-")
+		operand = operand || isExprBinaryOp(file, start-1) || tokCharIs(file, start-1, '!') || tokenTextIs(file, start-1, "<-")
 	}
 	if !operand || symbol.File < 0 || symbol.File >= len(pkg.Files) {
 		return false

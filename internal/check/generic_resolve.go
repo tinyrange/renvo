@@ -192,7 +192,7 @@ func (e *genericEnvironment) lookupInScope(scope genericTypeScope, name string) 
 	file := &e.graph.Packages[scope.pkg].Files[scope.file].File
 	found := -1
 	for _, imp := range file.Imports {
-		if imp.NameTok < 0 || !tokenTextIs(file, imp.NameTok, ".") {
+		if imp.NameTok < 0 || !tokCharIs(file, imp.NameTok, '.') {
 			continue
 		}
 		path, _ := syntax.StringLiteralValue(file.Src, file.Tokens[imp.PathTok])

@@ -34,7 +34,7 @@ func invalidDefiniteInterfaceCompatibility(pkg *load.Package, info *PackageInfo,
 			continue
 		}
 		op := findTopLevelAssignOp(file, stmt.StartTok, stmt.EndTok)
-		if op < 0 || !tokenTextIs(file, op, "=") {
+		if op < 0 || !tokCharIs(file, op, '=') {
 			continue
 		}
 		left := splitExprList(file, stmt.StartTok, op)

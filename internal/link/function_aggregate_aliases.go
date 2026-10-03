@@ -16,7 +16,7 @@ func functionValueMatchingAggregateAlias(program *unit.Program, target int, end 
 		}
 		name := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
 		start := name + 2
-		if !functionValueTokenEquals(program, name+1, "=") || !functionValueTokenEquals(program, start, functionValueTokenText(program, target)) {
+		if !functionValueTokenCharIs(program, name+1, '=') || !functionValueTokenEquals(program, start, functionValueTokenText(program, target)) {
 			continue
 		}
 		finish := functionValueTypeEnd(program, start)
@@ -57,7 +57,7 @@ type functionValueAggregateMember struct {
 // Struct identity uses the ordered fields after expanding grouped names.
 // Explicit interface methods are compared without regard to declaration order.
 func functionValueSameAggregateMembersAt(program *unit.Program, left int, leftEnd int, right int, rightEnd int, depth int) bool {
-	structure := functionValueTokenEquals(program, left, "struct")
+	structure := functionValueTokenKindIs(program, left, unit.TokenStruct)
 	ls, lok := functionValueAggregateMembers(program, left, leftEnd)
 	rs, rok := functionValueAggregateMembers(program, right, rightEnd)
 	if !structure {
@@ -96,9 +96,9 @@ func functionValueSameAggregateMembersAt(program *unit.Program, left int, leftEn
 
 func functionValueAggregateMembers(program *unit.Program, start int, end int) ([]functionValueAggregateMember, bool) {
 	var members []functionValueAggregateMember
-	structure := functionValueTokenEquals(program, start, "struct")
+	structure := functionValueTokenKindIs(program, start, unit.TokenStruct)
 	for field := start + 2; field < end-1; {
-		if functionValueTokenEquals(program, field, ";") {
+		if functionValueTokenCharIs(program, field, ';') {
 			field++
 			continue
 		}
@@ -106,7 +106,7 @@ func functionValueAggregateMembers(program *unit.Program, start int, end int) ([
 		finish := functionValueTypeEnd(program, field)
 		embedded := false
 		var names []int
-		if !structure && functionValueTokenEquals(program, field+1, "(") {
+		if !structure && functionValueTokenCharIs(program, field+1, '(') {
 			_, next, ok := parseFunctionValueCallableSignature(program, field, "")
 			if !ok {
 				return nil, false
@@ -114,7 +114,7 @@ func functionValueAggregateMembers(program *unit.Program, start int, end int) ([
 			finish = next
 			names = append(names, field)
 		} else if structure {
-			embedded = finish > field && (finish == end-1 || functionValueTokenEquals(program, finish, ";") || program.Tokens[finish].KindLine&255 == unit.TokenString)
+			embedded = finish > field && (finish == end-1 || functionValueTokenCharIs(program, finish, ';') || program.Tokens[finish].KindLine&255 == unit.TokenString)
 			if embedded {
 				names = append(names, finish-1)
 			} else {
@@ -124,7 +124,7 @@ func functionValueAggregateMembers(program *unit.Program, start int, end int) ([
 					}
 					names = append(names, typ)
 					typ++
-					if !functionValueTokenEquals(program, typ, ",") {
+					if !functionValueTokenCharIs(program, typ, ',') {
 						break
 					}
 					typ++

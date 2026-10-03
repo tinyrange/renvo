@@ -10,7 +10,7 @@ import "renvo.dev/internal/unit"
 func lowerFunctionValueDefers(program *unit.Program, signatures []functionValueSignature, transient bool) bool {
 	var edits []functionValueEdit
 	for tok := 0; tok+3 < len(program.Tokens); tok++ {
-		if !functionValueTokenEquals(program, tok, "defer") || !functionValueTokenEquals(program, tok+2, "(") {
+		if !functionValueTokenEquals(program, tok, "defer") || !functionValueTokenCharIs(program, tok+2, '(') {
 			continue
 		}
 		sigIndex := -1
@@ -153,7 +153,7 @@ func functionDeferArguments(program *unit.Program, starts []int, ends []int, par
 		element := functionDeferVariadicElement(params[fixed])
 		name := integerRangeName(program, stem+"_variadic")
 		value := "[]" + element + "{"
-		expanded := len(starts) == fixed+1 && ends[fixed]-starts[fixed] >= 3 && functionValueTokenEquals(program, ends[fixed]-1, ".") && functionValueTokenEquals(program, ends[fixed]-2, ".") && functionValueTokenEquals(program, ends[fixed]-3, ".")
+		expanded := len(starts) == fixed+1 && ends[fixed]-starts[fixed] >= 3 && functionValueTokenCharIs(program, ends[fixed]-1, '.') && functionValueTokenCharIs(program, ends[fixed]-2, '.') && functionValueTokenCharIs(program, ends[fixed]-3, '.')
 		if len(starts) == fixed {
 			value = "nil"
 		} else if expanded {
@@ -185,7 +185,7 @@ func functionDeferVariadicElement(typ string) string {
 
 func functionDeferTupleArity(program *unit.Program, start int, end int) int {
 	start, end = functionValueUnparen(program, start, end)
-	if !functionValueTokenEquals(program, end-1, ")") {
+	if !functionValueTokenCharIs(program, end-1, ')') {
 		return 0
 	}
 	open := functionValueFindMatchingBackward(program, end-1, "(", ")")

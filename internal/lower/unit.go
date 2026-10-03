@@ -52,7 +52,7 @@ func EmitCheckedPackageCore(pkg load.Package, info check.PackageInfo, transient 
 		arena.Discard(info.CoreArenaStart, info.CoreArenaEnd)
 	}
 	for i := 0; i < len(pkg.Files); i++ {
-		file := pkg.Files[i].File
+		file := &pkg.Files[i].File
 		if _, ok := builder.addFileTokens(file, pkg.Files[i].Src, i, i+1 < len(pkg.Files), transient); !ok {
 			return emitFail(result, builder.err, builder.errFile, builder.errToken)
 		}
@@ -85,7 +85,7 @@ type coreUnitBuilder struct {
 }
 
 type coreFileTokens struct {
-	file     syntax.File
+	file     *syntax.File
 	tokens   coreTokenMap
 	textBase int
 }
@@ -100,7 +100,7 @@ func (b *coreUnitBuilder) prepareFileTokens(pkg load.Package) ([]coreFileTokens,
 	textBase := 0
 	tokenBase := 0
 	for i := 0; i < len(pkg.Files); i++ {
-		file := pkg.Files[i].File
+		file := &pkg.Files[i].File
 		if !file.Ok {
 			b.setErr(EmitErrPackage, i, file.ErrorTok)
 			return files, false
@@ -141,12 +141,12 @@ func (b *coreUnitBuilder) reserveCheckedPackage(pkg load.Package, info check.Pac
 	refCap := 0
 	selectorCap := 0
 	for i := 0; i < len(info.Decls); i++ {
-		decl := info.Decls[i]
+		decl := &info.Decls[i]
 		refCap += len(decl.CoreRefs)
 		selectorCap += len(decl.CoreSelectors)
 	}
 	for i := 0; i < len(info.CoreBodies); i++ {
-		body := info.CoreBodies[i]
+		body := &info.CoreBodies[i]
 		typeRefCap += len(body.CoreTypeRefs)
 		refCap += len(body.CoreRefs)
 		selectorCap += len(body.CoreSelectors)
@@ -168,7 +168,7 @@ func (b *coreUnitBuilder) addCheckedConcurrencySites(files []coreFileTokens) boo
 		file := files[fileIndex].file
 		mapping := files[fileIndex].tokens
 		for token := 0; token < len(file.Tokens); token++ {
-			tokenValue := file.Tokens[token]
+			tokenValue := &file.Tokens[token]
 			tokenKind := tokenValue.KindLine & 255
 			arrow := false
 			if tokenKind == syntax.TokenOperator {
@@ -227,7 +227,7 @@ func (b *coreUnitBuilder) addCheckedConcurrencySites(files []coreFileTokens) boo
 	return true
 }
 
-func lowerTokenTextIs(file syntax.File, token int, wanted string) bool {
+func lowerTokenTextIs(file *syntax.File, token int, wanted string) bool {
 	if token < 0 || token >= len(file.Tokens) {
 		return false
 	}
@@ -245,7 +245,7 @@ func lowerTokenTextIs(file syntax.File, token int, wanted string) bool {
 	return true
 }
 
-func lowerConcurrencyTypeEnd(file syntax.File, start int) int {
+func lowerConcurrencyTypeEnd(file *syntax.File, start int) int {
 	if start < 0 || start >= len(file.Tokens) {
 		return start
 	}
@@ -291,7 +291,7 @@ func lowerConcurrencyTypeEnd(file syntax.File, start int) int {
 	return start + 1
 }
 
-func lowerMatchingToken(file syntax.File, start int, open string, close string) int {
+func lowerMatchingToken(file *syntax.File, start int, open string, close string) int {
 	depth := 0
 	for i := start; i < len(file.Tokens); i++ {
 		if lowerTokenTextIs(file, i, open) {
@@ -306,7 +306,7 @@ func lowerMatchingToken(file syntax.File, start int, open string, close string) 
 	return -1
 }
 
-func lowerConcurrencyArrowIsSend(file syntax.File, arrow int) bool {
+func lowerConcurrencyArrowIsSend(file *syntax.File, arrow int) bool {
 	if arrow <= 0 {
 		return false
 	}
@@ -314,7 +314,7 @@ func lowerConcurrencyArrowIsSend(file syntax.File, arrow int) bool {
 	return previous != "=" && previous != ":=" && previous != "," && previous != "(" && previous != "case" && previous != "return"
 }
 
-func lowerConcurrencyReceiveArity(file syntax.File, arrow int) int {
+func lowerConcurrencyReceiveArity(file *syntax.File, arrow int) int {
 	for i := arrow - 1; i >= 0 && file.Tokens[i].KindLine>>8 == file.Tokens[arrow].KindLine>>8; i-- {
 		if lowerTokenTextIs(file, i, ":=") || lowerTokenTextIs(file, i, "=") {
 			for j := i - 1; j >= 0 && file.Tokens[j].KindLine>>8 == file.Tokens[arrow].KindLine>>8; j-- {
@@ -328,7 +328,7 @@ func lowerConcurrencyReceiveArity(file syntax.File, arrow int) int {
 	return 1
 }
 
-func (b *coreUnitBuilder) addFileTokens(file syntax.File, src []byte, fileIndex int, hasNext bool, transient bool) (coreTokenMap, bool) {
+func (b *coreUnitBuilder) addFileTokens(file *syntax.File, src []byte, fileIndex int, hasNext bool, transient bool) (coreTokenMap, bool) {
 	base := len(b.program.Text)
 	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
@@ -378,7 +378,7 @@ func (b *coreUnitBuilder) finishUnit() bool {
 	return true
 }
 
-func (b *coreUnitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, mapping coreTokenMap, textBase int, fileIndex int) bool {
+func (b *coreUnitBuilder) addDecl(file *syntax.File, decl syntax.TopDecl, mapping coreTokenMap, textBase int, fileIndex int) bool {
 	if decl.NameTok < 0 || decl.NameTok >= len(file.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, decl.NameTok)
 		return false
@@ -403,7 +403,7 @@ func (b *coreUnitBuilder) addDecl(file syntax.File, decl syntax.TopDecl, mapping
 	return true
 }
 
-func mapCoreDeclStartToken(file syntax.File, decl syntax.TopDecl, mapping coreTokenMap, eof int) int {
+func mapCoreDeclStartToken(file *syntax.File, decl syntax.TopDecl, mapping coreTokenMap, eof int) int {
 	start := decl.StartTok
 	if start > 0 && start < len(file.Tokens) && file.Tokens[start-1].KindLine&255 == decl.Kind {
 		start--
@@ -411,7 +411,7 @@ func mapCoreDeclStartToken(file syntax.File, decl syntax.TopDecl, mapping coreTo
 	return mapCoreToken(mapping, start, eof)
 }
 
-func (b *coreUnitBuilder) addFunc(file syntax.File, fn syntax.FuncDecl, mapping coreTokenMap, textBase int, fileIndex int) bool {
+func (b *coreUnitBuilder) addFunc(file *syntax.File, fn syntax.FuncDecl, mapping coreTokenMap, textBase int, fileIndex int) bool {
 	if fn.NameTok < 0 || fn.NameTok >= len(file.Tokens) {
 		b.setErr(EmitErrToken, fileIndex, fn.NameTok)
 		return false
@@ -487,7 +487,7 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 			return false
 		}
 		seen[index] = true
-		declInfo := info.Decls[index]
+		declInfo := &info.Decls[index]
 		if declInfo.File < 0 || declInfo.File >= len(files) {
 			b.setErr(EmitErrCheck, -1, declInfo.Token)
 			return false
@@ -503,9 +503,6 @@ func (b *coreUnitBuilder) addCheckedDecls(info check.PackageInfo, files []coreFi
 		}
 		ownerIndex := len(b.program.Decls) - 1
 		b.declRows[index] = ownerIndex
-		if !b.addDeclCalls(declInfo, files[declInfo.File].tokens, ownerIndex) {
-			return false
-		}
 		if !b.addDeclResolution(declInfo, files[declInfo.File].tokens, ownerIndex, info.Package, info.Symbols) {
 			return false
 		}
@@ -543,7 +540,7 @@ func (b *coreUnitBuilder) addCheckedFuncs(info check.PackageInfo, files []coreFi
 		b.funcRows[i] = -1
 	}
 	for i := 0; i < len(info.CoreBodies); i++ {
-		body := info.CoreBodies[i]
+		body := &info.CoreBodies[i]
 		if body.File < 0 || body.File >= len(files) {
 			b.setErr(EmitErrCheck, -1, -1)
 			return false
@@ -563,9 +560,6 @@ func (b *coreUnitBuilder) addCheckedFuncs(info check.PackageInfo, files []coreFi
 		}
 		ownerIndex := len(b.program.Funcs) - 1
 		b.funcRows[i] = ownerIndex
-		if !b.addBodyCalls(body, files[body.File].tokens, ownerIndex) {
-			return false
-		}
 		if !b.addBodyResolution(body, files[body.File].tokens, ownerIndex, info.Package, info.Symbols) {
 			return false
 		}
@@ -605,11 +599,7 @@ func cloneCoreString(value string) string {
 	return string(data)
 }
 
-func (b *coreUnitBuilder) addDeclCalls(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int) bool {
-	return true
-}
-
-func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
+func (b *coreUnitBuilder) addDeclResolution(decl *check.DeclInfo, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
 	for i := 0; i < len(decl.CoreRefs); i++ {
 		ref, ok := mapCoreNameRef(decl.CoreRefs[i], mapping, b.finalEOF, ownerIndex, pkg, symbols)
 		if !ok {
@@ -629,7 +619,7 @@ func (b *coreUnitBuilder) addDeclResolution(decl check.DeclInfo, mapping coreTok
 	return true
 }
 
-func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
+func (b *coreUnitBuilder) addBodyResolution(body *check.CoreFuncBody, mapping coreTokenMap, ownerIndex int, pkg int, symbols []check.Symbol) bool {
 	for i := 0; i < len(body.CoreRefs); i++ {
 		ref, ok := mapCoreNameRef(body.CoreRefs[i], mapping, b.finalEOF, ownerIndex, pkg, symbols)
 		if !ok {
@@ -649,11 +639,7 @@ func (b *coreUnitBuilder) addBodyResolution(body check.CoreFuncBody, mapping cor
 	return true
 }
 
-func (b *coreUnitBuilder) addBodyCalls(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int) bool {
-	return true
-}
-
-func (b *coreUnitBuilder) addBodyTypeRefs(body check.CoreFuncBody, mapping coreTokenMap, ownerIndex int) bool {
+func (b *coreUnitBuilder) addBodyTypeRefs(body *check.CoreFuncBody, mapping coreTokenMap, ownerIndex int) bool {
 	for i := 0; i < len(body.CoreTypeRefs); i++ {
 		if body.CoreTypeRefs[i].File != body.File {
 			b.setErr(EmitErrCheck, body.File, body.ErrorToken)
@@ -754,7 +740,7 @@ func mapCoreSelectorRef(selector check.CoreSelectorRef, mapping coreTokenMap, eo
 	return out, true
 }
 
-func findCoreFileDecl(file syntax.File, nameTok int) syntax.TopDecl {
+func findCoreFileDecl(file *syntax.File, nameTok int) syntax.TopDecl {
 	for i := 0; i < len(file.Decls); i++ {
 		if file.Decls[i].NameTok == nameTok {
 			return file.Decls[i]
@@ -763,7 +749,7 @@ func findCoreFileDecl(file syntax.File, nameTok int) syntax.TopDecl {
 	return syntax.TopDecl{NameTok: -1}
 }
 
-func findCoreFileImport(file syntax.File, tok int) syntax.ImportDecl {
+func findCoreFileImport(file *syntax.File, tok int) syntax.ImportDecl {
 	for i := 0; i < len(file.Imports); i++ {
 		imp := file.Imports[i]
 		if imp.NameTok == tok || imp.PathTok == tok {
@@ -843,8 +829,8 @@ func mapNullableCoreToken(tok int, mapping coreTokenMap, eof int) int {
 
 func countCoreNewlines(src []byte) int {
 	count := 0
-	for i := 0; i < len(src); i++ {
-		if src[i] == '\n' {
+	for _, value := range src {
+		if value == '\n' {
 			count++
 		}
 	}

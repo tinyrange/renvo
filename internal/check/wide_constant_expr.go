@@ -116,12 +116,12 @@ func wideConstantExpr(context *constantIndexContext, start int, end int, depth i
 		}
 		return wideConstant{}
 	}
-	if tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-") || tokenTextIs(file, start, "^") {
+	if tokCharIs(file, start, '+') || tokCharIs(file, start, '-') || tokCharIs(file, start, '^') {
 		value := wideConstantExpr(context, start+1, end, depth+1)
-		if tokenTextIs(file, start, "-") {
+		if tokCharIs(file, start, '-') {
 			return wideNegate(value)
 		}
-		if tokenTextIs(file, start, "^") {
+		if tokCharIs(file, start, '^') {
 			return wideAdd(wideNegate(value), wideSmall(-1))
 		}
 		return value

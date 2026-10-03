@@ -375,7 +375,8 @@ go compiler {
 		renvoAsmEmit32(a, 0x10+(reg-6)*8)
 		renvoAsmStorePrimaryStack(a, offset)
 	}
-	func renvoAmd64PushBytes(a *renvoAsm, offset int, size int, mode int) {
+	func renvoAmd64PushBytes(g *renvoLinearGen, offset int, size int, mode int) {
+		a := &g.asm
 		// Reserve the same argument words as the descending PUSH sequence. Locals
 		// live in the persistent frame above the old RSP, so the new argument area
 		// is disjoint and a forward copy preserves their ascending byte order.
@@ -395,7 +396,14 @@ go compiler {
 			renvoAsmEmitText(a, "\x48\x81\xec") // SUB RSP, size
 			renvoAsmEmit32(a, size)
 		}
-		renvoAsmEmitText(a, "\x48\x89\xe7\xb9") // MOV RDI, RSP; MOV ECX, count
+		renvoAsmEmitText(a, "\x48\x89\xe7") // MOV RDI, RSP
+		if size <= 96 && size%8 == 0 {
+			// Small aggregate arguments already have disjoint source and stack
+			// storage. Reuse the fixed copy leaf instead of starting REP MOVSQ.
+			renvoAsmCallLabel(a, renvoAmd64EnsureFixedVectorCopy(g, size))
+			return
+		}
+		renvoAsmEmit8(a, 0xb9) // MOV ECX, count
 		if size%8 == 0 {
 			renvoAsmEmit32(a, size/8)
 			renvoAsmEmitText(a, "\xfc\xf3\x48\xa5") // CLD; REP MOVSQ
@@ -430,35 +438,10 @@ go compiler {
 			renvoAsmAddressCallWord0Stack(a, destOffset)
 		}
 		if size <= 96 {
-			// Load the whole value before storing: even partly overlapping
-			// aggregates retain memmove semantics. XMM0-XMM5 are volatile on
-			// both amd64 ABIs. An unaligned final window stays within the value.
-			chunks := (size + 15) / 16
-			for n := 0; n < chunks; n++ {
-				disp := n * 16
-				if disp+16 > size {
-					disp = size - 16
-				}
-				renvoAsmEmitText(a, "\xf3\x0f\x6f") // MOVDQU XMMn, [RSI+disp]
-				if disp == 0 {
-					renvoAsmEmit8(a, 0x06+n*8)
-				} else {
-					renvoAsmEmit8(a, 0x46+n*8)
-					renvoAsmEmit8(a, disp)
-				}
-			}
-			for n := 0; n < chunks; n++ {
-				disp := n * 16
-				if disp+16 > size {
-					disp = size - 16
-				}
-				renvoAsmEmitText(a, "\xf3\x0f\x7f") // MOVDQU [RDI+disp], XMMn
-				if disp == 0 {
-					renvoAsmEmit8(a, 0x07+n*8)
-				} else {
-					renvoAsmEmit8(a, 0x47+n*8)
-					renvoAsmEmit8(a, disp)
-				}
+			if size%8 == 0 {
+				renvoAsmCallLabel(a, renvoAmd64EnsureFixedVectorCopy(g, size))
+			} else {
+				renvoAmd64EmitFixedVectorCopy(a, size)
 			}
 			return
 		}
@@ -1047,11 +1030,39 @@ go compiler {
 		renvoAsmJnzLabel(a, notEqualLabel)
 		renvoAsmEmitText(a, "\x48\x85\xf6")
 		renvoAsmJzLabel(a, equalLabel)
+		// Consume complete words, then compare the beginning and end of the
+		// short tail. Overlapping tail reads are safe and avoid byte loops.
+		tail := renvoAsmNewLabel(a)
 		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmEmitText(a, "\x48\x83\xfe\x08")
+		renvoAmd64AsmJccLabel(a, 0x82, tail)
+		renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08")
+		renvoAsmJmpMarkLabel(a, loopLabel, tail)
+		for width := 4; width >= 2; width /= 2 {
+			next := renvoAsmNewLabel(a)
+			renvoAsmEmitText(a, "\x48\x83\xfe")
+			renvoAsmEmit8(a, width)
+			renvoAmd64AsmJccLabel(a, 0x82, next)
+			if width == 4 {
+				renvoAsmEmitText(a, "\x44\x8b\x07\x44\x3b\x02")
+			} else {
+				renvoAsmEmitText(a, "\x44\x0f\xb7\x07\x66\x44\x3b\x02")
+			}
+			renvoAsmJnzLabel(a, notEqualLabel)
+			if width == 4 {
+				renvoAsmEmitText(a, "\x44\x8b\x44\x37\xfc\x44\x3b\x44\x32\xfc")
+			} else {
+				renvoAsmEmitText(a, "\x44\x0f\xb7\x44\x37\xfe\x66\x44\x3b\x44\x32\xfe")
+			}
+			renvoAsmJnzLabel(a, notEqualLabel)
+			renvoAsmJmpMarkLabel(a, equalLabel, next)
+		}
+		renvoAsmEmitText(a, "\x48\x85\xf6")
+		renvoAsmJzLabel(a, equalLabel)
 		renvoAsmEmitText(a, "\x44\x8a\x07\x44\x38\x02")
 		renvoAsmJnzLabel(a, notEqualLabel)
-		renvoAsmEmitText(a, "\x48\xff\xc7\x48\xff\xc2\x48\xff\xce")
-		renvoAsmJnzLabel(a, loopLabel)
 		renvoAsmMarkLabel(a, equalLabel)
 		renvoAsmEmitText(a, "\x6a\x01\x58")
 		renvoAsmMarkLabel(a, notEqualLabel)

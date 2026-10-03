@@ -32,7 +32,7 @@ func invalidConstantArrayIndex(pkg *load.Package, info *PackageInfo, fileIndex i
 	// rescan every preceding token in a large function.
 	var shortDecls []int
 	for tok := fn.BodyStart + 1; tok+2 < fn.BodyEnd; tok++ {
-		if tokenTextIs(file, tok+1, ":=") && file.Tokens[tok].KindLine&255 == syntax.TokenIdent {
+		if file.Tokens[tok].KindLine&255 == syntax.TokenIdent && tokenTextIs(file, tok+1, ":=") {
 			shortDecls = append(shortDecls, tok)
 		}
 	}
@@ -78,18 +78,18 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		}
 		return applyConstantIndexOperator(tokenString(file, operator), left, right)
 	}
-	if tokenTextIs(file, start, "+") || tokenTextIs(file, start, "-") || tokenTextIs(file, start, "^") {
+	if tokCharIs(file, start, '+') || tokCharIs(file, start, '-') || tokCharIs(file, start, '^') {
 		value, ok := constantIndexInt(context, start+1, end, before, depth+1)
 		if !ok {
 			return 0, false
 		}
-		if tokenTextIs(file, start, "-") {
+		if tokCharIs(file, start, '-') {
 			if value == -int(^uint(0)>>1)-1 {
 				return 0, false
 			}
 			return -value, true
 		}
-		if tokenTextIs(file, start, "^") {
+		if tokCharIs(file, start, '^') {
 			return value ^ -1, true
 		}
 		return value, true
@@ -104,7 +104,7 @@ func constantIndexInt(context *constantIndexContext, start int, end int, before 
 		return 0, false
 	}
 	for i := context.fn.BodyStart + 1; !context.strict && i+3 < before; i++ {
-		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokenTextIs(file, i+2, "=") {
+		if file.Tokens[i].KindLine&255 == syntax.TokenConst && statementTokensEqual(file, i+1, start) && tokCharIs(file, i+2, '=') {
 			return constantIndexInt(context, i+3, statementSpecEnd(file, i+1, before), before, depth+1)
 		}
 	}

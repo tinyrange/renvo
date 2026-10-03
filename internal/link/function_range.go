@@ -21,8 +21,13 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 			if program.Tokens[at].KindLine&255 != unit.TokenFor {
 				continue
 			}
+			// Classification retains no storage for ordinary loops. Type lookup
+			// and header scanning may construct temporary strings even when the
+			// range needs no rewrite; reuse that scratch for the next loop.
+			mark := arena.Mark()
 			rangeTok, open := functionRangeHeader(program, at)
 			if rangeTok < 0 || open < 0 {
+				arena.Rewind(mark)
 				continue
 			}
 			typ := ordinaryBuiltinExprType(program, rangeTok, rangeTok+1, open)
@@ -39,6 +44,7 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 				break
 			}
 			if !functions || !functionValueHasPrefix(functionValueCompactTypeText(underlying), "func(") {
+				arena.Rewind(mark)
 				continue
 			}
 			iterator, ok := functionValueSignatureFromTypeText(underlying)
@@ -82,7 +88,7 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 				values = ""
 				allBlank := true
 				for n := 0; n < len(starts); n++ {
-					if ends[n] != starts[n]+1 || !functionValueTokenEquals(program, starts[n], "_") {
+					if ends[n] != starts[n]+1 || !functionValueTokenCharIs(program, starts[n], '_') {
 						allBlank = false
 					}
 					if n > 0 {
@@ -97,7 +103,7 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 				binding = functionValueTokensText(program, at+1, assign) + " " + op + " " + values + "; "
 			}
 			label := ""
-			if at > 1 && functionValueTokenEquals(program, at-1, ":") {
+			if at > 1 && functionValueTokenCharIs(program, at-1, ':') {
 				label = functionValueTokenText(program, at-2)
 			}
 			body, actions, returnPrefix, ok := functionRangeBody(program, at, open, close, label, state, action, stem)
@@ -155,11 +161,11 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 func functionRangeHeader(program *unit.Program, at int) (int, int) {
 	rangeTok := -1
 	for i := at + 1; i < len(program.Tokens); i++ {
-		if functionValueTokenEquals(program, i, "func") || functionValueTokenEquals(program, i, "struct") || functionValueTokenEquals(program, i, "interface") || functionValueTokenEquals(program, i, "map") || functionValueTokenEquals(program, i, "[") {
+		if functionValueTokenKindIs(program, i, unit.TokenFunc) || functionValueTokenKindIs(program, i, unit.TokenStruct) || functionValueTokenEquals(program, i, "interface") || functionValueTokenEquals(program, i, "map") || functionValueTokenCharIs(program, i, '[') {
 			end := functionValueTypeEnd(program, i)
 			if end > i {
 				i = end - 1
-				if functionValueTokenEquals(program, end, "{") {
+				if functionValueTokenCharIs(program, end, '{') {
 					i = functionValueFindMatchingBrace(program, end)
 					if i < 0 {
 						return -1, -1
@@ -168,7 +174,7 @@ func functionRangeHeader(program *unit.Program, at int) (int, int) {
 				continue
 			}
 		}
-		if functionValueTokenEquals(program, i, "(") || functionValueTokenEquals(program, i, "[") {
+		if functionValueTokenCharIs(program, i, '(') || functionValueTokenCharIs(program, i, '[') {
 			left := functionValueTokenText(program, i)
 			right := ")"
 			if left == "[" {
@@ -183,7 +189,7 @@ func functionRangeHeader(program *unit.Program, at int) (int, int) {
 		if functionValueTokenEquals(program, i, "range") {
 			rangeTok = i
 		}
-		if functionValueTokenEquals(program, i, "{") {
+		if functionValueTokenCharIs(program, i, '{') {
 			return rangeTok, i
 		}
 	}
@@ -198,17 +204,17 @@ func functionRangeExpressionType(program *unit.Program, before int, start int, e
 }
 
 func functionRangeExpressionFallbackType(program *unit.Program, before int, start int, end int) string {
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+	for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
-	if functionValueTokenEquals(program, start, "func") {
+	if functionValueTokenKindIs(program, start, unit.TokenFunc) {
 		_, body, ok := parseFunctionValueSignature(program, start, "")
-		if ok && functionValueTokenEquals(program, body, "{") && functionValueFindMatchingBrace(program, body) == end-1 {
+		if ok && functionValueTokenCharIs(program, body, '{') && functionValueFindMatchingBrace(program, body) == end-1 {
 			return functionValueTokensText(program, start, body)
 		}
 	}
-	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") {
+	if end-start >= 3 && functionValueTokenCharIs(program, end-2, '.') {
 		owner := ordinaryBuiltinExprType(program, before, start, end-2)
 		if typ := functionRangeInterfaceMethodType(program, owner, functionValueTokenText(program, end-1)); typ != "" {
 			return typ
@@ -223,7 +229,7 @@ func functionRangeExpressionFallbackType(program *unit.Program, before int, star
 			}
 		}
 	}
-	if functionValueTokenEquals(program, end-1, ")") {
+	if functionValueTokenCharIs(program, end-1, ')') {
 		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
 		if open > start {
 			return functionValueCallableResultType(program, functionRangeExpressionType(program, before, start, open))
@@ -295,7 +301,7 @@ func functionRangeBody(program *unit.Program, loop int, open int, close int, lab
 		word := functionValueTokenText(program, at)
 		if word == "func" {
 			_, body, ok := parseFunctionValueSignature(program, at, "")
-			if ok && functionValueTokenEquals(program, body, "{") {
+			if ok && functionValueTokenCharIs(program, body, '{') {
 				at = functionValueFindMatchingBrace(program, body)
 				if at < 0 {
 					return "", nil, "", false
@@ -433,7 +439,7 @@ func functionRangeReturnStorage(program *unit.Program, loop int, stem string) (s
 	names := []string{}
 	paramEnd := functionValueFindMatchingParen(program, fn.NameTok+1)
 	resultStart := paramEnd + 1
-	if functionValueTokenEquals(program, resultStart, "(") {
+	if functionValueTokenCharIs(program, resultStart, '(') {
 		resultEnd := functionValueFindMatchingParen(program, resultStart)
 		starts, ends := functionValueCommaParts(program, resultStart+1, resultEnd)
 		named := false
@@ -470,12 +476,12 @@ func functionRangeReturnStorage(program *unit.Program, loop int, stem string) (s
 func functionRangeStatementEnd(program *unit.Program, start int, limit int) int {
 	previous := start
 	for at := start + 1; at < limit; at++ {
-		if functionValueTokenEquals(program, at, ";") || functionValueTokenEquals(program, at, "}") {
+		if functionValueTokenCharIs(program, at, ';') || functionValueTokenCharIs(program, at, '}') {
 			return at
 		}
 		if program.Tokens[at].KindLine>>8 > program.Tokens[previous].KindLine>>8 {
 			kind := program.Tokens[previous].KindLine & 255
-			if previous == start || kind == unit.TokenIdent || kind == unit.TokenNumber || kind == unit.TokenFloat || kind == unit.TokenString || kind == unit.TokenChar || functionValueTokenEquals(program, previous, ")") || functionValueTokenEquals(program, previous, "]") || functionValueTokenEquals(program, previous, "}") {
+			if previous == start || kind == unit.TokenIdent || kind == unit.TokenNumber || kind == unit.TokenFloat || kind == unit.TokenString || kind == unit.TokenChar || functionValueTokenCharIs(program, previous, ')') || functionValueTokenCharIs(program, previous, ']') || functionValueTokenCharIs(program, previous, '}') {
 				return at
 			}
 		}

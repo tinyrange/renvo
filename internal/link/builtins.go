@@ -29,7 +29,7 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 			// Only these four builtin names can require a rewrite here.
 			size := token.Size
 			if !(size == 3 && (functionValueTokenEquals(program, i, "min") || functionValueTokenEquals(program, i, "max")) ||
-				size == 5 && functionValueTokenEquals(program, i, "clear") || size == 6 && functionValueTokenEquals(program, i, "string")) || !functionValueTokenEquals(program, i+1, "(") {
+				size == 5 && functionValueTokenEquals(program, i, "clear") || size == 6 && functionValueTokenEquals(program, i, "string")) || !functionValueTokenCharIs(program, i+1, '(') {
 				continue
 			}
 			mark := arena.Mark()
@@ -128,7 +128,7 @@ func lowerOrdinaryBuiltins(program *unit.Program, transient bool) bool {
 		originalLength := len(program.Text)
 		edits = appendFunctionValuePackageEdits(program, edits)
 		if stringLess != "" && !stringLessEmitted {
-			generated += "func " + stringLess + "(left string, right string) bool { limit := len(left); if len(right) < limit { limit = len(right) }; for index := 0; index < limit; index++ { if left[index] < right[index] { return true }; if left[index] > right[index] { return false } }; return len(left) < len(right) }\n"
+			generated += "func " + stringLess + "(left string, right string) bool { return left < right }\n"
 			stringLessEmitted = true
 		}
 		text, ok := applyFunctionValueEditsCapacityMode(program.Text, edits, len(generated)+1, transient)
@@ -214,7 +214,7 @@ func ordinaryBuiltinArguments(program *unit.Program, start int, close int) ([]in
 }
 
 func ordinaryTypeArgumentText(program *unit.Program, start int, end int) string {
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+	for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
@@ -274,7 +274,7 @@ func ordinaryClearText(program *unit.Program, call int, start int, end int) stri
 }
 
 func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end int) string {
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+	for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
@@ -304,30 +304,30 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return ordinaryGlobalType(program, name)
 	}
-	if functionValueTokenEquals(program, end-1, "}") {
+	if functionValueTokenCharIs(program, end-1, '}') {
 		typeEnd := functionValueTypeEnd(program, start)
-		if typeEnd > start && functionValueTokenEquals(program, typeEnd, "{") && functionValueFindMatchingBrace(program, typeEnd) == end-1 {
+		if typeEnd > start && functionValueTokenCharIs(program, typeEnd, '{') && functionValueFindMatchingBrace(program, typeEnd) == end-1 {
 			return functionValueTokensText(program, start, typeEnd)
 		}
 	}
-	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-") || functionValueTokenEquals(program, start, "^")) && start+1 < end {
+	if (functionValueTokenCharIs(program, start, '+') || functionValueTokenCharIs(program, start, '-') || functionValueTokenCharIs(program, start, '^')) && start+1 < end {
 		return ordinaryBuiltinExprType(program, before, start+1, end)
 	}
-	if functionValueTokenEquals(program, start, "*") && start+1 < end {
+	if functionValueTokenCharIs(program, start, '*') && start+1 < end {
 		typ := ordinaryBuiltinExprType(program, before, start+1, end)
 		if len(typ) > 0 && typ[0] == '*' {
 			return typ[1:]
 		}
 		return ""
 	}
-	if functionValueTokenEquals(program, start, "&") && start+1 < end {
+	if functionValueTokenCharIs(program, start, '&') && start+1 < end {
 		typ := ordinaryBuiltinExprType(program, before, start+1, end)
 		if typ != "" {
 			return "*" + typ
 		}
 		return ""
 	}
-	if program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
+	if program.Tokens[start].KindLine&255 == unit.TokenIdent && functionValueTokenCharIs(program, start+1, '(') && functionValueFindMatchingParen(program, start+1) == end-1 {
 		name := functionValueTokenText(program, start)
 		if name == "make" {
 			starts, ends := ordinaryBuiltinArguments(program, start+2, end-1)
@@ -356,10 +356,10 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
-	if functionValueTokenEquals(program, end-1, ")") {
+	if functionValueTokenCharIs(program, end-1, ')') {
 		open := functionValueFindMatchingBackward(program, end-1, "(", ")")
-		if open > start && functionValueTokenEquals(program, open-1, ".") &&
-			!functionValueTokenEquals(program, open+1, "type") && functionValueTypeEnd(program, open+1) == end-1 {
+		if open > start && functionValueTokenCharIs(program, open-1, '.') &&
+			!functionValueTokenKindIs(program, open+1, unit.TokenType) && functionValueTypeEnd(program, open+1) == end-1 {
 			return functionValueTokensText(program, open+1, end-1)
 		}
 		if open > start {
@@ -372,7 +372,7 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 			return functionValueCallableResultType(program, ordinaryBuiltinExprType(program, before, start, open))
 		}
 	}
-	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
+	if end-start >= 3 && functionValueTokenCharIs(program, end-2, '.') && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
 		owner := ordinaryBuiltinExprType(program, before, start, end-2)
 		if owner != "" {
 			if field := functionValueStructFieldType(program, functionValueBareType(owner), functionValueTokenText(program, end-1)); field != "" {
@@ -381,7 +381,7 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 	}
 	for open := start + 1; open < end; open++ {
-		if !functionValueTokenEquals(program, open, "[") || functionValueFindMatching(program, open, "[", "]") != end-1 {
+		if !functionValueTokenCharIs(program, open, '[') || functionValueFindMatching(program, open, "[", "]") != end-1 {
 			continue
 		}
 		container := ordinaryBuiltinExprType(program, before, start, open)
@@ -415,11 +415,11 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 }
 
 func ordinaryBuiltinAssertionType(program *unit.Program, start int, end int) string {
-	if !functionValueTokenEquals(program, end-1, ")") {
+	if !functionValueTokenCharIs(program, end-1, ')') {
 		return ""
 	}
 	open := functionValueFindMatchingBackward(program, end-1, "(", ")")
-	if open <= start || !functionValueTokenEquals(program, open-1, ".") || functionValueTokenEquals(program, open+1, "type") || functionValueTypeEnd(program, open+1) != end-1 {
+	if open <= start || !functionValueTokenCharIs(program, open-1, '.') || functionValueTokenKindIs(program, open+1, unit.TokenType) || functionValueTypeEnd(program, open+1) != end-1 {
 		return ""
 	}
 	return functionValueTokensText(program, open+1, end-1)
@@ -512,7 +512,7 @@ func functionValueCallableResultType(program *unit.Program, typ string) string {
 		return ""
 	}
 	for token := 0; token < len(parsed.Tokens); token++ {
-		if functionValueTokenEquals(&parsed, token, "func") {
+		if functionValueTokenKindIs(&parsed, token, unit.TokenFunc) {
 			sig, _, ok := parseFunctionValueSignature(&parsed, token, "")
 			if ok && len(sig.resultTypes) == 1 {
 				return sig.resultTypes[0]
@@ -529,21 +529,21 @@ func ordinaryBuiltinTypeName(name string) bool {
 
 func ordinaryGlobalType(program *unit.Program, name string) string {
 	for i := 0; i < len(program.Decls); i++ {
-		decl := program.Decls[i]
+		decl := &program.Decls[i]
 		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, name) {
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
 		start := nameTok + 1
 		end := functionValueTypeEnd(program, start)
-		if end > start && !functionValueTokenEquals(program, start, "=") {
+		if end > start && !functionValueTokenCharIs(program, start, '=') {
 			return functionValueTokensText(program, start, end)
 		}
-		if functionValueTokenEquals(program, start, "=") {
+		if functionValueTokenCharIs(program, start, '=') {
 			// A named function used as an initializer is a function value, not
 			// a call. Global literals have already been lifted to this form.
-			if fnIndex := functionValueGlobalInitializerFunction(program, decl); fnIndex >= 0 {
-				fn := program.Funcs[fnIndex]
+			if fnIndex := functionValueGlobalInitializerFunction(program, *decl); fnIndex >= 0 {
+				fn := &program.Funcs[fnIndex]
 				_, sigEnd, ok := parseFunctionValueCallableSignature(program, fn.NameTok, "")
 				if ok {
 					return "func" + functionValueTokensText(program, fn.NameTok+1, sigEnd)
@@ -561,17 +561,17 @@ func ordinaryUnderlyingType(program *unit.Program, typ string, depth int) string
 		return typ
 	}
 	for i := 0; i < len(program.Decls); i++ {
-		decl := program.Decls[i]
+		decl := &program.Decls[i]
 		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, typ) {
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
 		start := nameTok + 1
-		if functionValueTokenEquals(program, start, "=") {
+		if functionValueTokenCharIs(program, start, '=') {
 			start++
 		}
 		end := decl.EndTok
-		for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+		for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 			start++
 			end--
 		}
@@ -603,7 +603,7 @@ func ordinaryUnparenthesizedTypeText(typ string) string {
 }
 
 func ordinaryUntypedExpression(program *unit.Program, start int, end int) bool {
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+	for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
@@ -700,14 +700,14 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 	if depth > len(program.Decls)+8 {
 		return ordinaryBuiltinConstant{}
 	}
-	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+	for end-start >= 2 && functionValueTokenCharIs(program, start, '(') && functionValueFindMatchingParen(program, start) == end-1 {
 		start++
 		end--
 	}
 	if start < 0 || end <= start || end > len(program.Tokens) {
 		return ordinaryBuiltinConstant{}
 	}
-	if program.Tokens[start].KindLine&255 == unit.TokenIdent && start+2 < end && functionValueTokenEquals(program, start+1, "(") && functionValueFindMatchingParen(program, start+1) == end-1 {
+	if program.Tokens[start].KindLine&255 == unit.TokenIdent && start+2 < end && functionValueTokenCharIs(program, start+1, '(') && functionValueFindMatchingParen(program, start+1) == end-1 {
 		typ := functionValueTokenText(program, start)
 		if ordinaryBuiltinTypeName(typ) || functionValueDeclaredType(program, typ) {
 			value := ordinaryConstantValue(program, start+2, end-1, depth+1)
@@ -727,9 +727,9 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 	if end-start == 1 && program.Tokens[start].KindLine&255 == unit.TokenIdent {
 		return ordinaryConstantNamedValue(program, functionValueTokenText(program, start), depth+1)
 	}
-	if (functionValueTokenEquals(program, start, "+") || functionValueTokenEquals(program, start, "-")) && start+1 < end {
+	if (functionValueTokenCharIs(program, start, '+') || functionValueTokenCharIs(program, start, '-')) && start+1 < end {
 		value := ordinaryConstantValue(program, start+1, end, depth+1)
-		if value.ok && value.kind == 1 && functionValueTokenEquals(program, start, "-") && value.number.digits != "0" {
+		if value.ok && value.kind == 1 && functionValueTokenCharIs(program, start, '-') && value.number.digits != "0" {
 			value.number.negative = !value.number.negative
 		}
 		return value
@@ -771,12 +771,12 @@ func ordinaryConstantNamedValue(program *unit.Program, name string, depth int) o
 			continue
 		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || functionValueTokenText(program, nameTok) != name {
+		if nameTok < 0 || !functionValueTokenTextEquals(program, nameTok, name) {
 			continue
 		}
 		assign := -1
 		for tok := nameTok + 1; tok < decl.EndTok; tok++ {
-			if functionValueTokenEquals(program, tok, "=") {
+			if functionValueTokenCharIs(program, tok, '=') {
 				assign = tok
 				break
 			}
@@ -1154,7 +1154,7 @@ func ordinaryBuiltinShadowedWithTopLevel(program *unit.Program, at int, name str
 	if lo < len(program.Funcs) && program.Funcs[lo].NameTok == at {
 		return true
 	}
-	if at > 0 && functionValueTokenEquals(program, at-1, ".") {
+	if at > 0 && functionValueTokenCharIs(program, at-1, '.') {
 		return true
 	}
 	if topLevel || functionValueEnclosingLocalType(program, at, name) != "" {
@@ -1168,11 +1168,11 @@ func ordinaryBuiltinShadowedWithTopLevel(program *unit.Program, at int, name str
 	// block do not hide a predeclared builtin at the call site.
 	active := []bool{false}
 	for i := program.Funcs[fnIndex].BodyStart + 1; i < at; i++ {
-		if functionValueTokenEquals(program, i, "{") {
+		if functionValueTokenCharIs(program, i, '{') {
 			active = append(active, false)
 			continue
 		}
-		if functionValueTokenEquals(program, i, "}") {
+		if functionValueTokenCharIs(program, i, '}') {
 			if len(active) > 1 {
 				active = active[:len(active)-1]
 			}
@@ -1207,7 +1207,7 @@ func ordinaryBuiltinTopLevelObject(program *unit.Program, name string) bool {
 }
 
 func ordinaryBuiltinLocalDeclaration(program *unit.Program, nameTok int, limit int) bool {
-	if nameTok > 0 && (functionValueTokenEquals(program, nameTok-1, "var") || functionValueTokenEquals(program, nameTok-1, "const") || functionValueTokenEquals(program, nameTok-1, "type")) {
+	if nameTok > 0 && (functionValueTokenKindIs(program, nameTok-1, unit.TokenVar) || functionValueTokenKindIs(program, nameTok-1, unit.TokenConst) || functionValueTokenKindIs(program, nameTok-1, unit.TokenType)) {
 		return true
 	}
 	paren, bracket := 0, 0

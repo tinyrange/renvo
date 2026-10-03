@@ -24,7 +24,7 @@ func (c *genericExpressionContext) switchBindings(body *syntax.Body) {
 			continue
 		}
 		stmt := body.Stmts[owner]
-		if stmt.Kind != syntax.StmtSwitch || !tokenTextIs(file, stmt.ExprEnd-2, "type") {
+		if stmt.Kind != syntax.StmtSwitch || !tokenKindIs(file, stmt.ExprEnd-2, syntax.TokenType) {
 			continue
 		}
 		start := stmt.ExprStart
@@ -54,7 +54,7 @@ func (c *genericExpressionContext) validateSwitch(stmt syntax.Stmt) {
 	if semi := findTypeTopLevelChar(file, start, end, ';'); semi >= 0 {
 		start = semi + 1
 	}
-	if tokenTextIs(file, end-2, "type") {
+	if tokenKindIs(file, end-2, syntax.TokenType) {
 		if op := findTopLevelAssignOp(file, start, end); op >= 0 {
 			start = op + 1
 		}
@@ -77,7 +77,7 @@ func (c *genericExpressionContext) validateSwitchCase(owner syntax.Stmt, clause 
 	e := c.specializer.environment
 	file := &e.graph.Packages[c.scope.pkg].Files[c.scope.file].File
 	start, end := owner.ExprStart, owner.ExprEnd
-	if tokenTextIs(file, end-2, "type") {
+	if tokenKindIs(file, end-2, syntax.TokenType) {
 		return
 	}
 	if semi := findTypeTopLevelChar(file, start, end, ';'); semi >= 0 {
