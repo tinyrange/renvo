@@ -207,6 +207,24 @@ func renvoEmitBuiltinReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, o
 	return renvoFinishFileReadWrite(g, operation, offsetRead)
 }
 
+// Semantic open-flag roles; the runtime definition chooses their bit encodings.
+const (
+	renvoOpenReadOnly = iota
+	renvoOpenWriteOnly
+	renvoOpenReadWrite
+	renvoOpenCreate
+	renvoOpenTruncate
+)
+
+func renvoOpenFlagConstant(c *renvoCompileContext, flag int) renvoConstResult {
+	value := renvoTargetOpenFlag(c, flag)
+	if value >= 0 {
+		return renvoConstResultOk(value)
+	}
+	var result renvoConstResult
+	return result
+}
+
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
 	renvoNonNil(g)
 	p := g.prog
@@ -219,25 +237,19 @@ func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoC
 		return renvoConstResultOk(0)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDONLY") {
-		return renvoConstResultOk(0)
+		return renvoOpenFlagConstant(g.c, renvoOpenReadOnly)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_WRONLY") {
-		return renvoConstResultOk(1)
+		return renvoOpenFlagConstant(g.c, renvoOpenWriteOnly)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDWR") {
-		return renvoConstResultOk(2)
+		return renvoOpenFlagConstant(g.c, renvoOpenReadWrite)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-			return renvoConstResultOk(512)
-		}
-		return renvoConstResultOk(64)
+		return renvoOpenFlagConstant(g.c, renvoOpenCreate)
 	}
 	if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-		if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-			return renvoConstResultOk(1024)
-		}
-		return renvoConstResultOk(512)
+		return renvoOpenFlagConstant(g.c, renvoOpenTruncate)
 	}
 	var r renvoConstResult
 	return r

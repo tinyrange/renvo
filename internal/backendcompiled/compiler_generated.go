@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b5e7c61d83fc192841eb967abbfbd1603db4a73e0e33c1069c170d98470351ad"
+const CompilerSourceDigest = "1f967f3d1000c66fcaf002d19e609cd88b4b8a7642ccb6ac66fda49315e54cf1"
 
 // source: backend/compiler_common_impl.go
 
@@ -26805,6 +26805,24 @@ return false
 return renvoFinishFileReadWrite(g, operation, offsetRead)
 }
 
+
+const (
+renvoOpenReadOnly = iota
+renvoOpenWriteOnly
+renvoOpenReadWrite
+renvoOpenCreate
+renvoOpenTruncate
+)
+
+func renvoOpenFlagConstant(c *renvoCompileContext, flag int) renvoConstResult {
+value := renvoTargetOpenFlag(c, flag)
+if value >= 0 {
+return renvoConstResultOk(value)
+}
+var result renvoConstResult
+return result
+}
+
 func renvoEvalBuiltinConst(g *renvoLinearGen, nameStart int, nameEnd int) renvoConstResult {
 renvoNonNil(g)
 p := g.prog
@@ -26817,25 +26835,19 @@ if renvoBytesEqualText(p.src, nameStart, nameEnd, "nil") {
 return renvoConstResultOk(0)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDONLY") {
-return renvoConstResultOk(0)
+return renvoOpenFlagConstant(g.c, renvoOpenReadOnly)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_WRONLY") {
-return renvoConstResultOk(1)
+return renvoOpenFlagConstant(g.c, renvoOpenWriteOnly)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_RDWR") {
-return renvoConstResultOk(2)
+return renvoOpenFlagConstant(g.c, renvoOpenReadWrite)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_CREATE") {
-if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-return renvoConstResultOk(512)
-}
-return renvoConstResultOk(64)
+return renvoOpenFlagConstant(g.c, renvoOpenCreate)
 }
 if renvoBytesEqualText(p.src, nameStart, nameEnd, "O_TRUNC") {
-if targetIsDarwin(g.c.renvoTargetOS) || targetIsBSD(g.c.renvoTargetOS) {
-return renvoConstResultOk(1024)
-}
-return renvoConstResultOk(512)
+return renvoOpenFlagConstant(g.c, renvoOpenTruncate)
 }
 var r renvoConstResult
 return r
@@ -28816,10 +28828,10 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xe1\xf5\xf7\x82\x3d\xd4\x01\xf6\xd9\x5a\xd6\xda\x56\x71\x73\xaf\x7b\x5b\xaf\xd8\x1f\x4c\x4b\x2a\xe2\x5b\x63\x92\x32\xdf\xa1\xfa", 3, true
+return "wasi/wasm32", "\x48\x8a\xc5\xa8\x95\xbb\x10\x7f\x4f\x5d\x5f\x54\x1c\x46\xf8\xac\x0b\x3f\x38\x4c\xfe\xfd\xc1\xc9\xbd\xfc\xab\x56\x65\xc6\x2c\x7b", 3, true
 }
 if target == renvoTargetDarwinArm64 {
-return "darwin/arm64", "\xfc\x55\xf6\xae\xb8\xbd\xa5\xee\xc7\xf7\x66\xa0\xd4\xa6\xbb\x5b\xb4\xf5\xdc\x94\x11\x05\x2b\xe7\x9e\x48\x2c\x7d\x01\x60\xdd\xb9", 3, true
+return "darwin/arm64", "\xf9\xbd\x29\x38\x37\xdb\x8f\x6c\x70\x2d\x2c\xbf\x1e\x94\xcf\xde\xe3\xec\x13\x0f\xdf\x9a\x49\x63\x52\x8a\xf4\x75\xaf\x1d\x87\xa6", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
 return "linux-kernel/amd64", "\x00\xa0\xf9\xe3\x8a\x51\x74\xd2\xcb\x20\xc2\xd8\x67\xb7\x6e\x6d\x59\xd3\xf6\x88\xb5\x54\x1c\x00\xc2\x83\xed\xb5\x15\x6f\x6a\xe4", 3, true
@@ -28828,16 +28840,16 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x42\xec\xe5\xec\xc4\xcf\x6d\x5f\xfd\xc0\x52\x2b\xa9\x80\x77\x91\x9c\x05\x00\x0c\x85\x5b\x25\x2d\xeb\xc8\x63\x01\xb0\xcd\x00\xf6", 3, true
+return "vm/vm32", "\x8a\x18\x76\x67\x66\x69\x9a\xb7\x96\x32\x03\x2b\x48\x2a\xcb\x99\x84\x06\x3e\xe6\x7c\x82\x3a\x6d\xa3\xd6\x51\x85\x26\x4b\x1d\x1d", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "\xcd\xec\xaa\xda\x7c\xe8\x46\xad\xbd\x08\x99\x11\x79\xa7\xd9\x14\x00\x04\x77\xad\x1e\x1e\x0e\xe2\x1e\x84\xb3\x53\x68\x5f\x71\x68", 3, true
+return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\x51\x28\xba\x0c\x99\x8f\x1f\xa4\x6a\x9c\xbe\x9c\xf4\x36\x90\x8c\x69\xd0\x7c\x7a\xbe\x7c\x9b\x8f\xb8\xdb\xfd\xc8\xd1\x28\xbc\xda", 3, true
+return "openbsd/amd64", "\x83\x31\x81\x2e\xa7\x63\x4f\xae\x5d\xfa\xa4\x63\xc8\xf9\x48\x17\xd1\xd4\x80\xc0\x1f\x29\xcf\xde\xa7\x48\x75\xd0\x52\xc9\x2a\x4b", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "\x02\x05\xa8\xd5\x2e\xc7\x74\x9d\xe5\x9c\xf6\x02\x04\x8f\xef\xbf\xee\xf2\x04\x27\xa7\x8e\xc5\xa0\x4f\xe9\x4f\xec\x28\xef\x61\x3d", 3, true
+return "netbsd/amd64", "\x5a\x41\x71\x80\xdf\xe3\xa5\x04\x1f\xf5\x8f\x62\x0a\x1e\x5b\xea\x14\x75\xf1\x88\x6d\xb1\x1c\x58\x9b\x00\xd4\x2c\xbb\xf2\xde\x99", 3, true
 }
 return "", "", 0, false
 }
@@ -30273,6 +30285,56 @@ const renvoRTGObjectAggregateRegisterBytes = 0
 const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
 const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
+
+const renvoRTGOpenCreate = 64
+const renvoRTGOpenTruncate = 512
+
+func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+if flag == renvoOpenReadOnly {
+return 0
+}
+if flag == renvoOpenWriteOnly {
+return 1
+}
+if flag == renvoOpenReadWrite {
+return 2
+}
+if targetIsDarwin(c.renvoTargetOS) || targetIsBSD(c.renvoTargetOS) {
+if flag == renvoOpenCreate {
+return 512
+}
+if flag == renvoOpenTruncate {
+return 1024
+}
+}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+if flag == renvoOpenReadOnly {
+return 0
+}
+if flag == renvoOpenWriteOnly {
+return 1
+}
+if flag == renvoOpenReadWrite {
+return 2
+}
+}
+if flag == renvoOpenCreate {
+return 64
+}
+if flag == renvoOpenTruncate {
+return 512
+}
+return -1
+}
+return -1
+}
 
 func renvoFileOffsetSentinel(c *renvoCompileContext) bool {
 renvoNonNil(c)
@@ -46930,6 +46992,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49977,6 +50041,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -52758,6 +52824,8 @@ return 0
 
 
 
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -54580,6 +54648,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 
@@ -58270,6 +58340,8 @@ return 0x97
 }
 return 0
 }
+
+
 
 
 

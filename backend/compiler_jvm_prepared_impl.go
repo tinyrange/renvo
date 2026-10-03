@@ -628,6 +628,9 @@ const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
 const renvoRTGStaticCallPolicy = renvoStaticCallWords
 
+const renvoRTGOpenCreate = 64
+const renvoRTGOpenTruncate = 512
+
 var rtgJvmRAX = RTGRegister{Code:0, Valid:true}
 
 var rtgJvmRDX = RTGRegister{Code:1, Valid:true}
@@ -4387,6 +4390,16 @@ return RTGCondition{}
 
 func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
+}
+
+func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
+renvoNonNil(c)
+if flag == renvoOpenReadOnly { return 0 }
+if flag == renvoOpenWriteOnly { return 1 }
+if flag == renvoOpenReadWrite { return 2 }
+if flag == renvoOpenCreate { return renvoRTGOpenCreate }
+if flag == renvoOpenTruncate { return renvoRTGOpenTruncate }
+return -1
 }
 
 func renvoFileOffsetSentinel(c *renvoCompileContext) bool {

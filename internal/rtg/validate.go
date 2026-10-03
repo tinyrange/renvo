@@ -461,7 +461,7 @@ func declarationAllowedFields(kind string) []string {
 	}
 	if kind == DeclRuntime {
 		return []string{
-			"operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout",
+			"operations", "os", "entry", "exit", "allocator", "environment", "arguments", "static_call_layout", "open_flag_layout",
 			"entry_state_bytes", "emit_entry_start", "emit_entry", "emit_exit",
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
@@ -1089,6 +1089,10 @@ func validatePreparedRuntime(document Document, target ResolvedTarget) []Diagnos
 						" is missing "+hook))
 			}
 		}
+	}
+	if _, valid := decodeOpenFlagLayout(runtime); !valid {
+		diagnostics = append(diagnostics, resolveDiagnostic(document, runtime,
+			"RTG-VALIDATE-134", "runtime "+runtime.Name+" requires one portable or bsd open_flag_layout assignment"))
 	}
 	split, splitValid := decodeStaticCallLayout(runtime)
 	_, emitsStaticCall := architectureGoHook(runtime, "emit_static_call")

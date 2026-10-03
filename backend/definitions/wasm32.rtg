@@ -4150,6 +4150,7 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		open_flag = renvoWasm32CompilerOpenFlag
 		file_offset_sentinel = renvoWasm32CompilerFileOffsetSentinel
 		static_call_binding = renvoWasm32CompilerStaticCallBinding
 		linked_static_import = renvoWasm32CompilerLinkedStaticImport
@@ -7212,5 +7213,26 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerOpenFlag(c *renvoCompileContext, flag int) int {
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+		if flag == renvoOpenCreate {
+			return 64
+		}
+		if flag == renvoOpenTruncate {
+			return 512
+		}
+		return -1
 	}
 }

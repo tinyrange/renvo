@@ -816,6 +816,56 @@ const renvoRTGObjectCallABI = renvoObjectABIUnavailable
 
 const renvoRTGStaticCallPolicy = renvoStaticCallUnavailable
 
+const renvoRTGOpenCreate = 64
+const renvoRTGOpenTruncate = 512
+
+func renvoTargetOpenFlag(c *renvoCompileContext, flag int) int {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+		if targetIsDarwin(c.renvoTargetOS) || targetIsBSD(c.renvoTargetOS) {
+			if flag == renvoOpenCreate {
+				return 512
+			}
+			if flag == renvoOpenTruncate {
+				return 1024
+			}
+		}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+}
+if flag == renvoOpenCreate {
+			return 64
+		}
+		if flag == renvoOpenTruncate {
+			return 512
+		}
+		return -1
+}
+return -1
+}
+
 func renvoFileOffsetSentinel(c *renvoCompileContext) bool {
 renvoNonNil(c)
 renvoCompilerSelector := c

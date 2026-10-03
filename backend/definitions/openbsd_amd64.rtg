@@ -5,6 +5,7 @@ implements direct_emitter_v1
 @import "elf_amd64.rtg"
 
 runtime openbsd_x86_64 {
+	open_flag_layout = bsd
 	entry sequence x86_64.processStackEntry {
 		max_parameters = 2
 		bss args 32768 16
