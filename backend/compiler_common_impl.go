@@ -14637,52 +14637,11 @@ func renvoEmitCObjectIntegerStackCall(g *renvoLinearGen, fn *renvoFuncInfo, word
 			return false
 		}
 	}
-	// The evaluation stack presents argument zero at its top. Pop the six SysV
-	// register arguments and retain the remaining words in source order.
-	renvoAsmEmitText(&g.asm, "\x5f\x5e\x5a\x59\x41\x58\x41\x59")
-	stackWords := wordCount - 6
-	stackBytes := stackWords * 8
-	reserve := renvoAlignValue(stackBytes+16, 16)
-	saveOffset := reserve - 8
-	renvoAsmEmitText(&g.asm, "\x49\x89\xe3\x48\x83\xe4\xf0")
-	if reserve <= 127 {
-		renvoAsmEmitText(&g.asm, "\x48\x83\xec")
-		renvoAsmEmit8(&g.asm, reserve)
-	} else {
-		renvoAsmEmitText(&g.asm, "\x48\x81\xec")
-		renvoAsmEmit32(&g.asm, reserve)
-	}
-	for i := 0; i < stackWords; i++ {
-		displacement := i * 8
-		if displacement == 0 {
-			renvoAsmEmitText(&g.asm, "\x49\x8b\x03\x48\x89\x04\x24")
-		} else {
-			renvoAsmEmitText(&g.asm, "\x49\x8b\x43")
-			renvoAsmEmit8(&g.asm, displacement)
-			renvoAsmEmitText(&g.asm, "\x48\x89\x44\x24")
-			renvoAsmEmit8(&g.asm, displacement)
-		}
-	}
-	renvoAsmEmitText(&g.asm, "\x4c\x89\x5c\x24")
-	renvoAsmEmit8(&g.asm, saveOffset)
 	externalID := renvoAsmAddExternalImportRange(&g.asm, g.prog.src, fn.linkMethodStart, fn.linkMethodEnd)
 	if externalID < 0 {
 		return false
 	}
-	renvoAsmEmitText(&g.asm, "\x31\xc0\xe8")
-	relocationAt := len(g.asm.code)
-	renvoAsmEmit32(&g.asm, 0)
-	renvoAsmAddAbsReloc(&g.asm, relocationAt, externalID, renvoImportReloc)
-	renvoAsmEmitText(&g.asm, "\x48\x8b\x64\x24")
-	renvoAsmEmit8(&g.asm, saveOffset)
-	if stackBytes <= 127 {
-		renvoAsmEmitText(&g.asm, "\x48\x83\xc4")
-		renvoAsmEmit8(&g.asm, stackBytes)
-	} else {
-		renvoAsmEmitText(&g.asm, "\x48\x81\xc4")
-		renvoAsmEmit32(&g.asm, stackBytes)
-	}
-	return true
+	return renvoAsmObjectIntegerStackCall(&g.asm, externalID, wordCount)
 }
 
 func renvoEmitCObjectCallArgsReverse(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, fn *renvoFuncInfo) int {
@@ -15070,45 +15029,22 @@ func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoT
 	if len(wordOffsets) > 20 || hasAggregate && len(wordOffsets) > 6 {
 		return false
 	}
-	for i := 0; i < len(wordOffsets); i++ {
-		if renvoPreparedBackendActive == 0 && i >= 6 {
-			continue
-		}
-		if renvoPreparedBackendActive != 0 {
-			registers := renvoRTGObjectRegisters()
-			register := registers[i]
-			renvoRTGAsmLoadFrame(&g.asm, register, wordOffsets[i])
-		} else {
-			renvoAsmLoadPrimaryStack(&g.asm, wordOffsets[i])
-			if i == 0 {
-				renvoAsmEmitText(&g.asm, "\x48\x89\xc7")
-			} else if i == 1 {
-				renvoAsmEmitText(&g.asm, "\x48\x89\xc6")
-			} else if i == 2 {
-				renvoAsmEmitText(&g.asm, "\x48\x89\xc2")
-			} else if i == 3 {
-				renvoAsmEmitText(&g.asm, "\x48\x89\xc1")
-			} else if i == 4 {
-				renvoAsmEmitText(&g.asm, "\x49\x89\xc0")
-			} else {
-				renvoAsmEmitText(&g.asm, "\x49\x89\xc1")
-			}
+	registerWords := renvoObjectArgumentRegisterCount(g.c)
+	for i := 0; i < len(wordOffsets) && i < registerWords; i++ {
+		if !renvoAsmLoadObjectArgumentWord(&g.asm, i, wordOffsets[i]) {
+			return false
 		}
 	}
 	result := renvoResolveType(g.meta, functionType.elem)
 	if functionType.elem != 0 && !renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer {
 		return false
 	}
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGAsmLoadFrame(&g.asm, renvoRTGScratch, handleOffset)
-		renvoRTGDirectCallIndirect(&g.asm, renvoRTGScratch)
-	} else if len(wordOffsets) > 6 {
+	if len(wordOffsets) > registerWords {
 		if !renvoEmitCObjectFunctionPointerIntegerStackCall(g, handleOffset, wordOffsets) {
 			return false
 		}
 	} else {
-		renvoAsmLoadPrimaryStack(&g.asm, handleOffset)
-		renvoAsmEmitText(&g.asm, "\xff\xd0")
+		renvoAsmObjectIndirectRegisterCall(&g.asm, handleOffset)
 	}
 	if resultOffset != 0 && functionType.elem != 0 {
 		renvoAsmStorePrimaryStack(&g.asm, resultOffset)
@@ -15121,36 +15057,7 @@ func renvoEmitCObjectFunctionPointerIntegerStackCall(g *renvoLinearGen, handleOf
 	if !renvoIsSysVObject(g.c) || len(argOffsets) <= 6 || len(argOffsets) > 20 {
 		return false
 	}
-	// R11 retains the indirect target while R10 records the exact Renvo stack.
-	// Align a temporary SysV call area, copy arguments seven onward in source
-	// order, then restore the original stack pointer after the callback.
-	renvoAsmLoadPrimaryStack(&g.asm, handleOffset)
-	renvoAsmEmitText(&g.asm, "\x49\x89\xc3\x49\x89\xe2\x48\x83\xe4\xf0")
-	stackWords := len(argOffsets) - 6
-	reserve := renvoAlignValue(stackWords*8+16, 16)
-	saveOffset := reserve - 8
-	if reserve <= 127 {
-		renvoAsmEmitText(&g.asm, "\x48\x83\xec")
-		renvoAsmEmit8(&g.asm, reserve)
-	} else {
-		renvoAsmEmitText(&g.asm, "\x48\x81\xec")
-		renvoAsmEmit32(&g.asm, reserve)
-	}
-	for i := 6; i < len(argOffsets); i++ {
-		renvoAsmLoadPrimaryStack(&g.asm, argOffsets[i])
-		displacement := (i - 6) * 8
-		if displacement == 0 {
-			renvoAsmEmitText(&g.asm, "\x48\x89\x04\x24")
-		} else {
-			renvoAsmEmitText(&g.asm, "\x48\x89\x44\x24")
-			renvoAsmEmit8(&g.asm, displacement)
-		}
-	}
-	renvoAsmEmitText(&g.asm, "\x4c\x89\x54\x24")
-	renvoAsmEmit8(&g.asm, saveOffset)
-	renvoAsmEmitText(&g.asm, "\x41\xff\xd3\x48\x8b\x64\x24")
-	renvoAsmEmit8(&g.asm, saveOffset)
-	return true
+	return renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets)
 }
 
 func renvoCallMatchesFuncType(t *renvoTypeInfo, e *renvoExpr) bool {
@@ -15525,17 +15432,7 @@ func renvoEnsureRuntimeStackHelpers(g *renvoLinearGen, fn int) {
 	switchStack := renvoAsmNewLabel(a)
 	g.stackInitLabel = init + 1
 	g.stackSwitchLabel = switchStack + 1
-	base := len(a.code)
-	a.labelPos[init] = int32(base + 39)
-	a.labelPos[switchStack] = int32(base + 107)
-	// entry/context are retained in R12/R13 by the initial saved context. The
-	// generated two-argument ABI binds the last source parameter in RDI, so pass
-	// context first and entry second at this raw-to-generated-code boundary. A
-	// single fixed-layout blob holds the entry, finish, initialization, and
-	// switch helpers; only its generated StackRun call needs relocation. Its
-	// labels are offsets 39 and 107 within the 150-byte blob.
-	renvoAsmEmitText(a, "\xe9\x91\x00\x00\x00\x4c\x89\xef\x4c\x89\xe6\xe8\x00\x00\x00\x00\xc3\x41\x5a\x41\xc6\x02\x01\x41\x5b\x49\x8b\x23\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\x4c\x89\xc0\x48\x83\xe0\xf0\x48\x83\xe8\x58\x4c\x89\x38\x45\x31\xc9\x4c\x89\x48\x08\x48\x89\x50\x10\x48\x89\x48\x18\x4c\x89\x48\x20\x4c\x89\x48\x28\x4c\x8d\x0d\xb2\xff\xff\xff\x4c\x89\x48\x30\x4c\x8d\x0d\xb3\xff\xff\xff\x4c\x89\x48\x38\x48\x89\x70\x40\x48\x89\x78\x48\xc3\x49\x89\xf2\x49\x89\xfb\x4c\x8d\x0d\x1d\x00\x00\x00\x41\x51\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57\x49\x89\x22\x4c\x89\xdc\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\xc3")
-	renvoAsmAddReloc(a, base+12, g.funcLabels[fn])
+	renvoAsmRuntimeStackHelpers(a, init, switchStack, g.funcLabels[fn])
 }
 
 func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {

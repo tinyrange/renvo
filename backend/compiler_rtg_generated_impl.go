@@ -797,6 +797,199 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		base := len(a.code)
+		a.labelPos[init] = int32(base + 39)
+		a.labelPos[switchStack] = int32(base + 107)
+		// entry/context are retained in R12/R13 by the initial saved context. The
+		// generated two-argument ABI binds the last source parameter in RDI, so pass
+		// context first and entry second at this raw-to-generated-code boundary. A
+		// single fixed-layout blob holds the entry, finish, initialization, and
+		// switch helpers; only its generated StackRun call needs relocation. Its
+		// labels are offsets 39 and 107 within the 150-byte blob.
+		renvoAsmEmitText(a, "\xe9\x91\x00\x00\x00\x4c\x89\xef\x4c\x89\xe6\xe8\x00\x00\x00\x00\xc3\x41\x5a\x41\xc6\x02\x01\x41\x5b\x49\x8b\x23\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\x4c\x89\xc0\x48\x83\xe0\xf0\x48\x83\xe8\x58\x4c\x89\x38\x45\x31\xc9\x4c\x89\x48\x08\x48\x89\x50\x10\x48\x89\x48\x18\x4c\x89\x48\x20\x4c\x89\x48\x28\x4c\x8d\x0d\xb2\xff\xff\xff\x4c\x89\x48\x30\x4c\x8d\x0d\xb3\xff\xff\xff\x4c\x89\x48\x38\x48\x89\x70\x40\x48\x89\x78\x48\xc3\x49\x89\xf2\x49\x89\xfb\x4c\x8d\x0d\x1d\x00\x00\x00\x41\x51\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57\x49\x89\x22\x4c\x89\xdc\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3\xc3")
+		renvoAsmAddReloc(a, base+12, fnLabel)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		a.patchFailed = true
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmObjectIndirectRegisterCall(a *renvoAsm, handleOffset int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmLoadPrimaryStack(a, handleOffset)
+		renvoAsmEmitText(a, "\xff\xd0")
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		a.patchFailed = true
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmLoadObjectArgumentWord(a *renvoAsm, word int, offset int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmLoadPrimaryStack(a, offset)
+		if word == 0 {
+			renvoAsmEmitText(a, "\x48\x89\xc7")
+		} else if word == 1 {
+			renvoAsmEmitText(a, "\x48\x89\xc6")
+		} else if word == 2 {
+			renvoAsmEmitText(a, "\x48\x89\xc2")
+		} else if word == 3 {
+			renvoAsmEmitText(a, "\x48\x89\xc1")
+		} else if word == 4 {
+			renvoAsmEmitText(a, "\x49\x89\xc0")
+		} else if word == 5 {
+			renvoAsmEmitText(a, "\x49\x89\xc1")
+		} else {
+			return false
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAsmObjectIndirectStackCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		// R11 retains the indirect target while R10 records the exact Renvo stack.
+		// Align a temporary SysV call area, copy arguments seven onward in source
+		// order, then restore the original stack pointer after the callback.
+		renvoAsmLoadPrimaryStack(a, handleOffset)
+		renvoAsmEmitText(a, "\x49\x89\xc3\x49\x89\xe2\x48\x83\xe4\xf0")
+		stackWords := len(argOffsets) - 6
+		reserve := renvoAlignValue(stackWords*8+16, 16)
+		saveOffset := reserve - 8
+		if reserve <= 127 {
+			renvoAsmEmitText(a, "\x48\x83\xec")
+			renvoAsmEmit8(a, reserve)
+		} else {
+			renvoAsmEmitText(a, "\x48\x81\xec")
+			renvoAsmEmit32(a, reserve)
+		}
+		for i := 6; i < len(argOffsets); i++ {
+			renvoAsmLoadPrimaryStack(a, argOffsets[i])
+			displacement := (i - 6) * 8
+			if displacement == 0 {
+				renvoAsmEmitText(a, "\x48\x89\x04\x24")
+			} else {
+				renvoAsmEmitText(a, "\x48\x89\x44\x24")
+				renvoAsmEmit8(a, displacement)
+			}
+		}
+		renvoAsmEmitText(a, "\x4c\x89\x54\x24")
+		renvoAsmEmit8(a, saveOffset)
+		renvoAsmEmitText(a, "\x41\xff\xd3\x48\x8b\x64\x24")
+		renvoAsmEmit8(a, saveOffset)
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
+func renvoAsmObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		// The evaluation stack presents argument zero at its top. Pop the six SysV
+		// register arguments and retain the remaining words in source order.
+		renvoAsmEmitText(a, "\x5f\x5e\x5a\x59\x41\x58\x41\x59")
+		stackWords := wordCount - 6
+		stackBytes := stackWords * 8
+		reserve := renvoAlignValue(stackBytes+16, 16)
+		saveOffset := reserve - 8
+		renvoAsmEmitText(a, "\x49\x89\xe3\x48\x83\xe4\xf0")
+		if reserve <= 127 {
+			renvoAsmEmitText(a, "\x48\x83\xec")
+			renvoAsmEmit8(a, reserve)
+		} else {
+			renvoAsmEmitText(a, "\x48\x81\xec")
+			renvoAsmEmit32(a, reserve)
+		}
+		for i := 0; i < stackWords; i++ {
+			displacement := i * 8
+			if displacement == 0 {
+				renvoAsmEmitText(a, "\x49\x8b\x03\x48\x89\x04\x24")
+			} else {
+				renvoAsmEmitText(a, "\x49\x8b\x43")
+				renvoAsmEmit8(a, displacement)
+				renvoAsmEmitText(a, "\x48\x89\x44\x24")
+				renvoAsmEmit8(a, displacement)
+			}
+		}
+		renvoAsmEmitText(a, "\x4c\x89\x5c\x24")
+		renvoAsmEmit8(a, saveOffset)
+		renvoAsmEmitText(a, "\x31\xc0\xe8")
+		relocationAt := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, relocationAt, importID, renvoImportReloc)
+		renvoAsmEmitText(a, "\x48\x8b\x64\x24")
+		renvoAsmEmit8(a, saveOffset)
+		if stackBytes <= 127 {
+			renvoAsmEmitText(a, "\x48\x83\xc4")
+			renvoAsmEmit8(a, stackBytes)
+		} else {
+			renvoAsmEmitText(a, "\x48\x81\xc4")
+			renvoAsmEmit32(a, stackBytes)
+		}
+		return true
+	
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		return false
+	
+}
+a.patchFailed = true
+return false
+}
+
 func renvoFinishObjectVariadicArgs(a *renvoAsm) {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
