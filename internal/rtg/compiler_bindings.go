@@ -19,6 +19,9 @@ type compilerEmitterOperation struct {
 	Function string
 	Result   string
 	Failure  string
+	// Optional conservative reachability fact, derived from the bound bodies.
+	// False means every definition and the unknown-selector path return false.
+	ReachabilityGuard string
 }
 
 type compilerBindingParameter struct {
@@ -94,12 +97,12 @@ var compilerEmitterOperations = []compilerEmitterOperation{
 	{Name: "program_failure_exit_code", Suffix: "ProgramFailureExitCode", Function: "renvoProgramFailureExitCode", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "1", Parameters: []compilerBindingParameter{}, Prepared: "// Preserve the image-size rejection status for command-line embedders.\nif renvoRTGUnsupportedOperation == 5001 {\n\treturn 125\n}\nreturn 1"},
 	{Name: "program_result_valid", Suffix: "ProgramResultValid", Function: "renvoProgramResultValid", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{{"result", "*renvoCompileResult"}}, Prepared: "a := \u0026g.asm\nrenvoRTGValidateRelocations(a)\nif renvoRTGUnsupportedOperation != 0 {\n\trenvoRTGReportFailure(g)\n\treturn false\n}\nif len(result.data) == 0 \u0026\u0026 !renvoObjectProgram(g.c) \u0026\u0026 !renvoKernelProgram(g.c) {\n\tif renvoRTGImageLimit \u003e 0 {\n\t\trenvoRTGReportImageSize(g)\n\t} else {\n\t\trenvoPrintErr(\"renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\\n\")\n\t}\n\trenvoRTGUnsupportedOperation = 5001\n\treturn false\n}\nreturn true"},
 	{Name: "program_emission_valid", Suffix: "ProgramEmissionValid", Function: "renvoProgramEmissionValid", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "if renvoRTGUnsupportedOperation != 0 {\n\trenvoRTGReportFailure(g)\n\treturn false\n}\nreturn true"},
-	{Name: "label_notifications", Suffix: "LabelNotifications", Function: "renvoLabelNotifications", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
+	{Name: "label_notifications", ReachabilityGuard: "renvoMayNotifyLabels", Suffix: "LabelNotifications", Function: "renvoLabelNotifications", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
 	{Name: "unsupported_operation", Suffix: "UnsupportedOperation", Function: "renvoAsmUnsupportedOperation", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"code", "int"}}, Prepared: "if renvoRTGUnsupportedOperation == 0 {\n\trenvoRTGUnsupportedOperation = code\n}"},
 	{Name: "label_boundary", Suffix: "LabelBoundary", Function: "renvoAsmLabelBoundary", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"label", "int"}}, Prepared: "renvoRTGMarkLabel(a, label)"},
 	{Name: "structured_string_equal_body", Suffix: "StructuredStringEqualBody", Function: "renvoEmitStructuredStringEqualBody", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "", Failure: "", Parameters: []compilerBindingParameter{}, Prepared: "renvoRTGEmitStringEqualHelperBody(g)"},
 	{Name: "helper_function_boundary", Suffix: "HelperFunctionBoundary", Function: "renvoAsmHelperFunctionBoundary", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"label", "int"}, {"start", "bool"}}, Prepared: "if start {\n\trenvoRTGFunctionStart(a, label)\n} else {\n\trenvoRTGFunctionFinish(a)\n}"},
-	{Name: "structured_functions", Suffix: "StructuredFunctions", Function: "renvoUsesStructuredFunctions", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGStructuredFunctions != 0"},
+	{Name: "structured_functions", ReachabilityGuard: "renvoMayUseStructuredFunctions", Suffix: "StructuredFunctions", Function: "renvoUsesStructuredFunctions", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return renvoRTGStructuredFunctions != 0"},
 	{Name: "object_variadic_word_limit", Suffix: "ObjectVariadicWordLimit", Function: "renvoObjectVariadicWordLimit", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "return 0"},
 	{Name: "object_stack_arguments", Suffix: "ObjectStackArguments", Function: "renvoObjectStackArguments", Receiver: compilerBindingParameter{"c", "*renvoCompileContext"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "string_compare_arguments", Suffix: "StringCompareArguments", Function: "renvoAsmStringCompareArguments", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"left", "int"}, {"leftLength", "int"}, {"right", "int"}, {"rightLength", "int"}}, Prepared: "renvoRTGAsmLoadFrame(a, renvoRTGCallWord0, left)\nrenvoRTGAsmLoadFrame(a, renvoRTGCallWord1, leftLength)\nrenvoRTGAsmLoadFrame(a, renvoRTGCallWord2, right)\nrenvoRTGAsmLoadFrame(a, renvoRTGCallWord3, rightLength)"},
@@ -483,6 +486,10 @@ func validateCompilerBindings(document Document, arch Declaration) []Diagnostic 
 func appendPreparedCompilerBindings(out []byte) []byte {
 	for i := 0; i < len(compilerEmitterOperations); i++ {
 		operation := compilerEmitterOperations[i]
+		if operation.ReachabilityGuard != "" {
+			// Prepared adapters retain their query, including target contract facts.
+			out = append(out, "\nconst "+operation.ReachabilityGuard+" = true\n"...)
+		}
 		out = append(out, "\nfunc "...)
 		out = append(out, operation.functionName()...)
 		out = append(out, operation.signature()...)
@@ -604,6 +611,17 @@ func appendBundledCompilerBindings(out []byte, definitions []ResolveResult) Gene
 		out = appendCompilerBodyGroups(out, bodies, conditions)
 		out = append(out, operation.failBody()...)
 		out = append(out, "}\n"...)
+		if operation.ReachabilityGuard != "" {
+			// Only the existing exact false-body elimination proves unreachability.
+			// Unknown selectors keep the same false result; arbitrary hook bodies
+			// remain reachable even if they happen to return false at runtime.
+			value := "true"
+			if operation.receiver().Type == "*renvoCompileContext" &&
+				operation.Result == "bool" && operation.Failure == "false" && len(bodies) == 0 {
+				value = "false"
+			}
+			out = append(out, "\nconst "+operation.ReachabilityGuard+" = "+value+"\n"...)
+		}
 	}
 	return GenerateResult{Source: out, Ok: true}
 }

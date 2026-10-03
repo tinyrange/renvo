@@ -4403,6 +4403,8 @@ if renvoRTGUnsupportedOperation != 0 {
 return true
 }
 
+const renvoMayNotifyLabels = true
+
 func renvoLabelNotifications(c *renvoCompileContext) bool {
 renvoNonNil(c)
 return true
@@ -4433,6 +4435,8 @@ if start {
 	renvoRTGFunctionFinish(a)
 }
 }
+
+const renvoMayUseStructuredFunctions = true
 
 func renvoUsesStructuredFunctions(c *renvoCompileContext) bool {
 renvoNonNil(c)

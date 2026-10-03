@@ -338,7 +338,7 @@ func renvoQueueStructuredHelper(g *renvoLinearGen, kind int, arg int, label int)
 }
 
 func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) bool {
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		renvoAsmHelperFunctionBoundary(&g.asm, label, true)
 		renvoAsmMarkLabel(&g.asm, label)
 		if kind == renvoStructuredHelperSignedDivide {
@@ -491,7 +491,7 @@ func renvoAsmMarkLabel(a *renvoAsm, label int) {
 	a.labelPos[label] = int32(codeLen)
 	a.lastPrimaryStoreEnd = -1
 	a.lastPrimaryLoad = 0
-	if renvoLabelNotifications(a.c) {
+	if renvoMayNotifyLabels && renvoLabelNotifications(a.c) {
 		renvoAsmLabelBoundary(a, label)
 	}
 }
@@ -13722,7 +13722,7 @@ func renvoEnsureMakeZeroHelper(g *renvoLinearGen) int {
 	}
 	g.makeZeroEmitted = true
 	g.makeZeroLabel = renvoAsmNewLabel(a)
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		renvoQueueStructuredHelper(g, renvoStructuredHelperMakeZero, 0, g.makeZeroLabel)
 		return g.makeZeroLabel
 	}
@@ -15532,7 +15532,7 @@ func renvoEnsureUncaughtRuntimeFaultHelper(g *renvoLinearGen) int {
 
 func renvoEmitUncaughtFaultTransfer(g *renvoLinearGen, outOfMemory bool) {
 	label := renvoEnsureUncaughtFaultHelper(g, outOfMemory)
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		renvoAsmCallLabel(&g.asm, label)
 		renvoAsmRet(&g.asm)
 		return
@@ -15556,7 +15556,7 @@ func renvoEnsureUncaughtFaultHelper(g *renvoLinearGen, outOfMemory bool) int {
 	} else {
 		g.runtimeFaultLabel = label + 1
 	}
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		argument := 0
 		if outOfMemory {
 			argument = 1
@@ -15623,7 +15623,7 @@ func renvoEnsureNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
 	}
 	label := renvoAsmNewLabel(&g.asm)
 	*labelSlot = label + 1
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		argument := 0
 		if secondary {
 			argument = 1
@@ -17979,7 +17979,7 @@ func renvoEnsureIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
 	} else {
 		g.runtimeWideIndexLabel = label + 1
 	}
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		renvoQueueStructuredHelper(g, renvoStructuredHelperIndexAddress, elemSize, label)
 		return label
 	}
@@ -18029,7 +18029,7 @@ func renvoEnsureBoundsCheckHelper(g *renvoLinearGen) int {
 	}
 	label := renvoAsmNewLabel(&g.asm)
 	g.runtimeBoundsLabel = label + 1
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		renvoQueueStructuredHelper(g, renvoStructuredHelperBoundsCheck, 0, label)
 		return label
 	}
@@ -19280,7 +19280,7 @@ func renvoEnsureSignedDivisionHelper(g *renvoLinearGen, mod bool) int {
 	}
 	label := renvoAsmNewLabel(a)
 	*slot = label + 1
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		argument := 0
 		if mod {
 			argument = 1
@@ -20065,7 +20065,7 @@ func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) 
 		g.arenaAllocLabel = label + 1
 	}
 	renvoStringHeapOffsets(g)
-	if renvoUsesStructuredFunctions(g.c) {
+	if renvoMayUseStructuredFunctions && renvoUsesStructuredFunctions(g.c) {
 		argument := 0
 		if persistent {
 			argument = 1
