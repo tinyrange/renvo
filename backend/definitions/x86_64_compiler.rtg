@@ -963,6 +963,12 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		store_incoming_call_word = renvoAmd64CompilerStoreIncomingCallWord
+		call_with_word_count = renvoAmd64CompilerCallWithWordCount
+		unsigned_divide_primary_tertiary = renvoAmd64CompilerUnsignedDividePrimaryTertiary
+		ieee_conversion_primary = renvoAmd64CompilerIEEEConversionPrimary
+		ieee_arithmetic_primary_tertiary = renvoAmd64CompilerIEEEArithmeticPrimaryTertiary
+		ieee_compare_primary_tertiary = renvoAmd64CompilerIEEEComparePrimaryTertiary
 		ieee_compare_stack = renvoAmd64CompilerIEEECompareStack
 		ieee_negate_primary = renvoAmd64CompilerIEEENegatePrimary
 		global_init_frame_start = renvoAmd64CompilerGlobalInitFrameStart
@@ -1725,5 +1731,169 @@ go compiler {
 		// btc rax, 63 preserves every payload bit and toggles signed zero.
 		renvoAsmEmitText(a, "\x48\x0f\xba\xf8\x3f")
 		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerIEEEConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+		a := &g.asm
+		if sourceKind == renvoTypeUint64 && renvoTypeKindIsFloat(destKind) {
+			positive := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoAsmEmitText(a, "\x48\x85\xc0") // test rax, rax
+			renvoAmd64AsmJccLabel(a, 0x89, positive)
+			// Convert (value>>1 | value&1), then double. This retains the
+			// discarded low bit as rounding information for uint64 values whose
+			// sign bit is set.
+			renvoAsmEmitText(a, "\x48\x89\xc1\x83\xe1\x01\x48\xd1\xe8\x48\x09\xc8")
+			if destKind == renvoTypeFloat32 {
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\xf3\x0f\x58\xc0\x66\x0f\x7e\xc0")
+			} else {
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\xf2\x0f\x58\xc0\x66\x48\x0f\x7e\xc0")
+			}
+			renvoAsmJmpLabel(a, done)
+			renvoAsmMarkLabel(a, positive)
+			if destKind == renvoTypeFloat32 {
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\x66\x0f\x7e\xc0")
+			} else {
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\x66\x48\x0f\x7e\xc0")
+			}
+			renvoAsmMarkLabel(a, done)
+		} else if renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeUint64 {
+			below := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			if sourceKind == renvoTypeFloat32 {
+				// Compare against 2^63, subtract it on the upper half, then set
+				// the integer high bit after truncation.
+				renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xb9\x00\x00\x00\x5f\x66\x0f\x6e\xc9\x0f\x2e\xc1")
+				renvoAmd64AsmJccLabel(a, 0x82, below)
+				renvoAsmEmitText(a, "\xf3\x0f\x5c\xc1\xf3\x48\x0f\x2c\xc0\x48\x0f\xba\xf8\x3f")
+				renvoAsmJmpLabel(a, done)
+				renvoAsmMarkLabel(a, below)
+				renvoAsmEmitText(a, "\xf3\x48\x0f\x2c\xc0")
+			} else {
+				renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\x48\xb9")
+				renvoAsmEmit64(a, 0x43e0000000000000)
+				renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc9\x66\x0f\x2e\xc1")
+				renvoAmd64AsmJccLabel(a, 0x82, below)
+				renvoAsmEmitText(a, "\xf2\x0f\x5c\xc1\xf2\x48\x0f\x2c\xc0\x48\x0f\xba\xf8\x3f")
+				renvoAsmJmpLabel(a, done)
+				renvoAsmMarkLabel(a, below)
+				renvoAsmEmitText(a, "\xf2\x48\x0f\x2c\xc0")
+			}
+			renvoAsmMarkLabel(a, done)
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat64 {
+			// cvtsi2sd xmm0, rax; movq rax, xmm0
+			renvoAsmEmitText(a, "\xf2\x48\x0f\x2a\xc0\x66\x48\x0f\x7e\xc0")
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			// cvtsi2ss xmm0, rax; movd eax, xmm0
+			renvoAsmEmitText(a, "\xf3\x48\x0f\x2a\xc0\x66\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat64 && destKind == renvoTypeFloat32 {
+			// movq xmm0, rax; cvtsd2ss xmm0, xmm0; movd eax, xmm0
+			renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\xf2\x0f\x5a\xc0\x66\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat32 && destKind == renvoTypeFloat64 {
+			// movd xmm0, eax; cvtss2sd xmm0, xmm0; movq rax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xf3\x0f\x5a\xc0\x66\x48\x0f\x7e\xc0")
+		} else if sourceKind == renvoTypeFloat32 {
+			// movd xmm0, eax; cvttss2si rax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc0\xf3\x48\x0f\x2c\xc0")
+		} else if sourceKind == renvoTypeFloat64 {
+			// movq xmm0, rax; cvttsd2si rax, xmm0
+			renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc0\xf2\x48\x0f\x2c\xc0")
+		} else {
+			return false
+		}
+		return true
+	}
+
+	func renvoAmd64CompilerIEEEArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+		a := &g.asm
+		op := 0
+		if opChar == '+' {
+			op = 0x58
+		} else if opChar == '-' {
+			op = 0x5c
+		} else if opChar == '*' {
+			op = 0x59
+		} else if opChar == '/' {
+			op = 0x5e
+		}
+		if op == 0 {
+			return false
+		}
+		if kind == renvoTypeFloat32 {
+			// movd xmm0, ecx; movd xmm1, eax; opss xmm0, xmm1; movd eax, xmm0
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc1\x66\x0f\x6e\xc8\xf3\x0f")
+			renvoAsmEmit2(a, op, 0xc1)
+			renvoAsmEmitText(a, "\x66\x0f\x7e\xc0")
+			return true
+		}
+		// movq xmm0, rcx; movq xmm1, rax; opsd xmm0, xmm1; movq rax, xmm0
+		renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc1\x66\x48\x0f\x6e\xc8\xf2\x0f")
+		renvoAsmEmit2(a, op, 0xc1)
+		renvoAsmEmitText(a, "\x66\x48\x0f\x7e\xc0")
+		return true
+	}
+
+	func renvoAmd64CompilerIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+		renvoEmitAmd64IEEECompareResult(&g.asm, c0, c1, kind)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64IEEECompareFlagsResult(a *renvoAsm, c0 byte, c1 byte) {
+		first := 0x97 // seta: greater-than, unordered is false
+		second := 0
+		combine := byte(0)
+		if c0 == '=' {
+			first, second, combine = 0x94, 0x9b, 0x20 // equal and ordered
+		} else if c0 == '!' {
+			first, second, combine = 0x95, 0x9a, 0x08 // unequal or unordered
+		} else if c0 == '<' {
+			first, second, combine = 0x92, 0x9b, 0x20 // below and ordered
+			if c1 == '=' {
+				first = 0x96 // below-or-equal and ordered
+			}
+		} else if c0 == '>' && c1 == '=' {
+			first = 0x93 // above-or-equal; unordered is below
+		}
+		renvoAsmEmit3(a, 0x0f, first, 0xc0)
+		if second != 0 {
+			renvoAsmEmit3(a, 0x0f, second, 0xc2)
+			renvoAsmEmit2(a, int(combine), 0xd0)
+		}
+	}
+
+	func renvoEmitAmd64IEEECompareResult(a *renvoAsm, c0 byte, c1 byte, kind int) {
+		// Preserve both operands in XMM registers before clearing the integer result
+		// registers. UCOMISD's parity flag distinguishes unordered comparisons.
+		if kind == renvoTypeFloat32 {
+			renvoAsmEmitText(a, "\x66\x0f\x6e\xc1\x66\x0f\x6e\xc8\x31\xc0\x31\xd2\x0f\x2e\xc1")
+		} else {
+			renvoAsmEmitText(a, "\x66\x48\x0f\x6e\xc1\x66\x48\x0f\x6e\xc8\x31\xc0\x31\xd2\x66\x0f\x2e\xc1")
+		}
+		renvoAmd64IEEECompareFlagsResult(a, c0, c1)
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+		renvoAsmEmitText(&g.asm, "\x53\x48\x89\xc3\x48\x89\xc8\x31\xd2\x48\xf7\xf3")
+		if mod {
+			renvoAsmEmitText(&g.asm, "\x48\x89\xd0")
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+		renvoAmd64StoreParamWord(g, word, offset)
+	}
+
+	func renvoAmd64CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		renvoAmd64EmitCallWithWordCount(g, fnIndex, wordCount)
 	}
 }

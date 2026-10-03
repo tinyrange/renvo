@@ -4357,6 +4357,81 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+renvoNonNil(g)
+renvoRTGStoreParamWord(g, word, offset)
+}
+
+func renvoEmitTargetCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+renvoNonNil(g)
+renvoRTGEmitCallWithWordCount(g, fnIndex, wordCount)
+}
+
+func renvoEmitUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+renvoNonNil(g)
+if g.c.renvoNativeIntSize == 4 {
+	dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	divisor := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	quotient := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	remainder := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+	renvoAsmStorePrimaryStack(&g.asm, divisor)
+	renvoAsmStoreStackImm(&g.asm, divisor-g.c.renvoNativeIntSize, 0)
+	renvoAsmCopyTertiaryToPrimary(&g.asm)
+	renvoAsmStorePrimaryStack(&g.asm, dividend)
+	renvoAsmStoreStackImm(&g.asm, dividend-g.c.renvoNativeIntSize, 0)
+	renvoEmitWideUnsignedDivStack(g, quotient, remainder, dividend, divisor)
+	if mod {
+		renvoAsmLoadPrimaryStack(&g.asm, remainder)
+	} else {
+		renvoAsmLoadPrimaryStack(&g.asm, quotient)
+	}
+	return true
+}
+return renvoRTGEmitUnsignedDivide(&g.asm, mod)
+}
+
+func renvoEmitIEEEFloatConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 { return false }
+a := &g.asm
+	temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+	renvoAsmStorePrimaryStack(a, temp)
+	if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+		renvo32IEEEIntToFloatStack(g, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(sourceKind))
+	} else if sourceKind == renvoTypeFloat32 && !renvoTypeKindIsFloat(destKind) {
+		renvo32IEEEFloatToIntStack(g, temp, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(destKind))
+	} else {
+		return false
+	}
+	renvoAsmLoadPrimaryStack(a, temp)
+	return true
+}
+
+func renvoEmitIEEEFloatArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+renvoNonNil(g)
+if renvoRTGPreparedIEEEFloat == 0 { return false }
+a := &g.asm
+	if kind != renvoTypeFloat32 {
+		return false
+	}
+	left := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+	right := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+	result := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+	renvoAsmStorePrimaryStack(a, right)
+	renvoAsmCopyTertiaryToPrimary(a)
+	renvoAsmStorePrimaryStack(a, left)
+	if !renvo32IEEEBinaryStack(g, result, left, right, opChar, 4) {
+		return false
+	}
+	renvoAsmLoadPrimaryStack(a, result)
+	return true
+}
+
+func renvoEmitIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+renvoNonNil(g)
+return false
+}
+
 func renvoEmit32IEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
 renvoNonNil(g)
 if renvoRTGPreparedIEEEFloat == 0 {

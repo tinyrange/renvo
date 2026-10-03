@@ -737,6 +737,12 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		store_incoming_call_word = renvoAarch64CompilerStoreIncomingCallWord
+		call_with_word_count = renvoAarch64CompilerCallWithWordCount
+		unsigned_divide_primary_tertiary = renvoAarch64CompilerUnsignedDividePrimaryTertiary
+		ieee_conversion_primary = renvoAarch64CompilerIEEEConversionPrimary
+		ieee_arithmetic_primary_tertiary = renvoAarch64CompilerIEEEArithmeticPrimaryTertiary
+		ieee_compare_primary_tertiary = renvoAarch64CompilerIEEEComparePrimaryTertiary
 		ieee_compare_stack = renvoAarch64CompilerIEEECompareStack
 		ieee_negate_primary = renvoAarch64CompilerIEEENegatePrimary
 		global_init_frame_start = renvoAarch64CompilerGlobalInitFrameStart
@@ -1300,5 +1306,133 @@ go compiler {
 		renvoAarch64AsmEmit(a, 0x1e614000)
 		renvoAarch64AsmEmit(a, 0x9e660000)
 		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerIEEEConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+		a := &g.asm
+		if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat64 {
+			op := 0x9e620000 // scvtf d0, x0
+			if renvoTypeKindIsUnsignedInteger(sourceKind) {
+				op = 0x9e630000 // ucvtf d0, x0
+			}
+			renvoAarch64AsmEmit(a, op)
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		} else if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			op := 0x9e220000 // scvtf s0, x0
+			if renvoTypeKindIsUnsignedInteger(sourceKind) {
+				op = 0x9e230000 // ucvtf s0, x0
+			}
+			renvoAarch64AsmEmit(a, op)
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else if sourceKind == renvoTypeFloat64 && destKind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x9e670000) // fmov d0, x0
+			renvoAarch64AsmEmit(a, 0x1e624000) // fcvt s0, d0
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else if sourceKind == renvoTypeFloat32 && destKind == renvoTypeFloat64 {
+			renvoAarch64AsmEmit(a, 0x1e270000) // fmov s0, w0
+			renvoAarch64AsmEmit(a, 0x1e22c000) // fcvt d0, s0
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		} else if sourceKind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e270000) // fmov s0, w0
+			op := 0x9e380000                   // fcvtzs x0, s0
+			if renvoTypeKindIsUnsignedInteger(destKind) {
+				op = 0x9e390000 // fcvtzu x0, s0
+			}
+			renvoAarch64AsmEmit(a, op)
+		} else if sourceKind == renvoTypeFloat64 {
+			renvoAarch64AsmEmit(a, 0x9e670000) // fmov d0, x0
+			op := 0x9e780000                   // fcvtzs x0, d0
+			if renvoTypeKindIsUnsignedInteger(destKind) {
+				op = 0x9e790000 // fcvtzu x0, d0
+			}
+			renvoAarch64AsmEmit(a, op)
+		} else {
+			return false
+		}
+		return true
+	}
+
+	func renvoAarch64CompilerIEEEArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+		a := &g.asm
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e270040) // fmov s0, w2
+			renvoAarch64AsmEmit(a, 0x1e270001) // fmov s1, w0
+		} else {
+			renvoAarch64AsmEmit(a, 0x9e670040) // fmov d0, x2
+			renvoAarch64AsmEmit(a, 0x9e670001) // fmov d1, x0
+		}
+		op := 0
+		if opChar == '+' {
+			op = 0x1e612800
+		} else if opChar == '-' {
+			op = 0x1e613800
+		} else if opChar == '*' {
+			op = 0x1e610800
+		} else if opChar == '/' {
+			op = 0x1e611800
+		}
+		if op == 0 {
+			return false
+		}
+		if kind == renvoTypeFloat32 {
+			op -= 0x00400000
+		}
+		renvoAarch64AsmEmit(a, op)
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(a, 0x1e260000) // fmov w0, s0
+		} else {
+			renvoAarch64AsmEmit(a, 0x9e660000) // fmov x0, d0
+		}
+		return true
+	}
+
+	func renvoAarch64CompilerIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+		if kind == renvoTypeFloat32 {
+			renvoAarch64AsmEmit(&g.asm, 0x1e270040) // fmov s0, w2
+			renvoAarch64AsmEmit(&g.asm, 0x1e270001) // fmov s1, w0
+			renvoAarch64AsmEmit(&g.asm, 0x1e212000) // fcmp s0, s1
+		} else {
+			renvoAarch64AsmEmit(&g.asm, 0x9e670040) // fmov d0, x2
+			renvoAarch64AsmEmit(&g.asm, 0x9e670001) // fmov d1, x0
+			renvoAarch64AsmEmit(&g.asm, 0x1e612000) // fcmp d0, d1
+		}
+		cond := 12 // gt
+		if c0 == '=' {
+			cond = 0
+		} else if c0 == '!' {
+			cond = 1
+		} else if c0 == '<' {
+			cond = 4 // mi excludes unordered, unlike lt
+			if c1 == '=' {
+				cond = 9 // ls
+			}
+		} else if c0 == '>' && c1 == '=' {
+			cond = 10 // ge
+		}
+		renvoAarch64AsmCsetRax(&g.asm, cond)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+		renvoAarch64AsmMovRegReg(&g.asm, 9, 0)
+		renvoAarch64AsmEmit(&g.asm, 0x9ac00840)
+		if mod {
+			renvoAarch64AsmEmit(&g.asm, 0x9b098800)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+		renvoAarch64StoreParamWord(g, word, offset)
+	}
+
+	func renvoAarch64CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		renvoAarch64EmitCallWithWordCount(g, fnIndex, wordCount)
 	}
 }
