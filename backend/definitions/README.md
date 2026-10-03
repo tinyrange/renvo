@@ -152,11 +152,15 @@ go compiler {
 }
 ```
 
-The current migration covers 74 role-based operations: register copies,
+The current migration covers 76 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
-syscall boundary. Literal parsing selects ordinary or split-word materialization
+syscall boundary, scalar multiplication, and relocation finalization. The latter
+keeps branch relaxation, layout, and target relocation order in the definitions;
+the common PC-relative data displacement helper only performs layout arithmetic.
+The 386 normalization peepholes also live with their definition-owned caller.
+Literal parsing selects ordinary or split-word materialization
 without inspecting an architecture; each backend owns its scalar-width behavior.
 Hooks may take typed parameters in addition to the assembler; their complete
 signatures are checked before generation;

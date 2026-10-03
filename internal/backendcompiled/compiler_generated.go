@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c80f6c02daca0e2baa3997feb9620699448b6e5656de9327f68d577adecfe9ca"
+const CompilerSourceDigest = "b7aae0ff4e7c09d027542eb44d1e6947c9afe4d35ea8f16b205fc72eb4760ff2"
 
 // source: backend/compiler_common_impl.go
 
@@ -777,34 +777,10 @@ a.code = append(a.code, byte(v>>8))
 a.code = append(a.code, byte(v>>16))
 }
 
-func renvoAsmPatch(a *renvoAsm) {
+
+
+func renvoAsmPatchDataDisplacements32(a *renvoAsm) {
 renvoNonNil(a)
-if renvoPreparedBackendActive != 0 {
-renvoRTGPatchRelocations(a)
-renvoAsmSetDataOffsets(a)
-return
-}
-if a.c.renvoTargetArch == renvoArchArm {
-rtgArmPatchRelocations(a)
-renvoAsmSetDataOffsets(a)
-return
-}
-if a.c.renvoTargetArch == renvoArchAarch64 {
-rtgAarch64PatchRelocations(a)
-renvoAsmSetDataOffsets(a)
-return
-}
-if a.c.renvoTargetArch == renvoArchAmd64 {
-renvoAmd64RelaxBranches(a)
-rtgX8664PatchRelocations(a)
-} else if a.c.renvoTargetArch == renvoArch386 {
-rtgX8632PatchRelocations(a)
-}
-renvoAsmSetDataOffsets(a)
-if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
-return
-}
 for i := 0; i+2 < len(a.absRelocs); i += 3 {
 at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
 off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
@@ -22819,63 +22795,6 @@ return
 renvoAmd64AsmMemDisp(a, disp, op, disp8, disp32)
 }
 
-func renvo386FusePrimaryLoadNormalization(a *renvoAsm, kind int) bool {
-load := a.lastPrimaryLoad
-end := load >> 3
-modrm := end - (load & 7)
-if load <= 0 || end != len(a.code) || modrm < 2 || a.code[modrm-2] != 0x0f {
-return false
-}
-opcode := a.code[modrm-1]
-if kind == renvoTypeByte || kind == renvoTypeBool {
-return opcode == 0xb6
-}
-if kind == renvoTypeInt8 && opcode == 0xb6 {
-a.code[modrm-1] = 0xbe
-return true
-}
-if kind == renvoTypeInt16 {
-return opcode == 0xbf
-}
-if kind == renvoTypeUint16 && opcode == 0xbf {
-a.code[modrm-1] = 0xb7
-return true
-}
-return false
-}
-
-func renvo386PrimaryNormalizationRepeated(a *renvoAsm, kind int) bool {
-opcode := 0
-size := 0
-if kind == renvoTypeByte || kind == renvoTypeBool {
-opcode, size = 0xc0b60f, 3
-} else if kind == renvoTypeInt8 {
-opcode, size = 0xc0be0f, 3
-} else if kind == renvoTypeInt16 {
-opcode, size = 0x98, 1
-} else if kind == renvoTypeUint16 {
-opcode, size = 0xc0b70f, 3
-} else {
-return false
-}
-if len(a.code) < size {
-return false
-}
-for i := 0; i < len(a.labelPos); i++ {
-if int(a.labelPos[i]) == len(a.code) {
-return false
-}
-}
-start := len(a.code) - size
-for i := 0; i < size; i++ {
-if a.code[start+i] != byte(opcode>>(8*i)) {
-return false
-}
-}
-return true
-}
-
-
 func renvoAsmShrPrimaryImm(a *renvoAsm, imm int) {
 if renvoFixedTarget != 0 && a.c.renvoTargetArch != renvoArch386 && a.c.renvoTargetArch != renvoArchArm && a.c.renvoTargetArch != renvoArchWasm32 {
 return
@@ -24949,7 +24868,7 @@ return false
 if elementSize > 1 {
 renvoAsmPushImm(&g.asm, elementSize)
 renvoAsmPopTertiary(&g.asm)
-renvoAsmMulPrimaryTertiary(g)
+renvoAsmMulPrimaryTertiary(&g.asm)
 }
 renvoAsmCopyPrimaryToSecondary(&g.asm)
 renvoAsmPopPrimary(&g.asm)
@@ -29617,22 +29536,6 @@ renvoEmitIEEEFloatArithmeticPrimaryTertiary(g, '+', kind)
 }
 }
 
-func renvoAsmMulPrimaryTertiary(g *renvoLinearGen) {
-a := &g.asm
-if renvoPreparedBackendActive != 0 {
-renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
-} else if g.c.renvoTargetArch == renvoArchWasm32 {
-renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-} else if g.c.renvoTargetArch == renvoArchAarch64 {
-renvoAarch64AsmEmit(a, 0x9b007c40)
-} else if g.c.renvoTargetArch == renvoArchArm {
-renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-} else if g.c.renvoTargetArch == renvoArch386 {
-renvoAsmEmit24(a, 0xc1af0f)
-} else {
-renvoAsmEmit32(a, 0xc1af0f48)
-}
-}
 
 func renvoEmitComplexMultiplyDivide(g *renvoLinearGen, leftReal int, leftImag int, rightReal int, rightImag int, tok int, kind int) bool {
 realPart := renvoAddUnnamedLocal(g, kind)
@@ -30607,7 +30510,7 @@ return false
 }
 renvoAsmPopTertiary(&g.asm)
 if renvoTokCharIs(g.prog, e.tok, '*') {
-renvoAsmMulPrimaryTertiary(g)
+renvoAsmMulPrimaryTertiary(&g.asm)
 renvoAsmSarPrimaryImm(&g.asm, 2)
 return true
 }
@@ -36566,7 +36469,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x37\xb4\x86\xd1\xc5\xe0\x50\x84\x5f\xaa\x2f\x5d\xbd\xe9\x99\xb0\xee\x6c\x32\x16\xd5\x40\x47\x5f\x56\xfc\x39\x6e\xb0\x5e\x3d\xc1", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x08\xa8\x46\xbb\x23\x36\xfb\xfd\xd5\x1f\x7c\x05\x8c\xd1\xca\xa2\x67\xeb\x46\xc9\x8b\x26\x2b\x9e\x8b\x1b\x6b\xec\xa5\x9b\xed\x5d", 3, true
+return "wasi/wasm32", "\x64\x7d\xdf\xd1\x5a\x59\x01\xec\x83\x06\x53\x7f\x7e\x43\x36\x98\x78\x99\xdb\x13\x85\xa4\x45\xc3\x17\x0a\x73\xcd\x79\xd4\xca\xbd", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
@@ -36578,7 +36481,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x0b\xbe\x85\x7e\x11\x7d\x7e\x98\xec\x41\xba\x09\xb4\x87\x45\x37\x8c\xc5\x71\x1f\x30\x9a\x25\x67\x50\xc7\x86\x62\xb8\x96\xcf\x29", 3, true
+return "vm/vm32", "\xe0\x43\x41\xd6\xaa\x61\xd0\xd7\x0a\xd8\x40\x9c\x02\x99\xaf\x59\x73\xf4\x46\x88\xa3\x27\xe5\x43\xa4\x13\x39\x28\x07\xb3\x42\xf9", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
@@ -38049,6 +37952,106 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoAsmPatch(a *renvoAsm) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+renvoAmd64RelaxBranches(a)
+rtgX8664PatchRelocations(a)
+renvoAsmSetDataOffsets(a)
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+return
+}
+renvoAsmPatchDataDisplacements32(a)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+rtgX8632PatchRelocations(a)
+renvoAsmSetDataOffsets(a)
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+return
+}
+renvoAsmPatchDataDisplacements32(a)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+rtgAarch64PatchRelocations(a)
+renvoAsmSetDataOffsets(a)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+rtgArmPatchRelocations(a)
+renvoAsmSetDataOffsets(a)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+renvoAsmSetDataOffsets(a)
+if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+return
+}
+renvoAsmPatchDataDisplacements32(a)
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmMulPrimaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+renvoAsmEmit32(a, 0xc1af0f48)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+renvoAsmEmit24(a, 0xc1af0f)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+renvoAarch64AsmEmit(a, 0x9b007c40)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
+
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+
+return
+
+}
+a.patchFailed = true
 }
 
 func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
@@ -43372,6 +43375,10 @@ return false
 
 
 
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -45228,6 +45235,66 @@ return g.streqLabel
 
 
 
+
+
+
+
+
+func renvo386FusePrimaryLoadNormalization(a *renvoAsm, kind int) bool {
+load := a.lastPrimaryLoad
+end := load >> 3
+modrm := end - (load & 7)
+if load <= 0 || end != len(a.code) || modrm < 2 || a.code[modrm-2] != 0x0f {
+return false
+}
+opcode := a.code[modrm-1]
+if kind == renvoTypeByte || kind == renvoTypeBool {
+return opcode == 0xb6
+}
+if kind == renvoTypeInt8 && opcode == 0xb6 {
+a.code[modrm-1] = 0xbe
+return true
+}
+if kind == renvoTypeInt16 {
+return opcode == 0xbf
+}
+if kind == renvoTypeUint16 && opcode == 0xbf {
+a.code[modrm-1] = 0xb7
+return true
+}
+return false
+}
+
+func renvo386PrimaryNormalizationRepeated(a *renvoAsm, kind int) bool {
+opcode := 0
+size := 0
+if kind == renvoTypeByte || kind == renvoTypeBool {
+opcode, size = 0xc0b60f, 3
+} else if kind == renvoTypeInt8 {
+opcode, size = 0xc0be0f, 3
+} else if kind == renvoTypeInt16 {
+opcode, size = 0x98, 1
+} else if kind == renvoTypeUint16 {
+opcode, size = 0xc0b70f, 3
+} else {
+return false
+}
+if len(a.code) < size {
+return false
+}
+for i := 0; i < len(a.labelPos); i++ {
+if int(a.labelPos[i]) == len(a.code) {
+return false
+}
+}
+start := len(a.code) - size
+for i := 0; i < size; i++ {
+if a.code[start+i] != byte(opcode>>(8*i)) {
+return false
+}
+}
+return true
+}
 
 // source: backend/compiler_386_code16_impl.go
 
@@ -47759,6 +47826,10 @@ renvoAarch64AsmPopRdi(a)
 
 
 
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -49075,6 +49146,10 @@ result.data = data
 result.ok = true
 return result
 }
+
+
+
+
 
 
 
@@ -52110,6 +52185,10 @@ return nil, nil, false
 }
 return headers, tails, true
 }
+
+
+
+
 
 
 

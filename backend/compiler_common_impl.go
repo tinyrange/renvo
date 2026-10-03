@@ -770,34 +770,10 @@ func renvoAsmEmit24(a *renvoAsm, v int) {
 	a.code = append(a.code, byte(v>>16))
 }
 
-func renvoAsmPatch(a *renvoAsm) {
+// Patch signed 32-bit PC-relative data/BSS displacements after layout is fixed.
+// Backend definitions choose when this relocation representation applies.
+func renvoAsmPatchDataDisplacements32(a *renvoAsm) {
 	renvoNonNil(a)
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGPatchRelocations(a)
-		renvoAsmSetDataOffsets(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchArm {
-		rtgArmPatchRelocations(a)
-		renvoAsmSetDataOffsets(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAarch64 {
-		rtgAarch64PatchRelocations(a)
-		renvoAsmSetDataOffsets(a)
-		return
-	}
-	if a.c.renvoTargetArch == renvoArchAmd64 {
-		renvoAmd64RelaxBranches(a)
-		rtgX8664PatchRelocations(a)
-	} else if a.c.renvoTargetArch == renvoArch386 {
-		rtgX8632PatchRelocations(a)
-	}
-	renvoAsmSetDataOffsets(a)
-	if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
-		renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
-		return
-	}
 	for i := 0; i+2 < len(a.absRelocs); i += 3 {
 		at := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i)) & 2147483647
 		off := int(renvo_runtime_UnsafeInt32At(a.absRelocs, i+1)) & 2147483647
@@ -22812,63 +22788,6 @@ func renvoAsmMemDisp(a *renvoAsm, disp int, op int, disp8 int, disp32 int) {
 	renvoAmd64AsmMemDisp(a, disp, op, disp8, disp32)
 }
 
-func renvo386FusePrimaryLoadNormalization(a *renvoAsm, kind int) bool {
-	load := a.lastPrimaryLoad
-	end := load >> 3
-	modrm := end - (load & 7)
-	if load <= 0 || end != len(a.code) || modrm < 2 || a.code[modrm-2] != 0x0f {
-		return false
-	}
-	opcode := a.code[modrm-1]
-	if kind == renvoTypeByte || kind == renvoTypeBool {
-		return opcode == 0xb6
-	}
-	if kind == renvoTypeInt8 && opcode == 0xb6 {
-		a.code[modrm-1] = 0xbe
-		return true
-	}
-	if kind == renvoTypeInt16 {
-		return opcode == 0xbf
-	}
-	if kind == renvoTypeUint16 && opcode == 0xbf {
-		a.code[modrm-1] = 0xb7
-		return true
-	}
-	return false
-}
-
-func renvo386PrimaryNormalizationRepeated(a *renvoAsm, kind int) bool {
-	opcode := 0
-	size := 0
-	if kind == renvoTypeByte || kind == renvoTypeBool {
-		opcode, size = 0xc0b60f, 3
-	} else if kind == renvoTypeInt8 {
-		opcode, size = 0xc0be0f, 3
-	} else if kind == renvoTypeInt16 {
-		opcode, size = 0x98, 1
-	} else if kind == renvoTypeUint16 {
-		opcode, size = 0xc0b70f, 3
-	} else {
-		return false
-	}
-	if len(a.code) < size {
-		return false
-	}
-	for i := 0; i < len(a.labelPos); i++ {
-		if int(a.labelPos[i]) == len(a.code) {
-			return false
-		}
-	}
-	start := len(a.code) - size
-	for i := 0; i < size; i++ {
-		if a.code[start+i] != byte(opcode>>(8*i)) {
-			return false
-		}
-	}
-	return true
-}
-
-
 func renvoAsmShrPrimaryImm(a *renvoAsm, imm int) {
 	if renvoFixedTarget != 0 && a.c.renvoTargetArch != renvoArch386 && a.c.renvoTargetArch != renvoArchArm && a.c.renvoTargetArch != renvoArchWasm32 {
 		return
@@ -24942,7 +24861,7 @@ func renvoEmitCPointerStep(g *renvoLinearGen, ep *renvoExprParse, callIndex int,
 	if elementSize > 1 {
 		renvoAsmPushImm(&g.asm, elementSize)
 		renvoAsmPopTertiary(&g.asm)
-		renvoAsmMulPrimaryTertiary(g)
+		renvoAsmMulPrimaryTertiary(&g.asm)
 	}
 	renvoAsmCopyPrimaryToSecondary(&g.asm)
 	renvoAsmPopPrimary(&g.asm)
@@ -29610,22 +29529,6 @@ func renvoEmitComplexProductPair(g *renvoLinearGen, firstLeft int, firstRight in
 	}
 }
 
-func renvoAsmMulPrimaryTertiary(g *renvoLinearGen) {
-	a := &g.asm
-	if renvoPreparedBackendActive != 0 {
-		renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)
-	} else if g.c.renvoTargetArch == renvoArchWasm32 {
-		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
-	} else if g.c.renvoTargetArch == renvoArchAarch64 {
-		renvoAarch64AsmEmit(a, 0x9b007c40)
-	} else if g.c.renvoTargetArch == renvoArchArm {
-		renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
-	} else if g.c.renvoTargetArch == renvoArch386 {
-		renvoAsmEmit24(a, 0xc1af0f)
-	} else {
-		renvoAsmEmit32(a, 0xc1af0f48)
-	}
-}
 
 func renvoEmitComplexMultiplyDivide(g *renvoLinearGen, leftReal int, leftImag int, rightReal int, rightImag int, tok int, kind int) bool {
 	realPart := renvoAddUnnamedLocal(g, kind)
@@ -30600,7 +30503,7 @@ func renvoEmitScaledCompatibilityFloatBinaryExpr(g *renvoLinearGen, ep *renvoExp
 	}
 	renvoAsmPopTertiary(&g.asm)
 	if renvoTokCharIs(g.prog, e.tok, '*') {
-		renvoAsmMulPrimaryTertiary(g)
+		renvoAsmMulPrimaryTertiary(&g.asm)
 		renvoAsmSarPrimaryImm(&g.asm, 2)
 		return true
 	}

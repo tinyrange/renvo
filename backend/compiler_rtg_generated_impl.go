@@ -797,6 +797,106 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmPatch(a *renvoAsm) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAmd64RelaxBranches(a)
+		rtgX8664PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		rtgX8632PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		rtgAarch64PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		rtgArmPatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmMulPrimaryTertiary(a *renvoAsm) {
+renvoNonNil(a)
+if a.c.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit32(a, 0xc1af0f48)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArch386 {
+
+		renvoAsmEmit24(a, 0xc1af0f)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmEmit(a, 0x9b007c40)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmMulRegReg(a, renvoArmRegRax, renvoArmRegRcx, renvoArmRegRax)
+	
+return
+
+}
+if a.c.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMulRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
+	
+return
+
+}
+a.patchFailed = true
+}
+
 func renvoAsmPrimaryImm64(a *renvoAsm, imm int, high int) {
 renvoNonNil(a)
 if a.c.renvoTargetArch == renvoArchAmd64 {

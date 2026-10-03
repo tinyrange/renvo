@@ -43,6 +43,8 @@ func (op compilerEmitterOperation) contract() directEmitterOperation {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{"patch", "Patch", "renvoRTGPatchRelocations(a)\nrenvoAsmSetDataOffsets(a)", nil},
+	{"mul_primary_tertiary", "MulPrimaryTertiary", "renvoRTGDirectMultiply(a, renvoRTGPrimary, renvoRTGTertiary)", nil},
 	{"primary_imm64", "PrimaryImm64", "renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(uint32(imm)) | int64(high)<<32)", []compilerBindingParameter{{"imm", "int"}, {"high", "int"}}},
 	{"primary_imm", "PrimaryImm", "renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(imm))", []compilerBindingParameter{{"imm", "int"}}},
 	{"syscall", "Syscall", "renvoRTGDirectHostSyscall(a)", nil},
