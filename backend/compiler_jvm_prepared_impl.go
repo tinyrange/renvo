@@ -4357,6 +4357,56 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmSliceBackingSize(a *renvoAsm, elemSize int) int {
+renvoNonNil(a)
+	backingSize := 0
+	if renvoFixedTarget != 0 {
+		count := 4096
+		if elemSize == 1 {
+			count = 65536
+		}
+		backingSize = elemSize * count
+		if backingSize < 8192 {
+			backingSize = 8192
+		}
+		if backingSize > 65536 {
+			backingSize = 65536
+		}
+		if backingSize < elemSize {
+			backingSize = elemSize
+		}
+	} else {
+		backingSize = elemSize * 8192
+		if backingSize < 4096 {
+			backingSize = 4096
+		}
+		if backingSize > 65536 {
+			backingSize = 65536
+		}
+	}
+	return backingSize
+}
+
+func renvoAsmFoldedFieldAddressing(a *renvoAsm) bool {
+renvoNonNil(a)
+return false
+}
+
+func renvoAsmCanStoreScalar(a *renvoAsm, size int) bool {
+renvoNonNil(a)
+return true
+}
+
+func renvoAsmStorePrimaryMemTertiaryDisp(a *renvoAsm, disp int) {
+renvoNonNil(a)
+renvoRTGDirectStoreNative(a, renvoRTGAsmAddress(renvoRTGTertiary, RTGNoRegister, disp, 1), renvoRTGPrimary)
+}
+
+func renvoAsmLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
+renvoNonNil(a)
+renvoRTGDirectLoadNative(a, renvoRTGTertiary, renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, disp, 1))
+}
+
 func renvoAsmNeedsFunctionSymbols(a *renvoAsm) bool {
 renvoNonNil(a)
 if renvoFixedTarget == 0 && renvoIsHostedObject(a.c) { return true }

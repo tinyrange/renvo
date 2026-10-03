@@ -4150,6 +4150,11 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		slice_backing_size = renvoWasm32CompilerSliceBackingSize
+		folded_field_addressing = renvoWasm32CompilerFoldedFieldAddressing
+		can_store_scalar = renvoWasm32CompilerCanStoreScalar
+		store_primary_mem_tertiary_disp = renvoWasm32CompilerStorePrimaryMemTertiaryDisp
+		load_tertiary_mem_secondary_disp = renvoWasm32CompilerLoadTertiaryMemSecondaryDisp
 		needs_function_symbols = renvoWasm32CompilerNeedsFunctionSymbols
 		assembler_reserves = renvoWasm32CompilerAssemblerReserves
 		dereference_secondary = renvoWasm32CompilerDereferenceSecondary
@@ -5798,5 +5803,37 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
 		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoAsmPushPrimary(a)
+		renvoAsmLoadPrimaryMemSecondaryDisp(a, disp)
+		renvoAsmPopPrimaryToTertiary(a)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerStorePrimaryMemTertiaryDisp(a *renvoAsm, disp int) {
+		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRcx, disp, 4)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCanStoreScalar(a *renvoAsm, size int) bool {
+		return size == 1 || size == 2 || size == 4
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerFoldedFieldAddressing(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
+		return renvoWasm32FallbackSliceBackingSize
 	}
 }

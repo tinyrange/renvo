@@ -16521,7 +16521,7 @@ func renvoEmitCallArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int) int
 
 func renvoLocalStructSelectorOffset(g *renvoLinearGen, ep *renvoExprParse, idx int) (int, bool) {
 	renvoNonNil(g, ep)
-	if g.c.renvoTargetArch != renvoArchAmd64 {
+	if !renvoAsmFoldedFieldAddressing(&g.asm) {
 		return 0, false
 	}
 	e := &ep.exprs[idx]
@@ -17028,7 +17028,7 @@ func renvoEmitAppendLocalToLocation(g *renvoLinearGen, locEp *renvoExprParse, lo
 			return true
 		}
 		renvoAsmPushStack(a, offset)
-		if renvoPreparedBackendActive != 0 || elem.kind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
+		if elem.kind == renvoTypePointer || renvoAsmCanStoreScalar(a, elemSize) {
 			if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
 				return false
 			}
@@ -17293,7 +17293,7 @@ func renvoEmitAppendScalarToLocation(g *renvoLinearGen, ep *renvoExprParse, locE
 		return false
 	}
 	renvoAsmPushPrimary(a)
-	if renvoPreparedBackendActive != 0 || elemKind == renvoTypePointer || g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchAarch64 || elemSize == 1 || elemSize == 2 || elemSize == 4 {
+	if elemKind == renvoTypePointer || renvoAsmCanStoreScalar(a, elemSize) {
 		if !renvoEmitAppendDestPrimary(g, locEp, loc, elemSize) {
 			return false
 		}
@@ -17500,34 +17500,7 @@ func renvoEmitEnsureMemSlice(g *renvoLinearGen, elemSize int) {
 	okLabel := renvoAsmNewLabel(a)
 	renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 	renvoAsmJnzPrimary(a, okLabel)
-	backingSize := 0
-	if renvoFixedTarget != 0 {
-		count := 4096
-		if elemSize == 1 {
-			count = 65536
-		}
-		backingSize = elemSize * count
-		if backingSize < 8192 {
-			backingSize = 8192
-		}
-		if backingSize > 65536 {
-			backingSize = 65536
-		}
-		if backingSize < elemSize {
-			backingSize = elemSize
-		}
-	} else {
-		backingSize = elemSize * 8192
-		if backingSize < 4096 {
-			backingSize = 4096
-		}
-		if backingSize > 65536 {
-			backingSize = 65536
-		}
-	}
-	if g.c.renvoTargetArch == renvoArchWasm32 {
-		backingSize = renvoWasm32FallbackSliceBackingSize
-	}
+	backingSize := renvoAsmSliceBackingSize(a, elemSize)
 	label := renvoEnsureArenaAllocHelper(g)
 	renvoAsmPrimaryImm(a, backingSize)
 	renvoAsmCallLabel(a, label)
@@ -17957,7 +17930,7 @@ func renvoEmitSliceArrayConversion(g *renvoLinearGen, ep *renvoExprParse, arg in
 }
 func renvoEmitDirectSelectorWords(g *renvoLinearGen, ep *renvoExprParse, idx int, primaryDisp int, tertiaryDisp int, size int) bool {
 	renvoNonNil(g, ep)
-	if g.c.renvoTargetArch != renvoArchAmd64 {
+	if !renvoAsmFoldedFieldAddressing(&g.asm) {
 		return false
 	}
 	e := &ep.exprs[idx]
@@ -17989,12 +17962,7 @@ func renvoEmitDirectSelectorWords(g *renvoLinearGen, ep *renvoExprParse, idx int
 	}
 	renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, primaryOffset, size)
 	if tertiaryOffset >= 0 {
-		if renvoPreparedBackendActive != 0 {
-			renvoRTGDirectLoadNative(&g.asm, renvoRTGTertiary,
-				renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, tertiaryOffset, 1))
-		} else {
-			renvoAsmMemDisp(&g.asm, tertiaryOffset, 0x8b48, 0x4a, 0x8a)
-		}
+		renvoAsmLoadTertiaryMemSecondaryDisp(&g.asm, tertiaryOffset)
 	}
 	return true
 }
@@ -18059,18 +18027,7 @@ func renvoEmitSlicePtrLen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 			return false
 		}
 		renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
-		if g.c.renvoTargetArch == renvoArchWasm32 {
-			renvoAsmPushPrimary(a)
-			renvoAsmLoadPrimaryMemSecondaryDisp(a, 8)
-			renvoAsmPopPrimaryToTertiary(a)
-		} else {
-			if renvoPreparedBackendActive != 0 {
-				renvoRTGDirectLoadNative(a, renvoRTGTertiary,
-					renvoRTGAsmAddress(renvoRTGSecondary, RTGNoRegister, 8, 1))
-			} else {
-				renvoAsmMemDisp(a, 8, 0x8b48, 0x4a, 0x8a)
-			}
-		}
+		renvoAsmLoadTertiaryMemSecondaryDisp(a, 8)
 		return true
 	}
 	if e.kind == renvoExprIndex {
@@ -25918,17 +25875,7 @@ func renvoEmitNativeStructReturnExpr(g *renvoLinearGen, ep *renvoExprParse, idx 
 		renvoAsmLoadTertiaryStack(a, g.returnStruct)
 		for at := 0; at < size; at += 8 {
 			renvoAsmLoadPrimaryMemSecondaryDisp(a, at)
-			if g.c.renvoTargetArch == renvoArchAarch64 {
-				renvoAarch64AsmStoreRegMem(a, renvoAarch64RegRax, renvoAarch64RegRcx, at, 8)
-			} else if g.c.renvoTargetArch == renvoArchArm {
-				renvoArmAsmStoreRegMem(a, renvoArmRegRax, renvoArmRegRcx, at, 4)
-			} else if g.c.renvoTargetArch == renvoArchWasm32 {
-				renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegRcx, at, 4)
-			} else if at == 0 {
-				renvoAsmEmit24(a, 0x018948)
-			} else {
-				renvoAsmMemDisp(a, at, 0x8948, 0x41, 0x81)
-			}
+			renvoAsmStorePrimaryMemTertiaryDisp(a, at)
 		}
 		return true
 	}
@@ -26080,7 +26027,7 @@ func renvoEmitNativeSelectorAddressSecondary(g *renvoLinearGen, ep *renvoExprPar
 		renvoEmitSecondaryFrameAddress(g, offset-fieldOffset)
 		return true
 	}
-	if g.c.renvoTargetArch == renvoArchAmd64 && base.kind == renvoExprSelector {
+	if renvoAsmFoldedFieldAddressing(&g.asm) && base.kind == renvoExprSelector {
 		totalOffset := fieldOffset
 		rootIndex := e.left
 		for ep.exprs[rootIndex].kind == renvoExprSelector {
