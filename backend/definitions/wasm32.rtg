@@ -4150,6 +4150,10 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		write_value_regs = renvoWasm32CompilerWriteValueRegs
+		exit_status = renvoWasm32CompilerExitStatus
+		syscall_from_stack = renvoWasm32CompilerSyscallFromStack
+		jit_call_from_stack = renvoWasm32CompilerJITCallFromStack
 		runtime_stack_helpers = renvoWasm32CompilerRuntimeStackHelpers
 		object_indirect_register_call = renvoWasm32CompilerObjectIndirectRegisterCall
 		load_object_argument_word = renvoWasm32CompilerLoadObjectArgumentWord
@@ -6434,5 +6438,56 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerJITCallFromStack(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+		if wordCount > 1 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
+		}
+		if wordCount > 2 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
+		}
+		if wordCount > 3 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+		}
+		if wordCount > 4 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+		}
+		if wordCount > 5 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
+		}
+		if wordCount > 6 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
+		}
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerExitStatus(a *renvoAsm) bool {
+		renvoAsmEmit8(a, renvoWasm32OpExit)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerWriteValueRegs(g *renvoLinearGen, fd int) bool {
+		a := &g.asm
+		renvoAsmPushImm(a, fd)
+		renvoAsmPopCallWord0(a)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }

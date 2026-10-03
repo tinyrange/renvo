@@ -696,6 +696,10 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		write_value_regs = renvoArmCompilerWriteValueRegs
+		exit_status = renvoArmCompilerExitStatus
+		syscall_from_stack = renvoArmCompilerSyscallFromStack
+		jit_call_from_stack = renvoArmCompilerJITCallFromStack
 		runtime_stack_helpers = renvoArmCompilerRuntimeStackHelpers
 		object_indirect_register_call = renvoArmCompilerObjectIndirectRegisterCall
 		load_object_argument_word = renvoArmCompilerLoadObjectArgumentWord
@@ -2865,5 +2869,77 @@ go compiler {
 go compiler {
 	func renvoArmCompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerJITCallFromStack(a *renvoAsm) bool {
+		renvoArmAsmPopReg(a, renvoArmRegRdi)
+		renvoArmAsmPopReg(a, renvoArmRegRsi)
+		renvoArmAsmPopReg(a, renvoArmRegRdx)
+		renvoArmAsmPopReg(a, renvoArmRegRcx)
+		renvoArmAsmPopReg(a, renvoArmRegR8)
+		renvoArmAsmPopReg(a, renvoArmRegR9)
+		renvoArmAsmMovRegReg(a, renvoArmRegTmp, renvoArmRegRdi)
+		renvoArmAsmMovRegReg(a, renvoArmRegTmp2, renvoArmRegRsi)
+		renvoArmAsmMovRegReg(a, renvoArmRegAddr, renvoArmRegSp)
+		renvoArmAsmMovRegReg(a, renvoArmRegSp, renvoArmRegTmp2)
+		renvoArmAsmAddRegImm(a, renvoArmRegSp, renvoArmRegSp, -8)
+		renvoArmAsmStoreRegMem(a, renvoArmRegAddr, renvoArmRegSp, 4, 4)
+		renvoArmAsmMovRegReg(a, 0, renvoArmRegRdx)
+		renvoArmAsmMovRegReg(a, 1, renvoArmRegRcx)
+		renvoArmAsmMovRegReg(a, 2, renvoArmRegR8)
+		renvoArmAsmMovRegReg(a, 3, renvoArmRegR9)
+		renvoArmAsmEmit(a, 0xe12fff39) // BLX R9
+		renvoArmAsmLoadRegMem(a, renvoArmRegAddr, renvoArmRegSp, 4, 4)
+		renvoArmAsmMovRegReg(a, renvoArmRegSp, renvoArmRegAddr)
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+		renvoArmAsmPopReg(a, renvoArmRegSys)
+		if wordCount > 1 {
+			renvoArmAsmPopReg(a, 0)
+		}
+		if wordCount > 2 {
+			renvoArmAsmPopReg(a, 1)
+		}
+		if wordCount > 3 {
+			renvoArmAsmPopReg(a, 2)
+		}
+		if wordCount > 4 {
+			renvoArmAsmPopReg(a, 3)
+		}
+		if wordCount > 5 {
+			renvoArmAsmPopReg(a, 4)
+		}
+		if wordCount > 6 {
+			renvoArmAsmPopReg(a, 5)
+		}
+		renvoArmAsmEmit(a, 0xef000000)
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerExitStatus(a *renvoAsm) bool {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPrimaryImm(a, renvoLinuxArmSysExit)
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerWriteValueRegs(g *renvoLinearGen, fd int) bool {
+		a := &g.asm
+		renvoAsmPushImm(a, fd)
+		renvoAsmPopCallWord0(a)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }
