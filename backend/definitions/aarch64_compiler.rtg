@@ -737,6 +737,8 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		logical_shift_primary_word_immediate = renvoAarch64CompilerLogicalShiftPrimaryWordImmediate
+		bitwise_primary_tertiary = renvoAarch64CompilerBitwisePrimaryTertiary
 		ensure_append_bytes_helper = renvoAarch64CompilerEnsureAppendBytesHelper
 		append_bytes_helper = renvoAarch64CompilerAppendBytesHelper
 		unsigned_word_comparison = renvoAarch64CompilerUnsignedWordComparison
@@ -2728,5 +2730,26 @@ go compiler {
 	func renvoAarch64CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
 		g.asm.patchFailed = true
 		return 0
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerBitwisePrimaryTertiary(a *renvoAsm, op byte) {
+		instruction := 0x8a000040
+		if op == '|' {
+			instruction = 0xaa000040
+		} else if op == '^' {
+			instruction = 0xca000040
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoAarch64AsmEmit(a, instruction)
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerLogicalShiftPrimaryWordImmediate(a *renvoAsm, imm int) {
+		renvoAarch64AsmEmit(a, 0xd340fc00|(imm<<16))
 	}
 }

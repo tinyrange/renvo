@@ -797,6 +797,135 @@ func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
 }
 
+func renvoAsmLogicalShiftPrimaryWordImm(a *renvoAsm, imm int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		renvoAsmEmit4(a, 0x48, 0xc1, 0xe8, imm)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		renvo386AsmShrRaxImm(a, imm)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		renvoAarch64AsmEmit(a, 0xd340fc00|(imm<<16))
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		renvoArmAsmShrRaxImm(a, imm)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		renvoWasm32AsmShrRaxImm(a, imm)
+	
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmBitwisePrimaryTertiary(a *renvoAsm, op byte) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+		instruction := 0xc82148
+		if op == '|' {
+			instruction = 0xc80948
+		} else if op == '^' {
+			instruction = 0xc83148
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoAsmEmit24(a, instruction)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+
+		instruction := 0xc821
+		if op == '|' {
+			instruction = 0xc809
+		} else if op == '^' {
+			instruction = 0xc831
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoAsmEmit16(a, instruction)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
+
+		instruction := 0x8a000040
+		if op == '|' {
+			instruction = 0xaa000040
+		} else if op == '^' {
+			instruction = 0xca000040
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoAarch64AsmEmit(a, instruction)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+
+		instruction := 0xe0000000
+		if op == '|' {
+			instruction = 0xe1800000
+		} else if op == '^' {
+			instruction = 0xe0200000
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoArmAsmEmit(a, instruction|(renvoArmRegRcx<<16)|(renvoArmRegRax<<12)|renvoArmRegRax)
+	
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+		instruction := renvoWasm32OpAndRegReg
+		if op == '|' {
+			instruction = renvoWasm32OpOrRegReg
+		} else if op == '^' {
+			instruction = renvoWasm32OpXorRegReg
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoWasm32EmitRegReg(a, instruction, renvoWasm32RegRax, renvoWasm32RegRcx)
+	
+return
+
+}
+a.patchFailed = true
+}
+
 func renvoEnsureAppendBytesHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
 renvoCompilerSelector := g.c

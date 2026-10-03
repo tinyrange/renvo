@@ -85,6 +85,8 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "logical_shift_primary_word_immediate", Suffix: "LogicalShiftPrimaryWordImmediate", Function: "renvoAsmLogicalShiftPrimaryWordImm", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"imm", "int"}}, Prepared: "renvoRTGDirectShiftRightUnsignedImmediate(a, renvoRTGPrimary, byte(imm))"},
+	{Name: "bitwise_primary_tertiary", Suffix: "BitwisePrimaryTertiary", Function: "renvoAsmBitwisePrimaryTertiary", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"op", "byte"}}, Prepared: "if op == '\u0026' {\nrenvoRTGDirectBitAnd(a, renvoRTGPrimary, renvoRTGTertiary)\n} else if op == '|' {\nrenvoRTGDirectBitOr(a, renvoRTGPrimary, renvoRTGTertiary)\n} else if op == '^' {\nrenvoRTGDirectBitXor(a, renvoRTGPrimary, renvoRTGTertiary)\n} else {\na.patchFailed = true\n}"},
 	{Name: "ensure_append_bytes_helper", Suffix: "EnsureAppendBytesHelper", Function: "renvoEnsureAppendBytesHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "int", Failure: "0", Parameters: []compilerBindingParameter{}, Prepared: "g.asm.patchFailed = true\nreturn 0"},
 	{Name: "append_bytes_helper", Suffix: "AppendBytesHelper", Function: "renvoHasAppendBytesHelper", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return false"},
 	{Name: "unsigned_word_comparison", Suffix: "UnsignedWordComparison", Function: "renvoCanCompareUnsignedWord", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},

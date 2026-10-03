@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		logical_shift_primary_word_immediate = renvoWasm32CompilerLogicalShiftPrimaryWordImmediate
+		bitwise_primary_tertiary = renvoWasm32CompilerBitwisePrimaryTertiary
 		ensure_append_bytes_helper = renvoWasm32CompilerEnsureAppendBytesHelper
 		append_bytes_helper = renvoWasm32CompilerAppendBytesHelper
 		unsigned_word_comparison = renvoWasm32CompilerUnsignedWordComparison
@@ -6013,5 +6015,26 @@ go compiler {
 	func renvoWasm32CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
 		g.asm.patchFailed = true
 		return 0
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerBitwisePrimaryTertiary(a *renvoAsm, op byte) {
+		instruction := renvoWasm32OpAndRegReg
+		if op == '|' {
+			instruction = renvoWasm32OpOrRegReg
+		} else if op == '^' {
+			instruction = renvoWasm32OpXorRegReg
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoWasm32EmitRegReg(a, instruction, renvoWasm32RegRax, renvoWasm32RegRcx)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerLogicalShiftPrimaryWordImmediate(a *renvoAsm, imm int) {
+		renvoWasm32AsmShrRaxImm(a, imm)
 	}
 }
