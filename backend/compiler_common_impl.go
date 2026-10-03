@@ -15001,7 +15001,7 @@ func renvoEmitFunctionValueCall(g *renvoLinearGen, ep *renvoExprParse, idx int, 
 func renvoEmitCObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
 	renvoNonNil(g, functionType)
 	if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
-		return renvo386EmitCObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
+		return renvoEmitCdeclObjectFunctionPointerCall(g, functionType, handleOffset, argOffsets, resultOffset)
 	}
 	if functionType.resolved != 0 || len(argOffsets) > 20 || renvoPreparedBackendActive != 0 && len(argOffsets) > renvoRTGObjectRegisterCount() {
 		return false
@@ -24912,4 +24912,32 @@ func renvoEmitWordIntrinsicCall(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 		return renvoBoolInt(renvoEmitBuiltinNew(g, ep, idx))
 	}
 	return -1
+}
+
+func renvoEmitCdeclObjectFunctionPointerCall(g *renvoLinearGen, functionType *renvoTypeInfo, handleOffset int, argOffsets []int, resultOffset int) bool {
+	renvoNonNil(g, functionType)
+	if functionType.resolved != 0 || len(argOffsets) > 127 {
+		return false
+	}
+	for i := 0; i < len(argOffsets); i++ {
+		paramType := g.meta.fields[functionType.first+i].typ
+		param := renvoResolveType(g.meta, paramType)
+		if (!renvoTypeKindIsScalarInt(param.kind) && param.kind != renvoTypePointer && param.kind != renvoTypeFunc) ||
+			renvoTypeSize(g.meta, paramType) > g.c.renvoNativeIntSize {
+			return false
+		}
+	}
+	result := renvoResolveType(g.meta, functionType.elem)
+	if functionType.elem != 0 &&
+		((!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
+			renvoTypeSize(g.meta, functionType.elem) > g.c.renvoNativeIntSize) {
+		return false
+	}
+	if !renvoAsmObjectIndirectStackCall(&g.asm, handleOffset, argOffsets) {
+		return false
+	}
+	if resultOffset != 0 && functionType.elem != 0 {
+		renvoAsmStorePrimaryStack(&g.asm, resultOffset)
+	}
+	return true
 }
