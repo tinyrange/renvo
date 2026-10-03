@@ -367,7 +367,9 @@ go backend {
 		a.SetCode(RTGAppend32(a.Code(), imm))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpMovRegImm {
-			a.SetPrimaryLoad(-(len(a.Code())*32 + reg + 2))
+			// Tags 0..7 identify pushes; 8..15 identify immediate loads. An
+			// immediate's trailing bytes must not look like a register push.
+			a.SetPrimaryLoad(-(len(a.Code())*32 + reg + 10))
 		}
 	}
 
@@ -386,7 +388,7 @@ go backend {
 		}
 		end := len(a.Code())
 		if renvoWasm32FusibleBinary(op) &&
-			a.PrimaryLoad() == -(end*32+src+2) && end >= 6 &&
+			a.PrimaryLoad() == -(end*32+src+10) && end >= 6 &&
 			int(a.Code()[end-6]) == renvoWasm32OpMovRegImm && int(a.Code()[end-5]) == src {
 			imm := RTGGet32At(a.Code(), end-4)
 			a.SetCode(a.Code()[:end-6])
@@ -401,7 +403,7 @@ go backend {
 		a.SetCode(append(a.Code(), byte(src)))
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpMovRegReg {
-			a.SetPrimaryLoad(len(a.Code())*32 + dst + 2)
+			a.SetPrimaryLoad(len(a.Code())*32 + dst + 10)
 		}
 	}
 
@@ -427,7 +429,7 @@ go backend {
 				}
 			}
 			if a.PrimaryLoad() < 0 && end >= 6 && marker/32 == end &&
-				int(a.Code()[end-6]) == renvoWasm32OpMovRegImm {
+				int(a.Code()[end-6]) == renvoWasm32OpMovRegImm && marker%32 == int(a.Code()[end-5])+8 {
 				dst := int(a.Code()[end-5])
 				imm := RTGGet32At(a.Code(), end-4)
 				a.SetCode(a.Code()[:end-6])
@@ -439,8 +441,9 @@ go backend {
 			}
 			positive := a.PrimaryLoad() - 2
 			if a.PrimaryLoad() > 0 && positive/32 == end {
-				markerReg := positive % 32
-				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack &&
+				tag := positive % 32
+				markerReg := tag % 8
+				if tag < 8 && end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack &&
 					int(a.Code()[end-5]) == markerReg {
 					dst := int(a.Code()[end-5])
 					offset := RTGGet32At(a.Code(), end-4)
@@ -451,13 +454,8 @@ go backend {
 					a.SetPrimaryLoad(0)
 					return
 				}
-				// LoadMem uses the same primary-load marker. Its displacement can
-				// end in bytes that resemble a MovRegReg, so reject that longer
-				// form before considering the three-byte move below.
-				if end >= 8 && int(a.Code()[end-8]) == renvoWasm32OpLoadMem &&
-					int(a.Code()[end-7]) == markerReg {
-					a.SetPrimaryLoad(0)
-				} else if end >= 3 && int(a.Code()[end-3]) == renvoWasm32OpMovRegReg &&
+				if tag >= 8 && tag < 16 && end >= 3 &&
+					int(a.Code()[end-3]) == renvoWasm32OpMovRegReg &&
 					int(a.Code()[end-2]) == markerReg {
 					dst := int(a.Code()[end-2])
 					src := int(a.Code()[end-1])
@@ -472,7 +470,8 @@ go backend {
 			end := len(a.Code())
 			marker := a.PrimaryLoad() - 2
 			if a.PrimaryLoad() > 0 && marker/32 == end {
-				if end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack {
+				tag := marker % 32
+				if tag < 8 && end >= 6 && int(a.Code()[end-6]) == renvoWasm32OpLoadStack && int(a.Code()[end-5]) == tag {
 					dst := int(a.Code()[end-5])
 					offset := RTGGet32At(a.Code(), end-4)
 					a.SetCode(a.Code()[:end-6])
@@ -482,7 +481,7 @@ go backend {
 					a.SetPrimaryLoad(0)
 					return
 				}
-				if end >= 8 && int(a.Code()[end-8]) == renvoWasm32OpLoadMem {
+				if tag >= 16 && tag < 24 && end >= 8 && int(a.Code()[end-8]) == renvoWasm32OpLoadMem && int(a.Code()[end-7]) == tag-16 {
 					loadReg := int(a.Code()[end-7])
 					base := int(a.Code()[end-6])
 					disp := RTGGet32At(a.Code(), end-5)
@@ -554,7 +553,7 @@ go backend {
 		}
 		a.SetPrimaryLoad(0)
 		if op == renvoWasm32OpLoadMem {
-			a.SetPrimaryLoad(len(a.Code())*32 + reg + 2)
+			a.SetPrimaryLoad(len(a.Code())*32 + reg + 18)
 		}
 	}
 
@@ -885,6 +884,35 @@ go backend {
 		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRcx)
 	}
 
+	// The VM stores a wrapped subtraction as its comparison flag. A signed
+	// ordering must therefore handle operands with different signs separately;
+	// same-sign subtraction cannot overflow. Preserve both operands and scratch.
+	func renvoWasm32CompareSigned(a *RTGEmitter, left int, right int) {
+		scratch := renvoWasm32RegRdx
+		for scratch == left || scratch == right {
+			scratch++
+		}
+		sameSign := a.NewLabel()
+		done := a.NewLabel()
+		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, scratch)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, scratch, left)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpXorRegReg, scratch, right)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, scratch, 0)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondGe, RTGLabelIndex(sameSign))
+		renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, scratch, left)
+		// Zero on the left is greater than every negative right operand.
+		a.Int8(renvoWasm32OpBinaryRegImm)
+		a.Int8(scratch)
+		a.Int32(1)
+		a.Int8(renvoWasm32OpOrRegReg)
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, scratch, 0)
+		renvoWasm32AsmJmpLabel(a, RTGLabelIndex(done))
+		a.Mark(sameSign)
+		renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, left, right)
+		a.Mark(done)
+		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, scratch)
+	}
+
 	// Compare unsigned 32-bit words without changing the VM comparison format.
 	// Their upper 31-bit halves have a signed-safe difference. Only equal halves
 	// need a second comparison of the low bits. Preserve all operand registers.
@@ -934,6 +962,8 @@ go backend {
 		}
 		if unsigned {
 			renvoWasm32CompareUnsigned(a)
+		} else if cond != renvoWasm32CondEq && cond != renvoWasm32CondNe {
+			renvoWasm32CompareSigned(a, renvoWasm32RegRcx, renvoWasm32RegRax)
 		} else {
 			renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
 		}
@@ -3089,7 +3119,7 @@ go backend {
 	func vm32Compare(
 		out *RTGEmitter, left RTGRegister, right RTGRegister,
 	) {
-		vm32Binary(out, renvoWasm32OpCmpRegReg, left, right)
+		renvoWasm32CompareSigned(out, left.Code, right.Code)
 	}
 
 	func vm32Test(
@@ -3754,6 +3784,7 @@ arch vm32 {
 		renvoWasm32AsmCallLabel = go renvoWasm32AsmCallLabel
 		renvoWasm32AsmCmpRaxImm8 = go renvoWasm32AsmCmpRaxImm8
 		renvoWasm32AsmCmpRcxRaxSet = go renvoWasm32AsmCmpRcxRaxSet
+		renvoWasm32CompareSigned = go renvoWasm32CompareSigned
 		renvoWasm32CompareUnsigned = go renvoWasm32CompareUnsigned
 		renvoWasm32AsmDecMemRdx = go renvoWasm32AsmDecMemRdx
 		renvoWasm32AsmDivLeftRcxRightRax = go renvoWasm32AsmDivLeftRcxRightRax

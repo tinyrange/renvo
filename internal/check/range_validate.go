@@ -12,12 +12,9 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 		if stmt.Kind != syntax.StmtFor {
 			continue
 		}
-		for tok := stmt.StartTok + 1; tok < stmt.BodyStart; tok++ {
-			if file.Tokens[tok].KindLine&255 != syntax.TokenRange {
-				continue
-			}
+		if tok := findTypeTopLevelKind(file, stmt.StartTok+1, stmt.BodyStart, syntax.TokenRange); tok >= 0 {
 			if numericBuiltinInNestedFunction(file, fn, stmt.StartTok) {
-				break
+				continue
 			}
 			// Collect bindings only after finding a range statement in this
 			// function; the statement tree already identifies the loop headers.
@@ -30,7 +27,6 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if value.kind == "bool" || value.kind == "other" || value.kind == "float" || value.kind == "complex" || definiteStructExpr(pkg, info, fileIndex, scope, bindings, start, end, tok, 0) {
 				return start
 			}
-			break
 		}
 	}
 	return -1

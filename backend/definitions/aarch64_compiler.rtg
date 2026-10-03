@@ -664,6 +664,7 @@ go compiler {
 		if s.queueIndex < len(s.gen.funcQueue) {
 			return false
 		}
+		renvoResolveSpeculativeClosureLabels(&s.gen)
 		a := &s.gen.asm
 		var data []byte
 		if targetIsWindows(s.gen.c.renvoTargetOS) {

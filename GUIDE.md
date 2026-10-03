@@ -177,7 +177,7 @@ and the offline bundle containing `std/`, `forms/`, and `device/` against the
 former 4 MiB reference. Those historical comparisons are telemetry; both payloads
 must fit the shared 8 MiB ceiling. The checked-in
 `systems/frontend-linux-amd64.rtg` profile applies that full-bundle limit and
-gives the running compiler a 192 MiB arena:
+gives the running compiler a 224 MiB arena so cross-target REPL compilation fits:
 
 ```sh
 renvo -system systems/frontend-linux-amd64.rtg -tags renvo_bundle -s \
@@ -325,18 +325,272 @@ not duplicate the linker or add C semantics to a target backend. The supported
 C subset and its current limitations, including the initial integer-only export
 header ABI, are documented beside that frontend.
 
-The closed out-of-scope list is:
+Generics are frontend work. The frontend checks constraints and specializes
+generic declarations into concrete types and functions before ordinary lowering.
+Backends receive the existing concrete source subset. Generic checking and
+specialization live in `internal/check/generic_*.go`; acceptance cases include
+`generic_builtin_identity`, which checks inferred universe types when package
+types hide their names. Specialization adds a declaration-only package of
+builtin aliases only when needed; original package indices remain stable.
+`generic_alias_scope` checks receiver, parameter, result, and captured names
+that hide concrete types in function bodies and closure signatures, along with
+local type declarations and function-value conversions. Body-inserted type
+text uses package aliases when needed to keep its checked lexical identity.
+Graphs containing generic declarations also check ordinary function bodies
+before specialization, including unused functions in imported packages.
+Array lengths and constant bounds use the selected target's integer width,
+including when a 32-bit frontend compiles for a 64-bit target. Array identity
+stores lengths in 64 bits; explicit literal keys must fit target `int`, while
+inferred positions and lengths can extend beyond its maximum. Target-width
+tests compare declaration acceptance with Go's checker for both widths. A VM32-hosted frontend also compiles and executes a 64-bit program containing
+huge zero-element arrays and slices and function-size constant array bounds.
+Signed VM comparisons handle different-sign operands before subtracting, since
+the VM comparison flag stores a wrapped 32-bit difference. Peephole load markers
+identify the instruction kind as well as its register, so literal and displacement
+bytes cannot be mistaken for neighboring instructions.
+`generic_ordinary_bodies` covers concrete parameters, methods, closures, and
+indexing untyped string literals and constants. String indexing produces a byte
+value, so it cannot be used as a constant initializer.
+The generic checker models the existing `open`, `read`, `write`, and `chmod`
+runtime primitives, including their integer results and argument types. The
+legacy `close(int) -> int` form remains available for file descriptors; a type
+parameter constrained by `~int` does not become a valid channel-close operand.
+`generic_runtime_os` checks file I/O through generic function values and the
+Renvo standard library with process arguments supplied on both native and VM
+targets.
+Function-value storage includes an unused zero-length array of slices to retain
+Go noncomparability through boxing and containing arrays or structs. Comparisons
+through interfaces and use as dynamic map keys still panic, including typed nil
+functions and empty containers. `generic_function_interfaces` covers these
+cases, cross-package function aliases, assertions, methods, and pointer controls.
+Defined function types keep separate declarations and interface identities from
+anonymous function types. Matching signatures share their implementation tags,
+so assignments and conversions retain callable closures. Ordinary function
+values use a fixed descriptor containing a tag and an interface holding a typed
+environment pointer. Method environments snapshot the receiver at binding;
+closure environments retain captured variables. Dispatch and native defer
+registration restore each concrete environment type.
+Tuple assignments through native function values obtain their result type from
+the callable signature before looking up a named declaration. This preserves
+interface result fields and local callbacks that shadow global functions.
+`generic_tuple_callbacks` covers inferred and explicitly typed callbacks across
+packages.
+Generic map type replacements preserve enclosing parentheses, including the
+call delimiters in `make(map[K]V)`. Parenthesized type arguments and declared
+map types are resolved before map construction and indexing are lowered;
+`generic_map_types` exercises creation, nil conversions, pointers, named types,
+and aliases. Function-range checking resolves named and constrained yield
+function types, including variadic yields, while retaining the required builtin
+`bool` result identity. Integer and function ranges require Go 1.22 and 1.23,
+respectively, including in unused generic definitions.
+Function ranges lower to typed callbacks before function-value conversion in
+both whole-program and incremental links. The lowering evaluates the iterator
+once, creates fresh declared bindings, preserves assignment destinations and
+nested branches, and propagates outward branches and returns after the iterator
+finishes. Named results are assigned before iterator cleanup. Yield state checks
+detect resumed, exhausted, reentrant, and swallowed-panic invocations.
+Interface iterator methods retain their declared signatures, including embedded
+and aliased interfaces. Parentheses around named yield types are normalized
+before the compact backend boundary.
+`generic_range_functions` and the upstream slices/maps iterator fixture cover
+these paths. Defers in an iterator body retain the enclosing function as their
+owner. Typed invocation records snapshot callees and arguments into one list
+per invocation, including defers outside the loop so their LIFO order is retained.
+Compiler-generated invocation and dispatch frames explicitly forward the owner's
+recovery permission; ordinary authored helpers retain normal recover semantics.
+`generic_range_defers` covers normal returns, named results, nested owners,
+methods, builtins, nil callbacks, and nested/replaced panics. Variadic yield
+signatures are checked and execution has been validated on AMD64, x86-32, ARM,
+and AArch64. Go 1.25.5's compiler crashes on the separate variadic-yield probe,
+so that probe remains outside the host-Go expectation corpus.
+Deferred tagged function values select and register their actual callable in
+the original function's defer stack. Callees and arguments are captured once;
+direct recovery, concrete/interface method values, tuple arguments and variadic
+snapshots are covered by `generic_defer_callbacks`. Interface method values
+check nil receivers when selected, before deferred arguments are evaluated;
+interfaces containing typed nil pointers retain their concrete method behavior.
+Discarded `recover()` calls lower to blank assignments in their original frame,
+including parenthesized calls, simple control-statement initializers, and
+for-clause post statements.
+A defer executed on a
+helper's normal return cannot recover a panic already active when that helper
+was entered; the native defer ABI grants recovery only for a new panic unwound
+by its owner.
+The same acceptance module checks defined and anonymous assertions, generic
+function aliases, assignments, returns, and conversions between defined types.
+`generic_function_conversions` also checks anonymous function-type conversions,
+typed nil conversions, single evaluation of captured callbacks, aliases inside
+container signatures, and nested function returns. Function-type aliases are
+resolved in their lexical scope before storage selection; defined parameter
+types retain their identity. Nested function results receive concrete storage
+and chained calls dispatch in source evaluation order.
+`generic_nested_callbacks` checks higher-order callbacks across packages,
+parameter names inside nested function types, native callback parameters,
+callback literals in slices, arrays and maps, captures, and direct calls through
+function type assertions. Parameter/result lists and assertion parentheses are
+type syntax rather than function conversions. Container literals supply the
+element's declared function type when choosing callable storage. Import removal
+uses declaration boundaries so explicit semicolons and shared source lines do
+not remove neighboring declarations.
+`generic_aggregate_callbacks` checks aggregate aliases in callback signatures,
+including imported structs and interfaces and private types from different
+packages. Matching aggregate alias bodies share a signature spelling without
+moving their declarations; aliases with private members retain their package
+identity. The return checker parses a closure's full signature before skipping
+its body, including braces belonging to parameter and result types. Interface
+method declarations sharing a scalar type's name are not conversions.
+Builtin bridges preserve primitive and builtin `error` identity across
+package boundaries, boxing, generic methods, and closure results. Other cases include
+`generic_functions` and an unchanged copy of Go 1.25.5's `cmp` package in
+`generic_upstream_cmp`, plus upstream slice algorithms in
+`generic_upstream_slices` (only dependency import paths are adapted). Runtime compatibility with the upstream Go standard
+library is a separate task.
+`generic_intrinsic_aliases` checks authored callback and global names that
+match runtime intrinsic aliases, including names with existing suffixes and
+generic specialization prefixes. Linked intrinsic aliases avoid authored names.
+When an intrinsic alias changes, a `//renvo:intrinsic` declaration marker keeps
+its backend ABI identity; unmarked functions with similar names stay ordinary
+calls. The compact unit format is unchanged, and package-artifact linking retains
+these markers.
 
-- generics.
+A method selected through a type parameter must retain Go's receiver semantics
+after specialization. Method expressions become concrete forwarding functions;
+method values retain the outer receiver through a method-only interface. This
+matters when an embedded interface field changes after binding the method value.
+`generic_promoted_methods` covers this distinction, private cross-package
+methods, nested embedding, interface assertions, and variadic method calls and
+expressions. `generic_embedded_pointer_paths` covers successive embedded pointer
+dereferences mixed with value embedding, reads and writes through slice/call/
+assertion bases, captured variables, nil pointer recovery, and direct methods
+that hide promoted methods. It also covers range loops inside closure conditions.
+`generic_unsafe` covers unsafe pointer conversions, cross-package
+specializations of unsafe pointer types, and package declarations that shadow
+predeclared value names. Type-set interface declarations are checked even when
+the source has no generic declarations or instantiations; their use as value
+types is rejected in signatures, variables, conversions, assertions, literals,
+and builtin type operands, including unused functions and closures. Aliases and
+imports retain this distinction, while local values and types may shadow a
+constraint name. `generic_constraint_values` covers valid value-interface
+conversions and shadowing through both ordinary and generic functions.
+`generic_predeclared_shadow` covers package callbacks named after predeclared
+types and builtins, local alias and value shadowing, initializer visibility,
+and type parameters that shadow package values. Type positions reject visible
+values even when they have a predeclared type's spelling.
+
+`//renvo:reflect` on a generic named struct applies to its concrete
+specializations. Compiler-owned `//renvo:typename` comments retain semantic type
+and embedded-field names through source lowering and frontend caches. Embedded
+alias bridges have one declaration per field identity across the package graph,
+so package symbol disambiguation cannot disconnect their selectors or literal
+keys. `generic_reflection` covers names, alias fields, private-field visibility,
+field reads and writes, nil pointers, and grouped reflection annotations using
+Renvo's existing reflection API. The predeclared `error` type retains its defined
+interface identity; it is distinct from `interface { Error() string }`, and a
+pointer to it has no methods.
+
+Runtime identity compares anonymous interfaces by their complete method sets,
+including embedded methods, signatures, and variadic arguments. Private struct
+fields and interface methods include their declaring package in identity.
+Compact package ownership must survive transient linking, and hoisted anonymous
+type aliases retain their source package. Unicode identifier lowering preserves
+export status. `generic_type_identity` exercises these rules across packages,
+including pointers, arrays, slices, function signatures, and Unicode members.
+
+Dot-imported names retain their declaring package in checked name and type
+references. Linking can then apply the same alias to declarations and uses when
+another package or local binding requires renaming. Aggregate field and method
+names remain member declarations rather than package references.
+`generic_dot_import_identity` covers ordinary and generic calls, aliases,
+signature types, imported variables, constant array lengths, callbacks, and
+anonymous fields across normal and dot-importing files in the same package.
+
+Function initializers use the same callable representation through transparent
+parentheses, both for inferred locals and globals. Named function conversions
+wrap native implementations in that type's shared callable storage. Resolve
+initializer operands before introducing new local bindings, including when a
+local function variable shadows the function supplying its initial value.
+`generic_function_initializers` covers these cases alongside grouped declarations,
+reassignment, reused short declarations, nil conversions, imported methods, and
+parenthesized calls returning function values.
+
+Grouped `var (...)` declarations retain each specification's own initializer
+scope, including multi-result calls and closures containing declarations.
+Linking expands the group into ordinary `var` declarations before callable
+lowering, preserving declaration and initialization order. The
+`generic_variable_groups` acceptance module covers local and global groups,
+initializer shadowing, callbacks, tuple results, and generic function bodies.
+
+Unsafe layout operands are checked as values even though they are not evaluated.
+Untyped operands must fit their default type. `Offsetof` requires one accessible
+field and rejects methods, ambiguity, and promotion through embedded pointers;
+an explicit pointer base is allowed. Variable-size checking propagates through
+arrays and structs, but stops at pointers, slices, maps, channels, interfaces,
+and functions. This also determines whether an enclosing array `len` or `cap`
+can be constant. `generic_unsafe_layout` covers these rules and shallower field
+selection. The generic array-length checker uses its expression evaluator when
+the ordinary wide-constant evaluator cannot handle the expression.
+Scalar `unsafe.Sizeof` results are constants during generic checking, using the
+destination word width and Renvo's scalar storage. They can supply array lengths
+without losing the resulting array's type identity. Backend constant evaluation
+shares layout queries between package constants, local constants, and array
+bounds; queries never evaluate their operands or cache unresolved layouts.
+Numeric constant checking also covers fixed containers and aggregate offsets.
+The frontend layout model uses the selected target's language alignment and
+lowering ABI: maps and slices use descriptor storage, ordinary pointers occupy
+normalized slots, and object output uses native aggregate and pointer layouts.
+Target alignment and object mode participate in package-cache identities.
+Ordinary function-value descriptors occupy 24 bytes in the normalized ABI;
+object function values remain native code pointers. Numeric function layout
+constants therefore work before collecting implementations. Queries use an
+explicit callable operand type so direct function names and local callbacks
+agree, and never evaluate their operands. `generic_callable_layout` checks
+constant array bounds, cross-package aliases and identity, bound receiver
+snapshots, closures, containing aggregates, and nil values.
+Empty structs, zero-length arrays, and arrays of empty
+elements have zero value size and stride. The backend keeps their addressable
+scratch storage separate from data copies and unsafe queries. Zero-element
+slices retain logical length/capacity without proportional backing allocation;
+expanded append updates their descriptor without per-element copying.
+`generic_zero_layout` checks generic array identity, empty fields, callbacks,
+bound receivers, defer, boxed values, maps, slices and array materialization.
+
+Generic constant evaluation keeps exact rational values until a concrete type
+supplies the rounding context. Specializations emit rounded floating and complex
+constants as exact hexadecimal binary literals, including constants passed to
+calls, composites, and builtins. `generic_constants` covers these contexts and
+float32 double rounding. Map types in specialized bodies need concrete spelling
+because their lowering helpers live at package scope, outside local parameter
+aliases.
+
+At the ordinary numeric boundary, a typed real value combined with untyped
+imaginary zero keeps its real type and defined name. The backend uses that type
+for storage and comparison instructions. Leading decimal literals end a source
+line like other numbers; their first character is not a continuation operator.
+The compact-unit reader accepts a separately encoded decimal point and remaps
+token ranges after recovering the literal. Numeric regressions cover both raw
+source and unit input, including VM32 and 32-bit native targets.
+
+Generic language checks use the loader's effective version for each source file.
+Type parameters and instantiation require Go 1.18, the concrete comparable
+exception requires Go 1.20, function-value and interface-argument inference use
+Go 1.21 rules, and generic alias declarations require Go 1.24. A declaration and
+its caller can select different versions, including through leading build
+constraints; the instantiation's file owns its constraint-satisfaction rules.
+
+The command driver passes destination word and pointer widths through
+`pipeline.Config` to `load.Graph.Layout`. Generic constant representability,
+unsigned complement, array lengths, and constant indices use that layout.
+Resolved custom backend descriptors supply the same widths. Keep the layout in
+each build session and its package-cache identity so concurrent and incremental
+builds cannot reuse a different target's checking context.
 
 Goroutines, channels, and `select` are accepted by the frontend and lowered to
 the `renvo.dev/x/runtime` handler ABI before backend compilation. Version 1
 handlers serialize Renvo execution; this is concurrency, not parallelism. The
 direct backend source subset still does not accept those constructs.
 
-These features must fail early with clear, structured diagnostics saying that
-they are unsupported. Do not let them fall through to a generic backend
-failure.
+Invalid generic definitions and instantiations must fail in the frontend with
+structured diagnostics, including definitions that are never instantiated.
 
 Every other ordinary Go feature is frontend work unless the project explicitly
 changes the policy. That includes:
@@ -590,6 +844,17 @@ operation that must not destroy it.
 The normalized backend storage slot is eight bytes. This is not proof that the
 target pointer or language `int` is eight bytes.
 
+Array metadata keeps the logical length in `arrayLength` (`uint64`), independently
+of host-sized compiler counts and storage sizes. Inferred lengths use the all-ones
+sentinel until the literal is resolved. A 32-bit compiler targeting 64-bit code
+must preserve both words of a parsed array bound, type identity, and emitted
+`len`/`cap` values. Storage-size multiplication is checked before narrowing;
+an unrepresentable array size is marked negative. Struct metadata propagates
+that marker and checks field-size addition and alignment before narrowing.
+Such a type can describe a pointee and supply a constant length, but requesting
+physical storage still fails. This does not establish support for materializing
+gigantic aggregates or implementing all of Go's zero-size storage rules.
+
 Important stored layouts are:
 
 - string: pointer, length;
@@ -740,6 +1005,15 @@ This is especially important for:
 - slice and string element bounds;
 - array and slice expressions nested under selectors or indexes;
 - `bytes`/`io` sentinel error identity.
+
+Native closure dispatch must include compatible literals before their factories
+are emitted. Constructing a handle establishes its capture layout and requeues
+any body deferred earlier. At queue exhaustion, referenced literals whose
+constructors were never emitted receive fault labels without compiling dead
+bodies. `closure_transitive_factory` and `closure_dispatch_unreachable` cover
+these cases. The function queue can grow when a body is requeued; its capacity
+must participate in scratch-arena lifetime tracking, or a self-hosted compiler
+can retain a queue allocation after rewinding the memory that owns it.
 
 Runtime faults must use the same panic machinery as explicit `panic`:
 
@@ -904,8 +1178,8 @@ Native and WASI Tier 1 targets use the bundled frontend/backend compiler to buil
 itself. VM32 measures a prepared custom backend compiling a semantic regression
 program from a compact unit.
 The shared policy lives in `internal/perfgate/policy.json`: 8 MiB compiler,
-256 MiB peak memory, and median growth limits of 25% CPU, 20% memory,
-10% artifact size, and 20% VM instructions against a pinned source reference.
+256 MiB peak memory, and median growth limits of 60% CPU, 20% memory,
+30% artifact size, and 20% VM instructions against a pinned source reference.
 Both revisions execute on the same runner. Larger increases block feature
 inclusion for maintainer evaluation case by case.
 

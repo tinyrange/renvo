@@ -139,15 +139,15 @@ func rewriteBuiltinCalls(original *unit.Program, text []byte, edits []functionVa
 		cursor++
 	}
 	for _, decl := range original.Decls {
-		decl.NameStart = mapFunctionValueOffset(decl.NameStart, edits, originalLength)
-		decl.NameEnd = mapFunctionValueOffset(decl.NameEnd, edits, originalLength)
+		decl.NameStart = mapBuiltinCallOffset(decl.NameStart, edits, changes, originalLength)
+		decl.NameEnd = mapBuiltinCallOffset(decl.NameEnd, edits, changes, originalLength)
 		decl.StartTok = mapBuiltinCallToken(decl.StartTok, changes)
 		decl.EndTok = mapBuiltinCallToken(decl.EndTok, changes)
 		out.Decls = append(out.Decls, decl)
 	}
 	for _, fn := range original.Funcs {
-		fn.NameStart = mapFunctionValueOffset(fn.NameStart, edits, originalLength)
-		fn.NameEnd = mapFunctionValueOffset(fn.NameEnd, edits, originalLength)
+		fn.NameStart = mapBuiltinCallOffset(fn.NameStart, edits, changes, originalLength)
+		fn.NameEnd = mapBuiltinCallOffset(fn.NameEnd, edits, changes, originalLength)
 		fn.StartTok = mapBuiltinCallToken(fn.StartTok, changes)
 		fn.NameTok = mapBuiltinCallToken(fn.NameTok, changes)
 		if fn.ReceiverStart != fn.ReceiverEnd {
@@ -227,4 +227,32 @@ func mapBuiltinCallToken(index int, changes []callTokenEdit) int {
 		return changes[lo].start + delta
 	}
 	return index + delta
+}
+
+// Reuse the cumulative text offsets recorded while preparing token edits.
+// Looking up every declaration against the complete edit list is quadratic.
+func mapBuiltinCallOffset(position int, edits []functionValueEdit, changes []callTokenEdit, sourceLength int) int {
+	if position < 0 {
+		return 0
+	}
+	if position > sourceLength {
+		position = sourceLength
+	}
+	lo, hi := 0, len(edits)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if edits[mid].start <= position {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo == 0 {
+		return position
+	}
+	edit, change := &edits[lo-1], &changes[lo-1]
+	if position < edit.end {
+		return change.offset
+	}
+	return position + change.offset + len(edit.text) - edit.end
 }

@@ -11,6 +11,7 @@ func CheckGraphCore(graph load.Graph) Program {
 	if !prog.Ok {
 		return prog
 	}
+	graph = prog.Graph
 	for i := 0; i < len(graph.Packages); i++ {
 		prog = CheckGraphPackageCore(graph, prog, i)
 		if !prog.Ok {
@@ -35,6 +36,13 @@ func CheckGraphHeadersCore(graph load.Graph) Program {
 	if !graph.Ok {
 		return checkFail(prog, CheckErrGraph, graph.ErrorPackage, -1, -1)
 	}
+	prepared := PrepareGenerics(graph)
+	if !prepared.Ok {
+		prog.ErrorMessage = prepared.Message
+		return checkFail(prog, CheckErrGeneric, prepared.ErrorPackage, prepared.ErrorFile, prepared.ErrorToken)
+	}
+	graph = prepared.Graph
+	prog.Graph = graph
 	prog.Packages = make([]PackageInfo, 0, len(graph.Packages))
 	for i := 0; i < len(graph.Packages); i++ {
 		info, ok, err, file, tok := checkPackageHeader(graph, i)
@@ -118,7 +126,7 @@ func checkPackageBodyCore(graph load.Graph, pkgIndex int, info *PackageInfo, che
 	if file, tok := invalidRecursiveValueType(pkg, info); tok >= 0 {
 		return false, CheckErrRecursiveType, file, tok
 	}
-	if file, tok := undefinedSimplePackageTypeCore(pkg, info); tok >= 0 {
+	if file, tok := undefinedSimplePackageTypeCore(pkg, info, checked); tok >= 0 {
 		return false, CheckErrUndefined, file, tok
 	}
 	info.CoreTypeRefs = buildPackageTypeRefsCore(pkg, info, checked)
@@ -419,15 +427,17 @@ func countTypeDeclsCore(decls []DeclInfo) int {
 	return count
 }
 
-func undefinedSimplePackageTypeCore(pkg *load.Package, info *PackageInfo) (int, int) {
+func undefinedSimplePackageTypeCore(pkg *load.Package, info *PackageInfo, checked []PackageInfo) (int, int) {
 	for i := 0; i < len(info.Decls); i++ {
 		decl := info.Decls[i]
 		if decl.TypeEnd-decl.TypeStart != 1 {
 			continue
 		}
 		file := &pkg.Files[decl.File].File
-		if file.Tokens[decl.TypeStart].KindLine&255 == syntax.TokenIdent && !corePredeclaredToken(file, decl.TypeStart) && lookupPackageSymbolTokenCore(info, file, decl.File, decl.TypeStart) < 0 && !hasDotImportCore(info, decl.File) {
-			return decl.File, decl.TypeStart
+		if file.Tokens[decl.TypeStart].KindLine&255 == syntax.TokenIdent && !corePredeclaredToken(file, decl.TypeStart) && lookupPackageSymbolTokenCore(info, file, decl.File, decl.TypeStart) < 0 {
+			if _, symbol := lookupDotImportSymbolCore(info, checked, file, decl.File, decl.TypeStart); symbol < 0 {
+				return decl.File, decl.TypeStart
+			}
 		}
 	}
 	return -1, -1
@@ -495,6 +505,7 @@ type CoreScopeName struct {
 	Kind  int
 	Token int
 	Hash  int
+	End   int // zero is function-wide; closure parameters end with their body
 }
 
 func resolutionCapacitiesCore(tokens int) (int, int) {
@@ -563,12 +574,17 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 		if !skipRef && scopeIndex < 0 && lookupImportTokenNameCore(info, fileIndex, file, i) < 0 {
 			symbolIndex := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbolIndex >= 0 {
-				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex})
+				refs = append(refs, CoreNameRef{Token: i, Index: symbolIndex, Package: info.Package})
+			} else if pkg, symbol := lookupDotImportSymbolCore(info, checked, file, fileIndex, i); symbol >= 0 {
+				refs = append(refs, CoreNameRef{Token: i, Index: symbol, Package: pkg})
+				if bad := invalidImportedStructLiteral(file, i, i, &checked[pkg], symbol); bad >= 0 {
+					return refs, selectors, bad
+				}
 			} else if corePredeclaredToken(file, i) {
 				if builtinCalls != nil && i+1 < end && tokCharIs(file, i+1, '(') && coreOrdinaryBuiltinToken(file, i) {
 					*builtinCalls = append(*builtinCalls, i)
 				}
-			} else if !hasDotImportCore(info, fileIndex) && undefined < 0 {
+			} else if undefined < 0 {
 				undefined = i
 			}
 		}
@@ -584,7 +600,7 @@ func appendResolutionRefsCore(refs []CoreNameRef, selectors []CoreSelectorRef, f
 					if !exportedToken(file, i+1) {
 						return refs, selectors, i + 1
 					}
-					if bad := invalidImportedStructLiteral(file, i+1, &checked[selector.BasePackage], selector.Symbol); bad >= 0 {
+					if bad := invalidImportedStructLiteral(file, i-1, i+1, &checked[selector.BasePackage], selector.Symbol); bad >= 0 {
 						return refs, selectors, bad
 					}
 				}
@@ -602,14 +618,14 @@ func exportedToken(file *syntax.File, tok int) bool {
 	return syntax.IdentifierExported(file.Src, start)
 }
 
-func invalidImportedStructLiteral(file *syntax.File, name int, pkg *PackageInfo, symbol int) int {
+func invalidImportedStructLiteral(file *syntax.File, base int, name int, pkg *PackageInfo, symbol int) int {
 	if !tokCharIs(file, name+1, '{') {
 		return -1
 	}
 	// In []pkg.T{...}, [N]pkg.T{...}, or map[K]pkg.T{...}, the
 	// braces initialize the collection, not T's private fields. Pointer
 	// element types may appear between the bracket and package selector.
-	before := name - 3
+	before := base - 1
 	collections := 0
 	for before >= 0 {
 		if tokCharIs(file, before, '*') {
@@ -720,15 +736,6 @@ func corePredeclaredToken(file *syntax.File, tok int) bool {
 	start := int(offsets[low*2]) | int(offsets[low*2+1])<<8
 	end := int(offsets[low*2+2]) | int(offsets[low*2+3])<<8
 	return tokenMatchesCoreSymbol(file.Src, int(token.Start), tokenSize, names[start:end])
-}
-
-func hasDotImportCore(info *PackageInfo, fileIndex int) bool {
-	for i := 0; i < len(info.Imports); i++ {
-		if info.Imports[i].File == fileIndex && info.Imports[i].Dot {
-			return true
-		}
-	}
-	return false
 }
 
 func coreSelectorContinues(file *syntax.File, nameTok int, end int) bool {
@@ -869,6 +876,29 @@ func markCoreTypeRefOwnerDecl(refs []CoreTypeRef, start int, ownerDecl int) {
 
 func appendTypeSpanRefsCore(refs []CoreTypeRef, file *syntax.File, fileIndex int, info *PackageInfo, checked []PackageInfo, scope *CoreScope, start int, end int) []CoreTypeRef {
 	for i := start; i < end && i < len(file.Tokens); i++ {
+		kind := file.Tokens[i].KindLine & 255
+		if (kind == syntax.TokenStruct || kind == syntax.TokenInterface) && tokCharIs(file, i+1, '{') {
+			close := findTypeMatching(file, i+1, '{', '}')
+			if close > i+1 && close <= end {
+				// Field and method names declare members; only their type spans
+				// refer to package symbols, including symbols from dot imports.
+				if kind == syntax.TokenStruct {
+					for _, field := range parseStructFields(file, i+2, close-1) {
+						refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, field.TypeStart, field.TypeEnd)
+					}
+				} else {
+					methods, embeds := parseInterfaceElements(file, i+2, close-1)
+					for _, method := range methods {
+						refs = appendSignatureTypeRefsCore(refs, file, fileIndex, info, checked, scope, &method.Signature)
+					}
+					for _, embed := range embeds {
+						refs = appendTypeSpanRefsCore(refs, file, fileIndex, info, checked, scope, embed.TypeStart, embed.TypeEnd)
+					}
+				}
+				i = close - 1
+				continue
+			}
+		}
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
@@ -890,10 +920,37 @@ func appendTypeSpanRefsCore(refs []CoreTypeRef, file *syntax.File, fileIndex int
 			symbol := lookupPackageSymbolTokenCore(info, file, fileIndex, i)
 			if symbol >= 0 {
 				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: info.Package, Symbol: symbol})
+			} else if pkg, imported := lookupDotImportSymbolCore(info, checked, file, fileIndex, i); imported >= 0 {
+				refs = append(refs, CoreTypeRef{Kind: TypeRefPackage, File: fileIndex, Token: i, BaseTok: i, DotTok: i, Package: pkg, Symbol: imported})
 			}
 		}
 	}
 	return refs
+}
+
+// Dot imports introduce exported declarations into this file's scope. Keep the
+// declaring package on unqualified references so linking can rename them safely.
+func lookupDotImportSymbolCore(info *PackageInfo, checked []PackageInfo, file *syntax.File, fileIndex int, tok int) (int, int) {
+	if !exportedToken(file, tok) {
+		return -1, -1
+	}
+	owner, found := -1, -1
+	for i := 0; i < len(info.Imports); i++ {
+		imp := info.Imports[i]
+		if imp.File != fileIndex || !imp.Dot || imp.Package < 0 || imp.Package >= len(checked) {
+			continue
+		}
+		symbol := lookupPackageSymbolTextCore(&checked[imp.Package], file, tok)
+		if symbol < 0 {
+			continue
+		}
+		if found >= 0 {
+			return -1, -1
+		}
+		info.Imports[i].Used = true
+		owner, found = imp.Package, symbol
+	}
+	return owner, found
 }
 
 func resolveImportSelectorCore(fileIndex int, info *PackageInfo, checked []PackageInfo, scope *CoreScope, file *syntax.File, baseTok int, dotTok int, nameTok int) CoreSelectorRef {
@@ -1037,6 +1094,10 @@ func lookupScopeTokenNameCore(scope *CoreScope, file *syntax.File, tok int) int 
 			}
 		}
 		if matches {
+			if scope.Names[i].End > 0 && tok >= scope.Names[i].End {
+				i = next
+				continue
+			}
 			if nameTok <= tok {
 				return i
 			}
@@ -1291,21 +1352,35 @@ func buildFuncScopeCore(file *syntax.File, fn *syntax.FuncDecl) (CoreScope, bool
 		token := file.Tokens[i]
 		kind := token.KindLine & 255
 		if kind == syntax.TokenFunc && i+1 < end && tokCharIs(file, i+1, '(') {
-			paramsEnd := findTypeMatching(file, i+1, '(', ')')
-			if paramsEnd > i+1 && paramsEnd <= end {
-				var literal CoreScope
-				ok, tok := collectCoreFieldNames(file, i+2, paramsEnd-1, NameParam, &literal)
-				if !ok {
-					return scope, false, tok
-				}
-				for j := 0; j < len(literal.Names); j++ {
-					name := literal.Names[j]
-					addCoreScopeName(&scope, file, name.Token, name.Kind, false, false, false)
-				}
+			if ok, tok := collectCoreLiteralBindings(file, i, end, &scope); !ok {
+				return scope, false, tok
+			}
+			literal := genericFunctionLiteral(file, i, end)
+			if literal.BodyStart >= 0 {
+				i = literal.BodyEnd - 1
+				continue
 			}
 		}
 		if kind == syntax.TokenConst || kind == syntax.TokenVar || kind == syntax.TokenType {
-			i = collectCoreDeclScope(file, i, end, &scope)
+			if kind == syntax.TokenType && tokCharIs(file, i-1, '(') {
+				continue // The type-switch assertion .(type) is not a declaration.
+			}
+			finish := collectCoreDeclScope(file, i, end, &scope)
+			// A declaration initializer can contain a literal whose bindings
+			// must resolve inside its body, even though the declaration scanner
+			// consumes the whole statement.
+			for literal := i + 1; literal <= finish && literal < end; literal++ {
+				if file.Tokens[literal].KindLine&255 == syntax.TokenFunc && tokCharIs(file, literal+1, '(') {
+					if ok, tok := collectCoreLiteralBindings(file, literal, end, &scope); !ok {
+						return scope, false, tok
+					}
+					fn := genericFunctionLiteral(file, literal, end)
+					if fn.BodyStart >= 0 {
+						literal = fn.BodyEnd - 1
+					}
+				}
+			}
+			i = finish
 			continue
 		}
 		tokenStart := int(token.Start)
@@ -1320,6 +1395,26 @@ func buildFuncScopeCore(file *syntax.File, fn *syntax.FuncDecl) (CoreScope, bool
 		}
 	}
 	return scope, true, -1
+}
+
+func collectCoreLiteralBindings(file *syntax.File, start int, end int, scope *CoreScope) (bool, int) {
+	fn := genericFunctionLiteral(file, start, end)
+	if fn.BodyStart < 0 || fn.ParamsEnd <= start+1 || fn.ParamsEnd > end {
+		return true, -1
+	}
+	literal, ok, tok := buildFuncScopeCore(file, &fn)
+	if !ok {
+		return false, tok
+	}
+	for _, name := range literal.Names {
+		addCoreScopeName(scope, file, name.Token, name.Kind, false, false, false)
+		end := name.End
+		if end == 0 || end > fn.BodyEnd {
+			end = fn.BodyEnd
+		}
+		scope.Names[len(scope.Names)-1].End = end
+	}
+	return true, -1
 }
 
 func collectCoreFieldNames(file *syntax.File, start int, end int, kind int, scope *CoreScope) (bool, int) {
@@ -1391,7 +1486,10 @@ func addCoreScopeName(scope *CoreScope, file *syntax.File, tok int, kind int, re
 				continue
 			}
 			if labelsOnly {
-				if scope.Names[i].Kind == NameLabel {
+				// Literal bindings carry an End boundary when copied into the
+				// enclosing reference scope. Their labels belong to that nested
+				// function and cannot duplicate this function's own labels.
+				if scope.Names[i].Kind == NameLabel && scope.Names[i].End == 0 {
 					return false
 				}
 				continue
@@ -1511,6 +1609,9 @@ func buildFuncLocalTypeSpansCore(file *syntax.File, fn *syntax.FuncDecl) []CoreL
 	for i := start; i < end; i++ {
 		kind := file.Tokens[i].KindLine & 255
 		if kind != syntax.TokenConst && kind != syntax.TokenVar && kind != syntax.TokenType {
+			continue
+		}
+		if kind == syntax.TokenType && tokCharIs(file, i-1, '(') {
 			continue
 		}
 		specStart := i + 1

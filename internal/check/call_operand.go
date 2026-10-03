@@ -8,6 +8,13 @@ import (
 func invalidCallOperandCount(graph load.Graph, pkgIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn *syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
 	file := &graph.Packages[pkgIndex].Files[fileIndex].File
 	for _, ref := range refs {
+		if ref.Package != pkgIndex {
+			pkg := ref.Package
+			if pkg >= 0 && pkg < len(checked) && pkg < len(graph.Packages) && ref.Index >= 0 && ref.Index < len(checked[pkg].Symbols) && invalidResolvedCallOperand(&graph.Packages[pkg], checked[pkg].Symbols[ref.Index], file, fn, ref.Token, ref.Token) {
+				return ref.Token
+			}
+			continue
+		}
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}

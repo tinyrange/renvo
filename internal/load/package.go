@@ -75,7 +75,19 @@ type Package struct {
 	CoreArenaEnd   int
 }
 
+// TargetLayout carries destination widths and language layout through checking.
+// ScalarAlign is the largest scalar alignment, which can differ from a target's
+// normalized descriptor alignment. Object selects native aggregate storage.
+// A zero layout preserves the historical 64-bit API default.
+type TargetLayout struct {
+	WordBits    int
+	PointerBits int
+	ScalarAlign int
+	Object      bool
+}
+
 type Graph struct {
+	Layout       TargetLayout
 	Module       Module
 	Root         string
 	Packages     []Package

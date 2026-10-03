@@ -1,0 +1,8 @@
+{
+  "phase": "checker",
+  "code": "RENVO-CHECK-042",
+  "file": "cmd/app/main.go",
+  "line": 3,
+  "column": 48,
+  "message": "operation is not valid for every type in the constraint"
+}

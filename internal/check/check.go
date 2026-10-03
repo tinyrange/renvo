@@ -49,6 +49,7 @@ const (
 	CheckErrStructLiteral
 	CheckErrNewVersion
 	CheckErrMapKey
+	CheckErrGeneric
 )
 
 const (
@@ -74,6 +75,7 @@ type Program struct {
 	ErrorPackage int
 	ErrorFile    int
 	ErrorToken   int
+	ErrorMessage string
 }
 
 type PackageInfo struct {
@@ -203,8 +205,9 @@ type FuncBody struct {
 }
 
 type CoreNameRef struct {
-	Token int
-	Index int
+	Token   int
+	Index   int
+	Package int
 }
 
 type CoreSelectorRef struct {
@@ -586,6 +589,21 @@ func receiverTypeName(file *syntax.File, fn *syntax.FuncDecl) string {
 	end := fn.ReceiverEnd
 	if end > len(file.Tokens) {
 		end = len(file.Tokens)
+	}
+	if end > fn.ReceiverStart && tokCharIs(file, end-1, ']') {
+		depth := 1
+		for i := end - 2; i >= fn.ReceiverStart; i-- {
+			if tokCharIs(file, i, ']') {
+				depth++
+			}
+			if tokCharIs(file, i, '[') {
+				depth--
+				if depth == 0 {
+					end = i
+					break
+				}
+			}
+		}
 	}
 	for i := end - 1; i >= fn.ReceiverStart; i-- {
 		if file.Tokens[i].KindLine&255 == syntax.TokenIdent {

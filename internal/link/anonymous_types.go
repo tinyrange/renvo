@@ -10,6 +10,8 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	var edits []functionValueEdit
 	var types []string
 	var names []string
+	var owners []unit.PackageInfo
+	var lengths []int
 	generated := ""
 	for i := 0; i+1 < len(program.Tokens); i++ {
 		if (program.Tokens[i].KindLine&255 != unit.TokenStruct && !functionValueTokenEquals(program, i, "interface")) || !functionValueTokenEquals(program, i+1, "{") {
@@ -40,9 +42,16 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 				key += functionValueTokenText(program, tok) + "\x00"
 			}
 		}
+		owner := unit.PackageInfo{}
+		for _, pkg := range program.Packages {
+			if program.Tokens[i].Start >= pkg.TextStart && program.Tokens[i].Start < pkg.TextEnd {
+				owner = pkg
+				break
+			}
+		}
 		index := -1
 		for j := 0; j < len(types); j++ {
-			if types[j] == key {
+			if types[j] == key && owners[j].ImportPath == owner.ImportPath {
 				index = j
 				break
 			}
@@ -52,7 +61,10 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 			name := ordinaryBuiltinGeneratedName(program, "__renvo_anonymous_type_"+functionValueDecimal(index))
 			types = append(types, key)
 			names = append(names, name)
-			generated += "type " + name + " = " + text + "\n"
+			declaration := "type " + name + " = " + text + "\n"
+			generated += declaration
+			owners = append(owners, owner)
+			lengths = append(lengths, len(declaration))
 		}
 		edits = append(edits, functionValueTokenRangeEdit(program, i, close+1, names[index]))
 		i = close
@@ -75,7 +87,20 @@ func lowerAnonymousTypes(program *unit.Program, transient bool) bool {
 	text = append(text, '\n')
 	generatedStart := len(text)
 	text = appendFunctionValueString(text, generated)
-	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+	// Each alias keeps the package of its source type. In particular, private
+	// fields and interface methods must not acquire the root package's identity.
+	if !reparseFunctionValueProgram(program, text, edits, originalLength, -1) {
+		return false
+	}
+	for i, owner := range owners {
+		if owner.ImportPath != "" {
+			owner.TextStart, owner.TextEnd = generatedStart, generatedStart+lengths[i]
+			setFunctionValuePackageTableRanges(&owner, program)
+			program.Packages = append(program.Packages, owner)
+		}
+		generatedStart += lengths[i]
+	}
+	return true
 }
 
 func anonymousTypeLocalVariable(program *unit.Program, start int) bool {

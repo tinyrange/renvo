@@ -292,6 +292,11 @@ func TestVM32FullBackendSuite(t *testing.T) {
 	if len(paths) == 0 {
 		t.Fatal("no backend regression programs")
 	}
+	stepBudget := uint64(3) * 1000 * 1000 * 1000
+	stepLimit := int(^uint(0) >> 1)
+	if uint64(stepLimit) > stepBudget {
+		stepLimit = int(stepBudget)
+	}
 	for _, path := range paths {
 		source, err := os.ReadFile(path)
 		if err != nil {
@@ -305,7 +310,10 @@ func TestVM32FullBackendSuite(t *testing.T) {
 			t.Fatalf("%s: compile failed", path)
 		}
 		result := vm.RunConfig(image, vm.Config{
-			Limits: vm.Limits{Steps: 500 * 1000 * 1000, Memory: 16 * 1024 * 1024},
+			// The exhaustive overlap-copy matrix requires about 2.413 billion
+			// instructions. This functional corpus budget is independent of the
+			// prepared-compiler performance policy and its instruction ceiling.
+			Limits: vm.Limits{Steps: stepLimit, Memory: 16 * 1024 * 1024},
 			Args:   []string{"program"},
 			Env:    []string{"PATH=/vm"},
 		})

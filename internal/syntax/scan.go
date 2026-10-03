@@ -1,5 +1,7 @@
 package syntax
 
+import "unsafe"
+
 type Scanner struct {
 	Ok     bool
 	Tokens []Token
@@ -108,6 +110,15 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 			i++
 			for i < len(src) && src[i] != '"' {
 				if src[i] == '\\' {
+					if i+3 < len(src) && src[i+1] == 'x' {
+						high, low := src[i+2], src[i+3]
+						if (uint(high)-'0' < 10 || uint(high|32)-'a' < 6) && (uint(low)-'0' < 10 || uint(low|32)-'a' < 6) {
+							i += 4
+							continue
+						}
+						ok = false
+						break
+					}
 					next, _, _, valid := stringEscapeValue(src, i, len(src))
 					if !valid {
 						ok = false
@@ -217,7 +228,28 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 // Validate the entire source, including comments and raw string literals.
 // Escaped arbitrary bytes in interpreted strings remain valid source text.
 func validSourceEncoding(src []byte) bool {
+	wordSize := int(unsafe.Sizeof(uint(0)))
+	lowBytes := ^uint(0) / 255
+	highBytes := lowBytes * 128
 	for i := 0; i < len(src); {
+		// Read only aligned, in-bounds native words. A high bit or a zero
+		// byte ends the ASCII fast path; the byte walk locates it exactly.
+		for i < len(src) && uintptr(unsafe.Pointer(&src[i]))&uintptr(wordSize-1) != 0 {
+			if src[i] == 0 || src[i] >= 0x80 {
+				break
+			}
+			i++
+		}
+		if i < len(src) && uintptr(unsafe.Pointer(&src[i]))&uintptr(wordSize-1) == 0 {
+			for i+wordSize <= len(src) {
+				word := *(*uint)(unsafe.Pointer(&src[i]))
+				if word&highBytes != 0 || (word-lowBytes)&^word&highBytes != 0 {
+					break
+				}
+				i += wordSize
+			}
+		}
+
 		// Range lowers to a single bounded byte walk for the common ASCII run.
 		for _, c := range src[i:] {
 			if c == 0 || c >= 0x80 {

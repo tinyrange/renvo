@@ -16,6 +16,7 @@ func TestInvalidKnownConversions(t *testing.T) {
 		`func main(){_=int("x")}`,
 		`func main(){_=bool(1)}`,
 		`func main(){_=float64(true)}`,
+		`type Value int;func main(){type Reader interface{Value()int};var v Reader;_=v;_=Value("x")}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); result.Ok || result.Error != CheckErrOperand {
@@ -33,6 +34,8 @@ func TestKnownConversionControls(t *testing.T) {
 		`func main(){int:=func(s string)int{return len(s)};_=int("x")}`,
 		`func string(v float64)int{return 1};func main(){_=string(1.2)}`,
 		`func main(){type string int;_=string(1)}`,
+		`type Value int;func main(){type Reader interface{Value()int};var v Reader;_=v}`,
+		`type Value int;func main(){type Callback=func(interface{Value()int})int;var v Callback;_=v}`,
 	} {
 		graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})
 		if result := CheckGraphCore(graph); !result.Ok {

@@ -721,14 +721,14 @@ func mapCoreCallRef(call check.CallRef, mapping coreTokenMap, eof int) (unit.Cal
 }
 
 func mapCoreNameRef(ref check.CoreNameRef, mapping coreTokenMap, eof int, ownerIndex int, pkg int, symbols []check.Symbol) (unit.NameRef, bool) {
-	if ref.Index < 0 || ref.Index >= len(symbols) {
+	if ref.Index < 0 || ref.Package < 0 || ref.Package == pkg && ref.Index >= len(symbols) {
 		return unit.NameRef{}, false
 	}
 	out := unit.NameRef{
 		Kind:    unit.RefPackage,
 		Token:   mapCoreToken(mapping, ref.Token, eof),
 		Index:   ref.Index,
-		Package: pkg,
+		Package: ref.Package,
 	}
 	if ownerIndex < 0 || out.Token < 0 || out.Index < -1 || out.Package < -1 {
 		return out, false

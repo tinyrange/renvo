@@ -45,29 +45,12 @@ func invalidReturnCount(file *syntax.File, fn *syntax.FuncDecl, signature *FuncS
 }
 
 func skipNestedFunction(file *syntax.File, start int, limit int) int {
-	open := -1
-	for i := start + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
-			open = i
-			break
-		}
-		if tokCharIs(file, i, ';') {
-			return start
-		}
-	}
-	if open < 0 {
-		return start
-	}
-	depth := 1
-	for i := open + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
-			depth++
-		} else if tokCharIs(file, i, '}') {
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
+	// Struct/interface types in parameters or results own braces too. Parse the
+	// complete signature before skipping the literal's body; a function type
+	// without a body must leave later returns in the enclosing function visible.
+	fn := genericFunctionLiteral(file, start, limit)
+	if fn.BodyStart >= 0 && fn.BodyEnd > fn.BodyStart && fn.BodyEnd <= limit {
+		return fn.BodyEnd - 1
 	}
 	return start
 }

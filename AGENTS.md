@@ -85,7 +85,11 @@ as an oracle. After adding a positive test, run
 
 ## Frontend scope
 
-The exclusion list is closed: generics and cgo are out of scope for now.
+The exclusion list is closed: cgo is out of scope for now.
+Generics are frontend work. Check generic declarations against their constraints
+and specialize required instantiations into concrete declarations before the
+compact unit reaches a backend. Preserve Go type identity, inference, and
+cross-package semantics; generic syntax must not become a backend requirement.
 Goroutines, channels, and `select` may be accepted only as frontend syntax that
 is lowered completely through the runtime handler ABI before the compact unit
 reaches a backend; they remain outside the direct backend source subset. Every

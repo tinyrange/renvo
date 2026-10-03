@@ -261,10 +261,10 @@ func main() {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	if !bytes.Contains(linked.Program.Text, []byte("receiver0: c")) ||
-		bytes.Contains(linked.Program.Text, []byte("receiver1")) ||
-		!bytes.Contains(linked.Program.Text, []byte("fn.receiver0.one()")) ||
-		!bytes.Contains(linked.Program.Text, []byte("fn.receiver0.two()")) {
+	if !bytes.Contains(linked.Program.Text, []byte("{value: c}")) ||
+		bytes.Count(linked.Program.Text, []byte(" struct { value *Controller }")) != 1 ||
+		!bytes.Contains(linked.Program.Text, []byte(").value.one()")) ||
+		!bytes.Contains(linked.Program.Text, []byte(").value.two()")) {
 		t.Fatalf("same-receiver methods did not share function-value storage:\n%s", linked.Program.Text)
 	}
 }

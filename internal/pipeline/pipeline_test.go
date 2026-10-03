@@ -152,7 +152,7 @@ int callGo(int value) { return goDouble(value); }
 	if err != nil {
 		t.Fatalf("mixed linked unit did not decode: %v", err)
 	}
-	for _, name := range []string{"goDouble", "renvop0_C_cAdd", "renvop0_C_callGo", "main", "appMain"} {
+	for _, name := range []string{"goDouble", "Renvop0_C_cAdd", "Renvop0_C_callGo", "main", "appMain"} {
 		found := false
 		for i := 0; i < len(decoded.Funcs); i++ {
 			fn := decoded.Funcs[i]

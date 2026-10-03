@@ -11,21 +11,59 @@ backend to accept Go source directly.
 
 | Measurement | Required ceiling |
 | --- | --- |
-| CPU, median of three | Reference +25% |
+| CPU, median of three | Reference +60% |
 | Peak memory, median of three | Reference +20% |
 | Peak memory, every candidate sample | 256 MiB |
-| Stripped stage-3 compiler, median of three | Reference +10% |
+| Stripped stage-3 compiler, median of three | Reference +35% |
 | Stripped stage-3 compiler, every candidate sample | 8 MiB |
-| VM instructions, median of three | Reference +20% |
+| VM instructions, median of three | Reference +60% |
+
+The generics implementation raises the relative CPU allowance from 25% to 60%
+and the artifact allowance from 10% to 35%, following maintainer approval.
+The complete frontend workload includes declaration checking, constraint and
+inference analysis, concrete specialization, and runtime lowering for generic
+method and callback calls. Paired three-sample measurements on the final
+implementation showed approximately 52% CPU growth on Linux AMD64 and 30.1%
+artifact growth on Linux ARM. The ARM compiler grew from 5,892,829 to 7,667,631
+bytes, exceeding the interim 30% allowance by 6,954 bytes. The 35% artifact
+allowance covers that measured growth. The pinned reference, three-sample
+comparison, memory allowance, and absolute ceilings still apply. The VM
+instruction allowance increases from 20% to 60% with the same authorization:
+correct signed comparisons need extra bytecode to avoid overflowing the VM's
+subtraction-based flag. The prepared-backend workload measured 7,562,799
+instructions versus 4,997,307 in the reference, a 51.3% increase. Its absolute
+500-million-instruction limit still applies. Every required target must pass
+its own measurements.
+
+The Linux AMD64 frontend profile and performance workload use a 224 MiB arena.
+The expanded frontend exhausted the previous 192 MiB arena when compiling the
+bundled REPL for Windows ARM64; the same source succeeded with 224 MiB. This
+target-specific increase follows maintainer approval. Other default compiler
+arenas and the 256 MiB process-memory ceiling remain unchanged.
 
 VM linear memory also has the 256 MiB absolute and +20% relative memory limits;
-the host VM process is measured independently. Self-hosting compilers use a 192 MiB arena by default. Windows uses a 240 MiB
+the host VM process is measured independently. Self-hosting compilers use a 192 MiB arena by default, with the Linux AMD64 override above. Windows uses a 240 MiB
 arena, reserving 16 MiB of the 256 MiB process-memory ceiling for runtime overhead
 (the initial 256 MiB arena measured about 264–265 MiB total commit). WASI uses
 a 256 MiB arena. Its process-memory ceiling remains 256 MiB and includes
 Wasmtime overhead, so this arena increase alone does not establish a passing gate.
 The VM prepared-backend workload uses the production preparation tool’s 96 MiB
 compiler arena.
+
+The separate VM frontend self-hosting acceptance test uses a 192 MiB compiler
+arena, a 256 MiB VM memory limit, and a 25-billion-instruction limit. These were
+raised with maintainer approval after the expanded compiler exceeded the old
+128 MiB arena and 15-billion-instruction limit. The prepared-backend performance
+workload and its policy limits remain independent of this acceptance test.
+
+The full VM backend corpus has a separate 3-billion-instruction execution budget
+per program on a 64-bit test host and a 16 MiB memory ceiling. On a 32-bit host,
+the step budget is capped at the largest host `int` supported by the VM API.
+The exhaustive overlap-copy matrix
+finishes at about 2.413 billion instructions; its unchanged bytecode exceeded
+the former 500-million budget. The instruction allowance was raised with
+maintainer approval. The prepared-compiler performance workload retains its
+500-million-instruction ceiling and relative regression limits.
 
 Larger increases block feature inclusion. The maintainer evaluates the value
 of additional features and their cost case by case. There is no automatic

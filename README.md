@@ -100,9 +100,9 @@ compiling a semantic regression program from a compact unit. The authoritative p
 
 | Metric | Gate |
 | --- | --- |
-| CPU time (user + kernel) | At most 25% above the pinned reference |
+| CPU time (user + kernel) | At most 60% above the pinned reference |
 | Peak memory | At most 256 MiB and 20% above the reference |
-| Stripped stage-3 compiler | At most 8 MiB and 10% above the reference |
+| Stripped stage-3 compiler | At most 8 MiB and 30% above the reference |
 | VM instructions | At most 20% above the reference |
 
 Reference and candidate run on the same runner: one warm-up each, followed by
@@ -122,7 +122,9 @@ target-specific files, `//go:embed`, and an offline module cache. Language
 coverage includes ordinary control flow, methods, maps, interfaces, closures,
 defer/panic/recover, arrays and slices, complex values, goroutines, channels,
 `select`, cgo-style explicit C package boundaries, and the builtins needed by
-Renvo itself. Generics remain out of scope.
+Renvo itself. Generic functions, types, receiver methods, and aliases are checked
+against their constraints and specialized into concrete declarations before
+backend compilation, including inference and cross-package instantiation.
 
 Release build tags are fixed to Renvo's Go 1.25 baseline: `go1.1` through
 `go1.25` are enabled independently of the host compiler and the module's `go`

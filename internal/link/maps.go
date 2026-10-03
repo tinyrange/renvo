@@ -204,6 +204,25 @@ func mapLowerEdits(program *unit.Program, specs []mapLowerSpec) ([]functionValue
 	if !ok {
 		return nil, nil, nil, false
 	}
+	// Declared map types retain their identity after representation lowering,
+	// but the compact backend's declaration grammar expects the type directly.
+	// Parentheses in make/new calls are kept by the construction pass above.
+	for _, decl := range program.Decls {
+		if decl.Kind != unit.TokenType {
+			continue
+		}
+		start := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd) + 1
+		if functionValueTokenEquals(program, start, "=") {
+			start++
+		}
+		end := decl.EndTok
+		for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+			edits = append(edits, functionValueTokenRangeEdit(program, start, start+1, ""))
+			edits = append(edits, functionValueTokenRangeEdit(program, end-1, end, ""))
+			start++
+			end--
+		}
+	}
 	for i := 0; i < len(program.Tokens); i++ {
 		if covered[i] || !functionValueTokenEquals(program, i, "map") || !functionValueTokenEquals(program, i+1, "[") {
 			continue
@@ -519,7 +538,7 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 			if close < 0 || len(starts) < 1 || len(starts) > 2 {
 				continue
 			}
-			result := functionValueTokensText(program, starts[0], ends[0])
+			result := ordinaryTypeArgumentText(program, starts[0], ends[0])
 			spec := mapLowerSpecIndex(specs, ordinaryUnderlyingType(program, result, 0))
 			if spec < 0 {
 				continue
@@ -645,6 +664,24 @@ func mapLowerLiteralTypeStarts(program *unit.Program) []int {
 	for i := 0; i < len(starts); i++ {
 		if starts[i] < 0 && functionValueTokenEquals(program, i, "{") {
 			starts[i] = functionValuePrimaryStart(program, i-1)
+		}
+	}
+	// A function's result type may end immediately before its body brace.
+	// That brace starts statements, even when the result's underlying type is
+	// a map and its parenthesized spelling resembles a composite literal.
+	for _, fn := range program.Funcs {
+		if fn.BodyStart >= 0 && fn.BodyStart < len(starts) {
+			starts[fn.BodyStart] = -1
+		}
+	}
+	for tok := 0; tok+1 < len(program.Tokens); tok++ {
+		if functionValueTokenEquals(program, tok, "func") && functionValueTokenEquals(program, tok+1, "(") {
+			mark := arena.Mark()
+			_, body, ok := parseFunctionValueSignature(program, tok, "")
+			arena.Rewind(mark)
+			if ok && body >= 0 && body < len(starts) && functionValueTokenEquals(program, body, "{") && !functionValueLiteralTypePosition(program, tok, body) {
+				starts[body] = -1
+			}
 		}
 	}
 	return starts

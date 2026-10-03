@@ -213,6 +213,14 @@ func ordinaryBuiltinArguments(program *unit.Program, start int, close int) ([]in
 	return starts, ends
 }
 
+func ordinaryTypeArgumentText(program *unit.Program, start int, end int) string {
+	for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+		start++
+		end--
+	}
+	return functionValueTokensText(program, start, end)
+}
+
 func ordinaryMinMaxText(program *unit.Program, name string, typ string, underlying string, stringLess string, call int, starts []int, ends []int) (string, string) {
 	prefix := "__renvo_builtin_" + name + "_" + functionValueDecimal(call)
 	typeName := prefix + "_arguments"
@@ -273,6 +281,9 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 	if end <= start {
 		return ""
 	}
+	if typ := ordinaryBuiltinAssertionType(program, start, end); typ != "" {
+		return typ
+	}
 	if end-start == 1 {
 		kind := program.Tokens[start].KindLine & 255
 		if kind == unit.TokenString {
@@ -321,7 +332,7 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		if name == "make" {
 			starts, ends := ordinaryBuiltinArguments(program, start+2, end-1)
 			if len(starts) > 0 {
-				return functionValueTokensText(program, starts[0], ends[0])
+				return ordinaryTypeArgumentText(program, starts[0], ends[0])
 			}
 		}
 		if name == "min" || name == "max" {
@@ -338,6 +349,11 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		if functionValueDeclaredType(program, name) && functionValueEnclosingLocalTypeDepthMode(program, before, name, 0, false) == "" {
 			return name
 		}
+		if typ := functionValueEnclosingLocalType(program, before, name); typ != "" {
+			if result := functionValueCallableResultType(program, typ); result != "" {
+				return result
+			}
+		}
 		return functionValueDeclaredFunctionResultType(program, name)
 	}
 	if functionValueTokenEquals(program, end-1, ")") {
@@ -347,9 +363,13 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 			return functionValueTokensText(program, open+1, end-1)
 		}
 		if open > start {
+			if typ := functionValueAnonymousTypeCallee(program, start, open); typ != "" {
+				return typ
+			}
 			if fn, ok := functionValueCalledFunction(program, open); ok {
 				return functionValueDeclaredResultType(program, fn)
 			}
+			return functionValueCallableResultType(program, ordinaryBuiltinExprType(program, before, start, open))
 		}
 	}
 	if end-start >= 3 && functionValueTokenEquals(program, end-2, ".") && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
@@ -392,6 +412,17 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 		}
 	}
 	return ""
+}
+
+func ordinaryBuiltinAssertionType(program *unit.Program, start int, end int) string {
+	if !functionValueTokenEquals(program, end-1, ")") {
+		return ""
+	}
+	open := functionValueFindMatchingBackward(program, end-1, "(", ")")
+	if open <= start || !functionValueTokenEquals(program, open-1, ".") || functionValueTokenEquals(program, open+1, "type") || functionValueTypeEnd(program, open+1) != end-1 {
+		return ""
+	}
+	return functionValueTokensText(program, open+1, end-1)
 }
 
 func ordinaryBuiltinSliceExpression(program *unit.Program, start int, end int) bool {
@@ -470,6 +501,28 @@ func ordinaryIndexedElementType(program *unit.Program, typ string) string {
 	return ""
 }
 
+func functionValueCallableResultType(program *unit.Program, typ string) string {
+	typ = ordinaryUnderlyingType(program, typ, 0)
+	if !functionValueHasPrefix(functionValueCompactTypeText(typ), "func(") {
+		return ""
+	}
+	source := []byte("package main\ntype Signature " + typ + "\n")
+	parsed := unit.Program{Package: "main"}
+	if !reparseFunctionValueProgram(&parsed, source, nil, len(source), -1) {
+		return ""
+	}
+	for token := 0; token < len(parsed.Tokens); token++ {
+		if functionValueTokenEquals(&parsed, token, "func") {
+			sig, _, ok := parseFunctionValueSignature(&parsed, token, "")
+			if ok && len(sig.resultTypes) == 1 {
+				return sig.resultTypes[0]
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
 func ordinaryBuiltinTypeName(name string) bool {
 	return name == "string" || name == "float32" || name == "float64" || name == "int" || name == "int8" || name == "int16" || name == "int32" || name == "int64" || name == "uint" || name == "uint8" || name == "uint16" || name == "uint32" || name == "uint64" || name == "uintptr" || name == "byte" || name == "rune"
 }
@@ -503,6 +556,7 @@ func ordinaryGlobalType(program *unit.Program, name string) string {
 }
 
 func ordinaryUnderlyingType(program *unit.Program, typ string, depth int) string {
+	typ = ordinaryUnparenthesizedTypeText(typ)
 	if depth > len(program.Decls)+1 || ordinaryBuiltinTypeName(typ) || functionValueHasPrefix(typ, "[]") || functionValueHasPrefix(typ, "map[") || functionValueHasPrefix(typ, "chan") || functionValueHasPrefix(typ, "<-chan") {
 		return typ
 	}
@@ -516,9 +570,36 @@ func ordinaryUnderlyingType(program *unit.Program, typ string, depth int) string
 		if functionValueTokenEquals(program, start, "=") {
 			start++
 		}
-		return ordinaryUnderlyingType(program, functionValueTokensText(program, start, decl.EndTok), depth+1)
+		end := decl.EndTok
+		for end-start >= 2 && functionValueTokenEquals(program, start, "(") && functionValueFindMatchingParen(program, start) == end-1 {
+			start++
+			end--
+		}
+		return ordinaryUnderlyingType(program, functionValueTokensText(program, start, end), depth+1)
 	}
 	return typ
+}
+
+// Parentheses can occur at a use site as well as in a type declaration. Resolve
+// the inner named type without changing its identity or interpreting punctuation
+// inside string tags as type syntax.
+func ordinaryUnparenthesizedTypeText(typ string) string {
+	first := 0
+	for first < len(typ) && functionValueIsSpace(typ[first]) {
+		first++
+	}
+	if first >= len(typ) || typ[first] != '(' {
+		return typ
+	}
+	source := []byte("package main\ntype Parenthesized " + typ + "\n")
+	parsed := unit.Program{Package: "main"}
+	if !reparseFunctionValueProgram(&parsed, source, nil, len(source), -1) || len(parsed.Decls) != 1 {
+		return typ
+	}
+	decl := parsed.Decls[0]
+	start := functionValueTokenAtSpan(&parsed, decl.NameStart, decl.NameEnd) + 1
+	start, end := functionValueUnparen(&parsed, start, decl.EndTok)
+	return functionValueTokensText(&parsed, start, end)
 }
 
 func ordinaryUntypedExpression(program *unit.Program, start int, end int) bool {

@@ -75,6 +75,63 @@ func TestBackendDefinitionResolvesBeforeSourceSelection(t *testing.T) {
 	}
 }
 
+func TestGenericCheckingUsesCustomBackendLayout(t *testing.T) {
+	for _, width := range []string{"32", "64"} {
+		t.Run(width, func(t *testing.T) {
+			definition := strings.ReplaceAll(testBackendDefinition, "= 64", "= "+width)
+			files := []load.SourceFile{
+				{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\ngo 1.25\n")},
+				{Path: "/repo/case/acme.rtg", Src: []byte(definition)},
+				{Path: "/repo/case/main.go", Src: []byte("package main;func Value[T ~int]()T{return 1<<31};func main(){}")},
+			}
+			args := []string{"-backend", "acme.rtg", "-t", "acme/aarch64", "-emit-unit", "-o", "app.unit", "."}
+			fs := memorySourceFS{files: files}
+			direct := BuildFromFSWithBackend(args, "/repo/case", "/std", fs)
+			session := BeginFSBuildSession(args, "/repo/case", "/std", "", fs, false)
+			for !session.Step() {
+			}
+			for _, result := range []BuildResult{direct, session.Result()} {
+				if result.Ok != (width == "64") {
+					t.Fatalf("width %s: valid=%v diagnostic=%#v options=%#v", width, result.Ok, result.Diagnostic, result.Options)
+				}
+			}
+		})
+	}
+}
+
+func TestGenericAlignmentUsesPreparedBackendLayout(t *testing.T) {
+	for _, test := range []struct{ name, alias, width, align string }{
+		{"native64", "aarch64", "64", "8"},
+		{"native32", "aarch64", "32", "4"},
+		{"preparedwasm32", "wasm32", "32", "4"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			definition := strings.ReplaceAll(testBackendDefinition, "= 64", "= "+test.width)
+			definition = strings.ReplaceAll(definition, `alias = "aarch64"`, `alias = "`+test.alias+`"`)
+			if test.alias == "wasm32" {
+				definition = strings.ReplaceAll(definition, "family = native_v1", "family = structured32")
+			}
+			files := []load.SourceFile{
+				{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\ngo 1.25\n")},
+				{Path: "/repo/case/acme.rtg", Src: []byte(definition)},
+				{Path: "/std/unsafe/unsafe.go", Src: []byte("package unsafe;type Pointer *byte")},
+				{Path: "/repo/case/main.go", Src: []byte(`package main;import "unsafe";func Value[T any]() [unsafe.Alignof(uint64(0))]T{var v [unsafe.Alignof(uint64(0))]T;return v};func main(){var v [` + test.align + `]int=Value[int]();_=v}`)},
+			}
+			args := []string{"-backend", "acme.rtg", "-t", "acme/aarch64", "-emit-unit", "-o", "app.unit", "."}
+			fs := memorySourceFS{files: files}
+			direct := BuildFromFSWithBackend(args, "/repo/case", "/std", fs)
+			session := BeginFSBuildSession(args, "/repo/case", "/std", "", fs, false)
+			for !session.Step() {
+			}
+			for _, result := range []BuildResult{direct, session.Result()} {
+				if !result.Ok {
+					t.Fatalf("diagnostic=%#v options=%#v", result.Diagnostic, result.Options)
+				}
+			}
+		})
+	}
+}
+
 func TestBackendEnablementAddsStandardLibraryPackage(t *testing.T) {
 	rbeSource := testBackendDefinition + `
 @stdlib "acmefeature/feature.go"

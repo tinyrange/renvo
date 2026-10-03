@@ -6,7 +6,7 @@ import (
 )
 
 func TestFunctionValueTypeIdentityIgnoresParameterAndResultNames(t *testing.T) {
-	signatures := []functionValueSignature{{name: "callback", paramTypes: []string{"*T", "int"}, resultTypes: []string{"bool", "int"}}}
+	signatures := []functionValueSignature{{name: "callback", anonymous: true, paramTypes: []string{"*T", "int"}, resultTypes: []string{"bool", "int"}}}
 	for _, typ := range []string{
 		"func(*T, int) (bool, int)",
 		"func(value *T, count int) (ok bool, total int)",
@@ -31,7 +31,7 @@ func main() {}
 	if !reparseFunctionValueProgram(&program, source, nil, len(source), -1) {
 		t.Fatal("reparse")
 	}
-	signatures := []functionValueSignature{{name: "callback", paramTypes: []string{"*T"}}}
+	signatures := []functionValueSignature{{name: "callback", anonymous: true, paramTypes: []string{"*T"}}}
 	for _, fn := range program.Funcs {
 		name := functionValueTokenText(&program, fn.NameTok)
 		types := functionValueFunctionParamTypes(&program, &fn)

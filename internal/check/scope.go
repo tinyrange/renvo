@@ -185,18 +185,32 @@ func collectLeadingIdentList(file *syntax.File, start int, end int, scope *FuncS
 }
 
 func statementSpecEnd(file *syntax.File, start int, end int) int {
-	line := syntax.TokenLine(file.Tokens[start])
-	i := start
-	for i < end {
-		if tokCharIs(file, i, ';') {
-			return i + 1
+	depth := 0
+	for i := start; i < end; i++ {
+		if depth == 0 {
+			if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+				return i
+			}
+			if tokCharIs(file, i, ';') {
+				return i + 1
+			}
+			if i > start && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) && declarationTokenEndsSpec(file, i-1) {
+				return i
+			}
 		}
-		if i > start && syntax.TokenLine(file.Tokens[i]) != line {
-			return i
+		if tokCharIs(file, i, '(') || tokCharIs(file, i, '[') || tokCharIs(file, i, '{') {
+			depth++
+		} else if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
+			depth--
 		}
-		i++
 	}
 	return end
+}
+
+func declarationTokenEndsSpec(file *syntax.File, token int) bool {
+	kind := file.Tokens[token].KindLine & 255
+	return kind == syntax.TokenIdent || kind == syntax.TokenNumber || kind == syntax.TokenString || kind == syntax.TokenChar ||
+		tokCharIs(file, token, ')') || tokCharIs(file, token, ']') || tokCharIs(file, token, '}')
 }
 
 func firstNonSeparator(file *syntax.File, start int, end int) int {

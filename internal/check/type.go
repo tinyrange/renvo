@@ -345,6 +345,31 @@ func findTypeTopLevelChar(file *syntax.File, start int, end int, c byte) int {
 	return -1
 }
 
+// Keywords in nested function literals belong to their own statements, not
+// to the surrounding control header.
+func findTypeTopLevelKind(file *syntax.File, start, end, kind int) int {
+	for i := start; i < end; i++ {
+		if file.Tokens[i].KindLine&255 == kind {
+			return i
+		}
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int('(') || ch == int('[') || ch == int('{') {
+			right := byte(')')
+			if ch == int('[') {
+				right = ']'
+			} else if ch == int('{') {
+				right = '}'
+			}
+			next := findTypeMatching(file, i, byte(ch), right)
+			if next <= i || next > end {
+				return -1
+			}
+			i = next - 1
+		}
+	}
+	return -1
+}
+
 func findTypeMatching(file *syntax.File, open int, left byte, right byte) int {
 	if open < 0 || !tokCharIs(file, open, left) {
 		return -1

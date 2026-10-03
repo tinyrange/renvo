@@ -46,6 +46,7 @@ func TestValidStructLiteralFieldLists(t *testing.T) {
 		"type S struct { X int }; type A = S; func main() { _ = A{X:1} }",
 		"type S struct { X int }; var f = func() { type S map[int]int; k:=1; _ = S{k:1,k:2} }; func main() {}",
 		"type S struct { X int }; var f = func() { type S map[string]int; _ = S{\"key\":1,\"other\":2} }; func main() {}",
+		"type S struct {};func main(){type T=S\n{var value int;_=value};_=T{}}",
 	} {
 		t.Run(source, func(t *testing.T) {
 			graph := checkTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: []byte("package main\n" + source)}})

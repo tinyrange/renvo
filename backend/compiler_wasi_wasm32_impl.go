@@ -698,9 +698,28 @@ func renvoAppendSoftFloatSource(src []byte) []byte {
 	return src
 }
 
+// Source and compact-unit inputs need the same VM floating-point helpers.
+// Preserve unit metadata when reparsing the original source plus those helpers.
+func renvoPrepareSoftFloatProgram(prog *renvoProgram) {
+	if prog.c.renvoTarget != renvoTargetVM32 || !renvoProgramNeedsSoftFloat(prog) {
+		return
+	}
+	for _, fn := range prog.funcs {
+		if renvoBytesEqualText(prog.src, fn.nameStart, fn.nameEnd, "__renvoSoftUnpack64") {
+			return
+		}
+	}
+	parsed := renvoParseProgramWithContext(renvoAppendSoftFloatSource(prog.src), &prog.c)
+	parsed.entryFunc = prog.entryFunc
+	parsed.packageTable = prog.packageTable
+	parsed.foreign = prog.foreign
+	parsed.c11Semantics = prog.c11Semantics
+	*prog = parsed
+}
+
 func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 	for i := 0; i < renvoTokCount(prog); i++ {
-		if renvoTokIsKind(prog, i, renvoTokFloat) {
+		if renvoTokIsKind(prog, i, renvoTokFloat) || renvoTokIsKind(prog, i, renvoTokNumber) && renvoExprTokenIsImaginary(prog, i) {
 			return true
 		}
 		if !renvoTokIsKind(prog, i, renvoTokIdent) {
@@ -708,6 +727,7 @@ func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 		}
 		tok := renvoTokAt(prog, i)
 		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
+			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
@@ -745,13 +765,6 @@ func compileWasm32Arena(input []int, output int, arenaSize int) int {
 	prog = renvoParseProgram(src)
 	if !prog.ok {
 		return 1
-	}
-	if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		src = renvoAppendSoftFloatSource(src)
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(&prog, &meta)
@@ -834,6 +847,7 @@ func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoC
 			return renvoCompileResult{}
 		}
 	}
+	renvoResolveSpeculativeClosureLabels(&g)
 	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
 	var result renvoCompileResult
 	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
@@ -961,7 +975,7 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []re
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}
-			rootIndex := len(ep.exprs) - 1
+			rootIndex := ep.root
 			root := &ep.exprs[rootIndex]
 			if root.kind != renvoExprCall || root.argCount != 1 || !renvoExprIsIdentText(p, &ep, root.left, "print") {
 				return nil
@@ -988,7 +1002,7 @@ func renvoWasiWasm32EmitBinary(p *renvoProgram, meta *renvoMeta, statements []re
 			if !ep.ok || len(ep.exprs) == 0 {
 				return nil
 			}
-			result := renvoEvalConstExpr(&gen, &ep, len(ep.exprs)-1)
+			result := renvoEvalConstExpr(&gen, &ep, ep.root)
 			if !result.ok {
 				return nil
 			}

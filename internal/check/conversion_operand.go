@@ -10,8 +10,18 @@ import (
 func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	var bindings []scopedTypeBinding
+	var interfaceMethods []int
 	ready := false
 	for name := fn.BodyStart + 1; name+1 < fn.BodyEnd; name++ {
+		if file.Tokens[name].KindLine&255 == syntax.TokenInterface && tokCharIs(file, name+1, '{') {
+			end := findTypeMatching(file, name+1, '{', '}')
+			if end > name+1 {
+				methods, _ := parseInterfaceElements(file, name+2, end-1)
+				for _, method := range methods {
+					interfaceMethods = append(interfaceMethods, method.NameTok)
+				}
+			}
+		}
 		if file.Tokens[name].KindLine&255 == syntax.TokenFunc {
 			name = pointerOrderingNestedFunctionEnd(file, name, fn.BodyEnd-1)
 			continue
@@ -31,6 +41,18 @@ func invalidKnownConversion(pkg *load.Package, info *PackageInfo, fileIndex int,
 		}
 		target := conversionUnderlyingType(pkg, info, fileIndex, scope, start, name+1, 0)
 		if target == "" {
+			continue
+		}
+		// A method declaration may share a name with a scalar type. Its
+		// parameter list is type syntax, while conversions inside array bounds
+		// in that signature still need their ordinary checks.
+		methodName := false
+		for _, token := range interfaceMethods {
+			if token == name {
+				methodName = true
+			}
+		}
+		if methodName {
 			continue
 		}
 		close := findTypeMatching(file, name+1, '(', ')')

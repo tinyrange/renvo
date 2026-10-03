@@ -856,7 +856,7 @@ func appendSourceEmbedDecimal(out []byte, value int) []byte {
 }
 
 func compressSourceEmbedArchive(data []byte) []byte {
-	const bucketCount = 65536
+	const bucketCount = 262144
 	buckets := make([]int32, bucketCount)
 	previous := make([]int32, len(data))
 	var out []byte
@@ -937,6 +937,7 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 	first, second, third := data[pos], data[pos+1], data[pos+2]
 	bestDistance := 0
 	bestLength := 0
+	bestNext := byte(0)
 	checked := 0
 	// Reuse the three prefix bytes already loaded for candidate filtering.
 	bucket := ((int(first)*251+int(second))*251 + int(third)) & (len(buckets) - 1)
@@ -949,13 +950,16 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 		// A candidate must extend the current best match to improve it. Reject
 		// mismatches at that boundary before rescanning an identical prefix.
 		// This keeps the deeper, size-saving search cheap on repetitive source.
-		if bestLength > 0 && data[candidate+bestLength] != data[pos+bestLength] {
+		if bestLength > 0 && data[candidate+bestLength] != bestNext {
 			continue
 		}
 		if data[candidate] != first || data[candidate+1] != second || data[candidate+2] != third {
 			continue
 		}
 		length := 3
+		for length+4 <= limit && data[candidate+length] == data[pos+length] && data[candidate+length+1] == data[pos+length+1] && data[candidate+length+2] == data[pos+length+2] && data[candidate+length+3] == data[pos+length+3] {
+			length += 4
+		}
 		for length < limit && data[candidate+length] == data[pos+length] {
 			length++
 		}
@@ -965,6 +969,7 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 			if length == limit {
 				break
 			}
+			bestNext = data[pos+length]
 		}
 	}
 	return bestDistance, bestLength

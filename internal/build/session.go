@@ -33,10 +33,16 @@ func BeginProgramsSession(graph load.Graph, transient bool, cached bool) *Progra
 }
 
 func BeginObjectProgramsSession(graph load.Graph, cached bool) *ProgramSession {
+	graph.Layout.Object = true
 	return beginProgramsSession(graph, false, cached, cached, false)
 }
 
 func beginProgramsSession(graph load.Graph, transient bool, cached bool, identities bool, requireMain bool) *ProgramSession {
+	prepared := check.PrepareGenerics(graph)
+	if !prepared.Ok {
+		return &ProgramSession{stage: 2, result: Result{Root: -1, Error: BuildErrCheck, ErrorDetail: check.CheckErrGeneric, ErrorMessage: prepared.Message, ErrorPackage: prepared.ErrorPackage, ErrorFile: prepared.ErrorFile, ErrorToken: prepared.ErrorToken}}
+	}
+	graph = prepared.Graph
 	graphKeyA, graphKeyB := 0, 0
 	var contextA []int
 	var contextB []int
@@ -82,6 +88,7 @@ func (s *ProgramSession) Step() bool {
 		s.headerEnd = arena.Mark()
 		if !s.checked.Ok {
 			s.result.ErrorDetail = s.checked.Error
+			s.result.ErrorMessage = s.checked.ErrorMessage
 			s.result = buildFail(s.result, BuildErrCheck, s.checked.ErrorPackage, s.checked.ErrorFile, s.checked.ErrorToken)
 			s.stage = 2
 			return true

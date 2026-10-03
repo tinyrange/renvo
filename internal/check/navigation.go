@@ -354,7 +354,7 @@ func navigationMember(graph load.Graph, program Program, target navigationTarget
 func navigationRefs(refs []CoreNameRef, selectors []CoreSelectorRef, ownPackage int, token int) (navigationTarget, bool) {
 	for i := 0; i < len(refs); i++ {
 		if refs[i].Token == token {
-			return navigationTarget{packageIndex: ownPackage, symbolIndex: refs[i].Index}, true
+			return navigationTarget{packageIndex: refs[i].Package, symbolIndex: refs[i].Index}, true
 		}
 	}
 	for i := 0; i < len(selectors); i++ {
@@ -407,7 +407,7 @@ func navigationPackage(graph load.Graph, program Program, packageIndex int, symb
 
 func navigationAppendResolved(graph load.Graph, locations *[]SourceLocation, ownPackage int, file int, refs []CoreNameRef, selectors []CoreSelectorRef, targetPackage int, targetSymbol int) {
 	for i := 0; i < len(refs); i++ {
-		if ownPackage == targetPackage && refs[i].Index == targetSymbol {
+		if refs[i].Package == targetPackage && refs[i].Index == targetSymbol {
 			if location, ok := navigationLocation(graph, ownPackage, file, refs[i].Token); ok {
 				navigationAppend(locations, location)
 			}

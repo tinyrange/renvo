@@ -16,7 +16,7 @@ func renvoEmitWindowsReadWrite(g *renvoLinearGen, ep *renvoExprParse, idx int, i
 	if !fdEp.ok || len(fdEp.exprs) == 0 {
 		return false
 	}
-	if !renvoEmitIntExpr(g, fdEp, len(fdEp.exprs)-1) {
+	if !renvoEmitIntExpr(g, fdEp, fdEp.root) {
 		return false
 	}
 	renvoAsmPushPrimary(a)

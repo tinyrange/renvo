@@ -124,6 +124,16 @@ func malformedTypeAssertionComposite(file *syntax.File, dot int, end int) int {
 		return -1
 	}
 	for tok := dot + 2; tok < close-1; tok++ {
+		// An array bound is a constant expression and may contain a literal
+		// (for example len([2]int{})). Its braces do not turn the asserted
+		// array type into a composite value.
+		if tokCharIs(file, tok, '[') {
+			bracketEnd := findTypeMatching(file, tok, '[', ']')
+			if bracketEnd > tok && bracketEnd < close {
+				tok = bracketEnd - 1
+				continue
+			}
+		}
 		if tokCharIs(file, tok, '{') && !isCompositeTypeBodyOpen(file, tok) {
 			return tok
 		}

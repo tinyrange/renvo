@@ -156,11 +156,11 @@ func (s *PackageSession) Step() bool {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerReflectionCore(&program, s.reflection, s.transient) {
+	if !lowerVariableGroups(&program, s.transient) || !lowerReflectionCore(&program, s.reflection, s.transient) {
 		s.failUnit()
 		return true
 	}
-	if !lowerDefaultHandler(&program, s.defaultHandler, s.transient) || !lowerIntegerRangesCore(&program, s.transient) || !lowerAnonymousTypes(&program, s.transient) || !lowerGlobalFunctionLiterals(&program, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
+	if !lowerDefaultHandler(&program, s.defaultHandler, s.transient) || !lowerFunctionRangeDefers(&program, s.transient) || !lowerFunctionRangesCore(&program, s.transient) || !lowerIntegerRangesCore(&program, s.transient) || !lowerAnonymousTypes(&program, s.transient) || !lowerGlobalFunctionLiterals(&program, s.transient) || !lowerConcurrencyCoreNeeded(&program, s.transient, concurrencyNeeded) {
 		s.failUnit()
 		return true
 	}

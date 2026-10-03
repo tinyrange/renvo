@@ -26,6 +26,19 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			}
 		}
 	}
+	resolved, ordinal, ok := constantDeclarationInfo(&file, target)
+	if !ok || resolved.TypeEnd > resolved.TypeStart {
+		return wideConstant{}
+	}
+	values := splitExprList(&file, resolved.ValueStart, resolved.ValueEnd)
+	if resolved.ValueIndex < 0 || resolved.ValueIndex >= len(values) {
+		return wideConstant{}
+	}
+	context.iotaKnown, context.iotaValue = true, ordinal
+	return wideConstantExpr(&context, values[resolved.ValueIndex].StartTok, values[resolved.ValueIndex].EndTok, depth)
+}
+
+func constantDeclarationInfo(file *syntax.File, target DeclInfo) (DeclInfo, int, bool) {
 	previousStart, valueStart, valueEnd, typeStart, typeEnd := -1, -1, -1, -1, -1
 	previousEnd := 0
 	ordinal := 0
@@ -49,26 +62,23 @@ func wideDeclaredConstant(context constantIndexContext, target DeclInfo, depth i
 			}
 			previousStart = start
 			previousEnd = decl.EndTok
-			namesEnd := declNameListEnd(&file, decl)
-			assign := findDeclAssign(&file, namesEnd, decl.EndTok)
+			namesEnd := declNameListEnd(file, decl)
+			assign := findDeclAssign(file, namesEnd, decl.EndTok)
 			if assign >= 0 {
-				typeStart, typeEnd = trimDeclSpan(&file, namesEnd, assign)
-				valueStart, valueEnd = trimDeclSpan(&file, assign+1, decl.EndTok)
+				typeStart, typeEnd = trimDeclSpan(file, namesEnd, assign)
+				valueStart, valueEnd = trimDeclSpan(file, assign+1, decl.EndTok)
 			}
 		}
 		if decl.NameTok != target.Token {
 			continue
 		}
-		if valueStart < 0 || typeEnd > typeStart {
-			return wideConstant{}
+		if valueStart < 0 {
+			return target, 0, false
 		}
-		values := splitExprList(&file, valueStart, valueEnd)
-		index := declNameIndex(&file, decl)
-		if index < 0 || index >= len(values) {
-			return wideConstant{}
-		}
-		context.iotaKnown, context.iotaValue = true, ordinal
-		return wideConstantExpr(&context, values[index].StartTok, values[index].EndTok, depth)
+		target.ValueStart, target.ValueEnd = valueStart, valueEnd
+		target.TypeStart, target.TypeEnd = typeStart, typeEnd
+		target.Values = splitExprList(file, valueStart, valueEnd)
+		return target, ordinal, true
 	}
-	return wideConstant{}
+	return target, 0, false
 }
