@@ -152,7 +152,7 @@ go compiler {
 }
 ```
 
-The current migration covers 186 role-based operations: register copies,
+The current migration covers 228 role-based operations: register copies,
 pushes/pops, stack slots, immediate values, data/BSS addresses, sized memory
 accesses, normalization, arithmetic and logic, comparisons and label branches,
 return/frame teardown, split-word immediates, frame comparisons, and the
@@ -203,8 +203,22 @@ helper selection, tertiary frame stores and fresh-arena copy paths use typed
 hooks; concatenation result storage also follows definition-owned allocation/copy
 policy. Slice location evaluation and expression semantics remain in common lowering. The
 x86 definitions retain their C/code16 peepholes and object-ABI helper implementations rather than placing them in core.
-Hooks may take typed parameters, an assembler or compiler-state input, and a
-validated result type. Their complete
+Scalar atom, unary, selector, index, call, and binary evaluation now share a
+single language-level path. Definitions select word-constant materialization,
+bounded shifts, unsigned comparison result normalization, and ABI intrinsic
+eligibility; the core does not select an ISA to evaluate an integer expression.
+File open/close/chmod and sequential/offset read/write calls likewise share
+argument evaluation while definitions own register placement and runtime entry.
+Raw stack and memory instruction encoders are private to their ISA definitions.
+Hosted-object calling conventions are selected by definition queries rather
+than core architecture predicates. Incoming object register and stack words,
+argument-register counts, and export frames are typed operations. Aggregate
+classification, aggregate-result/variadic wrapper emission, and other legacy
+object ABI assumptions remain migration work, not completed generic ABI support.
+Hooks may take typed parameters, an assembler, compiler-state input, or a
+read-only compile-context query, and a validated result type. Context queries
+return an explicit unavailable value for an unknown selector; emission operations
+still mark an unknown selector as an emission failure. Their complete
 signatures are checked before generation;
 missing operations, duplicate selectors, and unknown operations are errors.
 The generated dispatcher projects definition-owned bodies directly into their
@@ -221,7 +235,7 @@ Generated local names cannot capture identifiers supplied by a definition. Hooks
 noncanonical parameter names or function-scoped labels retain direct calls.
 Private projected entrypoints are omitted from the architecture source unless
 another binding, Go body, or definition declaration still references them.
-An unrecognized selector fails compilation rather than falling back to an ISA.
+An unrecognized emission selector fails compilation rather than falling back to an ISA.
 Prepared backends provide the same compiler operation names through their direct
 emitter and ABI bindings, without depending on bundled hooks or selectors.
 
