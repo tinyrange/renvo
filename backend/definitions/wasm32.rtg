@@ -4150,6 +4150,8 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		chmod_file = renvoWasm32CompilerChmodFile
+		close_file = renvoWasm32CompilerCloseFile
 		open_path_length = renvoWasm32CompilerOpenPathLength
 		open_file = renvoWasm32CompilerOpenFile
 		function_word_conversion = renvoWasm32CompilerFunctionWordConversion
@@ -6157,5 +6159,29 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerOpenPathLength(g *renvoLinearGen) bool {
 		return !targetIsDarwin(g.c.renvoTargetOS)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerCloseFile(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionClose(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysClose(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerChmodFile(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionChmod(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }

@@ -1300,6 +1300,8 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		chmod_file = renvo386CompilerChmodFile
+		close_file = renvo386CompilerCloseFile
 		open_path_length = renvo386CompilerOpenPathLength
 		open_file = renvo386CompilerOpenFile
 		function_word_conversion = renvo386CompilerFunctionWordConversion
@@ -4695,5 +4697,29 @@ go compiler {
 go compiler {
 	func renvo386CompilerOpenPathLength(g *renvoLinearGen) bool {
 		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerCloseFile(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionClose(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysClose(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerChmodFile(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionChmod(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }

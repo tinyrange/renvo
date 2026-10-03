@@ -4357,6 +4357,16 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoAsmChmodFile(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)
+}
+
+func renvoAsmCloseFile(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)
+}
+
 func renvoOpenPathNeedsLength(g *renvoLinearGen) bool {
 renvoNonNil(g)
 return false

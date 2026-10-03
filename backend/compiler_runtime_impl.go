@@ -386,6 +386,35 @@ func renvoEmitOpenFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 	return renvoAsmOpenFile(&g.asm)
 }
 
+// renvoEmitDescriptorFileCall shares argument validation and ordered evaluation
+// for close and chmod. The definition consumes the descriptor in call word zero
+// and, for chmod, the mode in call word one.
+func renvoEmitDescriptorFileCall(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
+	e := &ep.exprs[idx]
+	a := &g.asm
+	if callee == renvoIdentClose {
+		if e.argCount != 1 {
+			return false
+		}
+	} else if callee != renvoIdentChmod || e.argCount != 2 {
+		return false
+	}
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+		return false
+	}
+	if callee == renvoIdentClose {
+		renvoAsmCopyPrimaryToCallWord0(a)
+		return renvoAsmCloseFile(a)
+	}
+	renvoAsmPushPrimary(a)
+	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
+		return false
+	}
+	renvoAsmCopyPrimaryToCallWord1(a)
+	renvoAsmPopCallWord0(a)
+	return renvoAsmChmodFile(a)
+}
+
 func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, callee int) bool {
 	renvoNonNil(g, ep)
 	if renvoPreparedBackendActive != 0 {
@@ -416,58 +445,16 @@ func renvoEmitTargetRuntime(g *renvoLinearGen, ep *renvoExprParse, idx int, call
 		}
 		return renvoEmitBuiltinReadWrite(g, ep, idx, renvoLinuxSysReadSeq(g.c.renvoTargetOS, g.c.renvoTargetArch), renvoLinuxSysReadAt(g.c.renvoTargetOS, g.c.renvoTargetArch))
 	}
-	e := &ep.exprs[idx]
-	a := &g.asm
-	firstArgIndex := -1
-	if e.argCount > 0 {
-		firstArgIndex = renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)
-	}
 	if callee == renvoIdentOpen {
 		return renvoEmitOpenFileCall(g, ep, idx)
 	}
-	if callee == renvoIdentClose {
-		if e.argCount != 1 {
-			return false
-		}
-		if !renvoEmitIntExpr(g, ep, firstArgIndex) {
-			return false
-		}
-		renvoAsmCopyPrimaryToCallWord0(a)
-		if targetIsDarwin(g.c.renvoTargetOS) {
-			renvoDarwinArm64DefinitionClose(a)
-			return true
-		}
-		renvoAsmPrimaryImm(a, renvoLinuxSysClose(g.c.renvoTargetOS, g.c.renvoTargetArch))
-		renvoAsmSyscall(a)
-		return true
-	}
-	if e.argCount != 2 {
-		return false
-	}
-	if !renvoEmitIntExpr(g, ep, firstArgIndex) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1)) {
-		return false
-	}
-	renvoAsmCopyPrimaryToCallWord1(a)
-	renvoAsmPopCallWord0(a)
-	if targetIsDarwin(g.c.renvoTargetOS) {
-		renvoDarwinArm64DefinitionChmod(a)
-		return true
-	}
-	renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(g.c.renvoTargetOS, g.c.renvoTargetArch))
-	renvoAsmSyscall(a)
-	return true
+	return renvoEmitDescriptorFileCall(g, ep, idx, callee)
 }
 
 func renvoEmitPreparedTargetRuntime(
 	g *renvoLinearGen, ep *renvoExprParse, idx int, callee int,
 ) bool {
 	renvoNonNil(g, ep)
-	expression := &ep.exprs[idx]
-	a := &g.asm
 	if callee == renvoIdentRead || callee == renvoIdentWrite {
 		operation := RTGRuntimeRead
 		if callee == renvoIdentWrite {
@@ -478,27 +465,7 @@ func renvoEmitPreparedTargetRuntime(
 	if callee == renvoIdentOpen {
 		return renvoEmitOpenFileCall(g, ep, idx)
 	}
-	if callee == renvoIdentClose {
-		if expression.argCount != 1 ||
-			!renvoEmitIntExpr(g, ep, ep.args[expression.firstArg]) {
-			return false
-		}
-		renvoRTGDirectMove(a, renvoRTGCallWord0, renvoRTGPrimary)
-		return renvoRTGEmitRuntimeOperation(a, RTGRuntimeClose)
-	}
-	if callee != renvoIdentChmod || expression.argCount != 2 {
-		return false
-	}
-	if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg]) {
-		return false
-	}
-	renvoAsmPushPrimary(a)
-	if !renvoEmitIntExpr(g, ep, ep.args[expression.firstArg+1]) {
-		return false
-	}
-	renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
-	renvoRTGAsmPopRegister(a, renvoRTGCallWord0)
-	return renvoRTGEmitRuntimeOperation(a, RTGRuntimeChmod)
+	return renvoEmitDescriptorFileCall(g, ep, idx, callee)
 }
 func renvoEmitExitStatus(g *renvoLinearGen) bool {
 	renvoNonNil(g)
