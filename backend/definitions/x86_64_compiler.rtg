@@ -634,6 +634,12 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		label_notifications = renvoAmd64CompilerLabelNotifications
+		unsupported_operation = renvoAmd64CompilerUnsupportedOperation
+		label_boundary = renvoAmd64CompilerLabelBoundary
+		structured_string_equal_body = renvoAmd64CompilerStructuredStringEqualBody
+		helper_function_boundary = renvoAmd64CompilerHelperFunctionBoundary
+		structured_functions = renvoAmd64CompilerStructuredFunctions
 		object_variadic_word_limit = renvoAmd64CompilerObjectVariadicWordLimit
 		object_stack_arguments = renvoAmd64CompilerObjectStackArguments
 		string_compare_arguments = renvoAmd64CompilerStringCompareArguments
@@ -4449,5 +4455,41 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
 		return 7
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStructuredFunctions(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerStructuredStringEqualBody(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerLabelBoundary(a *renvoAsm, label int) {
+		return
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerUnsupportedOperation(a *renvoAsm, code int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAmd64CompilerLabelNotifications(c *renvoCompileContext) bool {
+		return false
 	}
 }

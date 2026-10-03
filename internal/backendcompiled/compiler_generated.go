@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ed2f651db5b5a2976de7090b201c72085167197c618ed2e4107ecfe5f88b1e0b"
+const CompilerSourceDigest = "87862b5ff9f71efeebb0ecca0b67540a2d948a8c3456ab8be87974ab769ecb78"
 
 // source: backend/compiler_common_impl.go
 
@@ -334,9 +334,7 @@ const renvoStructuredHelperNonNil = 8
 
 func renvoQueueStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) {
 if g.structuredHelperCount >= len(g.structuredHelperKinds) {
-if renvoRTGUnsupportedOperation == 0 {
-renvoRTGUnsupportedOperation = 4003
-}
+renvoAsmUnsupportedOperation(&g.asm, 4003)
 return
 }
 index := g.structuredHelperCount
@@ -347,8 +345,8 @@ g.structuredHelperCount++
 }
 
 func renvoEmitStructuredHelper(g *renvoLinearGen, kind int, arg int, label int) bool {
-if renvoRTGStructuredFunctions != 0 {
-renvoRTGFunctionStart(&g.asm, label)
+if renvoUsesStructuredFunctions(g.c) {
+renvoAsmHelperFunctionBoundary(&g.asm, label, true)
 renvoAsmMarkLabel(&g.asm, label)
 if kind == renvoStructuredHelperSignedDivide {
 renvoEmitSignedDivisionHelperBody(g, arg != 0)
@@ -357,7 +355,7 @@ renvoEmitMakeZeroHelperBody(g)
 } else if kind == renvoStructuredHelperFault {
 renvoEmitUncaughtFaultHelperBody(g, arg != 0)
 } else if kind == renvoStructuredHelperStringEqual {
-renvoRTGEmitStringEqualHelperBody(g)
+renvoEmitStructuredStringEqualBody(g)
 } else if kind == renvoStructuredHelperArenaAlloc {
 renvoEmitArenaAllocHelperBody(g, arg != 0)
 } else if kind == renvoStructuredHelperIndexAddress {
@@ -369,7 +367,7 @@ renvoEmitNonNilCheckHelperBody(g, arg != 0)
 } else {
 return false
 }
-renvoRTGFunctionFinish(&g.asm)
+renvoAsmHelperFunctionBoundary(&g.asm, label, false)
 return true
 }
 return false
@@ -500,8 +498,8 @@ codeLen := len(a.code)
 a.labelPos[label] = int32(codeLen)
 a.lastPrimaryStoreEnd = -1
 a.lastPrimaryLoad = 0
-if renvoPreparedBackendActive != 0 {
-renvoRTGMarkLabel(a, label)
+if renvoLabelNotifications(a.c) {
+renvoAsmLabelBoundary(a, label)
 }
 }
 
@@ -13731,7 +13729,7 @@ return g.makeZeroLabel
 }
 g.makeZeroEmitted = true
 g.makeZeroLabel = renvoAsmNewLabel(a)
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperMakeZero, 0, g.makeZeroLabel)
 return g.makeZeroLabel
 }
@@ -15541,7 +15539,7 @@ return renvoEnsureUncaughtFaultHelper(g, false)
 
 func renvoEmitUncaughtFaultTransfer(g *renvoLinearGen, outOfMemory bool) {
 label := renvoEnsureUncaughtFaultHelper(g, outOfMemory)
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 renvoAsmCallLabel(&g.asm, label)
 renvoAsmRet(&g.asm)
 return
@@ -15565,7 +15563,7 @@ g.arenaFaultLabel = label + 1
 } else {
 g.runtimeFaultLabel = label + 1
 }
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if outOfMemory {
 argument = 1
@@ -15632,7 +15630,7 @@ return *labelSlot - 1
 }
 label := renvoAsmNewLabel(&g.asm)
 *labelSlot = label + 1
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if secondary {
 argument = 1
@@ -17988,7 +17986,7 @@ g.runtimeWordIndexLabel = label + 1
 } else {
 g.runtimeWideIndexLabel = label + 1
 }
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperIndexAddress, elemSize, label)
 return label
 }
@@ -18038,7 +18036,7 @@ return g.runtimeBoundsLabel - 1
 }
 label := renvoAsmNewLabel(&g.asm)
 g.runtimeBoundsLabel = label + 1
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 renvoQueueStructuredHelper(g, renvoStructuredHelperBoundsCheck, 0, label)
 return label
 }
@@ -19289,7 +19287,7 @@ return *slot - 1
 }
 label := renvoAsmNewLabel(a)
 *slot = label + 1
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if mod {
 argument = 1
@@ -20074,7 +20072,7 @@ g.persistentAllocLabel = label + 1
 g.arenaAllocLabel = label + 1
 }
 renvoStringHeapOffsets(g)
-if renvoRTGStructuredFunctions != 0 {
+if renvoUsesStructuredFunctions(g.c) {
 argument := 0
 if persistent {
 argument = 1
@@ -29072,7 +29070,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xd0\x37\x40\xf5\x2f\xaf\x5d\x8b\x63\xe7\x3d\x68\x49\xe3\x17\x83\x88\xae\xb8\x49\xad\x3c\x4c\x79\x80\xc2\x7c\xed\x14\x51\x05\x5c", 3, true
+return "wasi/wasm32", "\x77\xad\x50\x05\xdf\x41\xdc\x0c\x09\x76\xe0\x38\xb6\x84\x0a\xf1\x20\xf0\x38\xec\x7e\xbd\x82\x0f\x70\x71\xf4\x78\xc7\x78\x8a\x50", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x60\xa3\xcf\xd5\xcc\x0f\xa9\xee\x0e\xa6\x22\xeb\x5c\xe1\x20\x84\xd1\x4d\x32\x4d\x62\x37\x66\xfc\x6c\x4c\xd6\xa8\xa5\x6b\x2a\xde", 3, true
@@ -29084,7 +29082,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x1f\x24\xb2\x1a\x81\x50\x5e\x3b\x68\x89\x27\x42\xa9\x68\x12\x7e\x73\x77\xa6\xd3\x81\x3a\xa3\xd8\xb4\xce\x1f\x81\x81\xf9\x53\xd2", 3, true
+return "vm/vm32", "\xac\x8b\xcd\xa4\x73\x4b\x59\x66\x35\x35\xdb\x90\xae\x48\x9b\x8d\x95\x49\x46\x95\x66\x60\x4d\x0b\x2a\xe0\x9d\xfe\x3c\xaa\x6a\x52", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xc0\x53\x9f\x29\x64\xa4\xd4\xcb\x8a\x03\x27\x4a\x45\xdc\x57\x37\xc9\xd6\xba\x59\x28\xc3\x9f\x41\x29\xa8\x00\x05\x81\xd6\xde\xa7", 3, true
@@ -30462,6 +30460,74 @@ return 0
 
 func renvoRTGTargetBinding(target int) (string, string, int, bool) {
 return renvoBuiltInTargetBinding(target)
+}
+
+func renvoLabelNotifications(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
+}
+
+func renvoAsmUnsupportedOperation(a *renvoAsm, code int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a.patchFailed = true
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoAsmLabelBoundary(a *renvoAsm, label int) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoEmitStructuredStringEqualBody(g *renvoLinearGen) {
+renvoNonNil(g)
+renvoCompilerSelector := g.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+g.asm.patchFailed = true
+
+return
+
+}
+g.asm.patchFailed = true
+}
+
+func renvoAsmHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+renvoNonNil(a)
+renvoCompilerSelector := a.c
+renvoNonNil(renvoCompilerSelector)
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+
+a.patchFailed = true
+
+return
+
+}
+a.patchFailed = true
+}
+
+func renvoUsesStructuredFunctions(c *renvoCompileContext) bool {
+renvoNonNil(c)
+renvoCompilerSelector := c
+renvoNonNil(renvoCompilerSelector)
+return false
 }
 
 func renvoObjectVariadicWordLimit(c *renvoCompileContext) int {
@@ -46272,6 +46338,18 @@ return renvoFinishScalarProgram(g)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_amd64_target_impl.go
 
 
@@ -49150,6 +49228,18 @@ return renvoTryCompileScalarProgramScratch(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_386_code16_impl.go
 
 
@@ -51784,6 +51874,18 @@ return renvoTryCompileScalarProgramCached(p, meta)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // source: backend/compiler_arm_impl.go
 
 
@@ -53442,6 +53544,18 @@ return out
 func renvoTryCompileScalarProgramArm(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 return renvoTryCompileScalarProgramScratch(p, meta)
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -56649,6 +56763,18 @@ renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

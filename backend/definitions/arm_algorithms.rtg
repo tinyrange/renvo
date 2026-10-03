@@ -486,6 +486,12 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		label_notifications = renvoArmCompilerLabelNotifications
+		unsupported_operation = renvoArmCompilerUnsupportedOperation
+		label_boundary = renvoArmCompilerLabelBoundary
+		structured_string_equal_body = renvoArmCompilerStructuredStringEqualBody
+		helper_function_boundary = renvoArmCompilerHelperFunctionBoundary
+		structured_functions = renvoArmCompilerStructuredFunctions
 		object_variadic_word_limit = renvoArmCompilerObjectVariadicWordLimit
 		object_stack_arguments = renvoArmCompilerObjectStackArguments
 		string_compare_arguments = renvoArmCompilerStringCompareArguments
@@ -3114,5 +3120,41 @@ go compiler {
 go compiler {
 	func renvoArmCompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
 		return 0
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStructuredFunctions(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvoArmCompilerHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerStructuredStringEqualBody(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLabelBoundary(a *renvoAsm, label int) {
+		return
+	}
+}
+
+go compiler {
+	func renvoArmCompilerUnsupportedOperation(a *renvoAsm, code int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoArmCompilerLabelNotifications(c *renvoCompileContext) bool {
+		return false
 	}
 }
