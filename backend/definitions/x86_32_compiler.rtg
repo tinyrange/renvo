@@ -1300,6 +1300,10 @@ go compiler {
 extend arch x86_32 {
 	compiler_selector = renvoArch386
 	compiler_bindings {
+		write_value_regs = renvo386CompilerWriteValueRegs
+		exit_status = renvo386CompilerExitStatus
+		syscall_from_stack = renvo386CompilerSyscallFromStack
+		jit_call_from_stack = renvo386CompilerJITCallFromStack
 		runtime_stack_helpers = renvo386CompilerRuntimeStackHelpers
 		object_indirect_register_call = renvo386CompilerObjectIndirectRegisterCall
 		load_object_argument_word = renvo386CompilerLoadObjectArgumentWord
@@ -4947,5 +4951,83 @@ go compiler {
 go compiler {
 	func renvo386CompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerJITCallFromStack(a *renvoAsm) bool {
+		renvoAsmEmitText(a, "\x5b\x5e\x5a\x59\x58\x5f")
+		renvoAsmEmitText(a, "\x89\x66\xfc\x89\xf4\x83\xec\x08\x57\x50\x51\x52\xff\xd3")
+		renvoAsmEmitText(a, "\x83\xc4\x10\x8b\x54\x24\x04\x89\xd4")
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+		if wordCount > 7 {
+			return false
+		}
+		renvoAsmPopPrimary(a)
+		if wordCount > 1 {
+			renvoAsmPopCallWord0(a)
+		}
+		if wordCount > 2 {
+			renvoAsmEmit8(a, 0x59)
+		}
+		if wordCount > 3 {
+			renvoAsmPopSecondary(a)
+		}
+		if wordCount > 4 {
+			renvoAsmEmit8(a, 0x5e)
+		}
+		if wordCount > 5 {
+			renvoAsmEmit8(a, 0x5f)
+		}
+		if wordCount > 6 {
+			// Linux/i386 carries the sixth syscall argument in EBP. Exchange
+			// it with the saved frame pointer at the top of the expression
+			// stack, then restore EBP after int 0x80.
+			renvoAsmEmitText(a, "\x87\x2c\x24")
+			renvoAsmSyscall(a)
+			renvoAsmEmit8(a, 0x5d)
+			return true
+		}
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerExitStatus(a *renvoAsm) bool {
+		if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWin386EmitExit(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerWriteValueRegs(g *renvoLinearGen, fd int) bool {
+		a := &g.asm
+		if targetIsWindows(g.c.renvoTargetOS) {
+			renvoAsmEmit16(a, 0xc689)
+			renvoAsmPrimaryImm(a, -1)
+			renvoAsmCopyPrimaryToTertiary(a)
+			renvoAsmPrimaryImm(a, fd)
+			renvoAsmEmit16(a, 0xc389)
+			renvoWin386EmitRuntimeWriteAt(g)
+			return true
+		}
+		renvoAsmPushImm(a, fd)
+		renvoAsmPopCallWord0(a)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }

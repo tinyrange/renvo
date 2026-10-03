@@ -737,6 +737,10 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		write_value_regs = renvoAarch64CompilerWriteValueRegs
+		exit_status = renvoAarch64CompilerExitStatus
+		syscall_from_stack = renvoAarch64CompilerSyscallFromStack
+		jit_call_from_stack = renvoAarch64CompilerJITCallFromStack
 		runtime_stack_helpers = renvoAarch64CompilerRuntimeStackHelpers
 		object_indirect_register_call = renvoAarch64CompilerObjectIndirectRegisterCall
 		load_object_argument_word = renvoAarch64CompilerLoadObjectArgumentWord
@@ -3150,5 +3154,112 @@ go compiler {
 go compiler {
 	func renvoAarch64CompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerJITCallFromStack(a *renvoAsm) bool {
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdi)
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRsi)
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRdx)
+		renvoAarch64AsmPopReg(a, renvoAarch64RegRcx)
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR8)
+		renvoAarch64AsmPopReg(a, renvoAarch64RegR9)
+		renvoAarch64AsmMovRegReg(a, 9, renvoAarch64RegRdi)
+		renvoAarch64AsmMovRegReg(a, 10, renvoAarch64RegRsi)
+		renvoAarch64AsmEmit(a, 0x910003eb) // ADD X11, SP, #0
+		renvoAarch64AsmEmit(a, 0x9100015f) // ADD SP, X10, #0
+		renvoAarch64AsmEmit(a, 0xd10043ff) // SUB SP, SP, #16
+		renvoAarch64AsmStoreRegMem(a, 11, 31, 8, 8)
+		renvoAarch64AsmMovRegReg(a, 0, renvoAarch64RegRdx)
+		renvoAarch64AsmMovRegReg(a, 1, renvoAarch64RegRcx)
+		renvoAarch64AsmMovRegReg(a, 2, renvoAarch64RegR8)
+		renvoAarch64AsmMovRegReg(a, 3, renvoAarch64RegR9)
+		renvoAarch64AsmEmit(a, 0xd63f0120) // BLR X9
+		renvoAarch64AsmLoadRegMem(a, 11, 31, 8, 8)
+		renvoAarch64AsmEmit(a, 0x9100017f) // ADD SP, X11, #0
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			if wordCount != 4 {
+				return false
+			}
+			renvoAarch64AsmPopReg(a, 9)
+			renvoAarch64AsmPopReg(a, 0)
+			renvoAarch64AsmPopReg(a, 1)
+			renvoAarch64AsmPopReg(a, 2)
+			baseOff := a.bssSize
+			a.bssSize += 8
+			renvoAarch64AsmMovRegAbs(a, 3, baseOff, renvoAbsBssReloc)
+			renvoDarwinArm64EmitGetdirentries(a)
+			return true
+		}
+		renvoAarch64AsmPopReg(a, renvoAarch64RegSys)
+		if wordCount > 1 {
+			renvoAarch64AsmPopReg(a, 0)
+		}
+		if wordCount > 2 {
+			renvoAarch64AsmPopReg(a, 1)
+		}
+		if wordCount > 3 {
+			renvoAarch64AsmPopReg(a, 2)
+		}
+		if wordCount > 4 {
+			renvoAarch64AsmPopReg(a, 3)
+		}
+		if wordCount > 5 {
+			renvoAarch64AsmPopReg(a, 4)
+		}
+		if wordCount > 6 {
+			renvoAarch64AsmPopReg(a, 5)
+		}
+		renvoAarch64AsmEmit(a, 0xd4000001)
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerExitStatus(a *renvoAsm) bool {
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionExit(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWinArm64DefinitionExit(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinuxAarch64SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvoAarch64CompilerWriteValueRegs(g *renvoLinearGen, fd int) bool {
+		a := &g.asm
+		if targetIsWindows(g.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord1(a)
+			renvoAsmPrimaryImm(a, -1)
+			renvoAsmCopyPrimaryToTertiary(a)
+			renvoAsmPrimaryImm(a, fd)
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoWinArm64DefinitionWriteAt(g)
+			return true
+		}
+		if targetIsDarwin(g.c.renvoTargetOS) {
+			renvoAarch64AsmMovRegReg(a, renvoAarch64RegRsi, renvoAarch64RegRax)
+			renvoAarch64AsmMovRegImm(a, renvoAarch64RegRdi, fd)
+			renvoDarwinArm64DefinitionWrite(a)
+			return true
+		}
+		renvoAsmPushImm(a, fd)
+		renvoAsmPopCallWord0(a)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
 	}
 }

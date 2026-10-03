@@ -2106,6 +2106,61 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgLlvmLlvmAmd64PackageLlvmPatchRelocations(out)
 }
 
+func renvoEmitTargetWriteValueRegs(g *renvoLinearGen, fd int) bool {
+renvoNonNil(g)
+a := &g.asm
+renvoRTGDirectMove(a, renvoRTGCallWord2, renvoRTGSecondary)
+renvoRTGDirectMove(a, renvoRTGCallWord1, renvoRTGPrimary)
+renvoRTGDirectMoveImmediate(a, renvoRTGCallWord0, int64(fd))
+return renvoRTGEmitRuntimeOperation(a, RTGRuntimeWrite)
+}
+
+func renvoAsmExitStatus(a *renvoAsm) bool {
+renvoNonNil(a)
+return renvoRTGEmitExit(a, renvoRTGPrimary)
+}
+
+func renvoAsmSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+renvoNonNil(a)
+if wordCount > 7 {
+	return false
+}
+registers := []RTGRegister{
+	renvoRTGSyscallNumber,
+	renvoRTGSyscallWord0, renvoRTGSyscallWord1, renvoRTGSyscallWord2,
+	renvoRTGSyscallWord3, renvoRTGSyscallWord4, renvoRTGSyscallWord5,
+}
+for i := 0; i < wordCount; i++ {
+	if !registers[i].Valid {
+		return false
+	}
+	renvoRTGAsmPopRegister(a, registers[i])
+}
+renvoRTGDirectHostSyscall(a)
+if renvoRTGSyscallResult.Valid &&
+	renvoRTGSyscallResult.Code != renvoRTGPrimary.Code {
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGSyscallResult)
+}
+return true
+}
+
+func renvoAsmJITCallFromStack(a *renvoAsm) bool {
+renvoNonNil(a)
+entry := renvoRTGScratch
+stackTop := renvoRTGPrimary
+argsData := renvoRTGCallWord0
+argsLen := renvoRTGCallWord1
+envData := renvoRTGTertiary
+envLen := renvoRTGSecondary
+renvoRTGAsmPopRegister(a, entry)
+renvoRTGAsmPopRegister(a, stackTop)
+renvoRTGAsmPopRegister(a, argsData)
+renvoRTGAsmPopRegister(a, argsLen)
+renvoRTGAsmPopRegister(a, envData)
+renvoRTGAsmPopRegister(a, envLen)
+return renvoRTGEmitJITCall(a, entry, stackTop, argsData, argsLen, envData, envLen)
+}
+
 func renvoAsmRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
 renvoNonNil(a)
 	a.patchFailed = true
