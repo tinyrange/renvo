@@ -696,6 +696,9 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		named_function_address = renvoArmCompilerNamedFunctionAddress
+		address_taken_local = renvoArmCompilerAddressTakenLocal
+		address_result_buffer = renvoArmCompilerAddressResultBuffer
 		load_indirect_field_value = renvoArmCompilerLoadIndirectFieldValue
 		load_frame_field_value = renvoArmCompilerLoadFrameFieldValue
 		direct_slice_count_selector = renvoArmCompilerDirectSliceCountSelector
@@ -2534,5 +2537,23 @@ go compiler {
 		} else {
 			renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 		}
+	}
+}
+
+go compiler {
+	func renvoArmCompilerAddressResultBuffer(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerAddressTakenLocal(a *renvoAsm, offset int) {
+		renvoAsmAddressPrimaryStack(a, offset)
+	}
+}
+
+go compiler {
+	func renvoArmCompilerNamedFunctionAddress(g *renvoLinearGen) bool {
+		return true
 	}
 }

@@ -4150,6 +4150,9 @@ target vm/vm32 {
 extend arch vm32 {
 	compiler_selector = renvoArchWasm32
 	compiler_bindings {
+		named_function_address = renvoWasm32CompilerNamedFunctionAddress
+		address_taken_local = renvoWasm32CompilerAddressTakenLocal
+		address_result_buffer = renvoWasm32CompilerAddressResultBuffer
 		load_indirect_field_value = renvoWasm32CompilerLoadIndirectFieldValue
 		load_frame_field_value = renvoWasm32CompilerLoadFrameFieldValue
 		direct_slice_count_selector = renvoWasm32CompilerDirectSliceCountSelector
@@ -6104,5 +6107,23 @@ go compiler {
 		} else {
 			renvoAsmLoadPrimaryMemSecondaryDisp(a, 0)
 		}
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerAddressResultBuffer(a *renvoAsm, offset int) {
+		renvoAsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerAddressTakenLocal(a *renvoAsm, offset int) {
+		renvoAsmAddressPrimaryStack(a, offset)
+	}
+}
+
+go compiler {
+	func renvoWasm32CompilerNamedFunctionAddress(g *renvoLinearGen) bool {
+		return true
 	}
 }

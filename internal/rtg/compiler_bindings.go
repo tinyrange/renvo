@@ -85,6 +85,9 @@ func (op compilerEmitterOperation) failBody() string {
 }
 
 var compilerEmitterOperations = []compilerEmitterOperation{
+	{Name: "named_function_address", Suffix: "NamedFunctionAddress", Function: "renvoCanTakeNamedFunctionAddress", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},
+	{Name: "address_taken_local", Suffix: "AddressTakenLocal", Function: "renvoAsmAddressTakenLocal", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoAsmAddressPrimaryStack(a, offset)"},
+	{Name: "address_result_buffer", Suffix: "AddressResultBuffer", Function: "renvoAsmAddressResultBuffer", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}}, Prepared: "renvoAsmAddressPrimaryStack(a, offset)"},
 	{Name: "load_indirect_field_value", Suffix: "LoadIndirectFieldValue", Function: "renvoAsmLoadIndirectFieldValue", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"size", "int"}, {"nativeABI", "bool"}}, Prepared: "if nativeABI {\nrenvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)\n} else {\nrenvoAsmLoadPrimaryMemSecondaryDisp(a, 0)\n}"},
 	{Name: "load_frame_field_value", Suffix: "LoadFrameFieldValue", Function: "renvoAsmLoadFrameFieldValue", Result: "", Failure: "", Parameters: []compilerBindingParameter{{"offset", "int"}, {"size", "int"}, {"nativeABI", "bool"}}, Prepared: "if nativeABI {\nrenvoAsmAddressPrimaryStack(a, offset)\nrenvoAsmCopyPrimaryToSecondary(a)\nrenvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)\n} else {\nrenvoAsmLoadPrimaryStack(a, offset)\n}"},
 	{Name: "direct_slice_count_selector", Suffix: "DirectSliceCountSelector", Function: "renvoCanLoadDirectSliceCountSelector", Receiver: compilerBindingParameter{"g", "*renvoLinearGen"}, Result: "bool", Failure: "false", Parameters: []compilerBindingParameter{}, Prepared: "return true"},

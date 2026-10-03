@@ -4357,6 +4357,21 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoCanTakeNamedFunctionAddress(g *renvoLinearGen) bool {
+renvoNonNil(g)
+return true
+}
+
+func renvoAsmAddressTakenLocal(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoAsmAddressPrimaryStack(a, offset)
+}
+
+func renvoAsmAddressResultBuffer(a *renvoAsm, offset int) {
+renvoNonNil(a)
+renvoAsmAddressPrimaryStack(a, offset)
+}
+
 func renvoAsmLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
 renvoNonNil(a)
 if nativeABI {
