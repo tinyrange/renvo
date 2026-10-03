@@ -4365,6 +4365,48 @@ func renvoRTGPatchRelocations(out *renvoAsm) {
 rtgJvmJvmPackageJvmPatchRelocations(out)
 }
 
+func renvoKernelProgram(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return renvoRTGPreparedKernelModule != 0 && !c.objectFile
+}
+
+func renvoBuildProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+renvoNonNil(a)
+if renvoRTGPreparedKernelModule != 0 && !a.c.objectFile {
+	result.data = renvoRTGKernelImage(a, initLabel, exitLabel)
+} else {
+	result.data = renvoRTGImage(a)
+}
+}
+
+func renvoFinalizeObjectCode(a *renvoAsm) bool {
+renvoNonNil(a)
+return true
+}
+
+func renvoReleaseProgramScratch(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoReleaseProgramDeclarations(c *renvoCompileContext) bool {
+renvoNonNil(c)
+return false
+}
+
+func renvoSetupProgramLayout(a *renvoAsm, image bool) int {
+renvoNonNil(a)
+a.codeOffset = renvoRTGCodeOffset
+offset := -1
+if renvoRTGEntryStateBytes > 0 {
+	offset = a.ReserveBSS(renvoRTGEntryStateBytes, renvoRTGStackWordBytes)
+}
+if !renvoRTGEmitEntryStart(a, offset) {
+	return -2
+}
+return offset
+}
+
 func renvoEmitCompactCValueHelperBody(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
 renvoNonNil(a)
 return false

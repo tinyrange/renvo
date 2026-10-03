@@ -395,12 +395,7 @@ func renvoEmitAllQueuedFunctionsScratch(g *renvoLinearGen) bool {
 			continue
 		}
 		if !renvoEmitScalarFunctionScratch(g, fnIndex) {
-			if renvoFixedTarget == 0 {
-				fn := &g.meta.funcs[fnIndex]
-				renvoPrintErr("renvo: failed function: ")
-				write(2, g.prog.src[fn.nameStart:fn.nameEnd], -1)
-				renvoPrintErr("\n")
-			}
+			renvoPrintFailedFunction(g, fnIndex)
 			return false
 		}
 	}
@@ -21677,6 +21672,125 @@ func renvoEmitApplicationEntry(g *renvoLinearGen, appIndex int, image bool, entr
 	return renvoEmitProgramExit(&g.asm, image)
 }
 
+// Program orchestration is shared. Definitions own only layout, physical
+// entry setup, object-code transforms and image construction.
+func renvoBeginScalarProgram(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
+	renvoNonNil(p, meta)
+	if renvoFixedTarget == 0 && (renvoIsSysVObject(meta.c) || renvoIsCdeclObject(meta.c)) {
+		return renvoBeginObjectProgram(p, meta)
+	}
+	appIndex := p.entryFunc
+	if appIndex < 0 {
+		return nil
+	}
+	if renvoReleaseProgramDeclarations(meta.c) {
+		renvo_runtime_ArenaDiscardDecls(p.decls)
+		renvo_runtime_ArenaDiscardFuncs(p.funcs)
+	}
+	g := new(renvoLinearGen)
+	renvoInitLinearProgram(g, p, meta, renvoFixedTarget == 0)
+	image := renvoFixedTarget == 0 && meta.c.emitImage
+	g.darwinEntryOff = renvoSetupProgramLayout(&g.asm, image)
+	if g.darwinEntryOff == -2 {
+		return nil
+	}
+	renvoInitProgramFunctions(g, renvoFixedTarget != 0)
+	if renvoKernelProgram(g.c) {
+		if !renvoBeginKernelModule(g, appIndex) {
+			return nil
+		}
+	} else if !renvoEmitApplicationEntry(g, appIndex, image, g.darwinEntryOff) {
+		return nil
+	}
+	return g
+}
+
+func renvoFinishScalarProgram(g *renvoLinearGen) renvoCompileResult {
+	renvoNonNil(g)
+	a := &g.asm
+	if renvoFixedTarget == 0 && (renvoIsSysVObject(g.c) || renvoIsCdeclObject(g.c)) {
+		// Names and spans belong to the frontend arena: copy them before release.
+		renvoRecordObjectFunctionRanges(g)
+		if !renvoFinalizeObjectCode(a) {
+			return renvoCompileResult{}
+		}
+	}
+	if renvoReleaseProgramScratch(g.c) {
+		renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
+	}
+	var result renvoCompileResult
+	renvoBuildProgramImage(a, g.kernelInitLabel, g.kernelExitLabel, &result)
+	result.ok = !a.patchFailed && len(result.data) != 0
+	return result
+}
+
+func renvoTryCompileScalarProgramScratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgram(p, meta)
+	if g == nil {
+		renvoPrintErr("renvo: failed to begin program\n")
+		return renvoCompileResult{}
+	}
+	if !renvoEmitAllQueuedFunctionsScratch(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgram(g)
+}
+
+func renvoTryCompileScalarProgramCached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	g := renvoBeginScalarProgram(p, meta)
+	if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
+		return renvoCompileResult{}
+	}
+	return renvoFinishScalarProgram(g)
+}
+
+// A resumable program has the same emitter and finalizer as a synchronous
+// compilation. Only the number of queue entries visited per step differs.
+type renvoProgramSession struct {
+	gen        *renvoLinearGen
+	queueIndex int
+	done       bool
+	result     renvoCompileResult
+}
+
+func renvoBeginProgramSession(p *renvoProgram, meta *renvoMeta) *renvoProgramSession {
+	g := renvoBeginScalarProgram(p, meta)
+	if g == nil {
+		return nil
+	}
+	return &renvoProgramSession{gen: g}
+}
+
+func (s *renvoProgramSession) step(functionLimit int) bool {
+	if s == nil || s.done {
+		return true
+	}
+	if functionLimit < 1 {
+		functionLimit = 1
+	}
+	failed := renvoEmitQueuedFunctionsCached(s.gen, &s.queueIndex, functionLimit)
+	if failed >= 0 {
+		renvoPrintFailedFunction(s.gen, failed)
+		s.done = true
+		return true
+	}
+	if s.queueIndex < len(s.gen.funcQueue) {
+		return false
+	}
+	s.result = renvoFinishScalarProgram(s.gen)
+	s.done = true
+	return true
+}
+
+func renvoPrintFailedFunction(g *renvoLinearGen, fnIndex int) {
+	if renvoFixedTarget == 0 {
+		fn := &g.meta.funcs[fnIndex]
+		renvoPrintErr("renvo: failed function: ")
+		write(2, g.prog.src[fn.nameStart:fn.nameEnd], -1)
+		renvoPrintErr("\n")
+	}
+}
+
 func renvoInitLinearProgram(g *renvoLinearGen, p *renvoProgram, meta *renvoMeta, optimizeRuntime bool) {
 	g.c = meta.c
 	g.prog = p
@@ -24887,26 +25001,11 @@ func renvoCompileProgramToOutput(prog *renvoProgram, output int, target int, are
 	var result renvoCompileResult
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		result = renvoTryCompileScalarProgramRTG(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetLinux386 || renvoFixedTarget == renvoTargetWindows386 {
-		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetLinuxAarch64 || renvoFixedTarget == renvoTargetDarwinArm64 || renvoFixedTarget == renvoTargetWindowsArm64 {
-		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetLinuxArm {
-		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 {
-		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
-	} else if renvoFixedTarget != 0 {
-		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
-	} else if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		result = renvoTryCompileScalarProgram386Cached(prog, &meta)
-	} else if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		result = renvoTryCompileScalarProgramAarch64Cached(prog, &meta)
-	} else if target == renvoTargetLinuxArm {
-		result = renvoTryCompileScalarProgramArmCached(prog, &meta)
-	} else if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
+	} else if renvoFixedTarget == renvoTargetWasiWasm32 || renvoFixedTarget == renvoTargetVM32 ||
+		renvoFixedTarget == 0 && (target == renvoTargetWasiWasm32 || target == renvoTargetVM32) {
 		result = renvoTryCompileScalarProgramWasm32(prog, &meta)
 	} else {
-		result = renvoTryCompileScalarProgramAmd64Cached(prog, &meta)
+		result = renvoTryCompileScalarProgramCached(prog, &meta)
 	}
 	if result.ok {
 		write(output, renvoCompileOutputDataWithContext(context, result.data, target), -1)

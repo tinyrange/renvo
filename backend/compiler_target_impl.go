@@ -420,7 +420,7 @@ type RenvoCompileSession struct {
 	ok         bool
 	prog       *renvoProgram
 	meta       *renvoMeta
-	aarch64    *renvoAarch64ProgramSession
+	program    *renvoProgramSession
 	result     renvoCompileResult
 }
 
@@ -475,8 +475,8 @@ func (s *RenvoCompileSession) Step() bool {
 	}
 	if s.stage == 2 {
 		if s.target == renvoTargetDarwinArm64 {
-			s.aarch64 = renvoBeginScalarProgramAarch64(s.prog, s.meta)
-			if s.aarch64 == nil {
+			s.program = renvoBeginProgramSession(s.prog, s.meta)
+			if s.program == nil {
 				s.done = true
 				return true
 			}
@@ -488,10 +488,10 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 3 {
-		if !s.aarch64.step(8) {
+		if !s.program.step(8) {
 			return false
 		}
-		s.result = s.aarch64.result
+		s.result = s.program.result
 		s.stage = 4
 		return false
 	}
@@ -543,41 +543,23 @@ func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, tar
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
-	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386Scratch(prog, meta)
-	}
-	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64Scratch(prog, meta)
-	}
-	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArmScratch(prog, meta)
-	}
 	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
-	return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
+	return renvoTryCompileScalarProgramScratch(prog, meta)
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		return renvoTryCompileScalarProgramRTG(prog, meta)
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
-		return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
-	}
-	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386Cached(prog, meta)
-	}
-	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64Cached(prog, meta)
-	}
-	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArmCached(prog, meta)
-	}
 	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
 		return renvoTryCompileScalarProgramWasm32(prog, meta)
 	}
-	return renvoTryCompileScalarProgramAmd64Cached(prog, meta)
+	if targetIsKernelModule(meta.c) {
+		return renvoTryCompileScalarProgramScratch(prog, meta)
+	}
+	return renvoTryCompileScalarProgramCached(prog, meta)
 }
 
 func renvoSetStripSymbols(stripSymbols bool) {
