@@ -8675,9 +8675,18 @@ func renvoEmitBareReturnValues(g *renvoLinearGen) bool {
 		}
 		field := &g.meta.fields[tuple.first+i]
 		renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-		// Result tuples reserve complete value slots, including narrow scalars.
-		// Match explicit returns so callers never read uninitialized slot padding.
-		renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeCopySize(g.meta, result.typ))
+		// Fill the complete value slot when the tuple layout reserves one. Packed
+		// native tuples must retain their exact field width and neighboring fields.
+		size := renvoTypeSize(g.meta, result.typ)
+		copySize := renvoTypeCopySize(g.meta, result.typ)
+		available := tuple.size - field.offset
+		if i+1 < fn.resultCount {
+			available = g.meta.fields[tuple.first+i+1].offset - field.offset
+		}
+		if copySize <= available {
+			size = copySize
+		}
+		renvoEmitCopyStackToMemSecondary(g, offset, field.offset, size)
 	}
 	return true
 }

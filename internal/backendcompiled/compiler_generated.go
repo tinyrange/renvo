@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "3a1c151ff1c64e5e0c5d5082592b02b97a126e6fbb7e085b2a45ffe6f8b82066"
+const CompilerSourceDigest = "ac3de1474a1e93cc9e22783869cee8d6b836d9f71b36235385f18ea0ea8f965c"
 
 // source: backend/compiler_common_impl.go
 
@@ -8684,7 +8684,16 @@ field := &g.meta.fields[tuple.first+i]
 renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
 
 
-renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeCopySize(g.meta, result.typ))
+size := renvoTypeSize(g.meta, result.typ)
+copySize := renvoTypeCopySize(g.meta, result.typ)
+available := tuple.size - field.offset
+if i+1 < fn.resultCount {
+available = g.meta.fields[tuple.first+i+1].offset - field.offset
+}
+if copySize <= available {
+size = copySize
+}
+renvoEmitCopyStackToMemSecondary(g, offset, field.offset, size)
 }
 return true
 }
