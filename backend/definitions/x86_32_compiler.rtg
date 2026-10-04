@@ -3999,7 +3999,7 @@ go compiler {
 
 go compiler {
 	func renvo386CompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return true
 	}
 }
 

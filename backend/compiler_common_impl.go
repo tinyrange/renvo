@@ -18045,13 +18045,17 @@ func renvoBinaryUsesFloat(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) b
 	if renvoTok2Is(p, e.tok, '|', '|') {
 		return false
 	}
-	left := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+	return renvoBinaryUsesFloatTypes(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right))
+}
+
+// Reuse operand types while classifying a binary expression. Only literal
+// expressions without a definitive type need the floating-value fallback.
+func renvoBinaryUsesFloatTypes(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, leftType int, rightType int) bool {
+	left := renvoResolveType(g.meta, leftType)
 	renvoNonNil(left)
-	right := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right))
+	right := renvoResolveType(g.meta, rightType)
 	renvoNonNil(right)
 	if renvoTypeKindIsComplex(left.kind) || renvoTypeKindIsComplex(right.kind) {
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		rightType := renvoInferParsedExprType(g, ep, e.right)
 		if realType := renvoTypedRealZeroImaginaryType(g, ep, e, leftType, rightType); realType != 0 {
 			return renvoTypeKindIsFloat(renvoResolveType(g.meta, realType).kind)
 		}
@@ -20875,21 +20879,34 @@ func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 	p := g.prog
 	a := &g.asm
 	e := &ep.exprs[idx]
-	if renvoBinaryUsesFloat(g, ep, e) {
+	if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+		falseLabel := renvoAsmNewLabel(a)
+		endLabel := renvoAsmNewLabel(a)
+		if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
+			return 0
+		}
+		renvoAsmPrimaryImm(a, 1)
+		renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmMarkLabel(a, endLabel)
+		return 1
+	}
+	leftType := renvoInferParsedExprType(g, ep, e.left)
+	rightType := renvoInferParsedExprType(g, ep, e.right)
+	if renvoBinaryUsesFloatTypes(g, ep, e, leftType, rightType) {
 		if renvoEmitFloatBinaryExpr(g, ep, idx) {
 			return 1
 		}
 		return 0
 	}
-	if renvoStringOrderingExpr(g, ep, e) {
+	if (renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '<', '=') || renvoTok2Is(p, e.tok, '>', '=')) &&
+		(renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType)) {
 		if renvoEmitStringOrdering(g, ep, e) {
 			return 1
 		}
 		return 0
 	}
 	if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		rightType := renvoInferParsedExprType(g, ep, e.right)
 		compositeType := renvoComparisonCompositeType(g, ep, e, leftType, rightType)
 		if compositeType != 0 {
 			if renvoEmitCompositeCompare(g, ep, e, compositeType) {
@@ -20903,18 +20920,6 @@ func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 			}
 			return 0
 		}
-	}
-	if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
-		falseLabel := renvoAsmNewLabel(a)
-		endLabel := renvoAsmNewLabel(a)
-		if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
-			return 0
-		}
-		renvoAsmPrimaryImm(a, 1)
-		renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmMarkLabel(a, endLabel)
-		return 1
 	}
 	return -1
 }

@@ -2209,7 +2209,7 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return true
 	}
 }
 

@@ -5029,11 +5029,11 @@ func renvoAsmFoldedFieldAddressing(a *renvoAsm) bool {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 return true
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-return false
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+return a.c.renvoTarget == renvoTargetVM32
 }
 a.patchFailed = true
 return false
@@ -14427,14 +14427,16 @@ renvoNonNil(g, ep, e)
 		}
 		// The immediate compare fast path operates on raw integer bits. Floating
 		// operands must use IEEE comparison so NaNs remain unordered.
-		usesFloat := renvoBinaryUsesFloat(g, ep, e)
+		leftType := renvoInferParsedExprType(g, ep, e.left)
+		rightType := renvoInferParsedExprType(g, ep, e.right)
+		usesFloat := renvoBinaryUsesFloatTypes(g, ep, e, leftType, rightType)
 		floatKind := 0
 		if usesFloat {
 			floatKind = renvoBinaryFloatKind(g, ep, e)
 		}
 		leftIndex := e.left
 		rightIndex := e.right
-		if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right)) != 0 {
+		if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, leftType, rightType) != 0 {
 			return false
 		}
 		unsigned := (c0 == '<' || c0 == '>') &&
@@ -14630,8 +14632,6 @@ renvoNonNil(g, ep, e)
 			}
 		}
 		if c0 == '=' || c0 == '!' {
-			leftType := renvoInferParsedExprType(g, ep, leftIndex)
-			rightType := renvoInferParsedExprType(g, ep, rightIndex)
 			leftResolved := renvoResolveType(g.meta, leftType)
 			renvoNonNil(leftResolved)
 			if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
@@ -15422,12 +15422,8 @@ if g.copyBytesLabel > 0 {
 			return label
 		}
 
-		// Fixed aggregate copies preserve the secondary address register. The
-		// wider block uses three additional scratch registers, so save them here
-		// for every caller rather than widening the original copy ABI.
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR8)
-		renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR9)
+		// Visit words in copy direction, so byte-offset overlaps retain memmove
+		// semantics without snapshot registers. Secondary and R8/R9 stay intact.
 		src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
 		forward := renvoAsmNewLabel(a)
 		done := renvoAsmNewLabel(a)
@@ -15439,72 +15435,47 @@ if g.copyBytesLabel > 0 {
 			if direction == 1 {
 				renvoAsmMarkLabel(a, forward)
 			}
-			// Load a whole block before any store so even byte-offset overlaps
-			// retain memmove semantics. Four words amortize the loop branches.
-			blocks := renvoAsmNewLabel(a)
-			blockTail := renvoAsmNewLabel(a)
-			renvoAsmMarkLabel(a, blocks)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, 16)
-			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, blockTail)
-			if direction == 0 {
-				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -16)
-				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -16)
-			}
-			for word := 0; word < 4; word++ {
-				reg := renvoWasm32RegRax
-				if word == 1 {
-					reg = renvoWasm32RegRdx
-				} else if word == 2 {
-					reg = renvoWasm32RegR8
-				} else if word == 3 {
-					reg = renvoWasm32RegR9
+			for pass := 0; pass < 4; pass++ {
+				width := 64
+				if pass == 1 {
+					width = 16
+				} else if pass == 2 {
+					width = 4
+				} else if pass == 3 {
+					width = 1
 				}
-				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, reg, src, word*4, 4)
-			}
-			for word := 0; word < 4; word++ {
-				reg := renvoWasm32RegRax
-				if word == 1 {
-					reg = renvoWasm32RegRdx
-				} else if word == 2 {
-					reg = renvoWasm32RegR8
-				} else if word == 3 {
-					reg = renvoWasm32RegR9
-				}
-				renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, reg, dest, word*4, 4)
-			}
-			if direction == 1 {
-				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, 16)
-				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, 16)
-			}
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -16)
-			renvoAsmJmpLabel(a, blocks)
-			renvoAsmMarkLabel(a, blockTail)
-			for size := 4; size > 0; size -= 3 {
 				loop := renvoAsmNewLabel(a)
 				tail := renvoAsmNewLabel(a)
 				renvoAsmMarkLabel(a, loop)
-				renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, width)
 				renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
 				if direction == 0 {
-					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
-					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -width)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -width)
 				}
-				renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
-				renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+				size := 4
+				if width == 1 {
+					size = 1
+				}
+				for offset := 0; offset < width; offset += size {
+					disp := offset
+					if direction == 0 {
+						disp = width - size - offset
+					}
+					renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, disp, size)
+					renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, disp, size)
+				}
 				if direction == 1 {
-					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
-					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, width)
+					renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, width)
 				}
-				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+				renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -width)
 				renvoAsmJmpLabel(a, loop)
 				renvoAsmMarkLabel(a, tail)
 			}
 			renvoAsmJmpLabel(a, done)
 		}
 		renvoAsmMarkLabel(a, done)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-		renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, after)
 		return label

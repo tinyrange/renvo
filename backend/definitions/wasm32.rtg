@@ -923,22 +923,8 @@ go backend {
 				return
 			}
 		}
-		if left == renvoWasm32RegRcx && right == renvoWasm32RegRax {
-			label := a.SignedCompareLabel()
-			if label == 0 {
-				entry := a.NewLabel()
-				label = RTGLabelIndex(entry) + 1
-				a.SetSignedCompareLabel(label)
-				after := a.NewLabel()
-				renvoWasm32AsmJmpLabel(a, RTGLabelIndex(after))
-				a.Mark(entry)
-				renvoWasm32CompareSignedBody(a, left, right)
-				renvoWasm32AsmRet(a)
-				a.Mark(after)
-			}
-			renvoWasm32AsmCallLabel(a, label-1)
-			return
-		}
+		// VM source comparisons execute frequently. Keep the sign guard inline:
+		// an out-of-line guard adds a call and return to every comparison.
 		renvoWasm32CompareSignedBody(a, left, right)
 	}
 
@@ -6257,7 +6243,7 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return a.c.renvoTarget == renvoTargetVM32
 	}
 }
 

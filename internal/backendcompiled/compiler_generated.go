@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "435746c9aada663f629c06f6ffbef2e5ee0f1b8d13436b84848a59f4e8c22b14"
+const CompilerSourceDigest = "ce7d26d8ca107aa1e6ddd91d8f3be38555951c6cf73099647f614472865f3304"
 
 // source: backend/compiler_common_impl.go
 
@@ -18052,13 +18052,17 @@ return false
 if renvoTok2Is(p, e.tok, '|', '|') {
 return false
 }
-left := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+return renvoBinaryUsesFloatTypes(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right))
+}
+
+
+
+func renvoBinaryUsesFloatTypes(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, leftType int, rightType int) bool {
+left := renvoResolveType(g.meta, leftType)
 renvoNonNil(left)
-right := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.right))
+right := renvoResolveType(g.meta, rightType)
 renvoNonNil(right)
 if renvoTypeKindIsComplex(left.kind) || renvoTypeKindIsComplex(right.kind) {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-rightType := renvoInferParsedExprType(g, ep, e.right)
 if realType := renvoTypedRealZeroImaginaryType(g, ep, e, leftType, rightType); realType != 0 {
 return renvoTypeKindIsFloat(renvoResolveType(g.meta, realType).kind)
 }
@@ -20882,21 +20886,34 @@ func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 p := g.prog
 a := &g.asm
 e := &ep.exprs[idx]
-if renvoBinaryUsesFloat(g, ep, e) {
+if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
+falseLabel := renvoAsmNewLabel(a)
+endLabel := renvoAsmNewLabel(a)
+if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
+return 0
+}
+renvoAsmPrimaryImm(a, 1)
+renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
+renvoAsmPrimaryImm(a, 0)
+renvoAsmMarkLabel(a, endLabel)
+return 1
+}
+leftType := renvoInferParsedExprType(g, ep, e.left)
+rightType := renvoInferParsedExprType(g, ep, e.right)
+if renvoBinaryUsesFloatTypes(g, ep, e, leftType, rightType) {
 if renvoEmitFloatBinaryExpr(g, ep, idx) {
 return 1
 }
 return 0
 }
-if renvoStringOrderingExpr(g, ep, e) {
+if (renvoTokCharIs(p, e.tok, '<') || renvoTokCharIs(p, e.tok, '>') || renvoTok2Is(p, e.tok, '<', '=') || renvoTok2Is(p, e.tok, '>', '=')) &&
+(renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType)) {
 if renvoEmitStringOrdering(g, ep, e) {
 return 1
 }
 return 0
 }
 if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-leftType := renvoInferParsedExprType(g, ep, e.left)
-rightType := renvoInferParsedExprType(g, ep, e.right)
 compositeType := renvoComparisonCompositeType(g, ep, e, leftType, rightType)
 if compositeType != 0 {
 if renvoEmitCompositeCompare(g, ep, e, compositeType) {
@@ -20910,18 +20927,6 @@ return 1
 }
 return 0
 }
-}
-if renvoTok2Is(p, e.tok, '&', '&') || renvoTok2Is(p, e.tok, '|', '|') {
-falseLabel := renvoAsmNewLabel(a)
-endLabel := renvoAsmNewLabel(a)
-if !renvoEmitJumpIfFalse(g, ep, idx, falseLabel) {
-return 0
-}
-renvoAsmPrimaryImm(a, 1)
-renvoAsmJmpMarkLabel(a, endLabel, falseLabel)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmMarkLabel(a, endLabel)
-return 1
 }
 return -1
 }
@@ -30497,7 +30502,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xf0\x2f\x15\xd7\x20\x23\x85\xbd\xfa\x30\xa9\xc1\x28\xeb\x4b\x69\x91\xd7\xcb\x08\xed\x11\x58\x06\xcd\x5a\xd8\x7b\x34\x79\x71\xea", 3, true
+return "wasi/wasm32", "\xab\x09\x21\x99\x5b\x66\x29\x8f\xd4\x74\xca\x05\x97\x41\xd7\x34\xd6\x6a\x28\x8e\x46\xf0\xf2\x47\xbf\x79\x2b\x1e\x41\x64\x57\xa4", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30509,7 +30514,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x9e\xa7\x8d\xac\xcc\xf2\x7d\x7b\xba\xb7\xf9\x6f\x99\xa5\x34\x03\x4c\x3a\x62\xa4\x46\x95\x1e\xc1\xbd\xa1\x29\xf8\xb3\xcb\xd3\x10", 3, true
+return "vm/vm32", "\x42\xc6\x1d\x64\x89\xe3\x72\xb4\x7f\x34\x75\x11\x4e\x43\xa9\xc0\xec\xfe\xdb\x0c\x23\x63\x95\x61\x70\x69\x63\x8d\xb2\x59\xc1\xf2", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
@@ -36183,11 +36188,11 @@ func renvoAsmFoldedFieldAddressing(a *renvoAsm) bool {
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 return true
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-return false
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+return a.c.renvoTarget == renvoTargetVM32
 }
 a.patchFailed = true
 return false
@@ -45581,14 +45586,16 @@ return false
 }
 
 
-usesFloat := renvoBinaryUsesFloat(g, ep, e)
+leftType := renvoInferParsedExprType(g, ep, e.left)
+rightType := renvoInferParsedExprType(g, ep, e.right)
+usesFloat := renvoBinaryUsesFloatTypes(g, ep, e, leftType, rightType)
 floatKind := 0
 if usesFloat {
 floatKind = renvoBinaryFloatKind(g, ep, e)
 }
 leftIndex := e.left
 rightIndex := e.right
-if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right)) != 0 {
+if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, leftType, rightType) != 0 {
 return false
 }
 unsigned := (c0 == '<' || c0 == '>') &&
@@ -45784,8 +45791,6 @@ return true
 }
 }
 if c0 == '=' || c0 == '!' {
-leftType := renvoInferParsedExprType(g, ep, leftIndex)
-rightType := renvoInferParsedExprType(g, ep, rightIndex)
 leftResolved := renvoResolveType(g.meta, leftType)
 renvoNonNil(leftResolved)
 if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
@@ -46578,10 +46583,6 @@ return label
 
 
 
-
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR8)
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR9)
 src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
 forward := renvoAsmNewLabel(a)
 done := renvoAsmNewLabel(a)
@@ -46593,72 +46594,47 @@ for direction := 0; direction < 2; direction++ {
 if direction == 1 {
 renvoAsmMarkLabel(a, forward)
 }
-
-
-blocks := renvoAsmNewLabel(a)
-blockTail := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, blocks)
-renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, 16)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, blockTail)
-if direction == 0 {
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -16)
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -16)
+for pass := 0; pass < 4; pass++ {
+width := 64
+if pass == 1 {
+width = 16
+} else if pass == 2 {
+width = 4
+} else if pass == 3 {
+width = 1
 }
-for word := 0; word < 4; word++ {
-reg := renvoWasm32RegRax
-if word == 1 {
-reg = renvoWasm32RegRdx
-} else if word == 2 {
-reg = renvoWasm32RegR8
-} else if word == 3 {
-reg = renvoWasm32RegR9
-}
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, reg, src, word*4, 4)
-}
-for word := 0; word < 4; word++ {
-reg := renvoWasm32RegRax
-if word == 1 {
-reg = renvoWasm32RegRdx
-} else if word == 2 {
-reg = renvoWasm32RegR8
-} else if word == 3 {
-reg = renvoWasm32RegR9
-}
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, reg, dest, word*4, 4)
-}
-if direction == 1 {
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, 16)
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, 16)
-}
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -16)
-renvoAsmJmpLabel(a, blocks)
-renvoAsmMarkLabel(a, blockTail)
-for size := 4; size > 0; size -= 3 {
 loop := renvoAsmNewLabel(a)
 tail := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, loop)
-renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, width)
 renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
 if direction == 0 {
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -width)
 }
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
+size := 4
+if width == 1 {
+size = 1
+}
+for offset := 0; offset < width; offset += size {
+disp := offset
+if direction == 0 {
+disp = width - size - offset
+}
+renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, disp, size)
+renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, disp, size)
+}
 if direction == 1 {
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, width)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, width)
 }
-renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
+renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -width)
 renvoAsmJmpLabel(a, loop)
 renvoAsmMarkLabel(a, tail)
 }
 renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, after)
 return label
@@ -55783,22 +55759,8 @@ a.Mark(done)
 return
 }
 }
-if left == renvoWasm32RegRcx && right == renvoWasm32RegRax {
-label := a.signedCompareLabel
-if label == 0 {
-entry := a.NewLabel()
-label = renvoRTGLabelCode(entry) + 1
-a.signedCompareLabel = label
-after := a.NewLabel()
-renvoWasm32AsmJmpLabel(a, renvoRTGLabelCode(after))
-a.Mark(entry)
-rtgWasm32Wasm32PackageRenvoWasm32CompareSignedBody(a, left, right)
-renvoWasm32AsmRet(a)
-a.Mark(after)
-}
-renvoWasm32AsmCallLabel(a, label-1)
-return
-}
+
+
 rtgWasm32Wasm32PackageRenvoWasm32CompareSignedBody(a, left, right)
 }
 func rtgWasm32Wasm32PackageRenvoWasm32CompareSignedBody(a *renvoAsm, left int, right int) {

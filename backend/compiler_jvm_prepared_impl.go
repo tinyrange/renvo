@@ -7693,14 +7693,16 @@ if !renvoIsComparisonChars(c0, c1) {
 }
 // The immediate compare fast path operates on raw integer bits. Floating
 // operands must use IEEE comparison so NaNs remain unordered.
-usesFloat := renvoBinaryUsesFloat(g, ep, e)
+leftType := renvoInferParsedExprType(g, ep, e.left)
+rightType := renvoInferParsedExprType(g, ep, e.right)
+usesFloat := renvoBinaryUsesFloatTypes(g, ep, e, leftType, rightType)
 floatKind := 0
 if usesFloat {
 	floatKind = renvoBinaryFloatKind(g, ep, e)
 }
 leftIndex := e.left
 rightIndex := e.right
-if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right)) != 0 {
+if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, leftType, rightType) != 0 {
 	return false
 }
 unsigned := (c0 == '<' || c0 == '>') &&
@@ -7896,8 +7898,6 @@ if g.c.renvoTargetArch == renvoArchAmd64 {
 	}
 }
 if c0 == '=' || c0 == '!' {
-	leftType := renvoInferParsedExprType(g, ep, leftIndex)
-	rightType := renvoInferParsedExprType(g, ep, rightIndex)
 	leftResolved := renvoResolveType(g.meta, leftType)
 	renvoNonNil(leftResolved)
 	if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {

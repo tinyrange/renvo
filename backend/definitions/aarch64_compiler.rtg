@@ -2348,7 +2348,7 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return true
 	}
 }
 
