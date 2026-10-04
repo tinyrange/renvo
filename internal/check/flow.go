@@ -233,7 +233,7 @@ func isAssignOp(file *syntax.File, tok int) bool {
 }
 
 func assignKind(file *syntax.File, tok int) int {
-	if tokenTextIs(file, tok, "=") {
+	if tokCharIs(file, tok, '=') {
 		return AssignSet
 	}
 	if tokenTextIs(file, tok, ":=") {

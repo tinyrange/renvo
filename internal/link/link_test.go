@@ -67,7 +67,7 @@ func Value() int { return answer }
 	}
 }
 
-func TestLinkBuildTransientOmitsIncrementalPackageMetadata(t *testing.T) {
+func TestLinkBuildTransientRetainsPackageOwnership(t *testing.T) {
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
@@ -83,8 +83,8 @@ func main() {}
 	if err != nil {
 		t.Fatalf("transient linked unit did not decode: %v", err)
 	}
-	if len(decoded.Packages) != 0 {
-		t.Fatalf("transient package metadata = %#v, want none", decoded.Packages)
+	if len(decoded.Packages) != 1 || decoded.Packages[0].ImportPath != "example.com/case/cmd/app" || decoded.Packages[0].TextEnd != len(decoded.Text) {
+		t.Fatalf("transient package ownership = %#v", decoded.Packages)
 	}
 
 	retained := LinkBuildCore(result)
@@ -135,7 +135,6 @@ func main() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	persistentProgram.Packages = nil
 	if !reflect.DeepEqual(transientProgram, persistentProgram) {
 		t.Fatal("transient linked core differs from persistent linked core")
 	}
@@ -279,8 +278,8 @@ func Value() int { return 2 }
 	if !ok {
 		t.Fatal("LinkUnits failed")
 	}
-	left := findLinkedFunc(program, "renvop0_Value")
-	right := findLinkedFunc(program, "renvop1_Value")
+	left := findLinkedFunc(program, "Renvop0_Value")
+	right := findLinkedFunc(program, "Renvop1_Value")
 	appMain := findLinkedFunc(program, "appMain")
 	if left < 0 || right < 0 || appMain < 0 {
 		t.Fatalf("linked funcs missing aliases: %#v", program.Funcs)
@@ -800,14 +799,19 @@ func appMain() int { return 0 }
 		"interfaceResult": "interface { Value() int }",
 		"functionResult":  "func(int) int",
 	}
-	if len(signatures) != len(want) {
-		t.Fatalf("signature count = %d, want %d", len(signatures), len(want))
-	}
+	named := 0
 	for i := 0; i < len(signatures); i++ {
 		sig := signatures[i]
+		if sig.anonymous {
+			continue
+		}
+		named++
 		if expected, found := want[sig.name]; !found || sig.result != expected {
 			t.Fatalf("signature %q result = %q, want %q", sig.name, sig.result, expected)
 		}
+	}
+	if named != len(want) {
+		t.Fatalf("named signature count = %d, want %d", named, len(want))
 	}
 }
 

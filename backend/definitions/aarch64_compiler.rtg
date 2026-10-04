@@ -5,6 +5,8 @@ implements direct_emitter_v1
 # Compiler-private lowering generated separately from the portable architecture projection.
 @import "aarch64.rtg"
 
+@import "lowering_optimizations.rtg"
+
 go compiler {
 	const renvoAarch64RegRax = 0
 	const renvoAarch64RegRdx = 1
@@ -392,6 +394,40 @@ go compiler {
 extend arch aarch64 {
 	compiler_selector = renvoArchAarch64
 	compiler_bindings {
+		vm32_copy_fixed = renvoDefinitionVM32CopyFixed
+		ensure_string_storage_arm = renvoDefinitionEnsureStringStorageArm
+		ensure_string_order_helper = renvoDefinitionEnsureStringOrderHelper
+		ensure_string_copy_x86 = renvoDefinitionEnsureStringCopyX86
+		ensure_string_copy_wasm32 = renvoDefinitionEnsureStringCopyWasm32
+		ensure_string_concat_x86 = renvoDefinitionEnsureStringConcatX86
+		ensure_string_concat_wasm32 = renvoDefinitionEnsureStringConcatWasm32
+		ensure_small_risc_copy = renvoDefinitionEnsureSmallRiscCopy
+		ensure_slice_bounds_vm32 = renvoDefinitionEnsureSliceBoundsVM32
+		ensure_copy_bytes_vm32 = renvoDefinitionEnsureCopyBytesVM32
+		ensure_copy_bytes_arm = renvoDefinitionEnsureCopyBytesArm
+		ensure_copy_bytes_aarch64 = renvoDefinitionEnsureCopyBytesAarch64
+		emit_wasm_parsed_compare_flags = renvoDefinitionEmitWasmParsedCompareFlags
+		emit_string_storage_arm_return = renvoDefinitionEmitStringStorageArmReturn
+		emit_scaled_index_primary = renvoDefinitionEmitScaledIndexPrimary
+		emit_frame_index_tertiary = renvoDefinitionEmitFrameIndexTertiary
+		arm_emit_checked_index_address = renvoDefinitionArmEmitCheckedIndexAddress
+		arm_copy_fixed = renvoDefinitionArmCopyFixed
+		amd64_ensure_fixed_vector_copy = renvoDefinitionAmd64EnsureFixedVectorCopy
+		amd64_emit_fixed_vector_copy = renvoDefinitionAmd64EmitFixedVectorCopy
+		aarch64_copy_fixed = renvoDefinitionAarch64CopyFixed
+		tracks_index_range_facts = renvoDefinitionTracksIndexRangeFacts
+		zero_local_at_offset = renvoDefinitionZeroLocalAtOffset
+		emit_zero_struct_result = renvoDefinitionEmitZeroStructResult
+		emit_word_compare_jump = renvoDefinitionEmitWordCompareJump
+		emit_string_ordering = renvoDefinitionEmitStringOrdering
+		emit_string_concat_pair_value_regs = renvoDefinitionEmitStringConcatPairValueRegs
+		emit_slice_bounds_checks = renvoDefinitionEmitSliceBoundsChecks
+		emit_index_primary = renvoDefinitionEmitIndexPrimary
+		emit_index_expr = renvoDefinitionEmitIndexExpr
+		emit_direct_selector_words = renvoDefinitionEmitDirectSelectorWords
+		emit_copy_native = renvoDefinitionEmitCopyNative
+		emit_byte_slice_string_copy_value_regs = renvoDefinitionEmitByteSliceStringCopyValueRegs
+		emit_byte_slice_conversion_regs = renvoDefinitionEmitByteSliceConversionRegs
 		repl_globals_supported = renvoAarch64CompilerReplGlobalsSupported
 		profile_float_model = renvoAarch64CompilerProfileFloatModel
 		syscall_argument_policy = renvoAarch64CompilerSyscallArgumentPolicy
@@ -1470,7 +1506,11 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-		renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+		a := &g.asm
+		renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
+		renvoAarch64AsmLoadRegStack(a, 1, destPtr)
+		renvoAarch64AsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesAarch64(g))
 	}
 
 	func renvoAarch64CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
@@ -1975,6 +2015,30 @@ go compiler {
 	func renvoAarch64CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 8 && size >= 32 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoAarch64AsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoAarch64AsmMovRegReg(a, 0, 1)
+			}
+			// The expression stack reserves sixteen bytes for each eight-byte
+			// word. Expand the packed value while pushing in reverse order.
+			renvoAarch64AsmAddRegImm(a, 0, 0, size)
+			renvoAarch64AsmMovRegImm(a, 2, size/8)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoAarch64AsmAddRegImm(a, 0, 0, -8)
+			renvoAarch64AsmLoadRegMem(a, 1, 0, 0, 8)
+			renvoAarch64AsmPushReg(a, 1)
+			renvoAarch64AsmAddRegImm(a, 2, 2, -1)
+			renvoAarch64AsmCmpRegImm(a, 2, 0)
+			renvoAarch64AsmBCondLabel(a, loop, 1)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -2284,7 +2348,7 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return true
 	}
 }
 

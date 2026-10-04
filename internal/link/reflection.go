@@ -22,6 +22,7 @@ type coreReflectionNames struct {
 	assign            string
 	aliases           []string
 	originals         []string
+	fieldOriginals    []string
 }
 
 // Resolve the intrinsic by import identity before package namespacing and
@@ -81,15 +82,47 @@ func reflectionNamesCore(programs []unit.Program, aliases []string, offsets []in
 		return
 	}
 	for i := 0; i < len(programs); i++ {
+		var generatedNames, typeNames, fieldNames []string
+		for _, decl := range programs[i].Decls {
+			if decl.Kind != unit.TokenType || decl.StartTok < 0 || decl.StartTok >= len(programs[i].Tokens) {
+				continue
+			}
+			typeName, fieldName := syntax.GeneratedTypeNames(programs[i].Text, programs[i].Tokens[decl.StartTok].Start)
+			if typeName != "" {
+				generatedNames = append(generatedNames, string(programs[i].Text[decl.NameStart:decl.NameEnd]))
+				typeNames = append(typeNames, typeName)
+				fieldNames = append(fieldNames, fieldName)
+			}
+		}
 		for j := 0; j < len(programs[i].Symbols); j++ {
 			name := programs[i].Symbols[j].Name
 			alias := corePackageSymbolAlias(aliases, offsets, i, j)
-			if alias != "" && alias != name {
+			typeName, fieldName := name, name
+			for k, generated := range generatedNames {
+				if generated == name {
+					typeName, fieldName = typeNames[k], fieldNames[k]
+					break
+				}
+			}
+			if alias == "" {
+				alias = name
+			}
+			if alias != name || typeName != name || fieldName != name {
 				out.aliases = append(out.aliases, cloneCoreLinkString(alias))
-				out.originals = append(out.originals, cloneCoreLinkString(name))
+				out.originals = append(out.originals, cloneCoreLinkString(typeName))
+				out.fieldOriginals = append(out.fieldOriginals, cloneCoreLinkString(fieldName))
 			}
 		}
 	}
+}
+
+func reflectionOriginalFieldName(names *coreReflectionNames, name string) string {
+	for i := 0; i < len(names.aliases); i++ {
+		if names.aliases[i] == name {
+			return names.fieldOriginals[i]
+		}
+	}
+	return name
 }
 
 func reflectionOriginalName(names *coreReflectionNames, name string) string {
@@ -169,7 +202,7 @@ func lowerReflectionCore(program *unit.Program, names *coreReflectionNames, tran
 			fieldName := field.Name
 			if field.NameTok < 0 {
 				embedded := file.Tokens[field.TypeEnd-1]
-				fieldName = reflectionOriginalName(names, string(file.Src[syntax.TokenStart(embedded):syntax.TokenStart(embedded)+syntax.TokenSize(embedded)]))
+				fieldName = reflectionOriginalFieldName(names, string(file.Src[syntax.TokenStart(embedded):syntax.TokenStart(embedded)+syntax.TokenSize(embedded)]))
 			}
 			if !syntax.IdentifierExported([]byte(fieldName), 0) {
 				continue

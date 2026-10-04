@@ -16585,7 +16585,7 @@ func (t *translator) expressionType(tokens []token) int {
 			return cTypeUint32ID
 		}
 		if value, ok := integerTokenValue(t.src, tokens[:1]); ok && value > 0x7fffffff {
-			if len(text) > 1 && text[0] == '0' && value <= 0xffffffff {
+			if len(text) > 1 && text[0] == '0' && uint64(value) <= 0xffffffff {
 				return cTypeUint32ID
 			}
 			return cTypeInt64ID

@@ -27,6 +27,11 @@ Wasmtime overhead, so this arena increase alone does not establish a passing gat
 The VM prepared-backend workload uses the production preparation tool’s 96 MiB
 compiler arena.
 
+The separate VM frontend self-hosting acceptance test uses a 128 MiB compiler
+arena, a 192 MiB VM memory limit, and a 15-billion-instruction limit. These
+acceptance-test budgets are independent of the prepared-backend performance
+workload and its policy limits.
+
 Larger increases block feature inclusion. The maintainer evaluates the value
 of additional features and their cost case by case. There is no automatic
 baseline ratchet, exception flag, or formal waiver procedure. Ordinary policy

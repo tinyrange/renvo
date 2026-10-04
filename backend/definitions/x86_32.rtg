@@ -361,11 +361,10 @@ go backend {
 
 	func frameFinish(out *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
-		if frame > 65528 {
-			frame = 65528
-		}
-		out.SetByteAt(at+1, byte(frame))
-		out.SetByteAt(at+2, byte(frame>>8))
+		out.SetByteAt(at+5, byte(frame))
+		out.SetByteAt(at+6, byte(frame>>8))
+		out.SetByteAt(at+7, byte(frame>>16))
+		out.SetByteAt(at+8, byte(frame>>24))
 	}
 
 	// Target projections use compact integer register codes. Keeping this small
@@ -709,7 +708,9 @@ arch x86_32 {
 		}
 		frameStart(out:emitter) -> int {
 			let at = out.Len()
-			out.Bytes4(0xc8, 0, 0, 0)
+			out.Bytes3(0x55, 0x89, 0xe5)
+			out.Bytes2(0x81, 0xec)
+			out.Bytes4(0, 0, 0, 0)
 			return at
 		}
 		encodeGroup(out:emitter, opcode:byte, selector:byte, operand:register) {

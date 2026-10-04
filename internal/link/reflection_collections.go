@@ -20,11 +20,11 @@ func reflectionCanonicalType(program *unit.Program, typ string, underlying bool)
 				continue
 			}
 			name := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-			if functionValueTokenText(program, name) != typ {
+			if !functionValueTokenTextEquals(program, name, typ) {
 				continue
 			}
 			start := name + 1
-			alias := functionValueTokenEquals(program, start, "=")
+			alias := functionValueTokenCharIs(program, start, '=')
 			if !underlying && !alias {
 				return typ
 			}

@@ -92,7 +92,7 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 	result := NavigationResult{Definition: definition, Ok: true}
 	navigationAppend(&result.References, definition)
 	for i := 0; i < len(file.Tokens); i++ {
-		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(&file, i) != name {
+		if file.Tokens[i].KindLine&255 != syntax.TokenIdent || !tokenStringEquals(&file, i, name) {
 			continue
 		}
 		isAlias := false
@@ -102,7 +102,7 @@ func navigationImportedPackage(graph load.Graph, program Program, pkgIndex, file
 				break
 			}
 		}
-		if !isAlias && (i+1 >= len(file.Tokens) || !tokenTextIs(&file, i+1, ".")) {
+		if !isAlias && (i+1 >= len(file.Tokens) || !tokCharIs(&file, i+1, '.')) {
 			continue
 		}
 		if location, valid := navigationLocation(graph, pkgIndex, fileIndex, i); valid {
@@ -190,7 +190,7 @@ func navigationResolve(graph load.Graph, program Program, pkgIndex int, fileInde
 
 func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileIndex int, token int) (navigationTarget, bool) {
 	file := graph.Packages[pkgIndex].Files[fileIndex].File
-	if token < 2 || !tokenTextIs(&file, token-1, ".") {
+	if token < 2 || !tokCharIs(&file, token-1, '.') {
 		return navigationTarget{}, false
 	}
 	components := completionSelectorComponents(file.Src, syntax.TokenStart(file.Tokens[token-1]))
@@ -234,13 +234,13 @@ func navigationMemberAt(graph load.Graph, program Program, pkgIndex int, fileInd
 
 func navigationShortAssignType(graph load.Graph, program Program, pkgIndex int, fileIndex int, file *syntax.File, fn *syntax.FuncDecl, name string, offset int) (completionType, bool) {
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
-		if syntax.TokenStart(file.Tokens[i]) >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || tokenString(file, i) != name {
+		if syntax.TokenStart(file.Tokens[i]) >= offset || file.Tokens[i].KindLine&255 != syntax.TokenIdent || !tokenStringEquals(file, i, name) {
 			continue
 		}
 		assign := completionFindShortAssign(file, i, fn.BodyEnd)
 		start := assign + 1
 		if assign < 0 || start+3 >= fn.BodyEnd || file.Tokens[start].KindLine&255 != syntax.TokenIdent ||
-			!tokenTextIs(file, start+1, ".") || file.Tokens[start+2].KindLine&255 != syntax.TokenIdent || !tokenTextIs(file, start+3, "(") {
+			!tokCharIs(file, start+1, '.') || file.Tokens[start+2].KindLine&255 != syntax.TokenIdent || !tokCharIs(file, start+3, '(') {
 			continue
 		}
 		owner := completionImportPackage(program.Packages[pkgIndex], fileIndex, tokenString(file, start))
@@ -335,7 +335,7 @@ func navigationMember(graph load.Graph, program Program, target navigationTarget
 		for fileIndex := 0; fileIndex < len(graph.Packages[pkg].Files); fileIndex++ {
 			file := graph.Packages[pkg].Files[fileIndex].File
 			for token := 2; token < len(file.Tokens); token++ {
-				if file.Tokens[token].KindLine&255 != syntax.TokenIdent || !tokenTextIs(&file, token-1, ".") {
+				if file.Tokens[token].KindLine&255 != syntax.TokenIdent || !tokCharIs(&file, token-1, '.') {
 					continue
 				}
 				candidate, resolved := navigationMemberAt(graph, program, pkg, fileIndex, token)
@@ -354,7 +354,7 @@ func navigationMember(graph load.Graph, program Program, target navigationTarget
 func navigationRefs(refs []CoreNameRef, selectors []CoreSelectorRef, ownPackage int, token int) (navigationTarget, bool) {
 	for i := 0; i < len(refs); i++ {
 		if refs[i].Token == token {
-			return navigationTarget{packageIndex: ownPackage, symbolIndex: refs[i].Index}, true
+			return navigationTarget{packageIndex: refs[i].Package, symbolIndex: refs[i].Index}, true
 		}
 	}
 	for i := 0; i < len(selectors); i++ {
@@ -407,7 +407,7 @@ func navigationPackage(graph load.Graph, program Program, packageIndex int, symb
 
 func navigationAppendResolved(graph load.Graph, locations *[]SourceLocation, ownPackage int, file int, refs []CoreNameRef, selectors []CoreSelectorRef, targetPackage int, targetSymbol int) {
 	for i := 0; i < len(refs); i++ {
-		if ownPackage == targetPackage && refs[i].Index == targetSymbol {
+		if refs[i].Package == targetPackage && refs[i].Index == targetSymbol {
 			if location, ok := navigationLocation(graph, ownPackage, file, refs[i].Token); ok {
 				navigationAppend(locations, location)
 			}

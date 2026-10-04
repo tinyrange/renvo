@@ -24,9 +24,13 @@ type File struct {
 	Imports     []ImportDecl
 	Decls       []TopDecl
 	Funcs       []FuncDecl
-	Ok          bool
-	Error       int
-	ErrorTok    int
+	Generics    *GenericDeclarations
+	// HasInterfaceCandidates conservatively records interface keywords and
+	// comparable identifiers from scanning, including function bodies.
+	HasInterfaceCandidates bool
+	Ok                     bool
+	Error                  int
+	ErrorTok               int
 }
 
 type ImportDecl struct {
@@ -65,16 +69,17 @@ func ParseLinkedFile(src []byte) (File, []int) { return parseFileMode(src, true)
 func parseFileMode(src []byte, linked bool) (File, []int) {
 	var lineStarts []int
 	tokenArenaStart := arena.Mark()
-	tokens, scanOK := scanTokensMode(src, linked)
+	tokens, scanOK, interfaceCandidates := scanTokensMode(src, linked)
 	tokenArenaEnd := arena.Mark()
 	tokenCapacity := cap(tokens)
 	file := File{
-		Src:         src,
-		Tokens:      tokens,
-		PackageName: -1,
-		Ok:          true,
-		Error:       ParseOK,
-		ErrorTok:    -1,
+		Src:                    src,
+		Tokens:                 tokens,
+		HasInterfaceCandidates: interfaceCandidates,
+		PackageName:            -1,
+		Ok:                     true,
+		Error:                  ParseOK,
+		ErrorTok:               -1,
 	}
 	// Scanning performs no other allocation, so the final backing array ends at
 	// tokenArenaEnd even when append replaced one or more smaller arrays. Drop
@@ -284,6 +289,11 @@ func parseDeclSpec(file *File, lineStarts []int, kind int, start int, grouped bo
 		return start, false
 	}
 	if kind == TokenType {
+		if typeDeclarationHasParameters(file, start+1, end) {
+			if _, ok := parseTypeParamList(file, start, start+1, TokenType); !ok {
+				return start, false
+			}
+		}
 		file.Decls = append(file.Decls, TopDecl{Kind: kind, NameTok: start, StartTok: start, EndTok: end})
 		return next, true
 	}
@@ -329,6 +339,16 @@ func parseFuncDecl(file *File, lineStarts []int, start int) (FuncDecl, bool) {
 	}
 	fn.NameTok = i
 	i++
+	if tokCharIs(file.Tokens, i, '[') {
+		if fn.ReceiverStart >= 0 {
+			return fn, false
+		}
+		var ok bool
+		i, ok = parseTypeParamList(file, fn.NameTok, i, TokenFunc)
+		if !ok {
+			return fn, false
+		}
+	}
 	if !tokCharIs(file.Tokens, i, '(') {
 		return fn, false
 	}
@@ -413,7 +433,6 @@ func findFuncBody(file *File, lineStarts []int, start int) (int, int) {
 }
 
 func skipDeclSpec(file *File, lineStarts []int, start int, grouped bool) (int, int, bool) {
-	line := TokenLineAt(file, start, lineStarts)
 	i := start
 	parenDepth := 0
 	bracketDepth := 0
@@ -427,8 +446,14 @@ func skipDeclSpec(file *File, lineStarts []int, start int, grouped bool) (int, i
 			if c == ';' {
 				return i, i + 1, true
 			}
-			if i > start && TokenLineAt(file, i, lineStarts) != line {
-				return i, i, true
+			if i > start && TokenLineAt(file, i, lineStarts) != TokenLineAt(file, i-1, lineStarts) && insertsSemicolon(file, i-1) {
+				// A raw string can span lines without ending its declaration.
+				// Only newlines after the preceding token insert a semicolon.
+				for offset := int(file.Tokens[i-1].End); offset < int(file.Tokens[i].Start); offset++ {
+					if file.Src[offset] == '\n' {
+						return i, i, true
+					}
+				}
 			}
 		}
 		if c == '(' {
@@ -471,11 +496,11 @@ func skipBalanced(file *File, start int, open byte, close byte) int {
 	depth := 1
 	i := start + 1
 	for i < len(file.Tokens) {
-		tok := file.Tokens[i]
-		if tok.KindLine&255 == TokenEOF {
+		packed := file.Tokens[i].KindLine
+		if packed&255 == TokenEOF {
 			break
 		}
-		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		c := byte(packed >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == open {
 			depth++
 		} else if c == close {
@@ -526,4 +551,15 @@ func tokCharIs(toks []Token, i int, c byte) bool {
 	}
 	packed := toks[i].KindLine
 	return packed>>TokenOperatorCharShift&TokenOperatorCharMask == int(c)
+}
+
+// Go inserts a semicolon after these tokens at a line boundary.
+func insertsSemicolon(file *File, at int) bool {
+	switch file.Tokens[at].KindLine & 255 {
+	case TokenIdent, TokenNumber, TokenString, TokenChar, TokenBreak, TokenContinue, TokenFallthrough, TokenReturn:
+		return true
+	case TokenOperator:
+		return tokCharIs(file.Tokens, at, ')') || tokCharIs(file.Tokens, at, ']') || tokCharIs(file.Tokens, at, '}') || tokenTextIs(file.Src, file.Tokens[at], "++") || tokenTextIs(file.Src, file.Tokens[at], "--")
+	}
+	return false
 }

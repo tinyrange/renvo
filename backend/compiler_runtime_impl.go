@@ -51,7 +51,7 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 	if !ep.ok || len(ep.exprs) == 0 {
 		return false
 	}
-	root := &ep.exprs[len(ep.exprs)-1]
+	root := &ep.exprs[ep.root]
 	if root.kind != renvoExprCall {
 		return false
 	}
@@ -59,8 +59,7 @@ func renvoEmitLinearPrintStmt(g *renvoLinearGen, stmt *renvoStmt) bool {
 	println := builtinPrintln || renvoExprIsIdentText(p, ep, root.left, "Println")
 	fmtPrintln := false
 	if !println && !renvoExprIsIdentText(p, ep, root.left, "print") {
-		candidate := &ep.exprs[root.left]
-		if candidate.kind != renvoExprIdent || candidate.nameEnd-candidate.nameStart != 24 || !renvoBytesEqualText(p.src, candidate.nameStart, candidate.nameEnd, "renvo_runtime_FmtPrintln") {
+		if !renvoExprIsCompilerIntrinsic(g, ep, root.left, "renvo_runtime_FmtPrintln") {
 			return false
 		}
 		fmtPrintln = true

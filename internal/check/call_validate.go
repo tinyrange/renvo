@@ -36,6 +36,14 @@ func invalidDefiniteCallArity(graph load.Graph, packageIndex int, info *PackageI
 	file := &graph.Packages[packageIndex].Files[fileIndex].File
 	for i := 0; i < len(refs); i++ {
 		ref := refs[i]
+		if ref.Package != packageIndex {
+			if ref.Package >= 0 && ref.Package < len(checked) && ref.Index >= 0 && ref.Index < len(checked[ref.Package].Symbols) {
+				if tok := invalidResolvedCallArity(file, *fn, ref.Token, checked[ref.Package].Symbols[ref.Index]); tok >= 0 {
+					return tok
+				}
+			}
+			continue
+		}
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}
@@ -96,6 +104,9 @@ func invalidResolvedCallArity(caller *syntax.File, callerFn syntax.FuncDecl, cal
 
 func prepareDefiniteCallTargets(pkg *load.Package, info *PackageInfo, refs []CoreNameRef, targets []definiteCallTarget) {
 	for i := 0; i < len(refs); i++ {
+		if refs[i].Package != info.Package {
+			continue
+		}
 		symbolIndex := refs[i].Index
 		if symbolIndex >= 0 && symbolIndex < len(info.Symbols) && symbolIndex < len(targets) {
 			prepareDefiniteCallTarget(pkg, info, symbolIndex, &targets[symbolIndex])
@@ -112,6 +123,9 @@ func invalidDefiniteCallArgumentType(pkg *load.Package, info *PackageInfo, fileI
 	var localTypes []definiteLocalTypeSpan
 	for refIndex := 0; refIndex < len(refs); refIndex++ {
 		ref := refs[refIndex]
+		if ref.Package != info.Package {
+			continue
+		}
 		calleeTok := ref.Token
 		open := calleeTok + 1
 		if open >= caller.BodyEnd || file.Tokens[open].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('(') {

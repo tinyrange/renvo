@@ -278,15 +278,6 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 				if packageError == load.PackageErrParse && result.ErrorFile >= 0 && result.ErrorFile < len(graph.Packages[pkg].Files) {
 					file := graph.Packages[pkg].Files[result.ErrorFile]
 					renvoSyntaxErrorDiagnostic(&d, file.File.Error)
-					if offset := sourceGenericsOffset(file.Src); offset >= 0 {
-						renvoSetDiagnosticDetail(&d, "RENVO-PARSE-002", "generics are not supported by RENVO")
-						for i := 0; i < len(file.File.Tokens); i++ {
-							if syntax.TokenStart(file.File.Tokens[i]) == offset {
-								file.File.ErrorTok = i
-								break
-							}
-						}
-					}
 					result.ErrorToken = file.File.ErrorTok
 				}
 			}
@@ -294,7 +285,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	} else if built.Error == pipeline.PipelineErrBuild {
 		renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-012", "compiler bug: build stage returned undeclared error code "+diagnosticIntText(built.Build.Error))
 		if built.Build.Error == build.BuildErrCheck {
-			if built.Build.ErrorDetail == check.CheckErrGraph {
+			if built.Build.ErrorDetail == check.CheckErrGeneric {
+				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-042", built.Build.ErrorMessage)
+			} else if built.Build.ErrorDetail == check.CheckErrGraph {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-001", "invalid package graph reached the type checker")
 			} else if built.Build.ErrorDetail == check.CheckErrInitSignature {
 				renvoSetDiagnostic(&d, "checker", "RENVO-CHECK-034", "func init must have no receiver, parameters, or results")

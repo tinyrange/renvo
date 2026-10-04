@@ -86,11 +86,19 @@ func sourceConcurrencyCandidate(src []byte) bool {
 		if c == '"' || c == '\'' || c == '`' {
 			quote := c
 			pos++
-			for pos < len(src) && src[pos] != quote {
-				if quote != '`' && src[pos] == '\\' {
+			for pos < len(src) {
+				// Walk ordinary literal bytes with one range bound. Resume after an
+				// escape without interpreting it; the full scanner validates syntax.
+				for _, next := range src[pos:] {
+					if next == quote || quote != '`' && next == '\\' {
+						break
+					}
 					pos++
 				}
-				pos++
+				if pos >= len(src) || src[pos] == quote {
+					break
+				}
+				pos += 2
 			}
 			continue
 		}

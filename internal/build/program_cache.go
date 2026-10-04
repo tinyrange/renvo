@@ -136,6 +136,12 @@ func storeCachedPackageProgram(graph load.Graph, packageIndex int, contextA int,
 
 func packageGraphHash(graph load.Graph) (int, int) {
 	a, b := 17, 29
+	a = packageCacheHashInt(a, graph.Layout.WordBits)
+	b = packageCacheHashIntB(b, graph.Layout.PointerBits)
+	a = packageCacheHashInt(a, graph.Layout.ScalarAlign)
+	if graph.Layout.Object {
+		b = packageCacheHashIntB(b, 1)
+	}
 	a, b = packageCacheHashMix(a, b, graph.Root)
 	for i := 0; i < len(graph.Packages); i++ {
 		pkg := graph.Packages[i]
@@ -160,6 +166,12 @@ func packageContextHashes(graph load.Graph) ([]int, []int, []int, []int) {
 		a, b := packageSourceHash(pkg)
 		sourcesA[i] = a
 		sourcesB[i] = b
+		a = packageCacheHashInt(a, graph.Layout.WordBits)
+		b = packageCacheHashIntB(b, graph.Layout.PointerBits)
+		a = packageCacheHashInt(a, graph.Layout.ScalarAlign)
+		if graph.Layout.Object {
+			b = packageCacheHashIntB(b, 1)
+		}
 		a, b = packageCacheHashMix(a, b, pkg.Ref.ImportPath)
 		a, b = packageCacheHashMix(a, b, pkg.Name)
 		for j := 0; j < len(pkg.Imports); j++ {

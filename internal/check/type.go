@@ -282,7 +282,7 @@ func nextStructFieldEnd(file *syntax.File, start int, end int) int {
 	braceDepth := 0
 	i := start
 	for i < end {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[i-1]) {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) {
 			return i
 		}
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
@@ -340,6 +340,31 @@ func findTypeTopLevelChar(file *syntax.File, start int, end int, c byte) int {
 			if braceDepth > 0 {
 				braceDepth--
 			}
+		}
+	}
+	return -1
+}
+
+// Keywords in nested function literals belong to their own statements, not
+// to the surrounding control header.
+func findTypeTopLevelKind(file *syntax.File, start, end, kind int) int {
+	for i := start; i < end; i++ {
+		if file.Tokens[i].KindLine&255 == kind {
+			return i
+		}
+		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask
+		if ch == int('(') || ch == int('[') || ch == int('{') {
+			right := byte(')')
+			if ch == int('[') {
+				right = ']'
+			} else if ch == int('{') {
+				right = '}'
+			}
+			next := findTypeMatching(file, i, byte(ch), right)
+			if next <= i || next > end {
+				return -1
+			}
+			i = next - 1
 		}
 	}
 	return -1

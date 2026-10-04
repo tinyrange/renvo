@@ -49,6 +49,9 @@ const RunHelpText = "Usage: renvo run [-s] [-tags <list>] [-arena-size <bytes>] 
 type Options struct {
 	Target               string
 	TargetExplicit       bool
+	TargetWordBits       int
+	TargetPointerBits    int
+	TargetScalarAlign    int
 	Output               string
 	Package              string
 	Files                []string

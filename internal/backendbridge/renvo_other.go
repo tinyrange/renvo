@@ -9,6 +9,12 @@ func TargetSupported(targetName string) bool  { return renvo.RenvoTargetSupporte
 func TargetBinding(targetName string) (string, string, int, bool) {
 	return renvo.RenvoTargetBinding(targetName)
 }
+func TargetLayout(targetName string) (int, int, bool) {
+	return renvo.RenvoTargetLayout(targetName)
+}
+func TargetScalarAlignment(targetName string) (int, bool) {
+	return renvo.RenvoTargetScalarAlignment(targetName)
+}
 func TargetHasBuildTag(targetName string, tag string) bool {
 	return renvo.RenvoTargetHasBuildTag(targetName, tag)
 }

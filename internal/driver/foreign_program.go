@@ -37,6 +37,7 @@ type foreignPreparation struct {
 
 type foreignTarget struct {
 	Binding unit.TargetBinding
+	Layout  load.TargetLayout
 	Tags    []string
 	InPlace bool
 	Ok      bool
@@ -105,7 +106,7 @@ func prepareForeignPrograms(options *Options, workDir string, stdRoot string, mo
 		if len(options.Files) > 0 {
 			rootArg = childSources.Root.Dir
 		}
-		built := pipeline.BuildUnit(workDir, stdRoot, rootArg, childSources.Files)
+		built := pipeline.BuildUnitConfigured(workDir, stdRoot, rootArg, childSources.Files, pipeline.Config{Layout: target.Layout})
 		if !built.Ok {
 			failed := BuildResult{Error: BuildErrPipeline, Pipeline: built, Sources: childSources,
 				ErrorAt: built.ErrorOffset, ErrorPackage: built.ErrorPackage, ErrorFile: built.ErrorFile, ErrorToken: built.ErrorToken}

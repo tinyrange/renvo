@@ -8,6 +8,13 @@ import (
 func invalidCallOperandCount(graph load.Graph, pkgIndex int, info *PackageInfo, checked []PackageInfo, fileIndex int, fn *syntax.FuncDecl, refs []CoreNameRef, selectors []CoreSelectorRef) int {
 	file := &graph.Packages[pkgIndex].Files[fileIndex].File
 	for _, ref := range refs {
+		if ref.Package != pkgIndex {
+			pkg := ref.Package
+			if pkg >= 0 && pkg < len(checked) && pkg < len(graph.Packages) && ref.Index >= 0 && ref.Index < len(checked[pkg].Symbols) && invalidResolvedCallOperand(&graph.Packages[pkg], checked[pkg].Symbols[ref.Index], file, fn, ref.Token, ref.Token) {
+				return ref.Token
+			}
+			continue
+		}
 		if ref.Index < 0 || ref.Index >= len(info.Symbols) {
 			continue
 		}
@@ -45,9 +52,9 @@ func invalidResolvedCallOperand(pkg *load.Package, symbol Symbol, file *syntax.F
 	}
 	// A newline after ')' terminates a statement. A following '*' may start
 	// an unrelated pointer assignment rather than multiply this call's result.
-	operand := end < fn.BodyEnd && syntax.TokenLine(file.Tokens[end]) == syntax.TokenLine(file.Tokens[end-1]) && (isExprBinaryOp(file, end) || tokCharIs(file, end, '[') || tokCharIs(file, end, '.') || tokCharIs(file, end, '('))
+	operand := end < fn.BodyEnd && (file.Tokens[end].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == (file.Tokens[end-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && (isExprBinaryOp(file, end) || tokCharIs(file, end, '[') || tokCharIs(file, end, '.') || tokCharIs(file, end, '('))
 	if start > fn.BodyStart+1 {
-		operand = operand || isExprBinaryOp(file, start-1) || tokenTextIs(file, start-1, "!") || tokenTextIs(file, start-1, "<-")
+		operand = operand || isExprBinaryOp(file, start-1) || tokCharIs(file, start-1, '!') || tokenTextIs(file, start-1, "<-")
 	}
 	if !operand || symbol.File < 0 || symbol.File >= len(pkg.Files) {
 		return false

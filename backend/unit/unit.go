@@ -1347,7 +1347,10 @@ func linkStaticDirectiveBefore(data []byte, pos int) (string, bool) {
 		start++
 	}
 	prefix := []byte("// renvo:linkstatic ")
-	if end-start < len(prefix) || !bytes.Equal(data[start:start+len(prefix)], prefix) {
+	intrinsicPrefix := []byte("//renvo:intrinsic ")
+	deferForwardPrefix := []byte("//renvo:defer-forward ")
+	if !bytes.HasPrefix(data[start:end], prefix) && !bytes.HasPrefix(data[start:end], intrinsicPrefix) &&
+		!bytes.HasPrefix(data[start:end], deferForwardPrefix) {
 		return "", false
 	}
 	return string(data[start:end]), true
@@ -1791,6 +1794,9 @@ func skipTopLevelLine(toks []sourceToken, start int) int {
 			return i
 		}
 		if toks[i].line != line && depth == 0 {
+			return i
+		}
+		if tokCharIs(toks, i, ';') && depth == 0 {
 			return i
 		}
 		if tokCharIs(toks, i, '{') || tokCharIs(toks, i, '(') {
@@ -3967,7 +3973,7 @@ func writeNode(out *bytes.Buffer, node Node) error {
 		}
 		payload = nested.Bytes()
 	}
-	if len(payload) > int(^uint32(0)) {
+	if uint64(len(payload)) > uint64(^uint32(0)) {
 		return fmt.Errorf("node %d payload too large", node.Tag)
 	}
 	var header [6]byte

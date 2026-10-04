@@ -3,7 +3,7 @@
 ## Scope and result
 
 This audit covers the architecture-independent core migration in PR #589.
-The implementation has 345 typed compiler operations, generated from five
+The implementation has 379 typed compiler operations, generated from five
 bundled integration roots. The core retains source semantics and compilation
 ordering; definitions select representation, physical emission, runtime ABI,
 and image construction. Prepared backends implement the same semantic boundary
@@ -30,7 +30,8 @@ ownership document.
 
 The authoritative operation schema is `internal/rtg/compiler_bindings.go`.
 Bundled implementations are in `x86_64_compiler.rtg`, `x86_32_compiler.rtg`,
-`aarch64_compiler.rtg`, `arm_algorithms.rtg`, and `wasm32.rtg`; shared physical
+`aarch64_compiler.rtg`, `arm_algorithms.rtg`, and `wasm32.rtg`; shared optimization recipes are in
+`lowering_optimizations.rtg`, and shared physical
 x86 runtime recipes are in `x86_runtime_intrinsics.rtg`. Generated Go is a
 projection, not a second implementation to edit independently.
 

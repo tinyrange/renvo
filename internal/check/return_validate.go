@@ -45,36 +45,19 @@ func invalidReturnCount(file *syntax.File, fn *syntax.FuncDecl, signature *FuncS
 }
 
 func skipNestedFunction(file *syntax.File, start int, limit int) int {
-	open := -1
-	for i := start + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
-			open = i
-			break
-		}
-		if tokCharIs(file, i, ';') {
-			return start
-		}
-	}
-	if open < 0 {
-		return start
-	}
-	depth := 1
-	for i := open + 1; i < limit; i++ {
-		if tokCharIs(file, i, '{') {
-			depth++
-		} else if tokCharIs(file, i, '}') {
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
+	// Struct/interface types in parameters or results own braces too. Parse the
+	// complete signature before skipping the literal's body; a function type
+	// without a body must leave later returns in the enclosing function visible.
+	fn := genericFunctionLiteral(file, start, limit)
+	if fn.BodyStart >= 0 && fn.BodyEnd > fn.BodyStart && fn.BodyEnd <= limit {
+		return fn.BodyEnd - 1
 	}
 	return start
 }
 
 func returnValueList(file *syntax.File, returnTok int, limit int) (int, int, int) {
 	start := returnTok + 1
-	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || syntax.TokenLine(file.Tokens[start]) > syntax.TokenLine(file.Tokens[returnTok]) {
+	if start >= limit || tokCharIs(file, start, ';') || tokCharIs(file, start, '}') || (file.Tokens[start].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) > (file.Tokens[returnTok].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) {
 		return start, start, 0
 	}
 	parenDepth := 0
@@ -83,7 +66,7 @@ func returnValueList(file *syntax.File, returnTok int, limit int) (int, int, int
 	count := 1
 	end := start
 	for i := start; i < limit; i++ {
-		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && syntax.TokenLine(file.Tokens[i]) > syntax.TokenLine(file.Tokens[i-1]) && !returnLineContinues(file, i-1) {
+		if i > start && parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) > (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && !returnLineContinues(file, i-1) {
 			break
 		}
 		ch := file.Tokens[i].KindLine >> syntax.TokenOperatorCharShift & syntax.TokenOperatorCharMask

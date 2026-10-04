@@ -8,16 +8,14 @@ import (
 func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn *syntax.FuncDecl, body *syntax.Body, signature *FuncSignature, scope *CoreScope, cachedBindings *[]scopedTypeBinding) int {
 	file := &pkg.Files[fileIndex].File
 	bindings := *cachedBindings
-	for _, stmt := range body.Stmts {
+	for stmtIndex := 0; stmtIndex < len(body.Stmts); stmtIndex++ {
+		stmt := &body.Stmts[stmtIndex]
 		if stmt.Kind != syntax.StmtFor {
 			continue
 		}
-		for tok := stmt.StartTok + 1; tok < stmt.BodyStart; tok++ {
-			if file.Tokens[tok].KindLine&255 != syntax.TokenRange {
-				continue
-			}
+		if tok := findTypeTopLevelKind(file, stmt.StartTok+1, stmt.BodyStart, syntax.TokenRange); tok >= 0 {
 			if numericBuiltinInNestedFunction(file, fn, stmt.StartTok) {
-				break
+				continue
 			}
 			// Collect bindings only after finding a range statement in this
 			// function; the statement tree already identifies the loop headers.
@@ -30,7 +28,6 @@ func invalidRangeOperand(pkg *load.Package, info *PackageInfo, fileIndex int, fn
 			if value.kind == "bool" || value.kind == "other" || value.kind == "float" || value.kind == "complex" || definiteStructExpr(pkg, info, fileIndex, scope, bindings, start, end, tok, 0) {
 				return start
 			}
-			break
 		}
 	}
 	return -1
@@ -82,7 +79,8 @@ func definiteStructExpr(pkg *load.Package, info *PackageInfo, fileIndex int, sco
 		return definiteStructExpr(pkg, info, fileIndex, scope, bindings, binding.valueStart, binding.valueEnd, binding.name, depth+1)
 	}
 	name := tokenString(file, start)
-	for _, decl := range info.Decls {
+	for declIndex := 0; declIndex < len(info.Decls); declIndex++ {
+		decl := &info.Decls[declIndex]
 		if decl.Name != name || decl.Kind != SymbolVar {
 			continue
 		}

@@ -27,6 +27,19 @@ func main() {
 		t.Fatal("parse")
 	}
 	starts := mapLowerLiteralTypeStarts(&program)
+	functionBodies := map[int]bool{}
+	for _, fn := range program.Funcs {
+		functionBodies[fn.BodyStart] = true
+	}
+	for tok := range program.Tokens {
+		if !functionValueTokenEquals(&program, tok, "func") || !functionValueTokenEquals(&program, tok+1, "(") {
+			continue
+		}
+		_, body, ok := parseFunctionValueSignature(&program, tok, "")
+		if ok && functionValueTokenEquals(&program, body, "{") && !functionValueLiteralTypePosition(&program, tok, body) {
+			functionBodies[body] = true
+		}
+	}
 	braces := 0
 	for open := range program.Tokens {
 		if !functionValueTokenEquals(&program, open, "{") {
@@ -42,6 +55,10 @@ func main() {
 		}
 		if want < 0 {
 			want = functionValuePrimaryStart(&program, open-1)
+		}
+		// A result type before a function body is not a composite literal.
+		if functionBodies[open] {
+			want = -1
 		}
 		if starts[open] != want {
 			t.Errorf("brace %d: got start %d, want %d", open, starts[open], want)

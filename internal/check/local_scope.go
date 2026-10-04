@@ -10,7 +10,7 @@ func localRuleScopeEnd(body *syntax.Body, tok int) int {
 	ownerIndex := -1
 	ownerStart := -1
 	for i := 0; i < len(body.Stmts); i++ {
-		owner := body.Stmts[i]
+		owner := &body.Stmts[i]
 		if (owner.Kind == syntax.StmtSwitch || owner.Kind == syntax.StmtSelect) && owner.BodyStart < tok && tok < owner.BodyEnd && owner.BodyStart > ownerStart {
 			ownerIndex, ownerStart = i, owner.BodyStart
 		}
@@ -23,7 +23,7 @@ func localRuleScopeEnd(body *syntax.Body, tok int) int {
 	// Statements are in source order. Skip each nested switch/select interval
 	// once instead of rescanning all preceding statements for every clause.
 	for i := ownerIndex + 1; i < len(body.Stmts); i++ {
-		stmt := body.Stmts[i]
+		stmt := &body.Stmts[i]
 		if stmt.StartTok >= end || stmt.StartTok >= ownerEnd {
 			break
 		}
@@ -46,7 +46,8 @@ func localRuleScopeEnds(body *syntax.Body) []int {
 	clauseEnds := make([]int, len(body.Stmts))
 	currentClause := make([]int, len(body.Stmts))
 	var blocks, owners []int
-	for i, stmt := range body.Stmts {
+	for i := 0; i < len(body.Stmts); i++ {
+		stmt := &body.Stmts[i]
 		for len(blocks) > 0 && body.Stmts[blocks[len(blocks)-1]].EndTok <= stmt.StartTok {
 			blocks = blocks[:len(blocks)-1]
 		}

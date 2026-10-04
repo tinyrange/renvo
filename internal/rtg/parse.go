@@ -91,9 +91,46 @@ func parseDocument(source []byte, filename string, sourceMap []sourceSegment) Do
 }
 
 type documentParser struct {
-	document *Document
-	at       int
-	goNames  []string
+	document   *Document
+	at         int
+	goNames    []string
+	lineStarts []int
+}
+
+// sourcePosition indexes line boundaries once per immutable document. Definition
+// imports can produce large sources with many spans; rescanning each prefix would
+// make parsing quadratic in the source size. Columns remain byte-based.
+func (p *documentParser) sourcePosition(offset int) Position {
+	source := p.document.Source
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	if p.lineStarts == nil {
+		p.lineStarts = []int{0}
+		for i, b := range source {
+			if b == '\n' {
+				p.lineStarts = append(p.lineStarts, i+1)
+			}
+		}
+	}
+	low, high := 0, len(p.lineStarts)
+	for low < high {
+		middle := low + (high-low)/2
+		if p.lineStarts[middle] <= offset {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	line := low - 1
+	return Position{Offset: offset, Line: line + 1, Column: offset - p.lineStarts[line] + 1}
+}
+
+func (p *documentParser) sourceSpan(start, end int) Span {
+	return Span{Start: p.sourcePosition(start), End: p.sourcePosition(end)}
 }
 
 func (p *documentParser) parse() {
@@ -259,7 +296,7 @@ func (p *documentParser) parseDeclarationFrom(kind string, startToken int, nameS
 		End:       p.document.Tokens[close].End,
 		BodyStart: p.document.Tokens[open].End,
 		BodyEnd:   p.document.Tokens[close].Start,
-		Span:      sourceSpan(p.document.Source, p.document.Tokens[startToken].Start, p.document.Tokens[close].End),
+		Span:      p.sourceSpan(p.document.Tokens[startToken].Start, p.document.Tokens[close].End),
 	}
 	declaration.Fields = p.parseFields(open+1, close)
 	declaration.Statements = p.parseStatements(open+1, close)
@@ -302,7 +339,7 @@ func (p *documentParser) parseGo() {
 		BodyStart: bodyStart,
 		BodyEnd:   bodyEnd,
 		GoSource:  body,
-		Span:      sourceSpan(p.document.Source, p.document.Tokens[startToken].Start, p.document.Tokens[close].End),
+		Span:      p.sourceSpan(p.document.Tokens[startToken].Start, p.document.Tokens[close].End),
 	}
 	p.validateGo(declaration)
 	p.document.Declarations = append(p.document.Declarations, declaration)
@@ -414,7 +451,7 @@ func (p *documentParser) parseFields(start int, end int) []Field {
 			Name:       name,
 			ValueStart: p.document.Tokens[valueStart].Start,
 			ValueEnd:   p.document.Tokens[at-1].End,
-			Span:       sourceSpan(p.document.Source, p.document.Tokens[nameStart].Start, p.document.Tokens[at-1].End),
+			Span:       p.sourceSpan(p.document.Tokens[nameStart].Start, p.document.Tokens[at-1].End),
 		})
 	}
 	return fields
@@ -457,7 +494,7 @@ func (p *documentParser) parseStatementsDepth(start int, end int, depth int) []S
 				statement := Statement{
 					Tokens:   p.statementTokens(statementStart, at),
 					Children: p.parseStatementsDepth(at+1, close, depth+1),
-					Span: sourceSpan(p.document.Source,
+					Span: p.sourceSpan(
 						p.document.Tokens[statementStart].Start,
 						p.document.Tokens[close].End),
 				}
@@ -486,7 +523,7 @@ func (p *documentParser) parseStatementsDepth(start int, end int, depth int) []S
 				p.document.Tokens[at].Line > line {
 				statement := Statement{
 					Tokens: p.statementTokens(statementStart, at),
-					Span: sourceSpan(p.document.Source,
+					Span: p.sourceSpan(
 						p.document.Tokens[statementStart].Start,
 						p.document.Tokens[at-1].End),
 				}
@@ -559,12 +596,12 @@ func (p *documentParser) failAt(at int, code string, message string) {
 	}
 	token := p.document.Tokens[at]
 	p.document.Diagnostics = append(p.document.Diagnostics, documentDiagnostic(
-		*p.document, sourceSpan(p.document.Source, token.Start, token.End), code, message))
+		*p.document, p.sourceSpan(token.Start, token.End), code, message))
 }
 
 func (p *documentParser) failOffset(offset int, code string, message string) {
 	p.document.Diagnostics = append(p.document.Diagnostics, documentDiagnostic(
-		*p.document, sourceSpan(p.document.Source, offset, offset), code, message))
+		*p.document, p.sourceSpan(offset, offset), code, message))
 }
 
 func invalidUTF8Offset(source []byte) int {

@@ -148,6 +148,12 @@ func appendExprComposites(composites []CompositeExpr, file *syntax.File, start i
 		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('{') {
 			continue
 		}
+		// A line break after a completed type inserts a semicolon. The brace
+		// then starts a block, as in a local type alias followed by a closure's
+		// specialization scope; it cannot be that type's composite literal.
+		if i > 0 && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[i-1].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) && (file.Tokens[i-1].KindLine&255 == syntax.TokenIdent || tokCharIs(file, i-1, ')') || tokCharIs(file, i-1, ']') || tokCharIs(file, i-1, '}')) {
+			continue
+		}
 		if isCompositeTypeBodyOpen(file, i) {
 			continue
 		}
@@ -262,7 +268,7 @@ func exprBinaryOperatorKind(file *syntax.File, tok int) int {
 	if tok < 0 || tok >= len(file.Tokens) {
 		return exprBinaryNone
 	}
-	token := file.Tokens[tok]
+	token := &file.Tokens[tok]
 	start := int(token.Start)
 	end := int(token.End)
 	if token.KindLine&255 != syntax.TokenOperator || start < 0 || end > len(file.Src) {

@@ -15,6 +15,8 @@ const (
 
 // renvo_runtime_Syscall is the frontend's explicit generic Linux syscall
 // intrinsic. Its body is replaced by the selected native backend.
+//
+//renvo:intrinsic renvo_runtime_Syscall
 func renvo_runtime_Syscall(number int, first int, second int, third int, fourth int, fifth int, sixth int) int {
 	return 0
 }

@@ -1,5 +1,7 @@
 package syntax
 
+import "unsafe"
+
 type Scanner struct {
 	Ok     bool
 	Tokens []Token
@@ -10,12 +12,16 @@ func Scan(src []byte) []Token {
 	return tokens
 }
 
-func scanTokens(src []byte) ([]Token, bool) { return scanTokensMode(src, false) }
+func scanTokens(src []byte) ([]Token, bool) {
+	tokens, ok, _ := scanTokensMode(src, false)
+	return tokens, ok
+}
 
-func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
+func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
+	interfaceCandidates := false
 	tokens := make([]Token, 0, scanTokenCapacity(src))
 	if !validSourceEncoding(src) {
-		return tokens, false
+		return tokens, false, false
 	}
 	ok := true
 	i := 0
@@ -30,11 +36,10 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 		}
 		c := src[i]
 		if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-			for i < len(src) {
-				c = src[i]
-				if c == '\n' {
+			for _, space := range src[i:] {
+				if space == '\n' {
 					line++
-				} else if c != ' ' && c != '\t' && c != '\r' {
+				} else if space != ' ' && space != '\t' && space != '\r' {
 					break
 				}
 				i++
@@ -43,7 +48,10 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 		}
 		if c == '/' && i+1 < len(src) && src[i+1] == '/' {
 			i += 2
-			for i < len(src) && src[i] != '\n' {
+			for _, comment := range src[i:] {
+				if comment == '\n' {
+					break
+				}
 				i++
 			}
 			continue
@@ -71,8 +79,15 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 				i++
 			}
 			for i < len(src) {
-				part := src[i]
-				if part >= 128 {
+				// Walk ASCII bytes with one range bound, then resume at a Unicode
+				// rune if present. The outer loop handles its variable width.
+				for _, part := range src[i:] {
+					if !(uint(part|32)-'a' < 26 || uint(part)-'0' < 10 || part == '_') {
+						break
+					}
+					i++
+				}
+				if i < len(src) && src[i] >= 128 {
 					width := unicodeIdentifierWidth(src, i, false)
 					if width == 0 {
 						break
@@ -80,15 +95,17 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 					i += width
 					continue
 				}
-				if !(uint(part|32)-'a' < 26 || uint(part)-'0' < 10 || part == '_') {
-					break
-				}
-				i++
+				break
 			}
 			kind := TokenIdent
 			size := i - start
 			if size >= 2 && size <= 9 || size == 11 {
 				kind = keywordKind(src, start, i, c)
+			}
+			// Remember the conservative constraint candidates while spelling
+			// identifiers, so nongeneric preparation can skip ordinary files.
+			if kind == TokenInterface || c == 'c' && size == 10 && bytesEqualText(src, start, i, "comparable") {
+				interfaceCandidates = true
 			}
 			tokens = append(tokens, Token{KindLine: kind | line<<TokenOperatorLineShift, Start: int32(start), End: int32(i)})
 			continue
@@ -108,6 +125,15 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 			i++
 			for i < len(src) && src[i] != '"' {
 				if src[i] == '\\' {
+					if i+3 < len(src) && src[i+1] == 'x' {
+						high, low := src[i+2], src[i+3]
+						if (uint(high)-'0' < 10 || uint(high|32)-'a' < 6) && (uint(low)-'0' < 10 || uint(low|32)-'a' < 6) {
+							i += 4
+							continue
+						}
+						ok = false
+						break
+					}
 					next, _, _, valid := stringEscapeValue(src, i, len(src))
 					if !valid {
 						ok = false
@@ -211,13 +237,34 @@ func scanTokensMode(src []byte, linked bool) ([]Token, bool) {
 		ok = false
 	}
 	tokens = append(tokens, Token{KindLine: TokenEOF | line<<TokenOperatorLineShift, Start: int32(len(src)), End: int32(len(src))})
-	return tokens, ok
+	return tokens, ok, interfaceCandidates
 }
 
 // Validate the entire source, including comments and raw string literals.
 // Escaped arbitrary bytes in interpreted strings remain valid source text.
 func validSourceEncoding(src []byte) bool {
+	wordSize := int(unsafe.Sizeof(uint(0)))
+	lowBytes := ^uint(0) / 255
+	highBytes := lowBytes * 128
 	for i := 0; i < len(src); {
+		// Read only aligned, in-bounds native words. A high bit or a zero
+		// byte ends the ASCII fast path; the byte walk locates it exactly.
+		for i < len(src) && uintptr(unsafe.Pointer(&src[i]))&uintptr(wordSize-1) != 0 {
+			if src[i] == 0 || src[i] >= 0x80 {
+				break
+			}
+			i++
+		}
+		if i < len(src) && uintptr(unsafe.Pointer(&src[i]))&uintptr(wordSize-1) == 0 {
+			for i+wordSize <= len(src) {
+				word := *(*uint)(unsafe.Pointer(&src[i]))
+				if word&highBytes != 0 || (word-lowBytes)&^word&highBytes != 0 {
+					break
+				}
+				i += wordSize
+			}
+		}
+
 		// Range lowers to a single bounded byte walk for the common ASCII run.
 		for _, c := range src[i:] {
 			if c == 0 || c >= 0x80 {

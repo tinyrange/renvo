@@ -38,6 +38,7 @@ type Result struct {
 	ErrorFile    int
 	ErrorToken   int
 	ErrorDetail  int
+	ErrorMessage string
 	ErrorPath    string
 	ErrorOffset  int
 }
@@ -51,6 +52,7 @@ func BuildPrograms(graph load.Graph) Result {
 }
 
 func BuildObjectPrograms(graph load.Graph) Result {
+	graph.Layout.Object = true
 	return buildProgramsDirect(graph, false, false)
 }
 
@@ -94,8 +96,10 @@ func buildProgramsDirect(graph load.Graph, transient bool, requireMain bool) Res
 	}
 	if !checked.Ok {
 		result.ErrorDetail = checked.Error
+		result.ErrorMessage = checked.ErrorMessage
 		return buildFail(result, BuildErrCheck, checked.ErrorPackage, checked.ErrorFile, checked.ErrorToken)
 	}
+	graph = checked.Graph
 	for i := 0; i < len(graph.Packages); i++ {
 		persistMark := 0
 		if transient {

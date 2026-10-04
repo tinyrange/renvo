@@ -374,7 +374,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 			}
 		} else if c == '{' && parenDepth == 0 && bracketDepth == 0 {
 			closeTok := skipBalanced(file, i, '{', '}')
-			if closeTok > i && closeTok < limit && TokenLine(file.Tokens[closeTok-1]) == TokenLine(file.Tokens[closeTok]) {
+			if closeTok > i && closeTok < limit && (file.Tokens[closeTok-1].KindLine>>TokenOperatorLineShift&TokenLineLimit) == (file.Tokens[closeTok].KindLine>>TokenOperatorLineShift&TokenLineLimit) {
 				next := byte(0)
 				nextTok := file.Tokens[closeTok]
 				if nextTok.End > nextTok.Start {
@@ -396,7 +396,7 @@ func findStmtBlockStart(file *File, start int, limit int) int {
 }
 
 func findStmtEnd(file *File, start int, limit int) int {
-	if start < limit && start > 0 && TokenLine(file.Tokens[start]) != TokenLine(file.Tokens[start-1]) && !lineContinues(file, start-1, start) {
+	if start < limit && start > 0 && (file.Tokens[start].KindLine>>TokenOperatorLineShift&TokenLineLimit) != (file.Tokens[start-1].KindLine>>TokenOperatorLineShift&TokenLineLimit) && !lineContinues(file, start-1, start) {
 		return start
 	}
 	i := start
@@ -405,13 +405,13 @@ func findStmtEnd(file *File, start int, limit int) int {
 	braceDepth := 0
 	prev := start - 1
 	for i < limit {
-		tok := file.Tokens[i]
-		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		packed := file.Tokens[i].KindLine
+		c := byte(packed >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 {
 			if c == ';' {
 				return i + 1
 			}
-			if i > start && TokenLine(file.Tokens[i]) != TokenLine(file.Tokens[prev]) && !lineContinues(file, prev, i) {
+			if i > start && (file.Tokens[i].KindLine>>TokenOperatorLineShift&TokenLineLimit) != (file.Tokens[prev].KindLine>>TokenOperatorLineShift&TokenLineLimit) && !lineContinues(file, prev, i) {
 				return i
 			}
 		}
@@ -458,8 +458,8 @@ func findTopLevelChar(file *File, start int, limit int, c byte) int {
 	bracketDepth := 0
 	braceDepth := 0
 	for i < limit {
-		tok := file.Tokens[i]
-		tokChar := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		packed := file.Tokens[i].KindLine
+		tokChar := byte(packed >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && tokChar == c {
 			return i
 		}
@@ -562,8 +562,8 @@ func hasTopLevelBinary(file *File, start int, end int) bool {
 	bracketDepth := 0
 	braceDepth := 0
 	for i := start; i < end; i++ {
-		tok := file.Tokens[i]
-		c := byte(tok.KindLine >> TokenOperatorCharShift & TokenOperatorCharMask)
+		packed := file.Tokens[i].KindLine
+		c := byte(packed >> TokenOperatorCharShift & TokenOperatorCharMask)
 		if c == '(' {
 			parenDepth++
 		} else if c == ')' {
@@ -590,7 +590,7 @@ func hasTopLevelBinary(file *File, start int, end int) bool {
 }
 
 func isBinaryOp(file *File, i int) bool {
-	tok := file.Tokens[i]
+	tok := &file.Tokens[i]
 	if tok.KindLine&255 != TokenOperator {
 		return false
 	}
@@ -614,7 +614,7 @@ func isBinaryOp(file *File, i int) bool {
 }
 
 func isUnaryExpr(file *File, start int) bool {
-	tok := file.Tokens[start]
+	tok := &file.Tokens[start]
 	if tok.KindLine&255 != TokenOperator {
 		return false
 	}

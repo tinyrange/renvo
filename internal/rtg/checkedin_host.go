@@ -2,6 +2,8 @@
 
 package rtg
 
+import "strings"
+
 // GenerateCheckedInTargetProjection emits the target-owned production glue
 // used by a built-in compiler. Unlike GeneratePreparedBackend, this projection
 // does not emit the stateful RTG adapter or another copy of the ISA contract;
@@ -591,8 +593,13 @@ func appendCompilerGoBlocks(source []byte, document Document) []byte {
 		if declaration.Kind != DeclGo || declaration.Name != "compiler" {
 			continue
 		}
+		body := appendCompilerBlockWithoutPrivateHooks(nil, dedentGoSource(declaration.GoSource), private)
+		block := strings.TrimSpace(string(body))
+		if block == "" {
+			continue
+		}
 		source = append(source, '\n')
-		source = appendCompilerBlockWithoutPrivateHooks(source, dedentGoSource(declaration.GoSource), private)
+		source = append(source, block...)
 		source = append(source, '\n')
 	}
 	return source

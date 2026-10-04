@@ -306,10 +306,6 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 			diagnostic = diagnosticAtOffset(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, pkg.ErrorOffset)
 		} else if pkg.Error == load.PackageErrParse {
 			diagnostic = syntaxErrorDiagnostic(diagnostic, file.File.Error)
-			if offset := sourceGenericsOffset(file.Src); offset >= 0 {
-				diagnostic.Code, diagnostic.Message = "RENVO-PARSE-002", "generics are not supported by RENVO"
-				return diagnosticAtOffset(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, offset)
-			}
 			diagnostic = diagnosticAtToken(diagnostic, load.SourceFile{Path: file.Path, Src: file.Src}, file.File.Tokens, file.File.ErrorTok)
 		}
 	} else {
@@ -349,6 +345,8 @@ func buildPhaseDiagnostic(result BuildResult, built pipeline.Result) Diagnostic 
 	if built.Build.Error == build.BuildErrCheck {
 		phase, code, message = "checker", "RENVO-BUG-013", "compiler bug: type checker returned undeclared error code "+diagnosticIntText(built.Build.ErrorDetail)
 		switch built.Build.ErrorDetail {
+		case check.CheckErrGeneric:
+			code, message = "RENVO-CHECK-042", built.Build.ErrorMessage
 		case check.CheckErrGraph:
 			code, message = "RENVO-CHECK-001", "invalid package graph reached the type checker"
 		case check.CheckErrDuplicate:

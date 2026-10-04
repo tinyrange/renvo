@@ -7,6 +7,8 @@ implements direct_emitter_v1
 # Compiler-private lowering generated separately from the portable architecture projection.
 @import "x86_64.rtg"
 
+@import "lowering_optimizations.rtg"
+
 go compiler {
 	func renvoAmd64AsmStackMem(a *renvoAsm, offset int, base int, disp8 int, disp32 int) {
 		renvoNonNil(a)
@@ -46,17 +48,87 @@ go compiler {
 		renvoAsmEmit32(a, 0x10+(reg-6)*8)
 		renvoAsmStorePrimaryStack(a, offset)
 	}
-	func renvoAmd64PushStackBytes(a *renvoAsm, offset int, size int) {
+	func renvoAmd64PushBytes(g *renvoLinearGen, offset int, size int, mode int) {
+		a := &g.asm
 		// Reserve the same argument words as the descending PUSH sequence. Locals
 		// live in the persistent frame above the old RSP, so the new argument area
 		// is disjoint and a forward copy preserves their ascending byte order.
 		// Call argument registers are populated after all arguments are stacked.
-		renvoAsmEmitText(a, "\x48\x81\xec") // SUB RSP, size
+		if mode == renvoPushStack {
+			renvoAsmAddressCallWord1Stack(a, offset) // LEA RSI, [RBP-offset]
+		} else if mode == renvoPushBss {
+			renvoAsmPrimaryBssAddr(a, offset)
+			renvoAsmCopyPrimaryToCallWord1(a)
+		} else {
+			renvoAsmEmitText(a, "\x48\x89\xd6") // MOV RSI, RDX
+		}
+		if size <= 127 {
+			renvoAsmEmitText(a, "\x48\x83\xec")
+			renvoAsmEmit8(a, size)
+		} else {
+			renvoAsmEmitText(a, "\x48\x81\xec") // SUB RSP, size
+			renvoAsmEmit32(a, size)
+		}
+		renvoAsmEmitText(a, "\x48\x89\xe7") // MOV RDI, RSP
+		if size <= 96 && size%8 == 0 {
+			// Small aggregate arguments already have disjoint source and stack
+			// storage. Reuse the fixed copy leaf instead of starting REP MOVSQ.
+			renvoAsmCallLabel(a, renvoAmd64EnsureFixedVectorCopy(g, size))
+			return
+		}
+		renvoAsmEmit8(a, 0xb9) // MOV ECX, count
+		if size%8 == 0 {
+			renvoAsmEmit32(a, size/8)
+			renvoAsmEmitText(a, "\xfc\xf3\x48\xa5") // CLD; REP MOVSQ
+		} else {
+			renvoAsmEmit32(a, size)
+			renvoAsmEmitText(a, "\xfc\xf3\xa4") // CLD; REP MOVSB
+		}
+	}
+
+	func renvoAmd64CopyFixed(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
+		// Materialize known addresses directly in the copy helper's registers.
+		// Keeping these out of temporary frame slots reduces both frame size and
+		// instruction count while retaining memmove semantics for aliased values.
+		a := &g.asm
+		if mode == renvoNativeCopyStackToStack && srcOffset == destOffset {
+			return
+		}
+		if mode == renvoNativeCopyMemToStack {
+			renvoAsmEmitText(a, "\x48\x89\xd6") // MOV RSI, RDX
+		} else if mode == renvoNativeCopyBSSToStack {
+			renvoAsmPrimaryBssAddr(a, srcOffset)
+			renvoAsmCopyPrimaryToCallWord1(a)
+		} else {
+			renvoAsmAddressCallWord1Stack(a, srcOffset)
+		}
+		if mode == renvoNativeCopyStackToMem {
+			renvoAmd64AsmMemDisp(a, destOffset, 0x8d48, 0x7a, 0xba) // LEA RDI, [RDX+disp]
+		} else if mode == renvoNativeCopyStackToBSS {
+			renvoAsmPrimaryBssAddr(a, destOffset)
+			renvoAsmCopyPrimaryToCallWord0(a)
+		} else {
+			renvoAsmAddressCallWord0Stack(a, destOffset)
+		}
+		if size <= 96 {
+			if size%8 == 0 {
+				renvoAsmCallLabel(a, renvoAmd64EnsureFixedVectorCopy(g, size))
+			} else {
+				renvoAmd64EmitFixedVectorCopy(a, size)
+			}
+			return
+		}
+		if mode == renvoNativeCopyStackToStack && (srcOffset+size <= destOffset || destOffset+size <= srcOffset) && size%8 == 0 {
+			// Frame displacements prove these regions disjoint. Copy full words
+			// directly instead of paying for the general overlap test and call.
+			renvoAsmEmit8(a, 0xb9) // MOV ECX, word count
+			renvoAsmEmit32(a, size/8)
+			renvoAsmEmitText(a, "\xfc\xf3\x48\xa5") // CLD; REP MOVSQ
+			return
+		}
+		renvoAsmEmit8(a, 0xb9) // MOV ECX, byte count
 		renvoAsmEmit32(a, size)
-		renvoAsmAddressCallWord1Stack(a, offset) // LEA RSI, [RBP-offset]
-		renvoAsmEmitText(a, "\x48\x89\xe7\xb9")  // MOV RDI, RSP; MOV ECX, size
-		renvoAsmEmit32(a, size)
-		renvoAsmEmitText(a, "\xfc\xf3\xa4") // CLD; REP MOVSB
+		renvoAsmCallLabel(a, renvoAmd64EnsureCopyBytesHelper(g))
 	}
 
 	func renvoAmd64EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
@@ -66,15 +138,35 @@ go compiler {
 		renvoAsmLoadPrimaryStack(a, destPtr)
 		renvoAsmCopyPrimaryToCallWord0(a)
 		renvoAsmLoadTertiaryStack(a, byteCount)
+		renvoAsmCallLabel(a, renvoAmd64EnsureCopyBytesHelper(g))
+	}
+
+	func renvoAmd64EnsureCopyBytesHelper(g *renvoLinearGen) int {
+		a := &g.asm
+		if g.copyBytesLabel != 0 {
+			return g.copyBytesLabel - 1
+		}
+		label := renvoAsmNewLabel(a)
+		g.copyBytesLabel = label + 1
+		after := renvoAsmNewLabel(a)
+		end := renvoAsmNewLabel(a)
+		renvoAsmJmpMarkLabel(a, after, label)
 		// A destination above the source only needs a backward copy when the
-		// ranges actually overlap. Forward REP MOVSB is substantially faster for
-		// the overwhelmingly common disjoint case. The two forward branches and
-		// final short jump are entirely internal to this fixed instruction block.
+		// ranges actually overlap. Forward REP MOVSB handles disjoint copies.
 		renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, end)
+		renvoAsmMarkLabel(a, after)
+		if renvoFixedTarget == 0 && renvoObjectProgram(g.c) && renvoObjectRegisterScalarABI(g.c) {
+			renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_copy_bytes", label, end)
+		}
+		return label
 	}
 	func renvoAmd64RelaxBranches(a *renvoAsm) {
 		renvoNonNil(a)
 		oldLen := len(a.code)
+		// Apply the same relocation-preserving compaction to large programs:
+		// the self-hosted compiler also needs the space saved by short branches.
 		// Keep only the positions of branches that become short. The previous
 		// representation used one byte plus one int32 for every byte of generated
 		// code, then allocated a second full code buffer. Large self-hosted builds
@@ -513,7 +605,9 @@ go compiler {
 		}
 		renvoAsmEmitText(a, "\x50\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x8b\x7c\x24\x30\x48\x8b\x37\x48\x8b\x3c\x24\xfc\xf3\xa4\x48\x8b\x7c\x24\x30\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x20\x4c\x8b\x44\x24\x08\x4d\x89\x01\x48\x8b\x04\x24\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x74\x24\x28\x48\x8b\x4c\x24\x10\x48\xff\xc1\x48\x89\x0e\x48\x83\xc4\x38\xc3")
 		renvoAsmMarkLabel(a, noGrowLabel)
-		renvoAsmEmitText(a, "\x48\x8b\x0e\x48\x8b\x07\x48\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x0e\x48\xff\xc1\x48\x89\x0e\xc3")
+		// The initial capacity check retains length in RCX. Compute the byte
+		// offset in RAX so advancing length needs no repeated descriptor loads.
+		renvoAsmEmitText(a, "\x48\x89\xc8\x48\x0f\xaf\xc2\x48\x03\x07\x48\xff\xc1\x48\x89\x0e\xc3")
 		renvoAsmMarkLabel(a, helperEnd)
 		renvoAsmMarkLabel(a, afterLabel)
 		if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
@@ -611,11 +705,39 @@ go compiler {
 		renvoAsmJnzLabel(a, notEqualLabel)
 		renvoAsmEmitText(a, "\x48\x85\xf6")
 		renvoAsmJzLabel(a, equalLabel)
+		// Consume complete words, then compare the beginning and end of the
+		// short tail. Overlapping tail reads are safe and avoid byte loops.
+		tail := renvoAsmNewLabel(a)
 		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmEmitText(a, "\x48\x83\xfe\x08")
+		renvoAmd64AsmJccLabel(a, 0x82, tail)
+		renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08")
+		renvoAsmJmpMarkLabel(a, loopLabel, tail)
+		for width := 4; width >= 2; width /= 2 {
+			next := renvoAsmNewLabel(a)
+			renvoAsmEmitText(a, "\x48\x83\xfe")
+			renvoAsmEmit8(a, width)
+			renvoAmd64AsmJccLabel(a, 0x82, next)
+			if width == 4 {
+				renvoAsmEmitText(a, "\x44\x8b\x07\x44\x3b\x02")
+			} else {
+				renvoAsmEmitText(a, "\x44\x0f\xb7\x07\x66\x44\x3b\x02")
+			}
+			renvoAsmJnzLabel(a, notEqualLabel)
+			if width == 4 {
+				renvoAsmEmitText(a, "\x44\x8b\x44\x37\xfc\x44\x3b\x44\x32\xfc")
+			} else {
+				renvoAsmEmitText(a, "\x44\x0f\xb7\x44\x37\xfe\x66\x44\x3b\x44\x32\xfe")
+			}
+			renvoAsmJnzLabel(a, notEqualLabel)
+			renvoAsmJmpMarkLabel(a, equalLabel, next)
+		}
+		renvoAsmEmitText(a, "\x48\x85\xf6")
+		renvoAsmJzLabel(a, equalLabel)
 		renvoAsmEmitText(a, "\x44\x8a\x07\x44\x38\x02")
 		renvoAsmJnzLabel(a, notEqualLabel)
-		renvoAsmEmitText(a, "\x48\xff\xc7\x48\xff\xc2\x48\xff\xce")
-		renvoAsmJnzLabel(a, loopLabel)
 		renvoAsmMarkLabel(a, equalLabel)
 		renvoAsmEmitText(a, "\x6a\x01\x58")
 		renvoAsmMarkLabel(a, notEqualLabel)
@@ -634,6 +756,40 @@ go compiler {
 extend arch x86_64 {
 	compiler_selector = renvoArchAmd64
 	compiler_bindings {
+		vm32_copy_fixed = renvoDefinitionVM32CopyFixed
+		ensure_string_storage_arm = renvoDefinitionEnsureStringStorageArm
+		ensure_string_order_helper = renvoDefinitionEnsureStringOrderHelper
+		ensure_string_copy_x86 = renvoDefinitionEnsureStringCopyX86
+		ensure_string_copy_wasm32 = renvoDefinitionEnsureStringCopyWasm32
+		ensure_string_concat_x86 = renvoDefinitionEnsureStringConcatX86
+		ensure_string_concat_wasm32 = renvoDefinitionEnsureStringConcatWasm32
+		ensure_small_risc_copy = renvoDefinitionEnsureSmallRiscCopy
+		ensure_slice_bounds_vm32 = renvoDefinitionEnsureSliceBoundsVM32
+		ensure_copy_bytes_vm32 = renvoDefinitionEnsureCopyBytesVM32
+		ensure_copy_bytes_arm = renvoDefinitionEnsureCopyBytesArm
+		ensure_copy_bytes_aarch64 = renvoDefinitionEnsureCopyBytesAarch64
+		emit_wasm_parsed_compare_flags = renvoDefinitionEmitWasmParsedCompareFlags
+		emit_string_storage_arm_return = renvoDefinitionEmitStringStorageArmReturn
+		emit_scaled_index_primary = renvoDefinitionEmitScaledIndexPrimary
+		emit_frame_index_tertiary = renvoDefinitionEmitFrameIndexTertiary
+		arm_emit_checked_index_address = renvoDefinitionArmEmitCheckedIndexAddress
+		arm_copy_fixed = renvoDefinitionArmCopyFixed
+		amd64_ensure_fixed_vector_copy = renvoDefinitionAmd64EnsureFixedVectorCopy
+		amd64_emit_fixed_vector_copy = renvoDefinitionAmd64EmitFixedVectorCopy
+		aarch64_copy_fixed = renvoDefinitionAarch64CopyFixed
+		tracks_index_range_facts = renvoDefinitionTracksIndexRangeFacts
+		zero_local_at_offset = renvoDefinitionZeroLocalAtOffset
+		emit_zero_struct_result = renvoDefinitionEmitZeroStructResult
+		emit_word_compare_jump = renvoDefinitionEmitWordCompareJump
+		emit_string_ordering = renvoDefinitionEmitStringOrdering
+		emit_string_concat_pair_value_regs = renvoDefinitionEmitStringConcatPairValueRegs
+		emit_slice_bounds_checks = renvoDefinitionEmitSliceBoundsChecks
+		emit_index_primary = renvoDefinitionEmitIndexPrimary
+		emit_index_expr = renvoDefinitionEmitIndexExpr
+		emit_direct_selector_words = renvoDefinitionEmitDirectSelectorWords
+		emit_copy_native = renvoDefinitionEmitCopyNative
+		emit_byte_slice_string_copy_value_regs = renvoDefinitionEmitByteSliceStringCopyValueRegs
+		emit_byte_slice_conversion_regs = renvoDefinitionEmitByteSliceConversionRegs
 		repl_globals_supported = renvoAmd64CompilerReplGlobalsSupported
 		profile_float_model = renvoAmd64CompilerProfileFloatModel
 		syscall_argument_policy = renvoAmd64CompilerSyscallArgumentPolicy
@@ -2259,7 +2415,7 @@ go compiler {
 
 	func renvoAmd64CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
 		a := &g.asm
-		if size >= 64 {
+		if size >= 24 {
 			// Large zero values are common in the compiler's parser and metadata
 			// structures.  A counted store avoids expanding each zero value into a
 			// separate frame-relative instruction.
@@ -2753,13 +2909,25 @@ go compiler {
 		size = renvoAlignValue(size, wordSize)
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
-		if mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
-			renvoAmd64PushStackBytes(&g.asm, offset, size)
+		if wordSize == 8 && (size >= 64 || size >= 48 && (mode != renvoPushStack || offset >= 128)) && size <= 4096 {
+			renvoAmd64PushBytes(g, offset, size, mode)
 			return
 		}
 		for at := size - wordSize; at >= 0; at -= wordSize {
 			if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize {
 				renvoAsmPushStackWord(&g.asm, offset-at)
+				continue
+			}
+			if mode != renvoPushStack && mode != renvoPushBss && wordSize == 8 {
+				// PUSH [RDX+disp] leaves the descriptor base intact between words.
+				renvoAsmEmit8(&g.asm, 0xff)
+				if renvoAsmImmFits8Signed(at) {
+					renvoAsmEmit2(&g.asm, 0x72, at)
+				} else {
+					renvoAsmEmit8(&g.asm, 0xb2)
+					renvoAsmEmit32(&g.asm, at)
+				}
+				g.asm.lastPrimaryLoad = 0
 				continue
 			}
 			if mode == renvoPushStack {
@@ -2960,6 +3128,26 @@ go compiler {
 			constant := renvoEvalConstExpr(g, ep, e.right)
 			immediate = constant.ok
 		}
+		if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && (immOpcode != 0 || immMultiply) && rightKind == renvoExprIdent {
+			offset := renvoNativeCompareFrameOffset(g, ep, e.right)
+			if offset >= 0 {
+				if !renvoEmitIntExpr(g, ep, e.left) {
+					return 0
+				}
+				// Integer arithmetic has a register-to-frame operand form.
+				// Read the right local after evaluating the left, as source
+				// semantics require, without spilling the left to the stack.
+				if immMultiply {
+					renvoAsmEmit8(a, 0x48)
+					renvoAmd64AsmStackMem(a, offset, 0xaf0f, 0x45, 0x85)
+				} else {
+					opcode := immOpcode - 2
+					renvoAmd64AsmStackMem(a, offset, opcode<<8|0x48, 0x45, 0x85)
+				}
+				renvoNormalizeNativeExprPrimary(g, ep, idx)
+				return 1
+			}
+		}
 		if immediate && (immOpcode != 0 || immMultiply || immShift != 0) {
 			if value >= -2147483647 && value <= 2147483647 && (immShift == 0 || value >= 0 && value < 64) {
 				if !renvoEmitIntExpr(g, ep, e.left) {
@@ -2986,7 +3174,11 @@ go compiler {
 			if !renvoEmitIntExpr(g, ep, e.left) {
 				return 0
 			}
-			renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
+			if renvoExprHasUnsignedIntType(g, ep, e.left) {
+				renvoAsmEmitText(a, "\x48\xd1\xe8")
+			} else {
+				renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
+			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return 1
 		}
@@ -3359,6 +3551,11 @@ go compiler {
 		} else if op == '^' {
 			memoryOp = 0x3148
 		} else {
+			return -1
+		}
+		// An authored call can change the target through an alias. Preserve its
+		// original value before evaluating that operand in ordinary lowering.
+		if !renvoStringCompareOperandIsReadOnly(g, ep, idx) {
 			return -1
 		}
 		if !renvoEmitScalarExprForKind(g, ep, idx, kind) {

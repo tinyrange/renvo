@@ -2,6 +2,7 @@ package link
 
 import "renvo.dev/internal/arena"
 import "renvo.dev/internal/unit"
+import "renvo.dev/internal/syntax"
 
 // Encode non-ASCII identifiers after source-level resolution. Use an unused
 // prefix and the complete UTF-8 byte sequence, preserving identity without
@@ -10,7 +11,8 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 	maybeUnicode := false
 	// Non-ASCII comments and string literals need no identifier rewriting.
 	// Inspect identifier bytes directly before allocating names or edits.
-	for _, token := range program.Tokens {
+	for i := 0; i < len(program.Tokens); i++ {
+		token := &program.Tokens[i]
 		if token.KindLine&255 != unit.TokenIdent || token.Start < 0 || token.Size <= 0 || token.Start > len(program.Text)-token.Size {
 			continue
 		}
@@ -31,7 +33,7 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 	for {
 		used := false
 		for i := 0; i < len(program.Tokens); i++ {
-			if program.Tokens[i].KindLine&255 == unit.TokenIdent && functionValueHasPrefix(functionValueTokenText(program, i), prefix) {
+			if program.Tokens[i].KindLine&255 == unit.TokenIdent && (functionValueHasPrefix(functionValueTokenText(program, i), prefix) || functionValueHasPrefix(functionValueTokenText(program, i), "Renvo"+prefix)) {
 				used = true
 				break
 			}
@@ -58,7 +60,11 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 		if !unicode {
 			continue
 		}
-		encoded := []byte(prefix)
+		encodedPrefix := prefix
+		if syntax.IdentifierExported([]byte(name), 0) {
+			encodedPrefix = "Renvo" + prefix
+		}
+		encoded := []byte(encodedPrefix)
 		for j := 0; j < len(name); j++ {
 			encoded = append(encoded, digits[name[j]>>4], digits[name[j]&15])
 		}

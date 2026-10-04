@@ -23,7 +23,67 @@ go backend {
 		asmEmit(a, 0xe1a00000|(dst<<12)|src)
 	}
 
+	// ARM data-processing immediates rotate an eight-bit value right by an
+	// even number of bits. Return the operand encoding, or -1 if it needs
+	// a register. Mask to 32 bits because the host may use 64-bit integers.
+	func asmImmediate(imm int) int {
+		value := uint32(imm)
+		if value <= 255 {
+			return int(value)
+		}
+		// Find the highest set bit with five bounded reductions instead of
+		// trying all sixteen rotations for each unencodable stack offset.
+		top := 0
+		high := value
+		if high > 65535 {
+			high >>= 16
+			top += 16
+		}
+		if high > 255 {
+			high >>= 8
+			top += 8
+		}
+		if high > 15 {
+			high >>= 4
+			top += 4
+		}
+		if high > 3 {
+			high >>= 2
+			top += 2
+		}
+		if high > 1 {
+			top++
+		}
+		shift := uint((top - 6) & -2)
+		payload := value >> shift
+		if payload<<shift == value {
+			return ((32-int(shift))/2)<<8 | int(payload)
+		}
+		// Only rotations by two, four or six bits can wrap an eight-bit
+		// payload across the boundary between bits 31 and zero.
+		for rotation := 1; rotation <= 3; rotation++ {
+			shift := uint(rotation * 2)
+			rolled := value<<shift | value>>(32-shift)
+			if rolled <= 255 {
+				return rotation<<8 | int(rolled)
+			}
+		}
+		return -1
+	}
+
 	func asmMovRegImm(a *RTGEmitter, reg int, imm int) {
+		if imm < 0 || imm > 65535 {
+			encoded := asmImmediate(imm)
+			if encoded >= 0 {
+				asmEmit(a, 0xe3a00000|(reg<<12)|encoded)
+				return
+			}
+			encoded = asmImmediate(^imm)
+			if encoded >= 0 {
+				asmEmit(a, 0xe3e00000|(reg<<12)|encoded)
+				return
+			}
+		}
 		part := imm & 65535
 		asmEmit(a, 0xe3000000|((part&0xf000)<<4)|(reg<<12)|(part&0x0fff))
 		part = (imm >> 16) & 65535
@@ -39,6 +99,17 @@ go backend {
 		}
 		if imm >= -255 && imm <= 255 {
 			asmAddRegSmallImm(a, dst, src, imm)
+			return
+		}
+		magnitude := imm
+		opcode := 0xe2800000
+		if imm < 0 {
+			magnitude = -imm
+			opcode = 0xe2400000
+		}
+		encoded := asmImmediate(magnitude)
+		if encoded >= 0 {
+			asmEmit(a, opcode|(src<<16)|(dst<<12)|encoded)
 			return
 		}
 		tmp := scratch.Code
@@ -96,9 +167,19 @@ go backend {
 	}
 
 	func asmLoadRegMem(a *RTGEmitter, dst int, base int, disp int, size int) {
-		addr := asmLoadStoreAddr(a, base, disp, size)
-		if addr != base {
-			disp = 0
+		addr := base
+		if size != 2 && (disp < -4095 || disp > 4095) {
+			// Keep the low twelve address bits in the load/store itself.
+			// Stack frames usually need one rotated ADD/SUB for the rest.
+			high := disp & -4096
+			addr = address.Code
+			asmAddRegImm(a, addr, base, high)
+			disp -= high
+		} else {
+			addr = asmLoadStoreAddr(a, base, disp, size)
+			if addr != base {
+				disp = 0
+			}
 		}
 		up := 0x00800000
 		if disp < 0 {
@@ -117,9 +198,19 @@ go backend {
 	}
 
 	func asmStoreRegMem(a *RTGEmitter, src int, base int, disp int, size int) {
-		addr := asmLoadStoreAddr(a, base, disp, size)
-		if addr != base {
-			disp = 0
+		addr := base
+		if size != 2 && (disp < -4095 || disp > 4095) {
+			// Keep the low twelve address bits in the load/store itself.
+			// Stack frames usually need one rotated ADD/SUB for the rest.
+			high := disp & -4096
+			addr = address.Code
+			asmAddRegImm(a, addr, base, high)
+			disp -= high
+		} else {
+			addr = asmLoadStoreAddr(a, base, disp, size)
+			if addr != base {
+				disp = 0
+			}
 		}
 		up := 0x00800000
 		if disp < 0 {
@@ -231,6 +322,11 @@ go backend {
 	func asmCmpRegImm(a *RTGEmitter, reg int, imm int) {
 		if imm >= 0 && imm <= 255 {
 			asmEmit(a, 0xe3500000|(reg<<16)|imm)
+			return
+		}
+		encoded := asmImmediate(imm)
+		if encoded >= 0 {
+			asmEmit(a, 0xe3500000|(reg<<16)|encoded)
 			return
 		}
 		tmp := scratch.Code
@@ -512,6 +608,7 @@ arch arm {
 		renvoArmAsmEmit = sequence asmEmit
 		renvoArmAsmAlign = go asmAlign
 		renvoArmAsmMovRegReg = go asmMovRegReg
+		renvoArmAsmImmediate = go asmImmediate
 		renvoArmAsmMovRegImm = go asmMovRegImm
 		renvoArmAsmPatchMovRegImmAt = sequence asmPatchMovRegImmAt
 		renvoArmAsmMovRegAbs = sequence asmMovRegAbs

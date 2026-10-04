@@ -81,7 +81,7 @@ func duplicateCaseTypeTokens(file *syntax.File, a ExprSpan, b ExprSpan) bool {
 }
 
 func duplicateCaseLiteral(file *syntax.File, span ExprSpan) ConstValue {
-	if span.StartTok < span.EndTok && tokenTextIs(file, span.StartTok, "+") {
+	if span.StartTok < span.EndTok && tokCharIs(file, span.StartTok, '+') {
 		span.StartTok++
 	}
 	value := evalConstSpan(file, span)

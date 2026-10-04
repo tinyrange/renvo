@@ -11,7 +11,7 @@ func lowerInterfaceMethodExpressions(program *unit.Program, transient bool) bool
 			continue
 		}
 		start := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd) + 1
-		if functionValueTokenEquals(program, start, "=") {
+		if functionValueTokenCharIs(program, start, '=') {
 			start++
 		}
 		if functionValueTokenEquals(program, start, "interface") || start < len(program.Tokens) && program.Tokens[start].KindLine&255 == unit.TokenIdent {
@@ -25,12 +25,12 @@ func lowerInterfaceMethodExpressions(program *unit.Program, transient bool) bool
 	generated := ""
 	count := 0
 	for i := 0; i+2 < len(program.Tokens); i++ {
-		if program.Tokens[i].KindLine&255 != unit.TokenIdent || !functionValueTokenEquals(program, i+1, ".") || program.Tokens[i+2].KindLine&255 != unit.TokenIdent {
+		if program.Tokens[i].KindLine&255 != unit.TokenIdent || !functionValueTokenCharIs(program, i+1, '.') || program.Tokens[i+2].KindLine&255 != unit.TokenIdent {
 			continue
 		}
 		// A selector member with the same name as an interface type is a
 		// value, not the start of a type-qualified method expression.
-		if i > 0 && functionValueTokenEquals(program, i-1, ".") {
+		if i > 0 && functionValueTokenCharIs(program, i-1, '.') {
 			continue
 		}
 		name := functionValueTokenText(program, i)
@@ -109,7 +109,7 @@ func interfaceExpressionMethod(program *unit.Program, typ string, method string,
 			continue
 		}
 		start := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd) + 1
-		if functionValueTokenEquals(program, start, "=") {
+		if functionValueTokenCharIs(program, start, '=') {
 			start++
 		}
 		if !functionValueTokenEquals(program, start, "interface") {
@@ -120,10 +120,10 @@ func interfaceExpressionMethod(program *unit.Program, typ string, method string,
 		}
 		close := functionValueFindMatchingBrace(program, start+1)
 		for tok := start + 2; tok < close; tok++ {
-			if functionValueTokenEquals(program, tok, method) && functionValueTokenEquals(program, tok+1, "(") {
+			if functionValueTokenEquals(program, tok, method) && functionValueTokenCharIs(program, tok+1, '(') {
 				return tok
 			}
-			if functionValueTokenEquals(program, tok+1, "(") {
+			if functionValueTokenCharIs(program, tok+1, '(') {
 				_, end, ok := parseFunctionValueCallableSignature(program, tok, "")
 				if ok {
 					tok = end - 1

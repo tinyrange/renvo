@@ -5,6 +5,8 @@ implements direct_emitter_v1
 # Closed root for the checked-in shared ARM algorithm projection.
 @import "arm.rtg"
 
+@import "lowering_optimizations.rtg"
+
 go compiler {
 	func renvoArmAsmVFPLoadStack(a *renvoAsm, offset int, reg int, size int) {
 		renvoArmAsmLeaRegStack(a, renvoArmRegAddr, offset)
@@ -486,6 +488,40 @@ go compiler {
 extend arch arm {
 	compiler_selector = renvoArchArm
 	compiler_bindings {
+		vm32_copy_fixed = renvoDefinitionVM32CopyFixed
+		ensure_string_storage_arm = renvoDefinitionEnsureStringStorageArm
+		ensure_string_order_helper = renvoDefinitionEnsureStringOrderHelper
+		ensure_string_copy_x86 = renvoDefinitionEnsureStringCopyX86
+		ensure_string_copy_wasm32 = renvoDefinitionEnsureStringCopyWasm32
+		ensure_string_concat_x86 = renvoDefinitionEnsureStringConcatX86
+		ensure_string_concat_wasm32 = renvoDefinitionEnsureStringConcatWasm32
+		ensure_small_risc_copy = renvoDefinitionEnsureSmallRiscCopy
+		ensure_slice_bounds_vm32 = renvoDefinitionEnsureSliceBoundsVM32
+		ensure_copy_bytes_vm32 = renvoDefinitionEnsureCopyBytesVM32
+		ensure_copy_bytes_arm = renvoDefinitionEnsureCopyBytesArm
+		ensure_copy_bytes_aarch64 = renvoDefinitionEnsureCopyBytesAarch64
+		emit_wasm_parsed_compare_flags = renvoDefinitionEmitWasmParsedCompareFlags
+		emit_string_storage_arm_return = renvoDefinitionEmitStringStorageArmReturn
+		emit_scaled_index_primary = renvoDefinitionEmitScaledIndexPrimary
+		emit_frame_index_tertiary = renvoDefinitionEmitFrameIndexTertiary
+		arm_emit_checked_index_address = renvoDefinitionArmEmitCheckedIndexAddress
+		arm_copy_fixed = renvoDefinitionArmCopyFixed
+		amd64_ensure_fixed_vector_copy = renvoDefinitionAmd64EnsureFixedVectorCopy
+		amd64_emit_fixed_vector_copy = renvoDefinitionAmd64EmitFixedVectorCopy
+		aarch64_copy_fixed = renvoDefinitionAarch64CopyFixed
+		tracks_index_range_facts = renvoDefinitionTracksIndexRangeFacts
+		zero_local_at_offset = renvoDefinitionZeroLocalAtOffset
+		emit_zero_struct_result = renvoDefinitionEmitZeroStructResult
+		emit_word_compare_jump = renvoDefinitionEmitWordCompareJump
+		emit_string_ordering = renvoDefinitionEmitStringOrdering
+		emit_string_concat_pair_value_regs = renvoDefinitionEmitStringConcatPairValueRegs
+		emit_slice_bounds_checks = renvoDefinitionEmitSliceBoundsChecks
+		emit_index_primary = renvoDefinitionEmitIndexPrimary
+		emit_index_expr = renvoDefinitionEmitIndexExpr
+		emit_direct_selector_words = renvoDefinitionEmitDirectSelectorWords
+		emit_copy_native = renvoDefinitionEmitCopyNative
+		emit_byte_slice_string_copy_value_regs = renvoDefinitionEmitByteSliceStringCopyValueRegs
+		emit_byte_slice_conversion_regs = renvoDefinitionEmitByteSliceConversionRegs
 		repl_globals_supported = renvoArmCompilerReplGlobalsSupported
 		profile_float_model = renvoArmCompilerProfileFloatModel
 		syscall_argument_policy = renvoArmCompilerSyscallArgumentPolicy
@@ -1472,7 +1508,11 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-		renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
+		a := &g.asm
+		renvoArmAsmLoadRegStack(a, 0, srcPtr)
+		renvoArmAsmLoadRegStack(a, 1, destPtr)
+		renvoArmAsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesArm(g))
 	}
 
 	func renvoArmCompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
@@ -1575,7 +1615,22 @@ go compiler {
 
 	func renvoArmCompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
 		a := &g.asm
-		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+		if size >= 64 {
+			// Frame storage is word-aligned and reserves the rounded final word.
+			// Preserve descriptor registers while clearing a large value in a loop.
+			renvoAsmPushSecondary(a)
+			renvoAsmPushTertiary(a)
+			renvoArmAsmLeaRegStack(a, 1, offset)
+			renvoArmAsmMovRegImm(a, 2, (size+3)/4)
+			renvoAsmPrimaryImm(a, 0)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmEmit(a, 0xe4810004) // STR r0, [r1], #4
+			renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1
+			renvoArmAsmBCondLabel(a, loop, 1)
+			renvoAsmPopTertiary(a)
+			renvoAsmPopSecondary(a)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
 			renvoAsmAddressPrimaryStack(a, offset)
 			renvoAsmPushImm(a, size)
 			renvoAsmPopTertiary(a)
@@ -1871,6 +1926,29 @@ go compiler {
 	func renvoArmCompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 4 && size >= 48 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoArmAsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoArmAsmMovRegReg(a, 0, 1)
+			}
+			// Preserve the argument ABI by pushing packed words in reverse order.
+			renvoArmAsmAddRegImm(a, 0, 0, size)
+			renvoArmAsmMovRegImm(a, 2, size/4)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmAddRegImm(a, 0, 0, -4)
+			renvoArmAsmLoadRegMem(a, 1, 0, 0, 4)
+			renvoArmAsmPushReg(a, 1)
+			renvoArmAsmAddRegImm(a, 2, 2, -1)
+			renvoArmAsmCmpRegImm(a, 2, 0)
+			renvoArmAsmBCondLabel(a, loop, 1)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -1990,7 +2068,28 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
-		return -1
+		e := &ep.exprs[idx]
+		if (!renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-')) ||
+			!renvoExprIsUntypedInteger(ep, e.right) {
+			return -1
+		}
+		kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+		if kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32 {
+			return -1
+		}
+		constant := renvoEvalConstExpr(g, ep, e.right)
+		if !constant.ok {
+			return -1
+		}
+		step := constant.value
+		if renvoTokCharIs(g.prog, e.tok, '-') {
+			step = -step
+		}
+		if !renvoEmitIntExpr(g, ep, e.left) {
+			return 0
+		}
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		return 1
 	}
 }
 
@@ -2010,13 +2109,11 @@ go compiler {
 	func renvoArmCompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryStack(a, localOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoArmAsmAddRegImm(a, 0, 0, step)
 		renvoAsmStorePrimaryStack(a, localOffset)
 		return true
 	}
@@ -2026,13 +2123,11 @@ go compiler {
 	func renvoArmCompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryBss(a, globalOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoArmAsmAddRegImm(a, 0, 0, step)
 		renvoAsmStorePrimaryBss(a, globalOffset)
 		return true
 	}
@@ -2135,7 +2230,7 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerFoldedFieldAddressing(a *renvoAsm) bool {
-		return false
+		return true
 	}
 }
 
@@ -2288,13 +2383,56 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
-		return false
+		e := &ep.exprs[idx]
+		if e.kind != renvoExprBinary || !renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-') {
+			return false
+		}
+		left := &ep.exprs[e.left]
+		if left.kind != renvoExprIdent {
+			return false
+		}
+		local := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
+		if local < 0 || g.locals[local].captureOff != 0 || g.locals[local].offset != offset {
+			return false
+		}
+		kind := renvoResolveType(g.meta, g.locals[local].typ).kind
+		if kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32 {
+			return false
+		}
+		value := renvoEvalConstExpr(g, ep, e.right)
+		if !value.ok {
+			return false
+		}
+		step := value.value
+		if renvoTokCharIs(g.prog, e.tok, '-') {
+			step = -step
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, offset)
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		renvoAsmStorePrimaryStack(&g.asm, offset)
+		renvoClearLocalConstAtOffset(g, offset)
+		renvoClearLocalFlowConstAtOffset(g, offset)
+		return true
 	}
 }
 
 go compiler {
 	func renvoArmCompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
-		return -1
+		if (kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32) || size != 4 || op != '+' && op != '-' {
+			return -1
+		}
+		value := renvoEvalConstExpr(g, ep, idx)
+		if !value.ok {
+			return -1
+		}
+		step := value.value
+		if op == '-' {
+			step = -step
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, offset)
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		renvoAsmStorePrimaryStack(&g.asm, offset)
+		return 1
 	}
 }
 

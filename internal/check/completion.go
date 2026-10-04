@@ -332,7 +332,7 @@ func completionNameType(graph load.Graph, prog Program, pkgIndex, fileIndex int,
 	}
 	for i := fn.BodyStart + 1; i < fn.BodyEnd && i < len(file.Tokens); i++ {
 		tok := file.Tokens[i]
-		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 != syntax.TokenIdent || tokenString(file, i) != name {
+		if syntax.TokenStart(tok) >= offset || tok.KindLine&255 != syntax.TokenIdent || !tokenStringEquals(file, i, name) {
 			continue
 		}
 		if i > 0 && file.Tokens[i-1].KindLine&255 == syntax.TokenVar {
@@ -384,7 +384,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		return completionExpressionType(graph, prog, pkgIndex, fileIndex, file, start, operator, 0)
 	}
 	address := false
-	for start < end && start < len(file.Tokens) && tokenTextIs(file, start, "&") {
+	for start < end && start < len(file.Tokens) && tokCharIs(file, start, '&') {
 		address = true
 		start++
 	}
@@ -409,7 +409,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 	}
 	owner := pkgIndex
 	nameTok := start
-	if start+2 < end && tokenTextIs(file, start+1, ".") && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
+	if start+2 < end && tokCharIs(file, start+1, '.') && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
 		imported := completionImportPackage(prog.Packages[pkgIndex], fileIndex, tokenString(file, start))
 		if imported >= 0 {
 			owner = imported
@@ -421,10 +421,10 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 	}
 	name := tokenString(file, nameTok)
 	next := nameTok + 1
-	if next < end && tokenTextIs(file, next, "{") {
+	if next < end && tokCharIs(file, next, '{') {
 		return completionType{Package: owner, Name: name, Pointer: address}, true
 	}
-	if next < end && tokenTextIs(file, next, "(") {
+	if next < end && tokCharIs(file, next, '(') {
 		if owner == pkgIndex && name == "make" {
 			close := findTypeMatching(file, next, '(', ')')
 			if close < 0 || close > end {
@@ -444,7 +444,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 		}
 		return completionFunctionResultType(graph, prog, owner, name, resultIndex)
 	}
-	if owner == pkgIndex && next+1 < end && tokenTextIs(file, next, ".") && file.Tokens[next+1].KindLine&255 == syntax.TokenIdent {
+	if owner == pkgIndex && next+1 < end && tokCharIs(file, next, '.') && file.Tokens[next+1].KindLine&255 == syntax.TokenIdent {
 		fn, ok := completionFunctionAt(file, syntax.TokenStart(file.Tokens[start]))
 		if !ok {
 			return completionType{}, false
@@ -454,7 +454,7 @@ func completionExpressionType(graph load.Graph, prog Program, pkgIndex, fileInde
 			return completionType{}, false
 		}
 		member := tokenString(file, next+1)
-		if next+2 >= end || !tokenTextIs(file, next+2, "(") {
+		if next+2 >= end || !tokCharIs(file, next+2, '(') {
 			typ, found := completionFieldType(graph, prog, receiver, member)
 			if address {
 				typ.Pointer = true
@@ -489,11 +489,11 @@ func completionTopLevelBinary(file *syntax.File, start, end int) (int, int) {
 	fallback := -1
 	fallbackKind := exprBinaryNone
 	for i := start; i < end && i < len(file.Tokens); i++ {
-		if tokenTextIs(file, i, "(") || tokenTextIs(file, i, "[") || tokenTextIs(file, i, "{") {
+		if tokCharIs(file, i, '(') || tokCharIs(file, i, '[') || tokCharIs(file, i, '{') {
 			depth++
 			continue
 		}
-		if tokenTextIs(file, i, ")") || tokenTextIs(file, i, "]") || tokenTextIs(file, i, "}") {
+		if tokCharIs(file, i, ')') || tokCharIs(file, i, ']') || tokCharIs(file, i, '}') {
 			if depth > 0 {
 				depth--
 			}
@@ -583,10 +583,10 @@ func completionSymbolResultType(graph load.Graph, prog Program, pkg, symbolIndex
 func completionShortAssignValueIndex(file *syntax.File, name, assign int) int {
 	index := 0
 	for i := name - 1; i >= 0 && i < assign; i-- {
-		if syntax.TokenLine(file.Tokens[i]) != syntax.TokenLine(file.Tokens[name]) || tokenTextIs(file, i, ";") {
+		if (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != (file.Tokens[name].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) || tokCharIs(file, i, ';') {
 			break
 		}
-		if tokenTextIs(file, i, ",") {
+		if tokCharIs(file, i, ',') {
 			index++
 		}
 	}
@@ -624,7 +624,7 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 	}
 	pointer := false
 	for start < end && start < len(file.Tokens) && file.Tokens[start].KindLine&255 != syntax.TokenIdent {
-		if tokenTextIs(&file, start, "*") {
+		if tokCharIs(&file, start, '*') {
 			pointer = true
 		}
 		start++
@@ -634,7 +634,7 @@ func completionSpanType(graph load.Graph, prog Program, pkg, fileIndex, start, e
 	}
 	name := tokenString(&file, start)
 	owner := pkg
-	if start+2 < end && tokenTextIs(&file, start+1, ".") && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
+	if start+2 < end && tokCharIs(&file, start+1, '.') && file.Tokens[start+2].KindLine&255 == syntax.TokenIdent {
 		owner = completionImportPackage(prog.Packages[pkg], fileIndex, name)
 		name = tokenString(&file, start+2)
 	}
@@ -692,12 +692,12 @@ func completionSelectorComponents(src []byte, dot int) []string {
 }
 
 func completionFindShortAssign(file *syntax.File, name, end int) int {
-	line := syntax.TokenLine(file.Tokens[name])
-	for i := name + 1; i < end && i < len(file.Tokens) && syntax.TokenLine(file.Tokens[i]) == line; i++ {
+	line := (file.Tokens[name].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit)
+	for i := name + 1; i < end && i < len(file.Tokens) && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) == line; i++ {
 		if tokenTextIs(file, i, ":=") {
 			return i
 		}
-		if tokenTextIs(file, i, ";") {
+		if tokCharIs(file, i, ';') {
 			break
 		}
 	}
@@ -708,9 +708,9 @@ func completionStatementEnd(file *syntax.File, start, limit int) int {
 	if start >= len(file.Tokens) {
 		return start
 	}
-	line := syntax.TokenLine(file.Tokens[start])
+	line := (file.Tokens[start].KindLine >> syntax.TokenOperatorLineShift & syntax.TokenLineLimit)
 	for i := start; i < limit && i < len(file.Tokens); i++ {
-		if tokenTextIs(file, i, ";") || i > start && syntax.TokenLine(file.Tokens[i]) != line {
+		if tokCharIs(file, i, ';') || i > start && (file.Tokens[i].KindLine>>syntax.TokenOperatorLineShift&syntax.TokenLineLimit) != line {
 			return i
 		}
 	}

@@ -151,6 +151,29 @@ func RenvoTargetSupported(targetName string) bool {
 	return renvoParseTargetArg(targetName) != 0
 }
 
+// RenvoTargetLayout exposes the destination widths to the frontend of a
+// prepared compiler, including targets absent from the built-in catalog.
+func RenvoTargetLayout(targetName string) (int, int, bool) {
+	target := renvoParseTargetArg(targetName)
+	if target == renvoTargetRTG {
+		profile := renvoRTGProfileForTarget(target)
+		return profile.intBits, profile.pointerBits, profile.intBits != 0
+	}
+	profile, ok := renvoProfileForTarget(target)
+	return profile.intBits, profile.pointerBits, ok
+}
+
+func RenvoTargetScalarAlignment(targetName string) (int, bool) {
+	target := renvoParseTargetArg(targetName)
+	profile, ok := renvoProfileForTarget(target)
+	if target == renvoTargetRTG {
+		profile = renvoRTGProfileForTarget(target)
+		ok = profile.intBits != 0
+	}
+	context := renvoCompileContext{renvoNativeIntSize: profile.intBits / 8, renvoTargetArch: profile.arch}
+	return renvoNativeAlignment(&context, 8), ok
+}
+
 // RenvoTargetBinding returns the descriptor identity used to bind frontend
 // units to a target. Prepared compilers use this to advertise their embedded
 // target to the frontend as well as to the backend dispatcher.
@@ -213,10 +236,6 @@ func RenvoCompileSourceToBytesWithOptions(source []byte, targetName string, opti
 	}
 	renvoConfigureCompileContext(context, targetName, moduleNamePath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
-	if prog.ok && target == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		source = renvoAppendSoftFloatSource(source)
-		prog = renvoParseProgramWithContext(source, context)
-	}
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 	if !result.ok {
 		return nil, false
@@ -239,10 +258,6 @@ func RenvoCompileSourceToOutputWithOptions(source []byte, targetName string, out
 	context.regParm = options.RegParm
 	renvoConfigureCompileContext(context, targetName, outputPath, options.ModuleLicense)
 	prog := renvoParseProgramWithContext(source, context)
-	if prog.ok && target == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		source = renvoAppendSoftFloatSource(source)
-		prog = renvoParseProgramWithContext(source, context)
-	}
 	result := renvoCompileParsedProgramArena(&prog, target, options.ArenaSize)
 	if !result.ok {
 		return false

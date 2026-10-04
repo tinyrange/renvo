@@ -27,7 +27,7 @@ func TestPreparedFunctionSymbolsAreDeclaredNotNamed(t *testing.T) {
 		if !declared {
 			modified = bytes.ReplaceAll(modified, []byte(", function_symbols"), nil)
 		}
-		resolved := Resolve(Parse(modified, filename))
+		resolved := Resolve(ParseImports(modified, filename, testFilesystemImportLoader{}))
 		generated := GeneratePreparedBackend(resolved, "custom/image")
 		if !generated.Ok {
 			t.Fatalf("kind %s declared %v: %#v", kind, declared, generated.Diagnostics)

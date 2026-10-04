@@ -77,7 +77,7 @@ func parseFieldList(file *syntax.File, start int, end int) []Field {
 			i = segEnd + 1
 			continue
 		}
-		if file.Tokens[first].KindLine&255 == syntax.TokenIdent && first+1 < last && !tokCharIs(file, first+1, '.') {
+		if fieldStartsWithName(file, first, last) {
 			fields = appendNamedFields(fields, file, pending, first, first+1, last)
 			pending = pending[:0]
 		} else {
@@ -88,6 +88,18 @@ func parseFieldList(file *syntax.File, start int, end int) []Field {
 		i = segEnd + 1
 	}
 	return appendPendingUnnamed(fields, file, pending)
+}
+
+func fieldStartsWithName(file *syntax.File, first int, last int) bool {
+	if file.Tokens[first].KindLine&255 != syntax.TokenIdent || first+1 >= last || tokCharIs(file, first+1, '.') {
+		return false
+	}
+	// Box[T] is an unnamed instantiated type; x [N]T is a named
+	// parameter whose type is an array.
+	if tokCharIs(file, first+1, '[') && findTypeMatching(file, first+1, '[', ']') == last {
+		return false
+	}
+	return true
 }
 
 func appendNamedFields(fields []Field, file *syntax.File, pending []int, current int, typeStart int, typeEnd int) []Field {

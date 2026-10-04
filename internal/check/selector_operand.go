@@ -23,7 +23,8 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 		var fields []Field
 		known := false
 		concrete := interfaceConcreteType{}
-		for _, literal := range literals {
+		for literalIndex := 0; literalIndex < len(literals); literalIndex++ {
+			literal := &literals[literalIndex]
 			if literal.EndTok == dot {
 				fields, known = literalStructFields(pkg, info, file, literal.TypeStart, literal.TypeEnd, scope, 0)
 				concrete = interfaceNamedType(pkg, info, fileIndex, scope, literal.TypeStart, literal.TypeEnd, 0)
@@ -66,7 +67,8 @@ func invalidKnownStructSelector(pkg *load.Package, info *PackageInfo, fileIndex 
 		// Embedded members need full promotion/ambiguity resolution. Their
 		// absence from the direct field list is not rejection evidence.
 		embedded := false
-		for _, field := range fields {
+		for fieldIndex := 0; fieldIndex < len(fields); fieldIndex++ {
+			field := &fields[fieldIndex]
 			if field.NameTok < 0 {
 				embedded = true
 			}

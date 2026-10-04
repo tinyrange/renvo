@@ -128,14 +128,14 @@ func appendTypeSpanRefs(refs []TypeRef, file *syntax.File, fileIndex int, info P
 		if file.Tokens[i].KindLine&255 != syntax.TokenIdent {
 			continue
 		}
-		if i > start && tokenTextIs(file, i-1, ".") {
+		if i > start && tokCharIs(file, i-1, '.') {
 			continue
 		}
 		name := tokenString(file, i)
 		if name == "_" {
 			continue
 		}
-		if i+2 < end && tokenTextIs(file, i+1, ".") && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
+		if i+2 < end && tokCharIs(file, i+1, '.') && file.Tokens[i+2].KindLine&255 == syntax.TokenIdent {
 			refs = append(refs, resolveSelectorTypeRef(fileIndex, info, checked, scope, name, tokenString(file, i+2), i, i+1, i+2))
 			i += 2
 			continue
