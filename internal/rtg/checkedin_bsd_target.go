@@ -17,13 +17,14 @@ func generateCheckedInBSDAmd64Projection(
 	manifest := []string{resolved.Document.Unit + " " + HashText(resolved.Document.Hash)}
 	source := generateHeaderPackage(
 		manifest, "target-projection/"+target.Descriptor.Name, packageName)
+	variant, _ := fieldValue(resolved.Document, target.Executable, "image_variant")
 	prefix := "renvoFreeBSDAmd64"
 	body := checkedInFreeBSDAmd64Source
-	if target.Descriptor.Name == "openbsd/amd64" {
+	if valueName(variant) == "openbsd" {
 		prefix = "renvoOpenBSDAmd64"
 		body = checkedInOpenBSDAmd64Source
 	}
-	if target.Descriptor.Name == "netbsd/amd64" {
+	if valueName(variant) == "netbsd" {
 		prefix = "renvoNetBSDAmd64"
 		body = checkedInNetBSDAmd64Source
 	}
@@ -33,7 +34,7 @@ func generateCheckedInBSDAmd64Projection(
 			return checkedInTargetProjectionFailure(resolved.Document, target.Runtime,
 				target.Descriptor.Name+" runtime operation "+operations[i].name+" violates the shared BSD syscall ABI")
 		}
-		if common && target.Descriptor.Name != "freebsd/amd64" {
+		if common && valueName(variant) != "freebsd" {
 			continue
 		}
 		source = append(source, "\nconst "...)
@@ -57,10 +58,10 @@ func generateCheckedInBSDAmd64Projection(
 func checkedInBSDAmd64FormatMismatch(
 	document Document, target ResolvedTarget,
 ) (string, string, bool) {
-	wantVariant := target.Descriptor.OS
 	variant, found := fieldValue(document, target.Executable, "image_variant")
-	if !found || valueName(variant) != wantVariant {
-		return "image_variant", wantVariant, true
+	wantVariant := valueName(variant)
+	if !found || (wantVariant != "freebsd" && wantVariant != "openbsd" && wantVariant != "netbsd") {
+		return "image_variant", "freebsd, openbsd, or netbsd", true
 	}
 	wantOffset := 176
 	if wantVariant == "netbsd" {

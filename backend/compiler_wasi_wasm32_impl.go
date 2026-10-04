@@ -698,25 +698,6 @@ func renvoAppendSoftFloatSource(src []byte) []byte {
 	return src
 }
 
-func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
-	for i := 0; i < renvoTokCount(prog); i++ {
-		if renvoTokIsKind(prog, i, renvoTokFloat) {
-			return true
-		}
-		if !renvoTokIsKind(prog, i, renvoTokIdent) {
-			continue
-		}
-		tok := renvoTokAt(prog, i)
-		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
-			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex128") {
-			return true
-		}
-	}
-	return false
-}
-
 func compileWasiWasm32(input []int, output int) int {
 	return compileWasiWasm32Arena(input, output, 0)
 }
@@ -736,155 +717,14 @@ func compileVM32Arena(input []int, output int, arenaSize int) int {
 }
 
 func compileWasm32Arena(input []int, output int, arenaSize int) int {
-	src := renvoMakeByteScratch(655360)
-	for i := 0; i < len(input); i++ {
-		src = renvoReadAll(input[i], src)
-		src = append(src, '\n')
-	}
-	var prog renvoProgram
-	prog = renvoParseProgram(src)
-	if !prog.ok {
-		return 1
-	}
-	if renvoTarget == renvoTargetVM32 && renvoProgramNeedsSoftFloat(&prog) {
-		src = renvoAppendSoftFloatSource(src)
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
-	}
-	var meta renvoMeta
-	renvoBuildMetaInto(&prog, &meta)
-	if !meta.ok {
-		return 1
-	}
-	meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-	var result renvoCompileResult
-	result = renvoTryCompileScalarProgramWasm32(&prog, &meta)
-	if result.ok {
-		data := result.data
-		if renvoFixedTarget == 0 {
-			data = renvoCompileOutputData(data, renvoTarget)
-		}
-		write(output, data, -1)
-		return 0
-	}
-	renvoPrintErr("renvo: wasm32 compilation failed\n")
-	return 1
+	return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
+// Compatibility entrypoint; structured programs use the common queue and
+// definition-owned image writer, preserving ownership of the output buffer.
 func renvoTryCompileScalarProgramWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	appIndex := p.entryFunc
-	if appIndex < 0 {
-		return renvoCompileResult{}
-	}
-	var g renvoLinearGen
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-		renvoLoadCompilerFixedTarget(&g)
-		if g.fixedTargetState != 1 {
-			// VM bytecode is an execution format, not a restriction on the targets
-			// exposed by a compiler running inside the VM. Preserve dynamic target
-			// selection so a runtime -t value remains authoritative.
-			g.fixedTargetState = 1
-			g.fixedTargetValue = 0
-		}
-	} else {
-		g.fixedTargetState = 1
-		g.fixedTargetValue = meta.c.renvoTarget
-	}
-	a := &g.asm
-	renvoAsmInitWithContext(a, g.c)
-	localSlotCapacity := len(meta.funcs) * 4
-	if localSlotCapacity < 256 {
-		localSlotCapacity = 256
-	}
-	a.wasmLocalSlots = make([]int32, 0, localSlotCapacity)
-	for i := 0; i < len(meta.funcs); i++ {
-		label := renvoAsmNewLabel(a)
-		g.funcLabels = append(g.funcLabels, label)
-	}
-	renvoInitFuncQueue(&g, len(meta.funcs))
-	renvoWasm32MarkFunc(&g, appIndex)
-	renvoEmitInitializeThreadState(&g)
-	renvoEmitPersistentArenaReady(&g)
-	if !renvoLinearInitGlobals(&g) || !renvoEmitProgramEntryArgsWasm32(&g, appIndex) {
-		return renvoCompileResult{}
-	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(&g) {
-		return renvoCompileResult{}
-	}
-	renvoWasm32AsmExit(a)
-	for queueIndex := 0; queueIndex < len(g.funcQueue); queueIndex++ {
-		i := g.funcQueue[queueIndex]
-		if renvoDeferUnreadyQueuedClosure(&g, i) {
-			continue
-		}
-		if !renvoEmitScalarFunctionScratch(&g, i) {
-			if renvoFixedTarget == 0 {
-				renvoPrintErr("renvo: wasm32 failed in function ")
-				write(2, meta.prog.src[meta.funcs[i].nameStart:meta.funcs[i].nameEnd], -1)
-				renvoPrintErr("\n")
-			}
-			return renvoCompileResult{}
-		}
-	}
-	renvo_runtime_ArenaDiscard(meta.scratchStart, meta.scratchEnd)
-	var result renvoCompileResult
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && meta.c.renvoTarget == renvoTargetVM32 {
-		result.data = renvoVMImage(a)
-	} else {
-		// Keep the owned buffer in a struct across this call. Returning its slice
-		// view would copy the complete image again in a self-hosted compiler.
-		image := rtgWasm32Wasm32PackageRenvoWasm32ImageBuffer(a)
-		result.data = image.data[:image.length]
-	}
-	result.ok = true
-	return result
+	return renvoTryCompileScalarProgramScratch(p, meta)
 }
-func renvoEmitProgramEntryArgsWasm32(g *renvoLinearGen, appIndex int) bool {
-	app := &g.meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-		return false
-	}
-	argsOff := g.asm.bssSize
-	envDataOff := argsOff
-	envLenOff := argsOff
-	if renvoFixedTarget == renvoTargetVM32 || renvoFixedTarget == 0 && g.fixedTargetValue == 0 {
-		// VM execution receives arguments from the VM host.
-	} else {
-		g.asm.bssSize += 32768
-		envDataOff = g.asm.bssSize
-		g.asm.bssSize += 32768
-		envLenOff = g.asm.bssSize
-		g.asm.bssSize += 8
-	}
-	renvoWasm32AsmBuildArgvEnvSlices(&g.asm, argsOff, envDataOff, envLenOff)
-	if app.paramCount == 0 {
-		return true
-	}
-	if app.paramCount > 2 {
-		return false
-	}
-	first := &g.meta.params[app.firstParam]
-	if !renvoTypeIsStringSlice(g.meta, first.typ) {
-		return false
-	}
-	if app.paramCount == 1 {
-		return true
-	}
-	second := &g.meta.params[app.firstParam+1]
-	if !renvoTypeIsStringSlice(g.meta, second.typ) {
-		return false
-	}
-	return true
-}
-
 func renvoTryCompileWasiWasm32(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
 	appIndex := p.entryFunc
 	if appIndex < 0 {
@@ -1416,7 +1256,7 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 
 	renvoAsmMarkLabel(&g.asm, compare)
 	if c0 == '=' || c0 == '!' {
-		renvoEmitNativeCompareStack(g, left, right, 0x94)
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionEqual)
 		if c0 == '!' {
 			renvoAsmBoolNotPrimary(&g.asm)
 		}
@@ -1445,8 +1285,8 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 		renvoAsmPrimaryImm(&g.asm, result)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, bothPositive)
-		setcc := renvoFloat32RelationSetcc(c0, c1)
-		renvoEmitNativeCompareStack(g, left, right, setcc)
+		condition := renvoFloat32RelationCondition(c0, c1)
+		renvoEmitNativeCompareStack(g, left, right, condition)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, leftNegative)
 		renvoAsmLoadPrimaryStack(&g.asm, rightSign)
@@ -1458,7 +1298,7 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 		renvoAsmPrimaryImm(&g.asm, result)
 		renvoAsmJmpLabel(&g.asm, relationalDone)
 		renvoAsmMarkLabel(&g.asm, bothNegative)
-		renvoEmitNativeCompareStack(g, right, left, setcc)
+		renvoEmitNativeCompareStack(g, right, left, condition)
 		renvoAsmMarkLabel(&g.asm, relationalDone)
 		renvoAsmJmpLabel(&g.asm, done)
 	}
@@ -1480,17 +1320,17 @@ func renvoWasm32SoftFloat32CompareInline(g *renvoLinearGen, left int, right int,
 	return true
 }
 
-func renvoFloat32RelationSetcc(c0 byte, c1 byte) int {
+func renvoFloat32RelationCondition(c0 byte, c1 byte) int {
 	if c0 == '<' {
 		if c1 == '=' {
-			return 0x96
+			return renvoConditionUnsignedLessEqual
 		}
-		return 0x92
+		return renvoConditionUnsignedLess
 	}
 	if c1 == '=' {
-		return 0x93
+		return renvoConditionUnsignedGreaterEqual
 	}
-	return 0x97
+	return renvoConditionUnsignedGreater
 }
 
 func renvoWasm32SoftConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
@@ -1732,9 +1572,9 @@ func renvoWasm32SoftFloatCompareInline(g *renvoLinearGen, left int, right int, c
 func renvoWasm32SoftFloatRawEquality(g *renvoLinearGen, left int, right int, notEqualResult bool) {
 	notEqual := renvoAsmNewLabel(&g.asm)
 	done := renvoAsmNewLabel(&g.asm)
-	renvoEmitNativeCompareStack(g, left-4, right-4, 0x94)
+	renvoEmitNativeCompareStack(g, left-4, right-4, renvoConditionEqual)
 	renvoAsmJzPrimary(&g.asm, notEqual)
-	renvoEmitNativeCompareStack(g, left, right, 0x94)
+	renvoEmitNativeCompareStack(g, left, right, renvoConditionEqual)
 	renvoAsmJmpMarkLabel(&g.asm, done, notEqual)
 	renvoAsmPrimaryImm(&g.asm, 0)
 	renvoAsmMarkLabel(&g.asm, done)
@@ -1987,65 +1827,6 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 		}
 	}
 	a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)
-}
-
-func renvoWasm32EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-	g.wasmMemoryRanges = nil
-	a := &g.asm
-	metaFn := &g.meta.funcs[fnInfoIndex]
-	fn := &g.prog.funcs[metaFn.declIndex]
-	g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-	g.localCount = 0
-	g.gotoLabels = nil
-	g.breakDepth = 0
-	g.continueDepth = 0
-	g.pendingControl = 0
-	g.currentFunc = fnInfoIndex
-	g.returnStruct = 0
-	g.closureEnvOffset = 0
-	g.deferHeadOffset = 0
-	g.deferReturnLabel = 0
-	g.deferResultOffset = 0
-	g.deferSites = nil
-	g.emittingDefers = false
-	g.suppressPanicCheck = false
-	g.stackUsed = 0
-	g.stackPeak = 0
-	g.lastRangeReturns = false
-	functionPC := len(a.code)
-	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoWasm32EmitStack(a, renvoWasm32OpStoreStack, renvoWasm32RegRdi, g.returnStruct)
-	}
-	renvoBindFunctionParams(g, fnInfoIndex)
-	if !renvoBindClosureCaptures(g, fnInfoIndex) {
-		return false
-	}
-	if !renvoBindNamedResults(g, fnInfoIndex) {
-		return false
-	}
-	if !renvoPrepareFunctionControl(g) {
-		return false
-	}
-	if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-		return false
-	}
-	if g.deferReturnLabel > 0 {
-		if !g.lastRangeReturns {
-			renvoAsmJmpLabel(a, g.deferReturnLabel)
-		}
-		if !renvoEmitFunctionControlEpilogue(g) {
-			return false
-		}
-	} else if !g.lastRangeReturns {
-		renvoMoveCapturedLocals(g, true)
-		renvoAsmPrimaryImm(a, 0)
-		renvoAsmLeave(a)
-		renvoAsmRet(a)
-	}
-	renvoWasm32RecordDirectLocals(g, functionPC)
-	return true
 }
 
 func renvoWasm32EmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {

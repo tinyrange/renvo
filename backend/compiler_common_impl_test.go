@@ -156,8 +156,11 @@ func TestLargeStaticSliceZeroingHasBoundedCodeSize(t *testing.T) {
 	renvoSetTarget(renvoTargetLinuxAmd64)
 	renvoFixedTarget = renvoTargetLinuxAmd64
 
+	var program renvoProgram
 	var g renvoLinearGen
 	var meta renvoMeta
+	meta.prog = &program
+	g.prog = &program
 	g.meta = &meta
 	g.c = renvoLegacyCompileContext()
 	renvoAsmInitWithContext(&g.asm, g.c)

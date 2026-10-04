@@ -1024,7 +1024,7 @@ func TestResolveRequiresKnownBackendFamily(t *testing.T) {
 }
 
 func TestResolveSeparatesNativeAndStructuredFamilies(t *testing.T) {
-	nativeStructured := replaceOnce(testMachineDefinition, "alias = \"tiny\"", "alias = \"wasm32\"")
+	nativeStructured := replaceOnce(testMachineDefinition, "arch tiny64 {", "arch tiny64 {\n\tcompiler_family = structured32")
 	resolved := Resolve(Parse([]byte(nativeStructured), "native-structured.rtg"))
 	if resolved.Ok || !hasDiagnosticCode(resolved.Diagnostics, "RTG-RESOLVE-024") {
 		t.Fatalf("native structured diagnostics = %#v", resolved.Diagnostics)

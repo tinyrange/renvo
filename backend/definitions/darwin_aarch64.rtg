@@ -17,6 +17,21 @@ go backend {
 	const machCallIntegerFloat64 = 5
 	const machCallIntegerFloat32 = 6
 
+	func machDirectoryFromStack(out *RTGEmitter, wordCount int, selector int) bool {
+		if wordCount != 4 || selector != 217 {
+			return false
+		}
+		asmPopReg(out, 9)
+		asmPopReg(out, 0)
+		asmPopReg(out, 1)
+		asmPopReg(out, 2)
+		baseOffset := out.ReserveBSS(8, 8)
+		asmMovRegAbs(out, 3, baseOffset, RTGRelocationAbsoluteBSS)
+		importIndex := out.DynamicImport(machLibSystem, "_getdirentries")
+		asmCallLabel(out, out.DynamicImportLabel(importIndex))
+		return true
+	}
+
 	func machStaticImport(out *RTGEmitter, importID int) int {
 		library := out.StaticImportDLL(importID)
 		name := out.StaticImportName(importID)
@@ -877,6 +892,10 @@ extend arch aarch64 {
 }
 
 runtime darwin_arm64 {
+	raw_syscall_layout = directory_entries
+	emit_syscall_from_stack = go machDirectoryFromStack
+	open_flag_layout = bsd
+	static_call_layout = split_register_words8
 	entry sequence darwinEntry {
 		max_parameters = 2
 		requires_state = true
@@ -907,6 +926,7 @@ format macho64_arm64 {
 }
 
 target darwin/arm64 {
+	production_projection = macho_aapcs64_process
 	family = native_v1
 	os = darwin
 	arch = aarch64

@@ -65,98 +65,98 @@ func Lookup(name string) (Descriptor, bool) {
 
 func descriptorAt(index int) Descriptor {
 	if index == 0 {
-		return Descriptor{Name: "linux/amd64", Backend: "linux/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "linkstatic", "object"}, Definition: [32]uint8{0x77, 0xd3, 0xb7, 0x55, 0x41, 0x36, 0x35, 0xb, 0xa9, 0x5f, 0xf6, 0xe3, 0x86, 0x67, 0xd6, 0x55, 0x4a, 0x70, 0x1c, 0xc3, 0xbe, 0x18, 0x1f, 0xb3, 0xe9, 0x22, 0x37, 0x54, 0xce, 0x80, 0x23, 0x2f}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-linux-amd64", IDE: false}
+		return Descriptor{Name: "linux/amd64", Backend: "linux/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "linkstatic", "object"}, Definition: [32]uint8{0x32, 0x66, 0x89, 0x8e, 0x2f, 0xa3, 0x14, 0xad, 0xaf, 0x45, 0xdf, 0xc, 0xb9, 0x39, 0x2a, 0x47, 0xb6, 0xbf, 0xea, 0xd3, 0xf7, 0x4e, 0xc5, 0xc3, 0xfd, 0x6d, 0xd, 0x4, 0x36, 0x5a, 0x6b, 0x59}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-linux-amd64", IDE: false}
 	}
 	if index == 1 {
-		return Descriptor{Name: "linux/386", Backend: "linux/386", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "386", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "cdecl32", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"386", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x74, 0x9c, 0x78, 0xa5, 0x14, 0x3, 0xd8, 0x17, 0x23, 0x7d, 0x4c, 0xb1, 0xb, 0x9f, 0xe, 0x49, 0x72, 0x1b, 0x94, 0x12, 0x11, 0x3d, 0x4, 0x0, 0x93, 0xc0, 0x7c, 0xea, 0x63, 0x81, 0xcf, 0xd8}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "linux/386", Backend: "linux/386", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "386", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "cdecl32", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"386", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x3, 0x65, 0x1, 0xa7, 0xe4, 0x1b, 0x8c, 0x34, 0x43, 0x12, 0xc, 0x7f, 0xb9, 0x43, 0xf7, 0x50, 0x9b, 0x7a, 0x8b, 0xd3, 0x48, 0x3b, 0xf3, 0x11, 0x33, 0x88, 0x47, 0xb4, 0x33, 0x91, 0x64, 0x7b}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 67108864, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 2 {
-		return Descriptor{Name: "linux/aarch64", Backend: "linux/aarch64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "aapcs64", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"aarch64", "arm64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xb3, 0xfd, 0x36, 0xba, 0x7e, 0xc5, 0xe, 0x2a, 0xd4, 0x3d, 0xc8, 0x21, 0xa8, 0x59, 0xf2, 0x7c, 0xb1, 0x4b, 0x96, 0x3c, 0x4e, 0xe4, 0x5e, 0xa6, 0xd9, 0x53, 0x7a, 0x1f, 0xa, 0x52, 0x69, 0x6d}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "linux/aarch64", Backend: "linux/aarch64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "aapcs64", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"aarch64", "arm64", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x38, 0xa, 0xb0, 0xc7, 0x24, 0xd4, 0x5f, 0x54, 0x16, 0xcd, 0x5b, 0xee, 0xe1, 0xe, 0x23, 0x17, 0x5d, 0x9, 0x1, 0xd1, 0xb, 0x84, 0xd4, 0xfb, 0xb6, 0x54, 0xa6, 0x59, 0x92, 0xad, 0x62, 0x1c}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 3 {
-		return Descriptor{Name: "linux/arm", Backend: "linux/arm", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "arm", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "aapcs32", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"arm", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x6b, 0xbf, 0x6, 0xf7, 0x8a, 0xc7, 0x4d, 0xa3, 0x23, 0x38, 0x99, 0xd4, 0x23, 0xdd, 0xa3, 0x53, 0x1d, 0xf2, 0xc3, 0x53, 0x59, 0x4a, 0x87, 0xfd, 0x6f, 0x44, 0x25, 0x82, 0x80, 0xbb, 0x8e, 0x10}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "linux/arm", Backend: "linux/arm", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "arm", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "aapcs32", Image: "elf", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "exit", "hosted"}, Tags: []string{"arm", "linux", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x3d, 0x7d, 0xa6, 0xf9, 0x9a, 0x9f, 0x3e, 0x37, 0xc4, 0x14, 0xd1, 0x24, 0xb3, 0x23, 0x68, 0x6c, 0x97, 0x36, 0x12, 0x37, 0xa2, 0xdf, 0x24, 0x6, 0xf4, 0xeb, 0xc2, 0x68, 0xa8, 0x73, 0xf8, 0x9}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 67108864, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 4 {
-		return Descriptor{Name: "windows/amd64", Backend: "windows/amd64", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "windows_x86_64", Image: "pe", Runtime: []string{"open", "close", "read", "write", "read_at", "write_at", "seek", "print", "chmod", "exit", "hosted"}, Tags: []string{"amd64", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "imports", "linkstatic", "object", "windows_gui"}, Definition: [32]uint8{0x8, 0x72, 0x6c, 0x8f, 0x58, 0xa0, 0xb, 0x4f, 0x46, 0x61, 0xb4, 0x6e, 0xc2, 0xac, 0xa7, 0x1d, 0x53, 0x64, 0xc4, 0xc7, 0xa, 0x60, 0xde, 0x9a, 0x70, 0x19, 0x47, 0x68, 0x5, 0xa2, 0x95, 0x44}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-windows-amd64.exe", IDE: true}
+		return Descriptor{Name: "windows/amd64", Backend: "windows/amd64", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "windows_x86_64", Image: "pe", Runtime: []string{"open", "close", "read", "write", "read_at", "write_at", "seek", "print", "chmod", "exit", "hosted"}, Tags: []string{"amd64", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "imports", "linkstatic", "object", "windows_gui"}, Definition: [32]uint8{0x5c, 0x3f, 0x16, 0x8d, 0x10, 0x78, 0xda, 0x18, 0xe8, 0x60, 0x6d, 0x68, 0x86, 0x57, 0xfb, 0x2f, 0xa7, 0x43, 0x12, 0x84, 0x3f, 0x28, 0x5b, 0x39, 0x29, 0x55, 0xc7, 0xbc, 0x11, 0x52, 0x92, 0x9d}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-windows-amd64.exe", IDE: true}
 	}
 	if index == 5 {
-		return Descriptor{Name: "windows/386", Backend: "windows/386", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "386", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "win32", Image: "pe", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"386", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x71, 0xf3, 0xb, 0xf8, 0x94, 0x69, 0x4e, 0x98, 0x11, 0x53, 0xbe, 0x5c, 0x67, 0xbe, 0xda, 0x18, 0x54, 0xe2, 0xe, 0x76, 0xe5, 0x9d, 0x98, 0x64, 0xcf, 0xb4, 0xc3, 0xad, 0xf8, 0x64, 0xf0, 0xed}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: true}
+		return Descriptor{Name: "windows/386", Backend: "windows/386", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "386", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 4, Endian: "little", ABI: "win32", Image: "pe", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"386", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x8, 0xeb, 0x75, 0xd6, 0xb9, 0x61, 0xfb, 0x62, 0x30, 0x5d, 0x7f, 0x5d, 0x50, 0x73, 0x83, 0x5, 0xd1, 0xa, 0x3b, 0xf8, 0xf2, 0x2a, 0x6, 0x8c, 0x6d, 0x8a, 0xdd, 0xc1, 0x3, 0x8b, 0x5a, 0x85}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 67108864, ReleaseArtifact: "", IDE: true}
 	}
 	if index == 6 {
-		return Descriptor{Name: "windows/arm64", Backend: "windows/arm64", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "windows_arm64", Image: "pe", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"aarch64", "arm64", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "windows_gui"}, Definition: [32]uint8{0x2b, 0xa8, 0xf5, 0x9b, 0xa7, 0xee, 0x20, 0x1b, 0xdc, 0xcb, 0x20, 0x3a, 0x93, 0xbc, 0x8, 0xb6, 0x13, 0x3b, 0xd6, 0x24, 0x25, 0xf6, 0xde, 0xc8, 0x6f, 0x58, 0x12, 0xd7, 0x47, 0x25, 0x33, 0xfb}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: true}
+		return Descriptor{Name: "windows/arm64", Backend: "windows/arm64", Aliases: []string(nil), Family: "native_v1", OS: "windows", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "windows_arm64", Image: "pe", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"aarch64", "arm64", "windows"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted", "windows_gui"}, Definition: [32]uint8{0xd2, 0xf6, 0xb6, 0x46, 0x66, 0x97, 0x98, 0xa6, 0xb8, 0x57, 0xca, 0xc2, 0xa2, 0x22, 0x7d, 0x99, 0x6e, 0x25, 0x93, 0x4, 0xd3, 0x22, 0x10, 0x25, 0x1d, 0xdb, 0xf5, 0x38, 0xc3, 0x33, 0x7f, 0xa1}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: true}
 	}
 	if index == 7 {
-		return Descriptor{Name: "darwin/arm64", Backend: "darwin/arm64", Aliases: []string(nil), Family: "native_v1", OS: "darwin", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "aapcs64", Image: "mach-o", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"aarch64", "arm64", "darwin", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xce, 0xdf, 0x49, 0xa1, 0x42, 0x2e, 0x79, 0xeb, 0x9, 0x3e, 0x17, 0xd, 0x7f, 0xc1, 0xff, 0x27, 0x99, 0xbe, 0x75, 0xe6, 0x4b, 0x64, 0xd3, 0x67, 0x6e, 0xc6, 0xe1, 0x4c, 0xbb, 0xf9, 0x2b, 0xf5}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-darwin-arm64", IDE: true}
+		return Descriptor{Name: "darwin/arm64", Backend: "darwin/arm64", Aliases: []string(nil), Family: "native_v1", OS: "darwin", ISA: "aarch64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "aapcs64", Image: "mach-o", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"aarch64", "arm64", "darwin", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xd, 0x8e, 0xb3, 0x23, 0x91, 0xde, 0xae, 0xd0, 0x75, 0x80, 0xed, 0x62, 0xf2, 0xd2, 0xa2, 0x9b, 0x24, 0x9a, 0xa4, 0x80, 0x19, 0x69, 0x23, 0x92, 0x62, 0xef, 0x6e, 0x29, 0x6, 0x78, 0x4c, 0x25}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "renvo-darwin-arm64", IDE: true}
 	}
 	if index == 8 {
-		return Descriptor{Name: "wasi/wasm32", Backend: "wasi/wasm32", Aliases: []string(nil), Family: "structured32", OS: "wasi", ISA: "wasm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "wasm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"wasi", "wasip1", "wasm", "wasm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xfd, 0x20, 0xc6, 0xb9, 0xf0, 0x63, 0xd0, 0xa3, 0x94, 0x2c, 0x7, 0xc3, 0x5f, 0x91, 0x76, 0x34, 0x7e, 0xb0, 0x1d, 0xc5, 0xe7, 0x27, 0x3, 0x4d, 0x2e, 0x60, 0x74, 0x6d, 0x1d, 0xfd, 0xb6, 0x4a}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "wasi/wasm32", Backend: "wasi/wasm32", Aliases: []string(nil), Family: "structured32", OS: "wasi", ISA: "wasm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "wasm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"wasi", "wasip1", "wasm", "wasm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "function_symbols", "heap", "hosted"}, Definition: [32]uint8{0x2c, 0xf5, 0x61, 0xdb, 0xdb, 0xe2, 0xda, 0x3e, 0x90, 0x85, 0x28, 0xa5, 0x3f, 0xf0, 0xd7, 0x46, 0xe5, 0xc5, 0x8d, 0x7d, 0xe6, 0xde, 0xb, 0x29, 0x45, 0x60, 0x1d, 0xe2, 0xe, 0xd4, 0xa, 0xda}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 33554432, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 9 {
-		return Descriptor{Name: "browser/wasm32", Backend: "wasi/wasm32", Aliases: []string(nil), Family: "structured32", OS: "browser", ISA: "wasm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "html-wasm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"browser", "wasi", "wasip1", "wasm", "wasm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xf6, 0xd8, 0x13, 0x3c, 0x66, 0x31, 0x1d, 0x95, 0xba, 0x5e, 0x6, 0xeb, 0x47, 0x81, 0xf8, 0xba, 0xfd, 0xac, 0xb4, 0x8b, 0x7f, 0x4c, 0xab, 0xbc, 0x1c, 0x8, 0x40, 0x0, 0x48, 0x33, 0x59, 0x9a}, DescriptorVersion: 3, Advertised: true, Virtual: true, DefaultArena: 134217728, ReleaseArtifact: "", IDE: true}
+		return Descriptor{Name: "browser/wasm32", Backend: "wasi/wasm32", Aliases: []string(nil), Family: "structured32", OS: "browser", ISA: "wasm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "html-wasm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"browser", "wasi", "wasip1", "wasm", "wasm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "function_symbols", "heap", "hosted"}, Definition: [32]uint8{0x90, 0x1, 0xd, 0xad, 0xd8, 0x57, 0x5c, 0xfc, 0x86, 0xe8, 0x1f, 0x1, 0x6c, 0xb5, 0x4b, 0x56, 0xad, 0xc4, 0x2d, 0x69, 0x9b, 0x2e, 0xed, 0x12, 0xa, 0x18, 0x6e, 0x8d, 0x95, 0x7e, 0xac, 0xc9}, DescriptorVersion: 3, Advertised: true, Virtual: true, DefaultArena: 134217728, ReleaseArtifact: "", IDE: true}
 	}
 	if index == 10 {
-		return Descriptor{Name: "vm/vm32", Backend: "vm/vm32", Aliases: []string(nil), Family: "structured32", OS: "vm", ISA: "vm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "rnvm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"vm", "vm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xc1, 0x73, 0x8a, 0x77, 0x39, 0xf9, 0x92, 0xce, 0xe7, 0x89, 0x39, 0x74, 0xfb, 0xd5, 0xac, 0x50, 0xd, 0x3a, 0xa2, 0x88, 0x2, 0x44, 0xbd, 0xe5, 0xf5, 0x93, 0x5b, 0x52, 0x24, 0x4b, 0x87, 0xfb}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "vm/vm32", Backend: "vm/vm32", Aliases: []string(nil), Family: "structured32", OS: "vm", ISA: "vm32", WordBits: 32, PointerBits: 32, CodePointerBits: 32, FunctionPointerBits: 32, MaxAlign: 8, Endian: "little", ABI: "vm32_internal", Image: "rnvm", Runtime: []string{"read", "write", "read_at", "write_at", "open", "close", "chmod", "print", "hosted"}, Tags: []string{"vm", "vm32"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "function_symbols", "heap", "hosted"}, Definition: [32]uint8{0x82, 0x3e, 0xd6, 0x36, 0xe1, 0x3a, 0x9f, 0xcf, 0xa0, 0x9d, 0xeb, 0xa1, 0x5, 0xdd, 0x37, 0xa1, 0xdc, 0x9f, 0x46, 0x0, 0x67, 0x97, 0x65, 0xdf, 0xe5, 0x52, 0x8e, 0x5e, 0x98, 0xd2, 0x4e, 0xd5}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 67108864, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 11 {
-		return Descriptor{Name: "linux-kernel/amd64", Backend: "linux-kernel/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf-relocatable", Runtime: []string{"print", "open", "close", "read", "write", "chmod"}, Tags: []string{"amd64", "linux", "renvo_kernel", "unix"}, Capabilities: []string{"freestanding", "imports", "kernel_module", "linkstatic", "object"}, Definition: [32]uint8{0x3a, 0x3, 0x91, 0xe9, 0x2c, 0xa4, 0x2, 0x7, 0x5, 0x75, 0x89, 0x75, 0x49, 0x30, 0x9d, 0x43, 0xab, 0x8b, 0xf2, 0xc7, 0x2f, 0xd0, 0x48, 0x6c, 0xc4, 0xb4, 0xbd, 0x19, 0xfa, 0x24, 0xbd, 0xf2}, DescriptorVersion: 3, Advertised: false, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "linux-kernel/amd64", Backend: "linux-kernel/amd64", Aliases: []string(nil), Family: "native_v1", OS: "linux", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf-relocatable", Runtime: []string{"print", "open", "close", "read", "write", "chmod"}, Tags: []string{"amd64", "linux", "renvo_kernel", "unix"}, Capabilities: []string{"freestanding", "imports", "kernel_module", "linkstatic", "object"}, Definition: [32]uint8{0x0, 0xa0, 0xf9, 0xe3, 0x8a, 0x51, 0x74, 0xd2, 0xcb, 0x20, 0xc2, 0xd8, 0x67, 0xb7, 0x6e, 0x6d, 0x59, 0xd3, 0xf6, 0x88, 0xb5, 0x54, 0x1c, 0x0, 0xc2, 0x83, 0xed, 0xb5, 0x15, 0x6f, 0x6a, 0xe4}, DescriptorVersion: 3, Advertised: false, Virtual: false, DefaultArena: 65536, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 12 {
-		return Descriptor{Name: "freebsd/amd64", Backend: "freebsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "freebsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "freebsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x47, 0x63, 0x90, 0xde, 0xec, 0xff, 0xe6, 0xa8, 0x92, 0xa0, 0x12, 0x3b, 0xa1, 0x6b, 0x11, 0x1d, 0x6b, 0x74, 0x2d, 0xb, 0x6a, 0xf5, 0x15, 0x55, 0x32, 0x4a, 0x7, 0x48, 0x37, 0xc8, 0xf1, 0x8a}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "freebsd/amd64", Backend: "freebsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "freebsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "freebsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0xef, 0xee, 0xbf, 0x37, 0x0, 0x68, 0x45, 0x1b, 0xce, 0x0, 0xa9, 0x7f, 0x31, 0x3e, 0xe3, 0xb2, 0x4c, 0xc, 0xb2, 0x6f, 0x4b, 0xf3, 0xe6, 0x13, 0x2d, 0x82, 0x9f, 0xc7, 0x20, 0xbc, 0xfa, 0xd1}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 13 {
-		return Descriptor{Name: "openbsd/amd64", Backend: "openbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "openbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "openbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x41, 0x46, 0xb9, 0x34, 0xec, 0xbd, 0xb5, 0x71, 0x1, 0xe2, 0x4a, 0x98, 0xb2, 0x47, 0x84, 0xcd, 0x6f, 0x74, 0x97, 0xbf, 0xf3, 0x29, 0xf5, 0x9, 0x47, 0x45, 0x90, 0xac, 0xe, 0xd2, 0x37, 0x9e}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "openbsd/amd64", Backend: "openbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "openbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "openbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x83, 0x31, 0x81, 0x2e, 0xa7, 0x63, 0x4f, 0xae, 0x5d, 0xfa, 0xa4, 0x63, 0xc8, 0xf9, 0x48, 0x17, 0xd1, 0xd4, 0x80, 0xc0, 0x1f, 0x29, 0xcf, 0xde, 0xa7, 0x48, 0x75, 0xd0, 0x52, 0xc9, 0x2a, 0x4b}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
 	}
 	if index == 14 {
-		return Descriptor{Name: "netbsd/amd64", Backend: "netbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "netbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "netbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x4, 0x3a, 0xdc, 0x8a, 0xef, 0x8c, 0x15, 0x6e, 0x31, 0xbf, 0x5d, 0x29, 0xcc, 0x86, 0xda, 0xf9, 0x69, 0x3, 0xeb, 0x62, 0xcc, 0x3f, 0xdd, 0xa9, 0x12, 0x9d, 0xe7, 0xf2, 0xe0, 0x4f, 0x32, 0x13}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
+		return Descriptor{Name: "netbsd/amd64", Backend: "netbsd/amd64", Aliases: []string(nil), Family: "native_v1", OS: "netbsd", ISA: "amd64", WordBits: 64, PointerBits: 64, CodePointerBits: 64, FunctionPointerBits: 64, MaxAlign: 8, Endian: "little", ABI: "sysv_x86_64", Image: "elf", Runtime: []string{"read", "write", "open", "close", "read_at", "write_at", "chmod", "print", "exit", "hosted"}, Tags: []string{"amd64", "netbsd", "unix"}, Capabilities: []string{"argv", "environment", "executable", "filesystem", "heap", "hosted"}, Definition: [32]uint8{0x5a, 0x41, 0x71, 0x80, 0xdf, 0xe3, 0xa5, 0x4, 0x1f, 0xf5, 0x8f, 0x62, 0xa, 0x1e, 0x5b, 0xea, 0x14, 0x75, 0xf1, 0x88, 0x6d, 0xb1, 0x1c, 0x58, 0x9b, 0x0, 0xd4, 0x2c, 0xbb, 0xf2, 0xde, 0x99}, DescriptorVersion: 3, Advertised: true, Virtual: false, DefaultArena: 0, ReleaseArtifact: "", IDE: false}
 	}
 	return Descriptor{}
 }
 
 func Binding(name string) (string, string, int, bool) {
 	if name == "linux/amd64" {
-		return "linux/amd64", "\x77\xd3\xb7\x55\x41\x36\x35\x0b\xa9\x5f\xf6\xe3\x86\x67\xd6\x55\x4a\x70\x1c\xc3\xbe\x18\x1f\xb3\xe9\x22\x37\x54\xce\x80\x23\x2f", 3, true
+		return "linux/amd64", "\x32\x66\x89\x8e\x2f\xa3\x14\xad\xaf\x45\xdf\x0c\xb9\x39\x2a\x47\xb6\xbf\xea\xd3\xf7\x4e\xc5\xc3\xfd\x6d\x0d\x04\x36\x5a\x6b\x59", 3, true
 	}
 	if name == "linux/386" {
-		return "linux/386", "\x74\x9c\x78\xa5\x14\x03\xd8\x17\x23\x7d\x4c\xb1\x0b\x9f\x0e\x49\x72\x1b\x94\x12\x11\x3d\x04\x00\x93\xc0\x7c\xea\x63\x81\xcf\xd8", 3, true
+		return "linux/386", "\x03\x65\x01\xa7\xe4\x1b\x8c\x34\x43\x12\x0c\x7f\xb9\x43\xf7\x50\x9b\x7a\x8b\xd3\x48\x3b\xf3\x11\x33\x88\x47\xb4\x33\x91\x64\x7b", 3, true
 	}
 	if name == "linux/aarch64" {
-		return "linux/aarch64", "\xb3\xfd\x36\xba\x7e\xc5\x0e\x2a\xd4\x3d\xc8\x21\xa8\x59\xf2\x7c\xb1\x4b\x96\x3c\x4e\xe4\x5e\xa6\xd9\x53\x7a\x1f\x0a\x52\x69\x6d", 3, true
+		return "linux/aarch64", "\x38\x0a\xb0\xc7\x24\xd4\x5f\x54\x16\xcd\x5b\xee\xe1\x0e\x23\x17\x5d\x09\x01\xd1\x0b\x84\xd4\xfb\xb6\x54\xa6\x59\x92\xad\x62\x1c", 3, true
 	}
 	if name == "linux/arm" {
-		return "linux/arm", "\x6b\xbf\x06\xf7\x8a\xc7\x4d\xa3\x23\x38\x99\xd4\x23\xdd\xa3\x53\x1d\xf2\xc3\x53\x59\x4a\x87\xfd\x6f\x44\x25\x82\x80\xbb\x8e\x10", 3, true
+		return "linux/arm", "\x3d\x7d\xa6\xf9\x9a\x9f\x3e\x37\xc4\x14\xd1\x24\xb3\x23\x68\x6c\x97\x36\x12\x37\xa2\xdf\x24\x06\xf4\xeb\xc2\x68\xa8\x73\xf8\x09", 3, true
 	}
 	if name == "windows/amd64" {
-		return "windows/amd64", "\x08\x72\x6c\x8f\x58\xa0\x0b\x4f\x46\x61\xb4\x6e\xc2\xac\xa7\x1d\x53\x64\xc4\xc7\x0a\x60\xde\x9a\x70\x19\x47\x68\x05\xa2\x95\x44", 3, true
+		return "windows/amd64", "\x5c\x3f\x16\x8d\x10\x78\xda\x18\xe8\x60\x6d\x68\x86\x57\xfb\x2f\xa7\x43\x12\x84\x3f\x28\x5b\x39\x29\x55\xc7\xbc\x11\x52\x92\x9d", 3, true
 	}
 	if name == "windows/386" {
-		return "windows/386", "\x71\xf3\x0b\xf8\x94\x69\x4e\x98\x11\x53\xbe\x5c\x67\xbe\xda\x18\x54\xe2\x0e\x76\xe5\x9d\x98\x64\xcf\xb4\xc3\xad\xf8\x64\xf0\xed", 3, true
+		return "windows/386", "\x08\xeb\x75\xd6\xb9\x61\xfb\x62\x30\x5d\x7f\x5d\x50\x73\x83\x05\xd1\x0a\x3b\xf8\xf2\x2a\x06\x8c\x6d\x8a\xdd\xc1\x03\x8b\x5a\x85", 3, true
 	}
 	if name == "windows/arm64" {
-		return "windows/arm64", "\x2b\xa8\xf5\x9b\xa7\xee\x20\x1b\xdc\xcb\x20\x3a\x93\xbc\x08\xb6\x13\x3b\xd6\x24\x25\xf6\xde\xc8\x6f\x58\x12\xd7\x47\x25\x33\xfb", 3, true
+		return "windows/arm64", "\xd2\xf6\xb6\x46\x66\x97\x98\xa6\xb8\x57\xca\xc2\xa2\x22\x7d\x99\x6e\x25\x93\x04\xd3\x22\x10\x25\x1d\xdb\xf5\x38\xc3\x33\x7f\xa1", 3, true
 	}
 	if name == "darwin/arm64" {
-		return "darwin/arm64", "\xce\xdf\x49\xa1\x42\x2e\x79\xeb\x09\x3e\x17\x0d\x7f\xc1\xff\x27\x99\xbe\x75\xe6\x4b\x64\xd3\x67\x6e\xc6\xe1\x4c\xbb\xf9\x2b\xf5", 3, true
+		return "darwin/arm64", "\x0d\x8e\xb3\x23\x91\xde\xae\xd0\x75\x80\xed\x62\xf2\xd2\xa2\x9b\x24\x9a\xa4\x80\x19\x69\x23\x92\x62\xef\x6e\x29\x06\x78\x4c\x25", 3, true
 	}
 	if name == "wasi/wasm32" {
-		return "wasi/wasm32", "\xfd\x20\xc6\xb9\xf0\x63\xd0\xa3\x94\x2c\x07\xc3\x5f\x91\x76\x34\x7e\xb0\x1d\xc5\xe7\x27\x03\x4d\x2e\x60\x74\x6d\x1d\xfd\xb6\x4a", 3, true
+		return "wasi/wasm32", "\x2c\xf5\x61\xdb\xdb\xe2\xda\x3e\x90\x85\x28\xa5\x3f\xf0\xd7\x46\xe5\xc5\x8d\x7d\xe6\xde\x0b\x29\x45\x60\x1d\xe2\x0e\xd4\x0a\xda", 3, true
 	}
 	if name == "browser/wasm32" {
-		return "browser/wasm32", "\xf6\xd8\x13\x3c\x66\x31\x1d\x95\xba\x5e\x06\xeb\x47\x81\xf8\xba\xfd\xac\xb4\x8b\x7f\x4c\xab\xbc\x1c\x08\x40\x00\x48\x33\x59\x9a", 3, true
+		return "browser/wasm32", "\x90\x01\x0d\xad\xd8\x57\x5c\xfc\x86\xe8\x1f\x01\x6c\xb5\x4b\x56\xad\xc4\x2d\x69\x9b\x2e\xed\x12\x0a\x18\x6e\x8d\x95\x7e\xac\xc9", 3, true
 	}
 	if name == "vm/vm32" {
-		return "vm/vm32", "\xc1\x73\x8a\x77\x39\xf9\x92\xce\xe7\x89\x39\x74\xfb\xd5\xac\x50\x0d\x3a\xa2\x88\x02\x44\xbd\xe5\xf5\x93\x5b\x52\x24\x4b\x87\xfb", 3, true
+		return "vm/vm32", "\x82\x3e\xd6\x36\xe1\x3a\x9f\xcf\xa0\x9d\xeb\xa1\x05\xdd\x37\xa1\xdc\x9f\x46\x00\x67\x97\x65\xdf\xe5\x52\x8e\x5e\x98\xd2\x4e\xd5", 3, true
 	}
 	if name == "linux-kernel/amd64" {
-		return "linux-kernel/amd64", "\x3a\x03\x91\xe9\x2c\xa4\x02\x07\x05\x75\x89\x75\x49\x30\x9d\x43\xab\x8b\xf2\xc7\x2f\xd0\x48\x6c\xc4\xb4\xbd\x19\xfa\x24\xbd\xf2", 3, true
+		return "linux-kernel/amd64", "\x00\xa0\xf9\xe3\x8a\x51\x74\xd2\xcb\x20\xc2\xd8\x67\xb7\x6e\x6d\x59\xd3\xf6\x88\xb5\x54\x1c\x00\xc2\x83\xed\xb5\x15\x6f\x6a\xe4", 3, true
 	}
 	if name == "freebsd/amd64" {
-		return "freebsd/amd64", "\x47\x63\x90\xde\xec\xff\xe6\xa8\x92\xa0\x12\x3b\xa1\x6b\x11\x1d\x6b\x74\x2d\x0b\x6a\xf5\x15\x55\x32\x4a\x07\x48\x37\xc8\xf1\x8a", 3, true
+		return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
 	}
 	if name == "openbsd/amd64" {
-		return "openbsd/amd64", "\x41\x46\xb9\x34\xec\xbd\xb5\x71\x01\xe2\x4a\x98\xb2\x47\x84\xcd\x6f\x74\x97\xbf\xf3\x29\xf5\x09\x47\x45\x90\xac\x0e\xd2\x37\x9e", 3, true
+		return "openbsd/amd64", "\x83\x31\x81\x2e\xa7\x63\x4f\xae\x5d\xfa\xa4\x63\xc8\xf9\x48\x17\xd1\xd4\x80\xc0\x1f\x29\xcf\xde\xa7\x48\x75\xd0\x52\xc9\x2a\x4b", 3, true
 	}
 	if name == "netbsd/amd64" {
-		return "netbsd/amd64", "\x04\x3a\xdc\x8a\xef\x8c\x15\x6e\x31\xbf\x5d\x29\xcc\x86\xda\xf9\x69\x03\xeb\x62\xcc\x3f\xdd\xa9\x12\x9d\xe7\xf2\xe0\x4f\x32\x13", 3, true
+		return "netbsd/amd64", "\x5a\x41\x71\x80\xdf\xe3\xa5\x04\x1f\xf5\x8f\x62\x0a\x1e\x5b\xea\x14\x75\xf1\x88\x6d\xb1\x1c\x58\x9b\x00\xd4\x2c\xbb\xf2\xde\x99", 3, true
 	}
 	return "", "", 0, false
 }
@@ -247,13 +247,13 @@ func HasCapability(name string, capability string) bool {
 		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
 	}
 	if name == "wasi/wasm32" {
-		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "function_symbols" || capability == "heap" || capability == "hosted"
 	}
 	if name == "browser/wasm32" {
-		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "function_symbols" || capability == "heap" || capability == "hosted"
 	}
 	if name == "vm/vm32" {
-		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted"
+		return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "function_symbols" || capability == "heap" || capability == "hosted"
 	}
 	if name == "linux-kernel/amd64" {
 		return capability == "freestanding" || capability == "imports" || capability == "kernel_module" || capability == "linkstatic" || capability == "object"
@@ -273,8 +273,26 @@ func HasCapability(name string, capability string) bool {
 func SupportsInPlaceEntry(name string) bool { return false }
 
 func DefaultArena(name string) int {
+	if name == "linux/386" {
+		return 67108864
+	}
+	if name == "linux/arm" {
+		return 67108864
+	}
+	if name == "windows/386" {
+		return 67108864
+	}
+	if name == "wasi/wasm32" {
+		return 33554432
+	}
 	if name == "browser/wasm32" {
 		return 134217728
+	}
+	if name == "vm/vm32" {
+		return 67108864
+	}
+	if name == "linux-kernel/amd64" {
+		return 65536
 	}
 	return 0
 }

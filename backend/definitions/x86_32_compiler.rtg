@@ -2,6 +2,8 @@ definition 1
 unit x86_32_compiler
 implements direct_emitter_v1
 
+@import "x86_runtime_intrinsics.rtg"
+
 # Compiler-private lowering generated separately from the portable architecture projection.
 @import "x86_32.rtg"
 
@@ -44,169 +46,11 @@ go compiler {
 	}
 
 	func renvoCompile386(input []int, output int, arenaSize int) int {
-		src := renvoMakeByteScratch(786432)
-		for i := 0; i < len(input); i++ {
-			src = renvoReadAll(input[i], src)
-			src = append(src, '\n')
-		}
-		var prog renvoProgram
-		prog = renvoParseProgram(src)
-		if !prog.ok {
-			return 1
-		}
-		var meta renvoMeta
-		renvoBuildMetaInto(&prog, &meta)
-		if !meta.ok {
-			return 1
-		}
-		meta.arenaSize = renvoResolveArenaSize(renvoTarget, arenaSize)
-		result := renvoTryCompileScalarProgram386Scratch(&prog, &meta)
-		if result.ok {
-			data := result.data
-			if renvoFixedTarget == 0 {
-				data = renvoCompileOutputData(data, renvoTarget)
-			}
-			write(output, data, -1)
-			return 0
-		}
-		renvoPrintErr("renvo: compilation failed\n")
-		return 1
+		return renvoCompileSourceInputs(input, output, arenaSize)
 	}
 
 	func renvoAsmImageObject386(emitter *renvoAsm) []byte {
 		return renvoAsmImageRelocatableObject386(emitter)
-	}
-
-	func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		return renvoTryCompileScalarProgram386Scratch(p, meta)
-	}
-
-	func renvoTryCompileScalarProgram386Scratch(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgram386(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgram386(g)
-	}
-
-	func renvoTryCompileScalarProgram386Cached(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-		g := renvoBeginScalarProgram386(p, meta)
-		if g == nil || !renvoEmitAllQueuedFunctionsCached(g) {
-			return renvoCompileResult{}
-		}
-		return renvoFinishScalarProgram386(g)
-	}
-	func renvoBeginScalarProgram386(p *renvoProgram, meta *renvoMeta) *renvoLinearGen {
-		if renvoFixedTarget == 0 {
-			if renvoIsHostedObject386(meta.c) {
-				return renvoBeginObjectProgram(p, meta)
-			}
-		}
-		appIndex := p.entryFunc
-		if appIndex < 0 {
-			return nil
-		}
-		g := new(renvoLinearGen)
-		g.c = meta.c
-		g.prog = p
-		g.meta = meta
-		g.arenaSize = meta.arenaSize
-		g.c.optimizeRuntime = renvoFixedTarget == 0 && len(p.src) >= renvoLargeProgramSourceThreshold
-		a := &g.asm
-		renvoAsmInitWithContext(a, g.c)
-		a.codeOffset = renvo386ELFCodeOffset
-		if targetIsWindows(meta.c.renvoTargetOS) {
-			a.codeOffset = renvoWinSectionRVA
-		}
-		if renvoFixedTarget != 0 {
-			g.funcLabels = make([]int, 0, len(meta.funcs))
-		}
-		for i := 0; i < len(meta.funcs); i++ {
-			label := renvoAsmNewLabel(a)
-			g.funcLabels = append(g.funcLabels, label)
-		}
-		renvoInitFuncQueue(g, len(meta.funcs))
-		renvoLinearMarkFunc(g, appIndex)
-		renvoEmitInitializeThreadState(g)
-		renvoEmitPersistentArenaReady(g)
-		if !renvoLinearInitGlobals(g) {
-			return nil
-		}
-		entryOK := false
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			entryOK = renvoEmitImageEntryArgs386(g, appIndex)
-		} else {
-			entryOK = renvoEmitProgramEntryArgs386(g, appIndex)
-		}
-		if !entryOK {
-			return nil
-		}
-		renvoAsmCallLabel(a, g.funcLabels[appIndex])
-		if !renvoEmitProgramPanicCheck(g) {
-			return nil
-		}
-		if renvoFixedTarget == 0 && meta.c.emitImage {
-			renvoAsmRet(a)
-		} else if targetIsWindows(meta.c.renvoTargetOS) {
-			renvoWin386EmitExit(a)
-			renvoAsmRet(a)
-		} else {
-			renvoAsmCopyPrimaryToCallWord0(a)
-			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
-			renvoAsmSyscall(a)
-		}
-		return g
-	}
-
-	func renvoEmitImageEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 || !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam].typ) {
-			return false
-		}
-		// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
-		renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
-		if app.paramCount == 1 {
-			return true
-		}
-		if !renvoTypeIsStringSlice(g.meta, g.meta.params[app.firstParam+1].typ) {
-			return false
-		}
-		// ECX/EAX/EDI, the second Renvo slice.
-		renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
-		return true
-	}
-
-	func renvoFinishScalarProgram386(g *renvoLinearGen) renvoCompileResult {
-		renvoNonNil(g)
-		a := &g.asm
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
-			renvoRecordObjectFunctionRanges(g)
-			if g.c.code16 && !renvo386ApplyCode16(&g.asm) {
-				return renvoCompileResult{}
-			}
-		}
-		renvo_runtime_ArenaDiscard(g.meta.scratchStart, g.meta.scratchEnd)
-		var data []byte
-		if renvoFixedTarget == 0 && renvoIsHostedObject386(g.c) {
-			data = renvoAsmImageObject386(a)
-		} else if targetIsWindows(g.c.renvoTargetOS) {
-			data = renvoAsmImageWindows386(a)
-		} else {
-			data = renvoAsmImage386(a)
-		}
-		var result renvoCompileResult
-		if a.patchFailed || len(data) == 0 {
-			return result
-		}
-		result.data = data
-		result.ok = true
-		return result
 	}
 
 	func renvo386ApplyCode16(a *renvoAsm) bool {
@@ -424,51 +268,6 @@ go compiler {
 		return true
 	}
 
-	func renvoEmitProgramEntryArgs386(g *renvoLinearGen, appIndex int) bool {
-		app := &g.meta.funcs[appIndex]
-		if app.resultType != 0 && !renvoTypeIsInt(g.meta, app.resultType) {
-			return false
-		}
-		if app.paramCount == 0 {
-			return true
-		}
-		if app.paramCount > 2 {
-			return false
-		}
-		first := &g.meta.params[app.firstParam]
-		if !renvoTypeIsStringSlice(g.meta, first.typ) {
-			return false
-		}
-		if targetIsWindows(g.c.renvoTargetOS) {
-			argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
-			argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
-			g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
-			argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
-			g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
-			envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
-			envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
-			renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
-		} else {
-			argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
-			g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
-			envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
-			g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
-			envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
-			g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
-			renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
-		}
-		if app.paramCount == 1 {
-			return true
-		}
-		second := &g.meta.params[app.firstParam+1]
-		if !renvoTypeIsStringSlice(g.meta, second.typ) {
-			return false
-		}
-		return true
-	}
 	func renvo386AsmMovRaxAddr(a *renvoAsm, offset int, relocKind int) {
 		if a.c.renvoTargetOS == renvoOSLinux && !a.c.objectFile {
 			renvo386AsmMovRegPCRel(a, 0, offset, relocKind)
@@ -524,7 +323,7 @@ go compiler {
 			loadOpcode = 0xd9
 			storeOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, left, loadOpcode, 0x45, 0x85) // fld
+		renvo386AsmStackMem(a, left, loadOpcode, 0x45, 0x85) // fld
 		opcode := 0xdc
 		shortModRM := 0x45
 		longModRM := 0x85
@@ -540,8 +339,8 @@ go compiler {
 		} else if op != '+' {
 			return false
 		}
-		renvoAsmStackMem(a, right, opcode, shortModRM, longModRM)
-		renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d) // fstp
+		renvo386AsmStackMem(a, right, opcode, shortModRM, longModRM)
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d) // fstp
 		return true
 	}
 
@@ -550,8 +349,8 @@ go compiler {
 		if size == 4 {
 			opcode = 0xd9
 		}
-		renvoAsmStackMem(a, right, opcode, 0x45, 0x85)
-		renvoAsmStackMem(a, left, opcode, 0x45, 0x85)
+		renvo386AsmStackMem(a, right, opcode, 0x45, 0x85)
+		renvo386AsmStackMem(a, left, opcode, 0x45, 0x85)
 		renvoAsmEmit16(a, 0xe9df) // fucomip st(0), st(1)
 		renvoAsmEmit16(a, 0xd8dd) // fstp st(0)
 	}
@@ -562,9 +361,9 @@ go compiler {
 			intSize = 8
 		}
 		if intSize == 8 {
-			renvoAsmStackMem(a, offset, 0xdf, 0x6d, 0xad) // fild qword
+			renvo386AsmStackMem(a, offset, 0xdf, 0x6d, 0xad) // fild qword
 		} else {
-			renvoAsmStackMem(a, offset, 0xdb, 0x45, 0x85) // fild dword
+			renvo386AsmStackMem(a, offset, 0xdb, 0x45, 0x85) // fild dword
 		}
 		if !signed && intSize == 8 {
 			converted := renvoAsmNewLabel(a)
@@ -574,13 +373,13 @@ go compiler {
 			// corresponding non-negative value before the final rounding step.
 			renvoAsmStoreStackImm(a, offset, 0)
 			renvoAsmStoreStackImm(a, offset-4, 0x43f00000)
-			renvoAsmStackMem(a, offset, 0xdc, 0x45, 0x85) // fadd qword
+			renvo386AsmStackMem(a, offset, 0xdc, 0x45, 0x85) // fadd qword
 			renvoAsmMarkLabel(a, converted)
 		}
 		if floatSize == 4 {
-			renvoAsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0xd9, 0x5d, 0x9d)
 		} else {
-			renvoAsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0xdd, 0x5d, 0x9d)
 		}
 	}
 
@@ -593,8 +392,8 @@ go compiler {
 		if destSize == 4 {
 			storeOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
-		renvoAsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)  // fstp
+		renvo386AsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x5d, 0x9d)  // fstp
 	}
 
 	func renvo386AsmX87FloatToIntStack(a *renvoAsm, dest int, source int, floatSize int, intSize int, signed bool) {
@@ -602,12 +401,12 @@ go compiler {
 		if floatSize == 4 {
 			loadOpcode = 0xd9
 		}
-		renvoAsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
-		storeOpcode := 0xdb                                 // fisttp dword
+		renvo386AsmStackMem(a, source, loadOpcode, 0x45, 0x85) // fld
+		storeOpcode := 0xdb                                    // fisttp dword
 		if intSize == 8 || !signed {
 			storeOpcode = 0xdd // fisttp qword
 		}
-		renvoAsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
+		renvo386AsmStackMem(a, dest, storeOpcode, 0x4d, 0x8d)
 	}
 
 	func renvo386AsmX87NegateStack(a *renvoAsm, offset int, size int) {
@@ -619,38 +418,6 @@ go compiler {
 		renvoAsmEmit8(a, 0x35) // xor eax, imm32
 		renvoAsmEmit32(a, -2147483648)
 		renvoAsmStorePrimaryStack(a, highOffset)
-	}
-
-	func renvo386EmitSliceSlotAddrs(g *renvoLinearGen, locEp *renvoExprParse, loc *renvoSliceLocation, elemSize int) bool {
-		a := &g.asm
-		if loc.mem {
-			if !renvoEmitSliceLocationHeaderAddressSecondary(g, locEp, loc) {
-				return false
-			}
-			renvoAsmEmit16(a, 0x5f52)
-			renvoAsmEmit16(a, 0x728d)
-			renvoAsmEmit8(a, 8)
-			return true
-		}
-		if loc.global {
-			if g.c.renvoTargetOS == renvoOSLinux {
-				renvo386AsmMovRegPCRel(a, 7, loc.offset, renvoAbsBssReloc)
-				renvo386AsmMovRegPCRel(a, 6, loc.offset+8, renvoAbsBssReloc)
-				return true
-			}
-			renvoAsmEmit16(a, 0x3d8d)
-			at := len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset, renvoAbsBssReloc)
-			renvoAsmEmit16(a, 0x358d)
-			at = len(a.code)
-			renvoAsmEmit32(a, 0)
-			renvoAsmAddAbsReloc(a, at, loc.offset+8, renvoAbsBssReloc)
-			return true
-		}
-		renvoAsmAddressCallWord0Stack(a, loc.offset)
-		renvoAsmAddressCallWord1Stack(a, loc.offset-8)
-		return true
 	}
 
 	func renvo386EmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
@@ -693,9 +460,9 @@ go compiler {
 
 	func renvo386EmitWideHelperCall(g *renvoLinearGen, dest int, left int, right int, mode int, label int) {
 		a := &g.asm
-		renvoAsmStackMem(a, dest, 0x8d, 0x7d, 0xbd)
-		renvoAsmStackMem(a, left, 0x8d, 0x75, 0xb5)
-		renvoAsmStackMem(a, right, 0x8d, 0x5d, 0x9d)
+		renvo386AsmStackMem(a, dest, 0x8d, 0x7d, 0xbd)
+		renvo386AsmStackMem(a, left, 0x8d, 0x75, 0xb5)
+		renvo386AsmStackMem(a, right, 0x8d, 0x5d, 0x9d)
 		renvoAsmPrimaryImm(a, mode)
 		renvoAsmCallLabel(a, label)
 	}
@@ -762,9 +529,9 @@ go compiler {
 		if mode == 14 || mode == 15 {
 			different := renvoAsmNewLabel(&g.asm)
 			done := renvoAsmNewLabel(&g.asm)
-			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, 0x95)
+			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionNotEqual)
 			renvoAsmJnzPrimary(&g.asm, different)
-			renvoEmitNativeCompareStack(g, left, right, 0x95)
+			renvoEmitNativeCompareStack(g, left, right, renvoConditionNotEqual)
 			renvoAsmJmpLabel(&g.asm, done)
 			renvoAsmMarkLabel(&g.asm, different)
 			renvoAsmPrimaryImm(&g.asm, 1)
@@ -792,159 +559,14 @@ go compiler {
 		renvo386EmitWideHelperCall(g, 0, left, right, mode, renvo386EnsureWideCompareHelper(g))
 	}
 
-	func renvo386EmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-		a := &g.asm
-		metaFn := &g.meta.funcs[fnInfoIndex]
-		fn := &g.prog.funcs[metaFn.declIndex]
-		oldLocals := g.locals
-		oldLocalCount := g.localCount
-		oldBreak := g.breakDepth
-		oldContinue := g.continueDepth
-		oldCurrent := g.currentFunc
-		oldReturnStruct := g.returnStruct
-		oldClosureEnvOffset := g.closureEnvOffset
-		oldDeferHeadOffset := g.deferHeadOffset
-		oldDeferReturnLabel := g.deferReturnLabel
-		oldDeferResultOffset := g.deferResultOffset
-		oldDeferSites := g.deferSites
-		oldEmittingDefers := g.emittingDefers
-		oldSuppressPanicCheck := g.suppressPanicCheck
-		oldStackUsed := g.stackUsed
-		oldStackPeak := g.stackPeak
-		oldGotoLabels := g.gotoLabels
-		oldLastRangeReturns := g.lastRangeReturns
-		g.locals = make([]renvoLocalInfo, renvoFunctionLocalCap(fn))
-		g.localCount = 0
-		g.gotoLabels = nil
-		g.breakDepth = 0
-		g.continueDepth = 0
-		g.pendingControl = 0
-		g.currentFunc = fnInfoIndex
-		g.returnStruct = 0
-		g.closureEnvOffset = 0
-		g.stackUsed = 0
-		g.stackPeak = 0
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		framePatch := len(a.code)
-		renvoAsmEmit32(a, 0x000000c8)
-		if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-			g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-			renvoAsmStackMem(a, g.returnStruct, 0x89, 0x5d, 0x9d)
-		}
-		renvoBindFunctionParams(g, fnInfoIndex)
-		if !renvoBindClosureCaptures(g, fnInfoIndex) {
-			return false
-		}
-		if !renvoBindNamedResults(g, fnInfoIndex) {
-			return false
-		}
-		if !renvoPrepareFunctionControl(g) {
-			return false
-		}
-		if !renvoEmitLinearRange(g, fn.bodyStart+1, fn.bodyEnd) {
-			return false
-		}
-		if g.deferReturnLabel > 0 {
-			if !g.lastRangeReturns {
-				renvoAsmJmpLabel(a, g.deferReturnLabel)
-			}
-			if !renvoEmitFunctionControlEpilogue(g) {
-				return false
-			}
-		} else if !g.lastRangeReturns {
-			renvoMoveCapturedLocals(g, true)
-			renvoAsmPrimaryImm(a, 0)
-			renvoAsmLeave(a)
-			renvoAsmRet(a)
-		}
-		frame := renvoAlignTo8(g.stackPeak)
-		if frame > 65528 {
-			frame = 65528
-		}
-		renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
-		g.locals = oldLocals
-		g.localCount = oldLocalCount
-		g.breakDepth = oldBreak
-		g.continueDepth = oldContinue
-		g.currentFunc = oldCurrent
-		g.returnStruct = oldReturnStruct
-		g.closureEnvOffset = oldClosureEnvOffset
-		g.deferHeadOffset = oldDeferHeadOffset
-		g.deferReturnLabel = oldDeferReturnLabel
-		g.deferResultOffset = oldDeferResultOffset
-		g.deferSites = oldDeferSites
-		g.emittingDefers = oldEmittingDefers
-		g.suppressPanicCheck = oldSuppressPanicCheck
-		g.stackUsed = oldStackUsed
-		g.stackPeak = oldStackPeak
-		g.gotoLabels = oldGotoLabels
-		g.lastRangeReturns = oldLastRangeReturns
-		return true
-	}
-
-	func renvo386EmitCompactCValueHelper(g *renvoLinearGen, fnInfoIndex int) bool {
-		if !g.c.code16 || !g.c.objectFile || fnInfoIndex < 0 || fnInfoIndex >= len(g.meta.funcs) {
-			return false
-		}
-		fn := &g.meta.funcs[fnInfoIndex]
-		postInc := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_inc_")
-		postDec := renvoBytesPrefixText(g.prog.src, fn.nameStart, fn.nameEnd, "__c_post_assign_dec_")
-		if !postInc && !postDec || fn.paramCount != 2 || fn.resultType == 0 {
-			return false
-		}
-		result := renvoResolveType(g.meta, fn.resultType)
-		size := renvoTypeSize(g.meta, fn.resultType)
-		if size < 1 || size > 4 ||
-			(!renvoTypeKindIsScalarValue(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) {
-			return false
-		}
-		a := &g.asm
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
-		// value. Advance *p, store the value through the old pointer, and leave the
-		// expression result in EAX without constructing a frame.
-		renvoAsmEmit16(a, 0x168b) // mov edx,[esi]
-		delta := size
-		if postDec {
-			delta = -delta
-		}
-		if renvoAsmImmFits8Signed(delta) {
-			renvoAsmEmit3(a, 0x8d, 0x4a, delta) // lea ecx,[edx+delta]
-		} else {
-			renvoAsmEmit16(a, 0x8a8d)
-			renvoAsmEmit32(a, delta)
-		}
-		renvoAsmEmit16(a, 0x0e89) // mov [esi],ecx
-		if size == 1 {
-			renvoAsmEmit16(a, 0x1a88) // mov [edx],bl
-			if result.kind == renvoTypeInt8 {
-				renvoAsmEmitText(a, "\x0f\xbe\xc3")
-			} else {
-				renvoAsmEmitText(a, "\x0f\xb6\xc3")
-			}
-		} else if size == 2 {
-			renvoAsmEmitText(a, "\x66\x89\x1a") // mov [edx],bx
-			if result.kind == renvoTypeInt16 {
-				renvoAsmEmitText(a, "\x0f\xbf\xc3")
-			} else {
-				renvoAsmEmitText(a, "\x0f\xb7\xc3")
-			}
-		} else {
-			renvoAsmEmit16(a, 0x1a89) // mov [edx],ebx
-			renvoAsmEmit16(a, 0xd889) // mov eax,ebx
-		}
-		renvoAsmRet(a)
-		return true
-	}
-
 	func renvo386StoreParamWord(g *renvoLinearGen, reg int, offset int) {
 		a := &g.asm
 		if reg == 0 {
-			renvoAsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
+			renvo386AsmStackMem(a, offset, 0x89, 0x5d, 0x9d)
 			return
 		}
 		if reg == 1 {
-			renvoAsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
+			renvo386AsmStackMem(a, offset, 0x8948, 0x75, 0xb5)
 			return
 		}
 		if reg == 2 {
@@ -952,7 +574,7 @@ go compiler {
 			return
 		}
 		if reg == 3 {
-			renvoAsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+			renvo386AsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
 			return
 		}
 		if reg == 4 {
@@ -960,7 +582,7 @@ go compiler {
 			return
 		}
 		if reg == 5 {
-			renvoAsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
+			renvo386AsmStackMem(a, offset, 0x89, 0x7d, 0xbd)
 			return
 		}
 		renvoAsmEmit16(a, 0x858b)
@@ -1322,5 +944,4590 @@ go compiler {
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, afterLabel)
 		return g.streqLabel
+	}
+}
+
+# Bundled lowering hooks. Prepared backends use the same semantic operations
+# through their direct emitter and ABI bindings.
+extend arch x86_32 {
+	compiler_selector = renvoArch386
+	compiler_bindings {
+		repl_globals_supported = renvo386CompilerReplGlobalsSupported
+		profile_float_model = renvo386CompilerProfileFloatModel
+		syscall_argument_policy = renvo386CompilerSyscallArgumentPolicy
+		jit_call_supported = renvo386CompilerJITCallSupported
+		open_flag = renvo386CompilerOpenFlag
+		file_offset_sentinel = renvo386CompilerFileOffsetSentinel
+		static_call_binding = renvo386CompilerStaticCallBinding
+		linked_static_import = renvo386CompilerLinkedStaticImport
+		finish_static_call_shape = renvo386CompilerFinishStaticCallShape
+		static_call_policy = renvo386CompilerStaticCallPolicy
+		compact_c_value_helpers = renvo386CompilerCompactCValueHelpers
+		condition_branch = renvo386CompilerConditionBranch
+		compare_stack_immediate_jump = renvo386CompilerCompareStackImmediateJump
+		compare_stack_stack_jump = renvo386CompilerCompareStackStackJump
+		compare_jump = renvo386CompilerCompareJump
+		compare_set = renvo386CompilerCompareSet
+		object_absolute_symbols = renvo386CompilerObjectAbsoluteSymbols
+		object_lazy_arena = renvo386CompilerObjectLazyArena
+		object_faults_trap = renvo386CompilerObjectFaultsTrap
+		object_helper_symbols = renvo386CompilerObjectHelperSymbols
+		object_pair_result = renvo386CompilerObjectPairResult
+		object_register_scalar_abi = renvo386CompilerObjectRegisterScalarABI
+		object_stack_scalar_abi = renvo386CompilerObjectStackScalarABI
+		single_call_constants = renvo386CompilerSingleCallConstants
+		elide_empty_calls = renvo386CompilerElideEmptyCalls
+		pure_call_constants = renvo386CompilerPureCallConstants
+		flow_constant_propagation = renvo386CompilerFlowConstantPropagation
+		reset_program_emission = renvo386CompilerResetProgramEmission
+		function_address_layout = renvo386CompilerFunctionAddressLayout
+		reconstruct_wide_argument = renvo386CompilerReconstructWideArgument
+		scaled_atom_literals = renvo386CompilerScaledAtomLiterals
+		wide_float_locals = renvo386CompilerWideFloatLocals
+		scaled_float64_values = renvo386CompilerScaledFloat64Values
+		result_copy_via_frame = renvo386CompilerResultCopyViaFrame
+		reserve_function_labels = renvo386CompilerReserveFunctionLabels
+		optimize_program_runtime = renvo386CompilerOptimizeProgramRuntime
+		fixed_object_cabi = renvo386CompilerFixedObjectCABI
+		save_slice_slot_addresses = renvo386CompilerSaveSliceSlotAddresses
+		inline_append = renvo386CompilerInlineAppend
+		string_arguments_from_frame = renvo386CompilerStringArgumentsFromFrame
+		tuple_parameter_layout = renvo386CompilerTupleParameterLayout
+		hosted_object = renvo386CompilerHostedObject
+		retain_panic_runtime = renvo386CompilerRetainPanicRuntime
+		stable_function_order = renvo386CompilerStableFunctionOrder
+		program_failure_exit_code = renvo386CompilerProgramFailureExitCode
+		program_result_valid = renvo386CompilerProgramResultValid
+		program_emission_valid = renvo386CompilerProgramEmissionValid
+		label_notifications = renvo386CompilerLabelNotifications
+		unsupported_operation = renvo386CompilerUnsupportedOperation
+		label_boundary = renvo386CompilerLabelBoundary
+		structured_string_equal_body = renvo386CompilerStructuredStringEqualBody
+		helper_function_boundary = renvo386CompilerHelperFunctionBoundary
+		structured_functions = renvo386CompilerStructuredFunctions
+		object_variadic_word_limit = renvo386CompilerObjectVariadicWordLimit
+		object_stack_arguments = renvo386CompilerObjectStackArguments
+		string_compare_arguments = renvo386CompilerStringCompareArguments
+		object_absolute_address = renvo386CompilerObjectAbsoluteAddress
+		object_fault_trap = renvo386CompilerObjectFaultTrap
+		object_indirect_aggregate = renvo386CompilerObjectIndirectAggregate
+		object_word_limit = renvo386CompilerObjectWordLimit
+		object_argument_word_bytes = renvo386CompilerObjectArgumentWordBytes
+		source_token_capacity = renvo386CompilerSourceTokenCapacity
+		source_soft_float = renvo386CompilerSourceSoftFloat
+		source_scratch = renvo386CompilerSourceScratch
+		source_capacity = renvo386CompilerSourceCapacity
+		empty_function = renvo386CompilerEmptyFunction
+		resolve_unemitted_closures = renvo386CompilerResolveUnemittedClosures
+		object_program = renvo386CompilerObjectProgram
+		program_image_entry = renvo386CompilerProgramImageEntry
+		program_cache_supported = renvo386CompilerProgramCacheSupported
+		program_target_mode = renvo386CompilerProgramTargetMode
+		kernel_program = renvo386CompilerKernelProgram
+		program_image = renvo386CompilerProgramImage
+		finalize_object_code = renvo386CompilerFinalizeObjectCode
+		release_program_scratch = renvo386CompilerReleaseProgramScratch
+		release_program_declarations = renvo386CompilerReleaseProgramDeclarations
+		program_layout = renvo386CompilerProgramLayout
+		compact_c_value_helper = renvo386CompilerCompactCValueHelper
+		function_override = renvo386CompilerFunctionOverride
+		zero_void_return = renvo386CompilerZeroVoidReturn
+		function_frame_finish = renvo386CompilerFunctionFrameFinish
+		function_frame_start = renvo386CompilerFunctionFrameStart
+		store_hidden_result = renvo386CompilerStoreHiddenResult
+		struct_argument_by_reference = renvo386CompilerStructArgumentByReference
+		resolves_static_import = renvo386CompilerResolvesStaticImport
+		entry_runtime_registers = renvo386CompilerEntryRuntimeRegisters
+		program_exit = renvo386CompilerProgramExit
+		program_entry_frame = renvo386CompilerProgramEntryFrame
+		image_entry_words = renvo386CompilerImageEntryWords
+		process_entry_words = renvo386CompilerProcessEntryWords
+		object_reverse_register_call = renvo386CompilerObjectReverseRegisterCall
+		local_storage_unit = renvo386CompilerLocalStorageUnit
+		kernel_callback_address = renvo386CompilerKernelCallbackAddress
+		kernel_entry_return = renvo386CompilerKernelEntryReturn
+		kernel_entry_frame = renvo386CompilerKernelEntryFrame
+		object_aggregate_register_bytes = renvo386CompilerObjectAggregateRegisterBytes
+		hosted_static_call = renvo386CompilerHostedStaticCall
+		object_register_call = renvo386CompilerObjectRegisterCall
+		cdecl_object_call = renvo386CompilerCdeclObjectCall
+		discard_arena_pages = renvo386CompilerDiscardArenaPages
+		arena_discard_supported = renvo386CompilerArenaDiscardSupported
+		write_value_regs = renvo386CompilerWriteValueRegs
+		exit_status = renvo386CompilerExitStatus
+		syscall_from_stack = renvo386CompilerSyscallFromStack
+		jit_call_from_stack = renvo386CompilerJITCallFromStack
+		runtime_stack_helpers = renvo386CompilerRuntimeStackHelpers
+		object_indirect_register_call = renvo386CompilerObjectIndirectRegisterCall
+		load_object_argument_word = renvo386CompilerLoadObjectArgumentWord
+		object_indirect_stack_call = renvo386CompilerObjectIndirectStackCall
+		object_integer_stack_call = renvo386CompilerObjectIntegerStackCall
+		finish_object_variadic_args = renvo386CompilerFinishObjectVariadicArgs
+		push_object_variadic_args = renvo386CompilerPushObjectVariadicArgs
+		reserve_object_variadic_args = renvo386CompilerReserveObjectVariadicArgs
+		object_call_with_word_count = renvo386CompilerObjectCallWithWordCount
+		finish_object_aggregate_result = renvo386CompilerFinishObjectAggregateResult
+		push_object_private_result = renvo386CompilerPushObjectPrivateResult
+		push_object_sret_pointer = renvo386CompilerPushObjectSRetPointer
+		begin_object_aggregate_result = renvo386CompilerBeginObjectAggregateResult
+		begin_object_stack_args = renvo386CompilerBeginObjectStackArgs
+		push_object_register_word = renvo386CompilerPushObjectRegisterWord
+		push_object_stack_word = renvo386CompilerPushObjectStackWord
+		object_export_frame = renvo386CompilerObjectExportFrame
+		object_argument_register_count = renvo386CompilerObjectArgumentRegisterCount
+		object_call_abi = renvo386CompilerObjectCallABI
+		word_call_intrinsic = renvo386CompilerWordCallIntrinsic
+		unsigned_word_order_result = renvo386CompilerUnsignedWordOrderResult
+		word_constant_immediate = renvo386CompilerWordConstantImmediate
+		bounded_word_shift = renvo386CompilerBoundedWordShift
+		read_write_file = renvo386CompilerReadWriteFile
+		pop_read_write_offset = renvo386CompilerPopReadWriteOffset
+		chmod_file = renvo386CompilerChmodFile
+		close_file = renvo386CompilerCloseFile
+		open_path_length = renvo386CompilerOpenPathLength
+		open_file = renvo386CompilerOpenFile
+		function_word_conversion = renvo386CompilerFunctionWordConversion
+		named_function_address = renvo386CompilerNamedFunctionAddress
+		address_taken_local = renvo386CompilerAddressTakenLocal
+		address_result_buffer = renvo386CompilerAddressResultBuffer
+		load_indirect_field_value = renvo386CompilerLoadIndirectFieldValue
+		load_frame_field_value = renvo386CompilerLoadFrameFieldValue
+		direct_slice_count_selector = renvo386CompilerDirectSliceCountSelector
+		slice_count_result = renvo386CompilerSliceCountResult
+		move_read_write_offset = renvo386CompilerMoveReadWriteOffset
+		prepare_read_write_buffer = renvo386CompilerPrepareReadWriteBuffer
+		compare_word_immediate_kind = renvo386CompilerCompareWordImmediateKind
+		unsigned_pointer_ordering = renvo386CompilerUnsignedPointerOrdering
+		logical_shift_primary_word_immediate = renvo386CompilerLogicalShiftPrimaryWordImmediate
+		bitwise_primary_tertiary = renvo386CompilerBitwisePrimaryTertiary
+		ensure_append_bytes_helper = renvo386CompilerEnsureAppendBytesHelper
+		append_bytes_helper = renvo386CompilerAppendBytesHelper
+		unsigned_word_comparison = renvo386CompilerUnsignedWordComparison
+		direct_scalar_deref = renvo386CompilerDirectScalarDeref
+		compound_local_assign = renvo386CompilerCompoundLocalAssign
+		self_binary_local_assign = renvo386CompilerSelfBinaryLocalAssign
+		scalar_preserves_secondary = renvo386CompilerScalarPreservesSecondary
+		direct_scalar_store = renvo386CompilerDirectScalarStore
+		compound_pointer_memory = renvo386CompilerCompoundPointerMemory
+		indexed_pointer_address = renvo386CompilerIndexedPointerAddress
+		switch_case_peephole = renvo386CompilerSwitchCasePeephole
+		register_switch = renvo386CompilerRegisterSwitch
+		string_equal_left_length = renvo386CompilerStringEqualLeftLength
+		folded_indexed_scalar_load = renvo386CompilerFoldedIndexedScalarLoad
+		can_fold_indexed_scalar_load = renvo386CompilerCanFoldIndexedScalarLoad
+		local_immediate_compare_jump = renvo386CompilerLocalImmediateCompareJump
+		deref_compare_jump = renvo386CompilerDerefCompareJump
+		local_bit_test_jump = renvo386CompilerLocalBitTestJump
+		negate_primary_word = renvo386CompilerNegatePrimaryWord
+		primary_address_offset = renvo386CompilerPrimaryAddressOffset
+		word_expression_peephole = renvo386CompilerWordExpressionPeephole
+		wide_ident_to_local = renvo386CompilerWideIdentToLocal
+		constant_pointer_step = renvo386CompilerConstantPointerStep
+		c_update_intrinsic = renvo386CompilerCUpdateIntrinsic
+		c_inline_return = renvo386CompilerCInlineReturn
+		slice_backing_size = renvo386CompilerSliceBackingSize
+		folded_field_addressing = renvo386CompilerFoldedFieldAddressing
+		can_store_scalar = renvo386CompilerCanStoreScalar
+		store_primary_mem_tertiary_disp = renvo386CompilerStorePrimaryMemTertiaryDisp
+		load_tertiary_mem_secondary_disp = renvo386CompilerLoadTertiaryMemSecondaryDisp
+		needs_function_symbols = renvo386CompilerNeedsFunctionSymbols
+		assembler_reserves = renvo386CompilerAssemblerReserves
+		dereference_secondary = renvo386CompilerDereferenceSecondary
+		secondary_frame_address = renvo386CompilerSecondaryFrameAddress
+		local_word_compare_jump = renvo386CompilerLocalWordCompareJump
+		register_ieee_comparison = renvo386CompilerRegisterIEEEComparison
+		immediate_word_comparison = renvo386CompilerImmediateWordComparison
+		compare_word_operands = renvo386CompilerCompareWordOperands
+		object_external_call = renvo386CompilerObjectExternalCall
+		checked_index_address = renvo386CompilerCheckedIndexAddress
+		increment_global_word = renvo386CompilerIncrementGlobalWord
+		increment_local_word = renvo386CompilerIncrementLocalWord
+		bounded_narrow_unsigned_shift = renvo386CompilerBoundedNarrowUnsignedShift
+		bounded_wide_word_shift = renvo386CompilerBoundedWideWordShift
+		optimized_native_binary_expr = renvo386CompilerOptimizedNativeBinaryExpr
+		thread_state_register_capability = renvo386CompilerThreadStateRegisterCapability
+		swap_thread_state = renvo386CompilerSwapThreadState
+		record_local_storage = renvo386CompilerRecordLocalStorage
+		wide_compare_value = renvo386CompilerWideCompareValue
+		wide_binary_value = renvo386CompilerWideBinaryValue
+		stack_ieee_float = renvo386CompilerStackIEEEFloat
+		scaled_float = renvo386CompilerScaledFloat
+		direct_float64_operands = renvo386CompilerDirectFloat64Operands
+		string_concat_value_regs = renvo386CompilerStringConcatValueRegs
+		append_scalar_helper = renvo386CompilerAppendScalarHelper
+		append_address_helper = renvo386CompilerAppendAddressHelper
+		string_equal_helper = renvo386CompilerStringEqualHelper
+		copy_to_fresh_arena = renvo386CompilerCopyToFreshArena
+		slice_header_addresses_secondary = renvo386CompilerSliceHeaderAddressesSecondary
+		slice_header_addresses_bss = renvo386CompilerSliceHeaderAddressesBss
+		slice_header_addresses_stack = renvo386CompilerSliceHeaderAddressesStack
+		store_tertiary_stack = renvo386CompilerStoreTertiaryStack
+		index_address_helper_body = renvo386CompilerIndexAddressHelperBody
+		index_address_helper = renvo386CompilerIndexAddressHelper
+		reserved_bounds_check_helper = renvo386CompilerTargetBoundsCheckHelper
+		optimized_slice_bounds_checks = renvo386CompilerOptimizedSliceBoundsChecks
+		push_words = renvo386CompilerPushWords
+		split_word_lowering_enabled = renvo386CompilerSplitWordLoweringEnabled
+		shift_primary_right_unsigned_immediate = renvo386CompilerShiftPrimaryRightUnsignedImmediate
+		negate_primary = renvo386CompilerNegatePrimary
+		wide_less_stack = renvo386CompilerWideLessStack
+		wide_add_stack = renvo386CompilerWideAddStack
+		wide_sub_stack = renvo386CompilerWideSubStack
+		wide_shift_left_one = renvo386CompilerWideShiftLeftOne
+		wide_shift_right_one = renvo386CompilerWideShiftRightOne
+		wide_shift_stack = renvo386CompilerWideShiftStack
+		wide_multiply_stack = renvo386CompilerWideMultiplyStack
+		wide_negate_stack = renvo386CompilerWideNegateStack
+		wide_unsigned_divide_stack = renvo386CompilerWideUnsignedDivideStack
+		unsigned_less_stack = renvo386CompilerUnsignedLessStack
+		native_wide_stack = renvo386CompilerNativeWideStack
+		copy_bytes = renvo386CompilerCopyBytes
+		prefer_bulk_stack_copy = renvo386CompilerPreferBulkStackCopy
+		prefer_bulk_indirect_copy = renvo386CompilerPreferBulkIndirectCopy
+		fresh_arena_zero_return = renvo386CompilerFreshArenaZeroReturn
+		make_zero_helper_body = renvo386CompilerMakeZeroHelperBody
+		optimized_make_zero_helper = renvo386CompilerOptimizedMakeZeroHelper
+		make_zero = renvo386CompilerMakeZero
+		zero_local_storage = renvo386CompilerZeroLocalStorage
+		primary_tertiary_operation = renvo386CompilerPrimaryTertiaryOperation
+		unsigned_shift_right = renvo386CompilerUnsignedShiftRight
+		signed_division_guard = renvo386CompilerSignedDivisionGuard
+		unchecked_signed_division = renvo386CompilerUncheckedSignedDivision
+		unchecked_bounds_check = renvo386CompilerUncheckedBoundsCheck
+		bounds_success_branch = renvo386CompilerBoundsSuccessBranch
+		bounds_check_helper = renvo386CompilerBoundsCheckHelper
+		non_nil_check_helper = renvo386CompilerNonNilCheckHelper
+		install_thread_state = renvo386CompilerInstallThreadState
+		load_primary_thread_state = renvo386CompilerLoadPrimaryThreadState
+		store_primary_thread_state = renvo386CompilerStorePrimaryThreadState
+		runtime_stack = renvo386CompilerRuntimeStack
+		unchecked_non_nil_primary = renvo386CompilerUncheckedNonNilPrimary
+		unchecked_non_nil_secondary = renvo386CompilerUncheckedNonNilSecondary
+		irq_stack_call = renvo386CompilerIRQStackCall
+		ms_abi_call = renvo386CompilerMSABICall
+		runtime_platform_intrinsic = renvoX86CompilerRuntimePlatformIntrinsic
+		store_incoming_call_word = renvo386CompilerStoreIncomingCallWord
+		call_with_word_count = renvo386CompilerCallWithWordCount
+		unsigned_divide_primary_tertiary = renvo386CompilerUnsignedDividePrimaryTertiary
+		ieee_conversion_primary = renvo386CompilerIEEEConversionPrimary
+		ieee_arithmetic_primary_tertiary = renvo386CompilerIEEEArithmeticPrimaryTertiary
+		ieee_compare_primary_tertiary = renvo386CompilerIEEEComparePrimaryTertiary
+		ieee_compare_stack = renvo386CompilerIEEECompareStack
+		ieee_negate_primary = renvo386CompilerIEEENegatePrimary
+		global_init_frame_start = renvo386CompilerGlobalInitFrameStart
+		global_init_frame_end = renvo386CompilerGlobalInitFrameEnd
+		ieee_binary_stack = renvo386CompilerIEEEBinaryStack
+		ieee_convert_float_stack = renvo386CompilerIEEEConvertFloatStack
+		ieee_int_to_float_stack = renvo386CompilerIEEEIntToFloatStack
+		ieee_float_to_int_stack = renvo386CompilerIEEEFloatToIntStack
+		ieee_negate_stack = renvo386CompilerIEEENegateStack
+		patch = renvo386CompilerPatch
+		mul_primary_tertiary = renvo386CompilerMulPrimaryTertiary
+		primary_imm64 = renvo386CompilerPrimaryImm64
+		primary_imm = renvo386CompilerPrimaryImm
+		syscall = renvo386CompilerSyscall
+		push_stack_word = renvo386CompilerPushStackWord
+		jcmp_stack_stack = renvo386CompilerJcmpStackStack
+		jcmp_stack_imm = renvo386CompilerJcmpStackImm
+		secondary_imm = renvo386CompilerSecondaryImm
+		primary_data_addr = renvo386CompilerPrimaryDataAddr
+		primary_bss_addr = renvo386CompilerPrimaryBssAddr
+		load_primary_bss = renvo386CompilerLoadPrimaryBss
+		store_primary_bss = renvo386CompilerStorePrimaryBss
+		pop_call_word0 = renvo386CompilerPopCallWord0
+		pop_call_word1 = renvo386CompilerPopCallWord1
+		add_secondary_imm = renvo386CompilerAddSecondaryImm
+		load_qword_primary_index_tertiary_disp = renvo386CompilerLoadQwordPrimaryIndexTertiaryDisp
+		load_primary_mem_secondary_disp = renvo386CompilerLoadPrimaryMemSecondaryDisp
+		load_primary_mem_secondary_disp_size = renvo386CompilerLoadPrimaryMemSecondaryDispSize
+		load_primary_index_tertiary_size = renvo386CompilerLoadPrimaryIndexTertiarySize
+		store_primary_mem_secondary_disp = renvo386CompilerStorePrimaryMemSecondaryDisp
+		store_primary_mem_secondary_disp_size = renvo386CompilerStorePrimaryMemSecondaryDispSize
+		normalize_primary_for_kind = renvo386CompilerNormalizePrimaryForKind
+		cmp_primary_imm8 = renvo386CompilerCmpPrimaryImm8
+		cmp_primary_imm8_discard = renvo386CompilerCmpPrimaryImm8Discard
+		shl_tertiary_imm = renvo386CompilerShlTertiaryImm
+		shl_primary_imm = renvo386CompilerShlPrimaryImm
+		sar_primary_imm = renvo386CompilerSarPrimaryImm
+		div_left_tertiary_right_primary = renvo386CompilerDivLeftTertiaryRightPrimary
+		cmp_tertiary_primary_set = renvo386CompilerCmpTertiaryPrimarySet
+		store_primary_mem_secondary_tertiary_size = renvo386CompilerStorePrimaryMemSecondaryTertiarySize
+		cmp_tertiary_primary_jump = renvo386CompilerCmpTertiaryPrimaryJump
+		push_imm = renvo386CompilerPushImm
+		store_primary_stack = renvo386CompilerStorePrimaryStack
+		store_secondary_stack = renvo386CompilerStoreSecondaryStack
+		load_primary_stack = renvo386CompilerLoadPrimaryStack
+		inc_stack = renvo386CompilerIncStack
+		dec_stack = renvo386CompilerDecStack
+		address_primary_stack = renvo386CompilerAddressPrimaryStack
+		address_call_word0_stack = renvo386CompilerAddressCallWord0Stack
+		address_call_word1_stack = renvo386CompilerAddressCallWord1Stack
+		load_secondary_stack = renvo386CompilerLoadSecondaryStack
+		load_tertiary_stack = renvo386CompilerLoadTertiaryStack
+		store_slice_stack = renvo386CompilerStoreSliceStack
+		mul_tertiary_imm = renvo386CompilerMulTertiaryImm
+		call_label = renvo386CompilerCallLabel
+		jmp_label = renvo386CompilerJmpLabel
+		jz_label = renvo386CompilerJzLabel
+		jnz_label = renvo386CompilerJnzLabel
+		store_byte_mem_secondary_tertiary = renvo386CompilerStoreByteMemSecondaryTertiary
+		inc_tertiary = renvo386CompilerIncTertiary
+		inc_primary = renvo386CompilerIncPrimary
+		ret = renvo386CompilerRet
+		leave = renvo386CompilerLeave
+		copy_primary_to_call_word0 = renvo386CompilerCopyPrimaryToCallWord0
+		copy_secondary_to_primary = renvo386CompilerCopySecondaryToPrimary
+		copy_primary_to_call_word1 = renvo386CompilerCopyPrimaryToCallWord1
+		add_secondary_tertiary = renvo386CompilerAddSecondaryTertiary
+		load_byte_primary_index_tertiary = renvo386CompilerLoadBytePrimaryIndexTertiary
+		store_primary_mem_secondary_tertiary8 = renvo386CompilerStorePrimaryMemSecondaryTertiary8
+		inc_mem_secondary = renvo386CompilerIncMemSecondary
+		dec_mem_secondary = renvo386CompilerDecMemSecondary
+		bool_not_primary = renvo386CompilerBoolNotPrimary
+		bitwise_not_primary = renvo386CompilerBitwiseNotPrimary
+		add_primary_tertiary = renvo386CompilerAddPrimaryTertiary
+		sub_primary_tertiary = renvo386CompilerSubPrimaryTertiary
+		pop_primary = renvo386CompilerPopPrimary
+		pop_secondary = renvo386CompilerPopSecondary
+		pop_tertiary = renvo386CompilerPopTertiary
+		copy_primary_to_secondary = renvo386CompilerCopyPrimaryToSecondary
+		copy_primary_to_tertiary = renvo386CompilerCopyPrimaryToTertiary
+		copy_secondary_to_tertiary = renvo386CompilerCopySecondaryToTertiary
+		copy_tertiary_to_primary = renvo386CompilerCopyTertiaryToPrimary
+		push_primary = renvo386CompilerPushPrimary
+		push_secondary = renvo386CompilerPushSecondary
+		push_tertiary = renvo386CompilerPushTertiary
+	}
+}
+
+go compiler {
+	func renvo386CompilerCopyPrimaryToSecondary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386RewritePrimaryLoad(a, 2, false) {
+				return
+			}
+			renvoAsmEmit16(a, 0xc289)
+			return
+		}
+		renvoAsmEmit16(a, 0x5a50)
+	}
+
+	func renvo386CompilerCopyPrimaryToTertiary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386RewritePrimaryLoad(a, 1, false) {
+				return
+			}
+			renvoAsmEmit16(a, 0xc189)
+			return
+		}
+		renvoAsmEmit16(a, 0x5950)
+	}
+
+	func renvo386CompilerCopySecondaryToTertiary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			renvoAsmEmit16(a, 0xd189)
+			return
+		}
+		renvoAsmEmit16(a, 0x5952)
+	}
+
+	func renvo386CompilerCopyTertiaryToPrimary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			renvoAsmEmit16(a, 0xc889)
+			return
+		}
+		renvoAsmPushTertiary(a)
+		renvoAsmPopPrimary(a)
+	}
+
+	func renvo386CompilerPushPrimary(a *renvoAsm) {
+		load := a.lastPrimaryLoad
+		fold := renvoFixedTarget == 0 && a.c.code16 && load > 0 && load/8 == len(a.code)
+		renvoAsmEmit8(a, 0x50)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			a.lastPrimaryStoreEnd = -(len(a.code)*32 + 2)
+		}
+		if fold {
+			a.lastPrimaryLoad = -load
+		}
+	}
+
+	func renvo386CompilerPushSecondary(a *renvoAsm) {
+		renvoAsmEmit8(a, 0x52)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			a.lastPrimaryStoreEnd = -(len(a.code)*32 + 4)
+		}
+	}
+
+	func renvo386CompilerPushTertiary(a *renvoAsm) {
+		renvoAsmEmit8(a, 0x51)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			a.lastPrimaryStoreEnd = -(len(a.code)*32 + 3)
+		}
+	}
+
+	func renvo386CompilerPopPrimary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386CancelAdjacentPush(a, 0x50) {
+				return
+			}
+			if renvo386RewritePrimaryLoad(a, 0, true) {
+				return
+			}
+		}
+		renvoAsmEmit8(a, 0x58)
+	}
+	func renvo386CompilerPopSecondary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386CancelAdjacentPush(a, 0x52) {
+				return
+			}
+			if renvo386RewritePrimaryLoad(a, 2, true) {
+				return
+			}
+			if renvo386CancelAdjacentPush(a, 0x50) {
+				renvoAsmEmit16(a, 0xc289)
+				return
+			}
+		}
+		renvoAsmEmit8(a, 0x5a)
+	}
+	func renvo386CompilerPopTertiary(a *renvoAsm) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386CancelAdjacentPush(a, 0x51) {
+				return
+			}
+			if renvo386RewritePrimaryLoad(a, 1, true) {
+				return
+			}
+			if renvo386CancelAdjacentPush(a, 0x50) {
+				renvoAsmEmit16(a, 0xc189)
+				return
+			}
+		}
+		renvoAsmEmit8(a, 0x59)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStoreByteMemSecondaryTertiary(a *renvoAsm) {
+		renvoAsmEmit24(a, 0x0a0488)
+	}
+
+	func renvo386CompilerIncTertiary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xc1ff)
+	}
+
+	func renvo386CompilerIncPrimary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xc0ff)
+	}
+
+	func renvo386CompilerRet(a *renvoAsm) {
+		renvoAsmEmit8(a, 0xc3)
+	}
+
+	func renvo386CompilerLeave(a *renvoAsm) {
+		renvoAsmEmit8(a, 0xc9)
+	}
+
+	func renvo386CompilerCopyPrimaryToCallWord0(a *renvoAsm) {
+		renvo386AsmMovRdiRax(a)
+	}
+
+	func renvo386CompilerCopySecondaryToPrimary(a *renvoAsm) {
+		renvo386AsmMovRaxRdx(a)
+	}
+
+	func renvo386CompilerCopyPrimaryToCallWord1(a *renvoAsm) {
+		renvo386AsmMovRsiRax(a)
+	}
+
+	func renvo386CompilerAddSecondaryTertiary(a *renvoAsm) {
+		renvo386AsmAddRdxRcx(a)
+	}
+
+	func renvo386CompilerLoadBytePrimaryIndexTertiary(a *renvoAsm) {
+		renvo386AsmLoadByteRaxIndexRcx(a)
+	}
+
+	func renvo386CompilerStorePrimaryMemSecondaryTertiary8(a *renvoAsm) {
+		renvo386AsmStoreRaxMemRdxRcx8(a)
+	}
+
+	func renvo386CompilerIncMemSecondary(a *renvoAsm) {
+		renvo386AsmIncMemRdx(a)
+	}
+
+	func renvo386CompilerDecMemSecondary(a *renvoAsm) {
+		renvo386AsmDecMemRdx(a)
+	}
+
+	func renvo386CompilerBoolNotPrimary(a *renvoAsm) {
+		renvo386AsmBoolNotRax(a)
+	}
+
+	func renvo386CompilerBitwiseNotPrimary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xd0f7)
+	}
+
+	func renvo386CompilerAddPrimaryTertiary(a *renvoAsm) {
+		renvo386AsmAddRaxRcx(a)
+	}
+
+	func renvo386CompilerSubPrimaryTertiary(a *renvoAsm) {
+		renvo386AsmSubRaxRcx(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		if renvoAsmImmFits8Signed(imm) {
+			renvoAsmEmit2(a, 0x6a, imm)
+			return
+		}
+		if imm >= -2147483647 && imm <= 2147483647 {
+			renvoAsmEmit8(a, 0x68)
+			renvoAsmEmit32(a, imm)
+			return
+		}
+		renvoAsmPrimaryImm(a, imm)
+		renvoAsmPushPrimary(a)
+	}
+
+	func renvo386CompilerStorePrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8948, 0x45, 0x85)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			a.lastPrimaryStoreEnd = len(a.code)
+			a.lastPrimaryStoreOff = offset
+		}
+	}
+
+	func renvo386CompilerStoreSecondaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8948, 0x55, 0x95)
+	}
+
+	func renvo386CompilerLoadPrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			n := len(a.code)
+			if a.lastPrimaryStoreEnd == n && a.lastPrimaryStoreOff == offset {
+				return
+			}
+		}
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x45, 0x85)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			distance := 2
+			if offset < 0 || offset > 128 {
+				distance = 5
+			}
+			a.lastPrimaryLoad = len(a.code)*8 + distance
+		}
+	}
+
+	func renvo386CompilerIncStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoAsmLoadPrimaryStack(a, offset)
+		renvoAsmIncPrimary(a)
+		renvoAsmStorePrimaryStack(a, offset)
+	}
+
+	func renvo386CompilerDecStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvoAsmLoadPrimaryStack(a, offset)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmStorePrimaryStack(a, offset)
+	}
+
+	func renvo386CompilerAddressPrimaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			distance := 2
+			if offset < 0 || offset > 128 {
+				distance = 5
+			}
+			a.lastPrimaryLoad = len(a.code)*8 + distance
+		}
+	}
+
+	func renvo386CompilerAddressCallWord0Stack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x7d, 0xbd)
+	}
+
+	func renvo386CompilerAddressCallWord1Stack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x75, 0xb5)
+	}
+
+	func renvo386CompilerLoadSecondaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x55, 0x95)
+	}
+
+	func renvo386CompilerLoadTertiaryStack(a *renvoAsm, offset int) {
+		renvoNonNil(a)
+		renvo386AsmStackMem(a, offset, 0x8b48, 0x4d, 0x8d)
+	}
+
+	func renvo386CompilerStoreSliceStack(a *renvoAsm, offset int) {
+		renvoAsmStorePrimarySecondaryStack(a, offset, offset-8)
+		renvo386AsmStackMem(a, offset-16, 0x8948, 0x4d, 0x8d)
+	}
+
+	func renvo386CompilerMulTertiaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		if imm == 1 {
+			return
+		}
+		if renvoAsmImmFits8Signed(imm) {
+			renvoAsmEmit3(a, 0x6b, 0xc9, imm)
+			return
+		}
+		renvoAsmEmit16(a, 0xc969)
+		renvoAsmEmit32(a, imm)
+	}
+
+	func renvo386CompilerCallLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoAsmEmit8(a, 0xe8)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+
+	func renvo386CompilerJmpLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoAsmEmit8(a, 0xe9)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+
+	func renvo386CompilerJzLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoAsmEmit16(a, 0x840f)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+
+	func renvo386CompilerJnzLabel(a *renvoAsm, label int) {
+		renvoNonNil(a)
+		renvoAsmEmit16(a, 0x850f)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSecondaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmMovRdxImm(a, imm)
+	}
+
+	func renvo386CompilerPrimaryDataAddr(a *renvoAsm, dataOff int) {
+		renvoNonNil(a)
+		renvo386AsmMovRaxAddr(a, dataOff, 0)
+	}
+
+	func renvo386CompilerPrimaryBssAddr(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvo386AsmMovRaxAddr(a, bssOff, renvoAbsBssReloc)
+	}
+
+	func renvo386CompilerLoadPrimaryBss(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvo386AsmLoadRaxBss(a, bssOff)
+	}
+
+	func renvo386CompilerStorePrimaryBss(a *renvoAsm, bssOff int) {
+		renvoNonNil(a)
+		renvo386AsmStoreRaxBss(a, bssOff)
+	}
+
+	func renvo386CompilerPopCallWord0(a *renvoAsm) {
+		renvoNonNil(a)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386CancelAdjacentPush(a, 0x57) {
+				return
+			}
+		}
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386RewritePrimaryLoad(a, 7, true) {
+				return
+			}
+			if renvo386CancelAdjacentPush(a, 0x50) {
+				renvoAsmEmit16(a, 0xc389)
+				return
+			}
+		}
+		renvo386AsmPopRdi(a)
+	}
+
+	func renvo386CompilerPopCallWord1(a *renvoAsm) {
+		renvoNonNil(a)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvo386CancelAdjacentPush(a, 0x56) {
+				return
+			}
+			if renvo386RewritePrimaryLoad(a, 6, true) {
+				return
+			}
+			if renvo386CancelAdjacentPush(a, 0x50) {
+				renvoAsmEmit16(a, 0xc689)
+				return
+			}
+		}
+		renvoAsmEmit8(a, 0x5e)
+	}
+
+	func renvo386CompilerAddSecondaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmAddRdxImm(a, imm)
+	}
+
+	func renvo386CompilerLoadQwordPrimaryIndexTertiaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvo386AsmLoadQwordRaxIndexRcxDisp(a, disp)
+	}
+
+	func renvo386CompilerLoadPrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvo386AsmLoadRaxMemRdxDisp(a, disp)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			distance := 1
+			if disp != 0 {
+				distance = 2
+				if !renvoAsmImmFits8Signed(disp) {
+					distance = 5
+				}
+			}
+			a.lastPrimaryLoad = len(a.code)*8 + distance
+		}
+	}
+
+	func renvo386CompilerLoadPrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+		renvoNonNil(a)
+		renvo386AsmLoadRaxMemRdxDispSize(a, disp, size)
+		if renvoFixedTarget == 0 && a.c.code16 {
+			distance := 1
+			if disp != 0 {
+				distance = 2
+				if !renvoAsmImmFits8Signed(disp) {
+					distance = 5
+				}
+			}
+			a.lastPrimaryLoad = len(a.code)*8 + distance
+		}
+	}
+
+	func renvo386CompilerLoadPrimaryIndexTertiarySize(a *renvoAsm, size int) {
+		renvoNonNil(a)
+		renvo386AsmLoadRaxIndexRcxSize(a, size)
+		if renvoFixedTarget == 0 && a.c.code16 && (size == 1 || size == 2) {
+			a.lastPrimaryLoad = len(a.code)*8 + 2
+		}
+	}
+
+	func renvo386CompilerStorePrimaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvoNonNil(a)
+		renvo386AsmStoreRaxMemRdxDisp(a, disp)
+	}
+
+	func renvo386CompilerStorePrimaryMemSecondaryDispSize(a *renvoAsm, disp int, size int) {
+		renvoNonNil(a)
+		renvo386AsmStoreRaxMemRdxDispSize(a, disp, size)
+	}
+
+	func renvo386CompilerNormalizePrimaryForKind(a *renvoAsm, kind int) {
+		renvoNonNil(a)
+		if renvoFixedTarget == 0 && a.c.code16 && renvo386FusePrimaryLoadNormalization(a, kind) {
+			return
+		}
+		if renvoFixedTarget == 0 && a.c.code16 && renvo386PrimaryNormalizationRepeated(a, kind) {
+			return
+		}
+		renvo386AsmNormalizeRaxForKind(a, kind)
+	}
+
+	func renvo386CompilerCmpPrimaryImm8(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmCmpRaxImm8(a, imm)
+	}
+
+	func renvo386CompilerCmpPrimaryImm8Discard(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		if renvoFixedTarget == 0 && a.c.code16 && renvo386RewritePrimaryLoadCompare(a, imm) {
+			return
+		}
+		renvoAsmCmpPrimaryImm8(a, imm)
+	}
+
+	func renvo386CompilerShlTertiaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmShlRcxImm(a, imm)
+	}
+
+	func renvo386CompilerShlPrimaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmShlRaxImm(a, imm)
+	}
+
+	func renvo386CompilerSarPrimaryImm(a *renvoAsm, imm int) {
+		renvoNonNil(a)
+		renvo386AsmSarRaxImm(a, imm)
+	}
+
+	func renvo386CompilerDivLeftTertiaryRightPrimary(a *renvoAsm, mod bool) {
+		renvoNonNil(a)
+		renvo386AsmDivLeftRcxRightRax(a, mod)
+	}
+
+	func renvo386CompilerCmpTertiaryPrimarySet(a *renvoAsm, setcc int) {
+		renvoNonNil(a)
+		renvo386AsmCmpRcxRaxSet(a, setcc)
+	}
+
+	func renvo386CompilerStorePrimaryMemSecondaryTertiarySize(a *renvoAsm, size int) {
+		renvoNonNil(a)
+		if size == 1 {
+			renvoAsmStoreByteMemSecondaryTertiary(a)
+			return
+		}
+		if size == 2 {
+			renvoAsmEmit32(a, 0x4a048966)
+			return
+		}
+		if size == 4 {
+			renvoAsmEmit24(a, 0x8a0489)
+			return
+		}
+		renvoAsmStorePrimaryMemSecondaryTertiary8(a)
+	}
+
+	func renvo386CompilerCmpTertiaryPrimaryJump(a *renvoAsm, setcc int, label int) {
+		renvoNonNil(a)
+		renvoAsmEmit16(a, 0xc139)
+		renvo386AsmJccLabel(a, setcc-0x10, label)
+	}
+}
+
+# Immediate, frame-branch, and runtime-boundary emission.
+go compiler {
+	func renvo386CompilerPrimaryImm(a *renvoAsm, imm int) {
+		renvo386AsmMovRaxImm(a, imm)
+	}
+
+	func renvo386CompilerSyscall(a *renvoAsm) {
+		renvo386AsmSyscall(a)
+	}
+
+	func renvo386CompilerPushStackWord(a *renvoAsm, offset int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// The 386 call adapter recognizes contiguous load/push argument words and
+			// rewrites the whole sequence into direct frame-to-register loads.  Emit
+			// the analyzable form for code16, where avoiding both PUSH and POP also
+			// removes two operand-size prefixes per argument.
+			renvoAsmPushStack(a, offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xff)
+		if offset >= 0 && offset <= 128 {
+			renvoAsmEmit8(a, 0x75)
+			renvoAsmEmit8(a, -offset)
+			return
+		}
+		renvoAsmEmit8(a, 0xb5)
+		renvoAsmEmit32(a, -offset)
+		return
+	}
+
+	func renvo386CompilerJcmpStackStack(a *renvoAsm, left int, right int, label int, setcc int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			// Compare the right frame value in EAX directly with the left frame
+			// value.  The stack-machine sequence used on the other compact targets
+			// adds a push, pop, and (for code16) two operand-size overrides without
+			// changing either operand.
+			renvoAsmLoadPrimaryStack(a, right)
+			renvo386AsmStackMem(a, left, 0x39, 0x45, 0x85)
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, left)
+		renvoAsmLoadPrimaryStack(a, right)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+
+	func renvo386CompilerJcmpStackImm(a *renvoAsm, offset int, value int, label int, setcc int) {
+		if renvoFixedTarget == 0 && a.c.code16 {
+			if renvoAsmImmFits8Signed(value) {
+				renvo386AsmStackMem(a, offset, 0x83, 0x7d, 0xbd)
+				renvoAsmEmit8(a, value)
+			} else {
+				renvo386AsmStackMem(a, offset, 0x81, 0x7d, 0xbd)
+				renvoAsmEmit32(a, value)
+			}
+			renvo386AsmJccLabel(a, setcc-0x10, label)
+			return
+		}
+		renvoAsmPushStack(a, offset)
+		renvoAsmPrimaryImm(a, value)
+		renvoAsmPopTertiary(a)
+		renvoAsmCmpTertiaryPrimaryJump(a, setcc, label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPrimaryImm64(a *renvoAsm, imm int, high int) {
+		// This operation materializes one native scalar. Paired-word lowering
+		// handles the high half separately on this 32-bit backend.
+		renvo386AsmMovRaxImm(a, imm)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPatch(a *renvoAsm) {
+		rtgX8632PatchRelocations(a)
+		renvoAsmSetDataOffsets(a)
+		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 ||
+			renvoFixedTarget == 0 && targetIsKernelModule(a.c) {
+			return
+		}
+		renvoAsmPatchDataDisplacements32(a)
+	}
+
+	func renvo386CompilerMulPrimaryTertiary(a *renvoAsm) {
+		renvoAsmEmit24(a, 0xc1af0f)
+	}
+}
+
+go compiler {
+	func renvo386FusePrimaryLoadNormalization(a *renvoAsm, kind int) bool {
+		load := a.lastPrimaryLoad
+		end := load >> 3
+		modrm := end - (load & 7)
+		if load <= 0 || end != len(a.code) || modrm < 2 || a.code[modrm-2] != 0x0f {
+			return false
+		}
+		opcode := a.code[modrm-1]
+		if kind == renvoTypeByte || kind == renvoTypeBool {
+			return opcode == 0xb6
+		}
+		if kind == renvoTypeInt8 && opcode == 0xb6 {
+			a.code[modrm-1] = 0xbe
+			return true
+		}
+		if kind == renvoTypeInt16 {
+			return opcode == 0xbf
+		}
+		if kind == renvoTypeUint16 && opcode == 0xbf {
+			a.code[modrm-1] = 0xb7
+			return true
+		}
+		return false
+	}
+
+	func renvo386PrimaryNormalizationRepeated(a *renvoAsm, kind int) bool {
+		opcode := 0
+		size := 0
+		if kind == renvoTypeByte || kind == renvoTypeBool {
+			opcode, size = 0xc0b60f, 3
+		} else if kind == renvoTypeInt8 {
+			opcode, size = 0xc0be0f, 3
+		} else if kind == renvoTypeInt16 {
+			opcode, size = 0x98, 1
+		} else if kind == renvoTypeUint16 {
+			opcode, size = 0xc0b70f, 3
+		} else {
+			return false
+		}
+		if len(a.code) < size {
+			return false
+		}
+		for i := 0; i < len(a.labelPos); i++ {
+			if int(a.labelPos[i]) == len(a.code) {
+				return false
+			}
+		}
+		start := len(a.code) - size
+		for i := 0; i < size; i++ {
+			if a.code[start+i] != byte(opcode>>(8*i)) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerGlobalInitFrameStart(g *renvoLinearGen) int {
+		a := &g.asm
+		framePatch := len(a.code)
+		renvoAsmEmit32(a, 0x000000c8)
+		return framePatch
+	}
+
+	func renvo386CompilerGlobalInitFrameEnd(g *renvoLinearGen, framePatch int) {
+		renvoAsmLeave(&g.asm)
+		if framePatch < 0 {
+			return
+		}
+		frame := renvoAlignValue(g.stackPeak, 16)
+		if frame > 65520 {
+			frame = 65520
+		}
+		g.asm.code[framePatch+1] = byte(frame & 255)
+		g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+	}
+
+	func renvo386CompilerIEEEBinaryStack(g *renvoLinearGen, dest int, left int, right int, op byte, size int) bool {
+		return renvo386AsmX87BinaryStack(&g.asm, dest, left, right, op, size)
+	}
+
+	func renvo386CompilerIEEEConvertFloatStack(g *renvoLinearGen, dest int, source int, sourceSize int, destSize int) {
+		renvo386AsmX87ConvertFloatStack(&g.asm, dest, source, sourceSize, destSize)
+	}
+
+	func renvo386CompilerIEEEIntToFloatStack(g *renvoLinearGen, offset int, intSize int, floatSize int, signed bool) {
+		renvo386AsmX87IntToFloatStack(&g.asm, offset, intSize, floatSize, signed)
+	}
+
+	func renvo386CompilerIEEEFloatToIntStack(g *renvoLinearGen, dest int, source int, floatSize int, intSize int, signed bool) {
+		renvo386AsmX87FloatToIntStack(&g.asm, dest, source, floatSize, intSize, signed)
+	}
+
+	func renvo386CompilerIEEENegateStack(g *renvoLinearGen, offset int, size int) {
+		renvo386AsmX87NegateStack(&g.asm, offset, size)
+		return
+	}
+}
+
+go compiler {
+	func renvo386CompilerIEEECompareStack(g *renvoLinearGen, left int, right int, kind int, c0 byte, c1 byte) bool {
+		size := 8
+		if kind == renvoTypeFloat32 {
+			size = 4
+		}
+		renvoAsmEmitText(&g.asm, "\x31\xc0\x31\xd2")
+		renvo386AsmX87CompareStack(&g.asm, left, right, size)
+		renvo386IEEECompareFlagsResult(&g.asm, c0, c1)
+		return true
+	}
+
+	func renvo386CompilerIEEENegatePrimary(g *renvoLinearGen, kind int) bool {
+		if kind == renvoTypeFloat32 {
+			return renvoEmit32BitIEEEFloatNegatePrimary(g)
+		}
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerIEEEConversionPrimary(g *renvoLinearGen, sourceKind int, destKind int) bool {
+		a := &g.asm
+		temp := renvoAddUnnamedLocal(g, renvoTypeInt64)
+		renvoAsmStorePrimaryStack(a, temp)
+		if !renvoTypeKindIsFloat(sourceKind) && destKind == renvoTypeFloat32 {
+			renvo32IEEEIntToFloatStack(g, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(sourceKind))
+		} else if sourceKind == renvoTypeFloat32 && !renvoTypeKindIsFloat(destKind) {
+			renvo32IEEEFloatToIntStack(g, temp, temp, 4, 4, !renvoTypeKindIsUnsignedInteger(destKind))
+		} else {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, temp)
+		return true
+	}
+
+	func renvo386CompilerIEEEArithmeticPrimaryTertiary(g *renvoLinearGen, opChar byte, kind int) bool {
+		a := &g.asm
+		if kind != renvoTypeFloat32 {
+			return false
+		}
+		left := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		right := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeFloat32)
+		renvoAsmStorePrimaryStack(a, right)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmStorePrimaryStack(a, left)
+		if !renvo32IEEEBinaryStack(g, result, left, right, opChar, 4) {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(a, result)
+		return true
+	}
+
+	func renvo386CompilerIEEEComparePrimaryTertiary(g *renvoLinearGen, c0 byte, c1 byte, kind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386IEEECompareFlagsResult(a *renvoAsm, c0 byte, c1 byte) {
+		first := 0x97 // seta: greater-than, unordered is false
+		second := 0
+		combine := byte(0)
+		if c0 == '=' {
+			first, second, combine = 0x94, 0x9b, 0x20 // equal and ordered
+		} else if c0 == '!' {
+			first, second, combine = 0x95, 0x9a, 0x08 // unequal or unordered
+		} else if c0 == '<' {
+			first, second, combine = 0x92, 0x9b, 0x20 // below and ordered
+			if c1 == '=' {
+				first = 0x96 // below-or-equal and ordered
+			}
+		} else if c0 == '>' && c1 == '=' {
+			first = 0x93 // above-or-equal; unordered is below
+		}
+		renvoAsmEmit3(a, 0x0f, first, 0xc0)
+		if second != 0 {
+			renvoAsmEmit3(a, 0x0f, second, 0xc2)
+			renvoAsmEmit2(a, int(combine), 0xd0)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedDividePrimaryTertiary(g *renvoLinearGen, mod bool) bool {
+		renvoAsmEmitText(&g.asm, "\x53\x89\xc3\x89\xc8\x31\xd2\xf7\xf3")
+		if mod {
+			renvoAsmEmit16(&g.asm, 0xd089)
+		}
+		renvoAsmEmit8(&g.asm, 0x5b)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerStoreIncomingCallWord(g *renvoLinearGen, word int, offset int) {
+		renvo386StoreParamWord(g, word, offset)
+	}
+
+	func renvo386CompilerCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerIRQStackCall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+
+	func renvo386CompilerMSABICall(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, helper *renvoFuncInfo) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerInstallThreadState(g *renvoLinearGen) {
+		return
+	}
+
+	func renvo386CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
+			// Object wrappers reserve R15 for the word-index helper. Until object
+			// output has a TLS runtime contract, retain unwind state in this object's
+			// private BSS instead of clobbering that ABI register.
+			renvoEnsurePanicState(g)
+			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvo386CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+		renvoAsmPopSecondary(&g.asm)
+	}
+
+	func renvo386CompilerRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
+		if count == 5 {
+			renvoAsmPrimaryImm(&g.asm, 0)
+		}
+		return true
+	}
+
+	func renvo386CompilerUncheckedNonNilPrimary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, false))
+	}
+
+	func renvo386CompilerUncheckedNonNilSecondary(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNonNilCheckHelper(g, true))
+	}
+}
+
+go compiler {
+	func renvo386CancelAdjacentPush(a *renvoAsm, pushOpcode int) bool {
+		register := pushOpcode - 0x50
+		if register < 0 || register > 7 || a.lastPrimaryStoreEnd != -(len(a.code)*32+register+2) ||
+			len(a.code) == 0 || int(a.code[len(a.code)-1]) != pushOpcode {
+			return false
+		}
+		at := len(a.code) - 1
+		renvoTruncBytes(&a.code, at)
+		a.lastPrimaryStoreEnd = -1
+		if pushOpcode == 0x50 && a.lastPrimaryLoad < 0 {
+			a.lastPrimaryLoad = -a.lastPrimaryLoad
+		}
+		return true
+	}
+}
+
+go compiler {
+}
+
+go compiler {
+	func renvo386CompilerPrimaryTertiaryOperation(g *renvoLinearGen, tok int) bool {
+		leftShift := renvoTokStarts2(g.prog, tok, '<', '<')
+		rightShift := renvoTokStarts2(g.prog, tok, '>', '>')
+		if leftShift || rightShift {
+			a := &g.asm
+			shift := renvoAsmNewLabel(a)
+			oversized := renvoAsmNewLabel(a)
+			done := renvoAsmNewLabel(a)
+			renvoAsmCmpPrimaryImm8(a, 32)
+			renvo386AsmJccLabel(a, 0x82, shift)
+			renvoAsmMarkLabel(a, oversized)
+			if rightShift {
+				renvoAsmCopyTertiaryToPrimary(a)
+				renvoAsmSarPrimaryImm(a, 31)
+			} else {
+				renvoAsmPrimaryImm(a, 0)
+			}
+			renvoAsmJmpLabel(a, done)
+			renvoAsmMarkLabel(a, shift)
+			ok := false
+			ok = renvo386EmitRaxRcxOp(g, tok, false)
+			renvoAsmMarkLabel(a, done)
+			return ok
+		}
+		return renvo386EmitRaxRcxOp(g, tok, false)
+	}
+
+	func renvo386CompilerUnsignedShiftRight(g *renvoLinearGen, tok int) bool {
+		return renvoEmitBounded386UnsignedRightShift(g, tok)
+	}
+
+	func renvo386CompilerSignedDivisionGuard(g *renvoLinearGen, mod bool) int {
+		return renvoEmitSignedDivisionOverflowGuard(g, mod)
+	}
+
+	func renvo386CompilerUncheckedSignedDivision(g *renvoLinearGen, mod bool) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureSignedDivisionHelper(g, mod))
+	}
+
+	func renvo386CompilerUncheckedBoundsCheck(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+	}
+
+	func renvo386CompilerBoundsSuccessBranch(g *renvoLinearGen, done int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureBoundsCheckHelper(g))
+		renvoAsmJnzPrimary(&g.asm, done)
+	}
+
+	func renvo386CompilerBoundsCheckHelper(g *renvoLinearGen) {
+		if !g.c.code16 {
+			a := &g.asm
+			invalid := renvoAsmNewLabel(a)
+			// Preserve the original index in secondary, as the caller expects.
+			renvoAsmEmitText(a, "\x89\xc2\x39\xc8") // mov edx, eax; cmp eax, ecx
+			renvo386AsmJccLabel(a, 0x83, invalid)
+			renvoAsmCopySecondaryToTertiary(a)
+			renvoAsmPrimaryImm(a, 1)
+			renvoAsmRet(a)
+			renvoAsmMarkLabel(a, invalid)
+			if !g.meta.panicEnabled {
+				renvoEmitUncaughtFaultTransfer(g, false)
+				return
+			}
+			renvoAsmCopySecondaryToTertiary(a)
+			renvoAsmPrimaryImm(a, 0)
+			renvoAsmRet(a)
+			return
+		}
+		invalid := renvoAsmNewLabel(&g.asm)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPushTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+		renvoAsmJzPrimary(&g.asm, invalid)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+		if !g.meta.panicEnabled {
+			valid := renvoAsmNewLabel(&g.asm)
+			renvoAsmJnzPrimary(&g.asm, valid)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			renvoAsmMarkLabel(&g.asm, valid)
+			renvoAsmRet(&g.asm)
+			renvoAsmMarkLabel(&g.asm, invalid)
+			renvoAsmPopTertiary(&g.asm)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmRet(&g.asm)
+	}
+
+	func renvo386CompilerNonNilCheckHelper(g *renvoLinearGen, secondary bool) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvoEmitBounded386UnsignedRightShift(g *renvoLinearGen, tok int) bool {
+		a := &g.asm
+		shift := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		renvoAsmCmpPrimaryImm8(a, 32)
+		renvo386AsmJccLabel(a, 0x82, shift)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmJmpLabel(a, done)
+		renvoAsmMarkLabel(a, shift)
+		if !renvo386EmitRaxRcxOp(g, tok, true) {
+			return false
+		}
+		renvoAsmMarkLabel(a, done)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
+		renvo386EmitCopyBytes(g, srcPtr, destPtr, byteCount)
+	}
+
+	func renvo386CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
+		return renvoFixedTarget == 0 && size >= 64
+	}
+
+	func renvo386CompilerPreferBulkIndirectCopy(g *renvoLinearGen, size int) bool {
+		return size >= 64
+	}
+
+	// Arena storage starts zeroed. Only ranges retired by an explicit rewind can
+	// contain old values. Avoid touching large allocations in the virgin interval;
+	// reused ranges and non-arena addresses still take the ordinary zeroing path.
+	func renvo386CompilerFreshArenaZeroReturn(g *renvoLinearGen) {
+		// Object writers require relocations to name storage inside a section;
+		// the executable fast path also references the arena's one-past end.
+		// Keep ordinary zeroing for objects, including prepared object targets.
+		if g.c.objectFile {
+			return
+		}
+		renvoStringHeapOffsets(g)
+		a := &g.asm
+		small := renvoAsmNewLabel(a)
+		reusedLabel := renvoAsmNewLabel(a)
+		highReady := renvoAsmNewLabel(a)
+		plain := renvoAsmNewLabel(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPrimaryImm(a, 256)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmPushSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmPushTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmAddPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff+renvoStringArenaSize(g))
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+24)
+		renvoAsmJzPrimary(a, highReady)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x97)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmMarkLabel(a, highReady)
+		renvoAsmCopySecondaryToPrimary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmPrimaryBssAddr(a, g.stringHeapDataOff)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmLoadPrimaryBss(a, g.stringHeapOff+16)
+		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
+		renvoAsmJnzPrimary(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmPushImm(a, 0)
+		renvoAsmPopTertiary(a)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, reusedLabel)
+		renvoAsmPopTertiary(a)
+		renvoAsmPopPrimary(a)
+		renvoAsmPopSecondary(a)
+		renvoAsmJmpLabel(a, plain)
+		renvoAsmMarkLabel(a, small)
+		renvoAsmPopPrimary(a)
+		renvoAsmMarkLabel(a, plain)
+	}
+
+	func renvo386CompilerMakeZeroHelperBody(g *renvoLinearGen) {
+		a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		loopLabel := renvoAsmNewLabel(a)
+		doneLabel := renvoAsmNewLabel(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPushPrimary(a)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmJzPrimary(a, doneLabel)
+		renvoAsmPrimaryImm(a, 0)
+		renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, 1)
+		renvoAsmAddSecondaryImm(a, 1)
+		renvoAsmCopyTertiaryToPrimary(a)
+		renvoAsmPushImm(a, 1)
+		renvoAsmPopTertiary(a)
+		renvoAsmSubPrimaryTertiary(a)
+		renvoAsmCopyPrimaryToTertiary(a)
+		renvoAsmJmpMarkLabel(a, loopLabel, doneLabel)
+		renvoAsmPopPrimary(a)
+		renvoAsmRet(a)
+	}
+
+	func renvo386CompilerOptimizedMakeZeroHelper(g *renvoLinearGen) bool {
+		if g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindows386 {
+			a := &g.asm
+			renvoEmitMakeZeroFreshArenaReturn(g)
+			// Preserve the result pointer and ABI call register while REP STOSB
+			// clears (E)CX bytes beginning at (E)AX on flat x86 targets.
+			renvoAsmEmitText(a, "\x50\x57\x50\x5f\x31\xc0\xf3\xaa\x5f\x58\xc3")
+			return true
+		}
+		return false
+	}
+
+	func renvo386CompilerMakeZero(g *renvoLinearGen) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureMakeZeroHelper(g))
+	}
+
+	func renvo386CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
+		a := &g.asm
+		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideLessStack(g *renvoLinearGen, left int, right int, signed bool) {
+		renvoNonNil(g)
+		highEqual := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionEqual)
+		renvoAsmJnzPrimary(&g.asm, highEqual)
+		if signed {
+			renvoEmitNativeCompareStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize, renvoConditionSignedLess)
+		} else {
+			renvoEmitNativeUnsignedLessStack(g, left-g.c.renvoNativeIntSize, right-g.c.renvoNativeIntSize)
+		}
+		renvoAsmJmpMarkLabel(&g.asm, done, highEqual)
+		renvoEmitNativeUnsignedLessStack(g, left, right)
+		renvoAsmMarkLabel(&g.asm, done)
+	}
+
+	func renvo386CompilerWideAddStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvo386AsmStackMem(&g.asm, right, 0x03, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x13, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideSubStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvo386AsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0x1b, 0x45, 0x85)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideShiftLeftOne(g *renvoLinearGen, value int) {
+		renvoNonNil(g)
+		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, carry)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmShlPrimaryImm(&g.asm, 1)
+		renvoAsmLoadTertiaryStack(&g.asm, carry)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShlPrimaryImm(&g.asm, 1)
+		renvoAsmStorePrimaryStack(&g.asm, value)
+	}
+
+	func renvo386CompilerWideShiftRightOne(g *renvoLinearGen, value int, signed bool) {
+		renvoNonNil(g)
+		carry := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		renvoAsmShlPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, carry)
+		renvoAsmLoadPrimaryStack(&g.asm, value)
+		renvoAsmShrPrimaryImm(&g.asm, 1)
+		renvoAsmLoadTertiaryStack(&g.asm, carry)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, value)
+		renvoAsmLoadPrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+		if signed {
+			renvoAsmSarPrimaryImm(&g.asm, 1)
+		} else {
+			renvoAsmShrPrimaryImm(&g.asm, 1)
+		}
+		renvoAsmStorePrimaryStack(&g.asm, value-g.c.renvoNativeIntSize)
+	}
+
+	func renvo386CompilerWideShiftStack(g *renvoLinearGen, dest int, left int, count int, right bool, signed bool) {
+		renvoNonNil(g)
+		renvoEmitCopyStackToStack(g, left, dest, renvoBackendValueSlotSize)
+		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
+		limit := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmStoreStackImm(&g.asm, limit, 64)
+		renvoAsmLoadPrimaryStack(&g.asm, count-g.c.renvoNativeIntSize)
+		clamp := renvoAsmNewLabel(&g.asm)
+		ready := renvoAsmNewLabel(&g.asm)
+		begin := renvoAsmNewLabel(&g.asm)
+		renvoAsmJnzPrimary(&g.asm, clamp)
+		renvoEmitNativeUnsignedLessStack(g, count, limit)
+		renvoAsmJnzPrimary(&g.asm, ready)
+		renvoAsmMarkLabel(&g.asm, clamp)
+		renvoAsmStoreStackImm(&g.asm, counter, 64)
+		renvoAsmJmpLabel(&g.asm, begin)
+		renvoAsmMarkLabel(&g.asm, ready)
+		renvoAsmCopyStackSlot(&g.asm, count, counter)
+		renvoAsmMarkLabel(&g.asm, begin)
+		done := renvoAsmNewLabel(&g.asm)
+		loop := renvoAsmNewLabel(&g.asm)
+		renvoAsmMarkLabel(&g.asm, loop)
+		renvoAsmLoadPrimaryStack(&g.asm, counter)
+		renvoAsmJzPrimary(&g.asm, done)
+		if right {
+			renvoEmitWideShiftRightOne(g, dest, signed)
+		} else {
+			renvoEmitWideShiftLeftOne(g, dest)
+		}
+		renvoAsmDecStack(&g.asm, counter)
+		renvoAsmJmpMarkLabel(&g.asm, loop, done)
+	}
+
+	func renvo386CompilerWideMultiplyStack(g *renvoLinearGen, dest int, left int, right int) {
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvo386AsmStackMem(&g.asm, right, 0xf7, 0x65, 0xa5)
+		renvoAsmStorePrimaryStack(&g.asm, dest)
+		renvoAsmEmit16(&g.asm, 0xd189)
+		renvoAsmLoadPrimaryStack(&g.asm, left-g.c.renvoNativeIntSize)
+		renvoAsmEmit8(&g.asm, 0x0f)
+		renvo386AsmStackMem(&g.asm, right, 0xaf, 0x45, 0x85)
+		renvoAsmEmit16(&g.asm, 0xc101)
+		renvoAsmLoadPrimaryStack(&g.asm, left)
+		renvoAsmEmit8(&g.asm, 0x0f)
+		renvo386AsmStackMem(&g.asm, right-g.c.renvoNativeIntSize, 0xaf, 0x45, 0x85)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, dest-g.c.renvoNativeIntSize)
+		return
+	}
+
+	func renvo386CompilerWideNegateStack(g *renvoLinearGen, value int) {
+		renvoNonNil(g)
+		zero := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		result := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoZeroLocalAtOffset(g, zero)
+		renvoEmitWideSubStack(g, result, zero, value)
+		renvoEmitCopyStackToStack(g, result, value, renvoBackendValueSlotSize)
+	}
+
+	func renvo386CompilerWideUnsignedDivideStack(g *renvoLinearGen, quotient int, remainder int, dividendValue int, divisor int) {
+		renvoNonNil(g)
+		dividend := renvoAddUnnamedLocal(g, renvoBuiltinTypeUint64)
+		renvoEmitCopyStackToStack(g, dividendValue, dividend, renvoBackendValueSlotSize)
+		renvoZeroLocalAtOffset(g, quotient)
+		renvoZeroLocalAtOffset(g, remainder)
+		counter := renvoAddUnnamedLocal(g, renvoTypeInt)
+		bit := renvoAddUnnamedLocal(g, renvoTypeInt)
+		renvoAsmStoreStackImm(&g.asm, counter, 64)
+		loop := renvoAsmNewLabel(&g.asm)
+		skipSubtract := renvoAsmNewLabel(&g.asm)
+		done := renvoAsmNewLabel(&g.asm)
+		renvoAsmMarkLabel(&g.asm, loop)
+		renvoAsmLoadPrimaryStack(&g.asm, counter)
+		renvoAsmJzPrimary(&g.asm, done)
+		renvoAsmLoadPrimaryStack(&g.asm, dividend-g.c.renvoNativeIntSize)
+		renvoAsmShrPrimaryImm(&g.asm, 31)
+		renvoAsmStorePrimaryStack(&g.asm, bit)
+		renvoEmitWideShiftLeftOne(g, remainder)
+		renvoAsmLoadPrimaryStack(&g.asm, remainder)
+		renvoAsmLoadTertiaryStack(&g.asm, bit)
+		renvoAsmAddPrimaryTertiary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, remainder)
+		renvoEmitWideShiftLeftOne(g, dividend)
+		renvoEmitWideShiftLeftOne(g, quotient)
+		renvoEmitWideLessStack(g, remainder, divisor, false)
+		renvoAsmJnzPrimary(&g.asm, skipSubtract)
+		renvoEmitWideSubStack(g, remainder, remainder, divisor)
+		renvoAsmLoadPrimaryStack(&g.asm, quotient)
+		renvoAsmIncPrimary(&g.asm)
+		renvoAsmStorePrimaryStack(&g.asm, quotient)
+		renvoAsmMarkLabel(&g.asm, skipSubtract)
+		renvoAsmDecStack(&g.asm, counter)
+		renvoAsmJmpMarkLabel(&g.asm, loop, done)
+	}
+
+	func renvo386CompilerUnsignedLessStack(g *renvoLinearGen, left int, right int) {
+		renvoEmitNativeCompareStack(g, left, right, renvoConditionUnsignedLess)
+		return
+	}
+
+	func renvo386CompilerNativeWideStack(g *renvoLinearGen, dest int, left int, right int, mode int) bool {
+		renvo386EmitWideBinaryStack(g, dest, left, right, mode)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSplitWordLoweringEnabled(a *renvoAsm) bool {
+		return true
+	}
+
+	func renvo386CompilerShiftPrimaryRightUnsignedImmediate(a *renvoAsm, imm int) {
+		renvo386AsmShrRaxImm(a, imm)
+		return
+	}
+
+	func renvo386CompilerNegatePrimary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xd8f7)
+	}
+}
+
+go compiler {
+	func renvo386SimpleIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return false
+		}
+		expr := &ep.exprs[idx]
+		for expr.kind == renvoExprCall && expr.argCount == 1 && renvoConversionTypeFromExpr(g, ep, expr.left) != 0 {
+			idx = renvo_runtime_UnsafeIntAt(ep.args, expr.firstArg)
+			if idx < 0 || idx >= len(ep.exprs) {
+				return false
+			}
+			expr = &ep.exprs[idx]
+		}
+		return expr.kind == renvoExprIdent || expr.kind == renvoExprInt || expr.kind == renvoExprChar
+	}
+
+	func renvo386SimpleScalarExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return false
+		}
+		expr := &ep.exprs[idx]
+		for expr.kind == renvoExprCall && expr.argCount == 1 && renvoConversionTypeFromExpr(g, ep, expr.left) != 0 {
+			idx = renvo_runtime_UnsafeIntAt(ep.args, expr.firstArg)
+			if idx < 0 || idx >= len(ep.exprs) {
+				return false
+			}
+			expr = &ep.exprs[idx]
+		}
+		return expr.kind == renvoExprIdent || expr.kind == renvoExprInt || expr.kind == renvoExprChar || expr.kind == renvoExprBool
+	}
+
+	func renvo386EmitCompoundPointerMemory(g *renvoLinearGen, right *renvoExprParse, rightIndex int, kind int, assignTok int) bool {
+		if !renvoTypeKindIsScalarInt(kind) {
+			return false
+		}
+		opcode := -1
+		if renvoTok2Is(g.prog, assignTok, '+', '=') {
+			opcode = 0x01
+		} else if renvoTok2Is(g.prog, assignTok, '-', '=') {
+			opcode = 0x29
+		} else if renvoTok2Is(g.prog, assignTok, '&', '=') {
+			opcode = 0x21
+		} else if renvoTok2Is(g.prog, assignTok, '|', '=') {
+			opcode = 0x09
+		} else if renvoTok2Is(g.prog, assignTok, '^', '=') {
+			opcode = 0x31
+		}
+		if opcode < 0 {
+			return false
+		}
+		size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+		if size != 1 && size != 2 && size != 4 {
+			return false
+		}
+		renvoAsmPushPrimary(&g.asm)
+		if !renvoEmitScalarExprForKind(g, right, rightIndex, kind) {
+			return false
+		}
+		renvoAsmPopSecondary(&g.asm)
+		if size == 2 {
+			renvoAsmEmit8(&g.asm, 0x66)
+		} else if size == 1 {
+			opcode--
+		}
+		renvoAsmEmit16(&g.asm, opcode|0x02<<8)
+		return true
+	}
+
+	func renvo386EmitCIndexedPointerAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return -1
+		}
+		call := &ep.exprs[idx]
+		if call.kind != renvoExprCall || call.argCount != 2 || call.left < 0 || call.left >= len(ep.exprs) {
+			return -1
+		}
+		callee := &ep.exprs[call.left]
+		if callee.kind != renvoExprIdent ||
+			(!renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_pointer_index_") &&
+				!renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_array_index_")) {
+			return -1
+		}
+		baseArg := renvo_runtime_UnsafeIntAt(ep.args, call.firstArg)
+		indexArg := renvo_runtime_UnsafeIntAt(ep.args, call.firstArg+1)
+		if !renvo386SimpleIndexExpr(g, ep, indexArg) {
+			return -1
+		}
+		pointer := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+		if pointer.kind != renvoTypePointer {
+			return -1
+		}
+		elementSize := renvoTypeSize(g.meta, pointer.elem)
+		scale := -1
+		if elementSize == 1 {
+			scale = 0
+		} else if elementSize == 2 {
+			scale = 1
+		} else if elementSize == 4 {
+			scale = 2
+		} else if elementSize == 8 {
+			scale = 3
+		}
+		if scale < 0 {
+			return -1
+		}
+		if !renvoEmitIntExpr(g, ep, baseArg) {
+			return 0
+		}
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		if !renvoEmitIntExpr(g, ep, indexArg) {
+			return 0
+		}
+		renvoAsmEmit3(&g.asm, 0x8d, 0x04, scale<<6|0x02)
+		return 1
+	}
+
+	func renvo386EmitDirectCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int, assignTok int, memoryOp int, kind int) bool {
+		value := renvoEvalConstExpr(g, ep, rootIndex)
+		if value.ok {
+			group := 0
+			if renvoTok2Is(g.prog, assignTok, '-', '=') {
+				group = 5
+			} else if renvoTok2Is(g.prog, assignTok, '&', '=') {
+				group = 4
+			} else if renvoTok2Is(g.prog, assignTok, '|', '=') {
+				group = 1
+			} else if renvoTok2Is(g.prog, assignTok, '^', '=') {
+				group = 6
+			}
+			opcode := 0x81
+			if renvoAsmImmFits8Signed(value.value) {
+				opcode = 0x83
+			}
+			renvo386AsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
+			if opcode == 0x83 {
+				renvoAsmEmit8(&g.asm, value.value)
+			} else {
+				renvoAsmEmit32(&g.asm, value.value)
+			}
+		} else {
+			if !renvoEmitScalarExprForKind(g, ep, rootIndex, kind) {
+				return false
+			}
+			renvo386AsmStackMem(&g.asm, offset, memoryOp, 0x45, 0x85)
+		}
+		return true
+	}
+
+	func renvo386EmitSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, rootIndex int, offset int) bool {
+		if rootIndex < 0 || rootIndex >= len(ep.exprs) {
+			return false
+		}
+		root := &ep.exprs[rootIndex]
+		if root.kind != renvoExprBinary || root.left < 0 || root.left >= len(ep.exprs) {
+			return false
+		}
+		left := &ep.exprs[root.left]
+		if left.kind != renvoExprIdent || renvoFindLocalOffset(g, left.nameStart, left.nameEnd) != offset {
+			return false
+		}
+		group := -1
+		if renvoTokCharIs(g.prog, root.tok, '+') {
+			group = 0
+		} else if renvoTokCharIs(g.prog, root.tok, '-') {
+			group = 5
+		} else if renvoTokCharIs(g.prog, root.tok, '&') {
+			group = 4
+		} else if renvoTokCharIs(g.prog, root.tok, '|') {
+			group = 1
+		} else if renvoTokCharIs(g.prog, root.tok, '^') {
+			group = 6
+		}
+		if group < 0 {
+			return false
+		}
+		value := renvoEvalConstExpr(g, ep, root.right)
+		if value.ok {
+			opcode := 0x81
+			if renvoAsmImmFits8Signed(value.value) {
+				opcode = 0x83
+			}
+			renvo386AsmStackMem(&g.asm, offset, opcode, 0x45|group<<3, 0x85|group<<3)
+			if opcode == 0x83 {
+				renvoAsmEmit8(&g.asm, value.value)
+			} else {
+				renvoAsmEmit32(&g.asm, value.value)
+			}
+			return true
+		}
+		if !renvoConstExprSideEffectFree(g, ep, root.right) {
+			return false
+		}
+		rightType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, root.right))
+		if !renvoTypeKindIsScalarInt(rightType.kind) || renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, root.right)) > 4 ||
+			!renvoEmitScalarExprForKind(g, ep, root.right, rightType.kind) {
+			return false
+		}
+		opcode := []int{0x01, 0x09, 0, 0, 0x21, 0x29, 0x31}[group]
+		if opcode == 0 {
+			return false
+		}
+		renvo386AsmStackMem(&g.asm, offset, opcode, 0x45, 0x85)
+		return true
+	}
+
+	func renvo386EmitLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, comparison byte, label int, jumpIfTrue bool) bool {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return false
+		}
+		expr := &ep.exprs[idx]
+		for expr.kind == renvoExprCall && expr.argCount == 1 && renvoConversionTypeFromExpr(g, ep, expr.left) != 0 {
+			idx = renvo_runtime_UnsafeIntAt(ep.args, expr.firstArg)
+			if idx < 0 || idx >= len(ep.exprs) {
+				return false
+			}
+			expr = &ep.exprs[idx]
+		}
+		if expr.kind != renvoExprBinary || !renvoTokCharIs(g.prog, expr.tok, '&') {
+			return false
+		}
+		localExpr := &ep.exprs[expr.left]
+		mask := renvoEvalConstExpr(g, ep, expr.right)
+		if !mask.ok {
+			localExpr = &ep.exprs[expr.right]
+			mask = renvoEvalConstExpr(g, ep, expr.left)
+		}
+		if !mask.ok || localExpr.kind != renvoExprIdent {
+			return false
+		}
+		localIndex := renvoFindLocalIndex(g, localExpr.nameStart, localExpr.nameEnd)
+		if localIndex < 0 || renvoTypeSize(g.meta, g.locals[localIndex].typ) != 4 {
+			return false
+		}
+		if mask.value >= 0 && mask.value <= 255 {
+			renvo386AsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf6, 0x45, 0x85)
+			renvoAsmEmit8(&g.asm, mask.value)
+		} else {
+			renvo386AsmStackMem(&g.asm, g.locals[localIndex].offset, 0xf7, 0x45, 0x85)
+			renvoAsmEmit32(&g.asm, mask.value)
+		}
+		wantNonzero := jumpIfTrue
+		if comparison == '=' {
+			wantNonzero = !wantNonzero
+		}
+		condition := 0x84
+		if wantNonzero {
+			condition = 0x85
+		}
+		renvo386AsmJccLabel(&g.asm, condition, label)
+		return true
+	}
+
+	func renvo386EmitDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return false
+		}
+		valueIndex := idx
+		for {
+			expr := &ep.exprs[valueIndex]
+			if expr.kind != renvoExprCall || expr.argCount != 1 ||
+				(renvoConversionTypeFromExpr(g, ep, expr.left) == 0 && !renvoExprIsIdentText(g.prog, ep, expr.left, "__c_bool_int")) {
+				break
+			}
+			valueIndex = renvo_runtime_UnsafeIntAt(ep.args, expr.firstArg)
+			if valueIndex < 0 || valueIndex >= len(ep.exprs) {
+				return false
+			}
+		}
+		deref := &ep.exprs[valueIndex]
+		if deref.kind != renvoExprUnary || !renvoTokCharIs(g.prog, deref.tok, '*') {
+			return false
+		}
+		kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, valueIndex)).kind
+		size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+		if size != 1 && size != 2 && size != 4 {
+			return false
+		}
+		// Narrow relational comparisons are performed after C integer promotion;
+		// their flags cannot in general be reproduced by a narrow memory compare.
+		// Equality is safe when the constant is representable in the source type.
+		if size < 4 {
+			if c0 != '=' && c0 != '!' {
+				return false
+			}
+			if kind == renvoTypeInt8 && (value < -128 || value > 127) ||
+				kind == renvoTypeInt16 && (value < -32768 || value > 32767) ||
+				kind != renvoTypeInt8 && kind != renvoTypeInt16 &&
+					(size == 1 && (value < 0 || value > 255) || size == 2 && (value < 0 || value > 65535)) {
+				return false
+			}
+		}
+		if !renvoEmitIntExpr(g, ep, deref.left) {
+			return false
+		}
+		renvoEmitRuntimeNonNilPrimary(g)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		if size == 1 {
+			renvoAsmEmit3(&g.asm, 0x80, 0x3a, value)
+		} else if size == 2 {
+			renvoAsmEmit8(&g.asm, 0x66)
+			if renvoAsmImmFits8Signed(value) {
+				renvoAsmEmit3(&g.asm, 0x83, 0x3a, value)
+			} else {
+				renvoAsmEmit16(&g.asm, 0x3a81)
+				renvoAsmEmit16(&g.asm, value)
+			}
+		} else if renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit3(&g.asm, 0x83, 0x3a, value)
+		} else {
+			renvoAsmEmit16(&g.asm, 0x3a81)
+			renvoAsmEmit32(&g.asm, value)
+		}
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	}
+
+	func renvo386EmitWideImmediateBinary(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, right *renvoExpr) bool {
+		p := g.prog
+		immOpcode := 0
+		immGroup := 0
+		immMultiply := false
+		immShift := 0
+		if renvoTokCharIs(p, e.tok, '+') {
+			immOpcode, immGroup = 0x05, 0xc0
+		} else if renvoTokCharIs(p, e.tok, '-') {
+			immOpcode, immGroup = 0x2d, 0xe8
+		} else if renvoTokCharIs(p, e.tok, '*') {
+			immMultiply = true
+		} else if renvoTokCharIs(p, e.tok, '&') {
+			immOpcode, immGroup = 0x25, 0xe0
+		} else if renvoTokCharIs(p, e.tok, '|') {
+			immOpcode, immGroup = 0x0d, 0xc8
+		} else if renvoTokCharIs(p, e.tok, '^') {
+			immOpcode, immGroup = 0x35, 0xf0
+		} else if renvoTok2Is(p, e.tok, '<', '<') {
+			immShift = 0xe0
+		} else if renvoTok2Is(p, e.tok, '>', '>') {
+			immShift = 0xf8
+			if renvoExprHasUnsignedIntType(g, ep, e.left) {
+				immShift = 0xe8
+			}
+		}
+		value := 0
+		immediate := false
+		if right.kind == renvoExprInt {
+			value = renvoParseIntToken(p, right.tok)
+			immediate = true
+		} else if right.kind == renvoExprChar {
+			value = renvoParseCharToken(p, right.tok)
+			immediate = true
+		} else if right.kind == renvoExprIdent {
+			value = renvoFindSmallConstByName(g, right.nameStart, right.nameEnd)
+			immediate = value >= -128
+		}
+		if p.compilerInt32 && immediate {
+			constant := renvoEvalConstExpr(g, ep, e.right)
+			immediate = constant.ok
+		}
+		if !immediate || immOpcode == 0 && !immMultiply && immShift == 0 ||
+			value < -2147483647 || value > 2147483647 || immShift != 0 && (value < 0 || value >= 32) {
+			return false
+		}
+		if !renvoEmitIntExpr(g, ep, e.left) {
+			return false
+		}
+		if immShift != 0 {
+			renvoAsmEmit3(&g.asm, 0xc1, immShift, value)
+		} else if immMultiply && renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit3(&g.asm, 0x6b, 0xc0, value)
+		} else if immMultiply {
+			renvoAsmEmit16(&g.asm, 0xc069)
+			renvoAsmEmit32(&g.asm, value)
+		} else if renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit3(&g.asm, 0x83, immGroup, value)
+		} else {
+			renvoAsmEmit8(&g.asm, immOpcode)
+			renvoAsmEmit32(&g.asm, value)
+		}
+		resultType := renvoInferParsedExprType(g, ep, idx)
+		result := renvoResolveType(g.meta, resultType)
+		renvoAsmNormalizePrimaryForKind(&g.asm, result.kind)
+		return true
+	}
+
+	func renvo386EmitCInlineReturnHelper(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, jumpLabel int, jumpIfTrue bool) int {
+		condition := renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_condition_")
+		conditional := renvoBytesPrefixText(g.prog.src, callee.nameStart, callee.nameEnd, "__c_conditional_")
+		if !g.c.code16 {
+			return -1
+		}
+		fnIndex := renvoFuncInfoFromCall(g, ep, e.left)
+		if fnIndex < 0 || fnIndex >= len(g.meta.funcs) {
+			return -1
+		}
+		fn := &g.meta.funcs[fnIndex]
+		generatedHelper := condition || conditional
+		staticSmall := false
+		if fn.objectDecl > 0 && fn.objectDecl < len(g.meta.objectDecls) {
+			staticSmall = g.meta.objectDecls[fn.objectDecl].binding == 0
+		}
+		singleUse := fnIndex < len(g.funcSingleCallState) && renvoFunctionHasSingleDirectUse(g, fnIndex)
+		if !generatedHelper && !staticSmall && (!singleUse || fn.exportNameEnd > fn.exportNameStart || fn.literalTok != 0) {
+			return -1
+		}
+		if fn.linkStatic != 0 || fn.receiverType != 0 || fn.paramCount != e.argCount || fn.resultType == 0 {
+			return -1
+		}
+		result := renvoResolveType(g.meta, fn.resultType)
+		if (!renvoTypeKindIsScalarInt(result.kind) && result.kind != renvoTypePointer && result.kind != renvoTypeFunc) ||
+			renvoTypeSize(g.meta, fn.resultType) > 4 {
+			return -1
+		}
+		body := renvoNewExprParse()
+		var conditionBody *renvoExprParse
+		var alternateBody *renvoExprParse
+		if !conditional {
+			start, end, found := renvo386CInlineSingleReturnRange(g, fn.bodyStart, fn.bodyEnd)
+			if staticSmall && !generatedHelper && end-start > 256 {
+				return -1
+			}
+			if !found || !renvoParseExpressionOK(body, g.prog, start, end) {
+				return -1
+			}
+		} else {
+			var bp renvoBodyParse
+			bp.prog = g.prog
+			bp.ok = true
+			next := renvoParseOneStatement(&bp, fn.bodyStart, fn.bodyEnd)
+			if !bp.ok || next <= fn.bodyStart || bp.stmtCount != 1 {
+				return -1
+			}
+			branch := renvoBodyStmtAt(&bp, 0)
+			if !bp.ok || branch.kind != renvoStmtIf || branch.elseStart != 0 {
+				return -1
+			}
+			thenStart, thenEnd, thenOK := renvo386CInlineSingleReturnRange(g, branch.bodyStart, branch.bodyEnd)
+			elseStart, elseEnd, elseOK := renvo386CInlineSingleReturnRange(g, next, fn.bodyEnd)
+			if !thenOK || !elseOK {
+				return -1
+			}
+			conditionBody = renvoNewExprParse()
+			alternateBody = renvoNewExprParse()
+			if !renvoParseExpressionOK(conditionBody, g.prog, branch.exprStart, branch.exprEnd) ||
+				!renvoParseExpressionOK(body, g.prog, thenStart, thenEnd) ||
+				!renvoParseExpressionOK(alternateBody, g.prog, elseStart, elseEnd) {
+				return -1
+			}
+		}
+		oldLocalCount := g.localCount
+		oldStackUsed := g.stackUsed
+		firstLocal := g.localCount
+		for i := 0; i < fn.paramCount; i++ {
+			param := &g.meta.params[fn.firstParam+i]
+			offset := renvoAddUnnamedLocal(g, param.typ)
+			arg := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)
+			// The C adapter passes addresses of surrounding automatic variables to
+			// generated condition/conditional helpers.  While inlining those helpers,
+			// bind such a parameter directly to the caller's frame slot instead of
+			// materializing an address in another slot and immediately reloading it.
+			// This is ordinary substitution of a side-effect-free &local argument;
+			// writes through the parameter still reach the original C object.
+			if generatedHelper {
+				argument := &ep.exprs[arg]
+				if argument.kind == renvoExprUnary && renvoTokCharIs(g.prog, argument.tok, '&') {
+					inner := &ep.exprs[argument.left]
+					if inner.kind == renvoExprIdent {
+						localIndex := renvoFindLocalIndex(g, inner.nameStart, inner.nameEnd)
+						if localIndex >= 0 && g.locals[localIndex].flowConstValid >= 0 {
+							g.locals[firstLocal+i].flowConstValue = g.locals[localIndex].offset
+							g.locals[firstLocal+i].flowConstValid = -1
+							continue
+						}
+					}
+				}
+			}
+			argument := &ep.exprs[arg]
+			if argument.kind == renvoExprIdent && renvoInferParsedExprType(g, ep, arg) == param.typ {
+				localIndex := renvoFindLocalIndex(g, argument.nameStart, argument.nameEnd)
+				if localIndex >= 0 && g.locals[localIndex].flowConstValid >= 0 {
+					g.locals[firstLocal+i].flowConstValue = g.locals[localIndex].offset
+					g.locals[firstLocal+i].flowConstValid = -2
+					continue
+				}
+			}
+			if !renvoEmitTypedAssign(g, ep, arg, offset) {
+				g.localCount = oldLocalCount
+				g.stackUsed = oldStackUsed
+				g.localCacheStart = -1
+				return 0
+			}
+		}
+		// Bind the helper parameter names only after every caller argument has
+		// been evaluated. Earlier bindings must not shadow identifiers occurring
+		// in later argument expressions.
+		for i := 0; i < fn.paramCount; i++ {
+			param := &g.meta.params[fn.firstParam+i]
+			local := &g.locals[firstLocal+i]
+			local.nameStart = param.nameStart
+			local.nameEnd = param.nameEnd
+			local.nameHash = renvoHashRange(g.prog.src, param.nameStart, param.nameEnd)
+		}
+		g.localCacheStart = -1
+		ok := true
+		if conditionBody == nil {
+			if jumpLabel >= 0 {
+				bodyIndex := len(body.exprs) - 1
+				for bodyIndex >= 0 {
+					bodyExpr := &body.exprs[bodyIndex]
+					if bodyExpr.kind != renvoExprCall || bodyExpr.argCount != 1 ||
+						(renvoConversionTypeFromExpr(g, body, bodyExpr.left) == 0 &&
+							!renvoExprIsIdentText(g.prog, body, bodyExpr.left, "__c_bool_int")) {
+						break
+					}
+					bodyIndex = renvo_runtime_UnsafeIntAt(body.args, bodyExpr.firstArg)
+				}
+				ok = bodyIndex >= 0 && renvoEmitJump(g, body, bodyIndex, jumpLabel, jumpIfTrue)
+			} else {
+				ok = renvoEmitScalarExprForKind(g, body, len(body.exprs)-1, result.kind)
+			}
+		} else {
+			alternateLabel := renvoAsmNewLabel(&g.asm)
+			endLabel := renvoAsmNewLabel(&g.asm)
+			ok = renvoEmitJumpIfFalse(g, conditionBody, len(conditionBody.exprs)-1, alternateLabel) &&
+				renvoEmitScalarExprForKind(g, body, len(body.exprs)-1, result.kind)
+			if ok {
+				renvoAsmJmpMarkLabel(&g.asm, endLabel, alternateLabel)
+				ok = renvoEmitScalarExprForKind(g, alternateBody, len(alternateBody.exprs)-1, result.kind)
+				renvoAsmMarkLabel(&g.asm, endLabel)
+			}
+		}
+		g.localCount = oldLocalCount
+		g.stackUsed = oldStackUsed
+		g.localCacheStart = -1
+		if !ok {
+			return 0
+		}
+		return 1
+	}
+
+	func renvo386CInlineSingleReturnRange(g *renvoLinearGen, start int, end int) (int, int, bool) {
+		for start < end && renvoTokCharIs(g.prog, start, ';') {
+			start++
+		}
+		var bp renvoBodyParse
+		bp.prog = g.prog
+		bp.ok = true
+		next := renvoParseOneStatement(&bp, start, end)
+		if !bp.ok || next <= start || bp.stmtCount != 1 {
+			return 0, 0, false
+		}
+		for next < end && renvoTokCharIs(g.prog, next, ';') {
+			next++
+		}
+		stmt := renvoBodyStmtAt(&bp, 0)
+		if !bp.ok || next != end || stmt.kind != renvoStmtReturn || stmt.exprStart >= stmt.exprEnd {
+			return 0, 0, false
+		}
+		return stmt.exprStart, stmt.exprEnd, true
+	}
+
+	func renvo386EmitCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
+		src := g.prog.src
+		postAssignInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_post_assign_inc_")
+		postAssignDec := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_post_assign_dec_")
+		if postAssignInc || postAssignDec {
+			if e.argCount != 2 {
+				return 0
+			}
+			pointerOffset := renvo386CAddressedFrameLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+			resultTypeIndex := renvoInferParsedExprType(g, ep, idx)
+			resultType := renvoResolveType(g.meta, resultTypeIndex)
+			resultSize := renvoTypeSize(g.meta, resultTypeIndex)
+			if pointerOffset < 0 || resultSize < 1 || resultSize > 4 ||
+				(!renvoTypeKindIsScalarValue(resultType.kind) && resultType.kind != renvoTypePointer && resultType.kind != renvoTypeFunc) {
+				return -1
+			}
+			pointerType := renvoResolveType(g.meta, renvoLocalTypeAtOffset(g, pointerOffset))
+			if pointerType.kind != renvoTypePointer {
+				return -1
+			}
+			delta := renvoTypeSize(g.meta, pointerType.elem)
+			if postAssignDec {
+				delta = -delta
+			}
+			// The address argument is &local and has no side effects. Evaluate the
+			// assignment value first, then preserve it in EAX while loading and
+			// advancing the old pointer directly from the frame slot.
+			if !renvoEmitScalarExprForKind(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), resultType.kind) {
+				return 0
+			}
+			renvo386AsmStackMem(&g.asm, pointerOffset, 0x8b, 0x55, 0x95)
+			if renvoAsmImmFits8Signed(delta) {
+				renvo386AsmStackMem(&g.asm, pointerOffset, 0x83, 0x45, 0x85)
+				renvoAsmEmit8(&g.asm, delta)
+			} else {
+				renvo386AsmStackMem(&g.asm, pointerOffset, 0x81, 0x45, 0x85)
+				renvoAsmEmit32(&g.asm, delta)
+			}
+			renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, resultSize)
+			return 1
+		}
+		assignmentValue := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_assignment_value_")
+		if assignmentValue {
+			if e.argCount != 2 {
+				return 0
+			}
+			resultType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+			resultSize := renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, idx))
+			if resultSize < 1 || resultSize > 4 ||
+				(!renvoTypeKindIsScalarValue(resultType.kind) && resultType.kind != renvoTypePointer && resultType.kind != renvoTypeFunc) {
+				return -1
+			}
+			address := renvoAddUnnamedLocal(g, renvoTypeInt)
+			if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+				return 0
+			}
+			renvoAsmStorePrimaryStack(&g.asm, address)
+			if !renvoEmitScalarExprForKind(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+1), resultType.kind) {
+				return 0
+			}
+			renvoAsmLoadSecondaryStack(&g.asm, address)
+			renvoAsmStorePrimaryMemSecondaryDispSize(&g.asm, 0, resultSize)
+			return 1
+		}
+		pointerPostInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_pointer_post_inc_")
+		pointerPreInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_pointer_pre_inc_")
+		pointerPostDec := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_pointer_post_dec_")
+		pointerPreDec := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_pointer_pre_dec_")
+		scalarPostInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_scalar_post_inc_")
+		scalarPreInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_scalar_pre_inc_")
+		scalarPostDec := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_scalar_post_dec_")
+		scalarPreDec := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_scalar_pre_dec_")
+		postDerefInc := renvoBytesPrefixText(src, callee.nameStart, callee.nameEnd, "__c_post_deref_inc_")
+		if !pointerPostInc && !pointerPreInc && !pointerPostDec && !pointerPreDec &&
+			!scalarPostInc && !scalarPreInc && !scalarPostDec && !scalarPreDec && !postDerefInc {
+			return -1
+		}
+		if e.argCount != 1 {
+			return 0
+		}
+		resultType := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+		frameOffset := renvo386CAddressedFrameLocal(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		if frameOffset >= 0 && (pointerPostInc || pointerPreInc || pointerPostDec || pointerPreDec ||
+			postDerefInc || renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, idx)) == 4) {
+			delta := 1
+			if pointerPostInc || pointerPreInc || pointerPostDec || pointerPreDec {
+				if resultType.kind != renvoTypePointer {
+					return 0
+				}
+				delta = renvoTypeSize(g.meta, resultType.elem)
+			}
+			if pointerPostDec || pointerPreDec || scalarPostDec || scalarPreDec {
+				delta = -delta
+			}
+			if postDerefInc {
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x8b, 0x55, 0x95)
+				step := renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, idx))
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
+				renvoAsmEmit8(&g.asm, step)
+				renvo386EmitCScalarLoad(&g.asm, resultType.kind, 2)
+				return 1
+			}
+			post := pointerPostInc || pointerPostDec || scalarPostInc || scalarPostDec
+			if post {
+				if !discard {
+					renvoAsmLoadPrimaryStack(&g.asm, frameOffset)
+				}
+			}
+			if renvoAsmImmFits8Signed(delta) {
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x83, 0x45, 0x85)
+				renvoAsmEmit8(&g.asm, delta)
+			} else {
+				renvo386AsmStackMem(&g.asm, frameOffset, 0x81, 0x45, 0x85)
+				renvoAsmEmit32(&g.asm, delta)
+			}
+			if !post && !discard {
+				renvoAsmLoadPrimaryStack(&g.asm, frameOffset)
+				renvoAsmNormalizePrimaryForKind(&g.asm, resultType.kind)
+			}
+			return 1
+		}
+		if !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+			return 0
+		}
+		if pointerPostInc || pointerPreInc || pointerPostDec || pointerPreDec {
+			if resultType.kind != renvoTypePointer {
+				return 0
+			}
+			delta := renvoTypeSize(g.meta, resultType.elem)
+			if pointerPostDec || pointerPreDec {
+				delta = -delta
+			}
+			renvoAsmEmitText(&g.asm, "\x89\xc2\x8b\x02")
+			if pointerPostInc || pointerPostDec {
+				renvoAsmEmitText(&g.asm, "\x89\xc1")
+				if renvoAsmImmFits8Signed(delta) {
+					renvoAsmEmit3(&g.asm, 0x83, 0xc1, delta)
+				} else {
+					renvoAsmEmit16(&g.asm, 0xc181)
+					renvoAsmEmit32(&g.asm, delta)
+				}
+				renvoAsmEmitText(&g.asm, "\x89\x0a")
+			} else {
+				if renvoAsmImmFits8Signed(delta) {
+					renvoAsmEmit3(&g.asm, 0x83, 0xc0, delta)
+				} else {
+					renvoAsmEmit8(&g.asm, 0x05)
+					renvoAsmEmit32(&g.asm, delta)
+				}
+				renvoAsmEmitText(&g.asm, "\x89\x02")
+			}
+			return 1
+		}
+		if postDerefInc {
+			renvoAsmEmitText(&g.asm, "\x89\xc2\x8b\x0a")
+			renvo386EmitCScalarLoad(&g.asm, resultType.kind, 1)
+			delta := renvoTypeSize(g.meta, renvoInferParsedExprType(g, ep, idx))
+			if renvoAsmImmFits8Signed(delta) {
+				renvoAsmEmit3(&g.asm, 0x83, 0xc1, delta)
+			} else {
+				renvoAsmEmit16(&g.asm, 0xc181)
+				renvoAsmEmit32(&g.asm, delta)
+			}
+			renvoAsmEmitText(&g.asm, "\x89\x0a")
+			return 1
+		}
+		if !renvoTypeKindIsScalarInt(resultType.kind) {
+			return 0
+		}
+		renvoAsmEmitText(&g.asm, "\x89\xc2")
+		renvo386EmitCScalarLoad(&g.asm, resultType.kind, 2)
+		delta := 1
+		if scalarPostDec || scalarPreDec {
+			delta = -1
+		}
+		post := scalarPostInc || scalarPostDec
+		if post {
+			renvoAsmEmitText(&g.asm, "\x89\xc1")
+			renvoAsmEmit3(&g.asm, 0x83, 0xc1, delta)
+			renvo386EmitCScalarStore(&g.asm, resultType.kind, 1)
+		} else {
+			renvoAsmEmit3(&g.asm, 0x83, 0xc0, delta)
+			renvo386EmitCScalarStore(&g.asm, resultType.kind, 0)
+			renvoAsmNormalizePrimaryForKind(&g.asm, resultType.kind)
+		}
+		return 1
+	}
+
+	func renvo386CAddressedFrameLocal(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if idx < 0 || idx >= len(ep.exprs) {
+			return -1
+		}
+		address := &ep.exprs[idx]
+		if address.kind != renvoExprUnary || !renvoTokCharIs(g.prog, address.tok, '&') ||
+			address.left < 0 || address.left >= len(ep.exprs) {
+			return -1
+		}
+		value := &ep.exprs[address.left]
+		if value.kind != renvoExprIdent {
+			return -1
+		}
+		localIndex := renvoFindLocalIndex(g, value.nameStart, value.nameEnd)
+		if localIndex < 0 || g.locals[localIndex].captureOff != 0 || g.locals[localIndex].flowConstValid < 0 {
+			return -1
+		}
+		return g.locals[localIndex].offset
+	}
+
+	func renvo386EmitCScalarLoad(a *renvoAsm, kind int, base int) {
+		if kind == renvoTypeByte || kind == renvoTypeBool {
+			renvoAsmEmitText(a, "\x0f\xb6")
+			renvoAsmEmit8(a, base)
+		} else if kind == renvoTypeInt8 {
+			renvoAsmEmitText(a, "\x0f\xbe")
+			renvoAsmEmit8(a, base)
+		} else if kind == renvoTypeUint16 {
+			renvoAsmEmitText(a, "\x0f\xb7")
+			renvoAsmEmit8(a, base)
+		} else if kind == renvoTypeInt16 {
+			renvoAsmEmitText(a, "\x0f\xbf")
+			renvoAsmEmit8(a, base)
+		} else {
+			renvoAsmEmit8(a, 0x8b)
+			renvoAsmEmit8(a, base)
+		}
+	}
+
+	func renvo386EmitCScalarStore(a *renvoAsm, kind int, source int) {
+		if kind == renvoTypeByte || kind == renvoTypeBool || kind == renvoTypeInt8 {
+			renvoAsmEmit8(a, 0x88)
+			renvoAsmEmit8(a, 0x02|source<<3)
+		} else if kind == renvoTypeUint16 || kind == renvoTypeInt16 {
+			renvoAsmEmit8(a, 0x66)
+			renvoAsmEmit8(a, 0x89)
+			renvoAsmEmit8(a, 0x02|source<<3)
+		} else {
+			renvoAsmEmit8(a, 0x89)
+			renvoAsmEmit8(a, 0x02|source<<3)
+		}
+	}
+
+	func renvo386TryLoadInlineLocal(g *renvoLinearGen, localIndex int) bool {
+		local := &g.locals[localIndex]
+		if local.flowConstValid == -1 {
+			renvoAsmAddressPrimaryStack(&g.asm, local.flowConstValue)
+			return true
+		}
+		if local.flowConstValid == -2 {
+			renvoAsmLoadPrimaryStack(&g.asm, local.flowConstValue)
+			return true
+		}
+		return false
+	}
+
+	func renvo386EmitNativeImmediateBinary(g *renvoLinearGen, ep *renvoExprParse, idx int, left int, value int, immOpcode int, immGroup int, immMultiply bool, immShift int) bool {
+		if !renvoEmitIntExpr(g, ep, left) {
+			return false
+		}
+		if immShift != 0 {
+			renvoAsmEmit3(&g.asm, 0xc1, immShift, value)
+		} else if immMultiply && renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit3(&g.asm, 0x6b, 0xc0, value)
+		} else if immMultiply {
+			renvoAsmEmit16(&g.asm, 0xc069)
+			renvoAsmEmit32(&g.asm, value)
+		} else if renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit3(&g.asm, 0x83, immGroup, value)
+		} else {
+			renvoAsmEmit8(&g.asm, immOpcode)
+			renvoAsmEmit32(&g.asm, value)
+		}
+		renvoNormalizeNativeExprPrimary(g, ep, idx)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerIndexAddressHelperBody(g *renvoLinearGen, elemSize int) {
+		if !g.c.code16 {
+			a := &g.asm
+			invalid := renvoAsmNewLabel(a)
+			// EAX is the base, EDX the nonnegative length, and ECX the index.
+			// An unsigned comparison also rejects every negative index.
+			renvoAsmEmitText(a, "\x39\xd1") // cmp ecx, edx
+			renvo386AsmJccLabel(a, 0x83, invalid)
+			renvoAsmAddScaledTertiary(a, elemSize)
+			renvoAsmRet(a)
+			renvoAsmMarkLabel(a, invalid)
+			renvoEmitUncaughtFaultTransfer(g, false)
+			return
+		}
+		negative := renvoAsmNewLabel(&g.asm)
+		invalid := renvoAsmNewLabel(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmPushSecondary(&g.asm)
+		renvoAsmCopyTertiaryToPrimary(&g.asm)
+		renvoAsmCopyPrimaryToSecondary(&g.asm)
+		renvoAsmPrimaryImm(&g.asm, 0)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9d)
+		renvoAsmJzPrimary(&g.asm, negative)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmCmpTertiaryPrimarySet(&g.asm, 0x9c)
+		renvoAsmJzPrimary(&g.asm, invalid)
+		renvoAsmPopPrimary(&g.asm)
+		renvoAsmCopySecondaryToTertiary(&g.asm)
+		renvoAsmAddScaledTertiary(&g.asm, elemSize)
+		renvoAsmRet(&g.asm)
+		renvoAsmMarkLabel(&g.asm, negative)
+		renvoAsmPopTertiary(&g.asm)
+		renvoAsmMarkLabel(&g.asm, invalid)
+		renvoAsmPopTertiary(&g.asm)
+		renvoEmitUncaughtFaultTransfer(g, false)
+	}
+
+	func renvo386CompilerIndexAddressHelper(g *renvoLinearGen, elemSize int) int {
+		return -1
+	}
+
+	func renvo386CompilerTargetBoundsCheckHelper(g *renvoLinearGen) int {
+		return -1
+	}
+
+	func renvo386CompilerOptimizedSliceBoundsChecks(g *renvoLinearGen, lowOff int, highOff int, maxOff int, capOff int) bool {
+		return false
+	}
+
+	func renvo386CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
+		renvoNonNil(g)
+		size = renvoAlignValue(size, wordSize)
+		// Keep larger arguments on the word-push path so stack growth touches each
+		// guard page; one reservation must not skip a Windows stack guard page.
+		for at := size - wordSize; at >= 0; at -= wordSize {
+			if mode == renvoPushStack && wordSize == g.c.renvoNativeIntSize {
+				renvoAsmPushStackWord(&g.asm, offset-at)
+				continue
+			}
+			if mode == renvoPushStack {
+				renvoAsmLoadPrimaryStack(&g.asm, offset-at)
+			} else if mode == renvoPushBss {
+				renvoAsmLoadPrimaryBss(&g.asm, offset+at)
+			} else {
+				renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
+			}
+			renvoAsmPushPrimary(&g.asm)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerSliceHeaderAddressesSecondary(a *renvoAsm) {
+		renvoAsmEmit16(a, 0x5f52)
+		renvoAsmEmit16(a, 0x728d)
+		renvoAsmEmit8(a, 8)
+	}
+
+	func renvo386CompilerSliceHeaderAddressesBss(a *renvoAsm, offset int) {
+		if a.c.renvoTargetOS == renvoOSLinux {
+			renvo386AsmMovRegPCRel(a, 7, offset, renvoAbsBssReloc)
+			renvo386AsmMovRegPCRel(a, 6, offset+8, renvoAbsBssReloc)
+			return
+		}
+		renvoAsmEmit16(a, 0x3d8d)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset, renvoAbsBssReloc)
+		renvoAsmEmit16(a, 0x358d)
+		at = len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, offset+8, renvoAbsBssReloc)
+	}
+
+	func renvo386CompilerSliceHeaderAddressesStack(a *renvoAsm, offset int) {
+		renvoAsmAddressCallWord0Stack(a, offset)
+		renvoAsmAddressCallWord1Stack(a, offset-8)
+	}
+
+	func renvo386CompilerStoreTertiaryStack(a *renvoAsm, offset int) {
+		renvo386AsmStackMem(a, offset, 0x8948, 0x4d, 0x8d)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAppendScalarHelper(g *renvoLinearGen, elemKind int) int {
+		small := renvoScalarKindSize(g.c.renvoNativeIntSize, elemKind) == 1
+		return renvo386EnsureAppendScalarHelper(g, small)
+	}
+
+	func renvo386CompilerAppendAddressHelper(g *renvoLinearGen) int {
+		return renvo386EnsureAppendAddrHelper(g)
+	}
+
+	func renvo386CompilerStringEqualHelper(g *renvoLinearGen) int {
+		return renvo386EnsureStringEqualHelper(g)
+	}
+
+	func renvo386CompilerCopyToFreshArena(g *renvoLinearGen, srcOff int, destOff int, byteCountOff int) {
+		renvoEmitCopyBytes(g, srcOff, destOff, byteCountOff)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringConcatValueRegs(g *renvoLinearGen, offset int) bool {
+		renvoNonNil(g)
+		a := &g.asm
+		renvoAsmPushStack(a, offset)
+		renvoAsmLoadSecondaryStack(a, offset-8)
+		renvoAsmPopPrimary(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerStackIEEEFloat(a *renvoAsm) bool {
+		return true
+	}
+	func renvo386CompilerScaledFloat(a *renvoAsm) bool {
+		return false
+	}
+	func renvo386CompilerDirectFloat64Operands(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideBinaryValue(g *renvoLinearGen, dest int, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, dest, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideCompareValue(g *renvoLinearGen, left int, right int, tok int, signed bool) bool {
+		return renvoEmitNativeWideStack(g, 0, left, right, renvoWideBinaryMode(g, tok, signed))
+	}
+}
+
+go compiler {
+	func renvo386CompilerRecordLocalStorage(g *renvoLinearGen, offset int, size int, captureOff int, typ int) {
+
+	}
+}
+
+go compiler {
+	func renvo386CompilerSwapThreadState(g *renvoLinearGen) {
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopSecondary(&g.asm)
+		renvoAsmPushPrimary(&g.asm)
+		renvoAsmCopySecondaryToPrimary(&g.asm)
+		renvoAsmStorePrimaryBss(&g.asm, g.threadStatePointerOff)
+		renvoAsmPopPrimary(&g.asm)
+	}
+}
+
+go compiler {
+	func renvo386CompilerThreadStateRegisterCapability(g *renvoLinearGen) {
+		renvoAsmPrimaryImm(&g.asm, 0)
+	}
+}
+
+go compiler {
+	func renvo386CompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		return -1
+	}
+}
+
+go compiler {
+	func renvo386CompilerBoundedWideWordShift(g *renvoLinearGen, mode int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureNativeShiftHelper(g, mode))
+	}
+}
+
+go compiler {
+	func renvo386CompilerBoundedNarrowUnsignedShift(g *renvoLinearGen, tok int) {
+		renvoEmitBounded386UnsignedRightShift(g, tok)
+	}
+}
+
+go compiler {
+	func renvo386CompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
+		a := &g.asm
+		renvoAsmEmit8(a, 0xff)
+		if localOffset >= 0 && localOffset <= 128 {
+			if inc {
+				renvoAsmEmit8(a, 0x45)
+			} else {
+				renvoAsmEmit8(a, 0x4d)
+			}
+			renvoAsmEmit8(a, -localOffset)
+		} else {
+			if inc {
+				renvoAsmEmit8(a, 0x85)
+			} else {
+				renvoAsmEmit8(a, 0x8d)
+			}
+			renvoAsmEmit32(a, -localOffset)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
+		a := &g.asm
+		renvoAsmPrimaryBssAddr(a, globalOffset)
+		opcode := 0x08ff
+		if inc {
+			opcode = 0x00ff
+		}
+		renvoAsmEmit16(a, opcode)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCheckedIndexAddress(g *renvoLinearGen, elemSize int) {
+		renvoAsmCallLabel(&g.asm, renvoEnsureIndexAddressHelper(g, elemSize))
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectExternalCall(g *renvoLinearGen, fn *renvoFuncInfo) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareWordOperands(g *renvoLinearGen, unsigned bool) bool {
+		renvoAsmEmit16(&g.asm, 0xc139)
+		return unsigned
+	}
+}
+
+go compiler {
+	func renvo386CompilerImmediateWordComparison(g *renvoLinearGen, unsigned bool) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerRegisterIEEEComparison(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalWordCompareJump(g *renvoLinearGen, left int, right int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool, leftKind int, rightKind int, leftSize int, rightSize int) bool {
+		if leftSize != 4 || rightSize != 4 {
+			return false
+		}
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, right)
+		renvo386AsmStackMem(&g.asm, left, 0x39, 0x45, 0x85)
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSecondaryFrameAddress(g *renvoLinearGen, offset int) {
+		renvo386AsmStackMem(&g.asm, offset, 0x8d48, 0x55, 0x95)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDereferenceSecondary(g *renvoLinearGen) {
+		renvoAsmEmit16(&g.asm, 0x128b)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAssemblerReserves(a *renvoAsm) renvoAsmReserves {
+		if renvoFixedTarget != 0 {
+			r := renvoAsmReserves{code: 2097152, labels: 32768, relocs: 65536, absRelocs: 49152, data: 65536}
+			if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+				r.symbols = 1024
+			}
+			return r
+		}
+		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
+		if a.c.optimizeRuntime {
+			r.data = 131072
+			r.code = 4194304
+			r.labels, r.relocs, r.absRelocs = 65536, 262144, 32768
+		}
+		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
+			r.symbols = 4096
+		}
+		return r
+	}
+}
+
+go compiler {
+	func renvo386CompilerNeedsFunctionSymbols(a *renvoAsm) bool {
+		return renvoFixedTarget == 0 && renvoIsHostedObject(a.c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadTertiaryMemSecondaryDisp(a *renvoAsm, disp int) {
+		renvo386AsmMemDisp(a, disp, 0x8b48, 0x4a, 0x8a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStorePrimaryMemTertiaryDisp(a *renvoAsm, disp int) {
+		renvo386AsmMemDisp(a, disp, 0x8948, 0x41, 0x81)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCanStoreScalar(a *renvoAsm, size int) bool {
+		return size == 1 || size == 2 || size == 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerFoldedFieldAddressing(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerSliceBackingSize(a *renvoAsm, elemSize int) int {
+		backingSize := 0
+		if renvoFixedTarget != 0 {
+			count := 4096
+			if elemSize == 1 {
+				count = 65536
+			}
+			backingSize = elemSize * count
+			if backingSize < 8192 {
+				backingSize = 8192
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+			if backingSize < elemSize {
+				backingSize = elemSize
+			}
+		} else {
+			backingSize = elemSize * 8192
+			if backingSize < 4096 {
+				backingSize = 4096
+			}
+			if backingSize > 65536 {
+				backingSize = 65536
+			}
+		}
+		return backingSize
+	}
+}
+
+go compiler {
+	func renvo386CompilerCInlineReturn(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, label int, jumpIfTrue bool) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCInlineReturnHelper(g, ep, idx, e, callee, label, jumpIfTrue)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCUpdateIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int, e *renvoExpr, callee *renvoExpr, discard bool) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCUpdateIntrinsic(g, ep, idx, e, callee, discard)
+	}
+}
+
+go compiler {
+	func renvo386CompilerConstantPointerStep(g *renvoLinearGen, delta int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		if delta != 0 {
+			if renvoAsmImmFits8Signed(delta) {
+				renvoAsmEmit3(&g.asm, 0x83, 0xc0, delta)
+			} else {
+				renvoAsmEmit8(&g.asm, 0x05)
+				renvoAsmEmit32(&g.asm, delta)
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitWideIdentToLocal(g, e, offset)
+	}
+}
+
+go compiler {
+	func renvo386CompilerWordExpressionPeephole(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitWideIntExprFast(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPrimaryAddressOffset(a *renvoAsm, offset int) {
+		if renvoAsmImmFits8Signed(offset) {
+			renvoAsmEmit3(a, 0x83, 0xc0, offset)
+		} else {
+			renvoAsmEmit8(a, 0x05)
+			renvoAsmEmit32(a, offset)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerNegatePrimaryWord(a *renvoAsm) {
+		renvoAsmEmit16(a, 0xd8f7)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalBitTestJump(g *renvoLinearGen, ep *renvoExprParse, idx int, c0 byte, label int, jumpIfTrue bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitLocalBitTestJump(g, ep, idx, c0, label, jumpIfTrue)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDerefCompareJump(g *renvoLinearGen, ep *renvoExprParse, idx int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitDerefCompareJump(g, ep, idx, value, c0, c1, label, jumpIfTrue, unsigned)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalImmediateCompareJump(g *renvoLinearGen, offset int, value int, c0 byte, c1 byte, label int, jumpIfTrue bool, unsigned bool) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		opcode := 0x81
+		if renvoAsmImmFits8Signed(value) {
+			opcode = 0x83
+		}
+		renvo386AsmStackMem(&g.asm, offset, opcode, 0x7d, 0xbd)
+		if opcode == 0x83 {
+			renvoAsmEmit8(&g.asm, value)
+		} else {
+			renvoAsmEmit32(&g.asm, value)
+		}
+		renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCanFoldIndexedScalarLoad(g *renvoLinearGen, ep *renvoExprParse, idx int, elementSize int, size int) bool {
+		return size >= 1 && size <= 4 && (elementSize == 1 || elementSize == 2 || elementSize == 4 || elementSize == 8) && renvo386SimpleIndexExpr(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerFoldedIndexedScalarLoad(a *renvoAsm, elementSize int, size int, signed bool) {
+		scale := 0
+		if elementSize == 2 {
+			scale = 1
+		} else if elementSize == 4 {
+			scale = 2
+		} else if elementSize == 8 {
+			scale = 3
+		}
+		sib := scale<<6 | 0x02
+		if size == 1 {
+			opcode := 0xb6
+			if signed {
+				opcode = 0xbe
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else if size == 2 {
+			opcode := 0xb7
+			if signed {
+				opcode = 0xbf
+			}
+			renvoAsmEmit3(a, 0x0f, opcode, 0x04)
+			renvoAsmEmit8(a, sib)
+		} else {
+			renvoAsmEmit3(a, 0x8b, 0x04, sib)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringEqualLeftLength(a *renvoAsm) {
+		renvoAsmMovArg1Rax(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerRegisterSwitch(g *renvoLinearGen) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSwitchCasePeephole(g *renvoLinearGen, ep *renvoExprParse, idx int, valueOffset int, matchLabel int, known bool, value int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		a := &g.asm
+		if known {
+			if renvoPreparedBackendActive == 0 && valueOffset < 0 {
+				if renvoAsmImmFits8Signed(value) {
+					renvoAsmCmpPrimaryImm8(a, value)
+				} else {
+					renvoAsmEmit8(a, 0x3d)
+					renvoAsmEmit32(a, value)
+				}
+				renvo386AsmJccLabel(a, 0x84, matchLabel)
+			} else {
+				renvoAsmJcmpStackImm(a, valueOffset, value, matchLabel, 0x94)
+			}
+			return 1
+		}
+		if renvoPreparedBackendActive != 0 {
+			return -1
+		}
+		if !renvoEmitIntExpr(g, ep, idx) {
+			return 0
+		}
+		renvo386AsmStackMem(a, valueOffset, 0x39, 0x45, 0x85)
+		renvo386AsmJccLabel(a, 0x84, matchLabel)
+		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerIndexedPointerAddress(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return -1
+		}
+		return renvo386EmitCIndexedPointerAddress(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompoundPointerMemory(g *renvoLinearGen, ep *renvoExprParse, idx int, kind int, tok int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitCompoundPointerMemory(g, ep, idx, kind, tok)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDirectScalarStore(g *renvoLinearGen, size int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return size >= 1 && size <= 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerScalarPreservesSecondary(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386SimpleScalarExpr(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
+		if renvoFixedTarget != 0 || !g.c.code16 {
+			return false
+		}
+		return renvo386EmitSelfBinaryLocalAssign(g, ep, idx, offset)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
+		if renvoFixedTarget != 0 || !g.c.code16 || size != 4 {
+			return -1
+		}
+		memoryOp := 0
+		if op == '+' {
+			memoryOp = 0x0148
+		} else if op == '-' {
+			memoryOp = 0x2948
+		} else if op == '&' {
+			memoryOp = 0x2148
+		} else if op == '|' {
+			memoryOp = 0x0948
+		} else if op == '^' {
+			memoryOp = 0x3148
+		} else {
+			return -1
+		}
+		if !renvo386EmitDirectCompoundLocalAssign(g, ep, idx, offset, tok, memoryOp, kind) {
+			return 0
+		}
+		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerDirectScalarDeref(g *renvoLinearGen) bool {
+		return g.c.code16
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedWordComparison(g *renvoLinearGen) bool {
+		return g.c.renvoNativeIntSize == 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerAppendBytesHelper(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerEnsureAppendBytesHelper(g *renvoLinearGen) int {
+		g.asm.patchFailed = true
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerBitwisePrimaryTertiary(a *renvoAsm, op byte) {
+		instruction := 0xc821
+		if op == '|' {
+			instruction = 0xc809
+		} else if op == '^' {
+			instruction = 0xc831
+		} else if op != '&' {
+			a.patchFailed = true
+			return
+		}
+		renvoAsmEmit16(a, instruction)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLogicalShiftPrimaryWordImmediate(a *renvoAsm, imm int) {
+		renvo386AsmShrRaxImm(a, imm)
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedPointerOrdering(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareWordImmediateKind(a *renvoAsm, imm int, kind int) {
+		renvoAsmCmpPrimaryImm8(a, imm)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPrepareReadWriteBuffer(a *renvoAsm) {
+		renvo386AsmPrepareReadWriteBuf(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerMoveReadWriteOffset(a *renvoAsm) {
+		renvo386AsmMoveOffsetArg(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSliceCountResult(a *renvoAsm) {
+		renvoAsmEmit16(a, 0x5851)
+	}
+}
+
+go compiler {
+	func renvo386CompilerDirectSliceCountSelector(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadFrameFieldValue(a *renvoAsm, offset int, size int, nativeABI bool) {
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x55, 0x95)
+		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadIndirectFieldValue(a *renvoAsm, size int, nativeABI bool) {
+		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, size)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAddressResultBuffer(a *renvoAsm, offset int) {
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvo386CompilerAddressTakenLocal(a *renvoAsm, offset int) {
+		renvo386AsmStackMem(a, offset, 0x8d48, 0x45, 0x85)
+	}
+}
+
+go compiler {
+	func renvo386CompilerNamedFunctionAddress(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionWordConversion(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerOpenFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoAsmEmit16(a, 0xc389)
+			renvoAsmPopPrimary(a)
+			renvoWin386EmitRuntimeOpen(a)
+			return true
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPopCallWord1(a)
+			renvoAsmSecondaryImm(a, 493)
+			renvoDarwinArm64DefinitionOpen(a)
+			return true
+		}
+		renvoAsmCopyPrimaryToCallWord0(a)
+		renvoAsmPopTertiary(a)
+		renvoAsmSecondaryImm(a, 493)
+		renvoAsmPrimaryImm(a, renvoLinuxSysOpen(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerOpenPathLength(g *renvoLinearGen) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerCloseFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoWin386EmitRuntimeClose(a)
+			return true
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionClose(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysClose(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerChmodFile(a *renvoAsm) bool {
+		if a.c.renvoTargetOS == renvoOSWindows {
+			renvoWin386EmitRuntimeChmod(a)
+			return true
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoDarwinArm64DefinitionChmod(a)
+			return true
+		}
+		renvoAsmPrimaryImm(a, renvoLinuxSysFchmod(a.c.renvoTargetOS, a.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerPopReadWriteOffset(a *renvoAsm) {
+		renvoAsmPopPrimary(a)
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			renvoAsmCopyPrimaryToTertiary(a)
+		} else {
+			renvoAsmMoveOffsetArg(a)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerReadWriteFile(g *renvoLinearGen, operation int, hasOffset bool) bool {
+		if g.c.renvoTargetOS == renvoOSWindows {
+			a := &g.asm
+			renvoAsmEmit16(a, 0xc689)
+			renvoAsmEmit16(a, 0xca89)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit8(a, 0x5b)
+			if operation == RTGRuntimeWrite {
+				renvoWin386EmitRuntimeWriteAt(g)
+			} else {
+				renvoWin386EmitRuntimeReadAt(g)
+			}
+			return true
+		}
+		a := &g.asm
+		renvoAsmPrepareReadWriteBuf(a)
+		if hasOffset {
+			renvoAsmPopReadWriteOffset(a)
+		}
+		renvoAsmPopCallWord0(a)
+		isWrite := operation == RTGRuntimeWrite
+		number := renvoLinuxSysReadSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
+		if hasOffset {
+			number = renvoLinuxSysReadAt(a.c.renvoTargetOS, a.c.renvoTargetArch)
+		}
+		if isWrite {
+			number = renvoLinuxSysWriteSeq(a.c.renvoTargetOS, a.c.renvoTargetArch)
+			if hasOffset {
+				number = renvoLinuxSysWriteAt(a.c.renvoTargetOS, a.c.renvoTargetArch)
+			}
+		}
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			number = renvoDarwinImportRead
+			if hasOffset {
+				number = renvoDarwinImportPread
+			}
+			if isWrite {
+				number = renvoDarwinImportWrite
+				if hasOffset {
+					number = renvoDarwinImportPwrite
+				}
+			}
+		}
+		renvoAsmPrimaryImm(a, number)
+		if targetIsDarwin(a.c.renvoTargetOS) {
+			if hasOffset {
+				if isWrite {
+					renvoDarwinArm64DefinitionWriteAt(a)
+				} else {
+					renvoDarwinArm64DefinitionReadAt(a)
+				}
+			} else if isWrite {
+				renvoDarwinArm64DefinitionWrite(a)
+			} else {
+				renvoDarwinArm64DefinitionRead(a)
+			}
+			return true
+		}
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerBoundedWordShift(g *renvoLinearGen, tok int, right bool, leftUnsigned bool, resultUnsigned bool) bool {
+		if right && resultUnsigned {
+			return renvoEmitBounded386UnsignedRightShift(g, tok)
+		}
+		return renvoEmitPrimaryTertiaryOp(g, tok)
+	}
+}
+
+go compiler {
+	func renvo386CompilerWordConstantImmediate(a *renvoAsm, kind int, value int) bool {
+		renvoAsmPrimaryImm(a, value)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsignedWordOrderResult(g *renvoLinearGen, op0 byte, op1 byte, opLen int, kind int) bool {
+		return renvoEmitUnsignedPrimaryTertiaryCompare(g, op0, op1, opLen)
+	}
+}
+
+go compiler {
+	func renvo386CompilerWordCallIntrinsic(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
+		if renvoFixedTarget == 0 {
+			result := renvoEmitCNativeIntCall(g, ep, idx, &ep.exprs[idx])
+			if result >= 0 {
+				return result
+			}
+		}
+		return renvoEmitPointerDifferenceCall(g, ep, idx)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectCallABI(c *renvoCompileContext) int {
+		if c.renvoTargetOS != renvoOSLinux || targetIsKernelModule(c) {
+			return renvoObjectABIUnavailable
+		}
+		return renvoObjectABICdecl
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectArgumentRegisterCount(c *renvoCompileContext) int {
+		if c.regParm == 3 {
+			return 3
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectExportFrame(g *renvoLinearGen, reserve bool) {
+		if reserve {
+			// Preserve the cdecl callee-saved registers, leaving scalar result registers live.
+			renvoAsmEmitText(&g.asm, "\x55\x89\xe5\x53\x56\x57")
+		} else {
+			renvoAsmEmitText(&g.asm, "\x5f\x5e\x5b\xc9")
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectStackWord(a *renvoAsm, word int, kind int) bool {
+		if word < 0 || kind != 0 {
+			return false
+		}
+		displacement := 8 + word*4
+		if displacement <= 127 {
+			renvoAsmEmitText(a, "\xff\x75")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\xff\xb5")
+			renvoAsmEmit32(a, displacement)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectRegisterWord(a *renvoAsm, register int, kind int) bool {
+		if register < 0 || register >= 3 || kind != 0 {
+			return false
+		}
+		if register == 0 {
+			renvoAsmEmit8(a, 0x50)
+		}
+		if register == 1 {
+			renvoAsmEmit8(a, 0x52)
+		}
+		if register == 2 {
+			renvoAsmEmit8(a, 0x51)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerBeginObjectStackArgs(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerBeginObjectAggregateResult(a *renvoAsm, sret bool) bool {
+		if sret {
+			return false
+		}
+		renvoAsmEmitText(a, "\x83\xec\x08")
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectSRetPointer(a *renvoAsm) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectPrivateResult(a *renvoAsm, wordCount int) bool {
+		displacement := wordCount * 4
+		if displacement == 0 {
+			renvoAsmEmitText(a, "\x8d\x04\x24")
+		} else if displacement <= 127 {
+			renvoAsmEmitText(a, "\x8d\x44\x24")
+			renvoAsmEmit8(a, displacement)
+		} else {
+			renvoAsmEmitText(a, "\x8d\x84\x24")
+			renvoAsmEmit32(a, displacement)
+		}
+		renvoAsmPushPrimary(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+		if resultWords != 2 {
+			a.patchFailed = true
+			return
+		}
+		// Publish the private wide result in EDX:EAX before releasing its slot.
+		renvoAsmEmitText(a, "\x8b\x04\x24\x8b\x54\x24\x04\x83\xc4\x08")
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int) {
+		if !(renvoFixedTarget == 0 && g.c.code16 && renvo386EmitDirectCallWithWordCount(g, fnIndex, wordCount)) {
+			renvo386EmitCallWithWordCount(g, fnIndex, wordCount)
+		}
+	}
+}
+
+go compiler {
+	func renvo386CompilerReserveObjectVariadicArgs(g *renvoLinearGen, fixedCount int) {
+		// The neutral carrier holds the first unnamed stack argument in word zero.
+		renvoAsmEmitText(&g.asm, "\x83\xec\x0c\x8d\x45")
+		renvoAsmEmit8(&g.asm, 8+fixedCount*4)
+		renvoAsmEmitText(&g.asm, "\x89\x04\x24\xc7\x44\x24\x04\x00\x00\x00\x00\xc7\x44\x24\x08\x00\x00\x00\x00")
+	}
+}
+
+go compiler {
+	func renvo386CompilerPushObjectVariadicArgs(a *renvoAsm, fixedWords int) {
+		renvo386CompilerPushObjectPrivateResult(a, fixedWords)
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinishObjectVariadicArgs(a *renvoAsm) {
+		renvoAsmEmitText(a, "\x83\xc4\x0c")
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIndirectStackCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
+		// Stack arguments are placed right-to-left. GCC regparm consumes the first
+		// three scalar words in eax, edx, and ecx after the indirect target has been
+		// saved in the callee-saved edi register.
+		for i := len(argOffsets) - 1; i >= 0; i-- {
+			renvoAsmLoadPrimaryStack(a, argOffsets[i])
+			renvoAsmPushPrimary(a)
+		}
+		renvoAsmLoadPrimaryStack(a, handleOffset)
+		registerWords := 0
+		if a.c.regParm == 3 {
+			renvoAsmEmitText(a, "\x89\xc7")
+			registerWords = len(argOffsets)
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(a, 0x58)
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(a, 0x5a)
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(a, 0x59)
+			}
+			renvoAsmEmitText(a, "\xff\xd7")
+		} else {
+			renvoAsmEmitText(a, "\xff\xd0")
+		}
+		if len(argOffsets) > registerWords {
+			bytes := (len(argOffsets) - registerWords) * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmitText(a, "\x83\xc4")
+				renvoAsmEmit8(a, bytes)
+			} else {
+				renvoAsmEmitText(a, "\x81\xc4")
+				renvoAsmEmit32(a, bytes)
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLoadObjectArgumentWord(a *renvoAsm, word int, offset int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIndirectRegisterCall(a *renvoAsm, handleOffset int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerRuntimeStackHelpers(a *renvoAsm, init int, switchStack int, fnLabel int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerJITCallFromStack(a *renvoAsm) bool {
+		renvoAsmEmitText(a, "\x5b\x5e\x5a\x59\x58\x5f")
+		renvoAsmEmitText(a, "\x89\x66\xfc\x89\xf4\x83\xec\x08\x57\x50\x51\x52\xff\xd3")
+		renvoAsmEmitText(a, "\x83\xc4\x10\x8b\x54\x24\x04\x89\xd4")
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) bool {
+		if wordCount > 7 {
+			return false
+		}
+		renvoAsmPopPrimary(a)
+		if wordCount > 1 {
+			renvoAsmPopCallWord0(a)
+		}
+		if wordCount > 2 {
+			renvoAsmEmit8(a, 0x59)
+		}
+		if wordCount > 3 {
+			renvoAsmPopSecondary(a)
+		}
+		if wordCount > 4 {
+			renvoAsmEmit8(a, 0x5e)
+		}
+		if wordCount > 5 {
+			renvoAsmEmit8(a, 0x5f)
+		}
+		if wordCount > 6 {
+			// Linux/i386 carries the sixth syscall argument in EBP. Exchange
+			// it with the saved frame pointer at the top of the expression
+			// stack, then restore EBP after int 0x80.
+			renvoAsmEmitText(a, "\x87\x2c\x24")
+			renvoAsmSyscall(a)
+			renvoAsmEmit8(a, 0x5d)
+			return true
+		}
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerExitStatus(a *renvoAsm) bool {
+		if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWin386EmitExit(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerWriteValueRegs(g *renvoLinearGen, fd int) bool {
+		a := &g.asm
+		if targetIsWindows(g.c.renvoTargetOS) {
+			renvoAsmEmit16(a, 0xc689)
+			renvoAsmPrimaryImm(a, -1)
+			renvoAsmCopyPrimaryToTertiary(a)
+			renvoAsmPrimaryImm(a, fd)
+			renvoAsmEmit16(a, 0xc389)
+			renvoWin386EmitRuntimeWriteAt(g)
+			return true
+		}
+		renvoAsmPushImm(a, fd)
+		renvoAsmPopCallWord0(a)
+		renvoAsmCopyPrimaryToCallWord1(a)
+		renvoAsmPrimaryImm(a, renvoLinuxSysWriteSeq(g.c.renvoTargetOS, g.c.renvoTargetArch))
+		renvoAsmSyscall(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerArenaDiscardSupported(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerDiscardArenaPages(a *renvoAsm, startOff int, endOff int, lenOff int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerCdeclObjectCall(a *renvoAsm, importID int, wordCount int, variadic bool) bool {
+		registerWords := 0
+		if a.c.regParm == 3 && !variadic {
+			registerWords = wordCount
+			if registerWords > 3 {
+				registerWords = 3
+			}
+			if registerWords > 0 {
+				renvoAsmEmit8(a, 0x58) // eax
+			}
+			if registerWords > 1 {
+				renvoAsmEmit8(a, 0x5a) // edx
+			}
+			if registerWords > 2 {
+				renvoAsmEmit8(a, 0x59) // ecx
+			}
+		}
+		renvoAsmEmit8(a, 0xe8)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddAbsReloc(a, at, importID, renvoImportReloc)
+		if wordCount > registerWords {
+			bytes := (wordCount - registerWords) * 4
+			if renvoAsmImmFits8Signed(bytes) {
+				renvoAsmEmit3(a, 0x83, 0xc4, bytes)
+			} else {
+				renvoAsmEmit16(a, 0xc481)
+				renvoAsmEmit32(a, bytes)
+			}
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectRegisterCall(a *renvoAsm, importID int, wordCount int, vectorMask int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHostedStaticCall(a *renvoAsm, importID int, wordCount int) bool {
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return false
+		}
+		renvoWin386CallImport(a, importID)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectAggregateRegisterBytes(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerKernelEntryFrame(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerKernelEntryReturn(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerKernelCallbackAddress(a *renvoAsm, label int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLocalStorageUnit(c *renvoCompileContext, compactScalar bool) int {
+		if c.code16 && compactScalar {
+			return 4
+		}
+		return renvoBackendValueSlotSize
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectReverseRegisterCall(a *renvoAsm, importID int, wordCount int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerProcessEntryWords(g *renvoLinearGen, paramCount int, entryStateOffset int) bool {
+		if paramCount == 0 {
+			return true
+		}
+		if targetIsWindows(g.c.renvoTargetOS) {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoWindows386ArgsBSSSize
+			argsTextOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsTextBSSAlignment)
+			g.asm.bssSize = argsTextOff + renvoWindows386ArgsTextBSSSize
+			argsLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386ArgsLengthBSSAlignment)
+			g.asm.bssSize = argsLenOff + renvoWindows386ArgsLengthBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoWindows386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoWindows386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoWindows386EnvironmentLengthBSSSize
+			renvoAsmBuildWindowsArgvEnvSlices386(&g.asm, argsOff, argsTextOff, argsLenOff, envDataOff, envLenOff)
+		} else {
+			argsOff := renvoAlignValue(g.asm.bssSize, renvoLinux386ArgsBSSAlignment)
+			g.asm.bssSize = argsOff + renvoLinux386ArgsBSSSize
+			envDataOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentBSSAlignment)
+			g.asm.bssSize = envDataOff + renvoLinux386EnvironmentBSSSize
+			envLenOff := renvoAlignValue(g.asm.bssSize, renvoLinux386EnvironmentLengthBSSAlignment)
+			g.asm.bssSize = envLenOff + renvoLinux386EnvironmentLengthBSSSize
+			renvoAsmBuildArgvEnvSlices386(&g.asm, argsOff, envDataOff, envLenOff)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerImageEntryWords(g *renvoLinearGen, paramCount int) bool {
+		if paramCount == 0 {
+			return true
+		}
+		// cdecl entry stack -> EBX/ESI/EDX, the first Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x5c\x24\x04\x8b\x74\x24\x08\x89\xf2")
+		if paramCount == 1 {
+			return true
+		}
+		// ECX/EAX/EDI, the second Renvo slice.
+		renvoAsmEmitText(&g.asm, "\x8b\x4c\x24\x0c\x8b\x44\x24\x10\x89\xc7")
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramEntryFrame(a *renvoAsm, image bool) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramExit(a *renvoAsm, image bool) bool {
+		if image {
+			renvoAsmRet(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			renvoWin386EmitExit(a)
+			renvoAsmRet(a)
+		} else {
+			renvoAsmCopyPrimaryToCallWord0(a)
+			renvoAsmPrimaryImm(a, renvoLinux386SysExit)
+			renvoAsmSyscall(a)
+		}
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerEntryRuntimeRegisters(g *renvoLinearGen) {
+		return
+	}
+}
+
+go compiler {
+	func renvo386CompilerResolvesStaticImport(c *renvoCompileContext, absoluteLibrary bool) bool {
+		if renvoFixedTarget == 0 && renvoIsHostedObject(c) {
+			return true
+		}
+		return targetIsDarwin(c.renvoTargetOS) && absoluteLibrary || targetIsWindows(c.renvoTargetOS) && !absoluteLibrary
+	}
+}
+
+go compiler {
+	// Shared call carriers use value words; physical ABI marshalling is separate.
+	func renvo386CompilerStructArgumentByReference(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerStoreHiddenResult(g *renvoLinearGen, offset int) {
+		renvo386AsmStackMem(&g.asm, offset, 0x89, 0x5d, 0x9d)
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionFrameStart(g *renvoLinearGen, label int) int {
+		a := &g.asm
+		renvoAsmMarkLabel(a, label)
+		framePatch := len(a.code)
+		renvoAsmEmit32(a, 0x000000c8)
+		return framePatch
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionFrameFinish(g *renvoLinearGen, framePatch int) {
+		a := &g.asm
+		frame := renvoAlignTo8(g.stackPeak)
+		if frame > 65528 {
+			frame = 65528
+		}
+		renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
+	}
+}
+
+go compiler {
+	func renvo386CompilerZeroVoidReturn(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionOverride(a *renvoAsm, declIndex int, label int) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompactCValueHelper(a *renvoAsm, label int, size int, signedValue bool, postDec bool) bool {
+		if size < 1 || size > 4 {
+			return false
+		}
+		renvoAsmMarkLabel(a, label)
+		// Internal word 1 (ESI) is **T and word 0 (EBX) is the assignment
+		// value. Advance *p, store the value through the old pointer, and leave the
+		// expression result in EAX without constructing a frame.
+		renvoAsmEmit16(a, 0x168b) // mov edx,[esi]
+		delta := size
+		if postDec {
+			delta = -delta
+		}
+		if renvoAsmImmFits8Signed(delta) {
+			renvoAsmEmit3(a, 0x8d, 0x4a, delta) // lea ecx,[edx+delta]
+		} else {
+			renvoAsmEmit16(a, 0x8a8d)
+			renvoAsmEmit32(a, delta)
+		}
+		renvoAsmEmit16(a, 0x0e89) // mov [esi],ecx
+		if size == 1 {
+			renvoAsmEmit16(a, 0x1a88) // mov [edx],bl
+			if signedValue {
+				renvoAsmEmitText(a, "\x0f\xbe\xc3")
+			} else {
+				renvoAsmEmitText(a, "\x0f\xb6\xc3")
+			}
+		} else if size == 2 {
+			renvoAsmEmitText(a, "\x66\x89\x1a") // mov [edx],bx
+			if signedValue {
+				renvoAsmEmitText(a, "\x0f\xbf\xc3")
+			} else {
+				renvoAsmEmitText(a, "\x0f\xb7\xc3")
+			}
+		} else {
+			renvoAsmEmit16(a, 0x1a89) // mov [edx],ebx
+			renvoAsmEmit16(a, 0xd889) // mov eax,ebx
+		}
+		renvoAsmRet(a)
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramLayout(a *renvoAsm, image bool, functionCount int) int {
+		a.codeOffset = renvo386ELFCodeOffset
+		if targetIsWindows(a.c.renvoTargetOS) {
+			a.codeOffset = renvoWinSectionRVA
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerReleaseProgramDeclarations(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerReleaseProgramScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinalizeObjectCode(a *renvoAsm) bool {
+		return !a.c.code16 || renvo386ApplyCode16(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramImage(a *renvoAsm, initLabel int, exitLabel int, result *renvoCompileResult) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(a.c) {
+			result.data = renvoAsmImageObject386(a)
+		} else if targetIsWindows(a.c.renvoTargetOS) {
+			result.data = renvoAsmImageWindows386(a)
+		} else {
+			result.data = renvoAsmImage386(a)
+		}
+	}
+}
+
+go compiler {
+	// Compatibility entrypoint; program compilation is shared.
+	func renvoTryCompileScalarProgram386(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+		return renvoTryCompileScalarProgramScratch(p, meta)
+	}
+}
+
+go compiler {
+	func renvo386CompilerKernelProgram(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramTargetMode(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramCacheSupported(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramImageEntry(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectProgram(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && renvoIsCdeclObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerResolveUnemittedClosures(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerEmptyFunction(a *renvoAsm, label int) {
+		renvoAsmMarkLabel(a, label)
+		renvoAsmRet(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceCapacity(c *renvoCompileContext) int {
+		return 786432
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceScratch(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceSoftFloat(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerSourceTokenCapacity(c *renvoCompileContext, length int) int {
+		return length/4 + 8192
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectArgumentWordBytes(c *renvoCompileContext) int {
+		return 4
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectWordLimit(c *renvoCompileContext, export bool) int {
+		return 127
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectIndirectAggregate(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectFaultTrap(a *renvoAsm) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectAbsoluteAddress(a *renvoAsm, targetStart int, targetEnd int, addend int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
+		renvoAsmLoadPrimarySecondaryStack(a, left, leftLength)
+		renvoAsmPushStringRegs(a)
+		renvoAsmLoadPrimarySecondaryStack(a, right, rightLength)
+		renvoAsmCopySecondaryToTertiary(a)
+		renvoAsmCopyPrimaryToSecondary(a)
+		renvoAsmPopCallWord0(a)
+		renvoAsmPopCallWord1(a)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectStackArguments(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectVariadicWordLimit(c *renvoCompileContext) int {
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerStructuredFunctions(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHelperFunctionBoundary(a *renvoAsm, label int, start bool) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerStructuredStringEqualBody(g *renvoLinearGen) {
+		g.asm.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLabelBoundary(a *renvoAsm, label int) {
+		return
+	}
+}
+
+go compiler {
+	func renvo386CompilerUnsupportedOperation(a *renvoAsm, code int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerLabelNotifications(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramEmissionValid(g *renvoLinearGen) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramResultValid(g *renvoLinearGen, result *renvoCompileResult) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerProgramFailureExitCode(c *renvoCompileContext) int {
+		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerStableFunctionOrder(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerRetainPanicRuntime(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerHostedObject(c *renvoCompileContext) bool {
+		return renvoIsCdeclObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerTupleParameterLayout(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerStringArgumentsFromFrame(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerInlineAppend(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+		a.patchFailed = true
+	}
+}
+
+go compiler {
+	func renvo386CompilerFixedObjectCABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerOptimizeProgramRuntime(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerReserveFunctionLabels(c *renvoCompileContext, mode int) bool {
+		return renvoFixedTarget != 0 && mode == 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerResultCopyViaFrame(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerScaledFloat64Values(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerWideFloatLocals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerScaledAtomLiterals(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerReconstructWideArgument(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerFunctionAddressLayout(c *renvoCompileContext) bool {
+		return renvoFixedTarget == 0 && c.objectFile
+	}
+}
+
+go compiler {
+	func renvo386CompilerResetProgramEmission(g *renvoLinearGen) {
+
+	}
+}
+
+go compiler {
+	func renvo386CompilerFlowConstantPropagation(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerPureCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerElideEmptyCalls(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerSingleCallConstants(c *renvoCompileContext) bool {
+		return renvoIsSysVObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectStackScalarABI(c *renvoCompileContext) bool {
+		return renvoIsCdeclObject(c)
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectRegisterScalarABI(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectPairResult(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectHelperSymbols(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectFaultsTrap(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectLazyArena(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerObjectAbsoluteSymbols(c *renvoCompileContext) bool {
+		return false
+	}
+}
+
+# Adapter for the private legacy emitter protocol; semantic IDs are not opcodes.
+go compiler {
+	func renvo386CompilerLegacyCondition(condition int) int {
+		if condition == renvoConditionEqual {
+			return 0x94
+		}
+		if condition == renvoConditionNotEqual {
+			return 0x95
+		}
+		if condition == renvoConditionSignedLess {
+			return 0x9c
+		}
+		if condition == renvoConditionSignedGreaterEqual {
+			return 0x9d
+		}
+		if condition == renvoConditionSignedLessEqual {
+			return 0x9e
+		}
+		if condition == renvoConditionSignedGreater {
+			return 0x9f
+		}
+		if condition == renvoConditionUnsignedLess {
+			return 0x92
+		}
+		if condition == renvoConditionUnsignedGreaterEqual {
+			return 0x93
+		}
+		if condition == renvoConditionUnsignedLessEqual {
+			return 0x96
+		}
+		if condition == renvoConditionUnsignedGreater {
+			return 0x97
+		}
+		return 0
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareSet(a *renvoAsm, condition int) {
+		renvo386CompilerCmpTertiaryPrimarySet(a, renvo386CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareJump(a *renvoAsm, condition int, label int) {
+		renvo386CompilerCmpTertiaryPrimaryJump(a, renvo386CompilerLegacyCondition(condition), label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareStackStackJump(a *renvoAsm, left int, right int, label int, condition int) {
+		renvo386CompilerJcmpStackStack(a, left, right, label, renvo386CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompareStackImmediateJump(a *renvoAsm, offset int, value int, label int, condition int) {
+		renvo386CompilerJcmpStackImm(a, offset, value, label, renvo386CompilerLegacyCondition(condition))
+	}
+}
+
+go compiler {
+	func renvo386CompilerConditionBranch(a *renvoAsm, condition int, label int) {
+		cond := renvo386CompilerLegacyCondition(condition) - 0x10
+		renvoAsmEmit2(a, 0x0f, cond)
+		at := len(a.code)
+		renvoAsmEmit32(a, 0)
+		renvoAsmAddReloc(a, at, label)
+	}
+}
+
+go compiler {
+	func renvo386CompilerCompactCValueHelpers(c *renvoCompileContext) bool {
+		return c.code16 && c.objectFile
+	}
+}
+
+go compiler {
+	func renvo386CompilerStaticCallPolicy(c *renvoCompileContext) int {
+		if c.renvoTargetOS == renvoOSWindows {
+			return renvoStaticCallWords
+		}
+		return renvoStaticCallUnavailable
+	}
+}
+
+go compiler {
+	func renvo386CompilerFinishStaticCallShape(a *renvoAsm, integerCount int, floatCount int, allInteger bool, resultRegister int, resultKind int) bool {
+		return false
+	}
+}
+
+go compiler {
+	func renvo386CompilerLinkedStaticImport(a *renvoAsm, libraryStart int, libraryEnd int, nameStart int, nameEnd int, src []byte) int {
+		if a.c.renvoTargetOS != renvoOSWindows {
+			return -1
+		}
+		return renvoAsmAddWinStaticImport(a, libraryStart, libraryEnd, nameStart, nameEnd, src)
+	}
+}
+
+go compiler {
+	func renvo386CompilerStaticCallBinding(c *renvoCompileContext, src []byte, libraryStart int, libraryEnd int) int {
+		if c.renvoTargetOS == renvoOSWindows && libraryStart < libraryEnd && renvo_runtime_UnsafeByteAt(src, libraryStart) != '/' {
+			return 1
+		}
+		return -1
+	}
+}
+
+go compiler {
+	func renvo386CompilerFileOffsetSentinel(c *renvoCompileContext) bool {
+		return c.renvoTargetOS == renvoOSWindows
+	}
+}
+
+go compiler {
+	func renvo386CompilerOpenFlag(c *renvoCompileContext, flag int) int {
+		if flag == renvoOpenReadOnly {
+			return 0
+		}
+		if flag == renvoOpenWriteOnly {
+			return 1
+		}
+		if flag == renvoOpenReadWrite {
+			return 2
+		}
+		if targetIsDarwin(c.renvoTargetOS) || targetIsBSD(c.renvoTargetOS) {
+			if flag == renvoOpenCreate {
+				return 512
+			}
+			if flag == renvoOpenTruncate {
+				return 1024
+			}
+		}
+		if flag == renvoOpenCreate {
+			return 64
+		}
+		if flag == renvoOpenTruncate {
+			return 512
+		}
+		return -1
+	}
+}
+
+go compiler {
+	func renvo386CompilerJITCallSupported(c *renvoCompileContext) bool {
+		return true
+	}
+}
+
+go compiler {
+	func renvo386CompilerSyscallArgumentPolicy(c *renvoCompileContext) int {
+		if targetIsDarwin(c.renvoTargetOS) {
+			return 3
+		}
+		return 1
+	}
+}
+
+go compiler {
+	func renvo386CompilerProfileFloatModel(c *renvoCompileContext) int {
+		return renvoFloatIEEEHardware
+	}
+}
+
+go compiler {
+	func renvo386CompilerReplGlobalsSupported(c *renvoCompileContext) bool {
+		return true
 	}
 }

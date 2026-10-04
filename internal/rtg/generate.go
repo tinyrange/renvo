@@ -89,7 +89,7 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 	return GenerateResult{Source: source, Manifest: manifest, Ok: true}
 }
 
-func GenerateArchitectureKernel(packageName string) GenerateResult {
+func GenerateArchitectureKernel(packageName string, definitions []ResolveResult) GenerateResult {
 	ensureDirectEmitterV1()
 	source := []byte("//go:build !renvo_prepared && !renvo_jvm_prepared\n\n")
 	source = append(source, generateHeaderPackage(nil, "architecture-kernel", packageName)...)
@@ -98,7 +98,12 @@ func GenerateArchitectureKernel(packageName string) GenerateResult {
 	source = appendNativeEmitterAPI(source)
 	source = appendDirectEmitterKernelAdapters(source)
 	source = appendPreparedTargetFacts(source, TargetDescriptor{}, false)
-	return GenerateResult{Source: source, Ok: true}
+	source = appendPreparedDiscardPolicy(source, Declaration{})
+	source = appendPreparedObjectCallPolicy(source, ResolvedTarget{})
+	source = appendPreparedStaticCallPolicy(source, ResolvedTarget{})
+	source = appendPreparedOpenFlags(source, Declaration{})
+	source = appendPreparedSyscallPolicy(source, Document{}, Declaration{})
+	return appendBundledCompilerBindings(source, definitions)
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -134,6 +139,11 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendDescriptorSource(source, target.Descriptor)
 	source = appendArchitectureBackendAPI(source)
 	source = appendPreparedTargetFacts(source, target.Descriptor, true)
+	source = appendPreparedDiscardPolicy(source, target.Runtime)
+	source = appendPreparedObjectCallPolicy(source, target)
+	source = appendPreparedStaticCallPolicy(source, target)
+	source = appendPreparedOpenFlags(source, target.Runtime)
+	source = appendPreparedSyscallPolicy(source, resolved.Document, target.Runtime)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	goRoots := baseTargetGoRoots(resolved.Document, target)
 	sequenceRoots := targetSequenceRoots(resolved.Document, target)
@@ -153,6 +163,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendArchitectureBindings(source, resolved.Document, target.Arch, true, true)
 	source = appendDirectEmitterBindings(source, resolved.Document, target.Arch, true, false)
 	source = appendPreparedDirectEmitterAdapters(source, resolved.Document, target)
+	source = appendPreparedCompilerBindings(source)
 	source = appendPreparedABIAdapters(source, resolved.Document, target)
 	source = appendPreparedFormatAdapters(source, resolved.Document, target)
 	source = appendArchitectureHooks(source, resolved.Document, target.Arch, true)
@@ -172,6 +183,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
+	source = append(source, "\nconst renvoRTGPreparedMaxAlign = "...)
+	if active {
+		source = appendDecimalFrame(source, descriptor.MaxAlign)
+	} else {
+		source = append(source, '0')
+	}
 	source = append(source, "\nconst renvoRTGPreparedKernelModule = "...)
 	if active && stringIndex(descriptor.Capabilities, "kernel_module") >= 0 {
 		source = append(source, '1')
@@ -185,17 +202,8 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	} else {
 		source = append(source, '0')
 	}
-	source = append(source, "\nconst renvoRTGPreparedSysVX8664 = "...)
-	if active && descriptor.ABI == "sysv_x86_64" {
-		source = append(source, '1')
-	} else {
-		source = append(source, '0')
-	}
 	source = append(source, "\nconst renvoRTGPreparedFunctionSymbols = "...)
-	if active && (stringIndex(descriptor.Capabilities, "function_symbols") >= 0 ||
-		descriptor.OutputKind == "rnvm" ||
-		descriptor.OutputKind == "wasm" ||
-		descriptor.OutputKind == "html-wasm") {
+	if active && stringIndex(descriptor.Capabilities, "function_symbols") >= 0 {
 		source = append(source, '1')
 	} else {
 		source = append(source, '0')
@@ -293,9 +301,15 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 		source = appendDecimalFrame(source, descriptor.FunctionPointerBits)
 		source = append(source, "\np.maxAlign = "...)
 		source = appendDecimalFrame(source, descriptor.MaxAlign)
+		source = append(source, "\np.endian = "...)
+		if descriptor.Endian == "big" {
+			source = append(source, "renvoEndianBig"...)
+		} else {
+			source = append(source, "renvoEndianLittle"...)
+		}
 		source = append(source, "\np.backendSlotSize = renvoBackendValueSlotSize\np.addressModel = renvoAddressModelFlat\n"...)
 		source = append(source, "p.runtimeCaps = "...)
-		source = appendDecimalFrame(source, preparedRuntimeCapabilities(descriptor.RuntimeOps))
+		source = appendDecimalFrame(source, CompilerRuntimeCapabilities(descriptor.RuntimeOps, descriptor.Capabilities))
 		source = append(source, "\np.heapModel = renvoHeapNone\np.oomModel = renvoOOMResult\np.interruptModel = renvoInterruptNone\np.floatModel = "...)
 		if stringIndex(descriptor.Capabilities, "ieee_float") >= 0 {
 			source = append(source, "renvoFloatIEEESoft"...)
@@ -359,8 +373,14 @@ func preparedTargetOS(name string) int {
 	return 6
 }
 
-func preparedRuntimeCapabilities(operations []string) int {
+// CompilerRuntimeCapabilities projects the compact compiler runtime boundary.
+// Runtime operations and hosted status are independent definition facts; a
+// target's name, architecture, or word width does not imply either.
+func CompilerRuntimeCapabilities(operations []string, capabilities []string) int {
 	result := 0
+	if stringIndex(capabilities, "hosted") >= 0 {
+		result |= 64
+	}
 	for i := 0; i < len(operations); i++ {
 		if operations[i] == "print" {
 			result |= 1
@@ -681,6 +701,14 @@ func (out *renvoAsm) StaticImportDLL(index int) string {
 
 func (out *renvoAsm) StaticImportName(index int) string {
 	return out.staticImports[index].name
+}
+
+func (out *renvoAsm) StaticCallWordLocations() []int {
+	return out.staticCallWordLocations
+}
+
+func (out *renvoAsm) StaticCallStackBytes() int {
+	return out.staticCallStackBytes
 }
 
 func (out *renvoAsm) StaticCallParameterCount() int {
@@ -1283,6 +1311,14 @@ func (out *RTGEmitter) StaticImportDLL(index int) string {
 
 func (out *RTGEmitter) StaticImportName(index int) string {
 	return out.asm.staticImports[index].name
+}
+
+func (out *RTGEmitter) StaticCallWordLocations() []int {
+	return out.asm.staticCallWordLocations
+}
+
+func (out *RTGEmitter) StaticCallStackBytes() int {
+	return out.asm.staticCallStackBytes
 }
 
 func (out *RTGEmitter) StaticCallParameterCount() int {
@@ -2132,8 +2168,10 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		return out
 	}
 	var protected []bool
+	var architectureSymbols [][]generatedSymbol
 	if document != nil {
 		protected = virtualGoProtectedIdentifiers(source, tokens)
+		architectureSymbols = generatedArchitectureSymbols(*document)
 	}
 	last := 0
 	for i := 0; i < len(tokens); i++ {
@@ -2211,7 +2249,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		if nativeEmitter && document != nil && token.Kind == TokenIdent &&
 			(i >= len(protected) || !protected[i]) && i+2 < len(tokens) &&
 			tokenText(source, tokens[i+1]) == "." && tokenText(source, tokens[i+2]) == "Code" {
-			if code, found := generatedArchitectureCode(*document, text); found {
+			if code, found := generatedArchitectureCodeIndexed(architectureSymbols, text); found {
 				out = appendDecimalFrame(out, code)
 				last = tokens[i+2].End
 				i += 2
@@ -2233,7 +2271,7 @@ func appendRewrittenGoModeExports(out []byte, source []byte, names []string, pre
 		} else if external, found := embeddedExternalName(exports, text); found && token.Kind == TokenIdent {
 			out = append(out, external...)
 		} else if document != nil && token.Kind == TokenIdent {
-			replacement, found := generatedArchitectureOutput(*document, text)
+			replacement, found := generatedArchitectureOutputIndexed(architectureSymbols, text)
 			if found && (i >= len(protected) || !protected[i]) {
 				out = append(out, replacement...)
 			} else if stringIndex(names, text) >= 0 {
@@ -2264,6 +2302,7 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		method != "StaticImportDLL" && method != "StaticImportName" &&
 		method != "StaticCallParameterCount" && method != "StaticCallParameterKind" &&
 		method != "StaticCallResultFloatRegister" &&
+		method != "StaticCallWordLocations" && method != "StaticCallStackBytes" &&
 		method != "RelocationCount" &&
 		method != "RelocationAt" && method != "RelocationOffset" &&
 		method != "RelocationLabel" && method != "RelocationWordCount" &&
@@ -2391,6 +2430,14 @@ func nativeEmitterStateMethod(source []byte, tokens []Token, start int, receiver
 		replacement = append(replacement, ".staticImports["...)
 		replacement = append(replacement, arguments[0]...)
 		return append(replacement, "].name"...), end, true
+	}
+	if method == "StaticCallWordLocations" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallWordLocations"...), end, true
+	}
+	if method == "StaticCallStackBytes" && len(arguments) == 0 {
+		replacement = append(replacement, receiver...)
+		return append(replacement, ".staticCallStackBytes"...), end, true
 	}
 	if method == "StaticCallParameterCount" && len(arguments) == 0 {
 		replacement = append(replacement, receiver...)

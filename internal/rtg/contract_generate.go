@@ -440,6 +440,7 @@ var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
 const renvoRTGStackWordBytes = 0
 func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
+func renvoRTGConditionFromSemantic(condition int) RTGCondition { return RTGCondition{} }
 func renvoRTGPatchRelocations(out *renvoAsm) {}
 func renvoRTGFrameStart(out *renvoAsm) int { return -1 }
 func renvoRTGFrameFinish(out *renvoAsm, framePatch int, stackUsed int) {}
@@ -454,6 +455,7 @@ func renvoRTGABICallWordCount(out *renvoAsm, label int, wordCount int) bool { re
 func renvoRTGMarkLabel(out *renvoAsm, label int) {}
 func renvoRTGFunctionStart(out *renvoAsm, label int) {}
 func renvoRTGFunctionFinish(out *renvoAsm) {}
+const renvoRTGJITCallSupported = false
 func renvoRTGEmitJITCall(out *renvoAsm, entry RTGRegister, stackTop RTGRegister, argsData RTGRegister, argsLen RTGRegister, envData RTGRegister, envLen RTGRegister) bool { return false }
 func renvoRTGEmitUnsignedDivide(out *renvoAsm, remainder bool) bool { return false }
 const renvoRTGCodeOffset = 0
@@ -556,6 +558,14 @@ func appendPreparedABIAdapters(out []byte, document Document, target ResolvedTar
 func appendPreparedABIHook(out []byte, document Document, abi Declaration, prefix string,
 	wrapper string, field string, parameters string, arguments string) []byte {
 	algorithm, found := targetABIGoHook(document, abi, field)
+	if field == "jit_call" {
+		out = append(out, "const renvoRTGJITCallSupported = "...)
+		if found {
+			out = append(out, "true\n"...)
+		} else {
+			out = append(out, "false\n"...)
+		}
+	}
 	out = append(out, "func "...)
 	out = append(out, wrapper...)
 	out = append(out, '(')
@@ -1012,7 +1022,7 @@ func appendPreparedRuntimeOperationAdapter(
 			out = append(out, ", "...)
 			out = appendDecimalFrame(out, number)
 			out = append(out, ")\n"...)
-			if target.Descriptor.OS == "openbsd" {
+			if targetRuntimeSyscallField(target.Runtime, "site_table") == "address_number_pairs" {
 				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, len(out.code))\n"...)
 				out = append(out, "\t\tout.openbsdSyscalls = append(out.openbsdSyscalls, "...)
 				out = appendDecimalFrame(out, number)
@@ -1437,21 +1447,38 @@ func targetABICallWords(document Document, abi Declaration) []string {
 
 func appendPreparedConditionAdapter(out []byte, document Document, arch Declaration) []byte {
 	names := []string{"eq", "ne", "slt", "sge", "sle", "sgt", "ult", "uge", "ule", "ugt"}
+	semantic := []string{"Equal", "NotEqual", "SignedLess", "SignedGreaterEqual", "SignedLessEqual", "SignedGreater", "UnsignedLess", "UnsignedGreaterEqual", "UnsignedLessEqual", "UnsignedGreater"}
+	// Retain the private legacy adapter for existing physical emitter recipes.
 	setcc := []int{0x94, 0x95, 0x9c, 0x9d, 0x9e, 0x9f, 0x92, 0x93, 0x96, 0x97}
-	out = append(out, "func renvoRTGConditionFromSetcc(setcc int) RTGCondition {\n"...)
-	for i := 0; i < len(names); i++ {
-		local := architectureLocalPrefix(arch.Name) + upperIdentifier(names[i])
-		symbol, ok := generatedArchitectureOutput(document, local)
-		if !ok {
-			continue
+	for mode := 0; mode < 2; mode++ {
+		if mode == 0 {
+			out = append(out, "func renvoRTGConditionFromSetcc(setcc int) RTGCondition {\n"...)
+		} else {
+			out = append(out, "func renvoRTGConditionFromSemantic(condition int) RTGCondition {\n"...)
 		}
-		out = append(out, "if setcc == "...)
-		out = appendDecimalFrame(out, setcc[i])
-		out = append(out, " { return "...)
-		out = append(out, symbol...)
-		out = append(out, " }\n"...)
+		for i := 0; i < len(names); i++ {
+			local := architectureLocalPrefix(arch.Name) + upperIdentifier(names[i])
+			symbol, ok := generatedArchitectureOutput(document, local)
+			if !ok {
+				continue
+			}
+			if mode == 0 {
+				out = append(out, "if setcc == "...)
+				out = appendDecimalFrame(out, setcc[i])
+			} else {
+				out = append(out, "if condition == renvoCondition"...)
+				out = append(out, semantic[i]...)
+			}
+			out = append(out, " { return "...)
+			out = append(out, symbol...)
+			out = append(out, " }\n"...)
+		}
+		if mode == 0 {
+			out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }\n"...)
+		} else {
+			out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 2000 + condition }\n"...)
+		}
+		out = append(out, "return RTGCondition{}\n}\n"...)
 	}
-	out = append(out, "if renvoRTGUnsupportedOperation == 0 { renvoRTGUnsupportedOperation = 1000 + setcc }\n"...)
-	out = append(out, "return RTGCondition{}\n}\n"...)
 	return out
 }

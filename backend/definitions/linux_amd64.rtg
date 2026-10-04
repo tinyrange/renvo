@@ -8,6 +8,10 @@ go backend {
 	func linuxObjectStaticCall(
 		out *RTGEmitter, importID int, wordCount int,
 	) {
+		if len(out.StaticCallWordLocations()) != 0 {
+			linuxObjectMemoryCall(out, importID)
+			return
+		}
 		vectorMask := wordCount >> 8
 		wordCount &= 255
 		integerCount := 0
@@ -111,6 +115,12 @@ runtime linux_x86_64 {
 		instruction = syscall
 	}
 
+	discard_pages {
+		page_size = 4096
+		number = 28
+		advice = 4
+	}
+
 	operation read { number = 0 args = [fd, buffer, count] }
 	operation write { number = 1 args = [fd, buffer, count] }
 	operation open { number = 2 args = [path, flags, mode] }
@@ -123,6 +133,7 @@ runtime linux_x86_64 {
 }
 
 target linux/amd64 {
+	production_projection = elf_sysv64_process
 	family = native_v1
 	os = linux
 	arch = x86_64
@@ -135,4 +146,95 @@ target linux/amd64 {
 		hosted, executable, object, filesystem, heap,
 		argv, environment, linkstatic
 	]
+}
+
+go backend {
+	func linuxObjectLoadSourceWord(out *RTGEmitter, word int) {
+		displacement := word * 8
+		if displacement <= 127 {
+			out.Text("\x49\x8b\x43")
+			out.Int8(displacement)
+		} else {
+			out.Text("\x49\x8b\x83")
+			out.Int32(displacement)
+		}
+	}
+
+	func linuxObjectStoreOutgoingWord(out *RTGEmitter, displacement int) {
+		if displacement == 0 {
+			out.Text("\x48\x89\x04\x24")
+		} else if displacement <= 127 {
+			out.Text("\x48\x89\x44\x24")
+			out.Int8(displacement)
+		} else {
+			out.Text("\x48\x89\x84\x24")
+			out.Int32(displacement)
+		}
+	}
+
+	func linuxObjectMovePrimaryToIntegerArg(out *RTGEmitter, register int) {
+		operations := []string{"\x48\x89\xc7", "\x48\x89\xc6", "\x48\x89\xc2", "\x48\x89\xc1", "\x49\x89\xc0", "\x49\x89\xc1"}
+		if register >= 0 && register < len(operations) {
+			out.Text(operations[register])
+		}
+	}
+
+	func linuxObjectMemoryCall(out *RTGEmitter, importID int) {
+		locations := out.StaticCallWordLocations()
+		wordCount := len(locations)
+		stackBytes := out.StaticCallStackBytes()
+		// The reordered evaluation stack starts with source argument word zero.
+		// Keep that address in caller-clobbered R11 while constructing an aligned
+		// outgoing SysV stack below it.
+		out.Text("\x49\x89\xe3\x48\x83\xe4\xf0")
+		reserve := (stackBytes + 31) / 16 * 16
+		if reserve <= 127 {
+			out.Text("\x48\x83\xec")
+			out.Int8(reserve)
+		} else {
+			out.Text("\x48\x81\xec")
+			out.Int32(reserve)
+		}
+		saveOffset := reserve - 8
+		if saveOffset <= 127 {
+			out.Text("\x4c\x89\x5c\x24")
+			out.Int8(saveOffset)
+		} else {
+			out.Text("\x4c\x89\x9c\x24")
+			out.Int32(saveOffset)
+		}
+
+		for word := 0; word < wordCount; word++ {
+			if locations[word] < 0 {
+				linuxObjectLoadSourceWord(out, word)
+				linuxObjectStoreOutgoingWord(out, -locations[word]-1)
+			}
+		}
+		for word := 0; word < wordCount; word++ {
+			if locations[word] >= 0 {
+				linuxObjectLoadSourceWord(out, word)
+				linuxObjectMovePrimaryToIntegerArg(out, locations[word])
+			}
+		}
+		externalID := out.ExternalImport(out.StaticImportName(importID))
+		out.Text("\xb0\x00\xe8")
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, externalID, RTGRelocationImport)
+		if saveOffset <= 127 {
+			out.Text("\x48\x8b\x64\x24")
+			out.Int8(saveOffset)
+		} else {
+			out.Text("\x48\x8b\xa4\x24")
+			out.Int32(saveOffset)
+		}
+		argumentBytes := wordCount * 8
+		if argumentBytes <= 127 {
+			out.Text("\x48\x83\xc4")
+			out.Int8(argumentBytes)
+		} else {
+			out.Text("\x48\x81\xc4")
+			out.Int32(argumentBytes)
+		}
+	}
 }

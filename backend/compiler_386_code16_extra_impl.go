@@ -1,18 +1,5 @@
 package main
 
-func renvo386Code16LocalSize(g *renvoLinearGen, typ int, size int) int {
-	if g.c.code16 && renvoProgramUsesC11Semantics(g.prog) && renvoTypeSize(g.meta, typ) <= 4 {
-		kind := renvoResolveType(g.meta, typ).kind
-		if renvoTypeKindIsScalarInt(kind) || kind == renvoTypePointer || kind == renvoTypeFunc {
-			return 4
-		}
-	}
-	if size < renvoBackendValueSlotSize {
-		return renvoBackendValueSlotSize
-	}
-	return size
-}
-
 func renvo386EmitWideIdentToLocal(g *renvoLinearGen, e *renvoExpr, offset int) bool {
 	if e.kind != renvoExprIdent {
 		return false
@@ -77,9 +64,9 @@ func renvo386EmitWideIntExprFast(g *renvoLinearGen, ep *renvoExprParse, idx int)
 	}
 	if memoryMultiply {
 		renvoAsmEmit8(&g.asm, 0x0f)
-		renvoAsmStackMem(&g.asm, g.locals[rightLocal].offset, 0xaf, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, g.locals[rightLocal].offset, 0xaf, 0x45, 0x85)
 	} else {
-		renvoAsmStackMem(&g.asm, g.locals[rightLocal].offset, memoryOpcode, 0x45, 0x85)
+		renvo386AsmStackMem(&g.asm, g.locals[rightLocal].offset, memoryOpcode, 0x45, 0x85)
 	}
 	resultType := renvoInferParsedExprType(g, ep, idx)
 	result := renvoResolveType(g.meta, resultType)
@@ -102,74 +89,4 @@ func renvo386EmitDirectCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCou
 		}
 	}
 	return true
-}
-
-// renvo386EmitNativeIntExprFast returns -1 when the ordinary lowering should
-// run, zero on an emission failure, and one when it emitted the expression.
-func renvo386EmitNativeIntExprFast(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
-	e := &ep.exprs[idx]
-	if e.kind == renvoExprIdent {
-		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-		if localIndex >= 0 && renvo386TryLoadInlineLocal(g, localIndex) {
-			kind := renvoResolveType(g.meta, g.locals[localIndex].typ).kind
-			renvoAsmNormalizePrimaryForKind(&g.asm, kind)
-			return 1
-		}
-		return -1
-	}
-	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
-		return renvoEmitCDirectDeref(g, ep, idx)
-	}
-	if e.kind != renvoExprBinary {
-		return -1
-	}
-	p := g.prog
-	right := &ep.exprs[e.right]
-	value := 0
-	immediate := false
-	if right.kind == renvoExprInt {
-		value = renvoParseIntToken(p, right.tok)
-		immediate = true
-	} else if right.kind == renvoExprChar {
-		value = renvoParseCharToken(p, right.tok)
-		immediate = true
-	} else if right.kind == renvoExprIdent {
-		value = renvoFindSmallConstByName(g, right.nameStart, right.nameEnd)
-		immediate = value >= -128
-	}
-	if p.compilerInt32 && immediate {
-		immediate = renvoEvalConstExpr(g, ep, e.right).ok
-	}
-	immOpcode := 0
-	immGroup := 0
-	immMultiply := false
-	immShift := 0
-	if renvoTokCharIs(p, e.tok, '+') {
-		immOpcode, immGroup = 0x05, 0xc0
-	} else if renvoTokCharIs(p, e.tok, '-') {
-		immOpcode, immGroup = 0x2d, 0xe8
-	} else if renvoTokCharIs(p, e.tok, '*') {
-		immMultiply = true
-	} else if renvoTokCharIs(p, e.tok, '&') {
-		immOpcode, immGroup = 0x25, 0xe0
-	} else if renvoTokCharIs(p, e.tok, '|') {
-		immOpcode, immGroup = 0x0d, 0xc8
-	} else if renvoTokCharIs(p, e.tok, '^') {
-		immOpcode, immGroup = 0x35, 0xf0
-	} else if renvoTok2Is(p, e.tok, '<', '<') {
-		immShift = 0xe0
-	} else if renvoTok2Is(p, e.tok, '>', '>') {
-		immShift = 0xf8
-		if renvoExprHasUnsignedIntType(g, ep, e.left) {
-			immShift = 0xe8
-		}
-	}
-	if !immediate || immOpcode == 0 && !immMultiply && immShift == 0 || value < -2147483647 || value > 2147483647 ||
-		immShift != 0 && (value < 0 || value >= 32) {
-		return -1
-	}
-	if renvo386EmitNativeImmediateBinary(g, ep, idx, e.left, value, immOpcode, immGroup, immMultiply, immShift) {
-		return 1
-	}
-	return 0
 }
