@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9665345637a50056d902834700eaa25eaa1dce6b0567537f9c37c8516b9e7d9f"
+const CompilerSourceDigest = "ddb38780815636a33d8e8a21976b935e9395c3385b378b5fb2066da5b278d756"
 
 // source: backend/compiler_common_impl.go
 
@@ -31073,7 +31073,7 @@ if renvoFixedTarget != 0 && g.c.renvoTargetArch != renvoArch386 && g.c.renvoTarg
 return
 }
 renvoNonNil(g)
-if g.c.renvoTargetArch == renvoArch386 {
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArch386 {
 renvoAsmLoadPrimaryStack(&g.asm, left)
 renvoAsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
 renvoAsmStorePrimaryStack(&g.asm, dest)

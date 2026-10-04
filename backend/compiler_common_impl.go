@@ -31066,7 +31066,7 @@ func renvoEmitWideSubStack(g *renvoLinearGen, dest int, left int, right int) {
 		return
 	}
 	renvoNonNil(g)
-	if g.c.renvoTargetArch == renvoArch386 {
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArch386 {
 		renvoAsmLoadPrimaryStack(&g.asm, left)
 		renvoAsmStackMem(&g.asm, right, 0x2b, 0x45, 0x85)
 		renvoAsmStorePrimaryStack(&g.asm, dest)
