@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "63d635a3cde9b936a9cfb54399a98ffa163025b7f636352634b549e0c02c8eba"
+const CompilerSourceDigest = "435746c9aada663f629c06f6ffbef2e5ee0f1b8d13436b84848a59f4e8c22b14"
 
 // source: backend/compiler_common_impl.go
 
@@ -18709,11 +18709,15 @@ renvoAsmBoolNotPrimary(a)
 }
 return true
 }
-func renvoComparisonCompositeType(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) int {
-leftType := renvoInferParsedExprType(g, ep, e.left)
+func renvoComparisonCompositeType(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, leftType int, rightType int) int {
 left := renvoResolveType(g.meta, leftType)
-rightType := renvoInferParsedExprType(g, ep, e.right)
 right := renvoResolveType(g.meta, rightType)
+if !renvoTypeKindIsComplex(left.kind) && !renvoTypeKindIsComplex(right.kind) {
+if left.kind == renvoTypeArray || left.kind == renvoTypeStruct {
+return leftType
+}
+return 0
+}
 if renvoTypedRealZeroImaginaryType(g, ep, e, leftType, rightType) != 0 {
 return 0
 }
@@ -20891,15 +20895,15 @@ return 1
 return 0
 }
 if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-compositeType := renvoComparisonCompositeType(g, ep, e)
+leftType := renvoInferParsedExprType(g, ep, e.left)
+rightType := renvoInferParsedExprType(g, ep, e.right)
+compositeType := renvoComparisonCompositeType(g, ep, e, leftType, rightType)
 if compositeType != 0 {
 if renvoEmitCompositeCompare(g, ep, e, compositeType) {
 return 1
 }
 return 0
 }
-leftType := renvoInferParsedExprType(g, ep, e.left)
-rightType := renvoInferParsedExprType(g, ep, e.right)
 if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
 if renvoEmitStringCompare(g, ep, e.left, e.right, renvoTok2Is(p, e.tok, '!', '=')) {
 return 1
@@ -30493,7 +30497,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x80\x37\x75\x57\xa4\x1c\xdd\xbf\x75\x05\xf5\x80\x1b\xe4\x82\x79\xdc\x1d\xcd\x03\x5f\x06\xdf\x8f\xb8\x6c\xb3\x2d\x96\x3b\x42\xdf", 3, true
+return "wasi/wasm32", "\xf0\x2f\x15\xd7\x20\x23\x85\xbd\xfa\x30\xa9\xc1\x28\xeb\x4b\x69\x91\xd7\xcb\x08\xed\x11\x58\x06\xcd\x5a\xd8\x7b\x34\x79\x71\xea", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30505,7 +30509,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x8f\xfc\x34\xc7\xd9\xb9\x45\x72\xfc\x74\x49\x3f\xac\x98\xc6\x74\xb3\x11\x9b\x86\xb4\x52\x67\x94\xba\xfa\x43\x71\xe0\x50\x88\x8c", 3, true
+return "vm/vm32", "\x9e\xa7\x8d\xac\xcc\xf2\x7d\x7b\xba\xb7\xf9\x6f\x99\xa5\x34\x03\x4c\x3a\x62\xa4\x46\x95\x1e\xc1\xbd\xa1\x29\xf8\xb3\xcb\xd3\x10", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
@@ -45584,7 +45588,7 @@ floatKind = renvoBinaryFloatKind(g, ep, e)
 }
 leftIndex := e.left
 rightIndex := e.right
-if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e) != 0 {
+if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right)) != 0 {
 return false
 }
 unsigned := (c0 == '<' || c0 == '>') &&

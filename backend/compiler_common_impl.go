@@ -18702,11 +18702,15 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 	}
 	return true
 }
-func renvoComparisonCompositeType(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr) int {
-	leftType := renvoInferParsedExprType(g, ep, e.left)
+func renvoComparisonCompositeType(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, leftType int, rightType int) int {
 	left := renvoResolveType(g.meta, leftType)
-	rightType := renvoInferParsedExprType(g, ep, e.right)
 	right := renvoResolveType(g.meta, rightType)
+	if !renvoTypeKindIsComplex(left.kind) && !renvoTypeKindIsComplex(right.kind) {
+		if left.kind == renvoTypeArray || left.kind == renvoTypeStruct {
+			return leftType
+		}
+		return 0
+	}
 	if renvoTypedRealZeroImaginaryType(g, ep, e, leftType, rightType) != 0 {
 		return 0
 	}
@@ -20884,15 +20888,15 @@ func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 		return 0
 	}
 	if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-		compositeType := renvoComparisonCompositeType(g, ep, e)
+		leftType := renvoInferParsedExprType(g, ep, e.left)
+		rightType := renvoInferParsedExprType(g, ep, e.right)
+		compositeType := renvoComparisonCompositeType(g, ep, e, leftType, rightType)
 		if compositeType != 0 {
 			if renvoEmitCompositeCompare(g, ep, e, compositeType) {
 				return 1
 			}
 			return 0
 		}
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		rightType := renvoInferParsedExprType(g, ep, e.right)
 		if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
 			if renvoEmitStringCompare(g, ep, e.left, e.right, renvoTok2Is(p, e.tok, '!', '=')) {
 				return 1

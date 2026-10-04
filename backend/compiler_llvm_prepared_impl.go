@@ -5449,7 +5449,7 @@ if usesFloat {
 }
 leftIndex := e.left
 rightIndex := e.right
-if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e) != 0 {
+if (c0 == '=' || c0 == '!') && renvoComparisonCompositeType(g, ep, e, renvoInferParsedExprType(g, ep, e.left), renvoInferParsedExprType(g, ep, e.right)) != 0 {
 	return false
 }
 unsigned := (c0 == '<' || c0 == '>') &&

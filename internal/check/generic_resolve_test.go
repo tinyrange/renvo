@@ -101,3 +101,35 @@ func TestGenericResolveInvalidConstraints(t *testing.T) {
 		})
 	}
 }
+
+func TestGenericInstantiationCycleReachability(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		edges   []genericInstantiationEdge
+		invalid bool
+	}{
+		{name: "finite cycles", edges: []genericInstantiationEdge{
+			{from: 1, to: 2}, {from: 2, to: 1},
+			{from: 3, to: 4, growing: true}, {from: 4, to: 5},
+		}},
+		{name: "separate growing walks", invalid: true, edges: []genericInstantiationEdge{
+			{from: 1, to: 3, growing: true},
+			{from: 2, to: 3, growing: true}, {from: 3, to: 2},
+		}},
+		{name: "growing self edge", invalid: true, edges: []genericInstantiationEdge{
+			{from: 4, to: 4, growing: true},
+		}},
+		{name: "branch reaches growing cycle", invalid: true, edges: []genericInstantiationEdge{
+			{from: 1, to: 2, growing: true}, {from: 2, to: 3},
+			{from: 2, to: 4}, {from: 4, to: 5}, {from: 5, to: 1},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := genericEnvironment{types: genericTypes{items: make([]genericType, 6)}, edges: tc.edges}
+			e.checkInstantiationCycles()
+			if (e.errorText != "") != tc.invalid {
+				t.Fatalf("cycle diagnostic = %q, want invalid %v", e.errorText, tc.invalid)
+			}
+		})
+	}
+}

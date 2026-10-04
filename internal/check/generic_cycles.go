@@ -103,11 +103,32 @@ func (e *genericEnvironment) recordTypeEdges(scope genericTypeScope, token int, 
 }
 
 func (e *genericEnvironment) checkInstantiationCycles() {
+	// Only constructor edges can make a recursive instantiation grow. Build
+	// outgoing links once, and reuse visit marks across those reachability walks.
+	// Scanning every edge and clearing every type for each walk is quadratic
+	// even when the parameter graph consists of many unrelated declarations.
+	growing := false
 	for _, edge := range e.edges {
+		if edge.growing {
+			growing = true
+			break
+		}
+	}
+	if !growing {
+		return
+	}
+	heads := make([]int, len(e.types.items)+1)
+	next := make([]int, len(e.edges))
+	visited := make([]int, len(heads))
+	for i, edge := range e.edges {
+		next[i] = heads[edge.from]
+		heads[edge.from] = i + 1
+	}
+	for i, edge := range e.edges {
 		if !edge.growing {
 			continue
 		}
-		visited := make([]bool, len(e.types.items)+1)
+		mark := i + 1
 		pending := []int{edge.to}
 		for len(pending) > 0 {
 			id := pending[len(pending)-1]
@@ -116,14 +137,12 @@ func (e *genericEnvironment) checkInstantiationCycles() {
 				e.fail(edge.scope, edge.token, "recursive instantiation grows type arguments")
 				return
 			}
-			if visited[id] {
+			if visited[id] == mark {
 				continue
 			}
-			visited[id] = true
-			for _, next := range e.edges {
-				if next.from == id {
-					pending = append(pending, next.to)
-				}
+			visited[id] = mark
+			for link := heads[id]; link != 0; link = next[link-1] {
+				pending = append(pending, e.edges[link-1].to)
 			}
 		}
 	}
