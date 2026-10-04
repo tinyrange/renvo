@@ -1028,6 +1028,14 @@ func TestCompiledInBootstrapUsesVM32Definitions(t *testing.T) {
 			if writeErr := os.WriteFile(definition, definitionSource, 0o600); writeErr != nil {
 				t.Fatal(writeErr)
 			}
+			// Keep the renamed definition's shared emission recipes beside its entrypoint.
+			dependency, readErr := os.ReadFile(filepath.Join(root, "backend", "definitions", "lowering_optimizations.rtg"))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if writeErr := os.WriteFile(filepath.Join(filepath.Dir(definition), "lowering_optimizations.rtg"), dependency, 0o600); writeErr != nil {
+				t.Fatal(writeErr)
+			}
 			result := driver.CompileFromFS([]string{
 				"-backend", definition,
 				"-t", test.custom,

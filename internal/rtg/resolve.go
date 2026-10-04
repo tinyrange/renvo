@@ -245,18 +245,26 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	if kind, found := fieldValue(document, output, "kind"); found {
 		target.Descriptor.OutputKind = valueName(kind)
 	}
-	if target.Descriptor.Family == BackendFamilyNativeV1 &&
-		(target.Descriptor.ISA == "wasm32" || target.Descriptor.ISA == "vm32" ||
-			target.Descriptor.OutputKind == "wasm" || target.Descriptor.OutputKind == "html-wasm" ||
-			target.Descriptor.OutputKind == "rnvm") {
-		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-024",
-			"native_v1 target "+declaration.Name+" uses a structured backend machine or output")
-		return target, diagnostic, false
+	archFamily, _ := decodeCompilerFamily(target.Arch)
+	outputs := []Declaration{target.Executable, target.Object}
+	compatible := archFamily == family
+	for _, format := range outputs {
+		if format.Name != "" {
+			formatFamily, _ := decodeCompilerFamily(format)
+			compatible = compatible && formatFamily == family
+		}
 	}
-	if target.Descriptor.Family == BackendFamilyStructured32 &&
-		target.Descriptor.ISA != "wasm32" && target.Descriptor.ISA != "vm32" {
-		diagnostic := resolveDiagnostic(document, declaration, "RTG-RESOLVE-025",
-			"structured32 target "+declaration.Name+" requires wasm32 or vm32 frontend architecture")
+	if family == BackendFamilyStructured32 {
+		compatible = compatible && target.Descriptor.WordBits == 32 &&
+			target.Descriptor.PointerBits == 32
+	}
+	if !compatible {
+		code := "RTG-RESOLVE-024"
+		if family == BackendFamilyStructured32 {
+			code = "RTG-RESOLVE-025"
+		}
+		diagnostic := resolveDiagnostic(document, declaration, code,
+			"target "+declaration.Name+" requires matching architecture and output compiler_family contracts; structured32 requires 32-bit words and pointers")
 		return target, diagnostic, false
 	}
 	sortStrings(target.Descriptor.Aliases)

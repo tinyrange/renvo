@@ -106,6 +106,8 @@ func (out *RTGEmitter) WindowsSubsystem() int { return 0 }
 func (out *RTGEmitter) StaticImportCount() int { return 0 }
 func (out *RTGEmitter) StaticImportDLL(index int) string { return "" }
 func (out *RTGEmitter) StaticImportName(index int) string { return "" }
+func (out *RTGEmitter) StaticCallWordLocations() []int { return nil }
+func (out *RTGEmitter) StaticCallStackBytes() int { return 0 }
 func (out *RTGEmitter) StaticCallParameterCount() int { return 0 }
 func (out *RTGEmitter) StaticCallParameterKind(index int) int { return 0 }
 func (out *RTGEmitter) StaticCallResultFloatRegister() int { return -1 }

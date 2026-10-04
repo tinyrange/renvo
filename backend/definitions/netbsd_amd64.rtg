@@ -5,6 +5,7 @@ implements direct_emitter_v1
 @import "elf_amd64.rtg"
 
 runtime netbsd_x86_64 {
+	open_flag_layout = bsd
 	entry sequence x86_64.processStackEntry {
 		max_parameters = 2
 		bss args 32768 16
@@ -55,6 +56,7 @@ format elf64_x86_64_netbsd {
 }
 
 target netbsd/amd64 {
+	production_projection = elf_sysv64_carry_process
 	family = native_v1
 	os = netbsd
 	arch = x86_64

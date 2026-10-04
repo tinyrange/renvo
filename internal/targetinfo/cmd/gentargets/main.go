@@ -49,6 +49,8 @@ type sourceDescriptor struct {
 	ReachableGoDecls    int            `json:"-"`
 	CatalogGoDecls      int            `json:"-"`
 	RuntimeNumbers      map[string]int `json:"-"`
+
+	RuntimeNumberDefault bool `json:"runtime_number_default"`
 }
 
 func main() {
@@ -63,6 +65,7 @@ func main() {
 	must(writeFormatted(filepath.Join(root, "internal", "targetinfo", "registry_generated.go"), frontendSource(descriptors)))
 	must(writeFormatted(filepath.Join(root, "internal", "driver", "target_help_generated.go"), driverHelpSource(descriptors)))
 	must(updatePolicyProjection(filepath.Join(root, "backend", "compiler_target_policy_impl.go"), descriptors))
+	must(updateRuntimeNumbers(filepath.Join(root, "backend", "compiler_linux_impl.go"), descriptors))
 	must(writeFormatted(filepath.Join(root, "backend", "compiler_target_registry_impl.go"), backendSource(descriptors)))
 	must(os.WriteFile(filepath.Join(root, "backend", "docs", "machine-definitions.generated.md"), documentationSource(descriptors), 0o644))
 }
@@ -318,7 +321,8 @@ func validate(descriptors []sourceDescriptor) error {
 			return fmt.Errorf("backend target IDs are not dense at %d", id)
 		}
 	}
-	return nil
+	_, err := runtimeNumberDefault(descriptors)
+	return err
 }
 
 func frontendSource(descriptors []sourceDescriptor) []byte {
@@ -527,16 +531,22 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	for _, descriptor := range backend {
 		fmt.Fprintf(&projection, "const %s = %d\n", descriptor.Constant, descriptor.BackendID)
 	}
-	var linuxAmd64 *sourceDescriptor
-	for i := range backend {
-		if backend[i].Name == "linux/amd64" {
-			linuxAmd64 = &backend[i]
-			break
-		}
+	fallback, err := runtimeNumberDefault(descriptors)
+	if err != nil {
+		return err
 	}
-	if linuxAmd64 == nil {
-		return fmt.Errorf("target registry has no linux/amd64 definition")
+	// The first registry entry is already the driver's declared default.
+	// Keep that role independent from the syscall-number compatibility role.
+	if len(descriptors) == 0 || descriptors[0].Constant == "" {
+		return fmt.Errorf("default target requires a bundled backend projection")
 	}
+	contextDefault := descriptors[0]
+	// Keep the private prepared slot outside the generated bundled registry.
+	fmt.Fprintf(&projection, "const renvoTargetRTG = %d\n", backend[len(backend)-1].BackendID+1)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTarget = %s\n", contextDefault.Constant)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetOS = %d\n", contextDefault.OSID)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetArch = %d\n", contextDefault.ISAID)
+	fmt.Fprintf(&projection, "const renvoContextDefaultTargetIntSize = %d\n", contextDefault.WordBits/8)
 	projection.WriteByte('\n')
 	for _, operation := range []struct {
 		name   string
@@ -551,9 +561,9 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 		{"chmod", "Fchmod"},
 		{"exit", "Exit"},
 	} {
-		number, ok := linuxAmd64.RuntimeNumbers[operation.name]
+		number, ok := fallback.RuntimeNumbers[operation.name]
 		if !ok {
-			return fmt.Errorf("linux/amd64 definition has no %s runtime number", operation.name)
+			return fmt.Errorf("runtime number default %q has no %s runtime number", fallback.Name, operation.name)
 		}
 		fmt.Fprintf(&projection, "const renvoResolvedLinuxAmd64Sys%s = %d\n", operation.suffix, number)
 	}
@@ -563,6 +573,39 @@ func updatePolicyProjection(path string, descriptors []sourceDescriptor) error {
 	projection.WriteString(strconv.Quote(byteTable(backend, func(descriptor sourceDescriptor) int { return descriptor.ISAID })))
 	projection.WriteString("\nconst renvoTargetIntBitsTable = ")
 	projection.WriteString(strconv.Quote(byteTable(backend, func(descriptor sourceDescriptor) int { return descriptor.WordBits })))
+	for _, table := range []struct {
+		name  string
+		value func(sourceDescriptor) int
+	}{
+		{"RuntimeCaps", func(d sourceDescriptor) int { return rtg.CompilerRuntimeCapabilities(d.Runtime, d.Capabilities) }},
+		{"KernelModule", func(d sourceDescriptor) int {
+			if contains(d.Capabilities, "kernel_module") {
+				return 1
+			}
+			return 0
+		}},
+		{"PointerBits", func(d sourceDescriptor) int { return d.PointerBits }},
+		{"CodePointerBits", func(d sourceDescriptor) int { return d.CodePointerBits }},
+		{"FunctionPointerBits", func(d sourceDescriptor) int { return d.FunctionPointerBits }},
+		{"Endian", func(d sourceDescriptor) int {
+			if d.Endian == "big" {
+				return 2
+			}
+			return 1
+		}},
+	} {
+		fmt.Fprintf(&projection, "\nconst renvoTarget%sTable = %s", table.name, strconv.Quote(byteTable(backend, table.value)))
+	}
+	projection.WriteString("\nfunc renvoBundledTargetMaxAlign(target int) int {\n")
+	for _, descriptor := range backend {
+		fmt.Fprintf(&projection, "if target == %s { return %d }\n", descriptor.Constant, descriptor.MaxAlign)
+	}
+	projection.WriteString("return 0\n}\n")
+	projection.WriteString("\nfunc renvoBundledDefaultArenaSize(target int) int {\n")
+	for _, descriptor := range backend {
+		fmt.Fprintf(&projection, "if target == %s { return %d }\n", descriptor.Constant, descriptor.DefaultArena)
+	}
+	projection.WriteString("return 0\n}\n")
 	projection.WriteByte('\n')
 	projection.WriteString(end)
 	updated := append([]byte{}, source[:start]...)

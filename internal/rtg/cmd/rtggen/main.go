@@ -33,14 +33,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: rtggen -t target/name -o output.go definition.rtg")
 		os.Exit(2)
 	}
-	if *kernel {
-		if *target != "" || *arch != "" || *statefulEmitter || *compilerIntegration ||
-			*targetProjection || flag.NArg() != 0 {
-			fail("kernel generation does not accept definitions, -t, or -arch")
-		}
-		generated := rtg.GenerateArchitectureKernel(*packageName)
-		writeGenerated(*output, *check, generated)
-		return
+	if *kernel && (*target != "" || *arch != "" || *statefulEmitter || *compilerIntegration || *targetProjection || *algorithms || *contract || *prepared) {
+		fail("kernel generation accepts only bundled definitions and output options")
 	}
 	if *compilerIntegration && *arch == "" {
 		fail("compiler integration generation requires -arch")
@@ -58,7 +52,7 @@ func main() {
 		source = bundle.Definition
 		parsed := rtg.ParseImports(source, path, filesystemImportLoader{})
 		var resolved rtg.ResolveResult
-		if *arch != "" {
+		if *arch != "" || *kernel {
 			resolved = rtg.ResolveArchitectureDefinition(parsed)
 		} else {
 			resolved = rtg.ResolveDefinitions(parsed)
@@ -69,7 +63,9 @@ func main() {
 		definitions = append(definitions, resolved)
 	}
 	var generated rtg.GenerateResult
-	if *arch != "" {
+	if *kernel {
+		generated = rtg.GenerateArchitectureKernel(*packageName, definitions)
+	} else if *arch != "" {
 		if *target != "" || *prepared || *targetProjection || len(definitions) != 1 {
 			fail("architecture generation requires one definition and no -t")
 		}

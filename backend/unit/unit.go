@@ -1348,7 +1348,9 @@ func linkStaticDirectiveBefore(data []byte, pos int) (string, bool) {
 	}
 	prefix := []byte("// renvo:linkstatic ")
 	intrinsicPrefix := []byte("//renvo:intrinsic ")
-	if !bytes.HasPrefix(data[start:end], prefix) && !bytes.HasPrefix(data[start:end], intrinsicPrefix) {
+	deferForwardPrefix := []byte("//renvo:defer-forward ")
+	if !bytes.HasPrefix(data[start:end], prefix) && !bytes.HasPrefix(data[start:end], intrinsicPrefix) &&
+		!bytes.HasPrefix(data[start:end], deferForwardPrefix) {
 		return "", false
 	}
 	return string(data[start:end]), true

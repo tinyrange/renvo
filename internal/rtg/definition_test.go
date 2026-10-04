@@ -893,7 +893,7 @@ func TestWindowsArm64ParameterlessEntrySkipsArgvRuntime(t *testing.T) {
 	if entry < 0 {
 		t.Fatal("windows/arm64 projection omitted its entry adapter")
 	}
-	guard := strings.Index(source[entry:], "if app.paramCount == 0")
+	guard := strings.Index(source[entry:], "if paramCount == 0")
 	allocation := strings.Index(source[entry:], "renvoWindowsArm64ArgsBSSAlignment")
 	if guard < 0 || allocation < 0 || guard > allocation {
 		t.Fatalf("parameterless entry guard does not precede argv runtime allocation")
@@ -1082,7 +1082,14 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 }
 
 func TestCheckedInArchitectureKernelOutput(t *testing.T) {
-	generated := GenerateArchitectureKernel("main")
+	var definitions []ResolveResult
+	for _, name := range []string{"x86_64_compiler.rtg", "x86_32_compiler.rtg", "aarch64_compiler.rtg", "arm_algorithms.rtg", "wasm32.rtg"} {
+		definitions = append(definitions, ResolveArchitectureDefinition(parseDefinitionFile(t, "../../backend/definitions/"+name)))
+	}
+	generated := GenerateArchitectureKernel("main", definitions)
+	if !generated.Ok {
+		t.Fatalf("generate bundled kernel: %#v", generated.Diagnostics)
+	}
 	checkedIn, err := os.ReadFile("../../backend/compiler_rtg_generated_impl.go")
 	if err != nil {
 		t.Fatal(err)

@@ -1,8 +1,35 @@
 package main
 
-func renvoStructArgByReference(g *renvoLinearGen, kind int) bool {
-	return kind == renvoTypeStruct && g.c.renvoTargetArch != renvoArchWasm32 &&
-		(g.c.renvoNativeIntSize == 4 || renvoPreparedBackendActive != 0 && g.c.renvoNativeIntSize == 2)
+// renvoStoreTargetConstant keeps target object byte order out of source-level
+// constant evaluation. The profile is descriptor-derived for prepared targets.
+func renvoStoreTargetConstant(c *renvoCompileContext, data []byte, offset int, size int, bits uint64) bool {
+	target := c.renvoTarget
+	if renvoFixedTarget != 0 {
+		target = renvoFixedTarget
+	}
+	endian := 0
+	if target == renvoTargetRTG {
+		profile := renvoRTGProfileForTarget(target)
+		endian = profile.endian
+	} else if target > 0 && target < len(renvoTargetEndianTable) {
+		endian = int(renvoTargetEndianTable[target])
+	}
+	return renvoStoreIntegerBytes(data, offset, size, bits, endian)
+}
+
+func renvoStoreIntegerBytes(data []byte, offset int, size int, bits uint64, endian int) bool {
+	if size < 1 || size > 8 || offset < 0 || offset > len(data) || size > len(data)-offset ||
+		endian != renvoEndianLittle && endian != renvoEndianBig {
+		return false
+	}
+	for at := 0; at < size; at++ {
+		shift := at
+		if endian == renvoEndianBig {
+			shift = size - 1 - at
+		}
+		data[offset+at] = byte(bits >> (shift * 8))
+	}
+	return true
 }
 
 func renvoRTGEnsureStringEqualHelper(g *renvoLinearGen) int {
@@ -58,10 +85,8 @@ func renvoRTGEmitStringEqualHelperBody(g *renvoLinearGen) {
 	renvoAsmRet(a)
 }
 
-// compileTarget composes an OS/architecture implementation after target
-// selection. It is deliberately target-neutral: Linux runtime operations live
-// in compiler_linux_impl.go, while target-specific image builders remain in
-// their composition files until those layers are split further.
+// compileTarget validates target selection before entering the shared source
+// pipeline. Prepared adapters retain their single-input contract.
 func compileTarget(input []int, output int, target int, arenaSize int) int {
 	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
 		// renvoCompileUnitInput uses a positional header read for regular files,
@@ -77,93 +102,14 @@ func compileTarget(input []int, output int, target int, arenaSize int) int {
 		prog := renvoParseProgram(src)
 		return renvoCompileProgramToOutput(&prog, output, target, arenaSize)
 	}
-	// A stage compiler is specialized while its parent is lowering this source.
-	// Keep that dispatch expressed in terms of the specialization global so the
-	// fixed-target branch pruner can remove every unrelated backend call.
 	if renvoFixedTarget != 0 {
-		if renvoFixedTarget == renvoTargetLinuxKernelAmd64 {
-			renvoFixedTarget = renvoTargetLinuxKernelAmd64
-			return compileLinuxAmd64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindowsAmd64 {
-			renvoFixedTarget = renvoTargetWindowsAmd64
-			return compileWindowsAmd64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindows386 {
-			renvoFixedTarget = renvoTargetWindows386
-			return compileWindows386Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWindowsArm64 {
-			renvoFixedTarget = renvoTargetWindowsArm64
-			return compileWindowsArm64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetWasiWasm32 {
-			renvoFixedTarget = renvoTargetWasiWasm32
-			return compileWasiWasm32Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetVM32 {
-			renvoFixedTarget = renvoTargetVM32
-			return compileVM32Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetDarwinArm64 {
-			renvoFixedTarget = renvoTargetDarwinArm64
-			return compileDarwinArm64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinux386 {
-			renvoFixedTarget = renvoTargetLinux386
-			return compileLinux386Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinuxAarch64 {
-			renvoFixedTarget = renvoTargetLinuxAarch64
-			return compileLinuxAarch64Arena(input, output, arenaSize)
-		}
-		if renvoFixedTarget == renvoTargetLinuxArm {
-			renvoFixedTarget = renvoTargetLinuxArm
-			return compileLinuxArmArena(input, output, arenaSize)
-		}
-		if renvoFixedTarget >= renvoTargetFreeBSDAmd64 && renvoFixedTarget <= renvoTargetNetBSDAmd64 {
-			return compileBSDAmd64Arena(input, output, renvoFixedTarget, arenaSize)
-		}
-		renvoFixedTarget = renvoTargetLinuxAmd64
-		return compileLinuxAmd64Arena(input, output, arenaSize)
+		target = renvoFixedTarget
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
-		return compileLinuxKernelAmd64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindowsAmd64 {
-		return compileWindowsAmd64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindows386 {
-		return compileWindows386Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWindowsArm64 {
-		return compileWindowsArm64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWasiWasm32 {
-		return compileWasiWasm32Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return compileVM32Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetDarwinArm64 {
-		return compileDarwinArm64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinux386 {
-		return compileLinux386Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinuxAarch64 {
-		return compileLinuxAarch64Arena(input, output, arenaSize)
-	}
-	if target == renvoTargetLinuxArm {
-		return compileLinuxArmArena(input, output, arenaSize)
-	}
-	if target >= renvoTargetFreeBSDAmd64 && target <= renvoTargetNetBSDAmd64 {
-		return compileBSDAmd64Arena(input, output, target, arenaSize)
-	}
-	if target != renvoTargetLinuxAmd64 {
+	if target <= 0 || target >= len(targetArchTable) {
 		return 1
 	}
-	return compileLinuxAmd64Arena(input, output, arenaSize)
+	renvoSetTarget(target)
+	return renvoCompileSourceInputs(input, output, arenaSize)
 }
 
 func compileBSDAmd64Arena(input []int, output int, target int, arenaSize int) int {
@@ -196,7 +142,7 @@ type RenvoCompileOptions struct {
 // before taking their transient frontend arena mark.
 func RenvoInitializeObjectCache(targetName string) {
 	target := renvoParseTargetArg(targetName)
-	if target != 0 && target != renvoTargetWasiWasm32 && target != renvoTargetVM32 && target != renvoTargetLinuxKernelAmd64 {
+	if target != 0 && renvoProgramCacheSupported(renvoNewCompileContext(target, false, false, false)) {
 		renvoInitializeObjectCache()
 	}
 }
@@ -422,7 +368,7 @@ func renvoWriteCompileResult(context *renvoCompileContext, result renvoCompileRe
 }
 
 // RenvoCompileSession advances an embedded compilation in bounded phases. The
-// Darwin/arm64 backend emits a small batch of relocatable function objects per
+// cache-capable backends emit a small batch of relocatable function objects per
 // step so GUI callers can return to their event loop between batches.
 type RenvoCompileSession struct {
 	unit       []byte
@@ -436,7 +382,7 @@ type RenvoCompileSession struct {
 	ok         bool
 	prog       *renvoProgram
 	meta       *renvoMeta
-	aarch64    *renvoAarch64ProgramSession
+	program    *renvoProgramSession
 	result     renvoCompileResult
 }
 
@@ -471,12 +417,12 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 1 {
-		if s.target == renvoTargetLinuxKernelAmd64 && !s.context.objectFile {
+		if renvoKernelProgram(s.context) && !s.context.objectFile {
 			if !renvoPrepareKernelMetadata(s.context) {
 				s.done = true
 				return true
 			}
-			renvoCaptureKernelCompileContext(s.context)
+			renvoPopulateKernelCompileContext(s.context)
 			s.prog.c = *s.context
 		}
 		s.meta = new(renvoMeta)
@@ -490,9 +436,9 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 2 {
-		if s.target == renvoTargetDarwinArm64 {
-			s.aarch64 = renvoBeginScalarProgramAarch64(s.prog, s.meta)
-			if s.aarch64 == nil {
+		if renvoProgramCacheSupported(s.context) {
+			s.program = renvoBeginProgramSession(s.prog, s.meta)
+			if s.program == nil {
 				s.done = true
 				return true
 			}
@@ -504,10 +450,10 @@ func (s *RenvoCompileSession) Step() bool {
 		return false
 	}
 	if s.stage == 3 {
-		if !s.aarch64.step(8) {
+		if !s.program.step(8) {
 			return false
 		}
-		s.result = s.aarch64.result
+		s.result = s.program.result
 		s.stage = 4
 		return false
 	}
@@ -532,19 +478,11 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 	if !prog.ok {
 		return result
 	}
-	if !prog.c.objectFile && (target == renvoTargetLinuxKernelAmd64 || target == renvoTargetRTG &&
-		renvoRTGPreparedKernelModule != 0) {
+	if renvoKernelProgram(&prog.c) && !prog.c.objectFile {
 		if !renvoPrepareKernelMetadata(&prog.c) {
 			return result
 		}
-		if target == renvoTargetLinuxKernelAmd64 {
-			prog.c.renvoTarget = renvoTargetLinuxKernelAmd64
-			prog.c.renvoTargetOS = renvoOSLinux
-			prog.c.renvoTargetArch = renvoArchAmd64
-			prog.c.renvoNativeIntSize = 8
-		} else {
-			renvoPopulateKernelCompileContext(&prog.c)
-		}
+		renvoPopulateKernelCompileContext(&prog.c)
 	}
 	var meta renvoMeta
 	renvoBuildMetaInto(prog, &meta)
@@ -556,44 +494,14 @@ func renvoCompileParsedProgramArena(prog *renvoProgram, target int, arenaSize in
 }
 
 func renvoCompileProgramWithMetaScratch(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		return renvoTryCompileScalarProgramRTG(prog, meta)
-	}
-	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386Scratch(prog, meta)
-	}
-	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64Scratch(prog, meta)
-	}
-	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArmScratch(prog, meta)
-	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return renvoTryCompileScalarProgramWasm32(prog, meta)
-	}
-	return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
+	return renvoTryCompileScalarProgramScratch(prog, meta)
 }
 
 func renvoCompileProgramWithMeta(prog *renvoProgram, meta *renvoMeta, target int) renvoCompileResult {
-	if renvoPreparedBackendActive != 0 || renvoFixedTarget == 0 && target == renvoTargetRTG {
-		return renvoTryCompileScalarProgramRTG(prog, meta)
+	if !renvoProgramCacheSupported(meta.c) {
+		return renvoTryCompileScalarProgramScratch(prog, meta)
 	}
-	if target == renvoTargetLinuxKernelAmd64 {
-		return renvoTryCompileScalarProgramAmd64Scratch(prog, meta)
-	}
-	if target == renvoTargetLinux386 || target == renvoTargetWindows386 {
-		return renvoTryCompileScalarProgram386Cached(prog, meta)
-	}
-	if target == renvoTargetLinuxAarch64 || target == renvoTargetDarwinArm64 || target == renvoTargetWindowsArm64 {
-		return renvoTryCompileScalarProgramAarch64Cached(prog, meta)
-	}
-	if target == renvoTargetLinuxArm {
-		return renvoTryCompileScalarProgramArmCached(prog, meta)
-	}
-	if target == renvoTargetWasiWasm32 || target == renvoTargetVM32 {
-		return renvoTryCompileScalarProgramWasm32(prog, meta)
-	}
-	return renvoTryCompileScalarProgramAmd64Cached(prog, meta)
+	return renvoTryCompileScalarProgramCached(prog, meta)
 }
 
 func renvoSetStripSymbols(stripSymbols bool) {
@@ -676,4 +584,50 @@ func renvoSetKernelLicense(license string) {
 	if license != "" {
 		renvoKernelLicense = license
 	}
+}
+
+// RenvoEmitPureBlock preserves the public two-native-target RFE adapter. The
+// record validation and lowering are target-neutral and take an explicit context.
+func RenvoEmitPureBlock(records []int, stateWords int, arm64 bool) ([]byte, bool) {
+	arch := renvoArchAmd64
+	if arm64 {
+		arch = renvoArchAarch64
+	}
+	// Do not allocate the whole-program emitter's multi-megabyte reserves for a
+	// small block. No global compiler options or legacy context are consulted.
+	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	return renvoEmitPureBlock(records, stateWords, context)
+}
+
+// renvoParseProgram adapts the legacy global target selection to the shared
+// parser. Explicit-context callers use renvoParseProgramWithContext instead.
+func renvoParseProgram(src []byte) renvoProgram {
+	var p renvoProgram
+	p.c.stripSymbols = renvoCompilerStripSymbols
+	if renvoFixedTarget == 0 {
+		p.c.renvoTarget = renvoTarget
+		p.c.renvoTargetOS = renvoTargetOS
+		p.c.renvoTargetArch = renvoTargetArch
+		p.c.renvoNativeIntSize = renvoNativeIntSize
+		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+		p.c.emitImage = renvoCompilerEmitImage
+	} else if targetIsWindows(renvoTargetOS) {
+		p.c.windowsSubsystem = renvoCompilerWindowsSubsystem
+	}
+	renvoParseProgramInto(src, &p)
+	return p
+}
+
+// Compatibility classification for definition-owned object policies. Shared
+// language lowering queries individual capabilities rather than these ABI IDs.
+const renvoObjectABIUnavailable = 0
+const renvoObjectABISysV = 1
+const renvoObjectABICdecl = 2
+
+func renvoIsSysVObject(c *renvoCompileContext) bool {
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABISysV
+}
+
+func renvoIsCdeclObject(c *renvoCompileContext) bool {
+	return c != nil && c.objectFile && renvoTargetObjectCallABI(c) == renvoObjectABICdecl
 }

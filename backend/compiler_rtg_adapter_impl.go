@@ -375,70 +375,25 @@ func renvoRTGEmitBoundedVariableShift(a *renvoAsm, direction RTGShiftDirection, 
 	renvoAsmMarkLabel(a, done)
 }
 
-func renvoRTGEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	metaFn := &g.meta.funcs[fnInfoIndex]
+func renvoRTGEmitAssemblyFunction(a *renvoAsm, declIndex int, label int) int {
 	for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
 		binding := &renvoRTGAssembly.bindings[i]
-		if binding.function != metaFn.declIndex {
+		if binding.function != declIndex {
 			continue
 		}
 		if len(binding.code) == 0 {
 			renvoPrintErr("renvo: RTGASM entry was not evaluated by CompilerJIT\n")
-			return false
+			return -1
 		}
-		renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-		renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
+		renvoRTGFunctionStart(a, label)
+		renvoAsmMarkLabel(a, label)
 		for at := 0; at < len(binding.code); at++ {
 			a.code = append(a.code, binding.code[at])
 		}
 		renvoRTGFunctionFinish(a)
-		return true
+		return 1
 	}
-	localCapacity := 16
-	if metaFn.bodyEnd-metaFn.bodyStart >= 512 {
-		localCapacity = 32
-	}
-	g.locals = make([]renvoLocalInfo, localCapacity)
-	g.localCount = 0
-	g.gotoLabels = nil
-	g.pendingControl = 0
-	g.currentFunc = fnInfoIndex
-	g.stackUsed = 0
-	g.stackPeak = 0
-	renvoRTGFunctionStart(a, g.funcLabels[fnInfoIndex])
-	renvoAsmMarkLabel(a, g.funcLabels[fnInfoIndex])
-	framePatch := renvoRTGFrameStart(a)
-	if renvoTypeUsesHiddenResult(g.meta, metaFn.resultType) {
-		g.returnStruct = renvoAddTypedLocal(g, 0, 0, renvoTypeInt)
-		renvoRTGStoreParamWord(g, 0, g.returnStruct)
-	}
-	renvoBindFunctionParams(g, fnInfoIndex)
-	if !renvoBindClosureCaptures(g, fnInfoIndex) ||
-		!renvoBindNamedResults(g, fnInfoIndex) ||
-		!renvoPrepareFunctionControl(g) ||
-		!renvoEmitLinearRange(g, metaFn.bodyStart, metaFn.bodyEnd) {
-		return false
-	}
-	if g.deferReturnLabel > 0 {
-		if !g.lastRangeReturns {
-			renvoAsmJmpLabel(a, g.deferReturnLabel)
-		}
-		if !renvoEmitFunctionControlEpilogue(g) {
-			return false
-		}
-	} else if !g.lastRangeReturns {
-		renvoMoveCapturedLocals(g, true)
-		if metaFn.resultType != 0 {
-			renvoAsmPrimaryImm(a, 0)
-		}
-		renvoAsmLeave(a)
-		renvoAsmRet(a)
-	}
-	renvoRTGFrameFinish(a, framePatch, g.stackPeak)
-	renvoRTGFunctionFinish(a)
-	return true
+	return 0
 }
 
 func renvoRTGStoreParamWord(g *renvoLinearGen, word int, offset int) {
@@ -509,129 +464,6 @@ func renvoRTGEmitCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount
 	renvoRTGDirectCopyBytes(&g.asm)
 }
 
-func renvoTryCompileScalarProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
-	renvoRTGUnsupportedOperation = 0
-	renvoRTGFailureDetail = -1
-	renvoRTGImageLimitMemory = false
-	renvoRTGImageLimitNeeded = 0
-	renvoRTGImageLimit = 0
-	if renvoRTGPreparedObject != 0 {
-		return renvoTryCompileObjectProgramRTG(p, meta)
-	}
-	appIndex := p.entryFunc
-	if appIndex < 0 {
-		renvoPrintErr("renvo: prepared backend could not find appMain\n")
-		return renvoCompileResult{}
-	}
-	g := new(renvoLinearGen)
-	g.c = meta.c
-	g.prog = p
-	g.meta = meta
-	g.arenaSize = meta.arenaSize
-	g.c.optimizeRuntime = len(p.src) >= renvoLargeProgramSourceThreshold
-	renvoAsmInitWithContext(&g.asm, g.c)
-	g.asm.codeOffset = renvoRTGCodeOffset
-	for i := 0; i < len(meta.funcs); i++ {
-		g.funcLabels = append(g.funcLabels, renvoAsmNewLabel(&g.asm))
-	}
-	renvoInitFuncQueue(g, len(meta.funcs))
-	if renvoRTGPreparedKernelModule != 0 {
-		if !renvoBeginKernelModuleRTG(g, appIndex) {
-			return renvoCompileResult{}
-		}
-		if !renvoEmitAllQueuedFunctionsScratch(g) {
-			return renvoCompileResult{}
-		}
-		if renvoRTGUnsupportedOperation != 0 {
-			renvoRTGReportFailure(g)
-			return renvoCompileResult{}
-		}
-		renvoAsmPatch(&g.asm)
-		data := renvoRTGKernelImage(&g.asm, g.kernelInitLabel, g.kernelExitLabel)
-		renvoRTGValidateRelocations(&g.asm)
-		if renvoRTGUnsupportedOperation != 0 {
-			renvoRTGReportFailure(g)
-			return renvoCompileResult{}
-		}
-		if len(data) == 0 {
-			return renvoCompileResult{}
-		}
-		return renvoCompileResult{data: data, ok: true}
-	}
-	entryStateOffset := -1
-	if renvoRTGEntryStateBytes > 0 {
-		entryStateOffset = g.asm.ReserveBSS(renvoRTGEntryStateBytes, renvoRTGStackWordBytes)
-	}
-	if !renvoRTGEmitEntryStart(&g.asm, entryStateOffset) {
-		renvoPrintErr("renvo: prepared backend rejected entry start\n")
-		return renvoCompileResult{}
-	}
-	renvoLinearMarkFunc(g, appIndex)
-	renvoEmitInitializeThreadState(g)
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		renvoPrintErr("renvo: prepared backend failed global initialization\n")
-		return renvoCompileResult{}
-	}
-	app := &meta.funcs[appIndex]
-	if app.resultType != 0 && !renvoTypeIsInt(meta, app.resultType) {
-		return renvoCompileResult{}
-	}
-	if app.paramCount > 2 {
-		return renvoCompileResult{}
-	}
-	for i := 0; i < app.paramCount; i++ {
-		param := &meta.params[app.firstParam+i]
-		if !renvoTypeIsStringSlice(meta, param.typ) {
-			return renvoCompileResult{}
-		}
-	}
-	// Native process argument and environment decoding belongs to the selected
-	// runtime definition. The hook leaves the ordinary Renvo call words ready
-	// for appMain, so the shared lowering path does not know an OS entry ABI.
-	if !renvoRTGEmitEntry(&g.asm, app.paramCount, entryStateOffset) {
-		renvoPrintErr("renvo: prepared backend rejected process arguments\n")
-		return renvoCompileResult{}
-	}
-	renvoAsmCallLabel(&g.asm, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		renvoPrintErr("renvo: prepared backend failed panic check\n")
-		return renvoCompileResult{}
-	}
-	if !renvoRTGEmitExit(&g.asm, renvoRTGPrimary) {
-		renvoPrintErr("renvo: prepared backend rejected process exit\n")
-		return renvoCompileResult{}
-	}
-	if !renvoEmitAllQueuedFunctionsScratch(g) {
-		renvoPrintErr("renvo: prepared backend failed queued functions\n")
-		return renvoCompileResult{}
-	}
-	if renvoRTGUnsupportedOperation != 0 {
-		renvoRTGReportFailure(g)
-		return renvoCompileResult{}
-	}
-	renvoAsmPatch(&g.asm)
-	data := renvoRTGImage(&g.asm)
-	if renvoFixedTarget == 0 && g.asm.c.emitImage {
-		data = renvoAppendReplLinkTable(data, &g.asm)
-	}
-	renvoRTGValidateRelocations(&g.asm)
-	if renvoRTGUnsupportedOperation != 0 {
-		renvoRTGReportFailure(g)
-		return renvoCompileResult{}
-	}
-	if len(data) == 0 {
-		if renvoRTGImageLimit > 0 {
-			renvoRTGReportImageSize(g)
-		} else {
-			renvoPrintErr("renvo: error RENVO-BUG-020 (backend): target image encoder returned no output or diagnostic\n")
-		}
-		renvoRTGUnsupportedOperation = 5001
-		return renvoCompileResult{}
-	}
-	return renvoCompileResult{data: data, ok: true}
-}
-
 func renvoRTGAdjustObjectStack(a *renvoAsm, reserve bool) {
 	renvoRTGDirectMoveImmediate(a, renvoRTGScratch, int64(renvoRTGStackWordBytes))
 	if reserve {
@@ -677,23 +509,8 @@ func renvoRTGPushObjectCallWord(a *renvoAsm, word int) bool {
 	return true
 }
 
-func renvoTryCompileObjectProgramRTG(
-	p *renvoProgram, meta *renvoMeta,
-) renvoCompileResult {
-	g := renvoBeginObjectProgram(p, meta)
-	if g == nil || !renvoEmitAllQueuedFunctionsScratch(g) {
-		return renvoCompileResult{}
-	}
-	if renvoRTGUnsupportedOperation != 0 {
-		return renvoCompileResult{}
-	}
-	renvoRecordObjectFunctionRanges(g)
-	data := renvoRTGImage(&g.asm)
-	renvoRTGValidateRelocations(&g.asm)
-	if renvoRTGUnsupportedOperation != 0 || len(data) == 0 {
-		return renvoCompileResult{}
-	}
-	return renvoCompileResult{data: data, ok: true}
+func renvoTryCompileObjectProgramRTG(p *renvoProgram, meta *renvoMeta) renvoCompileResult {
+	return renvoTryCompileScalarProgramScratch(p, meta)
 }
 
 func renvoRTGReportFailure(g *renvoLinearGen) {
@@ -791,81 +608,84 @@ func renvoRTGValidateRelocations(out *renvoAsm) {
 	}
 }
 
-func renvoBeginKernelModuleRTG(g *renvoLinearGen, appIndex int) bool {
-	renvoNonNil(g)
-	a := &g.asm
-	g.kernelCallbackLabels = make([]int, len(g.meta.funcs))
-	for i := 0; i < len(g.kernelCallbackLabels); i++ {
-		g.kernelCallbackLabels[i] = -1
+// Prepared physical carriers use the selected descriptor registers.
+func renvoRTGBeginObjectAggregateResult(a *renvoAsm, preserveSRet bool) bool {
+	if renvoRTGStackWordBytes != 8 || !renvoRTGStack.Valid ||
+		!renvoRTGPrimary.Valid || !renvoRTGSecondary.Valid {
+		return false
 	}
-	exitIndex := -1
-	for i := 0; i < len(g.meta.funcs); i++ {
-		fn := &g.meta.funcs[i]
-		if renvoBytesEqualText(g.meta.prog.src, fn.nameStart, fn.nameEnd, "moduleExit") {
-			exitIndex = i
+	renvoRTGAdjustObjectStack(a, true)
+	renvoRTGAdjustObjectStack(a, true)
+	if preserveSRet {
+		if !renvoRTGCallWord0.Valid {
+			return false
 		}
-	}
-	g.kernelInitLabel = renvoAsmNewLabel(a)
-	g.kernelExitLabel = -1
-	renvoAsmMarkLabel(a, g.kernelInitLabel)
-	renvoRTGKernelEntryPrologue(a)
-	renvoLinearMarkFunc(g, appIndex)
-	renvoEmitInitializeThreadState(g)
-	renvoEmitPersistentArenaReady(g)
-	if !renvoLinearInitGlobals(g) {
-		return false
-	}
-	renvoAsmCallLabel(a, g.funcLabels[appIndex])
-	if !renvoEmitProgramPanicCheck(g) {
-		return false
-	}
-	renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, 0)
-	renvoRTGKernelEntryEpilogue(a)
-	if exitIndex >= 0 {
-		g.kernelExitLabel = renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, g.kernelExitLabel)
-		renvoRTGKernelEntryPrologue(a)
-		renvoLinearMarkFunc(g, exitIndex)
-		renvoAsmCallLabel(a, g.funcLabels[exitIndex])
-		renvoRTGKernelEntryEpilogue(a)
+		renvoRTGDirectStoreNative(a,
+			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1),
+			renvoRTGCallWord0)
 	}
 	return true
 }
 
-func renvoRTGEmitKernelCallbackArgReverse(
-	g *renvoLinearGen, ep *renvoExprParse, idx int, funcType int,
-) int {
-	renvoNonNil(g, ep)
-	if idx < 0 || idx >= len(ep.exprs) {
-		return -1
+func renvoRTGPushObjectSRetPointer(a *renvoAsm) bool {
+	if !renvoRTGCallWord0.Valid {
+		return false
 	}
-	e := &ep.exprs[idx]
-	if e.kind != renvoExprIdent {
-		return -1
+	renvoRTGAsmPushRegister(a, renvoRTGCallWord0)
+	return true
+}
+
+func renvoRTGPushObjectPrivateResult(a *renvoAsm, argumentWords int) bool {
+	if argumentWords < 0 || !renvoRTGStack.Valid || !renvoRTGPrimary.Valid {
+		return false
 	}
-	fnIndex := renvoFindMetaFunction(g.meta, e.nameStart, e.nameEnd)
-	if fnIndex < 0 ||
-		renvoFunctionValueMode(g.meta, fnIndex, funcType) != renvoFunctionValueDirect {
-		return -1
-	}
-	renvoLinearMarkFunc(g, fnIndex)
-	a := &g.asm
-	label := g.kernelCallbackLabels[fnIndex]
-	first := label < 0
-	if first {
-		label = renvoAsmNewLabel(a)
-		g.kernelCallbackLabels[fnIndex] = label
-	}
-	renvoRTGKernelCallbackAddress(a, label)
+	address := renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
+		argumentWords*renvoRTGStackWordBytes, 1)
+	renvoRTGDirectAddress(a, renvoRTGPrimary, address)
 	renvoRTGAsmPushRegister(a, renvoRTGPrimary)
-	if first {
-		after := renvoAsmNewLabel(a)
-		renvoAsmJmpLabel(a, after)
-		renvoAsmMarkLabel(a, label)
-		renvoRTGKernelEntryPrologue(a)
-		renvoAsmCallLabel(a, g.funcLabels[fnIndex])
-		renvoRTGKernelEntryEpilogue(a)
-		renvoAsmMarkLabel(a, after)
+	return true
+}
+
+func renvoRTGFinishObjectAggregateResult(a *renvoAsm, resultWords int) {
+	renvoRTGDirectLoadNative(a, renvoRTGPrimary,
+		renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, 0, 1))
+	if resultWords > 1 {
+		renvoRTGDirectLoadNative(a, renvoRTGSecondary,
+			renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
+				renvoRTGStackWordBytes, 1))
 	}
-	return 1
+	renvoRTGAdjustObjectStack(a, false)
+	renvoRTGAdjustObjectStack(a, false)
+}
+
+func renvoRTGIEEEHostSyscall(g *renvoLinearGen, number int, addressCount int, offset0 int, offset1 int, offset2 int) {
+	renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord0, offset0)
+	if addressCount > 1 {
+		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord1, offset1)
+	}
+	if addressCount > 2 {
+		renvoRTGAsmAddressFrame(&g.asm, renvoRTGSyscallWord2, offset2)
+	}
+	renvoRTGDirectMoveImmediate(&g.asm, renvoRTGSyscallNumber, int64(number))
+	renvoRTGDirectHostSyscall(&g.asm)
+}
+
+func renvoRTGSaveSliceSlotAddresses(a *renvoAsm, dataSlot int, lenSlot int, capSlot int) {
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord0)
+	renvoAsmStorePrimaryStack(a, dataSlot)
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord1)
+	renvoAsmStorePrimaryStack(a, lenSlot)
+	renvoRTGDirectMove(a, renvoRTGPrimary, renvoRTGCallWord5)
+	renvoAsmStorePrimaryStack(a, capSlot)
+}
+
+// ObjectImage is the RTG-visible bridge to the production x86_64 relocatable
+// writer. A custom target still selects the object format in its definition;
+// the implementation is shared with the compiled-in frontend so the two paths
+// cannot drift on section, symbol, or relocation semantics.
+func (a *renvoAsm) ObjectImage() []byte {
+	if renvoFixedTarget != 0 {
+		return nil
+	}
+	return renvoAsmImageRelocatableObjectAmd64(a)
 }

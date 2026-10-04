@@ -110,6 +110,8 @@ func TestGenericAlignmentUsesPreparedBackendLayout(t *testing.T) {
 			definition = strings.ReplaceAll(definition, `alias = "aarch64"`, `alias = "`+test.alias+`"`)
 			if test.alias == "wasm32" {
 				definition = strings.ReplaceAll(definition, "family = native_v1", "family = structured32")
+				definition = strings.Replace(definition, "arch a64 {", "arch a64 {\n compiler_family = structured32", 1)
+				definition = strings.Replace(definition, "format acme_image {", "format acme_image {\n compiler_family = structured32\n", 1)
 			}
 			files := []load.SourceFile{
 				{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\ngo 1.25\n")},

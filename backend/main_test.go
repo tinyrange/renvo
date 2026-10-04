@@ -172,9 +172,17 @@ func skipIfTargetRunnerMissing(t *testing.T, target compilerTarget) {
 	if len(target.runner) == 0 {
 		return
 	}
-	if _, err := exec.LookPath(target.runner[0]); err != nil {
-		t.Skipf("runner %s is not installed", target.runner[0])
+	runner, err := exec.LookPath(target.runner[0])
+	if err != nil && target.runner[0] == "wasmtime" {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			runner, err = exec.LookPath(filepath.Join(home, ".wasmtime", "bin", "wasmtime"))
+		}
 	}
+	if err != nil {
+		t.Skipf("runner %s is unavailable: %v", target.runner[0], err)
+	}
+	// Keep the resolved path for subsequent commands using this runner slice.
+	target.runner[0] = runner
 }
 
 func compile(inputFiles []string, outputFile string) error {

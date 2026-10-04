@@ -52,7 +52,7 @@ func renvoCompileOutputDataWithContext(context *renvoCompileContext, data []byte
 func renvoLinearPrepareReplGlobals(g *renvoLinearGen) {
 	renvoNonNil(g)
 	if renvoFixedTarget != 0 || !g.c.emitImage ||
-		g.c.renvoTargetArch == renvoArchWasm32 {
+		!renvoReplGlobalsSupported(g.c) {
 		return
 	}
 	for i := 0; i < len(g.meta.globals); i++ {
