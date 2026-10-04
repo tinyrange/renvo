@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e64f4625eb2fb4de9e2f3e442e0bdf533885a049bda14362b4419fee9a4e932e"
+const CompilerSourceDigest = "48401ec82d0cff360594bed9e2347b2af04ed8ad1f37d4674754fe6e9ef42902"
 
 // source: backend/compiler_common_impl.go
 
@@ -10390,6 +10390,13 @@ renvoAsmJnzPrimary(&g.asm, skipInitializer)
 }
 if renvoTypeIsNativeInt(meta, s.typ) && renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoDefaultTarget") {
 renvoAsmPrimaryImm(&g.asm, g.c.renvoTarget)
+renvoAsmStorePrimaryBss(&g.asm, off)
+} else if g.fixedTargetState == 1 && renvoTypeIsNativeInt(meta, s.typ) &&
+renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoFixedTarget") {
+
+
+
+renvoAsmPrimaryImm(&g.asm, g.fixedTargetValue)
 renvoAsmStorePrimaryBss(&g.asm, off)
 } else if s.initStart < s.initEnd {
 localBase := g.localCount

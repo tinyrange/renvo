@@ -10384,6 +10384,13 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 	if renvoTypeIsNativeInt(meta, s.typ) && renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoDefaultTarget") {
 		renvoAsmPrimaryImm(&g.asm, g.c.renvoTarget)
 		renvoAsmStorePrimaryBss(&g.asm, off)
+	} else if g.fixedTargetState == 1 && renvoTypeIsNativeInt(meta, s.typ) &&
+		renvoBytesEqualText(g.prog.src, s.nameStart, s.nameEnd, "renvoFixedTarget") {
+		// Runtime reads must agree with the selector used to specialize branches.
+		// A definition may select a fixed compiler target despite a zero source
+		// initializer; retaining that zero would contradict the emitted control flow.
+		renvoAsmPrimaryImm(&g.asm, g.fixedTargetValue)
+		renvoAsmStorePrimaryBss(&g.asm, off)
 	} else if s.initStart < s.initEnd {
 		localBase := g.localCount
 		stackBase := g.stackUsed
