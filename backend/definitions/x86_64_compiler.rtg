@@ -3553,6 +3553,11 @@ go compiler {
 		} else {
 			return -1
 		}
+		// An authored call can change the target through an alias. Preserve its
+		// original value before evaluating that operand in ordinary lowering.
+		if !renvoStringCompareOperandIsReadOnly(g, ep, idx) {
+			return -1
+		}
 		if !renvoEmitScalarExprForKind(g, ep, idx, kind) {
 			return 0
 		}

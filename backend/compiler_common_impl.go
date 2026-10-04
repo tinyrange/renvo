@@ -18657,8 +18657,15 @@ func renvoStringCompareOperandIsReadOnly(g *renvoLinearGen, ep *renvoExprParse, 
 			renvoStringCompareOperandIsReadOnly(g, ep, e.right) &&
 			renvoStringCompareOperandIsReadOnly(g, ep, e.nameStart)
 	}
-	if e.kind == renvoExprCall && e.argCount == 1 && renvoConversionTypeFromExpr(g, ep, e.left) != 0 {
-		return renvoStringCompareOperandIsReadOnly(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+	if e.kind == renvoExprCall && e.argCount == 1 {
+		if renvoConversionTypeFromExpr(g, ep, e.left) != 0 {
+			return renvoStringCompareOperandIsReadOnly(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		}
+		callee := renvoExprIdentCode(g.prog, ep, e.left)
+		if (callee == renvoIdentLen || callee == renvoIdentCap) &&
+			renvoFuncInfoFromCall(g, ep, e.left) < 0 && renvoFunctionValueCalleeType(g, ep, e.left) == 0 {
+			return renvoStringCompareOperandIsReadOnly(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		}
 	}
 	return false
 }

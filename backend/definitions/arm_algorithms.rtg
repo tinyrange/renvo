@@ -2362,13 +2362,56 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerSelfBinaryLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int) bool {
-		return false
+		e := &ep.exprs[idx]
+		if e.kind != renvoExprBinary || !renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-') {
+			return false
+		}
+		left := &ep.exprs[e.left]
+		if left.kind != renvoExprIdent {
+			return false
+		}
+		local := renvoFindLocalIndex(g, left.nameStart, left.nameEnd)
+		if local < 0 || g.locals[local].captureOff != 0 || g.locals[local].offset != offset {
+			return false
+		}
+		kind := renvoResolveType(g.meta, g.locals[local].typ).kind
+		if kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32 {
+			return false
+		}
+		value := renvoEvalConstExpr(g, ep, e.right)
+		if !value.ok {
+			return false
+		}
+		step := value.value
+		if renvoTokCharIs(g.prog, e.tok, '-') {
+			step = -step
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, offset)
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		renvoAsmStorePrimaryStack(&g.asm, offset)
+		renvoClearLocalConstAtOffset(g, offset)
+		renvoClearLocalFlowConstAtOffset(g, offset)
+		return true
 	}
 }
 
 go compiler {
 	func renvoArmCompilerCompoundLocalAssign(g *renvoLinearGen, ep *renvoExprParse, idx int, offset int, tok int, op byte, kind int, size int) int {
-		return -1
+		if (kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32) || size != 4 || op != '+' && op != '-' {
+			return -1
+		}
+		value := renvoEvalConstExpr(g, ep, idx)
+		if !value.ok {
+			return -1
+		}
+		step := value.value
+		if op == '-' {
+			step = -step
+		}
+		renvoAsmLoadPrimaryStack(&g.asm, offset)
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		renvoAsmStorePrimaryStack(&g.asm, offset)
+		return 1
 	}
 }
 
