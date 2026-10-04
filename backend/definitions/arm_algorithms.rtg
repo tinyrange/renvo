@@ -2088,13 +2088,11 @@ go compiler {
 	func renvoArmCompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryStack(a, localOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoArmAsmAddRegImm(a, 0, 0, step)
 		renvoAsmStorePrimaryStack(a, localOffset)
 		return true
 	}
@@ -2104,13 +2102,11 @@ go compiler {
 	func renvoArmCompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryBss(a, globalOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoArmAsmAddRegImm(a, 0, 0, step)
 		renvoAsmStorePrimaryBss(a, globalOffset)
 		return true
 	}

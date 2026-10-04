@@ -5512,11 +5512,10 @@ go compiler {
 		reusedLabel := renvoAsmNewLabel(a)
 		highReady := renvoAsmNewLabel(a)
 		plain := renvoAsmNewLabel(a)
-		renvoAsmPushPrimary(a)
-		renvoAsmPrimaryImm(a, 256)
-		renvoAsmCmpTertiaryPrimarySet(a, 0x92)
-		renvoAsmJnzPrimary(a, small)
-		renvoAsmPopPrimary(a)
+		// Zeroing sizes are nonnegative; retain the address while testing the
+		// small-value cutoff directly, without materializing a boolean.
+		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 256)
+		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, small)
 		renvoAsmPushSecondary(a)
 		renvoAsmPushPrimary(a)
 		renvoAsmPushTertiary(a)
@@ -5551,7 +5550,6 @@ go compiler {
 		renvoAsmPopSecondary(a)
 		renvoAsmJmpLabel(a, plain)
 		renvoAsmMarkLabel(a, small)
-		renvoAsmPopPrimary(a)
 		renvoAsmMarkLabel(a, plain)
 	}
 
@@ -5563,13 +5561,26 @@ go compiler {
 		renvoAsmCopyPrimaryToSecondary(a)
 		renvoAsmPushPrimary(a)
 		renvoAsmPrimaryImm(a, 0)
-		for width := 4; width >= 1; width -= 3 {
+		for pass := 0; pass < 3; pass++ {
+			width := 16
+			if pass == 1 {
+				width = 4
+			}
+			if pass == 2 {
+				width = 1
+			}
 			loop := renvoAsmNewLabel(a)
 			done := renvoAsmNewLabel(a)
 			renvoAsmMarkLabel(a, loop)
 			renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, width)
 			renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, done)
-			renvoAsmStorePrimaryMemSecondaryDispSize(a, 0, width)
+			storeSize := 4
+			if width == 1 {
+				storeSize = 1
+			}
+			for at := 0; at < width; at += storeSize {
+				renvoAsmStorePrimaryMemSecondaryDispSize(a, at, storeSize)
+			}
 			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, width)
 			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -width)
 			renvoAsmJmpMarkLabel(a, loop, done)
@@ -6068,7 +6079,39 @@ go compiler {
 
 go compiler {
 	func renvoWasm32CompilerOptimizedNativeBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) int {
-		return -1
+		if g.c.renvoTarget != renvoTargetVM32 {
+			return -1
+		}
+		e := &ep.exprs[idx]
+		start, end := renvoTokStart(g.prog, e.tok), renvoTokEnd(g.prog, e.tok)
+		op0 := renvo_runtime_UnsafeByteAt(g.prog.src, start)
+		op1 := byte(0)
+		if end-start == 2 {
+			op1 = renvo_runtime_UnsafeByteAt(g.prog.src, start+1)
+		}
+		if (op0 != '<' && op0 != '>') || op1 == op0 {
+			return -1
+		}
+		// Boolean results need the same source range facts as conditional jumps.
+		// Non-word operands have already been handled by source lowering.
+		if !renvoEmitWordBinaryOperands(g, ep, idx) {
+			return 0
+		}
+		unsigned := renvoExprHasUnsignedIntType(g, ep, e.left) || renvoExprHasUnsignedIntType(g, ep, e.right)
+		renvoEmitWasmParsedCompareFlags(g, ep, e.left, e.right, op0, unsigned)
+		cond := renvoWasm32CondLt
+		if op0 == '>' {
+			cond = renvoWasm32CondGt
+		}
+		if op1 == '=' {
+			cond = renvoWasm32CondLe
+			if op0 == '>' {
+				cond = renvoWasm32CondGe
+			}
+		}
+		renvoAsmEmit8(&g.asm, renvoWasm32OpSetCond)
+		renvoAsmEmit8(&g.asm, cond)
+		return 1
 	}
 }
 
@@ -6088,13 +6131,11 @@ go compiler {
 	func renvoWasm32CompilerIncrementLocalWord(g *renvoLinearGen, localOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryStack(a, localOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRax, step)
 		renvoAsmStorePrimaryStack(a, localOffset)
 		return true
 	}
@@ -6104,13 +6145,11 @@ go compiler {
 	func renvoWasm32CompilerIncrementGlobalWord(g *renvoLinearGen, globalOffset int, inc bool) bool {
 		a := &g.asm
 		renvoAsmLoadPrimaryBss(a, globalOffset)
-		renvoAsmPushImm(a, 1)
-		renvoAsmPopTertiary(a)
-		if inc {
-			renvoAsmAddPrimaryTertiary(a)
-		} else {
-			renvoAsmSubPrimaryTertiary(a)
+		step := 1
+		if !inc {
+			step = -1
 		}
+		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRax, step)
 		renvoAsmStorePrimaryBss(a, globalOffset)
 		return true
 	}

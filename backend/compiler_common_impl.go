@@ -16867,7 +16867,7 @@ func renvoEmitRuntimeUnsafeIndex(g *renvoLinearGen, ep *renvoExprParse, e *renvo
 		renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, 0, size)
 		return true
 	}
-	if e.argCount != 2 || !renvoEmitSlicePtrLen(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
+	if e.argCount != 2 || !renvoEmitSlicePointer(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
 		return false
 	}
 	renvoAsmPushPrimary(&g.asm)
@@ -18894,6 +18894,48 @@ func renvoEmitSliceArrayConversion(g *renvoLinearGen, ep *renvoExprParse, arg in
 	return true
 }
 
+// Unsafe reads need only the backing pointer. Loading descriptor lengths here
+// wastes instructions at every access, even though no bounds check consumes them.
+func renvoEmitSlicePointer(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprIdent {
+		localIndex := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if localIndex >= 0 {
+			kind := renvoResolveType(g.meta, g.locals[localIndex].typ).kind
+			if kind != renvoTypeSlice && kind != renvoTypeString {
+				return false
+			}
+			renvoAsmLoadPrimaryStack(&g.asm, g.locals[localIndex].offset)
+			return true
+		}
+		offset := renvoFindGlobalOffset(g, e.nameStart, e.nameEnd)
+		kind := renvoResolveType(g.meta, renvoFindGlobalType(g, e.nameStart, e.nameEnd)).kind
+		if offset < 0 || kind != renvoTypeSlice && kind != renvoTypeString {
+			return false
+		}
+		renvoAsmLoadPrimaryBss(&g.asm, offset)
+		return true
+	}
+	if e.kind == renvoExprSelector {
+		kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+		if kind != renvoTypeSlice && kind != renvoTypeString {
+			return false
+		}
+		if renvoEmitDirectSelectorWords(g, ep, idx, 0, -1, g.c.renvoNativeIntSize) {
+			return true
+		}
+		if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+			return false
+		}
+		renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, 0)
+		return true
+	}
+	// Calls, slicing, indexed descriptors and dereferences retain their ordinary
+	// evaluation path, including all side effects and nil checks.
+	return renvoEmitSlicePtrLen(g, ep, idx)
+}
+
 func renvoEmitSlicePtrLen(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	renvoNonNil(g, ep)
 	meta := g.meta
@@ -20842,14 +20884,14 @@ func renvoEmitNonWordBinaryExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) 
 		return 0
 	}
 	if renvoTok2Is(p, e.tok, '=', '=') || renvoTok2Is(p, e.tok, '!', '=') {
-		leftType := renvoInferParsedExprType(g, ep, e.left)
-		leftResolved := renvoResolveType(g.meta, leftType)
-		if leftResolved.kind == renvoTypeArray || leftResolved.kind == renvoTypeStruct || renvoTypeKindIsComplex(leftResolved.kind) {
-			if renvoEmitCompositeCompare(g, ep, e, leftType) {
+		compositeType := renvoComparisonCompositeType(g, ep, e)
+		if compositeType != 0 {
+			if renvoEmitCompositeCompare(g, ep, e, compositeType) {
 				return 1
 			}
 			return 0
 		}
+		leftType := renvoInferParsedExprType(g, ep, e.left)
 		rightType := renvoInferParsedExprType(g, ep, e.right)
 		if renvoTypeIsString(g.meta, leftType) || renvoTypeIsString(g.meta, rightType) {
 			if renvoEmitStringCompare(g, ep, e.left, e.right, renvoTok2Is(p, e.tok, '!', '=')) {
