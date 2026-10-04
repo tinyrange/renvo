@@ -36872,17 +36872,22 @@ func renvoEmitNativeIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 			constant := renvoEvalConstExpr(g, ep, e.right)
 			immediate = constant.ok
 		}
-		if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && immOpcode != 0 && rightKind == renvoExprIdent {
+		if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && (immOpcode != 0 || immMultiply) && rightKind == renvoExprIdent {
 			offset := renvoNativeCompareFrameOffset(g, ep, e.right)
 			if offset >= 0 {
 				if !renvoEmitIntExpr(g, ep, e.left) {
 					return false
 				}
-				// ADD/SUB/AND/OR/XOR have a register-to-frame operand form.
+				// Integer arithmetic has a register-to-frame operand form.
 				// Read the right local after evaluating the left, as source
 				// semantics require, without spilling the left to the stack.
-				opcode := immOpcode - 2
-				renvoAsmStackMem(a, offset, opcode<<8|0x48, 0x45, 0x85)
+				if immMultiply {
+					renvoAsmEmit8(a, 0x48)
+					renvoAsmStackMem(a, offset, 0xaf0f, 0x45, 0x85)
+				} else {
+					opcode := immOpcode - 2
+					renvoAsmStackMem(a, offset, opcode<<8|0x48, 0x45, 0x85)
+				}
 				renvoNormalizeNativeExprPrimary(g, ep, idx)
 				return true
 			}
@@ -37437,6 +37442,48 @@ func renvoEmitNativeCompareJump(g *renvoLinearGen, ep *renvoExprParse, e *renvoE
 					}
 					renvoAsmLoadPrimaryStack(&g.asm, rightOffset)
 					renvoAsmEmitText(&g.asm, "\x48\x39\x02") // CMP [RDX], RAX
+					renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+					return true
+				}
+			}
+			kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, leftIndex)).kind
+			if kind == renvoTypeInt || kind == renvoTypeUint64 {
+				if !renvoEmitIntExpr(g, ep, leftIndex) {
+					return false
+				}
+				renvoAsmStackMem(&g.asm, rightOffset, 0x3b48, 0x45, 0x85)
+				renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+				return true
+			}
+		}
+		if right.kind == renvoExprIdent {
+			local := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
+			if local >= 0 && g.locals[local].captureOff == 0 {
+				kind := renvoResolveType(g.meta, g.locals[local].typ).kind
+				leftKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, leftIndex)).kind
+				if leftKind == kind && renvoTypeKindIsScalarInt(kind) {
+					if !renvoEmitIntExpr(g, ep, leftIndex) {
+						return false
+					}
+					// Compare at the language width: pointer writes may leave the
+					// upper bytes of a narrow local's value slot unchanged.
+					size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+					if size == 8 {
+						renvoAsmEmit16(&g.asm, 0x3b48)
+					} else if size == 2 {
+						renvoAsmEmit16(&g.asm, 0x3b66)
+					} else if size == 1 {
+						renvoAsmEmit8(&g.asm, 0x3a)
+					} else {
+						renvoAsmEmit8(&g.asm, 0x3b)
+					}
+					offset := g.locals[local].offset
+					if offset >= 0 && offset <= 128 {
+						renvoAsmEmit2(&g.asm, 0x45, -offset)
+					} else {
+						renvoAsmEmit8(&g.asm, 0x85)
+						renvoAsmEmit32(&g.asm, -offset)
+					}
 					renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 					return true
 				}

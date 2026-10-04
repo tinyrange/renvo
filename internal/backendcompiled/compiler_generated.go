@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "92550f7b60c952a93e0d8ebafc02992625cf8b6b48f3abd3872e4e18019b7c29"
+const CompilerSourceDigest = "c8658c076594d0db1575d2ffb769a71ca9c807042c4ce497c3cd6a355864f837"
 
 // source: backend/compiler_common_impl.go
 
@@ -36879,7 +36879,7 @@ if p.compilerInt32 && immediate {
 constant := renvoEvalConstExpr(g, ep, e.right)
 immediate = constant.ok
 }
-if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && immOpcode != 0 && rightKind == renvoExprIdent {
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && (immOpcode != 0 || immMultiply) && rightKind == renvoExprIdent {
 offset := renvoNativeCompareFrameOffset(g, ep, e.right)
 if offset >= 0 {
 if !renvoEmitIntExpr(g, ep, e.left) {
@@ -36888,8 +36888,13 @@ return false
 
 
 
+if immMultiply {
+renvoAsmEmit8(a, 0x48)
+renvoAsmStackMem(a, offset, 0xaf0f, 0x45, 0x85)
+} else {
 opcode := immOpcode - 2
 renvoAsmStackMem(a, offset, opcode<<8|0x48, 0x45, 0x85)
+}
 renvoNormalizeNativeExprPrimary(g, ep, idx)
 return true
 }
@@ -37444,6 +37449,48 @@ return false
 }
 renvoAsmLoadPrimaryStack(&g.asm, rightOffset)
 renvoAsmEmitText(&g.asm, "\x48\x39\x02")
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+return true
+}
+}
+kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, leftIndex)).kind
+if kind == renvoTypeInt || kind == renvoTypeUint64 {
+if !renvoEmitIntExpr(g, ep, leftIndex) {
+return false
+}
+renvoAsmStackMem(&g.asm, rightOffset, 0x3b48, 0x45, 0x85)
+renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
+return true
+}
+}
+if right.kind == renvoExprIdent {
+local := renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
+if local >= 0 && g.locals[local].captureOff == 0 {
+kind := renvoResolveType(g.meta, g.locals[local].typ).kind
+leftKind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, leftIndex)).kind
+if leftKind == kind && renvoTypeKindIsScalarInt(kind) {
+if !renvoEmitIntExpr(g, ep, leftIndex) {
+return false
+}
+
+
+size := renvoScalarKindSize(g.c.renvoNativeIntSize, kind)
+if size == 8 {
+renvoAsmEmit16(&g.asm, 0x3b48)
+} else if size == 2 {
+renvoAsmEmit16(&g.asm, 0x3b66)
+} else if size == 1 {
+renvoAsmEmit8(&g.asm, 0x3a)
+} else {
+renvoAsmEmit8(&g.asm, 0x3b)
+}
+offset := g.locals[local].offset
+if offset >= 0 && offset <= 128 {
+renvoAsmEmit2(&g.asm, 0x45, -offset)
+} else {
+renvoAsmEmit8(&g.asm, 0x85)
+renvoAsmEmit32(&g.asm, -offset)
+}
 renvoEmitCompareJumpOp(&g.asm, c0, c1, label, jumpIfTrue, unsigned)
 return true
 }
