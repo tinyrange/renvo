@@ -2918,6 +2918,18 @@ go compiler {
 				renvoAsmPushStackWord(&g.asm, offset-at)
 				continue
 			}
+			if mode != renvoPushStack && mode != renvoPushBss && wordSize == 8 {
+				// PUSH [RDX+disp] leaves the descriptor base intact between words.
+				renvoAsmEmit8(&g.asm, 0xff)
+				if renvoAsmImmFits8Signed(at) {
+					renvoAsmEmit2(&g.asm, 0x72, at)
+				} else {
+					renvoAsmEmit8(&g.asm, 0xb2)
+					renvoAsmEmit32(&g.asm, at)
+				}
+				g.asm.lastPrimaryLoad = 0
+				continue
+			}
 			if mode == renvoPushStack {
 				renvoAsmLoadPrimaryStack(&g.asm, offset-at)
 			} else if mode == renvoPushBss {

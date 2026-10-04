@@ -17362,6 +17362,15 @@ func renvoEmitCallArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int) int
 				return 3
 			}
 		}
+		// A selector already denotes contiguous descriptor storage. Push its
+		// words directly instead of loading and reshuffling value registers.
+		if e.kind == renvoExprSelector {
+			if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+				return -1
+			}
+			renvoEmitPushWords(g, 0, 3*renvoBackendValueSlotSize, renvoBackendValueSlotSize, 0)
+			return 3
+		}
 		if !renvoEmitSliceValueRegs(g, ep, idx) {
 			return -1
 		}
@@ -17378,6 +17387,15 @@ func renvoEmitCallArgReverse(g *renvoLinearGen, ep *renvoExprParse, idx int) int
 				renvoAsmPushStackWord(a, offset)
 				return 2
 			}
+		}
+		// A selector already denotes contiguous descriptor storage. Push its
+		// words directly instead of loading and reshuffling value registers.
+		if e.kind == renvoExprSelector {
+			if !renvoEmitSelectorAddressSecondary(g, ep, idx) {
+				return -1
+			}
+			renvoEmitPushWords(g, 0, 2*renvoBackendValueSlotSize, renvoBackendValueSlotSize, 0)
+			return 2
 		}
 		if !renvoEmitStringValueRegs(g, ep, idx) {
 			return -1
