@@ -2596,7 +2596,14 @@ go compiler {
 
 	func renvo386CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
 		a := &g.asm
-		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+		if !g.c.code16 && size >= 24 {
+			// Frame slots are word-aligned, including their reserved padding.
+			renvoAsmAddressCallWord0Stack(a, offset)
+			renvoAsmPrimaryImm(a, 0)
+			renvoAsmPushImm(a, (size+3)/4)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit16(a, 0xabf3)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
 			renvoAsmAddressPrimaryStack(a, offset)
 			renvoAsmPushImm(a, size)
 			renvoAsmPopTertiary(a)
@@ -3697,6 +3704,11 @@ go compiler {
 	func renvo386CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if !g.c.code16 && wordSize == 4 && size >= 32 && size <= 4096 {
+			renvo386PushBytes(&g.asm, offset, size, mode)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {

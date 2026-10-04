@@ -2084,7 +2084,7 @@ go compiler {
 
 	func renvoDefinitionZeroLocalAtOffset(g *renvoLinearGen, offset int) {
 		renvoNonNil(g)
-	 a := &g.asm
+		a := &g.asm
 		size := 8
 		typ := renvoTypeInt
 		for i := g.localCount - 1; i >= 0; i-- {
@@ -2140,6 +2140,7 @@ go compiler {
 		}
 	}
 
-	func renvoDefinitionTracksIndexRangeFacts(c *renvoCompileContext) bool { return renvoPreparedBackendActive == 0 && c.renvoTarget == renvoTargetVM32 }
-
+	func renvoDefinitionTracksIndexRangeFacts(c *renvoCompileContext) bool {
+		return renvoPreparedBackendActive == 0 && c.renvoTarget == renvoTargetVM32
+	}
 }

@@ -5816,249 +5816,33 @@ return renvoPreparedBackendActive == 0 && c.renvoTarget == renvoTargetVM32
 
 func renvoAarch64CopyFixed(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 renvoNonNil(g)
-a := &g.asm
-if mode == renvoNativeCopyStackToStack && srcOffset == destOffset {
-	return
-}
-if mode == renvoNativeCopyMemToStack {
-	renvoAarch64AsmMovRegReg(a, 0, 1)
-} else if mode == renvoNativeCopyBSSToStack {
-	renvoAsmPrimaryBssAddr(a, srcOffset)
-} else {
-	renvoAarch64AsmLeaRegStack(a, 0, srcOffset)
-}
-if mode == renvoNativeCopyStackToMem {
-	renvoAarch64AsmAddRegImm(a, 1, 1, destOffset)
-} else if mode == renvoNativeCopyStackToBSS {
-	renvoAsmPushPrimary(a)
-	renvoAsmPrimaryBssAddr(a, destOffset)
-	renvoAarch64AsmMovRegReg(a, 1, 0)
-	renvoAsmPopPrimary(a)
-} else {
-	renvoAarch64AsmLeaRegStack(a, 1, destOffset)
-}
-if size == 16 || size == 24 {
-	renvoAsmCallLabel(a, renvoEnsureSmallRiscCopy(g, size))
-} else {
-	renvoAarch64AsmMovRegImm(a, 2, size)
-	renvoAsmCallLabel(a, renvoEnsureCopyBytesAarch64(g))
-}
+g.asm.patchFailed = true
 }
 
 func renvoAmd64EmitFixedVectorCopy(a *renvoAsm, size int) {
 renvoNonNil(a)
-if size == 16 || size == 24 {
-	// Scalar stores forward directly into general-purpose loads. R10/R11
-	// are scratch registers; leave the descriptor and argument registers
-	// intact and load the entire value before any overlapping store.
-	renvoAsmEmitText(a, "\x48\x8b\x06\x4c\x8b\x56\x08")
-	if size == 24 {
-		renvoAsmEmitText(a, "\x4c\x8b\x5e\x10")
-	}
-	renvoAsmEmitText(a, "\x48\x89\x07\x4c\x89\x57\x08")
-	if size == 24 {
-		renvoAsmEmitText(a, "\x4c\x89\x5f\x10")
-	}
-	return
-}
-// Load the whole value before storing: even partly overlapping
-// aggregates retain memmove semantics. XMM0-XMM5 are volatile on
-// both amd64 ABIs. Use word loads for small word-sized values: a vector
-// spanning several preceding scalar stores cannot use store forwarding.
-width := 16
-if size <= 48 && size%8 == 0 {
-	width = 8
-}
-chunks := (size + width - 1) / width
-for n := 0; n < chunks; n++ {
-	disp := n * width
-	if disp+width > size {
-		disp = size - width
-	}
-	if width == 8 {
-		renvoAsmEmitText(a, "\xf3\x0f\x7e")
-	} else {
-		renvoAsmEmitText(a, "\xf3\x0f\x6f")
-	} // MOVQ/MOVDQU XMMn, [RSI+disp]
-	if disp == 0 {
-		renvoAsmEmit8(a, 0x06+n*8)
-	} else {
-		renvoAsmEmit8(a, 0x46+n*8)
-		renvoAsmEmit8(a, disp)
-	}
-}
-for n := 0; n < chunks; n++ {
-	disp := n * width
-	if disp+width > size {
-		disp = size - width
-	}
-	if width == 8 {
-		renvoAsmEmitText(a, "\x66\x0f\xd6")
-	} else {
-		renvoAsmEmitText(a, "\xf3\x0f\x7f")
-	} // MOVQ/MOVDQU [RDI+disp], XMMn
-	if disp == 0 {
-		renvoAsmEmit8(a, 0x07+n*8)
-	} else {
-		renvoAsmEmit8(a, 0x47+n*8)
-		renvoAsmEmit8(a, disp)
-	}
-}
+a.patchFailed = true
 }
 
 func renvoAmd64EnsureFixedVectorCopy(g *renvoLinearGen, size int) int {
 renvoNonNil(g)
-if len(g.copyVectorLabels) == 0 {
-	g.copyVectorLabels = make([]int, 11)
-}
-slot := (size - 16) / 8
-if g.copyVectorLabels[slot] > 0 {
-	return g.copyVectorLabels[slot] - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.copyVectorLabels[slot] = label + 1
-after := renvoAsmNewLabel(a)
-end := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-renvoAmd64EmitFixedVectorCopy(a, size)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, end)
-renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoObjectProgram(g.c) && renvoObjectRegisterScalarABI(g.c) {
-	renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_copy_vector", label, end)
-}
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoArmCopyFixed(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 renvoNonNil(g)
-a := &g.asm
-if mode == renvoNativeCopyStackToStack && srcOffset == destOffset {
-	return
-}
-if mode == renvoNativeCopyMemToStack {
-	renvoArmAsmMovRegReg(a, 0, 1)
-} else if mode == renvoNativeCopyBSSToStack {
-	renvoAsmPrimaryBssAddr(a, srcOffset)
-} else {
-	renvoArmAsmLeaRegStack(a, 0, srcOffset)
-}
-if mode == renvoNativeCopyStackToMem {
-	renvoArmAsmAddRegImm(a, 1, 1, destOffset)
-} else if mode == renvoNativeCopyStackToBSS {
-	renvoAsmPushPrimary(a)
-	renvoAsmPrimaryBssAddr(a, destOffset)
-	renvoArmAsmMovRegReg(a, 1, 0)
-	renvoAsmPopPrimary(a)
-} else {
-	renvoArmAsmLeaRegStack(a, 1, destOffset)
-}
-if (size == 16 || size == 24) && mode == renvoNativeCopyStackToStack && srcOffset&3 == 0 && destOffset&3 == 0 {
-	// Frame slots are word-aligned. Two block instructions snapshot the
-	// descriptor without a helper call, including overlapping slots.
-	// LR and r12 are caller-saved; the frame preserves the return address.
-	registers := 0x020d // r0,r2,r3,r9
-	if size == 24 {
-		registers = 0x520d // r0,r2,r3,r9,r12,lr
-	}
-	renvoArmAsmEmit(a, 0xe8900000|registers) // LDMIA r0, {registers}
-	renvoArmAsmEmit(a, 0xe8810000|registers) // STMIA r1, {registers}
-} else if size == 16 || size == 24 {
-	renvoAsmCallLabel(a, renvoEnsureSmallRiscCopy(g, size))
-} else {
-	renvoArmAsmMovRegImm(a, 2, size)
-	renvoAsmCallLabel(a, renvoEnsureCopyBytesArm(g))
-}
+g.asm.patchFailed = true
 }
 
 func renvoArmEmitCheckedIndexAddress(g *renvoLinearGen, elemSize int) {
 renvoNonNil(g)
-a := &g.asm
-fault := renvoEnsureUncaughtFaultHelper(g, false)
-renvoArmAsmCmpRegReg(a, 2, 1)
-renvoArmAsmBCondLabel(a, fault, 2) // CS rejects negative and excessive indices.
-if elemSize == 1 || elemSize == 4 || elemSize == 8 {
-	shift := 0
-	if elemSize == 4 {
-		shift = 2
-	} else if elemSize == 8 {
-		shift = 3
-	}
-	renvoArmAsmAddRegRegShift(a, 0, 0, 2, shift)
-} else {
-	renvoAsmAddScaledTertiary(a, elemSize)
-}
+g.asm.patchFailed = true
 }
 
 func renvoEmitFrameIndexTertiary(g *renvoLinearGen, ep *renvoExprParse, idx int, depth int) bool {
 renvoNonNil(g)
-if idx < 0 || idx >= len(ep.exprs) || depth > 8 {
-	return false
-}
-renvoNonNil(g, ep)
-e := &ep.exprs[idx]
-if e.kind == renvoExprInt {
-	value := renvoParseIntToken(g.prog, e.tok)
-	if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
-		return false
-	}
-	renvoAsmEmitText(&g.asm, "\x48\x89\xca")
-	renvoAsmEmit8(&g.asm, 0xb9) // MOV ECX, imm32
-	renvoAsmEmit32(&g.asm, value)
-	return true
-}
-if e.kind == renvoExprIdent {
-	local := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
-	if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
-		return false
-	}
-	renvoAsmEmitText(&g.asm, "\x48\x89\xca")
-	renvoAsmLoadTertiaryStack(&g.asm, g.locals[local].offset)
-	return true
-}
-if e.kind != renvoExprBinary || !renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-') {
-	return false
-}
-subtract := renvoTokCharIs(g.prog, e.tok, '-')
-right := &ep.exprs[e.right]
-local := -1
-value := 0
-if right.kind == renvoExprIdent {
-	local = renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
-	if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
-		return false
-	}
-} else if right.kind == renvoExprInt {
-	value = renvoParseIntToken(g.prog, right.tok)
-	if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
-		return false
-	}
-} else {
-	return false
-}
-if !renvoEmitFrameIndexTertiary(g, ep, e.left, depth+1) {
-	return false
-}
-if local >= 0 {
-	op := 0x0348
-	if subtract {
-		op = 0x2b48
-	}
-	renvoAmd64AsmStackMem(&g.asm, g.locals[local].offset, op, 0x4d, 0x8d)
-} else {
-	op := 0xc1
-	if subtract {
-		op = 0xe9
-	}
-	if renvoAsmImmFits8Signed(value) {
-		renvoAsmEmit4(&g.asm, 0x48, 0x83, op, value)
-	} else {
-		renvoAsmEmit3(&g.asm, 0x48, 0x81, op)
-		renvoAsmEmit32(&g.asm, value)
-	}
-}
-return true
+return false
 }
 
 func renvoEmitScaledIndexPrimary(g *renvoLinearGen, size int, kind int) {
@@ -6076,865 +5860,83 @@ renvoEmitIndexLoadFromAddress(g, kind)
 
 func renvoEmitStringStorageArmReturn(a *renvoAsm) {
 renvoNonNil(a)
-if a.c.renvoTargetArch == renvoArchArm {
-	renvoArmAsmEmit(a, 0xe49de004) // pop LR
-} else {
-	renvoAarch64AsmEmit(a, 0xa8c17bfd) // ldp FP, LR, [SP], #16
-}
-renvoAsmRet(a)
+a.patchFailed = true
 }
 
 func renvoEmitWasmParsedCompareFlags(g *renvoLinearGen, ep *renvoExprParse, leftIndex int, rightIndex int, c0 byte, unsigned bool) {
 renvoNonNil(g)
-leftNonnegative := (c0 == '<' || c0 == '>') && g.c.renvoTarget == renvoTargetVM32 && renvoVMExprIsNonnegative(g, ep, leftIndex)
-rightNonnegative := (c0 == '<' || c0 == '>') && g.c.renvoTarget == renvoTargetVM32 && renvoVMExprIsNonnegative(g, ep, rightIndex)
-if leftNonnegative && rightNonnegative {
-	renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-} else if unsigned {
-	if rightNonnegative {
-		// With a nonnegative right operand, a negative left bit pattern
-		// is larger as an unsigned value. Only that case needs adjustment.
-		sameSign := renvoAsmNewLabel(&g.asm)
-		done := renvoAsmNewLabel(&g.asm)
-		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
-		renvoWasm32EmitCondBranch(&g.asm, renvoWasm32CondGe, sameSign)
-		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpMovRegImm, renvoWasm32RegR10, 1)
-		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpCmpRegImm, renvoWasm32RegR10, 0)
-		renvoAsmJmpMarkLabel(&g.asm, done, sameSign)
-		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-		renvoAsmMarkLabel(&g.asm, done)
-	} else {
-		renvoWasm32CompareUnsigned(&g.asm)
-	}
-} else if c0 == '<' || c0 == '>' {
-	if rightNonnegative {
-		// Lengths and nonnegative constants cannot overflow a same-sign
-		// subtraction. A negative left operand is always smaller.
-		done := renvoAsmNewLabel(&g.asm)
-		renvoWasm32EmitRegImm(&g.asm, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
-		renvoWasm32EmitCondBranch(&g.asm, renvoWasm32CondLt, done)
-		renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-		renvoAsmMarkLabel(&g.asm, done)
-	} else {
-		renvoWasm32CompareSigned(&g.asm, renvoWasm32RegRcx, renvoWasm32RegRax)
-	}
-} else {
-	renvoWasm32EmitRegReg(&g.asm, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRax)
-}
+g.asm.patchFailed = true
 }
 
 func renvoEnsureCopyBytesAarch64(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.copyBytesLabel > 0 {
-	return g.copyBytesLabel - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.copyBytesLabel = label + 1
-after := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-forward := renvoAsmNewLabel(a)
-done := renvoAsmNewLabel(a)
-renvoAarch64AsmCmpRegReg(a, 1, 0)
-renvoAarch64AsmBCondLabel(a, forward, 9)
-renvoAarch64AsmAddRegRegShift(a, 0, 0, 2, 0)
-renvoAarch64AsmAddRegRegShift(a, 1, 1, 2, 0)
-for direction := 0; direction < 2; direction++ {
-	if direction == 1 {
-		renvoAsmMarkLabel(a, forward)
-	}
-	words := renvoAsmNewLabel(a)
-	tail := renvoAsmNewLabel(a)
-	bytes := renvoAsmNewLabel(a)
-	renvoAsmMarkLabel(a, words)
-	renvoAarch64AsmCmpRegImm(a, 2, 8)
-	renvoAarch64AsmBCondLabel(a, tail, 3)
-	if direction == 0 {
-		renvoAarch64AsmAddRegImm(a, 0, 0, -8)
-		renvoAarch64AsmAddRegImm(a, 1, 1, -8)
-	}
-	renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 8)
-	renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 8)
-	if direction == 1 {
-		renvoAarch64AsmAddRegImm(a, 0, 0, 8)
-		renvoAarch64AsmAddRegImm(a, 1, 1, 8)
-	}
-	renvoAarch64AsmAddRegImm(a, 2, 2, -8)
-	renvoAsmJmpLabel(a, words)
-	renvoAsmMarkLabel(a, tail)
-	renvoAsmMarkLabel(a, bytes)
-	renvoAarch64AsmCmpRegImm(a, 2, 0)
-	renvoAarch64AsmBCondLabel(a, done, 0)
-	if direction == 0 {
-		renvoAarch64AsmAddRegImm(a, 0, 0, -1)
-		renvoAarch64AsmAddRegImm(a, 1, 1, -1)
-	}
-	renvoAarch64AsmLoadRegMem(a, 9, 0, 0, 1)
-	renvoAarch64AsmStoreRegMem(a, 9, 1, 0, 1)
-	if direction == 1 {
-		renvoAarch64AsmAddRegImm(a, 0, 0, 1)
-		renvoAarch64AsmAddRegImm(a, 1, 1, 1)
-	}
-	renvoAarch64AsmAddRegImm(a, 2, 2, -1)
-	renvoAsmJmpLabel(a, bytes)
-}
-renvoAsmMarkLabel(a, done)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureCopyBytesArm(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.copyBytesLabel > 0 {
-	return g.copyBytesLabel - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.copyBytesLabel = label + 1
-after := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-unaligned := renvoAsmNewLabel(a)
-renvoArmAsmEmit(a, 0xe1809001) // ORR r9, r0, r1.
-renvoArmAsmEmit(a, 0xe1899002) // ORR r9, r9, r2.
-renvoArmAsmEmit(a, 0xe3190003) // TST r9, #3.
-renvoArmAsmBCondLabel(a, unaligned, 1)
-forward := renvoAsmNewLabel(a)
-done := renvoAsmNewLabel(a)
-renvoArmAsmCmpRegReg(a, 1, 0)
-renvoArmAsmBCondLabel(a, forward, 9)
-renvoArmAsmAddRegRegShift(a, 0, 0, 2, 0)
-renvoArmAsmAddRegRegShift(a, 1, 1, 2, 0)
-for direction := 0; direction < 2; direction++ {
-	if direction == 1 {
-		renvoAsmMarkLabel(a, forward)
-	}
-	words := renvoAsmNewLabel(a)
-	tail := renvoAsmNewLabel(a)
-	bytes := renvoAsmNewLabel(a)
-	renvoAsmMarkLabel(a, words)
-	// Move three aligned words per iteration using caller-saved scratch
-	// registers. Snapshot each chunk before storing so overlap is safe.
-	wordTail := renvoAsmNewLabel(a)
-	renvoArmAsmCmpRegImm(a, 2, 12)
-	renvoArmAsmBCondLabel(a, wordTail, 3)
-	if direction == 0 {
-		renvoArmAsmEmit(a, 0xe9301208) // LDMDB r0!, {r3,r9,r12}
-		renvoArmAsmEmit(a, 0xe9211208) // STMDB r1!, {r3,r9,r12}
-	} else {
-		renvoArmAsmEmit(a, 0xe8b01208) // LDMIA r0!, {r3,r9,r12}
-		renvoArmAsmEmit(a, 0xe8a11208) // STMIA r1!, {r3,r9,r12}
-	}
-	renvoArmAsmAddRegImm(a, 2, 2, -12)
-	renvoAsmJmpLabel(a, words)
-	renvoAsmMarkLabel(a, wordTail)
-	words = wordTail
-	renvoArmAsmCmpRegImm(a, 2, 4)
-	renvoArmAsmBCondLabel(a, tail, 3)
-	if direction == 0 {
-		renvoArmAsmAddRegImm(a, 0, 0, -4)
-		renvoArmAsmAddRegImm(a, 1, 1, -4)
-	}
-	renvoArmAsmLoadRegMem(a, 9, 0, 0, 4)
-	renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
-	if direction == 1 {
-		renvoArmAsmAddRegImm(a, 0, 0, 4)
-		renvoArmAsmAddRegImm(a, 1, 1, 4)
-	}
-	renvoArmAsmAddRegImm(a, 2, 2, -4)
-	renvoAsmJmpLabel(a, words)
-	renvoAsmMarkLabel(a, tail)
-	renvoAsmMarkLabel(a, bytes)
-	renvoArmAsmCmpRegImm(a, 2, 0)
-	renvoArmAsmBCondLabel(a, done, 0)
-	if direction == 0 {
-		renvoArmAsmAddRegImm(a, 0, 0, -1)
-		renvoArmAsmAddRegImm(a, 1, 1, -1)
-	}
-	renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-	renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-	if direction == 1 {
-		renvoArmAsmAddRegImm(a, 0, 0, 1)
-		renvoArmAsmAddRegImm(a, 1, 1, 1)
-	}
-	renvoArmAsmAddRegImm(a, 2, 2, -1)
-	renvoAsmJmpLabel(a, bytes)
-}
-renvoAsmMarkLabel(a, done)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, unaligned)
-// A byte-aligned range still benefits from a chunked loop. Keep every
-// access byte-sized and visit overlapping destinations in copy order.
-byteForward := renvoAsmNewLabel(a)
-renvoArmAsmCmpRegReg(a, 1, 0)
-renvoArmAsmBCondLabel(a, byteForward, 9)
-renvoArmAsmAddRegRegShift(a, 0, 0, 2, 0)
-renvoArmAsmAddRegRegShift(a, 1, 1, 2, 0)
-for direction := 0; direction < 2; direction++ {
-	if direction == 1 {
-		renvoAsmMarkLabel(a, byteForward)
-	}
-	chunks := renvoAsmNewLabel(a)
-	tail := renvoAsmNewLabel(a)
-	bytes := renvoAsmNewLabel(a)
-	renvoAsmMarkLabel(a, chunks)
-	renvoArmAsmCmpRegImm(a, 2, 16)
-	renvoArmAsmBCondLabel(a, tail, 3)
-	if direction == 0 {
-		renvoArmAsmAddRegImm(a, 0, 0, -16)
-		renvoArmAsmAddRegImm(a, 1, 1, -16)
-	}
-	for index := 0; index < 16; index++ {
-		at := index
-		if direction == 0 {
-			at = 15 - index
-		}
-		renvoArmAsmLoadRegMem(a, 9, 0, at, 1)
-		renvoArmAsmStoreRegMem(a, 9, 1, at, 1)
-	}
-	if direction == 1 {
-		renvoArmAsmAddRegImm(a, 0, 0, 16)
-		renvoArmAsmAddRegImm(a, 1, 1, 16)
-	}
-	renvoArmAsmAddRegImm(a, 2, 2, -16)
-	renvoAsmJmpLabel(a, chunks)
-	renvoAsmMarkLabel(a, tail)
-	renvoAsmMarkLabel(a, bytes)
-	renvoArmAsmCmpRegImm(a, 2, 0)
-	renvoArmAsmBCondLabel(a, done, 0)
-	if direction == 0 {
-		renvoArmAsmAddRegImm(a, 0, 0, -1)
-		renvoArmAsmAddRegImm(a, 1, 1, -1)
-	}
-	renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-	renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-	if direction == 1 {
-		renvoArmAsmAddRegImm(a, 0, 0, 1)
-		renvoArmAsmAddRegImm(a, 1, 1, 1)
-	}
-	renvoArmAsmAddRegImm(a, 2, 2, -1)
-	renvoAsmJmpLabel(a, bytes)
-}
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureCopyBytesVM32(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.copyBytesLabel > 0 {
-	return g.copyBytesLabel - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.copyBytesLabel = label + 1
-after := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-if g.c.renvoTarget != renvoTargetVM32 {
-	renvoAsmEmit8(a, renvoWasm32OpMemoryCopy)
-	renvoAsmEmit8(a, renvoWasm32RegRdi)
-	renvoAsmEmit8(a, renvoWasm32RegRsi)
-	renvoAsmEmit8(a, renvoWasm32RegRcx)
-	renvoAsmRet(a)
-	renvoAsmMarkLabel(a, after)
-	return label
-}
-
-// Fixed aggregate copies preserve the secondary address register. The
-// wider block uses three additional scratch registers, so save them here
-// for every caller rather than widening the original copy ABI.
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegRdx)
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR8)
-renvoWasm32EmitReg(a, renvoWasm32OpPushReg, renvoWasm32RegR9)
-src, dest, count, value := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx, renvoWasm32RegRax
-forward := renvoAsmNewLabel(a)
-done := renvoAsmNewLabel(a)
-renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, dest, src)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLe, forward)
-renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, src, count)
-renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, dest, count)
-for direction := 0; direction < 2; direction++ {
-	if direction == 1 {
-		renvoAsmMarkLabel(a, forward)
-	}
-	// Load a whole block before any store so even byte-offset overlaps
-	// retain memmove semantics. Four words amortize the loop branches.
-	blocks := renvoAsmNewLabel(a)
-	blockTail := renvoAsmNewLabel(a)
-	renvoAsmMarkLabel(a, blocks)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, 16)
-	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, blockTail)
-	if direction == 0 {
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -16)
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -16)
-	}
-	for word := 0; word < 4; word++ {
-		reg := renvoWasm32RegRax
-		if word == 1 {
-			reg = renvoWasm32RegRdx
-		} else if word == 2 {
-			reg = renvoWasm32RegR8
-		} else if word == 3 {
-			reg = renvoWasm32RegR9
-		}
-		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, reg, src, word*4, 4)
-	}
-	for word := 0; word < 4; word++ {
-		reg := renvoWasm32RegRax
-		if word == 1 {
-			reg = renvoWasm32RegRdx
-		} else if word == 2 {
-			reg = renvoWasm32RegR8
-		} else if word == 3 {
-			reg = renvoWasm32RegR9
-		}
-		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, reg, dest, word*4, 4)
-	}
-	if direction == 1 {
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, 16)
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, 16)
-	}
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -16)
-	renvoAsmJmpLabel(a, blocks)
-	renvoAsmMarkLabel(a, blockTail)
-	for size := 4; size > 0; size -= 3 {
-		loop := renvoAsmNewLabel(a)
-		tail := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, loop)
-		renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, count, size)
-		renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, tail)
-		if direction == 0 {
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, -size)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, -size)
-		}
-		renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, value, src, 0, size)
-		renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, value, dest, 0, size)
-		if direction == 1 {
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, src, size)
-			renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, size)
-		}
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, count, -size)
-		renvoAsmJmpLabel(a, loop)
-		renvoAsmMarkLabel(a, tail)
-	}
-	renvoAsmJmpLabel(a, done)
-}
-renvoAsmMarkLabel(a, done)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureSliceBoundsVM32(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.runtimeSliceBoundsLabel > 0 {
-	return g.runtimeSliceBoundsLabel - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.runtimeSliceBoundsLabel = label + 1
-after := renvoAsmNewLabel(a)
-invalid := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-// Reject negative bounds before subtraction: all remaining differences
-// are between nonnegative ints and cannot overflow the VM's signed flag.
-for i := 0; i < 4; i++ {
-	reg := renvoWasm32RegRax
-	if i == 1 {
-		reg = renvoWasm32RegRdx
-	} else if i == 2 {
-		reg = renvoWasm32RegRcx
-	} else if i == 3 {
-		reg = renvoWasm32RegRdi
-	}
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, reg, 0)
-	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
-}
-renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRdx, renvoWasm32RegRax)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
-renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRcx, renvoWasm32RegRdx)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
-renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRdi, renvoWasm32RegRcx)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, invalid)
-if g.meta.panicEnabled {
-	renvoAsmPrimaryImm(a, 1)
-}
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, invalid)
-if g.meta.panicEnabled {
-	renvoAsmPrimaryImm(a, 0)
-	renvoAsmRet(a)
-} else {
-	renvoEmitUncaughtFaultTransfer(g, false)
-}
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureSmallRiscCopy(g *renvoLinearGen, size int) int {
 renvoNonNil(g)
-slot := (size - 16) / 8
-if len(g.copyVectorLabels) == 0 {
-	g.copyVectorLabels = make([]int, 11)
-}
-if g.copyVectorLabels[slot] != 0 {
-	return g.copyVectorLabels[slot] - 1
-}
-fallback := -1
-if g.c.renvoTargetArch == renvoArchArm {
-	fallback = renvoEnsureCopyBytesArm(g)
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.copyVectorLabels[slot] = label + 1
-after := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-// Load the entire descriptor before storing, including overlapping copies.
-// Only the existing copy ABI's scratch registers may remain clobbered.
-if g.c.renvoTargetArch == renvoArchAarch64 {
-	renvoAarch64AsmLoadRegMem(a, 2, 0, 0, 8)
-	if size == 24 {
-		renvoAarch64AsmLoadRegMem(a, 9, 0, 8, 8)
-	}
-	renvoAarch64AsmLoadRegMem(a, 0, 0, size-8, 8)
-	renvoAarch64AsmStoreRegMem(a, 2, 1, 0, 8)
-	if size == 24 {
-		renvoAarch64AsmStoreRegMem(a, 9, 1, 8, 8)
-	}
-	renvoAarch64AsmStoreRegMem(a, 0, 1, size-8, 8)
-} else {
-	// ARM word loads require alignment on supported targets. An unaligned
-	// descriptor tail-calls the general byte copy with the original count.
-	renvoArmAsmEmit(a, 0xe1809001) // ORR r9, r0, r1
-	renvoArmAsmEmit(a, 0xe3190003) // TST r9, #3
-	aligned := renvoAsmNewLabel(a)
-	renvoArmAsmBCondLabel(a, aligned, 0)
-	renvoArmAsmMovRegImm(a, 2, size)
-	renvoAsmJmpLabel(a, fallback)
-	renvoAsmMarkLabel(a, aligned)
-	if size == 24 {
-		renvoArmAsmEmit(a, 0xe92d0030) // PUSH {r4,r5}
-	}
-	for at := 0; at < size; at += 4 {
-		reg := 2 + at/4
-		if at == size-4 {
-			reg = 0
-		} else if at == size-8 {
-			reg = 9
-		}
-		renvoArmAsmLoadRegMem(a, reg, 0, at, 4)
-	}
-	for at := 0; at < size; at += 4 {
-		reg := 2 + at/4
-		if at == size-4 {
-			reg = 0
-		} else if at == size-8 {
-			reg = 9
-		}
-		renvoArmAsmStoreRegMem(a, reg, 1, at, 4)
-	}
-	if size == 24 {
-		renvoArmAsmEmit(a, 0xe8bd0030) // POP {r4,r5}
-	}
-}
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringConcatWasm32(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.stringConcatLabel != 0 {
-	return g.stringConcatLabel - 1
-}
-a := &g.asm
-allocate := renvoEnsureArenaAllocHelper(g)
-copyBytes := renvoEnsureCopyBytesVM32(g)
-scratch := a.bssSize
-a.bssSize += 48
-label := renvoAsmNewLabel(a)
-g.stringConcatLabel = label + 1
-after := renvoAsmNewLabel(a)
-failed := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRdi, renvoWasm32RegR10, 0, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRsi, renvoWasm32RegR10, 8, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRdx, renvoWasm32RegR10, 16, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegR10, 24, 4)
-renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, renvoWasm32RegRax, renvoWasm32RegRsi)
-renvoAsmAddPrimaryTertiary(a)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 32, 4)
-renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRax, 0)
-renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, failed)
-renvoAsmCallLabel(a, allocate)
-renvoAsmJzPrimary(a, failed)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 40, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRsi, renvoWasm32RegR10, 0, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRdi, renvoWasm32RegR10, 40, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR10, 8, 4)
-renvoAsmCallLabel(a, copyBytes)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRdi, renvoWasm32RegR10, 40, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR10, 8, 4)
-renvoWasm32EmitRegReg(a, renvoWasm32OpAddRegReg, renvoWasm32RegRdi, renvoWasm32RegRcx)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRsi, renvoWasm32RegR10, 16, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR10, 24, 4)
-renvoAsmCallLabel(a, copyBytes)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegR10, 40, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRdx, renvoWasm32RegR10, 32, 4)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, failed)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmSecondaryImm(a, 0)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringConcatX86(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.stringConcatLabel != 0 {
-	return g.stringConcatLabel - 1
-}
-a := &g.asm
-allocate := renvoEnsureArenaAllocHelper(g)
-label := renvoAsmNewLabel(a)
-g.stringConcatLabel = label + 1
-after := renvoAsmNewLabel(a)
-failed := renvoAsmNewLabel(a)
-end := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x55\x89\xe5\x83\xec\x18\x89\x5d\xfc\x89\x75\xf8\x89\x55\xf4\x89\x4d\xf0\x89\xf0\x01\xc8")
-} else {
-	renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x83\xec\x30")
-	renvoAsmEmitText(a, "\x48\x89\x7d\xf8\x48\x89\x75\xf0\x48\x89\x55\xe8\x48\x89\x4d\xe0")
-	renvoAsmEmitText(a, "\x48\x89\xf0\x48\x01\xc8")
-}
-if g.c.renvoTargetArch == renvoArch386 {
-	renvo386AsmJccLabel(a, 0x80, failed)
-} else {
-	renvoAmd64AsmJccLabel(a, 0x80, failed)
-} // JO: lengths cannot wrap.
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x89\x45\xec")
-} else {
-	renvoAsmEmitText(a, "\x48\x89\x45\xd8")
-}
-renvoAsmCallLabel(a, allocate)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x85\xc0")
-} else {
-	renvoAsmEmitText(a, "\x48\x85\xc0")
-}
-renvoAsmJzLabel(a, failed)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x89\x45\xe8\x89\xc7\x8b\x75\xfc\x8b\x4d\xf8\xfc\xf3\xa4")
-	renvoAsmEmitText(a, "\x8b\x7d\xe8\x03\x7d\xf8\x8b\x75\xf4\x8b\x4d\xf0\xf3\xa4\x8b\x45\xe8\x8b\x55\xec\xc9\xc3")
-} else {
-	renvoAsmEmitText(a, "\x48\x89\x45\xd0\x48\x89\xc7\x48\x8b\x75\xf8\x48\x8b\x4d\xf0\xfc\xf3\xa4")
-	renvoAsmEmitText(a, "\x48\x8b\x7d\xd0\x48\x03\x7d\xf0\x48\x8b\x75\xe8\x48\x8b\x4d\xe0\xf3\xa4")
-	renvoAsmEmitText(a, "\x48\x8b\x45\xd0\x48\x8b\x55\xd8\xc9\xc3")
-}
-renvoAsmMarkLabel(a, failed)
-renvoAsmEmitText(a, "\x31\xc0\x31\xd2\xc9\xc3")
-renvoAsmMarkLabel(a, end)
-renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoObjectProgram(g.c) && renvoObjectRegisterScalarABI(g.c) {
-	renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_concat", label, end)
-}
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringCopyWasm32(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.stringCopyLabel != 0 {
-	return g.stringCopyLabel - 1
-}
-a := &g.asm
-allocate := renvoEnsureArenaAllocHelper(g)
-copyBytes := renvoEnsureCopyBytesVM32(g)
-scratch := a.bssSize
-a.bssSize += 24
-label := renvoAsmNewLabel(a)
-g.stringCopyLabel = label + 1
-after := renvoAsmNewLabel(a)
-failed := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 0, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRcx, renvoWasm32RegR10, 8, 4)
-renvoAsmCopyTertiaryToPrimary(a)
-renvoAsmCallLabel(a, allocate)
-renvoAsmJzPrimary(a, failed)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpStoreMem, renvoWasm32RegRax, renvoWasm32RegR10, 16, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRsi, renvoWasm32RegR10, 0, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRdi, renvoWasm32RegR10, 16, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRcx, renvoWasm32RegR10, 8, 4)
-renvoAsmCallLabel(a, copyBytes)
-renvoWasm32AsmMovR10BssAddr(a, scratch)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRax, renvoWasm32RegR10, 16, 4)
-renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegRdx, renvoWasm32RegR10, 8, 4)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, failed)
-renvoAsmSecondaryImm(a, 0)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringCopyX86(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.stringCopyLabel != 0 {
-	return g.stringCopyLabel - 1
-}
-a := &g.asm
-allocate := renvoEnsureArenaAllocHelper(g)
-label := renvoAsmNewLabel(a)
-g.stringCopyLabel = label + 1
-after := renvoAsmNewLabel(a)
-failed := renvoAsmNewLabel(a)
-end := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x55\x89\xe5\x83\xec\x0c\x89\x45\xfc\x89\x4d\xf8\x89\xc8")
-} else {
-	renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x83\xec\x20\x48\x89\x45\xf8\x48\x89\x4d\xf0\x48\x89\xc8")
-}
-renvoAsmCallLabel(a, allocate)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x85\xc0")
-} else {
-	renvoAsmEmitText(a, "\x48\x85\xc0")
-}
-renvoAsmJzLabel(a, failed)
-if g.c.renvoTargetArch == renvoArch386 {
-	renvoAsmEmitText(a, "\x89\x45\xf4\x89\xc7\x8b\x75\xfc\x8b\x4d\xf8\xfc\xf3\xa4\x8b\x45\xf4\x8b\x55\xf8\xc9\xc3")
-} else {
-	renvoAsmEmitText(a, "\x48\x89\x45\xe8\x48\x89\xc7\x48\x8b\x75\xf8\x48\x8b\x4d\xf0\xfc\xf3\xa4")
-	renvoAsmEmitText(a, "\x48\x8b\x45\xe8\x48\x8b\x55\xf0\xc9\xc3")
-}
-renvoAsmMarkLabel(a, failed)
-renvoAsmEmitText(a, "\x31\xd2\xc9\xc3")
-renvoAsmMarkLabel(a, end)
-renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoObjectProgram(g.c) && renvoObjectRegisterScalarABI(g.c) {
-	renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_copy", label, end)
-}
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringOrderHelper(g *renvoLinearGen) int {
 renvoNonNil(g)
-if g.stringOrderLabel > 0 {
-	return g.stringOrderLabel - 1
-}
-a := &g.asm
-label := renvoAsmNewLabel(a)
-g.stringOrderLabel = label + 1
-after := renvoAsmNewLabel(a)
-loop := renvoAsmNewLabel(a)
-bytes := renvoAsmNewLabel(a)
-lengths := renvoAsmNewLabel(a)
-done := renvoAsmNewLabel(a)
-end := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-renvoAsmMarkLabel(a, loop)
-if g.c.renvoTarget == renvoTargetVM32 {
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 0)
-	renvoAsmJzLabel(a, lengths)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 0)
-	renvoAsmJzLabel(a, lengths)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRsi, 4)
-	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, bytes)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpCmpRegImm, renvoWasm32RegRcx, 4)
-	renvoWasm32EmitCondBranch(a, renvoWasm32CondLt, bytes)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 4)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 4)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
-	renvoAsmJnzLabel(a, bytes)
-	for i := 0; i < 4; i++ {
-		reg, amount := renvoWasm32RegRdi, 4
-		if i == 1 {
-			reg = renvoWasm32RegRdx
-		}
-		if i == 2 {
-			reg, amount = renvoWasm32RegRsi, -4
-		}
-		if i == 3 {
-			reg, amount = renvoWasm32RegRcx, -4
-		}
-		renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, reg, amount)
-	}
-	renvoAsmJmpMarkLabel(a, loop, bytes)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR8, renvoWasm32RegRdi, 0, 1)
-	renvoWasm32EmitMem(a, renvoWasm32OpLoadMem, renvoWasm32RegR9, renvoWasm32RegRdx, 0, 1)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegR8, renvoWasm32RegR9)
-	renvoAsmJnzLabel(a, done)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdi, 1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRdx, 1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRsi, -1)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, renvoWasm32RegRcx, -1)
-	renvoAsmJmpMarkLabel(a, loop, lengths)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpCmpRegReg, renvoWasm32RegRsi, renvoWasm32RegRcx)
-} else {
-	renvoAsmEmitText(a, "\x48\x85\xf6")
-	renvoAsmJzLabel(a, lengths)
-	renvoAsmEmitText(a, "\x48\x85\xc9")
-	renvoAsmJzLabel(a, lengths)
-	renvoAsmEmitText(a, "\x48\x83\xfe\x08")
-	renvoAmd64AsmJccLabel(a, 0x82, bytes)
-	renvoAsmEmitText(a, "\x48\x83\xf9\x08")
-	renvoAmd64AsmJccLabel(a, 0x82, bytes)
-	renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
-	renvoAsmJnzLabel(a, bytes)
-	renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08\x48\x83\xe9\x08")
-	renvoAsmJmpMarkLabel(a, loop, bytes)
-	renvoAsmEmitText(a, "\x44\x0f\xb6\x07\x44\x0f\xb6\x0a\x45\x39\xc8")
-	renvoAsmJnzLabel(a, done)
-	renvoAsmEmitText(a, "\x48\xff\xc7\x48\xff\xc2\x48\xff\xce\x48\xff\xc9")
-	renvoAsmJmpMarkLabel(a, loop, lengths)
-	renvoAsmEmitText(a, "\x48\x39\xce")
-}
-renvoAsmMarkLabel(a, done)
-renvoAsmRet(a)
-renvoAsmMarkLabel(a, end)
-renvoAsmMarkLabel(a, after)
-if renvoFixedTarget == 0 && renvoObjectProgram(g.c) && renvoObjectRegisterScalarABI(g.c) {
-	renvoAsmAddLocalObjectFuncSymbolText(a, "__renvo_string_order", label, end)
-}
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoEnsureStringStorageArm(g *renvoLinearGen, concat bool) int {
 renvoNonNil(g)
-cached := g.stringCopyLabel
-if concat {
-	cached = g.stringConcatLabel
-}
-if cached != 0 {
-	return cached - 1
-}
-a := &g.asm
-allocate := renvoEnsureArenaAllocHelper(g)
-copyBytes := 0
-if g.c.renvoTargetArch == renvoArchArm {
-	copyBytes = renvoEnsureCopyBytesArm(g)
-} else {
-	copyBytes = renvoEnsureCopyBytesAarch64(g)
-}
-scratch := a.bssSize
-result, length := scratch+16, scratch+8
-a.bssSize += 24
-if concat {
-	result, length = scratch+40, scratch+32
-	a.bssSize += 24
-}
-label := renvoAsmNewLabel(a)
-if concat {
-	g.stringConcatLabel = label + 1
-} else {
-	g.stringCopyLabel = label + 1
-}
-after := renvoAsmNewLabel(a)
-failed := renvoAsmNewLabel(a)
-renvoAsmJmpMarkLabel(a, after, label)
-if g.c.renvoTargetArch == renvoArchArm {
-	renvoArmAsmEmit(a, 0xe52de004) // push LR
-} else {
-	renvoAarch64AsmEmit(a, 0xa9bf7bfd) // stp FP, LR, [SP, #-16]!
-}
-if concat {
-	renvoAsmCopySecondaryToPrimary(a)
-	renvoAsmStorePrimaryBss(a, scratch+16)
-	renvoAsmCopyTertiaryToPrimary(a)
-	renvoAsmStorePrimaryBss(a, scratch+24)
-	for word := 0; word < 2; word++ {
-		if g.c.renvoTargetArch == renvoArchArm {
-			renvoArmAsmMovRegReg(a, 0, 3+word)
-		} else {
-			renvoAarch64AsmMovRegReg(a, 0, 3+word)
-		}
-		renvoAsmStorePrimaryBss(a, scratch+word*8)
-	}
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, scratch+24)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmAddPrimaryTertiary(a)
-	renvoAsmStorePrimaryBss(a, length)
-	renvoAsmCmpPrimaryImm8(a, 0)
-	renvoEmitCompareJumpOp(a, '<', 0, failed, true, false)
-} else {
-	renvoAsmStorePrimaryBss(a, scratch)
-	renvoAsmCopyTertiaryToPrimary(a)
-	renvoAsmStorePrimaryBss(a, length)
-}
-renvoAsmCallLabel(a, allocate)
-renvoAsmJzPrimary(a, failed)
-renvoAsmStorePrimaryBss(a, result)
-for part := 0; part < 1+renvoBoolInt(concat); part++ {
-	renvoAsmLoadPrimaryBss(a, result)
-	if part == 1 {
-		renvoAsmPushPrimary(a)
-		renvoAsmLoadPrimaryBss(a, scratch+8)
-		renvoAsmCopyPrimaryToTertiary(a)
-		renvoAsmPopPrimary(a)
-		renvoAsmAddPrimaryTertiary(a)
-	}
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, scratch+part*16)
-	renvoAsmPushPrimary(a)
-	renvoAsmLoadPrimaryBss(a, scratch+part*16+8)
-	renvoAsmCopyPrimaryToTertiary(a)
-	renvoAsmPopPrimary(a)
-	renvoAsmPopSecondary(a)
-	renvoAsmCallLabel(a, copyBytes)
-}
-renvoAsmLoadPrimaryBss(a, length)
-renvoAsmCopyPrimaryToSecondary(a)
-renvoAsmLoadPrimaryBss(a, result)
-renvoEmitStringStorageArmReturn(a)
-renvoAsmMarkLabel(a, failed)
-renvoAsmPrimaryImm(a, 0)
-renvoAsmSecondaryImm(a, 0)
-renvoEmitStringStorageArmReturn(a)
-renvoAsmMarkLabel(a, after)
-return label
+g.asm.patchFailed = true
+return -1
 }
 
 func renvoVM32CopyFixed(g *renvoLinearGen, srcOffset int, destOffset int, size int, mode int) {
 renvoNonNil(g)
-a := &g.asm
-src, dest, count := renvoWasm32RegRsi, renvoWasm32RegRdi, renvoWasm32RegRcx
-if mode == renvoNativeCopyStackToStack && srcOffset == destOffset {
-	return
-}
-if mode == renvoNativeCopyMemToStack {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, src, renvoWasm32RegRdx)
-} else if mode == renvoNativeCopyBSSToStack {
-	renvoAsmPrimaryBssAddr(a, srcOffset)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, src, renvoWasm32RegRax)
-} else {
-	renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, src, srcOffset)
-}
-if mode == renvoNativeCopyStackToMem {
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, dest, renvoWasm32RegRdx)
-	renvoWasm32EmitRegImm(a, renvoWasm32OpAddRegImm, dest, destOffset)
-} else if mode == renvoNativeCopyStackToBSS {
-	renvoAsmPrimaryBssAddr(a, destOffset)
-	renvoWasm32EmitRegReg(a, renvoWasm32OpMovRegReg, dest, renvoWasm32RegRax)
-} else {
-	renvoWasm32EmitStack(a, renvoWasm32OpLeaStack, dest, destOffset)
-}
-renvoWasm32EmitRegImm(a, renvoWasm32OpMovRegImm, count, size)
-renvoAsmCallLabel(a, renvoEnsureCopyBytesVM32(g))
+g.asm.patchFailed = true
 }
 
 func renvoRTGFrameStart(out *renvoAsm) int {

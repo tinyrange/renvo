@@ -2415,7 +2415,7 @@ go compiler {
 
 	func renvoAmd64CompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
 		a := &g.asm
-		if size >= 64 {
+		if size >= 24 {
 			// Large zero values are common in the compiler's parser and metadata
 			// structures.  A counted store avoids expanding each zero value into a
 			// separate frame-relative instruction.
@@ -2909,8 +2909,8 @@ go compiler {
 		size = renvoAlignValue(size, wordSize)
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
-		if mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
-			renvoAmd64PushBytes(g, offset, size, renvoPushStack)
+		if wordSize == 8 && (size >= 64 || size >= 48 && (mode != renvoPushStack || offset >= 128)) && size <= 4096 {
+			renvoAmd64PushBytes(g, offset, size, mode)
 			return
 		}
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -3177,7 +3177,7 @@ go compiler {
 			if renvoExprHasUnsignedIntType(g, ep, e.left) {
 				renvoAsmEmitText(a, "\x48\xd1\xe8")
 			} else {
-			renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
+				renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
 			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return 1

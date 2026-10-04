@@ -1508,7 +1508,11 @@ go compiler {
 
 go compiler {
 	func renvoArmCompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-		renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
+		a := &g.asm
+		renvoArmAsmLoadRegStack(a, 0, srcPtr)
+		renvoArmAsmLoadRegStack(a, 1, destPtr)
+		renvoArmAsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesArm(g))
 	}
 
 	func renvoArmCompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
@@ -1611,7 +1615,22 @@ go compiler {
 
 	func renvoArmCompilerZeroLocalStorage(g *renvoLinearGen, offset int, size int) {
 		a := &g.asm
-		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+		if size >= 64 {
+			// Frame storage is word-aligned and reserves the rounded final word.
+			// Preserve descriptor registers while clearing a large value in a loop.
+			renvoAsmPushSecondary(a)
+			renvoAsmPushTertiary(a)
+			renvoArmAsmLeaRegStack(a, 1, offset)
+			renvoArmAsmMovRegImm(a, 2, (size+3)/4)
+			renvoAsmPrimaryImm(a, 0)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmEmit(a, 0xe4810004) // STR r0, [r1], #4
+			renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1
+			renvoArmAsmBCondLabel(a, loop, 1)
+			renvoAsmPopTertiary(a)
+			renvoAsmPopSecondary(a)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
 			renvoAsmAddressPrimaryStack(a, offset)
 			renvoAsmPushImm(a, size)
 			renvoAsmPopTertiary(a)
@@ -1907,6 +1926,29 @@ go compiler {
 	func renvoArmCompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 4 && size >= 48 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoArmAsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoArmAsmMovRegReg(a, 0, 1)
+			}
+			// Preserve the argument ABI by pushing packed words in reverse order.
+			renvoArmAsmAddRegImm(a, 0, 0, size)
+			renvoArmAsmMovRegImm(a, 2, size/4)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmAddRegImm(a, 0, 0, -4)
+			renvoArmAsmLoadRegMem(a, 1, 0, 0, 4)
+			renvoArmAsmPushReg(a, 1)
+			renvoArmAsmAddRegImm(a, 2, 2, -1)
+			renvoArmAsmCmpRegImm(a, 2, 0)
+			renvoArmAsmBCondLabel(a, loop, 1)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {

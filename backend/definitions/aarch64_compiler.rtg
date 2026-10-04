@@ -1506,7 +1506,11 @@ go compiler {
 
 go compiler {
 	func renvoAarch64CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
-		renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+		a := &g.asm
+		renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
+		renvoAarch64AsmLoadRegStack(a, 1, destPtr)
+		renvoAarch64AsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesAarch64(g))
 	}
 
 	func renvoAarch64CompilerPreferBulkStackCopy(g *renvoLinearGen, size int) bool {
@@ -2011,6 +2015,30 @@ go compiler {
 	func renvoAarch64CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 8 && size >= 32 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoAarch64AsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoAarch64AsmMovRegReg(a, 0, 1)
+			}
+			// The expression stack reserves sixteen bytes for each eight-byte
+			// word. Expand the packed value while pushing in reverse order.
+			renvoAarch64AsmAddRegImm(a, 0, 0, size)
+			renvoAarch64AsmMovRegImm(a, 2, size/8)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoAarch64AsmAddRegImm(a, 0, 0, -8)
+			renvoAarch64AsmLoadRegMem(a, 1, 0, 0, 8)
+			renvoAarch64AsmPushReg(a, 1)
+			renvoAarch64AsmAddRegImm(a, 2, 2, -1)
+			renvoAarch64AsmCmpRegImm(a, 2, 0)
+			renvoAarch64AsmBCondLabel(a, loop, 1)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {

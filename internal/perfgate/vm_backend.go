@@ -30,7 +30,26 @@ func (h harness) prepareVMBackend(b *build, frontend string) error {
 	if err := run("go", "build", "-o", jit, "./cmd/renvowasibackendjit"); err != nil {
 		return err
 	}
-	source, err := os.ReadFile(filepath.Join(b.root, "backend/definitions/wasm32.rtg"))
+	// The renamed root retains relative imports. Keep its definition dependencies
+	// beside it; preparation remains outside the measured VM workload.
+	definitions := filepath.Join(b.root, "backend/definitions")
+	entries, err := os.ReadDir(definitions)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".rtg") {
+			continue
+		}
+		dependency, err := os.ReadFile(filepath.Join(definitions, entry.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(b.directory, entry.Name()), dependency, 0600); err != nil {
+			return err
+		}
+	}
+	source, err := os.ReadFile(filepath.Join(definitions, "wasm32.rtg"))
 	if err != nil {
 		return err
 	}

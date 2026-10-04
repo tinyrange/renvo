@@ -5463,7 +5463,11 @@ go compiler {
 go compiler {
 	func renvoWasm32CompilerCopyBytes(g *renvoLinearGen, srcPtr int, destPtr int, byteCount int) {
 		if g.c.renvoTarget == renvoTargetVM32 {
-			renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+			a := &g.asm
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRsi, srcPtr)
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdi, destPtr)
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRcx, byteCount)
+			renvoAsmCallLabel(a, renvoEnsureCopyBytesVM32(g))
 			return
 		}
 		a := &g.asm
@@ -5921,6 +5925,16 @@ go compiler {
 	func renvoWasm32CompilerPushWords(g *renvoLinearGen, offset int, size int, wordSize int, mode int) {
 		renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if g.c.renvoTarget != renvoTargetVM32 && mode == renvoPushStack && wordSize == 4 && size >= 32 {
+			// Wasm's expression stack grows upward, so arguments must be copied in
+			// reverse word order rather than with memory.copy.
+			renvoAsmEmit8(&g.asm, renvoWasm32OpPushFrameBlock)
+			renvoAsmEmit32(&g.asm, offset)
+			renvoAsmEmit32(&g.asm, size)
+			g.asm.lastPrimaryLoad = 0
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {

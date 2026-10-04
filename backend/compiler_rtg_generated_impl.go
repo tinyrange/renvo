@@ -5694,7 +5694,7 @@ p := g.prog
 			if renvoExprHasUnsignedIntType(g, ep, e.left) {
 				renvoAsmEmitText(a, "\x48\xd1\xe8")
 			} else {
-			renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
+				renvoAsmEmitText(a, "\x48\x85\xc0\x79\x04\x48\x83\xc0\x01\x48\xd1\xf8")
 			}
 			renvoNormalizeNativeExprPrimary(g, ep, idx)
 			return 1
@@ -6290,8 +6290,8 @@ renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
-		if mode == renvoPushStack && wordSize == 8 && size >= 128 && size <= 4096 {
-			renvoAmd64PushBytes(g, offset, size, renvoPushStack)
+		if wordSize == 8 && (size >= 64 || size >= 48 && (mode != renvoPushStack || offset >= 128)) && size <= 4096 {
+			renvoAmd64PushBytes(g, offset, size, mode)
 			return
 		}
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -6326,6 +6326,11 @@ return
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if !g.c.code16 && wordSize == 4 && size >= 32 && size <= 4096 {
+			renvo386PushBytes(&g.asm, offset, size, mode)
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -6345,9 +6350,102 @@ renvoNonNil(g)
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 renvoNonNil(g)
 		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 8 && size >= 32 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoAarch64AsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoAarch64AsmMovRegReg(a, 0, 1)
+			}
+			// The expression stack reserves sixteen bytes for each eight-byte
+			// word. Expand the packed value while pushing in reverse order.
+			renvoAarch64AsmAddRegImm(a, 0, 0, size)
+			renvoAarch64AsmMovRegImm(a, 2, size/8)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoAarch64AsmAddRegImm(a, 0, 0, -8)
+			renvoAarch64AsmLoadRegMem(a, 1, 0, 0, 8)
+			renvoAarch64AsmPushReg(a, 1)
+			renvoAarch64AsmAddRegImm(a, 2, 2, -1)
+			renvoAarch64AsmCmpRegImm(a, 2, 0)
+			renvoAarch64AsmBCondLabel(a, loop, 1)
+			return
+		}
+		// Keep larger arguments on the word-push path so stack growth touches each
+		// guard page; one reservation must not skip a Windows stack guard page.
+		for at := size - wordSize; at >= 0; at -= wordSize {
+			if mode == renvoPushStack {
+				renvoAsmLoadPrimaryStack(&g.asm, offset-at)
+			} else if mode == renvoPushBss {
+				renvoAsmLoadPrimaryBss(&g.asm, offset+at)
+			} else {
+				renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
+			}
+			renvoAsmPushPrimary(&g.asm)
+		}
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+renvoNonNil(g)
+		size = renvoAlignValue(size, wordSize)
+
+		if wordSize == 4 && size >= 48 && size <= 4096 {
+			a := &g.asm
+			if mode == renvoPushStack {
+				renvoArmAsmLeaRegStack(a, 0, offset)
+			} else if mode == renvoPushBss {
+				renvoAsmPrimaryBssAddr(a, offset)
+			} else {
+				renvoArmAsmMovRegReg(a, 0, 1)
+			}
+			// Preserve the argument ABI by pushing packed words in reverse order.
+			renvoArmAsmAddRegImm(a, 0, 0, size)
+			renvoArmAsmMovRegImm(a, 2, size/4)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmAddRegImm(a, 0, 0, -4)
+			renvoArmAsmLoadRegMem(a, 1, 0, 0, 4)
+			renvoArmAsmPushReg(a, 1)
+			renvoArmAsmAddRegImm(a, 2, 2, -1)
+			renvoArmAsmCmpRegImm(a, 2, 0)
+			renvoArmAsmBCondLabel(a, loop, 1)
+			return
+		}
+		// Keep larger arguments on the word-push path so stack growth touches each
+		// guard page; one reservation must not skip a Windows stack guard page.
+		for at := size - wordSize; at >= 0; at -= wordSize {
+			if mode == renvoPushStack {
+				renvoAsmLoadPrimaryStack(&g.asm, offset-at)
+			} else if mode == renvoPushBss {
+				renvoAsmLoadPrimaryBss(&g.asm, offset+at)
+			} else {
+				renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, at)
+			}
+			renvoAsmPushPrimary(&g.asm)
+		}
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+renvoNonNil(g)
+		size = renvoAlignValue(size, wordSize)
+
+		if g.c.renvoTarget != renvoTargetVM32 && mode == renvoPushStack && wordSize == 4 && size >= 32 {
+			// Wasm's expression stack grows upward, so arguments must be copied in
+			// reverse word order rather than with memory.copy.
+			renvoAsmEmit8(&g.asm, renvoWasm32OpPushFrameBlock)
+			renvoAsmEmit32(&g.asm, offset)
+			renvoAsmEmit32(&g.asm, size)
+			g.asm.lastPrimaryLoad = 0
+			return
+		}
 		// Keep larger arguments on the word-push path so stack growth touches each
 		// guard page; one reservation must not skip a Windows stack guard page.
 		for at := size - wordSize; at >= 0; at -= wordSize {
@@ -6847,18 +6945,30 @@ return
 
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
-renvoEmitCopyBytesAarch64(g, srcPtr, destPtr, byteCount)
+a := &g.asm
+		renvoAarch64AsmLoadRegStack(a, 0, srcPtr)
+		renvoAarch64AsmLoadRegStack(a, 1, destPtr)
+		renvoAarch64AsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesAarch64(g))
 return
 
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
-renvoArmEmitCopyBytes(g, srcPtr, destPtr, byteCount)
+a := &g.asm
+		renvoArmAsmLoadRegStack(a, 0, srcPtr)
+		renvoArmAsmLoadRegStack(a, 1, destPtr)
+		renvoArmAsmLoadRegStack(a, 2, byteCount)
+		renvoAsmCallLabel(a, renvoEnsureCopyBytesArm(g))
 return
 
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if g.c.renvoTarget == renvoTargetVM32 {
-			renvoEmitCopyBytesVM32(g, srcPtr, destPtr, byteCount)
+			a := &g.asm
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRsi, srcPtr)
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRdi, destPtr)
+			renvoWasm32EmitStack(a, renvoWasm32OpLoadStack, renvoWasm32RegRcx, byteCount)
+			renvoAsmCallLabel(a, renvoEnsureCopyBytesVM32(g))
 			return
 		}
 		a := &g.asm
@@ -7140,7 +7250,7 @@ renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 a := &g.asm
-		if size >= 64 {
+		if size >= 24 {
 			// Large zero values are common in the compiler's parser and metadata
 			// structures.  A counted store avoids expanding each zero value into a
 			// separate frame-relative instruction.
@@ -7164,9 +7274,65 @@ a := &g.asm
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+a := &g.asm
+		if !g.c.code16 && size >= 24 {
+			// Frame slots are word-aligned, including their reserved padding.
+			renvoAsmAddressCallWord0Stack(a, offset)
+			renvoAsmPrimaryImm(a, 0)
+			renvoAsmPushImm(a, (size+3)/4)
+			renvoAsmPopTertiary(a)
+			renvoAsmEmit16(a, 0xabf3)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 a := &g.asm
 		if g.c.renvoNativeIntSize == 8 && size >= 24 {
+			renvoAsmAddressPrimaryStack(a, offset)
+			renvoAsmPushImm(a, size)
+			renvoAsmPopTertiary(a)
+			renvoEmitMakeZero(g)
+		} else {
+			renvoAsmPrimaryImm(a, 0)
+			step := g.c.renvoNativeIntSize
+			for at := 0; at < size; at += step {
+				renvoAsmStorePrimaryStack(a, offset-at)
+			}
+		}
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+a := &g.asm
+		if size >= 64 {
+			// Frame storage is word-aligned and reserves the rounded final word.
+			// Preserve descriptor registers while clearing a large value in a loop.
+			renvoAsmPushSecondary(a)
+			renvoAsmPushTertiary(a)
+			renvoArmAsmLeaRegStack(a, 1, offset)
+			renvoArmAsmMovRegImm(a, 2, (size+3)/4)
+			renvoAsmPrimaryImm(a, 0)
+			loop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, loop)
+			renvoArmAsmEmit(a, 0xe4810004) // STR r0, [r1], #4
+			renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1
+			renvoArmAsmBCondLabel(a, loop, 1)
+			renvoAsmPopTertiary(a)
+			renvoAsmPopSecondary(a)
+		} else if g.c.renvoNativeIntSize == 8 && size >= 24 {
 			renvoAsmAddressPrimaryStack(a, offset)
 			renvoAsmPushImm(a, size)
 			renvoAsmPopTertiary(a)
@@ -14446,7 +14612,7 @@ renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 renvoNonNil(g)
-	 a := &g.asm
+		a := &g.asm
 		size := 8
 		typ := renvoTypeInt
 		for i := g.localCount - 1; i >= 0; i-- {
