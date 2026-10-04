@@ -11,7 +11,8 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 	maybeUnicode := false
 	// Non-ASCII comments and string literals need no identifier rewriting.
 	// Inspect identifier bytes directly before allocating names or edits.
-	for _, token := range program.Tokens {
+	for i := 0; i < len(program.Tokens); i++ {
+		token := &program.Tokens[i]
 		if token.KindLine&255 != unit.TokenIdent || token.Start < 0 || token.Size <= 0 || token.Start > len(program.Text)-token.Size {
 			continue
 		}

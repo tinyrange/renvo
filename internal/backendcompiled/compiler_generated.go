@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "48c73fbd5256ce23c4dbf2f9568770cf6af0f645b4685df3a3d163b9ef307d87"
+const CompilerSourceDigest = "3a1c151ff1c64e5e0c5d5082592b02b97a126e6fbb7e085b2a45ffe6f8b82066"
 
 // source: backend/compiler_common_impl.go
 
@@ -8682,7 +8682,9 @@ return false
 }
 field := &g.meta.fields[tuple.first+i]
 renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeSize(g.meta, result.typ))
+
+
+renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeCopySize(g.meta, result.typ))
 }
 return true
 }
@@ -24393,6 +24395,12 @@ return renvoEmitSliceValueRegs(g, ep, idx)
 return false
 }
 func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexIdx int) bool {
+return renvoEmitIndexPrimary(g, ep, indexIdx, 0)
+}
+
+
+
+func renvoEmitIndexPrimary(g *renvoLinearGen, ep *renvoExprParse, indexIdx int, loadKind int) bool {
 renvoNonNil(g, ep)
 meta := g.meta
 renvoNonNil(meta)
@@ -24403,7 +24411,11 @@ renvoNonNil(sliceType)
 if sliceType.kind == renvoTypePointer {
 elem := renvoResolveType(meta, sliceType.elem)
 if elem.kind != renvoTypeArray && elem.kind != renvoTypeSlice {
-return renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType)
+if !renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType) {
+return false
+}
+renvoEmitIndexLoadFromAddress(g, loadKind)
+return true
 }
 }
 pointerArray := sliceType.kind == renvoTypePointer
@@ -24475,6 +24487,16 @@ return false
 
 
 
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+!g.meta.panicEnabled && elemSize >= 0 && elemSize <= 2147483647 &&
+(ep.exprs[indexExpr.right].kind == renvoExprBinary || ep.exprs[indexExpr.right].kind == renvoExprInt) &&
+renvoEmitFrameIndexTertiary(g, ep, indexExpr.right, 0) {
+fault := renvoEnsureUncaughtFaultHelper(g, false)
+renvoAsmEmitText(a, "\x48\x39\xd1")
+renvoAmd64AsmJccLabel(a, 0x83, fault)
+renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+return true
+}
 if renvoPreparedBackendActive == 0 && !g.meta.panicEnabled &&
 (g.c.renvoTarget == renvoTargetVM32 || g.c.renvoTargetArch == renvoArchAmd64 ||
 g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchAarch64 ||
@@ -24486,6 +24508,15 @@ local := renvoFindLocalIndex(g, index.nameStart, index.nameEnd)
 if local >= 0 && g.locals[local].captureOff == 0 && renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
 if g.c.renvoTargetArch == renvoArchAmd64 {
 renvoAsmEmitText(a, "\x48\x89\xca")
+renvoAsmLoadTertiaryStack(a, g.locals[local].offset)
+if !(sliceType.kind == renvoTypeSlice && !pointerArray && baseExpr.kind == renvoExprIdent &&
+local+1 == g.boundedIndexLocal && renvoFindLocalIndex(g, baseExpr.nameStart, baseExpr.nameEnd)+1 == g.boundedSliceLocal) {
+fault := renvoEnsureUncaughtFaultHelper(g, false)
+renvoAsmEmitText(a, "\x48\x39\xd1")
+renvoAmd64AsmJccLabel(a, 0x83, fault)
+}
+renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+return true
 } else if g.c.renvoTargetArch == renvoArch386 {
 renvoAsmEmitText(a, "\x89\xca")
 } else if g.c.renvoTargetArch == renvoArchArm {
@@ -24499,23 +24530,12 @@ renvoAsmLoadTertiaryStack(a, g.locals[local].offset)
 if sliceType.kind == renvoTypeSlice && !pointerArray && baseExpr.kind == renvoExprIdent &&
 local+1 == g.boundedIndexLocal && renvoFindLocalIndex(g, baseExpr.nameStart, baseExpr.nameEnd)+1 == g.boundedSliceLocal {
 renvoAsmAddScaledTertiary(a, elemSize)
-} else if g.c.renvoTargetArch == renvoArchAmd64 && g.c.optimizeRuntime {
-fault := renvoEnsureUncaughtRuntimeFaultHelper(g)
-renvoAsmEmit24(a, 0xd13948)
-renvoAmd64AsmJccLabel(a, 0x83, fault)
-renvoAsmAddScaledTertiary(a, elemSize)
 } else if g.c.renvoTargetArch == renvoArchArm {
 renvoArmEmitCheckedIndexAddress(g, elemSize)
-} else if g.c.renvoTargetArch == renvoArchAmd64 && !checkedSize {
-
-
-fault := renvoEnsureUncaughtFaultHelper(g, false)
-renvoAsmEmitText(a, "\x48\x39\xd1")
-renvoAmd64AsmJccLabel(a, 0x83, fault)
-renvoAsmAddScaledTertiary(a, elemSize)
 } else {
 renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 }
+renvoEmitIndexLoadFromAddress(g, loadKind)
 return true
 }
 }
@@ -24536,7 +24556,7 @@ renvoAsmCopyPrimaryToSecondary(a)
 renvoAsmPopTertiary(a)
 renvoAsmCopySecondaryToTertiary(a)
 renvoAsmPopPrimary(a)
-renvoAsmAddScaledTertiary(a, elemSize)
+renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
 return true
 }
 }
@@ -24563,13 +24583,109 @@ renvoArmEmitCheckedIndexAddress(g, elemSize)
 } else {
 renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 }
+renvoEmitIndexLoadFromAddress(g, loadKind)
 return true
 }
 renvoAsmPopTertiary(a)
 renvoEmitRuntimeBoundsCheck(g)
 renvoAsmCopySecondaryToTertiary(a)
 renvoAsmPopPrimary(a)
-renvoAsmAddScaledTertiary(a, elemSize)
+renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+return true
+}
+
+func renvoEmitIndexLoadFromAddress(g *renvoLinearGen, kind int) {
+renvoNonNil(g)
+if kind == 0 {
+return
+}
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, kind))
+renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+}
+
+func renvoEmitScaledIndexPrimary(g *renvoLinearGen, size int, kind int) {
+renvoNonNil(g)
+if kind != 0 && renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+(size == 1 || size == 2 || size == 4 || size == 8) {
+renvoAmd64AsmLoadRaxIndexRcxSize(&g.asm, size)
+renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+return
+}
+renvoAsmAddScaledTertiary(&g.asm, size)
+renvoEmitIndexLoadFromAddress(g, kind)
+}
+
+
+
+
+
+func renvoEmitFrameIndexTertiary(g *renvoLinearGen, ep *renvoExprParse, idx int, depth int) bool {
+if idx < 0 || idx >= len(ep.exprs) || depth > 8 {
+return false
+}
+renvoNonNil(g, ep)
+e := &ep.exprs[idx]
+if e.kind == renvoExprInt {
+value := renvoParseIntToken(g.prog, e.tok)
+if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
+return false
+}
+renvoAsmEmitText(&g.asm, "\x48\x89\xca")
+renvoAsmEmit8(&g.asm, 0xb9)
+renvoAsmEmit32(&g.asm, value)
+return true
+}
+if e.kind == renvoExprIdent {
+local := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
+if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
+return false
+}
+renvoAsmEmitText(&g.asm, "\x48\x89\xca")
+renvoAsmLoadTertiaryStack(&g.asm, g.locals[local].offset)
+return true
+}
+if e.kind != renvoExprBinary || !renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-') {
+return false
+}
+subtract := renvoTokCharIs(g.prog, e.tok, '-')
+right := &ep.exprs[e.right]
+local := -1
+value := 0
+if right.kind == renvoExprIdent {
+local = renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
+if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
+return false
+}
+} else if right.kind == renvoExprInt {
+value = renvoParseIntToken(g.prog, right.tok)
+if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
+return false
+}
+} else {
+return false
+}
+if !renvoEmitFrameIndexTertiary(g, ep, e.left, depth+1) {
+return false
+}
+if local >= 0 {
+op := 0x0348
+if subtract {
+op = 0x2b48
+}
+renvoAsmStackMem(&g.asm, g.locals[local].offset, op, 0x4d, 0x8d)
+} else {
+op := 0xc1
+if subtract {
+op = 0xe9
+}
+if renvoAsmImmFits8Signed(value) {
+renvoAsmEmit4(&g.asm, 0x48, 0x83, op, value)
+} else {
+renvoAsmEmit3(&g.asm, 0x48, 0x81, op)
+renvoAsmEmit32(&g.asm, value)
+}
+}
 return true
 }
 
@@ -25027,6 +25143,17 @@ if baseResolved.kind == renvoTypeString {
 if !renvoEmitStringValueRegs(g, ep, e.left) {
 return false
 }
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && !g.meta.panicEnabled {
+
+renvoAsmEmitText(a, "\x48\x89\xd1")
+if renvoEmitFrameIndexTertiary(g, ep, e.right, 0) {
+fault := renvoEnsureUncaughtFaultHelper(g, false)
+renvoAsmEmitText(a, "\x48\x39\xd1")
+renvoAmd64AsmJccLabel(a, 0x83, fault)
+renvoAsmLoadBytePrimaryIndexTertiary(a)
+return true
+}
+}
 renvoAsmPushPrimary(a)
 renvoAsmPushSecondary(a)
 if !renvoEmitIntExpr(g, ep, e.right) {
@@ -25054,15 +25181,7 @@ renvoNonNil(elem)
 if !renvoTypeKindIsScalarValue(elem.kind) && elem.kind != renvoTypePointer && elem.kind != renvoTypeFunc {
 return false
 }
-if !renvoEmitIndexAddressPrimary(g, ep, idx) {
-return false
-}
-renvoAsmCopyPrimaryToSecondary(a)
-renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
-
-
-renvoAsmNormalizePrimaryForKind(a, elem.kind)
-return true
+return renvoEmitIndexPrimary(g, ep, idx, elem.kind)
 }
 return false
 }
@@ -45571,7 +45690,9 @@ renvoAsmMarkLabel(a, allocOKLabel)
 }
 renvoAsmEmitText(a, "\x50\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x8b\x7c\x24\x30\x48\x8b\x37\x48\x8b\x3c\x24\xfc\xf3\xa4\x48\x8b\x7c\x24\x30\x48\x8b\x04\x24\x48\x89\x07\x4c\x8b\x4c\x24\x20\x4c\x8b\x44\x24\x08\x4d\x89\x01\x48\x8b\x04\x24\x48\x8b\x4c\x24\x10\x48\x8b\x54\x24\x18\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x74\x24\x28\x48\x8b\x4c\x24\x10\x48\xff\xc1\x48\x89\x0e\x48\x83\xc4\x38\xc3")
 renvoAsmMarkLabel(a, noGrowLabel)
-renvoAsmEmitText(a, "\x48\x8b\x0e\x48\x8b\x07\x48\x0f\xaf\xca\x48\x01\xc8\x48\x8b\x0e\x48\xff\xc1\x48\x89\x0e\xc3")
+
+
+renvoAsmEmitText(a, "\x48\x89\xc8\x48\x0f\xaf\xc2\x48\x03\x07\x48\xff\xc1\x48\x89\x0e\xc3")
 renvoAsmMarkLabel(a, helperEnd)
 renvoAsmMarkLabel(a, afterLabel)
 if renvoFixedTarget == 0 && renvoIsHostedObjectAmd64(g.c) {

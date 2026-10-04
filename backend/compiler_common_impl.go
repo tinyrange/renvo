@@ -8675,7 +8675,9 @@ func renvoEmitBareReturnValues(g *renvoLinearGen) bool {
 		}
 		field := &g.meta.fields[tuple.first+i]
 		renvoAsmLoadSecondaryStack(&g.asm, g.returnStruct)
-		renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeSize(g.meta, result.typ))
+		// Result tuples reserve complete value slots, including narrow scalars.
+		// Match explicit returns so callers never read uninitialized slot padding.
+		renvoEmitCopyStackToMemSecondary(g, offset, field.offset, renvoTypeCopySize(g.meta, result.typ))
 	}
 	return true
 }
@@ -24386,6 +24388,12 @@ func renvoEmitSlicePtrCap(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	return false
 }
 func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexIdx int) bool {
+	return renvoEmitIndexPrimary(g, ep, indexIdx, 0)
+}
+
+// A scalar read can use the same checked index evaluation while retaining the
+// scaled memory operand, instead of materializing its address and reloading it.
+func renvoEmitIndexPrimary(g *renvoLinearGen, ep *renvoExprParse, indexIdx int, loadKind int) bool {
 	renvoNonNil(g, ep)
 	meta := g.meta
 	renvoNonNil(meta)
@@ -24396,7 +24404,11 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 	if sliceType.kind == renvoTypePointer {
 		elem := renvoResolveType(meta, sliceType.elem)
 		if elem.kind != renvoTypeArray && elem.kind != renvoTypeSlice {
-			return renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType)
+			if !renvoEmitCPointerIndexAddressPrimary(g, ep, indexIdx, sliceType) {
+				return false
+			}
+			renvoEmitIndexLoadFromAddress(g, loadKind)
+			return true
 		}
 	}
 	pointerArray := sliceType.kind == renvoTypePointer
@@ -24468,6 +24480,16 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 	// A frame-local index has no evaluation side effects. Load it directly
 	// after the base, keeping pointer, length and index in registers instead
 	// of spilling two operands to the expression stack. Bounds checks remain.
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+		!g.meta.panicEnabled && elemSize >= 0 && elemSize <= 2147483647 &&
+		(ep.exprs[indexExpr.right].kind == renvoExprBinary || ep.exprs[indexExpr.right].kind == renvoExprInt) &&
+		renvoEmitFrameIndexTertiary(g, ep, indexExpr.right, 0) {
+		fault := renvoEnsureUncaughtFaultHelper(g, false)
+		renvoAsmEmitText(a, "\x48\x39\xd1") // CMP RCX, RDX
+		renvoAmd64AsmJccLabel(a, 0x83, fault)
+		renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+		return true
+	}
 	if renvoPreparedBackendActive == 0 && !g.meta.panicEnabled &&
 		(g.c.renvoTarget == renvoTargetVM32 || g.c.renvoTargetArch == renvoArchAmd64 ||
 			g.c.renvoTargetArch == renvoArchArm || g.c.renvoTargetArch == renvoArchAarch64 ||
@@ -24479,6 +24501,15 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 			if local >= 0 && g.locals[local].captureOff == 0 && renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
 				if g.c.renvoTargetArch == renvoArchAmd64 {
 					renvoAsmEmitText(a, "\x48\x89\xca") // MOV RDX, RCX (length)
+					renvoAsmLoadTertiaryStack(a, g.locals[local].offset)
+					if !(sliceType.kind == renvoTypeSlice && !pointerArray && baseExpr.kind == renvoExprIdent &&
+						local+1 == g.boundedIndexLocal && renvoFindLocalIndex(g, baseExpr.nameStart, baseExpr.nameEnd)+1 == g.boundedSliceLocal) {
+						fault := renvoEnsureUncaughtFaultHelper(g, false)
+						renvoAsmEmitText(a, "\x48\x39\xd1") // CMP RCX, RDX
+						renvoAmd64AsmJccLabel(a, 0x83, fault)
+					}
+					renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+					return true
 				} else if g.c.renvoTargetArch == renvoArch386 {
 					renvoAsmEmitText(a, "\x89\xca")
 				} else if g.c.renvoTargetArch == renvoArchArm {
@@ -24492,23 +24523,12 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 				if sliceType.kind == renvoTypeSlice && !pointerArray && baseExpr.kind == renvoExprIdent &&
 					local+1 == g.boundedIndexLocal && renvoFindLocalIndex(g, baseExpr.nameStart, baseExpr.nameEnd)+1 == g.boundedSliceLocal {
 					renvoAsmAddScaledTertiary(a, elemSize)
-				} else if g.c.renvoTargetArch == renvoArchAmd64 && g.c.optimizeRuntime {
-					fault := renvoEnsureUncaughtRuntimeFaultHelper(g)
-					renvoAsmEmit24(a, 0xd13948)
-					renvoAmd64AsmJccLabel(a, 0x83, fault)
-					renvoAsmAddScaledTertiary(a, elemSize)
 				} else if g.c.renvoTargetArch == renvoArchArm {
 					renvoArmEmitCheckedIndexAddress(g, elemSize)
-				} else if g.c.renvoTargetArch == renvoArchAmd64 && !checkedSize {
-					// Arbitrary aggregate widths use the same checked address
-					// contract without entering a helper cached for another width.
-					fault := renvoEnsureUncaughtFaultHelper(g, false)
-					renvoAsmEmitText(a, "\x48\x39\xd1") // CMP RCX, RDX
-					renvoAmd64AsmJccLabel(a, 0x83, fault)
-					renvoAsmAddScaledTertiary(a, elemSize)
 				} else {
 					renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 				}
+				renvoEmitIndexLoadFromAddress(g, loadKind)
 				return true
 			}
 		}
@@ -24529,7 +24549,7 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 			renvoAsmPopTertiary(a)
 			renvoAsmCopySecondaryToTertiary(a)
 			renvoAsmPopPrimary(a)
-			renvoAsmAddScaledTertiary(a, elemSize)
+			renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
 			return true
 		}
 	}
@@ -24556,13 +24576,109 @@ func renvoEmitIndexAddressPrimary(g *renvoLinearGen, ep *renvoExprParse, indexId
 		} else {
 			renvoAsmCallLabel(a, renvoEnsureIndexAddressHelper(g, elemSize))
 		}
+		renvoEmitIndexLoadFromAddress(g, loadKind)
 		return true
 	}
 	renvoAsmPopTertiary(a)
 	renvoEmitRuntimeBoundsCheck(g)
 	renvoAsmCopySecondaryToTertiary(a)
 	renvoAsmPopPrimary(a)
-	renvoAsmAddScaledTertiary(a, elemSize)
+	renvoEmitScaledIndexPrimary(g, elemSize, loadKind)
+	return true
+}
+
+func renvoEmitIndexLoadFromAddress(g *renvoLinearGen, kind int) {
+	renvoNonNil(g)
+	if kind == 0 {
+		return
+	}
+	renvoAsmCopyPrimaryToSecondary(&g.asm)
+	renvoAsmLoadPrimaryMemSecondaryDispSize(&g.asm, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, kind))
+	renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+}
+
+func renvoEmitScaledIndexPrimary(g *renvoLinearGen, size int, kind int) {
+	renvoNonNil(g)
+	if kind != 0 && renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 &&
+		(size == 1 || size == 2 || size == 4 || size == 8) {
+		renvoAmd64AsmLoadRaxIndexRcxSize(&g.asm, size)
+		renvoAsmNormalizePrimaryForKind(&g.asm, kind)
+		return
+	}
+	renvoAsmAddScaledTertiary(&g.asm, size)
+	renvoEmitIndexLoadFromAddress(g, kind)
+}
+
+// Evaluate local integer sums directly in tertiary, retaining the already
+// evaluated slice pointer in primary and its length in secondary. Validate
+// each right operand before emitting the left chain, so failure emits no code.
+// Calls, captured bindings and narrowing conversions use the general path.
+func renvoEmitFrameIndexTertiary(g *renvoLinearGen, ep *renvoExprParse, idx int, depth int) bool {
+	if idx < 0 || idx >= len(ep.exprs) || depth > 8 {
+		return false
+	}
+	renvoNonNil(g, ep)
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprInt {
+		value := renvoParseIntToken(g.prog, e.tok)
+		if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
+			return false
+		}
+		renvoAsmEmitText(&g.asm, "\x48\x89\xca")
+		renvoAsmEmit8(&g.asm, 0xb9) // MOV ECX, imm32
+		renvoAsmEmit32(&g.asm, value)
+		return true
+	}
+	if e.kind == renvoExprIdent {
+		local := renvoFindLocalIndex(g, e.nameStart, e.nameEnd)
+		if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
+			return false
+		}
+		renvoAsmEmitText(&g.asm, "\x48\x89\xca")
+		renvoAsmLoadTertiaryStack(&g.asm, g.locals[local].offset)
+		return true
+	}
+	if e.kind != renvoExprBinary || !renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-') {
+		return false
+	}
+	subtract := renvoTokCharIs(g.prog, e.tok, '-')
+	right := &ep.exprs[e.right]
+	local := -1
+	value := 0
+	if right.kind == renvoExprIdent {
+		local = renvoFindLocalIndex(g, right.nameStart, right.nameEnd)
+		if local < 0 || g.locals[local].captureOff != 0 || !renvoTypeIsNativeInt(g.meta, g.locals[local].typ) {
+			return false
+		}
+	} else if right.kind == renvoExprInt {
+		value = renvoParseIntToken(g.prog, right.tok)
+		if g.prog.parsedIntHigh != 0 || value < 0 || value > 2147483647 {
+			return false
+		}
+	} else {
+		return false
+	}
+	if !renvoEmitFrameIndexTertiary(g, ep, e.left, depth+1) {
+		return false
+	}
+	if local >= 0 {
+		op := 0x0348
+		if subtract {
+			op = 0x2b48
+		}
+		renvoAsmStackMem(&g.asm, g.locals[local].offset, op, 0x4d, 0x8d)
+	} else {
+		op := 0xc1
+		if subtract {
+			op = 0xe9
+		}
+		if renvoAsmImmFits8Signed(value) {
+			renvoAsmEmit4(&g.asm, 0x48, 0x83, op, value)
+		} else {
+			renvoAsmEmit3(&g.asm, 0x48, 0x81, op)
+			renvoAsmEmit32(&g.asm, value)
+		}
+	}
 	return true
 }
 
@@ -25020,6 +25136,17 @@ func renvoEmitIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if !renvoEmitStringValueRegs(g, ep, e.left) {
 			return false
 		}
+		if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchAmd64 && !g.meta.panicEnabled {
+			// Put the descriptor length in the frame-index evaluator's input register.
+			renvoAsmEmitText(a, "\x48\x89\xd1") // MOV RCX, RDX
+			if renvoEmitFrameIndexTertiary(g, ep, e.right, 0) {
+				fault := renvoEnsureUncaughtFaultHelper(g, false)
+				renvoAsmEmitText(a, "\x48\x39\xd1") // CMP RCX, RDX
+				renvoAmd64AsmJccLabel(a, 0x83, fault)
+				renvoAsmLoadBytePrimaryIndexTertiary(a)
+				return true
+			}
+		}
 		renvoAsmPushPrimary(a)
 		renvoAsmPushSecondary(a)
 		if !renvoEmitIntExpr(g, ep, e.right) {
@@ -25047,15 +25174,7 @@ func renvoEmitIndexExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 		if !renvoTypeKindIsScalarValue(elem.kind) && elem.kind != renvoTypePointer && elem.kind != renvoTypeFunc {
 			return false
 		}
-		if !renvoEmitIndexAddressPrimary(g, ep, idx) {
-			return false
-		}
-		renvoAsmCopyPrimaryToSecondary(a)
-		renvoAsmLoadPrimaryMemSecondaryDispSize(a, 0, renvoScalarKindSize(g.c.renvoNativeIntSize, elem.kind))
-		// Size-only loads sign-extend halfwords. Restore the parsed element's
-		// signedness before its value reaches comparisons or wider arithmetic.
-		renvoAsmNormalizePrimaryForKind(a, elem.kind)
-		return true
+		return renvoEmitIndexPrimary(g, ep, idx, elem.kind)
 	}
 	return false
 }

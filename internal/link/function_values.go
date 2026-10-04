@@ -4246,6 +4246,9 @@ func functionValueTokenEquals(program *unit.Program, tok int, want string) bool 
 	if len(want) > 0 && program.Text[token.Start] != want[0] {
 		return false
 	}
+	if len(want) == 2 {
+		return program.Text[token.Start+1] == want[1]
+	}
 	return string(program.Text[token.Start:token.Start+token.Size]) == want
 }
 

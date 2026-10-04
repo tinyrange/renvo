@@ -323,6 +323,9 @@ func tokenTextIs(file *syntax.File, tok int, text string) bool {
 	if size > 0 && file.Src[start] != text[0] {
 		return false
 	}
+	if len(text) == 2 {
+		return file.Src[start+1] == text[1]
+	}
 	return string(file.Src[start:start+size]) == text
 }
 

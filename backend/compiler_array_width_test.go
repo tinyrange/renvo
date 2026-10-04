@@ -28,7 +28,8 @@ func TestArrayLengthPreserves64BitTargetOn32BitCompiler(t *testing.T) {
 		t.Run(test.bound, func(t *testing.T) {
 			resetRuntime()
 			source := []byte(fmt.Sprintf("package main\ntype Element struct{}\ntype NamedBound uint64\ntype SignedBound int64\ntype ShortBound uint32\ntype AliasBound=uint64\ntype Value [%s]Element\nfunc appMain()int{return 0}\n", test.bound))
-			program := renvoParseProgram(source)
+			context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+			program := renvoParseProgramWithContext(source, context)
 			// Force the same two-word parser contract used by a real 32-bit
 			// self-hosted compiler. Cross-host execution also has a corpus case.
 			program.compilerInt32 = true
@@ -55,7 +56,8 @@ func TestArrayLengthPreserves64BitTargetOn32BitCompiler(t *testing.T) {
 
 func TestWideArrayLengthsRetainAnonymousTypeIdentity(t *testing.T) {
 	resetRuntime()
-	program := renvoParseProgram([]byte("package main\ntype E struct{}\ntype A = [4294967296]E\ntype B = [4294967297]E\nfunc appMain()int{return 0}\n"))
+	context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+	program := renvoParseProgramWithContext([]byte("package main\ntype E struct{}\ntype A = [4294967296]E\ntype B = [4294967297]E\nfunc appMain()int{return 0}\n"), context)
 	program.compilerInt32 = true
 	var meta renvoMeta
 	renvoBuildMetaInto(&program, &meta)
@@ -74,35 +76,44 @@ func TestWideArrayLengthsRetainAnonymousTypeIdentity(t *testing.T) {
 }
 
 func TestWideArrayStructPointeesRetainMetadata(t *testing.T) {
-	for _, compilerInt32 := range []bool{false, true} {
-		t.Run(fmt.Sprintf("compiler32=%v", compilerInt32), func(t *testing.T) {
-			resetRuntime()
-			program := renvoParseProgram([]byte(`package main
-type Element struct{}
+	for _, test := range []struct {
+		element  string
+		overflow bool
+	}{
+		{"struct{}", false},
+		{"int64", true},
+	} {
+		for _, compilerInt32 := range []bool{false, true} {
+			t.Run(fmt.Sprintf("element=%s/compiler32=%v", test.element, compilerInt32), func(t *testing.T) {
+				resetRuntime()
+				context := renvoNewCompileContext(renvoTargetLinuxAmd64, false, false, false)
+				program := renvoParseProgramWithContext([]byte(fmt.Sprintf(`package main
+type Element %s
 type Huge [int(^uint(0)>>2)]Element
 type Nested struct{Prefix byte;Value Huge;Suffix int}
 type Alias = Nested
 type Wrap struct{Value Alias}
 func appMain()int{var value *Wrap;return len(value.Value.Value)}
-`))
-			program.compilerInt32 = compilerInt32
-			var meta renvoMeta
-			renvoBuildMetaInto(&program, &meta)
-			if !meta.ok {
-				t.Fatal("describing an unmaterialized large-array pointee failed")
-			}
-			structs := 0
-			for _, typ := range meta.types {
-				if typ.kind == renvoTypeStruct && typ.count > 0 {
-					structs++
-					if typ.size >= 0 {
-						t.Fatal("unrepresentable aggregate storage was narrowed to a valid size")
+`, test.element)), context)
+				program.compilerInt32 = compilerInt32
+				var meta renvoMeta
+				renvoBuildMetaInto(&program, &meta)
+				if !meta.ok {
+					t.Fatal("describing an unmaterialized large-array pointee failed")
+				}
+				structs := 0
+				for _, typ := range meta.types {
+					if typ.kind == renvoTypeStruct && typ.count > 0 {
+						structs++
+						if (typ.size < 0) != test.overflow {
+							t.Fatalf("aggregate size=%d, want overflow=%v", typ.size, test.overflow)
+						}
 					}
 				}
-			}
-			if structs != 2 {
-				t.Fatalf("found %d aggregate layouts, want 2", structs)
-			}
-		})
+				if structs != 2 {
+					t.Fatalf("found %d aggregate layouts, want 2", structs)
+				}
+			})
+		}
 	}
 }
