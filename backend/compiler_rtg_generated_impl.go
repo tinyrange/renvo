@@ -5799,8 +5799,32 @@ p := g.prog
 		}
 		return -1
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 return -1
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+e := &ep.exprs[idx]
+		if (!renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-')) ||
+			!renvoExprIsUntypedInteger(ep, e.right) {
+			return -1
+		}
+		kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+		if kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32 {
+			return -1
+		}
+		constant := renvoEvalConstExpr(g, ep, e.right)
+		if !constant.ok {
+			return -1
+		}
+		step := constant.value
+		if renvoTokCharIs(g.prog, e.tok, '-') {
+			step = -step
+		}
+		if !renvoEmitIntExpr(g, ep, e.left) {
+			return 0
+		}
+		renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+		return 1
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if g.c.renvoTarget != renvoTargetVM32 {

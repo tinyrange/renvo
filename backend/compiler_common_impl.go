@@ -26799,13 +26799,22 @@ func renvoCompileSourceInputs(input []int, output int, arenaSize int) int {
 
 func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 	for i := 0; i < renvoTokCount(prog); i++ {
-		if renvoTokIsKind(prog, i, renvoTokFloat) {
+		if renvoTokIsKind(prog, i, renvoTokFloat) ||
+			renvoTokIsKind(prog, i, renvoTokNumber) && renvoExprTokenIsImaginary(prog, i) {
 			return true
 		}
 		if !renvoTokIsKind(prog, i, renvoTokIdent) {
 			continue
 		}
 		tok := renvoTokAt(prog, i)
+		// Integer arguments to complex still produce floating components.
+		// Unit producers may also encode integer imaginary literals as numbers.
+		if i+1 < renvoTokCount(prog) && renvoTokCharIs(prog, i+1, '(') &&
+			(renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex") ||
+				renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "real") ||
+				renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "imag")) {
+			return true
+		}
 		if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
 			renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "36a2988bfe1425369ed28070777f689f6512f5ace8b38b9a6c53b53cd1d8a322"
+const CompilerSourceDigest = "ce78be97eaba223cb4b21520098decb4b6d40e4e99045ad24c798755a3387d2a"
 
 // source: backend/compiler_common_impl.go
 
@@ -26806,13 +26806,22 @@ return 1
 
 func renvoProgramNeedsSoftFloat(prog *renvoProgram) bool {
 for i := 0; i < renvoTokCount(prog); i++ {
-if renvoTokIsKind(prog, i, renvoTokFloat) {
+if renvoTokIsKind(prog, i, renvoTokFloat) ||
+renvoTokIsKind(prog, i, renvoTokNumber) && renvoExprTokenIsImaginary(prog, i) {
 return true
 }
 if !renvoTokIsKind(prog, i, renvoTokIdent) {
 continue
 }
 tok := renvoTokAt(prog, i)
+
+
+if i+1 < renvoTokCount(prog) && renvoTokCharIs(prog, i+1, '(') &&
+(renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex") ||
+renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "real") ||
+renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "imag")) {
+return true
+}
 if renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float32") ||
 renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "float64") ||
 renvoBytesEqualText(prog.src, int(tok.start), int(tok.end), "complex64") ||
@@ -36965,8 +36974,32 @@ return 1
 }
 return -1
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 return -1
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+e := &ep.exprs[idx]
+if (!renvoTokCharIs(g.prog, e.tok, '+') && !renvoTokCharIs(g.prog, e.tok, '-')) ||
+!renvoExprIsUntypedInteger(ep, e.right) {
+return -1
+}
+kind := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx)).kind
+if kind != renvoTypeInt && kind != renvoTypeInt32 && kind != renvoTypeUint32 {
+return -1
+}
+constant := renvoEvalConstExpr(g, ep, e.right)
+if !constant.ok {
+return -1
+}
+step := constant.value
+if renvoTokCharIs(g.prog, e.tok, '-') {
+step = -step
+}
+if !renvoEmitIntExpr(g, ep, e.left) {
+return 0
+}
+renvoArmAsmAddRegImm(&g.asm, 0, 0, step)
+return 1
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if g.c.renvoTarget != renvoTargetVM32 {
