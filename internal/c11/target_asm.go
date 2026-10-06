@@ -1,10 +1,9 @@
 package c11
 
 func (t *translator) emitTargetAsm(operation cAsm) bool {
-	fail := func() bool { t.ok = false; t.err = TranslateErrUnsupported; t.errorAt = operation.offset; return false }
 	compiler := t.asmCompiler
 	if compiler == nil || compiler.WordBits() == 0 {
-		return fail()
+		return t.failTargetAsm(operation.offset)
 	}
 	name := "__c_target_asm_" + t.asmNamespace + "_" + decimalString(len(t.asmSources))
 	outputs := []AssemblyOperand{}
@@ -16,7 +15,7 @@ func (t *translator) emitTargetAsm(operation cAsm) bool {
 			typ := t.typeInfo(t.lvalueType(operand.expression))
 			value.Bits, value.Signed = typ.size*8, typ.kind == cTypeInt
 			if typ.kind != cTypeInt && typ.kind != cTypeUint && typ.kind != cTypePointer || typ.size <= 0 || typ.size > compiler.WordBits()/8 || typ.qualifiers&cQualifierConst != 0 {
-				return fail()
+				return t.failTargetAsm(operation.offset)
 			}
 			outputs = append(outputs, value)
 		} else {
@@ -25,12 +24,12 @@ func (t *translator) emitTargetAsm(operation cAsm) bool {
 			if operand.constraint == "i" || operand.constraint == "n" {
 				constant, ok := t.constantExpression(operand.expression)
 				if !ok {
-					return fail()
+					return t.failTargetAsm(operation.offset)
 				}
 				value.Constant = true
 				value.Value = decimalString(constant)
 			} else if typ.kind != cTypeInt && typ.kind != cTypeUint && typ.kind != cTypePointer || typ.size <= 0 || typ.size > compiler.WordBits()/8 {
-				return fail()
+				return t.failTargetAsm(operation.offset)
 			}
 			inputs = append(inputs, value)
 		}
@@ -38,7 +37,7 @@ func (t *translator) emitTargetAsm(operation cAsm) bool {
 	lowered := compiler.CompileInline(AssemblyRequest{Name: name, Template: operation.template, Outputs: outputs, Inputs: inputs, Clobbers: operation.clobbers, Labels: operation.labels, Unique: len(t.asmSources)})
 	if !lowered.Ok {
 		t.asmError = lowered.Message
-		return fail()
+		return t.failTargetAsm(operation.offset)
 	}
 	// All expression evaluation stays in ordinary frontend code. Only their
 	// runtime words enter the managed body; assembly never splices C source.
@@ -67,7 +66,7 @@ func (t *translator) emitTargetAsm(operation cAsm) bool {
 		operand := operands[word.Operand]
 		if word.Address {
 			if t.lvalueType(operand.expression) == cTypeVoidID {
-				return fail()
+				return t.failTargetAsm(operation.offset)
 			}
 			t.appendText("uintptr(__c_unsafe.Pointer(&(")
 			t.emitExpression(operand.expression)
@@ -90,4 +89,13 @@ func (t *translator) emitTargetAsm(operation cAsm) bool {
 	}
 	t.appendText("};")
 	return t.ok
+}
+
+// A direct helper keeps failure handling out of function-value dispatch. The
+// translator does not need a closure/environment or a callable nil boundary.
+func (t *translator) failTargetAsm(offset int) bool {
+	t.ok = false
+	t.err = TranslateErrUnsupported
+	t.errorAt = offset
+	return false
 }

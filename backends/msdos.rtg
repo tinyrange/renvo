@@ -871,17 +871,17 @@ go backend {
 
 arch i8086 {
 	frontend_constraints {
-r = [ax, cx, dx, bx, si, di]
-a = [ax]
-c = [cx]
-d = [dx]
-S = [si]
-D = [di]
-i = immediate
-n = immediate
-cc = resource flags
-    }
-    frontend_syntax {
+		r = [ax, cx, dx, bx, si, di]
+		a = [ax]
+		c = [cx]
+		d = [dx]
+		S = [si]
+		D = [di]
+		i = immediate
+		n = immediate
+		cc = resource flags
+	}
+	frontend_syntax {
 		att {
 			style = att
 			new_label = new_label
@@ -907,7 +907,7 @@ cc = resource flags
 		}
 	}
 
-    frontend_syntax {
+	frontend_syntax {
 		intel {
 			style = intel
 			new_label = new_label

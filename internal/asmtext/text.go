@@ -22,7 +22,9 @@ func Scan(source []byte) ([]Line, Error) {
 		return nil, Error{Message: "assembly exceeds the source limit"}
 	}
 	lines := []Line{}
-	var text strings.Builder
+	// Keep line storage owned by the scanner. A strings.Builder adds a
+	// copy-check panic path to every self-hosted compiler that imports us.
+	var text []byte
 	start := 0
 	blockComment, lineComment := false, false
 	for at := 0; at <= len(source); at++ {
@@ -32,19 +34,19 @@ func Scan(source []byte) ([]Line, Error) {
 		}
 		if blockComment && at+1 < len(source) && c == '*' && source[at+1] == '/' {
 			blockComment = false
-			text.WriteByte(' ')
+			text = append(text, ' ')
 			at++
 			continue
 		}
 		if c == '\n' || c == ';' && !blockComment && !lineComment {
-			value := strings.TrimSpace(text.String())
+			value := strings.TrimSpace(string(text))
 			if value != "" {
 				lines = append(lines, Line{Text: value, Start: start, End: at})
 			}
 			if len(lines) > 8192 {
 				return nil, Error{Offset: start, Message: "assembly exceeds the statement limit"}
 			}
-			text.Reset()
+			text = nil
 			start = at + 1
 			lineComment = false
 			continue
@@ -59,13 +61,13 @@ func Scan(source []byte) ([]Line, Error) {
 		if at+1 < len(source) && c == '/' && source[at+1] == '*' {
 			blockComment = true
 			at++
-			text.WriteByte(' ')
+			text = append(text, ' ')
 			continue
 		}
 		if c == '"' || c == '\'' || c == '`' {
 			return nil, Error{Offset: at, Message: "quoted data and assembler expressions are not instruction operands"}
 		}
-		text.WriteByte(c)
+		text = append(text, c)
 	}
 	if blockComment {
 		return nil, Error{Offset: start, Message: "unterminated assembler comment"}
