@@ -931,6 +931,19 @@ def pr_continue_approved_config(expected_head):
 pr_work = pr_work + module("pr_work", resume = pr_resume,
     continue_approved_config = pr_continue_approved_config)
 
+# Focused WASI self-hosting diagnosis using the existing backend test.
+def wasi_selfhost_smoke():
+    """Run only the existing WASI stage-one smoke test with cross-target opt-in."""
+    return std_go_test(
+        packages = ["./backend"],
+        run = "^TestStage1CompilerCanEmitSmokeTargets$/^wasi$/^wasm32$",
+        verbose = True, count = 1, timeout = "9m", cwd = _work(),
+        env = {"RENVO_CROSS_ARCH_TESTS": "1"},
+        timeout_ms = 600000, output_limit = 2097152,
+    )
+
+repo = repo + module("repo", wasi_selfhost_smoke = wasi_selfhost_smoke)
+
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo,
     "propose_agents_star": propose_agents_star, "publication": publication,
@@ -951,3 +964,5 @@ default = privileged.model("gpt-6-astra").create(default_repl, prompt_addons = [
     "Preserve user changes. Additional capabilities require a new user-approved " +
     "configuration; do not bypass these restrictions through existing tools.",
 ])
+
+
