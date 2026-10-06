@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "6b1a767901ed8fde96b14bc65cad5afaa3a3959f38cff210f4c3912c98962069"
+const CompilerSourceDigest = "7da996c63de0c8031b52121aab206d9d2f2a3eb5d1f508888e8aa3ca2adc53f3"
 
 // source: backend/compiler_common_impl.go
 
@@ -30522,7 +30522,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x9d\xf6\x35\xbf\x83\x1d\x4a\x95\xc3\x9f\x4c\xb0\x6d\x67\x73\x4d\xdb\x25\x1b\xef\x9b\xda\xef\xb9\x63\x00\x83\xd3\xf6\x53\xc9\xac", 3, true
+return "wasi/wasm32", "\x30\x50\x0c\xa0\x43\x1f\xfe\xb3\x6e\xec\xbd\x2c\x4d\x86\xa4\x76\x15\xf8\xc6\x6d\x1e\x8b\x7c\xea\xa5\xb2\xa3\x4f\x55\x88\x4e\x5e", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30534,7 +30534,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x8f\x81\xd3\x7a\xea\xf5\x5a\x8b\xed\x6a\xe0\xaf\xdb\xf0\xb4\x99\xd3\xfa\xcc\xa3\xec\xc4\x70\xd4\x29\x83\x74\x5e\xe0\xd1\x50\xde", 3, true
+return "vm/vm32", "\x58\xc6\x8b\x77\xf1\x10\x93\x47\x1b\xfe\x99\x2e\x83\xc0\xe5\x2d\xfd\xde\x76\x46\x67\xb5\x49\xf9\xef\x78\x6f\xcc\xf7\x78\x53\x86", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
@@ -46666,6 +46666,30 @@ renvoArmAsmAddRegImm(a, 1, 1, 16)
 renvoArmAsmAddRegImm(a, 2, 2, -16)
 renvoAsmJmpLabel(a, chunks)
 renvoAsmMarkLabel(a, tail)
+
+
+shortChunks := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, shortChunks)
+renvoArmAsmCmpRegImm(a, 2, 4)
+renvoArmAsmBCondLabel(a, bytes, 3)
+if direction == 0 {
+renvoArmAsmAddRegImm(a, 0, 0, -4)
+renvoArmAsmAddRegImm(a, 1, 1, -4)
+}
+for index := 0; index < 4; index++ {
+at := index
+if direction == 0 {
+at = 3 - index
+}
+renvoArmAsmLoadRegMem(a, 9, 0, at, 1)
+renvoArmAsmStoreRegMem(a, 9, 1, at, 1)
+}
+if direction == 1 {
+renvoArmAsmAddRegImm(a, 0, 0, 4)
+renvoArmAsmAddRegImm(a, 1, 1, 4)
+}
+renvoArmAsmAddRegImm(a, 2, 2, -4)
+renvoAsmJmpLabel(a, shortChunks)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
 renvoArmAsmBCondLabel(a, done, 0)

@@ -15487,6 +15487,30 @@ if g.copyBytesLabel > 0 {
 			renvoArmAsmAddRegImm(a, 2, 2, -16)
 			renvoAsmJmpLabel(a, chunks)
 			renvoAsmMarkLabel(a, tail)
+			// Short backreferences and slice copies still benefit from chunks.
+			// Keep byte-sized accesses and the same overlap-safe visitation order.
+			shortChunks := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, shortChunks)
+			renvoArmAsmCmpRegImm(a, 2, 4)
+			renvoArmAsmBCondLabel(a, bytes, 3)
+			if direction == 0 {
+				renvoArmAsmAddRegImm(a, 0, 0, -4)
+				renvoArmAsmAddRegImm(a, 1, 1, -4)
+			}
+			for index := 0; index < 4; index++ {
+				at := index
+				if direction == 0 {
+					at = 3 - index
+				}
+				renvoArmAsmLoadRegMem(a, 9, 0, at, 1)
+				renvoArmAsmStoreRegMem(a, 9, 1, at, 1)
+			}
+			if direction == 1 {
+				renvoArmAsmAddRegImm(a, 0, 0, 4)
+				renvoArmAsmAddRegImm(a, 1, 1, 4)
+			}
+			renvoArmAsmAddRegImm(a, 2, 2, -4)
+			renvoAsmJmpLabel(a, shortChunks)
 			renvoAsmMarkLabel(a, bytes)
 			renvoArmAsmCmpRegImm(a, 2, 0)
 			renvoArmAsmBCondLabel(a, done, 0)
