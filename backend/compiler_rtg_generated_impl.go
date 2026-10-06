@@ -15435,18 +15435,19 @@ if g.copyBytesLabel > 0 {
 			renvoAsmMarkLabel(a, bytes)
 			renvoArmAsmCmpRegImm(a, 2, 0)
 			renvoArmAsmBCondLabel(a, done, 0)
+			byteLoop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, byteLoop)
+			// Indexing updates pointers in the memory instructions themselves.
 			if direction == 0 {
-				renvoArmAsmAddRegImm(a, 0, 0, -1)
-				renvoArmAsmAddRegImm(a, 1, 1, -1)
+				renvoArmAsmEmit(a, 0xe5709001) // LDRB r9, [r0, #-1]!.
+				renvoArmAsmEmit(a, 0xe5619001) // STRB r9, [r1, #-1]!.
+			} else {
+				renvoArmAsmEmit(a, 0xe4d09001) // LDRB r9, [r0], #1.
+				renvoArmAsmEmit(a, 0xe4c19001) // STRB r9, [r1], #1.
 			}
-			renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-			renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-			if direction == 1 {
-				renvoArmAsmAddRegImm(a, 0, 0, 1)
-				renvoArmAsmAddRegImm(a, 1, 1, 1)
-			}
-			renvoArmAsmAddRegImm(a, 2, 2, -1)
-			renvoAsmJmpLabel(a, bytes)
+			renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1.
+			renvoArmAsmBCondLabel(a, byteLoop, 1)
+			renvoAsmJmpLabel(a, done)
 		}
 		renvoAsmMarkLabel(a, done)
 		renvoAsmRet(a)
@@ -15514,18 +15515,19 @@ if g.copyBytesLabel > 0 {
 			renvoAsmMarkLabel(a, bytes)
 			renvoArmAsmCmpRegImm(a, 2, 0)
 			renvoArmAsmBCondLabel(a, done, 0)
+			byteLoop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, byteLoop)
+			// Indexing updates pointers in the memory instructions themselves.
 			if direction == 0 {
-				renvoArmAsmAddRegImm(a, 0, 0, -1)
-				renvoArmAsmAddRegImm(a, 1, 1, -1)
+				renvoArmAsmEmit(a, 0xe5709001) // LDRB r9, [r0, #-1]!.
+				renvoArmAsmEmit(a, 0xe5619001) // STRB r9, [r1, #-1]!.
+			} else {
+				renvoArmAsmEmit(a, 0xe4d09001) // LDRB r9, [r0], #1.
+				renvoArmAsmEmit(a, 0xe4c19001) // STRB r9, [r1], #1.
 			}
-			renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-			renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-			if direction == 1 {
-				renvoArmAsmAddRegImm(a, 0, 0, 1)
-				renvoArmAsmAddRegImm(a, 1, 1, 1)
-			}
-			renvoArmAsmAddRegImm(a, 2, 2, -1)
-			renvoAsmJmpLabel(a, bytes)
+			renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1.
+			renvoArmAsmBCondLabel(a, byteLoop, 1)
+			renvoAsmJmpLabel(a, done)
 		}
 		renvoAsmMarkLabel(a, after)
 		return label

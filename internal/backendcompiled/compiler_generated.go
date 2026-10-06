@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a233fcdfbacde9838ef575e8c39a74112cd8acb9e8f07abf81caed5974c9503b"
+const CompilerSourceDigest = "a5187e4a7593d026ef6fdcf7c13d9a512301ffb670c6ce5a7d7aacfb54703202"
 
 // source: backend/compiler_common_impl.go
 
@@ -30522,7 +30522,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x30\x50\x0c\xa0\x43\x1f\xfe\xb3\x6e\xec\xbd\x2c\x4d\x86\xa4\x76\x15\xf8\xc6\x6d\x1e\x8b\x7c\xea\xa5\xb2\xa3\x4f\x55\x88\x4e\x5e", 3, true
+return "wasi/wasm32", "\x0e\xb8\xb7\x2c\x56\x21\xa8\xc7\x77\x01\x02\x5e\x5a\x15\xc0\xb2\xfc\xc0\x4e\xc0\x8c\xb6\x48\x7d\x95\xdf\x51\x26\xbf\x25\xa1\xe4", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30534,7 +30534,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x58\xc6\x8b\x77\xf1\x10\x93\x47\x1b\xfe\x99\x2e\x83\xc0\xe5\x2d\xfd\xde\x76\x46\x67\xb5\x49\xf9\xef\x78\x6f\xcc\xf7\x78\x53\x86", 3, true
+return "vm/vm32", "\x7f\xe6\x15\x4d\x8e\x21\x16\xf9\xec\xa0\x70\x0a\x13\xef\x51\x13\x3a\xb6\xb2\xe6\x0f\xf2\x7b\xc4\xd2\x9d\x5b\xc3\x40\x5e\xc0\x1d", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
@@ -46614,18 +46614,19 @@ renvoAsmMarkLabel(a, tail)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
 renvoArmAsmBCondLabel(a, done, 0)
+byteLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, byteLoop)
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -1)
-renvoArmAsmAddRegImm(a, 1, 1, -1)
+renvoArmAsmEmit(a, 0xe5709001)
+renvoArmAsmEmit(a, 0xe5619001)
+} else {
+renvoArmAsmEmit(a, 0xe4d09001)
+renvoArmAsmEmit(a, 0xe4c19001)
 }
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 1)
-renvoArmAsmAddRegImm(a, 1, 1, 1)
-}
-renvoArmAsmAddRegImm(a, 2, 2, -1)
-renvoAsmJmpLabel(a, bytes)
+renvoArmAsmEmit(a, 0xe2522001)
+renvoArmAsmBCondLabel(a, byteLoop, 1)
+renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 renvoAsmRet(a)
@@ -46693,18 +46694,19 @@ renvoAsmJmpLabel(a, shortChunks)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
 renvoArmAsmBCondLabel(a, done, 0)
+byteLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, byteLoop)
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -1)
-renvoArmAsmAddRegImm(a, 1, 1, -1)
+renvoArmAsmEmit(a, 0xe5709001)
+renvoArmAsmEmit(a, 0xe5619001)
+} else {
+renvoArmAsmEmit(a, 0xe4d09001)
+renvoArmAsmEmit(a, 0xe4c19001)
 }
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 1)
-renvoArmAsmAddRegImm(a, 1, 1, 1)
-}
-renvoArmAsmAddRegImm(a, 2, 2, -1)
-renvoAsmJmpLabel(a, bytes)
+renvoArmAsmEmit(a, 0xe2522001)
+renvoArmAsmBCondLabel(a, byteLoop, 1)
+renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, after)
 return label
@@ -55053,37 +55055,13 @@ renvoArmAsmCmpRegReg(a, renvoArmRegRsi, renvoArmRegRcx)
 renvoArmAsmBCondLabel(a, notEqualLabel, 1)
 renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
 renvoArmAsmBCondLabel(a, equalLabel, 0)
-renvoArmAsmCmpRegReg(a, renvoArmRegRdi, renvoArmRegRdx)
-renvoArmAsmBCondLabel(a, equalLabel, 0)
-
-
-tailLabel := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, loopLabel)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 4)
-renvoArmAsmBCondLabel(a, tailLabel, 3)
-for at := 0; at < 4; at++ {
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, at, 1)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, at, 1)
+
+renvoArmAsmEmit(a, 0xe4d39001)
+renvoArmAsmEmit(a, 0xe4d1a001)
 renvoArmAsmCmpRegReg(a, renvoArmRegTmp, renvoArmRegTmp2)
 renvoArmAsmBCondLabel(a, notEqualLabel, 1)
-}
-renvoArmAsmAddRegImm(a, renvoArmRegRdi, renvoArmRegRdi, 4)
-renvoArmAsmAddRegImm(a, renvoArmRegRdx, renvoArmRegRdx, 4)
-renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRsi, -4)
-renvoAsmJmpLabel(a, loopLabel)
-renvoAsmMarkLabel(a, tailLabel)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
-renvoArmAsmBCondLabel(a, equalLabel, 0)
-loopLabel = renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, loopLabel)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 1)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, 0, 1)
-renvoArmAsmCmpRegReg(a, renvoArmRegTmp, renvoArmRegTmp2)
-renvoArmAsmBCondLabel(a, notEqualLabel, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdi, renvoArmRegRdi, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdx, renvoArmRegRdx, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRsi, -1)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
+renvoArmAsmEmit(a, 0xe2544001)
 renvoArmAsmBCondLabel(a, loopLabel, 1)
 renvoAsmMarkLabel(a, equalLabel)
 renvoAsmPrimaryImm(a, 1)
