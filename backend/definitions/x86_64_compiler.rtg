@@ -181,6 +181,15 @@ go compiler {
 		renvoAsmMarkLabel(a, shortDone)
 		renvoAsmEmitText(a, "\x31\xc9\xfc\xc3") // Clear count and DF; RET.
 		renvoAsmMarkLabel(a, large)
+		// Keep the <=16-byte dispatch unchanged; only medium ranges take this
+		// extra test. Snapshot both 16-byte ends before either store, which
+		// also implements memmove for every overlap distance and alignment.
+		bulk := renvoAsmNewLabel(a)
+		renvoAsmEmitText(a, "\x48\x83\xf9\x20") // CMP RCX,32.
+		renvoAmd64AsmJccLabel(a, 0x87, bulk)
+		renvoAsmEmitText(a, "\xf3\x0f\x6f\x06\xf3\x0f\x6f\x4c\x0e\xf0\xf3\x0f\x7f\x07\xf3\x0f\x7f\x4c\x0f\xf0")
+		renvoAsmJmpLabel(a, shortDone)
+		renvoAsmMarkLabel(a, bulk)
 		// A destination above the source only needs a backward copy when the
 		// ranges actually overlap. Forward REP MOVSB handles disjoint copies.
 		renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
@@ -735,16 +744,24 @@ go compiler {
 		renvoAsmJnzLabel(a, notEqualLabel)
 		renvoAsmEmitText(a, "\x48\x85\xf6")
 		renvoAsmJzLabel(a, equalLabel)
-		// Consume complete words, then compare the beginning and end of the
-		// short tail. Overlapping tail reads are safe and avoid byte loops.
+		// The first and last words cover an 8..16-byte tail without pointer
+		// updates or a second loop trip. All reads follow the length guard.
 		tail := renvoAsmNewLabel(a)
-		renvoAsmMarkLabel(a, loopLabel)
+		shortWords := renvoAsmNewLabel(a)
 		renvoAsmEmitText(a, "\x48\x83\xfe\x08")
 		renvoAmd64AsmJccLabel(a, 0x82, tail)
+		renvoAsmMarkLabel(a, loopLabel)
+		renvoAsmEmitText(a, "\x48\x83\xfe\x10")
+		renvoAmd64AsmJccLabel(a, 0x86, shortWords)
 		renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
 		renvoAsmJnzLabel(a, notEqualLabel)
 		renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08")
-		renvoAsmJmpMarkLabel(a, loopLabel, tail)
+		renvoAsmJmpMarkLabel(a, loopLabel, shortWords)
+		renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoAsmEmitText(a, "\x4c\x8b\x44\x37\xf8\x4c\x3b\x44\x32\xf8")
+		renvoAsmJnzLabel(a, notEqualLabel)
+		renvoAsmJmpMarkLabel(a, equalLabel, tail)
 		for width := 4; width >= 2; width /= 2 {
 			next := renvoAsmNewLabel(a)
 			renvoAsmEmitText(a, "\x48\x83\xfe")
@@ -5129,14 +5146,5 @@ go compiler {
 go compiler {
 	func renvoAmd64CompilerReplGlobalsSupported(c *renvoCompileContext) bool {
 		return true
-	}
-}
-
-go compiler {
-	// CMP EAX, imm32 compares the exact low bits of zero-extended short loads.
-	// A four-byte literal's high bit must not sign-extend into the upper word.
-	func renvoAmd64AsmCmpShortStringWord(a *renvoAsm, word int) {
-		renvoAsmEmit8(a, 0x3d)
-		renvoAsmEmit32(a, word)
 	}
 }

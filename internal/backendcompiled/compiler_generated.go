@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "caa0fad4c0baed203c08e4a0a2f69f3e0fb703ad195be6715346ecdfb629c1b1"
+const CompilerSourceDigest = "3baafa1fe3c4ad1e99fda1e5da6b9cb854828b6a95df0a81159d36f7bd7cefcd"
 
 // source: backend/compiler_common_impl.go
 
@@ -18693,27 +18693,10 @@ renvoAsmCopySecondaryToPrimary(a)
 renvoAsmCmpPrimaryImm8(a, len(value))
 renvoAsmPopSecondary(a)
 renvoAsmJnzLabel(a, fail)
-for at := 0; at < len(value); {
-width := 1
-if g.c.renvoTargetArch == renvoArchAmd64 {
-if at+4 <= len(value) {
-width = 4
-} else if at+2 <= len(value) {
-width = 2
-}
-}
-word := 0
-for i := 0; i < width; i++ {
-word |= int(value[at+i]) << (i * 8)
-}
-renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, width)
-if g.c.renvoTargetArch == renvoArchAmd64 {
-renvoAmd64AsmCmpShortStringWord(a, word)
-} else {
-renvoAsmCmpPrimaryImm8(a, word)
-}
+for at := 0; at < len(value); at++ {
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, 1)
+renvoAsmCmpPrimaryImm8(a, int(value[at]))
 renvoAsmJnzLabel(a, fail)
-at += width
 }
 if notEqual {
 renvoAsmPrimaryImm(a, 0)
@@ -18734,7 +18717,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 renvoNonNil(g, ep)
 
 
-if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchArm) {
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchArm {
 literal := right
 operand := left
 if ep.exprs[literal].kind != renvoExprString {
@@ -48385,6 +48368,15 @@ renvoAsmEmitText(a, "\x31\xc9\xfc\xc3")
 renvoAsmMarkLabel(a, large)
 
 
+
+bulk := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x83\xf9\x20")
+renvoAmd64AsmJccLabel(a, 0x87, bulk)
+renvoAsmEmitText(a, "\xf3\x0f\x6f\x06\xf3\x0f\x6f\x4c\x0e\xf0\xf3\x0f\x7f\x07\xf3\x0f\x7f\x4c\x0f\xf0")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, bulk)
+
+
 renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, end)
@@ -48940,13 +48932,21 @@ renvoAsmJzLabel(a, equalLabel)
 
 
 tail := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, loopLabel)
+shortWords := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x83\xfe\x08")
 renvoAmd64AsmJccLabel(a, 0x82, tail)
+renvoAsmMarkLabel(a, loopLabel)
+renvoAsmEmitText(a, "\x48\x83\xfe\x10")
+renvoAmd64AsmJccLabel(a, 0x86, shortWords)
 renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
 renvoAsmJnzLabel(a, notEqualLabel)
 renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08")
-renvoAsmJmpMarkLabel(a, loopLabel, tail)
+renvoAsmJmpMarkLabel(a, loopLabel, shortWords)
+renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoAsmEmitText(a, "\x4c\x8b\x44\x37\xf8\x4c\x3b\x44\x32\xf8")
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoAsmJmpMarkLabel(a, equalLabel, tail)
 for width := 4; width >= 2; width /= 2 {
 next := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x83\xfe")
@@ -49323,13 +49323,6 @@ if condition == renvoConditionUnsignedGreater {
 return 0x97
 }
 return 0
-}
-
-
-
-func renvoAmd64AsmCmpShortStringWord(a *renvoAsm, word int) {
-renvoAsmEmit8(a, 0x3d)
-renvoAsmEmit32(a, word)
 }
 
 // source: backend/compiler_amd64_target_impl.go

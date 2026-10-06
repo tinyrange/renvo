@@ -18686,27 +18686,10 @@ func renvoEmitShortLiteralStringCompare(g *renvoLinearGen, ep *renvoExprParse, o
 	renvoAsmCmpPrimaryImm8(a, len(value))
 	renvoAsmPopSecondary(a)
 	renvoAsmJnzLabel(a, fail)
-	for at := 0; at < len(value); {
-		width := 1
-		if g.c.renvoTargetArch == renvoArchAmd64 {
-			if at+4 <= len(value) {
-				width = 4
-			} else if at+2 <= len(value) {
-				width = 2
-			}
-		}
-		word := 0
-		for i := 0; i < width; i++ {
-			word |= int(value[at+i]) << (i * 8)
-		}
-		renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, width)
-		if g.c.renvoTargetArch == renvoArchAmd64 {
-			renvoAmd64AsmCmpShortStringWord(a, word)
-		} else {
-			renvoAsmCmpPrimaryImm8(a, word)
-		}
+	for at := 0; at < len(value); at++ {
+		renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, 1)
+		renvoAsmCmpPrimaryImm8(a, int(value[at]))
 		renvoAsmJnzLabel(a, fail)
-		at += width
 	}
 	if notEqual {
 		renvoAsmPrimaryImm(a, 0)
@@ -18727,7 +18710,7 @@ func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, rig
 	renvoNonNil(g, ep)
 	// Only literal operands qualify; the other operand still executes exactly
 	// once, and borrowing its byte storage is safe against a pure literal.
-	if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchArm) {
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchArm {
 		literal := right
 		operand := left
 		if ep.exprs[literal].kind != renvoExprString {

@@ -332,7 +332,19 @@ func (b *coreUnitBuilder) addFileTokens(file *syntax.File, src []byte, fileIndex
 	base := len(b.program.Text)
 	tokenBase := len(b.program.Tokens)
 	lineOffset := b.lineOffset
-	newlines := countCoreNewlines(src)
+	// Successful scanning already records the physical EOF line, including
+	// comments and multiline literals. Reuse it instead of rescanning source.
+	newlines := -1
+	if len(file.Tokens) > 0 {
+		eof := &file.Tokens[len(file.Tokens)-1]
+		line := eof.KindLine >> syntax.TokenOperatorLineShift
+		if eof.KindLine&255 == syntax.TokenEOF && int(eof.Start) == len(src) && int(eof.End) == len(src) && line > 0 && line <= syntax.TokenLineLimit {
+			newlines = line - 1
+		}
+	}
+	if newlines < 0 {
+		newlines = countCoreNewlines(src)
+	}
 	needsSeparator := hasNext && (len(src) == 0 || src[len(src)-1] != '\n')
 	for i := 0; i < len(file.Tokens); i++ {
 		tok := &file.Tokens[i]

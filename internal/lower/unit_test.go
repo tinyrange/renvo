@@ -142,3 +142,30 @@ func lowerSpanText(program unit.Program, start int, end int) string {
 	}
 	return string(program.Text[start:end])
 }
+
+// Physical lines include newlines inside comments and raw literals, not just
+// gaps between tokens. File separators and a trailing comment without a final
+// newline must also preserve the next file's lines and the final EOF line.
+func TestEmitCheckedPackageCorePreservesPhysicalTokenLines(t *testing.T) {
+	graph := lowerTestGraph(t, []load.SourceFile{
+		{Path: "/repo/case/cmd/app/a.go", Src: []byte("package main\n/* first\nsecond\n*/\nconst raw = `first\nsecond`\n// trailing comment")},
+		{Path: "/repo/case/cmd/app/b.go", Src: []byte("package main\nfunc alpha() string { return raw }\n\n")},
+		{Path: "/repo/case/cmd/app/c.go", Src: []byte("package main\nfunc beta() int { return 1 } /* final\ncomment */")},
+		{Path: "/repo/case/cmd/app/d.go", Src: []byte("package main\n// last\n\n")},
+	})
+	checked := check.CheckGraphCore(graph)
+	if !checked.Ok {
+		t.Fatalf("CheckGraphCore failed: err=%d file=%d tok=%d", checked.Error, checked.ErrorFile, checked.ErrorToken)
+	}
+	root := lowerRootPackage(t, graph)
+	result := EmitCheckedPackageCore(graph.Packages[root], checked.Packages[root], false)
+	if !result.Ok {
+		t.Fatalf("EmitCheckedPackageCore failed: err=%d", result.Error)
+	}
+	for i, token := range result.Program.Tokens {
+		want := bytes.Count(result.Program.Text[:token.Start], []byte("\n")) + 1
+		if got := token.KindLine >> 8; got != want {
+			t.Fatalf("token %d (%q) physical line = %d, want %d", i, lowerTokenText(result.Program, i), got, want)
+		}
+	}
+}
