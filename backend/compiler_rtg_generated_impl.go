@@ -15351,15 +15351,31 @@ if g.copyBytesLabel > 0 {
 		renvoAsmJmpMarkLabel(a, after, label)
 		unaligned := renvoAsmNewLabel(a)
 		renvoArmAsmEmit(a, 0xe1809001) // ORR r9, r0, r1.
-		renvoArmAsmEmit(a, 0xe1899002) // ORR r9, r9, r2.
 		renvoArmAsmEmit(a, 0xe3190003) // TST r9, #3.
 		renvoArmAsmBCondLabel(a, unaligned, 1)
 		forward := renvoAsmNewLabel(a)
 		done := renvoAsmNewLabel(a)
 		renvoArmAsmCmpRegReg(a, 1, 0)
 		renvoArmAsmBCondLabel(a, forward, 9)
+		renvoArmAsmEmit(a, 0xe0419000) // SUB r9, r1, r0 (positive destination distance).
+		renvoArmAsmCmpRegReg(a, 9, 2)
+		renvoArmAsmBCondLabel(a, forward, 2)
 		renvoArmAsmAddRegRegShift(a, 0, 0, 2, 0)
 		renvoArmAsmAddRegRegShift(a, 1, 1, 2, 0)
+		// Aligned starts with an odd byte count have unaligned ends. Peel the
+		// backward byte tail first, then use only aligned word loads/stores.
+		backwardTail := renvoAsmNewLabel(a)
+		backwardWords := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, backwardTail)
+		renvoArmAsmEmit(a, 0xe3120003) // TST r2, #3.
+		renvoArmAsmBCondLabel(a, backwardWords, 0)
+		renvoArmAsmAddRegImm(a, 0, 0, -1)
+		renvoArmAsmAddRegImm(a, 1, 1, -1)
+		renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
+		renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
+		renvoArmAsmAddRegImm(a, 2, 2, -1)
+		renvoAsmJmpLabel(a, backwardTail)
+		renvoAsmMarkLabel(a, backwardWords)
 		for direction := 0; direction < 2; direction++ {
 			if direction == 1 {
 				renvoAsmMarkLabel(a, forward)
