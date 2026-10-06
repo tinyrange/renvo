@@ -5131,3 +5131,12 @@ go compiler {
 		return true
 	}
 }
+
+go compiler {
+	// CMP EAX, imm32 compares the exact low bits of zero-extended short loads.
+	// A four-byte literal's high bit must not sign-extend into the upper word.
+	func renvoAmd64AsmCmpShortStringWord(a *renvoAsm, word int) {
+		renvoAsmEmit8(a, 0x3d)
+		renvoAsmEmit32(a, word)
+	}
+}

@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "a5187e4a7593d026ef6fdcf7c13d9a512301ffb670c6ce5a7d7aacfb54703202"
+const CompilerSourceDigest = "caa0fad4c0baed203c08e4a0a2f69f3e0fb703ad195be6715346ecdfb629c1b1"
 
 // source: backend/compiler_common_impl.go
 
@@ -18677,8 +18677,74 @@ return renvoStringCompareOperandIsReadOnly(g, ep, renvo_runtime_UnsafeIntAt(ep.a
 return false
 }
 
+
+
+
+func renvoEmitShortLiteralStringCompare(g *renvoLinearGen, ep *renvoExprParse, operand int, literal int, notEqual bool) bool {
+value := renvoDecodeStringToken(g.prog, ep.exprs[literal].tok)
+a := &g.asm
+if !renvoEmitStringCompareValueRegs(g, ep, operand, true) {
+return false
+}
+fail := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmPushPrimary(a)
+renvoAsmCopySecondaryToPrimary(a)
+renvoAsmCmpPrimaryImm8(a, len(value))
+renvoAsmPopSecondary(a)
+renvoAsmJnzLabel(a, fail)
+for at := 0; at < len(value); {
+width := 1
+if g.c.renvoTargetArch == renvoArchAmd64 {
+if at+4 <= len(value) {
+width = 4
+} else if at+2 <= len(value) {
+width = 2
+}
+}
+word := 0
+for i := 0; i < width; i++ {
+word |= int(value[at+i]) << (i * 8)
+}
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, width)
+if g.c.renvoTargetArch == renvoArchAmd64 {
+renvoAmd64AsmCmpShortStringWord(a, word)
+} else {
+renvoAsmCmpPrimaryImm8(a, word)
+}
+renvoAsmJnzLabel(a, fail)
+at += width
+}
+if notEqual {
+renvoAsmPrimaryImm(a, 0)
+} else {
+renvoAsmPrimaryImm(a, 1)
+}
+renvoAsmJmpMarkLabel(a, done, fail)
+if notEqual {
+renvoAsmPrimaryImm(a, 1)
+} else {
+renvoAsmPrimaryImm(a, 0)
+}
+renvoAsmMarkLabel(a, done)
+return true
+}
+
 func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, right int, notEqual bool) bool {
 renvoNonNil(g, ep)
+
+
+if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchArm) {
+literal := right
+operand := left
+if ep.exprs[literal].kind != renvoExprString {
+literal = left
+operand = right
+}
+if ep.exprs[literal].kind == renvoExprString && renvoTokEnd(g.prog, ep.exprs[literal].tok)-renvoTokStart(g.prog, ep.exprs[literal].tok) <= 10 {
+return renvoEmitShortLiteralStringCompare(g, ep, operand, literal, notEqual)
+}
+}
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
 borrowLeft := renvoStringCompareOperandIsReadOnly(g, ep, right)
@@ -30522,7 +30588,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\x0e\xb8\xb7\x2c\x56\x21\xa8\xc7\x77\x01\x02\x5e\x5a\x15\xc0\xb2\xfc\xc0\x4e\xc0\x8c\xb6\x48\x7d\x95\xdf\x51\x26\xbf\x25\xa1\xe4", 3, true
+return "wasi/wasm32", "\xdd\xc4\x0a\x1e\x21\x50\x83\x49\x10\x2b\xcd\xf1\x30\x6c\xc9\x5a\x67\x97\x0a\x19\x7a\xe4\xd1\x5f\x83\x75\x42\xa0\x20\x6a\x2a\x0b", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30534,7 +30600,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x7f\xe6\x15\x4d\x8e\x21\x16\xf9\xec\xa0\x70\x0a\x13\xef\x51\x13\x3a\xb6\xb2\xe6\x0f\xf2\x7b\xc4\xd2\x9d\x5b\xc3\x40\x5e\xc0\x1d", 3, true
+return "vm/vm32", "\xf2\x73\xeb\x3a\x8d\x05\x4b\x53\xed\x2e\xb3\xcf\x65\x04\xbc\xb0\xa0\x8e\xb1\xee\x29\xd2\x72\xc9\x49\xb0\xca\xa9\xbc\x92\xd1\xfa", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
@@ -46595,21 +46661,22 @@ renvoArmAsmEmit(a, 0xe8a11208)
 renvoArmAsmAddRegImm(a, 2, 2, -12)
 renvoAsmJmpLabel(a, words)
 renvoAsmMarkLabel(a, wordTail)
-words = wordTail
 renvoArmAsmCmpRegImm(a, 2, 4)
 renvoArmAsmBCondLabel(a, tail, 3)
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -4)
-renvoArmAsmAddRegImm(a, 1, 1, -4)
-}
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 4)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 4)
-renvoArmAsmAddRegImm(a, 1, 1, 4)
+renvoArmAsmEmit(a, 0xe5309004)
+renvoArmAsmEmit(a, 0xe5219004)
+} else {
+renvoArmAsmEmit(a, 0xe4909004)
+renvoArmAsmEmit(a, 0xe4819004)
 }
 renvoArmAsmAddRegImm(a, 2, 2, -4)
-renvoAsmJmpLabel(a, words)
+renvoArmAsmCmpRegImm(a, 2, 4)
+renvoArmAsmBCondLabel(a, wordLoop, 2)
 renvoAsmMarkLabel(a, tail)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
@@ -49256,6 +49323,13 @@ if condition == renvoConditionUnsignedGreater {
 return 0x97
 }
 return 0
+}
+
+
+
+func renvoAmd64AsmCmpShortStringWord(a *renvoAsm, word int) {
+renvoAsmEmit8(a, 0x3d)
+renvoAsmEmit32(a, word)
 }
 
 // source: backend/compiler_amd64_target_impl.go

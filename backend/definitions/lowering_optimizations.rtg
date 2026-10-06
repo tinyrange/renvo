@@ -1416,21 +1416,22 @@ go compiler {
 			renvoArmAsmAddRegImm(a, 2, 2, -12)
 			renvoAsmJmpLabel(a, words)
 			renvoAsmMarkLabel(a, wordTail)
-			words = wordTail
 			renvoArmAsmCmpRegImm(a, 2, 4)
 			renvoArmAsmBCondLabel(a, tail, 3)
+			wordLoop := renvoAsmNewLabel(a)
+			renvoAsmMarkLabel(a, wordLoop)
+			// Indexed word accesses retain the same aligned, overlap-safe
+			// direction without separate pointer-update instructions.
 			if direction == 0 {
-				renvoArmAsmAddRegImm(a, 0, 0, -4)
-				renvoArmAsmAddRegImm(a, 1, 1, -4)
-			}
-			renvoArmAsmLoadRegMem(a, 9, 0, 0, 4)
-			renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
-			if direction == 1 {
-				renvoArmAsmAddRegImm(a, 0, 0, 4)
-				renvoArmAsmAddRegImm(a, 1, 1, 4)
+				renvoArmAsmEmit(a, 0xe5309004) // LDR r9, [r0, #-4]!.
+				renvoArmAsmEmit(a, 0xe5219004) // STR r9, [r1, #-4]!.
+			} else {
+				renvoArmAsmEmit(a, 0xe4909004) // LDR r9, [r0], #4.
+				renvoArmAsmEmit(a, 0xe4819004) // STR r9, [r1], #4.
 			}
 			renvoArmAsmAddRegImm(a, 2, 2, -4)
-			renvoAsmJmpLabel(a, words)
+			renvoArmAsmCmpRegImm(a, 2, 4)
+			renvoArmAsmBCondLabel(a, wordLoop, 2)
 			renvoAsmMarkLabel(a, tail)
 			renvoAsmMarkLabel(a, bytes)
 			renvoArmAsmCmpRegImm(a, 2, 0)

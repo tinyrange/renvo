@@ -18670,8 +18670,74 @@ func renvoStringCompareOperandIsReadOnly(g *renvoLinearGen, ep *renvoExprParse, 
 	return false
 }
 
+// A short literal needs no second descriptor or general equality loop. The
+// length guard precedes every load, including the empty/nil case. ARM keeps
+// byte accesses because a string's data pointer may have any alignment.
+func renvoEmitShortLiteralStringCompare(g *renvoLinearGen, ep *renvoExprParse, operand int, literal int, notEqual bool) bool {
+	value := renvoDecodeStringToken(g.prog, ep.exprs[literal].tok)
+	a := &g.asm
+	if !renvoEmitStringCompareValueRegs(g, ep, operand, true) {
+		return false
+	}
+	fail := renvoAsmNewLabel(a)
+	done := renvoAsmNewLabel(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmCopySecondaryToPrimary(a)
+	renvoAsmCmpPrimaryImm8(a, len(value))
+	renvoAsmPopSecondary(a)
+	renvoAsmJnzLabel(a, fail)
+	for at := 0; at < len(value); {
+		width := 1
+		if g.c.renvoTargetArch == renvoArchAmd64 {
+			if at+4 <= len(value) {
+				width = 4
+			} else if at+2 <= len(value) {
+				width = 2
+			}
+		}
+		word := 0
+		for i := 0; i < width; i++ {
+			word |= int(value[at+i]) << (i * 8)
+		}
+		renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, width)
+		if g.c.renvoTargetArch == renvoArchAmd64 {
+			renvoAmd64AsmCmpShortStringWord(a, word)
+		} else {
+			renvoAsmCmpPrimaryImm8(a, word)
+		}
+		renvoAsmJnzLabel(a, fail)
+		at += width
+	}
+	if notEqual {
+		renvoAsmPrimaryImm(a, 0)
+	} else {
+		renvoAsmPrimaryImm(a, 1)
+	}
+	renvoAsmJmpMarkLabel(a, done, fail)
+	if notEqual {
+		renvoAsmPrimaryImm(a, 1)
+	} else {
+		renvoAsmPrimaryImm(a, 0)
+	}
+	renvoAsmMarkLabel(a, done)
+	return true
+}
+
 func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, right int, notEqual bool) bool {
 	renvoNonNil(g, ep)
+	// Only literal operands qualify; the other operand still executes exactly
+	// once, and borrowing its byte storage is safe against a pure literal.
+	if renvoPreparedBackendActive == 0 && (g.c.renvoTargetArch == renvoArchAmd64 || g.c.renvoTargetArch == renvoArchArm) {
+		literal := right
+		operand := left
+		if ep.exprs[literal].kind != renvoExprString {
+			literal = left
+			operand = right
+		}
+		if ep.exprs[literal].kind == renvoExprString && renvoTokEnd(g.prog, ep.exprs[literal].tok)-renvoTokStart(g.prog, ep.exprs[literal].tok) <= 10 {
+			return renvoEmitShortLiteralStringCompare(g, ep, operand, literal, notEqual)
+		}
+	}
 	a := &g.asm
 	label := renvoEnsureStringEqualHelper(g)
 	borrowLeft := renvoStringCompareOperandIsReadOnly(g, ep, right)
