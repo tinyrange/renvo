@@ -69,11 +69,14 @@ func (p *assemblyParser) parse() {
 		p.fail("RTGASM-PARSE-001", "expected rtgasm version declaration")
 		return
 	}
-	if p.kind() != TokenNumber || p.text() != "1" {
-		p.fail("RTGASM-PARSE-002", "expected supported rtgasm version 1")
+	if p.kind() != TokenNumber || (p.text() != "1" && p.text() != "2") {
+		p.fail("RTGASM-PARSE-002", "expected supported rtgasm version 1 or 2")
 		return
 	}
 	p.document.Version = 1
+	if p.text() == "2" {
+		p.document.Version = 2
+	}
 	p.at++
 	if !p.takeIdent("assembly") {
 		p.fail("RTGASM-PARSE-003", "expected assembly declaration")
@@ -133,7 +136,7 @@ func (p *assemblyParser) parseEntry() {
 		return
 	}
 	parserDocument := Document{Filename: p.document.Filename, Source: p.source, Tokens: p.tokens}
-	statementParser := documentParser{document: &parserDocument}
+	statementParser := documentParser{document: &parserDocument, semicolonStatements: p.document.Version == 2}
 	steps := statementParser.parseStatements(p.at+1, bodyClose)
 	if len(parserDocument.Diagnostics) != 0 {
 		p.document.Diagnostics = append(p.document.Diagnostics, parserDocument.Diagnostics...)
@@ -259,6 +262,7 @@ func (p *assemblyParser) fail(code string, message string) {
 }
 
 func assemblyFail(document AssemblyDocument, span Span, code string, message string) AssemblyDocument {
+	document.Ok = false
 	document.Diagnostics = append(document.Diagnostics, Diagnostic{
 		Filename: document.Filename, Span: span, Code: code, Message: message,
 	})
@@ -310,7 +314,7 @@ func generateAssemblyEvaluators(resolved ResolveResult, targetName string, entri
 	goNames := embeddedGoFunctionNames(resolved.Document)
 	architectureEntries := architectureSequences(target.Arch)
 	for evaluatorIndex := range entries {
-		assembly := entries[evaluatorIndex].Assembly
+		assembly := LowerTargetAssembly(resolved, targetName, entries[evaluatorIndex].Assembly)
 		entryIndex := entries[evaluatorIndex].EntryIndex
 		if !assembly.Ok || entryIndex < 0 || entryIndex >= len(assembly.Entries) {
 			return GenerateResult{Diagnostics: []Diagnostic{{

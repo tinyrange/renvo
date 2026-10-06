@@ -487,3 +487,12 @@ capability `function_symbols`; output-kind strings do not grant it. The VM,
 WASI, and browser compositions declare it because their images consume the
 function-symbol table. Renaming those image kinds preserves retention, while
 reusing a familiar kind without the capability does not enable it.
+
+## Custom frontend operations
+
+`frontend_operations` advertises a backend-owned typed vocabulary for explicit
+physical machine blocks. `extend arch` can add operations without overriding
+existing ones. The version 2 typed assembler and public driver API consume the
+same contract and use the existing encoders. See
+[Typed target operations and assembler frontends](../../docs/target-frontends.md)
+for effects, validation, examples, and the current scope.

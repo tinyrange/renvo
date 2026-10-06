@@ -16,3 +16,16 @@ func TestParseRTGAssemblyBindingsRejectsDuplicates(t *testing.T) {
 		t.Fatalf("duplicate bindings accepted: %#v", document)
 	}
 }
+
+func TestRTGAssemblyBindingsAllowSignatureTrivia(t *testing.T) {
+	for _, source := range []string{
+		"rtgasm 2 assembly { answer ( out : emitter ) { return() } }",
+		"rtgasm 2 assembly { answer /* name */ (out /* kind */ : emitter) /* body */ { return() } }",
+		"rtgasm 1 assembly { answer\n(\nout\n:\nemitter\n)\n{ out.Byte(0xc3) } }",
+	} {
+		d := parseRTGAssemblyBindings([]byte(source))
+		if !d.ok || len(d.entries) != 1 || d.entries[0].name != "answer" {
+			t.Fatalf("wrapper binding: %q %+v", source, d)
+		}
+	}
+}

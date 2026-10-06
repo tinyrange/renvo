@@ -166,6 +166,25 @@ go backend {
 		encodeR(out, 0x33, 4, 0, destination, destination, source)
 	}
 
+	// Parallel copies into the declared comparison registers, including a
+	// source/destination cycle. The physical frontend cannot assume these
+	// registers are reserved compiler temporaries.
+	func machineCompare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
+		if right.Code == compareLeft.Code {
+			if left.Code == compareRight.Code {
+				bitXor(out, compareLeft, compareRight)
+				bitXor(out, compareRight, compareLeft)
+				bitXor(out, compareLeft, compareRight)
+			} else {
+				move(out, compareRight, right)
+				move(out, compareLeft, left)
+			}
+		} else {
+			move(out, compareLeft, left)
+			move(out, compareRight, right)
+		}
+	}
+
 	func compare(out *RTGEmitter, left RTGRegister, right RTGRegister) {
 		move(out, compareLeft, left)
 		move(out, compareRight, right)
@@ -396,6 +415,135 @@ go backend {
 }
 
 arch riscv32 {
+	frontend_operations {
+		address(base:register, offset:int) -> address {
+			lower = sequence machineAddress
+			reads = [base]
+			writes = []
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { offset = signed 12 }
+		}
+		load(destination:register, source:address) {
+			lower = go loadNative
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		store(destination:address, source:register) {
+			lower = go storeNative
+			reads = [destination, source]
+			writes = []
+			clobbers = []
+			memory = write
+			control = none
+			ordering = ordered
+			requires = []
+		}
+
+		new_label() -> label {
+			lower = sequence machineNewLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		bind_label(destination:label) {
+			lower = sequence machineBindLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = label
+			ordering = ordered
+			requires = []
+			defines = [destination]
+		}
+		move_immediate(destination:register, value:int64) {
+			lower = go moveImmediate
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { value = bits 32 }
+		}
+		move(destination:register, source:register) {
+			lower = go move
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add(destination:register, source:register) {
+			lower = go add
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare(left:register, right:register) {
+			lower = go machineCompare
+			reads = [left, right]
+			writes = [t3, t4]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		jump(destination:label) {
+			lower = go jump
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = jump
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		branch(condition:condition, destination:label) {
+			lower = go jumpCondition
+			reads = [t3, t4]
+			writes = []
+			clobbers = []
+			memory = none
+			control = branch
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		return() {
+			lower = go ret
+			reads = [link]
+			writes = []
+			clobbers = []
+			memory = none
+			control = return
+			ordering = ordered
+			requires = []
+		}
+	}
+
 	alias = "riscv32"
 	endian = little
 	word_bits = 32
@@ -479,6 +627,13 @@ arch riscv32 {
 		copy_bytes = sequence copyBytes
 	}
 	sequences {
+		machineAddress(out:emitter, base:register, offset:int) -> address {
+			return record_address(Base:base, Displacement:offset,)
+		}
+
+		machineNewLabel(out:emitter) -> label { return out.NewLabel() }
+		machineBindLabel(out:emitter, destination:label) { out.Mark(destination) }
+
 		copyBytes(out:emitter) {
 			let forward = out.NewLabel()
 			let backwardLoop = out.NewLabel()

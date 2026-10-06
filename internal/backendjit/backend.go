@@ -149,8 +149,11 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 	}
 	code := make([][]byte, len(bindings))
 	documents := make([]rtg.AssemblyDocument, len(sources))
+	typedSources := make([]bool, len(sources))
 	for i := 0; i < len(sources); i++ {
 		documents[i] = rtg.ParseAssembly(sources[i].Source, sources[i].Path)
+		typedSources[i] = documents[i].Version == 2
+		documents[i] = rtg.LowerTargetAssembly(prepared.Resolved, prepared.Artifact.Descriptor.Name, documents[i])
 		if !documents[i].Ok {
 			return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
 				Phase: "rtgasm", Code: "RENVO-RTGASM-003", Message: documents[i].Diagnostics[0].Message,
@@ -165,13 +168,15 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 	}
 	var pending []pendingAssembly
 	for i := 0; i < len(bindings); i++ {
-		if len(bindings[i].Code) != 0 {
-			code[i] = bindings[i].Code
-			continue
-		}
 		binding := bindings[i]
 		if binding.Source < 0 || binding.Source >= len(documents) || binding.Entry < 0 || binding.Entry >= len(documents[binding.Source].Entries) {
 			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-004", "RTGASM binding is invalid")
+		}
+		// Typed blocks are always checked against the selected definition. Do
+		// not trust pre-materialized code supplied in a frontend unit.
+		if len(binding.Code) != 0 && !typedSources[binding.Source] {
+			code[i] = binding.Code
+			continue
 		}
 		cacheInput := make([]byte, 0, len(prepared.Artifact.Descriptor.Definition)+len(sources[binding.Source].Source)+8)
 		cacheInput = append(cacheInput, prepared.Artifact.Descriptor.Definition[:]...)

@@ -15,6 +15,7 @@ func validateMachineDeclarations(document Document) []Diagnostic {
 			diagnostics = append(diagnostics, validateCompilerBindings(document, declaration)...)
 			diagnostics = append(diagnostics, validateArchitectureSequences(document, declaration, goNames)...)
 			diagnostics = append(diagnostics, validateDirectEmitterBindings(document, declaration, goNames)...)
+			diagnostics = append(diagnostics, frontendVocabulary(document, declaration).Diagnostics...)
 		} else if declaration.Kind == DeclABI {
 			diagnostics = append(diagnostics, validateABI(document, declaration)...)
 		} else if declaration.Kind == DeclRuntime {
