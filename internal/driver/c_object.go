@@ -135,6 +135,7 @@ func prepareCSourcesPass(result SourceResult, options *Options, workDir string, 
 		result.Files[i].CObject = object
 		result.Files[i].CCompiler = options.CCompiler
 		result.Files[i].CDataModel = dataModel
+		result.Files[i].CAssemblyCompiler = options.CAssemblyCompiler
 		result.Files[i].CFunctionSections = options.CFunctionSections
 		result.Files[i].CDataSections = options.CDataSections
 		result.Files[i].CShortWChar = options.CShortWChar

@@ -1,7 +1,7 @@
 package unit
 
 // HasRTGAssembly reports whether a canonical unit carries project assembly.
-// Decoding and materializing that table is host-only CompilerJIT work.
+// Decoding and materialization use the portable assembly fragment service.
 func HasRTGAssembly(data []byte) bool {
 	if !validUnitRoot(data) {
 		return false

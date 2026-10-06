@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package rtg
 
 import (
@@ -87,6 +85,9 @@ func EncodeTargetAssembly(v TargetVocabulary, blocks []TargetBlock, filename str
 // bounded-sequence evaluator. Only advertised operations, typed literal data,
 // and preceding results can cross this boundary; there is no expression escape.
 func LowerTargetAssembly(resolved ResolveResult, targetName string, assembly AssemblyDocument) AssemblyDocument {
+	if assembly.Ok && assembly.Version == 3 {
+		return LowerManagedAssembly(resolved, targetName, assembly)
+	}
 	if !assembly.Ok || assembly.Version != 2 {
 		return assembly
 	}

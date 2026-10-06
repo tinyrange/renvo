@@ -30,6 +30,7 @@ type SourceFile struct {
 	CObject           bool
 	CCompiler         bool
 	CDataModel        int
+	CAssemblyCompiler c11.AssemblyCompiler
 	CFunctionSections bool
 	CDataSections     bool
 	CShortWChar       bool
@@ -70,6 +71,7 @@ type Package struct {
 	ErrorImport    int
 	ErrorOffset    int
 	C11Error       int
+	C11Message     string
 	ExplicitC      bool
 	CoreArenaStart int
 	CoreArenaEnd   int
@@ -151,7 +153,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 	}
 	code := selected[:0]
 	for i := 0; i < len(selected); i++ {
-		if !stringHasSuffix(selected[i].Path, ".rtgasm") {
+		if !isRTGAsmSourceFile(selected[i].Path) {
 			code = append(code, selected[i])
 			continue
 		}
@@ -283,6 +285,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			var translated c11.Result
 			if source.CObject {
 				translated = c11.TranslateObjectWithConfig(pkg.Name, source.Src, source.CPrelude, c11.ObjectConfig{
+					AssemblyCompiler: source.CAssemblyCompiler, AssemblyNamespace: cAssemblyNamespace(source.Path),
 					DataModel: source.CDataModel, FunctionSections: source.CFunctionSections,
 					DataSections:       source.CDataSections,
 					ShortWChar:         source.CShortWChar,
@@ -298,6 +301,7 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 					dataModel = c11.DataModelLP64
 				}
 				translated = c11.TranslateWithPreludeConfig(pkg.Name, source.Src, exportHeader, c11.ObjectConfig{
+					AssemblyCompiler: source.CAssemblyCompiler, AssemblyNamespace: cAssemblyNamespace(source.Path),
 					DataModel: dataModel, ShortWChar: source.CShortWChar, UnsignedChar: source.CUnsignedChar,
 					PruneUnusedStatics: source.COptimize, IsolateGoBuiltins: source.CCompiler, GoExports: goExports,
 				})
@@ -305,8 +309,12 @@ func loadPackage(module Module, stdRoot string, ref PackageRef, dependencies []M
 			if !translated.Ok {
 				pkg.ErrorOffset = translated.ErrorAt
 				pkg.C11Error = translated.Error
+				pkg.C11Message = translated.Message
 				pkg.Files = append(pkg.Files, ParsedFile{Path: source.Path, Src: source.Src, ArenaStart: source.ArenaStart, ArenaEnd: source.ArenaEnd})
 				return packageFail(pkg, PackageErrC11, i, -1)
+			}
+			for index, assembly := range translated.Assemblies {
+				pkg.Assemblies = append(pkg.Assemblies, AssemblyFile{Path: source.Path + "." + decimalAssemblyIndex(index) + ".rtgasm", Src: assembly})
 			}
 			source.Src = translated.Source
 			parsed = syntax.ParseFile(source.Src)
@@ -458,7 +466,8 @@ func selectPackageFiles(dir string, files []SourceFile) []SourceFile {
 			continue
 		}
 		selected = append(selected, SourceFile{Path: path, Src: files[i].Src, CPrelude: files[i].CPrelude,
-			CObject: files[i].CObject, CCompiler: files[i].CCompiler, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
+			CAssemblyCompiler: files[i].CAssemblyCompiler,
+			CObject:           files[i].CObject, CCompiler: files[i].CCompiler, CDataModel: files[i].CDataModel, CFunctionSections: files[i].CFunctionSections,
 			CDataSections: files[i].CDataSections, CShortWChar: files[i].CShortWChar,
 			CUnsignedChar:    files[i].CUnsignedChar,
 			CKernelCodeModel: files[i].CKernelCodeModel, COptimize: files[i].COptimize,
@@ -577,7 +586,7 @@ func isCSourceFile(path string) bool {
 
 func isRTGAsmSourceFile(path string) bool {
 	base := BasePath(path)
-	return stringHasSuffix(base, ".rtgasm") && !stringHasSuffix(base, "_test.rtgasm")
+	return (stringHasSuffix(base, ".rtgasm") && !stringHasSuffix(base, "_test.rtgasm")) || (stringHasSuffix(base, ".s") && !stringHasSuffix(base, "_test.s"))
 }
 
 func isFrontendSourceFile(path string) bool {

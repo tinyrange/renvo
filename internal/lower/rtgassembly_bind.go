@@ -1,6 +1,7 @@
 package lower
 
 import (
+	"renvo.dev/internal/asmtext"
 	"renvo.dev/internal/load"
 	"renvo.dev/internal/unit"
 )
@@ -12,7 +13,23 @@ func (b *coreUnitBuilder) addRTGAssembly(pkg load.Package) bool {
 	bound := make([]bool, len(b.program.Funcs))
 	for fileIndex := 0; fileIndex < len(pkg.Assemblies); fileIndex++ {
 		file := pkg.Assemblies[fileIndex]
-		document := parseRTGAssemblyBindings(file.Src)
+		document := rtgAssemblyDocument{}
+		if len(file.Path) > 2 && file.Path[len(file.Path)-2:] == ".s" {
+			lines, err := asmtext.Scan(file.Src)
+			if err.Message != "" {
+				return b.failRTGAssembly(pkg, fileIndex, err.Offset)
+			}
+			functions, err := asmtext.Functions(lines)
+			if err.Message != "" {
+				return b.failRTGAssembly(pkg, fileIndex, err.Offset)
+			}
+			document.ok = true
+			for i := 0; i < len(functions); i++ {
+				document.entries = append(document.entries, rtgAssemblyEntry{name: functions[i].Name, offset: functions[i].Offset})
+			}
+		} else {
+			document = parseRTGAssemblyBindings(file.Src)
+		}
 		if !document.ok {
 			return b.failRTGAssembly(pkg, fileIndex, document.errorOffset)
 		}

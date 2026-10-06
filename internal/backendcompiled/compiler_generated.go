@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "392a0062fc771468cc6cf46039a346fcab9707ef9dd7101a3d06f5f4aced3276"
+const CompilerSourceDigest = "22530c0f51efe13c41d2b6f8056446bc072f6a12f348e3ffa8b2b29693bea8ab"
 
 // source: backend/compiler_common_impl.go
 
@@ -20510,6 +20510,10 @@ metaFn := &g.meta.funcs[fnInfoIndex]
 if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
 return true
 }
+if len(renvoRTGAssembly.bindings) != 0 && !renvoRTGManagedSignature(g, fnInfoIndex) {
+renvoPrintErr("renvo: managed assembly signature does not match runtime word inputs/results\n")
+return false
+}
 override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
 if override != 0 {
 return override > 0
@@ -30500,7 +30504,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x22\x20\xde\x56\xb0\xbc\x0a\xb7\xcf\xb5\x35\xc5\x2d\x53\xdb\x32\x3a\xf0\x33\x33\x64\xe3\xd7\xa9\x45\x25\x91\x03\x42\xc1\x75\x50", 3, true
+return "linux/amd64", "\xef\x54\xbc\xdc\xa7\x39\xa1\x42\x3b\x54\x75\x00\x1b\x7f\x3e\x63\x36\xa0\x16\x84\x01\x40\x2a\xbe\x45\xf2\x93\x6a\xf5\x53\x4d\x7d", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x60\xc3\x7c\xa8\xd9\x78\x29\x90\xaa\xa0\xd4\x5c\xb6\xc6\x9f\x4f\x20\x90\xa5\x94\x11\x03\xe0\x23\x70\xa1\x58\x3a\x09\xbc\xa6\xd1", 3, true
@@ -30512,7 +30516,7 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\x27\x7b\x54\xf0\x24\x66\x4e\xdc\xdf\xac\xb4\x34\x21\x91\x91\xfe\xbd\x98\x31\x9e\x7e\x02\x73\x64\xd4\x12\x0a\x6e\xec\x8e\xb7\xe4", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xe9\xf1\x3e\x6b\x12\xe4\xff\x16\x61\x5b\x8f\xfd\x4a\x6e\xab\x70\x94\x53\x96\x1b\x7a\x5a\x94\x33\x9e\xa1\x97\x6b\xb0\xc4\x0b\x7c", 3, true
+return "windows/amd64", "\xc0\xa6\x4c\x4b\x2f\x7f\x56\xe8\x6e\x76\x73\xb4\xc5\x3a\x02\xf8\xfc\x07\x6e\x60\x87\x1c\x1d\x90\x8a\x03\x5e\x11\x1a\x5b\x1a\x54", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
@@ -30524,7 +30528,7 @@ if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\x3f\x56\x3f\xeb\xa9\xa3\x85\x40\x21\x15\xb3\x16\x3c\xdd\xe5\x53\x09\xd8\xf9\xec\x58\x01\xf2\x3b\xca\x86\x1c\xbd\x7f\x57\xd5\x38", 3, true
+return "linux-kernel/amd64", "\x7c\x2d\xcd\x67\xe9\xfc\x06\xce\x55\x41\x96\xba\x77\x4c\x92\x4c\xa6\x19\x9d\x5f\x04\x16\x82\xb8\x5c\xc5\x6c\xf7\x81\x8c\xf6\x1f", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
@@ -30533,13 +30537,13 @@ if target == renvoTargetVM32 {
 return "vm/vm32", "\x42\xc6\x1d\x64\x89\xe3\x72\xb4\x7f\x34\x75\x11\x4e\x43\xa9\xc0\xec\xfe\xdb\x0c\x23\x63\x95\x61\x70\x69\x63\x8d\xb2\x59\xc1\xf2", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "\xe5\x6f\xf0\x65\xe1\xbb\x90\xaf\xc2\x1f\x4f\x9d\x1d\xeb\xbb\xff\x4c\xc2\xd3\x7d\x6f\x9d\x26\xab\xa5\x17\x82\x3a\xdc\x4b\x56\xf9", 3, true
+return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\x0b\x3f\x6a\x3b\xb2\xf6\x1f\x59\xa2\x66\x7b\xfc\x31\x81\xcf\x36\x01\x0a\x9f\x9e\x75\xc0\xa4\xe7\xed\xb9\x4d\xf7\xd9\x94\x6b\x45", 3, true
+return "openbsd/amd64", "\xc9\xbb\x3e\xf9\x14\xdc\xc0\xa5\x11\x91\x69\x13\xe0\xf2\x40\xd5\x0c\xa3\x4f\xc7\x0a\xc5\xd5\x2b\x4b\x24\x38\x48\xde\x99\x7d\xe0", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "\x62\xcc\xc3\x94\x38\xa3\xad\x3c\x74\x76\x55\x3d\x30\x51\x27\x46\xf1\xaf\xce\x7e\xed\xb3\xf3\x43\x1f\x0b\xf9\x07\xdf\x5d\xd8\x7d", 3, true
+return "netbsd/amd64", "\x56\x86\x32\x1a\xa5\x86\xe5\xd0\x2d\x0c\xa7\xb9\xa9\x5d\x80\x24\x5c\x97\x1b\x16\x11\x7d\xb2\xca\xb7\xa9\x02\xe5\x1c\xfc\xf1\x04", 3, true
 }
 return "", "", 0, false
 }
@@ -47310,10 +47314,11 @@ source []byte
 }
 
 type renvoRTGAssemblyBinding struct {
-function int
-source   int
-entry    int
-code     []byte
+function              int
+source                int
+entry                 int
+mode, inputs, outputs int
+code                  []byte
 }
 
 type renvoRTGAssemblyTable struct {
@@ -47331,6 +47336,14 @@ return true
 }
 r := renvoUnitReader{src: data, end: len(data), ok: true}
 sourceCount := renvoUnitReadVar(&r)
+version := 1
+if sourceCount == 0 {
+version = renvoUnitReadVar(&r)
+sourceCount = renvoUnitReadVar(&r)
+if version != 2 {
+return false
+}
+}
 if !r.ok || sourceCount < 0 || sourceCount > len(data) {
 return false
 }
@@ -47360,6 +47373,14 @@ table.bindings = make([]renvoRTGAssemblyBinding, 0, bindingCount)
 seen := make([]bool, len(prog.funcs))
 for i := 0; i < bindingCount; i++ {
 binding := renvoRTGAssemblyBinding{function: renvoUnitReadVar(&r), source: renvoUnitReadVar(&r), entry: renvoUnitReadVar(&r)}
+if version == 2 {
+binding.mode = renvoUnitReadVar(&r)
+binding.inputs = renvoUnitReadVar(&r)
+binding.outputs = renvoUnitReadVar(&r)
+}
+if binding.mode < 0 || binding.mode > 1 || binding.inputs < 0 || binding.inputs > 6 || binding.outputs < 0 || binding.outputs > 1 || binding.mode == 0 && (binding.inputs != 0 || binding.outputs != 0) {
+return false
+}
 codeLength := renvoUnitReadVar(&r)
 if !r.ok || codeLength < 0 || r.pos+codeLength < r.pos || r.pos+codeLength > r.end {
 return false
@@ -47694,6 +47715,9 @@ renvoAsmMarkLabel(a, label)
 for at := 0; at < len(binding.code); at++ {
 a.code = append(a.code, binding.code[at])
 }
+if binding.mode == 1 {
+renvoRTGDirectReturn(a)
+}
 renvoRTGFunctionFinish(a)
 return 1
 }
@@ -47752,7 +47776,9 @@ return
 }
 renvoRTGAsmPopRegister(&g.asm, registers[i])
 }
+if !renvoRTGEmitManagedCall(g, fnIndex, wordCount) {
 renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
+}
 if wordCount > len(registers) {
 stackBytes := (wordCount - len(registers)) * renvoRTGStackWordBytes
 renvoRTGDirectMoveImmediate(&g.asm, renvoRTGScratch,
@@ -47992,6 +48018,69 @@ if renvoFixedTarget != 0 {
 return nil
 }
 return renvoAsmImageRelocatableObjectAmd64(a)
+}
+
+func renvoRTGManagedBinding(g *renvoLinearGen, fnIndex int) int {
+decl := g.meta.funcs[fnIndex].declIndex
+for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+binding := &renvoRTGAssembly.bindings[i]
+if binding.function == decl && binding.mode == 1 {
+return i
+}
+}
+return -1
+}
+
+func renvoRTGManagedSignature(g *renvoLinearGen, fnIndex int) bool {
+index := renvoRTGManagedBinding(g, fnIndex)
+if index < 0 {
+return true
+}
+binding := &renvoRTGAssembly.bindings[index]
+fn := &g.meta.funcs[fnIndex]
+outputs := 0
+if fn.resultType != 0 {
+outputs = 1
+}
+if fn.receiverType != 0 || fn.paramCount != binding.inputs || outputs != binding.outputs {
+return false
+}
+
+for i := 0; i < fn.paramCount; i++ {
+param := g.meta.params[fn.firstParam+i]
+typ := renvoResolveType(g.meta, param.typ)
+if typ == nil || renvoTypeSize(g.meta, param.typ) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+return false
+}
+}
+if binding.outputs == 1 {
+typ := renvoResolveType(g.meta, fn.resultType)
+if typ == nil || renvoTypeSize(g.meta, fn.resultType) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+return false
+}
+}
+return true
+}
+
+func renvoRTGEmitManagedCall(g *renvoLinearGen, fnIndex int, wordCount int) bool {
+index := renvoRTGManagedBinding(g, fnIndex)
+if index < 0 {
+return false
+}
+binding := &renvoRTGAssembly.bindings[index]
+if !renvoRTGManagedSignature(g, fnIndex) || wordCount != binding.inputs || len(binding.code) == 0 {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 3101
+}
+return true
+}
+for i := 0; i < len(binding.code); i++ {
+g.asm.code = append(g.asm.code, binding.code[i])
+}
+
+g.asm.lastPrimaryLoad = 0
+g.asm.lastPrimaryStoreEnd = -1
+return true
 }
 
 // source: backend/compiler_amd64_impl.go

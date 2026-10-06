@@ -289,6 +289,9 @@ func loadDiagnostic(result BuildResult, built pipeline.Result) Diagnostic {
 		diagnostic.Phase, diagnostic.Code, diagnostic.Message = "compiler", "RENVO-BUG-005", "compiler bug: parser failure has no source file coordinate"
 	} else if pkg.Error == load.PackageErrC11 {
 		diagnostic = c11ErrorDiagnostic(diagnostic, pkg.C11Error)
+		if pkg.C11Message != "" {
+			diagnostic.Message += ": " + pkg.C11Message
+		}
 	} else if pkg.Error == load.PackageErrName {
 		diagnostic.Code, diagnostic.Message = "RENVO-LOAD-012", "files in one directory declare different packages"
 	} else if pkg.Error == load.PackageErrImport {

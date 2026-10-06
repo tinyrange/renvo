@@ -112,6 +112,8 @@ func encodeForeignProgramsCore(programs []ForeignProgram) []byte {
 
 func encodeRTGAssemblyCore(sources []RTGAssemblySource, bindings []RTGAssemblyBinding) []byte {
 	out := make([]byte, 0)
+	out = appendVarint(out, 0) // distinguish versioned payloads from the original source count
+	out = appendVarint(out, 2)
 	out = appendVarint(out, len(sources))
 	for i := 0; i < len(sources); i++ {
 		out = appendVarint(out, len(sources[i].Path))
@@ -124,6 +126,9 @@ func encodeRTGAssemblyCore(sources []RTGAssemblySource, bindings []RTGAssemblyBi
 		out = appendVarint(out, bindings[i].Func)
 		out = appendVarint(out, bindings[i].Source)
 		out = appendVarint(out, bindings[i].Entry)
+		out = appendVarint(out, bindings[i].Mode)
+		out = appendVarint(out, bindings[i].Inputs)
+		out = appendVarint(out, bindings[i].Outputs)
 		out = appendVarint(out, len(bindings[i].Code))
 		out = append(out, bindings[i].Code...)
 	}

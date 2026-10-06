@@ -870,6 +870,69 @@ go backend {
 }
 
 arch i8086 {
+	frontend_constraints {
+r = [ax, cx, dx, bx, si, di]
+a = [ax]
+c = [cx]
+d = [dx]
+S = [si]
+D = [di]
+i = immediate
+n = immediate
+cc = resource flags
+    }
+    frontend_syntax {
+		att {
+			style = att
+			new_label = new_label
+			bind_label = bind_label
+			movw(source:register, destination:register) = move(destination, source)
+			movw(value:int, destination:register) = move_immediate(destination, value)
+			addw(source:register, destination:register) = add(destination, source)
+			cmpw(right:register, left:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
+    frontend_syntax {
+		intel {
+			style = intel
+			new_label = new_label
+			bind_label = bind_label
+			mov(destination:register, source:register) = move(destination, source)
+			mov(destination:register, value:int) = move_immediate(destination, value)
+			add(destination:register, source:register) = add(destination, source)
+			cmp(left:register, right:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
 	frontend_operations {
 		resources = [flags]
 		new_label() -> label {

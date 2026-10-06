@@ -20503,6 +20503,10 @@ func renvoEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
 		return true
 	}
+	if len(renvoRTGAssembly.bindings) != 0 && !renvoRTGManagedSignature(g, fnInfoIndex) {
+		renvoPrintErr("renvo: managed assembly signature does not match runtime word inputs/results\n")
+		return false
+	}
 	override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
 	if override != 0 {
 		return override > 0

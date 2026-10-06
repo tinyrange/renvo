@@ -33,6 +33,11 @@ type TargetImmediate struct {
 type TargetVocabulary struct {
 	Target                           TargetDescriptor
 	Operations                       []TargetOperation
+	Syntaxes                         []TargetSyntax
+	Widths                           []TargetWidth
+	Constraints                      []TargetConstraint
+	Managed                          TargetManaged
+	Intrinsics                       []TargetIntrinsic
 	Registers, Conditions, Resources []string
 	Diagnostics                      []Diagnostic
 	Ok                               bool
@@ -67,6 +72,8 @@ func FrontendOperations(resolved ResolveResult, targetName string) TargetVocabul
 	}
 	v.Operations = available
 	v.Target = target.Descriptor
+	selectFrontendManaged(resolved, target, &v)
+	selectFrontendIntrinsics(&v)
 	v.Ok = true
 	return v
 }
@@ -134,6 +141,11 @@ func frontendVocabulary(document Document, arch Declaration) TargetVocabulary {
 			v.Diagnostics = append(v.Diagnostics, statementDiagnostic(document, op.statement, "RTG-FRONTEND-004", message))
 		}
 	}
+	frontendWidths(document, arch, &v)
+	frontendSyntaxes(document, arch, &v)
+	frontendConstraints(document, arch, &v)
+	frontendManaged(document, arch, &v)
+	frontendIntrinsics(document, arch, &v)
 	v.Ok = len(v.Diagnostics) == 0
 	return v
 }

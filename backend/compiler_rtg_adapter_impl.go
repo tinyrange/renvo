@@ -6,10 +6,11 @@ type renvoRTGAssemblySource struct {
 }
 
 type renvoRTGAssemblyBinding struct {
-	function int
-	source   int
-	entry    int
-	code     []byte
+	function              int
+	source                int
+	entry                 int
+	mode, inputs, outputs int
+	code                  []byte
 }
 
 type renvoRTGAssemblyTable struct {
@@ -27,6 +28,14 @@ func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
 	}
 	r := renvoUnitReader{src: data, end: len(data), ok: true}
 	sourceCount := renvoUnitReadVar(&r)
+	version := 1
+	if sourceCount == 0 {
+		version = renvoUnitReadVar(&r)
+		sourceCount = renvoUnitReadVar(&r)
+		if version != 2 {
+			return false
+		}
+	}
 	if !r.ok || sourceCount < 0 || sourceCount > len(data) {
 		return false
 	}
@@ -56,6 +65,14 @@ func renvoDecodeRTGAssemblyTable(prog *renvoProgram, data []byte) bool {
 	seen := make([]bool, len(prog.funcs))
 	for i := 0; i < bindingCount; i++ {
 		binding := renvoRTGAssemblyBinding{function: renvoUnitReadVar(&r), source: renvoUnitReadVar(&r), entry: renvoUnitReadVar(&r)}
+		if version == 2 {
+			binding.mode = renvoUnitReadVar(&r)
+			binding.inputs = renvoUnitReadVar(&r)
+			binding.outputs = renvoUnitReadVar(&r)
+		}
+		if binding.mode < 0 || binding.mode > 1 || binding.inputs < 0 || binding.inputs > 6 || binding.outputs < 0 || binding.outputs > 1 || binding.mode == 0 && (binding.inputs != 0 || binding.outputs != 0) {
+			return false
+		}
 		codeLength := renvoUnitReadVar(&r)
 		if !r.ok || codeLength < 0 || r.pos+codeLength < r.pos || r.pos+codeLength > r.end {
 			return false
@@ -390,6 +407,9 @@ func renvoRTGEmitAssemblyFunction(a *renvoAsm, declIndex int, label int) int {
 		for at := 0; at < len(binding.code); at++ {
 			a.code = append(a.code, binding.code[at])
 		}
+		if binding.mode == 1 {
+			renvoRTGDirectReturn(a)
+		}
 		renvoRTGFunctionFinish(a)
 		return 1
 	}
@@ -448,7 +468,9 @@ func renvoRTGEmitCallWithWordCount(g *renvoLinearGen, fnIndex int, wordCount int
 		}
 		renvoRTGAsmPopRegister(&g.asm, registers[i])
 	}
-	renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
+	if !renvoRTGEmitManagedCall(g, fnIndex, wordCount) {
+		renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
+	}
 	if wordCount > len(registers) {
 		stackBytes := (wordCount - len(registers)) * renvoRTGStackWordBytes
 		renvoRTGDirectMoveImmediate(&g.asm, renvoRTGScratch,
@@ -688,4 +710,67 @@ func (a *renvoAsm) ObjectImage() []byte {
 		return nil
 	}
 	return renvoAsmImageRelocatableObjectAmd64(a)
+}
+
+func renvoRTGManagedBinding(g *renvoLinearGen, fnIndex int) int {
+	decl := g.meta.funcs[fnIndex].declIndex
+	for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+		binding := &renvoRTGAssembly.bindings[i]
+		if binding.function == decl && binding.mode == 1 {
+			return i
+		}
+	}
+	return -1
+}
+
+func renvoRTGManagedSignature(g *renvoLinearGen, fnIndex int) bool {
+	index := renvoRTGManagedBinding(g, fnIndex)
+	if index < 0 {
+		return true
+	}
+	binding := &renvoRTGAssembly.bindings[index]
+	fn := &g.meta.funcs[fnIndex]
+	outputs := 0
+	if fn.resultType != 0 {
+		outputs = 1
+	}
+	if fn.receiverType != 0 || fn.paramCount != binding.inputs || outputs != binding.outputs {
+		return false
+	}
+
+	for i := 0; i < fn.paramCount; i++ {
+		param := g.meta.params[fn.firstParam+i]
+		typ := renvoResolveType(g.meta, param.typ)
+		if typ == nil || renvoTypeSize(g.meta, param.typ) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+			return false
+		}
+	}
+	if binding.outputs == 1 {
+		typ := renvoResolveType(g.meta, fn.resultType)
+		if typ == nil || renvoTypeSize(g.meta, fn.resultType) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+			return false
+		}
+	}
+	return true
+}
+
+func renvoRTGEmitManagedCall(g *renvoLinearGen, fnIndex int, wordCount int) bool {
+	index := renvoRTGManagedBinding(g, fnIndex)
+	if index < 0 {
+		return false
+	}
+	binding := &renvoRTGAssembly.bindings[index]
+	if !renvoRTGManagedSignature(g, fnIndex) || wordCount != binding.inputs || len(binding.code) == 0 {
+		if renvoRTGUnsupportedOperation == 0 {
+			renvoRTGUnsupportedOperation = 3101
+		}
+		return true // never fall back to a call with an invalid managed contract
+	}
+	for i := 0; i < len(binding.code); i++ {
+		g.asm.code = append(g.asm.code, binding.code[i])
+	}
+	// An opaque ordered body invalidates load/store peephole assumptions.
+	g.asm.lastPrimaryLoad = 0
+	g.asm.lastPrimaryStoreEnd = -1
+	return true
 }

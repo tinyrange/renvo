@@ -12,6 +12,7 @@ import (
 
 type Result struct {
 	Descriptor   rtg.TargetDescriptor
+	Vocabulary   rtg.TargetVocabulary
 	LibraryFiles []rbe.File
 	Message      string
 	Ok           bool
@@ -31,7 +32,19 @@ func ResolveImports(
 		}
 		descriptor := artifact.Descriptor
 		if descriptor.Name == targetName || contains(descriptor.Aliases, targetName) {
-			return Result{Descriptor: descriptor, LibraryFiles: artifact.LibraryFiles, Ok: true}
+			var vocabulary rtg.TargetVocabulary
+			if len(artifact.DefinitionFiles) != 0 {
+				root := artifact.DefinitionFiles[0]
+				resolved := rtg.ResolveDefinitions(rtg.ParseImports(root.Source, root.Filename, definitionSnapshotLoader{files: artifact.DefinitionFiles}))
+				if !resolved.Ok {
+					return Result{Message: "invalid prepared backend definition snapshot"}
+				}
+				vocabulary = rtg.FrontendOperations(resolved, descriptor.Name)
+				if !vocabulary.Ok {
+					return Result{Message: "invalid prepared backend frontend contract"}
+				}
+			}
+			return Result{Descriptor: descriptor, Vocabulary: vocabulary, LibraryFiles: artifact.LibraryFiles, Ok: true}
 		}
 		return Result{Message: "backend definition does not export target " + targetName}
 	}
@@ -46,7 +59,11 @@ func ResolveImports(
 	for i := 0; i < len(resolved.Targets); i++ {
 		target := resolved.Targets[i]
 		if target.Descriptor.Name == targetName || contains(target.Descriptor.Aliases, targetName) {
-			return Result{Descriptor: target.Descriptor, LibraryFiles: bundle.Files, Ok: true}
+			vocabulary := rtg.FrontendOperations(resolved, target.Descriptor.Name)
+			if !vocabulary.Ok {
+				return Result{Message: vocabulary.Diagnostics[0].Message}
+			}
+			return Result{Descriptor: target.Descriptor, Vocabulary: vocabulary, LibraryFiles: bundle.Files, Ok: true}
 		}
 	}
 	return Result{Message: "backend definition does not export target " + targetName}

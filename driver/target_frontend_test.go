@@ -20,6 +20,7 @@ func TestTargetFrontendVirtualBackendVocabulary(t *testing.T) {
 			// Neither public operation names nor target names are a frontend
 			// dispatch table. An independent backend can choose both.
 			source = bytes.Replace(source, []byte("move_immediate(destination:"), []byte("load_constant(destination:"), 1)
+			source = bytes.ReplaceAll(source, []byte("= move_immediate("), []byte("= load_constant("))
 			source = bytes.Replace(source, []byte("target msdos/8086"), []byte("target private/board"), 1)
 		}
 		files["definitions/"+name] = &fstest.MapFile{Data: source}
