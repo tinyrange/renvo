@@ -3,6 +3,15 @@
 @import "elf_amd64_primitives.rtg"
 
 go backend {
+	func encodeByteRegisterPair(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister) {
+		byteRegister := source
+		if destination.Code > byteRegister.Code {
+			byteRegister = destination
+		}
+		emitREX(out, false, source, RTGNoRegister, destination, byteRegister)
+		emitOpcode(out, opcode)
+		modRM(out, 3, registerLowBits(source), registerLowBits(destination))
+	}
 	func processStackEntry(out *RTGEmitter, argsOffset int,
 		environmentOffset int, environmentLengthOffset int) {
 		base := out.Len()
@@ -492,6 +501,627 @@ go backend {
 }
 
 arch x86_64 {
+	frontend_intrinsics {
+		word_add(left:word, right:word) -> word {
+			lower = sequence machineAddValues
+			reads = [left, right]
+			writes = [result]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		word_sub(left:word, right:word) -> word {
+			lower = sequence machineSubtractValues
+			reads = [left, right]
+			writes = [result]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+	}
+
+	frontend_widths {
+		width8 {
+			bits = 8
+			modifier = b
+			load = load8
+			load_signed = load_signed8
+			store = store8
+			operations = [move8, move_immediate8, read8, store8, add8, compare8]
+			aliases {
+				rax = al
+				rcx = cl
+				rdx = dl
+				rbx = bl
+				rsp = spl
+				rbp = bpl
+				rsi = sil
+				rdi = dil
+				r8 = r8b
+				r9 = r9b
+				r10 = r10b
+				r11 = r11b
+				r12 = r12b
+				r13 = r13b
+				r14 = r14b
+				r15 = r15b
+			}
+		}
+		width16 {
+			bits = 16
+			modifier = w
+			load = load16
+			load_signed = load_signed16
+			store = store16
+			operations = [move16, move_immediate16, read16, store16, add16, compare16]
+			aliases {
+				rax = ax
+				rcx = cx
+				rdx = dx
+				rbx = bx
+				rsp = sp
+				rbp = bp
+				rsi = si
+				rdi = di
+				r8 = r8w
+				r9 = r9w
+				r10 = r10w
+				r11 = r11w
+				r12 = r12w
+				r13 = r13w
+				r14 = r14w
+				r15 = r15w
+			}
+		}
+		width32 {
+			bits = 32
+			modifier = k
+			load = load32
+			load_signed = load_signed32
+			store = store32
+			operations = [move32, move_immediate32, read32, store32, add32, compare32]
+			aliases {
+				rax = eax
+				rcx = ecx
+				rdx = edx
+				rbx = ebx
+				rsp = esp
+				rbp = ebp
+				rsi = esi
+				rdi = edi
+				r8 = r8d
+				r9 = r9d
+				r10 = r10d
+				r11 = r11d
+				r12 = r12d
+				r13 = r13d
+				r14 = r14d
+				r15 = r15d
+			}
+		}
+		width64 {
+			bits = 64
+			modifier = q
+			load = load
+			load_signed = load
+			store = store
+			operations = []
+			aliases {
+				rax = rax
+				rcx = rcx
+				rdx = rdx
+				rbx = rbx
+				rsp = rsp
+				rbp = rbp
+				rsi = rsi
+				rdi = rdi
+				r8 = r8
+				r9 = r9
+				r10 = r10
+				r11 = r11
+				r12 = r12
+				r13 = r13
+				r14 = r14
+				r15 = r15
+			}
+		}
+	}
+
+	frontend_managed {
+		registers = [rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11]
+		resources = [flags]
+		move = move
+		address = address
+		load = load
+		store = store
+		immediate = move_immediate
+		jump = jump
+		new_label = new_label
+		bind_label = bind_label
+	}
+	frontend_constraints {
+		r = [rax, rdi, rsi, rdx, rcx, r8, r9, r10, r11]
+		a = [rax]
+		c = [rcx]
+		d = [rdx]
+		S = [rsi]
+		D = [rdi]
+		m = memory [rdi, rsi, rdx, rcx, r8, r9, r10, r11, rax]
+		i = immediate
+		n = immediate
+		cc = resource flags
+	}
+	frontend_syntax {
+		att {
+			style = att
+			new_label = new_label
+			bind_label = bind_label
+			address = address
+			movb(source:register, destination:register) = move8(destination, source)
+			movb(value:int64, destination:register) = move_immediate8(destination, value)
+			movb(source:address, destination:register) = read8(destination, source)
+			movb(source:register, destination:address) = store8(destination, source)
+			addb(source:register, destination:register) = add8(destination, source)
+			cmpb(right:register, left:register) = compare8(left, right)
+			movw(source:register, destination:register) = move16(destination, source)
+			movw(value:int64, destination:register) = move_immediate16(destination, value)
+			movw(source:address, destination:register) = read16(destination, source)
+			movw(source:register, destination:address) = store16(destination, source)
+			addw(source:register, destination:register) = add16(destination, source)
+			cmpw(right:register, left:register) = compare16(left, right)
+			movl(source:register, destination:register) = move32(destination, source)
+			movl(value:int64, destination:register) = move_immediate32(destination, value)
+			movl(source:address, destination:register) = read32(destination, source)
+			movl(source:register, destination:address) = store32(destination, source)
+			addl(source:register, destination:register) = add32(destination, source)
+			cmpl(right:register, left:register) = compare32(left, right)
+			movq(source:register, destination:register) = move(destination, source)
+			movq(value:int64, destination:register) = move_immediate(destination, value)
+			movq(source:address, destination:register) = load(destination, source)
+			movq(source:register, destination:address) = store(destination, source)
+			addq(source:register, destination:register) = add(destination, source)
+			cmpq(right:register, left:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
+	frontend_syntax {
+		intel {
+			style = intel
+			new_label = new_label
+			bind_label = bind_label
+			address = address
+			mov(destination:register, source:register) = move8(destination, source)
+			mov(destination:register, value:int64) = move_immediate8(destination, value)
+			mov(destination:register, source:address) = read8(destination, source)
+			mov(destination:address, source:register) = store8(destination, source)
+			add(destination:register, source:register) = add8(destination, source)
+			cmp(left:register, right:register) = compare8(left, right)
+			mov(destination:register, source:register) = move16(destination, source)
+			mov(destination:register, value:int64) = move_immediate16(destination, value)
+			mov(destination:register, source:address) = read16(destination, source)
+			mov(destination:address, source:register) = store16(destination, source)
+			add(destination:register, source:register) = add16(destination, source)
+			cmp(left:register, right:register) = compare16(left, right)
+			mov(destination:register, source:register) = move32(destination, source)
+			mov(destination:register, value:int64) = move_immediate32(destination, value)
+			mov(destination:register, source:address) = read32(destination, source)
+			mov(destination:address, source:register) = store32(destination, source)
+			add(destination:register, source:register) = add32(destination, source)
+			cmp(left:register, right:register) = compare32(left, right)
+			mov(destination:register, source:register) = move(destination, source)
+			mov(destination:register, value:int64) = move_immediate(destination, value)
+			mov(destination:register, source:address) = load(destination, source)
+			mov(destination:address, source:register) = store(destination, source)
+			add(destination:register, source:register) = add(destination, source)
+			cmp(left:register, right:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
+	frontend_operations {
+		move8(destination:register, source:register) {
+			lower = sequence machineWidthmove8
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move_immediate8(destination:register, value:int64) {
+			lower = sequence machineWidthmove_immediate8
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { value = bits 8 }
+		}
+		read8(destination:register, source:address) {
+			lower = sequence machineWidthread8
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load8(destination:register, source:address) {
+			lower = sequence machineWidthload8
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load_signed8(destination:register, source:address) {
+			lower = sequence machineWidthload_signed8
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		store8(destination:address, source:register) {
+			lower = sequence machineWidthstore8
+			reads = [destination, source]
+			writes = []
+			clobbers = []
+			memory = write
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add8(destination:register, source:register) {
+			lower = sequence machineWidthadd8
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare8(left:register, right:register) {
+			lower = sequence machineWidthcompare8
+			reads = [left, right]
+			writes = []
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move16(destination:register, source:register) {
+			lower = sequence machineWidthmove16
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move_immediate16(destination:register, value:int64) {
+			lower = sequence machineWidthmove_immediate16
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { value = bits 16 }
+		}
+		read16(destination:register, source:address) {
+			lower = sequence machineWidthread16
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load16(destination:register, source:address) {
+			lower = sequence machineWidthload16
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load_signed16(destination:register, source:address) {
+			lower = sequence machineWidthload_signed16
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		store16(destination:address, source:register) {
+			lower = sequence machineWidthstore16
+			reads = [destination, source]
+			writes = []
+			clobbers = []
+			memory = write
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add16(destination:register, source:register) {
+			lower = sequence machineWidthadd16
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare16(left:register, right:register) {
+			lower = sequence machineWidthcompare16
+			reads = [left, right]
+			writes = []
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move32(destination:register, source:register) {
+			lower = sequence machineWidthmove32
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move_immediate32(destination:register, value:int64) {
+			lower = sequence machineWidthmove_immediate32
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { value = bits 32 }
+		}
+		read32(destination:register, source:address) {
+			lower = sequence machineWidthread32
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load32(destination:register, source:address) {
+			lower = sequence machineWidthload32
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		load_signed32(destination:register, source:address) {
+			lower = sequence machineWidthload_signed32
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		store32(destination:address, source:register) {
+			lower = sequence machineWidthstore32
+			reads = [destination, source]
+			writes = []
+			clobbers = []
+			memory = write
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add32(destination:register, source:register) {
+			lower = sequence machineWidthadd32
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare32(left:register, right:register) {
+			lower = sequence machineWidthcompare32
+			reads = [left, right]
+			writes = []
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+
+		address(base:register, offset:int) -> address {
+			lower = sequence machineAddress
+			reads = [base]
+			writes = []
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { offset = signed 32 }
+		}
+		load(destination:register, source:address) {
+			lower = sequence machineLoad
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = read
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		store(destination:address, source:register) {
+			lower = sequence machineStore
+			reads = [destination, source]
+			writes = []
+			clobbers = []
+			memory = write
+			control = none
+			ordering = ordered
+			requires = []
+		}
+
+		resources = [flags]
+		new_label() -> label {
+			lower = sequence machineNewLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		bind_label(destination:label) {
+			lower = sequence machineBindLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = label
+			ordering = ordered
+			requires = []
+			defines = [destination]
+		}
+		move_immediate(destination:register, value:int64) {
+			lower = sequence machineMoveImmediate
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		move(destination:register, source:register) {
+			lower = sequence machineMove
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add(destination:register, source:register) {
+			lower = sequence machineAdd
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare(left:register, right:register) {
+			lower = sequence machineCompare
+			reads = [left, right]
+			writes = []
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		jump(destination:label) {
+			lower = sequence machineJump
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = jump
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		branch(condition:condition, destination:label) {
+			lower = sequence machineBranch
+			reads = [flags]
+			writes = []
+			clobbers = []
+			memory = none
+			control = branch
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		return() {
+			lower = sequence machineReturn
+			reads = [rsp]
+			writes = [rsp]
+			clobbers = []
+			memory = read
+			control = return
+			ordering = ordered
+			requires = []
+		}
+	}
+
 	alias = "amd64"
 	endian = little
 	word_bits = 64
@@ -706,6 +1336,60 @@ arch x86_64 {
 	}
 
 	sequences {
+		machineWidthmove8(out:emitter, destination:register, source:register) { encodeByteRegisterPair(out, 0x88, destination, source) }
+		machineWidthmove_immediate8(out:emitter, destination:register, value:int64) { emitREX(out, false, RTGNoRegister, RTGNoRegister, destination, destination) ; out.Byte(0xb0 + registerLowBits(destination)) ; out.Byte(int(value)) }
+		machineWidthread8(out:emitter, destination:register, source:address) { emitREX(out, false, destination, source.Index, source.Base, destination) ; out.Byte(0x8a) ; emitMemoryOperand(out, registerLowBits(destination), source) }
+		machineWidthload8(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x0fb6, destination, source, 32) }
+		machineWidthload_signed8(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x0fbe, destination, source, 64) }
+		machineWidthstore8(out:emitter, destination:address, source:register) { encodeRegisterToMemory(out, 0x88, destination, source, 8) }
+		machineWidthadd8(out:emitter, destination:register, source:register) { encodeByteRegisterPair(out, 0x00, destination, source) }
+		machineWidthcompare8(out:emitter, left:register, right:register) { encodeByteRegisterPair(out, 0x38, left, right) }
+		machineWidthmove16(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x89, destination, source, 16) }
+		machineWidthmove_immediate16(out:emitter, destination:register, value:int64) { out.Byte(0x66) ; emitREX(out, false, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister) ; out.Byte(0xb8 + registerLowBits(destination)) ; out.Uint16(uint16(value)) }
+		machineWidthread16(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x8b, destination, source, 16) }
+		machineWidthload16(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x0fb7, destination, source, 32) }
+		machineWidthload_signed16(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x0fbf, destination, source, 64) }
+		machineWidthstore16(out:emitter, destination:address, source:register) { encodeRegisterToMemory(out, 0x89, destination, source, 16) }
+		machineWidthadd16(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x01, destination, source, 16) }
+		machineWidthcompare16(out:emitter, left:register, right:register) { encodeRegisterToRM(out, 0x39, left, right, 16) }
+		machineWidthmove32(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x89, destination, source, 32) }
+		machineWidthmove_immediate32(out:emitter, destination:register, value:int64) { emitREX(out, false, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister) ; out.Byte(0xb8 + registerLowBits(destination)) ; out.Int32(int32(value)) }
+		machineWidthread32(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x8b, destination, source, 32) }
+		machineWidthload32(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x8b, destination, source, 32) }
+		machineWidthload_signed32(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x63, destination, source, 64) }
+		machineWidthstore32(out:emitter, destination:address, source:register) { encodeRegisterToMemory(out, 0x89, destination, source, 32) }
+		machineWidthadd32(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x01, destination, source, 32) }
+		machineWidthcompare32(out:emitter, left:register, right:register) { encodeRegisterToRM(out, 0x39, left, right, 32) }
+		machineLoad(out:emitter, destination:register, source:address) { encodeMemoryToRegister(out, 0x8b, destination, source, 64) }
+		machineStore(out:emitter, destination:address, source:register) { encodeRegisterToMemory(out, 0x89, destination, source, 64) }
+
+		machineAddress(out:emitter, base:register, offset:int) -> address {
+			return record_address(Base:base, Displacement:offset,)
+		}
+
+		machineNewLabel(out:emitter) -> label { return out.NewLabel() }
+		machineBindLabel(out:emitter, destination:label) { out.Mark(destination) }
+		# Physical MOV must not use the compiler's XOR/push/pop shortcuts.
+		machineMoveImmediate(out:emitter, destination:register, value:int64) {
+			emitREX(out, true, RTGNoRegister, RTGNoRegister, destination, RTGNoRegister)
+			out.AppendByte(0xb8 + registerLowBits(destination))
+			out.Uint64(uint64(value))
+		}
+		machineMove(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x89, destination, source, 64) }
+		machineSubtractValues(out:emitter, destination:register, left:register, right:register) {
+			encodeRegisterToRM(out, 0x89, destination, left, 64)
+			encodeRegisterToRM(out, 0x29, destination, right, 64)
+		}
+		machineAddValues(out:emitter, destination:register, left:register, right:register) {
+			encodeRegisterToRM(out, 0x89, destination, left, 64)
+			encodeRegisterToRM(out, 0x01, destination, right, 64)
+		}
+		machineAdd(out:emitter, destination:register, source:register) { encodeRegisterToRM(out, 0x01, destination, source, 64) }
+		machineCompare(out:emitter, left:register, right:register) { encodeRegisterToRM(out, 0x39, left, right, 64) }
+		machineJump(out:emitter, destination:label) { encodeRelative(out, 0xe9, destination) }
+		machineBranch(out:emitter, condition:condition, destination:label) { jumpCondition(out, condition, destination) }
+		machineReturn(out:emitter) { out.Byte(0xc3) }
+
 		asmCmpRcxRaxSet(a:emitter, setcc:int) {
 			a.Int32(0x0fc13948)
 			a.Bytes3(setcc, 0xc0, 0xf)

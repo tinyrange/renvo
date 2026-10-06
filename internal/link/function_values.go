@@ -497,6 +497,10 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 		if !functionValueTokenKindIs(program, funcTok, unit.TokenFunc) || !functionValueTokenCharIs(program, funcTok+1, '(') {
 			continue
 		}
+		// Method declarations are also spelled func (...). Most candidates
+		// are not function values, so do not retain their parsed signatures
+		// across discovery or its repeat after alias normalization.
+		candidateMark := arena.Mark()
 		candidate, end, valid := parseFunctionValueSignature(program, funcTok, "")
 		conversion := functionValueTokenCharIs(program, funcTok-1, '(') &&
 			functionValueTokenCharIs(program, end, ')') && functionValueTokenCharIs(program, end+1, '(')
@@ -516,9 +520,11 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 			}
 		}
 		if !valid || !conversion && !accessorResult && !inferredLocal && !anonymousType {
+			arena.Rewind(candidateMark)
 			continue
 		}
 		if functionValueSignatureByShape(signatures, candidate) >= 0 {
+			arena.Rewind(candidateMark)
 			continue
 		}
 		candidate.name = "__renvo_function_" + functionValueDecimal(len(signatures))
@@ -1642,7 +1648,9 @@ func functionValueStructText(sig functionValueSignature) string {
 }
 
 func functionValueGeneratedText(signatures []functionValueSignature, closures []functionValueClosure) string {
-	out := ""
+	// Append to one growing buffer: repeated whole-prefix concatenation
+	// retains quadratic arena storage before the generated unit is reparsed.
+	out := make([]byte, 0, 4096)
 	var methodEnvironments []string
 	for i := 0; i < len(signatures); i++ {
 		for _, impl := range signatures[i].storage.impls {
@@ -1657,99 +1665,99 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 			}
 			if !found {
 				methodEnvironments = append(methodEnvironments, impl.environmentType)
-				out += "type " + impl.environmentType + " struct { value " + impl.receiverType + " }\n"
+				out = appendFunctionValueString(out, "type "+impl.environmentType+" struct { value "+impl.receiverType+" }\n")
 			}
 		}
 	}
 	for i := 0; i < len(closures); i++ {
 		closure := closures[i]
-		out = out + "type " + closure.envName + " struct {"
+		out = appendFunctionValueString(out, "type "+closure.envName+" struct {")
 		for j := 0; j < len(closure.fields); j++ {
-			out = out + " " + closure.fields[j] + " " + closure.types[j] + ";"
+			out = appendFunctionValueString(out, " "+closure.fields[j]+" "+closure.types[j]+";")
 		}
-		out = out + " }\n"
-		out = out + "func " + closure.funcName + "(env *" + closure.envName
+		out = appendFunctionValueString(out, " }\n")
+		out = appendFunctionValueString(out, "func "+closure.funcName+"(env *"+closure.envName)
 		if closure.params != "" {
-			out = out + ", " + closure.params
+			out = appendFunctionValueString(out, ", "+closure.params)
 		}
-		out = out + ")"
+		out = appendFunctionValueString(out, ")")
 		if closure.result != "" {
-			out = out + " " + closure.result
+			out = appendFunctionValueString(out, " "+closure.result)
 		}
-		out = out + " {" + closure.body + "}\n"
+		out = appendFunctionValueString(out, " {"+closure.body+"}\n")
 	}
 	for i := 0; i < len(signatures); i++ {
 		sig := signatures[i]
 		if sig.declFuncTok < 0 {
-			out = out + "type " + sig.name + " " + functionValueStructText(sig) + "\n"
+			out = appendFunctionValueString(out, "type "+sig.name+" "+functionValueStructText(sig)+"\n")
 		}
-		out = out + "//renvo:defer-forward call\nfunc __renvo_call_" + functionValueDecimal(i) + "(fn " + sig.name
+		out = appendFunctionValueString(out, "//renvo:defer-forward call\nfunc __renvo_call_"+functionValueDecimal(i)+"(fn "+sig.name)
 		if sig.params != "" {
-			out = out + ", " + sig.params
+			out = appendFunctionValueString(out, ", "+sig.params)
 		}
-		out = out + ")"
+		out = appendFunctionValueString(out, ")")
 		if sig.result != "" {
-			out = out + " " + sig.result
+			out = appendFunctionValueString(out, " "+sig.result)
 		}
-		out = out + " {\n"
+		out = appendFunctionValueString(out, " {\n")
 		args := functionValueJoin(sig.paramNames, ", ")
 		if len(sig.paramTypes) > 0 && functionValueHasPrefix(functionValueCompactTypeText(sig.paramTypes[len(sig.paramTypes)-1]), "...") {
 			args += "..."
 		}
 		for j := 0; j < len(sig.storage.impls); j++ {
 			impl := sig.storage.impls[j]
-			out = out + "if fn.kind == " + functionValueDecimal(j+1) + " { "
+			out = appendFunctionValueString(out, "if fn.kind == "+functionValueDecimal(j+1)+" { ")
 			if sig.result != "" {
-				out = out + "return "
+				out = appendFunctionValueString(out, "return ")
 			}
 			if impl.method != "" {
-				out = out + "fn.data.(*" + impl.environmentType + ").value." + impl.method + "(" + args + ")"
+				out = appendFunctionValueString(out, "fn.data.(*"+impl.environmentType+").value."+impl.method+"("+args+")")
 			} else if impl.environmentType != "" {
 				callArgs := "fn.data.(" + impl.receiverType + ")"
 				if args != "" {
 					callArgs = callArgs + ", " + args
 				}
-				out = out + impl.function + "(" + callArgs + ")"
+				out = appendFunctionValueString(out, impl.function+"("+callArgs+")")
 			} else {
-				out = out + impl.function + "(" + args + ")"
+				out = appendFunctionValueString(out, impl.function+"("+args+")")
 			}
 			if sig.result == "" {
-				out = out + "; return"
+				out = appendFunctionValueString(out, "; return")
 			}
-			out = out + " }\n"
+			out = appendFunctionValueString(out, " }\n")
 		}
 		// The zero representation is a nil function, not a no-op returning the
 		// result type's zero value. Retain the unreachable return below for the
 		// compact backend's structural return handling.
-		out = out + "panic(\"call of nil function\")\n"
+		out = appendFunctionValueString(out, "panic(\"call of nil function\")\n")
 		if sig.result != "" {
 			if len(sig.resultTypes) > 1 {
 				var names []string
 				for j := 0; j < len(sig.resultTypes); j++ {
 					name := "__renvo_zero_" + functionValueDecimal(j)
-					out = out + "var " + name + " " + sig.resultTypes[j] + "\n"
+					out = appendFunctionValueString(out, "var "+name+" "+sig.resultTypes[j]+"\n")
 					names = append(names, name)
 				}
-				out = out + "return " + functionValueJoin(names, ", ") + "\n"
+				out = appendFunctionValueString(out, "return "+functionValueJoin(names, ", ")+"\n")
 			} else if len(sig.resultTypes) == 1 && functionValueSignatureByTypeText(signatures, sig.resultTypes[0]) >= 0 {
 				resultSignature := functionValueSignatureByTypeText(signatures, sig.resultTypes[0])
-				out = out + "var __renvo_zero " + signatures[resultSignature].name + "\nreturn __renvo_zero\n"
+				out = appendFunctionValueString(out, "var __renvo_zero "+signatures[resultSignature].name+"\nreturn __renvo_zero\n")
 			} else if sig.zeroType != "" {
-				out = out + "var __renvo_zero " + sig.zeroType + "\nreturn __renvo_zero\n"
+				out = appendFunctionValueString(out, "var __renvo_zero "+sig.zeroType+"\nreturn __renvo_zero\n")
 			} else {
-				out = out + "return " + functionValueZero(sig.result) + "\n"
+				out = appendFunctionValueString(out, "return "+functionValueZero(sig.result)+"\n")
 			}
 		} else {
-			out = out + "return\n"
+			out = appendFunctionValueString(out, "return\n")
 		}
-		out = out + "}\n"
+		out = appendFunctionValueString(out, "}\n")
 		for j, impl := range sig.storage.impls {
 			if impl.nilReceiver {
-				out += "func __renvo_bind_" + functionValueDecimal(i) + "_" + functionValueDecimal(j) + "(receiver " + impl.receiverType + ") " + sig.name + " { if receiver == nil { panic(\"nil interface method value\") }; return " + sig.name + "{kind: " + functionValueDecimal(j+1) + ", data: &" + impl.environmentType + "{value: receiver}} }\n"
+				out = appendFunctionValueString(out, "func __renvo_bind_"+functionValueDecimal(i)+"_"+functionValueDecimal(j)+"(receiver "+impl.receiverType+") "+sig.name+" { if receiver == nil { panic(\"nil interface method value\") }; return "+sig.name+"{kind: "+functionValueDecimal(j+1)+", data: &"+impl.environmentType+"{value: receiver}} }\n")
 			}
 		}
 	}
-	return out
+	return string(out)
 }
 
 // Dispatchers are generated after the source type edits. Their nested callback

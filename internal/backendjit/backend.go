@@ -3,7 +3,6 @@
 package backendjit
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"os"
 	"path/filepath"
@@ -121,7 +120,11 @@ func (b *Backend) compile(source []byte, options driver.BackendCompileOptions) d
 			Message: "unit target binding does not match the prepared backend",
 		}}
 	}
-	if _, assemblyBindings, hasAssembly := readRTGAssembly(source); hasAssembly && len(assemblyBindings) != 0 {
+	_, assemblyBindings, validAssembly := readRTGAssembly(source)
+	if !validAssembly {
+		return rtgAssemblyBackendFailure("RENVO-RTGASM-004", "invalid assembly fragment table")
+	}
+	if len(assemblyBindings) != 0 {
 		var evaluated driver.BackendResult
 		source, evaluated = b.evaluateRTGAssembly(source, prepared)
 		if !evaluated.Ok {
@@ -149,8 +152,18 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 	}
 	code := make([][]byte, len(bindings))
 	documents := make([]rtg.AssemblyDocument, len(sources))
+	typedSources := make([]bool, len(sources))
+	managedSources := make([]bool, len(sources))
 	for i := 0; i < len(sources); i++ {
-		documents[i] = rtg.ParseAssembly(sources[i].Source, sources[i].Path)
+		if len(sources[i].Path) > 2 && sources[i].Path[len(sources[i].Path)-2:] == ".s" {
+			documents[i] = rtg.LowerAssemblerFile(prepared.Resolved, prepared.Artifact.Descriptor.Name, sources[i].Source, sources[i].Path)
+			typedSources[i] = true
+		} else {
+			documents[i] = rtg.ParseAssembly(sources[i].Source, sources[i].Path)
+			managedSources[i] = documents[i].Version == 3
+			typedSources[i] = documents[i].Version >= 2
+			documents[i] = rtg.LowerTargetAssembly(prepared.Resolved, prepared.Artifact.Descriptor.Name, documents[i])
+		}
 		if !documents[i].Ok {
 			return nil, driver.BackendResult{Diagnostic: driver.Diagnostic{
 				Phase: "rtgasm", Code: "RENVO-RTGASM-003", Message: documents[i].Diagnostics[0].Message,
@@ -165,13 +178,22 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 	}
 	var pending []pendingAssembly
 	for i := 0; i < len(bindings); i++ {
-		if len(bindings[i].Code) != 0 {
-			code[i] = bindings[i].Code
-			continue
-		}
 		binding := bindings[i]
 		if binding.Source < 0 || binding.Source >= len(documents) || binding.Entry < 0 || binding.Entry >= len(documents[binding.Source].Entries) {
 			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-004", "RTGASM binding is invalid")
+		}
+		mode := 0
+		if managedSources[binding.Source] {
+			mode = 1
+		}
+		bindings[i].Mode = mode
+		bindings[i].Inputs = documents[binding.Source].Entries[binding.Entry].ManagedInputs
+		bindings[i].Outputs = documents[binding.Source].Entries[binding.Entry].ManagedOutputs
+		// Typed blocks are always checked against the selected definition. Do
+		// not trust pre-materialized code supplied in a frontend unit.
+		if len(binding.Code) != 0 && !typedSources[binding.Source] {
+			code[i] = binding.Code
+			continue
 		}
 		cacheInput := make([]byte, 0, len(prepared.Artifact.Descriptor.Definition)+len(sources[binding.Source].Source)+8)
 		cacheInput = append(cacheInput, prepared.Artifact.Descriptor.Definition[:]...)
@@ -229,7 +251,7 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 			length := int(run.Output[at]) | int(run.Output[at+1])<<8 |
 				int(run.Output[at+2])<<16 | int(run.Output[at+3])<<24
 			at += 4
-			if length < 0 || at+length < at || at+length > len(run.Output) {
+			if length <= 0 || at+length < at || at+length > len(run.Output) {
 				return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator returned invalid output")
 			}
 			fragment := append([]byte(nil), run.Output[at:at+length]...)
@@ -241,7 +263,7 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 			return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-008", "RTGASM evaluator returned trailing output")
 		}
 	}
-	evaluated, ok := attachRTGAssemblyCode(source, code)
+	evaluated, ok := attachRTGAssemblyFragments(source, bindings, code)
 	if !ok {
 		return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-009", "could not attach evaluated RTGASM code")
 	}
@@ -252,8 +274,11 @@ func (b *Backend) evaluateRTGAssembly(source []byte, prepared Prepared) ([]byte,
 // resolved target. Sandboxed frontends use this before invoking a separately
 // prepared compiler image.
 func EvaluateRTGAssembly(source []byte, resolved rtg.ResolveResult, descriptor rtg.TargetDescriptor, stdRoot string, bootstrap driver.Backend) ([]byte, driver.BackendResult) {
-	_, bindings, hasAssembly := readRTGAssembly(source)
-	if !hasAssembly || len(bindings) == 0 {
+	_, bindings, valid := readRTGAssembly(source)
+	if !valid {
+		return nil, rtgAssemblyBackendFailure("RENVO-RTGASM-004", "invalid assembly fragment table")
+	}
+	if len(bindings) == 0 {
 		return source, driver.BackendResult{Ok: true}
 	}
 	b := Backend{stdRoot: stdRoot, bootstrap: bootstrap}
@@ -262,18 +287,12 @@ func EvaluateRTGAssembly(source []byte, resolved rtg.ResolveResult, descriptor r
 }
 
 func assemblyEvaluationSources(generated rtg.GenerateResult) ([]load.SourceFile, []string, error) {
-	sources, names, err := preparationSources("", generated)
-	if err != nil {
-		return nil, nil, err
-	}
-	for i := 0; i < len(sources); i++ {
-		if filepath.Base(sources[i].Path) != "compiler_main.go" {
-			continue
-		}
-		sources[i].Src = bytes.Replace(sources[i].Src, []byte("func appMain("), []byte("func renvoCompilerMain("), 1)
-		break
-	}
-	return sources, names, nil
+	// Evaluators are closed, encoder-only programs; they no longer need the
+	// complete compiler kernel or a compiler_main entrypoint rename.
+	return []load.SourceFile{
+		{Path: "/backend/go.mod", Src: []byte("module renvo.dev/assembly-evaluator\n")},
+		{Path: "/backend/evaluator.go", Src: generated.Source},
+	}, []string{"/backend/evaluator.go"}, nil
 }
 
 func rtgAssemblyBackendFailure(code string, message string) driver.BackendResult {

@@ -121,6 +121,7 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 	if !options.Ok {
 		return backendBuildOptions{options: options, hasBackend: true}
 	}
+	options.CAssemblyCompiler = targetCAssemblyCompiler{vocabulary: resolved.Vocabulary}
 	options.Target = resolved.Descriptor.Name
 	options.TargetWordBits = resolved.Descriptor.WordBits
 	options.TargetPointerBits = resolved.Descriptor.PointerBits

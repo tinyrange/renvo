@@ -232,8 +232,28 @@ func mergeArchitectureExtensions(document *Document) {
 			continue
 		}
 		sequenceBlock := -1
+		frontendBlock := -1
+		syntaxBlock := -1
+		constraintBlock := -1
+		intrinsicBlock := -1
 		valid := len(extension.Fields) == 0
 		for statement := 0; statement < len(extension.Statements); statement++ {
+			if statementBlockName(extension.Statements[statement]) == "frontend_intrinsics" && intrinsicBlock < 0 {
+				intrinsicBlock = statement
+				continue
+			}
+			if statementBlockName(extension.Statements[statement]) == "frontend_constraints" && constraintBlock < 0 {
+				constraintBlock = statement
+				continue
+			}
+			if statementBlockName(extension.Statements[statement]) == "frontend_syntax" && syntaxBlock < 0 {
+				syntaxBlock = statement
+				continue
+			}
+			if statementBlockName(extension.Statements[statement]) == "frontend_operations" && frontendBlock < 0 {
+				frontendBlock = statement
+				continue
+			}
 			if statementBlockName(extension.Statements[statement]) != "sequences" ||
 				sequenceBlock >= 0 {
 				valid = false
@@ -247,10 +267,10 @@ func mergeArchitectureExtensions(document *Document) {
 		_, compilerBlock := declarationBlock(extension, "compiler_bindings")
 		compilerExtension := compilerBlock && len(extension.Fields) == 1 &&
 			extension.Fields[0].Name == "compiler_selector" && len(extension.Statements) == 2
-		if (!valid || sequenceBlock < 0) && !compilerExtension {
+		if (!valid || sequenceBlock < 0 && frontendBlock < 0 && syntaxBlock < 0 && constraintBlock < 0 && intrinsicBlock < 0) && !compilerExtension {
 			document.Diagnostics = append(document.Diagnostics,
 				resolveDiagnostic(*document, extension, "RTG-EXTEND-002",
-					"architecture extensions require a sequences block or a compiler selector and binding block"))
+					"architecture extensions require sequences/frontend_operations/frontend_syntax/frontend_constraints/frontend_intrinsics blocks or a compiler selector and binding block"))
 			continue
 		}
 		baseIndex := -1
@@ -270,6 +290,21 @@ func mergeArchitectureExtensions(document *Document) {
 		if compilerExtension {
 			document.Declarations[baseIndex].Fields = append(document.Declarations[baseIndex].Fields, extension.Fields...)
 			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements...)
+			continue
+		}
+		if intrinsicBlock >= 0 {
+			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements[intrinsicBlock])
+		}
+		if constraintBlock >= 0 {
+			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements[constraintBlock])
+		}
+		if syntaxBlock >= 0 {
+			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements[syntaxBlock])
+		}
+		if frontendBlock >= 0 {
+			document.Declarations[baseIndex].Statements = append(document.Declarations[baseIndex].Statements, extension.Statements[frontendBlock])
+		}
+		if sequenceBlock < 0 {
 			continue
 		}
 		baseBlock := -1

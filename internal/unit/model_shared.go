@@ -146,10 +146,11 @@ type RTGAssemblySource struct {
 // index. Package units use package-local indexes; the linker remaps them to the
 // final linked function table before serialization.
 type RTGAssemblyBinding struct {
-	Func   int
-	Source int
-	Entry  int
-	Code   []byte
+	Func                  int
+	Source                int
+	Entry                 int
+	Mode, Inputs, Outputs int // Mode 0: whole function; Mode 1: managed inline word body
+	Code                  []byte
 }
 
 const (

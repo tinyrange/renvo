@@ -91,10 +91,11 @@ func parseDocument(source []byte, filename string, sourceMap []sourceSegment) Do
 }
 
 type documentParser struct {
-	document   *Document
-	at         int
-	goNames    []string
-	lineStarts []int
+	semicolonStatements bool // opt-in for typed project assembly, not definitions
+	document            *Document
+	at                  int
+	goNames             []string
+	lineStarts          []int
 }
 
 // sourcePosition indexes line boundaries once per immutable document. Definition
@@ -482,6 +483,17 @@ func (p *documentParser) parseStatementsDepth(start int, end int, depth int) []S
 		roundDepth := 0
 		squareDepth := 0
 		for at < end {
+			if p.semicolonStatements && roundDepth == 0 && squareDepth == 0 && p.operator(at, ";") {
+				if at > statementStart {
+					statements = append(statements, Statement{Tokens: p.statementTokens(statementStart, at), Span: p.sourceSpan(p.document.Tokens[statementStart].Start, p.document.Tokens[at].End)})
+					if len(statements) > maxStatementsPerBody {
+						p.failAt(statementStart, "RTG-LIMIT-006", "declaration body exceeds the statement-count limit")
+						return statements
+					}
+				}
+				at++
+				break
+			}
 			if roundDepth == 0 && squareDepth == 0 && p.operator(at, "{") {
 				close, ok := p.matchBlock(at)
 				if !ok || close > end {

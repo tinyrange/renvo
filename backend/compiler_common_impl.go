@@ -18670,8 +18670,57 @@ func renvoStringCompareOperandIsReadOnly(g *renvoLinearGen, ep *renvoExprParse, 
 	return false
 }
 
+// A short literal needs no second descriptor or general equality loop. The
+// length guard precedes every load, including the empty/nil case. ARM keeps
+// byte accesses because a string's data pointer may have any alignment.
+func renvoEmitShortLiteralStringCompare(g *renvoLinearGen, ep *renvoExprParse, operand int, literal int, notEqual bool) bool {
+	value := renvoDecodeStringToken(g.prog, ep.exprs[literal].tok)
+	a := &g.asm
+	if !renvoEmitStringCompareValueRegs(g, ep, operand, true) {
+		return false
+	}
+	fail := renvoAsmNewLabel(a)
+	done := renvoAsmNewLabel(a)
+	renvoAsmPushPrimary(a)
+	renvoAsmCopySecondaryToPrimary(a)
+	renvoAsmCmpPrimaryImm8(a, len(value))
+	renvoAsmPopSecondary(a)
+	renvoAsmJnzLabel(a, fail)
+	for at := 0; at < len(value); at++ {
+		renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, 1)
+		renvoAsmCmpPrimaryImm8(a, int(value[at]))
+		renvoAsmJnzLabel(a, fail)
+	}
+	if notEqual {
+		renvoAsmPrimaryImm(a, 0)
+	} else {
+		renvoAsmPrimaryImm(a, 1)
+	}
+	renvoAsmJmpMarkLabel(a, done, fail)
+	if notEqual {
+		renvoAsmPrimaryImm(a, 1)
+	} else {
+		renvoAsmPrimaryImm(a, 0)
+	}
+	renvoAsmMarkLabel(a, done)
+	return true
+}
+
 func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, right int, notEqual bool) bool {
 	renvoNonNil(g, ep)
+	// Only literal operands qualify; the other operand still executes exactly
+	// once, and borrowing its byte storage is safe against a pure literal.
+	if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchArm {
+		literal := right
+		operand := left
+		if ep.exprs[literal].kind != renvoExprString {
+			literal = left
+			operand = right
+		}
+		if ep.exprs[literal].kind == renvoExprString && renvoTokEnd(g.prog, ep.exprs[literal].tok)-renvoTokStart(g.prog, ep.exprs[literal].tok) <= 10 {
+			return renvoEmitShortLiteralStringCompare(g, ep, operand, literal, notEqual)
+		}
+	}
 	a := &g.asm
 	label := renvoEnsureStringEqualHelper(g)
 	borrowLeft := renvoStringCompareOperandIsReadOnly(g, ep, right)
@@ -20502,6 +20551,10 @@ func renvoEmitScalarFunction(g *renvoLinearGen, fnInfoIndex int) bool {
 	metaFn := &g.meta.funcs[fnInfoIndex]
 	if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
 		return true
+	}
+	if len(renvoRTGAssembly.bindings) != 0 && !renvoRTGManagedSignature(g, fnInfoIndex) {
+		renvoPrintErr("renvo: managed assembly signature does not match runtime word inputs/results\n")
+		return false
 	}
 	override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
 	if override != 0 {

@@ -1,6 +1,9 @@
 package driver
 
-import "renvo.dev/internal/targetinfo"
+import (
+	"renvo.dev/internal/c11"
+	"renvo.dev/internal/targetinfo"
+)
 
 const (
 	ParseOK = iota
@@ -50,6 +53,7 @@ type Options struct {
 	Target               string
 	TargetExplicit       bool
 	TargetWordBits       int
+	CAssemblyCompiler    c11.AssemblyCompiler
 	TargetPointerBits    int
 	TargetScalarAlign    int
 	Output               string
@@ -699,7 +703,7 @@ func optionArgIsCFile(arg string) bool {
 }
 
 func optionArgIsRTGAsmFile(arg string) bool {
-	return len(arg) > 7 && arg[len(arg)-7:] == ".rtgasm"
+	return len(arg) > 7 && arg[len(arg)-7:] == ".rtgasm" || len(arg) > 2 && arg[len(arg)-2:] == ".s"
 }
 
 func optionArgIsPreprocessedCFile(arg string) bool {

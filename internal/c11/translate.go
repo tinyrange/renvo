@@ -1,6 +1,8 @@
 package c11
 
-import "renvo.dev/internal/arena"
+import (
+	"renvo.dev/internal/arena"
+)
 
 const (
 	TranslateOK = iota
@@ -26,10 +28,12 @@ const (
 // Result is the C11 source adapter result. Source is ordinary Renvo Go input,
 // so every later frontend phase is shared with Go packages.
 type Result struct {
-	Source  []byte
-	Ok      bool
-	Error   int
-	ErrorAt int
+	Source     []byte
+	Assemblies [][]byte
+	Ok         bool
+	Error      int
+	ErrorAt    int
+	Message    string
 }
 
 type declarator struct {
@@ -80,6 +84,7 @@ type cAsmOperand struct {
 }
 
 type cAsm struct {
+	offset   int
 	template []byte
 	outputs  []cAsmOperand
 	inputs   []cAsmOperand
@@ -133,6 +138,10 @@ type generatedIdentifierReferences struct {
 }
 
 type translator struct {
+	asmCompiler             AssemblyCompiler
+	asmError                string
+	asmNamespace            string
+	asmSources              [][]byte
 	src                     []byte
 	tokens                  []token
 	pos                     int
@@ -377,6 +386,8 @@ func TranslateObjectForDataModel(packageName string, src []byte, prelude []byte,
 // driver. Declaration attributes remain properties of the declaration itself;
 // these booleans only implement the corresponding GCC command-line switches.
 type ObjectConfig struct {
+	AssemblyCompiler   AssemblyCompiler
+	AssemblyNamespace  string
 	DataModel          int
 	FunctionSections   bool
 	DataSections       bool
@@ -425,6 +436,7 @@ func translateObjectConfig(packageName string, src []byte, prelude []byte, objec
 
 func translateObjectConfigMode(packageName string, src []byte, prelude []byte, object bool, config ObjectConfig, checkOnly bool, assemblyOutput bool) Result {
 	t := translator{
+		asmCompiler: config.AssemblyCompiler, asmNamespace: config.AssemblyNamespace,
 		packageName:        packageName,
 		isolateGoBuiltins:  config.IsolateGoBuiltins,
 		goExports:          config.GoExports,
@@ -468,7 +480,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		return Result{Ok: false, Error: t.err, ErrorAt: -1}
 	}
 	if !t.translateScannedSource(src, sourceScan) {
-		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt, Message: t.asmError}
 	}
 	if checkOnly {
 		if packageName == "" {
@@ -489,7 +501,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 	t.emitReachableDeferredFunctions()
 	t.emitPendingDeclarations()
 	if !t.ok {
-		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt}
+		return Result{Ok: false, Error: t.err, ErrorAt: t.errorAt, Message: t.asmError}
 	}
 	if t.usesUnsafe {
 		declaration := []byte("import __c_unsafe \"unsafe\"\n")
@@ -499,7 +511,7 @@ func translateObjectConfigMode(packageName string, src []byte, prelude []byte, o
 		copy(t.out[at:], declaration)
 	}
 	t.out = compactGeneratedCLineBreaks(t.out)
-	return Result{Source: t.out, Ok: true, Error: TranslateOK, ErrorAt: -1}
+	return Result{Source: t.out, Assemblies: t.asmSources, Ok: true, Error: TranslateOK, ErrorAt: -1}
 }
 
 func compactGeneratedCLineBreaks(source []byte) []byte {
@@ -3927,6 +3939,7 @@ func (t *translator) takeAsmClause() bool {
 
 func (t *translator) parseAsmClause() (cAsm, bool) {
 	var result cAsm
+	result.offset = t.tokens[t.pos].start
 	if !t.currentIs("asm") && !t.currentIs("__asm") && !t.currentIs("__asm__") {
 		return result, false
 	}
@@ -4064,6 +4077,9 @@ func (t *translator) emitAsmStatement() bool {
 		// constant metadata records that the -S contract explicitly supports.
 		t.emitAsmConstantMetadata(operation)
 		return t.ok
+	}
+	if t.asmCompiler != nil {
+		return t.emitTargetAsm(operation)
 	}
 	if operation.gotoAsm || len(operation.labels) != 0 {
 		return t.emitAsmGotoCPUFeature(operation) || t.emitAsmGotoUserLoad(operation) || t.emitAsmGotoUserStore(operation)

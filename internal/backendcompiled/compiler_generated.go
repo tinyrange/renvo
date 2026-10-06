@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ce78be97eaba223cb4b21520098decb4b6d40e4e99045ad24c798755a3387d2a"
+const CompilerSourceDigest = "3baafa1fe3c4ad1e99fda1e5da6b9cb854828b6a95df0a81159d36f7bd7cefcd"
 
 // source: backend/compiler_common_impl.go
 
@@ -18677,8 +18677,57 @@ return renvoStringCompareOperandIsReadOnly(g, ep, renvo_runtime_UnsafeIntAt(ep.a
 return false
 }
 
+
+
+
+func renvoEmitShortLiteralStringCompare(g *renvoLinearGen, ep *renvoExprParse, operand int, literal int, notEqual bool) bool {
+value := renvoDecodeStringToken(g.prog, ep.exprs[literal].tok)
+a := &g.asm
+if !renvoEmitStringCompareValueRegs(g, ep, operand, true) {
+return false
+}
+fail := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmPushPrimary(a)
+renvoAsmCopySecondaryToPrimary(a)
+renvoAsmCmpPrimaryImm8(a, len(value))
+renvoAsmPopSecondary(a)
+renvoAsmJnzLabel(a, fail)
+for at := 0; at < len(value); at++ {
+renvoAsmLoadPrimaryMemSecondaryDispSize(a, at, 1)
+renvoAsmCmpPrimaryImm8(a, int(value[at]))
+renvoAsmJnzLabel(a, fail)
+}
+if notEqual {
+renvoAsmPrimaryImm(a, 0)
+} else {
+renvoAsmPrimaryImm(a, 1)
+}
+renvoAsmJmpMarkLabel(a, done, fail)
+if notEqual {
+renvoAsmPrimaryImm(a, 1)
+} else {
+renvoAsmPrimaryImm(a, 0)
+}
+renvoAsmMarkLabel(a, done)
+return true
+}
+
 func renvoEmitStringCompare(g *renvoLinearGen, ep *renvoExprParse, left int, right int, notEqual bool) bool {
 renvoNonNil(g, ep)
+
+
+if renvoPreparedBackendActive == 0 && g.c.renvoTargetArch == renvoArchArm {
+literal := right
+operand := left
+if ep.exprs[literal].kind != renvoExprString {
+literal = left
+operand = right
+}
+if ep.exprs[literal].kind == renvoExprString && renvoTokEnd(g.prog, ep.exprs[literal].tok)-renvoTokStart(g.prog, ep.exprs[literal].tok) <= 10 {
+return renvoEmitShortLiteralStringCompare(g, ep, operand, literal, notEqual)
+}
+}
 a := &g.asm
 label := renvoEnsureStringEqualHelper(g)
 borrowLeft := renvoStringCompareOperandIsReadOnly(g, ep, right)
@@ -20509,6 +20558,10 @@ a := &g.asm
 metaFn := &g.meta.funcs[fnInfoIndex]
 if renvoEmitCompactCValueHelper(g, fnInfoIndex) {
 return true
+}
+if len(renvoRTGAssembly.bindings) != 0 && !renvoRTGManagedSignature(g, fnInfoIndex) {
+renvoPrintErr("renvo: managed assembly signature does not match runtime word inputs/results\n")
+return false
 }
 override := renvoEmitFunctionOverride(a, metaFn.declIndex, g.funcLabels[fnInfoIndex])
 if override != 0 {
@@ -30500,7 +30553,7 @@ return renvoRTGParseTargetArg(target)
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\x32\x66\x89\x8e\x2f\xa3\x14\xad\xaf\x45\xdf\x0c\xb9\x39\x2a\x47\xb6\xbf\xea\xd3\xf7\x4e\xc5\xc3\xfd\x6d\x0d\x04\x36\x5a\x6b\x59", 3, true
+return "linux/amd64", "\xef\x54\xbc\xdc\xa7\x39\xa1\x42\x3b\x54\x75\x00\x1b\x7f\x3e\x63\x36\xa0\x16\x84\x01\x40\x2a\xbe\x45\xf2\x93\x6a\xf5\x53\x4d\x7d", 3, true
 }
 if target == renvoTargetLinux386 {
 return "linux/386", "\x60\xc3\x7c\xa8\xd9\x78\x29\x90\xaa\xa0\xd4\x5c\xb6\xc6\x9f\x4f\x20\x90\xa5\x94\x11\x03\xe0\x23\x70\xa1\x58\x3a\x09\xbc\xa6\xd1", 3, true
@@ -30512,34 +30565,34 @@ if target == renvoTargetLinuxArm {
 return "linux/arm", "\x27\x7b\x54\xf0\x24\x66\x4e\xdc\xdf\xac\xb4\x34\x21\x91\x91\xfe\xbd\x98\x31\x9e\x7e\x02\x73\x64\xd4\x12\x0a\x6e\xec\x8e\xb7\xe4", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\x5c\x3f\x16\x8d\x10\x78\xda\x18\xe8\x60\x6d\x68\x86\x57\xfb\x2f\xa7\x43\x12\x84\x3f\x28\x5b\x39\x29\x55\xc7\xbc\x11\x52\x92\x9d", 3, true
+return "windows/amd64", "\xc0\xa6\x4c\x4b\x2f\x7f\x56\xe8\x6e\x76\x73\xb4\xc5\x3a\x02\xf8\xfc\x07\x6e\x60\x87\x1c\x1d\x90\x8a\x03\x5e\x11\x1a\x5b\x1a\x54", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xab\x09\x21\x99\x5b\x66\x29\x8f\xd4\x74\xca\x05\x97\x41\xd7\x34\xd6\x6a\x28\x8e\x46\xf0\xf2\x47\xbf\x79\x2b\x1e\x41\x64\x57\xa4", 3, true
+return "wasi/wasm32", "\xdd\xc4\x0a\x1e\x21\x50\x83\x49\x10\x2b\xcd\xf1\x30\x6c\xc9\x5a\x67\x97\x0a\x19\x7a\xe4\xd1\x5f\x83\x75\x42\xa0\x20\x6a\x2a\x0b", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\x00\xa0\xf9\xe3\x8a\x51\x74\xd2\xcb\x20\xc2\xd8\x67\xb7\x6e\x6d\x59\xd3\xf6\x88\xb5\x54\x1c\x00\xc2\x83\xed\xb5\x15\x6f\x6a\xe4", 3, true
+return "linux-kernel/amd64", "\x7c\x2d\xcd\x67\xe9\xfc\x06\xce\x55\x41\x96\xba\x77\x4c\x92\x4c\xa6\x19\x9d\x5f\x04\x16\x82\xb8\x5c\xc5\x6c\xf7\x81\x8c\xf6\x1f", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x42\xc6\x1d\x64\x89\xe3\x72\xb4\x7f\x34\x75\x11\x4e\x43\xa9\xc0\xec\xfe\xdb\x0c\x23\x63\x95\x61\x70\x69\x63\x8d\xb2\x59\xc1\xf2", 3, true
+return "vm/vm32", "\xf2\x73\xeb\x3a\x8d\x05\x4b\x53\xed\x2e\xb3\xcf\x65\x04\xbc\xb0\xa0\x8e\xb1\xee\x29\xd2\x72\xc9\x49\xb0\xca\xa9\xbc\x92\xd1\xfa", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "\xef\xee\xbf\x37\x00\x68\x45\x1b\xce\x00\xa9\x7f\x31\x3e\xe3\xb2\x4c\x0c\xb2\x6f\x4b\xf3\xe6\x13\x2d\x82\x9f\xc7\x20\xbc\xfa\xd1", 3, true
+return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\x83\x31\x81\x2e\xa7\x63\x4f\xae\x5d\xfa\xa4\x63\xc8\xf9\x48\x17\xd1\xd4\x80\xc0\x1f\x29\xcf\xde\xa7\x48\x75\xd0\x52\xc9\x2a\x4b", 3, true
+return "openbsd/amd64", "\xc9\xbb\x3e\xf9\x14\xdc\xc0\xa5\x11\x91\x69\x13\xe0\xf2\x40\xd5\x0c\xa3\x4f\xc7\x0a\xc5\xd5\x2b\x4b\x24\x38\x48\xde\x99\x7d\xe0", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "\x5a\x41\x71\x80\xdf\xe3\xa5\x04\x1f\xf5\x8f\x62\x0a\x1e\x5b\xea\x14\x75\xf1\x88\x6d\xb1\x1c\x58\x9b\x00\xd4\x2c\xbb\xf2\xde\x99", 3, true
+return "netbsd/amd64", "\x56\x86\x32\x1a\xa5\x86\xe5\xd0\x2d\x0c\xa7\xb9\xa9\x5d\x80\x24\x5c\x97\x1b\x16\x11\x7d\xb2\xca\xb7\xa9\x02\xe5\x1c\xfc\xf1\x04", 3, true
 }
 return "", "", 0, false
 }
@@ -46525,19 +46578,52 @@ g.copyBytesLabel = label + 1
 after := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
 unaligned := renvoAsmNewLabel(a)
-renvoArmAsmEmit(a, 0xe1809001)
-renvoArmAsmEmit(a, 0xe1899002)
-renvoArmAsmEmit(a, 0xe3190003)
-renvoArmAsmBCondLabel(a, unaligned, 1)
 forward := renvoAsmNewLabel(a)
 done := renvoAsmNewLabel(a)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+
+renvoArmAsmEmit(a, 0xe0209001)
+renvoArmAsmEmit(a, 0xe3190003)
+renvoArmAsmBCondLabel(a, unaligned, 1)
 renvoArmAsmCmpRegReg(a, 1, 0)
 renvoArmAsmBCondLabel(a, forward, 9)
+renvoArmAsmEmit(a, 0xe0419000)
+renvoArmAsmCmpRegReg(a, 9, 2)
+renvoArmAsmBCondLabel(a, forward, 2)
 renvoArmAsmAddRegRegShift(a, 0, 0, 2, 0)
 renvoArmAsmAddRegRegShift(a, 1, 1, 2, 0)
+
+
+backwardTail := renvoAsmNewLabel(a)
+backwardWords := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, backwardTail)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+renvoArmAsmEmit(a, 0xe3100003)
+renvoArmAsmBCondLabel(a, backwardWords, 0)
+renvoArmAsmAddRegImm(a, 0, 0, -1)
+renvoArmAsmAddRegImm(a, 1, 1, -1)
+renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
+renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
+renvoArmAsmAddRegImm(a, 2, 2, -1)
+renvoAsmJmpLabel(a, backwardTail)
+renvoAsmMarkLabel(a, backwardWords)
 for direction := 0; direction < 2; direction++ {
 if direction == 1 {
 renvoAsmMarkLabel(a, forward)
+forwardWords := renvoAsmNewLabel(a)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+renvoArmAsmEmit(a, 0xe3100003)
+renvoArmAsmBCondLabel(a, forwardWords, 0)
+renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
+renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
+renvoArmAsmAddRegImm(a, 0, 0, 1)
+renvoArmAsmAddRegImm(a, 1, 1, 1)
+renvoArmAsmAddRegImm(a, 2, 2, -1)
+renvoAsmJmpLabel(a, forward)
+renvoAsmMarkLabel(a, forwardWords)
 }
 words := renvoAsmNewLabel(a)
 tail := renvoAsmNewLabel(a)
@@ -46558,37 +46644,39 @@ renvoArmAsmEmit(a, 0xe8a11208)
 renvoArmAsmAddRegImm(a, 2, 2, -12)
 renvoAsmJmpLabel(a, words)
 renvoAsmMarkLabel(a, wordTail)
-words = wordTail
 renvoArmAsmCmpRegImm(a, 2, 4)
 renvoArmAsmBCondLabel(a, tail, 3)
+wordLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, wordLoop)
+
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -4)
-renvoArmAsmAddRegImm(a, 1, 1, -4)
-}
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 4)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 4)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 4)
-renvoArmAsmAddRegImm(a, 1, 1, 4)
+renvoArmAsmEmit(a, 0xe5309004)
+renvoArmAsmEmit(a, 0xe5219004)
+} else {
+renvoArmAsmEmit(a, 0xe4909004)
+renvoArmAsmEmit(a, 0xe4819004)
 }
 renvoArmAsmAddRegImm(a, 2, 2, -4)
-renvoAsmJmpLabel(a, words)
+renvoArmAsmCmpRegImm(a, 2, 4)
+renvoArmAsmBCondLabel(a, wordLoop, 2)
 renvoAsmMarkLabel(a, tail)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
 renvoArmAsmBCondLabel(a, done, 0)
+byteLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, byteLoop)
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -1)
-renvoArmAsmAddRegImm(a, 1, 1, -1)
+renvoArmAsmEmit(a, 0xe5709001)
+renvoArmAsmEmit(a, 0xe5619001)
+} else {
+renvoArmAsmEmit(a, 0xe4d09001)
+renvoArmAsmEmit(a, 0xe4c19001)
 }
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 1)
-renvoArmAsmAddRegImm(a, 1, 1, 1)
-}
-renvoArmAsmAddRegImm(a, 2, 2, -1)
-renvoAsmJmpLabel(a, bytes)
+renvoArmAsmEmit(a, 0xe2522001)
+renvoArmAsmBCondLabel(a, byteLoop, 1)
+renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, done)
 renvoAsmRet(a)
@@ -46629,21 +46717,46 @@ renvoArmAsmAddRegImm(a, 1, 1, 16)
 renvoArmAsmAddRegImm(a, 2, 2, -16)
 renvoAsmJmpLabel(a, chunks)
 renvoAsmMarkLabel(a, tail)
+
+
+shortChunks := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, shortChunks)
+renvoArmAsmCmpRegImm(a, 2, 4)
+renvoArmAsmBCondLabel(a, bytes, 3)
+if direction == 0 {
+renvoArmAsmAddRegImm(a, 0, 0, -4)
+renvoArmAsmAddRegImm(a, 1, 1, -4)
+}
+for index := 0; index < 4; index++ {
+at := index
+if direction == 0 {
+at = 3 - index
+}
+renvoArmAsmLoadRegMem(a, 9, 0, at, 1)
+renvoArmAsmStoreRegMem(a, 9, 1, at, 1)
+}
+if direction == 1 {
+renvoArmAsmAddRegImm(a, 0, 0, 4)
+renvoArmAsmAddRegImm(a, 1, 1, 4)
+}
+renvoArmAsmAddRegImm(a, 2, 2, -4)
+renvoAsmJmpLabel(a, shortChunks)
 renvoAsmMarkLabel(a, bytes)
 renvoArmAsmCmpRegImm(a, 2, 0)
 renvoArmAsmBCondLabel(a, done, 0)
+byteLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, byteLoop)
+
 if direction == 0 {
-renvoArmAsmAddRegImm(a, 0, 0, -1)
-renvoArmAsmAddRegImm(a, 1, 1, -1)
+renvoArmAsmEmit(a, 0xe5709001)
+renvoArmAsmEmit(a, 0xe5619001)
+} else {
+renvoArmAsmEmit(a, 0xe4d09001)
+renvoArmAsmEmit(a, 0xe4c19001)
 }
-renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
-renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
-if direction == 1 {
-renvoArmAsmAddRegImm(a, 0, 0, 1)
-renvoArmAsmAddRegImm(a, 1, 1, 1)
-}
-renvoArmAsmAddRegImm(a, 2, 2, -1)
-renvoAsmJmpLabel(a, bytes)
+renvoArmAsmEmit(a, 0xe2522001)
+renvoArmAsmBCondLabel(a, byteLoop, 1)
+renvoAsmJmpLabel(a, done)
 }
 renvoAsmMarkLabel(a, after)
 return label
@@ -47310,10 +47423,11 @@ source []byte
 }
 
 type renvoRTGAssemblyBinding struct {
-function int
-source   int
-entry    int
-code     []byte
+function              int
+source                int
+entry                 int
+mode, inputs, outputs int
+code                  []byte
 }
 
 type renvoRTGAssemblyTable struct {
@@ -47331,6 +47445,14 @@ return true
 }
 r := renvoUnitReader{src: data, end: len(data), ok: true}
 sourceCount := renvoUnitReadVar(&r)
+version := 1
+if sourceCount == 0 {
+version = renvoUnitReadVar(&r)
+sourceCount = renvoUnitReadVar(&r)
+if version != 2 {
+return false
+}
+}
 if !r.ok || sourceCount < 0 || sourceCount > len(data) {
 return false
 }
@@ -47360,6 +47482,14 @@ table.bindings = make([]renvoRTGAssemblyBinding, 0, bindingCount)
 seen := make([]bool, len(prog.funcs))
 for i := 0; i < bindingCount; i++ {
 binding := renvoRTGAssemblyBinding{function: renvoUnitReadVar(&r), source: renvoUnitReadVar(&r), entry: renvoUnitReadVar(&r)}
+if version == 2 {
+binding.mode = renvoUnitReadVar(&r)
+binding.inputs = renvoUnitReadVar(&r)
+binding.outputs = renvoUnitReadVar(&r)
+}
+if binding.mode < 0 || binding.mode > 1 || binding.inputs < 0 || binding.inputs > 6 || binding.outputs < 0 || binding.outputs > 1 || binding.mode == 0 && (binding.inputs != 0 || binding.outputs != 0) {
+return false
+}
 codeLength := renvoUnitReadVar(&r)
 if !r.ok || codeLength < 0 || r.pos+codeLength < r.pos || r.pos+codeLength > r.end {
 return false
@@ -47694,6 +47824,9 @@ renvoAsmMarkLabel(a, label)
 for at := 0; at < len(binding.code); at++ {
 a.code = append(a.code, binding.code[at])
 }
+if binding.mode == 1 {
+renvoRTGDirectReturn(a)
+}
 renvoRTGFunctionFinish(a)
 return 1
 }
@@ -47752,7 +47885,9 @@ return
 }
 renvoRTGAsmPopRegister(&g.asm, registers[i])
 }
+if !renvoRTGEmitManagedCall(g, fnIndex, wordCount) {
 renvoAsmCallLabel(&g.asm, g.funcLabels[fnIndex])
+}
 if wordCount > len(registers) {
 stackBytes := (wordCount - len(registers)) * renvoRTGStackWordBytes
 renvoRTGDirectMoveImmediate(&g.asm, renvoRTGScratch,
@@ -47994,6 +48129,69 @@ return nil
 return renvoAsmImageRelocatableObjectAmd64(a)
 }
 
+func renvoRTGManagedBinding(g *renvoLinearGen, fnIndex int) int {
+decl := g.meta.funcs[fnIndex].declIndex
+for i := 0; i < len(renvoRTGAssembly.bindings); i++ {
+binding := &renvoRTGAssembly.bindings[i]
+if binding.function == decl && binding.mode == 1 {
+return i
+}
+}
+return -1
+}
+
+func renvoRTGManagedSignature(g *renvoLinearGen, fnIndex int) bool {
+index := renvoRTGManagedBinding(g, fnIndex)
+if index < 0 {
+return true
+}
+binding := &renvoRTGAssembly.bindings[index]
+fn := &g.meta.funcs[fnIndex]
+outputs := 0
+if fn.resultType != 0 {
+outputs = 1
+}
+if fn.receiverType != 0 || fn.paramCount != binding.inputs || outputs != binding.outputs {
+return false
+}
+
+for i := 0; i < fn.paramCount; i++ {
+param := g.meta.params[fn.firstParam+i]
+typ := renvoResolveType(g.meta, param.typ)
+if typ == nil || renvoTypeSize(g.meta, param.typ) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+return false
+}
+}
+if binding.outputs == 1 {
+typ := renvoResolveType(g.meta, fn.resultType)
+if typ == nil || renvoTypeSize(g.meta, fn.resultType) != g.c.renvoNativeIntSize || (!renvoTypeKindIsScalarInt(typ.kind) && typ.kind != renvoTypePointer) {
+return false
+}
+}
+return true
+}
+
+func renvoRTGEmitManagedCall(g *renvoLinearGen, fnIndex int, wordCount int) bool {
+index := renvoRTGManagedBinding(g, fnIndex)
+if index < 0 {
+return false
+}
+binding := &renvoRTGAssembly.bindings[index]
+if !renvoRTGManagedSignature(g, fnIndex) || wordCount != binding.inputs || len(binding.code) == 0 {
+if renvoRTGUnsupportedOperation == 0 {
+renvoRTGUnsupportedOperation = 3101
+}
+return true
+}
+for i := 0; i < len(binding.code); i++ {
+g.asm.code = append(g.asm.code, binding.code[i])
+}
+
+g.asm.lastPrimaryLoad = 0
+g.asm.lastPrimaryStoreEnd = -1
+return true
+}
+
 // source: backend/compiler_amd64_impl.go
 
 
@@ -48138,6 +48336,45 @@ g.copyBytesLabel = label + 1
 after := renvoAsmNewLabel(a)
 end := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
+
+
+large := renvoAsmNewLabel(a)
+small8 := renvoAsmNewLabel(a)
+small4 := renvoAsmNewLabel(a)
+small2 := renvoAsmNewLabel(a)
+shortDone := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x83\xf9\x10")
+renvoAmd64AsmJccLabel(a, 0x87, large)
+renvoAsmEmitText(a, "\x83\xf9\x08")
+renvoAmd64AsmJccLabel(a, 0x82, small8)
+renvoAsmEmitText(a, "\x4c\x8b\x16\x4c\x8b\x5c\x0e\xf8\x4c\x89\x17\x4c\x89\x5c\x0f\xf8")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small8)
+renvoAsmEmitText(a, "\x83\xf9\x04")
+renvoAmd64AsmJccLabel(a, 0x82, small4)
+renvoAsmEmitText(a, "\x44\x8b\x16\x44\x8b\x5c\x0e\xfc\x44\x89\x17\x44\x89\x5c\x0f\xfc")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small4)
+renvoAsmEmitText(a, "\x83\xf9\x02")
+renvoAmd64AsmJccLabel(a, 0x82, small2)
+renvoAsmEmitText(a, "\x44\x0f\xb7\x16\x44\x0f\xb7\x5c\x0e\xfe\x66\x44\x89\x17\x66\x44\x89\x5c\x0f\xfe")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small2)
+renvoAsmEmitText(a, "\x85\xc9")
+renvoAmd64AsmJccLabel(a, 0x84, shortDone)
+renvoAsmEmitText(a, "\x44\x8a\x16\x44\x88\x17")
+renvoAsmMarkLabel(a, shortDone)
+renvoAsmEmitText(a, "\x31\xc9\xfc\xc3")
+renvoAsmMarkLabel(a, large)
+
+
+
+bulk := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x83\xf9\x20")
+renvoAmd64AsmJccLabel(a, 0x87, bulk)
+renvoAsmEmitText(a, "\xf3\x0f\x6f\x06\xf3\x0f\x6f\x4c\x0e\xf0\xf3\x0f\x7f\x07\xf3\x0f\x7f\x4c\x0f\xf0")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, bulk)
 
 
 renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
@@ -48695,13 +48932,21 @@ renvoAsmJzLabel(a, equalLabel)
 
 
 tail := renvoAsmNewLabel(a)
-renvoAsmMarkLabel(a, loopLabel)
+shortWords := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x83\xfe\x08")
 renvoAmd64AsmJccLabel(a, 0x82, tail)
+renvoAsmMarkLabel(a, loopLabel)
+renvoAsmEmitText(a, "\x48\x83\xfe\x10")
+renvoAmd64AsmJccLabel(a, 0x86, shortWords)
 renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
 renvoAsmJnzLabel(a, notEqualLabel)
 renvoAsmEmitText(a, "\x48\x83\xc7\x08\x48\x83\xc2\x08\x48\x83\xee\x08")
-renvoAsmJmpMarkLabel(a, loopLabel, tail)
+renvoAsmJmpMarkLabel(a, loopLabel, shortWords)
+renvoAsmEmitText(a, "\x4c\x8b\x07\x4c\x3b\x02")
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoAsmEmitText(a, "\x4c\x8b\x44\x37\xf8\x4c\x3b\x44\x32\xf8")
+renvoAsmJnzLabel(a, notEqualLabel)
+renvoAsmJmpMarkLabel(a, equalLabel, tail)
 for width := 4; width >= 2; width /= 2 {
 next := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x83\xfe")
@@ -49991,8 +50236,17 @@ label := renvoAsmNewLabel(a)
 g.copyBytesLabel = label + 1
 after := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
+forward := renvoAsmNewLabel(a)
 
-renvoAsmEmitText(a, "\x39\xf7\x76\x0e\x8d\x74\x0e\xff\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4\xc3")
+
+
+renvoAsmEmitText(a, "\x39\xf7")
+renvo386AsmJccLabel(a, 0x86, forward)
+renvoAsmEmitText(a, "\x50\x89\xf8\x29\xf0\x39\xc8\x58")
+renvo386AsmJccLabel(a, 0x83, forward)
+renvoAsmEmitText(a, "\x8d\x74\x0e\xff\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xc3")
+renvoAsmMarkLabel(a, forward)
+renvoAsmEmitText(a, "\xfc\xf3\xa4\xc3")
 renvoAsmMarkLabel(a, after)
 return label
 }
@@ -50025,7 +50279,7 @@ renvoAsmEmit16(a, 0xc689)
 renvoAsmLoadPrimaryStack(a, destPtr)
 renvoAsmEmit16(a, 0xc789)
 renvoAsmLoadTertiaryStack(a, byteCount)
-renvoAsmEmitText(a, "\x39\xf7\x76\x0e\x8d\x74\x0e\xff\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+renvoAsmCallLabel(a, renvo386EnsureCopyBytesHelper(g))
 }
 
 func renvo386EnsureWideBinaryHelper(g *renvoLinearGen) int {
@@ -54869,14 +55123,12 @@ renvoArmAsmBCondLabel(a, notEqualLabel, 1)
 renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
 renvoArmAsmBCondLabel(a, equalLabel, 0)
 renvoAsmMarkLabel(a, loopLabel)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 1)
-renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, 0, 1)
+
+renvoArmAsmEmit(a, 0xe4d39001)
+renvoArmAsmEmit(a, 0xe4d1a001)
 renvoArmAsmCmpRegReg(a, renvoArmRegTmp, renvoArmRegTmp2)
 renvoArmAsmBCondLabel(a, notEqualLabel, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdi, renvoArmRegRdi, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRdx, renvoArmRegRdx, 1)
-renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRsi, -1)
-renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
+renvoArmAsmEmit(a, 0xe2544001)
 renvoArmAsmBCondLabel(a, loopLabel, 1)
 renvoAsmMarkLabel(a, equalLabel)
 renvoAsmPrimaryImm(a, 1)

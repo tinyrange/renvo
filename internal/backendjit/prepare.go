@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	KernelVersion            = 1
+	KernelVersion            = 2
 	ProtocolVersion          = 2
 	OptimizationVersion      = 1
 	preparedBackendArenaSize = 1073741824

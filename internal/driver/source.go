@@ -852,7 +852,7 @@ func isCSourceName(name string) bool {
 }
 
 func isRTGAsmSourceName(name string) bool {
-	return stringHasSuffix(name, ".rtgasm") && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.rtgasm")
+	return (stringHasSuffix(name, ".rtgasm") || stringHasSuffix(name, ".s")) && name[0] != '.' && name[0] != '_' && !stringHasSuffix(name, "_test.rtgasm") && !stringHasSuffix(name, "_test.s")
 }
 
 func isFrontendSourceName(name string) bool {
@@ -870,6 +870,9 @@ func frontendFilenameEnabledWithTags(name string, target string, tags []string) 
 		return sourceFilenameEnabledWithExtension(name, ".c", target, tags)
 	}
 	if isRTGAsmSourceName(name) {
+		if stringHasSuffix(name, ".s") {
+			return sourceFilenameEnabledWithExtension(name, ".s", target, tags)
+		}
 		return sourceFilenameEnabledWithExtension(name, ".rtgasm", target, tags)
 	}
 	return false

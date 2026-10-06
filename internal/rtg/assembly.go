@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package rtg
 
 // AssemblyDocument is the source-preserving parse surface for project
@@ -16,13 +14,14 @@ type AssemblyDocument struct {
 }
 
 type AssemblyEntry struct {
-	Name       string
-	NameSpan   Span
-	Parameters []AssemblyParameter
-	Steps      []Statement
-	BodyStart  int
-	BodyEnd    int
-	Span       Span
+	Name                          string
+	ManagedInputs, ManagedOutputs int
+	NameSpan                      Span
+	Parameters                    []AssemblyParameter
+	Steps                         []Statement
+	BodyStart                     int
+	BodyEnd                       int
+	Span                          Span
 }
 
 type AssemblyParameter struct {
@@ -69,11 +68,17 @@ func (p *assemblyParser) parse() {
 		p.fail("RTGASM-PARSE-001", "expected rtgasm version declaration")
 		return
 	}
-	if p.kind() != TokenNumber || p.text() != "1" {
-		p.fail("RTGASM-PARSE-002", "expected supported rtgasm version 1")
+	if p.kind() != TokenNumber || (p.text() != "1" && p.text() != "2" && p.text() != "3") {
+		p.fail("RTGASM-PARSE-002", "expected supported rtgasm version 1, 2, or 3")
 		return
 	}
 	p.document.Version = 1
+	if p.text() == "2" {
+		p.document.Version = 2
+	}
+	if p.text() == "3" {
+		p.document.Version = 3
+	}
 	p.at++
 	if !p.takeIdent("assembly") {
 		p.fail("RTGASM-PARSE-003", "expected assembly declaration")
@@ -133,7 +138,7 @@ func (p *assemblyParser) parseEntry() {
 		return
 	}
 	parserDocument := Document{Filename: p.document.Filename, Source: p.source, Tokens: p.tokens}
-	statementParser := documentParser{document: &parserDocument}
+	statementParser := documentParser{document: &parserDocument, semicolonStatements: p.document.Version >= 2}
 	steps := statementParser.parseStatements(p.at+1, bodyClose)
 	if len(parserDocument.Diagnostics) != 0 {
 		p.document.Diagnostics = append(p.document.Diagnostics, parserDocument.Diagnostics...)
@@ -259,6 +264,7 @@ func (p *assemblyParser) fail(code string, message string) {
 }
 
 func assemblyFail(document AssemblyDocument, span Span, code string, message string) AssemblyDocument {
+	document.Ok = false
 	document.Diagnostics = append(document.Diagnostics, Diagnostic{
 		Filename: document.Filename, Span: span, Code: code, Message: message,
 	})
@@ -310,7 +316,7 @@ func generateAssemblyEvaluators(resolved ResolveResult, targetName string, entri
 	goNames := embeddedGoFunctionNames(resolved.Document)
 	architectureEntries := architectureSequences(target.Arch)
 	for evaluatorIndex := range entries {
-		assembly := entries[evaluatorIndex].Assembly
+		assembly := LowerTargetAssembly(resolved, targetName, entries[evaluatorIndex].Assembly)
 		entryIndex := entries[evaluatorIndex].EntryIndex
 		if !assembly.Ok || entryIndex < 0 || entryIndex >= len(assembly.Entries) {
 			return GenerateResult{Diagnostics: []Diagnostic{{
@@ -367,20 +373,30 @@ func generateAssemblyEvaluators(resolved ResolveResult, targetName string, entri
 			Name: name, Parameters: []embeddedParameter{{Name: "out", Source: []byte("out *RTGEmitter")}}, Steps: steps,
 		})
 	}
-	generated := generatePreparedBackendWithRoots(resolved, targetName, wantedGo, wantedSequences)
-	if !generated.Ok {
-		return generated
+	// Only encoder dependencies are roots; compiler/runtime/image operations
+	// are unrelated to materializing an assembly fragment.
+	if patch, found := architectureGoHook(target.Arch, "patch_relocations"); found {
+		wantedGo = append(wantedGo, patch)
 	}
+	selectedGo, selectedSequences := resolveArchitectureSequenceProjection(resolved.Document, target.Arch, wantedGo, wantedSequences)
+	var body []byte
+	body = appendArchitectureFacts(body, resolved.Document, target.Arch, true)
+	body = appendReachableEmbeddedGo(body, resolved.Document, selectedGo, true, architectureExports(target.Arch))
+	body = appendArchitectureSequences(body, resolved.Document, target.Arch, true, false, false, selectedSequences)
+	body = appendArchitectureHooksNamedMode(body, resolved.Document, target.Arch, true, "renvoAsmPatch", false)
+	if _, found := architectureGoHook(target.Arch, "patch_relocations"); !found && declarativeArchitectureRelocations(target.Arch) == "" {
+		body = append(body, "\nfunc renvoAsmPatch(out *renvoAsm) {}\n"...)
+	}
+	generated := GenerateResult{Source: body, Descriptor: target.Descriptor, Ok: true}
 	for i := range sequences {
 		generated.Source = appendAssemblyEvaluatorFunction(generated.Source, resolved.Document, target.Arch, sequences[i])
 	}
 	if !framed {
 		generated.Source = append(generated.Source, `
 func appMain(args []string, env []string) int {
-	context := renvoNewCompileContext(renvoTargetRTG, true, false, false)
 	var out renvoAsm
-	renvoAsmInitWithContext(&out, context)
 	renvoRTGASMEntry(&out)
+	if !renvoAsmAssemblyReady(&out) { return 1 }
 	renvoAsmPatch(&out)
 	if renvoRTGUnsupportedOperation != 0 || out.patchFailed {
 		return 1
@@ -389,20 +405,21 @@ func appMain(args []string, env []string) int {
 	return 0
 }
 `...)
+		generated.Source = finishAssemblyEvaluator(generated.Source)
 		return generated
 	}
-	generated.Source = append(generated.Source, "\nfunc appMain(args []string, env []string) int {\n\tcontext := renvoNewCompileContext(renvoTargetRTG, true, false, false)\n\tvar output []byte\n"...)
+	generated.Source = append(generated.Source, "\nfunc appMain(args []string, env []string) int {\n\tvar output []byte\n"...)
 	for i := range sequences {
 		index := decimalText(i)
 		generated.Source = append(generated.Source, "\tvar out"...)
 		generated.Source = append(generated.Source, index...)
-		generated.Source = append(generated.Source, " renvoAsm\n\trenvoAsmInitWithContext(&out"...)
-		generated.Source = append(generated.Source, index...)
-		generated.Source = append(generated.Source, ", context)\n\t"...)
+		generated.Source = append(generated.Source, " renvoAsm\n\t"...)
 		generated.Source = append(generated.Source, sequences[i].Name...)
 		generated.Source = append(generated.Source, "(&out"...)
 		generated.Source = append(generated.Source, index...)
-		generated.Source = append(generated.Source, ")\n\trenvoAsmPatch(&out"...)
+		generated.Source = append(generated.Source, ")\n\tif !renvoAsmAssemblyReady(&out"...)
+		generated.Source = append(generated.Source, index...)
+		generated.Source = append(generated.Source, ") { return 1 }\n\trenvoAsmPatch(&out"...)
 		generated.Source = append(generated.Source, index...)
 		generated.Source = append(generated.Source, ")\n\tif renvoRTGUnsupportedOperation != 0 || out"...)
 		generated.Source = append(generated.Source, index...)
@@ -423,7 +440,14 @@ func appMain(args []string, env []string) int {
 		generated.Source = append(generated.Source, ".code...)\n"...)
 	}
 	generated.Source = append(generated.Source, "\twrite(1, output, -1)\n\treturn 0\n}\n"...)
+	generated.Source = finishAssemblyEvaluator(generated.Source)
 	return generated
+}
+
+func finishAssemblyEvaluator(body []byte) []byte {
+	out := []byte("package main\n")
+	out = append(out, assemblyEvaluatorKernel(body)...)
+	return append(out, body...)
 }
 
 func appendAssemblyEvaluatorFunction(out []byte, document Document, arch Declaration, sequence architectureSequence) []byte {

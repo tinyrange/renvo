@@ -870,6 +870,171 @@ go backend {
 }
 
 arch i8086 {
+	frontend_constraints {
+		r = [ax, cx, dx, bx, si, di]
+		a = [ax]
+		c = [cx]
+		d = [dx]
+		S = [si]
+		D = [di]
+		i = immediate
+		n = immediate
+		cc = resource flags
+	}
+	frontend_syntax {
+		att {
+			style = att
+			new_label = new_label
+			bind_label = bind_label
+			movw(source:register, destination:register) = move(destination, source)
+			movw(value:int, destination:register) = move_immediate(destination, value)
+			addw(source:register, destination:register) = add(destination, source)
+			cmpw(right:register, left:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
+	frontend_syntax {
+		intel {
+			style = intel
+			new_label = new_label
+			bind_label = bind_label
+			mov(destination:register, source:register) = move(destination, source)
+			mov(destination:register, value:int) = move_immediate(destination, value)
+			add(destination:register, source:register) = add(destination, source)
+			cmp(left:register, right:register) = compare(left, right)
+			ret() = return()
+			jmp(destination:label) = jump(destination)
+			je(destination:label) = branch(eq, destination)
+			jz(destination:label) = branch(eq, destination)
+			jne(destination:label) = branch(ne, destination)
+			jnz(destination:label) = branch(ne, destination)
+			jl(destination:label) = branch(slt, destination)
+			jge(destination:label) = branch(sge, destination)
+			jle(destination:label) = branch(sle, destination)
+			jg(destination:label) = branch(sgt, destination)
+			jb(destination:label) = branch(ult, destination)
+			jae(destination:label) = branch(uge, destination)
+			jbe(destination:label) = branch(ule, destination)
+			ja(destination:label) = branch(ugt, destination)
+		}
+	}
+
+	frontend_operations {
+		resources = [flags]
+		new_label() -> label {
+			lower = sequence machineNewLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		bind_label(destination:label) {
+			lower = sequence machineBindLabel
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = label
+			ordering = ordered
+			requires = []
+			defines = [destination]
+		}
+		move_immediate(destination:register, value:int) {
+			lower = go emitImmediate
+			reads = []
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+			immediates { value = bits 16 }
+		}
+		move(destination:register, source:register) {
+			lower = go emitMove
+			reads = [source]
+			writes = [destination]
+			clobbers = []
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		add(destination:register, source:register) {
+			lower = go emitAdd
+			reads = [destination, source]
+			writes = [destination]
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		compare(left:register, right:register) {
+			lower = go emitCompare
+			reads = [left, right]
+			writes = []
+			clobbers = [flags]
+			memory = none
+			control = none
+			ordering = ordered
+			requires = []
+		}
+		jump(destination:label) {
+			lower = go emitJump
+			reads = []
+			writes = []
+			clobbers = []
+			memory = none
+			control = jump
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		branch(condition:condition, destination:label) {
+			lower = go emitJumpCondition
+			reads = [flags]
+			writes = []
+			clobbers = []
+			memory = none
+			control = branch
+			ordering = ordered
+			requires = []
+			references = [destination]
+		}
+		return() {
+			lower = go emitReturn
+			reads = [sp]
+			writes = [sp]
+			clobbers = []
+			memory = read
+			control = return
+			ordering = ordered
+			requires = []
+		}
+	}
+	sequences {
+		machineNewLabel(out:emitter) -> label { return out.NewLabel() }
+		machineBindLabel(out:emitter, destination:label) { out.Mark(destination) }
+	}
+
 	alias = "8086"
 	endian = little
 	word_bits = 16
