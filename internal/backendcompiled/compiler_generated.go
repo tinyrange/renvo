@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "684683ffe6e2cc1baa3d51242a1579fb4af1390323a62d162b70235d1fc649d3"
+const CompilerSourceDigest = "6b1a767901ed8fde96b14bc65cad5afaa3a3959f38cff210f4c3912c98962069"
 
 // source: backend/compiler_common_impl.go
 
@@ -30522,7 +30522,7 @@ if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
 }
 if target == renvoTargetWasiWasm32 {
-return "wasi/wasm32", "\xf6\x71\x09\xb2\x7b\x24\x9b\x09\x0a\x83\x9d\x0c\x1b\x02\x4d\x37\xb5\xc0\xbf\x1c\x36\x27\xb8\x1a\x4b\xe3\xf6\x07\x17\x04\x1a\xaf", 3, true
+return "wasi/wasm32", "\x9d\xf6\x35\xbf\x83\x1d\x4a\x95\xc3\x9f\x4c\xb0\x6d\x67\x73\x4d\xdb\x25\x1b\xef\x9b\xda\xef\xb9\x63\x00\x83\xd3\xf6\x53\xc9\xac", 3, true
 }
 if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
@@ -30534,7 +30534,7 @@ if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
 }
 if target == renvoTargetVM32 {
-return "vm/vm32", "\x21\xbf\xd7\xea\x82\xa7\x33\x7b\x86\x90\xb2\xc1\x52\x65\xb1\x04\x11\x27\x03\x4d\x97\xc5\xbd\x0b\x54\xfa\x08\xe9\xa3\x06\x3b\x5e", 3, true
+return "vm/vm32", "\x8f\x81\xd3\x7a\xea\xf5\x5a\x8b\xed\x6a\xe0\xaf\xdb\xf0\xb4\x99\xd3\xfa\xcc\xa3\xec\xc4\x70\xd4\x29\x83\x74\x5e\xe0\xd1\x50\xde", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
 return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
@@ -46529,11 +46529,14 @@ g.copyBytesLabel = label + 1
 after := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
 unaligned := renvoAsmNewLabel(a)
-renvoArmAsmEmit(a, 0xe1809001)
-renvoArmAsmEmit(a, 0xe3190003)
-renvoArmAsmBCondLabel(a, unaligned, 1)
 forward := renvoAsmNewLabel(a)
 done := renvoAsmNewLabel(a)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+
+renvoArmAsmEmit(a, 0xe0209001)
+renvoArmAsmEmit(a, 0xe3190003)
+renvoArmAsmBCondLabel(a, unaligned, 1)
 renvoArmAsmCmpRegReg(a, 1, 0)
 renvoArmAsmBCondLabel(a, forward, 9)
 renvoArmAsmEmit(a, 0xe0419000)
@@ -46546,7 +46549,9 @@ renvoArmAsmAddRegRegShift(a, 1, 1, 2, 0)
 backwardTail := renvoAsmNewLabel(a)
 backwardWords := renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, backwardTail)
-renvoArmAsmEmit(a, 0xe3120003)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+renvoArmAsmEmit(a, 0xe3100003)
 renvoArmAsmBCondLabel(a, backwardWords, 0)
 renvoArmAsmAddRegImm(a, 0, 0, -1)
 renvoArmAsmAddRegImm(a, 1, 1, -1)
@@ -46558,6 +46563,18 @@ renvoAsmMarkLabel(a, backwardWords)
 for direction := 0; direction < 2; direction++ {
 if direction == 1 {
 renvoAsmMarkLabel(a, forward)
+forwardWords := renvoAsmNewLabel(a)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+renvoArmAsmEmit(a, 0xe3100003)
+renvoArmAsmBCondLabel(a, forwardWords, 0)
+renvoArmAsmLoadRegMem(a, 9, 0, 0, 1)
+renvoArmAsmStoreRegMem(a, 9, 1, 0, 1)
+renvoArmAsmAddRegImm(a, 0, 0, 1)
+renvoArmAsmAddRegImm(a, 1, 1, 1)
+renvoArmAsmAddRegImm(a, 2, 2, -1)
+renvoAsmJmpLabel(a, forward)
+renvoAsmMarkLabel(a, forwardWords)
 }
 words := renvoAsmNewLabel(a)
 tail := renvoAsmNewLabel(a)
@@ -48243,6 +48260,36 @@ g.copyBytesLabel = label + 1
 after := renvoAsmNewLabel(a)
 end := renvoAsmNewLabel(a)
 renvoAsmJmpMarkLabel(a, after, label)
+
+
+large := renvoAsmNewLabel(a)
+small8 := renvoAsmNewLabel(a)
+small4 := renvoAsmNewLabel(a)
+small2 := renvoAsmNewLabel(a)
+shortDone := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x83\xf9\x10")
+renvoAmd64AsmJccLabel(a, 0x87, large)
+renvoAsmEmitText(a, "\x50\x52\x83\xf9\x08")
+renvoAmd64AsmJccLabel(a, 0x82, small8)
+renvoAsmEmitText(a, "\x48\x8b\x06\x48\x8b\x54\x0e\xf8\x48\x89\x07\x48\x89\x54\x0f\xf8")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small8)
+renvoAsmEmitText(a, "\x83\xf9\x04")
+renvoAmd64AsmJccLabel(a, 0x82, small4)
+renvoAsmEmitText(a, "\x8b\x06\x8b\x54\x0e\xfc\x89\x07\x89\x54\x0f\xfc")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small4)
+renvoAsmEmitText(a, "\x83\xf9\x02")
+renvoAmd64AsmJccLabel(a, 0x82, small2)
+renvoAsmEmitText(a, "\x0f\xb7\x06\x0f\xb7\x54\x0e\xfe\x66\x89\x07\x66\x89\x54\x0f\xfe")
+renvoAsmJmpLabel(a, shortDone)
+renvoAsmMarkLabel(a, small2)
+renvoAsmEmitText(a, "\x85\xc9")
+renvoAmd64AsmJccLabel(a, 0x84, shortDone)
+renvoAsmEmitText(a, "\x8a\x06\x88\x07")
+renvoAsmMarkLabel(a, shortDone)
+renvoAsmEmitText(a, "\x5a\x58\x31\xc9\xfc\xc3")
+renvoAsmMarkLabel(a, large)
 
 
 renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
