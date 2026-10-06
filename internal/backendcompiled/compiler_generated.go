@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "7da996c63de0c8031b52121aab206d9d2f2a3eb5d1f508888e8aa3ca2adc53f3"
+const CompilerSourceDigest = "a233fcdfbacde9838ef575e8c39a74112cd8acb9e8f07abf81caed5974c9503b"
 
 // source: backend/compiler_common_impl.go
 
@@ -48293,26 +48293,26 @@ small2 := renvoAsmNewLabel(a)
 shortDone := renvoAsmNewLabel(a)
 renvoAsmEmitText(a, "\x48\x83\xf9\x10")
 renvoAmd64AsmJccLabel(a, 0x87, large)
-renvoAsmEmitText(a, "\x50\x52\x83\xf9\x08")
+renvoAsmEmitText(a, "\x83\xf9\x08")
 renvoAmd64AsmJccLabel(a, 0x82, small8)
-renvoAsmEmitText(a, "\x48\x8b\x06\x48\x8b\x54\x0e\xf8\x48\x89\x07\x48\x89\x54\x0f\xf8")
+renvoAsmEmitText(a, "\x4c\x8b\x16\x4c\x8b\x5c\x0e\xf8\x4c\x89\x17\x4c\x89\x5c\x0f\xf8")
 renvoAsmJmpLabel(a, shortDone)
 renvoAsmMarkLabel(a, small8)
 renvoAsmEmitText(a, "\x83\xf9\x04")
 renvoAmd64AsmJccLabel(a, 0x82, small4)
-renvoAsmEmitText(a, "\x8b\x06\x8b\x54\x0e\xfc\x89\x07\x89\x54\x0f\xfc")
+renvoAsmEmitText(a, "\x44\x8b\x16\x44\x8b\x5c\x0e\xfc\x44\x89\x17\x44\x89\x5c\x0f\xfc")
 renvoAsmJmpLabel(a, shortDone)
 renvoAsmMarkLabel(a, small4)
 renvoAsmEmitText(a, "\x83\xf9\x02")
 renvoAmd64AsmJccLabel(a, 0x82, small2)
-renvoAsmEmitText(a, "\x0f\xb7\x06\x0f\xb7\x54\x0e\xfe\x66\x89\x07\x66\x89\x54\x0f\xfe")
+renvoAsmEmitText(a, "\x44\x0f\xb7\x16\x44\x0f\xb7\x5c\x0e\xfe\x66\x44\x89\x17\x66\x44\x89\x5c\x0f\xfe")
 renvoAsmJmpLabel(a, shortDone)
 renvoAsmMarkLabel(a, small2)
 renvoAsmEmitText(a, "\x85\xc9")
 renvoAmd64AsmJccLabel(a, 0x84, shortDone)
-renvoAsmEmitText(a, "\x8a\x06\x88\x07")
+renvoAsmEmitText(a, "\x44\x8a\x16\x44\x88\x17")
 renvoAsmMarkLabel(a, shortDone)
-renvoAsmEmitText(a, "\x5a\x58\x31\xc9\xfc\xc3")
+renvoAsmEmitText(a, "\x31\xc9\xfc\xc3")
 renvoAsmMarkLabel(a, large)
 
 
@@ -55053,6 +55053,28 @@ renvoArmAsmCmpRegReg(a, renvoArmRegRsi, renvoArmRegRcx)
 renvoArmAsmBCondLabel(a, notEqualLabel, 1)
 renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
 renvoArmAsmBCondLabel(a, equalLabel, 0)
+renvoArmAsmCmpRegReg(a, renvoArmRegRdi, renvoArmRegRdx)
+renvoArmAsmBCondLabel(a, equalLabel, 0)
+
+
+tailLabel := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, loopLabel)
+renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 4)
+renvoArmAsmBCondLabel(a, tailLabel, 3)
+for at := 0; at < 4; at++ {
+renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, at, 1)
+renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, at, 1)
+renvoArmAsmCmpRegReg(a, renvoArmRegTmp, renvoArmRegTmp2)
+renvoArmAsmBCondLabel(a, notEqualLabel, 1)
+}
+renvoArmAsmAddRegImm(a, renvoArmRegRdi, renvoArmRegRdi, 4)
+renvoArmAsmAddRegImm(a, renvoArmRegRdx, renvoArmRegRdx, 4)
+renvoArmAsmAddRegImm(a, renvoArmRegRsi, renvoArmRegRsi, -4)
+renvoAsmJmpLabel(a, loopLabel)
+renvoAsmMarkLabel(a, tailLabel)
+renvoArmAsmCmpRegImm(a, renvoArmRegRsi, 0)
+renvoArmAsmBCondLabel(a, equalLabel, 0)
+loopLabel = renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, loopLabel)
 renvoArmAsmLoadRegMem(a, renvoArmRegTmp, renvoArmRegRdi, 0, 1)
 renvoArmAsmLoadRegMem(a, renvoArmRegTmp2, renvoArmRegRdx, 0, 1)
