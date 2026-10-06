@@ -2,7 +2,10 @@
 // Instruction semantics and typed operands belong to the selected frontend.
 package asmtext
 
-import "strings"
+import (
+	"unicode"
+	"unicode/utf8"
+)
 
 type Line struct {
 	Text       string
@@ -39,7 +42,7 @@ func Scan(source []byte) ([]Line, Error) {
 			continue
 		}
 		if c == '\n' || c == ';' && !blockComment && !lineComment {
-			value := strings.TrimSpace(string(text))
+			value := trimSpace(string(text))
 			if value != "" {
 				lines = append(lines, Line{Text: value, Start: start, End: at})
 			}
@@ -75,11 +78,12 @@ func Scan(source []byte) ([]Line, Error) {
 	return lines, Error{}
 }
 func Head(text string) (string, string) {
-	at := strings.IndexAny(text, " \t\r")
-	if at < 0 {
-		return text, ""
+	for at := 0; at < len(text); at++ {
+		if text[at] == ' ' || text[at] == '\t' || text[at] == '\r' {
+			return text[:at], trimSpace(text[at:])
+		}
 	}
-	return text[:at], strings.TrimSpace(text[at:])
+	return text, ""
 }
 func Identifier(name string) bool {
 	if len(name) == 0 {
@@ -111,13 +115,21 @@ func Functions(lines []Line) ([]Function, Error) {
 		if head != ".globl" && head != ".global" {
 			continue
 		}
-		names := strings.Split(tail, ",")
-		for j := 0; j < len(names); j++ {
-			name := strings.TrimSpace(names[j])
+		for {
+			comma := indexByte(tail, ',')
+			name := tail
+			if comma >= 0 {
+				name = tail[:comma]
+			}
+			name = trimSpace(name)
 			if !Identifier(name) || contains(globals, name) {
 				return nil, Error{Offset: lines[i].Start, Message: "invalid or duplicate global function"}
 			}
 			globals = append(globals, name)
+			if comma < 0 {
+				break
+			}
+			tail = tail[comma+1:]
 		}
 	}
 	if len(globals) == 0 {
@@ -127,11 +139,11 @@ func Functions(lines []Line) ([]Function, Error) {
 	defined := []string{}
 	for i := 0; i < len(lines); i++ {
 		text := lines[i].Text
-		colon := strings.IndexByte(text, ':')
+		colon := indexByte(text, ':')
 		if colon < 0 {
 			continue
 		}
-		name := strings.TrimSpace(text[:colon])
+		name := trimSpace(text[:colon])
 		if !contains(globals, name) {
 			continue
 		}
@@ -145,4 +157,35 @@ func Functions(lines []Line) ([]Function, Error) {
 		return nil, Error{Message: "declared assembly function has no body"}
 	}
 	return functions, Error{}
+}
+
+// Keep lexical operations direct: importing strings also imports callback and
+// reader/builder APIs that must be parsed when this parser self-hosts. Unicode
+// whitespace and malformed UTF-8 boundaries match strings.TrimSpace.
+func trimSpace(text string) string {
+	start, end := 0, len(text)
+	for start < end {
+		r, width := utf8.DecodeRuneInString(text[start:end])
+		if !unicode.IsSpace(r) {
+			break
+		}
+		start += width
+	}
+	for end > start {
+		r, width := utf8.DecodeLastRuneInString(text[start:end])
+		if !unicode.IsSpace(r) {
+			break
+		}
+		end -= width
+	}
+	return text[start:end]
+}
+
+func indexByte(text string, value byte) int {
+	for i := 0; i < len(text); i++ {
+		if text[i] == value {
+			return i
+		}
+	}
+	return -1
 }
