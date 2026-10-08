@@ -1305,6 +1305,18 @@ def coremark_host_run():
 coremark = coremark + module("coremark", host_info = coremark_host_info,
     host_build = coremark_host_build, host_run = coremark_host_run)
 
+# Canonical positive-regression expectation synchronization required by AGENTS.md.
+def repo_sync_expectations():
+    """Run only the repository expectation generator with its fixed write mode.
+
+    No caller paths, flags, environment or commands. Review resulting companion
+    expectations before publication. Does not execute regression programs.
+    """
+    return privileged.run("go", "run", "./cmd/renvoexpect", "-write",
+        cwd = _work(), timeout_ms = 180000, output_limit = 1048576)
+
+repo = repo + module("repo", sync_expectations = repo_sync_expectations)
+
 environment = {
     "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,
     "propose_agents_star": propose_agents_star, "publication": publication,
