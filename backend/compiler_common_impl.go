@@ -8985,7 +8985,7 @@ type renvoLinearGen struct {
 	addressNameTokens        []int
 	localCacheStart          int
 	localCacheEnd            int
-	localCacheCount          int
+	localCacheDeclStart      int
 	localCacheIndex          int
 	stackUsed                int
 	stackPeak                int
@@ -19594,9 +19594,11 @@ func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
 		if g.localCacheEnd == nameEnd && g.localCacheIndex < 0 {
 			return -1
 		}
-		if g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
+		if g.localCacheEnd == nameEnd && g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
 			local := &g.locals[g.localCacheIndex]
-			if renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
+			// The source span is immutable. A named declaration invalidates
+			// the cache; checking its start also rejects an unnamed reused slot.
+			if local.nameStart == g.localCacheDeclStart && local.nameEnd > local.nameStart {
 				return g.localCacheIndex
 			}
 		}
@@ -19604,12 +19606,12 @@ func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
 	nameHash := renvoHashRange(g.prog.src, nameStart, nameEnd)
 	g.localCacheStart = nameStart
 	g.localCacheEnd = nameEnd
-	g.localCacheCount = g.localCount
 	g.localCacheIndex = -1
 	for i := g.localCount - 1; i >= 0; i-- {
 		local := &g.locals[i]
 		if local.nameHash == nameHash && renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
 			g.localCacheIndex = i
+			g.localCacheDeclStart = local.nameStart
 			return i
 		}
 	}

@@ -14,51 +14,18 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 	if unicodeSourceASCII(program.Text) {
 		return true
 	}
-	maybeUnicode := false
-	// Non-ASCII comments and string literals need no identifier rewriting.
-	// Inspect identifier bytes directly before allocating names or edits.
+	prefix := "__renvo_unicode_"
+	var edits []functionValueEdit
+	const digits = "0123456789abcdef"
 	for i := 0; i < len(program.Tokens); i++ {
 		token := &program.Tokens[i]
 		if token.KindLine&255 != unit.TokenIdent || token.Start < 0 || token.Size <= 0 || token.Start > len(program.Text)-token.Size {
 			continue
 		}
-		for _, value := range program.Text[token.Start : token.Start+token.Size] {
-			if value >= 128 {
-				maybeUnicode = true
-				break
-			}
-		}
-		if maybeUnicode {
-			break
-		}
-	}
-	if !maybeUnicode {
-		return true
-	}
-	prefix := "__renvo_unicode_"
-	for {
-		used := false
-		for i := 0; i < len(program.Tokens); i++ {
-			if program.Tokens[i].KindLine&255 == unit.TokenIdent && (functionValueHasPrefix(functionValueTokenText(program, i), prefix) || functionValueHasPrefix(functionValueTokenText(program, i), "Renvo"+prefix)) {
-				used = true
-				break
-			}
-		}
-		if !used {
-			break
-		}
-		prefix += "_"
-	}
-	var edits []functionValueEdit
-	const digits = "0123456789abcdef"
-	for i := 0; i < len(program.Tokens); i++ {
-		if program.Tokens[i].KindLine&255 != unit.TokenIdent {
-			continue
-		}
-		name := functionValueTokenText(program, i)
+		name := program.Text[token.Start : token.Start+token.Size]
 		unicode := false
-		for j := 0; j < len(name); j++ {
-			if name[j] >= 128 {
+		for _, value := range name {
+			if value >= 128 {
 				unicode = true
 				break
 			}
@@ -66,8 +33,25 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 		if !unicode {
 			continue
 		}
+		// Select a collision-free prefix only when an identifier needs an edit.
+		// Comments and literals do not allocate names or cause a second walk.
+		if len(edits) == 0 {
+			for {
+				used := false
+				for i := 0; i < len(program.Tokens); i++ {
+					if program.Tokens[i].KindLine&255 == unit.TokenIdent && (functionValueHasPrefix(functionValueTokenText(program, i), prefix) || functionValueHasPrefix(functionValueTokenText(program, i), "Renvo"+prefix)) {
+						used = true
+						break
+					}
+				}
+				if !used {
+					break
+				}
+				prefix += "_"
+			}
+		}
 		encodedPrefix := prefix
-		if syntax.IdentifierExported([]byte(name), 0) {
+		if syntax.IdentifierExported(name, 0) {
 			encodedPrefix = "Renvo" + prefix
 		}
 		encoded := []byte(encodedPrefix)

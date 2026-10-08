@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "656f99760a7d189613457ecbe16f46b99bc4c6aa496a45fc087036d19ccf8e38"
+const CompilerSourceDigest = "27cfb414e5c880c50c74418efd84a947b584e812b50eb1b5f0d361dffe1dd8ec"
 
 // source: backend/compiler_common_impl.go
 
@@ -8992,7 +8992,7 @@ addressNamesReady        bool
 addressNameTokens        []int
 localCacheStart          int
 localCacheEnd            int
-localCacheCount          int
+localCacheDeclStart      int
 localCacheIndex          int
 stackUsed                int
 stackPeak                int
@@ -19601,9 +19601,11 @@ if g.localCacheStart == nameStart {
 if g.localCacheEnd == nameEnd && g.localCacheIndex < 0 {
 return -1
 }
-if g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
+if g.localCacheEnd == nameEnd && g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
 local := &g.locals[g.localCacheIndex]
-if renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
+
+
+if local.nameStart == g.localCacheDeclStart && local.nameEnd > local.nameStart {
 return g.localCacheIndex
 }
 }
@@ -19611,12 +19613,12 @@ return g.localCacheIndex
 nameHash := renvoHashRange(g.prog.src, nameStart, nameEnd)
 g.localCacheStart = nameStart
 g.localCacheEnd = nameEnd
-g.localCacheCount = g.localCount
 g.localCacheIndex = -1
 for i := g.localCount - 1; i >= 0; i-- {
 local := &g.locals[i]
 if local.nameHash == nameHash && renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
 g.localCacheIndex = i
+g.localCacheDeclStart = local.nameStart
 return i
 }
 }
