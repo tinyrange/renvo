@@ -42,9 +42,9 @@ func localRuleScopeEnd(body *syntax.Body, tok int) int {
 // declaration makes large functions unnecessarily quadratic.
 func localRuleScopeEnds(body *syntax.Body) []int {
 	ends := make([]int, len(body.Stmts))
-	clauses := make([]int, len(body.Stmts))
-	clauseEnds := make([]int, len(body.Stmts))
-	currentClause := make([]int, len(body.Stmts))
+	// Ordinary functions need only block endpoints. Allocate clause tables
+	// lazily when a switch/select actually introduces an owner.
+	var clauses, clauseEnds, currentClause []int
 	var blocks, owners []int
 	for i := 0; i < len(body.Stmts); i++ {
 		stmt := &body.Stmts[i]
@@ -76,6 +76,11 @@ func localRuleScopeEnds(body *syntax.Body) []int {
 			blocks = append(blocks, i)
 		}
 		if stmt.Kind == syntax.StmtSwitch || stmt.Kind == syntax.StmtSelect {
+			if clauses == nil {
+				clauses = make([]int, len(body.Stmts))
+				clauseEnds = make([]int, len(body.Stmts))
+				currentClause = make([]int, len(body.Stmts))
+			}
 			owners = append(owners, i)
 		}
 	}

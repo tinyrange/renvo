@@ -297,11 +297,14 @@ func validateFrontendOperation(document Document, arch Declaration, v TargetVoca
 	if op.Result != "" {
 		result, _ = sequenceGoType(op.Result)
 	}
-	function, found := findEmbeddedFunction(document, op.lowerName)
+	var function embeddedFunction
+	found := false
 	if op.lowerKind == "sequence" {
 		sequence, ok := findArchitectureSequence(arch, op.lowerName)
 		found = ok
 		function = architectureSequenceFunction(sequence)
+	} else {
+		function, found = findEmbeddedFunction(document, op.lowerName)
 	}
 	if !found || !directEmitterSignatureMatches(function, directEmitterOperation{Parameters: parameters, Result: result}) {
 		return "frontend operation " + op.Name + " has an incompatible lowering signature"

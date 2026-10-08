@@ -18,46 +18,298 @@ const (
 // renvoEmitPureBlock lowers the RFE uint64 state-transform contract through the
 // existing native emitters. The caller owns executable memory and invocation.
 // Each four-word record is (operation, left value, right value, immediate).
-// Values are SSA record indices; operations 0..11 match the documented RFE IR.
+// Values are SSA record indices; operations 0..12 match the documented RFE IR.
 // The native entry receives its state pointer in primary and makes no calls.
 func renvoEmitPureBlock(records []int, stateWords int, context *renvoCompileContext) ([]byte, bool) {
+	return renvoEmitStateBlock(records, stateWords, context, false)
+}
+
+// Native context wire layout. These constants are also exported by the
+// generated host bundle; runtime assertions verify the GC-visible Go layout.
+// Offsets compose from the prefix and table shapes instead of magic indices.
+const (
+	RenvoRFEWordBytes        = 8
+	RenvoRFERetired          = 0
+	RenvoRFEStatus           = RenvoRFERetired + RenvoRFEWordBytes
+	RenvoRFEAddress          = RenvoRFEStatus + RenvoRFEWordBytes
+	RenvoRFEClock            = RenvoRFEAddress + RenvoRFEWordBytes
+	RenvoRFEPages            = RenvoRFEClock + RenvoRFEWordBytes
+	RenvoRFEPageSize         = 32
+	RenvoRFEPageCount        = 64
+	RenvoRFEPageData         = 8
+	RenvoRFEPagePermissions  = 16
+	RenvoRFEPageEpoch        = 24
+	RenvoRFERemaining        = RenvoRFEPages + RenvoRFEPageSize*RenvoRFEPageCount
+	RenvoRFETotal            = RenvoRFERemaining + RenvoRFEWordBytes
+	RenvoRFEMemoryTotal      = RenvoRFETotal + RenvoRFEWordBytes
+	RenvoRFECodeView         = RenvoRFEMemoryTotal + RenvoRFEWordBytes
+	RenvoRFEBlocks           = RenvoRFECodeView + 4*RenvoRFEWordBytes
+	RenvoRFEDescriptorSize   = 64
+	RenvoRFEDescriptorCount  = 1024
+	RenvoRFEDescriptorPrefix = 32
+	RenvoRFELoopExits        = RenvoRFEBlocks + RenvoRFEDescriptorSize*RenvoRFEDescriptorCount
+	RenvoRFELoopIterations   = RenvoRFELoopExits + RenvoRFEWordBytes
+	RenvoRFEPreparedTargets  = RenvoRFELoopIterations + RenvoRFEWordBytes
+	RenvoRFEDescriptorBase   = RenvoRFEPreparedTargets + RenvoRFEWordBytes
+	RenvoRFEAdmissionEpoch   = RenvoRFEDescriptorBase + RenvoRFEWordBytes
+	RenvoRFEContextSize      = RenvoRFEAdmissionEpoch + RenvoRFEWordBytes
+)
+
+// Record-shape queries are shared by validation and every liveness/folding
+// pass. Select has a plain third SSA operand; carry/pair stores pack it above
+// the low byte of immediate flags. LoopContinue has only a left operand.
+func renvoRFEHasLeft(op int) bool { return op >= 2 && op != 15 }
+func renvoRFEHasRight(op int) bool {
+	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35
+}
+func renvoRFEThirdOperand(op int, immediate int) int {
+	if op == 21 {
+		return immediate
+	}
+	if op == 33 || op == 34 || op == 37 {
+		return immediate >> 8
+	}
+	return -1
+}
+
+func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 	if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 0 || len(records) > 8192 {
-		return nil, false
+		return false
 	}
 	count := len(records) / 4
+	maxOperation := 41
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
-		if op < 0 || op > 11 || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
-			return nil, false
+		if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26 || op == 36 || op == 37) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
+			return false
 		}
-		if op >= 2 && (left < 0 || left >= i || records[left*4] == 2) {
-			return nil, false
+		if renvoRFEHasLeft(op) && (left < 0 || left >= i || renvoMemoryEffectOnly(records[left*4])) {
+			return false
 		}
-		if op >= 3 && op != 8 && op != 9 && (right < 0 || right >= i || records[right*4] == 2) {
-			return nil, false
+		if renvoRFEHasRight(op) && (right < 0 || right >= i || renvoMemoryEffectOnly(records[right*4])) {
+			return false
+		}
+		if (op == 13 || op == 14) && immediate != 1 && immediate != 2 && immediate != 4 && immediate != 8 && !(op == 13 && immediate == 16) {
+			return false
+		}
+
+		if op == 36 && (i == 0 || left != i-1 || right != 0 || immediate != 0 || records[(i-1)*4] != 13 || records[(i-1)*4+3] != 16) {
+			return false
+		}
+		if op == 13 && immediate == 16 && (i+1 >= count || records[(i+1)*4] != 36 || records[(i+1)*4+1] != i) {
+			return false
+		}
+
+		if op >= 29 && op <= 32 {
+			width, group := immediate&255, immediate>>8
+			if width != 32 && width != 64 || op != 31 && group != 0 || op == 31 && (group != 16 && group != 32 && group != 64 || group > width) {
+				return false
+			}
+		}
+		if op >= 22 && op <= 25 {
+			flagOperation, flagWidth := op, immediate
+			if op >= 24 {
+				if immediate < 0 || immediate>>8 > 15 {
+					return false
+				}
+				flagOperation -= 2
+				flagWidth &= 255
+			}
+			if flagOperation == 22 && flagWidth != 32 && flagWidth != 64 && flagWidth != 160 && flagWidth != 192 || flagOperation == 23 && flagWidth != 32 && flagWidth != 64 {
+				return false
+			}
+		}
+		if op == 33 || op == 34 || op == 37 {
+			width, carry := immediate&255, immediate>>8
+			if carry < 0 || carry >= i || renvoMemoryEffectOnly(records[carry*4]) || op != 37 && width != 32 && width != 64 && width != 160 && width != 192 || op == 37 && width != 16 {
+				return false
+			}
+		}
+		if op == 21 && (immediate < 0 || immediate >= i || renvoMemoryEffectOnly(records[immediate*4])) {
+			return false
+		}
+		if (op >= 17 && op <= 20 || op >= 38 && op <= 41) && immediate != 32 && immediate != 64 {
+			return false
+		}
+		if op == 15 && (immediate < 0 || immediate > 256) {
+			return false
 		}
 	}
-	g := renvoLinearGen{c: context, stackPeak: (count + 1) * 8}
+	return true
+}
+
+func renvoEmitStateBlock(records []int, stateWords int, context *renvoCompileContext, memory bool) ([]byte, bool) {
+	code, _, ok := renvoEmitStateBlockABI(records, stateWords, context, memory, false)
+	return code, ok
+}
+
+func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompileContext, memory bool, shared bool) ([]byte, int, bool) {
+	if !renvoRFEValidateRecords(records, stateWords, memory) {
+		return nil, 0, false
+	}
+	count, base := len(records)/4, 2
+	if memory || shared {
+		base = 3
+	}
+	locations, spills := renvoRFEAllocate(records, memory, context.renvoTargetArch == renvoArchAarch64, shared)
+	scratch := (spills + base) * 8
+	peak := scratch - 8
+	if memory {
+		peak = scratch
+	}
+	tertiary := 1
+	if context.renvoTargetArch == renvoArchAarch64 {
+		tertiary = 2
+	}
+	if shared {
+		peak += renvoRFESharedPrefix
+		if peak > renvoRFESharedFrameSize {
+			return nil, 0, false
+		}
+	}
+	g := renvoLinearGen{c: context, stackPeak: peak}
 	g.asm.c = context
 	g.asm.code = make([]byte, 0, count*32+64)
 	a := &g.asm
+	a.rfeNarrowSources = renvoRFENarrowSources(records)
 	frame := renvoEmitGlobalInitFrameStart(&g)
-	renvoAsmStorePrimaryStack(a, 8)
+	bodyOffset := 0
+	if shared {
+		body := renvoAsmNewLabel(a)
+		renvoRFERegMove(a, 11, 0)
+		if memory {
+			a.rfeFrameBias = renvoRFESharedPrefix
+			renvoRFESetContext(a)
+			a.rfeFrameBias = 0
+			renvoRFEInitSharedFacts(a)
+		}
+		renvoAsmCallLabel(a, body)
+		renvoEmitGlobalInitFrameEnd(&g, frame)
+		renvoAsmRet(a)
+		renvoAsmMarkLabel(a, body)
+		bodyOffset = len(a.code)
+		a.rfeFrameBias = renvoRFESharedPrefix
+	}
+	// The shared ABI inherits a stable state base and context from its owner.
+	// Legacy leaf calls establish them at their own entry instead.
+	if !shared {
+		renvoRFERegMove(a, 11, 0)
+	}
+
+	exit, progress := -1, 0
+	slowLabels, slowRecords, slowProgress, slowStatus := []int{}, []int{}, []int{}, []int{}
+	if memory {
+		if !shared {
+			renvoRFESetContext(a)
+		}
+		renvoAsmPrimaryImm(a, 0)
+		renvoRFEGetContext(a)
+		renvoAsmStorePrimaryMemSecondaryDisp(a, 8)
+		exit = renvoAsmNewLabel(a)
+	}
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if a.rfeNarrowSources[i] == -2 || op == 36 {
+			continue
+		}
+		if !renvoMemoryEffectOnly(op) && op != 13 && locations[i] == 0 && op != 0 {
+			continue
+		}
 		if op == 0 {
-			renvoAsmPrimaryImm(a, immediate)
-		} else if op == 1 {
-			renvoAsmLoadSecondaryStack(a, 8)
-			renvoAsmLoadPrimaryMemSecondaryDisp(a, immediate*8)
+			continue
+		} // constants are rematerialized at their uses
+
+		if op == 15 {
+			progress = immediate
+			continue
+		}
+		failure := -1
+		if op == 13 || op == 14 || op == 37 || op == 16 || op == 26 {
+			failure = renvoAsmNewLabel(a)
+			slowLabels = append(slowLabels, failure)
+			slowRecords = append(slowRecords, i)
+			slowProgress = append(slowProgress, progress)
+			status := 1
+			if op == 16 {
+				status = 2
+			}
+			if op == 26 {
+				status = 4
+			}
+			slowStatus = append(slowStatus, status)
+		}
+		if op == 16 || op == 26 {
+			renvoRFELoadValue(a, records, locations, left, 0)
+			renvoAsmJzPrimary(a, failure)
+			continue
+		}
+		if op == 13 || op == 14 || op == 37 {
+			renvoRFELoadValue(a, records, locations, left, 0)
+			if op == 14 || op == 37 {
+				secondary := 2
+				if renvoRFEArm(a) {
+					secondary = 1
+				}
+				renvoRFELoadValue(a, records, locations, right, secondary)
+			}
+			renvoEmitRegisterMemoryAccess(a, op, immediate, failure, records, locations)
+			if op == 13 {
+				if immediate == 16 {
+					renvoRFESavePairHigh(a, locations, i+1)
+				}
+				renvoRFESaveValue(a, locations, i)
+			}
+			continue
+		}
+		if renvoRFEEmitDirectRecord(a, records, locations, i) {
+			continue
+		}
+		if op == 1 {
+			renvoRFERegLoad(a, 0, 11, immediate*8, 8)
 		} else {
-			renvoAsmLoadPrimaryStack(a, (left+2)*8)
+			renvoRFELoadValue(a, records, locations, left, 0)
 			if op == 2 {
-				renvoAsmLoadSecondaryStack(a, 8)
-				renvoAsmStorePrimaryMemSecondaryDisp(a, immediate*8)
+				renvoRFERegStore(a, 0, 11, immediate*8, 8)
 				continue
 			}
-			if op == 8 || op == 9 {
+			if op >= 22 {
+				secondary := 2
+				if renvoRFEArm(a) {
+					secondary = 1
+				}
+				if op == 22 || op == 24 {
+					renvoRFELoadValue(a, records, locations, right, secondary)
+				}
+				renvoRFEFlags(a, op, immediate)
+			} else if op == 21 {
+				renvoRFERegMove(a, tertiary, 0)
+				renvoRFELoadValue(a, records, locations, right, 0)
+				secondary := 2
+				if renvoRFEArm(a) {
+					secondary = 1
+				}
+				renvoRFELoadValue(a, records, locations, immediate, secondary)
+				renvoRFERegBinary(a, 101, tertiary, tertiary)
+				if renvoRFEArm(a) {
+					renvoAsmEmit32(a, 0x9a811000)
+				} else {
+					renvoAsmEmit4(a, 0x48, 0x0f, 0x44, 0xc2)
+				}
+			} else if op >= 17 && op <= 20 {
+				renvoRFELoadValue(a, records, locations, right, tertiary)
+				renvoRFEVariableShift(a, op, immediate)
+			} else if op >= 3 && op <= 7 || op == 12 {
+				if records[right*4] == 0 && renvoRFEImmediateOperation(a, op, records[right*4+3]) {
+					renvoRFESaveValue(a, locations, i)
+					continue
+				}
+				renvoRFELoadValue(a, records, locations, right, tertiary)
+				if op == 12 {
+					renvoAsmMulPrimaryTertiary(a)
+				} else {
+					renvoRFERegBinary(a, op, 0, tertiary)
+				}
+			} else if op == 8 || op == 9 {
 				if immediate < 0 || immediate >= 64 {
 					renvoAsmPrimaryImm(a, 0)
 				} else if op == 8 {
@@ -66,34 +318,45 @@ func renvoEmitPureBlock(records []int, stateWords int, context *renvoCompileCont
 					renvoAsmLogicalShiftPrimaryWordImm(a, immediate)
 				}
 			} else {
-				renvoAsmLoadTertiaryStack(a, (right+2)*8)
-				if op == 3 {
-					renvoAsmAddPrimaryTertiary(a)
-				} else if op == 4 {
-					renvoAsmSubPrimaryTertiary(a)
-				} else if op >= 5 && op <= 7 {
-					operator := byte('&')
-					if op == 6 {
-						operator = '|'
-					} else if op == 7 {
-						operator = '^'
-					}
-					renvoAsmBitwisePrimaryTertiary(a, operator)
-				} else {
-					condition := renvoConditionEqual // equal
-					if op == 11 {
-						condition = renvoConditionUnsignedGreater
-					} // right > left, unsigned
-					renvoAsmCompareSet(a, condition)
+				renvoRFELoadValue(a, records, locations, right, tertiary)
+				condition := renvoConditionEqual
+				if op == 11 {
+					condition = renvoConditionUnsignedGreater
 				}
+				renvoAsmCompareSet(a, condition)
 			}
 		}
-		renvoAsmStorePrimaryStack(a, (i+2)*8)
+		renvoRFESaveValue(a, locations, i)
 	}
-	renvoEmitGlobalInitFrameEnd(&g, frame)
+
+	if memory {
+		renvoRFEGetContext(a)
+		renvoAsmPrimaryImm(a, progress)
+		renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
+		renvoAsmJmpLabel(a, exit)
+		for j, label := range slowLabels {
+			renvoAsmMarkLabel(a, label)
+			// Failure branches precede the result's register assignment, so
+			// the address SSA value is still available even at its last use.
+			renvoRFEGetContext(a)
+			if slowStatus[j] == 1 {
+				renvoRFELoadValue(a, records, locations, records[slowRecords[j]*4+1], 0)
+				renvoAsmStorePrimaryMemSecondaryDisp(a, 16)
+			}
+			renvoAsmPrimaryImm(a, slowProgress[j])
+			renvoAsmStorePrimaryMemSecondaryDisp(a, 0)
+			renvoAsmPrimaryImm(a, slowStatus[j])
+			renvoAsmStorePrimaryMemSecondaryDisp(a, 8)
+			renvoAsmJmpLabel(a, exit)
+		}
+		renvoAsmMarkLabel(a, exit)
+	}
+	if !shared {
+		renvoEmitGlobalInitFrameEnd(&g, frame)
+	}
 	renvoAsmRet(a)
 	renvoAsmPatch(a)
-	return a.code, !a.patchFailed
+	return a.code, bodyOffset, !a.patchFailed
 }
 
 const renvoAbsBssReloc = 1
@@ -270,6 +533,9 @@ type renvoAsm struct {
 	// or -(outgoing stack byte offset + 1). Valid only during a static call.
 	staticCallWordLocations []int
 	staticCallStackBytes    int
+	// RFE shared-frame bodies partition scratch below the dispatcher header.
+	rfeFrameBias     int
+	rfeNarrowSources []int
 }
 
 // A backend object is an unpatched function fragment plus its local labels,
@@ -8719,7 +8985,7 @@ type renvoLinearGen struct {
 	addressNameTokens        []int
 	localCacheStart          int
 	localCacheEnd            int
-	localCacheCount          int
+	localCacheDeclStart      int
 	localCacheIndex          int
 	stackUsed                int
 	stackPeak                int
@@ -14380,8 +14646,13 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 		e.kind == renvoExprUnary && renvoTokCharIs(p, e.tok, '*') {
 		return true
 	}
-	if e.kind == renvoExprSlice && renvoTypeIsSlice(meta, renvoInferParsedExprType(g, ep, e.left)) {
-		return renvoReturnedSliceCanReuseDescriptor(g, ep, e.left)
+	if e.kind == renvoExprSlice {
+		if renvoTypeIsSlice(meta, renvoInferParsedExprType(g, ep, e.left)) {
+			return renvoReturnedSliceCanReuseDescriptor(g, ep, e.left)
+		}
+		// An array view reached through a pointer, slice element or global
+		// already has caller-owned storage. Copying it on return breaks aliasing.
+		return renvoReturnedArrayHasStableStorage(g, ep, e.left)
 	}
 	if e.kind == renvoExprCall {
 		callee := renvoExprIdentCode(p, ep, e.left)
@@ -14432,6 +14703,33 @@ func renvoReturnedSliceCanReuseDescriptor(g *renvoLinearGen, ep *renvoExprParse,
 		return true
 	}
 	return g.locals[localIndex].constValid != 0 || renvoLocalIsCurrentFuncParam(g, localIndex)
+}
+
+// Distinguish caller-owned array storage from arrays held by this frame.
+// Value parameters and local aggregate values still require escape copying.
+func renvoReturnedArrayHasStableStorage(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+	if idx < 0 || idx >= len(ep.exprs) {
+		return false
+	}
+	e := &ep.exprs[idx]
+	t := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+	if t.kind == renvoTypePointer {
+		return true
+	}
+	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
+		return true
+	}
+	if e.kind == renvoExprSelector || e.kind == renvoExprIndex {
+		base := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+		if base.kind == renvoTypePointer || base.kind == renvoTypeSlice {
+			return true
+		}
+		return renvoReturnedArrayHasStableStorage(g, ep, e.left)
+	}
+	if e.kind == renvoExprIdent {
+		return renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 && renvoFindGlobalType(g, e.nameStart, e.nameEnd) != 0
+	}
+	return false
 }
 
 func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
@@ -19296,9 +19594,11 @@ func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
 		if g.localCacheEnd == nameEnd && g.localCacheIndex < 0 {
 			return -1
 		}
-		if g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
+		if g.localCacheEnd == nameEnd && g.localCacheIndex >= 0 && g.localCacheIndex < g.localCount {
 			local := &g.locals[g.localCacheIndex]
-			if renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
+			// The source span is immutable. A named declaration invalidates
+			// the cache; checking its start also rejects an unnamed reused slot.
+			if local.nameStart == g.localCacheDeclStart && local.nameEnd > local.nameStart {
 				return g.localCacheIndex
 			}
 		}
@@ -19306,12 +19606,12 @@ func renvoFindLocalIndex(g *renvoLinearGen, nameStart int, nameEnd int) int {
 	nameHash := renvoHashRange(g.prog.src, nameStart, nameEnd)
 	g.localCacheStart = nameStart
 	g.localCacheEnd = nameEnd
-	g.localCacheCount = g.localCount
 	g.localCacheIndex = -1
 	for i := g.localCount - 1; i >= 0; i-- {
 		local := &g.locals[i]
 		if local.nameHash == nameHash && renvoBytesEqualRange(g.prog.src, local.nameStart, local.nameEnd, nameStart, nameEnd) {
 			g.localCacheIndex = i
+			g.localCacheDeclStart = local.nameStart
 			return i
 		}
 	}
@@ -26987,6 +27287,3231 @@ func renvoInitStructSliceFields(g *renvoLinearGen, typ int, offset int) {
 			renvoInitEmptySliceStack(g, fieldOffset)
 		} else if fieldType.kind == renvoTypeStruct {
 			renvoInitStructSliceFields(g, field.typ, fieldOffset)
+		}
+	}
+}
+
+// RenvoEmitMemoryBlock uses the same uint64 SSA contract as pure blocks plus
+// checked memory load/store, progress and guard records (13..16). The second
+// native argument is a trusted host MemoryContext, never a guest address.
+func RenvoEmitMemoryBlock(records []int, stateWords int, arm64 bool) ([]byte, bool) {
+	arch := renvoArchAmd64
+	if arm64 {
+		arch = renvoArchAarch64
+	}
+	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	return renvoEmitStateBlock(records, stateWords, context, true)
+}
+
+func renvoMemoryEffectOnly(op int) bool {
+	return op == 37 || op == 2 || op == 14 || op == 15 || op == 16 || op == 26 || op == 35
+}
+
+// RenvoEmitLinkedDispatcher loops only over previously published leaf entries.
+// A live arena view is lent under its lock. Every transition checks full PC tag,
+// instruction budget, offset alignment/range, installed entry and exact shape.
+// No Go callback, mapping operation or executable-page store occurs in the loop.
+func RenvoEmitLinkedDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte, bool) {
+	if stateWords < 1 || stateWords > 256 || pcSlot < 0 || pcSlot >= stateWords {
+		return nil, false
+	}
+	return renvoEmitRegisterDispatcher(pcSlot, stateWords, arm64)
+}
+
+// RFE leaf ABI: primary/state and secondary/context are caller scratch. Leaf
+// code preserves dispatcher registers (amd64 RBX,R12..R15; arm64 X19..X23).
+// SSA allocation uses only disjoint caller-scratch registers. These helpers
+// encode this uint64 IR ABI, not arbitrary source-level register assumptions.
+func renvoRFEArm(a *renvoAsm) bool { return a.c.renvoTargetArch == renvoArchAarch64 }
+func renvoRFERex(a *renvoAsm, reg int, base int, wide bool) {
+	rex := 0x40 | ((reg >> 3) << 2) | (base >> 3)
+	if wide {
+		rex |= 8
+	}
+	if rex != 0x40 {
+		renvoAsmEmit8(a, rex)
+	}
+}
+func renvoRFERegMove(a *renvoAsm, dst int, src int) {
+	if dst == src {
+		return
+	}
+	if renvoRFEArm(a) {
+		renvoAarch64AsmMovRegReg(a, dst, src)
+		return
+	}
+	renvoRFERex(a, src, dst, true)
+	renvoAsmEmit2(a, 0x89, 0xc0|((src&7)<<3)|(dst&7))
+}
+func renvoRFERegImm(a *renvoAsm, dst int, value int) {
+	if renvoRFEArm(a) {
+		renvoAarch64AsmMovRegImm(a, dst, value)
+		return
+	}
+	if value >= 0 && value>>32 == 0 {
+		renvoRFERex(a, 0, dst, false)
+		renvoAsmEmit8(a, 0xb8|(dst&7))
+		renvoAsmEmit32(a, value)
+	} else {
+		renvoRFERex(a, 0, dst, true)
+		renvoAsmEmit8(a, 0xb8|(dst&7))
+		renvoAsmEmit64(a, value)
+	}
+}
+
+// Binary kinds follow the RFE IR; 100 is compare (dst-src), 101 is TEST.
+func renvoRFERegBinary(a *renvoAsm, kind int, dst int, src int) {
+	if kind == 12 {
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0x9b007c00|(src<<16)|(dst<<5)|dst)
+		} else {
+			renvoRFERex(a, dst, src, true)
+			renvoAsmEmit2(a, 0x0f, 0xaf)
+			renvoAsmEmit8(a, 0xc0|((dst&7)<<3)|(src&7))
+		}
+		return
+	}
+	if renvoRFEArm(a) {
+		opcode := 0x8b000000
+		if kind == 4 {
+			opcode = 0xcb000000
+		}
+		if kind == 5 {
+			opcode = 0x8a000000
+		}
+		if kind == 6 {
+			opcode = 0xaa000000
+		}
+		if kind == 7 {
+			opcode = 0xca000000
+		}
+		if kind == 100 {
+			renvoAsmEmit32(a, 0xeb00001f|(src<<16)|(dst<<5))
+			return
+		}
+		if kind == 101 {
+			renvoAsmEmit32(a, 0xea00001f|(src<<16)|(dst<<5))
+			return
+		}
+		renvoAsmEmit32(a, opcode|(src<<16)|(dst<<5)|dst)
+		return
+	}
+	opcode := 0x01
+	if kind == 4 {
+		opcode = 0x29
+	}
+	if kind == 5 {
+		opcode = 0x21
+	}
+	if kind == 6 {
+		opcode = 0x09
+	}
+	if kind == 7 {
+		opcode = 0x31
+	}
+	if kind == 100 {
+		opcode = 0x39
+	}
+	if kind == 101 {
+		opcode = 0x85
+	}
+	renvoRFERex(a, src, dst, true)
+	renvoAsmEmit2(a, opcode, 0xc0|((src&7)<<3)|(dst&7))
+}
+func renvoRFERegImmediate(a *renvoAsm, kind int, reg int, value int) {
+	if renvoRFEArm(a) {
+		if kind == 3 || kind == 4 {
+			if kind == 4 {
+				value = -value
+			}
+			renvoAarch64AsmAddRegImm(a, reg, reg, value)
+			return
+		}
+		renvoRFERegImm(a, 16, value)
+		renvoRFERegBinary(a, kind, reg, 16)
+		return
+	}
+	group := 0
+	if kind == 4 {
+		group = 5
+	}
+	if kind == 5 {
+		group = 4
+	}
+	if kind == 6 {
+		group = 1
+	}
+	if kind == 7 {
+		group = 6
+	}
+	if kind == 100 {
+		group = 7
+	}
+	renvoRFERex(a, 0, reg, true)
+	if value >= -128 && value <= 127 {
+		renvoAsmEmit3(a, 0x83, 0xc0|(group<<3)|(reg&7), value)
+	} else {
+		renvoAsmEmit2(a, 0x81, 0xc0|(group<<3)|(reg&7))
+		renvoAsmEmit32(a, value)
+	}
+}
+func renvoRFERegShift(a *renvoAsm, reg int, kind int, count int) {
+	if renvoRFEArm(a) {
+		if kind == 8 {
+			renvoAsmEmit32(a, 0xd3400000|(((64-count)&63)<<16)|((63-count)<<10)|(reg<<5)|reg)
+		} else {
+			renvoAsmEmit32(a, 0xd3400000|(count<<16)|(63<<10)|(reg<<5)|reg)
+		}
+		return
+	}
+	group := 4
+	if kind == 9 {
+		group = 5
+	}
+	renvoRFERex(a, 0, reg, true)
+	renvoAsmEmit3(a, 0xc1, 0xc0|(group<<3)|(reg&7), count)
+}
+func renvoRFEMemoryOperand(a *renvoAsm, field int, base int, disp int) {
+	mod := 2
+	if disp >= -128 && disp <= 127 {
+		mod = 1
+	}
+	renvoAsmEmit8(a, (mod<<6)|((field&7)<<3)|(base&7))
+	if base&7 == 4 {
+		renvoAsmEmit8(a, 0x24)
+	}
+	if mod == 1 {
+		renvoAsmEmit8(a, disp)
+	} else {
+		renvoAsmEmit32(a, disp)
+	}
+}
+func renvoRFERegLoad(a *renvoAsm, dst int, base int, disp int, size int) {
+	disp = renvoRFEFrameDisplacement(a, base, disp)
+	if renvoRFEArm(a) {
+		opcode := 0xf9400000
+		if size == 1 {
+			opcode = 0x39400000
+		}
+		if size == 2 {
+			opcode = 0x79400000
+		}
+		if size == 4 {
+			opcode = 0xb9400000
+		}
+		if disp >= 0 && disp%size == 0 && disp/size < 4096 {
+			renvoAsmEmit32(a, opcode|((disp/size)<<10)|(base<<5)|dst)
+			return
+		}
+		renvoAarch64AsmLoadRegMem(a, dst, base, disp, size)
+		if size == 2 || size == 4 {
+			renvoRFERegShift(a, dst, 8, 64-size*8)
+			renvoRFERegShift(a, dst, 9, 64-size*8)
+		}
+		return
+	}
+	renvoRFERex(a, dst, base, size == 8)
+	if size == 1 {
+		renvoAsmEmit2(a, 0x0f, 0xb6)
+	} else if size == 2 {
+		renvoAsmEmit2(a, 0x0f, 0xb7)
+	} else {
+		renvoAsmEmit8(a, 0x8b)
+	}
+	renvoRFEMemoryOperand(a, dst, base, disp)
+}
+func renvoRFERegStore(a *renvoAsm, src int, base int, disp int, size int) {
+	disp = renvoRFEFrameDisplacement(a, base, disp)
+	if renvoRFEArm(a) {
+		renvoAarch64AsmStoreRegMem(a, src, base, disp, size)
+		return
+	}
+	if size == 2 {
+		renvoAsmEmit8(a, 0x66)
+	}
+	renvoRFERex(a, src, base, size == 8)
+	opcode := 0x89
+	if size == 1 {
+		opcode = 0x88
+	}
+	renvoAsmEmit8(a, opcode)
+	renvoRFEMemoryOperand(a, src, base, disp)
+}
+func renvoRFEJump(a *renvoAsm, condition int, label int) {
+	if renvoRFEArm(a) {
+		cc := 0
+		if condition == 1 {
+			cc = 1
+		}
+		if condition == 2 {
+			cc = 3
+		}
+		if condition == 3 {
+			cc = 2
+		}
+		if condition == 4 {
+			cc = 8
+		}
+		if condition == 5 {
+			cc = 9
+		}
+		renvoAarch64AsmBCondLabel(a, label, cc)
+		return
+	}
+	cc := 0x84
+	if condition == 1 {
+		cc = 0x85
+	}
+	if condition == 2 {
+		cc = 0x82
+	}
+	if condition == 3 {
+		cc = 0x83
+	}
+	if condition == 4 {
+		cc = 0x87
+	}
+	if condition == 5 {
+		cc = 0x86
+	}
+	renvoAmd64AsmJccLabel(a, cc, label)
+}
+func renvoRFEJumpZero(a *renvoAsm, reg int, label int) {
+	renvoRFERegBinary(a, 101, reg, reg)
+	renvoRFEJump(a, 0, label)
+}
+
+// A compare may read its checked host operand directly on amd64. AArch64
+// keeps the same explicit scratch load; condition sense is dst-memory.
+// Form a checked host address without changing flags. The dispatcher uses
+// distinct base/destination registers; amd64 folds scale and displacement.
+func renvoRFERegAddress(a *renvoAsm, dst int, base int, index int, scale int, disp int) {
+	if renvoRFEArm(a) {
+		renvoRFERegMove(a, dst, index)
+		if scale != 0 {
+			renvoRFERegShift(a, dst, 8, scale)
+		}
+		renvoRFERegBinary(a, 3, dst, base)
+		if disp != 0 {
+			renvoRFERegImmediate(a, 3, dst, disp)
+		}
+		return
+	}
+	renvoAsmEmit8(a, 0x48|((dst>>3)<<2)|((index>>3)<<1)|(base>>3))
+	renvoAsmEmit2(a, 0x8d, 0x84|((dst&7)<<3))
+	renvoAsmEmit8(a, (scale<<6)|((index&7)<<3)|(base&7))
+	renvoAsmEmit32(a, disp)
+}
+
+func renvoRFECompareMemory(a *renvoAsm, dst int, base int, disp int, scratch int) {
+	if renvoRFEArm(a) {
+		renvoRFERegLoad(a, scratch, base, disp, 8)
+		renvoRFERegBinary(a, 100, dst, scratch)
+		return
+	}
+	disp = renvoRFEFrameDisplacement(a, base, disp)
+	renvoRFERex(a, dst, base, true)
+	renvoAsmEmit8(a, 0x3b)
+	renvoRFEMemoryOperand(a, dst, base, disp)
+}
+
+func renvoRFEJumpMasked(a *renvoAsm, source int, scratch int, mask int, nonzero bool, label int) {
+	if renvoRFEArm(a) {
+		renvoRFERegMove(a, scratch, source)
+		renvoRFERegImmediate(a, 5, scratch, mask)
+		renvoRFERegBinary(a, 101, scratch, scratch)
+	} else {
+		renvoRFERex(a, 0, source, true)
+		renvoAsmEmit2(a, 0xf7, 0xc0|(source&7))
+		renvoAsmEmit32(a, mask)
+	}
+	cc := 0
+	if nonzero {
+		cc = 1
+	}
+	renvoRFEJump(a, cc, label)
+}
+
+// A foreign session borrows only the public integer descriptor field. Legacy
+// contexts keep the inline table. Neither view is an executable admission.
+func renvoRFEDescriptorBase(a *renvoAsm, destination int, context int) {
+	renvoRFERegLoad(a, destination, context, RenvoRFEDescriptorBase, 8)
+	ready := renvoAsmNewLabel(a)
+	renvoRFERegImmediate(a, 100, destination, 0)
+	renvoRFEJump(a, 1, ready)
+	renvoRFERegMove(a, destination, context)
+	renvoRFERegImmediate(a, 3, destination, RenvoRFEBlocks)
+	renvoAsmMarkLabel(a, ready)
+}
+
+// Probe the four fixed ways of a full-PC-tagged table. Both public descriptors
+// and private proofs retain the same 1024-entry capacity and 64-byte stride.
+// The matching pointer is returned in place and scratch holds its nonzero
+// count. A miss never executes a candidate.
+func renvoRFEProbeLink(a *renvoAsm, pc int, pointer int, scratch int, miss int) {
+	found := renvoAsmNewLabel(a)
+	for way := 0; way < 4; way++ {
+		next := miss
+		if way != 3 {
+			next = renvoAsmNewLabel(a)
+		}
+		renvoRFECompareMemory(a, pc, pointer, 0, scratch)
+		renvoRFEJump(a, 1, next)
+		// Zero is the empty marker, even when the requested full PC is zero.
+		renvoRFERegLoad(a, scratch, pointer, 16, 8)
+		if way == 3 {
+			renvoRFEJumpZero(a, scratch, miss)
+		} else {
+			renvoRFERegBinary(a, 101, scratch, scratch)
+			renvoRFEJump(a, 1, found)
+			renvoAsmMarkLabel(a, next)
+			renvoRFERegImmediate(a, 3, pointer, 16384)
+		}
+	}
+	renvoAsmMarkLabel(a, found)
+}
+
+func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte, bool) {
+	arch := renvoArchAmd64
+	state, context, descriptor, count, remaining := 12, 13, 14, 15, 3
+	primary, secondary, temporary, target := 0, 2, 1, 8
+	frameReg := 5
+	saved := []int{3, 12, 13, 14, 15}
+	if arm64 {
+		arch = renvoArchAarch64
+		state, context, descriptor, count, remaining = 19, 20, 21, 22, 23
+		secondary, temporary, target = 1, 2, 9
+		frameReg = 29
+		saved = []int{19, 20, 21, 22, 23}
+	}
+	cc := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	g := renvoLinearGen{c: cc, stackPeak: renvoRFESharedFrameSize}
+	g.asm.c = cc
+	a := &g.asm
+	frame := renvoEmitGlobalInitFrameStart(&g)
+	for i, reg := range saved {
+		renvoRFERegStore(a, reg, frameReg, -(i+1)*8, 8)
+	}
+	renvoRFERegMove(a, state, primary)
+	renvoRFERegMove(a, 11, primary)
+	renvoRFERegMove(a, context, secondary)
+	renvoRFERegStore(a, context, frameReg, -(renvoRFESharedPrefix + 16), 8)
+	renvoRFEInitSharedFacts(a)
+	renvoRFERegLoad(a, remaining, context, RenvoRFERemaining, 8)
+	// Save the initial budget and total privately. Each validated leaf reduces
+	// remaining; reconstruct aggregate retirement only at the cold exit.
+	renvoRFERegStore(a, remaining, frameReg, -56, 8)
+	renvoRFERegLoad(a, secondary, context, RenvoRFETotal, 8)
+	renvoRFERegStore(a, secondary, frameReg, -112, 8)
+	// Freeze authority before executing any guest operation. Compatibility
+	// contexts may alias guest RAM; later writes must not enable the cache.
+	renvoRFERegLoad(a, temporary, context, RenvoRFEAdmissionEpoch, 8)
+	renvoRFERegStore(a, temporary, frameReg, -120, 8)
+	loop, exit, bad, pure, account, slow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	ordinary, loopResult, loopSlow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	loopSideExit := renvoAsmNewLabel(a)
+	selectTarget := renvoAsmNewLabel(a)
+	genericAdmission, admitted := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	genericSelect, callTarget := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	preparedLoop, preparedMemory, preparedPure := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	memoryResult := renvoAsmNewLabel(a)
+	validatePrepared := renvoAsmNewLabel(a)
+	renvoAsmMarkLabel(a, loop)
+	renvoRFEJumpZero(a, remaining, exit)
+	renvoAsmMarkLabel(a, selectTarget)
+	// Opaque arena-owned proofs bind full PC, public entry and exact count.
+	// Their offset/family/state shape was checked under the same arena lock.
+	// This borrowed view is refreshed and cleared on every host call.
+	renvoRFERegLoad(a, target, context, RenvoRFEPreparedTargets, 8)
+	renvoRFEJumpZero(a, target, genericSelect)
+	renvoRFERegLoad(a, primary, state, pcSlot*8, 8)
+	renvoRFERegMove(a, descriptor, primary)
+	renvoRFERegShift(a, descriptor, 9, 2)
+	renvoRFERegMove(a, temporary, primary)
+	renvoRFERegShift(a, temporary, 9, 12)
+	renvoRFERegBinary(a, 7, descriptor, temporary)
+	renvoRFERegImmediate(a, 5, descriptor, 255)
+	renvoRFERegShift(a, descriptor, 8, 6)
+	renvoRFERegBinary(a, 3, target, descriptor)
+	renvoRFEProbeLink(a, primary, target, count, genericSelect)
+	// Repeated admissions may reuse a check only inside a proven non-aliasing
+	// foreign session. The epoch is private, nonzero and fresh per invocation.
+	// Full PC and remaining budget are checked on EVERY dispatch, cached or not.
+	renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+	renvoRFEJumpZero(a, temporary, validatePrepared)
+	renvoRFECompareMemory(a, temporary, target, 32, secondary)
+	renvoRFEJump(a, 1, validatePrepared)
+	renvoRFERegBinary(a, 100, count, remaining)
+	renvoRFEJump(a, 4, exit)
+	// Loop returns account their own memory and never need the descriptor.
+	renvoRFERegLoad(a, primary, target, 24, 4)
+	renvoRFERegLoad(a, temporary, target, 28, 4)
+	renvoRFEJumpMasked(a, temporary, secondary, 8192, true, preparedLoop)
+	// Ordinary leaves still need their exact public memory-prefix table.
+	renvoRFERegLoad(a, descriptor, target, 40, 8)
+	renvoRFEDescriptorBase(a, secondary, context)
+	renvoRFERegBinary(a, 3, descriptor, secondary)
+	renvoRFEJumpMasked(a, temporary, secondary, 32768, false, preparedPure)
+	renvoAsmJmpLabel(a, preparedMemory)
+	renvoAsmMarkLabel(a, validatePrepared)
+	renvoRFEDescriptorBase(a, temporary, context)
+	renvoRFERegBinary(a, 3, descriptor, temporary)
+	renvoRFEProbeLink(a, primary, descriptor, temporary, genericSelect)
+	renvoRFECompareMemory(a, count, descriptor, 16, temporary)
+	renvoRFEJump(a, 1, genericSelect)
+	renvoRFERegBinary(a, 100, count, remaining)
+	renvoRFEJump(a, 4, exit)
+	renvoRFERegLoad(a, secondary, target, 8, 8)
+	renvoRFECompareMemory(a, secondary, descriptor, 8, temporary)
+	renvoRFEJump(a, 1, genericSelect)
+	renvoRFEDescriptorBase(a, secondary, context)
+	renvoRFERegMove(a, temporary, descriptor)
+	renvoRFERegBinary(a, 4, temporary, secondary)
+	renvoRFERegStore(a, temporary, target, 40, 8)
+	renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+	renvoRFERegStore(a, temporary, target, 32, 8)
+	renvoRFERegLoad(a, primary, target, 24, 4)
+	renvoRFERegLoad(a, temporary, target, 28, 4)
+	// The arena-owned family selects a return continuation before the call.
+	// No family spill/reload is needed on this fully checked prepared path.
+	renvoRFEJumpMasked(a, temporary, secondary, 8192, true, preparedLoop)
+	renvoRFEJumpMasked(a, temporary, secondary, 32768, false, preparedPure)
+	renvoAsmJmpLabel(a, preparedMemory)
+	renvoAsmMarkLabel(a, genericSelect)
+	renvoRFERegLoad(a, primary, state, pcSlot*8, 8)
+	renvoRFEJumpMasked(a, primary, temporary, 3, true, exit)
+	renvoRFERegMove(a, descriptor, primary)
+	renvoRFERegShift(a, descriptor, 9, 2)
+	renvoRFERegMove(a, temporary, primary)
+	renvoRFERegShift(a, temporary, 9, 12)
+	renvoRFERegBinary(a, 7, descriptor, temporary)
+	renvoRFERegImmediate(a, 5, descriptor, 255)
+	renvoRFERegShift(a, descriptor, 8, 6)
+	renvoRFEDescriptorBase(a, temporary, context)
+	renvoRFERegBinary(a, 3, descriptor, temporary)
+	renvoRFEProbeLink(a, primary, descriptor, count, exit)
+	renvoRFERegImmediate(a, 100, count, 256)
+	renvoRFEJump(a, 4, exit)
+	renvoRFERegBinary(a, 100, count, remaining)
+	renvoRFEJump(a, 4, exit)
+	renvoRFERegLoad(a, primary, descriptor, 8, 8)
+	renvoRFEJumpMasked(a, primary, temporary, 15, true, exit)
+	renvoRFERegMove(a, secondary, primary)
+	renvoRFERegShift(a, secondary, 9, 4)
+	renvoRFECompareMemory(a, secondary, context, RenvoRFECodeView+3*RenvoRFEWordBytes, temporary)
+	renvoRFEJump(a, 3, exit)
+	renvoRFERegLoad(a, temporary, context, RenvoRFECodeView+2*RenvoRFEWordBytes, 8)
+	renvoRFEJumpZero(a, temporary, exit)
+	renvoRFERegShift(a, secondary, 8, 4)
+	renvoRFERegBinary(a, 3, secondary, temporary)
+	renvoRFERegLoad(a, target, secondary, 2, 2)
+	renvoRFEJumpZero(a, target, genericAdmission)
+	// An arena-owned admission proves offset, entry family and immutable shape.
+	// Compare the public descriptor's count and this dispatcher's shape every time.
+	renvoRFERegStore(a, target, frameReg, -48, 8)
+	renvoRFERegImmediate(a, 5, target, 511)
+	renvoRFERegImmediate(a, 100, target, stateWords)
+	renvoRFEJump(a, 1, exit)
+	renvoRFERegLoad(a, temporary, secondary, 12, 4)
+	renvoRFERegBinary(a, 100, temporary, count)
+	renvoRFEJump(a, 1, exit)
+	renvoAsmJmpLabel(a, admitted)
+	renvoAsmMarkLabel(a, genericAdmission)
+	renvoRFERegLoad(a, temporary, context, RenvoRFECodeView+RenvoRFEWordBytes, 8)
+	renvoRFERegBinary(a, 100, primary, temporary)
+	renvoRFEJump(a, 3, exit)
+	renvoRFERegLoad(a, target, secondary, 0, 2)
+	renvoRFERegStore(a, target, frameReg, -48, 8)
+	// Dispatchers/legacy entries are never targets. Loop entries additionally
+	// carry the exact static body length in installed, immutable metadata.
+	renvoRFEJumpMasked(a, target, temporary, 16384, true, exit)
+	renvoRFERegMove(a, temporary, target)
+	renvoRFERegImmediate(a, 5, temporary, 8192)
+	if arm64 {
+		// AND does not define NZCV on this host. Never consume stale flags.
+		renvoRFERegBinary(a, 101, temporary, temporary)
+	}
+	wideLoop := renvoAsmNewLabel(a)
+	renvoRFEJump(a, 1, wideLoop)
+	// Ordinary leaf prefix tables remain 17 bytes; only shared loops are wide.
+	renvoRFERegImmediate(a, 100, count, 16)
+	renvoRFEJump(a, 4, exit)
+	renvoAsmJmpLabel(a, ordinary)
+	renvoAsmMarkLabel(a, wideLoop)
+	renvoRFERegLoad(a, temporary, secondary, 8, 4)
+	renvoRFERegBinary(a, 100, temporary, count)
+	renvoRFEJump(a, 1, exit)
+	renvoAsmMarkLabel(a, ordinary)
+	renvoRFERegImmediate(a, 5, target, 511)
+	renvoRFERegImmediate(a, 100, target, stateWords)
+	renvoRFEJump(a, 1, exit)
+	renvoAsmMarkLabel(a, admitted)
+	// The private record supplies a validated body offset; zero is a legacy entry
+	// or a loop-only shared body. Public descriptors never select this offset.
+	renvoRFERegLoad(a, temporary, secondary, 4, 4)
+	renvoRFERegBinary(a, 3, primary, temporary)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
+	renvoRFEJumpZero(a, target, exit)
+	renvoRFERegBinary(a, 3, target, primary)
+	renvoAsmMarkLabel(a, callTarget)
+	renvoRFERegMove(a, primary, state)
+	renvoRFERegMove(a, secondary, context)
+	if arm64 {
+		renvoAsmEmit32(a, 0xd63f0120)
+	} else {
+		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+	} // call X9/R8
+	// Shared bodies preserve the state base. Legacy leaf ABI allowed R11/X11
+	// as scratch, so reestablish it at this interoperability boundary.
+	renvoRFERegMove(a, 11, state)
+	renvoRFERegLoad(a, primary, frameReg, -48, 8)
+	renvoRFEJumpMasked(a, primary, temporary, 8192, true, loopResult)
+	renvoRFEJumpMasked(a, primary, temporary, 32768, false, pure)
+	renvoAsmJmpLabel(a, memoryResult)
+	renvoAsmMarkLabel(a, preparedMemory)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
+	renvoRFEJumpZero(a, target, exit)
+	renvoRFERegBinary(a, 3, target, primary)
+	renvoRFERegMove(a, primary, state)
+	renvoRFERegMove(a, secondary, context)
+	if arm64 {
+		renvoAsmEmit32(a, 0xd63f0120)
+	} else {
+		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+	}
+	renvoRFERegMove(a, 11, state)
+	renvoAsmMarkLabel(a, memoryResult)
+	renvoRFERegLoad(a, primary, context, 0, 8)
+	renvoRFERegBinary(a, 100, primary, count)
+	renvoRFEJump(a, 4, bad)
+	renvoRFERegLoad(a, secondary, context, 8, 8)
+	renvoRFERegBinary(a, 101, secondary, secondary)
+	renvoRFEJump(a, 1, slow)
+	renvoRFERegBinary(a, 100, primary, count)
+	renvoRFEJump(a, 1, bad)
+	renvoAsmJmpLabel(a, account)
+	renvoAsmMarkLabel(a, preparedPure)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
+	renvoRFEJumpZero(a, target, exit)
+	renvoRFERegBinary(a, 3, target, primary)
+	renvoRFERegMove(a, primary, state)
+	renvoRFERegMove(a, secondary, context)
+	if arm64 {
+		renvoAsmEmit32(a, 0xd63f0120)
+	} else {
+		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+	}
+	renvoRFERegMove(a, 11, state)
+	renvoAsmMarkLabel(a, pure)
+	renvoRFERegMove(a, primary, count)
+	renvoRFERegStore(a, primary, context, 0, 8)
+	renvoAsmMarkLabel(a, account)
+	// Prefix index bounded by checked retired<=count<=16, even on slow exits.
+	renvoRFERegMove(a, temporary, descriptor)
+	renvoRFERegBinary(a, 3, temporary, primary)
+	renvoRFERegLoad(a, temporary, temporary, 32, 1)
+	renvoRFERegLoad(a, secondary, context, RenvoRFEMemoryTotal, 8)
+	renvoRFERegBinary(a, 3, secondary, temporary)
+	renvoRFERegStore(a, secondary, context, RenvoRFEMemoryTotal, 8)
+	renvoRFERegBinary(a, 4, remaining, primary)
+	if arm64 {
+		renvoAsmJmpLabel(a, loop)
+	} else {
+		// SUB defines this budget's ZF immediately before the branch. Skip
+		// the redundant head TEST only on its proven nonzero successor.
+		renvoRFEJump(a, 1, selectTarget)
+		renvoAsmJmpLabel(a, exit)
+	}
+	renvoAsmMarkLabel(a, slow)
+	renvoRFERegBinary(a, 100, primary, count)
+	renvoRFEJump(a, 3, bad)
+	// A valid slow exit accounts its prefix once and returns immediately.
+	// Keep it off the successful transition path, whose zero status was
+	// already checked above (pure leaves cannot change context status).
+	renvoRFERegBinary(a, 4, remaining, primary)
+	renvoRFERegMove(a, temporary, descriptor)
+	renvoRFERegBinary(a, 3, temporary, primary)
+	renvoRFERegLoad(a, temporary, temporary, 32, 1)
+	renvoRFERegLoad(a, secondary, context, RenvoRFEMemoryTotal, 8)
+	renvoRFERegBinary(a, 3, secondary, temporary)
+	renvoRFERegStore(a, secondary, context, RenvoRFEMemoryTotal, 8)
+	renvoAsmJmpLabel(a, exit)
+	renvoAsmMarkLabel(a, preparedLoop)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
+	renvoRFEJumpZero(a, target, exit)
+	renvoRFERegBinary(a, 3, target, primary)
+	renvoRFERegMove(a, primary, state)
+	renvoRFERegMove(a, secondary, context)
+	if arm64 {
+		renvoAsmEmit32(a, 0xd63f0120)
+	} else {
+		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+	}
+	renvoRFERegMove(a, 11, state)
+	renvoAsmMarkLabel(a, loopResult)
+	// The bounded loop reports dynamic progress and accounts its own exact
+	// memory prefix in generated code. Its registered body count is immutable.
+	renvoRFERegLoad(a, primary, context, 0, 8)
+	renvoRFERegBinary(a, 100, primary, remaining)
+	renvoRFEJump(a, 4, bad)
+	renvoRFERegLoad(a, secondary, context, 8, 8)
+	renvoRFERegBinary(a, 101, secondary, secondary)
+	renvoRFEJump(a, 1, loopSlow)
+	renvoRFERegBinary(a, 100, primary, count)
+	renvoRFEJump(a, 2, bad)
+	renvoRFERegBinary(a, 4, remaining, primary)
+	if arm64 {
+		renvoAsmJmpLabel(a, loop)
+	} else {
+		renvoRFEJump(a, 1, selectTarget)
+		renvoAsmJmpLabel(a, exit)
+	}
+	renvoAsmMarkLabel(a, loopSlow)
+	renvoRFERegImmediate(a, 100, secondary, 4)
+	renvoRFEJump(a, 0, loopSideExit)
+	renvoRFERegImmediate(a, 100, secondary, 2)
+	renvoRFEJump(a, 4, bad)
+	renvoRFERegBinary(a, 100, primary, remaining)
+	renvoRFEJump(a, 3, bad)
+	renvoRFERegBinary(a, 4, remaining, primary)
+	renvoAsmJmpLabel(a, exit)
+	renvoAsmMarkLabel(a, loopSideExit)
+	renvoRFEJumpZero(a, primary, bad)
+	renvoRFERegBinary(a, 100, primary, remaining)
+	renvoRFEJump(a, 3, bad)
+	renvoRFERegImm(a, secondary, 0)
+	renvoRFERegStore(a, secondary, context, 8, 8)
+	renvoRFERegBinary(a, 4, remaining, primary)
+	if arm64 {
+		renvoAsmJmpLabel(a, loop)
+	} else {
+		renvoRFEJump(a, 1, selectTarget)
+		renvoAsmJmpLabel(a, exit)
+	}
+	renvoAsmMarkLabel(a, bad)
+	renvoRFERegImm(a, primary, 3)
+	renvoRFERegStore(a, primary, context, 8, 8)
+	renvoAsmMarkLabel(a, exit)
+	renvoRFERegLoad(a, primary, frameReg, -56, 8)
+	renvoRFERegBinary(a, 4, primary, remaining)
+	renvoRFERegLoad(a, secondary, frameReg, -112, 8)
+	renvoRFERegBinary(a, 3, secondary, primary)
+	renvoRFERegStore(a, secondary, context, RenvoRFETotal, 8)
+	renvoRFERegStore(a, remaining, context, RenvoRFERemaining, 8)
+	for i, reg := range saved {
+		renvoRFERegLoad(a, reg, frameReg, -(i+1)*8, 8)
+	}
+	renvoEmitGlobalInitFrameEnd(&g, frame)
+	renvoAsmRet(a)
+	renvoAsmPatch(a)
+	return a.code, !a.patchFailed
+}
+
+// Allocate complete SSA live intervals. Constants are rematerialized. A value
+// either stays in one scratch register for its entire interval or uses a spill
+// slot; no partial-interval relocation can invalidate an earlier operand. When
+// pressure is high, evict the longest-lived interval in favor of a shorter one.
+// Spill slots are bounded by record count; architectural checkpoints are roots.
+func renvoRFEAllocate(records []int, memory bool, arm64 bool, shared bool) ([]int, int) {
+	count := len(records) / 4
+	last := make([]int, count)
+	locations := make([]int, count)
+	for i := 0; i < count; i++ {
+		last[i] = -1
+	}
+	for i := 0; i < count; i++ {
+		op := records[i*4]
+		if renvoRFEHasLeft(op) {
+			last[records[i*4+1]] = i
+		}
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			last[third] = i
+		}
+		if renvoRFEHasRight(op) {
+			last[records[i*4+2]] = i
+		}
+	}
+	renvoRFENarrowLifetimes(records, last, renvoRFENarrowSources(records))
+	registers := []int{8, 9, 10, 6, 7}
+	if memory {
+		registers = []int{8, 9, 10}
+	}
+	if arm64 {
+		registers = []int{3, 4, 5, 6, 7, 8}
+	}
+	owners := make([]int, len(registers))
+	for i := 0; i < len(owners); i++ {
+		owners[i] = -1
+	}
+	spills, base := 0, 2
+	if memory || shared {
+		base = 3
+	}
+	for i := 0; i < count; i++ {
+		if records[i*4] == 0 || renvoMemoryEffectOnly(records[i*4]) || last[i] < 0 {
+			continue
+		}
+		if records[i*4] == 36 {
+			locations[i] = -(spills + base) * 8
+			spills++
+			continue
+		}
+		available := -1
+		for r, owner := range owners {
+			if owner < 0 || last[owner] <= i {
+				available = r
+				break
+			}
+		}
+		if available < 0 {
+			farthest := 0
+			for r := 1; r < len(owners); r++ {
+				if last[owners[r]] > last[owners[farthest]] {
+					farthest = r
+				}
+			}
+			if last[owners[farthest]] > last[i] {
+				locations[owners[farthest]] = -(spills + base) * 8
+				spills++
+				available = farthest
+			}
+		}
+		if available < 0 {
+			locations[i] = -(spills + base) * 8
+			spills++
+		} else {
+			owners[available] = i
+			locations[i] = registers[available] + 1
+		}
+	}
+	return locations, spills
+}
+func renvoRFELoadValue(a *renvoAsm, records []int, locations []int, value int, register int) {
+	if records[value*4] == 0 {
+		renvoRFERegImm(a, register, records[value*4+3])
+		return
+	}
+	location := locations[value]
+	if location == 0 && records[value*4] == 1 {
+		// A loop-invariant input with no architectural exit writes can be
+		// reloaded instead of occupying a register across the whole iteration.
+		renvoRFERegLoad(a, register, 11, records[value*4+3]*8, 8)
+		return
+	}
+	if location > 0 {
+		renvoRFERegMove(a, register, location-1)
+	} else {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegLoad(a, register, frame, location, 8)
+	}
+}
+func renvoRFESavePairHigh(a *renvoAsm, locations []int, value int) {
+	if locations[value] == 0 {
+		return
+	}
+	frame, source := 5, 7
+	if renvoRFEArm(a) {
+		frame, source = 29, 9
+	}
+	renvoRFERegStore(a, source, frame, locations[value], 8)
+}
+
+func renvoRFESaveValue(a *renvoAsm, locations []int, value int) {
+	location := locations[value]
+	if location == 0 {
+		return
+	}
+	if location > 0 {
+		renvoRFERegMove(a, location-1, 0)
+	} else {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegStore(a, 0, frame, location, 8)
+	}
+}
+
+// Inputs are address in primary, optional store data in secondary. Use only
+// reserved scratch registers, so live SSA values survive every permission,
+// ownership and generation check. All guards precede data/version mutation.
+func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, records []int, locations []int) {
+	if a.rfeFrameBias != 0 {
+		renvoEmitLoopMemoryAccess(a, op, size, failure, 0, 0, records, locations)
+		return
+	}
+	pairHigh := -1
+	if op == 37 {
+		pairHigh = size >> 8
+		op, size = 14, 16
+	}
+	primary, value, temp, descriptor, host, frame := 0, 2, 1, 7, 6, 5
+	if renvoRFEArm(a) {
+		value, temp, descriptor, host, frame = 1, 2, 9, 10, 29
+	}
+	renvoRFERegMove(a, temp, primary)
+	renvoRFERegShift(a, temp, 9, 48)
+	renvoRFERegBinary(a, 101, temp, temp)
+	renvoRFEJump(a, 1, failure)
+	renvoRFERegMove(a, temp, primary)
+	renvoRFERegImmediate(a, 5, temp, 4095)
+	renvoRFERegImmediate(a, 100, temp, 4096-size)
+	renvoRFEJump(a, 4, failure)
+	renvoRFERegMove(a, host, primary)
+	renvoRFERegShift(a, host, 9, 12) // full page number
+	renvoRFERegMove(a, descriptor, host)
+	renvoRFERegImmediate(a, 5, descriptor, 63)
+	renvoRFERegShift(a, descriptor, 8, 5)
+	renvoRFERegLoad(a, primary, frame, -16, 8)
+	renvoRFERegBinary(a, 3, descriptor, primary)
+	renvoRFERegImmediate(a, 3, descriptor, RenvoRFEPages)
+	renvoRFECompareMemory(a, host, descriptor, 0, primary)
+	renvoRFEJump(a, 1, failure)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageData, 8)
+	renvoRFEJumpZero(a, primary, failure)
+	renvoRFERegMove(a, host, primary)
+	renvoRFERegBinary(a, 3, host, temp) // bounded host address
+	permission, relevant := 1, 1
+	if op == 14 {
+		permission, relevant = 2, 6
+	}
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPagePermissions, 8)
+	renvoRFERegImmediate(a, 5, primary, relevant)
+	renvoRFERegImmediate(a, 100, primary, permission)
+	renvoRFEJump(a, 1, failure)
+	if op == 13 {
+		if size == 16 {
+			renvoRFERegLoad(a, descriptor, host, 8, 8)
+			size = 8
+		}
+		renvoRFERegLoad(a, primary, host, 0, size)
+		return
+	}
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageEpoch, 8)
+	renvoRFEJumpZero(a, primary, failure) // page epoch pointer
+	renvoRFERegLoad(a, temp, frame, -16, 8)
+	renvoRFERegLoad(a, temp, temp, RenvoRFEClock, 8)
+	renvoRFEJumpZero(a, temp, failure)
+	renvoRFERegMove(a, descriptor, temp) // clock pointer, descriptor no longer needed
+	renvoRFERegLoad(a, temp, descriptor, 0, 8)
+	// Unsigned increment wraps to zero only for an exhausted generation
+	// clock. Test the tentative value before either clock or epoch mutation.
+	renvoRFERegImmediate(a, 3, temp, 1)
+	if renvoRFEArm(a) {
+		renvoRFEJumpZero(a, temp, failure)
+	} else {
+		// ADD defines ZF, so the bounded failure check needs no extra CMP.
+		renvoRFEJump(a, 0, failure)
+	}
+	renvoRFERegStore(a, temp, descriptor, 0, 8)
+	renvoRFERegStore(a, temp, primary, 0, 8)
+	if pairHigh >= 0 {
+		// All permission/overflow checks precede both stores and the single
+		// generation allocation. The remaining SSA load cannot guest-fault.
+		renvoRFELoadValue(a, records, locations, pairHigh, primary)
+		renvoRFERegStore(a, value, host, 0, 8)
+		renvoRFERegStore(a, primary, host, 8, 8)
+	} else {
+		renvoRFERegStore(a, value, host, 0, size)
+	}
+}
+
+func renvoRFEImmediateOperation(a *renvoAsm, op int, value int) bool {
+	if op == 5 && int64(value) == 4294967295 {
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0xd3407c00)
+		} else {
+			renvoAsmEmit2(a, 0x89, 0xc0)
+		}
+		return true
+	}
+	if value < -2147483648 || value > 2147483647 {
+		return false
+	}
+	if op == 12 {
+		if renvoRFEArm(a) {
+			return false
+		}
+		if value >= -128 && value <= 127 {
+			renvoAsmEmit4(a, 0x48, 0x6b, 0xc0, value)
+		} else {
+			renvoAsmEmit3(a, 0x48, 0x69, 0xc0)
+			renvoAsmEmit32(a, value)
+		}
+		return true
+	}
+	// Large signed immediates on arm64 must be materialized once, not decomposed
+	// into a potentially long add-immediate loop. All masks use a scratch register.
+	if renvoRFEArm(a) && (op == 3 || op == 4) && (value > 4095 || value < -4095) {
+		return false
+	}
+	renvoRFERegImmediate(a, op, 0, value)
+	return true
+}
+func renvoRFEVariableShift(a *renvoAsm, kind int, width int) {
+	if renvoRFEArm(a) {
+		opcode := 0x1ac02000 + (kind-17)*1024
+		if width == 64 {
+			opcode |= 0x80000000
+		}
+		renvoAsmEmit32(a, opcode|(2<<16))
+		return
+	}
+	group := 4
+	if kind == 18 {
+		group = 5
+	}
+	if kind == 19 {
+		group = 7
+	}
+	if kind == 20 {
+		group = 1
+	}
+	if width == 64 {
+		renvoAsmEmit8(a, 0x48)
+	}
+	renvoAsmEmit2(a, 0xd3, 0xc0|(group<<3)) // CL implicitly reduces count to width
+}
+
+// Compute NZCV explicitly from this operation, never ambient host flags. Only
+// AX/CX/DX or X0/X1/X2 are scratch; allocated SSA and dispatcher registers live.
+func renvoRFEFlags(a *renvoAsm, operation int, encoding int) {
+	sub := encoding&128 != 0
+	condition := -1
+	if operation >= 24 {
+		condition = encoding >> 8
+		operation -= 2
+	}
+	if condition >= 14 {
+		renvoAsmPrimaryImm(a, 1)
+		return
+	}
+	renvoRFEFlagsOperation(a, operation, encoding)
+	if renvoRFEArm(a) {
+		if condition >= 0 {
+			renvoAsmEmit32(a, 0x9a9f07e0|((condition^1)<<12))
+		} else {
+			renvoAsmEmit32(a, 0xd53b4200)
+		}
+		return
+	}
+	if condition >= 0 {
+		renvoRFEFlagsCondition(a, condition, sub)
+		return
+	}
+	renvoRFEFlagsPack(a, operation, sub)
+}
+
+// Constant arithmetic operands need not occupy a scratch register. x86's
+// imm32 is sign-extended for 64-bit operations; wider constants keep fallback.
+func renvoRFEFlagsImmediate(a *renvoAsm, operation int, encoding int, value int) bool {
+	if renvoRFEArm(a) || operation != 24 {
+		return false
+	}
+	width := encoding & 127
+	if width == 64 && (value < -2147483648 || value > 2147483647) {
+		return false
+	}
+	if width == 64 {
+		renvoAsmEmit8(a, 0x48)
+	}
+	group := 0
+	if encoding&128 != 0 {
+		group = 5
+	}
+	if value >= -128 && value <= 127 {
+		renvoAsmEmit3(a, 0x83, 0xc0|(group<<3), value)
+	} else {
+		renvoAsmEmit2(a, 0x81, 0xc0|(group<<3))
+		renvoAsmEmit32(a, value)
+	}
+	return true
+}
+
+func renvoRFEFlagsOperation(a *renvoAsm, operation int, encoding int) {
+	width, sub := encoding&127, encoding&128 != 0
+	if renvoRFEArm(a) {
+		instruction := 0x2b010000
+		if sub {
+			instruction = 0x6b010000
+		}
+		if operation == 23 {
+			instruction = 0x6a000000
+		}
+		if width == 64 {
+			instruction += 0x80000000
+		}
+		renvoAsmEmit32(a, instruction)
+		return
+	}
+	if width == 64 {
+		renvoAsmEmit8(a, 0x48)
+	}
+	if operation == 23 {
+		renvoAsmEmit2(a, 0x85, 0xc0)
+	} else if sub {
+		renvoAsmEmit2(a, 0x29, 0xd0)
+	} else {
+		renvoAsmEmit2(a, 0x01, 0xd0)
+	}
+}
+
+func renvoRFEFlagsCondition(a *renvoAsm, condition int, sub bool) {
+	if condition >= 14 {
+		renvoAsmPrimaryImm(a, 1)
+		return
+	}
+	// HI/LS on addition use carry, rather than x86 subtraction's no-borrow.
+	if condition>>1 == 4 && !sub {
+		renvoAsmEmit3(a, 0x0f, 0x92, 0xc2) // SETB DL
+		renvoAsmEmit3(a, 0x0f, 0x95, 0xc0) // SETNE AL
+		renvoAsmEmit3(a, 0x0f, 0xb6, 0xd2)
+		renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0)
+		renvoRFERegBinary(a, 5, 0, 2)
+		if condition&1 != 0 {
+			renvoRFERegImmediate(a, 7, 0, 1)
+		}
+		return
+	}
+	opcode := 0x94
+	switch condition >> 1 {
+	case 0:
+		opcode = 0x94 // Z
+	case 1:
+		opcode = 0x92
+		if sub {
+			opcode = 0x93
+		} // carry/no-borrow
+	case 2:
+		opcode = 0x98 // N
+	case 3:
+		opcode = 0x90 // V
+	case 4:
+		opcode = 0x97 // no-borrow and nonzero
+	case 5:
+		opcode = 0x9d // N == V
+	case 6:
+		opcode = 0x9f // N == V and nonzero
+	}
+	if condition&1 != 0 {
+		opcode ^= 1
+	}
+	renvoAsmEmit3(a, 0x0f, opcode, 0xc0)
+	renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0)
+}
+
+// Emit ordinary SSA operations directly in their allocated destination. The
+// allocator may reuse a dying right operand, so preserve it before destructive
+// two-address operations. Fixed-register flags/complex operations keep fallback.
+func renvoRFEEmitDirectRecord(a *renvoAsm, records []int, locations []int, i int) bool {
+	if len(a.rfeNarrowSources) != 0 && a.rfeNarrowSources[i] >= 0 {
+		renvoRFEEmitNarrowRecord(a, records, locations, i, a.rfeNarrowSources[i])
+		return true
+	}
+	op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+	dst, tertiary, secondary := 0, 1, 2
+	if locations[i] > 0 {
+		dst = locations[i] - 1
+	}
+	if renvoRFEArm(a) {
+		tertiary, secondary = 2, 1
+	}
+	if op == 33 || op == 34 || op == 37 {
+		renvoRFELoadValue(a, records, locations, left, 0)
+		renvoRFELoadValue(a, records, locations, right, secondary)
+		renvoRFELoadValue(a, records, locations, immediate>>8, tertiary)
+		renvoRFECarry(a, op, immediate&255)
+		renvoRFESaveValue(a, locations, i)
+		return true
+	}
+	if op >= 38 && op <= 41 {
+		renvoRFELoadValue(a, records, locations, left, 0)
+		renvoRFELoadValue(a, records, locations, right, tertiary)
+		renvoRFEDivision(a, op, immediate)
+		renvoRFESaveValue(a, locations, i)
+		return true
+	}
+	if op >= 27 && op <= 32 {
+		renvoRFELoadValue(a, records, locations, left, 0)
+		if op == 27 || op == 28 {
+			renvoRFELoadValue(a, records, locations, right, tertiary)
+		}
+		renvoRFERichInteger(a, op, immediate)
+		renvoRFESaveValue(a, locations, i)
+		return true
+	}
+	if op == 1 {
+		renvoRFERegLoad(a, dst, 11, immediate*8, 8)
+	} else if op == 2 {
+		source := 0
+		if records[left*4] != 0 && locations[left] > 0 {
+			source = locations[left] - 1
+		} else {
+			renvoRFELoadValue(a, records, locations, left, source)
+		}
+		renvoRFERegStore(a, source, 11, immediate*8, 8)
+		return true
+	} else if op >= 3 && op <= 7 || op == 12 {
+		savedRight := false
+		if records[right*4] != 0 && locations[right] == dst+1 && locations[left] != dst+1 {
+			renvoRFELoadValue(a, records, locations, right, tertiary)
+			savedRight = true
+		}
+		renvoRFELoadValue(a, records, locations, left, dst)
+		if records[right*4] == 0 && renvoRFEDirectImmediate(a, op, dst, records[right*4+3]) {
+		} else {
+			source := tertiary
+			if !savedRight {
+				if records[right*4] != 0 && locations[right] > 0 {
+					source = locations[right] - 1
+				} else {
+					renvoRFELoadValue(a, records, locations, right, source)
+				}
+			}
+			renvoRFERegBinary(a, op, dst, source)
+		}
+	} else if op == 8 || op == 9 {
+		renvoRFELoadValue(a, records, locations, left, dst)
+		if immediate < 0 || immediate >= 64 {
+			renvoRFERegImm(a, dst, 0)
+		} else if immediate != 0 {
+			renvoRFERegShift(a, dst, op, immediate)
+		}
+	} else if op == 10 || op == 11 {
+		compare := 0
+		if records[left*4] != 0 && locations[left] > 0 {
+			compare = locations[left] - 1
+		} else {
+			renvoRFELoadValue(a, records, locations, left, compare)
+		}
+		if records[right*4] != 0 || !renvoRFEDirectImmediate(a, 100, compare, records[right*4+3]) {
+			renvoRFELoadValue(a, records, locations, right, tertiary)
+			renvoRFERegBinary(a, 100, compare, tertiary)
+		}
+		renvoRFESetBoolean(a, dst, op == 11)
+	} else if op >= 17 && op <= 20 {
+		renvoRFELoadValue(a, records, locations, right, tertiary)
+		renvoRFELoadValue(a, records, locations, left, dst)
+		if renvoRFEArm(a) {
+			instruction := 0x1ac02000 + (op-17)*1024
+			if immediate == 64 {
+				instruction |= 0x80000000
+			}
+			renvoAsmEmit32(a, instruction|(tertiary<<16)|(dst<<5)|dst)
+		} else {
+			group := 4
+			if op == 18 {
+				group = 5
+			}
+			if op == 19 {
+				group = 7
+			}
+			if op == 20 {
+				group = 1
+			}
+			renvoRFERex(a, 0, dst, immediate == 64)
+			renvoAsmEmit2(a, 0xd3, 0xc0|(group<<3)|(dst&7))
+		}
+	} else if op == 21 {
+		renvoRFELoadValue(a, records, locations, left, tertiary)
+		renvoRFELoadValue(a, records, locations, immediate, secondary)
+		renvoRFELoadValue(a, records, locations, right, dst)
+		renvoRFERegBinary(a, 101, tertiary, tertiary)
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0x9a800000|(secondary<<16)|(1<<12)|(dst<<5)|dst)
+		} else {
+			renvoRFERex(a, dst, secondary, true)
+			renvoAsmEmit2(a, 0x0f, 0x44)
+			renvoAsmEmit8(a, 0xc0|((dst&7)<<3)|(secondary&7))
+		}
+	} else {
+		return false
+	}
+	if locations[i] < 0 {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegStore(a, dst, frame, locations[i], 8)
+	}
+	return true
+}
+func renvoRFEDirectImmediate(a *renvoAsm, op int, dst int, value int) bool {
+	if op == 5 && int64(value) == 4294967295 {
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0xd3407c00|(dst<<5)|dst)
+		} else {
+			renvoRFERex(a, dst, dst, false)
+			renvoAsmEmit2(a, 0x89, 0xc0|((dst&7)<<3)|(dst&7))
+		}
+		return true
+	}
+	if value < -2147483648 || value > 2147483647 {
+		return false
+	}
+	if op == 12 {
+		if renvoRFEArm(a) {
+			return false
+		}
+		renvoRFERex(a, dst, dst, true)
+		if value >= -128 && value <= 127 {
+			renvoAsmEmit3(a, 0x6b, 0xc0|((dst&7)<<3)|(dst&7), value)
+		} else {
+			renvoAsmEmit2(a, 0x69, 0xc0|((dst&7)<<3)|(dst&7))
+			renvoAsmEmit32(a, value)
+		}
+		return true
+	}
+	if renvoRFEArm(a) && (op == 3 || op == 4) && (value > 4095 || value < -4095) {
+		return false
+	}
+	renvoRFERegImmediate(a, op, dst, value)
+	return true
+}
+func renvoRFESetBoolean(a *renvoAsm, dst int, less bool) {
+	if renvoRFEArm(a) {
+		condition := 0
+		if less {
+			condition = 3
+		}
+		renvoAsmEmit32(a, 0x9a9f07e0|((condition^1)<<12)|dst)
+		return
+	}
+	condition := 0x94
+	if less {
+		condition = 0x92
+	}
+	if dst >= 4 && dst < 8 {
+		renvoAsmEmit8(a, 0x40)
+	} else {
+		renvoRFERex(a, 0, dst, false)
+	}
+	renvoAsmEmit3(a, 0x0f, condition, 0xc0|(dst&7))
+	if dst >= 4 && dst < 8 {
+		renvoAsmEmit8(a, 0x40)
+	} else {
+		renvoRFERex(a, dst, dst, false)
+	}
+	renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0|((dst&7)<<3)|(dst&7))
+}
+
+// Loop exit maps describe the architectural state after a specific completed
+// prefix. They are compile-time data; generated cold stubs perform restoration.
+type renvoRFELoopMemorySlow struct {
+	op, failure, miss, publish int
+}
+
+type renvoRFELoopExit struct {
+	values                                   []int
+	label, progress, memory, address, status int
+}
+
+func RenvoEmitLoopBlock(records []int, stateWords int, instructions int, arm64 bool) ([]byte, bool) {
+	return renvoEmitLoopBlockABI(records, stateWords, instructions, arm64, false)
+}
+
+func RenvoEmitSharedLoopBlock(records []int, stateWords int, instructions int, arm64 bool) ([]byte, bool) {
+	return renvoEmitLoopBlockABI(records, stateWords, instructions, arm64, true)
+}
+
+func renvoEmitLoopBlockABI(records []int, stateWords int, instructions int, arm64 bool, shared bool) ([]byte, bool) {
+	if instructions < 1 || instructions > 256 || len(records) < 8 || len(records)%4 != 0 || len(records) > 8192 {
+		return nil, false
+	}
+	count := len(records) / 4
+	if records[(count-1)*4] != 35 || records[(count-1)*4+1] < 0 || records[(count-1)*4+1] >= count-1 || renvoMemoryEffectOnly(records[records[(count-1)*4+1]*4]) {
+		return nil, false
+	}
+	if !renvoRFEValidateRecords(records[:len(records)-4], stateWords, true) {
+		return nil, false
+	}
+	conditionValue := records[(count-1)*4+1]
+	oneShot := records[conditionValue*4] == 0 && records[conditionValue*4+3] == 0
+	inputs, stateMap, last := make([]int, stateWords), make([]int, stateWords), make([]int, count)
+	for i := 0; i < stateWords; i++ {
+		inputs[i], stateMap[i] = -1, -1
+	}
+	for i := 0; i < count; i++ {
+		last[i] = -1
+	}
+	// Inputs are hoisted once. Duplicate raw loads of one slot would not describe
+	// a loop phi and are rejected, rather than silently changing their semantics.
+	for i := 0; i < count; i++ {
+		if records[i*4] == 1 {
+			slot := records[i*4+3]
+			if inputs[slot] >= 0 {
+				return nil, false
+			}
+			inputs[slot], stateMap[slot] = i, i
+		}
+	}
+	snapshots := []renvoRFELoopExit{}
+	progress, memory := 0, 0
+	storesMemory := false
+	for i := 0; i < count; i++ {
+		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if renvoRFEHasLeft(op) {
+			last[left] = i
+		}
+		if third := renvoRFEThirdOperand(op, immediate); third >= 0 {
+			last[third] = i
+		}
+		if renvoRFEHasRight(op) {
+			last[right] = i
+		}
+		if op == 2 {
+			stateMap[immediate] = left
+		}
+		if op == 15 {
+			if immediate < progress || immediate > instructions {
+				return nil, false
+			}
+			progress = immediate
+		}
+		if op == 13 || op == 14 || op == 37 || op == 16 || op == 26 {
+			if progress >= instructions || op == 26 && progress == 0 {
+				return nil, false
+			}
+			status := 1
+			if op == 16 {
+				status = 2
+			}
+			if op == 26 {
+				status = 4
+			}
+			values := make([]int, stateWords)
+			copy(values, stateMap)
+			snapshots = append(snapshots, renvoRFELoopExit{values: values, progress: progress, memory: memory, address: left, status: status})
+			for slot, v := range stateMap {
+				if v >= 0 && (!oneShot || v != inputs[slot]) {
+					last[v] = i
+				}
+			}
+			if op == 13 || op == 14 || op == 37 {
+				if op == 14 || op == 37 {
+					storesMemory = true
+				}
+				memory++
+				if memory > instructions {
+					return nil, false
+				}
+			}
+		}
+	}
+	if progress != instructions {
+		return nil, false
+	}
+	for slot, v := range stateMap {
+		if v >= 0 && (!oneShot || v != inputs[slot]) {
+			last[v] = count
+		}
+	}
+	registers := []int{8, 9, 10, 3, 12, 13}
+	if memory == 0 {
+		registers = []int{8, 9, 10, 6, 7, 3, 12, 13}
+	}
+	arch, frameReg, iterations, budget := renvoArchAmd64, 5, 15, 14
+	saved := []int{3, 12, 13, 14, 15}
+	if arm64 {
+		arch, frameReg, iterations, budget = renvoArchAarch64, 29, 22, 23
+		saved = []int{19, 20, 21, 22, 23}
+		// X12 is the address scratch used by distant frame loads/stores.
+		// Shared-frame spills must not overwrite a live SSA value there.
+		registers = []int{3, 4, 5, 6, 7, 8, 13, 14, 15, 19, 20, 21}
+	}
+	if oneShot {
+		// An acyclic body has no loop-carried budget or iteration counter.
+		// Their preserved registers may instead hold SSA values.
+		registers = append(registers, budget, iterations)
+	}
+	deferred := renvoRFELoopDeferredValues(records, inputs, stateMap)
+	inherited, capturedLeaves := renvoRFELoopInheritedOutputs(records, stateMap, snapshots, deferred, !oneShot)
+	// Propagate exit lifetimes backwards through the deferred SSA DAG before
+	// removing its hot allocations. Every leaf survives its latest exit use.
+	for i := count - 1; i >= 0; i-- {
+		cold := deferred[i]
+		if !cold {
+			continue
+		}
+		until := last[i]
+		left, right := records[i*4+1], records[i*4+2]
+		if last[left] < until {
+			last[left] = until
+		}
+		if (records[i*4] != 23 && records[i*4] != 25) && last[right] < until {
+			last[right] = until
+		}
+		if records[i*4] == 21 {
+			third := records[i*4+3]
+			if last[third] < until {
+				last[third] = until
+			}
+		}
+	}
+	for i, cold := range deferred {
+		if cold {
+			last[i] = -1
+		}
+	}
+	invariant := renvoRFELoopInvariants(records, stateMap)
+	cacheOffsets := make([]int, count)
+	cached := 0
+	for i := 0; i < count; i++ {
+		op := records[i*4]
+		if !oneShot && (op == 13 || op == 14 || op == 37) && invariant[records[i*4+1]] {
+			cacheOffsets[i] = -(160 + cached*24)
+			cached++
+		}
+	}
+	spillBase := 160 + cached*24
+	signedWidths, signedAliases, signedSkip := renvoRFESignedLoadSources(records)
+	narrow := renvoRFENarrowSources(records)
+	for final, load := range signedAliases {
+		if load >= 0 {
+			last[load] = last[final]
+		}
+	}
+	for i, source := range narrow {
+		if source >= 0 && signedSkip[source] {
+			narrow[i] = -1
+		}
+	}
+	for i, skipped := range signedSkip {
+		if skipped {
+			narrow[i] = -1
+			last[i] = -1
+		}
+	}
+	renvoRFENarrowLifetimes(records, last, narrow)
+	// Delayed low-word consumers can extend an alias after its original
+	// lifetime was transferred. Propagate these extensions to the guarded
+	// load before allocation, then keep the eliminated alias unallocated.
+	for final, load := range signedAliases {
+		if load >= 0 {
+			if last[final] > last[load] {
+				last[load] = last[final]
+			}
+			last[final] = -1
+		}
+	}
+	if !oneShot && !storesMemory {
+		// Read-only bodies cannot mutate even an aliased architectural input.
+		for slot, input := range inputs {
+			if input < 0 || stateMap[slot] != input {
+				continue
+			}
+			unchanged := true
+			for _, snapshot := range snapshots {
+				if snapshot.values[slot] != input {
+					unchanged = false
+				}
+			}
+			if unchanged {
+				last[input] = -1
+			}
+		}
+	}
+	foldedAddresses := renvoRFELoopAddressSources(records, last, narrow, signedSkip, deferred)
+	// Folding delays address operands to the final add. Transfer any delayed
+	// signed-load alias use to the real guarded load before allocation.
+	for final, load := range signedAliases {
+		if load >= 0 {
+			if last[final] > last[load] {
+				last[load] = last[final]
+			}
+			last[final] = -1
+		}
+	}
+	locations, spills := renvoRFELoopAllocate(records, last, registers, spillBase, !oneShot, inputs, stateMap)
+	for final, load := range signedAliases {
+		if load >= 0 {
+			locations[final] = locations[load]
+		}
+	}
+	// Cold values get private spill slots, never hot registers. Recursive exit
+	// evaluation can then preserve one operand while evaluating another.
+	for i, cold := range deferred {
+		if cold {
+			locations[i] = -(spillBase + spills*8)
+			spills++
+		}
+	}
+	capturedLocations := append([]int(nil), locations...)
+	for value, captured := range capturedLeaves {
+		if captured {
+			capturedLocations[value] = -(spillBase + spills*8)
+			spills++
+		}
+	}
+	cc := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	g := renvoLinearGen{c: cc, stackPeak: spillBase + spills*8}
+	g.asm.c = cc
+	a := &g.asm
+	a.rfeNarrowSources = narrow
+	frame := -1
+	if shared {
+		if g.stackPeak+renvoRFESharedPrefix > renvoRFESharedFrameSize {
+			return nil, false
+		}
+		a.rfeFrameBias = renvoRFESharedPrefix
+		if oneShot {
+			saved = renvoRFEUsedPreservedRegisters(locations, saved, -1, -1)
+		} else {
+			saved = renvoRFEUsedPreservedRegisters(locations, saved, iterations, budget)
+		}
+	} else {
+		frame = renvoEmitGlobalInitFrameStart(&g)
+	}
+	for i, reg := range saved {
+		renvoRFERegStore(a, reg, frameReg, -(56 + i*8), 8)
+	}
+	if !shared {
+		renvoRFERegMove(a, 11, 0)
+	}
+	contextReg := 2
+	dispatcherBudget := 3
+	if arm64 {
+		contextReg, dispatcherBudget = 1, 23
+	}
+	if !shared {
+		renvoRFERegStore(a, contextReg, frameReg, -16, 8)
+	}
+	if !oneShot {
+		renvoRFERegMove(a, budget, dispatcherBudget)
+		renvoRFERegImm(a, iterations, 0)
+	}
+	renvoRFERegImm(a, 0, 0)
+	renvoRFERegStore(a, 0, contextReg, 8, 8)
+	for _, offset := range cacheOffsets {
+		if offset != 0 {
+			renvoRFERegStore(a, 0, frameReg, offset, 8)
+		}
+	}
+	if !shared {
+		renvoRFERegImm(a, 0, -1)
+		renvoRFERegStore(a, 0, frameReg, -96, 8)
+		renvoRFERegStore(a, 0, frameReg, -112, 8)
+	}
+	for i := 0; i < count; i++ {
+		if !oneShot && records[i*4] == 1 && locations[i] != 0 {
+			renvoRFEEmitDirectRecord(a, records, locations, i)
+		}
+	}
+	loop, finish, branchExit, restore := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	restoreCondition := renvoAsmNewLabel(a)
+	renvoAsmMarkLabel(a, loop)
+	exitIndex := 0
+	memorySlow := []renvoRFELoopMemorySlow{}
+	for i := 0; i < count; i++ {
+		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 36 || op == 0 || op == 1 && !oneShot || op == 2 || op == 15 || deferred[i] || narrow[i] == -2 || signedSkip[i] || foldedAddresses[i] == -2 {
+			continue
+		}
+		if op == 35 {
+			break
+		}
+		if !renvoMemoryEffectOnly(op) && op != 13 && locations[i] == 0 {
+			continue
+		}
+		if op == 13 || op == 14 || op == 37 || op == 16 || op == 26 {
+			snapshots[exitIndex].label = renvoAsmNewLabel(a)
+			failure := snapshots[exitIndex].label
+			exitIndex++
+			if op == 16 || op == 26 {
+				renvoRFELoopPredicateJump(a, records, locations, deferred, left, false, failure)
+				continue
+			}
+			renvoRFELoadValue(a, records, locations, left, 0)
+			if op == 14 || op == 37 {
+				renvoRFELoadValue(a, records, locations, right, contextReg)
+			}
+			miss, publish := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+			memorySlow = append(memorySlow, renvoRFELoopMemorySlow{op: op, failure: failure, miss: miss, publish: publish})
+			renvoEmitLoopMemoryAccessDeferred(a, op, immediate, failure, cacheOffsets[i], signedWidths[i], records, locations, miss, publish)
+			if op == 13 {
+				if immediate == 16 {
+					renvoRFESavePairHigh(a, locations, i+1)
+				}
+				renvoRFESaveValue(a, locations, i)
+			}
+			continue
+		}
+		if foldedAddresses[i] >= 0 {
+			renvoRFEEmitLoopAddress(a, records, locations, foldedAddresses, i)
+			continue
+		}
+		if renvoRFEEmitDirectRecord(a, records, locations, i) {
+			continue
+		}
+		if op >= 22 && op <= 25 {
+			renvoRFELoadValue(a, records, locations, left, 0)
+			if op == 22 || op == 24 {
+				renvoRFELoadValue(a, records, locations, right, contextReg)
+			}
+			renvoRFEFlags(a, op, immediate)
+			renvoRFESaveValue(a, locations, i)
+			continue
+		}
+		return nil, false
+	}
+	if !oneShot {
+		renvoRFERegImmediate(a, 3, iterations, 1)
+		renvoRFERegImmediate(a, 4, budget, instructions)
+	}
+	condition := records[(count-1)*4+1]
+	knownCondition := -1
+	if deferred[condition] && renvoRFEBooleanValue(records, condition) {
+		knownCondition = condition
+	}
+	if records[condition*4] == 0 {
+		if records[condition*4+3] == 0 {
+			renvoAsmJmpLabel(a, branchExit)
+		}
+	} else {
+		renvoRFELoopPredicateJump(a, records, locations, deferred, condition, false, branchExit)
+	}
+	if !oneShot {
+		renvoRFERegImmediate(a, 100, budget, instructions)
+		renvoRFEJump(a, 2, finish)
+		// Capture before parallel phi assignments can overwrite the old leaves.
+		// These values are private and never survive a native call boundary.
+		for value, captured := range capturedLeaves {
+			if captured {
+				source := 0
+				if records[value*4] != 0 && locations[value] > 0 {
+					source = locations[value] - 1
+				} else {
+					renvoRFELoadValue(a, records, locations, value, source)
+				}
+				renvoRFERegStore(a, source, frameReg, capturedLocations[value], 8)
+			}
+		}
+		renvoRFELoopPhiMoves(a, records, locations, inputs, stateMap)
+		renvoAsmJmpLabel(a, loop)
+	}
+	renvoAsmMarkLabel(a, branchExit)
+	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+	renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopExits, 8)
+	renvoRFERegImmediate(a, 3, 0, 1)
+	renvoRFERegStore(a, 0, contextReg, RenvoRFELoopExits, 8)
+	restoreFinal := stateMap
+	if oneShot {
+		restoreFinal = inputs
+	}
+	if knownCondition >= 0 {
+		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 0)
+		renvoAsmJmpLabel(a, restoreCondition)
+	}
+	renvoAsmMarkLabel(a, finish)
+	renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 1)
+	renvoAsmMarkLabel(a, restoreCondition)
+	if oneShot {
+		renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
+	} else {
+		renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
+	}
+	renvoAsmJmpLabel(a, restore)
+
+	for _, snapshot := range snapshots {
+		renvoAsmMarkLabel(a, snapshot.label)
+		// Read the old address before restoration can overwrite any architectural
+		// slot. SSA locations stay live to this access, including spilled inputs.
+		if snapshot.status == 1 {
+			renvoRFELoadValue(a, records, locations, snapshot.address, 0)
+			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+			renvoRFERegStore(a, 0, contextReg, 16, 8)
+		}
+		if snapshot.status == 4 {
+			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+			renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopExits, 8)
+			renvoRFERegImmediate(a, 3, 0, 1)
+			renvoRFERegStore(a, 0, contextReg, RenvoRFELoopExits, 8)
+		}
+		renvoRFELoopRestoreInherited(a, records, capturedLocations, deferred, inherited, snapshot.values, stateMap, iterations)
+		renvoRFELoopRestoreState(a, records, locations, snapshot.values, inputs, restoreFinal, deferred, -1, 0)
+		if oneShot {
+			renvoRFEAcyclicProgress(a, frameReg, contextReg, snapshot.progress, snapshot.memory, snapshot.status, 0)
+		} else {
+			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, snapshot.progress, snapshot.memory, snapshot.status)
+		}
+		renvoAsmJmpLabel(a, restore)
+	}
+	for _, slow := range memorySlow {
+		renvoAsmMarkLabel(a, slow.miss)
+		renvoEmitLoopMemoryMiss(a, slow.op, slow.failure)
+		renvoAsmJmpLabel(a, slow.publish)
+	}
+	renvoAsmMarkLabel(a, restore)
+	for i, reg := range saved {
+		renvoRFERegLoad(a, reg, frameReg, -(56 + i*8), 8)
+	}
+	if !shared {
+		renvoEmitGlobalInitFrameEnd(&g, frame)
+	}
+	renvoAsmRet(a)
+	renvoAsmPatch(a)
+	return a.code, !a.patchFailed
+}
+
+// Fold single-use scaled address expressions without changing their 64-bit
+// wrapping semantics. A low-word index is projected before scaling, never
+// after it; the base and final sum remain full-width.
+func renvoRFELoopAddressSources(records []int, last []int, narrow []int, skipped []bool, cold []bool) []int {
+	count := len(records) / 4
+	uses, folded := make([]int, count), make([]int, count)
+	for i := 0; i < count; i++ {
+		folded[i] = -1
+		op := records[i*4]
+		if renvoRFEHasLeft(op) {
+			uses[records[i*4+1]]++
+		}
+		if renvoRFEHasRight(op) {
+			uses[records[i*4+2]]++
+		}
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
+		}
+	}
+	for i := 0; i < count; i++ {
+		if records[i*4] != 3 || narrow[i] != -1 || skipped[i] || cold[i] || last[i] < 0 {
+			continue
+		}
+		shift := records[i*4+2]
+		if records[shift*4] != 8 || records[shift*4+3] < 1 || records[shift*4+3] > 3 || uses[shift] != 1 || cold[shift] || skipped[shift] {
+			continue
+		}
+		index := records[shift*4+1]
+		folded[i] = shift
+		last[shift] = -1
+		until := i
+		base := records[i*4+1]
+		if last[base] < until && (records[base*4] != 1 || last[base] >= 0) {
+			last[base] = until
+		}
+		if records[index*4] == 5 && records[records[index*4+2]*4] == 0 && records[records[index*4+2]*4+3] == 4294967295 && uses[index] == 1 && narrow[index] == -1 && !cold[index] && !skipped[index] {
+			folded[index] = -2
+			last[index] = -1
+			index = records[index*4+1]
+		}
+		if last[index] < until && (records[index*4] != 1 || last[index] >= 0) {
+			last[index] = until
+		}
+	}
+	return folded
+}
+func renvoRFEEmitLoopAddress(a *renvoAsm, records []int, locations []int, folded []int, i int) {
+	shift := folded[i]
+	index := records[shift*4+1]
+	dst, temporary := 0, 1
+	if locations[i] > 0 {
+		dst = locations[i] - 1
+	}
+	if renvoRFEArm(a) {
+		temporary = 2
+	}
+	project := folded[index] == -2
+	if project {
+		index = records[index*4+1]
+	}
+	// Save the index first: the destination can be the index's dying register.
+	renvoRFELoadValue(a, records, locations, index, temporary)
+	if project {
+		renvoRFEDirectImmediate(a, 5, temporary, 4294967295)
+	}
+	renvoRFELoadValue(a, records, locations, records[i*4+1], dst)
+	if renvoRFEArm(a) {
+		renvoAsmEmit32(a, 0x8b000000|(temporary<<16)|(records[shift*4+3]<<10)|(dst<<5)|dst)
+	} else {
+		renvoRFERegAddress(a, dst, dst, temporary, records[shift*4+3], 0)
+	}
+	if locations[i] < 0 {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegStore(a, dst, frame, locations[i], 8)
+	}
+}
+
+func renvoRFELoopAllocate(records []int, last []int, registers []int, spillBase int, hoisted bool, inputs []int, final []int) ([]int, int) {
+	count := len(records) / 4
+	locations, owners := make([]int, count), make([]int, len(registers))
+	for i := range owners {
+		owners[i] = -1
+	}
+	spills := 0
+	// Every loop input is simultaneously live at the preheader, even if the
+	// straight-line IR first mentions its slot later in the iteration.
+	for i := 0; i < count; i++ {
+		if !hoisted || records[i*4] != 1 || last[i] < 0 {
+			continue
+		}
+		if records[i*4] == 36 {
+			locations[i] = -(spillBase + spills*8)
+			spills++
+			continue
+		}
+		available := -1
+		for r, owner := range owners {
+			if owner < 0 {
+				available = r
+				break
+			}
+		}
+		if available < 0 {
+			locations[i] = -(spillBase + spills*8)
+			spills++
+		} else {
+			locations[i] = registers[available] + 1
+			owners[available] = i
+		}
+	}
+	for i := 0; i < count; i++ {
+		if records[i*4] == 0 || hoisted && records[i*4] == 1 || renvoMemoryEffectOnly(records[i*4]) || last[i] < 0 {
+			continue
+		}
+		if records[i*4] == 36 {
+			locations[i] = -(spillBase + spills*8)
+			spills++
+			continue
+		}
+		available := -1
+		// Prefer a dying operand's register or the matching loop phi input.
+		// A register is reusable only after its complete exit-root lifetime.
+		preferred := records[i*4+1]
+		if hoisted {
+			for slot, output := range final {
+				if output == i && inputs[slot] >= 0 {
+					input := inputs[slot]
+					if locations[input] > 0 {
+						for r, owner := range owners {
+							if registers[r]+1 == locations[input] && (owner < 0 || last[owner] <= i) {
+								available = r
+							}
+						}
+					}
+				}
+			}
+		}
+		if available < 0 && locations[preferred] > 0 {
+			for r, owner := range owners {
+				if registers[r]+1 == locations[preferred] && (owner < 0 || last[owner] <= i) {
+					available = r
+				}
+			}
+		}
+		for r, owner := range owners {
+			if available >= 0 {
+				break
+			}
+			if owner < 0 || last[owner] <= i {
+				available = r
+				break
+			}
+		}
+		if available < 0 {
+			farthest := 0
+			for r := 1; r < len(owners); r++ {
+				if last[owners[r]] > last[owners[farthest]] {
+					farthest = r
+				}
+			}
+			if last[owners[farthest]] > last[i] {
+				locations[owners[farthest]] = -(spillBase + spills*8)
+				spills++
+				available = farthest
+			}
+		}
+		if available < 0 {
+			locations[i] = -(spillBase + spills*8)
+			spills++
+		} else {
+			locations[i] = registers[available] + 1
+			owners[available] = i
+		}
+	}
+	return locations, spills
+}
+
+// Missing inputs denote untouched architectural slots on the first iteration,
+// not on later iterations. Capture the previous iteration's final hot leaves
+// privately; deferred DAGs (including flags) remain unevaluated until an exit.
+func renvoRFELoopInheritedOutputs(records []int, final []int, snapshots []renvoRFELoopExit, deferred []bool, cyclic bool) ([]bool, []bool) {
+	inherited, needed, leaves := make([]bool, len(final)), make([]bool, len(deferred)), make([]bool, len(deferred))
+	if !cyclic {
+		return inherited, leaves
+	}
+	for slot, value := range final {
+		if value < 0 {
+			continue
+		}
+		for _, snapshot := range snapshots {
+			if snapshot.values[slot] < 0 {
+				inherited[slot], needed[value] = true, true
+			}
+		}
+	}
+	for i := len(needed) - 1; i >= 0; i-- {
+		if !needed[i] || records[i*4] == 0 {
+			continue
+		}
+		if !deferred[i] {
+			leaves[i] = true
+			continue
+		}
+		op, l, r, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		needed[l] = true
+		if op != 8 && op != 9 && op != 23 && op != 25 {
+			needed[r] = true
+		}
+		if op == 21 {
+			needed[imm] = true
+		}
+	}
+	return inherited, leaves
+}
+
+func renvoRFELoopRestoreInherited(a *renvoAsm, records []int, captured []int, deferred []bool, inherited []bool, values []int, final []int, iterations int) {
+	needed := false
+	for slot, inherit := range inherited {
+		if inherit && values[slot] < 0 {
+			needed = true
+		}
+	}
+	if !needed {
+		return
+	}
+	doneLabel := renvoAsmNewLabel(a)
+	renvoRFEJumpZero(a, iterations, doneLabel)
+	done := make([]bool, len(deferred))
+	for slot, inherit := range inherited {
+		if !inherit || values[slot] >= 0 {
+			continue
+		}
+		value := final[slot]
+		renvoRFELoopColdValueOnce(a, records, captured, deferred, done, value)
+		renvoRFELoadValue(a, records, captured, value, 0)
+		renvoRFERegStore(a, 0, 11, slot*8, 8)
+	}
+	renvoAsmMarkLabel(a, doneLabel)
+}
+
+// Terminator truth proves an exact value only for normalized boolean SSA.
+// Arbitrary nonzero integers must retain their full value at architectural exits.
+func renvoRFEBooleanValue(records []int, value int) bool {
+	op := records[value*4]
+	if op == 10 || op == 11 || op == 24 || op == 25 {
+		return true
+	}
+	if op == 7 {
+		left, right := records[value*4+1], records[value*4+2]
+		return records[right*4] == 0 && records[right*4+3] == 1 && renvoRFEBooleanValue(records, left)
+	}
+	return false
+}
+
+// Specialize only completed-iteration cold restoration. The checked branch
+// proves the exact normalized predicate; early fault maps have no such fact.
+// Selection aliases keep their original private SSA locations and lifetimes.
+func renvoRFEKnownExitValues(original []int, known int, truth int) ([]int, []int) {
+	records := append([]int(nil), original...)
+	count := len(records) / 4
+	aliases := make([]int, count)
+	for i := range aliases {
+		aliases[i] = i
+	}
+	value, fact := known, truth
+	for {
+		op, left, right := original[value*4], original[value*4+1], original[value*4+2]
+		records[value*4], records[value*4+3] = 0, fact
+		invert := op == 7 && original[right*4] == 0 && original[right*4+3] == 1
+		invert = invert || op == 10 && original[right*4] == 0 && original[right*4+3] == 0
+		if !invert || !renvoRFEBooleanValue(original, left) {
+			break
+		}
+		value, fact = left, 1-fact
+	}
+	for i := 0; i < count; i++ {
+		op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 0 || op == 1 {
+			continue
+		}
+		left, right = aliases[left], aliases[right]
+		records[i*4+1], records[i*4+2] = left, right
+		if op == 21 {
+			imm = aliases[imm]
+			records[i*4+3] = imm
+			if records[left*4] == 0 {
+				aliases[i] = right
+				if records[left*4+3] == 0 {
+					aliases[i] = imm
+				}
+			}
+		} else if (op == 7 || op == 10) && records[left*4] == 0 && records[right*4] == 0 {
+			result := records[left*4+3] ^ records[right*4+3]
+			if op == 10 {
+				result = 0
+				if records[left*4+3] == records[right*4+3] {
+					result = 1
+				}
+			}
+			records[i*4], records[i*4+3] = 0, result
+		}
+		if op == 33 || op == 34 || op == 37 {
+			records[i*4+3] = imm&255 | aliases[imm>>8]<<8
+		}
+	}
+	return records, aliases
+}
+
+func renvoRFELoopRestoreState(a *renvoAsm, records []int, locations []int, values []int, inputs []int, final []int, deferred []bool, known int, truth int) {
+	done := make([]bool, len(deferred))
+	aliases := []int(nil)
+	if known >= 0 {
+		records, aliases = renvoRFEKnownExitValues(records, known, truth)
+	}
+	for slot, value := range values {
+		if value < 0 || value == inputs[slot] && final[slot] == value {
+			continue
+		}
+		if aliases != nil {
+			value = aliases[value]
+		}
+		source := 0
+		if deferred[value] {
+			renvoRFELoopColdValueOnce(a, records, locations, deferred, done, value)
+			renvoRFELoadValue(a, records, locations, value, 0)
+		} else if records[value*4] != 0 && locations[value] > 0 {
+			source = locations[value] - 1
+		} else {
+			renvoRFELoadValue(a, records, locations, value, 0)
+		}
+		renvoRFERegStore(a, source, 11, slot*8, 8)
+	}
+}
+
+// A proven acyclic trace reports constant retirement on each precise exit.
+// No iteration/budget register is live while its SSA body executes.
+func renvoRFEAcyclicProgress(a *renvoAsm, frameReg int, contextReg int, retired int, memory int, status int, completed int) {
+	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+	renvoRFERegImm(a, 0, retired)
+	renvoRFERegStore(a, 0, contextReg, 0, 8)
+	if memory != 0 {
+		renvoRFERegLoad(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
+		renvoRFERegImmediate(a, 3, 0, memory)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
+	}
+	if completed != 0 {
+		renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopIterations, 8)
+		renvoRFERegImmediate(a, 3, 0, completed)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFELoopIterations, 8)
+	}
+	renvoRFERegImm(a, 0, status)
+	renvoRFERegStore(a, 0, contextReg, 8, 8)
+}
+
+func renvoRFELoopProgress(a *renvoAsm, frameReg int, contextReg int, iterations int, instructions int, memory int, prefix int, memoryPrefix int, status int) {
+	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+	renvoRFERegMove(a, 0, iterations)
+	if instructions != 1 {
+		renvoRFELoopMultiply(a, 0, instructions)
+	}
+	if prefix != 0 {
+		renvoRFERegImmediate(a, 3, 0, prefix)
+	}
+	renvoRFERegStore(a, 0, contextReg, 0, 8)
+	if memory != 0 || memoryPrefix != 0 {
+		renvoRFERegMove(a, 0, iterations)
+		if memory == 0 {
+			renvoRFERegImm(a, 0, 0)
+		} else if memory != 1 {
+			renvoRFELoopMultiply(a, 0, memory)
+		}
+		if memoryPrefix != 0 {
+			renvoRFERegImmediate(a, 3, 0, memoryPrefix)
+		}
+		temp := 1
+		if renvoRFEArm(a) {
+			temp = 2
+		}
+		renvoRFERegLoad(a, temp, contextReg, RenvoRFEMemoryTotal, 8)
+		renvoRFERegBinary(a, 3, 0, temp)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
+	}
+	renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopIterations, 8)
+	renvoRFERegBinary(a, 3, 0, iterations)
+	renvoRFERegStore(a, 0, contextReg, RenvoRFELoopIterations, 8)
+	renvoRFERegImm(a, 0, status)
+	renvoRFERegStore(a, 0, contextReg, 8, 8)
+}
+func renvoRFELoopMultiply(a *renvoAsm, dst int, value int) {
+	if !renvoRFEDirectImmediate(a, 12, dst, value) {
+		renvoRFERegImm(a, 16, value)
+		renvoRFERegBinary(a, 12, dst, 16)
+	}
+}
+func renvoRFELoopReadLocation(a *renvoAsm, location int, reg int) {
+	if location > 0 {
+		renvoRFERegMove(a, reg, location-1)
+	} else {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegLoad(a, reg, frame, location, 8)
+	}
+}
+func renvoRFELoopWriteLocation(a *renvoAsm, location int, reg int) {
+	if location > 0 {
+		renvoRFERegMove(a, location-1, reg)
+	} else {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegStore(a, reg, frame, location, 8)
+	}
+}
+
+// Schedule parallel loop-phi assignments without clobbering a later source.
+// Cycles use one private temporary, not architectural stores or a Go callback.
+func renvoRFELoopPhiMoves(a *renvoAsm, records []int, locations []int, inputs []int, values []int) {
+	destinations, sources, sourceValues := []int{}, []int{}, []int{}
+	for slot, input := range inputs {
+		if input < 0 || locations[input] == 0 {
+			continue
+		}
+		source, value := 0, values[slot]
+		if records[value*4] != 0 {
+			source = locations[value]
+		}
+		if source == locations[input] {
+			continue
+		}
+		destinations = append(destinations, locations[input])
+		sources = append(sources, source)
+		sourceValues = append(sourceValues, value)
+	}
+	pending := len(destinations)
+	for pending != 0 {
+		selected := -1
+		for i, dst := range destinations {
+			if dst == 0 {
+				continue
+			}
+			safe := true
+			for j, source := range sources {
+				if destinations[j] != 0 && i != j && source == dst {
+					safe = false
+				}
+			}
+			if safe {
+				selected = i
+				break
+			}
+		}
+		if selected < 0 {
+			for i, dst := range destinations {
+				if dst != 0 {
+					selected = i
+					break
+				}
+			}
+			dst := destinations[selected]
+			renvoRFELoopReadLocation(a, dst, 0)
+			frame := 5
+			if renvoRFEArm(a) {
+				frame = 29
+			}
+			renvoRFERegStore(a, 0, frame, -48, 8)
+			for j, source := range sources {
+				if destinations[j] != 0 && source == dst {
+					sources[j] = -48
+				}
+			}
+			continue
+		}
+		target := 0
+		if destinations[selected] > 0 {
+			target = destinations[selected] - 1
+		}
+		if destinations[selected] < 0 && sources[selected] > 0 {
+			target = sources[selected] - 1
+		} else if sources[selected] == 0 {
+			renvoRFERegImm(a, target, records[sourceValues[selected]*4+3])
+		} else {
+			renvoRFELoopReadLocation(a, sources[selected], target)
+		}
+		if destinations[selected] < 0 {
+			renvoRFELoopWriteLocation(a, destinations[selected], target)
+		}
+		destinations[selected] = 0
+		pending--
+	}
+}
+
+// Translation facts are private to one serialized native loop call. Variable
+// addresses retain range, width, tag and permission guards on every access. A
+// proven invariant address/width gets an exact host-address fact only after all
+// guards succeed; its backing and permissions cannot change in this call. All
+// accesses still read/write actual memory, and every store checks clock overflow.
+func renvoEmitLoopMemoryAccess(a *renvoAsm, op int, size int, failure int, cache int, signedWidth int, records []int, locations []int) {
+	renvoEmitLoopMemoryAccessDeferred(a, op, size, failure, cache, signedWidth, records, locations, -1, -1)
+}
+
+func renvoEmitLoopMemoryAccessDeferred(a *renvoAsm, op int, size int, failure int, cache int, signedWidth int, records []int, locations []int, coldMiss int, coldPublish int) {
+	pairHigh := -1
+	if op == 37 {
+		pairHigh = size >> 8
+		op, size = 14, 16
+	}
+	primary, value, temp, descriptor, host, frame := 0, 2, 1, 7, 6, 5
+	if renvoRFEArm(a) {
+		value, temp, descriptor, host, frame = 1, 2, 9, 10, 29
+	}
+	miss, access, publish := coldMiss, renvoAsmNewLabel(a), coldPublish
+	if coldMiss < 0 {
+		miss, publish = renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	}
+	if cache != 0 {
+		first := renvoAsmNewLabel(a)
+		renvoRFERegLoad(a, host, frame, cache, 8)
+		renvoRFEJumpZero(a, host, first)
+		if op == 14 {
+			renvoRFERegLoad(a, primary, frame, cache-8, 8)
+			renvoRFERegLoad(a, temp, frame, cache-16, 8)
+		}
+		renvoAsmJmpLabel(a, access)
+		renvoAsmMarkLabel(a, first)
+	}
+	// Width checks remain per access. A full 52-bit page-number match can
+	// reuse the canonical-address and permission proof from this same call.
+	renvoRFERegMove(a, temp, primary)
+	renvoRFERegImmediate(a, 5, temp, 4095)
+	if size != 1 {
+		renvoRFERegImmediate(a, 100, temp, 4096-size)
+		renvoRFEJump(a, 4, failure)
+	}
+	renvoRFERegMove(a, host, primary)
+	renvoRFERegShift(a, host, 9, 12)
+	tag, data := -96, -104
+	if op == 14 {
+		tag, data = -112, -120
+	}
+	renvoRFEMemoryFactCompare(a, host, tag, primary)
+	renvoRFEJump(a, 1, miss)
+	renvoRFEMemoryFactLoad(a, host, data)
+	renvoRFERegBinary(a, 3, host, temp)
+	if op == 14 {
+		renvoRFEMemoryFactLoad(a, primary, -128)
+		renvoRFEMemoryFactLoad(a, temp, -136)
+	}
+	if coldMiss < 0 {
+		renvoAsmJmpLabel(a, publish)
+		renvoAsmMarkLabel(a, miss)
+		renvoEmitLoopMemoryMiss(a, op, failure)
+	}
+	renvoAsmMarkLabel(a, publish)
+	// The invariant-address fast path joins only after complete validation.
+	// Publishing it here covers either a page-fact hit or a checked miss.
+	if cache != 0 {
+		renvoRFERegStore(a, host, frame, cache, 8)
+		if op == 14 {
+			renvoRFERegStore(a, primary, frame, cache-8, 8)
+			renvoRFERegStore(a, temp, frame, cache-16, 8)
+		}
+	}
+	renvoAsmMarkLabel(a, access)
+	if op == 13 {
+		if size == 16 {
+			renvoRFERegLoad(a, descriptor, host, 8, 8)
+			size = 8
+		}
+		if signedWidth == 0 {
+			renvoRFERegLoad(a, primary, host, 0, size)
+		} else if renvoRFEArm(a) {
+			opcode := 0x39800000
+			if size == 2 {
+				opcode = 0x79800000
+			}
+			if size == 4 {
+				opcode = 0xb9800000
+			}
+			if signedWidth == 32 && size != 4 {
+				opcode |= 0x400000
+			}
+			if signedWidth == 32 && size == 4 {
+				opcode = 0xb9400000
+			}
+			renvoAsmEmit32(a, opcode|(host<<5)|primary)
+		} else {
+			renvoRFERex(a, primary, host, signedWidth == 64)
+			if size == 4 {
+				if signedWidth == 64 {
+					renvoAsmEmit8(a, 0x63)
+				} else {
+					renvoAsmEmit8(a, 0x8b)
+				}
+			} else {
+				renvoAsmEmit2(a, 0x0f, 0xbe+size-1)
+			}
+			renvoRFEMemoryOperand(a, primary, host, 0)
+		}
+		return
+	}
+	renvoRFERegMove(a, descriptor, temp)
+	renvoRFERegLoad(a, temp, descriptor, 0, 8)
+	// Unsigned increment wraps to zero only for an exhausted generation
+	// clock. Test the tentative value before either clock or epoch mutation.
+	renvoRFERegImmediate(a, 3, temp, 1)
+	if renvoRFEArm(a) {
+		renvoRFEJumpZero(a, temp, failure)
+	} else {
+		// ADD defines ZF, so the bounded failure check needs no extra CMP.
+		renvoRFEJump(a, 0, failure)
+	}
+	renvoRFERegStore(a, temp, descriptor, 0, 8)
+	renvoRFERegStore(a, temp, primary, 0, 8)
+	if pairHigh >= 0 {
+		// All permission/overflow checks precede both stores and the single
+		// generation allocation. The remaining SSA load cannot guest-fault.
+		renvoRFELoadValue(a, records, locations, pairHigh, primary)
+		renvoRFERegStore(a, value, host, 0, 8)
+		renvoRFERegStore(a, primary, host, 8, 8)
+	} else {
+		renvoRFERegStore(a, value, host, 0, size)
+	}
+}
+
+// Translation misses are emitted after the loop's architectural exit paths.
+// The hot page-fact hit falls through directly to the checked access. All
+// miss guards still precede permission facts, epochs and actual guest data.
+func renvoEmitLoopMemoryMiss(a *renvoAsm, op int, failure int) {
+	primary, temp, descriptor, host, frame := 0, 1, 7, 6, 5
+	if renvoRFEArm(a) {
+		temp, descriptor, host, frame = 2, 9, 10, 29
+	}
+	tag, data := -96, -104
+	if op == 14 || op == 37 {
+		op, tag, data = 14, -112, -120
+	}
+	// Check all high guest address bits before accepting a new fact. Native
+	// page tags alone are not an authority to admit noncanonical addresses.
+	renvoRFERegMove(a, primary, host)
+	renvoRFERegShift(a, primary, 9, 36)
+	renvoRFERegBinary(a, 101, primary, primary)
+	renvoRFEJump(a, 1, failure)
+	renvoRFERegMove(a, descriptor, host)
+	renvoRFERegImmediate(a, 5, descriptor, 63)
+	renvoRFERegShift(a, descriptor, 8, 5)
+	renvoRFERegLoad(a, primary, frame, -16, 8)
+	renvoRFERegBinary(a, 3, descriptor, primary)
+	renvoRFERegImmediate(a, 3, descriptor, RenvoRFEPages)
+	renvoRFECompareMemory(a, host, descriptor, 0, primary)
+	renvoRFEJump(a, 1, failure)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageData, 8)
+	renvoRFEJumpZero(a, primary, failure)
+	renvoRFEMemoryFactStore(a, host, tag)
+	renvoRFEMemoryFactStore(a, primary, data)
+	renvoRFERegMove(a, host, primary)
+	renvoRFERegBinary(a, 3, host, temp)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPagePermissions, 8)
+	permission, relevant := 1, 1
+	if op == 14 {
+		permission, relevant = 2, 6
+	}
+	renvoRFERegImmediate(a, 5, primary, relevant)
+	renvoRFERegImmediate(a, 100, primary, permission)
+	renvoRFEJump(a, 1, failure)
+	if op == 14 {
+		renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageEpoch, 8)
+		renvoRFEJumpZero(a, primary, failure)
+		renvoRFEMemoryFactStore(a, primary, -128)
+		renvoRFERegLoad(a, temp, frame, -16, 8)
+		renvoRFERegLoad(a, temp, temp, RenvoRFEClock, 8)
+		renvoRFEJumpZero(a, temp, failure)
+		renvoRFEMemoryFactStore(a, temp, -136)
+	}
+}
+
+// Baseline ISA selection: no LZCNT/BMI/AVX feature assumptions on amd64.
+func renvoRFERichInteger(a *renvoAsm, op int, encoding int) {
+	width, group := encoding&255, encoding>>8
+	if renvoRFEArm(a) {
+		instruction := 0
+		if op == 27 {
+			instruction = 0x9bc27c00
+		}
+		if op == 28 {
+			instruction = 0x9b427c00
+		}
+		if op == 29 {
+			instruction = 0x5ac01000
+		}
+		if op == 30 {
+			instruction = 0x5ac01400
+		}
+		if op == 32 {
+			instruction = 0x5ac00000
+		}
+		if op == 31 {
+			instruction = 0x5ac00400
+			if group == 32 {
+				instruction = 0x5ac00800
+			}
+			if group == 64 {
+				instruction = 0x5ac00c00
+			}
+		}
+		if width == 64 {
+			instruction |= 0x80000000
+		}
+		renvoAsmEmit32(a, instruction)
+		return
+	}
+	if op == 27 || op == 28 {
+		group := 4
+		if op == 28 {
+			group = 5
+		}
+		renvoAsmEmit3(a, 0x48, 0xf7, 0xc1|(group<<3))
+		renvoRFERegMove(a, 0, 2)
+		return
+	}
+	if width == 32 {
+		renvoAsmEmit2(a, 0x89, 0xc0)
+	}
+	if op == 29 || op == 30 {
+		if op == 30 {
+			renvoRFERegMove(a, 1, 0)
+			if width == 64 {
+				renvoAsmEmit8(a, 0x48)
+			}
+			renvoAsmEmit3(a, 0xc1, 0xf9, width-1)
+			renvoRFERegBinary(a, 7, 0, 1)
+			if width == 32 {
+				renvoAsmEmit2(a, 0x89, 0xc0)
+			}
+		}
+		zero, done := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+		if width == 64 {
+			renvoAsmEmit8(a, 0x48)
+		}
+		renvoAsmEmit3(a, 0x0f, 0xbd, 0xc0)
+		renvoRFEJump(a, 0, zero)
+		renvoRFERegImmediate(a, 7, 0, width-1)
+		renvoAsmJmpLabel(a, done)
+		renvoAsmMarkLabel(a, zero)
+		renvoRFERegImm(a, 0, width)
+		renvoAsmMarkLabel(a, done)
+		if op == 30 {
+			renvoRFERegImmediate(a, 4, 0, 1)
+		}
+		return
+	}
+	if op == 32 {
+		renvoRFEReverseStage(a, 1, 6148914691236517205)
+		renvoRFEReverseStage(a, 2, 3689348814741910323)
+		renvoRFEReverseStage(a, 4, 1085102592571150095)
+		group = width
+	}
+	if group == width {
+		if width == 64 {
+			renvoAsmEmit8(a, 0x48)
+		}
+		renvoAsmEmit2(a, 0x0f, 0xc8)
+		return
+	}
+	renvoRFEReverseStage(a, 8, 71777214294589695)
+	if group == 32 {
+		renvoRFEReverseStage(a, 16, 281470681808895)
+	}
+}
+func renvoRFEReverseStage(a *renvoAsm, shift int, mask int) {
+	renvoRFERegMove(a, 1, 0)
+	renvoRFERegImm(a, 2, mask)
+	renvoRFERegBinary(a, 5, 0, 2)
+	renvoRFERegShift(a, 0, 8, shift)
+	renvoRFERegShift(a, 1, 9, shift)
+	renvoRFERegBinary(a, 5, 1, 2)
+	renvoRFERegBinary(a, 6, 0, 1)
+}
+
+func renvoRFECarry(a *renvoAsm, op int, encoding int) {
+	width, sub := encoding&127, encoding&128 != 0
+	if renvoRFEArm(a) {
+		renvoRFERegImmediate(a, 5, 2, 1)
+		renvoRFERegShift(a, 2, 8, 29)
+		renvoAsmEmit32(a, 0xd51b4202) // MSR NZCV,X2, explicit SSA carry input
+		instruction := 0x1a010000     // ADC W0,W0,W1
+		if sub {
+			instruction = 0x5a010000
+		}
+		if op == 34 {
+			instruction |= 0x20000000
+		}
+		if width == 64 {
+			instruction |= 0x80000000
+		}
+		renvoAsmEmit32(a, instruction)
+		if op == 34 {
+			renvoAsmEmit32(a, 0xd53b4200)
+		}
+		return
+	}
+	if sub {
+		renvoRFERegImmediate(a, 7, 1, 1)
+	} // x86 SBB consumes borrow, A64 SBC no-borrow
+	renvoAsmEmit4(a, 0x48, 0x0f, 0xba, 0xe1)
+	renvoAsmEmit8(a, 0) // BT RCX,0
+	if width == 64 {
+		renvoAsmEmit8(a, 0x48)
+	}
+	instruction := 0x11
+	if sub {
+		instruction = 0x19
+	}
+	renvoAsmEmit2(a, instruction, 0xd0) // ADC/SBB AX,DX
+	if op == 33 {
+		return
+	}
+	renvoRFEFlagsPack(a, 22, sub)
+}
+
+func renvoRFEFlagsPack(a *renvoAsm, operation int, sub bool) {
+	renvoAsmEmit3(a, 0x0f, 0x98, 0xc1) // SETS CL
+	renvoAsmEmit3(a, 0x0f, 0x94, 0xc0) // SETZ AL
+	if operation == 22 {
+		condition := 0x92 // SETB DL (addition carry)
+		if sub {
+			condition = 0x93
+		} // SETAE DL (A64 no-borrow)
+		renvoAsmEmit3(a, 0x0f, condition, 0xc2)
+		renvoAsmEmit3(a, 0x0f, 0x90, 0xc5) // SETO CH
+	}
+	renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0) // MOVZX EAX,AL
+	renvoRFERegShift(a, 0, 8, 30)
+	if operation == 22 {
+		renvoAsmEmit3(a, 0x0f, 0xb6, 0xd2) // MOVZX EDX,DL
+		renvoRFERegShift(a, 2, 8, 29)
+		renvoRFERegBinary(a, 6, 0, 2)
+	}
+	renvoAsmEmit3(a, 0x0f, 0xb6, 0xd1) // MOVZX EDX,CL
+	renvoRFERegShift(a, 2, 8, 31)
+	renvoRFERegBinary(a, 6, 0, 2)
+	if operation == 22 {
+		renvoAsmEmit3(a, 0x0f, 0xb6, 0xd5) // MOVZX EDX,CH (no REX)
+		renvoRFERegShift(a, 2, 8, 28)
+		renvoRFERegBinary(a, 6, 0, 2)
+	}
+}
+
+// A translation can be kept for a static access when its address is invariant
+// under all loop phis. Memory values themselves never become invariant here.
+func renvoRFELoopInvariants(records []int, stateMap []int) []bool {
+	count := len(records) / 4
+	invariant := make([]bool, count)
+	for i := 0; i < count; i++ {
+		op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 0 {
+			invariant[i] = true
+			continue
+		}
+		if op == 1 {
+			invariant[i] = stateMap[imm] == i
+			continue
+		}
+		if renvoMemoryEffectOnly(op) || op == 13 {
+			continue
+		}
+		stable := invariant[left]
+		if renvoRFEHasRight(op) {
+			stable = stable && invariant[right]
+		}
+		if third := renvoRFEThirdOperand(op, imm); third >= 0 {
+			stable = stable && invariant[third]
+		}
+		invariant[i] = stable
+	}
+	return invariant
+}
+
+// Exit-only SSA DAGs and predicates can be evaluated where consumed rather
+// than materialized in every iteration. Loop phis and ordinary uses remain hot.
+func renvoRFELoopDeferredValues(records []int, inputs []int, final []int) []bool {
+	count := len(records) / 4
+	cold := make([]bool, count)
+	boolean := make([]bool, count)
+	for i := 0; i < count; i++ {
+		op, left, right := records[i*4], records[i*4+1], records[i*4+2]
+		boolean[i] = op == 10 || op == 11 || op == 24 || op == 25
+		if op == 7 && records[right*4] == 0 && records[right*4+3] == 1 && boolean[left] {
+			boolean[i] = true
+		}
+		cold[i] = boolean[i] || op >= 21 && op <= 23
+	}
+	for slot, value := range final {
+		if value >= 0 && inputs[slot] >= 0 {
+			cold[value] = false
+		}
+	}
+	// SSA operands precede their consumer, so one reverse walk propagates all
+	// hot roots. Stores are exit-map roots; guards/terminators consume fused
+	// predicates and do not force an otherwise cold boolean into a register.
+	for i := count - 1; i >= 0; i-- {
+		op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if cold[i] || op == 0 || op == 1 || op == 2 || op == 15 || op == 16 || op == 26 || op == 35 {
+			continue
+		}
+		cold[left] = false
+		if renvoRFEHasRight(op) {
+			cold[right] = false
+		}
+		if third := renvoRFEThirdOperand(op, imm); third >= 0 {
+			cold[third] = false
+		}
+	}
+	return cold
+}
+
+// Evaluate deferred operands into their private slots before using the normal
+// operation emitters. Architectural restoration never overwrites SSA storage.
+func renvoRFELoopColdValue(a *renvoAsm, records []int, locations []int, cold []bool, value int) {
+	renvoRFELoopColdValueOnce(a, records, locations, cold, make([]bool, len(cold)), value)
+}
+func renvoRFELoopColdValueOnce(a *renvoAsm, records []int, locations []int, cold []bool, done []bool, value int) {
+	if records[value*4] == 0 || !cold[value] || done[value] {
+		return
+	}
+	done[value] = true
+	op, left, right, imm := records[value*4], records[value*4+1], records[value*4+2], records[value*4+3]
+	renvoRFELoopColdValueOnce(a, records, locations, cold, done, left)
+	if op != 23 && op != 25 {
+		renvoRFELoopColdValueOnce(a, records, locations, cold, done, right)
+	}
+	if op == 21 {
+		renvoRFELoopColdValueOnce(a, records, locations, cold, done, imm)
+	}
+	if renvoRFEEmitDirectRecord(a, records, locations, value) {
+		return
+	}
+	secondary := 2
+	if renvoRFEArm(a) {
+		secondary = 1
+	}
+	renvoRFELoadValue(a, records, locations, left, 0)
+	if op == 22 || op == 24 {
+		renvoRFELoadValue(a, records, locations, right, secondary)
+	}
+	renvoRFEFlags(a, op, imm)
+	renvoRFESaveValue(a, locations, value)
+}
+
+// Only flags produced immediately below are consumed by the fused branch.
+// Iteration/progress updates precede this helper and cannot clobber those flags.
+func renvoRFELoopPredicateJump(a *renvoAsm, records []int, locations []int, cold []bool, value int, truth bool, label int) {
+	op, left, right, imm := records[value*4], records[value*4+1], records[value*4+2], records[value*4+3]
+	if op == 0 {
+		if (imm != 0) == truth {
+			renvoAsmJmpLabel(a, label)
+		}
+		return
+	}
+	if cold[value] && op == 7 {
+		renvoRFELoopPredicateJump(a, records, locations, cold, left, !truth, label)
+		return
+	}
+	if cold[value] && op == 10 && records[right*4] == 0 && records[right*4+3] == 0 && cold[left] && (records[left*4] == 10 || records[left*4] == 11 || records[left*4] == 24 || records[left*4] == 25) {
+		renvoRFELoopPredicateJump(a, records, locations, cold, left, !truth, label)
+		return
+	}
+	if cold[value] && (op == 10 || op == 11) {
+		renvoRFELoopColdValue(a, records, locations, cold, left)
+		renvoRFELoopColdValue(a, records, locations, cold, right)
+		secondary := 1
+		if renvoRFEArm(a) {
+			secondary = 2
+		}
+		compare := 0
+		if records[left*4] != 0 && locations[left] > 0 {
+			compare = locations[left] - 1
+		} else {
+			renvoRFELoadValue(a, records, locations, left, compare)
+		}
+		if records[right*4] != 0 || !renvoRFEDirectImmediate(a, 100, compare, records[right*4+3]) {
+			renvoRFELoadValue(a, records, locations, right, secondary)
+			renvoRFERegBinary(a, 100, compare, secondary)
+		}
+		cc := 0
+		if op == 11 {
+			cc = 2
+		}
+		if !truth {
+			cc ^= 1
+		}
+		renvoRFEJump(a, cc, label)
+		return
+	}
+	if cold[value] && (op == 24 || op == 25) {
+		condition, sub := imm>>8, imm&128 != 0
+		if condition >= 14 {
+			if truth {
+				renvoAsmJmpLabel(a, label)
+			}
+			return
+		}
+		// Addition HI/LS combines carry and zero, unlike x86 JA/JBE. Keep
+		// the existing explicit predicate for that case on x86.
+		if renvoRFEArm(a) || condition>>1 != 4 || sub {
+			renvoRFELoopColdValue(a, records, locations, cold, left)
+			secondary := 2
+			if renvoRFEArm(a) {
+				secondary = 1
+			}
+			if op == 24 {
+				renvoRFELoopColdValue(a, records, locations, cold, right)
+			}
+			renvoRFELoadValue(a, records, locations, left, 0)
+			if op != 24 || records[right*4] != 0 || !renvoRFEFlagsImmediate(a, op, imm, records[right*4+3]) {
+				if op == 24 {
+					renvoRFELoadValue(a, records, locations, right, secondary)
+				}
+				renvoRFEFlagsOperation(a, op-2, imm)
+			}
+			if !truth {
+				condition ^= 1
+			}
+			if renvoRFEArm(a) {
+				renvoAarch64AsmBCondLabel(a, label, condition)
+			} else {
+				cc := 4
+				switch condition >> 1 {
+				case 1:
+					cc = 2
+					if sub {
+						cc = 3
+					}
+				case 2:
+					cc = 8
+				case 3:
+					cc = 0
+				case 4:
+					cc = 7
+				case 5:
+					cc = 13
+				case 6:
+					cc = 15
+				}
+				if condition&1 != 0 {
+					cc ^= 1
+				}
+				renvoAmd64AsmJccLabel(a, 0x80|cc, label)
+			}
+			return
+		}
+	}
+	renvoRFELoopColdValue(a, records, locations, cold, value)
+	renvoRFELoadValue(a, records, locations, value, 0)
+	cc := 0
+	if truth {
+		cc = 1
+	}
+	renvoRFERegBinary(a, 101, 0, 0)
+	renvoRFEJump(a, cc, label)
+}
+
+// RFE shared-call ABI v2. The dispatcher owns one bounded frame for an entire
+// native quantum. Its first 64 bytes are private control state; all block SSA,
+// phi temporaries, translation facts and preserved registers live below it.
+// Bounds cover 2048 records, all spilled, plus <=16 invariant access facts and page facts.
+// Leaves make no calls; legacy framed entries may nest once below this area.
+const renvoRFESharedPrefix = 128
+const renvoRFESharedFrameSize = 17408
+
+func renvoRFEFrameDisplacement(a *renvoAsm, base int, disp int) int {
+	frame := 5
+	if renvoRFEArm(a) {
+		frame = 29
+	}
+	if base == frame && disp < 0 {
+		return disp - a.rfeFrameBias
+	}
+	return disp
+}
+func renvoRFESetContext(a *renvoAsm) {
+	frame, secondary := 5, 2
+	if renvoRFEArm(a) {
+		frame, secondary = 29, 1
+	}
+	renvoRFERegStore(a, secondary, frame, -16, 8)
+}
+func renvoRFEGetContext(a *renvoAsm) {
+	frame, secondary := 5, 2
+	if renvoRFEArm(a) {
+		frame, secondary = 29, 1
+	}
+	renvoRFERegLoad(a, secondary, frame, -16, 8)
+}
+
+// Standalone callers enter a compatibility frame. Native linking uses only the
+// checked body offset and borrows the dispatcher's partitioned frame instead.
+func RenvoEmitSharedBlock(records []int, stateWords int, memory bool, arm64 bool) ([]byte, int, bool) {
+	arch := renvoArchAmd64
+	if arm64 {
+		arch = renvoArchAarch64
+	}
+	context := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
+	return renvoEmitStateBlockABI(records, stateWords, context, memory, true)
+}
+
+func renvoRFEUsedPreservedRegisters(locations []int, candidates []int, iterations int, budget int) []int {
+	saved := []int{}
+	for _, reg := range candidates {
+		used := reg == iterations || reg == budget
+		for _, location := range locations {
+			if location == reg+1 {
+				used = true
+			}
+		}
+		if used {
+			saved = append(saved, reg)
+		}
+	}
+	return saved
+}
+
+// Shared translation proofs occupy only the dispatcher's reserved prefix.
+// They never survive a <=64-instruction native call or a host slow path.
+func renvoRFEInitSharedFacts(a *renvoAsm) {
+	frame, scratch := 5, 1
+	if renvoRFEArm(a) {
+		frame, scratch = 29, 2
+	}
+	renvoRFERegImm(a, scratch, -1)
+	renvoRFERegStore(a, scratch, frame, -64, 8)
+	renvoRFERegStore(a, scratch, frame, -80, 8)
+}
+func renvoRFEMemoryFactLoad(a *renvoAsm, reg int, offset int) {
+	frame := 5
+	if renvoRFEArm(a) {
+		frame = 29
+	}
+	bias := a.rfeFrameBias
+	if bias != 0 {
+		a.rfeFrameBias = 0
+		offset += 32
+	}
+	renvoRFERegLoad(a, reg, frame, offset, 8)
+	a.rfeFrameBias = bias
+}
+func renvoRFEMemoryFactStore(a *renvoAsm, reg int, offset int) {
+	frame := 5
+	if renvoRFEArm(a) {
+		frame = 29
+	}
+	bias := a.rfeFrameBias
+	if bias != 0 {
+		a.rfeFrameBias = 0
+		offset += 32
+	}
+	renvoRFERegStore(a, reg, frame, offset, 8)
+	a.rfeFrameBias = bias
+}
+func renvoRFEMemoryFactCompare(a *renvoAsm, reg int, offset int, scratch int) {
+	frame := 5
+	if renvoRFEArm(a) {
+		frame = 29
+	}
+	bias := a.rfeFrameBias
+	if bias != 0 {
+		a.rfeFrameBias = 0
+		offset += 32
+	}
+	renvoRFECompareMemory(a, reg, frame, offset, scratch)
+	a.rfeFrameBias = bias
+}
+
+// A sole low-word consumer can select the arithmetic operation directly at
+// width 32. Other users, including checkpoints and flags, prevent fusion.
+// Fuse a sole-use unsigned load followed by (v XOR sign)-sign, optionally
+// narrowed to uint32. The guarded access remains at its original position;
+// only arithmetic identities disappear. Intermediate architectural users and
+// checkpoint state stores prevent fusion through the ordinary use counts.
+func renvoRFESignedLoadSources(records []int) ([]int, []int, []bool) {
+	count := len(records) / 4
+	uses, widths, aliases := make([]int, count), make([]int, count), make([]int, count)
+	skip := make([]bool, count)
+	for i := 0; i < count; i++ {
+		aliases[i] = -1
+		op := records[i*4]
+		if renvoRFEHasLeft(op) {
+			uses[records[i*4+1]]++
+		}
+		if renvoRFEHasRight(op) {
+			uses[records[i*4+2]]++
+		}
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
+		}
+	}
+	for i := 0; i < count; i++ {
+		if records[i*4] != 4 {
+			continue
+		}
+		xor, sign := records[i*4+1], records[i*4+2]
+		if records[xor*4] != 7 || uses[xor] != 1 || records[sign*4] != 0 || records[xor*4+2] != sign {
+			continue
+		}
+		load := records[xor*4+1]
+		if records[load*4] != 13 || uses[load] != 1 {
+			continue
+		}
+		size := records[load*4+3]
+		if size != 1 && size != 2 && size != 4 || records[sign*4+3] != (1<<(size*8-1)) {
+			continue
+		}
+		final, width := i, 64
+		if uses[i] == 1 {
+			for j := i + 1; j < count; j++ {
+				mask := records[j*4+2]
+				if records[j*4] == 5 && records[j*4+1] == i && records[mask*4] == 0 && records[mask*4+3] == 4294967295 {
+					final, width = j, 32
+					break
+				}
+			}
+		}
+		widths[load] = width
+		aliases[final] = load
+		skip[xor], skip[i], skip[final] = true, true, true
+	}
+	return widths, aliases, skip
+}
+
+func renvoRFENarrowSources(records []int) []int {
+	count := len(records) / 4
+	uses, sources := make([]int, count), make([]int, count)
+	for i := 0; i < count; i++ {
+		sources[i] = -1
+		op := records[i*4]
+		if renvoRFEHasLeft(op) {
+			uses[records[i*4+1]]++
+		}
+		if renvoRFEHasRight(op) {
+			uses[records[i*4+2]]++
+		}
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
+		}
+	}
+	for i := 0; i < count; i++ {
+		if records[i*4] != 5 || records[records[i*4+2]*4] != 0 || records[records[i*4+2]*4+3] != 4294967295 {
+			continue
+		}
+		source := records[i*4+1]
+		op := records[source*4]
+		if uses[source] != 1 || sources[source] != -1 || !(op >= 3 && op <= 7 || op == 12) {
+			continue
+		}
+		sources[i], sources[source] = source, -2
+	}
+	return sources
+}
+func renvoRFENarrowLifetimes(records []int, last []int, sources []int) {
+	for i := len(sources) - 1; i >= 0; i-- {
+		source := sources[i]
+		if source < 0 {
+			continue
+		}
+		left, right := records[source*4+1], records[source*4+2]
+		if last[left] < i {
+			last[left] = i
+		}
+		if last[right] < i {
+			last[right] = i
+		}
+		last[source] = -1
+	}
+}
+func renvoRFEEmitNarrowRecord(a *renvoAsm, records []int, locations []int, i int, source int) {
+	op, left, right := records[source*4], records[source*4+1], records[source*4+2]
+	dst, temporary := 0, 1
+	if locations[i] > 0 {
+		dst = locations[i] - 1
+	}
+	if renvoRFEArm(a) {
+		temporary = 2
+	}
+	saved := false
+	if records[right*4] != 0 && locations[right] == dst+1 && locations[left] != dst+1 {
+		renvoRFELoadValue(a, records, locations, right, temporary)
+		saved = true
+	}
+	renvoRFELoadValue(a, records, locations, left, dst)
+	if records[right*4] == 0 && !renvoRFEArm(a) {
+		value := records[right*4+3]
+		if op == 12 {
+			renvoRFERex(a, dst, dst, false)
+			renvoAsmEmit2(a, 0x69, 0xc0|((dst&7)<<3)|(dst&7))
+			renvoAsmEmit32(a, value)
+		} else {
+			group := 0
+			if op == 4 {
+				group = 5
+			}
+			if op == 5 {
+				group = 4
+			}
+			if op == 6 {
+				group = 1
+			}
+			if op == 7 {
+				group = 6
+			}
+			renvoRFERex(a, 0, dst, false)
+			renvoAsmEmit2(a, 0x81, 0xc0|(group<<3)|(dst&7))
+			renvoAsmEmit32(a, value)
+		}
+	} else {
+		rhs := temporary
+		if !saved {
+			if records[right*4] != 0 && locations[right] > 0 {
+				rhs = locations[right] - 1
+			} else {
+				renvoRFELoadValue(a, records, locations, right, rhs)
+			}
+		}
+		if renvoRFEArm(a) {
+			opcode := 0x0b000000
+			if op == 4 {
+				opcode = 0x4b000000
+			}
+			if op == 5 {
+				opcode = 0x0a000000
+			}
+			if op == 6 {
+				opcode = 0x2a000000
+			}
+			if op == 7 {
+				opcode = 0x4a000000
+			}
+			if op == 12 {
+				renvoAsmEmit32(a, 0x1b007c00|(rhs<<16)|(dst<<5)|dst)
+			} else {
+				renvoAsmEmit32(a, opcode|(rhs<<16)|(dst<<5)|dst)
+			}
+		} else if op == 12 {
+			renvoRFERex(a, dst, rhs, false)
+			renvoAsmEmit2(a, 0x0f, 0xaf)
+			renvoAsmEmit8(a, 0xc0|((dst&7)<<3)|(rhs&7))
+		} else {
+			opcode := 0x01
+			if op == 4 {
+				opcode = 0x29
+			}
+			if op == 5 {
+				opcode = 0x21
+			}
+			if op == 6 {
+				opcode = 0x09
+			}
+			if op == 7 {
+				opcode = 0x31
+			}
+			renvoRFERex(a, rhs, dst, false)
+			renvoAsmEmit2(a, opcode, 0xc0|((rhs&7)<<3)|(dst&7))
+		}
+	}
+	if locations[i] < 0 {
+		frame := 5
+		if renvoRFEArm(a) {
+			frame = 29
+		}
+		renvoRFERegStore(a, dst, frame, locations[i], 8)
+	}
+}
+
+// Total division uses only the existing complex-operation scratch registers:
+// amd64 AX/CX/DX, arm64 X0/X1/X2. Never let a guest operand cause a host trap.
+func renvoRFEDivision(a *renvoAsm, op int, width int) {
+	signed := op == 39 || op == 41
+	remainder := op == 40 || op == 41
+	rhs := 1
+	if renvoRFEArm(a) {
+		rhs = 2
+	}
+	if width == 32 {
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0x2a0003e0) // MOV W0,W0
+			renvoAsmEmit32(a, 0x2a0203e2) // MOV W2,W2
+		} else if signed {
+			renvoAsmEmit3(a, 0x48, 0x63, 0xc0) // MOVSXD RAX,EAX
+			renvoAsmEmit3(a, 0x48, 0x63, 0xc9) // MOVSXD RCX,ECX
+		} else {
+			renvoAsmEmit2(a, 0x89, 0xc0)
+			renvoAsmEmit2(a, 0x89, 0xc9)
+		}
+	}
+	zero, done := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	renvoRFEJumpZero(a, rhs, zero)
+	if renvoRFEArm(a) {
+		instruction := 0x1ac00800
+		if signed {
+			instruction = 0x1ac00c00
+		}
+		if width == 64 {
+			instruction |= 0x80000000
+		}
+		dst := 0
+		if remainder {
+			dst = 1
+		}
+		renvoAsmEmit32(a, instruction|(2<<16)|dst)
+		if remainder {
+			instruction = 0x1b008000
+			if width == 64 {
+				instruction |= 0x80000000
+			}
+			renvoAsmEmit32(a, instruction|(2<<16)|(1<<5)) // MSUB result,quotient,divisor,dividend
+		}
+	} else {
+		normal := renvoAsmNewLabel(a)
+		if signed && width == 64 {
+			renvoRFERegImmediate(a, 100, rhs, -1)
+			renvoRFEJump(a, 1, normal)
+			renvoRFERegImm(a, 2, -9223372036854775807-1)
+			renvoRFERegBinary(a, 100, 0, 2)
+			renvoRFEJump(a, 1, normal)
+			if remainder {
+				renvoRFERegImm(a, 0, 0)
+			}
+			renvoAsmJmpLabel(a, done)
+		}
+		renvoAsmMarkLabel(a, normal)
+		if signed {
+			renvoAsmEmit2(a, 0x48, 0x99)       // CQO
+			renvoAsmEmit3(a, 0x48, 0xf7, 0xf9) // IDIV RCX
+		} else {
+			renvoRFERegImm(a, 2, 0)
+			renvoAsmEmit3(a, 0x48, 0xf7, 0xf1) // DIV RCX
+		}
+		if remainder {
+			renvoRFERegMove(a, 0, 2)
+		}
+	}
+	renvoAsmJmpLabel(a, done)
+	renvoAsmMarkLabel(a, zero)
+	if !remainder {
+		renvoRFERegImm(a, 0, -1)
+	}
+	renvoAsmMarkLabel(a, done)
+	if width == 32 {
+		if renvoRFEArm(a) {
+			renvoAsmEmit32(a, 0x2a0003e0)
+		} else {
+			renvoAsmEmit2(a, 0x89, 0xc0)
 		}
 	}
 }

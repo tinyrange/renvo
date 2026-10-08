@@ -766,12 +766,15 @@ func ordinaryConstantValue(program *unit.Program, start int, end int, depth int)
 
 func ordinaryConstantNamedValue(program *unit.Program, name string, depth int) ordinaryBuiltinConstant {
 	for i := 0; i < len(program.Decls); i++ {
-		decl := program.Decls[i]
+		decl := &program.Decls[i]
 		if decl.Kind != unit.TokenConst {
 			continue
 		}
+		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, name) {
+			continue
+		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || !functionValueTokenTextEquals(program, nameTok, name) {
+		if nameTok < 0 {
 			continue
 		}
 		assign := -1

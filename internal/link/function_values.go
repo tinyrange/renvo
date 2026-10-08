@@ -3658,12 +3658,16 @@ func functionValueStructFieldType(program *unit.Program, owner string, fieldName
 		return ""
 	}
 	for i := 0; i < len(program.Decls); i++ {
-		decl := program.Decls[i]
+		decl := &program.Decls[i]
 		if decl.Kind != unit.TokenType {
 			continue
 		}
+		// Reject unrelated declarations before searching the token table.
+		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, owner) {
+			continue
+		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || !functionValueTokenEquals(program, nameTok, owner) {
+		if nameTok < 0 {
 			continue
 		}
 		start := nameTok + 1
@@ -3736,12 +3740,16 @@ func functionValueTypeEmbeds(program *unit.Program, actual string, wanted string
 		return false
 	}
 	for i := 0; i < len(program.Decls); i++ {
-		decl := program.Decls[i]
+		decl := &program.Decls[i]
 		if decl.Kind != unit.TokenType {
 			continue
 		}
+		// Reject unrelated declarations before searching the token table.
+		if !ordinarySpanEquals(program.Text, decl.NameStart, decl.NameEnd, actual) {
+			continue
+		}
 		nameTok := functionValueTokenAtSpan(program, decl.NameStart, decl.NameEnd)
-		if nameTok < 0 || !functionValueTokenEquals(program, nameTok, actual) {
+		if nameTok < 0 {
 			continue
 		}
 		start := nameTok + 1

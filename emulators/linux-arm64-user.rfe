@@ -1,0 +1,1881 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "linux-arm64-user",
+  "import": "renvo.dev/emulators/arm64user",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "aarch64"
+    }
+  ]
+}
+
+-- branch_kernel_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestCompiledBranchLoopELF(t *testing.T) {
+	image := testELF(0x52800060, 0x71000400, 0x35ffffe0, 0xd2800ba8, 0xd4000001)
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		p, err := Load(image, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := aarch64.DefaultEngineConfig()
+		config.Mode, config.IRThreshold, config.NativeThreshold = mode, 1, 1
+		code, stats, err := p.Run(config, 9, nil, nil)
+		if err != nil || code != 0 || p.CPU.Retired != 9 {
+			t.Fatalf("%s: code=%d stats=%+v err=%v", mode, code, stats, err)
+		}
+		if mode == "native" {
+			requireNative(t, stats)
+		}
+		if mode != "interpreter" && stats.IR+stats.Native != 8 {
+			t.Fatalf("loop branches left compiled tier: %+v", stats)
+		}
+	}
+}
+
+func TestTerminalBranchPageGuard(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		m := codeMemory(t, 0x91000400)
+		// Put the terminal branch alone on the second dependency page.
+		if err := m.Write(0x2000, 4, 0x17ffffff); err != nil {
+			t.Fatal(err)
+		}
+		e := versionEngine(t, mode)
+		c := aarch64.CPU{Memory: m}
+		c.State[aarch64.PC] = 0x1ffc
+		if err := e.Step(&c, 2); err != nil || c.State[aarch64.PC] != 0x1ffc {
+			t.Fatal("initial branch")
+		}
+		fetches := m.fetches
+		if err := e.Step(&c, 2); err != nil || m.fetches != fetches {
+			t.Fatal("hot branch reread bytes")
+		}
+		if err := m.Write(0x2000, 4, 0x14000002); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Step(&c, 2); err != nil || e.Stats.Invalidations != 1 || c.State[aarch64.PC] != 0x2000 {
+			t.Fatal("terminal page mutation ignored")
+		}
+		c.State[aarch64.PC] = 0x1ffc
+		if err := e.Step(&c, 2); err != nil || c.State[aarch64.PC] != 0x2008 {
+			t.Fatal("new branch not compiled")
+		}
+		// Revoking the branch page may still retire the preceding valid ADD.
+		if err := m.Protect(0x2000, PageSize, ReadPermission); err != nil {
+			t.Fatal(err)
+		}
+		c.State[aarch64.PC] = 0x1ffc
+		if err := e.Step(&c, 2); err != nil || c.State[aarch64.PC] != 0x2000 {
+			t.Fatal("valid prefix lost")
+		}
+		before, retired := c.State, c.Retired
+		if err := e.Step(&c, 1); err == nil || c.State != before || c.Retired != retired {
+			t.Fatal("revoked terminal page executed")
+		}
+	}
+}
+
+-- code_version_test.go --
+package arm64user
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+type countedMemory struct {
+	*Memory
+	fetches uint64
+}
+
+func (m *countedMemory) Read(address uint64, size int, execute bool) (uint64, error) {
+	if execute {
+		m.fetches++
+	}
+	return m.Memory.Read(address, size, execute)
+}
+func codeMemory(t *testing.T, first uint32) *countedMemory {
+	t.Helper()
+	m := &countedMemory{Memory: NewMemory()}
+	if err := m.Map(0x1000, PageSize*2, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WritePair(0x1ffc, 4, uint64(first), 0x91000421); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x2004, 4, 0x17fffffe); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+func versionEngine(t *testing.T, mode string) *aarch64.Engine {
+	t.Helper()
+	config := aarch64.DefaultEngineConfig()
+	config.Mode = mode
+	config.IRThreshold = 1
+	config.NativeThreshold = 1
+	config.MaxInstructions = 2 // Keep these mutation checks focused on the pure prefix.
+	e, err := aarch64.NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := e.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return e
+}
+func TestVersionedCodeGuardsAndMutations(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			m := codeMemory(t, 0x91000400)
+			if err := m.Map(0x3000, PageSize, 3); err != nil {
+				t.Fatal(err)
+			}
+			e := versionEngine(t, mode)
+			c := aarch64.CPU{Memory: m}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			initialFetches, initialChecks, initialContexts := m.fetches, e.Stats.VersionChecks, e.Stats.ContextChecks
+			for i := 0; i < 100; i++ {
+				c.State[aarch64.PC] = 0x1ffc
+				if err := e.Step(&c, 2); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if m.fetches != initialFetches || e.Stats.VersionChecks != initialChecks || e.Stats.ContextChecks-initialContexts != 100 {
+				t.Fatalf("hot two-page block reread code: fetches=%d/%d checks=%d", m.fetches, initialFetches, e.Stats.VersionChecks-initialChecks)
+			}
+			if err := m.Write(0x3000, 8, 42); err != nil {
+				t.Fatal(err)
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || e.Stats.Invalidations != 0 || m.fetches != initialFetches {
+				t.Fatal("unrelated data write invalidated code")
+			}
+			// A store to the SECOND dependency page must invalidate the whole block.
+			if err := m.Write(0x2000, 4, 0x91000821); err != nil {
+				t.Fatal(err)
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			oldSecond := c.State[1]
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			if e.Stats.Invalidations != 1 || c.State[1] != oldSecond {
+				t.Fatal("second-page code change used stale block")
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || c.State[1] != oldSecond+2 {
+				t.Fatal("changed instruction not recompiled")
+			}
+			// Buffer writes are a different mutation path from scalar stores.
+			var bytes [4]byte
+			binary.LittleEndian.PutUint32(bytes[:], 0x91000c00)
+			if err := m.WriteBytes(0x1ffc, bytes[:]); err != nil {
+				t.Fatal(err)
+			}
+			oldFirst := c.State[0]
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || c.State[0] != oldFirst+3 || e.Stats.Invalidations != 2 {
+				t.Fatal("buffer write did not invalidate")
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			// Pair writes cross the page boundary and commit both versions together.
+			if err := m.WritePair(0x1ffc, 4, 0x91001000, 0x91000c21); err != nil {
+				t.Fatal(err)
+			}
+			oldFirst = c.State[0]
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || c.State[0] != oldFirst+4 || e.Stats.Invalidations != 3 {
+				t.Fatal("pair write did not invalidate")
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.Protect(0x1000, PageSize, ReadPermission); err != nil {
+				t.Fatal(err)
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			before := c.State
+			if err := e.Step(&c, 2); err == nil || c.State != before || e.Stats.Invalidations != 4 {
+				t.Fatal("revoked permission used stale block")
+			}
+		})
+	}
+}
+func TestVersionGuardsMappingAndAddressSpaceIdentity(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			first := codeMemory(t, 0x91000400)
+			second := codeMemory(t, 0x91002400)
+			oldStamp, _ := first.CodeVersion(0x1000)
+			newStamp, _ := second.CodeVersion(0x1000)
+			if oldStamp.Epoch != newStamp.Epoch || oldStamp.Identity == newStamp.Identity {
+				t.Fatal("fixture must have equal generations but different spaces")
+			}
+			e := versionEngine(t, mode)
+			c := aarch64.CPU{Memory: first}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			c.Memory = second
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || c.State[0] != 10 || e.Stats.Invalidations != 1 {
+				t.Fatal("address space identity ignored")
+			}
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.Unmap(0x1000, PageSize*2); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.Map(0x1000, PageSize*2, 7); err != nil {
+				t.Fatal(err)
+			}
+			if err := second.WritePair(0x1ffc, 4, 0x91001c00, 0x91000421); err != nil {
+				t.Fatal(err)
+			}
+			old := c.State[0]
+			c.State[aarch64.PC] = 0x1ffc
+			if err := e.Step(&c, 2); err != nil || c.State[0] != old+7 || e.Stats.Invalidations != 2 {
+				t.Fatal("same-address remap resurrected native code")
+			}
+		})
+	}
+}
+func TestVersionExhaustionIsTransactional(t *testing.T) {
+	m := codeMemory(t, 0x91000400)
+	before, err := m.ReadBytes(0x1ffc, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := m.CodeVersion(0x1000)
+	*m.NativeContext().Clock = ^uint64(0)
+	for _, mutate := range []func() error{
+		func() error { return m.Write(0x1ffc, 4, 0) },
+		func() error { return m.WriteBytes(0x1ffc, []byte{0, 0, 0, 0}) },
+		func() error { return m.WritePair(0x1ffc, 4, 0, 0) },
+		func() error { return m.Protect(0x1000, PageSize, 0) },
+		func() error { return m.Map(0x3000, PageSize, 7) },
+	} {
+		if err := mutate(); err == nil {
+			t.Fatal("generation counter wrapped")
+		}
+		got, _ := m.ReadBytes(0x1ffc, 8)
+		stamp, err := m.CodeVersion(0x1000)
+		if err != nil || string(got) != string(before) || stamp != old {
+			t.Fatal("failed mutation changed content, permission or generation")
+		}
+	}
+}
+func TestAliasedMemorySharesVersionClock(t *testing.T) {
+	original := codeMemory(t, 0x91000400)
+	alias := *original.Memory
+	if err := original.Write(0x1ffc, 4, 0x91000800); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := original.CodeVersion(0x1000)
+	if err := alias.Write(0x1ffc, 4, 0x91000c00); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := original.CodeVersion(0x1000)
+	if first.Identity != second.Identity || second.Epoch <= first.Epoch {
+		t.Fatal("copied Memory reused a live generation")
+	}
+}
+
+-- context_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+// Deliberately expose page versions but not the optional whole-code context.
+type pageVersionOnly struct{ memory *Memory }
+
+func (m *pageVersionOnly) Read(a uint64, s int, x bool) (uint64, error) {
+	return m.memory.Read(a, s, x)
+}
+func (m *pageVersionOnly) Write(a uint64, s int, v uint64) error { return m.memory.Write(a, s, v) }
+func (m *pageVersionOnly) ReadPair(a uint64, s int) (uint64, uint64, error) {
+	return m.memory.ReadPair(a, s)
+}
+func (m *pageVersionOnly) WritePair(a uint64, s int, x, y uint64) error {
+	return m.memory.WritePair(a, s, x, y)
+}
+func (m *pageVersionOnly) CodeVersion(a uint64) (aarch64.CodeStamp, error) {
+	return m.memory.CodeVersion(a)
+}
+func TestPageVersionsWithoutContextRemainGuarded(t *testing.T) {
+	m := codeMemory(t, 0x91000400)
+	c := aarch64.CPU{Memory: &pageVersionOnly{m.Memory}}
+	e := versionEngine(t, "native")
+	c.State[aarch64.PC] = 0x1ffc
+	if err := e.Step(&c, 2); err != nil {
+		t.Fatal(err)
+	}
+	checks := e.Stats.VersionChecks
+	for i := 0; i < 100; i++ {
+		c.State[aarch64.PC] = 0x1ffc
+		if err := e.Step(&c, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if e.Stats.ContextChecks != 0 || e.Stats.VersionChecks-checks != 200 {
+		t.Fatal("contextless memory skipped page checks")
+	}
+	if err := m.Protect(0x2000, PageSize, ReadPermission); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1ffc
+	if err := e.Step(&c, 2); err != nil || c.State[aarch64.PC] != 0x2000 {
+		t.Fatal("invalidated prefix")
+	}
+	if err := e.Step(&c, 1); err == nil {
+		t.Fatal("contextless revoked page executed")
+	}
+}
+func TestCodeContextAllMutationPaths(t *testing.T) {
+	m := codeMemory(t, 0x91000400)
+	if err := m.Map(0x3000, PageSize, 3); err != nil {
+		t.Fatal(err)
+	}
+	initial := m.CodeContext()
+	if err := m.Write(0x3000, 8, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteBytes(0x3000, []byte{2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WritePair(0x3000, 8, 4, 5); err != nil {
+		t.Fatal(err)
+	}
+	if m.CodeContext() != initial {
+		t.Fatal("data stores changed executable context")
+	}
+	for _, mutation := range []func() error{
+		func() error { return m.Write(0x1ffc, 4, 0x91000800) },
+		func() error { return m.WriteBytes(0x1ffc, []byte{0, 4, 0, 145}) },
+		func() error { return m.WritePair(0x1ffc, 4, 0x91000400, 0x91000421) },
+		func() error { return m.Protect(0x1000, PageSize, ReadPermission) },
+		func() error { return m.Protect(0x1000, PageSize, 7) },
+		func() error { return m.Unmap(0x1000, PageSize) },
+		func() error { return m.Map(0x1000, PageSize, 7) },
+	} {
+		old := m.CodeContext()
+		if err := mutation(); err != nil {
+			t.Fatal(err)
+		}
+		next := m.CodeContext()
+		if next.Identity != old.Identity || next.Epoch <= old.Epoch {
+			t.Fatal("executable mutation reused context stamp")
+		}
+	}
+	// Aliased memories share both generation clocks and executable context.
+	alias := *m.Memory
+	old := m.CodeContext()
+	if err := alias.Write(0x1000, 4, 0x91000400); err != nil {
+		t.Fatal(err)
+	}
+	if alias.CodeContext() != m.CodeContext() || m.CodeContext().Epoch <= old.Epoch {
+		t.Fatal("aliased context divergence")
+	}
+	old = m.CodeContext()
+	*m.NativeContext().Clock = ^uint64(0)
+	if err := m.Unmap(0x1000, PageSize); err == nil {
+		t.Fatal("unmap code ignored generation exhaustion")
+	}
+	if m.CodeContext() != old {
+		t.Fatal("failed unmap changed context")
+	}
+	if _, err := m.Read(0x1000, 4, true); err != nil {
+		t.Fatal("failed unmap removed page")
+	}
+}
+func TestContextChangeRevalidatesUnchangedPages(t *testing.T) {
+	m := codeMemory(t, 0x91000400)
+	e := versionEngine(t, "native")
+	c := aarch64.CPU{Memory: m}
+	c.State[aarch64.PC] = 0x1ffc
+	if err := e.Step(&c, 2); err != nil {
+		t.Fatal(err)
+	}
+	checks := e.Stats.VersionChecks
+	if err := m.Map(0x9000, PageSize, 5); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1ffc
+	if err := e.Step(&c, 2); err != nil || e.Stats.Invalidations != 0 || e.Stats.VersionChecks != checks+2 {
+		t.Fatal("new executable mapping not revalidated")
+	}
+	c.State[aarch64.PC] = 0x1ffc
+	if err := e.Step(&c, 2); err != nil || e.Stats.VersionChecks != checks+2 {
+		t.Fatal("stable context did not reuse validation")
+	}
+}
+
+-- integer_kernel_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+// A synthetic ELF integration kernel, NOT CoreMark or a reported benchmark.
+// Its arithmetic result flows through multiply, reversal, CLZ, extended add,
+// variable shift, flags, conditional select/compare and CSET before exit.
+func TestExpandedIntegerELF(t *testing.T) {
+	image := testELF(
+		0x52800060, // MOV W0,#3
+		0x528000e1, // MOV W1,#7
+		0x52800162, // MOV W2,#11
+		0x1b010800, // MADD W0,W0,W1,W2 -> 32
+		0x5ac00800, // REV W0,W0 -> 0x20000000
+		0x5ac01000, // CLZ W0,W0 -> 2
+		0x52800021, // MOV W1,#1
+		0x0b214800, // ADD W0,W0,W1,UXTW #2 -> 6
+		0x1ac12000, // LSLV W0,W0,W1 -> 12
+		0x7100301f, // CMP W0,#12
+		0x1a811000, // CSEL W0,W0,W1,NE -> 1
+		0x7a410800, // CCMP W0,#1,#0,EQ -> Z|C
+		0x1a9f17e0, // CSET W0,EQ -> 1
+		0xd2800ba8, // MOV X8,#93
+		0xd4000001, // SVC #0
+	)
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		p, err := Load(image, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := aarch64.DefaultEngineConfig()
+		config.Mode = mode
+		config.IRThreshold = 1
+		config.NativeThreshold = 1
+		code, stats, err := p.Run(config, 100, nil, nil)
+		if err != nil || code != 1 || p.CPU.Retired != 15 {
+			t.Fatalf("mode=%s code=%d retired=%d stats=%+v err=%v", mode, code, p.CPU.Retired, stats, err)
+		}
+		if mode == "native" {
+			requireNative(t, stats)
+		}
+		if mode != "interpreter" && stats.IR+stats.Native != 14 {
+			t.Fatal("expanded kernel unnecessarily left compiled execution")
+		}
+	}
+}
+
+-- interpreted_cache_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestGuardedMemoryInstructionCache(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		m := &countedMemory{Memory: NewMemory()}
+		if err := m.Map(0x1000, PageSize, 7); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Map(0x3000, PageSize, 3); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Write(0x1000, 4, 0xf9400020); err != nil {
+			t.Fatal(err)
+		} // LDR X0,[X1]
+		if err := m.Write(0x3000, 8, 42); err != nil {
+			t.Fatal(err)
+		}
+		e := versionEngine(t, mode)
+		c := aarch64.CPU{Memory: m}
+		c.State[1], c.State[aarch64.PC] = 0x3000, 0x1000
+		if err := e.Step(&c, 1); err != nil || c.State[0] != 42 {
+			t.Fatal("initial load")
+		}
+		fetches := m.fetches
+		for i := 0; i < 100; i++ {
+			c.State[aarch64.PC] = 0x1000
+			if err := e.Step(&c, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		wantInterpreted, wantNative := uint64(101), uint64(0)
+		if mode == "native" {
+			wantInterpreted, wantNative = 1, 100
+		}
+		if m.fetches != fetches || c.Retired != 101 || e.Stats.Interpreted != wantInterpreted || e.Stats.Native != wantNative || e.Stats.IR != 0 || e.Stats.NativeMemory != wantNative {
+			t.Fatal("cached load refetched or changed tier accounting")
+		}
+		if err := m.Write(0x3000, 8, 99); err != nil {
+			t.Fatal(err)
+		}
+		c.State[aarch64.PC] = 0x1000
+		if err := e.Step(&c, 1); err != nil || c.State[0] != 99 || e.Stats.Invalidations != 0 {
+			t.Fatal("cached data or unrelated invalidation")
+		}
+		// A faulting post-index load must preserve both destination and writeback.
+		if err := m.Write(0x1000, 4, 0xf8408420); err != nil {
+			t.Fatal(err)
+		}
+		c.State[1], c.State[aarch64.PC] = 0x9000, 0x1000
+		before, retired := c.State, c.Retired
+		for i := 0; i < 3; i++ {
+			if err := e.Step(&c, 1); err == nil || c.State != before || c.Retired != retired {
+				t.Fatal("cached fault committed state")
+			}
+		}
+		if e.Stats.Invalidations != 1 {
+			t.Fatal("changed interpreted word not invalidated")
+		}
+		// Replacing a memory word by a pure instruction must rebuild its translation.
+		compiledBefore := e.Stats.IR + e.Stats.Native
+		if err := m.Write(0x1000, 4, 0x91000400); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Write(0x1004, 4, 0x14000000); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Step(&c, 2); err != nil {
+			t.Fatal(err)
+		}
+		c.State[aarch64.PC] = 0x1000
+		if err := e.Step(&c, 2); err != nil || e.Stats.IR+e.Stats.Native != compiledBefore+2 {
+			t.Fatal("word stayed interpreter-only after replacement")
+		}
+		// Swap back to an unsupported instruction: it must keep faulting, not turn
+		// into a cached no-op. Then revoke execute permission on the cached word.
+		if err := m.Write(0x1000, 4, 0xffffffff); err != nil {
+			t.Fatal(err)
+		}
+		c.State[aarch64.PC] = 0x1000
+		before, retired = c.State, c.Retired
+		for i := 0; i < 3; i++ {
+			if err := e.Step(&c, 1); err == nil || c.State != before || c.Retired != retired {
+				t.Fatal("cached unsupported instruction retired")
+			}
+		}
+		if err := m.Protect(0x1000, PageSize, ReadPermission); err != nil {
+			t.Fatal(err)
+		}
+		fault, ok := e.Step(&c, 1).(*aarch64.Exception)
+		if !ok || fault.Kind != "fetch" || c.State != before || c.Retired != retired {
+			t.Fatal("cached instruction ignored execute permission")
+		}
+	}
+}
+
+-- loader.go --
+package arm64user
+
+import (
+	"crypto/rand"
+	"fmt"
+	"io"
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/linuxuser"
+	"time"
+)
+
+const (
+	PageSize          = linuxuser.PageSize
+	AddressLimit      = linuxuser.AddressLimit
+	MemoryLimit       = linuxuser.MemoryLimit
+	ReadPermission    = linuxuser.ReadPermission
+	WritePermission   = linuxuser.WritePermission
+	ExecutePermission = linuxuser.ExecutePermission
+	stackTop          = linuxuser.StackTop
+	stackSize         = linuxuser.StackSize
+)
+
+type Memory = linuxuser.Memory
+
+func NewMemory() *Memory { return linuxuser.NewMemory() }
+
+type Process struct {
+	*linuxuser.Process
+	CPU     aarch64.CPU
+	started time.Time
+}
+
+func Load(image []byte, args []string) (*Process, error) {
+	shared, err := linuxuser.Load(image, args, linuxuser.ELFABI{Machine: 183, EntryAlignment: 4, EntryBytes: 4}, func(dst []byte) error { _, err := rand.Read(dst); return err })
+	if err != nil {
+		return nil, err
+	}
+	p := &Process{Process: shared, started: time.Now()}
+	shared.Clock = func(id uint64) (int64, int64, bool) {
+		if id == 0 {
+			now := time.Now()
+			return now.Unix(), int64(now.Nanosecond()), true
+		}
+		if id == 1 {
+			elapsed := time.Since(p.started)
+			return int64(elapsed / time.Second), int64(elapsed % time.Second), true
+		}
+		return 0, 0, false
+	}
+	p.CPU.Memory = shared.Memory
+	p.CPU.State[aarch64.PC], p.CPU.State[aarch64.SP] = shared.Entry, shared.StackPointer
+	return p, nil
+}
+func syscallABI() linuxuser.SyscallABI {
+	return linuxuser.SyscallABI{Number: 8, Result: 0, Arguments: [6]int{0, 1, 2, 3, 4, 5}, Trap: func(err error) (bool, error) {
+		trap, ok := err.(*aarch64.Exception)
+		if !ok || trap.Kind != "svc" {
+			return false, nil
+		}
+		if trap.Opcode>>5&65535 != 0 {
+			return false, fmt.Errorf("Linux requires SVC #0")
+		}
+		return true, nil
+	}}
+}
+func (p *Process) Syscall(output, diagnostics io.Writer) (bool, int) {
+	exited, code, _ := p.Process.ApplySyscall(p.CPU.State[:], syscallABI(), output, diagnostics)
+	return exited, code
+}
+func (p *Process) Run(config aarch64.EngineConfig, limit uint64, output, diagnostics io.Writer) (int, aarch64.Stats, error) {
+	return p.Process.Run(&p.CPU, aarch64.Architecture(), syscallABI(), config, limit, output, diagnostics)
+}
+func errno(value uint64) uint64 { return ^value + 1 }
+
+-- native_link_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func linkedLoop(t *testing.T) (*Memory, *aarch64.Engine, *aarch64.CPU) {
+	t.Helper()
+	// Two blocks: ADD X0,1; B +8; [unsupported]; ADD X1,1; B -16.
+	m := nativeTestMemory(t, 0x91000400, 0x14000002, 0xffffffff, 0x91000421, 0x17fffffc)
+	e := nativeMemoryEngine(t)
+	c := &aarch64.CPU{Memory: m}
+	c.State[aarch64.PC] = 0x1000
+	for i := 0; i < 2; i++ {
+		if err := e.Step(c, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Publish both hot blocks. Further native quanta must actually traverse them.
+	for i := 0; i < 2; i++ {
+		if err := e.Run(c, 64); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return m, e, c
+}
+func TestNativeLinkedLoopBudgetAndContextInvalidation(t *testing.T) {
+	m, e, c := linkedLoop(t)
+	before, linked := c.Retired, e.Stats.Linked
+	for _, budget := range []uint64{1, 2, 3, 63, 64} {
+		want := *c
+		for i := uint64(0); i < budget; i++ {
+			if err := want.Step(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		start := c.Retired
+		for c.Retired-start < budget {
+			if err := e.Run(c, budget-(c.Retired-start)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c.State != want.State || c.Retired != want.Retired {
+			t.Fatal("linked budget/state mismatch", budget, c.State, want.State)
+		}
+	}
+	if c.Retired-before != 133 || e.Stats.Linked-linked < 120 {
+		t.Fatal("loop did not link", c.Retired, e.Stats)
+	}
+	// A write through an alias must invalidate a published successor before entry.
+	c.State[aarch64.PC] = 0x1000
+	alias := *m
+	if err := alias.Write(0x100c, 4, 0xffffffff); err != nil {
+		t.Fatal(err)
+	}
+	start := c.Retired
+	for c.Retired-start < 2 {
+		if err := e.Run(c, 2-(c.Retired-start)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Retired-start != 2 || c.State[aarch64.PC] != 0x100c {
+		t.Fatal("stale linked successor executed", c.State, c.Retired-start)
+	}
+	state := c.State
+	if err := e.Run(c, 64); err == nil || c.State != state || c.Retired-start != 2 {
+		t.Fatal("invalid successor lost precise trap", err)
+	}
+}
+func TestNativeLinkedPermissionMappingAndOwnership(t *testing.T) {
+	for _, mutation := range []string{"protect", "unmap", "remap"} {
+		t.Run(mutation, func(t *testing.T) {
+			m, e, c := linkedLoop(t)
+			alias := *m
+			if mutation == "protect" {
+				if err := alias.Protect(0x1000, PageSize, 3); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := alias.Unmap(0x1000, PageSize); err != nil {
+					t.Fatal(err)
+				}
+				if mutation == "remap" {
+					if err := alias.Map(0x1000, PageSize, 7); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			state, before := c.State, c.Retired
+			if err := e.Run(c, 64); err == nil || c.State != state || c.Retired != before {
+				t.Fatal("detached or non-executable linked entry used", err)
+			}
+		})
+	}
+	m, e, c := linkedLoop(t)
+	other := nativeMemoryEngine(t)
+	// Same address space, distinct arena, and distinct entry allocation order.
+	c.State[aarch64.PC] = 0x100c
+	if err := other.Step(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := other.Step(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	for _, engine := range []*aarch64.Engine{other, e, other, e} {
+		want := *c
+		for i := 0; i < 64; i++ {
+			if err := want.Step(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before := c.Retired
+		for c.Retired-before < 64 {
+			if err := engine.Run(c, 64-(c.Retired-before)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c.State != want.State || c.Retired != want.Retired {
+			t.Fatal("wrong arena entry reused", c.State, want.State)
+		}
+	}
+	// Reusing an engine for another address space must not reuse old PCs' offsets.
+	replacement := nativeTestMemory(t, 0x91000800, 0x14000000)
+	c.Memory = replacement
+	c.State[aarch64.PC] = 0x1000
+	before := c.Retired
+	for c.Retired-before < 2 {
+		if err := e.Run(c, 2-(c.Retired-before)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Retired-before != 2 || c.State[aarch64.PC] != 0x1004 {
+		t.Fatal("wrong address space linked")
+	}
+	_ = m
+}
+func TestNativeLinkedMixedFaultCommitsOnlyOnce(t *testing.T) {
+	// Pure block branches into load/add/store then a faulting load and back edge.
+	m := nativeTestMemory(t, 0x91000442, 0x14000002, 0xffffffff, 0xf9400020, 0x91000400, 0xf9000020, 0xf9400064, 0x17fffff9)
+	e := nativeMemoryEngine(t)
+	c := &aarch64.CPU{Memory: m}
+	c.State[1], c.State[3], c.State[aarch64.PC] = 0x3100, 0x9100, 0x1000
+	if err := m.Write(0x3100, 8, 41); err != nil {
+		t.Fatal(err)
+	}
+	m.NativeContext()
+	m.NativeRefill(0x3100)
+	if err := e.Step(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Step(c, 5); err == nil {
+		t.Fatal("missing initial fault")
+	}
+	// Publish only the pure prefix. A multi-block region may now reach the
+	// known fault in this same Run call, so keep warmup below that region's size.
+	c.State[aarch64.PC] = 0x1000
+	if err := e.Run(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x100c
+	before := c.Retired
+	err := e.Run(c, 64)
+	trap, ok := err.(*aarch64.Exception)
+	value, _ := m.Read(0x3100, 8, false)
+	if !ok || trap.PC != 0x1018 || c.Retired-before != 3 || value != 43 {
+		t.Fatal("linked prefix replayed", err, c.Retired-before, value)
+	}
+	if e.Stats.Linked < 5 || e.Stats.NativeMemory < 4 {
+		t.Fatal("mixed native linking not exercised", e.Stats)
+	}
+}
+
+-- native_memory_test.go --
+package arm64user
+
+import (
+	"bytes"
+	"fmt"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func nativeMemoryEngine(t *testing.T) *aarch64.Engine {
+	t.Helper()
+	config := aarch64.DefaultEngineConfig()
+	config.IRThreshold, config.NativeThreshold = 1, 1
+	e, err := aarch64.NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := e.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return e
+}
+func nativeTestMemory(t *testing.T, words ...uint32) *Memory {
+	t.Helper()
+	m := NewMemory()
+	if err := m.Map(0x1000, PageSize, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Map(0x3000, PageSize*2, 3); err != nil {
+		t.Fatal(err)
+	}
+	for i, op := range words {
+		if err := m.Write(0x1000+uint64(i)*4, 4, uint64(op)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return m
+}
+
+func TestNativeScalarFormsAndArchitecturalAgreement(t *testing.T) {
+	// Independently encoded unsigned, unscaled, pre/post-index, signed and
+	// extended register accesses; include ZR, SP and base/destination aliases.
+	ops := []uint32{
+		0x39000020, 0x39400020, 0x39800020, 0x39c00020,
+		0x79000020, 0x79400020, 0x79800020, 0x79c00020,
+		0xb9000020, 0xb9400020, 0xb9800020, 0xf9000020, 0xf9400020,
+		0xf8008420, 0xf8408420, 0xf8408c20, 0xf8008c20,
+		0xf85f8020, 0xf81f8020, 0xf8627820, 0xb862d820, 0xb822d820,
+		0xf94003e0, 0xf90003e0, 0xf940003f, 0xf900003f, 0xf9400021,
+	}
+	for _, op := range ops {
+		for _, negative := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%08x/negative=%v", op, negative), func(t *testing.T) {
+				e := nativeMemoryEngine(t)
+				words := []uint32{0x91000463, op, 0x91000484, 0x14000000}
+				m, reference := nativeTestMemory(t, words...), nativeTestMemory(t, words...)
+				data := make([]byte, PageSize*2)
+				for i := range data {
+					data[i] = byte(129 + i*37)
+				}
+				if err := m.WriteBytes(0x3000, data); err != nil {
+					t.Fatal(err)
+				}
+				if err := reference.WriteBytes(0x3000, data); err != nil {
+					t.Fatal(err)
+				}
+				c := aarch64.CPU{Memory: m}
+				c.State[0], c.State[1], c.State[2], c.State[aarch64.SP], c.State[aarch64.PC] = 0x88776655aabbccdd, 0x3100, 2, 0x3200, 0x1000
+				if negative {
+					c.State[2] = ^uint64(0)
+				}
+				want := c
+				want.Memory = reference
+				m.NativeContext()
+				m.NativeRefill(0x3100)
+				for i := 0; i < 4; i++ {
+					if err := want.Step(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := e.Step(&c, 4); err != nil {
+					t.Fatal(err)
+				}
+				gotBytes, err := m.ReadBytes(0x3000, PageSize*2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantBytes, err := reference.ReadBytes(0x3000, PageSize*2)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if c.State != want.State || c.Retired != want.Retired || !bytes.Equal(gotBytes, wantBytes) {
+					t.Fatalf("native scalar differs: state=%x/%x retired=%d/%d", c.State, want.State, c.Retired, want.Retired)
+				}
+				if e.Stats.CompileFailures != 0 || e.Stats.NativeMemory != 1 || e.Stats.Native != 4 || e.Stats.MemoryExits != 0 {
+					t.Fatalf("scalar did not run natively: %+v", e.Stats)
+				}
+			})
+		}
+	}
+}
+
+func TestNativeMemoryPartialExitDoesNotReplayStores(t *testing.T) {
+	// Increment a memory cell before faulting on a second address. Replaying the
+	// committed prefix would increment twice; precise native exit must leave 42.
+	words := []uint32{0xf9400020, 0x91000400, 0xf9000020, 0xf9400082, 0x14000000}
+	for _, address := range []uint64{0x9000, 0x3ffc, 1 << 48} {
+		e := nativeMemoryEngine(t)
+		m := nativeTestMemory(t, words...)
+		if err := m.Write(0x3100, 8, 41); err != nil {
+			t.Fatal(err)
+		}
+		if address == 0x3ffc {
+			if err := m.Protect(0x4000, PageSize, 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.NativeContext()
+		m.NativeRefill(0x3100)
+		c := aarch64.CPU{Memory: m}
+		c.State[1], c.State[4], c.State[aarch64.PC] = 0x3100, address, 0x1000
+		err := e.Run(&c, 5)
+		trap, ok := err.(*aarch64.Exception)
+		value, readErr := m.Read(0x3100, 8, false)
+		if !ok || trap.Kind != "memory" || trap.PC != 0x100c || trap.Opcode != words[3] || c.State[aarch64.PC] != 0x100c || c.Retired != 3 || value != 42 || readErr != nil || e.Stats.NativeMemory != 2 || e.Stats.Native != 3 || e.Stats.Interpreted != 0 || e.Stats.MemoryExits != 1 {
+			t.Fatal("partial exit replayed/lost state", c.State, c.Retired, value, err, e.Stats)
+		}
+		if err := e.Run(&c, 5); err == nil || c.Retired != 3 {
+			t.Fatal("resumed fault retired")
+		}
+		if value, err := m.Read(0x3100, 8, false); err != nil || value != 42 {
+			t.Fatal("resumed fault replayed prefix", value, err)
+		}
+	}
+}
+
+func TestNativeMemoryAliasesProtectionRemapAndBudget(t *testing.T) {
+	e := nativeMemoryEngine(t)
+	m := nativeTestMemory(t, 0xf9400020, 0x14000000)
+	alias := *m
+	c := aarch64.CPU{Memory: m}
+	c.State[1], c.State[aarch64.PC] = 0x3100, 0x1000
+	if err := m.Write(0x3100, 8, 77); err != nil {
+		t.Fatal(err)
+	}
+	m.NativeContext()
+	m.NativeRefill(0x3100)
+	if err := e.Run(&c, 2); err != nil || c.State[0] != 77 || e.Stats.NativeMemory != 1 {
+		t.Fatal("initial native load", err, e.Stats)
+	}
+	if err := alias.Protect(0x3000, PageSize, WritePermission); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	before, retired := c.State, c.Retired
+	if err := e.Run(&c, 2); err == nil || c.State != before || c.Retired != retired {
+		t.Fatal("native alias protection bypass")
+	}
+	if err := alias.Unmap(0x3000, PageSize); err != nil {
+		t.Fatal(err)
+	}
+	if err := alias.Map(0x3000, PageSize, 3); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	if err := e.Run(&c, 2); err != nil || c.State[0] != 0 || c.Retired != retired+1 { // miss retires the architectural load; branch is a later quantum
+		t.Fatal("native remap reused detached page or lost retirement", c.State, c.Retired, err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	// A two-instruction native block cannot overrun a one-instruction ceiling.
+	retired = c.Retired
+	if err := e.Run(&c, 1); err != nil || c.Retired != retired+1 || c.State[aarch64.PC] != 0x1004 {
+		t.Fatal("native memory budget overrun", err)
+	}
+}
+
+func TestNativeMemoryExecutableStoreAndGenerationExhaustion(t *testing.T) {
+	e := nativeMemoryEngine(t)
+	words := []uint32{0x91000400, 0xb9000020, 0x91000442, 0x14000000}
+	m := nativeTestMemory(t, words...)
+	c := aarch64.CPU{Memory: m}
+	c.State[aarch64.PC] = 0x1008
+	// Cache the successor before a native block replaces it with an unsupported word.
+	if err := e.Step(&c, 2); err != nil {
+		t.Fatal(err)
+	}
+	before := c.Retired
+	c.State[0], c.State[1], c.State[aarch64.PC] = 0xfffffffe, 0x1008, 0x1000
+	if err := e.Run(&c, 4); err != nil || c.Retired != before+2 || c.State[aarch64.PC] != 0x1008 {
+		t.Fatal("executable store did not exit precisely", err, c.State, c.Retired)
+	}
+	state := c.State
+	err := e.Run(&c, 4)
+	trap, ok := err.(*aarch64.Exception)
+	if !ok || trap.Kind != "unsupported" || c.State != state || c.Retired != before+2 || e.Stats.Invalidations != 1 || e.Stats.MemoryExits != 1 || e.Stats.NativeMemory != 0 {
+		t.Fatal("native executable store used stale successor", err, c.State, e.Stats)
+	}
+
+	e2 := nativeMemoryEngine(t)
+	m2 := nativeTestMemory(t, 0x91000400, 0xf8008420, 0x14000000)
+	m2.NativeContext()
+	m2.NativeRefill(0x3100)
+	*m2.NativeContext().Clock = ^uint64(0)
+	c2 := aarch64.CPU{Memory: m2}
+	c2.State[0], c2.State[1], c2.State[aarch64.PC] = 41, 0x3100, 0x1000
+	err = e2.Run(&c2, 3)
+	trap, ok = err.(*aarch64.Exception)
+	value, _ := m2.Read(0x3100, 8, false)
+	if !ok || trap.Kind != "memory" || trap.PC != 0x1004 || c2.Retired != 1 || c2.State[0] != 42 || c2.State[1] != 0x3100 || value != 0 || *m2.NativeContext().Clock != ^uint64(0) {
+		t.Fatal("exhausted native store mutated state/data", c2.State, c2.Retired, value, err)
+	}
+}
+
+func TestNativeMemorySPGuardAndZRLoadFault(t *testing.T) {
+	for _, op := range []uint32{0xf94003e0, 0xf940003f} {
+		e := nativeMemoryEngine(t)
+		m := nativeTestMemory(t, 0x91000442, op, 0x14000000)
+		c := aarch64.CPU{Memory: m}
+		c.State[aarch64.SP], c.State[1], c.State[aarch64.PC] = 0x3101, 0x9000, 0x1000
+		err := e.Run(&c, 3)
+		trap, ok := err.(*aarch64.Exception)
+		if !ok || trap.Kind != "memory" || trap.PC != 0x1004 || c.State[2] != 1 || c.Retired != 1 || c.State[aarch64.PC] != 0x1004 || e.Stats.MemoryExits != 1 || e.Stats.NativeMemory != 0 {
+			t.Fatal("SP/ZR fault removed or lost prefix", c.State, c.Retired, err, e.Stats)
+		}
+	}
+}
+
+func TestNativeDescriptorCollisionNeverAliasesGuestPages(t *testing.T) {
+	e := nativeMemoryEngine(t)
+	m := nativeTestMemory(t, 0xf9400020, 0x14000000)
+	const other = 0x3000 + 64*PageSize
+	if err := m.Map(other, PageSize, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x3100, 8, 77); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(other+0x100, 8, 88); err != nil {
+		t.Fatal(err)
+	}
+	m.NativeContext()
+	m.NativeRefill(0x3100)
+	c := aarch64.CPU{Memory: m}
+	for _, address := range []uint64{0x3100, other + 0x100, 0x3100, other + 0x100} {
+		c.State[1], c.State[aarch64.PC] = address, 0x1000
+		if err := e.Run(&c, 2); err != nil {
+			t.Fatal(err)
+		}
+		expected := uint64(77)
+		if address != 0x3100 {
+			expected = 88
+		}
+		if c.State[0] != expected {
+			t.Fatal("descriptor collision aliased a different guest page", address, c.State[0])
+		}
+	}
+	// Native descriptors must not expose detached pages after an aliased unmap.
+	alias := *m
+	if err := alias.Unmap(other, PageSize); err != nil {
+		t.Fatal(err)
+	}
+	c.State[1], c.State[aarch64.PC] = other+0x100, 0x1000
+	before := c.Retired
+	if err := e.Run(&c, 2); err == nil || c.Retired != before {
+		t.Fatal("native descriptor survived alias unmap")
+	}
+}
+
+-- process.go --
+package arm64user
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"renvo.dev/emulators/aarch64"
+)
+
+func Main(args []string) int {
+	flags := flag.NewFlagSet("linux-arm64-user", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	config := aarch64.DefaultEngineConfig()
+	mode := flags.String("engine", "native", "interpreter, ir, or native")
+	steps := flags.Uint64("steps", 100000000, "maximum retired guest instructions")
+	statistics := flags.Bool("stats", false, "print tier and cache statistics")
+	regionInstructions := flags.Int("region-instructions", config.MaxRegionInstructions, "maximum optimized region width (1..256)")
+	nativeInstructions := flags.Int("native-instructions", config.MaxNativeInstructions, "maximum instructions per supported native session (1..65536)")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *regionInstructions < 1 || *regionInstructions > 256 || *nativeInstructions < 1 || *nativeInstructions > 65536 {
+		fmt.Fprintln(os.Stderr, "region/native instruction limit out of range")
+		return 2
+	}
+	if flags.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: linux-arm64-user [-engine mode] [-steps n] [-stats] [-region-instructions n] [-native-instructions n] static-aarch64-elf [args...]")
+		return 2
+	}
+	file, err := os.Open(flags.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	image, err := io.ReadAll(io.LimitReader(file, (64<<20)+1))
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	p, err := Load(image, flags.Args())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	config.Mode = *mode
+	config.ProfileNative = *statistics
+	config.MaxRegionInstructions = *regionInstructions
+	config.MaxNativeInstructions = *nativeInstructions
+	code, stats, err := p.Run(config, *steps, os.Stdout, os.Stderr)
+	if *statistics {
+		fmt.Fprintf(os.Stderr, "retired=%d interpreted=%d ir=%d native=%d blocks=%d promotions=%d invalidations=%d compile_failures=%d native_bytes=%d native_memory=%d memory_exits=%d linked=%d code_reads=%d version_checks=%d context_checks=%d profile_errors=%d regions=%d region_exits=%d loop_iterations=%d\n", p.CPU.Retired, stats.Interpreted, stats.IR, stats.Native, stats.Blocks, stats.Promotions, stats.Invalidations, stats.CompileFailures, stats.NativeBytes, stats.NativeMemory, stats.MemoryExits, stats.Linked, stats.CodeReads, stats.VersionChecks, stats.ContextChecks, stats.ProfileErrors, stats.Regions, stats.RegionExits, stats.LoopIterations)
+		fmt.Fprintf(os.Stderr, "native_sessions=%d link_miss_stops=%d budget_stops=%d other_stops=%d\n", stats.NativeSessions, stats.LinkMissStops, stats.BudgetStops, stats.OtherStops)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return code
+}
+
+-- quanta_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestRunQuantaMatchesArchitecturalStepsAndRevalidates(t *testing.T) {
+	m, e, c := linkedLoop(t)
+	defer e.Close()
+	for _, budget := range []uint64{1, 3, 63, 64, 65, 257, 1024, 1025} {
+		want := *c
+		for i := uint64(0); i < budget; i++ {
+			if err := want.Step(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before := c.Retired
+		for c.Retired-before < budget {
+			if err := e.RunQuanta(c, budget-(c.Retired-before)); err != nil {
+				t.Fatal(err)
+			}
+			if c.Retired-before > budget {
+				t.Fatal("absolute ceiling exceeded")
+			}
+		}
+		if c.State != want.State || c.Retired != want.Retired {
+			t.Fatal("quanta/architecture mismatch", budget, c.State, want.State, c.Retired, want.Retired)
+		}
+	}
+	// A mutation between schedules must not inherit their old code proof.
+	alias := *m
+	if err := alias.Write(0x100c, 4, 0xffffffff); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	before := c.Retired
+	for c.Retired-before < 2 {
+		if err := e.RunQuanta(c, 2-(c.Retired-before)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.State[aarch64.PC] != 0x100c || c.Retired-before != 2 {
+		t.Fatal("stale successor executed", c.State, c.Retired-before)
+	}
+	state := c.State
+	if err := e.RunQuanta(c, 1024); err == nil || c.State != state || c.Retired-before != 2 {
+		t.Fatal("precise mutated trap", err, c.State, c.Retired-before)
+	}
+}
+
+-- region_test.go --
+package arm64user
+
+import (
+	"fmt"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func hotRegion(t *testing.T, words ...uint32) (*Memory, *aarch64.Engine, *aarch64.CPU) {
+	t.Helper()
+	m, e := nativeTestMemory(t, words...), nativeMemoryEngine(t)
+	c := &aarch64.CPU{Memory: m}
+	c.State[aarch64.PC] = 0x1000
+	c.State[0], c.State[1] = 100, 0x3100
+	m.NativeContext()
+	m.NativeRefill(0x3100)
+	if err := e.Step(c, uint64(len(words)-1)); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	if err := e.Run(c, 64); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1000
+	if e.Stats.Regions == 0 {
+		t.Fatal("region was not compiled", e.Stats)
+	}
+	return m, e, c
+}
+
+func TestNativeRegionBudgetsAndConditionalExits(t *testing.T) {
+	// SUBS X0,X0,1; B.NE -4; unsupported successor.
+	for _, iterations := range []uint64{1, 2, 3, 100} {
+		for _, budget := range []uint64{1, 2, 3, 4, 7, 63, 64, 65} {
+			m, e, c := hotRegion(t, 0xf1000400, 0x54ffffe1, 0xffffffff)
+			c.State[0], c.State[aarch64.PC] = iterations, 0x1000
+			reference := nativeTestMemory(t, 0xf1000400, 0x54ffffe1, 0xffffffff)
+			want := *c
+			want.Memory = reference
+			before, exits, memoryExits := c.Retired, e.Stats.RegionExits, e.Stats.MemoryExits
+			var gotErr, wantErr error
+			for c.Retired-before < budget {
+				gotErr = e.Run(c, budget-(c.Retired-before))
+				if gotErr != nil {
+					break
+				}
+			}
+			for want.Retired-before < budget {
+				wantErr = want.Step()
+				if wantErr != nil {
+					break
+				}
+			}
+			if c.State != want.State || c.Retired != want.Retired || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || e.Stats.MemoryExits != memoryExits {
+				t.Fatal("region budget/exit mismatch", iterations, budget, c.State, want.State, c.Retired, want.Retired, gotErr, wantErr)
+			}
+			if iterations == 1 && budget >= 4 && e.Stats.RegionExits != exits+1 {
+				t.Fatal("first iteration did not side exit", e.Stats)
+			}
+			if e.Stats.Native+e.Stats.IR+e.Stats.Interpreted != c.Retired {
+				t.Fatal("tier accounting mismatch")
+			}
+			_ = m
+		}
+	}
+}
+
+func TestNativeRegionSecondIterationFaultNoReplay(t *testing.T) {
+	// ADD X0,1; STR X0,[X1]; ADD X1,8; B -12.
+	m, e, c := hotRegion(t, 0x91000400, 0xf9000020, 0x91002021, 0x17fffffd, 0xffffffff)
+	c.State[0], c.State[1], c.State[aarch64.PC] = 40, 0x4ff8, 0x1000
+	m.NativeRefill(0x4ff8)
+	before, native, stores := c.Retired, e.Stats.Native, e.Stats.NativeMemory
+	err := e.Run(c, 64)
+	trap, ok := err.(*aarch64.Exception)
+	value, readErr := m.Read(0x4ff8, 8, false)
+	if !ok || trap.Kind != "memory" || trap.PC != 0x1004 || c.Retired != before+5 || c.State[0] != 42 || c.State[1] != 0x5000 || value != 41 || readErr != nil || e.Stats.Native != native+5 || e.Stats.NativeMemory != stores+1 {
+		t.Fatal("second iteration fault replayed prefix", err, c.State, c.Retired-before, value, e.Stats)
+	}
+}
+
+func TestNativeRegionInvalidatesWithOriginalCode(t *testing.T) {
+	for _, mutation := range []string{"write", "protect", "unmap", "remap"} {
+		m, e, c := hotRegion(t, 0x91000400, 0x17ffffff, 0xffffffff)
+		alias := *m
+		var err error
+		switch mutation {
+		case "write":
+			err = alias.Write(0x1000, 4, 0xffffffff)
+		case "protect":
+			err = alias.Protect(0x1000, PageSize, 3)
+		default:
+			err = alias.Unmap(0x1000, PageSize)
+			if err == nil && mutation == "remap" {
+				err = alias.Map(0x1000, PageSize, 7)
+			}
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, before := c.State, c.Retired
+		if err = e.Run(c, 64); err == nil || c.State != state || c.Retired != before {
+			t.Fatal("stale region executed", mutation, err, c.State, c.Retired)
+		}
+	}
+}
+
+func TestNativeRegionKeepsStepAndIndependentRegionLimit(t *testing.T) {
+	_, e, c := hotRegion(t, 0x91000400, 0x17ffffff, 0xffffffff)
+	before, value := c.Retired, c.State[0]
+	if err := e.Step(c, 64); err != nil || c.Retired != before+2 || c.State[0] != value+1 || c.State[aarch64.PC] != 0x1000 {
+		t.Fatal("Step expanded into a region", err, c.State, c.Retired-before)
+	}
+	// A nine-instruction body now loops without expanding its static instruction count.
+	words := make([]uint32, 9)
+	for i := 0; i < 8; i++ {
+		words[i] = 0x91000400
+	}
+	words[8] = 0x17fffff8
+	m, engine := nativeTestMemory(t, words...), nativeMemoryEngine(t)
+	cpu := &aarch64.CPU{Memory: m}
+	cpu.State[aarch64.PC] = 0x1000
+	if err := engine.Step(cpu, 9); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Run(cpu, 64); err != nil {
+		t.Fatal(err)
+	}
+	if engine.Stats.Native == 0 || engine.Stats.Regions != 1 || engine.Stats.LoopIterations != 7 || cpu.Retired != 72 {
+		t.Fatal("bounded native loop budget changed", engine.Stats, cpu.Retired)
+	}
+	// Cold blocks remain short, but a 17-word cycle may now form a separately
+	// optimized region. Step must still execute only its original cold block.
+	large := make([]uint32, 17)
+	for i := 0; i < 16; i++ {
+		large[i] = 0x91000400
+	}
+	large[16] = 0x17fffff0
+	largeMemory, largeEngine := nativeTestMemory(t, large...), nativeMemoryEngine(t)
+	largeCPU := &aarch64.CPU{Memory: largeMemory}
+	largeCPU.State[aarch64.PC] = 0x1000
+	if err := largeEngine.Step(largeCPU, 64); err != nil || largeCPU.Retired != 16 {
+		t.Fatal("Step no longer has cold-block semantics", err, largeCPU.Retired)
+	}
+	for i := 0; i < 8; i++ {
+		before := largeCPU.Retired
+		if err := largeEngine.Run(largeCPU, 64); err != nil || largeCPU.Retired-before > 64 {
+			t.Fatal("caller ceiling exceeded", err, largeCPU.Retired-before)
+		}
+	}
+	if largeEngine.Stats.Regions == 0 || largeEngine.Stats.LoopIterations == 0 {
+		t.Fatal("wide region was not compiled/executed", largeEngine.Stats)
+	}
+	if largeCPU.State[0] != largeCPU.Retired-largeCPU.Retired/17 || largeCPU.State[aarch64.PC] != 0x1000+4*(largeCPU.Retired%17) {
+		t.Fatal("wide-region scalar state", largeCPU.State, largeCPU.Retired)
+	}
+}
+
+// Independently configured slices must also apply to RunQuanta, rather than
+// accidentally selecting the compatibility scheduler's fixed 64-instruction calls.
+func TestNativeConfiguredShortSliceAlsoBoundsRunQuanta(t *testing.T) {
+	config := aarch64.DefaultEngineConfig()
+	config.IRThreshold, config.NativeThreshold = 1, 1
+	config.MaxRegionInstructions, config.MaxNativeInstructions = 17, 3
+	e, err := aarch64.NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	m := nativeTestMemory(t, 0x91000400, 0x17ffffff, 0xffffffff)
+	c := &aarch64.CPU{Memory: m}
+	c.State[aarch64.PC] = 0x1000
+	if err = e.Step(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	before, value := c.Retired, c.State[0]
+	if err = e.RunQuanta(c, 65536); err != nil {
+		t.Fatal(err)
+	}
+	if e.Stats.Native == 0 {
+		t.Skip("native host unavailable")
+	}
+	if c.Retired-before != 2 || c.State[0] != value+1 || c.State[aarch64.PC] != 0x1000 {
+		t.Fatal("configured short slice ignored", c.Retired-before, c.State)
+	}
+}
+
+-- trace_refinement_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+// A proven internal branch target may be forwarded as a constant only after
+// the branch's checkpoint and guard. A later memory fault must retain that
+// target, while a failed first guard must retain its alternate architectural PC.
+func TestNativeTracePCRefinementThenFaultOrSideExit(t *testing.T) {
+	for _, take := range []uint64{0, 1} {
+		m := nativeTestMemory(t, 0x91000400, 0xb5007fe3, 0x91000484, 0x14000000)
+		if err := m.Map(0x2000, PageSize, 7); err != nil {
+			t.Fatal(err)
+		}
+		// LDR X2,[X1]; B 0x1000; invalid fallthrough.
+		for i, op := range []uint32{0xf9400022, 0x17fffbff, 0xffffffff} {
+			if err := m.Write(0x2000+uint64(i)*4, 4, uint64(op)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e := nativeMemoryEngine(t)
+		c := &aarch64.CPU{Memory: m}
+		c.State[aarch64.PC], c.State[1], c.State[3] = 0x1000, 0x3100, 1
+		m.NativeContext()
+		m.NativeRefill(0x3100)
+		for i := 0; i < 2; i++ {
+			if err := e.Step(c, 2); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := e.Run(c, 64); err != nil || e.Stats.Regions == 0 {
+			t.Fatal("trace warmup", err, e.Stats)
+		}
+		c.State[aarch64.PC], c.State[1], c.State[2], c.State[3] = 0x1000, 0x6000, 999, take
+		old, before := c.State, c.Retired
+		if take == 0 {
+			if err := e.Run(c, 4); err != nil || c.Retired != before+2 || c.State[aarch64.PC] != 0x1008 || c.State[0] != old[0]+1 || c.State[2] != 999 {
+				t.Fatal("refinement escaped failed guard", err, c.State, c.Retired-before)
+			}
+		} else {
+			err := e.Run(c, 64)
+			trap, ok := err.(*aarch64.Exception)
+			if !ok || trap.Kind != "memory" || trap.PC != 0x2000 || c.State[aarch64.PC] != 0x2000 || c.Retired != before+2 || c.State[0] != old[0]+1 || c.State[2] != 999 {
+				t.Fatal("post-guard fault lost refined PC", err, c.State, c.Retired-before)
+			}
+		}
+	}
+}
+
+-- trace_test.go --
+package arm64user
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func crossPageTrace(t *testing.T) (*Memory, *aarch64.Engine, *aarch64.CPU) {
+	t.Helper()
+	// ADD X0,1; CBNZ X3,0x2000. Alternate: ADD X4,1; B self.
+	m := nativeTestMemory(t, 0x91000400, 0xb5007fe3, 0x91000484, 0x14000000)
+	if err := m.Map(0x2000, PageSize, 7); err != nil {
+		t.Fatal(err)
+	}
+	// ADD X1,1; B 0x1000.
+	if err := m.Write(0x2000, 4, 0x91000421); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x2004, 4, 0x17fffbff); err != nil {
+		t.Fatal(err)
+	}
+	e := nativeMemoryEngine(t)
+	c := &aarch64.CPU{Memory: m}
+	c.State[3] = 1
+	c.State[aarch64.PC] = 0x1000
+	for i := 0; i < 2; i++ {
+		if err := e.Step(c, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.State[aarch64.PC] != 0x1000 {
+		t.Fatal("bad independently encoded cross-page branches", c.State)
+	}
+	if err := e.Run(c, 64); err != nil {
+		t.Fatal(err)
+	}
+	if e.Stats.Regions == 0 || e.Stats.LoopIterations < 16 {
+		t.Fatal("multi-block trace not selected", e.Stats)
+	}
+	return m, e, c
+}
+func TestNativeTraceInternalSideExitAndBudgets(t *testing.T) {
+	_, e, c := crossPageTrace(t)
+	for _, budget := range []uint64{1, 2, 3, 4, 7, 63, 64, 65} {
+		want := *c
+		before := c.Retired
+		for i := uint64(0); i < budget; i++ {
+			if err := want.Step(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for c.Retired-before < budget {
+			if err := e.Run(c, budget-(c.Retired-before)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c.State != want.State || c.Retired != want.Retired {
+			t.Fatal("cross-block trace budget/state mismatch", budget, c.State, want.State, c.Retired, want.Retired)
+		}
+	}
+	c.State[aarch64.PC] = 0x1008
+	if err := e.Step(c, 2); err != nil {
+		t.Fatal(err)
+	}
+	c.State[aarch64.PC] = 0x1008
+	if err := e.Run(c, 2); err != nil {
+		t.Fatal(err)
+	} // publish alternate target
+	c.State[3] = 0
+	c.State[aarch64.PC] = 0x1000
+	old := c.State
+	before, exits, memoryExits := c.Retired, e.Stats.RegionExits, e.Stats.MemoryExits
+	if err := e.Run(c, 4); err != nil {
+		t.Fatal(err)
+	}
+	if c.Retired != before+4 || c.State[0] != old[0]+1 || c.State[1] != old[1] || c.State[4] != old[4]+1 || c.State[aarch64.PC] != 0x100c || e.Stats.RegionExits != exits+1 || e.Stats.MemoryExits != memoryExits {
+		t.Fatal("internal trace side exit did not commit precisely", c.State, old, c.Retired-before, e.Stats)
+	}
+}
+func TestNativeTraceAllConstituentPagesInvalidate(t *testing.T) {
+	for _, mutation := range []string{"write", "protect", "unmap", "remap"} {
+		m, e, c := crossPageTrace(t)
+		alias := *m
+		var err error
+		switch mutation {
+		case "write":
+			err = alias.Write(0x2000, 4, 0xffffffff)
+		case "protect":
+			err = alias.Protect(0x2000, PageSize, 3)
+		default:
+			err = alias.Unmap(0x2000, PageSize)
+			if err == nil && mutation == "remap" {
+				err = alias.Map(0x2000, PageSize, 7)
+			}
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.State[aarch64.PC] = 0x1000
+		before, value, other := c.Retired, c.State[0], c.State[1]
+		for c.Retired-before < 2 {
+			if err = e.Run(c, 2-(c.Retired-before)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if c.Retired != before+2 || c.State[0] != value+1 || c.State[1] != other || c.State[aarch64.PC] != 0x2000 {
+			t.Fatal("stale cross-page region executed", mutation, c.State, c.Retired-before)
+		}
+		if err = e.Run(c, 64); err == nil || c.Retired != before+2 || c.State[1] != other {
+			t.Fatal("mutated constituent page lost precise trap", mutation, err, c.State, c.Retired-before)
+		}
+	}
+}
+
+-- user_test.go --
+package arm64user
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"strings"
+	"testing"
+	"time"
+)
+
+// This is a real ELF container with literal A64 instructions, not a recognized
+// benchmark payload. The loader and normal CPU path execute every instruction.
+func testELF(words ...uint32) []byte {
+	image := make([]byte, 4096)
+	copy(image, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binary.LittleEndian.PutUint16(image[16:], 2)
+	binary.LittleEndian.PutUint16(image[18:], 183)
+	binary.LittleEndian.PutUint32(image[20:], 1)
+	binary.LittleEndian.PutUint64(image[24:], 0x400080)
+	binary.LittleEndian.PutUint64(image[32:], 64)
+	binary.LittleEndian.PutUint16(image[52:], 64)
+	binary.LittleEndian.PutUint16(image[54:], 56)
+	binary.LittleEndian.PutUint16(image[56:], 1)
+	binary.LittleEndian.PutUint32(image[64:], 1)
+	binary.LittleEndian.PutUint32(image[68:], 7)
+	binary.LittleEndian.PutUint64(image[80:], 0x400000)
+	binary.LittleEndian.PutUint64(image[96:], 4096)
+	binary.LittleEndian.PutUint64(image[104:], 8192)
+	binary.LittleEndian.PutUint64(image[112:], 4096)
+	for i, word := range words {
+		binary.LittleEndian.PutUint32(image[128+i*4:], word)
+	}
+	return image
+}
+func requireNative(t *testing.T, stats aarch64.Stats) {
+	// The CPU archive separately requires native execution on supported hosts.
+	if stats.CompileFailures == 0 && stats.Native == 0 {
+		t.Fatal("native tier never executed")
+	}
+}
+func TestStaticELFWriteExit(t *testing.T) {
+	// mov x0,1; adr x1,message; mov x2,3; mov x8,64; svc 0;
+	// mov x0,7; mov x8,93; svc 0.
+	image := testELF(0xd2800020, 0x100003e1, 0xd2800062, 0xd2800808, 0xd4000001, 0xd28000e0, 0xd2800ba8, 0xd4000001)
+	copy(image[256:], "hi\n")
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			p, err := Load(image, []string{"hello", "arg"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			config := aarch64.DefaultEngineConfig()
+			config.Mode = mode
+			config.IRThreshold = 1
+			config.NativeThreshold = 1
+			code, stats, err := p.Run(config, 100, &out, nil)
+			if err != nil || code != 7 || out.String() != "hi\n" || p.CPU.Retired != 8 {
+				t.Fatalf("code=%d output=%q retired=%d stats=%+v err=%v", code, out.String(), p.CPU.Retired, stats, err)
+			}
+			if stats.Interpreted+stats.IR+stats.Native != 8 {
+				t.Fatal("retirement statistics")
+			}
+			if mode == "native" {
+				requireNative(t, stats)
+			}
+		})
+	}
+}
+func TestStaticELFHotLoop(t *testing.T) {
+	image := testELF(0x52800000, 0x52801901, 0x11000400, 0x71000421, 0x54ffffc1, 0xd2800ba8, 0xd4000001)
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		p, err := Load(image, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := aarch64.DefaultEngineConfig()
+		config.Mode = mode
+		code, stats, err := p.Run(config, 1000, nil, nil)
+		if err != nil || code != 200 || p.CPU.Retired != 604 {
+			t.Fatalf("mode=%s code=%d retired=%d stats=%+v err=%v", mode, code, p.CPU.Retired, stats, err)
+		}
+		if mode == "native" {
+			requireNative(t, stats)
+		}
+	}
+	p, err := Load(image, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := aarch64.DefaultEngineConfig()
+	config.IRThreshold = 1
+	config.NativeThreshold = 1
+	if _, _, err = p.Run(config, 17, nil, nil); err == nil || p.CPU.Retired != 17 {
+		t.Fatal("retirement budget overrun")
+	}
+}
+func TestELFInitialStackAndBSS(t *testing.T) {
+	p, err := Load(testELF(0xd503201f), []string{"guest", "argument"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := p.CPU.State[aarch64.SP]
+	if sp&15 != 0 {
+		t.Fatal("unaligned initial SP")
+	}
+	argc, err := p.Memory.Read(sp, 8, false)
+	if err != nil || argc != 2 {
+		t.Fatal("argc")
+	}
+	second, _ := p.Memory.Read(sp+16, 8, false)
+	data, err := p.Memory.ReadBytes(second, 9)
+	if err != nil || string(data) != "argument\x00" {
+		t.Fatal("argv")
+	}
+	for _, at := range []uint64{sp + 24, sp + 32} {
+		value, _ := p.Memory.Read(at, 8, false)
+		if value != 0 {
+			t.Fatal("argv/envp terminator")
+		}
+	}
+	bss, err := p.Memory.ReadBytes(0x401000, 4096)
+	if err != nil || !bytes.Equal(bss, make([]byte, 4096)) {
+		t.Fatal("BSS not zero initialized")
+	}
+	if err = p.Memory.Write(stackTop-stackSize-1, 1, 0); err == nil {
+		t.Fatal("missing stack guard")
+	}
+	foundRandom := false
+	for at := sp + 40; at < sp+512; at += 16 {
+		kind, _ := p.Memory.Read(at, 8, false)
+		value, _ := p.Memory.Read(at+8, 8, false)
+		if kind == 0 {
+			break
+		}
+		if kind == 25 {
+			foundRandom = true
+			if _, err = p.Memory.ReadBytes(value, 16); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !foundRandom {
+		t.Fatal("missing AT_RANDOM")
+	}
+}
+func TestELFRejectsInvalidImages(t *testing.T) {
+	for _, mutate := range []func([]byte){
+		func(b []byte) { b[18] = 62 },
+		func(b []byte) { b[4] = 1 },
+		func(b []byte) { binary.LittleEndian.PutUint16(b[16:], 3) },
+		func(b []byte) { binary.LittleEndian.PutUint32(b[64:], 3) },
+		func(b []byte) { binary.LittleEndian.PutUint64(b[104:], 1) },
+		func(b []byte) { binary.LittleEndian.PutUint64(b[80:], ^uint64(0)-1) },
+		func(b []byte) { binary.LittleEndian.PutUint64(b[112:], 3) },
+		func(b []byte) { binary.LittleEndian.PutUint64(b[24:], 0x400081) },
+		func(b []byte) { binary.LittleEndian.PutUint32(b[68:], 4) },
+		func(b []byte) { binary.LittleEndian.PutUint16(b[56:], 65535) },
+	} {
+		image := testELF(0xd503201f)
+		mutate(image)
+		if _, err := Load(image, nil); err == nil {
+			t.Fatal("accepted invalid ELF")
+		}
+	}
+	for _, length := range []int{0, 4, 16, 63, 100} {
+		if _, err := Load(testELF()[:length], nil); err == nil {
+			t.Fatal("accepted truncated ELF")
+		}
+	}
+	if _, err := Load(testELF(), []string{strings.Repeat("x", 65536)}); err == nil {
+		t.Fatal("argument budget")
+	}
+	if _, err := Load(testELF(), []string{"x\x00y"}); err == nil {
+		t.Fatal("NUL argument")
+	}
+}
+func TestMemoryPermissionsAndTransactions(t *testing.T) {
+	m := NewMemory()
+	if err := m.Map(0x1000, PageSize, ReadPermission|WritePermission); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x1ffc, 4, 0x12345678); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x1ffc, 8, ^uint64(0)); err == nil {
+		t.Fatal("cross-page write did not fault")
+	}
+	got, _ := m.Read(0x1ffc, 4, false)
+	if got != 0x12345678 {
+		t.Fatal("fault partially wrote memory")
+	}
+	if err := m.Protect(0x1000, PageSize*2, 0); err == nil {
+		t.Fatal("partial protection accepted")
+	}
+	if _, err := m.Read(0x1000, 1, false); err != nil {
+		t.Fatal("failed protect partially changed permissions")
+	}
+	if err := m.Protect(0x1000, PageSize, ExecutePermission); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Read(0x1000, 4, true); err != nil {
+		t.Fatal("execute-only fetch")
+	}
+	if _, err := m.Read(0x1000, 4, false); err == nil {
+		t.Fatal("execute-only data read")
+	}
+	if err := m.Map(0x1000, PageSize, 7); err == nil {
+		t.Fatal("overlapping mapping")
+	}
+	if err := m.Map(0x3000, MemoryLimit+PageSize, 7); err == nil {
+		t.Fatal("memory budget")
+	}
+	if err := m.Map(AddressLimit-PageSize, PageSize*2, 7); err == nil {
+		t.Fatal("overflow mapping")
+	}
+	if _, err := m.Read(^uint64(0), 8, false); err == nil {
+		t.Fatal("overflow read")
+	}
+	if err := m.Unmap(0x1000, PageSize); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Read(0x1000, 4, true); err == nil {
+		t.Fatal("unmapped fetch")
+	}
+}
+func TestSyscallErrorsMappingsAndClock(t *testing.T) {
+	p, err := Load(testELF(0xd503201f), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &p.CPU.State
+	x[8] = 9999
+	p.Syscall(nil, nil)
+	if x[0] != errno(38) {
+		t.Fatal("unsupported syscall must be ENOSYS")
+	}
+	x[8], x[0], x[1], x[2] = 64, 1, ^uint64(0), 8
+	var out bytes.Buffer
+	p.Syscall(&out, nil)
+	if x[0] != errno(14) || out.Len() != 0 {
+		t.Fatal("write EFAULT")
+	}
+	x[8], x[0], x[1], x[2] = 64, 123, 0, 0
+	p.Syscall(nil, nil)
+	if x[0] != errno(9) {
+		t.Fatal("write EBADF")
+	}
+	x[8], x[0] = 214, 0
+	p.Syscall(nil, nil)
+	old := x[0]
+	x[8], x[0] = 214, old+100
+	p.Syscall(nil, nil)
+	if x[0] != old+100 {
+		t.Fatal("brk growth")
+	}
+	x[8], x[0] = 214, ^uint64(0)
+	p.Syscall(nil, nil)
+	if x[0] != old+100 {
+		t.Fatal("brk failure convention")
+	}
+	x[8], x[0], x[1], x[2], x[3], x[4], x[5] = 222, 0, PageSize, 3, 0x22, ^uint64(0), 0
+	p.Syscall(nil, nil)
+	mapping := x[0]
+	if int64(mapping) < 0 {
+		t.Fatal("anonymous mmap")
+	}
+	if err = p.Memory.Write(mapping, 8, 0x1234); err != nil {
+		t.Fatal(err)
+	}
+	x[8], x[0], x[1], x[2] = 226, mapping, PageSize, 1
+	p.Syscall(nil, nil)
+	if x[0] != 0 {
+		t.Fatal("mprotect")
+	}
+	if err = p.Memory.Write(mapping, 8, 0); err == nil {
+		t.Fatal("read-only mapping")
+	}
+	x[8], x[0], x[1] = 215, mapping, PageSize
+	p.Syscall(nil, nil)
+	if x[0] != 0 {
+		t.Fatal("munmap")
+	}
+	if _, err = p.Memory.Read(mapping, 8, false); err == nil {
+		t.Fatal("unmapped anonymous memory")
+	}
+	p.started = time.Now().Add(-2 * time.Second)
+	destination := p.CPU.State[aarch64.SP] - 32
+	x[8], x[0], x[1] = 113, 1, destination
+	p.Syscall(nil, nil)
+	seconds, _ := p.Memory.Read(destination, 8, false)
+	if x[0] != 0 || seconds < 1 || p.CPU.Retired != 0 {
+		t.Fatal("monotonic clock must use real elapsed time")
+	}
+}

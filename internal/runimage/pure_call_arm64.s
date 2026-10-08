@@ -14,3 +14,17 @@ TEXT ·callPure(SB),NOSPLIT,$0-24
 	MOVD 8(RSP), R11
 	MOVD R11, RSP
 	RET
+
+TEXT ·callContext(SB),NOSPLIT,$0-32
+ MOVD entry+0(FP), R9
+ MOVD state+8(FP), R0
+ MOVD context+16(FP), R1
+ MOVD stackTop+24(FP), R10
+ MOVD RSP, R11
+ MOVD R10, RSP
+ SUB $16, RSP
+ MOVD R11, 8(RSP)
+ CALL (R9)
+ MOVD 8(RSP), R11
+ MOVD R11, RSP
+ RET

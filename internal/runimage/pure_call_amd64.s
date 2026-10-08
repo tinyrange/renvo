@@ -14,3 +14,17 @@ TEXT ·callPure(SB),NOSPLIT,$0-24
 	MOVQ 8(SP), CX
 	MOVQ CX, SP
 	RET
+
+TEXT ·callContext(SB),NOSPLIT,$0-32
+ MOVQ entry+0(FP), R10
+ MOVQ state+8(FP), AX
+ MOVQ context+16(FP), DX
+ MOVQ stackTop+24(FP), R11
+ MOVQ SP, CX
+ MOVQ R11, SP
+ SUBQ $16, SP
+ MOVQ CX, 8(SP)
+ CALL R10
+ MOVQ 8(SP), CX
+ MOVQ CX, SP
+ RET

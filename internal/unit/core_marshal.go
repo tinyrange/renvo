@@ -37,7 +37,7 @@ func marshalCoreInto(program *CoreProgram, transient bool, result *[]byte) bool 
 	for i := 0; i < len(program.RTGAssembly); i++ {
 		assemblyCapacity += len(program.RTGAssembly[i].Path) + len(program.RTGAssembly[i].Source) + 4
 	}
-	capacity := 82 + unboundTargetBindingReserve + len(program.Package) + len(program.ImportPath) + len(program.Text) + len(program.Tokens)*5 + len(program.Decls)*8 + len(program.Funcs)*12 + len(program.Packages)*48 + assemblyCapacity
+	capacity := 82 + unboundTargetBindingReserve + len(program.Package) + len(program.ImportPath) + len(program.Text) + encodedTokensCoreSize(program.Tokens) + encodedDeclsCoreSize(program.Decls) + encodedFuncsCoreSize(program.Funcs) + encodedPackagesCoreSize(program.Packages) + assemblyCapacity
 	out := make([]byte, 0, capacity)
 	for i := 0; i < len(Magic); i++ {
 		out = append(out, Magic[i])
@@ -170,6 +170,69 @@ func appendCoreStringBytes(out []byte, value string) []byte {
 // self-hosted frontends.
 func Marshal(program Program) ([]byte, bool) {
 	return MarshalCore(CoreProgramFrom(program))
+}
+
+// encodedTokensCoreSize measures the compact token table before reserving the
+// output buffer. A blanket five bytes per token wastes nearly a megabyte on
+// large units whose kind, start delta, size and line delta each fit in one byte.
+func encodedTokensCoreSize(tokens []Token) int {
+	size := coreVarintSize(len(tokens)) + len(tokens)*4
+	prevStart, prevLine := 0, 0
+	for i := 0; i < len(tokens); i++ {
+		tok := &tokens[i]
+		line := tok.KindLine >> 8
+		// Most fields fit in one byte. Only visit the varint loop for
+		// larger fields, avoiding three calls for every ordinary token.
+		if delta := tok.Start - prevStart; delta >= 128 {
+			size += coreVarintSize(delta) - 1
+		}
+		if tok.Size >= 128 {
+			size += coreVarintSize(tok.Size) - 1
+		}
+		if delta := line - prevLine; delta >= 128 {
+			size += coreVarintSize(delta) - 1
+		}
+		prevStart, prevLine = tok.Start, line
+	}
+	return size
+}
+
+func encodedDeclsCoreSize(decls []Decl) int {
+	size := coreVarintSize(len(decls))
+	for i := 0; i < len(decls); i++ {
+		d := &decls[i]
+		size += coreVarintSize(d.Kind) + coreVarintSize(d.NameStart) + coreVarintSize(d.NameEnd-d.NameStart) + coreVarintSize(d.StartTok) + coreVarintSize(d.EndTok-d.StartTok)
+	}
+	return size
+}
+
+func encodedFuncsCoreSize(funcs []Func) int {
+	size := coreVarintSize(len(funcs))
+	for i := 0; i < len(funcs); i++ {
+		f := &funcs[i]
+		size += coreVarintSize(f.NameStart) + coreVarintSize(f.NameEnd-f.NameStart) + coreVarintSize(f.StartTok) + coreVarintSize(f.NameTok-f.StartTok) + coreVarintSize(f.ReceiverStart) + coreVarintSize(f.ReceiverEnd-f.ReceiverStart) + coreVarintSize(f.BodyStart) + coreVarintSize(f.BodyEnd-f.BodyStart) + coreVarintSize(f.EndTok-f.BodyEnd)
+	}
+	return size
+}
+
+func encodedPackagesCoreSize(packages []PackageInfo) int {
+	size := coreVarintSize(len(packages))
+	for i := 0; i < len(packages); i++ {
+		p := &packages[i]
+		size += coreVarintSize(len(p.Name)) + len(p.Name) + coreVarintSize(len(p.ImportPath)) + len(p.ImportPath) + 16
+		size += coreVarintSize(p.TextStart) + coreVarintSize(p.TextEnd-p.TextStart) + coreVarintSize(p.TokenStart) + coreVarintSize(p.TokenEnd-p.TokenStart)
+		size += coreVarintSize(p.DeclStart) + coreVarintSize(p.DeclEnd-p.DeclStart) + coreVarintSize(p.FuncStart) + coreVarintSize(p.FuncEnd-p.FuncStart)
+	}
+	return size
+}
+
+func coreVarintSize(value int) int {
+	size := 1
+	for value >= 128 {
+		size++
+		value >>= 7
+	}
+	return size
 }
 
 func appendEncodedTokensCore(out []byte, tokens []Token, transient bool) []byte {

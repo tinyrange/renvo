@@ -186,3 +186,10 @@ limits its in-memory filesystem to 64 MiB, live processes to 64, descriptors to
 20 per process and each pipe to 4096 bytes. It supplies a useful historical
 shell environment, with remaining compatibility limitations listed in the
 [emulator README](../emulators/README.md).
+
+## AArch64 user mode
+
+The AArch64 RFE adds an integer CPU, static-ELF Linux personality and bounded
+IR/native tiers with versioned code guards and precise memory exits. See
+[aarch64-user.md](aarch64-user.md) for usage, scope and limits, and
+[rfe-native-abi.md](rfe-native-abi.md) for the native ownership contract.

@@ -354,6 +354,9 @@ func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return definiteTypeKind(pkg, info, fileIndex, typeStart, typeEnd, 0)
 	}
 	symbolIndex := lookupPackageSymbolTextCore(info, file, start)
+	if symbolIndex < 0 || info.Symbols[symbolIndex].Kind != SymbolVar {
+		return definiteTypeUnknown
+	}
 	for i := 0; i < len(info.Decls); i++ {
 		if info.Decls[i].Symbol != symbolIndex || info.Decls[i].Kind != SymbolVar {
 			continue
@@ -373,17 +376,14 @@ func definiteNamedFieldTypeKind(pkg *load.Package, info *PackageInfo, fileIndex 
 }
 
 func findDefiniteLocalType(file *syntax.File, locals []definiteLocalTypeSpan, nameTok int, before int) (int, int, bool) {
-	foundStart := -1
-	foundEnd := -1
-	found := false
-	for i := 0; i < len(locals); i++ {
+	// The last visible declaration wins. Search in that order instead of
+	// continuing through the whole list after every matching declaration.
+	for i := len(locals) - 1; i >= 0; i-- {
 		if locals[i].visible <= before && statementTokensEqual(file, locals[i].nameTok, nameTok) {
-			foundStart = locals[i].typeStart
-			foundEnd = locals[i].typeEnd
-			found = true
+			return locals[i].typeStart, locals[i].typeEnd, true
 		}
 	}
-	return foundStart, foundEnd, found
+	return -1, -1, false
 }
 
 func collectDefiniteLocalTypes(file *syntax.File, caller syntax.FuncDecl) []definiteLocalTypeSpan {

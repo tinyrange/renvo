@@ -1,5 +1,3 @@
-//go:build !renvo
-
 package binary
 
 type ByteOrder interface {

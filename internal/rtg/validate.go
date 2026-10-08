@@ -4,6 +4,10 @@ package rtg
 // required before target composition or source emission. More specialized
 // validators can grow beside these checks as each backend contract is migrated.
 func validateMachineDeclarations(document Document) []Diagnostic {
+	// Hook signatures are queried repeatedly across machine contracts. Parse
+	// each backend Go block once for this validation, not once per binding.
+	document.backendFunctions = indexEmbeddedFunctions(document, "backend")
+	document.backendFunctionsIndexed = true
 	diagnostics := validateImplementsContract(document)
 	goNames := embeddedGoNames(document)
 	for i := 0; i < len(document.Declarations); i++ {

@@ -8,6 +8,8 @@ files and do not require separately maintained emulator Go packages.
 | --- | --- |
 | `pdp11.rfe` | Shared PDP-11 CPU, FP11 floating point, MMU, interpreter and native lowering |
 | `v7-user.rfe` | V7 a.out loader and syscall personality; requires `pdp11` |
+| `aarch64.rfe` | A64 integer CPU with interpreter, IR and native tiers |
+| `linux-arm64-user.rfe` | Static-ELF Linux AArch64 personality; requires `aarch64` |
 | `pdp11-machine.rfe` | PDP-11 machine, console, clock and RK05 disks; requires `pdp11` |
 
 From the Renvo checkout, with the Go toolchain installed:
@@ -97,3 +99,9 @@ bad stacks, interrupted host reads without lost input, blocked host writes with
 stable buffers, and trap-to-signal mapping.
 
 See [the RFE format and runtime](../docs/rfe.md) for authoring and extension.
+
+## AArch64 user mode
+
+See [usage and supported scope](../docs/aarch64-user.md). This is an incomplete
+integer/static-ELF implementation, not a security sandbox or a demonstrated
+QEMU performance win.
