@@ -888,7 +888,9 @@ def pr_resume(number, expected_head, expected_main):
                 *(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"] + args))
         if _publish_require(inspect(["rev-parse", "refs/heads/" + branch])) != expected_head:
             continue
-        if _publish_require(inspect(["rev-parse", "ORIG_HEAD"])) != expected_head:
+        if _publish_require(inspect(["symbolic-ref", "--quiet", "--short", "HEAD"])) != branch:
+            continue
+        if _publish_require(inspect(["rev-parse", "HEAD"])) != expected_head:
             continue
         ancestry = inspect(["merge-base", "--is-ancestor", expected_main, "HEAD"])
         if not ancestry.success:
@@ -944,8 +946,367 @@ def wasi_selfhost_smoke():
 
 repo = repo + module("repo", wasi_selfhost_smoke = wasi_selfhost_smoke)
 
+# Narrow native profiling of the existing compiler self-host workload.
+def native_profile(name, target = "linux/386"):
+    """Sample a named compiler self-host for linux/386 or linux/amd64 only."""
+    name = _name(name)
+    if target not in ["linux/386", "linux/amd64"]:
+        fail("Profiling target must be linux/386 or linux/amd64")
+    if platform != "linux/amd64":
+        fail("Native profiling requires the Linux amd64 host")
+    directory = "sandbox/agent-profiles"
+    if "agent-profiles" not in _work().list_dir("sandbox"):
+        _work().mkdir(directory)
+    return privileged.run(
+        "perf", "record", "--freq", "997", "--call-graph", "fp",
+        "--output", _work().path(directory + "/native.perf"), "--",
+        _work().path(_PROGRAMS + "/" + name),
+        "-tags", "renvo_bundle", "-t", target,
+        "-arena-size", "201326592", "-s", "-o",
+        _work().path(_PROGRAMS + "/profile-selfhost-output"),
+        _work().path("cmd/renvo"),
+        cwd = _work().path(_PROGRAMS), timeout_ms = 30000, output_limit = 1048576,
+    )
+
+def native_profile_report():
+    """Read the fixed perf self-host report; no custom report flags or input path."""
+    return privileged.run(
+        "perf", "report", "--stdio", "--no-children", "--percent-limit", "0.5",
+        "--sort", "symbol", "--input", _work().path("sandbox/agent-profiles/native.perf"),
+        cwd = _work(), timeout_ms = 30000, output_limit = 1048576,
+    )
+
+repo = repo + module("repo", native_profile = native_profile,
+    native_profile_report = native_profile_report)
+
+# Fixed AArch64/CoreMark development and measurement workflows.
+# Source acquisition is NOT authorized here. Review a pinned upstream revision,
+# its license, and the freestanding Linux port before building these fixed files.
+_COREMARK = "sandbox/aarch64-coremark"
+
+def _coremark_directory():
+    if platform != "linux/amd64":
+        fail("CoreMark comparison is configured only for Linux amd64")
+    if "aarch64-coremark" not in _work().list_dir("sandbox"):
+        _work().mkdir(_COREMARK)
+    return _work().path(_COREMARK)
+
+def coremark_tool_version(tool):
+    """Inspect one fixed benchmark tool; missing executables may raise."""
+    if tool not in ["aarch64-linux-gnu-gcc", "aarch64-linux-gnu-objdump", "qemu-aarch64"]:
+        fail("Only the fixed AArch64 compiler, objdump and QEMU may be inspected")
+    return privileged.run(tool, "--version", cwd = _coremark_directory(),
+        timeout_ms = 10000, output_limit = 65536)
+
+def coremark_build_runner():
+    """Build only the Linux AArch64 RFE CLI at a fixed output path."""
+    _coremark_directory()
+    output = _COREMARK + "/linux-arm64-user"
+    if "linux-arm64-user" in _work().list_dir(_COREMARK):
+        _work().delete(output)
+    return privileged.run("go", "run", "./cmd/renvoemu", "build", "-o",
+        _work().path(output), "emulators/linux-arm64-user.rfe", cwd = _work(),
+        timeout_ms = 180000, output_limit = 1048576)
+
+def coremark_build(iterations):
+    """Cross-build fixed reviewed CoreMark files and freestanding port, no libc.
+
+    Review source provenance, license, port, and flags first. The same resulting
+    ELF is used for every engine and QEMU. No caller flags, source paths or env.
+    """
+    if type(iterations) != "int" or iterations < 1 or iterations > 1000000000:
+        fail("iterations must be an integer from 1 through 1000000000")
+    directory = _coremark_directory()
+    if "coremark.elf" in _work().list_dir(_COREMARK):
+        _work().delete(_COREMARK + "/coremark.elf")
+    return privileged.run("aarch64-linux-gnu-gcc", "-O2", "-static", "-nostdlib",
+        "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-no-pie",
+        "-mgeneral-regs-only", "-fno-tree-vectorize", "-I.", "-Iport",
+        "-DITERATIONS=" + str(iterations), "-DPERFORMANCE_RUN=1",
+        "core_list_join.c", "core_main.c", "core_matrix.c", "core_state.c",
+        "core_util.c", "port/core_portme.c", "port/start.S",
+        "-Wl,-e,_start", "-Wl,--build-id=none", "-o", "coremark.elf",
+        cwd = directory, timeout_ms = 120000, output_limit = 1048576)
+
+def coremark_disassemble():
+    """Inspect only the fixed benchmark ELF for ISA and syscall inventory."""
+    return privileged.run("aarch64-linux-gnu-objdump", "-d", "coremark.elf",
+        cwd = _coremark_directory(), timeout_ms = 30000, output_limit = 4194304)
+
+def coremark_run(engine, steps = 10000000000):
+    """Time the same fixed CoreMark ELF under interpreter/IR/native/QEMU.
+
+    Fixed 180-second deadline; no guest arguments, executable paths, env, shell,
+    downloads or background execution. Report CRC validation before throughput.
+    """
+    if engine not in ["interpreter", "ir", "native", "qemu"]:
+        fail("engine must be interpreter, ir, native, or qemu")
+    if type(steps) != "int" or steps < 1 or steps > 1000000000000:
+        fail("steps must be an integer from 1 through 1000000000000")
+    directory = _coremark_directory()
+    if engine == "qemu":
+        return privileged.run("/usr/bin/time", "-p", "qemu-aarch64", "./coremark.elf",
+            cwd = directory, timeout_ms = 180000, output_limit = 1048576)
+    return privileged.run("/usr/bin/time", "-p", _work().path(_COREMARK + "/linux-arm64-user"),
+        "-engine", engine, "-steps", str(steps), "-stats", "./coremark.elf",
+        cwd = directory, timeout_ms = 180000, output_limit = 1048576)
+
+coremark = module("coremark", tool_version = coremark_tool_version,
+    build_runner = coremark_build_runner, build = coremark_build,
+    disassemble = coremark_disassemble, run = coremark_run)
+
+# Fixed CoreMark native profiling; no general perf or process runner.
+def coremark_profile():
+    """Sample only the fixed native CoreMark guest using frame-pointer stacks.
+
+    Same fixed guest/runner; fixed 100-billion instruction ceiling for the
+    unchanged 100,000-iteration scored guest.
+    Fixed 180-second deadline, 99 Hz sampling and workspace profile path; no
+    executable paths, flags, environment, guest arguments or background options.
+    Inspect success/truncation and CRC output before reading the profile.
+    """
+    directory = _coremark_directory()
+    output = _COREMARK + "/coremark.perf"
+    if "coremark.perf" in _work().list_dir(_COREMARK):
+        _work().delete(output)
+    result = privileged.run(
+        "perf", "record", "--freq", "99", "--call-graph", "fp",
+        "--output", _work().path(output), "--",
+        _work().path(_COREMARK + "/linux-arm64-user"),
+        "-engine", "native", "-steps", "100000000000", "-stats", "./coremark.elf",
+        cwd = directory, timeout_ms = 180000, output_limit = 1048576,
+    )
+    if (not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated) and "coremark.perf" in _work().list_dir(_COREMARK):
+        _work().delete(output)
+    return result
+
+def coremark_profile_report():
+    """Read only the fixed CoreMark perf report; no caller-selected input or flags."""
+    directory = _coremark_directory()
+    if "coremark.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful CoreMark profile is available")
+    return privileged.run(
+        "perf", "report", "--stdio", "--no-children", "--percent-limit", "0.5",
+        "--sort", "symbol", "--input", _work().path(_COREMARK + "/coremark.perf"),
+        cwd = directory, timeout_ms = 30000, output_limit = 1048576,
+    )
+
+coremark = coremark + module("coremark", profile = coremark_profile,
+    profile_report = coremark_profile_report)
+
+
+# Instruction-level diagnostics for the same fixed CoreMark profile only.
+# These add no shell, general process runner, caller environment or executable
+# paths. Native-code artifacts are read as data; they are never executed.
+def coremark_profile_code():
+    """Profile the fixed guest with opt-in bounded native-code snapshots.
+
+    Same 99 Hz, 100-billion instruction ceiling and 180-second deadline as
+    profile(). The runtime must implement the reviewed opt-in snapshot hook.
+    No benchmark/port/flag changes, resource-gate changes or caller environment.
+    Inspect both CRC sets and artifact metadata before instruction correlation.
+    """
+    directory = _coremark_directory()
+    artifacts = ["coremark.perf", "native-code.bin", "native-code.meta"]
+    for artifact in artifacts:
+        if artifact in _work().list_dir(_COREMARK):
+            _work().delete(_COREMARK + "/" + artifact)
+    result = privileged.run(
+        "perf", "record", "--freq", "99", "--call-graph", "fp",
+        "--output", _work().path(_COREMARK + "/coremark.perf"), "--",
+        _work().path(_COREMARK + "/linux-arm64-user"),
+        "-engine", "native", "-steps", "100000000000", "-stats", "./coremark.elf",
+        cwd = directory, env = {"RENVO_RFE_PROFILE_CODE": "1"},
+        timeout_ms = 180000, output_limit = 1048576,
+    )
+    if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+        for artifact in artifacts:
+            if artifact in _work().list_dir(_COREMARK):
+                _work().delete(_COREMARK + "/" + artifact)
+    return result
+
+def coremark_profile_ips():
+    """Read instruction addresses/symbols from the fixed successful profile.
+
+    No caller-selected data file, arguments, flags, process or environment.
+    """
+    directory = _coremark_directory()
+    if "coremark.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful CoreMark profile is available")
+    return privileged.run(
+        "perf", "script", "--hide-call-graph", "-F", "ip,sym", "-i",
+        _work().path(_COREMARK + "/coremark.perf"),
+        cwd = directory, timeout_ms = 30000, output_limit = 1048576,
+    )
+
+def coremark_native_disassemble(offset, length = 512):
+    """Disassemble at most 4096 bytes of the fixed native-code snapshot.
+
+    Linux/amd64 diagnostics only. Offsets are integer arena-relative bytes;
+    no arbitrary binary path, executable, objdump flags, env or shell.
+    Review native-code.meta and same-run IP samples before choosing offsets.
+    """
+    if platform != "linux/amd64":
+        fail("Native snapshot disassembly is limited to Linux/amd64")
+    if type(offset) != "int" or type(length) != "int" or offset < 0 or length < 1 or length > 4096 or offset + length > 8388608:
+        fail("Expected a bounded offset and 1..4096 bytes inside the 8 MiB arena")
+    directory = _coremark_directory()
+    if "native-code.bin" not in _work().list_dir(_COREMARK) or "native-code.meta" not in _work().list_dir(_COREMARK):
+        fail("No reviewed native-code snapshot is available")
+    return privileged.run(
+        "objdump", "-D", "-b", "binary", "-m", "i386:x86-64",
+        "--start-address=" + str(offset), "--stop-address=" + str(offset + length),
+        "native-code.bin", cwd = directory, timeout_ms = 30000,
+        output_limit = 1048576,
+    )
+
+coremark = coremark + module("coremark", profile_code = coremark_profile_code,
+    profile_ips = coremark_profile_ips, native_disassemble = coremark_native_disassemble)
+
+
+# Read-only Intel PT capability/help inspection. No kernel settings, arbitrary
+# commands, target paths, process attachment or privilege escalation are exposed.
+def coremark_pt_capabilities():
+    """Inspect only host Intel PT/perf support and read-only perf security settings."""
+    if platform != "linux/amd64":
+        fail("Intel PT inspection requires the existing Linux/amd64 host")
+    directory = _coremark_directory()
+    return {
+        "perf_build": privileged.run("perf", "version", "--build-options", cwd = directory,
+            timeout_ms = 10000, output_limit = 65536),
+        "pt_events": privileged.run("perf", "list", "intel_pt", cwd = directory,
+            timeout_ms = 10000, output_limit = 65536),
+        "cpu": privileged.run("lscpu", cwd = directory, timeout_ms = 10000, output_limit = 65536),
+        "pt_sysfs": privileged.run("cat", "/sys/bus/event_source/devices/intel_pt/type",
+            "/sys/bus/event_source/devices/intel_pt/caps/num_address_ranges",
+            "/sys/bus/event_source/devices/intel_pt/caps/psb_cyc",
+            "/proc/sys/kernel/perf_event_paranoid", cwd = directory,
+            timeout_ms = 10000, output_limit = 65536),
+    }
+
+def coremark_pt_help(topic):
+    """Read installed perf documentation for fixed PT record/decode workflows."""
+    if topic not in ["record", "script", "inject", "report"]:
+        fail("Expected record, script, inject or report")
+    return privileged.run("perf", topic, "-h", cwd = _coremark_directory(),
+        timeout_ms = 10000, output_limit = 262144)
+
+coremark = coremark + module("coremark", pt_capabilities = coremark_pt_capabilities,
+    pt_help = coremark_pt_help)
+
+
+# Bounded Intel PT of the same reviewed CoreMark CLI/ELF only. Fixed user-space
+# 1ms window at 5s; fixed file-size/AUX/decode deadlines. No attachment, system-wide
+# tracing, shell, caller executable/env/flags or kernel-setting writes.
+_PT_COUNTS_SCRIPT = "import bisect, collections, json, os, selectors, subprocess, time\nmeta = \"native-code.meta\"\nif os.path.getsize(meta) > 4 * 1024 * 1024:\n    raise SystemExit(\"over-budget native metadata\")\nentries = {}\nbase = used = None\nwith open(meta) as f:\n    for line in f:\n        p = line.split()\n        if len(p) == 5 and p[0] == \"arena\" and p[3:] == [\"amd64\", \"complete\"]:\n            base, used = int(p[1], 16), int(p[2], 16)\n        elif len(p) == 3:\n            entries[int(p[0], 16)] = (int(p[1], 16), p[2])\nif base is None or not 0 < used <= 8 * 1024 * 1024:\n    raise SystemExit(\"no complete same-run native arena\")\nstarts = sorted(entries)\ndef native(ip):\n    return base <= ip < base + used\n\ndef symbol(ip):\n    if not native(ip):\n        return \"host\"\n    index = bisect.bisect_right(starts, ip) - 1\n    if index >= 0:\n        start = starts[index]\n        size, name = entries[start]\n        if ip < start + size:\n            return name\n    return \"native_unresolved\"\n\ncmd = [\"perf\", \"script\", \"--hide-call-graph\", \"--itrace=be\", \"-F\", \"event,ip,addr\", \"-i\", \"coremark-pt-jit.perf\"]\np = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\nsel = selectors.DefaultSelector()\nsel.register(p.stdout, selectors.EVENT_READ, \"stdout\")\nsel.register(p.stderr, selectors.EVENT_READ, \"stderr\")\nbuffer = b\"\"\nerrors = bytearray()\nerror_rows = []\nedges = collections.Counter()\nsymbol_edges = collections.Counter()\nnative_sources = native_targets = total = 0\ncapped = False\nstart_time = time.monotonic()\nwhile sel.get_map():\n    if time.monotonic() - start_time > 55:\n        capped = True\n        p.kill()\n        break\n    for key, _ in sel.select(timeout=0.2):\n        data = os.read(key.fileobj.fileno(), 65536)\n        if not data:\n            sel.unregister(key.fileobj)\n            continue\n        if key.data == \"stderr\":\n            errors.extend(data[:max(0, 65536 - len(errors))])\n            continue\n        buffer += data\n        if len(buffer) > 131072:\n            capped = True\n            p.kill()\n            break\n        lines = buffer.split(b\"\\n\")\n        buffer = lines.pop()\n        for raw in lines:\n            line = raw.decode(\"utf-8\", \"replace\")\n            if \"branches\" not in line:\n                if \"error\" in line.lower() or \"lost\" in line.lower():\n                    if len(error_rows) < 100:\n                        error_rows.append(line[:500])\n                continue\n            fields = line.split()\n            try:\n                ip, target = int(fields[-3] if fields[-2] == \"=>\" else fields[-2], 16), int(fields[-1], 16)\n            except (ValueError, IndexError):\n                if len(error_rows) < 100:\n                    error_rows.append(\"unparsed branch: \" + line[:500])\n                continue\n            total += 1\n            if native(ip): native_sources += 1\n            if native(target): native_targets += 1\n            if native(ip) or native(target):\n                edges[(ip, target)] += 1\n                symbol_edges[(symbol(ip), symbol(target))] += 1\n            if total > 10000000 or len(edges) > 200000:\n                capped = True\n                p.kill()\n                break\n        if capped: break\n    if capped: break\nif capped:\n    p.kill()\np.wait(timeout=5)\nreport = {\"decoder_exit\": p.returncode, \"capped\": capped, \"elapsed_seconds\": time.monotonic() - start_time,\n          \"branches\": total, \"native_sources\": native_sources, \"native_targets\": native_targets,\n          \"native_edge_kinds\": len(edges), \"decoder_stderr\": errors.decode(\"utf-8\", \"replace\"), \"error_rows\": error_rows,\n          \"arena_base\": hex(base), \"arena_bytes\": used,\n          \"top_symbol_edges\": [{\"from\": a, \"to\": b, \"count\": n} for (a,b),n in symbol_edges.most_common(40)],\n          \"top_native_edges\": [{\"from\": hex(a), \"from_offset\": a-base if native(a) else None,\n                                \"to\": hex(b), \"to_offset\": b-base if native(b) else None,\n                                \"from_symbol\": symbol(a), \"to_symbol\": symbol(b), \"count\": n}\n                               for (a,b),n in edges.most_common(80)]}\nprint(json.dumps(report))\nif capped or p.returncode != 0 or error_rows or errors or total == 0:\n    raise SystemExit(1)\n"
+
+_PT_SNAPSHOT_SCRIPT = "import json, os, select, signal, subprocess, time\n# Fixed CoreMark workload only. Circular AUX captures a bounded recent suffix,\n# not a claim to preserve the complete wall-clock enable interval.\ncontrol_read, control_write = os.pipe()\nack_read, ack_write = os.pipe()\ncmd = [\"perf\", \"record\", \"--event\", \"intel_pt/psb_period=0/u\", \"--delay\", \"-1\",\n       \"--snapshot=65536\", \"--control\", \"fd:%d,%d\" % (control_read, ack_write),\n       \"--mmap-pages\", \"64,64\", \"--max-size\", \"16M\", \"--switch-events\",\n       \"--no-buildid-cache\", \"--output\", \"coremark-pt.perf\", \"--\",\n       \"./linux-arm64-user\", \"-engine\", \"native\", \"-steps\", \"100000000000\",\n       \"-stats\", \"./coremark.elf\"]\np = subprocess.Popen(cmd, pass_fds=(control_read, ack_write), start_new_session=True)\nos.close(control_read)\nos.close(ack_write)\nstarted = time.monotonic()\nacks = []\ndef control(command):\n    if p.poll() is not None:\n        raise RuntimeError(\"perf exited before \" + command)\n    os.write(control_write, (command + \"\\n\").encode())\n    if not select.select([ack_read], [], [], 5)[0]:\n        raise RuntimeError(\"perf control acknowledgement timed out: \" + command)\n    ack = os.read(ack_read, 128)\n    if ack not in (b\"ack\\n\", b\"ack\\n\\x00\"):\n        raise RuntimeError(\"unexpected perf acknowledgement: \" + repr(ack))\n    acks.append({\"command\": command, \"elapsed_seconds\": time.monotonic() - started})\ntry:\n    time.sleep(5)\n    control(\"enable\")\n    time.sleep(0.001)\n    control(\"snapshot\")\n    control(\"disable\")\n    print(\"PT_CONTROL_JSON=\" + json.dumps({\"snapshot_bytes_per_cpu\":65536,\"acks\":acks}), flush=True)\n    result = p.wait(timeout=max(1, 175 - (time.monotonic() - started)))\n    if result != 0:\n        raise RuntimeError(\"perf/CoreMark exit status \" + str(result))\nfinally:\n    if p.poll() is None:\n        os.killpg(p.pid, signal.SIGTERM)\n        try:\n            p.wait(timeout=2)\n        except subprocess.TimeoutExpired:\n            os.killpg(p.pid, signal.SIGKILL)\n            p.wait(timeout=2)\n    os.close(control_write)\n    os.close(ack_read)\n"
+
+def coremark_pt_record():
+    """Capture one bounded 64KiB-per-CPU Intel PT snapshot of fixed CoreMark.
+
+    Starts disabled; enables at 5s, requests a snapshot after 1ms, then disables.
+    The snapshot is a recent suffix, NOT the whole 1ms interval. Fixed 256KiB AUX
+    rings, 16MiB file cap, 180s process-tree deadline, unchanged 100k guest and
+    100-billion retirement ceiling. No paths, flags, environment or PID inputs.
+    Inspect both CRC sets, profile_errors, control acknowledgements and decoder
+    loss/error checks. The control wrapper can signal only its own process group.
+    """
+    if platform != "linux/amd64":
+        fail("Intel PT recording is restricted to Linux/amd64")
+    directory = _coremark_directory()
+    for name in ["coremark-pt.perf", "coremark-pt-jit.perf", "native-code.bin", "native-code.meta"]:
+        if name in _work().list_dir(_COREMARK):
+            _work().delete(_COREMARK + "/" + name)
+    result = privileged.run("python3", "-c", _PT_SNAPSHOT_SCRIPT, cwd = directory,
+        env = {"RENVO_RFE_JITDUMP": "1", "RENVO_RFE_PROFILE_CODE": "1"},
+        timeout_ms = 180000, kill_tree = True, output_limit = 1048576)
+    if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+        if "coremark-pt.perf" in _work().list_dir(_COREMARK):
+            _work().delete(_COREMARK + "/coremark-pt.perf")
+    return result
+
+def coremark_pt_inject():
+    """Merge only the fixed successful CoreMark PT trace and its actual jitdump images."""
+    directory = _coremark_directory()
+    if "coremark-pt.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful fixed PT recording")
+    if _work().stat(_COREMARK + "/coremark-pt.perf").size > 16 * 1024 * 1024:
+        fail("PT recording exceeds its reviewed file cap")
+    if "pt-buildid" not in _work().list_dir(_COREMARK):
+        _work().mkdir(_COREMARK + "/pt-buildid")
+    return privileged.run("perf", "inject", "--jit", "--input", "coremark-pt.perf",
+        "--output", "coremark-pt-jit.perf", cwd = directory,
+        env = {"PERF_BUILDID_DIR": _work().path(_COREMARK + "/pt-buildid")},
+        timeout_ms = 60000, output_limit = 1048576)
+
+def coremark_pt_counts():
+    """Decode and aggregate only the fixed injected PT trace; no raw unlimited output.
+
+    Frozen parser executes only fixed perf script arguments. Deadline 60s,
+    10M decoded-branch/200k native-edge caps, bounded stderr/report. Any loss,
+    decode errors, truncation or cap is failure, not an exact-count claim.
+    """
+    directory = _coremark_directory()
+    if "coremark-pt-jit.perf" not in _work().list_dir(_COREMARK):
+        fail("No injected fixed PT recording")
+    if _work().stat(_COREMARK + "/coremark-pt-jit.perf").size > 32 * 1024 * 1024:
+        fail("Injected trace exceeds reviewed cap")
+    return privileged.run("python3", "-c", _PT_COUNTS_SCRIPT, cwd = directory,
+        env = {"PERF_BUILDID_DIR": _work().path(_COREMARK + "/pt-buildid")},
+        timeout_ms = 60000, kill_tree = True, output_limit = 262144)
+
+coremark = coremark + module("coremark", pt_record = coremark_pt_record,
+    pt_inject = coremark_pt_inject, pt_counts = coremark_pt_counts)
+
+
+# Fixed host-native CoreMark comparison; no general compiler/process runner.
+def coremark_host_info():
+    """Read the host CPU description and native GCC version."""
+    directory = _coremark_directory()
+    return [privileged.run("lscpu", cwd = directory, timeout_ms = 10000, output_limit = 65536),
+            privileged.run("gcc", "--version", cwd = directory, timeout_ms = 10000, output_limit = 65536)]
+
+def coremark_host_build(iterations):
+    """Build only the unchanged CoreMark sources with the reviewed x86-64 port.
+
+    Separate host artifact; never replaces the scored AArch64 ELF. Fixed -O2
+    scalar generic x86-64 flags, no caller paths, flags, environment or shell.
+    Review provenance, license and host-port sources before building.
+    """
+    if type(iterations) != "int" or iterations < 100000 or iterations > 100000000:
+        fail("host iterations must be 100000 through 100000000")
+    directory = _coremark_directory()
+    artifact = _COREMARK + "/coremark-host.elf"
+    if "coremark-host.elf" in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    result = privileged.run("gcc", "-O2", "-static", "-nostdlib",
+        "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-no-pie",
+        "-march=x86-64", "-mtune=generic", "-mgeneral-regs-only",
+        "-fno-tree-vectorize", "-I.", "-Ihost-port",
+        "-DITERATIONS=" + str(iterations), "-DPERFORMANCE_RUN=1",
+        "core_list_join.c", "core_main.c", "core_matrix.c", "core_state.c",
+        "core_util.c", "host-port/core_portme.c", "host-port/start.S",
+        "-Wl,-e,_start", "-Wl,--build-id=none", "-o", "coremark-host.elf",
+        cwd = directory, timeout_ms = 120000, output_limit = 1048576)
+    if not result.success and "coremark-host.elf" in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    return result
+
+def coremark_host_run():
+    """Time only the fixed native-host CoreMark binary, with a 180s deadline.
+
+    No executable/argument/environment selection, shell or background option.
+    Require both seed CRC sets and >=10 seconds per seed before scoring.
+    """
+    return privileged.run("/usr/bin/time", "-p", "./coremark-host.elf",
+        cwd = _coremark_directory(), timeout_ms = 180000, output_limit = 1048576)
+
+coremark = coremark + module("coremark", host_info = coremark_host_info,
+    host_build = coremark_host_build, host_run = coremark_host_run)
+
 environment = {
-    "workspace": workspace, "git": git, "go": go, "repo": repo,
+    "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,
     "propose_agents_star": propose_agents_star, "publication": publication,
     "compiler_pr": compiler_pr, "pr_work": pr_work, "release": release,
 }
