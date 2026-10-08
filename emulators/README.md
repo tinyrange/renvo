@@ -9,6 +9,8 @@ files and do not require separately maintained emulator Go packages.
 | `pdp11.rfe` | Shared PDP-11 CPU, FP11 floating point, MMU, interpreter and native lowering |
 | `v7-user.rfe` | V7 a.out loader and syscall personality; requires `pdp11` |
 | `pdp11-machine.rfe` | PDP-11 machine, console, clock and RK05 disks; requires `pdp11` |
+| `aarch64.rfe` | Initial A64 integer CPU, interpreter, pure IR, native scalar memory and bounded native linking |
+| `linux-arm64-user.rfe` | Initial static-ELF Linux AArch64 personality; requires `aarch64` |
 
 From the Renvo checkout, with the Go toolchain installed:
 
@@ -97,3 +99,43 @@ bad stacks, interrupted host reads without lost input, blocked host writes with
 stable buffers, and trap-to-signal mapping.
 
 See [the RFE format and runtime](../docs/rfe.md) for authoring and extension.
+
+## AArch64 user mode
+
+The initial `aarch64.rfe` / `linux-arm64-user.rfe` pair implements an integer
+subset and static ET_EXEC Linux user mode. It provides interpreter, portable IR
+and native pure-block tiers, including multiply, conditional select/compare and
+expanded integer operations. Exact instruction budgets and versioned code-page
+guards preserve invalidation and execute permissions; custom memories without
+version stamps retain instruction-byte revalidation. A pinned freestanding
+CoreMark port now passes CRC checks in all tiers; guarded interpreter-only
+entries reduce redundant fetches. It is **not yet a complete AArch64 emulator
+or a demonstrated QEMU performance win**. QEMU is far ahead in current timings.
+
+```sh
+go run ./cmd/renvoemu test emulators/linux-arm64-user.rfe
+go run ./cmd/renvoemu build -o sandbox/linux-arm64-user emulators/linux-arm64-user.rfe
+sandbox/linux-arm64-user -engine native -stats ./static-aarch64-guest argument
+```
+
+Dynamic linking, TLS startup, FP/ASIMD, guest signals and threads are not yet
+supported. Guest memory is capped at 64 MiB; only a documented syscall slice is
+implemented, and unsupported syscalls return ENOSYS. The default retirement
+ceiling is 100 million instructions, configurable with `-steps`. Real clocks
+are used for elapsed timing. Guest syscall numbers are never passed through to
+the host kernel. These checks are not a security sandbox.
+
+See [the detailed AArch64 design and milestone plan](../docs/aarch64-user.md)
+for instruction coverage, ABI limits, optimizer architecture and the CoreMark
+benchmark contract. See [validation evidence and outstanding workflows](../docs/aarch64-validation.md)
+for the pinned port, raw CoreMark diagnostics and remaining performance gates.
+
+
+On Linux, `-stats` also names native blocks and the bounded dispatcher in a
+private, exclusively created `/tmp/perf-PID.map` for perf report symbolization.
+The map is retained after process exit; `profile_errors` counts nonfatal output
+failures. AArch64's native path now uses SSA register allocation, compact memory
+guards, immediate/variable-shift/conditional-move selection and register-resident
+dispatch. Legacy calls retain a 64-instruction ceiling; supported Linux/amd64+cgo
+foreign sessions have a separate ceiling of 65,536 instructions. See
+`../docs/aarch64-validation.md` for diagnostic measurements and limitations.

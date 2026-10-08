@@ -1,0 +1,3781 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "aarch64",
+  "import": "renvo.dev/emulators/aarch64"
+}
+
+-- batch.go --
+package aarch64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+// Run executes one bounded dispatch quantum. Step remains the single-block API.
+// Only already-native blocks and cached architectural instructions participate;
+// discovery requiring promotion returns to Step outside the arena lock. Every
+// block entry still validates executable code, including after guest stores.
+func (e *Engine) Run(c *CPU, remaining uint64) error {
+	return e.run(c, remaining, 1)
+}
+
+// RunQuanta selects the configured native scheduling slice when supported.
+// Conservative hosts retain separate short calls; Step is still single-block.
+func (e *Engine) RunQuanta(c *CPU, remaining uint64) error {
+	return e.run(c, remaining, 16)
+}
+
+func (e *Engine) run(c *CPU, remaining uint64, quanta int) error {
+	if e.native == nil || remaining == 0 {
+		return e.Step(c, remaining)
+	}
+	first := e.block(c)
+	if first == nil || !first.native || uint64(len(first.words)) > remaining {
+		return e.stepBlock(c, remaining, first)
+	}
+	if memory, ok := c.Memory.(NativeMemory); ok {
+		if context := memory.NativeContext(); context != nil {
+			stamp := first.context // block() just validated this context in the same thread
+			if stamp.Identity != nil {
+				return e.runLinked(c, remaining, first, memory, context, stamp, quanta)
+			}
+		}
+	}
+	budget := remaining
+	if budget > 64 {
+		budget = 64
+	}
+	var pending *compiledBlock
+	memory, capable := c.Memory.(NativeMemory)
+	var context *emu.MemoryContext
+	if capable {
+		context = memory.NativeContext()
+	}
+	selectBlock := func(completed int) (int, bool, error) {
+		// This callback runs after each successful native call (also after the
+		// final call), never after a failed native entry check.
+		if pending != nil {
+			if pending.effects {
+				before, status := c.Retired, context.Status
+				err := e.accountMemory(c, pending, memory, context)
+				budget -= c.Retired - before
+				pending = nil
+				if status != 0 || err != nil {
+					return 0, false, err
+				}
+			} else {
+				retired := uint64(len(pending.words))
+				c.Retired += retired
+				e.Stats.Native += retired
+				budget -= retired
+				pending = nil
+			}
+		}
+		for budget != 0 {
+			block := first
+			first = nil
+			if block == nil {
+				block = e.block(c)
+			}
+			if block == nil || uint64(len(block.words)) > budget {
+				return 0, false, nil
+			}
+			if block.interpretOnly {
+				before := c.Retired
+				err := block.executeCached(c)
+				retired := c.Retired - before
+				e.Stats.Interpreted += retired
+				budget -= retired
+				if err != nil {
+					return 0, false, err
+				}
+				continue
+			}
+			if !block.native || block.effects && context == nil {
+				return 0, false, nil
+			}
+			block.visits++
+			pending = block
+			return block.entry, true, nil
+		}
+		return 0, false, nil
+	}
+	var err error
+	if context == nil {
+		_, err = e.native.CallBatch(c.State[:], 64, selectBlock)
+	} else {
+		_, err = e.native.CallBatchMemory(c.State[:], context, 64, selectBlock)
+	}
+	return err
+}
+
+-- batch_test.go --
+package aarch64
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"testing"
+)
+
+func hotBatchLoop(t *testing.T) (*Engine, *CPU, *testMemory) {
+	t.Helper()
+	config := DefaultEngineConfig()
+	config.IRThreshold, config.NativeThreshold = 1, 1
+	e, err := NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.native == nil {
+		e.Close()
+		t.Skip("native host unavailable")
+	}
+	m := &testMemory{data: make([]byte, 128), executable: true}
+	for i, op := range []uint32{0x91000400, 0xb9000020, 0xb9400022, 0x17fffffd} {
+		binary.LittleEndian.PutUint32(m.data[i*4:], op)
+	}
+	c := &CPU{Memory: m}
+	c.State[1] = 64
+	for i := 0; i < 4; i++ {
+		if err := e.Step(c, 1); err != nil {
+			e.Close()
+			t.Fatal(err)
+		}
+	}
+	return e, c, m
+}
+
+func TestNativeDispatchBatchRetirementAndFaults(t *testing.T) {
+	for _, limit := range []uint64{1, 2, 3, 4, 17, 63, 64, 65, 129} {
+		for _, fault := range []bool{false, true} {
+			e, c, m := hotBatchLoop(t)
+			before := c.Retired
+			m.failWrite = fault
+			wantMemory := &testMemory{data: append([]byte{}, m.data...), executable: true, failWrite: fault}
+			want := *c
+			want.Memory = wantMemory
+			var gotErr error
+			for c.Retired-before < limit {
+				start := c.Retired
+				gotErr = e.Run(c, limit-(c.Retired-before))
+				if c.Retired-start > 64 || c.Retired-before > limit {
+					t.Fatal("dispatch quantum exceeded retirement ceiling")
+				}
+				if gotErr != nil {
+					break
+				}
+				if c.Retired == start {
+					t.Fatal("dispatch made no progress")
+				}
+			}
+			var wantErr error
+			for want.Retired-before < limit {
+				wantErr = want.Step()
+				if wantErr != nil {
+					break
+				}
+			}
+			if c.State != want.State || c.Retired != want.Retired || !bytes.Equal(m.data, wantMemory.data) || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+				t.Fatalf("limit=%d fault=%v: retired=%d/%d state=%x/%x err=%v/%v", limit, fault, c.Retired, want.Retired, c.State, want.State, gotErr, wantErr)
+			}
+			if e.Stats.Native+e.Stats.IR+e.Stats.Interpreted != c.Retired {
+				t.Fatal("batch tier accounting differs from architectural retirement")
+			}
+			e.Close()
+		}
+	}
+}
+
+func TestNativeDispatchBatchSelfModifyingCodeAndTrap(t *testing.T) {
+	for _, replacement := range []uint32{0xffffffff, 0xd4000001} {
+		e, c, m := hotBatchLoop(t)
+		before := c.Retired
+		c.State[1] = 12
+		c.State[0] = uint64(replacement) - 1 // ADD then STR W0 replaces the hot branch.
+		var err error
+		for i := 0; i < 3; i++ {
+			err = e.Run(c, 64)
+			if err != nil {
+				break
+			}
+		}
+		trap, ok := err.(*Exception)
+		retired := before + 3
+		pc := uint64(12)
+		kind := "unsupported"
+		if replacement == 0xd4000001 {
+			retired++
+			pc += 4
+			kind = "svc"
+		}
+		if !ok || trap.Kind != kind || trap.PC != 12 || trap.Opcode != replacement || c.Retired != retired || c.State[PC] != pc || e.Stats.Invalidations != 1 || binary.LittleEndian.Uint32(m.data[12:]) != replacement {
+			t.Fatalf("batch executed stale branch or lost trap retirement: state=%x retired=%d err=%v", c.State, c.Retired, err)
+		}
+		e.Close()
+	}
+}
+
+-- branch.go --
+package aarch64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+// Branches end a translation. Only their state transition is compiled: the
+// dispatcher still validates the destination's code and instruction budget.
+func branchKind(op uint32) int {
+	switch {
+	case op&0x7c000000 == 0x14000000:
+		return 1 // B, BL
+	case op&0xff000010 == 0x54000000:
+		return 2 // B.cond
+	case op&0x7e000000 == 0x34000000:
+		return 3 // CBZ, CBNZ
+	case op&0x7e000000 == 0x36000000:
+		return 4 // TBZ, TBNZ
+	case op&0xfffffc1f == 0xd61f0000 || op&0xfffffc1f == 0xd63f0000 || op&0xfffffc1f == 0xd65f0000:
+		return 5 // BR, BLR, RET
+	}
+	return 0
+}
+
+// lowerBranch leaves b untouched when the instruction is not supported.
+func lowerBranch(b *emu.Builder, op uint32) bool {
+	kind := branchKind(op)
+	if kind == 0 {
+		return false
+	}
+	constant, binary := b.Constant, b.Binary
+	pc := b.Load(PC)
+	fallthroughPC := binary(emu.Add, pc, constant(4))
+	reg := func(r int) emu.Value {
+		if r == SP {
+			return constant(0)
+		}
+		return b.Load(r)
+	}
+	target := func(value uint64, bits int) emu.Value {
+		return binary(emu.Add, pc, constant(uint64(signed(value, bits)*4)))
+	}
+	var next emu.Value
+	switch kind {
+	case 1:
+		next = target(uint64(op&0x3ffffff), 26)
+		if op>>31 != 0 {
+			b.Store(30, fallthroughPC)
+		}
+	case 2:
+		next = b.Choose(conditionIR(b, b.Load(NZCV), int(op&15)), target(uint64(op>>5&0x7ffff), 19), fallthroughPC)
+	case 3, 4:
+		value := reg(int(op & 31))
+		bits, immediate := 19, uint64(op>>5&0x7ffff)
+		if kind == 3 {
+			if op>>31 == 0 {
+				value = binary(emu.And, value, constant(0xffffffff))
+			}
+		} else {
+			bit := uint64(op>>19&31) | uint64(op>>31)<<5
+			value = binary(emu.And, value, constant(uint64(1)<<bit))
+			bits, immediate = 14, uint64(op>>5&0x3fff)
+		}
+		zero := binary(emu.Equal, value, constant(0))
+		taken := zero
+		if op>>24&1 != 0 {
+			taken = binary(emu.Xor, zero, constant(1))
+		}
+		next = b.Choose(taken, target(immediate, bits), fallthroughPC)
+	case 5:
+		// Capture the old target before BLR writes LR, including BLR X30.
+		next = reg(int(op >> 5 & 31))
+		if op&0xfffffc1f == 0xd63f0000 {
+			b.Store(30, fallthroughPC)
+		}
+	}
+	b.Store(PC, next)
+	return true
+}
+
+-- branch_test.go --
+package aarch64
+
+import (
+	"encoding/binary"
+	"math/rand"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestCompiledBranchVectors(t *testing.T) {
+	cases := []struct {
+		op                                    uint32
+		pc, r0, lr, sp, flags, wantPC, wantLR uint64
+	}{
+		{0x17ffffff, 0, 0, 91, 99, V, ^uint64(3), 91}, // B -4 wraps
+		{0x94000002, 64, 0, 91, 99, V, 72, 68},        // BL +8
+		{0xd63f03c0, 64, 0, 91, 99, V, 91, 68},        // BLR X30 captures old LR
+		{0xd65f03c0, 64, 0, 91, 99, V, 91, 91},        // RET
+		{0xd61f03e0, 64, 0, 91, 99, V, 0, 91},         // BR XZR, not SP
+		{0x34000040, 64, 1 << 32, 91, 99, V, 72, 91},  // CBZ W0 ignores upper half
+		{0xb4000040, 64, 1 << 32, 91, 99, V, 68, 91},  // CBZ X0
+		{0xb5000040, 64, 1 << 32, 91, 99, V, 72, 91},  // CBNZ X0
+		{0x3400005f, 64, 1, 91, 99, V, 72, 91},        // CBZ WZR
+		{0xb7f80040, 64, 1 << 63, 91, 99, V, 72, 91},  // TBNZ X0,#63
+		{0xb6f80040, 64, 1 << 63, 91, 99, V, 68, 91},  // TBZ X0,#63
+		{0x54000040, 64, 0, 91, 99, Z, 72, 91},        // B.EQ
+		{0x54000040, 64, 0, 91, 99, V, 68, 91},
+		{0x5400004f, 64, 0, 91, 99, 0, 72, 91}, // NV is unconditional
+	}
+	for _, tc := range cases {
+		var b emu.Builder
+		if !lowerBranch(&b, tc.op) {
+			t.Fatalf("not lowered: %08x", tc.op)
+		}
+		var initial [StateWords]uint64
+		initial[PC], initial[0], initial[30], initial[SP], initial[NZCV] = tc.pc, tc.r0, tc.lr, tc.sp, tc.flags
+		want := initial
+		want[PC], want[30] = tc.wantPC, tc.wantLR
+		checkBranchTiers(t, b.Finish(StateWords), initial, want)
+	}
+}
+
+func checkBranchTiers(t *testing.T, ops []emu.Op, initial, want [StateWords]uint64) {
+	t.Helper()
+	got := initial
+	if err := emu.Interpret(ops, got[:]); err != nil || got != want {
+		t.Fatalf("IR branch: got=%x want=%x err=%v", got, want, err)
+	}
+	native, err := emu.NewNative(1 << 20)
+	if err != nil {
+		if nativeHost() {
+			t.Fatal(err)
+		}
+		return
+	}
+	defer native.Close()
+	entry, err := native.Compile(ops, StateWords)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = initial
+	if err := native.Call(entry, got[:]); err != nil || got != want {
+		t.Fatalf("native branch: got=%x want=%x err=%v", got, want, err)
+	}
+}
+
+func TestBranchLoweringAgreement(t *testing.T) {
+	rng := rand.New(rand.NewSource(716))
+	ops := []uint32{0x14000000, 0x95ffffff, 0x16000000, 0xd61f0000, 0xd63f03c0, 0xd65f03c0}
+	for cond := uint32(0); cond < 16; cond++ {
+		ops = append(ops, 0x54ffffc0|cond)
+	}
+	for _, sf := range []uint32{0, 1 << 31} {
+		for _, nz := range []uint32{0, 1 << 24} {
+			for _, r := range []uint32{0, 30, 31} {
+				ops = append(ops, sf|nz|0x34ffffc0|r)
+				for bit := uint32(0); bit < 32; bit++ {
+					ops = append(ops, sf|nz|0x3607ffc0|bit<<19|r)
+				}
+			}
+		}
+	}
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	for _, op := range ops {
+		var b emu.Builder
+		// Flag-setting prefix tests state/PC forwarding into the terminal branch.
+		if !Lower(&b, 0xb1000400) || !lowerBranch(&b, op) {
+			t.Fatalf("lower %08x", op)
+		}
+		lowered := b.Finish(StateWords)
+		entry := 0
+		if native != nil {
+			entry, err = native.Compile(lowered, StateWords)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for sample := 0; sample < 16; sample++ {
+			var c CPU
+			for i := range c.State {
+				c.State[i] = rng.Uint64()
+			}
+			if sample == 0 {
+				c.State[0] = ^uint64(0)
+			}
+			initial := c.State
+			if err := c.Execute(0xb1000400); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Execute(op); err != nil {
+				t.Fatal(err)
+			}
+			got := initial
+			if err := emu.Interpret(lowered, got[:]); err != nil || got != c.State {
+				t.Fatalf("IR op=%08x sample=%d err=%v", op, sample, err)
+			}
+			if native != nil {
+				got = initial
+				if err := native.Call(entry, got[:]); err != nil || got != c.State {
+					t.Fatalf("native op=%08x sample=%d err=%v", op, sample, err)
+				}
+			}
+		}
+	}
+	for _, op := range []uint32{0x54000010, 0xd61f0001, 0xd63f0400, 0xd4000001, 0xffffffff} {
+		var b emu.Builder
+		b.Store(0, b.Constant(7))
+		if lowerBranch(&b, op) {
+			t.Fatalf("accepted unsupported branch %08x", op)
+		}
+		var state [StateWords]uint64
+		if err := emu.Interpret(b.Finish(StateWords), state[:]); err != nil || state[0] != 7 || state[PC] != 0 {
+			t.Fatal("rejection changed builder")
+		}
+	}
+}
+
+func TestBranchBlockBudgetInvalidationAndTargetFault(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		config := DefaultEngineConfig()
+		config.Mode, config.IRThreshold, config.NativeThreshold = mode, 1, 1
+		e, err := NewEngine(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer e.Close()
+		m := instructionMemory(0x91000400, 0x17ffffff, 0x91000421)
+		c := CPU{Memory: m}
+		if err := e.Step(&c, 2); err != nil {
+			t.Fatal(err)
+		}
+		if c.State[0] != 1 || c.State[1] != 0 || c.State[PC] != 0 || c.Retired != 2 || e.Stats.IR+e.Stats.Native != 2 {
+			t.Fatal("branch did not terminate compiled block")
+		}
+		if mode == "native" && nativeHost() && e.Stats.Native != 2 {
+			t.Fatal("branch did not execute natively")
+		}
+		if err := e.Step(&c, 1); err != nil || c.State[PC] != 4 || c.Retired != 3 {
+			t.Fatal("short budget over-retired")
+		}
+		if err := e.Step(&c, 1); err != nil || c.State[PC] != 0 || c.Retired != 4 {
+			t.Fatal("single branch budget")
+		}
+		before := c.State
+		if err := e.Step(&c, 0); err == nil || c.State != before || c.Retired != 4 {
+			t.Fatal("zero budget")
+		}
+		binary.LittleEndian.PutUint32(m.data[4:], 0xd63f03c0) // BLR X30
+		c.State[30] = 3                                       // unaligned destination faults only on the next fetch
+		if err := e.Step(&c, 2); err != nil || e.Stats.Invalidations != 1 || c.State[PC] != 4 {
+			t.Fatal("stale terminal branch")
+		}
+		c.State[PC] = 0
+		if err := e.Step(&c, 2); err != nil || c.State[PC] != 3 || c.State[30] != 8 {
+			t.Fatal("BLR target/link ordering")
+		}
+		before, retired := c.State, c.Retired
+		err = e.Step(&c, 1)
+		fault, ok := err.(*Exception)
+		if !ok || fault.Kind != "alignment" || fault.PC != 3 || c.State != before || c.Retired != retired {
+			t.Fatalf("target fault lost branch state: %v", err)
+		}
+		c.State[PC], c.State[30] = 0, 4096
+		if err := e.Step(&c, 2); err != nil || c.State[PC] != 4096 {
+			t.Fatal("unmapped destination checked too early")
+		}
+		before, retired = c.State, c.Retired
+		err = e.Step(&c, 1)
+		fault, ok = err.(*Exception)
+		if !ok || fault.Kind != "fetch" || fault.PC != 4096 || c.State != before || c.Retired != retired {
+			t.Fatalf("target fetch fault: %v", err)
+		}
+	}
+}
+
+-- cached.go --
+package aarch64
+
+// executeCached skips only instruction classification. The original scalar and
+// pair handlers still perform all encoding, address, permission and writeback
+// checks. Code validation is performed by Engine.block before this call.
+func (b *compiledBlock) executeCached(c *CPU) error {
+	op := b.words[0]
+	var err error
+	switch b.memoryKind {
+	case 1:
+		err = c.singleMemory(op)
+	case 2:
+		err = c.pairMemory(op)
+	default:
+		return c.Execute(op)
+	}
+	if err != nil {
+		return &Exception{Kind: "memory", PC: c.State[PC], Opcode: op, Cause: err}
+	}
+	c.State[PC] += 4
+	c.Retired++
+	return nil
+}
+
+-- cached_test.go --
+package aarch64
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"testing"
+)
+
+// Compare both cold and cached dispatch with architectural Execute, including
+// precise memory faults. Independent architectural vectors remain in cpu_test
+// and pair_test; this test exercises the new dispatch/invalidation boundaries.
+func TestCachedMemoryDispatchAgreement(t *testing.T) {
+	for _, op := range []uint32{0xf8008420, 0xf8408c20, 0xf94003e0, 0xf8627820, 0xb862d820, 0xa9bf7bfd, 0xa8c17bfd, 0xf9c00020, 0x9ac20820, 0xd4000001, 0xffffffff} {
+		for _, fault := range []int{0, 1, 2, 3} {
+			config := DefaultEngineConfig()
+			config.Mode = "ir"
+			e, err := NewEngine(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for pass := 0; pass < 3; pass++ {
+				m := &testMemory{data: make([]byte, 128), executable: true, failWrite: fault == 1}
+				for i := range m.data {
+					m.data[i] = byte(i)
+				}
+				binary.LittleEndian.PutUint32(m.data, op)
+				expectedMemory := &testMemory{data: append([]byte{}, m.data...), executable: true, failWrite: m.failWrite}
+				got := CPU{Memory: m}
+				got.State[0], got.State[1], got.State[2] = 0x123456789abcdef0, 32, 2
+				got.State[29], got.State[30], got.State[SP] = 0x1234, 0x5678, 64
+				if fault == 2 {
+					got.State[1], got.State[SP] = 124, 128
+				}
+				if fault == 3 {
+					got.State[SP] = 1
+				}
+				want := got
+				want.Memory = expectedMemory
+				wantErr := want.Execute(op)
+				gotErr := e.Step(&got, 1)
+				if got.State != want.State || got.Retired != want.Retired || !bytes.Equal(m.data, expectedMemory.data) || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+					t.Fatalf("op=%x fault=%d pass=%d state=%x want=%x retired=%d/%d error=%v/%v", op, fault, pass, got.State, want.State, got.Retired, want.Retired, gotErr, wantErr)
+				}
+				if e.Stats.Interpreted != got.Retired*uint64(pass+1) {
+					t.Fatal("cached retirement accounting")
+				}
+			}
+			e.Close()
+		}
+	}
+}
+
+func TestCachedMemoryOpcodeInvalidation(t *testing.T) {
+	config := DefaultEngineConfig()
+	config.Mode = "ir"
+	e, err := NewEngine(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	m := &testMemory{data: make([]byte, 128), executable: true}
+	c := CPU{Memory: m}
+	c.State[1] = 64
+	c.State[SP] = 64
+	binary.LittleEndian.PutUint32(m.data, 0xf9400020) // LDR X0,[X1]
+	binary.LittleEndian.PutUint64(m.data[64:], 0x1234)
+	if err := e.Step(&c, 1); err != nil || c.State[0] != 0x1234 {
+		t.Fatal("initial load", err)
+	}
+	c.State[PC] = 0
+	binary.LittleEndian.PutUint32(m.data, 0xa8c17bfd) // LDP X29,X30,[SP],#16
+	binary.LittleEndian.PutUint64(m.data[72:], 0x5678)
+	if err := e.Step(&c, 1); err != nil || c.State[29] != 0x1234 || c.State[30] != 0x5678 || c.State[SP] != 80 || e.Stats.Invalidations != 1 {
+		t.Fatal("stale scalar dispatch after pair mutation", err)
+	}
+	c.State[PC] = 0
+	if err := e.Step(&c, 1); err != nil {
+		t.Fatal("rebuild pair cache", err)
+	}
+	m.executable = false
+	c.State[PC] = 0
+	before := c.State
+	if err := e.Step(&c, 1); err == nil || c.State != before || c.Retired != 3 {
+		t.Fatal("cached instruction ignored execute revocation")
+	}
+}
+
+-- code_version.go --
+package aarch64
+
+// CodeIdentity is deliberately non-zero-sized so different address spaces
+// cannot share an identity through Go's zero-size allocation coalescing.
+// It is a host-side ownership token, never a guest pointer or numeric address.
+type CodeIdentity struct{ marker byte }
+type CodeStamp struct {
+	Identity *CodeIdentity
+	Epoch    uint64
+}
+
+// VersionedMemory is optional. A stamp covers one 4 KiB guest page. Implementers
+// must change it for every content/permission/mapping change and check execute
+// permission on every query. Stamps must never be reused, including after remap.
+// The memory implementation and engine are single-threaded in this milestone.
+type VersionedMemory interface {
+	CodeVersion(address uint64) (CodeStamp, error)
+}
+
+// CodeContextMemory is optional and single-threaded. Its identity/epoch must
+// change before any executable byte, execute permission or executable mapping
+// changes. It may remain stable for writes to non-executable data. Epochs must
+// never be reused within an identity, including across copies of the memory.
+// A context stamp only permits reusing previously checked page dependencies;
+// it is not a substitute for validating a newly discovered block.
+type CodeContextMemory interface {
+	VersionedMemory
+	CodeContext() CodeStamp
+}
+
+type codeDependency struct {
+	address uint64
+	stamp   CodeStamp
+}
+
+func (e *Engine) validVersions(c *CPU, block *compiledBlock, context CodeStamp) bool {
+	memory, ok := c.Memory.(VersionedMemory)
+	if !ok {
+		return false
+	}
+	for _, dependency := range block.dependencies {
+		stamp, err := memory.CodeVersion(dependency.address)
+		e.Stats.VersionChecks++
+		if err != nil || stamp.Identity == nil || stamp != dependency.stamp {
+			return false
+		}
+	}
+	block.context = context
+	return true
+}
+
+func (e *Engine) validBytes(c *CPU, pc uint64, block *compiledBlock) bool {
+	for i, word := range block.words {
+		fetched, err := c.Memory.Read(pc+uint64(i)*4, 4, true)
+		e.Stats.CodeReads++
+		if err != nil || uint32(fetched) != word {
+			return false
+		}
+	}
+	return true
+}
+func (e *Engine) dependencies(c *CPU, pc uint64, block *compiledBlock) {
+	memory, ok := c.Memory.(VersionedMemory)
+	if !ok {
+		return
+	}
+	first, last := pc&^uint64(4095), (pc+uint64(len(block.words)-1)*4)&^uint64(4095)
+	for address := first; ; address += 4096 {
+		stamp, err := memory.CodeVersion(address)
+		e.Stats.VersionChecks++
+		if err != nil || stamp.Identity == nil {
+			block.dependencies = nil
+			return
+		}
+		block.dependencies = append(block.dependencies, codeDependency{address, stamp})
+		if address == last {
+			break
+		}
+	}
+	if contextual, ok := c.Memory.(CodeContextMemory); ok {
+		block.context = contextual.CodeContext()
+		e.Stats.ContextChecks++
+	}
+}
+
+-- cpu.go --
+// Package aarch64 implements a bounded, little-endian A64 user CPU.
+// Architectural source: Arm A-profile A64 ISA. See the accompanying design.
+package aarch64
+
+import "fmt"
+
+const (
+	SP                = 31
+	PC                = 32
+	NZCV              = 33
+	StateWords        = 34
+	N          uint64 = 1 << 31
+	Z          uint64 = 1 << 30
+	C          uint64 = 1 << 29
+	V          uint64 = 1 << 28
+)
+
+// Memory must check the complete access before committing a write. Fetches
+// require execute permission, not read permission. Addresses are guest values.
+type Memory interface {
+	Read(address uint64, size int, execute bool) (uint64, error)
+	Write(address uint64, size int, value uint64) error
+	ReadPair(address uint64, size int) (uint64, uint64, error)
+	WritePair(address uint64, size int, first, second uint64) error
+}
+
+type CPU struct {
+	State   [StateWords]uint64 // X0-X30, SP, PC, architectural NZCV bits
+	Memory  Memory
+	Retired uint64
+}
+
+type Exception struct {
+	Kind   string
+	PC     uint64
+	Opcode uint32
+	Cause  error
+}
+
+func (e *Exception) Error() string {
+	return fmt.Sprintf("aarch64 %s at %#x (instruction %#08x): %v", e.Kind, e.PC, e.Opcode, e.Cause)
+}
+func (c *CPU) reg(r int, stack bool) uint64 {
+	if r == SP && !stack {
+		return 0
+	}
+	return c.State[r]
+}
+func (c *CPU) put(r int, stack bool, value uint64, width int) {
+	if width == 32 {
+		value = uint64(uint32(value))
+	}
+	if r != SP || stack {
+		c.State[r] = value
+	}
+}
+func mask(width int) uint64 {
+	if width == 64 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << width) - 1
+}
+func signed(v uint64, bits int) int64 { return int64(v<<(64-bits)) >> (64 - bits) }
+func rotate(v uint64, amount, width int) uint64 {
+	amount &= width - 1
+	v &= mask(width)
+	if amount == 0 {
+		return v
+	}
+	return (v>>amount | v<<(width-amount)) & mask(width)
+}
+func shift(v uint64, kind, amount, width int) uint64 {
+	v &= mask(width)
+	switch kind {
+	case 0:
+		return v << amount & mask(width)
+	case 1:
+		return v >> amount
+	case 2:
+		return uint64(signed(v, width)>>amount) & mask(width)
+	default:
+		return rotate(v, amount, width)
+	}
+}
+func condition(flags uint64, cond int) bool {
+	n, z, carry, v := flags&N != 0, flags&Z != 0, flags&C != 0, flags&V != 0
+	var result bool
+	switch cond >> 1 {
+	case 0:
+		result = z
+	case 1:
+		result = carry
+	case 2:
+		result = n
+	case 3:
+		result = v
+	case 4:
+		result = carry && !z
+	case 5:
+		result = n == v
+	case 6:
+		result = n == v && !z
+	case 7:
+		result = true
+	}
+	if cond&1 != 0 && cond != 15 {
+		result = !result
+	}
+	return result
+}
+func arithmeticFlags(a, b, r uint64, width int, sub bool) uint64 {
+	m, sign := mask(width), uint64(1)<<(width-1)
+	a, b, r = a&m, b&m, r&m
+	var flags uint64
+	if r&sign != 0 {
+		flags |= N
+	}
+	if r == 0 {
+		flags |= Z
+	}
+	if sub {
+		if a >= b {
+			flags |= C
+		}
+		if (a^b)&(a^r)&sign != 0 {
+			flags |= V
+		}
+	} else {
+		if r < a {
+			flags |= C
+		}
+		if ^(a^b)&(a^r)&sign != 0 {
+			flags |= V
+		}
+	}
+	return flags
+}
+
+const (
+	invalid = iota
+	addImmediate
+	addShifted
+	logicalShifted
+	logicalImmediate
+	moveWide
+	address
+	bitfield
+	multiply
+	divide
+	selectCondition
+)
+
+type instruction struct {
+	kind, width, rd, rn, rm, ra, operation, shift, amount, cond int
+	immediate, writeMask, topMask                               uint64
+	flags, invert                                               bool
+}
+
+// decodePure rejects reserved encodings before either execution or lowering.
+// It deliberately does not claim coverage of every instruction in these groups.
+func decodePure(op uint32) (d instruction, ok bool) {
+	d.width = 32
+	if op>>31 != 0 {
+		d.width = 64
+	}
+	d.rd, d.rn, d.rm, d.ra = int(op&31), int(op>>5&31), int(op>>16&31), int(op>>10&31)
+	switch {
+	case op&0x1f800000 == 0x11000000:
+		d.kind, d.operation, d.flags = addImmediate, int(op>>30&1), op>>29&1 != 0
+		d.immediate = uint64(op>>10&4095) << (12 * (op >> 22 & 1))
+	case op&0x1f200000 == 0x0b000000:
+		d.kind, d.operation, d.flags = addShifted, int(op>>30&1), op>>29&1 != 0
+		d.shift, d.amount = int(op>>22&3), int(op>>10&63)
+		if d.shift == 3 || d.amount >= d.width {
+			return d, false
+		}
+	case op&0x1f000000 == 0x0a000000:
+		d.kind, d.operation, d.invert = logicalShifted, int(op>>29&3), op>>21&1 != 0
+		d.shift, d.amount = int(op>>22&3), int(op>>10&63)
+		if d.amount >= d.width {
+			return d, false
+		}
+	case op&0x1f800000 == 0x12000000:
+		d.kind, d.operation = logicalImmediate, int(op>>29&3)
+		var valid bool
+		d.immediate, _, valid = bitMasks(op, d.width, true)
+		if !valid {
+			return d, false
+		}
+	case op&0x1f800000 == 0x12800000:
+		d.kind, d.operation, d.amount = moveWide, int(op>>29&3), int(op>>21&3)*16
+		d.immediate = uint64(op>>5&65535) << d.amount
+		if d.operation == 1 || d.amount >= d.width {
+			return d, false
+		}
+	case op&0x1f000000 == 0x10000000:
+		d.kind, d.operation = address, int(op>>31)
+		d.immediate = uint64(signed(uint64(op>>5&0x7ffff)<<2|uint64(op>>29&3), 21))
+	case op&0x1f800000 == 0x13000000:
+		d.kind, d.operation, d.amount = bitfield, int(op>>29&3), int(op>>16&63)
+		d.cond = int(op >> 10 & 63) // source sign bit for SBFM
+		if d.operation == 3 || int(op>>22&1) != d.width/64 || d.amount >= d.width || d.cond >= d.width {
+			return d, false
+		}
+		var valid bool
+		d.writeMask, d.topMask, valid = bitMasks(op, d.width, false)
+		if !valid {
+			return d, false
+		}
+	case op&0x7fe00000 == 0x1b000000:
+		d.kind, d.operation = multiply, int(op>>15&1)
+	case op&0x7fe0f800 == 0x1ac00800:
+		d.kind, d.operation = divide, int(op>>10&1)
+	case op&0x3fe00800 == 0x1a800000:
+		d.kind, d.operation, d.amount, d.cond = selectCondition, int(op>>30&1), int(op>>10&1), int(op>>12&15)
+	default:
+		return decodeExtra(op, d)
+	}
+	return d, true
+}
+
+// Arm DecodeBitMasks, with the logical-immediate reserved all-ones case.
+func bitMasks(op uint32, width int, immediate bool) (uint64, uint64, bool) {
+	n, s, r := int(op>>22&1), int(op>>10&63), int(op>>16&63)
+	if width == 32 && n != 0 {
+		return 0, 0, false
+	}
+	pattern := n<<6 | (^s & 63)
+	length := -1
+	for i := 0; i < 7; i++ {
+		if pattern>>i&1 != 0 {
+			length = i
+		}
+	}
+	if length < 1 {
+		return 0, 0, false
+	}
+	size := 1 << length
+	if size > width {
+		return 0, 0, false
+	}
+	levels := size - 1
+	s, r = s&levels, r&levels
+	if immediate && s == levels {
+		return 0, 0, false
+	}
+	element := rotate(mask(s+1), r, size)
+	top := mask(((s - r) & levels) + 1)
+	var wm, tm uint64
+	for i := 0; i < width; i += size {
+		wm |= element << i
+		tm |= top << i
+	}
+	return wm, tm, true
+}
+
+func (c *CPU) executePure(d instruction) {
+	a, b := c.reg(d.rn, d.kind == addImmediate || d.kind == addExtended || d.kind == logicalImmediate), c.reg(d.rm, false)
+	var result uint64
+	switch d.kind {
+	case addImmediate, addShifted, addExtended:
+		if d.kind == addImmediate {
+			b = d.immediate
+		} else if d.kind == addExtended {
+			b = extended(b, d.shift) << d.amount
+		} else {
+			b = shift(b, d.shift, d.amount, d.width)
+		}
+		if d.operation == 0 {
+			result = a + b
+		} else {
+			result = a - b
+		}
+		if d.flags {
+			c.State[NZCV] = arithmeticFlags(a, b, result, d.width, d.operation != 0)
+		}
+	case logicalShifted, logicalImmediate:
+		// Logical-immediate Rn is ZR, while a non-flag-setting Rd may be SP.
+		a = c.reg(d.rn, false)
+		if d.kind == logicalImmediate {
+			b = d.immediate
+		} else if d.kind == addExtended {
+			b = extended(b, d.shift) << d.amount
+		} else {
+			b = shift(b, d.shift, d.amount, d.width)
+			if d.invert {
+				b = ^b
+			}
+		}
+		switch d.operation {
+		case 0, 3:
+			result = a & b
+		case 1:
+			result = a | b
+		case 2:
+			result = a ^ b
+		}
+		if d.operation == 3 {
+			c.State[NZCV] = 0
+			if result&mask(d.width) == 0 {
+				c.State[NZCV] |= Z
+			}
+			if result>>(d.width-1)&1 != 0 {
+				c.State[NZCV] |= N
+			}
+		}
+	case moveWide:
+		result = d.immediate
+		if d.operation == 0 {
+			result = ^result
+		}
+		if d.operation == 3 {
+			result = c.reg(d.rd, false)&^(uint64(65535)<<d.amount) | d.immediate
+		}
+	case address:
+		result = c.State[PC] + d.immediate
+		if d.operation != 0 {
+			result = (c.State[PC] &^ uint64(4095)) + (d.immediate << 12)
+		}
+		d.width = 64
+	case bitfield:
+		result = rotate(a, d.amount, d.width) & d.writeMask & d.topMask
+		if d.operation == 0 && a>>d.cond&1 != 0 {
+			result |= ^d.topMask
+		} else if d.operation == 1 {
+			old := c.reg(d.rd, false)
+			bottom := old & ^d.writeMask | rotate(a, d.amount, d.width)&d.writeMask
+			result = old & ^d.topMask | bottom&d.topMask
+		}
+	case multiply:
+		result = a * b
+		if d.operation == 0 {
+			result = c.reg(d.ra, false) + result
+		} else {
+			result = c.reg(d.ra, false) - result
+		}
+	case divide:
+		a, b = a&mask(d.width), b&mask(d.width)
+		if b != 0 {
+			if d.operation == 0 {
+				result = a / b
+			} else {
+				result = uint64(signed(a, d.width) / signed(b, d.width))
+			}
+		}
+	case selectCondition:
+		result = a
+		if !condition(c.State[NZCV], d.cond) {
+			result = b
+			if d.operation != 0 {
+				result = ^result
+			}
+			result += uint64(d.amount)
+		}
+	}
+	if d.kind >= addCarry {
+		result = c.executeExtra(d)
+	}
+	if d.kind == conditionalCompare {
+		return
+	}
+	stack := (d.kind == addImmediate || d.kind == addExtended) && !d.flags || d.kind == logicalImmediate && d.operation != 3
+	c.put(d.rd, stack, result, d.width)
+}
+
+func (c *CPU) Step() error {
+	pc := c.State[PC]
+	if pc&3 != 0 {
+		return &Exception{Kind: "alignment", PC: pc}
+	}
+	if c.Memory == nil {
+		return &Exception{Kind: "fetch", PC: pc, Cause: fmt.Errorf("no memory")}
+	}
+	word, err := c.Memory.Read(pc, 4, true)
+	if err != nil {
+		return &Exception{Kind: "fetch", PC: pc, Cause: err}
+	}
+	return c.Execute(uint32(word))
+}
+
+// Execute commits PC/retirement only on success. SVC is a retired instruction
+// that returns a structured exception to the user personality.
+func (c *CPU) Execute(op uint32) error {
+	pc, next := c.State[PC], c.State[PC]+4
+	fail := func(kind string, err error) error { return &Exception{Kind: kind, PC: pc, Opcode: op, Cause: err} }
+	if d, ok := decodePure(op); ok {
+		c.executePure(d)
+	} else {
+		switch {
+		case op == 0xd503201f: // NOP
+		case op&0xffe0001f == 0xd4000001:
+			c.State[PC] = next
+			c.Retired++
+			return fail("svc", nil)
+		case op&0x7c000000 == 0x14000000:
+			next = pc + uint64(signed(uint64(op&0x3ffffff), 26)*4)
+			if op>>31 != 0 {
+				c.State[30] = pc + 4
+			}
+		case op&0xff000010 == 0x54000000:
+			if condition(c.State[NZCV], int(op&15)) {
+				next = pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
+			}
+		case op&0x7e000000 == 0x34000000:
+			width := 32
+			if op>>31 != 0 {
+				width = 64
+			}
+			zero := c.reg(int(op&31), false)&mask(width) == 0
+			if zero == (op>>24&1 == 0) {
+				next = pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
+			}
+		case op&0x7e000000 == 0x36000000:
+			bit := int(op>>19&31) | int(op>>31)<<5
+			zero := c.reg(int(op&31), false)>>bit&1 == 0
+			if zero == (op>>24&1 == 0) {
+				next = pc + uint64(signed(uint64(op>>5&0x3fff), 14)*4)
+			}
+		case op&0xfffffc1f == 0xd61f0000 || op&0xfffffc1f == 0xd63f0000 || op&0xfffffc1f == 0xd65f0000:
+			next = c.reg(int(op>>5&31), false)
+			if op&0xfffffc1f == 0xd63f0000 {
+				c.State[30] = pc + 4
+			}
+		case op&0x3e000000 == 0x28000000:
+			if err := c.pairMemory(op); err != nil {
+				return fail("memory", err)
+			}
+		case op&0x3f000000 == 0x39000000 || op&0x3f200000 == 0x38000000 || op&0x3f200c00 == 0x38200800:
+			if err := c.singleMemory(op); err != nil {
+				return fail("memory", err)
+			}
+		case op&0x3f000000 == 0x18000000:
+			opc, rd := int(op>>30), int(op&31)
+			if opc == 3 {
+				return fail("unsupported", nil)
+			}
+			size := 4
+			if opc == 1 {
+				size = 8
+			}
+			addr := pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
+			if c.Memory == nil {
+				return fail("memory", fmt.Errorf("no memory"))
+			}
+			value, err := c.Memory.Read(addr, size, false)
+			if err != nil {
+				return fail("memory", err)
+			}
+			width := 32
+			if opc != 0 {
+				width = 64
+			}
+			if opc == 2 {
+				value = uint64(signed(value, 32))
+			}
+			c.put(rd, false, value, width)
+		default:
+			return fail("unsupported", nil)
+		}
+	}
+	c.State[PC] = next
+	c.Retired++
+	return nil
+}
+
+func (c *CPU) singleMemory(op uint32) error {
+	size, opc := 1<<int(op>>30), int(op>>22&3)
+	rn, rd := int(op>>5&31), int(op&31)
+	if opc >= 2 && (size == 8 || opc == 3 && size >= 4) {
+		return fmt.Errorf("reserved load encoding")
+	}
+	base := c.reg(rn, true)
+	if rn == SP && base&15 != 0 {
+		return fmt.Errorf("unaligned SP")
+	}
+	addr, updated := base, base
+	mode := 0
+	if op&0x3f000000 == 0x39000000 {
+		addr += uint64(op>>10&4095) * uint64(size)
+	} else if op&0x00200000 != 0 {
+		option := int(op >> 13 & 7)
+		offset := c.reg(int(op>>16&31), false)
+		switch option {
+		case 2:
+			offset = uint64(uint32(offset))
+		case 6:
+			offset = uint64(int64(int32(offset)))
+		case 3, 7:
+		default:
+			return fmt.Errorf("reserved register offset")
+		}
+		if op>>12&1 != 0 {
+			offset *= uint64(size)
+		}
+		addr += offset
+	} else {
+		mode = int(op >> 10 & 3)
+		if mode == 2 {
+			return fmt.Errorf("unprivileged access unsupported")
+		}
+		if mode != 0 && rn == rd && rn != SP {
+			return fmt.Errorf("constrained writeback overlap")
+		}
+		updated = base + uint64(signed(uint64(op>>12&511), 9))
+		if mode == 1 {
+			addr = base
+		} else {
+			addr = updated
+		}
+	}
+	if c.Memory == nil {
+		return fmt.Errorf("no memory")
+	}
+	if opc == 0 {
+		if err := c.Memory.Write(addr, size, c.reg(rd, false)); err != nil {
+			return err
+		}
+	} else {
+		value, err := c.Memory.Read(addr, size, false)
+		if err != nil {
+			return err
+		}
+		width := 64
+		if opc == 1 && size != 8 || opc == 3 {
+			width = 32
+		}
+		if opc >= 2 {
+			value = uint64(signed(value, size*8))
+		}
+		c.put(rd, false, value, width)
+	}
+	if mode == 1 || mode == 3 {
+		c.State[rn] = updated
+	}
+	return nil
+}
+
+-- cpu_test.go --
+package aarch64
+
+import (
+	"encoding/binary"
+	"fmt"
+	"math/rand"
+	emu "renvo.dev/internal/rfe/runtime"
+	"runtime"
+	"testing"
+)
+
+func TestArchitecturalVectors(t *testing.T) {
+	cases := []struct {
+		name                                  string
+		op                                    uint32
+		a, b, old, sp, flags, want, wantFlags uint64
+		destination                           int
+	}{
+		{"W zero extension and carry", 0x2b020020, 0xffffffff, 1, 0, 0, 0, 0, Z | C, 0},
+		{"X signed addition overflow", 0xab020020, 0x7fffffffffffffff, 1, 0, 0, 0, 0x8000000000000000, N | V, 0},
+		{"X subtraction borrow", 0xeb020020, 0, 1, 0, 0, 0, ^uint64(0), N, 0},
+		{"W signed subtraction overflow", 0x6b020020, 0x80000000, 1, 0, 0, 0, 0x7fffffff, C | V, 0},
+		{"SP immediate addition", 0x910043ff, 0, 0, 0, 0x1000, V, 0x1010, V, SP},
+		{"flag setting discards ZR result", 0xb10007ff, 0, 0, 0, 0x1000, V, 0x1000, 0, SP},
+		{"logical immediate SP destination", 0xb24003ff, 0, 0, 0, 0x1000, V, 1, V, SP},
+		{"ORR reads ZR not SP", 0xaa0103e0, 0x123, 0, 0, 0x1000, V, 0x123, V, 0},
+		{"MOVZ W", 0x529fffe0, 0, 0, ^uint64(0), 0, V, 0xffff, V, 0},
+		{"MOVN W", 0x12800000, 0, 0, 0, 0, V, 0xffffffff, V, 0},
+		{"MOVK preserves other halfwords", 0xf2b579a0, 0, 0, 0x1122334455667788, 0, V, 0x11223344abcd7788, V, 0},
+		{"ANDS clears carry and overflow", 0x6a020020, 0xffffffff, 0x80000000, 0, 0, C | V, 0x80000000, N, 0},
+		{"SBFM ASR sign replication", 0x937ffc20, 0x8000000000000000, 0, 0, 0, V, ^uint64(0), V, 0},
+		{"UBFM LSR W", 0x53017c20, 0xffffffff, 0, 0, 0, V, 0x7fffffff, V, 0},
+		{"UBFM LSL X", 0xd378dc20, 0xff, 0, 0, 0, V, 0xff00, V, 0},
+		{"ADD W ASR", 0x0b820c20, 1, 0xfffffff8, 0, 0, V, 0, V, 0},
+		{"ORR X ROR", 0xaac20420, 0, 1, 0, 0, V, 0x8000000000000000, V, 0},
+		{"ADRP negative offset", 0xf0ffffe0, 0, 0, 0, 0, V, 0x3000, V, 0},
+		{"MADD X", 0x9b020c20, 4, 5, 0, 0, V, 23, V, 0},
+		{"UDIV X", 0x9ac20820, 21, 5, 0, 0, V, 4, V, 0},
+		{"SDIV W", 0x1ac20c20, 0xfffffff7, 2, 0, 0, V, 0xfffffffc, V, 0},
+		{"division by zero", 0x9ac20820, 21, 0, 0, 0, V, 0, V, 0},
+		{"CSEL EQ", 0x9a820020, 4, 5, 0, 0, Z, 4, Z, 0},
+		{"CSNEG not EQ", 0xda820420, 4, 5, 0, 0, 0, ^uint64(4), 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c CPU
+			c.State[0], c.State[1], c.State[2], c.State[3] = tc.old, tc.a, tc.b, 3
+			c.State[SP], c.State[PC], c.State[NZCV] = tc.sp, 0x4560, tc.flags
+			if err := c.Execute(tc.op); err != nil {
+				t.Fatal(err)
+			}
+			if c.State[tc.destination] != tc.want || c.State[NZCV] != tc.wantFlags || c.State[PC] != 0x4564 || c.Retired != 1 {
+				t.Fatalf("result=%x flags=%x PC=%x retired=%d", c.State[tc.destination], c.State[NZCV], c.State[PC], c.Retired)
+			}
+		})
+	}
+	for _, op := range []uint32{0x0b02fc20, 0x32800000, 0x52c00000, 0x12400000, 0xd240fc20, 0xffffffff} {
+		c := CPU{}
+		c.State[PC] = 64
+		c.State[0] = 42
+		before := c.State
+		if err := c.Execute(op); err == nil {
+			t.Fatalf("accepted reserved/unsupported instruction %#x", op)
+		}
+		if c.State != before || c.Retired != 0 {
+			t.Fatal("rejected instruction changed state")
+		}
+	}
+}
+
+func nativeHost() bool {
+	return (runtime.GOOS == "linux" || runtime.GOOS == "windows") && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") || runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+
+// Independent interpreter vs IR and native over adversarial widths, flags,
+// register-31 roles, and multi-instruction state versions. Fixed seeds reproduce
+// failures; this is not just an Execute/Lower self-consistency test of a DSL.
+func TestLoweringAgreement(t *testing.T) {
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	sequences := [][]uint32{
+		{0x910043ff, 0xb10007ff, 0xb24003ff, 0xaa0103e0},
+		{0x529fffe0, 0x12800000, 0xf2b579a0},
+		{0x937ffc20, 0x53017c20, 0xd378dc20},
+		{0x10000000, 0xf0ffffe1, 0x91000400},
+	}
+	for _, sf := range []uint32{0, 1 << 31} {
+		for _, base := range []uint32{0x0b000000, 0x2b000000, 0x4b000000, 0x6b000000, 0x0a000000, 0x2a000000, 0x4a000000, 0x6a000000} {
+			for _, sh := range []uint32{0, 1, 2} {
+				sequences = append(sequences, []uint32{sf | base | sh<<22 | 2<<16 | 7<<10 | 1<<5, sf | 0x11000400})
+			}
+		}
+	}
+	for _, base := range []uint32{0x12000000, 0x32000000, 0x52000000, 0x72000000} {
+		sequences = append(sequences, []uint32{base | 7<<10 | 1<<5, base | 1<<31 | 1<<22 | 15<<10 | 2<<5 | 3})
+	}
+	rng := rand.New(rand.NewSource(183))
+	for index, sequence := range sequences {
+		var b emu.Builder
+		for _, op := range sequence {
+			if !Lower(&b, op) {
+				t.Fatalf("not lowerable: %#x", op)
+			}
+		}
+		ops := b.Finish(StateWords)
+		var entry int
+		if native != nil {
+			entry, err = native.Compile(ops, StateWords)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for trial := 0; trial < 32; trial++ {
+			var c CPU
+			for i := range c.State {
+				c.State[i] = rng.Uint64()
+			}
+			c.State[PC] = 0x4560
+			c.State[NZCV] = uint64(trial&15) << 28
+			if trial == 0 {
+				for i := 0; i < 31; i++ {
+					c.State[i] = ^uint64(0)
+				}
+			}
+			if trial == 1 {
+				for i := 0; i < 31; i++ {
+					c.State[i] = uint64(1) << 63
+				}
+			}
+			interpreted, compiled := c.State, c.State
+			for _, op := range sequence {
+				if err = c.Execute(op); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = emu.Interpret(ops, interpreted[:]); err != nil {
+				t.Fatal(err)
+			}
+			if interpreted != c.State {
+				t.Fatalf("IR mismatch: sequence %d trial %d\n got %x\nwant %x", index, trial, interpreted, c.State)
+			}
+			if native != nil {
+				if err = native.Call(entry, compiled[:]); err != nil {
+					t.Fatal(err)
+				}
+				if compiled != c.State {
+					t.Fatalf("native mismatch: sequence %d trial %d\n got %x\nwant %x", index, trial, compiled, c.State)
+				}
+			}
+		}
+	}
+}
+
+type testMemory struct {
+	data                  []byte
+	executable, failWrite bool
+}
+
+func (m *testMemory) Read(address uint64, size int, execute bool) (uint64, error) {
+	if address > uint64(len(m.data)) || uint64(size) > uint64(len(m.data))-address || execute && !m.executable {
+		return 0, fmt.Errorf("fault")
+	}
+	var value uint64
+	for i := 0; i < size; i++ {
+		value |= uint64(m.data[address+uint64(i)]) << (i * 8)
+	}
+	return value, nil
+}
+func (m *testMemory) Write(address uint64, size int, value uint64) error {
+	if m.failWrite || address > uint64(len(m.data)) || uint64(size) > uint64(len(m.data))-address {
+		return fmt.Errorf("fault")
+	}
+	for i := 0; i < size; i++ {
+		m.data[address+uint64(i)] = byte(value >> (i * 8))
+	}
+	return nil
+}
+func instructionMemory(words ...uint32) *testMemory {
+	m := &testMemory{data: make([]byte, len(words)*4), executable: true}
+	for i, word := range words {
+		binary.LittleEndian.PutUint32(m.data[i*4:], word)
+	}
+	return m
+}
+func TestMemoryFaultsAndControlFlow(t *testing.T) {
+	m := &testMemory{data: make([]byte, 64), executable: true, failWrite: true}
+	c := CPU{Memory: m}
+	c.State[0] = 0x1234
+	c.State[1] = 16
+	c.State[PC] = 32
+	before := c.State
+	// STR X0,[X1],#8 must not update X1 on a failed write.
+	if err := c.Execute(0xf8008420); err == nil {
+		t.Fatal("missing write fault")
+	}
+	if c.State != before || c.Retired != 0 {
+		t.Fatal("fault committed writeback")
+	}
+	// LDR X0,[X1,#8]! must not commit destination OR base on a fault.
+	c.State[1] = 60
+	before = c.State
+	if err := c.Execute(0xf8408c20); err == nil {
+		t.Fatal("missing read fault")
+	}
+	if c.State != before {
+		t.Fatal("read fault committed state")
+	}
+	// SP alignment check precedes data access.
+	c.State[SP] = 1
+	before = c.State
+	if err := c.Execute(0xf94003e0); err == nil || c.State != before {
+		t.Fatal("SP alignment")
+	}
+	m.failWrite = false
+	c.State[1] = 16
+	if err := c.Execute(0xf8008420); err != nil {
+		t.Fatal(err)
+	}
+	if c.State[1] != 24 || m.data[16] != 0x34 || m.data[17] != 0x12 {
+		t.Fatal("post-index store")
+	}
+	c.State[PC] = 32
+	c.State[1] = 0x88
+	if err := c.Execute(0xd63f0020); err != nil {
+		t.Fatal(err)
+	} // BLR X1
+	if c.State[PC] != 0x88 || c.State[30] != 36 {
+		t.Fatal("BLR target/link")
+	}
+	c.State[PC] = 32
+	c.State[NZCV] = Z
+	if err := c.Execute(0x54ffffc0); err != nil {
+		t.Fatal(err)
+	} // B.EQ -8
+	if c.State[PC] != 24 {
+		t.Fatal("signed conditional branch")
+	}
+	c.State[PC] = 3
+	if err := c.Step(); err == nil {
+		t.Fatal("misaligned fetch")
+	}
+}
+
+func TestTieringInvalidationAndBudget(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			config := DefaultEngineConfig()
+			config.Mode = mode
+			config.IRThreshold = 1
+			config.NativeThreshold = 2
+			config.MaxBlocks = 1
+			config.MaxInstructions = 2 // Exercise a pure prefix, excluding the terminal branch.
+			e, err := NewEngine(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			m := instructionMemory(0x91000400, 0x91000421, 0x17fffffe)
+			c := CPU{Memory: m}
+			for i := 0; i < 3; i++ {
+				c.State[PC] = 0
+				if err = e.Step(&c, 2); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.State[0] != 3 || c.State[1] != 3 || c.Retired != 6 {
+				t.Fatal("block execution")
+			}
+			if mode == "native" && nativeHost() && e.Stats.Native == 0 {
+				t.Fatal("hot block did not promote")
+			}
+			c.State[PC] = 0
+			// The final remaining instruction forces interpretation, not over-retirement.
+			if err = e.Step(&c, 1); err != nil {
+				t.Fatal(err)
+			}
+			if c.Retired != 7 || c.State[1] != 3 || c.State[PC] != 4 {
+				t.Fatal("block overran budget")
+			}
+			binary.LittleEndian.PutUint32(m.data, 0x91000800) // change ADD #1 to ADD #2
+			c.State[PC] = 0
+			if err = e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			if c.State[0] != 6 || e.Stats.Invalidations != 1 {
+				t.Fatal("stale translated code executed")
+			}
+			c.State[PC] = 0
+			if err = e.Step(&c, 2); err != nil {
+				t.Fatal(err)
+			}
+			m.executable = false
+			c.State[PC] = 0
+			before := c.State
+			if err = e.Step(&c, 2); err == nil || c.State != before {
+				t.Fatal("revoked execute permission ignored")
+			}
+			if e.Stats.Interpreted+e.Stats.IR+e.Stats.Native != c.Retired {
+				t.Fatal("tier retirement accounting")
+			}
+		})
+	}
+}
+
+-- dispatch.go --
+package aarch64
+
+// Clear both lookup structures together. A colliding direct-cache entry may
+// refer to another PC and must remain intact. Native storage stays append-only.
+func (e *Engine) discard(pc uint64) {
+	delete(e.blocks, pc)
+	entry := &e.dispatch[(pc>>2)&1023]
+	if entry.pc == pc {
+		*entry = dispatchEntry{}
+	}
+}
+
+-- dispatch_test.go --
+package aarch64
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestDirectDispatchCollisionPCSpecializationAndInvalidation(t *testing.T) {
+	for _, mode := range []string{"ir", "native"} {
+		config := DefaultEngineConfig()
+		config.Mode = mode
+		config.IRThreshold = 1
+		config.NativeThreshold = 1
+		config.MaxBlocks = 2
+		e, err := NewEngine(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer e.Close()
+		m := instructionMemory(make([]uint32, 2050)...)
+		for _, at := range []int{0, 4096, 8192} {
+			binary.LittleEndian.PutUint32(m.data[at:], 0x10000000)
+			binary.LittleEndian.PutUint32(m.data[at+4:], 0x14000000)
+		}
+		c := CPU{Memory: m}
+		for _, pc := range []uint64{0, 4096, 0, 4096, 0} {
+			c.State[PC] = pc
+			if err := e.Step(&c, 2); err != nil || c.State[0] != pc || c.State[PC] != pc+4 {
+				t.Fatalf("collision/ADR wrong PC=%x got=%x err=%v", pc, c.State, err)
+			}
+		}
+		if len(e.blocks) != 2 {
+			t.Fatal("direct cache changed bounded profile count")
+		}
+		binary.LittleEndian.PutUint32(m.data, 0x10000020) // ADR X0,+4
+		c.State[PC] = 0
+		if err := e.Step(&c, 2); err != nil || c.State[0] != 4 || e.Stats.Invalidations != 1 {
+			t.Fatal("direct slot executed stale translation")
+		}
+		c.State[PC] = 0
+		if err := e.Step(&c, 2); err != nil || c.State[0] != 4 || c.State[PC] != 4 {
+			t.Fatal("discard failed to clear direct slot")
+		}
+		// A new PC at the cache budget stays interpreter-only, even on collisions.
+		c.State[PC] = 8192
+		if err := e.Step(&c, 2); err != nil || c.State[0] != 8192 || c.State[PC] != 8196 || len(e.blocks) != 2 {
+			t.Fatal("cache budget bypass")
+		}
+	}
+}
+
+-- engine.go --
+package aarch64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// Lower appends a pure instruction to a block. Memory and control flow are
+// remain outside this pure-instruction API. A false result never modifies b.
+func Lower(b *emu.Builder, op uint32) bool {
+	d, ok := decodePure(op)
+	if !ok || d.kind == divide {
+		return false
+	}
+	constant := b.Constant
+	binary := b.Binary
+	and := func(a emu.Value, m uint64) emu.Value { return binary(emu.And, a, constant(m)) }
+	not := func(a emu.Value) emu.Value { return binary(emu.Xor, a, constant(^uint64(0))) }
+	reg := func(r int, stack bool) emu.Value {
+		if r == SP && !stack {
+			return constant(0)
+		}
+		return b.Load(r)
+	}
+	narrow := func(v emu.Value) emu.Value { return and(v, mask(d.width)) }
+	shifted := func(v emu.Value, kind, amount int) emu.Value {
+		v = narrow(v)
+		if amount == 0 {
+			return v
+		}
+		switch kind {
+		case 0:
+			return narrow(b.Shift(emu.Shl, v, uint64(amount)))
+		case 1:
+			return b.Shift(emu.Shr, v, uint64(amount))
+		case 2:
+			low := b.Shift(emu.Shr, v, uint64(amount))
+			sign := and(b.Shift(emu.Shr, v, uint64(d.width-1)), 1)
+			return binary(emu.Or, low, b.Choose(sign, constant(mask(d.width)&^mask(d.width-amount)), constant(0)))
+		default:
+			return narrow(binary(emu.Or, b.Shift(emu.Shr, v, uint64(amount)), b.Shift(emu.Shl, v, uint64(d.width-amount))))
+		}
+	}
+	a := reg(d.rn, d.kind == addImmediate || d.kind == addExtended)
+	var result emu.Value
+	switch d.kind {
+	case addImmediate, addShifted, addExtended:
+		a = narrow(a)
+		var rhs emu.Value
+		if d.kind == addImmediate {
+			rhs = constant(d.immediate)
+		} else if d.kind == addExtended {
+			rhs = narrow(b.Shift(emu.Shl, extendIR(b, reg(d.rm, false), d.shift), uint64(d.amount)))
+		} else {
+			rhs = shifted(reg(d.rm, false), d.shift, d.amount)
+		}
+		k := emu.Add
+		if d.operation != 0 {
+			k = emu.Sub
+		}
+		result = narrow(binary(k, a, rhs))
+		if d.flags {
+			b.Store(NZCV, b.ArithmeticFlags(a, rhs, d.width, d.operation != 0))
+		}
+	case logicalShifted, logicalImmediate:
+		var rhs emu.Value
+		if d.kind == logicalImmediate {
+			rhs = constant(d.immediate)
+		} else if d.kind == addExtended {
+			rhs = narrow(b.Shift(emu.Shl, extendIR(b, reg(d.rm, false), d.shift), uint64(d.amount)))
+		} else {
+			rhs = shifted(reg(d.rm, false), d.shift, d.amount)
+			if d.invert {
+				rhs = not(rhs)
+			}
+		}
+		k := emu.And
+		if d.operation == 1 {
+			k = emu.Or
+		}
+		if d.operation == 2 {
+			k = emu.Xor
+		}
+		result = narrow(binary(k, a, rhs))
+		if d.operation == 3 {
+			flags := b.LogicalFlags(result, d.width)
+			b.Store(NZCV, flags)
+		}
+	case moveWide:
+		result = constant(d.immediate)
+		if d.operation == 0 {
+			result = not(result)
+		}
+		if d.operation == 3 {
+			result = binary(emu.Or, and(reg(d.rd, false), ^(uint64(65535)<<d.amount)), result)
+		}
+		result = narrow(result)
+	case address:
+		base := b.Load(PC)
+		delta := d.immediate
+		if d.operation != 0 {
+			base = and(base, ^uint64(4095))
+			delta <<= 12
+		}
+		result = binary(emu.Add, base, constant(delta))
+	case bitfield:
+		result = and(shifted(a, 3, d.amount), d.writeMask&d.topMask)
+		if d.operation == 0 {
+			sign := and(b.Shift(emu.Shr, a, uint64(d.cond)), 1)
+			result = binary(emu.Or, result, b.Choose(sign, constant(^d.topMask), constant(0)))
+		}
+		if d.operation == 1 {
+			old := reg(d.rd, false)
+			bottom := binary(emu.Or, and(old, ^d.writeMask), and(shifted(a, 3, d.amount), d.writeMask))
+			result = binary(emu.Or, and(old, ^d.topMask), and(bottom, d.topMask))
+		}
+		result = narrow(result)
+	default:
+		result = lowerExtra(b, d)
+	}
+	stack := (d.kind == addImmediate || d.kind == addExtended) && !d.flags || d.kind == logicalImmediate && d.operation != 3
+	if d.kind != conditionalCompare && (d.rd != SP || stack) {
+		b.Store(d.rd, result)
+	}
+	b.Store(PC, binary(emu.Add, b.Load(PC), constant(4)))
+	return true
+}
+
+type EngineConfig struct {
+	Mode                  string // interpreter, ir, native; native includes both lower tiers
+	IRThreshold           uint64
+	NativeThreshold       uint64
+	MaxBlocks             int
+	MaxInstructions       int // cold block discovery width
+	MaxRegionInstructions int // independently optimized region width
+	MaxNativeInstructions int // bounded uninterrupted scheduling slice
+	NativeBytes           int
+	ProfileNative         bool // emit Linux perf-map symbols; enabled by CLI -stats
+	DirectChaining        bool // experimental checked edges and pure-register transfer; opt-in
+}
+
+func DefaultEngineConfig() EngineConfig {
+	return EngineConfig{Mode: "native", IRThreshold: 8, NativeThreshold: 64, MaxBlocks: 4096, MaxInstructions: 16, MaxRegionInstructions: 256, MaxNativeInstructions: 65536, NativeBytes: 8 << 20}
+}
+
+type Stats struct {
+	LoopIterations                                         uint64 // native loop iterations, without a Go transition
+	NativeSessions, LinkMissStops, BudgetStops, OtherStops uint64
+
+	Regions, RegionExits                               uint64 // bounded cyclic regions and successful side exits
+	ProfileErrors                                      uint64
+	Linked                                             uint64 // instructions retired inside the native dispatcher
+	Interpreted, IR, Native                            uint64 // retired instructions in each tier
+	Blocks, Promotions, Invalidations, CompileFailures uint64
+	NativeBytes                                        int
+	NativeMemory, MemoryExits                          uint64 // native scalar instructions and precise slow exits
+	CodeReads, VersionChecks, ContextChecks            uint64 // translation discovery/revalidation only
+}
+
+type compiledBlock struct {
+	regionAttempted, region         bool
+	regionGeneration                uint64 // retry only after another native promotion
+	regionEntry, regionInstructions int
+	regionPrefix                    [17]uint8
+	dependencies                    []codeDependency
+	context                         CodeStamp
+	words                           []uint32
+	visits                          uint64
+	ops                             []emu.Op
+	prepared                        *emu.PreparedBlock
+	entry                           int
+	native, attempted               bool
+	interpretOnly                   bool  // cached instruction word, still architecturally executed
+	memoryKind                      uint8 // scalar/pair dispatch classification, not a memory permission cache
+	effects                         bool
+	memoryPrefix                    [17]uint8 // scalar accesses retired in each prefix of the block
+}
+
+type dispatchEntry struct {
+	pc    uint64
+	block *compiledBlock
+}
+
+type Engine struct {
+	config      EngineConfig
+	blocks      map[uint64]*compiledBlock
+	dispatch    [1024]dispatchEntry
+	ir          emu.IRMachine
+	native      *emu.Native
+	Stats       Stats
+	linkContext CodeStamp
+	linkReady   bool // immutable state ABI, prepared once for this native engine
+}
+
+func NewEngine(config EngineConfig) (*Engine, error) {
+	if config.Mode != "interpreter" && config.Mode != "ir" && config.Mode != "native" {
+		return nil, fmt.Errorf("invalid engine %q", config.Mode)
+	}
+	if config.MaxRegionInstructions == 0 {
+		config.MaxRegionInstructions = config.MaxInstructions
+	}
+	if config.MaxNativeInstructions == 0 {
+		config.MaxNativeInstructions = 64
+	}
+	if config.MaxRegionInstructions < 1 || config.MaxRegionInstructions > 256 || config.MaxNativeInstructions < 1 || config.MaxNativeInstructions > emu.NativeSessionLimit {
+		return nil, fmt.Errorf("invalid execution slice configuration")
+	}
+	if config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold || config.MaxBlocks < 1 || config.MaxBlocks > 65536 || config.MaxInstructions < 1 || config.MaxInstructions > 16 || config.NativeBytes < 4096 || config.NativeBytes > 64<<20 {
+		return nil, fmt.Errorf("invalid engine budget")
+	}
+	e := &Engine{config: config, blocks: map[uint64]*compiledBlock{}}
+	if config.Mode == "native" {
+		n, err := emu.NewNative(config.NativeBytes)
+		if err != nil {
+			e.Stats.CompileFailures++
+		} else {
+			e.native = n
+			if config.ProfileNative {
+				_ = n.EnablePerfMap()
+				e.Stats.ProfileErrors = n.SymbolErrors
+			}
+		}
+	}
+	return e, nil
+}
+func (e *Engine) Close() error {
+	if e.native != nil {
+		err := e.native.Close()
+		e.native = nil
+		return err
+	}
+	return nil
+}
+func (e *Engine) block(c *CPU) *compiledBlock {
+	pc := c.State[PC]
+	if pc&3 != 0 || c.Memory == nil {
+		return nil
+	}
+	cache := &e.dispatch[(pc>>2)&1023]
+	old := cache.block
+	direct := old != nil && cache.pc == pc
+	if !direct {
+		old = e.blocks[pc]
+	}
+	if old == nil {
+		return e.discoverBlock(c, pc, cache)
+	}
+	valid := false
+	if len(old.dependencies) != 0 {
+		var context CodeStamp
+		if memory, ok := c.Memory.(CodeContextMemory); ok {
+			context = memory.CodeContext()
+			e.Stats.ContextChecks++
+			valid = context.Identity != nil && context == old.context
+		}
+		if !valid {
+			valid = e.validVersions(c, old, context)
+		}
+	} else {
+		valid = e.validBytes(c, pc, old)
+	}
+	if !valid {
+		e.discard(pc)
+		e.Stats.Invalidations++
+		return nil
+	}
+	// A direct hit already contains exactly this pointer; do not rewrite its
+	// GC-tracked slot on every executed block. Map hits still repair collisions.
+	if !direct {
+		*cache = dispatchEntry{pc, old}
+	}
+	return old
+}
+
+// Keep decoding, allocation and the large instruction descriptor out of the
+// guarded lookup's frame; none of these are needed for a hot block entry.
+func (e *Engine) discoverBlock(c *CPU, pc uint64, cache *dispatchEntry) *compiledBlock {
+	if len(e.blocks) >= e.config.MaxBlocks {
+		return nil
+	}
+	block := &compiledBlock{}
+	nativeMemory, capable := c.Memory.(NativeMemory)
+	allowMemory := capable && e.native != nil && nativeMemory.NativeContext() != nil
+	for i := 0; i < e.config.MaxInstructions; i++ {
+		addr := pc + uint64(i)*4
+		if addr < pc {
+			break
+		}
+		word, err := c.Memory.Read(addr, 4, true)
+		e.Stats.CodeReads++
+		if err != nil {
+			break
+		}
+		terminal := branchKind(uint32(word)) != 0
+		d, ok := decodePure(uint32(word))
+		_, scalar := decodeScalar(uint32(word))
+		scalar = scalar || nativePair(uint32(word))
+		if !terminal && (!ok || d.kind == divide) && !(scalar && allowMemory) {
+			if len(block.words) == 0 {
+				block.words = append(block.words, uint32(word))
+				block.interpretOnly = true
+				switch {
+				case uint32(word)&0x3e000000 == 0x28000000:
+					block.memoryKind = 2
+				case uint32(word)&0x3f000000 == 0x39000000 || uint32(word)&0x3f200000 == 0x38000000 || uint32(word)&0x3f200c00 == 0x38200800:
+					block.memoryKind = 1
+				}
+			}
+			break
+		}
+		block.words = append(block.words, uint32(word))
+		block.memoryPrefix[len(block.words)] = block.memoryPrefix[len(block.words)-1]
+		if scalar && allowMemory {
+			block.effects = true
+			block.memoryPrefix[len(block.words)]++
+		}
+		if terminal {
+			break
+		}
+	}
+	if len(block.words) == 0 {
+		return nil
+	}
+	e.dependencies(c, pc, block)
+	e.blocks[pc] = block
+	*cache = dispatchEntry{pc, block}
+	e.Stats.Blocks++
+	return block
+}
+
+// Step retires at most remaining instructions. Code page stamps (or bytes for
+// unversioned memories) and execute permission are checked on every block entry.
+// Code cache exhaustion always falls back; invalid native entries are never
+// reused or reclaimed underneath a call.
+func (e *Engine) Step(c *CPU, remaining uint64) error {
+	if remaining == 0 {
+		return fmt.Errorf("instruction budget exhausted")
+	}
+	if e.config.Mode == "interpreter" {
+		return e.interpret(c)
+	}
+	return e.stepBlock(c, remaining, e.block(c))
+}
+
+// stepBlock consumes a lookup already validated in this single-threaded engine.
+// This lets Run fall back without a second lookup/context query at the same PC.
+func (e *Engine) stepBlock(c *CPU, remaining uint64, block *compiledBlock) error {
+	if block == nil || uint64(len(block.words)) > remaining {
+		return e.interpret(c)
+	}
+	if block.interpretOnly {
+		// block() has validated this instruction's execute permission and
+		// code version (or bytes). Avoid fetching it a second time. Memory,
+		// division, traps and unsupported instructions keep CPU semantics.
+		before := c.Retired
+		err := block.executeCached(c)
+		e.Stats.Interpreted += c.Retired - before
+		return err
+	}
+	block.visits++
+	if block.effects {
+		return e.stepMemory(c, block)
+	}
+	if block.visits < e.config.IRThreshold {
+		return e.interpret(c)
+	}
+	if block.ops == nil {
+		var b emu.Builder
+		// This translation is reachable only through its guarded PC key.
+		// Specialize PC-relative values and sequential PC updates at build time.
+		b.Store(PC, b.Constant(c.State[PC]))
+		for _, word := range block.words {
+			if !Lower(&b, word) && !lowerBranch(&b, word) {
+				e.Stats.CompileFailures++
+				e.discard(c.State[PC])
+				return e.interpret(c)
+			}
+		}
+		block.ops = b.Finish(StateWords)
+		prepared, err := emu.Prepare(block.ops, StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+			e.discard(c.State[PC])
+			return e.interpret(c)
+		}
+		block.prepared = prepared
+	}
+	if e.native != nil && !block.attempted && block.visits >= e.config.NativeThreshold {
+		block.attempted = true
+		entry, err := e.native.Compile(block.ops, StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+		} else {
+			block.entry = entry
+			_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_pure_%d_ops", c.State[PC], len(block.ops)))
+			e.Stats.ProfileErrors = e.native.SymbolErrors
+			block.native = true
+			e.Stats.Promotions++
+		}
+		e.Stats.NativeBytes = e.native.Bytes
+	}
+	var err error
+	if block.native && e.native != nil {
+		err = e.native.Call(block.entry, c.State[:])
+	} else {
+		err = e.ir.Run(block.prepared, c.State[:])
+	}
+	if err != nil {
+		return err
+	}
+	retired := uint64(len(block.words))
+	c.Retired += retired
+	if block.native && e.native != nil {
+		e.Stats.Native += retired
+	} else {
+		e.Stats.IR += retired
+	}
+	return nil
+}
+func (e *Engine) interpret(c *CPU) error {
+	before := c.Retired
+	err := c.Step()
+	e.Stats.Interpreted += c.Retired - before
+	return err
+}
+
+-- integer.go --
+package aarch64
+
+import "math/bits"
+
+const (
+	addExtended = selectCondition + 1 + iota
+	addCarry
+	extract
+	variableShift
+	reverse
+	leading
+	conditionalCompare
+	longMultiply
+	highMultiply
+	compatibilityHint
+)
+
+func decodeExtra(op uint32, d instruction) (instruction, bool) {
+	switch {
+	case op == 0xd503201f || op == 0xd503233f || op == 0xd50323bf || op == 0xd503237f || op == 0xd50323ff || op == 0xd503241f || op == 0xd503245f || op == 0xd503249f || op == 0xd50324df:
+		// Base CPU has neither FEAT_PAuth nor FEAT_BTI. Only these explicit
+		// backward-compatible HINT encodings are NOPs, not non-HINT PAC/RETAA.
+		d.kind, d.rd = compatibilityHint, SP
+	case op&0xffe00000 == 0x9b200000 || op&0xffe00000 == 0x9ba00000:
+		d.kind, d.operation, d.invert = longMultiply, int(op>>15&1), op>>23&1 == 0
+	case op&0xffe0fc00 == 0x9b407c00 || op&0xffe0fc00 == 0x9bc07c00:
+		d.kind, d.invert = highMultiply, op>>23&1 == 0
+	case op&0x1fe00000 == 0x0b200000:
+		d.kind, d.operation, d.flags = addExtended, int(op>>30&1), op>>29&1 != 0
+		d.shift, d.amount = int(op>>13&7), int(op>>10&7)
+		if d.amount > 4 {
+			return d, false
+		}
+	case op&0x1fe0fc00 == 0x1a000000:
+		d.kind, d.operation, d.flags = addCarry, int(op>>30&1), op>>29&1 != 0
+	case op&0x7fa00000 == 0x13800000:
+		d.kind, d.amount = extract, int(op>>10&63)
+		if int(op>>22&1) != d.width/64 || d.amount >= d.width {
+			return d, false
+		}
+	case op&0x7fe0f000 == 0x1ac02000:
+		d.kind, d.operation = variableShift, int(op>>10&3)
+	case op&0x7ffffc00 == 0x5ac00000 || op&0x7ffffc00 == 0x5ac00400 || op&0x7ffffc00 == 0x5ac00800 || op&0x7ffffc00 == 0x5ac00c00:
+		d.kind, d.operation = reverse, int(op>>10&3)
+		if d.operation == 3 && d.width == 32 {
+			return d, false
+		}
+	case op&0x7ffffc00 == 0x5ac01000 || op&0x7ffffc00 == 0x5ac01400:
+		d.kind, d.operation = leading, int(op>>10&1)
+	case op&0x3fe00410 == 0x3a400000:
+		d.kind, d.operation, d.cond = conditionalCompare, int(op>>30&1), int(op>>12&15)
+		d.invert = op>>11&1 != 0 // immediate operand
+		d.immediate = uint64(op&15) << 28
+	default:
+		return d, false
+	}
+	return d, true
+}
+
+func extended(value uint64, option int) uint64 {
+	width := 8 << (option & 3)
+	if option&4 != 0 {
+		return uint64(signed(value, width))
+	}
+	return value & mask(width)
+}
+
+func (c *CPU) executeExtra(d instruction) uint64 {
+	a, b := c.reg(d.rn, false)&mask(d.width), c.reg(d.rm, false)&mask(d.width)
+	switch d.kind {
+	case compatibilityHint:
+		return 0
+	case longMultiply:
+		if d.invert {
+			a, b = uint64(int64(int32(a))), uint64(int64(int32(b)))
+		} else {
+			a, b = uint64(uint32(a)), uint64(uint32(b))
+		}
+		product := a * b
+		if d.operation != 0 {
+			return c.reg(d.ra, false) - product
+		}
+		return c.reg(d.ra, false) + product
+	case highMultiply:
+		high, _ := bits.Mul64(a, b)
+		if d.invert {
+			if a>>63 != 0 {
+				high -= b
+			}
+			if b>>63 != 0 {
+				high -= a
+			}
+		}
+		return high
+	case addCarry:
+		carry := c.State[NZCV] >> 29 & 1
+		operand := b
+		if d.operation != 0 {
+			operand = ^b & mask(d.width)
+		}
+		result, carryOut := bits.Add64(a, operand, carry)
+		if d.width == 32 {
+			carryOut = result >> 32
+			result &= 0xffffffff
+		}
+		if d.flags {
+			flags := uint64(0)
+			if result == 0 {
+				flags |= Z
+			}
+			if result>>(d.width-1)&1 != 0 {
+				flags |= N
+			}
+			if carryOut != 0 {
+				flags |= C
+			}
+			if ^(a^operand)&(a^result)&(uint64(1)<<(d.width-1)) != 0 {
+				flags |= V
+			}
+			c.State[NZCV] = flags
+		}
+		return result
+	case extract:
+		if d.amount == 0 {
+			return b
+		}
+		return b>>d.amount | a<<(d.width-d.amount)
+	case variableShift:
+		return shift(a, d.operation, int(b)&(d.width-1), d.width)
+	case reverse:
+		switch d.operation {
+		case 0:
+			if d.width == 32 {
+				return uint64(bits.Reverse32(uint32(a)))
+			}
+			return bits.Reverse64(a)
+		case 1:
+			return (a&0x00ff00ff00ff00ff)<<8 | (a&0xff00ff00ff00ff00)>>8
+		case 2:
+			return uint64(bits.ReverseBytes32(uint32(a))) | uint64(bits.ReverseBytes32(uint32(a>>32)))<<32
+		default:
+			return bits.ReverseBytes64(a)
+		}
+	case leading:
+		if d.operation != 0 && a>>(d.width-1) != 0 {
+			a = ^a
+		}
+		count := bits.LeadingZeros64(a)
+		if d.width == 32 {
+			count = bits.LeadingZeros32(uint32(a))
+		}
+		if d.operation != 0 {
+			count--
+		}
+		return uint64(count)
+	case conditionalCompare:
+		if !condition(c.State[NZCV], d.cond) {
+			c.State[NZCV] = d.immediate
+			return 0
+		}
+		if d.invert {
+			b = uint64(d.rm)
+		}
+		result := a + b
+		if d.operation != 0 {
+			result = a - b
+		}
+		c.State[NZCV] = arithmeticFlags(a, b, result, d.width, d.operation != 0)
+		return 0
+	}
+	return 0
+}
+
+-- integer_chain_test.go --
+package aarch64
+
+import (
+	"math/rand"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestIntegerChainsAndExtendedOperands(t *testing.T) {
+	sequences := [][]uint32{
+		{0xab020023, 0xba040065, 0xfa0600a7, 0x9a89a0e8, 0xfa480105, 0x9a8b510a},
+		{0x1b020c20, 0x33081c20, 0x1ac22403, 0x5ac00064, 0x5ac01485, 0x7a420829, 0x1a86c0a7},
+		{0x9ac22c20, 0xdac00c03, 0x93c21c64, 0xb3443c85, 0xdac010a6},
+	}
+	// Cover every extension option and legal scaling amount at both widths.
+	for _, sf := range []uint32{0, 1 << 31} {
+		for option := uint32(0); option < 8; option++ {
+			for amount := uint32(0); amount < 5; amount++ {
+				base := sf | 0x0b220020 | option<<13 | amount<<10
+				sequences = append(sequences, []uint32{base | 1<<29, base | 1<<30 | 1<<29 | 3, 0x9a860064})
+			}
+		}
+	}
+	// Dynamic counts exercise wraparound, sign extension and both rotate widths.
+	for _, sf := range []uint32{0, 1 << 31} {
+		for kind := uint32(0); kind < 4; kind++ {
+			sequences = append(sequences, []uint32{sf | 0x1ac22020 | kind<<10, sf | 0x1ac32004 | kind<<10})
+		}
+	}
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	rng := rand.New(rand.NewSource(481))
+	for index, sequence := range sequences {
+		var b emu.Builder
+		for _, op := range sequence {
+			if !Lower(&b, op) {
+				t.Fatalf("not lowerable %#x", op)
+			}
+		}
+		ops := b.Finish(StateWords)
+		entry := 0
+		if native != nil {
+			entry, err = native.Compile(ops, StateWords)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		for trial := 0; trial < 32; trial++ {
+			c := CPU{}
+			for i := 0; i < PC; i++ {
+				c.State[i] = rng.Uint64()
+			}
+			c.State[PC], c.State[NZCV] = 64, uint64(trial&15)<<28
+			if trial < 4 {
+				value := []uint64{0, ^uint64(0), 0x80000000, 0x8000000000000000}[trial]
+				for i := 0; i < PC; i++ {
+					c.State[i] = value
+				}
+			}
+			portable, compiled := c.State, c.State
+			for _, op := range sequence {
+				if err = c.Execute(op); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err = emu.Interpret(ops, portable[:]); err != nil || portable != c.State {
+				t.Fatalf("IR sequence=%d trial=%d err=%v\ngot=%x\nwant=%x", index, trial, err, portable, c.State)
+			}
+			if native != nil {
+				if err = native.Call(entry, compiled[:]); err != nil || compiled != c.State {
+					t.Fatalf("native sequence=%d trial=%d err=%v", index, trial, err)
+				}
+			}
+		}
+	}
+}
+
+-- integer_test.go --
+package aarch64
+
+import (
+	"math/big"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestIntegerExpansionVectors(t *testing.T) {
+	cases := []struct {
+		name                               string
+		op                                 uint32
+		a, b, old, flags, result, outFlags uint64
+		dest                               int
+	}{
+		{"ADD SP UXTW scaled", 0x8b214bff, 3, 0, 0, C, 0x100c, C, SP},
+		{"ADD SXTW", 0x8b22c420, 10, 0xffffffff, 0, V, 8, V, 0},
+		{"SUBS UXTB", 0x6b220020, 0, 0xff, 0, 0, 0xffffff01, N, 0},
+		{"ADCS W carry", 0x3a020020, 0xffffffff, 0, 0, C, 0, Z | C, 0},
+		{"ADCS X overflow", 0xba020020, 0x7fffffffffffffff, 0, 0, C, 0x8000000000000000, N | V, 0},
+		{"SBCS W borrow", 0x7a020020, 0, 0, 0, 0, 0xffffffff, N, 0},
+		{"SBCS X no borrow", 0xfa020020, 0, 0, 0, C, 0, Z | C, 0},
+		{"ADC ZR roles", 0x9a1f03e9, 0, 0, 0, C, 1, C, 9},
+		{"BFM wraps and preserves destination", 0x33081c20, 0x12345678, 0, 0x11aabbcc, V, 0x78aabbcc, V, 0},
+		{"BFM nonwrapping", 0xb3403c20, 0xabcd, 0, 0x1122334455667788, 0, 0x112233445566abcd, 0, 0},
+		{"EXTR W concatenation", 0x13822020, 0x11223344, 0x55667788, 0, 0, 0x44556677, 0, 0},
+		{"EXTR X zero count", 0x93c20020, 0x11223344, 0x55667788, 0, V, 0x55667788, V, 0},
+		{"LSLV W masks count", 0x1ac22020, 0xff, 32, 0, 0, 0xff, 0, 0},
+		{"ASRV W sign", 0x1ac22820, 0x80000000, 63, 0, 0, 0xffffffff, 0, 0},
+		{"RORV X masks count", 0x9ac22c20, 1, 65, 0, 0, 0x8000000000000000, 0, 0},
+		{"RBIT W", 0x5ac00020, 1, 0, 0, 0, 0x80000000, 0, 0},
+		{"REV16 X", 0xdac00420, 0x1122334455667788, 0, 0, 0, 0x2211443366558877, 0, 0},
+		{"REV W", 0x5ac00820, 0x11223344, 0, 0, 0, 0x44332211, 0, 0},
+		{"REV X", 0xdac00c20, 0x1122334455667788, 0, 0, 0, 0x8877665544332211, 0, 0},
+		{"CLZ W zero", 0x5ac01020, 0, 0, 0, 0, 32, 0, 0},
+		{"CLZ W nonzero", 0x5ac01020, 0x1000, 0, 0, V, 19, V, 0},
+		{"CLS X minus one", 0xdac01420, ^uint64(0), 0, 0, 0, 63, 0, 0},
+		{"CLS W sign boundary", 0x5ac01420, 0x40000000, 0, 0, 0, 0, 0, 0},
+	}
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := CPU{}
+			c.State[0], c.State[1], c.State[2] = tc.old, tc.a, tc.b
+			c.State[SP], c.State[PC], c.State[NZCV] = 0x1000, 64, tc.flags
+			before := c.State
+			if err := c.Execute(tc.op); err != nil {
+				t.Fatal(err)
+			}
+			if c.State[tc.dest] != tc.result || c.State[NZCV] != tc.outFlags {
+				t.Fatalf("result=%x flags=%x", c.State[tc.dest], c.State[NZCV])
+			}
+			var builder emu.Builder
+			if !Lower(&builder, tc.op) {
+				t.Fatal("not lowerable")
+			}
+			ops := builder.Finish(StateWords)
+			portable := before
+			if err := emu.Interpret(ops, portable[:]); err != nil {
+				t.Fatal(err)
+			}
+			if portable != c.State {
+				t.Fatalf("IR: got %x want %x", portable, c.State)
+			}
+			if native != nil {
+				entry, err := native.Compile(ops, StateWords)
+				if err != nil {
+					t.Fatal(err)
+				}
+				compiled := before
+				if err = native.Call(entry, compiled[:]); err != nil {
+					t.Fatal(err)
+				}
+				if compiled != c.State {
+					t.Fatalf("native: got %x want %x", compiled, c.State)
+				}
+			}
+		})
+	}
+	for _, op := range []uint32{0x8b225420, 0x13828020, 0x93820020, 0x5ac00c20, 0x1a024020, 0x7a420438} {
+		c := CPU{}
+		c.State[PC] = 64
+		before := c.State
+		var b emu.Builder
+		if c.Execute(op) == nil || Lower(&b, op) || c.State != before || len(b.Ops) != 0 {
+			t.Fatalf("reserved opcode %#x accepted or changed state", op)
+		}
+	}
+}
+
+// Arbitrary precision addition/subtraction and signed bounds independently
+// validate both carry-out and overflow, including the extra carry/borrow bit.
+func TestCarryAgainstMathematicalOracle(t *testing.T) {
+	values := []uint64{0, 1, 2, 0x7fffffff, 0x80000000, 0xfffffffe, 0xffffffff, 0x7fffffffffffffff, 0x8000000000000000, ^uint64(0) - 1, ^uint64(0)}
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	for _, width := range []int{32, 64} {
+		modulus := new(big.Int).Lsh(big.NewInt(1), uint(width))
+		half := new(big.Int).Rsh(new(big.Int).Set(modulus), 1)
+		minimum := new(big.Int).Neg(new(big.Int).Set(half))
+		maximum := new(big.Int).Sub(new(big.Int).Set(half), big.NewInt(1))
+		signedValue := func(v *big.Int) *big.Int {
+			s := new(big.Int).Set(v)
+			if s.Cmp(half) >= 0 {
+				s.Sub(s, modulus)
+			}
+			return s
+		}
+		for _, sub := range []bool{false, true} {
+			op := uint32(0x3a020020)
+			if width == 64 {
+				op |= 1 << 31
+			}
+			if sub {
+				op |= 1 << 30
+			}
+			var builder emu.Builder
+			if !Lower(&builder, op) {
+				t.Fatal("carry lowering")
+			}
+			ops := builder.Finish(StateWords)
+			entry := 0
+			if native != nil {
+				entry, err = native.Compile(ops, StateWords)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, x := range values {
+				for _, y := range values {
+					for cin := uint64(0); cin < 2; cin++ {
+						a := new(big.Int).Mod(new(big.Int).SetUint64(x), modulus)
+						b := new(big.Int).Mod(new(big.Int).SetUint64(y), modulus)
+						total := new(big.Int).Add(a, b)
+						signedTotal := new(big.Int).Add(signedValue(a), signedValue(b))
+						if sub {
+							total.Sub(a, b)
+							signedTotal.Sub(signedValue(a), signedValue(b))
+							total.Sub(total, new(big.Int).SetUint64(1-cin))
+							signedTotal.Sub(signedTotal, new(big.Int).SetUint64(1-cin))
+						} else {
+							total.Add(total, new(big.Int).SetUint64(cin))
+							signedTotal.Add(signedTotal, new(big.Int).SetUint64(cin))
+						}
+						expected := new(big.Int).Mod(new(big.Int).Set(total), modulus).Uint64()
+						flags := uint64(0)
+						if expected == 0 {
+							flags |= Z
+						}
+						if expected>>(width-1) != 0 {
+							flags |= N
+						}
+						if sub && total.Sign() >= 0 || !sub && total.Cmp(modulus) >= 0 {
+							flags |= C
+						}
+						if signedTotal.Cmp(minimum) < 0 || signedTotal.Cmp(maximum) > 0 {
+							flags |= V
+						}
+						c := CPU{}
+						c.State[1], c.State[2], c.State[NZCV], c.State[PC] = x, y, cin<<29, 64
+						portable, compiled := c.State, c.State
+						if err = c.Execute(op); err != nil {
+							t.Fatal(err)
+						}
+						if c.State[0] != expected || c.State[NZCV] != flags {
+							t.Fatalf("width=%d sub=%v a=%x b=%x cin=%d: result=%x flags=%x want=%x/%x", width, sub, x, y, cin, c.State[0], c.State[NZCV], expected, flags)
+						}
+						if err = emu.Interpret(ops, portable[:]); err != nil || portable != c.State {
+							t.Fatalf("carry IR: %v", err)
+						}
+						if native != nil {
+							if err = native.Call(entry, compiled[:]); err != nil || compiled != c.State {
+								t.Fatalf("carry native: %v", err)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func expectedCondition(flags uint64, cond int) bool {
+	n, z, c, v := flags&N != 0, flags&Z != 0, flags&C != 0, flags&V != 0
+	return []bool{z, !z, c, !c, n, !n, v, !v, c && !z, !c || z, n == v, n != v, !z && n == v, z || n != v, true, true}[cond]
+}
+func TestAllConditionalSelectAndCompareCodes(t *testing.T) {
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	for cond := 0; cond < 16; cond++ {
+		for variant := 0; variant < 4; variant++ {
+			op := uint32(0x9a820020) | uint32(cond)<<12 | uint32(variant>>1)<<30 | uint32(variant&1)<<10
+			var b emu.Builder
+			if !Lower(&b, op) {
+				t.Fatal("CSEL lower")
+			}
+			ops := b.Finish(StateWords)
+			entry := 0
+			if native != nil {
+				entry, err = native.Compile(ops, StateWords)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for bits := uint64(0); bits < 16; bits++ {
+				c := CPU{}
+				c.State[1], c.State[2], c.State[NZCV], c.State[PC] = 7, 11, bits<<28, 64
+				portable, compiled := c.State, c.State
+				want := uint64(7)
+				if !expectedCondition(bits<<28, cond) {
+					want = 11
+					if variant>>1 != 0 {
+						want = ^want
+					}
+					want += uint64(variant & 1)
+				}
+				if err = c.Execute(op); err != nil || c.State[0] != want || c.State[NZCV] != bits<<28 {
+					t.Fatalf("CSEL cond=%d variant=%d NZCV=%x: %x %v", cond, variant, bits, c.State[0], err)
+				}
+				if err = emu.Interpret(ops, portable[:]); err != nil || portable != c.State {
+					t.Fatalf("select IR: %v", err)
+				}
+				if native != nil {
+					if err = native.Call(entry, compiled[:]); err != nil || compiled != c.State {
+						t.Fatalf("select native: %v", err)
+					}
+				}
+			}
+		}
+		for _, immediate := range []bool{false, true} {
+			op := uint32(0x7a420029) | uint32(cond)<<12
+			if immediate {
+				op |= 1 << 11
+			}
+			var b emu.Builder
+			if !Lower(&b, op) {
+				t.Fatal("CCMP lower")
+			}
+			ops := b.Finish(StateWords)
+			entry := 0
+			if native != nil {
+				entry, err = native.Compile(ops, StateWords)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for bits := uint64(0); bits < 16; bits++ {
+				c := CPU{}
+				c.State[1], c.State[2], c.State[NZCV], c.State[PC] = 7, 7, bits<<28, 64
+				portable, compiled := c.State, c.State
+				before := c.State
+				want := N | V
+				if expectedCondition(bits<<28, cond) {
+					want = Z | C
+					if immediate {
+						want = C
+					}
+				}
+				if err = c.Execute(op); err != nil || c.State[NZCV] != want {
+					t.Fatalf("CCMP cond=%d immediate=%v flags=%x: got %x want %x err=%v", cond, immediate, bits, c.State[NZCV], want, err)
+				}
+				for i := 0; i < PC; i++ {
+					if c.State[i] != before[i] {
+						t.Fatal("CCMP wrote a general register")
+					}
+				}
+				if err = emu.Interpret(ops, portable[:]); err != nil || portable != c.State {
+					t.Fatalf("compare IR: %v", err)
+				}
+				if native != nil {
+					if err = native.Call(entry, compiled[:]); err != nil || compiled != c.State {
+						t.Fatalf("compare native: %v", err)
+					}
+				}
+			}
+		}
+	}
+}
+
+-- link.go --
+package aarch64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+// Only blocks validated in the current code context are published. Native
+// non-executable stores preserve that context. All other memory operations exit
+// before returning to Go, so no code-context change can occur within this loop.
+func (e *Engine) runLinked(c *CPU, remaining uint64, first *compiledBlock, memory NativeMemory, context *emu.MemoryContext, stamp CodeStamp, quanta int) error {
+	if context.ClaimLinks(e.native) || e.linkContext != stamp {
+		context.ClearLinks()
+		e.linkContext = stamp
+	}
+	if !e.linkReady {
+		if err := e.native.PrepareLinks(StateWords, PC); err != nil {
+			// Arena exhaustion preserves the original leaf fallback.
+			return e.stepBlock(c, remaining, first)
+		}
+		e.linkReady = true
+		e.Stats.NativeBytes = e.native.Bytes
+		e.Stats.ProfileErrors = e.native.SymbolErrors
+	}
+	if !first.region && (!first.regionAttempted || first.regionGeneration != e.Stats.Promotions) {
+		e.prepareRegion(c, first)
+		e.Stats.NativeBytes = e.native.Bytes
+		e.Stats.ProfileErrors = e.native.SymbolErrors
+	}
+	pc := c.State[PC]
+	entry, instructions := first.entry, len(first.words)
+	region := first.region && uint64(first.regionInstructions) <= remaining
+	if region {
+		entry, instructions = first.regionEntry, first.regionInstructions
+	}
+	link := context.LookupLink(pc)
+	// A block entry and its prefix are immutable in the append-only arena.
+	// Avoid revalidating/copying a publication already in this exact context.
+	if link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions) {
+		if err := e.native.PrepareTargetLink(pc, entry, StateWords, instructions); err != nil {
+			return err
+		}
+		if region {
+			context.PublishLink(pc, entry, instructions, first.regionPrefix)
+		} else {
+			context.PublishLink(pc, entry, instructions, first.memoryPrefix)
+		}
+	}
+	link = context.LookupLink(pc)
+	if link == nil {
+		return e.stepBlock(c, remaining, first)
+	}
+	// This publication has completed cold region preparation at the current
+	// promotion generation. Regions are immutable and need no future retry.
+	link.Reserved = e.Stats.Promotions
+	if first.region {
+		link.Reserved = ^uint64(0)
+	}
+	first.visits++
+	budget := remaining
+	if budget > uint64(e.config.MaxNativeInstructions) {
+		budget = uint64(e.config.MaxNativeInstructions)
+	}
+	var err error
+	if e.config.MaxNativeInstructions > 64 {
+		err = e.native.RunLinkedSession(c.State[:], context, budget)
+		if err != nil {
+			return err
+		}
+	} else if quanta == 1 || e.config.MaxNativeInstructions < 64 {
+		err = e.native.CallLinked(c.State[:], context, budget)
+		if err != nil {
+			return err
+		}
+	} else {
+		// No Go guest-memory mutation occurs between these distinct native
+		// calls. Non-executable native stores preserve the initial code proof;
+		// a fault or cold target stops scheduling before any host slow path.
+		_, err = e.native.RunLinkedQuanta(c.State[:], context, quanta, remaining, e.Stats.Promotions)
+	}
+	e.Stats.NativeSessions++
+	if context.Status == 0 && context.Remaining != 0 {
+		pc := c.State[PC]
+		link := context.LookupLink(pc)
+		if link == nil {
+			e.Stats.LinkMissStops++
+		} else if link.Instructions > context.Remaining {
+			e.Stats.BudgetStops++
+		} else {
+			e.Stats.OtherStops++
+		}
+	}
+	e.Stats.RegionExits += context.LoopExits
+	e.Stats.LoopIterations += context.LoopIterations
+	c.Retired += context.Total
+	e.Stats.Native += context.Total
+	e.Stats.Linked += context.Total
+	e.Stats.NativeMemory += context.MemoryTotal
+	if err != nil {
+		return err
+	}
+	if context.Status == emu.RegionExit {
+		e.Stats.RegionExits++
+		return nil
+	}
+	if context.Status != 0 {
+		e.Stats.MemoryExits++
+		if context.Status == 1 {
+			memory.NativeRefill(context.Address)
+		}
+		return e.interpret(c)
+	}
+	if context.Total == 0 {
+		if quanta != 1 {
+			first = e.block(c)
+		}
+		return e.stepBlock(c, remaining, first)
+	}
+	return nil
+}
+
+-- lower_integer.go --
+package aarch64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+func extendIR(b *emu.Builder, value emu.Value, option int) emu.Value {
+	width := 8 << (option & 3)
+	value = b.Binary(emu.And, value, b.Constant(mask(width)))
+	if option&4 != 0 && width != 64 {
+		sign := b.Shift(emu.Shr, value, uint64(width-1))
+		value = b.Binary(emu.Or, value, b.Choose(sign, b.Constant(^mask(width)), b.Constant(0)))
+	}
+	return value
+}
+
+func conditionIR(b *emu.Builder, flags emu.Value, cond int) emu.Value {
+	if result, ok := b.FlagCondition(flags, cond); ok {
+		return result
+	}
+	bit := func(shift uint64) emu.Value { return b.Binary(emu.And, b.Shift(emu.Shr, flags, shift), b.Constant(1)) }
+	n, z, c, v := bit(31), bit(30), bit(29), bit(28)
+	not := func(x emu.Value) emu.Value { return b.Binary(emu.Xor, x, b.Constant(1)) }
+	var result emu.Value
+	switch cond >> 1 {
+	case 0:
+		result = z
+	case 1:
+		result = c
+	case 2:
+		result = n
+	case 3:
+		result = v
+	case 4:
+		result = b.Binary(emu.And, c, not(z))
+	case 5:
+		result = b.Binary(emu.Equal, n, v)
+	case 6:
+		result = b.Binary(emu.And, b.Binary(emu.Equal, n, v), not(z))
+	case 7:
+		result = b.Constant(1)
+	}
+	if cond&1 != 0 && cond != 15 {
+		result = not(result)
+	}
+	return result
+}
+
+func flagsIR(b *emu.Builder, a, rhs, result emu.Value, width int, sub bool) emu.Value {
+	binary, constant := b.Binary, b.Constant
+	nz := binary(emu.Or, b.Choose(binary(emu.Equal, result, constant(0)), constant(Z), constant(0)), b.Choose(binary(emu.And, result, constant(uint64(1)<<(width-1))), constant(N), constant(0)))
+	var carry, overflow emu.Value
+	if sub {
+		carry = binary(emu.Equal, binary(emu.Less, a, rhs), constant(0))
+		overflow = binary(emu.And, binary(emu.Xor, a, rhs), binary(emu.Xor, a, result))
+	} else {
+		carry = binary(emu.Less, result, a)
+		overflow = binary(emu.And, binary(emu.Xor, binary(emu.Xor, a, rhs), constant(^uint64(0))), binary(emu.Xor, a, result))
+	}
+	overflow = binary(emu.And, overflow, constant(uint64(1)<<(width-1)))
+	return binary(emu.Or, nz, binary(emu.Or, b.Choose(carry, constant(C), constant(0)), b.Choose(overflow, constant(V), constant(0))))
+}
+
+func lowerExtra(b *emu.Builder, d instruction) emu.Value {
+	constant, binary := b.Constant, b.Binary
+	and := func(x emu.Value, m uint64) emu.Value { return binary(emu.And, x, constant(m)) }
+	narrow := func(x emu.Value) emu.Value { return and(x, mask(d.width)) }
+	reg := func(r int) emu.Value {
+		if r == SP {
+			return constant(0)
+		}
+		return narrow(b.Load(r))
+	}
+	a, rhs := reg(d.rn), reg(d.rm)
+	var result emu.Value
+	switch d.kind {
+	case compatibilityHint:
+		return constant(0)
+	case longMultiply:
+		option := 2 // UXTW
+		if d.invert {
+			option = 6
+		} // SXTW
+		product := binary(emu.Mul, extendIR(b, a, option), extendIR(b, rhs, option))
+		k := emu.Add
+		if d.operation != 0 {
+			k = emu.Sub
+		}
+		result = binary(k, reg(d.ra), product)
+	case highMultiply:
+		result = b.MultiplyHigh(a, rhs, d.invert)
+	case multiply:
+		product := binary(emu.Mul, a, rhs)
+		k := emu.Add
+		if d.operation != 0 {
+			k = emu.Sub
+		}
+		result = binary(k, reg(d.ra), product)
+	case selectCondition:
+		alternate := rhs
+		if d.operation != 0 {
+			alternate = binary(emu.Xor, alternate, constant(mask(d.width)))
+		}
+		if d.amount != 0 {
+			alternate = binary(emu.Add, alternate, constant(1))
+		}
+		result = b.Choose(conditionIR(b, b.Load(NZCV), d.cond), a, alternate)
+	case addCarry:
+		carry := and(b.Shift(emu.Shr, b.Load(NZCV), 29), 1)
+		result = b.Carry(emu.CarryArithmetic, a, rhs, carry, d.width, d.operation != 0)
+		if d.flags {
+			b.Store(NZCV, b.Carry(emu.CarryFlags, a, rhs, carry, d.width, d.operation != 0))
+		}
+	case extract:
+		result = rhs
+		if d.amount != 0 {
+			result = binary(emu.Or, b.Shift(emu.Shr, rhs, uint64(d.amount)), b.Shift(emu.Shl, a, uint64(d.width-d.amount)))
+		}
+	case variableShift:
+		result = b.VariableShift(emu.VariableShl+d.operation, a, rhs, d.width)
+	case reverse:
+		if d.operation == 0 {
+			result = b.RichUnary(emu.ReverseBits, a, d.width, 0)
+		} else {
+			result = b.RichUnary(emu.ReverseBytes, a, d.width, 8<<d.operation)
+		}
+	case leading:
+		kind := emu.LeadingZeros
+		if d.operation != 0 {
+			kind = emu.LeadingSigns
+		}
+		result = b.RichUnary(kind, a, d.width, 0)
+	case conditionalCompare:
+		selected := conditionIR(b, b.Load(NZCV), d.cond)
+		if d.invert {
+			rhs = constant(uint64(d.rm))
+		}
+		flags := b.ArithmeticFlags(a, rhs, d.width, d.operation != 0)
+		b.Store(NZCV, b.Choose(selected, flags, constant(d.immediate)))
+		return constant(0)
+	}
+	return narrow(result)
+}
+
+-- memory_native.go --
+package aarch64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// NativeMemory is a trusted, single-threaded host capability. Descriptors must
+// remain GC-rooted, match live permissions/mappings and share generation clocks
+// across aliases. Native stores to executable pages always leave to architecture.
+// A refill only changes lookup metadata; it must not perform the guest access.
+type NativeMemory interface {
+	CodeContextMemory
+	NativeContext() *emu.MemoryContext
+	NativeRefill(address uint64)
+}
+
+type scalarPlan struct {
+	size, opc, rn, rd, mode, rm, option int
+	offset                              uint64
+	register, scaled                    bool
+}
+
+func decodeScalar(op uint32) (scalarPlan, bool) {
+	var d scalarPlan
+	if op&0x3f000000 != 0x39000000 && op&0x3f200000 != 0x38000000 && op&0x3f200c00 != 0x38200800 {
+		return d, false
+	}
+	d.size, d.opc, d.rn, d.rd = 1<<int(op>>30), int(op>>22&3), int(op>>5&31), int(op&31)
+	if d.opc >= 2 && (d.size == 8 || d.opc == 3 && d.size >= 4) {
+		return d, false
+	}
+	if op&0x3f000000 == 0x39000000 {
+		d.offset = uint64(op>>10&4095) * uint64(d.size)
+	} else if op&0x00200000 != 0 {
+		d.register, d.rm, d.option, d.scaled = true, int(op>>16&31), int(op>>13&7), op>>12&1 != 0
+		if d.option != 2 && d.option != 3 && d.option != 6 && d.option != 7 {
+			return d, false
+		}
+	} else {
+		d.mode = int(op >> 10 & 3)
+		if d.mode == 2 || d.mode != 0 && d.rn == d.rd && d.rn != SP {
+			return d, false
+		}
+		d.offset = uint64(signed(uint64(op>>12&511), 9))
+	}
+	return d, true
+}
+func memorySignExtend(b *emu.Builder, value emu.Value, width int) emu.Value {
+	if width == 64 {
+		return value
+	}
+	// For a masked w-bit value, (v XOR sign) - sign is its exact modular
+	// sign extension. Keep this as two ordinary integer operations rather
+	// than materializing a predicate and a full-width selected mask.
+	value = b.Binary(emu.And, value, b.Constant(mask(width)))
+	sign := b.Constant(uint64(1) << uint(width-1))
+	return b.Binary(emu.Sub, b.Binary(emu.Xor, value, sign), sign)
+}
+func lowerScalar(b *emu.Builder, op uint32, pc uint64, completed int) bool {
+	d, ok := decodeScalar(op)
+	if !ok {
+		return false
+	}
+	b.Store(PC, b.Constant(pc))
+	b.Checkpoint(StateWords, completed)
+	base := b.Load(d.rn) // scalar base register 31 always denotes SP
+	if d.rn == SP {
+		b.Guard(b.Binary(emu.Equal, b.Binary(emu.And, base, b.Constant(15)), b.Constant(0)))
+	}
+	offset := b.Constant(d.offset)
+	if d.register {
+		offset = b.Constant(0)
+		if d.rm != SP {
+			offset = b.Load(d.rm)
+		}
+		if d.option == 2 || d.option == 6 {
+			offset = b.Binary(emu.And, offset, b.Constant(0xffffffff))
+			if d.option == 6 {
+				offset = memorySignExtend(b, offset, 32)
+			}
+		}
+		if d.scaled {
+			shift := uint64(0)
+			for size := d.size; size > 1; size >>= 1 {
+				shift++
+			}
+			offset = b.Shift(emu.Shl, offset, shift)
+		}
+	}
+	updated := b.Binary(emu.Add, base, offset)
+	address := updated
+	if d.mode == 1 {
+		address = base
+	}
+	if d.opc == 0 {
+		value := b.Constant(0)
+		if d.rd != SP {
+			value = b.Load(d.rd)
+		}
+		b.MemoryStore(address, value, d.size)
+	} else {
+		value := b.MemoryLoad(address, d.size)
+		if d.opc >= 2 {
+			value = memorySignExtend(b, value, d.size*8)
+		}
+		if d.opc == 1 && d.size != 8 || d.opc == 3 {
+			value = b.Binary(emu.And, value, b.Constant(0xffffffff))
+		}
+		if d.rd != SP {
+			b.Store(d.rd, value)
+		}
+	}
+	if d.mode == 1 || d.mode == 3 {
+		b.Store(d.rn, updated)
+	}
+	b.Store(PC, b.Constant(pc+4))
+	return true
+}
+func (e *Engine) stepMemory(c *CPU, block *compiledBlock) error {
+	memory, ok := c.Memory.(NativeMemory)
+	if !ok || e.native == nil || block.visits < e.config.NativeThreshold {
+		return e.interpret(c)
+	}
+	context := memory.NativeContext()
+	if context == nil {
+		return e.interpret(c)
+	}
+	if !block.attempted {
+		block.attempted = true
+		var b emu.Builder
+		pc := c.State[PC]
+		b.Store(PC, b.Constant(pc))
+		for i, word := range block.words {
+			if !lowerPair(&b, word, pc+uint64(i)*4, i) && !lowerScalar(&b, word, pc+uint64(i)*4, i) && !Lower(&b, word) && !lowerBranch(&b, word) {
+				e.Stats.CompileFailures++
+				e.discard(pc)
+				return e.interpret(c)
+			}
+		}
+		b.Checkpoint(StateWords, len(block.words))
+		block.ops = b.FinishMemory(StateWords)
+		entry, err := e.native.CompileMemory(block.ops, StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+		} else {
+			block.entry, block.native = entry, true
+			_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_memory_%d_ops", pc, len(block.ops)))
+			e.Stats.ProfileErrors = e.native.SymbolErrors
+			e.Stats.Promotions++
+		}
+		e.Stats.NativeBytes = e.native.Bytes
+	}
+	if !block.native {
+		return e.interpret(c)
+	}
+	if err := e.native.CallMemory(block.entry, c.State[:], context); err != nil {
+		return err
+	}
+	return e.accountMemory(c, block, memory, context)
+}
+
+// A slow exit has committed exactly the instructions preceding the access. The
+// architecture performs the faulting/slow instruction once, never replays a
+// prefix that may contain stores, and reports its original PC/opcode/cause.
+func (e *Engine) accountMemory(c *CPU, block *compiledBlock, memory NativeMemory, context *emu.MemoryContext) error {
+	retired := context.Retired
+	if retired > uint64(len(block.words)) || context.Status == 0 && retired != uint64(len(block.words)) {
+		return fmt.Errorf("invalid native memory progress")
+	}
+	c.Retired += retired
+	e.Stats.Native += retired
+	e.Stats.NativeMemory += uint64(block.memoryPrefix[retired])
+	if context.Status != 0 {
+		e.Stats.MemoryExits++
+		if context.Status == 1 {
+			memory.NativeRefill(context.Address)
+		}
+		return e.interpret(c)
+	}
+	return nil
+}
+
+-- multiply_wide_test.go --
+package aarch64
+
+import (
+	"math/big"
+	"math/rand"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+// The oracle is arbitrary precision, independent of the interpreter's Mul64
+// and the IR's 32-bit limb/carry implementation.
+func TestWideMultiplyAllTiers(t *testing.T) {
+	rng := rand.New(rand.NewSource(719))
+	values := []uint64{0, 1, 2, 0x7fffffff, 0x80000000, 0xffffffff, 0x100000000, 0x7fffffffffffffff, 0x8000000000000000, ^uint64(0)}
+	for i := 0; i < 32; i++ {
+		values = append(values, rng.Uint64())
+	}
+	native, err := emu.NewNative(8 << 20)
+	if err != nil && nativeHost() {
+		t.Fatal(err)
+	}
+	if native != nil {
+		defer native.Close()
+	}
+	modulus := new(big.Int).Lsh(big.NewInt(1), 64)
+	for _, base := range []uint32{0x9b200000, 0x9b208000, 0x9ba00000, 0x9ba08000, 0x9b407c00, 0x9bc07c00} {
+		high := base == 0x9b407c00 || base == 0x9bc07c00
+		signedProduct := base == 0x9b200000 || base == 0x9b208000 || base == 0x9b407c00
+		for _, regs := range [][4]uint32{{0, 1, 2, 3}, {1, 1, 2, 1}, {30, 31, 2, 31}, {31, 1, 31, 3}} {
+			rd, rn, rm, ra := regs[0], regs[1], regs[2], regs[3]
+			op := base | rm<<16 | rn<<5 | rd
+			if !high {
+				op |= ra << 10
+			}
+			var builder emu.Builder
+			if !Lower(&builder, op) {
+				t.Fatalf("lower %08x", op)
+			}
+			ops := builder.Finish(StateWords)
+			entry := 0
+			if native != nil {
+				entry, err = native.Compile(ops, StateWords)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, a := range values {
+				for j, b := range values {
+					var c CPU
+					for k := range c.State {
+						c.State[k] = rng.Uint64()
+					}
+					c.State[rn], c.State[rm] = a, b
+					initial := c.State
+					reg := func(r uint32) uint64 {
+						if r == 31 {
+							return 0
+						}
+						return initial[r]
+					}
+					number := func(v uint64) *big.Int {
+						if high {
+							if signedProduct {
+								return big.NewInt(int64(v))
+							}
+							return new(big.Int).SetUint64(v)
+						}
+						if signedProduct {
+							return big.NewInt(int64(int32(v)))
+						}
+						return new(big.Int).SetUint64(uint64(uint32(v)))
+					}
+					result := new(big.Int).Mul(number(reg(rn)), number(reg(rm)))
+					if high {
+						result.Rsh(result, 64)
+					} else {
+						accumulator := new(big.Int).SetUint64(reg(ra))
+						if base&0x8000 != 0 {
+							result.Sub(accumulator, result)
+						} else {
+							result.Add(accumulator, result)
+						}
+					}
+					result.Mod(result, modulus)
+					want := initial
+					if rd != 31 {
+						want[rd] = result.Uint64()
+					}
+					want[PC] += 4
+					if err := c.Execute(op); err != nil || c.State != want {
+						t.Fatalf("interpreter %08x (%d,%d): %v", op, i, j, err)
+					}
+					got := initial
+					if err := emu.Interpret(ops, got[:]); err != nil || got != want {
+						t.Fatalf("IR %08x (%d,%d): %v", op, i, j, err)
+					}
+					if native != nil {
+						got = initial
+						if err := native.Call(entry, got[:]); err != nil || got != want {
+							t.Fatalf("native %08x (%d,%d): %v", op, i, j, err)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestBaseCPUCompatibilityHints(t *testing.T) {
+	for _, op := range []uint32{0xd503201f, 0xd503233f, 0xd50323bf, 0xd503237f, 0xd50323ff, 0xd503241f, 0xd503245f, 0xd503249f, 0xd50324df} {
+		var c CPU
+		for i := range c.State {
+			c.State[i] = uint64(i) * 0x123456789abcdef
+		}
+		initial, want := c.State, c.State
+		want[PC] += 4
+		if err := c.Execute(op); err != nil || c.State != want || c.Retired != 1 {
+			t.Fatalf("hint %08x: %v", op, err)
+		}
+		var b emu.Builder
+		if !Lower(&b, op) {
+			t.Fatalf("hint lower %08x", op)
+		}
+		checkBranchTiers(t, b.Finish(StateWords), initial, want)
+	}
+	// Non-HINT pointer authentication is not silently accepted, nor are
+	// malformed wide multiply encodings (W forms or a non-ZR high-product Ra).
+	for _, op := range []uint32{0xd65f0bff, 0xd65f0fff, 0xdac10020, 0x1ba27c20, 0x9bc20020, 0x9bc2fc20} {
+		c := CPU{}
+		c.State[0] = 123
+		before := c.State
+		if err := c.Execute(op); err == nil || c.State != before || c.Retired != 0 {
+			t.Fatalf("accepted %08x", op)
+		}
+		var b emu.Builder
+		if Lower(&b, op) {
+			t.Fatalf("lowered unsupported %08x", op)
+		}
+	}
+}
+
+-- pair.go --
+package aarch64
+
+import "fmt"
+
+func (c *CPU) pairMemory(op uint32) error {
+	opc, mode := int(op>>30), int(op>>23&3)
+	load := op>>22&1 != 0
+	rn, first, second := int(op>>5&31), int(op&31), int(op>>10&31)
+	if opc == 3 || opc == 1 && !load {
+		return fmt.Errorf("reserved pair encoding")
+	}
+	if mode == 0 {
+		return fmt.Errorf("non-temporal pair unsupported")
+	}
+	if load && first == second {
+		return fmt.Errorf("constrained load overlap")
+	}
+	if mode != 2 && rn != SP && (rn == first || rn == second) {
+		return fmt.Errorf("constrained pair writeback overlap")
+	}
+	if c.Memory == nil {
+		return fmt.Errorf("no memory")
+	}
+	size, width := 4, 32
+	if opc == 2 {
+		size, width = 8, 64
+	}
+	if opc == 1 {
+		width = 64
+	}
+	base := c.reg(rn, true)
+	if rn == SP && base&15 != 0 {
+		return fmt.Errorf("unaligned SP")
+	}
+	updated := base + uint64(signed(uint64(op>>15&127), 7)*int64(size))
+	address := updated
+	if mode == 1 {
+		address = base
+	}
+	if load {
+		a, b, err := c.Memory.ReadPair(address, size)
+		if err != nil {
+			return err
+		}
+		if opc == 1 {
+			a, b = uint64(signed(a, 32)), uint64(signed(b, 32))
+		}
+		c.put(first, false, a, width)
+		c.put(second, false, b, width)
+	} else {
+		if err := c.Memory.WritePair(address, size, c.reg(first, false), c.reg(second, false)); err != nil {
+			return err
+		}
+	}
+	if mode != 2 {
+		c.State[rn] = updated
+	}
+	return nil
+}
+
+-- pair_native.go --
+package aarch64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+// A pair uses one checked 64- or 128-bit RAM access. Native page admission
+// validates the entire pair before any architectural update, and a store
+// allocates exactly one generation. Cross-page and executable accesses still
+// leave precisely to pairMemory. Unsupported encodings never modify the builder.
+func nativePair(op uint32) bool {
+	if op&0x3e000000 != 0x28000000 {
+		return false
+	}
+	opc, mode := int(op>>30), int(op>>23&3)
+	load := op>>22&1 != 0
+	rn, first, second := int(op>>5&31), int(op&31), int(op>>10&31)
+	return (opc == 0 || opc == 2 || opc == 1 && load) && mode != 0 && !(load && first == second) && !(mode != 2 && rn != SP && (rn == first || rn == second))
+}
+
+func lowerPair(b *emu.Builder, op uint32, pc uint64, completed int) bool {
+	if !nativePair(op) {
+		return false
+	}
+	opc, mode := int(op>>30), int(op>>23&3)
+	rn, first, second := int(op>>5&31), int(op&31), int(op>>10&31)
+	b.Store(PC, b.Constant(pc))
+	b.Checkpoint(StateWords, completed)
+	base := b.Load(rn)
+	if rn == SP {
+		b.Guard(b.Binary(emu.Equal, b.Binary(emu.And, base, b.Constant(15)), b.Constant(0)))
+	}
+	size := int64(4)
+	if opc == 2 {
+		size = 8
+	}
+	updated := b.Binary(emu.Add, base, b.Constant(uint64(signed(uint64(op>>15&127), 7)*size)))
+	address := updated
+	if mode == 1 {
+		address = base
+	}
+	if op>>22&1 != 0 {
+		var a, c emu.Value
+		if opc == 2 {
+			a, c = b.MemoryPairLoad(address)
+		} else {
+			packed := b.MemoryLoad(address, 8)
+			a = b.Binary(emu.And, packed, b.Constant(0xffffffff))
+			c = b.Shift(emu.Shr, packed, 32)
+		}
+		if opc == 1 {
+			a, c = memorySignExtend(b, a, 32), memorySignExtend(b, c, 32)
+		}
+		if first != SP {
+			b.Store(first, a)
+		}
+		if second != SP {
+			b.Store(second, c)
+		}
+	} else if opc == 2 {
+		a, c := b.Constant(0), b.Constant(0)
+		if first != SP {
+			a = b.Load(first)
+		}
+		if second != SP {
+			c = b.Load(second)
+		}
+		b.MemoryPairStore(address, a, c)
+	} else {
+		a, c := b.Constant(0), b.Constant(0)
+		if first != SP {
+			a = b.Binary(emu.And, b.Load(first), b.Constant(0xffffffff))
+		}
+		if second != SP {
+			c = b.Shift(emu.Shl, b.Load(second), 32)
+		}
+		b.MemoryStore(address, b.Binary(emu.Or, a, c), 8)
+	}
+	if mode != 2 {
+		b.Store(rn, updated)
+	}
+	b.Store(PC, b.Constant(pc+4))
+	return true
+}
+
+-- pair_native_test.go --
+package aarch64
+
+import (
+	"bytes"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestNativeWordPairsAgreeAndExitAtomically(t *testing.T) {
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.Close()
+	for _, op := range []uint32{0xa9000820, 0xa9810820, 0xa8810820, 0xa9007c3f, 0xa9400820, 0xa8c10820, 0xa9c10820, 0xa9408c02, 0xa9401065, 0x29400820, 0x29000820, 0x69400820, 0x28c10820, 0x29810820, 0x29400be0, 0x29007c3f} {
+		var b emu.Builder
+		if !lowerPair(&b, op, 0x1000, 0) {
+			t.Fatalf("supported pair rejected %08x", op)
+		}
+		b.Checkpoint(StateWords, 1)
+		entry, err := n.CompileMemory(b.FinishMemory(StateWords), StateWords)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, address := range []uint64{32, 4088, 4092, 4096, 1 << 48} {
+			for _, permissions := range []uint64{1, 2, 3, 7} {
+				m := new(emu.MemoryContext)
+				epoch, clock := uint64(1), uint64(1)
+				m.Clock = &clock
+				page := new([4096]byte)
+				reference := &testMemory{data: make([]byte, 4096), executable: true}
+				for i := range page {
+					page[i] = byte(i*37 + 129)
+					reference.data[i] = page[i]
+				}
+				m.Fill(0, page, permissions, &epoch)
+				c := CPU{Memory: reference}
+				c.State[0], c.State[1], c.State[2], c.State[SP], c.State[PC] = 0xaabbccdd88776655, address, 0x12345678fedcba98, address, 0x1000
+				original := c.State
+				state := c.State
+				if err = n.CallMemory(entry, state[:], m); err != nil {
+					t.Fatal(err)
+				}
+				if m.Status == 0 {
+					if err := c.Execute(op); err != nil {
+						t.Fatal(err)
+					}
+					if state != c.State || !bytes.Equal(page[:], reference.data) || m.Retired != 1 {
+						t.Fatal("pair differs", op, address, permissions, state, c.State)
+					}
+					wantClock := uint64(1)
+					if op>>22&1 == 0 {
+						wantClock++
+					}
+					if clock != wantClock || epoch != wantClock {
+						t.Fatal("pair generation", clock, epoch, wantClock)
+					}
+				} else {
+					if state != original || m.Retired != 0 || clock != 1 || epoch != 1 || !bytes.Equal(page[:], reference.data) {
+						t.Fatal("partial pair exit", op, address, permissions, state, original, m.Retired, clock, epoch)
+					}
+				}
+			}
+		}
+	}
+	for _, op := range []uint32{0xe9000820, 0x28400820, 0x29400020, 0x28c10420, 0x68000820} {
+		var b emu.Builder
+		if lowerPair(&b, op, 0x1000, 0) || len(b.Ops) != 0 {
+			t.Fatalf("unsupported pair mutated builder %08x", op)
+		}
+	}
+}
+
+-- pair_test.go --
+package aarch64
+
+import (
+	"fmt"
+	"testing"
+)
+
+func (m *testMemory) ReadPair(address uint64, size int) (uint64, uint64, error) {
+	a, err := m.Read(address, size, false)
+	if err != nil {
+		return 0, 0, err
+	}
+	b, err := m.Read(address+uint64(size), size, false)
+	return a, b, err
+}
+func (m *testMemory) WritePair(address uint64, size int, a, b uint64) error {
+	if m.failWrite || address > uint64(len(m.data)) || uint64(size)*2 > uint64(len(m.data))-address {
+		return fmt.Errorf("fault")
+	}
+	if err := m.Write(address, size, a); err != nil {
+		return err
+	}
+	return m.Write(address+uint64(size), size, b)
+}
+func TestPairsAndRegisterOffsets(t *testing.T) {
+	m := &testMemory{data: make([]byte, 64), executable: true}
+	c := CPU{Memory: m}
+	c.State[SP] = 32
+	c.State[29] = 0x1234
+	c.State[30] = 0x5678
+	if err := c.Execute(0xa9bf7bfd); err != nil {
+		t.Fatal(err)
+	} // STP X29,X30,[SP,#-16]!
+	if c.State[SP] != 16 {
+		t.Fatal("STP writeback")
+	}
+	c.State[29], c.State[30] = 0, 0
+	if err := c.Execute(0xa8c17bfd); err != nil {
+		t.Fatal(err)
+	} // LDP X29,X30,[SP],#16
+	if c.State[SP] != 32 || c.State[29] != 0x1234 || c.State[30] != 0x5678 {
+		t.Fatal("LDP state")
+	}
+	c.State[SP] = 64
+	before := c.State
+	if err := c.Execute(0xa8c17bfd); err == nil || c.State != before {
+		t.Fatal("LDP fault changed architectural state")
+	}
+	c.State[SP] = 16
+	c.State[1] = 0
+	c.State[2] = 2
+	if err := c.Execute(0xf8627820); err != nil {
+		t.Fatal(err)
+	} // LDR X0,[X1,X2,LSL #3]
+	if c.State[0] != 0x1234 {
+		t.Fatal("register-offset LDR")
+	}
+	c.State[1] = 24
+	c.State[2] = 0xffffffff
+	if err := c.Execute(0xb862d820); err != nil {
+		t.Fatal(err)
+	} // LDR W0,[X1,W2,SXTW #2]
+	if c.State[0] != 0 {
+		t.Fatal("signed register offset")
+	}
+}
+
+-- region.go --
+package aarch64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// Regions compile one iteration of a bounded cyclic trace with native loop phis
+// and exit maps. No new decoded pages or larger static block are introduced.
+// Step keeps its original leaf entry; only the native linked Run path uses them.
+func selfLoop(pc uint64, words []uint32) bool {
+	if len(words) == 0 {
+		return false
+	}
+	last := words[len(words)-1]
+	at := pc + uint64(len(words)-1)*4
+	if at < pc {
+		return false
+	}
+	var displacement int64
+	switch branchKind(last) {
+	case 1:
+		if last>>31 != 0 {
+			return false
+		} // BL is not a loop region edge
+		displacement = signed(uint64(last&0x3ffffff), 26) * 4
+	case 2, 3:
+		displacement = signed(uint64(last>>5&0x7ffff), 19) * 4
+	case 4:
+		displacement = signed(uint64(last>>5&0x3fff), 14) * 4
+	default:
+		return false
+	}
+	return at+uint64(displacement) == pc
+}
+
+// Already validated hot blocks may form a bounded cyclic trace. Each internal
+// branch is checked natively; only its chosen edge stays inside the region.
+type regionPart struct {
+	pc    uint64
+	block *compiledBlock
+}
+
+func directTargets(pc uint64, words []uint32) (uint64, uint64, bool) {
+	if len(words) == 0 {
+		return 0, 0, false
+	}
+	at := pc + uint64(len(words)-1)*4
+	op := words[len(words)-1]
+	switch branchKind(op) {
+	case 1:
+		if op>>31 != 0 {
+			return 0, 0, false
+		}
+		return at + uint64(signed(uint64(op&0x3ffffff), 26)*4), 0, false
+	case 2, 3:
+		return at + uint64(signed(uint64(op>>5&0x7ffff), 19)*4), at + 4, true
+	case 4:
+		return at + uint64(signed(uint64(op>>5&0x3fff), 14)*4), at + 4, true
+	case 0:
+		return at + 4, 0, false
+	}
+	return 0, 0, false
+}
+func (e *Engine) regionParts(c *CPU, first *compiledBlock) []regionPart {
+	root := c.State[PC]
+	if selfLoop(root, first.words) {
+		return []regionPart{{root, first}}
+	}
+	memory, ok := c.Memory.(CodeContextMemory)
+	if !ok {
+		return nil
+	}
+	stamp := memory.CodeContext()
+	if stamp.Identity == nil || first.context != stamp || len(first.dependencies) == 0 {
+		return nil
+	}
+	parts := []regionPart{{root, first}}
+	seen := map[uint64]bool{root: true}
+	// Explore both legal direct edges, but cap cold discovery independently of
+	// native execution. A failed taken edge must not hide a fallthrough cycle.
+	attempts := 0
+	best := []regionPart(nil)
+	bestInstructions := 0
+	var search func(int) []regionPart
+	search = func(total int) []regionPart {
+		if len(parts) > 1 && total > bestInstructions {
+			best = append([]regionPart(nil), parts...)
+			bestInstructions = total
+		}
+		current := parts[len(parts)-1]
+		if len(current.block.words) == 0 || branchKind(current.block.words[len(current.block.words)-1]) == 5 {
+			return nil
+		}
+		next, alternate, conditional := directTargets(current.pc, current.block.words)
+		targets := []uint64{next}
+		if conditional && alternate != next {
+			// Prefer the conventional loop back edge, otherwise fallthrough.
+			// This is only discovery order: every selected edge is still guarded.
+			if next > current.pc && alternate < next {
+				targets = []uint64{alternate, next}
+			} else {
+				targets = append(targets, alternate)
+			}
+		}
+		for _, target := range targets {
+			attempts++
+			if attempts > 256 {
+				return nil
+			}
+			if target == root {
+				return append([]regionPart(nil), parts...)
+			}
+			candidate := e.blocks[target]
+			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.words) == 0 || total+len(candidate.words) > e.config.MaxRegionInstructions {
+				continue
+			}
+			seen[target] = true
+			parts = append(parts, regionPart{target, candidate})
+			result := search(total + len(candidate.words))
+			parts = parts[:len(parts)-1]
+			delete(seen, target)
+			if len(result) != 0 {
+				return result
+			}
+		}
+		return nil
+	}
+	if cycle := search(len(first.words)); len(cycle) != 0 {
+		return cycle
+	}
+	return best
+}
+
+func (e *Engine) prepareRegion(c *CPU, block *compiledBlock) {
+	if block.region || !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
+		return
+	}
+	block.regionAttempted = true
+	block.regionGeneration = e.Stats.Promotions
+	parts := e.regionParts(c, block)
+	if len(parts) == 0 {
+		return
+	}
+	count := 0
+	for _, part := range parts {
+		count += len(part.block.words)
+	}
+	if count > e.config.MaxRegionInstructions {
+		return
+	}
+	var b emu.Builder
+	pc := c.State[PC]
+	b.Store(PC, b.Constant(pc))
+	completed := 0
+	prefix := [17]uint8{}
+	for index, part := range parts {
+		for i, word := range part.block.words {
+			if !lowerPair(&b, word, part.pc+uint64(i)*4, completed) && !lowerScalar(&b, word, part.pc+uint64(i)*4, completed) && !Lower(&b, word) && !lowerBranch(&b, word) {
+				return
+			}
+			completed++
+			if completed < len(prefix) {
+				prefix[completed] = prefix[completed-1] + part.block.memoryPrefix[i+1] - part.block.memoryPrefix[i]
+			}
+		}
+		if index+1 < len(parts) {
+			b.Checkpoint(StateWords, completed)
+			b.RegionGuard(b.Binary(emu.Equal, b.Load(PC), b.Constant(parts[index+1].pc)))
+			// A successful guard proves this exact edge. Refine forwarded PC
+			// only after the precise checkpoint/guard, never on a side exit.
+			b.Store(PC, b.Constant(parts[index+1].pc))
+		}
+	}
+	b.Checkpoint(StateWords, count)
+	// If neither legal direct successor can return to the root, this is
+	// provably a one-shot trace. Preserve the generic cyclic path for indirect
+	// branches and BL, whose targets this discovery routine does not model.
+	lastPart := parts[len(parts)-1]
+	lastWord := lastPart.block.words[len(lastPart.block.words)-1]
+	next, alternate, conditional := directTargets(lastPart.pc, lastPart.block.words)
+	oneShot := branchKind(lastWord) != 5 && !(branchKind(lastWord) == 1 && lastWord>>31 != 0) && next != pc && (!conditional || alternate != pc)
+	if oneShot {
+		b.LoopContinue(b.Constant(0))
+	} else {
+		b.LoopContinue(b.Binary(emu.Equal, b.Load(PC), b.Constant(pc)))
+	}
+	exits := []uint64{}
+	// Final successors first, then untaken internal guard edges. Every edge
+	// remains independently admitted; excess edges use normal dispatch.
+	for index := len(parts) - 1; index >= 0; index-- {
+		part := parts[index]
+		word := part.block.words[len(part.block.words)-1]
+		if branchKind(word) == 5 || branchKind(word) == 1 && word>>31 != 0 {
+			continue
+		}
+		edge, other, conditional := directTargets(part.pc, part.block.words)
+		candidates := []uint64{edge}
+		if conditional {
+			candidates = append(candidates, other)
+		}
+		for _, target := range candidates {
+			if target == pc || index+1 < len(parts) && target == parts[index+1].pc {
+				continue
+			}
+			seen := false
+			for _, old := range exits {
+				if old == target {
+					seen = true
+				}
+			}
+			if !seen && len(exits) < 8 {
+				exits = append(exits, target)
+			}
+		}
+	}
+	entry, err := 0, error(nil)
+	ops := b.FinishMemory(StateWords)
+	if e.config.DirectChaining && len(exits) != 0 {
+		entry, err = e.native.CompileLoopChained(ops, StateWords, count, PC, exits)
+	} else {
+		entry, err = e.native.CompileLoop(ops, StateWords, count)
+	}
+	if err != nil {
+		e.Stats.CompileFailures++
+		return
+	}
+	// Validation of this entry must cover all constituent pages, not just its
+	// original block. An executable mutation clears links before revalidation.
+	dependencies := append([]codeDependency(nil), block.dependencies...)
+	for _, part := range parts[1:] {
+		for _, dependency := range part.block.dependencies {
+			found := false
+			for _, old := range dependencies {
+				if old.address == dependency.address {
+					found = true
+					break
+				}
+			}
+			if !found {
+				dependencies = append(dependencies, dependency)
+			}
+		}
+	}
+	block.dependencies = dependencies
+	block.regionEntry, block.regionInstructions, block.region = entry, count, true
+	block.regionPrefix = prefix
+	e.Stats.Regions++
+	e.Stats.NativeBytes = e.native.Bytes
+	_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_region_%d_instructions", pc, count))
+	e.Stats.ProfileErrors = e.native.SymbolErrors
+}
+
+-- region_discovery_test.go --
+package aarch64
+
+import "testing"
+
+type regionDiscoveryMemory struct {
+	testMemory
+	stamp CodeStamp
+}
+
+func (m *regionDiscoveryMemory) CodeContext() CodeStamp                { return m.stamp }
+func (m *regionDiscoveryMemory) CodeVersion(uint64) (CodeStamp, error) { return m.stamp, nil }
+
+func TestRegionDiscoveryAlternativeCycleAndAcyclicBounds(t *testing.T) {
+	stamp := CodeStamp{Identity: new(CodeIdentity), Epoch: 1}
+	memory := &regionDiscoveryMemory{stamp: stamp}
+	c := CPU{Memory: memory}
+	makeBlock := func(words ...uint32) *compiledBlock {
+		return &compiledBlock{native: true, words: words, context: stamp, dependencies: []codeDependency{{0, stamp}}}
+	}
+	e := Engine{config: DefaultEngineConfig(), blocks: map[uint64]*compiledBlock{}}
+	// The first (backward) edge enters a different cycle. The alternative edge
+	// returns to this root and must not be hidden by the failed first search.
+	c.State[PC] = 16
+	first := makeBlock(0x54ffff81)       // B.NE 0
+	e.blocks[0] = makeBlock(0x14000000)  // B 0
+	e.blocks[20] = makeBlock(0x17ffffff) // B 16
+	parts := e.regionParts(&c, first)
+	if len(parts) != 2 || parts[0].pc != 16 || parts[1].pc != 20 {
+		t.Fatalf("alternative cycle lost: %+v", parts)
+	}
+	// A noncyclic path is still useful, but it must stay inside the static cap.
+	c.State[PC] = 0
+	first = makeBlock(0xd2800000)
+	e.blocks = map[uint64]*compiledBlock{4: makeBlock(0xd2800021), 8: makeBlock(0xd65f03c0)}
+	parts = e.regionParts(&c, first)
+	if len(parts) != 3 || parts[2].pc != 8 {
+		t.Fatalf("acyclic path missing: %+v", parts)
+	}
+	e.config.MaxRegionInstructions = 2
+	parts = e.regionParts(&c, first)
+	if len(parts) != 2 || parts[1].pc != 4 {
+		t.Fatalf("static trace bound violated: %+v", parts)
+	}
+	e.blocks[4].context.Epoch++
+	if len(e.regionParts(&c, first)) != 0 {
+		t.Fatal("cross-context candidate admitted")
+	}
+	e.blocks[4].context = stamp
+	e.blocks[4].dependencies = nil
+	if len(e.regionParts(&c, first)) != 0 {
+		t.Fatal("unvalidated dependency admitted")
+	}
+	e.blocks[4].dependencies = []codeDependency{{0, stamp}}
+	e.blocks[4].native = false
+	if len(e.regionParts(&c, first)) != 0 {
+		t.Fatal("uncompiled candidate admitted")
+	}
+}

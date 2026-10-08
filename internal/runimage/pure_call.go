@@ -4,3 +4,6 @@ package runimage
 
 //go:noescape
 func callPure(entry, state, stackTop uintptr)
+
+//go:noescape
+func callContext(entry, state, context, stackTop uintptr)

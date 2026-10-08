@@ -18,6 +18,7 @@ const (
 	Shr
 	Equal
 	Less
+	Mul // uint64 modular multiplication; appended to preserve existing record IDs
 )
 
 type Value int
@@ -27,17 +28,51 @@ type Op struct {
 	Imm  uint64
 }
 type Builder struct {
-	Ops   []Op
-	state map[int]Value
-	masks []uint64
+	Ops    []Op
+	state  map[int]Value
+	masks  []uint64
+	values map[Op]Value
+	dirty  map[int]bool // stores since the previous effect checkpoint
 }
 
 func (b *Builder) emit(op Op) Value {
+	// Value numbering is limited to immutable expressions. Architectural loads
+	// are tracked by the state map, never interned across a state update.
+	pure := op.Kind == Const || op.Kind >= Add && pureOperation(op.Kind)
+	if pure {
+		if v, ok := b.values[op]; ok {
+			return v
+		}
+	}
 	v := Value(len(b.Ops))
 	mask := ^uint64(0)
 	switch op.Kind {
 	case Const:
 		mask = op.Imm
+	case MemoryLoad:
+		if op.Imm == 1 || op.Imm == 2 || op.Imm == 4 {
+			mask = (uint64(1) << (op.Imm * 8)) - 1
+		}
+	case ArithmeticCondition, LogicalCondition:
+		mask = 1
+	case CarryArithmetic:
+		if op.Imm&127 == 32 {
+			mask = 0xffffffff
+		}
+	case LeadingZeros, LeadingSigns:
+		mask = 127
+	case ReverseBits, ReverseBytes:
+		if op.Imm&255 == 32 {
+			mask = 0xffffffff
+		}
+	case ArithmeticFlags, LogicalFlags, CarryFlags:
+		mask = 0xf0000000
+	case SelectValue:
+		mask = b.masks[op.B] | b.masks[Value(op.Imm)]
+	case VariableShl, VariableShr, ArithmeticShr, RotateRight:
+		if op.Imm == 32 {
+			mask = 0xffffffff
+		}
 	case And:
 		mask = b.masks[op.A] & b.masks[op.B]
 	case Or, Xor:
@@ -51,6 +86,12 @@ func (b *Builder) emit(op Op) Value {
 	}
 	b.Ops = append(b.Ops, op)
 	b.masks = append(b.masks, mask)
+	if pure {
+		if b.values == nil {
+			b.values = map[Op]Value{}
+		}
+		b.values[op] = v
+	}
 	return v
 }
 func (b *Builder) Constant(v uint64) Value { return b.emit(Op{Kind: Const, Imm: v}) }
@@ -70,6 +111,10 @@ func (b *Builder) Store(slot int, v Value) {
 		b.state = map[int]Value{}
 	}
 	b.state[slot] = v
+	if b.dirty == nil {
+		b.dirty = map[int]bool{}
+	}
+	b.dirty[slot] = true
 }
 func operation(k int, a, b uint64) uint64 {
 	switch k {
@@ -77,6 +122,8 @@ func operation(k int, a, b uint64) uint64 {
 		return a + b
 	case Sub:
 		return a - b
+	case Mul:
+		return a * b
 	case And:
 		return a & b
 	case Or:
@@ -108,13 +155,48 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 	if b.Ops[a].Kind == Const && b.Ops[c].Kind == Const {
 		return b.Constant(operation(k, b.Ops[a].Imm, b.Ops[c].Imm))
 	}
-	if (k == And || k == Or || k == Xor || k == Add) && b.Ops[a].Kind == Const {
+	if (k == And || k == Or || k == Xor || k == Add || k == Mul) && b.Ops[a].Kind == Const {
 		a, c = c, a
+	}
+
+	if k == Equal {
+		if b.Ops[a].Kind == Const {
+			a, c = c, a
+		}
+		if b.Ops[c].Kind == Const && b.Ops[a].Kind == SelectValue {
+			selected := b.Ops[a]
+			t, f := b.Ops[selected.B], b.Ops[Value(selected.Imm)]
+			if t.Kind == Const && f.Kind == Const && t.Imm != f.Imm {
+				if b.Ops[c].Imm == t.Imm {
+					return selected.A
+				}
+				if b.Ops[c].Imm == f.Imm {
+					return b.Binary(Equal, selected.A, b.Constant(0))
+				}
+				return b.Constant(0)
+			}
+		}
 	}
 	if b.Ops[c].Kind == Const {
 		mask := b.Ops[c].Imm
 		if (k == Or || k == Xor || k == Add || k == Sub) && mask == 0 {
 			return a
+		}
+		if k == Mul {
+			if mask == 0 {
+				return b.Constant(0)
+			}
+			if mask == 1 {
+				return a
+			}
+			if mask&(mask-1) == 0 {
+				var amount uint64
+				for mask > 1 {
+					mask >>= 1
+					amount++
+				}
+				return b.Shift(Shl, a, amount)
+			}
 		}
 		if k == And {
 			if b.masks[a]&mask == 0 {
@@ -124,9 +206,9 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 				return a
 			}
 			prior := b.Ops[a]
-			// Low-bit truncation commutes with modular addition/subtraction:
+			// Low-bit truncation commutes with modular addition/subtraction/multiplication:
 			// ((x & m) + y) & m == (x + y) & m for m = 2^n - 1.
-			if mask&(mask+1) == 0 && (prior.Kind == Add || prior.Kind == Sub) {
+			if mask&(mask+1) == 0 && (prior.Kind == Add || prior.Kind == Sub || prior.Kind == Mul) {
 				strip := func(v Value) Value {
 					o := b.Ops[v]
 					if o.Kind == And && b.Ops[o.B].Kind == Const && b.Ops[o.B].Imm&mask == mask {
@@ -195,8 +277,10 @@ func (b *Builder) Choose(c, t, f Value) Value {
 			return b.Shift(Shl, c, shift)
 		}
 	}
-	mask := b.Binary(Sub, b.Constant(0), c)
-	return b.Binary(Or, b.Binary(And, t, mask), b.Binary(And, f, b.Binary(Xor, mask, b.Constant(^uint64(0)))))
+	if t == f {
+		return t
+	}
+	return b.emit(Op{Kind: SelectValue, A: c, B: t, Imm: uint64(f)})
 }
 
 // Finish drops dead values and defers state writes until all pure expressions
@@ -214,6 +298,12 @@ func (b *Builder) Finish(words int) []Op {
 			visit(o.A)
 			if o.Kind != Shl && o.Kind != Shr {
 				visit(o.B)
+			}
+			if o.Kind == SelectValue {
+				visit(Value(o.Imm))
+			}
+			if carryKind(o.Kind) {
+				visit(Value(o.Imm >> 8))
 			}
 		}
 	}
@@ -234,6 +324,12 @@ func (b *Builder) Finish(words int) []Op {
 			if o.Kind != Shl && o.Kind != Shr {
 				o.B = remap[o.B]
 			}
+			if o.Kind == SelectValue {
+				o.Imm = uint64(remap[Value(o.Imm)])
+			}
+			if carryKind(o.Kind) {
+				o.Imm = o.Imm&255 | uint64(remap[Value(o.Imm>>8)])<<8
+			}
 		}
 		out = append(out, o)
 	}
@@ -249,8 +345,20 @@ func Validate(ops []Op, words int) error {
 		return fmt.Errorf("invalid block dimensions")
 	}
 	for i, o := range ops {
-		if o.Kind < Const || o.Kind > Less {
+		if carryKind(o.Kind) && (o.Imm>>8 >= uint64(i) || effectOnly(ops[o.Imm>>8].Kind) || !validFlags(Op{Kind: ArithmeticFlags, Imm: o.Imm & 255})) {
+			return fmt.Errorf("invalid carry operand/width")
+		}
+		if !validFlags(o) || !validRich(o) {
+			return fmt.Errorf("invalid flags width")
+		}
+		if !pureOperation(o.Kind) {
 			return fmt.Errorf("invalid IR operation %d", o.Kind)
+		}
+		if o.Kind == SelectValue && (o.Imm >= uint64(i) || ops[o.Imm].Kind == StoreState) {
+			return fmt.Errorf("invalid select operand")
+		}
+		if o.Kind >= VariableShl && o.Kind <= RotateRight && o.Imm != 32 && o.Imm != 64 {
+			return fmt.Errorf("invalid variable shift width")
 		}
 		if (o.Kind == LoadState || o.Kind == StoreState) && o.Imm >= uint64(words) {
 			return fmt.Errorf("invalid state slot")
@@ -269,6 +377,12 @@ func Interpret(ops []Op, state []uint64) error {
 		return err
 	}
 	values := make([]uint64, len(ops))
+	interpretValues(ops, state, values)
+	return nil
+}
+
+// interpretValues requires validated, immutable IR and scratch for every op.
+func interpretValues(ops []Op, state, values []uint64) {
 	for i, o := range ops {
 		switch o.Kind {
 		case Const:
@@ -279,9 +393,26 @@ func Interpret(ops []Op, state []uint64) error {
 			state[o.Imm] = values[o.A]
 		case Shl, Shr:
 			values[i] = operation(o.Kind, values[o.A], o.Imm)
+		case ArithmeticCondition, LogicalCondition:
+			values[i] = 0
+			if conditionFlags(flagsOperation(o.Kind-2, values[o.A], values[o.B], o.Imm&255), int(o.Imm>>8)) {
+				values[i] = 1
+			}
+		case ArithmeticFlags, LogicalFlags:
+			values[i] = flagsOperation(o.Kind, values[o.A], values[o.B], o.Imm)
+		case SelectValue:
+			values[i] = values[o.Imm]
+			if values[o.A] != 0 {
+				values[i] = values[o.B]
+			}
+		case CarryArithmetic, CarryFlags:
+			values[i] = carryOperation(o.Kind, values[o.A], values[o.B], values[o.Imm>>8], o.Imm&255)
+		case UnsignedMulHigh, SignedMulHigh, LeadingZeros, LeadingSigns, ReverseBytes, ReverseBits:
+			values[i] = richOperation(o.Kind, values[o.A], values[o.B], o.Imm)
+		case VariableShl, VariableShr, ArithmeticShr, RotateRight:
+			values[i] = variableOperation(o.Kind, values[o.A], values[o.B], o.Imm)
 		default:
 			values[i] = operation(o.Kind, values[o.A], values[o.B])
 		}
 	}
-	return nil
 }
